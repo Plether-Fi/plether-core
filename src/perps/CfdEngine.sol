@@ -22,6 +22,7 @@ import {CfdEngineSnapshotsLib} from "./libraries/CfdEngineSnapshotsLib.sol";
 import {MarginClearinghouseAccountingLib} from "./libraries/MarginClearinghouseAccountingLib.sol";
 import {MarketCalendarLib} from "./libraries/MarketCalendarLib.sol";
 import {PositionRiskAccountingLib} from "./libraries/PositionRiskAccountingLib.sol";
+import {OracleFreshnessPolicyLib} from "./libraries/OracleFreshnessPolicyLib.sol";
 import {SolvencyAccountingLib} from "./libraries/SolvencyAccountingLib.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
@@ -823,7 +824,17 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         if (price == 0) {
             revert CfdEngine__InsufficientCloseOrderBountyBacking();
         }
-        if (lastMarkTime == 0) {
+        OracleFreshnessPolicyLib.Policy memory closeCommitPolicy = OracleFreshnessPolicyLib.getPolicy(
+            OracleFreshnessPolicyLib.Mode.CloseCommitFallback,
+            isOracleFrozen(),
+            isFadWindow(),
+            engineMarkStalenessLimit,
+            address(vault) == address(0) ? 0 : vault.markStalenessLimit(),
+            0,
+            0,
+            fadMaxStaleness
+        );
+        if (closeCommitPolicy.requireStoredMark && lastMarkTime == 0) {
             revert CfdEngine__InsufficientCloseOrderBountyBacking();
         }
 
@@ -1579,15 +1590,16 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     }
 
     function _liveMarkStalenessLimit() internal view returns (uint256) {
-        if (isOracleFrozen()) {
-            return fadMaxStaleness;
-        }
-        if (address(vault) == address(0)) {
-            return engineMarkStalenessLimit;
-        }
-
-        uint256 poolLimit = vault.markStalenessLimit();
-        return engineMarkStalenessLimit < poolLimit ? engineMarkStalenessLimit : poolLimit;
+        return OracleFreshnessPolicyLib.getPolicy(
+            OracleFreshnessPolicyLib.Mode.PoolReconcile,
+            isOracleFrozen(),
+            isFadWindow(),
+            engineMarkStalenessLimit,
+            address(vault) == address(0) ? 0 : vault.markStalenessLimit(),
+            0,
+            0,
+            fadMaxStaleness
+        ).maxStaleness;
     }
 
     function _consumeDeferredTraderPayout(

@@ -7,7 +7,7 @@ import {CfdTypes} from "../CfdTypes.sol";
 import {ICfdEngineLens} from "../interfaces/ICfdEngineLens.sol";
 import {ICfdVault} from "../interfaces/ICfdVault.sol";
 import {MarketCalendarLib} from "../libraries/MarketCalendarLib.sol";
-import {OrderOraclePolicyLib} from "../libraries/OrderOraclePolicyLib.sol";
+import {OracleFreshnessPolicyLib} from "../libraries/OracleFreshnessPolicyLib.sol";
 import {OrderEscrowAccounting} from "./OrderEscrowAccounting.sol";
 
 abstract contract OrderOracleExecution is OrderEscrowAccounting {
@@ -15,7 +15,7 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
     struct RouterExecutionContext {
         bool oracleFrozen;
         bool isFadWindow;
-        OrderOraclePolicyLib.OracleExecutionPolicy policy;
+        OracleFreshnessPolicyLib.Policy policy;
     }
 
     ICfdVault internal immutable vault;
@@ -92,10 +92,20 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
     function _currentRouterExecutionContext() internal view returns (RouterExecutionContext memory context) {
         context.oracleFrozen = _isOracleFrozen();
         context.isFadWindow = engine.isFadWindow();
-        context.policy = OrderOraclePolicyLib.getOracleExecutionPolicy(
-            OrderOraclePolicyLib.OracleAction.OrderExecution,
-            context.oracleFrozen,
-            context.isFadWindow,
+        context.policy = _executionPolicyForOrder(false, context.oracleFrozen, context.isFadWindow);
+    }
+
+    function _executionPolicyForOrder(
+        bool isClose,
+        bool oracleFrozen,
+        bool isFadWindow
+    ) internal view returns (OracleFreshnessPolicyLib.Policy memory) {
+        return OracleFreshnessPolicyLib.getPolicy(
+            isClose ? OracleFreshnessPolicyLib.Mode.CloseExecution : OracleFreshnessPolicyLib.Mode.OpenExecution,
+            oracleFrozen,
+            isFadWindow,
+            engine.engineMarkStalenessLimit(),
+            vault.markStalenessLimit(),
             orderExecutionStalenessLimit,
             liquidationStalenessLimit,
             engine.fadMaxStaleness()
@@ -143,7 +153,7 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
 
         for (uint256 i = 0; i < len; i++) {
             PythStructs.Price memory p = pyth.getPriceUnsafe(pythFeedIds[i]);
-            if (OrderOraclePolicyLib.isStale(uint64(p.publishTime), maxStaleness, block.timestamp)) {
+            if (OracleFreshnessPolicyLib.isStale(uint64(p.publishTime), maxStaleness, block.timestamp)) {
                 _revertOraclePriceTooStale();
             }
             uint256 norm = inversions[i] ? _invertPythPrice(p.price, p.expo) : _normalizePythPrice(p.price, p.expo);
@@ -202,15 +212,8 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
             return false;
         }
 
-        OrderOraclePolicyLib.OracleExecutionPolicy memory policy = OrderOraclePolicyLib.getOracleExecutionPolicy(
-            OrderOraclePolicyLib.OracleAction.OrderExecution,
-            _isOracleFrozen(),
-            engine.isFadWindow(),
-            orderExecutionStalenessLimit,
-            liquidationStalenessLimit,
-            engine.fadMaxStaleness()
-        );
-        return !OrderOraclePolicyLib.isStale(lastMarkTime, policy.maxStaleness, block.timestamp);
+        OracleFreshnessPolicyLib.Policy memory policy = _executionPolicyForOrder(false, _isOracleFrozen(), engine.isFadWindow());
+        return !OracleFreshnessPolicyLib.isStale(lastMarkTime, policy.maxStaleness, block.timestamp);
     }
 
     function _isOracleFrozen() internal view returns (bool) {

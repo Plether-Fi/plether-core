@@ -12,7 +12,7 @@ import {CashPriorityLib} from "./libraries/CashPriorityLib.sol";
 import {MarketCalendarLib} from "./libraries/MarketCalendarLib.sol";
 import {MarginClearinghouseAccountingLib} from "./libraries/MarginClearinghouseAccountingLib.sol";
 import {OrderFailurePolicyLib} from "./libraries/OrderFailurePolicyLib.sol";
-import {OrderOraclePolicyLib} from "./libraries/OrderOraclePolicyLib.sol";
+import {OracleFreshnessPolicyLib} from "./libraries/OracleFreshnessPolicyLib.sol";
 import {OrderEscrowAccounting} from "./modules/OrderEscrowAccounting.sol";
 import {OrderExecutionOrchestrator} from "./modules/OrderExecutionOrchestrator.sol";
 import {OrderOracleExecution} from "./modules/OrderOracleExecution.sol";
@@ -416,7 +416,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         (, CfdTypes.Order memory order) = _pendingOrder(orderId);
 
         if (address(pyth) != address(0)) {
-            if (OrderOraclePolicyLib.isStale(oraclePublishTime, executionContext.policy.maxStaleness, block.timestamp))
+            if (OracleFreshnessPolicyLib.isStale(oraclePublishTime, executionContext.policy.maxStaleness, block.timestamp))
             {
                 revert OrderRouter__OraclePriceTooStale();
             }
@@ -464,7 +464,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
             _resolveOraclePrice(pythUpdateData, 1e8, maxStaleness, liquidationStalenessLimit);
 
         if (address(pyth) != address(0)) {
-            if (OrderOraclePolicyLib.isStale(oraclePublishTime, executionContext.policy.maxStaleness, block.timestamp))
+            if (OracleFreshnessPolicyLib.isStale(oraclePublishTime, executionContext.policy.maxStaleness, block.timestamp))
             {
                 revert OrderRouter__OraclePriceTooStale();
             }
@@ -790,15 +790,17 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
             _resolveOraclePrice(pythUpdateData, 1e8, orderExecutionStalenessLimit, orderExecutionStalenessLimit);
 
         if (address(pyth) != address(0)) {
-            OrderOraclePolicyLib.OracleExecutionPolicy memory policy = OrderOraclePolicyLib.getOracleExecutionPolicy(
-                OrderOraclePolicyLib.OracleAction.MarkRefresh,
+            OracleFreshnessPolicyLib.Policy memory policy = OracleFreshnessPolicyLib.getPolicy(
+                OracleFreshnessPolicyLib.Mode.MarkRefresh,
                 _isOracleFrozen(),
                 engine.isFadWindow(),
+                engine.engineMarkStalenessLimit(),
+                vault.markStalenessLimit(),
                 orderExecutionStalenessLimit,
                 liquidationStalenessLimit,
                 engine.fadMaxStaleness()
             );
-            if (OrderOraclePolicyLib.isStale(oraclePublishTime, policy.maxStaleness, block.timestamp)) {
+            if (OracleFreshnessPolicyLib.isStale(oraclePublishTime, policy.maxStaleness, block.timestamp)) {
                 revert OrderRouter__OraclePriceTooStale();
             }
         }
@@ -825,15 +827,17 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
             _resolveOraclePrice(pythUpdateData, 1e8, liquidationStalenessLimit, liquidationStalenessLimit);
 
         if (address(pyth) != address(0)) {
-            OrderOraclePolicyLib.OracleExecutionPolicy memory policy = OrderOraclePolicyLib.getOracleExecutionPolicy(
-                OrderOraclePolicyLib.OracleAction.Liquidation,
+            OracleFreshnessPolicyLib.Policy memory policy = OracleFreshnessPolicyLib.getPolicy(
+                OracleFreshnessPolicyLib.Mode.Liquidation,
                 _isOracleFrozen(),
                 engine.isFadWindow(),
+                engine.engineMarkStalenessLimit(),
+                vault.markStalenessLimit(),
                 orderExecutionStalenessLimit,
                 liquidationStalenessLimit,
                 engine.fadMaxStaleness()
             );
-            if (OrderOraclePolicyLib.isStale(oraclePublishTime, policy.maxStaleness, block.timestamp)) {
+            if (OracleFreshnessPolicyLib.isStale(oraclePublishTime, policy.maxStaleness, block.timestamp)) {
                 revert OrderRouter__MevOraclePriceTooStale();
             }
         }

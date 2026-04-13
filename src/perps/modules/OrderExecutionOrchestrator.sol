@@ -6,6 +6,7 @@ import {CfdTypes} from "../CfdTypes.sol";
 import {CashPriorityLib} from "../libraries/CashPriorityLib.sol";
 import {ICfdEngineCore} from "../interfaces/ICfdEngineCore.sol";
 import {IOrderRouterAccounting} from "../interfaces/IOrderRouterAccounting.sol";
+import {OracleFreshnessPolicyLib} from "../libraries/OracleFreshnessPolicyLib.sol";
 import {OrderOracleExecution} from "./OrderOracleExecution.sol";
 import {OrderQueueBook} from "./OrderQueueBook.sol";
 
@@ -114,6 +115,8 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
         bool revertOnBlockedExecution,
         uint256 pythFee
     ) internal returns (OrderExecutionStepResult result) {
+        OracleFreshnessPolicyLib.Policy memory orderPolicy =
+            _executionPolicyForOrder(order.isClose, executionContext.oracleFrozen, executionContext.isFadWindow);
         if (_maxOrderAge() > 0 && block.timestamp - order.commitTime > _maxOrderAge()) {
             emit OrderFailed(orderId, OrderFailReason.Expired);
             _finalizeOrCleanupOrder(
@@ -128,7 +131,7 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
             return revertOnBlockedExecution ? OrderExecutionStepResult.Return : OrderExecutionStepResult.Continue;
         }
 
-        if (executionContext.policy.closeOnly && !order.isClose) {
+        if (orderPolicy.closeOnly) {
             emit OrderFailed(orderId, OrderFailReason.CloseOnly);
             _finalizeOrCleanupOrder(
                 orderId,

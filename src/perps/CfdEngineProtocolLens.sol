@@ -8,6 +8,7 @@ import {HousePoolEngineViewTypes} from "./interfaces/HousePoolEngineViewTypes.so
 import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
 import {ICfdEngineProtocolLens} from "./interfaces/ICfdEngineProtocolLens.sol";
 import {ProtocolLensViewTypes} from "./interfaces/ProtocolLensViewTypes.sol";
+import {OracleFreshnessPolicyLib} from "./libraries/OracleFreshnessPolicyLib.sol";
 import {SolvencyAccountingLib} from "./libraries/SolvencyAccountingLib.sol";
 
 /// @title CfdEngineProtocolLens
@@ -54,11 +55,16 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         ICfdEngine.SideState memory bearState = _sideState(CfdTypes.Side.BEAR);
         snapshot.markFreshnessRequired = bullState.maxProfitUsdc + bearState.maxProfitUsdc > 0;
         if (snapshot.markFreshnessRequired) {
-            uint256 effectiveEngineLimit = engineContract.isOracleFrozen()
-                ? engineContract.fadMaxStaleness()
-                : engineContract.engineMarkStalenessLimit();
-            snapshot.maxMarkStaleness =
-                effectiveEngineLimit < markStalenessLimit ? effectiveEngineLimit : markStalenessLimit;
+            snapshot.maxMarkStaleness = OracleFreshnessPolicyLib.getPolicy(
+                OracleFreshnessPolicyLib.Mode.PoolReconcile,
+                engineContract.isOracleFrozen(),
+                engineContract.isFadWindow(),
+                engineContract.engineMarkStalenessLimit(),
+                markStalenessLimit,
+                0,
+                0,
+                engineContract.fadMaxStaleness()
+            ).maxStaleness;
         }
     }
 
