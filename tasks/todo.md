@@ -74,6 +74,22 @@ Review:
   - `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_CloseCommit_CanReserveKeeperBountyFromPositionMarginWhenFullyUtilized|test_CloseCommit_CanReserveKeeperBountyFromPositionMarginWithStaleStoredMark|test_ReserveCloseOrderExecutionBounty_RevertsWhenMarginBackedBountyWouldBreakMaintenance"`
 - Note: the legacy catch-all `test/perps/OrderRouter.t.sol` mega-suite still contains numerous older wallet-payout assertions that do not match the current clearinghouse-credit bounty/refund model, so it is not a reliable green gate for this size pass without a broader expectation update.
 
+- [x] Start simplifying the router policy surface by extracting oracle/policy logic into a dedicated module
+
+Review:
+- Added `src/perps/modules/OrderOracleExecution.sol` as the router’s dedicated oracle/policy module. It now owns Pyth feed configuration, staleness settings, router execution context construction, basket price resolution, slippage semantics, commit prefilter helpers, and oracle-frozen/close-only policy helpers.
+- `src/perps/OrderRouter.sol` now inherits `OrderOracleExecution` and is correspondingly narrower: it focuses on queue traversal, escrow cleanup, failure policy, and liquidation/order orchestration instead of mixing those with price-resolution details.
+- Preserved `OrderRouter`’s external error surface by keeping custom-error declarations on the child contract and letting the new module call small virtual revert hooks. This avoided breaking the large existing test surface that references `OrderRouter.OrderRouter__*.selector` directly.
+- Verified green with `forge test --match-path test/perps/OrderRouterPolicyMatrix.t.sol`, `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_BatchExecution_MEVCheckPerOrder|test_BatchExecution_MixedResults|test_ExpiredOpenOrderRefundsUsdcBountyToTrader_NotKeeper|test_CloseSlippageFailPaysClearerWhenBountyIsMarginBacked|test_Constructor_ZeroEngineLensReverts|test_BasketPrice_RevertsWhenFeedPublishTimesDivergeTooFar"`, and `forge test --match-path test/perps/PreviewExecutionDifferential.t.sol --match-test "testFuzz_ValidPreviewOpen_DoesNotUntypedRevertOnSameStateExecution|testFuzz_PreviewClose_FullCloseMatchesLiveExecution_LiquidVault|testFuzz_PreviewClose_FullCloseMatchesLiveExecution_IlliquidVault|testFuzz_PreviewLiquidation_MatchesLiveExecution_LiquidVault|testFuzz_PreviewLiquidation_MatchesLiveExecution_IlliquidVault"`.
+
+- [x] Continue router simplification by extracting queue-book responsibilities into a dedicated module
+
+Review:
+- Added `src/perps/modules/OrderQueueBook.sol` to own global queue linking/unlinking, pending-order lookup, and queued-position composition from live positions plus pending account orders.
+- `src/perps/OrderRouter.sol` now composes three dedicated modules: `OrderOracleExecution` (oracle/policy), `OrderQueueBook` (queue structure), and `OrderEscrowAccounting` (escrow bookkeeping). This leaves the child contract materially closer to pure execution orchestration and admin surface.
+- Kept the extraction low-risk: account/margin queue link helpers remain in `OrderEscrowAccounting`, while the new queue module only owns the global queue and read-side queue composition. That split reduces concern density without entangling execution with storage migration.
+- Verified green with the same high-signal router suites: `forge test --match-path test/perps/OrderRouterPolicyMatrix.t.sol`, `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_BatchExecution_MEVCheckPerOrder|test_BatchExecution_MixedResults|test_ExpiredOpenOrderRefundsUsdcBountyToTrader_NotKeeper|test_CloseSlippageFailPaysClearerWhenBountyIsMarginBacked|test_Constructor_ZeroEngineLensReverts|test_BasketPrice_RevertsWhenFeedPublishTimesDivergeTooFar"`, and `forge test --match-path test/perps/PreviewExecutionDifferential.t.sol --match-test "testFuzz_ValidPreviewOpen_DoesNotUntypedRevertOnSameStateExecution|testFuzz_PreviewClose_FullCloseMatchesLiveExecution_LiquidVault|testFuzz_PreviewClose_FullCloseMatchesLiveExecution_IlliquidVault|testFuzz_PreviewLiquidation_MatchesLiveExecution_LiquidVault|testFuzz_PreviewLiquidation_MatchesLiveExecution_IlliquidVault"`.
+
 - [x] Fix open-path post-realization risk check so pending carry is not double-counted
 - [x] Add a carry-aware keeper bounty credit path for clearinghouse settlement credits
 - [x] Add regressions covering both verified findings and run targeted Forge verification
