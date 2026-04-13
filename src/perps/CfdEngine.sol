@@ -173,6 +173,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
 
     uint256 public accumulatedFeesUsdc;
     uint256 public accumulatedBadDebtUsdc;
+    mapping(bytes32 => uint256) public unsettledCarryUsdc;
     bool public degradedMode;
 
     CfdTypes.RiskParams public riskParams;
@@ -625,9 +626,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         bytes32 accountId = bytes32(uint256(uint160(beneficiary)));
         StoredPosition storage pos = _positions[accountId];
         if (pos.size > 0) {
-            (bool priceFresh, uint256 price) = _tryGetFreshLiveMarkPrice();
-            if (priceFresh) {
-                _realizeCarryFromSettlement(accountId, pos, price, _physicalReachableCollateralUsdc(accountId));
+            uint256 price = lastMarkPrice;
+            if (price > 0) {
+                _checkpointCarryBeforeBasisChange(accountId, pos, price, _physicalReachableCollateralUsdc(accountId));
             }
         }
 
@@ -787,7 +788,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         }
 
         uint256 reachableUsdc = _physicalReachableCollateralUsdc(accountId);
-        uint256 pendingCarryUsdc = _pendingCarryUsdc(_loadPosition(accountId), price, reachableUsdc, block.timestamp);
+        uint256 pendingCarryUsdc =
+            _totalPendingCarryUsdc(accountId, _loadPosition(accountId), price, reachableUsdc, block.timestamp);
         if (reachableUsdc < amountUsdc) {
             revert CfdEngine__InsufficientCloseOrderBountyBacking();
         }
@@ -873,7 +875,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         _realizeCarryFromSettlement(accountId, storedPos, price, reachableUsdc);
         pos = _loadPosition(accountId);
         reachableUsdc = _physicalReachableCollateralUsdc(accountId);
-        uint256 pendingCarryUsdc = _pendingCarryUsdc(pos, price, reachableUsdc, block.timestamp);
+        uint256 pendingCarryUsdc = _totalPendingCarryUsdc(accountId, pos, price, reachableUsdc, block.timestamp);
         PositionRiskAccountingLib.PositionRiskState memory riskState =
             PositionRiskAccountingLib.buildPositionRiskStateWithCarry(
                 pos, price, CAP_PRICE, pendingCarryUsdc, reachableUsdc, riskParams.initMarginBps
@@ -1192,6 +1194,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
 
         snap.accumulatedFeesUsdc = accumulatedFeesUsdc;
         snap.accumulatedBadDebtUsdc = accumulatedBadDebtUsdc;
+        snap.unsettledCarryUsdc = unsettledCarryUsdc[accountId];
         snap.totalDeferredPayoutUsdc = totalDeferredPayoutUsdc;
         snap.totalDeferredClearerBountyUsdc = totalDeferredClearerBountyUsdc;
         snap.deferredPayoutForAccount = deferredPayoutUsdc[accountId];
@@ -1429,7 +1432,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         pos.vpiAccrued = stored.vpiAccrued;
     }
 
-    function _pendingCarryUsdc(
+    function _elapsedCarryUsdc(
         CfdTypes.Position memory pos,
         uint256 price,
         uint256 reachableCollateralUsdc,
@@ -1445,6 +1448,51 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         );
     }
 
+    function _totalPendingCarryUsdc(
+        bytes32 accountId,
+        CfdTypes.Position memory pos,
+        uint256 price,
+        uint256 reachableCollateralUsdc,
+        uint256 timestampNow
+    ) internal view returns (uint256) {
+        return unsettledCarryUsdc[accountId] + _elapsedCarryUsdc(pos, price, reachableCollateralUsdc, timestampNow);
+    }
+
+    function _canFullyRealizeCarryFromSettlement(
+        bytes32 accountId,
+        CfdTypes.Position memory pos,
+        uint256 price
+    ) internal view returns (bool) {
+        uint256 reachableCollateralUsdc = _physicalReachableCollateralUsdc(accountId);
+        uint256 pendingCarryUsdc =
+            _totalPendingCarryUsdc(accountId, pos, price, reachableCollateralUsdc, block.timestamp);
+        if (pendingCarryUsdc == 0) {
+            return true;
+        }
+
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(accountId);
+        return MarginClearinghouseAccountingLib.planFundingLossConsumption(buckets, pendingCarryUsdc).uncoveredUsdc == 0;
+    }
+
+    function _checkpointCarryBeforeBasisChange(
+        bytes32 accountId,
+        StoredPosition storage pos,
+        uint256 price,
+        uint256 reachableCollateralUsdc
+    ) internal {
+        if (_canFullyRealizeCarryFromSettlement(accountId, _loadPosition(accountId), price)) {
+            _realizeCarryFromSettlement(accountId, pos, price, reachableCollateralUsdc);
+            return;
+        }
+
+        uint256 elapsedCarryUsdc =
+            _elapsedCarryUsdc(_loadPosition(accountId), price, reachableCollateralUsdc, block.timestamp);
+        if (elapsedCarryUsdc > 0) {
+            unsettledCarryUsdc[accountId] += elapsedCarryUsdc;
+        }
+        pos.lastCarryTimestamp = uint64(block.timestamp);
+    }
+
     function _realizeCarryFromSettlement(
         bytes32 accountId,
         StoredPosition storage pos,
@@ -1452,26 +1500,28 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 reachableCollateralUsdc
     ) internal returns (uint256 realizedCarryUsdc) {
         CfdTypes.Position memory loaded = _loadPosition(accountId);
-        realizedCarryUsdc = _pendingCarryUsdc(loaded, price, reachableCollateralUsdc, block.timestamp);
-        if (realizedCarryUsdc == 0) {
+        uint256 carryDueUsdc =
+            _totalPendingCarryUsdc(accountId, loaded, price, reachableCollateralUsdc, block.timestamp);
+        if (carryDueUsdc == 0) {
             pos.lastCarryTimestamp = uint64(block.timestamp);
             return 0;
         }
 
         uint256 marginBefore = _positionMarginBucketUsdc(accountId);
         (uint256 marginConsumedUsdc, uint256 freeSettlementConsumedUsdc, uint256 uncoveredUsdc) =
-            clearinghouse.consumeSettlementLoss(accountId, marginBefore, realizedCarryUsdc, address(this));
+            clearinghouse.consumeSettlementLoss(accountId, marginBefore, carryDueUsdc, address(this));
         freeSettlementConsumedUsdc;
-        if (uncoveredUsdc > 0) {
-            revert CfdEngine__FundingExceedsMargin();
-        }
+        realizedCarryUsdc = carryDueUsdc - uncoveredUsdc;
+        unsettledCarryUsdc[accountId] = uncoveredUsdc;
 
         if (marginConsumedUsdc > 0) {
             _syncTotalSideMargin(pos.side, marginBefore, marginBefore - marginConsumedUsdc);
         }
 
-        USDC.safeTransfer(address(vault), realizedCarryUsdc);
-        vault.routeLpValue(realizedCarryUsdc, ICfdVault.LpValueMode.ExplicitCashInflow);
+        if (realizedCarryUsdc > 0) {
+            USDC.safeTransfer(address(vault), realizedCarryUsdc);
+            vault.routeLpValue(realizedCarryUsdc, ICfdVault.LpValueMode.ExplicitCashInflow);
+        }
         pos.lastCarryTimestamp = uint64(block.timestamp);
     }
 

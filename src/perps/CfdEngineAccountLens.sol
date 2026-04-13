@@ -157,6 +157,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
                 lpBackedNotionalUsdc, params.baseCarryBps, block.timestamp - pos.lastCarryTimestamp
             );
         }
+        pendingCarryUsdc += engineContract.unsettledCarryUsdc(accountId);
         PositionRiskAccountingLib.PositionRiskState memory riskState =
             PositionRiskAccountingLib.buildPositionRiskStateWithCarry(
                 pos,

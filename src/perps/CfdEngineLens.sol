@@ -253,6 +253,7 @@ contract CfdEngineLens is ICfdEngineLens {
         snap.lockedBuckets = clearinghouse.getLockedMarginBuckets(accountId);
         snap.accumulatedFeesUsdc = engineContract.accumulatedFeesUsdc();
         snap.accumulatedBadDebtUsdc = engineContract.accumulatedBadDebtUsdc();
+        snap.unsettledCarryUsdc = engineContract.unsettledCarryUsdc(accountId);
         snap.totalDeferredPayoutUsdc = engineContract.totalDeferredPayoutUsdc();
         snap.totalDeferredClearerBountyUsdc = engineContract.totalDeferredClearerBountyUsdc();
         snap.deferredPayoutForAccount = engineContract.deferredPayoutUsdc(accountId);

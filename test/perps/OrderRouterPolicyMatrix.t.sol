@@ -126,6 +126,40 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         );
     }
 
+    function test_OpenRefundStillCreditsTraderWhenMarkIsStale() public {
+        bytes32 traderAccountId = bytes32(uint256(uint160(ALICE)));
+
+        _fundTrader(ALICE, 20_000e6);
+        _open(traderAccountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+
+        vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
+
+        vm.prank(ALICE);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1.5e8, false);
+
+        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(traderAccountId);
+        uint64 carryTimestampBefore = engine.getPositionLastCarryTimestamp(traderAccountId);
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(1e8));
+        vm.prank(KEEPER);
+        vm.roll(block.number + 1);
+        router.executeOrder(1, priceData);
+
+        assertGt(
+            clearinghouse.balanceUsdc(traderAccountId),
+            traderSettlementBefore,
+            "Open-order refund should still credit settlement even when the cached mark is stale"
+        );
+        assertEq(
+            engine.getPositionLastCarryTimestamp(traderAccountId),
+            uint64(block.timestamp),
+            "Stale-mark refund should checkpoint carry before mutating the basis"
+        );
+        assertLt(
+            carryTimestampBefore, engine.getPositionLastCarryTimestamp(traderAccountId), "Carry clock should advance"
+        );
+    }
+
     function test_SlippageClosePaysClearer() public {
         bytes32 accountId = bytes32(uint256(uint160(ALICE)));
         bytes32 keeperAccountId = bytes32(uint256(uint160(KEEPER)));
@@ -207,16 +241,25 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccountId);
+        uint64 carryTimestampBefore = engine.getPositionLastCarryTimestamp(keeperAccountId);
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(1e8));
         vm.prank(KEEPER);
         vm.roll(block.number + 1);
         router.executeOrder(1, priceData);
 
-        assertEq(
-            clearinghouse.balanceUsdc(keeperAccountId) - keeperSettlementBefore,
-            1e6,
-            "Failed-order clearer payout should not depend on the keeper having a fresh cached mark"
+        assertGt(
+            clearinghouse.balanceUsdc(keeperAccountId),
+            keeperSettlementBefore,
+            "Failed-order clearer payout should still credit settlement when the cached mark is stale"
+        );
+        assertGe(
+            engine.getPositionLastCarryTimestamp(keeperAccountId),
+            uint64(block.timestamp),
+            "Stale-mark clearer payout should checkpoint carry before mutating the basis"
+        );
+        assertLt(
+            carryTimestampBefore, engine.getPositionLastCarryTimestamp(keeperAccountId), "Carry clock should advance"
         );
     }
 

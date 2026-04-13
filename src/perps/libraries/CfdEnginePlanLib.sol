@@ -210,9 +210,10 @@ library CfdEnginePlanLib {
         uint256 carryBaseUsdc = PositionRiskAccountingLib.computeLpBackedNotionalUsdc(
             effectiveSnap.position.size, price, effectiveSnap.accountBuckets.settlementBalanceUsdc
         );
-        delta.pendingCarryUsdc = PositionRiskAccountingLib.computePendingCarryUsdc(
-            carryBaseUsdc, effectiveSnap.riskParams.baseCarryBps, carryTimeDelta
-        );
+        delta.pendingCarryUsdc = effectiveSnap.unsettledCarryUsdc
+            + PositionRiskAccountingLib.computePendingCarryUsdc(
+                carryBaseUsdc, effectiveSnap.riskParams.baseCarryBps, carryTimeDelta
+            );
 
         if (_applyPendingCarryRealizationToOpenSnapshot(effectiveSnap, delta.pendingCarryUsdc)) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES;
@@ -454,9 +455,10 @@ library CfdEnginePlanLib {
         uint256 carryBaseUsdc = PositionRiskAccountingLib.computeLpBackedNotionalUsdc(
             snap.position.size, price, snap.accountBuckets.settlementBalanceUsdc
         );
-        delta.pendingCarryUsdc = PositionRiskAccountingLib.computePendingCarryUsdc(
-            carryBaseUsdc, snap.riskParams.baseCarryBps, carryTimeDelta
-        );
+        delta.pendingCarryUsdc = snap.unsettledCarryUsdc
+            + PositionRiskAccountingLib.computePendingCarryUsdc(
+                carryBaseUsdc, snap.riskParams.baseCarryBps, carryTimeDelta
+            );
 
         CfdTypes.Position memory pos = snap.position;
         delta.side = pos.side;
@@ -690,9 +692,10 @@ library CfdEnginePlanLib {
             : 0;
         uint256 carryBaseUsdc =
             PositionRiskAccountingLib.computeLpBackedNotionalUsdc(snap.position.size, price, settlementReachableUsdc);
-        delta.pendingCarryUsdc = PositionRiskAccountingLib.computePendingCarryUsdc(
-            carryBaseUsdc, snap.riskParams.baseCarryBps, carryTimeDelta
-        );
+        delta.pendingCarryUsdc = snap.unsettledCarryUsdc
+            + PositionRiskAccountingLib.computePendingCarryUsdc(
+                carryBaseUsdc, snap.riskParams.baseCarryBps, carryTimeDelta
+            );
 
         delta.riskState = PositionRiskAccountingLib.buildPositionRiskStateWithCarry(
             pos, price, snap.capPrice, delta.pendingCarryUsdc, settlementReachableUsdc, maintMarginBps
