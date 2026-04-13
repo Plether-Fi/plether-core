@@ -36,6 +36,8 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         uint256 totalAssetsUsdc;
         uint256 freeUsdc;
         uint256 withdrawalReservedUsdc;
+        uint256 pendingRecapitalizationUsdc;
+        uint256 pendingTradingRevenueUsdc;
         uint256 seniorPrincipalUsdc;
         uint256 juniorPrincipalUsdc;
         uint256 unpaidSeniorYieldUsdc;
@@ -720,6 +722,8 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         viewData.totalAssetsUsdc = totalAssets();
         viewData.freeUsdc = withdrawalSnapshot.freeUsdc;
         viewData.withdrawalReservedUsdc = withdrawalSnapshot.reserved;
+        viewData.pendingRecapitalizationUsdc = pendingRecapitalizationUsdc;
+        viewData.pendingTradingRevenueUsdc = pendingTradingRevenueUsdc;
         viewData.seniorPrincipalUsdc = seniorPrincipal;
         viewData.juniorPrincipalUsdc = juniorPrincipal;
         viewData.unpaidSeniorYieldUsdc = unpaidSeniorYield;

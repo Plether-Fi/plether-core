@@ -793,7 +793,7 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
-    function test_ClaimDeferredPayout_AllowsPermissionlessHeadService() public {
+    function test_ClaimDeferredPayout_RevertsForNonOwner() public {
         address trader = address(0xD307);
         address relayer = address(0xD308);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
@@ -809,16 +809,10 @@ contract CfdEngineTest is BasePerpTest {
 
         uint256 deferred = engine.deferredPayoutUsdc(accountId);
         usdc.mint(address(pool), deferred);
-        uint256 clearinghouseBefore = clearinghouse.balanceUsdc(accountId);
 
         vm.prank(relayer);
+        vm.expectRevert(CfdEngine.CfdEngine__NotAccountOwner.selector);
         engine.claimDeferredPayout(accountId);
-
-        assertEq(
-            clearinghouse.balanceUsdc(accountId),
-            clearinghouseBefore + deferred,
-            "Permissionless service should still credit the recorded trader"
-        );
     }
 
     function test_ClaimDeferredPayout_AllowsPartialHeadClaimWhenLiquidityReturnsGradually() public {

@@ -282,6 +282,17 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     event DeferredPayoutClaimed(bytes32 indexed accountId, uint256 amountUsdc);
     event DeferredClearerBountyRecorded(address indexed keeper, uint256 amountUsdc);
     event DeferredClearerBountyClaimed(address indexed keeper, uint256 amountUsdc);
+    event RiskParamsProposalCancelled();
+    event AddFadDaysProposalCancelled();
+    event RemoveFadDaysProposalCancelled();
+    event CarryCheckpointed(bytes32 indexed accountId, uint256 addedUnsettledCarryUsdc, uint256 totalUnsettledCarryUsdc);
+    event CarryRealized(
+        bytes32 indexed accountId,
+        uint256 realizedCarryUsdc,
+        uint256 freeSettlementConsumedUsdc,
+        uint256 marginConsumedUsdc,
+        uint256 remainingUnsettledCarryUsdc
+    );
 
     function _sideIndex(
         CfdTypes.Side side
@@ -450,6 +461,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     function cancelRiskParamsProposal() external onlyOwner {
         delete pendingRiskParams;
         riskParamsActivationTime = 0;
+        emit RiskParamsProposalCancelled();
     }
 
     /// @notice Proposes adding FAD (Friday Afternoon Deleverage) override days — elevated margin on those dates
@@ -481,6 +493,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     function cancelAddFadDaysProposal() external onlyOwner {
         delete _pendingAddFadDays;
         addFadDaysActivationTime = 0;
+        emit AddFadDaysProposalCancelled();
     }
 
     /// @notice Proposes removing FAD override days (restores normal margin on those dates)
@@ -512,6 +525,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     function cancelRemoveFadDaysProposal() external onlyOwner {
         delete _pendingRemoveFadDays;
         removeFadDaysActivationTime = 0;
+        emit RemoveFadDaysProposalCancelled();
     }
 
     /// @notice Proposes a new fadMaxStaleness — max age of the last mark price before FAD kicks in
@@ -730,6 +744,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     function claimDeferredPayout(
         bytes32 accountId
     ) external nonReentrant {
+        if (bytes32(uint256(uint160(msg.sender))) != accountId) {
+            revert CfdEngine__NotAccountOwner();
+        }
         StoredPosition storage pos = _positions[accountId];
         _prepareDeferredClaim(accountId, pos);
 
@@ -1491,6 +1508,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             _elapsedCarryUsdc(_loadPosition(accountId), price, reachableCollateralUsdc, block.timestamp);
         if (elapsedCarryUsdc > 0) {
             unsettledCarryUsdc[accountId] += elapsedCarryUsdc;
+            emit CarryCheckpointed(accountId, elapsedCarryUsdc, unsettledCarryUsdc[accountId]);
         }
         pos.lastCarryTimestamp = uint64(block.timestamp);
     }
@@ -1524,6 +1542,13 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             USDC.safeTransfer(address(vault), realizedCarryUsdc);
             vault.routeLpValue(realizedCarryUsdc, ICfdVault.LpValueMode.ExplicitCashInflow);
         }
+        emit CarryRealized(
+            accountId,
+            realizedCarryUsdc,
+            freeSettlementConsumedUsdc,
+            marginConsumedUsdc,
+            unsettledCarryUsdc[accountId]
+        );
         pos.lastCarryTimestamp = uint64(block.timestamp);
     }
 

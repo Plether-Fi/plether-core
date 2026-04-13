@@ -1275,11 +1275,23 @@ contract HousePoolTest is BasePerpTest {
     function test_GetVaultLiquidityView_ReturnsCurrentPoolState() public {
         _fundSenior(alice, 200_000e6);
         _fundJunior(bob, 300_000e6);
+        usdc.mint(address(pool), 50_000e6);
+        vm.prank(address(engine));
+        pool.recordRecapitalizationInflow(50_000e6);
+        usdc.mint(address(pool), 20_000e6);
+        vm.prank(address(engine));
+        pool.routeLpValue(20_000e6, ICfdVault.LpValueMode.ExplicitCashInflow);
 
         HousePool.VaultLiquidityView memory viewData = pool.getVaultLiquidityView();
         assertEq(viewData.totalAssetsUsdc, pool.totalAssets());
         assertEq(viewData.freeUsdc, pool.getFreeUSDC());
-        assertEq(viewData.withdrawalReservedUsdc, _withdrawalReservedUsdc());
+        assertEq(viewData.pendingRecapitalizationUsdc, pool.pendingRecapitalizationUsdc());
+        assertEq(viewData.pendingTradingRevenueUsdc, pool.pendingTradingRevenueUsdc());
+        assertEq(
+            viewData.withdrawalReservedUsdc,
+            _withdrawalReservedUsdc() + viewData.pendingRecapitalizationUsdc + viewData.pendingTradingRevenueUsdc,
+            "Liquidity view should include pending recapitalization and trading buckets in its reserved figure"
+        );
         assertEq(viewData.seniorPrincipalUsdc, pool.seniorPrincipal());
         assertEq(viewData.juniorPrincipalUsdc, pool.juniorPrincipal());
         assertEq(viewData.unpaidSeniorYieldUsdc, pool.unpaidSeniorYield());

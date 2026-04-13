@@ -129,6 +129,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     error OrderRouter__TradingNotActive();
     error OrderRouter__OraclePublishTimeOutOfOrder();
     error OrderRouter__InvalidStalenessLimit();
+    error OrderRouter__ZeroAddress();
     error OrderRouter__PredictableOpenInvalid(uint8 code);
 
     struct TimelockedUintProposal {
@@ -172,6 +173,9 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         uint256[] memory _basePrices,
         bool[] memory _inversions
     ) Ownable(msg.sender) OrderEscrowAccounting(_engine) {
+        if (_engineLens == address(0)) {
+            revert OrderRouter__ZeroAddress();
+        }
         vault = ICfdVault(_vault);
         engineLens = ICfdEngineLens(_engineLens);
         pyth = IPyth(_pyth);

@@ -3923,6 +3923,20 @@ contract MarkPriceStalenessTest is BasePerpTest {
         assertEq(engine.lastMarkPrice(), 1e8);
     }
 
+    function test_Constructor_ZeroEngineLensReverts() public {
+        vm.expectRevert(OrderRouter.OrderRouter__ZeroAddress.selector);
+        new OrderRouter(
+            address(engine),
+            address(0),
+            address(pool),
+            address(mockPyth),
+            feedIds,
+            weights,
+            bases,
+            new bool[](2)
+        );
+    }
+
 }
 
 // Regression: H-02

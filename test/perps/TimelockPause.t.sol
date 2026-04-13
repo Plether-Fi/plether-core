@@ -13,6 +13,8 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 
 contract TimelockPauseTest is BasePerpTest {
 
+    event RiskParamsProposalCancelled();
+
     address alice = address(0x111);
     address nonOwner = address(0xBAD);
 
@@ -112,6 +114,8 @@ contract TimelockPauseTest is BasePerpTest {
         });
 
         engine.proposeRiskParams(newParams);
+        vm.expectEmit(false, false, false, true);
+        emit RiskParamsProposalCancelled();
         engine.cancelRiskParamsProposal();
         assertEq(engine.riskParamsActivationTime(), 0);
 
