@@ -54,8 +54,11 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         ICfdEngine.SideState memory bearState = _sideState(CfdTypes.Side.BEAR);
         snapshot.markFreshnessRequired = bullState.maxProfitUsdc + bearState.maxProfitUsdc > 0;
         if (snapshot.markFreshnessRequired) {
+            uint256 effectiveEngineLimit = engineContract.isOracleFrozen()
+                ? engineContract.fadMaxStaleness()
+                : engineContract.engineMarkStalenessLimit();
             snapshot.maxMarkStaleness =
-                engineContract.isOracleFrozen() ? engineContract.fadMaxStaleness() : markStalenessLimit;
+                effectiveEngineLimit < markStalenessLimit ? effectiveEngineLimit : markStalenessLimit;
         }
     }
 

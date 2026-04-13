@@ -209,7 +209,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
 
     uint256 public pendingEngineMarkStalenessLimit;
     uint256 public engineMarkStalenessActivationTime;
-
     error CfdEngine__Unauthorized();
     error CfdEngine__VaultAlreadySet();
     error CfdEngine__RouterAlreadySet();
@@ -293,6 +292,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 marginConsumedUsdc,
         uint256 remainingUnsettledCarryUsdc
     );
+    event TokenSwept(address indexed token, address indexed to, uint256 amount);
 
     function _sideIndex(
         CfdTypes.Side side
@@ -872,6 +872,18 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         emit BadDebtCleared(amount, accumulatedBadDebtUsdc);
     }
 
+    function sweepToken(
+        address token,
+        address to,
+        uint256 amount
+    ) external onlyOwner {
+        if (to == address(0) || token == address(0)) {
+            revert CfdEngine__ZeroAddress();
+        }
+        IERC20(token).safeTransfer(to, amount);
+        emit TokenSwept(token, to, amount);
+    }
+
     function clearDegradedMode() external onlyOwner {
         if (!degradedMode) {
             revert CfdEngine__NotDegraded();
@@ -892,7 +904,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     /// @param accountId Clearinghouse account to check
     function checkWithdraw(
         bytes32 accountId
-    ) external override {
+    ) external override nonReentrant {
         if (msg.sender != address(clearinghouse)) {
             revert CfdEngine__NotClearinghouse();
         }
@@ -1567,7 +1579,15 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     }
 
     function _liveMarkStalenessLimit() internal view returns (uint256) {
-        return isOracleFrozen() ? fadMaxStaleness : engineMarkStalenessLimit;
+        if (isOracleFrozen()) {
+            return fadMaxStaleness;
+        }
+        if (address(vault) == address(0)) {
+            return engineMarkStalenessLimit;
+        }
+
+        uint256 poolLimit = vault.markStalenessLimit();
+        return engineMarkStalenessLimit < poolLimit ? engineMarkStalenessLimit : poolLimit;
     }
 
     function _consumeDeferredTraderPayout(

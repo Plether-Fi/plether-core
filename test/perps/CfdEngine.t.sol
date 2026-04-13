@@ -4004,7 +4004,7 @@ contract CfdEngineTest is BasePerpTest {
         engine.clearBadDebt(badDebt + 1);
     }
 
-    function test_CheckWithdraw_UsesEngineMarkStalenessLimit_NotPoolMarkLimit() public {
+    function test_CheckWithdraw_UsesMinimumOfEngineAndPoolMarkStalenessLimits() public {
         pool.proposeMarkStalenessLimit(300);
         vm.warp(block.timestamp + 48 hours + 1);
         pool.finalizeMarkStalenessLimit();
@@ -4034,6 +4034,16 @@ contract CfdEngineTest is BasePerpTest {
 
         vm.prank(address(clearinghouse));
         engine.checkWithdraw(accountId);
+    }
+
+    function test_SweepToken_RecoversAccidentallySentUsdc() public {
+        usdc.mint(address(engine), 123e6);
+        uint256 ownerBefore = usdc.balanceOf(address(this));
+
+        engine.sweepToken(address(usdc), address(this), 123e6);
+
+        assertEq(usdc.balanceOf(address(engine)), 0);
+        assertEq(usdc.balanceOf(address(this)), ownerBefore + 123e6);
     }
 
     function test_ReserveCloseOrderExecutionBounty_AllowsStaleLastMarkPriceWhenStored() public {

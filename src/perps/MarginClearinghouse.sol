@@ -10,12 +10,13 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 
 /// @title MarginClearinghouse
 /// @notice USDC-only cross-margin account manager for Plether.
 /// @dev Holds settlement balances and locked margin for CFD accounts.
 /// @custom:security-contact contact@plether.com
-contract MarginClearinghouse is IMarginAccount, Ownable2Step {
+contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTransient {
 
     using SafeERC20 for IERC20;
 
@@ -120,7 +121,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step {
     /// @notice Trader-facing wrapper that deposits into the caller's canonical account id.
     function depositMargin(
         uint256 amount
-    ) external {
+    ) external nonReentrant {
         _deposit(bytes32(uint256(uint160(msg.sender))), msg.sender, amount);
     }
 
@@ -130,14 +131,14 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step {
     function withdraw(
         bytes32 accountId,
         uint256 amount
-    ) external {
+    ) external nonReentrant {
         _withdraw(accountId, msg.sender, amount);
     }
 
     /// @notice Trader-facing wrapper that withdraws from the caller's canonical account id.
     function withdrawMargin(
         uint256 amount
-    ) external {
+    ) external nonReentrant {
         _withdraw(bytes32(uint256(uint160(msg.sender))), msg.sender, amount);
     }
 
