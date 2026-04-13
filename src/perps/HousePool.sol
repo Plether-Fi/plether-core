@@ -468,7 +468,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
             revert HousePool__ZeroAddress();
         }
 
-        HousePoolContext memory ctx = _syncAndBuildHousePoolContext();
+        HousePoolContext memory ctx = _buildCurrentHousePoolContext();
         _requireFreshMark(ctx.accountingSnapshot, ctx.statusSnapshot);
         _reconcile(ctx.accountingSnapshot);
 
@@ -799,10 +799,6 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         ctx.pendingState = _previewPendingAccountingState(accountingSnapshot, statusSnapshot);
     }
 
-    function _syncAndBuildHousePoolContext() internal returns (HousePoolContext memory ctx) {
-        return _buildCurrentHousePoolContext();
-    }
-
     function _buildCurrentHousePoolContext() internal view returns (HousePoolContext memory ctx) {
         return _buildHousePoolContext(_getHousePoolInputSnapshot(), _getHousePoolStatusSnapshot());
     }
@@ -981,26 +977,6 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         HousePoolPendingPreviewLib.applyPendingBucketsPreview(
             previewState, pendingRecapitalizationUsdc, pendingTradingRevenueUsdc
         );
-        state.waterfall = previewState.waterfall;
-        state.unassignedAssets = previewState.unassignedAssets;
-    }
-
-    function _applyRecapitalizationIntent(
-        PendingAccountingState memory state,
-        uint256 amount
-    ) internal pure {
-        HousePoolPendingPreviewLib.PendingAccountingState memory previewState = _copyPendingAccountingState(state);
-        HousePoolPendingPreviewLib.applyRecapitalizationIntent(previewState, amount);
-        state.waterfall = previewState.waterfall;
-        state.unassignedAssets = previewState.unassignedAssets;
-    }
-
-    function _routeSeededRevenue(
-        PendingAccountingState memory state,
-        uint256 amount
-    ) internal pure {
-        HousePoolPendingPreviewLib.PendingAccountingState memory previewState = _copyPendingAccountingState(state);
-        HousePoolPendingPreviewLib.routeSeededRevenue(previewState, amount);
         state.waterfall = previewState.waterfall;
         state.unassignedAssets = previewState.unassignedAssets;
     }

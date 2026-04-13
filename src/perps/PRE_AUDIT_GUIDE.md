@@ -21,6 +21,18 @@ If reviewing quickly, focus on these questions in order:
 
 ## Policy Spec
 
+### Privileged caller table
+
+| Contract | Privileged caller set | Notes |
+|----------|------------------------|-------|
+| `CfdEngine` settlement host hooks | `settlementModule` only | settlement module itself is engine-gated |
+| `CfdEngine.processOrderTyped` / `liquidatePosition` / fee bookkeeping | `orderRouter` only | router is the external execution boundary |
+| `MarginClearinghouse` operator paths | `engine`, `orderRouter`, `settlementModule` | router for queue escrow, engine/module for settlement |
+| `HousePool.payOut` / `recordProtocolInflow` | `engine`, `orderRouter`, `settlementModule` | payout/inflow authority is intentionally narrow |
+| `HousePool.routeLpValue` | `engine`, `settlementModule` | LP-owned value routing only |
+
+Any new helper/module contract that can reach these sets should be treated as security-critical and explicitly access-controlled.
+
 ### Order lifecycle state machine
 
 `Pending -> Executed`
@@ -201,11 +213,15 @@ Use the suites below as the highest-signal audit companions.
 | Theme | Primary suites |
 |-------|----------------|
 | Carry | `test/perps/CfdEngine.t.sol`, `test/perps/CfdEnginePlanRegression.t.sol`, `test/perps/MarginClearinghouse.t.sol` |
+| Deferred claim modes | `test/perps/DeferredClaimsMatrix.t.sol`, `test/perps/CfdEngine.t.sol` |
 | Liquidation | `test/perps/CfdEngine.t.sol`, `test/perps/OrderRouter.t.sol`, `test/perps/invariant/PerpDeferredPayoutInvariant.t.sol` |
+| Payout modes | `test/perps/PayoutModesMatrix.t.sol`, `test/perps/CfdEngine.t.sol` |
 | Deferred liabilities | `test/perps/CfdEngine.t.sol`, `test/perps/invariant/PerpDeferredPayoutInvariant.t.sol` |
 | FIFO / expiry / queue | `test/perps/OrderRouter.t.sol` |
 | Frozen oracle / FAD | `test/perps/OrderRouter.t.sol` |
 | LP reserve / withdrawals | `test/perps/MarginClearinghouse.t.sol`, `test/perps/CfdEngine.t.sol`, `test/perps/HousePool.t.sol` |
+| HousePool snapshot parity | `test/perps/HousePoolSnapshotParity.t.sol`, `test/perps/PerpsReadParity.t.sol` |
+| Router policy matrix | `test/perps/OrderRouterPolicyMatrix.t.sol` |
 | Stale-mark / reconcile behavior | `test/perps/HousePool.t.sol`, `test/perps/CfdEngine.t.sol`, `test/perps/AuditV2.t.sol`, `test/perps/AuditV3.t.sol` |
 | Audit-history regressions | `test/perps/AuditCurrentFindingsVerification.t.sol`, `test/perps/AuditFindings.t.sol`, `test/perps/AuditV2.t.sol`, `test/perps/AuditV3.t.sol` |
 
