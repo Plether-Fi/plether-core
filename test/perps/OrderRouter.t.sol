@@ -3389,7 +3389,7 @@ contract InversionTest is Test {
         mockPyth.setPrice(FEED_JPY, int64(156_700), int32(-3), 1001);
         (uint256 price,) = harness.computeBasketPrice(60, 60);
 
-        uint256 expectedNorm = uint256(1e11) / 156_700;
+        uint256 expectedNorm = (uint256(1e29) + (156_700 / 2)) / 156_700 / 1e18;
         uint256 expectedBasket = (expectedNorm * 1e18) / (uint256(638_163) * 1e10);
         assertEq(price, expectedBasket, "Inverted JPY should produce correct basket price");
     }

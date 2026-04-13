@@ -383,6 +383,36 @@ contract HousePoolTest is BasePerpTest {
         );
     }
 
+    function test_FinalizeSeniorRate_StaleMarkCapsCheckpointAtLastFreshMarkTime() public {
+        address trader = address(0x33341);
+        _fundSenior(alice, 200_000e6);
+        _fundJunior(bob, 200_000e6);
+        _fundTrader(trader, 50_000e6);
+
+        bytes32 traderId = bytes32(uint256(uint160(trader)));
+        _open(traderId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+
+        uint256 lastFreshMarkTime = engine.lastMarkTime();
+        pool.proposeSeniorRate(1600);
+        vm.warp(block.timestamp + 48 hours + 121);
+        pool.finalizeSeniorRate();
+
+        assertEq(
+            pool.lastSeniorYieldCheckpointTime(),
+            lastFreshMarkTime,
+            "Stale rate finalization should only checkpoint senior yield through the last fresh mark"
+        );
+
+        uint256 freshTime = block.timestamp + 1 hours;
+        vm.warp(freshTime);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(freshTime));
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        assertGt(pool.unpaidSeniorYield(), 0, "Yield after the last fresh mark should still accrue once freshness returns");
+    }
+
     function test_FinalizeSeniorRate_NoCarrySyncNeededBeforeReconcile() public {
         address trader = address(0x4444);
         bytes32 traderId = bytes32(uint256(uint160(trader)));

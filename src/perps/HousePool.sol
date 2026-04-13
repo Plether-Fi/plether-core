@@ -228,11 +228,14 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         if (_markIsFreshForReconcile(accountingSnapshot, statusSnapshot)) {
             _reconcile(accountingSnapshot);
         } else {
+            uint256 staleCheckpointTime = statusSnapshot.lastMarkTime > lastSeniorYieldCheckpointTime
+                ? statusSnapshot.lastMarkTime
+                : lastSeniorYieldCheckpointTime;
             if (seniorPrincipal == 0) {
-                lastReconcileTime = block.timestamp;
+                lastReconcileTime = staleCheckpointTime;
             }
             _applyPendingBucketsLive(accountingSnapshot, statusSnapshot);
-            lastSeniorYieldCheckpointTime = block.timestamp;
+            lastSeniorYieldCheckpointTime = staleCheckpointTime;
         }
         seniorRateBps = pendingSeniorRate;
         pendingSeniorRate = 0;

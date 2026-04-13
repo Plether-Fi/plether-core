@@ -1222,7 +1222,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     }
 
     /// @dev Inverts a Pyth price (e.g. USD/JPY → JPY/USD) and returns 8-decimal output.
-    ///      Formula: 10^(8 - expo) / price
+    ///      Formula: round(10^(8 - expo) / price) using an 18-decimal intermediate.
     function _invertPythPrice(
         int64 price,
         int32 expo
@@ -1230,7 +1230,10 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         if (price <= 0) {
             revert OrderRouter__OraclePriceNegative();
         }
-        return 10 ** uint256(uint32(8 - expo)) / uint64(price);
+        uint256 positivePrice = uint256(uint64(price));
+        uint256 scaledPrecision = 10 ** uint256(uint32(26 - expo));
+        uint256 scaledInverse = (scaledPrecision + (positivePrice / 2)) / positivePrice;
+        return scaledInverse / 1e18;
     }
 
     /// @dev Converts a Pyth price to 8-decimal format. Scales up/down based on exponent difference from -8.
