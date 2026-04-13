@@ -290,6 +290,7 @@ contract AuditCurrentFindingsVerifiedInvalid_RebateIlliquidity is BasePerpTest {
         usdc.transfer(address(0xDEAD), poolAssets - 2000e6);
 
         uint256 keeperBefore = usdc.balanceOf(address(this));
+        uint256 bobSettlementBefore = clearinghouse.balanceUsdc(bobId);
         bytes[] memory empty;
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
@@ -299,7 +300,11 @@ contract AuditCurrentFindingsVerifiedInvalid_RebateIlliquidity is BasePerpTest {
         assertEq(
             usdc.balanceOf(address(this)) - keeperBefore, 0, "keeper should not be paid on typed solvency invalidation"
         );
-        assertEq(usdc.balanceOf(bob), 1e6, "user should receive the reserved bounty refund");
+        assertEq(
+            clearinghouse.balanceUsdc(bobId) - bobSettlementBefore,
+            1e6,
+            "user should receive the reserved bounty refund in clearinghouse custody"
+        );
     }
 
 }

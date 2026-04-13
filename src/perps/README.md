@@ -113,7 +113,7 @@ Important details:
 - `acceptablePrice == 0` behaves like a delayed market-style order.
 - Open orders are rejected during degraded mode and close-only windows.
 - Failed orders are finalized from router-custodied bounty escrow; they are not requeued.
-- Execution-time user-invalid opens and terminal-invalid closes pay the clearer from escrow, while genuine protocol-state invalidations refund the trader.
+- Execution-time user-invalid opens and terminal-invalid closes pay the clearer from escrow, while genuine protocol-state invalidations refund the trader into clearinghouse settlement.
 - Close orders can still execute during genuine frozen-oracle windows using the last valid mark subject to the relaxed frozen-market rules.
 - Close-intent queue validation is account-local and bounded by the per-account pending-order queue.
 
@@ -214,6 +214,7 @@ Carry behavior:
 - Accrues continuously by wall-clock time.
 - Continues accruing even during stale or frozen oracle windows.
 - Applies to whichever side is consuming LP capital.
+- Can be checkpointed into `unsettledCarryUsdc` when a basis-changing settlement credit occurs before physical collection is possible.
 - Is realized on open, close, add-margin, and clearinghouse deposit/withdraw balance mutations before those mutations change the carry basis.
 - Flows to LP trading revenue once realized.
 - Affects guard and risk checks before realization.
@@ -249,6 +250,7 @@ The perps system intentionally splits accounting into separate kernels:
 - `LiquidationAccountingLib`: reachable collateral, keeper bounty, residual payout, and bad debt for forced close.
 - `SolvencyAccountingLib`: effective assets, bounded max liability, withdrawal reserves, and free vault cash.
 - `OrderEscrowAccounting`: router-held execution bounty reserves and margin-queue bookkeeping.
+- `HousePool.routeLpValue(amount, mode)`: LP-owned value routing for both fresh cash inflows and implicit retained value.
 
 These domains answer different questions. They should not silently share assumptions just because the inputs look similar.
 

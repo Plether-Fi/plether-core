@@ -231,11 +231,13 @@ Keep these categories separate:
 
 - `recordProtocolInflow`: protocol-owned value such as fees
 - `recordRecapitalizationInflow`: recapitalization intended to restore waterfall claimants
-- `recordTradingRevenueInflow`: LP-owned realized trading revenue
+- `routeLpValue(amount, ExplicitCashInflow)`: LP-owned value where fresh cash entered the vault in this flow
+- `routeLpValue(amount, ImplicitRetainedValue)`: LP-owned value already retained physically by the vault and only needing ownership routing
 
 Rules:
 
 - source semantics decide the owner of the inflow,
+- explicit cash inflow vs implicit retained value decides whether `accountedAssets` should increase,
 - claimant continuity should prefer seeded ownership paths when available,
 - only value with no safe claimant path belongs in `unassignedAssets`.
 
@@ -250,6 +252,7 @@ Definitions:
 - `positionNotionalUsdc = size * markPrice / scale`
 - `lpBackedNotionalUsdc = max(positionNotionalUsdc - reachableCollateralUsdc, 0)`
 - `pendingCarryUsdc = lpBackedNotionalUsdc * baseCarryBps * elapsedSeconds / (10_000 * 365 days)`
+- `unsettledCarryUsdc[accountId]`: carry that has been checkpointed at a basis change but not yet physically collected
 
 Rules:
 
@@ -257,6 +260,7 @@ Rules:
 - carry does not pause when the oracle is stale or frozen,
 - both sides pay when they consume LP-backed capital,
 - pending carry reduces equity for guard and risk checks before realization,
+- basis-changing settlement credits must checkpoint carry even when physical collection is deferred,
 - carry is realized on open, close, add-margin, and clearinghouse deposit/withdraw balance mutations before those mutations change the carry basis,
 - liquidation does not have its own separate carry-realization path,
 - realized carry is booked as LP trading revenue.
@@ -315,7 +319,7 @@ Rules:
 
 - deterministic live-state open failures may be rejected at commit time,
 - execution-time user-invalid opens pay the clearer from router escrow,
-- genuine post-commit protocol-state invalidations refund the trader bounty,
+- genuine post-commit protocol-state invalidations refund the trader bounty into clearinghouse settlement,
 - typed engine policy categories, not raw revert selectors, should drive the split.
 
 ## Settlement Rules

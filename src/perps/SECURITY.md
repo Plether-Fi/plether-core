@@ -208,6 +208,7 @@ Current policy is intentionally simple:
 - expired orders fail terminally,
 - typed engine failures route bounty according to semantic failure category,
 - terminal-invalid closes pay the clearer rather than refunding potentially margin-backed escrow to the trader wallet,
+- open-order refunds and clearer payouts credit clearinghouse settlement rather than sending direct wallet USDC transfers,
 - the router does not maintain a retry or requeue lane.
 
 ### Oracle regimes
@@ -240,6 +241,7 @@ The perps system uses LP-capital carry instead of side-to-side funding.
 - carry base: `max(positionNotionalUsdc - reachableCollateralUsdc, 0)`
 - accrual clock: wall-clock time
 - stale/frozen behavior: carry does not pause during stale or frozen oracle windows
+- basis-change fallback: if physical collection is unsafe, elapsed carry is checkpointed into `unsettledCarryUsdc`
 - realization points: open, close, add margin, and clearinghouse deposit/withdraw mutations before they change reachable collateral
 - destination: realized carry becomes LP trading revenue
 

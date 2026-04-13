@@ -67,11 +67,11 @@ Any new helper/module contract that can reach these sets should be treated as se
 |-----------|---------|---------------|--------------|
 | Open/close executes successfully | `Executed` | clearer paid from escrow | dequeue |
 | Typed `UserInvalid` open | `Failed` | clearer paid | dequeue |
-| Typed `ProtocolStateInvalidated` open | `Failed` | trader refunded or claimable fallback | dequeue |
+| Typed `ProtocolStateInvalidated` open | `Failed` | trader refunded into clearinghouse settlement | dequeue |
 | Terminal invalid close | `Failed` | clearer paid | dequeue |
-| Slippage failure on open | `Failed` | trader refunded or claimable fallback | dequeue |
+| Slippage failure on open | `Failed` | trader refunded into clearinghouse settlement | dequeue |
 | Slippage failure on close | `Failed` | clearer paid | dequeue |
-| Expired open order | `Failed` | trader refunded or claimable fallback | dequeue |
+| Expired open order | `Failed` | trader refunded into clearinghouse settlement | dequeue |
 | Expired close order | `Failed` | clearer paid from escrow under the current terminal-close policy | dequeue |
 | Stale oracle | blocked, not terminal | no distribution | keep pending |
 | Live-market publish-time ordering failure | blocked, not terminal | no distribution | keep pending |
@@ -80,7 +80,7 @@ Any new helper/module contract that can reach these sets should be treated as se
 
 | Bounty type | Source of funds | Custody while pending | Success path | Illiquid path | Terminal failure path |
 |-------------|-----------------|-----------------------|--------------|---------------|-----------------------|
-| Order execution bounty | Trader free settlement, then bounded close fallback from active position margin | `OrderRouter` escrow | immediate clearer payment | n/a | either trader refund/claimable fallback or clearer payment depending on failure category |
+| Order execution bounty | Trader free settlement, then bounded close fallback from active position margin | `OrderRouter` escrow | clearinghouse credit for the clearer | n/a | trader refund or clearer payment via clearinghouse credit depending on failure category |
 | Liquidation bounty | Capped from canonical liquidation value derived from reachable collateral and carry-adjusted equity | planned in engine, then serviced through the liquidation settlement path | immediate keeper payment if cash is available after the settlement path | deferred clearer bounty senior claim | n/a |
 
 ### Oracle regime table
@@ -104,6 +104,7 @@ Any new helper/module contract that can reach these sets should be treated as se
 | Router execution bounty escrow | Trader-funded keeper escrow | `OrderRouter` balance + order record | router commit/distribute/refund/forfeit | no | no | no | no |
 | Deferred trader payout | Trader senior claim on vault liquidity | `CfdEngine.deferredPayoutUsdc` | engine create/service | no | yes, as senior liability | yes | yes |
 | Deferred clearer bounty | Keeper senior claim on vault liquidity | `CfdEngine.deferredClearerBountyUsdc` | engine create/service | no | yes, as senior liability | yes | yes |
+| Unsettled carry | Protocol-recorded carry debt on an account | `CfdEngine.unsettledCarryUsdc[accountId]` | engine carry-checkpoint paths | no | yes, as carry drag on account equity | no | no |
 | Accumulated protocol fees | Protocol/treasury | `CfdEngine.accumulatedFeesUsdc` + canonical pool cash | engine accrual, owner withdraw | no | reduces net physical assets | yes | yes |
 | Accumulated bad debt | Protocol loss / LP impairment | `CfdEngine.accumulatedBadDebtUsdc` | engine realization, bad debt clear path | n/a | yes, as realized deficit | yes | yes |
 | Canonical pool assets | LP/protocol backing | `HousePool.totalAssets()` and accounting ledger | pool deposit/withdraw/accounting hooks | base physical solvency cash | yes | yes | yes |
