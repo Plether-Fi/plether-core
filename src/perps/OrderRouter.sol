@@ -1178,21 +1178,19 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         _releaseCommittedMargin(orderId);
     }
 
-    /// @notice Claims ETH or USDC balances that could not be pushed during prior cleanup/refund flows.
+    /// @notice Claims ETH balances that could not be pushed during prior cleanup/refund flows.
     function claimBalance(
         bool ethBalance
     ) external {
-        if (ethBalance) {
-            uint256 ethAmount = _claimAmount(claimableEth);
-            (bool success,) = payable(msg.sender).call{value: ethAmount}("");
-            if (!success) {
-                revert OrderRouter__EthTransferFailed();
-            }
-            return;
+        if (!ethBalance) {
+            revert OrderRouter__NothingToClaim();
         }
 
-        uint256 usdcAmount = _claimAmount(claimableUsdc);
-        USDC.safeTransfer(msg.sender, usdcAmount);
+        uint256 ethAmount = _claimAmount(claimableEth);
+        (bool success,) = payable(msg.sender).call{value: ethAmount}("");
+        if (!success) {
+            revert OrderRouter__EthTransferFailed();
+        }
     }
 
     function _computeBasketPrice(

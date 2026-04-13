@@ -38,7 +38,6 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
     mapping(bytes32 => uint64) internal accountTailOrderId;
     mapping(bytes32 => uint64) public marginHeadOrderId;
     mapping(bytes32 => uint64) public marginTailOrderId;
-    mapping(address => uint256) internal claimableUsdc;
 
     constructor(
         address _engine

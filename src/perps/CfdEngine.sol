@@ -1399,6 +1399,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         settlementModule.executeClose(ICfdEngineSettlementHost(address(this)), delta, currentPosition, publishTime);
         emit PositionClosed(delta.accountId, marginSide, delta.sizeDelta, delta.price, delta.realizedPnlUsdc);
 
+        unsettledCarryUsdc[delta.accountId] = 0;
+
         _enterDegradedModeIfInsolvent(delta.accountId, 0);
     }
 
@@ -1409,6 +1411,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         keeperBountyUsdc =
             settlementModule.executeLiquidation(ICfdEngineSettlementHost(address(this)), delta, publishTime);
         emit PositionLiquidated(delta.accountId, delta.side, delta.posSize, delta.price, keeperBountyUsdc);
+
+        unsettledCarryUsdc[delta.accountId] = 0;
+
         _enterDegradedModeIfInsolvent(delta.accountId, keeperBountyUsdc);
     }
 
