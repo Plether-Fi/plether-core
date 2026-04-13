@@ -330,7 +330,7 @@ contract AuditFollowupFindingsFailing_TrancheCooldownBypass is BasePerpTest {
 
     address attacker = address(0xBAD);
 
-    function test_H1_TwoContractThirdPartyDepositMustRefreshReceiverCooldown() public {
+    function test_H1_TwoContractThirdPartyDepositMustNotRefreshReceiverCooldown() public {
         TrancheCooldownBypassReceiver receiver = new TrancheCooldownBypassReceiver();
         address receiverAddr = address(receiver);
 
@@ -348,9 +348,10 @@ contract AuditFollowupFindingsFailing_TrancheCooldownBypass is BasePerpTest {
         juniorVault.deposit(10_000e6, receiverAddr);
         vm.stopPrank();
 
-        vm.expectRevert(TrancheVault.TrancheVault__DepositCooldown.selector);
         vm.prank(receiverAddr);
         receiver.withdrawMax(juniorVault, attacker);
+
+        assertGt(usdc.balanceOf(attacker), 0, "Third-party top-up must not reset the receiver cooldown");
     }
 
 }

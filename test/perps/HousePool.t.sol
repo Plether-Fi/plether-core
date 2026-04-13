@@ -780,6 +780,28 @@ contract HousePoolTest is BasePerpTest {
         );
     }
 
+    function test_Reconcile_RestoresSeededClaimantsBeforeUnassignedWhenClaimedEquityZero() public {
+        usdc.burn(address(pool), pool.totalAssets());
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        assertEq(pool.seniorPrincipal(), 0, "Setup should zero claimed equity before restoration");
+        assertEq(pool.juniorPrincipal(), 0, "Setup should zero junior claimed equity before restoration");
+        assertGt(seniorVault.totalSupply(), 0, "Seeded senior shares should still exist");
+        assertGt(juniorVault.totalSupply(), 0, "Seeded junior shares should still exist");
+
+        usdc.mint(address(pool), 1500e6);
+        vm.prank(address(engine));
+        pool.recordProtocolInflow(1500e6);
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        assertEq(pool.seniorPrincipal(), 1000e6, "Reconcile should restore seeded senior claims before quarantine");
+        assertEq(pool.juniorPrincipal(), 500e6, "Residual value should route to seeded junior before quarantine");
+        assertEq(pool.unassignedAssets(), 0, "Seeded claimant continuity should beat governance reassignment");
+    }
+
     function helper_UnassignedAssets_AreReservedFromWithdrawalLiquidity() public {
         usdc.mint(address(pool), 100_000e6);
         vm.prank(address(engine));
@@ -1271,6 +1293,27 @@ contract HousePoolTest is BasePerpTest {
         juniorVault.withdraw(100_000 * 1e6, alice, alice);
 
         assertEq(usdc.balanceOf(alice), 100_000 * 1e6, "Victim withdraw should succeed after original cooldown");
+    }
+
+    function test_MeaningfulThirdPartyTopUpToExistingHolderDoesNotResetCooldown() public {
+        _fundJunior(alice, 100_000 * 1e6);
+        uint256 initialCooldown = juniorVault.lastDepositTime(alice);
+
+        vm.warp(block.timestamp + 50 minutes);
+
+        address helper = address(0xB0B);
+        usdc.mint(helper, 10_000e6);
+        vm.startPrank(helper);
+        usdc.approve(address(juniorVault), 10_000e6);
+        juniorVault.deposit(10_000e6, alice);
+        vm.stopPrank();
+
+        assertGt(juniorVault.balanceOf(alice), 100_000e9, "Third-party top-up should still mint shares to the receiver");
+        assertEq(juniorVault.lastDepositTime(alice), initialCooldown, "Third-party top-up should not reset receiver cooldown");
+
+        vm.warp(block.timestamp + 11 minutes);
+        vm.prank(alice);
+        juniorVault.withdraw(100_000 * 1e6, alice, alice);
     }
 
     function test_SeniorPrincipal_RestoredBeforeJuniorSurplus() public {

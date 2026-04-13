@@ -44,7 +44,10 @@ library HousePoolReconcilePlanLib {
             state.unassignedAssets > snapshot.distributable ? snapshot.distributable : state.unassignedAssets;
 
         if (plan.claimedEquityZero) {
-            plan.state.unassignedAssets = snapshot.distributable;
+            uint256 seededDistributableToClaims = snapshot.distributable > plan.state.unassignedAssets
+                ? snapshot.distributable - plan.state.unassignedAssets
+                : 0;
+            HousePoolPendingPreviewLib.routeSeededRevenue(plan.state, seededDistributableToClaims);
             return plan;
         }
 
