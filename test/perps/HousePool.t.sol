@@ -1187,6 +1187,39 @@ contract HousePoolTest is BasePerpTest {
         );
     }
 
+    function test_SeniorHighWaterMark_RatchetsPaidYieldIntoProtectedClaim() public {
+        _fundSenior(alice, 100_000e6);
+
+        uint256 hwmBeforeYield = pool.seniorHighWaterMark();
+        uint256 originalSeniorPrincipal = pool.seniorPrincipal();
+
+        vm.warp(block.timestamp + 365 days);
+        _mintAndAccountPoolExcess(10_000e6);
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        uint256 seniorAfterYield = pool.seniorPrincipal();
+        assertGt(seniorAfterYield, originalSeniorPrincipal, "Setup should pay senior yield into principal");
+        assertEq(
+            pool.seniorHighWaterMark(),
+            seniorAfterYield,
+            "Paid senior yield should ratchet the protected HWM upward"
+        );
+        assertGt(pool.seniorHighWaterMark(), hwmBeforeYield, "HWM should rise after paying senior yield");
+
+        vm.prank(address(pool));
+        usdc.transfer(address(0xdead), 5_000e6);
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        assertGt(pool.seniorPrincipal(), originalSeniorPrincipal, "Senior can stay above original principal after the loss");
+        assertLt(
+            pool.seniorPrincipal(),
+            pool.seniorHighWaterMark(),
+            "Once yield has been paid, later losses treat that paid yield as protected HWM capital"
+        );
+    }
+
     function test_GetVaultLiquidityView_ReturnsCurrentPoolState() public {
         _fundSenior(alice, 200_000e6);
         _fundJunior(bob, 300_000e6);

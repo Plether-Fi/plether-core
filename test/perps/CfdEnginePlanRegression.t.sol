@@ -649,6 +649,67 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         );
     }
 
+    function test_PlanOpen_CarryBasisExcludesQueuedReservations() public view {
+        bytes32 accountId = bytes32(uint256(0xC0A771));
+        CfdEnginePlanTypes.RawSnapshot memory snap;
+        snap.accountId = accountId;
+        snap.position = CfdTypes.Position({
+            size: 100_000e18,
+            margin: 2_000e6,
+            entryPrice: 1e8,
+            maxProfitUsdc: 100_000e6,
+            side: CfdTypes.Side.BULL,
+            lastUpdateTime: 0,
+            lastCarryTimestamp: 1,
+            vpiAccrued: 0
+        });
+        snap.currentTimestamp = uint64(30 days + 1);
+        snap.lastMarkPrice = 1e8;
+        snap.lastMarkTime = uint64(block.timestamp);
+        snap.bullSide = CfdEnginePlanTypes.SideSnapshot({
+            maxProfitUsdc: 100_000e6,
+            openInterest: 100_000e18,
+            entryNotional: 100_000e18 * 1e8,
+            totalMargin: 2_000e6
+        });
+        snap.bearSide = CfdEnginePlanTypes.SideSnapshot({
+            maxProfitUsdc: 100_000e6,
+            openInterest: 100_000e18,
+            entryNotional: 100_000e18 * 1e8,
+            totalMargin: 2_000e6
+        });
+        snap.vaultAssetsUsdc = 50_000_000e6;
+        snap.vaultCashUsdc = 50_000_000e6;
+        snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
+            settlementBalanceUsdc: 5_000e6,
+            totalLockedMarginUsdc: 4_000e6,
+            activePositionMarginUsdc: 2_000e6,
+            otherLockedMarginUsdc: 2_000e6,
+            freeSettlementUsdc: 1_000e6
+        });
+        snap.lockedBuckets = IMarginClearinghouse.LockedMarginBuckets({
+            positionMarginUsdc: 2_000e6,
+            committedOrderMarginUsdc: 2_000e6,
+            reservedSettlementUsdc: 0,
+            totalLockedMarginUsdc: 4_000e6
+        });
+        snap.capPrice = CAP_PRICE;
+        snap.riskParams = _riskParams();
+
+        uint256 terminalCarryUsdc = PositionRiskAccountingLib.computePendingCarryUsdc(
+            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(
+                snap.position.size, 1e8, snap.accountBuckets.settlementBalanceUsdc
+            ),
+            snap.riskParams.baseCarryBps,
+            30 days
+        );
+
+        CfdEnginePlanTypes.OpenDelta memory delta =
+            CfdEnginePlanLib.planOpen(snap, _openOrder(accountId, CfdTypes.Side.BULL, 10_000e18, 0, 1e8), 1e8, 0);
+
+        assertGt(delta.pendingCarryUsdc, terminalCarryUsdc, "Planner carry basis must exclude queued reservations");
+    }
+
     function test_PlanOpen_SolvencyFailureCategoryMatchesTypedExecutionFailure() public {
         bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
         bytes32 bullId = bytes32(uint256(uint160(freshBullTrader)));

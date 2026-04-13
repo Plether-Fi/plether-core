@@ -168,9 +168,16 @@ Operationally:
 ### Senior / junior waterfall
 
 - Senior principal is restored before junior receives surplus if senior has been impaired.
-- `seniorHighWaterMark` prevents junior from extracting value while senior is still below its historical principal watermark.
+- `seniorHighWaterMark` is a compounded protected senior claim watermark, not a principal-only watermark.
+- When fresh revenue pays accrued senior yield into `seniorPrincipal`, that paid yield also ratchets `seniorHighWaterMark` upward and remains senior-protected after later losses.
 - The mark increases additively on deposits, scales proportionally on withdrawals, and resets cleanly after wipeout plus recapitalization.
 - Deposits remain blocked while senior is partially impaired.
+
+### Reachability domains
+
+- Generic collateral reachability excludes queued committed-order and reserved-settlement buckets.
+- Use the generic basis for carry, withdraw checks, and other non-terminal position health paths.
+- Terminal collateral reachability may consume queued/reserved buckets, but only in full-close and liquidation settlement paths that explicitly unlock them.
 
 ### Bootstrap and withdrawal gates
 

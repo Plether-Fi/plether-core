@@ -628,7 +628,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         if (pos.size > 0) {
             uint256 price = lastMarkPrice;
             if (price > 0) {
-                _checkpointCarryBeforeBasisChange(accountId, pos, price, _physicalReachableCollateralUsdc(accountId));
+                _checkpointCarryBeforeBasisChange(accountId, pos, price, _genericReachableCollateralUsdc(accountId));
             }
         }
 
@@ -656,7 +656,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         if (!priceFresh) {
             revert CfdEngine__MarkPriceStale();
         }
-        _realizeCarryFromSettlement(accountId, pos, price, _physicalReachableCollateralUsdc(accountId));
+        _realizeCarryFromSettlement(accountId, pos, price, _genericReachableCollateralUsdc(accountId));
 
         uint256 marginBefore = _positionMarginBucketUsdc(accountId);
         clearinghouse.lockPositionMargin(accountId, amount);
@@ -702,7 +702,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             if (!priceFresh) {
                 revert CfdEngine__MarkPriceStale();
             }
-            _realizeCarryFromSettlement(accountId, pos, price, _physicalReachableCollateralUsdc(accountId));
+            _realizeCarryFromSettlement(accountId, pos, price, _genericReachableCollateralUsdc(accountId));
         }
 
         uint256 amount = deferredPayoutUsdc[accountId];
@@ -734,7 +734,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             if (!priceFresh) {
                 revert CfdEngine__MarkPriceStale();
             }
-            _realizeCarryFromSettlement(accountId, pos, price, _physicalReachableCollateralUsdc(accountId));
+            _realizeCarryFromSettlement(accountId, pos, price, _genericReachableCollateralUsdc(accountId));
         }
 
         uint256 amount = deferredClearerBountyUsdc[beneficiary];
@@ -782,12 +782,12 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             revert CfdEngine__InsufficientCloseOrderBountyBacking();
         }
 
-        (bool priceFresh, uint256 price) = _tryGetFreshLiveMarkPrice();
-        if (!priceFresh) {
+        uint256 price = lastMarkPrice;
+        if (price == 0) {
             revert CfdEngine__InsufficientCloseOrderBountyBacking();
         }
 
-        uint256 reachableUsdc = _physicalReachableCollateralUsdc(accountId);
+        uint256 reachableUsdc = _genericReachableCollateralUsdc(accountId);
         uint256 pendingCarryUsdc =
             _totalPendingCarryUsdc(accountId, _loadPosition(accountId), price, reachableUsdc, block.timestamp);
         if (reachableUsdc < amountUsdc) {
@@ -870,11 +870,11 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             revert CfdEngine__MarkPriceStale();
         }
 
-        uint256 reachableUsdc = _physicalReachableCollateralUsdc(accountId);
+        uint256 reachableUsdc = _genericReachableCollateralUsdc(accountId);
         StoredPosition storage storedPos = _positions[accountId];
         _realizeCarryFromSettlement(accountId, storedPos, price, reachableUsdc);
         pos = _loadPosition(accountId);
-        reachableUsdc = _physicalReachableCollateralUsdc(accountId);
+        reachableUsdc = _genericReachableCollateralUsdc(accountId);
         uint256 pendingCarryUsdc = _totalPendingCarryUsdc(accountId, pos, price, reachableUsdc, block.timestamp);
         PositionRiskAccountingLib.PositionRiskState memory riskState =
             PositionRiskAccountingLib.buildPositionRiskStateWithCarry(
@@ -1357,7 +1357,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         CfdTypes.Position memory currentPosition = _loadPosition(delta.accountId);
         if (pos.size > 0) {
             _realizeCarryFromSettlement(
-                delta.accountId, pos, delta.price, _physicalReachableCollateralUsdc(delta.accountId)
+                delta.accountId, pos, delta.price, _genericReachableCollateralUsdc(delta.accountId)
             );
             currentPosition = _loadPosition(delta.accountId);
         }
@@ -1406,7 +1406,13 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         }
     }
 
-    function _physicalReachableCollateralUsdc(
+    function _genericReachableCollateralUsdc(
+        bytes32 accountId
+    ) internal view returns (uint256) {
+        return MarginClearinghouseAccountingLib.getGenericReachableUsdc(clearinghouse.getAccountUsdcBuckets(accountId));
+    }
+
+    function _terminalReachableCollateralUsdc(
         bytes32 accountId
     ) internal view returns (uint256) {
         return MarginClearinghouseAccountingLib.getTerminalReachableUsdc(clearinghouse.getAccountUsdcBuckets(accountId));
@@ -1463,7 +1469,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         CfdTypes.Position memory pos,
         uint256 price
     ) internal view returns (bool) {
-        uint256 reachableCollateralUsdc = _physicalReachableCollateralUsdc(accountId);
+        uint256 reachableCollateralUsdc = _genericReachableCollateralUsdc(accountId);
         uint256 pendingCarryUsdc =
             _totalPendingCarryUsdc(accountId, pos, price, reachableCollateralUsdc, block.timestamp);
         if (pendingCarryUsdc == 0) {

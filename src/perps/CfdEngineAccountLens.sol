@@ -70,14 +70,14 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
             return 0;
         }
 
-        uint256 reachableUsdc = MarginClearinghouseAccountingLib.getTerminalReachableUsdc(
+        uint256 reachableUsdc = MarginClearinghouseAccountingLib.getGenericReachableUsdc(
             engineContract.clearinghouse().getAccountUsdcBuckets(accountId)
         );
-        uint256 pendingCarryUsdc = 0;
+        uint256 pendingCarryUsdc = engineContract.unsettledCarryUsdc(accountId);
         if (pos.size > 0 && pos.lastCarryTimestamp > 0 && block.timestamp > pos.lastCarryTimestamp) {
             uint256 lpBackedNotionalUsdc =
                 PositionRiskAccountingLib.computeLpBackedNotionalUsdc(pos.size, price, reachableUsdc);
-            pendingCarryUsdc = PositionRiskAccountingLib.computePendingCarryUsdc(
+            pendingCarryUsdc += PositionRiskAccountingLib.computePendingCarryUsdc(
                 lpBackedNotionalUsdc, _riskParams().baseCarryBps, block.timestamp - pos.lastCarryTimestamp
             );
         }

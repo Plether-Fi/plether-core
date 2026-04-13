@@ -154,7 +154,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step {
         }
 
         uint256 reachableCollateralBasisUsdc =
-            MarginClearinghouseAccountingLib.getTerminalReachableUsdc(getAccountUsdcBuckets(accountId));
+            MarginClearinghouseAccountingLib.getGenericReachableUsdc(getAccountUsdcBuckets(accountId));
 
         IERC20(settlementAsset).safeTransferFrom(owner, address(this), amount);
 
@@ -181,7 +181,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step {
         }
 
         uint256 reachableCollateralBasisUsdc =
-            MarginClearinghouseAccountingLib.getTerminalReachableUsdc(getAccountUsdcBuckets(accountId));
+            MarginClearinghouseAccountingLib.getGenericReachableUsdc(getAccountUsdcBuckets(accountId));
 
         address engine_ = engine;
         if (engine_ != address(0)) {

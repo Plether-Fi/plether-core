@@ -21,6 +21,7 @@ import {PerpsViewTypes} from "../../src/perps/interfaces/PerpsViewTypes.sol";
 import {ProtocolLensViewTypes} from "../../src/perps/interfaces/ProtocolLensViewTypes.sol";
 import {CfdEnginePlanLib} from "../../src/perps/libraries/CfdEnginePlanLib.sol";
 import {LiquidationAccountingLib} from "../../src/perps/libraries/LiquidationAccountingLib.sol";
+import {MarginClearinghouseAccountingLib} from "../../src/perps/libraries/MarginClearinghouseAccountingLib.sol";
 import {PositionRiskAccountingLib} from "../../src/perps/libraries/PositionRiskAccountingLib.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
@@ -4041,7 +4042,7 @@ contract CfdEngineTest is BasePerpTest {
         engine.checkWithdraw(accountId);
     }
 
-    function test_ReserveCloseOrderExecutionBounty_UsesEngineMarkStalenessLimit_NotPoolMarkLimit() public {
+    function test_ReserveCloseOrderExecutionBounty_AllowsStaleLastMarkPrice() public {
         pool.proposeMarkStalenessLimit(300);
         vm.warp(block.timestamp + 48 hours + 1);
         pool.finalizeMarkStalenessLimit();
@@ -4062,18 +4063,34 @@ contract CfdEngineTest is BasePerpTest {
 
         vm.warp(block.timestamp + 270);
         vm.prank(address(router));
+        engine.reserveCloseOrderExecutionBounty(accountId, 1e6, address(router));
+    }
+
+    function test_ReserveCloseOrderExecutionBounty_ExcludesQueuedReservationsFromGenericReachability() public {
+        address trader = address(0x5161);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address counterparty = address(0x5162);
+        bytes32 counterpartyId = bytes32(uint256(uint160(counterparty)));
+
+        _fundTrader(trader, 10_000e6);
+        _fundTrader(counterparty, 50_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 2_000e6, 1e8);
+        _open(counterpartyId, CfdTypes.Side.BEAR, 10_000e18, 50_000e6, 1e8);
+
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 4_000e6, type(uint256).max, false);
+
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(accountId);
+        assertEq(buckets.otherLockedMarginUsdc, 4_000e6, "Setup should reserve queued order funds");
+        assertEq(
+            MarginClearinghouseAccountingLib.getGenericReachableUsdc(buckets),
+            buckets.settlementBalanceUsdc - buckets.otherLockedMarginUsdc,
+            "Generic reachability must exclude the queued reservation"
+        );
+
+        vm.prank(address(router));
         vm.expectRevert(CfdEngine.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
-        engine.reserveCloseOrderExecutionBounty(accountId, 1e6, address(router));
-
-        engine.proposeEngineMarkStalenessLimit(300);
-        vm.warp(engine.engineMarkStalenessActivationTime() + 1);
-        engine.finalizeEngineMarkStalenessLimit();
-
-        vm.prank(address(router));
-        engine.updateMarkPrice(1e8, uint64(block.timestamp));
-
-        vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(accountId, 1e6, address(router));
+        engine.reserveCloseOrderExecutionBounty(accountId, 6_000e6, address(router));
     }
 
     function test_CheckWithdraw_RevertsWhenOpenPositionHasZeroMarkPrice() public {

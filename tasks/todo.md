@@ -30,6 +30,26 @@ Review:
 - The first draft of the open property test surfaced `CfdEngine__Unauthorized()` because the low-level test call bypassed the normal router-authorized invocation style; switching to `try/catch` under `vm.startPrank(address(router))` fixed the harness and confirmed the real property.
 - Verified green with `forge test --match-path test/perps/PreviewExecutionDifferential.t.sol --match-test "testFuzz_ValidPreviewOpen_DoesNotUntypedRevertOnSameStateExecution|testFuzz_PreviewClose_FullCloseMatchesLiveExecution_LiquidVault|testFuzz_PreviewClose_FullCloseMatchesLiveExecution_IlliquidVault|testFuzz_PreviewLiquidation_MatchesLiveExecution_LiquidVault|testFuzz_PreviewLiquidation_MatchesLiveExecution_IlliquidVault"`, plus the accounting, planner, and router-policy suites to keep the whole prevention chain aligned.
 
+- [x] Fix generic vs terminal collateral-basis drift in carry, withdraw, and margin-basis paths
+- [x] Allow stale-mark close bounty reservation on risk-reducing close commits when a last mark exists
+- [x] Align senior high-water mark docs with compounded protected-claim semantics and add coverage
+- [x] Include `unsettledCarryUsdc` in withdrawable views and verify product/read parity
+
+Review:
+- Added `getGenericReachableUsdc(...)` to `src/perps/libraries/MarginClearinghouseAccountingLib.sol` and switched the non-terminal carry/risk callers to it. Generic reachability now excludes queued `CommittedOrder` / `ReservedSettlement` buckets, while liquidation and terminal settlement paths continue to use terminal reachability.
+- Updated `src/perps/CfdEngine.sol`, `src/perps/MarginClearinghouse.sol`, `src/perps/libraries/CfdEnginePlanLib.sol`, and `src/perps/CfdEngineAccountLens.sol` so carry basis changes, `checkWithdraw`, `addMargin`, deferred-claim carry realization, open planning, and account-lens withdrawability no longer count queued reservations as generic collateral.
+- Relaxed `CfdEngine.reserveCloseOrderExecutionBounty(...)` to use the latest stored mark price when present instead of requiring freshness, removing the stale-mark liveness block on risk-reducing close commits that need margin-backed bounty sourcing.
+- Kept the current HousePool economic model and aligned docs to it instead of rewriting waterfall math: paid senior yield now remains part of the protected `seniorHighWaterMark` claim, and that behavior is documented in `src/perps/README.md` / `src/perps/PRE_AUDIT_GUIDE.md` and covered by `test_SeniorHighWaterMark_RatchetsPaidYieldIntoProtectedClaim()`.
+- Added/updated focused regressions in `test/perps/CfdEnginePlanRegression.t.sol`, `test/perps/CfdEngine.t.sol`, `test/perps/PerpsPublicLens.t.sol`, and `test/perps/HousePool.t.sol` to prove the confirmed issues stay fixed.
+- Verified green with:
+  - `forge test --match-path test/perps/CfdEnginePlanRegression.t.sol --match-test "test_PlanOpen_CarryBasisExcludesQueuedReservations|test_PlanOpen_RejectsWhenCarryLeavesFreeSettlementBelowMarginDelta|test_PlanOpen_RejectsInsufficientPhysicalMargin"`
+  - `forge test --match-path test/perps/CfdEngine.t.sol --match-test "test_ReserveCloseOrderExecutionBounty_AllowsStaleLastMarkPrice|test_ReserveCloseOrderExecutionBounty_ExcludesQueuedReservationsFromGenericReachability|test_CheckWithdraw_UsesEngineMarkStalenessLimit_NotPoolMarkLimit"`
+  - `forge test --match-path test/perps/PerpsPublicLens.t.sol`
+  - `forge test --match-path test/perps/PerpsReadParity.t.sol`
+  - `forge test --match-path test/perps/MarginClearinghouse.t.sol --match-test "test_ApplyOpenCost_DebitsSettlementAndLeavesRemainingFreeBalance|test_ApplyOpenCost_UnlocksPositionMarginBeforeDebitingTradeCost|testFuzz_ApplyOpenCost_MatchesSharedOpenPlan|test_ConsumeCloseLoss_MatchesSharedTerminalLossPlan|test_ApplyLiquidationSettlementPlan_MatchesSharedResidualPlan"`
+  - `forge test --match-path test/perps/PreviewExecutionDifferential.t.sol --match-test "testFuzz_ValidPreviewOpen_DoesNotUntypedRevertOnSameStateExecution|testFuzz_PreviewClose_FullCloseMatchesLiveExecution_LiquidVault|testFuzz_PreviewClose_FullCloseMatchesLiveExecution_IlliquidVault|testFuzz_PreviewLiquidation_MatchesLiveExecution_LiquidVault|testFuzz_PreviewLiquidation_MatchesLiveExecution_IlliquidVault"`
+  - `forge test --match-path test/perps/HousePool.t.sol --match-test "test_SeniorHighWaterMark_RatchetsPaidYieldIntoProtectedClaim|test_SeniorPrincipal_RestoredBeforeJuniorSurplus|test_SeniorHWM_ProportionalOnWithdraw|test_SeniorHWM_PreservedOnFullWipeout"`
+
 - [x] Fix open-path post-realization risk check so pending carry is not double-counted
 - [x] Add a carry-aware keeper bounty credit path for clearinghouse settlement credits
 - [x] Add regressions covering both verified findings and run targeted Forge verification

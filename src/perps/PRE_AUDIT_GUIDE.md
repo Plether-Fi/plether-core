@@ -110,6 +110,11 @@ Any new helper/module contract that can reach these sets should be treated as se
 | Canonical pool assets | LP/protocol backing | `HousePool.totalAssets()` and accounting ledger | pool deposit/withdraw/accounting hooks | base physical solvency cash | yes | yes | yes |
 | Excess assets | no owner until admitted | `HousePool.excessAssets()` | pool account/sweep paths | no | no | no | no |
 
+Reachability note:
+- Generic reachability excludes `CommittedOrder` and `ReservedSettlement` buckets.
+- Terminal reachability may include those buckets, but only where the close/liquidation settlement plan explicitly consumes or unlocks them.
+- Carry, withdraw checks, margin-basis changes, and non-terminal open/modify risk paths must use the generic basis.
+
 ## Liveness vs Safety Choices
 
 ### Frozen oracle close-only behavior
@@ -146,6 +151,13 @@ Any new helper/module contract that can reach these sets should be treated as se
 - Chosen tradeoff: queued orders are binding until executed, expired, or failed by policy.
 - New risk: user flexibility is reduced once committed.
 - Protecting invariant: failure policy is explicit and terminal paths clean up escrow/reservations exactly once.
+
+### Stale-mark close bounty commits
+
+- Liveness problem: a trader with no free settlement may still need to queue a risk-reducing close that sources the fixed router bounty from active margin.
+- Chosen tradeoff: close-bounty reservation may use the latest stored mark price even when it is stale, as long as a mark exists.
+- New risk: commit-time close-bounty reservation may use an older mark than live execution would accept.
+- Protecting invariant: this path only supports risk-reducing close commits and still excludes queued reservations from generic collateral reachability.
 
 ## Transaction Narratives
 

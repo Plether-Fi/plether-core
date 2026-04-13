@@ -207,8 +207,9 @@ library CfdEnginePlanLib {
             && effectiveSnap.currentTimestamp > effectiveSnap.position.lastCarryTimestamp
             ? effectiveSnap.currentTimestamp - effectiveSnap.position.lastCarryTimestamp
             : 0;
+        uint256 genericReachableUsdc = MarginClearinghouseAccountingLib.getGenericReachableUsdc(effectiveSnap.accountBuckets);
         uint256 carryBaseUsdc = PositionRiskAccountingLib.computeLpBackedNotionalUsdc(
-            effectiveSnap.position.size, price, effectiveSnap.accountBuckets.settlementBalanceUsdc
+            effectiveSnap.position.size, price, genericReachableUsdc
         );
         delta.pendingCarryUsdc = effectiveSnap.unsettledCarryUsdc
             + PositionRiskAccountingLib.computePendingCarryUsdc(
@@ -370,7 +371,7 @@ library CfdEnginePlanLib {
             OpenAccountingLib.effectiveMarginAfterTradeCost(delta.positionMarginAfterOpen, delta.tradeCostUsdc);
         projectedPosition.entryPrice = delta.newPosEntryPrice;
 
-        uint256 reachableCollateralUsdc = snap.accountBuckets.settlementBalanceUsdc;
+        uint256 reachableCollateralUsdc = MarginClearinghouseAccountingLib.getGenericReachableUsdc(snap.accountBuckets);
         if (delta.tradeCostUsdc > 0) {
             uint256 tradeCostUsdc = uint256(delta.tradeCostUsdc);
             reachableCollateralUsdc =
@@ -450,8 +451,9 @@ library CfdEnginePlanLib {
             && snap.currentTimestamp > snap.position.lastCarryTimestamp
             ? snap.currentTimestamp - snap.position.lastCarryTimestamp
             : 0;
+        uint256 genericReachableUsdc = MarginClearinghouseAccountingLib.getGenericReachableUsdc(snap.accountBuckets);
         uint256 carryBaseUsdc = PositionRiskAccountingLib.computeLpBackedNotionalUsdc(
-            snap.position.size, price, snap.accountBuckets.settlementBalanceUsdc
+            snap.position.size, price, genericReachableUsdc
         );
         delta.pendingCarryUsdc = snap.unsettledCarryUsdc
             + PositionRiskAccountingLib.computePendingCarryUsdc(

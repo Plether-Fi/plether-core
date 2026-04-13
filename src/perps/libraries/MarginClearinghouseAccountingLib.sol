@@ -69,6 +69,14 @@ library MarginClearinghouseAccountingLib {
         return buildAccountUsdcBuckets(effectiveSettlementBalance, positionMarginUsdc, 0, 0);
     }
 
+    function getGenericReachableUsdc(
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets
+    ) internal pure returns (uint256 reachableUsdc) {
+        reachableUsdc = buckets.settlementBalanceUsdc > buckets.otherLockedMarginUsdc
+            ? buckets.settlementBalanceUsdc - buckets.otherLockedMarginUsdc
+            : 0;
+    }
+
     function planFundingLossConsumption(
         IMarginClearinghouse.AccountUsdcBuckets memory buckets,
         uint256 lossUsdc
