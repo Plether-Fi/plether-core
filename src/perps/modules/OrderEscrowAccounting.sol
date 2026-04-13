@@ -5,6 +5,7 @@ import {CfdTypes} from "../CfdTypes.sol";
 import {ICfdEngineCore} from "../interfaces/ICfdEngineCore.sol";
 import {IMarginClearinghouse} from "../interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "../interfaces/IOrderRouterAccounting.sol";
+import {MarginClearinghouseAccountingLib} from "../libraries/MarginClearinghouseAccountingLib.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
@@ -118,7 +119,10 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
         if (isClose) {
             _reserveCloseExecutionBounty(accountId, executionBountyUsdc);
         } else {
-            if (clearinghouse.getAccountUsdcBuckets(accountId).freeSettlementUsdc < executionBountyUsdc) {
+            if (
+                MarginClearinghouseAccountingLib.getFreeSettlementUsdc(clearinghouse.getAccountUsdcBuckets(accountId))
+                    < executionBountyUsdc
+            ) {
                 _revertInsufficientFreeEquity();
             }
             clearinghouse.seizeUsdc(accountId, executionBountyUsdc, address(this));

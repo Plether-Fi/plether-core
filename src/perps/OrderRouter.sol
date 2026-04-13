@@ -13,6 +13,7 @@ import {IPerpsKeeper} from "./interfaces/IPerpsKeeper.sol";
 import {IPerpsTraderActions} from "./interfaces/IPerpsTraderActions.sol";
 import {CashPriorityLib} from "./libraries/CashPriorityLib.sol";
 import {MarketCalendarLib} from "./libraries/MarketCalendarLib.sol";
+import {MarginClearinghouseAccountingLib} from "./libraries/MarginClearinghouseAccountingLib.sol";
 import {OrderFailurePolicyLib} from "./libraries/OrderFailurePolicyLib.sol";
 import {OrderOraclePolicyLib} from "./libraries/OrderOraclePolicyLib.sol";
 import {OrderEscrowAccounting} from "./modules/OrderEscrowAccounting.sol";
@@ -1093,7 +1094,9 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         bytes32 accountId,
         uint256 executionBountyUsdc
     ) internal override {
-        uint256 freeSettlementUsdc = clearinghouse.getAccountUsdcBuckets(accountId).freeSettlementUsdc;
+        uint256 freeSettlementUsdc = MarginClearinghouseAccountingLib.getFreeSettlementUsdc(
+            clearinghouse.getAccountUsdcBuckets(accountId)
+        );
         uint256 freeBackedBountyUsdc =
             freeSettlementUsdc > executionBountyUsdc ? executionBountyUsdc : freeSettlementUsdc;
         if (freeBackedBountyUsdc > 0) {

@@ -50,6 +50,16 @@ Review:
   - `forge test --match-path test/perps/PreviewExecutionDifferential.t.sol --match-test "testFuzz_ValidPreviewOpen_DoesNotUntypedRevertOnSameStateExecution|testFuzz_PreviewClose_FullCloseMatchesLiveExecution_LiquidVault|testFuzz_PreviewClose_FullCloseMatchesLiveExecution_IlliquidVault|testFuzz_PreviewLiquidation_MatchesLiveExecution_LiquidVault|testFuzz_PreviewLiquidation_MatchesLiveExecution_IlliquidVault"`
   - `forge test --match-path test/perps/HousePool.t.sol --match-test "test_SeniorHighWaterMark_RatchetsPaidYieldIntoProtectedClaim|test_SeniorPrincipal_RestoredBeforeJuniorSurplus|test_SeniorHWM_ProportionalOnWithdraw|test_SeniorHWM_PreservedOnFullWipeout"`
 
+- [x] Add a small canonical account-domain layer for bucket-derived semantics
+- [x] Migrate remaining ambiguous callers to named account-domain helpers
+- [x] Add a dedicated account-domain parity suite
+
+Review:
+- Extended `src/perps/libraries/MarginClearinghouseAccountingLib.sol` with named account-domain accessors: `getSettlementBalanceUsdc(...)`, `getFreeSettlementUsdc(...)`, `getPositionMarginUsdc(...)`, and `getQueuedReservedUsdc(...)`, then rewired the existing generic/terminal helpers and shared accounting planners to consume those named domains instead of raw bucket fields.
+- Refactored the remaining ambiguous business-logic callers in `src/perps/CfdEngineAccountLens.sol`, `src/perps/OrderRouter.sol`, `src/perps/modules/OrderEscrowAccounting.sol`, `src/perps/MarginClearinghouse.sol`, and the planner mutation path in `src/perps/libraries/CfdEnginePlanLib.sol` so new code reads as “which domain is this?” instead of “which raw bucket field happens to work here?”.
+- Added `test/perps/AccountDomainParity.t.sol` as the dedicated safety net for this lesson. It proves the helper layer separates generic vs terminal reachability and that the account/public read surfaces keep using the same canonical domain logic.
+- Verified green with `forge test --match-path test/perps/AccountDomainParity.t.sol`, `forge test --match-path test/perps/CfdEnginePlanRegression.t.sol --match-test "test_PlanOpen_CarryBasisExcludesQueuedReservations|test_PlanOpen_RejectsWhenCarryLeavesFreeSettlementBelowMarginDelta|test_PlanOpen_RejectsInsufficientPhysicalMargin"`, `forge test --match-path test/perps/PerpsReadParity.t.sol`, and `forge test --match-path test/perps/PreviewExecutionDifferential.t.sol --match-test "testFuzz_ValidPreviewOpen_DoesNotUntypedRevertOnSameStateExecution|testFuzz_PreviewClose_FullCloseMatchesLiveExecution_LiquidVault|testFuzz_PreviewClose_FullCloseMatchesLiveExecution_IlliquidVault|testFuzz_PreviewLiquidation_MatchesLiveExecution_LiquidVault|testFuzz_PreviewLiquidation_MatchesLiveExecution_IlliquidVault"`.
+
 - [x] Fix open-path post-realization risk check so pending carry is not double-counted
 - [x] Add a carry-aware keeper bounty credit path for clearinghouse settlement credits
 - [x] Add regressions covering both verified findings and run targeted Forge verification

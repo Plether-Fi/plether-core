@@ -402,6 +402,32 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(usdc.balanceOf(address(router)), 1_000_000, "Router should custody the close bounty after fallback");
     }
 
+    function test_CloseCommit_CanReserveKeeperBountyFromPositionMarginWithStaleStoredMark() public {
+        address trader = address(0x3341);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address counterparty = address(0x3351);
+        bytes32 counterpartyId = bytes32(uint256(uint160(counterparty)));
+
+        _fundTrader(trader, 1000e6);
+        _fundTrader(counterparty, 50_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 50_000e18, 1000e6, 1e8);
+        _open(counterpartyId, CfdTypes.Side.BEAR, 50_000e18, 50_000e6, 1e8);
+
+        assertEq(_freeSettlementUsdc(accountId), 0, "setup must fully consume free settlement");
+        (, uint256 marginBefore,,,,,) = engine.positions(accountId);
+        assertEq(engine.lastMarkPrice(), 1e8, "setup should leave a stored mark price");
+
+        vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
+
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 0, 0, true);
+
+        (, uint256 marginAfter,,,,,) = engine.positions(accountId);
+        assertEq(_executionBountyReserve(1), 1_000_000, "Stale-mark close commits should still escrow the flat router bounty");
+        assertEq(marginAfter, marginBefore - 1_000_000, "Stale-mark close bounty should still fall back to active margin");
+        assertEq(usdc.balanceOf(address(router)), 1_000_000, "Router should custody the stale-mark close bounty after fallback");
+    }
+
     function test_ReserveCloseOrderExecutionBounty_RevertsWhenMarginBackedBountyWouldBreakMaintenance() public {
         address trader = address(0x336);
         bytes32 accountId = bytes32(uint256(uint160(trader)));

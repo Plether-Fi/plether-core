@@ -897,7 +897,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step {
         if (settlementBalances[accountId] < amount) {
             revert MarginClearinghouse__InsufficientAssetToSeize();
         }
-        if (amount > _buildAccountUsdcBuckets(accountId).freeSettlementUsdc) {
+        if (amount > MarginClearinghouseAccountingLib.getFreeSettlementUsdc(_buildAccountUsdcBuckets(accountId))) {
             revert MarginClearinghouse__InsufficientAssetToSeize();
         }
 

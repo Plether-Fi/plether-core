@@ -69,11 +69,37 @@ library MarginClearinghouseAccountingLib {
         return buildAccountUsdcBuckets(effectiveSettlementBalance, positionMarginUsdc, 0, 0);
     }
 
+    function getSettlementBalanceUsdc(
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets
+    ) internal pure returns (uint256) {
+        return buckets.settlementBalanceUsdc;
+    }
+
+    function getFreeSettlementUsdc(
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets
+    ) internal pure returns (uint256) {
+        return buckets.freeSettlementUsdc;
+    }
+
+    function getPositionMarginUsdc(
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets
+    ) internal pure returns (uint256) {
+        return buckets.activePositionMarginUsdc;
+    }
+
+    function getQueuedReservedUsdc(
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets
+    ) internal pure returns (uint256) {
+        return buckets.otherLockedMarginUsdc;
+    }
+
     function getGenericReachableUsdc(
         IMarginClearinghouse.AccountUsdcBuckets memory buckets
     ) internal pure returns (uint256 reachableUsdc) {
-        reachableUsdc = buckets.settlementBalanceUsdc > buckets.otherLockedMarginUsdc
-            ? buckets.settlementBalanceUsdc - buckets.otherLockedMarginUsdc
+        uint256 settlementBalanceUsdc = getSettlementBalanceUsdc(buckets);
+        uint256 queuedReservedUsdc = getQueuedReservedUsdc(buckets);
+        reachableUsdc = settlementBalanceUsdc > queuedReservedUsdc
+            ? settlementBalanceUsdc - queuedReservedUsdc
             : 0;
     }
 
@@ -81,12 +107,13 @@ library MarginClearinghouseAccountingLib {
         IMarginClearinghouse.AccountUsdcBuckets memory buckets,
         uint256 lossUsdc
     ) internal pure returns (SettlementConsumption memory consumption) {
-        consumption.freeSettlementConsumedUsdc =
-            buckets.freeSettlementUsdc > lossUsdc ? lossUsdc : buckets.freeSettlementUsdc;
+        uint256 freeSettlementUsdc = getFreeSettlementUsdc(buckets);
+        consumption.freeSettlementConsumedUsdc = freeSettlementUsdc > lossUsdc ? lossUsdc : freeSettlementUsdc;
 
         uint256 remainingLossUsdc = lossUsdc - consumption.freeSettlementConsumedUsdc;
+        uint256 positionMarginUsdc = getPositionMarginUsdc(buckets);
         consumption.activeMarginConsumedUsdc =
-            buckets.activePositionMarginUsdc > remainingLossUsdc ? remainingLossUsdc : buckets.activePositionMarginUsdc;
+            positionMarginUsdc > remainingLossUsdc ? remainingLossUsdc : positionMarginUsdc;
         consumption.totalConsumedUsdc = consumption.freeSettlementConsumedUsdc + consumption.activeMarginConsumedUsdc;
         consumption.uncoveredUsdc = remainingLossUsdc - consumption.activeMarginConsumedUsdc;
     }
@@ -98,9 +125,9 @@ library MarginClearinghouseAccountingLib {
     ) internal pure returns (OpenCostPlan memory plan) {
         plan.netMarginChangeUsdc = int256(marginDeltaUsdc) - tradeCostUsdc;
 
-        uint256 settlementBalanceUsdc = buckets.settlementBalanceUsdc;
-        uint256 positionMarginUsdc = buckets.activePositionMarginUsdc;
-        uint256 otherLockedMarginUsdc = buckets.otherLockedMarginUsdc;
+        uint256 settlementBalanceUsdc = getSettlementBalanceUsdc(buckets);
+        uint256 positionMarginUsdc = getPositionMarginUsdc(buckets);
+        uint256 otherLockedMarginUsdc = getQueuedReservedUsdc(buckets);
 
         if (tradeCostUsdc < 0) {
             plan.settlementCreditUsdc = uint256(-tradeCostUsdc);
@@ -157,8 +184,8 @@ library MarginClearinghouseAccountingLib {
         uint256 protectedLockedMarginUsdc
     ) internal pure returns (uint256 reachableUsdc) {
         uint256 protectedBalance = protectedLockedMarginUsdc;
-        reachableUsdc =
-            buckets.settlementBalanceUsdc > protectedBalance ? buckets.settlementBalanceUsdc - protectedBalance : 0;
+        uint256 settlementBalanceUsdc = getSettlementBalanceUsdc(buckets);
+        reachableUsdc = settlementBalanceUsdc > protectedBalance ? settlementBalanceUsdc - protectedBalance : 0;
     }
 
     function planTerminalLossConsumption(
@@ -169,13 +196,15 @@ library MarginClearinghouseAccountingLib {
         uint256 reachableUsdc = getSettlementReachableUsdc(buckets, protectedLockedMarginUsdc);
         consumption.totalConsumedUsdc = reachableUsdc > lossUsdc ? lossUsdc : reachableUsdc;
         consumption.uncoveredUsdc = lossUsdc - consumption.totalConsumedUsdc;
-        consumption.freeSettlementConsumedUsdc = buckets.freeSettlementUsdc > consumption.totalConsumedUsdc
+        uint256 freeSettlementUsdc = getFreeSettlementUsdc(buckets);
+        consumption.freeSettlementConsumedUsdc = freeSettlementUsdc > consumption.totalConsumedUsdc
             ? consumption.totalConsumedUsdc
-            : buckets.freeSettlementUsdc;
+            : freeSettlementUsdc;
 
         uint256 remainingConsumedUsdc = consumption.totalConsumedUsdc - consumption.freeSettlementConsumedUsdc;
-        uint256 consumableActiveMarginUsdc = buckets.activePositionMarginUsdc > protectedLockedMarginUsdc
-            ? buckets.activePositionMarginUsdc - protectedLockedMarginUsdc
+        uint256 positionMarginUsdc = getPositionMarginUsdc(buckets);
+        uint256 consumableActiveMarginUsdc = positionMarginUsdc > protectedLockedMarginUsdc
+            ? positionMarginUsdc - protectedLockedMarginUsdc
             : 0;
         consumption.activeMarginConsumedUsdc =
             consumableActiveMarginUsdc > remainingConsumedUsdc ? remainingConsumedUsdc : consumableActiveMarginUsdc;
@@ -217,10 +246,12 @@ library MarginClearinghouseAccountingLib {
         }
 
         plan.mutation.settlementDebitUsdc = plan.settlementSeizedUsdc;
-        plan.mutation.positionMarginUnlockedUsdc = buckets.activePositionMarginUsdc;
+        uint256 freeSettlementUsdc = getFreeSettlementUsdc(buckets);
+        uint256 positionMarginUsdc = getPositionMarginUsdc(buckets);
+        plan.mutation.positionMarginUnlockedUsdc = positionMarginUsdc;
         plan.mutation.otherLockedMarginUnlockedUsdc = plan.settlementSeizedUsdc
-            > buckets.freeSettlementUsdc + buckets.activePositionMarginUsdc
-            ? plan.settlementSeizedUsdc - buckets.freeSettlementUsdc - buckets.activePositionMarginUsdc
+            > freeSettlementUsdc + positionMarginUsdc
+            ? plan.settlementSeizedUsdc - freeSettlementUsdc - positionMarginUsdc
             : 0;
     }
 

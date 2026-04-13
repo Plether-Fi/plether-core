@@ -338,14 +338,15 @@ library CfdEnginePlanLib {
             return true;
         }
 
-        snap.accountBuckets.settlementBalanceUsdc -= consumption.totalConsumedUsdc;
+        uint256 settlementBalanceUsdc =
+            MarginClearinghouseAccountingLib.getSettlementBalanceUsdc(snap.accountBuckets) - consumption.totalConsumedUsdc;
         snap.lockedBuckets.positionMarginUsdc -= consumption.activeMarginConsumedUsdc;
         snap.position.margin -= consumption.activeMarginConsumedUsdc;
         snap.vaultAssetsUsdc += pendingCarryUsdc;
         snap.vaultCashUsdc += pendingCarryUsdc;
 
         snap.accountBuckets = MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(
-            snap.accountBuckets.settlementBalanceUsdc,
+            settlementBalanceUsdc,
             snap.lockedBuckets.positionMarginUsdc,
             snap.lockedBuckets.committedOrderMarginUsdc,
             snap.lockedBuckets.reservedSettlementUsdc
@@ -638,7 +639,7 @@ library CfdEnginePlanLib {
         uint256 adjustedPosMargin = snap.lockedBuckets.positionMarginUsdc > marginToFreeUsdc
             ? snap.lockedBuckets.positionMarginUsdc - marginToFreeUsdc
             : 0;
-        uint256 settlementBalance = snap.accountBuckets.settlementBalanceUsdc;
+        uint256 settlementBalance = MarginClearinghouseAccountingLib.getSettlementBalanceUsdc(snap.accountBuckets);
         if (includeOtherLockedMargin) {
             return MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(
                 settlementBalance,
