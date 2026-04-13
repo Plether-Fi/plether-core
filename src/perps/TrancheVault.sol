@@ -193,8 +193,11 @@ contract TrancheVault is ERC4626 {
         } else {
             POOL.depositJunior(assets);
         }
+        uint256 previousBalance = balanceOf(receiver);
+        if (caller != receiver && previousBalance != 0) {
+            revert TrancheVault__ThirdPartyDepositForExistingHolder();
+        }
         _mint(receiver, shares);
-        uint256 previousBalance = balanceOf(receiver) - shares;
         if (caller == receiver || previousBalance == 0) {
             lastDepositTime[receiver] = block.timestamp;
         }

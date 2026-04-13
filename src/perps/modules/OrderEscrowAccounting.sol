@@ -146,23 +146,27 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
     function _consumeOrderEscrow(
         uint64 orderId,
         bool success,
-        uint8 failedPolicy
+        uint8 failedPolicy,
+        uint256 executionPrice,
+        uint64 oraclePublishTime
     ) internal returns (uint256 executionBountyUsdc) {
         if (success) {
-            return _collectExecutionBounty(orderId);
+            return _collectExecutionBounty(orderId, executionPrice, oraclePublishTime);
         }
 
         _releaseCommittedMargin(orderId);
         if (failedPolicy == 1) {
-            return _collectExecutionBounty(orderId);
+            return _collectExecutionBounty(orderId, executionPrice, oraclePublishTime);
         } else if (failedPolicy == 2) {
-            _refundExecutionBounty(orderId);
+            _refundExecutionBounty(orderId, executionPrice, oraclePublishTime);
         }
         return 0;
     }
 
     function _collectExecutionBounty(
-        uint64 orderId
+        uint64 orderId,
+        uint256 executionPrice,
+        uint64 oraclePublishTime
     ) internal returns (uint256 executionBountyUsdc) {
         OrderRecord storage record = _orderRecord(orderId);
         executionBountyUsdc = record.executionBountyUsdc;
@@ -171,12 +175,14 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
         }
         record.executionBountyUsdc = 0;
         USDC.safeTransfer(address(clearinghouse), executionBountyUsdc);
-        engine.creditKeeperExecutionBounty(msg.sender, executionBountyUsdc);
+        engine.creditKeeperExecutionBounty(msg.sender, executionBountyUsdc, executionPrice, oraclePublishTime);
         return executionBountyUsdc;
     }
 
     function _refundExecutionBounty(
-        uint64 orderId
+        uint64 orderId,
+        uint256 executionPrice,
+        uint64 oraclePublishTime
     ) internal {
         OrderRecord storage record = _orderRecord(orderId);
         uint256 bounty = record.executionBountyUsdc;
@@ -186,7 +192,9 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
 
         record.executionBountyUsdc = 0;
         USDC.safeTransfer(address(clearinghouse), bounty);
-        engine.creditKeeperExecutionBounty(address(uint160(uint256(record.core.accountId))), bounty);
+        engine.creditKeeperExecutionBounty(
+            address(uint160(uint256(record.core.accountId))), bounty, executionPrice, oraclePublishTime
+        );
     }
 
     function _releaseCommittedMargin(

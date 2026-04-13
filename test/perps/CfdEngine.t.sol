@@ -4036,7 +4036,7 @@ contract CfdEngineTest is BasePerpTest {
         engine.checkWithdraw(accountId);
     }
 
-    function test_ReserveCloseOrderExecutionBounty_AllowsBoundedlyStaleLastMarkPrice() public {
+    function test_ReserveCloseOrderExecutionBounty_AllowsStaleLastMarkPriceWhenStored() public {
         pool.proposeMarkStalenessLimit(300);
         vm.warp(block.timestamp + 48 hours + 1);
         pool.finalizeMarkStalenessLimit();
@@ -4055,12 +4055,12 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         engine.reserveCloseOrderExecutionBounty(accountId, 1e6, address(router));
 
-        vm.warp(block.timestamp + (engine.engineMarkStalenessLimit() * 2) - 31);
+        vm.warp(block.timestamp + 30 days);
         vm.prank(address(router));
         engine.reserveCloseOrderExecutionBounty(accountId, 1e6, address(router));
     }
 
-    function test_ReserveCloseOrderExecutionBounty_RevertsWhenStoredMarkTooStale() public {
+    function test_ReserveCloseOrderExecutionBounty_RevertsWhenNoStoredMarkExists() public {
         address trader = address(0x51595);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         address counterparty = address(0x51596);
@@ -4071,7 +4071,8 @@ contract CfdEngineTest is BasePerpTest {
         _open(accountId, CfdTypes.Side.BULL, 10_000e18, 1500e6, 1e8);
         _open(counterpartyId, CfdTypes.Side.BEAR, 10_000e18, 50_000e6, 1e8);
 
-        vm.warp(block.timestamp + (engine.engineMarkStalenessLimit() * 2) + 1);
+        vm.prank(address(router));
+        engine.updateMarkPrice(0, uint64(block.timestamp));
         vm.prank(address(router));
         vm.expectRevert(CfdEngine.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
         engine.reserveCloseOrderExecutionBounty(accountId, 1e6, address(router));

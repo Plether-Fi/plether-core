@@ -434,7 +434,20 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         if (nextExecuteId == 0) {
             revert OrderRouter__NoOrdersToExecute();
         }
-        _skipStaleOrders(orderId);
+        uint64 initialHeadOrderId = nextExecuteId;
+        (, CfdTypes.Order memory initialHeadOrder) = _pendingOrder(initialHeadOrderId);
+
+        RouterExecutionContext memory executionContext;
+        uint256 maxStaleness;
+        if (address(pyth) != address(0)) {
+            executionContext = _currentRouterExecutionContext();
+            maxStaleness = executionContext.policy.maxStaleness;
+        }
+
+        (uint256 executionPrice, uint64 oraclePublishTime, uint256 pythFee) =
+            _resolveOraclePrice(pythUpdateData, initialHeadOrder.targetPrice, maxStaleness, orderExecutionStalenessLimit);
+
+        _skipStaleOrders(orderId, executionPrice, oraclePublishTime);
         if (nextExecuteId == 0) {
             revert OrderRouter__NoOrdersToExecute();
         }
@@ -445,16 +458,6 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
             revert OrderRouter__FIFOViolation();
         }
         (, CfdTypes.Order memory order) = _pendingOrder(orderId);
-
-        RouterExecutionContext memory executionContext;
-        uint256 maxStaleness;
-        if (address(pyth) != address(0)) {
-            executionContext = _currentRouterExecutionContext();
-            maxStaleness = executionContext.policy.maxStaleness;
-        }
-
-        (uint256 executionPrice, uint64 oraclePublishTime, uint256 pythFee) =
-            _resolveOraclePrice(pythUpdateData, order.targetPrice, maxStaleness, orderExecutionStalenessLimit);
 
         if (address(pyth) != address(0)) {
             if (OrderOraclePolicyLib.isStale(oraclePublishTime, executionContext.policy.maxStaleness, block.timestamp))
@@ -534,7 +537,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
                     break;
                 }
                 emit OrderFailed(orderId, OrderFailReason.Expired);
-                _cleanupOrder(orderId, _failedOutcomeForTerminalFailure(order));
+                _cleanupOrder(orderId, _failedOutcomeForTerminalFailure(order), executionPrice, oraclePublishTime);
                 expiredPrunes++;
                 continue;
             }
@@ -554,9 +557,11 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     // ==========================================
 
     function _skipStaleOrders(
-        uint64 upToId
+        uint64 upToId,
+        uint256 executionPrice,
+        uint64 oraclePublishTime
     ) internal returns (uint256 skipped) {
-        skipped = _pruneExpiredHeadOrders(upToId, MAX_PRUNE_ORDERS_PER_CALL);
+        skipped = _pruneExpiredHeadOrders(upToId, MAX_PRUNE_ORDERS_PER_CALL, executionPrice, oraclePublishTime);
     }
 
     function _currentRouterExecutionContext() internal view returns (RouterExecutionContext memory context) {
@@ -574,7 +579,9 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
 
     function _pruneExpiredHeadOrders(
         uint64 upToId,
-        uint256 maxPrunes
+        uint256 maxPrunes,
+        uint256 executionPrice,
+        uint64 oraclePublishTime
     ) internal returns (uint256 pruned) {
         uint256 age = maxOrderAge;
         while (nextExecuteId != 0 && nextExecuteId <= upToId && pruned < maxPrunes) {
@@ -592,7 +599,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
                 break;
             }
             emit OrderFailed(headId, OrderFailReason.Expired);
-            _cleanupOrder(headId, _failedOutcomeForTerminalFailure(order));
+            _cleanupOrder(headId, _failedOutcomeForTerminalFailure(order), executionPrice, oraclePublishTime);
             pruned++;
         }
     }
@@ -632,7 +639,9 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
                 pythFee,
                 false,
                 _failedOutcomeForTerminalFailure(order),
-                revertOnBlockedExecution
+                revertOnBlockedExecution,
+                executionPrice,
+                oraclePublishTime
             );
             return revertOnBlockedExecution ? OrderExecutionStepResult.Return : OrderExecutionStepResult.Continue;
         }
@@ -644,7 +653,9 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
                 pythFee,
                 false,
                 _failedOutcomeForTerminalFailure(order),
-                revertOnBlockedExecution
+                revertOnBlockedExecution,
+                executionPrice,
+                oraclePublishTime
             );
             return revertOnBlockedExecution ? OrderExecutionStepResult.Return : OrderExecutionStepResult.Continue;
         }
@@ -670,7 +681,9 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
                 pythFee,
                 false,
                 _failedOutcomeForTerminalFailure(order),
-                revertOnBlockedExecution
+                revertOnBlockedExecution,
+                executionPrice,
+                oraclePublishTime
             );
             return revertOnBlockedExecution ? OrderExecutionStepResult.Return : OrderExecutionStepResult.Continue;
         }
@@ -694,12 +707,28 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         );
         if (executionSucceeded) {
             emit OrderExecuted(orderId, executionPrice);
-            _finalizeOrCleanupOrder(orderId, pythFee, true, FailedOrderOutcome.ClearerFull, revertOnBlockedExecution);
+            _finalizeOrCleanupOrder(
+                orderId,
+                pythFee,
+                true,
+                FailedOrderOutcome.ClearerFull,
+                revertOnBlockedExecution,
+                executionPrice,
+                oraclePublishTime
+            );
             return revertOnBlockedExecution ? OrderExecutionStepResult.Return : OrderExecutionStepResult.Continue;
         }
 
         emit OrderFailed(orderId, failureReason);
-        _finalizeOrCleanupOrder(orderId, pythFee, false, failureOutcome, revertOnBlockedExecution);
+        _finalizeOrCleanupOrder(
+            orderId,
+            pythFee,
+            false,
+            failureOutcome,
+            revertOnBlockedExecution,
+            executionPrice,
+            oraclePublishTime
+        );
         return revertOnBlockedExecution ? OrderExecutionStepResult.Return : OrderExecutionStepResult.Continue;
     }
 
@@ -708,13 +737,15 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         uint256 pythFee,
         bool success,
         FailedOrderOutcome failedOutcome,
-        bool refundEthNow
+        bool refundEthNow,
+        uint256 executionPrice,
+        uint64 oraclePublishTime
     ) internal {
         if (refundEthNow) {
-            _finalizeExecution(orderId, pythFee, success, failedOutcome);
+            _finalizeExecution(orderId, pythFee, success, failedOutcome, executionPrice, oraclePublishTime);
             return;
         }
-        _cleanupOrder(orderId, failedOutcome);
+        _cleanupOrder(orderId, failedOutcome, executionPrice, oraclePublishTime);
     }
 
     /// @notice Prunes expired head-of-queue orders in bounded slices.
@@ -730,7 +761,11 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         if (boundedPrunes == 0) {
             return;
         }
-        _pruneExpiredHeadOrders(upToId, boundedPrunes);
+        uint64 cachedMarkTime = engine.lastMarkTime();
+        if (cachedMarkTime == 0 || block.timestamp > cachedMarkTime + orderExecutionStalenessLimit) {
+            return;
+        }
+        _pruneExpiredHeadOrders(upToId, boundedPrunes, engine.lastMarkPrice(), cachedMarkTime);
     }
 
     function _resolveOraclePrice(
@@ -886,9 +921,12 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
 
     function _cleanupOrder(
         uint64 orderId,
-        FailedOrderOutcome failedOutcome
+        FailedOrderOutcome failedOutcome,
+        uint256 executionPrice,
+        uint64 oraclePublishTime
     ) internal returns (uint256 executionBountyUsdc) {
-        executionBountyUsdc = _consumeOrderEscrow(orderId, false, _failedOutcomeCode(failedOutcome));
+        executionBountyUsdc =
+            _consumeOrderEscrow(orderId, false, _failedOutcomeCode(failedOutcome), executionPrice, oraclePublishTime);
         _deleteOrder(orderId, IOrderRouterAccounting.OrderStatus.Failed);
     }
 
@@ -896,9 +934,11 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         uint64 orderId,
         uint256 pythFee,
         bool success,
-        FailedOrderOutcome failedOutcome
+        FailedOrderOutcome failedOutcome,
+        uint256 executionPrice,
+        uint64 oraclePublishTime
     ) internal {
-        _consumeOrderEscrow(orderId, success, _failedOutcomeCode(failedOutcome));
+        _consumeOrderEscrow(orderId, success, _failedOutcomeCode(failedOutcome), executionPrice, oraclePublishTime);
         _deleteOrder(orderId, success ? IOrderRouterAccounting.OrderStatus.Executed : IOrderRouterAccounting.OrderStatus.Failed);
         _sendEth(msg.sender, msg.value - pythFee);
     }

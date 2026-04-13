@@ -1321,15 +1321,15 @@ contract HousePoolTest is BasePerpTest {
 
         vm.warp(block.timestamp + 50 minutes);
 
-        // Attacker deposits 1 wei on behalf of alice to grief her cooldown
+        // Third-party deposits into an existing holder should be rejected outright.
         address attacker = address(0xBAD);
         usdc.mint(attacker, 1);
         vm.startPrank(attacker);
         usdc.approve(address(juniorVault), 1);
+        vm.expectRevert(TrancheVault.TrancheVault__ThirdPartyDepositForExistingHolder.selector);
         juniorVault.deposit(1, alice);
         vm.stopPrank();
 
-        // Third-party deposits must not grief Alice's cooldown.
         vm.warp(block.timestamp + 11 minutes);
         vm.prank(alice);
         juniorVault.withdraw(100_000 * 1e6, alice, alice);
@@ -1337,9 +1337,8 @@ contract HousePoolTest is BasePerpTest {
         assertEq(usdc.balanceOf(alice), 100_000 * 1e6, "Victim withdraw should succeed after original cooldown");
     }
 
-    function test_MeaningfulThirdPartyTopUpToExistingHolderDoesNotResetCooldown() public {
+    function test_MeaningfulThirdPartyTopUpToExistingHolderReverts() public {
         _fundJunior(alice, 100_000 * 1e6);
-        uint256 initialCooldown = juniorVault.lastDepositTime(alice);
 
         vm.warp(block.timestamp + 50 minutes);
 
@@ -1347,11 +1346,9 @@ contract HousePoolTest is BasePerpTest {
         usdc.mint(helper, 10_000e6);
         vm.startPrank(helper);
         usdc.approve(address(juniorVault), 10_000e6);
+        vm.expectRevert(TrancheVault.TrancheVault__ThirdPartyDepositForExistingHolder.selector);
         juniorVault.deposit(10_000e6, alice);
         vm.stopPrank();
-
-        assertGt(juniorVault.balanceOf(alice), 100_000e9, "Third-party top-up should still mint shares to the receiver");
-        assertEq(juniorVault.lastDepositTime(alice), initialCooldown, "Third-party top-up should not reset receiver cooldown");
 
         vm.warp(block.timestamp + 11 minutes);
         vm.prank(alice);

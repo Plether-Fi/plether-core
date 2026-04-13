@@ -665,19 +665,29 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     ///      depend on the clearer's or trader's own mark-freshness state.
     function creditKeeperExecutionBounty(
         address beneficiary,
-        uint256 amountUsdc
+        uint256 amountUsdc,
+        uint256 price,
+        uint64 publishTime
     ) external onlyRouter nonReentrant {
         if (amountUsdc == 0) {
             return;
         }
 
+        if (publishTime < lastMarkTime) {
+            revert CfdEngine__MarkPriceOutOfOrder();
+        }
+        if (block.timestamp > publishTime + _liveMarkStalenessLimit()) {
+            revert CfdEngine__MarkPriceStale();
+        }
+
+        uint256 clampedPrice = price > CAP_PRICE ? CAP_PRICE : price;
+        lastMarkPrice = clampedPrice;
+        lastMarkTime = publishTime;
+
         bytes32 accountId = bytes32(uint256(uint160(beneficiary)));
         StoredPosition storage pos = _positions[accountId];
         if (pos.size > 0) {
-            uint256 price = lastMarkPrice;
-            if (price > 0) {
-                _checkpointCarryBeforeBasisChange(accountId, pos, price, _genericReachableCollateralUsdc(accountId));
-            }
+            _checkpointCarryBeforeBasisChange(accountId, pos, clampedPrice, _genericReachableCollateralUsdc(accountId));
         }
 
         clearinghouse.settleUsdc(accountId, int256(amountUsdc));
@@ -813,8 +823,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         if (price == 0) {
             revert CfdEngine__InsufficientCloseOrderBountyBacking();
         }
-        uint256 stalenessLimit = engineMarkStalenessLimit * 2;
-        if (lastMarkTime == 0 || block.timestamp > lastMarkTime + stalenessLimit) {
+        if (lastMarkTime == 0) {
             revert CfdEngine__InsufficientCloseOrderBountyBacking();
         }
 

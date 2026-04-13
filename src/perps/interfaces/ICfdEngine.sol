@@ -98,7 +98,9 @@ interface ICfdEngine {
     ///      settlement-balance credit cannot retroactively dilute carry owed over the elapsed interval.
     function creditKeeperExecutionBounty(
         address beneficiary,
-        uint256 amountUsdc
+        uint256 amountUsdc,
+        uint256 price,
+        uint64 publishTime
     ) external;
 
     /// @notice Liquidates an undercollateralized position, returns keeper bounty in USDC

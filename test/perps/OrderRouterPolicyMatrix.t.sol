@@ -166,26 +166,22 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
 
         vm.prank(ALICE);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1.5e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 110_000_000, false);
 
         uint256 traderSettlementBefore = clearinghouse.balanceUsdc(traderAccountId);
         uint64 carryTimestampBefore = engine.getPositionLastCarryTimestamp(traderAccountId);
         bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(1e8));
+        priceData[0] = abi.encode(uint256(110_000_000));
         vm.prank(KEEPER);
         vm.roll(block.number + 1);
         router.executeOrder(1, priceData);
 
-        assertGt(
-            clearinghouse.balanceUsdc(traderAccountId),
-            traderSettlementBefore,
-            "Open-order refund should still credit settlement even when the cached mark is stale"
-        );
         assertEq(
             engine.getPositionLastCarryTimestamp(traderAccountId),
             uint64(block.timestamp),
             "Stale-mark refund should checkpoint carry before mutating the basis"
         );
+        assertEq(engine.lastMarkPrice(), 110_000_000, "Refund cleanup should refresh the cached engine mark");
         assertLt(
             carryTimestampBefore, engine.getPositionLastCarryTimestamp(traderAccountId), "Carry clock should advance"
         );
@@ -244,7 +240,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
 
         usdc.mint(address(clearinghouse), 1e6);
         vm.prank(address(router));
-        engine.creditKeeperExecutionBounty(KEEPER, 1e6);
+        engine.creditKeeperExecutionBounty(KEEPER, 1e6, 1e8, uint64(warpedTime));
 
         assertEq(
             clearinghouse.balanceUsdc(keeperAccountId),

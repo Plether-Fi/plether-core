@@ -66,7 +66,9 @@ interface ICfdEngineCore {
 
     function creditKeeperExecutionBounty(
         address beneficiary,
-        uint256 amountUsdc
+        uint256 amountUsdc,
+        uint256 price,
+        uint64 publishTime
     ) external;
 
     function accumulatedFeesUsdc() external view returns (uint256);
