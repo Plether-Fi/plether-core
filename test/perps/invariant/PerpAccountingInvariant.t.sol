@@ -42,7 +42,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         selectors[3] = handler.commitCloseOrder.selector;
         selectors[4] = handler.executeNextOrderBatch.selector;
         selectors[5] = handler.liquidate.selector;
-        selectors[6] = handler.claimDeferredClearerBounty.selector;
+        selectors[6] = handler.claimDeferredKeeperCredit.selector;
         selectors[7] = handler.setRouterPayoutFailureMode.selector;
 
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
@@ -168,15 +168,15 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function invariant_GhostDeferredClearerBountyMatchesEngine() public view {
-        uint256 ghostDeferredBounty = handler.deferredClearerBountySnapshot();
-        uint256 liveDeferredBounty = engine.deferredClearerBountyUsdc(address(handler));
+    function invariant_GhostDeferredKeeperCreditMatchesEngine() public view {
+        uint256 ghostDeferredBounty = handler.deferredKeeperCreditSnapshot();
+        uint256 liveDeferredBounty = engine.deferredKeeperCreditUsdc(address(handler));
 
         assertEq(ghostDeferredBounty, liveDeferredBounty, "Ghost deferred clearer bounty must match engine storage");
         assertEq(
-            handler.totalDeferredClearerBountySnapshot(),
+            handler.totalDeferredKeeperCreditSnapshot(),
             ghostDeferredBounty,
-            "Ghost deferred clearer bounty total must match tracked clearer balance"
+            "Ghost deferred keeper credit total must match tracked clearer balance"
         );
     }
 

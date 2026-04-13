@@ -33,24 +33,29 @@ contract PayoutModesMatrixTest is BasePerpTest {
         assertGt(preview.deferredPayoutUsdc, 0, "Illiquid close payout should become deferred");
     }
 
-    function test_LiquidationImmediateKeeperPayoutMode() public {
+    function test_LiquidationImmediateKeeperCreditMode() public {
         address trader = address(0xA003);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         address keeper = address(0xA103);
+        bytes32 keeperAccountId = bytes32(uint256(uint160(keeper)));
         _fundTrader(trader, 900e6);
         _open(accountId, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
 
         vm.prank(trader);
         clearinghouse.withdraw(accountId, 70e6);
 
-        uint256 keeperWalletBefore = usdc.balanceOf(keeper);
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccountId);
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(150_000_000));
         vm.prank(keeper);
         router.executeLiquidation(accountId, priceData);
 
-        assertGt(usdc.balanceOf(keeper) - keeperWalletBefore, 0, "Liquid mode should pay keeper bounty immediately");
-        assertEq(engine.deferredClearerBountyUsdc(keeper), 0, "Liquid mode should not defer keeper bounty");
+        assertGt(
+            clearinghouse.balanceUsdc(keeperAccountId) - keeperSettlementBefore,
+            0,
+            "Liquid mode should credit keeper bounty immediately"
+        );
+        assertEq(engine.deferredKeeperCreditUsdc(keeper), 0, "Liquid mode should not defer keeper bounty");
     }
 
     function test_LiquidationBadDebtMode() public {

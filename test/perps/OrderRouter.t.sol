@@ -1826,7 +1826,7 @@ contract OrderRouterPythTest is BasePerpTest {
             engine.deferredPayoutUsdc(accountId), 0, "Deferred payout should remain recorded after batch execution"
         );
         assertEq(
-            engine.deferredClearerBountyUsdc(address(this)),
+            engine.deferredKeeperCreditUsdc(address(this)),
             0,
             "Close execution should not rely on deferred liquidation bounties"
         );
@@ -2378,13 +2378,12 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         });
     }
 
-    function test_ExecuteLiquidation_PaysImmediateKeeperBountyToWallet() public {
+    function test_ExecuteLiquidation_CreditsImmediateKeeperBountyToClearinghouse() public {
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         _fundTrader(trader, 900e6);
 
         _open(accountId, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
 
-        uint256 keeperWalletBefore = usdc.balanceOf(address(this));
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(bytes32(uint256(uint160(address(this)))));
 
         CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, 150_000_000);
@@ -2398,18 +2397,13 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         _assertLiquidationPreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
 
         assertEq(
-            usdc.balanceOf(address(this)) - keeperWalletBefore,
-            preview.keeperBountyUsdc,
-            "Immediate liquidation bounty should pay directly to the keeper wallet"
-        );
-        assertEq(
             clearinghouse.balanceUsdc(bytes32(uint256(uint160(address(this))))) - keeperSettlementBefore,
-            0,
-            "Immediate liquidation bounty should not be routed through clearinghouse credit"
+            preview.keeperBountyUsdc,
+            "Immediate liquidation bounty should credit the keeper clearinghouse balance"
         );
     }
 
-    function test_ExecuteLiquidation_DefersKeeperBountyPerPreview() public {
+    function test_ExecuteLiquidation_DefersKeeperCreditPerPreviewWhenVaultPayoutFails() public {
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         _fundTrader(trader, 900e6);
 
@@ -2419,9 +2413,9 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         LiquidationParitySnapshot memory beforeSnapshot = _captureLiquidationParitySnapshot(accountId, address(this));
 
         vm.mockCallRevert(
-            address(usdc),
-            abi.encodeWithSelector(usdc.transfer.selector, address(this), preview.keeperBountyUsdc),
-            abi.encodeWithSignature("Error(string)", "blacklisted")
+            address(pool),
+            abi.encodeWithSelector(pool.payOut.selector, address(clearinghouse), preview.keeperBountyUsdc),
+            abi.encodeWithSignature("Error(string)", "vault illiquid")
         );
 
         bytes[] memory priceData = new bytes[](1);
@@ -2431,11 +2425,11 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
 
         LiquidationParityObserved memory observed = _observeLiquidationParity(accountId, address(this), beforeSnapshot);
         _assertLiquidationPreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
-        assertEq(observed.keeperWalletUsdc, 0, "Blacklisted keeper payout should not reach the wallet");
+        assertEq(observed.keeperSettlementUsdc, 0, "Failed immediate keeper credit should not reach settlement");
         assertEq(
-            observed.deferredClearerBountyUsdc,
+            observed.deferredKeeperCreditUsdc,
             preview.keeperBountyUsdc,
-            "Failed wallet payout should defer the previewed keeper bounty into deferred clearer liability"
+            "Failed immediate keeper credit should defer the previewed keeper bounty into deferred clearer liability"
         );
     }
 
@@ -2529,11 +2523,11 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(195_000_000));
 
-        uint256 keeperBefore = usdc.balanceOf(address(this));
+        uint256 keeperBefore = clearinghouse.balanceUsdc(bytes32(uint256(uint160(address(this)))));
         router.executeLiquidation(accountId, priceData);
 
         assertEq(
-            usdc.balanceOf(address(this)) - keeperBefore,
+            clearinghouse.balanceUsdc(bytes32(uint256(uint160(address(this))))) - keeperBefore,
             expectedPreview.keeperBountyUsdc,
             "Liquidation bounty should use the post-forfeiture vault depth for funding"
         );
@@ -4346,7 +4340,7 @@ contract KeeperFeeRefundTest is Test {
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1.5e8, false);
 
         uint256 keeperBefore = keeper.balance;
-        uint256 deferredClearerBefore = engine.totalDeferredClearerBountyUsdc();
+        uint256 deferredKeeperCreditBefore = engine.totalDeferredKeeperCreditUsdc();
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(1e8));
         vm.prank(keeper);
@@ -4356,8 +4350,8 @@ contract KeeperFeeRefundTest is Test {
         assertEq(keeper.balance - keeperBefore, 0, "Keeper should not receive fee on slippage failure");
         assertEq(alice.balance, 1 ether, "User receives slippage-failure refund");
         assertEq(
-            engine.totalDeferredClearerBountyUsdc(),
-            deferredClearerBefore,
+            engine.totalDeferredKeeperCreditUsdc(),
+            deferredKeeperCreditBefore,
             "Slippage failure should not leak failed-order bounty into deferred clearer liabilities"
         );
     }

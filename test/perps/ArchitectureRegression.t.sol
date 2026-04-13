@@ -39,7 +39,7 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
         vm.prank(address(router));
-        engine.recordDeferredClearerBounty(keeper, 950_001e6);
+        engine.recordDeferredKeeperCredit(keeper, 950_001e6);
 
         vm.expectRevert(CfdEngine.CfdEngine__PostOpSolvencyBreach.selector);
         engine.withdrawFees(address(this));
@@ -47,7 +47,7 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
 
     function test_Reconcile_MustSubtractDeferredLiquidationBounties() public {
         vm.prank(address(router));
-        engine.recordDeferredClearerBounty(keeper, 100_000e6);
+        engine.recordDeferredKeeperCredit(keeper, 100_000e6);
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -99,19 +99,19 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         assertGt(deferredPayout, 0, "setup must create a deferred payout");
 
         vm.prank(address(router));
-        engine.recordDeferredClearerBounty(keeper, deferredPayout);
+        engine.recordDeferredKeeperCredit(keeper, deferredPayout);
 
         usdc.mint(address(pool), deferredPayout);
 
-        DeferredEngineViewTypes.DeferredPayoutStatus memory status = _deferredPayoutStatus(aliceId, keeper);
+        DeferredEngineViewTypes.DeferredCreditStatus memory status = _deferredCreditStatus(aliceId, keeper);
         assertTrue(status.traderPayoutClaimableNow, "Deferred trader payout should be claimable when liquidity exists");
         assertTrue(
-            status.liquidationBountyClaimableNow, "Deferred clearer bounty should also be claimable without FIFO gating"
+            status.keeperCreditClaimableNow, "Deferred keeper credit should also be claimable without FIFO gating"
         );
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(bytes32(uint256(uint160(keeper))));
         vm.prank(keeper);
-        engine.claimDeferredClearerBounty();
+        engine.claimDeferredKeeperCredit();
         assertGt(
             clearinghouse.balanceUsdc(bytes32(uint256(uint160(keeper)))) - keeperSettlementBefore,
             0,

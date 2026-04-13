@@ -603,11 +603,13 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         }
     }
 
-    /// @dev Immediate liquidation bounties still pay directly to the executing keeper wallet.
-    ///      If immediate payment is unavailable or direct transfer fails, the bounty is deferred and later
-    ///      settles as clearinghouse credit via `claimDeferredClearerBounty()`.
-    function _payOrDeferLiquidationBounty(
-        uint256 liquidationBountyUsdc
+    /// @dev Liquidation keeper value follows the same default custody path as other keeper flows:
+    ///      credit the beneficiary's clearinghouse account when cash is available, otherwise defer the
+    ///      claim for later clearinghouse settlement.
+    function _creditOrDeferLiquidationBounty(
+        uint256 liquidationBountyUsdc,
+        uint256 executionPrice,
+        uint64 oraclePublishTime
     ) internal {
         if (liquidationBountyUsdc == 0) {
             return;
@@ -617,16 +619,18 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
             vault.totalAssets(),
             engine.accumulatedFeesUsdc(),
             engine.totalDeferredPayoutUsdc(),
-            engine.totalDeferredClearerBountyUsdc()
+            engine.totalDeferredKeeperCreditUsdc()
         );
         if (liquidationBountyUsdc > reservation.freeCashUsdc) {
-            engine.recordDeferredClearerBounty(msg.sender, liquidationBountyUsdc);
+            engine.recordDeferredKeeperCredit(msg.sender, liquidationBountyUsdc);
             return;
         }
 
-        try vault.payOut(msg.sender, liquidationBountyUsdc) {}
+        try vault.payOut(address(clearinghouse), liquidationBountyUsdc) {
+            engine.creditKeeperExecutionBounty(msg.sender, liquidationBountyUsdc, executionPrice, oraclePublishTime);
+        }
         catch {
-            engine.recordDeferredClearerBounty(msg.sender, liquidationBountyUsdc);
+            engine.recordDeferredKeeperCredit(msg.sender, liquidationBountyUsdc);
         }
     }
 
@@ -816,7 +820,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
 
     /// @notice Keeper-triggered liquidation using the canonical live-market staleness policy.
     ///         Forfeits any queued-order execution escrow to the vault instead of crediting it back to trader settlement,
-    ///         then pays the liquidation keeper bounty in USDC directly from the vault.
+    ///         then credits the liquidation keeper through the clearinghouse when cash is available.
     /// @param accountId The account to liquidate (bytes32-encoded address)
     /// @param pythUpdateData Pyth price update blobs; attach ETH to cover the Pyth fee
     function executeLiquidation(
@@ -848,7 +852,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
 
         _clearLiquidatedAccountOrders(accountId);
 
-        _payOrDeferLiquidationBounty(keeperBountyUsdc);
+        _creditOrDeferLiquidationBounty(keeperBountyUsdc, executionPrice, oraclePublishTime);
 
         _sendEth(msg.sender, msg.value - pythFee);
     }

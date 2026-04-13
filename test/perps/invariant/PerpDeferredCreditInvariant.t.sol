@@ -8,7 +8,7 @@ import {CashPriorityLib} from "../../../src/perps/libraries/CashPriorityLib.sol"
 import {BasePerpInvariantTest} from "./BasePerpInvariantTest.sol";
 import {PerpAccountingHandler} from "./handlers/PerpAccountingHandler.sol";
 
-contract PerpDeferredPayoutInvariantTest is BasePerpInvariantTest {
+contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
 
     PerpAccountingHandler internal handler;
 
@@ -32,16 +32,16 @@ contract PerpDeferredPayoutInvariantTest is BasePerpInvariantTest {
         targetContract(address(handler));
     }
 
-    function invariant_DeferredPayoutStatusMatchesEngineAndVaultLiquidity() public view {
+    function invariant_DeferredCreditStatusMatchesEngineAndVaultLiquidity() public view {
         uint256 totalDeferredPayoutUsdc;
         bool anyLiquidity = vault.totalAssets() > 0;
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
-            DeferredEngineViewTypes.DeferredPayoutStatus memory status =
-                _deferredPayoutStatus(accountId, address(handler));
+            DeferredEngineViewTypes.DeferredCreditStatus memory status =
+                _deferredCreditStatus(accountId, address(handler));
             uint256 deferredPayoutUsdc = engine.deferredPayoutUsdc(accountId);
-            uint256 deferredClearerBountyUsdc = engine.deferredClearerBountyUsdc(address(handler));
+            uint256 deferredKeeperCreditUsdc = engine.deferredKeeperCreditUsdc(address(handler));
 
             assertEq(status.deferredTraderPayoutUsdc, deferredPayoutUsdc, "Deferred payout status amount mismatch");
             assertEq(
@@ -50,8 +50,8 @@ contract PerpDeferredPayoutInvariantTest is BasePerpInvariantTest {
                 "Deferred payout claimability mismatch"
             );
             assertEq(
-                status.liquidationBountyClaimableNow,
-                deferredClearerBountyUsdc > 0 && anyLiquidity,
+                status.keeperCreditClaimableNow,
+                deferredKeeperCreditUsdc > 0 && anyLiquidity,
                 "Deferred clearer bounty claimability mismatch"
             );
 
@@ -115,7 +115,7 @@ contract PerpDeferredPayoutInvariantTest is BasePerpInvariantTest {
                 vault.totalAssets(),
                 engine.accumulatedFeesUsdc(),
                 engine.totalDeferredPayoutUsdc(),
-                engine.totalDeferredClearerBountyUsdc()
+                engine.totalDeferredKeeperCreditUsdc()
             )
             .freeCashUsdc;
             if (freeCashForFreshPayouts >= totalPayoutUsdc) {

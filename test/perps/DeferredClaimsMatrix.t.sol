@@ -34,14 +34,14 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
     function test_ClearerDeferredClaim_PartialWhenVaultIlliquid() public {
         address keeper = address(0xDC03);
         vm.prank(address(router));
-        engine.recordDeferredClearerBounty(keeper, 5000e6);
+        engine.recordDeferredKeeperCredit(keeper, 5000e6);
         usdc.burn(address(pool), pool.totalAssets());
         usdc.mint(address(pool), 2000e6);
 
         bytes32 keeperAccountId = bytes32(uint256(uint160(keeper)));
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccountId);
         vm.prank(keeper);
-        engine.claimDeferredClearerBounty();
+        engine.claimDeferredKeeperCredit();
 
         assertEq(
             clearinghouse.balanceUsdc(keeperAccountId),
@@ -49,7 +49,7 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
             "Clearer claim should service only liquid amount"
         );
         assertEq(
-            engine.deferredClearerBountyUsdc(keeper), 3000e6, "Remaining deferred clearer bounty should stay queued"
+            engine.deferredKeeperCreditUsdc(keeper), 3000e6, "Remaining deferred keeper credit should stay queued"
         );
     }
 

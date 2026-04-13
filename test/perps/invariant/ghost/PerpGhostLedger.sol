@@ -14,10 +14,10 @@ contract PerpGhostLedger {
     mapping(bytes32 => LiquidationSnapshot) internal liquidationSnapshots;
     mapping(bytes32 => uint256) internal committedMarginUsdc;
     mapping(bytes32 => uint256) internal deferredTraderPayoutUsdc;
-    mapping(address => uint256) internal deferredClearerBountyUsdc;
+    mapping(address => uint256) internal deferredKeeperCreditUsdc;
     uint256 internal totalTrackedCommittedMarginUsdc;
     uint256 internal totalTrackedDeferredTraderPayoutUsdc;
-    uint256 internal totalTrackedDeferredClearerBountyUsdc;
+    uint256 internal totalTrackedDeferredKeeperCreditUsdc;
 
     error PerpGhostLedger__Unauthorized();
 
@@ -64,7 +64,7 @@ contract PerpGhostLedger {
         totalTrackedCommittedMarginUsdc -= amountUsdc;
     }
 
-    function increaseDeferredClearerBounty(
+    function increaseDeferredKeeperCredit(
         address clearer,
         uint256 amountUsdc
     ) external {
@@ -72,11 +72,11 @@ contract PerpGhostLedger {
             revert PerpGhostLedger__Unauthorized();
         }
 
-        deferredClearerBountyUsdc[clearer] += amountUsdc;
-        totalTrackedDeferredClearerBountyUsdc += amountUsdc;
+        deferredKeeperCreditUsdc[clearer] += amountUsdc;
+        totalTrackedDeferredKeeperCreditUsdc += amountUsdc;
     }
 
-    function decreaseDeferredClearerBounty(
+    function decreaseDeferredKeeperCredit(
         address clearer,
         uint256 amountUsdc
     ) external {
@@ -84,8 +84,8 @@ contract PerpGhostLedger {
             revert PerpGhostLedger__Unauthorized();
         }
 
-        deferredClearerBountyUsdc[clearer] -= amountUsdc;
-        totalTrackedDeferredClearerBountyUsdc -= amountUsdc;
+        deferredKeeperCreditUsdc[clearer] -= amountUsdc;
+        totalTrackedDeferredKeeperCreditUsdc -= amountUsdc;
     }
 
     function increaseDeferredTraderPayout(
@@ -124,10 +124,10 @@ contract PerpGhostLedger {
         return committedMarginUsdc[accountId];
     }
 
-    function deferredClearerBountySnapshot(
+    function deferredKeeperCreditSnapshot(
         address clearer
     ) external view returns (uint256) {
-        return deferredClearerBountyUsdc[clearer];
+        return deferredKeeperCreditUsdc[clearer];
     }
 
     function deferredTraderPayoutSnapshot(
@@ -144,8 +144,8 @@ contract PerpGhostLedger {
         return totalTrackedDeferredTraderPayoutUsdc;
     }
 
-    function totalDeferredClearerBountySnapshot() external view returns (uint256) {
-        return totalTrackedDeferredClearerBountyUsdc;
+    function totalDeferredKeeperCreditSnapshot() external view returns (uint256) {
+        return totalTrackedDeferredKeeperCreditUsdc;
     }
 
 }

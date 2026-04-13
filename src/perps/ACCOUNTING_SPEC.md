@@ -112,7 +112,7 @@ Where `withdrawalReservedUsdc` is built from the canonical reserve model, includ
 
 - bounded trader liability,
 - deferred trader payouts,
-- deferred clearer balances,
+- deferred keeper credit,
 - protocol-owned inventory.
 
 Rule:
@@ -179,7 +179,7 @@ Key fields:
 - `supplementalReservedUsdc`: reserved extension slot for LP-withdrawal accounting; currently zero in the carry model
 - `unrealizedMtmLiabilityUsdc`
 - `deferredTraderPayoutUsdc`
-- `deferredClearerBountyUsdc`
+- `deferredKeeperCreditUsdc`
 - `protocolFeesUsdc`
 - `markFreshnessRequired`
 - `maxMarkStaleness`
@@ -278,7 +278,7 @@ The protocol supports fail-soft terminal settlement.
 
 ### Deferred clearer balances
 
-- illiquid liquidation bounties may create `deferredClearerBountyUsdc[beneficiary]`,
+- illiquid liquidation bounties may create `deferredKeeperCreditUsdc[beneficiary]`,
 - claims are permissionless,
 - settlement is credited into `MarginClearinghouse`.
 

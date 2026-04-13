@@ -255,7 +255,7 @@ contract CfdEngineLens is ICfdEngineLens {
         snap.accumulatedBadDebtUsdc = engineContract.accumulatedBadDebtUsdc();
         snap.unsettledCarryUsdc = engineContract.unsettledCarryUsdc(accountId);
         snap.totalDeferredPayoutUsdc = engineContract.totalDeferredPayoutUsdc();
-        snap.totalDeferredClearerBountyUsdc = engineContract.totalDeferredClearerBountyUsdc();
+        snap.totalDeferredKeeperCreditUsdc = engineContract.totalDeferredKeeperCreditUsdc();
         snap.deferredPayoutForAccount = engineContract.deferredPayoutUsdc(accountId);
         snap.degradedMode = engineContract.degradedMode();
         snap.capPrice = engineContract.CAP_PRICE();

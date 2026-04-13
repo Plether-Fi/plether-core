@@ -40,7 +40,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
         selectors[3] = handler.commitCloseOrder.selector;
         selectors[4] = handler.executeNextOrderBatch.selector;
         selectors[5] = handler.liquidate.selector;
-        selectors[6] = handler.claimDeferredClearerBounty.selector;
+        selectors[6] = handler.claimDeferredKeeperCredit.selector;
         selectors[7] = handler.setRouterPayoutFailureMode.selector;
         selectors[8] = handler.warpForward.selector;
         selectors[9] = handler.syncMarkNow.selector;
@@ -60,8 +60,8 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
             "Protocol accounting view deferred trader payout mismatch"
         );
         assertEq(
-            accountingView.totalDeferredClearerBountyUsdc,
-            engine.totalDeferredClearerBountyUsdc(),
+            accountingView.totalDeferredKeeperCreditUsdc,
+            engine.totalDeferredKeeperCreditUsdc(),
             "Protocol accounting view deferred clearer bounty mismatch"
         );
         assertEq(

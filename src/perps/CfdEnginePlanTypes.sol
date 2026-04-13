@@ -63,7 +63,7 @@ library CfdEnginePlanTypes {
         uint256 accumulatedBadDebtUsdc;
         uint256 unsettledCarryUsdc;
         uint256 totalDeferredPayoutUsdc;
-        uint256 totalDeferredClearerBountyUsdc;
+        uint256 totalDeferredKeeperCreditUsdc;
         uint256 deferredPayoutForAccount;
         bool degradedMode;
 

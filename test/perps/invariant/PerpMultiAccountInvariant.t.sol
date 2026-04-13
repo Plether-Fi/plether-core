@@ -29,7 +29,7 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
         selectors[5] = handler.executeNextOrderModelled.selector;
         selectors[6] = handler.liquidate.selector;
         selectors[7] = handler.claimDeferredPayout.selector;
-        selectors[8] = handler.claimDeferredClearerBounty.selector;
+        selectors[8] = handler.claimDeferredKeeperCredit.selector;
         selectors[9] = handler.createDeferredTraderPayout.selector;
 
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));

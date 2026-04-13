@@ -81,7 +81,7 @@ Any new helper/module contract that can reach these sets should be treated as se
 | Bounty type | Source of funds | Custody while pending | Success path | Illiquid path | Terminal failure path |
 |-------------|-----------------|-----------------------|--------------|---------------|-----------------------|
 | Order execution bounty | Trader free settlement, then bounded close fallback from active position margin | `OrderRouter` escrow | clearinghouse credit for the clearer | n/a | trader refund or clearer payment via clearinghouse credit depending on failure category |
-| Liquidation bounty | Capped from canonical liquidation value derived from reachable collateral and carry-adjusted equity | planned in engine, then serviced through the liquidation settlement path | immediate keeper payment if cash is available after the settlement path | deferred clearer bounty senior claim | n/a |
+| Liquidation bounty | Capped from canonical liquidation value derived from reachable collateral and carry-adjusted equity | planned in engine, then serviced through the liquidation settlement path | immediate keeper clearinghouse credit if cash is available after the settlement path | deferred keeper credit senior claim | n/a |
 
 ### Oracle regime table
 
@@ -103,7 +103,7 @@ Any new helper/module contract that can reach these sets should be treated as se
 | Committed order margin | Trader but reserved to one order | clearinghouse reservation keyed by `orderId` | router commit/execute/fail | no | no | no | no |
 | Router execution bounty escrow | Trader-funded keeper escrow | `OrderRouter` balance + order record | router commit/distribute/refund/forfeit | no | no | no | no |
 | Deferred trader payout | Trader senior claim on vault liquidity | `CfdEngine.deferredPayoutUsdc` | engine create/service | no | yes, as senior liability | yes | yes |
-| Deferred clearer bounty | Keeper senior claim on vault liquidity | `CfdEngine.deferredClearerBountyUsdc` | engine create/service | no | yes, as senior liability | yes | yes |
+| Deferred keeper credit | Keeper senior claim on vault liquidity | `CfdEngine.deferredKeeperCreditUsdc` | engine create/service | no | yes, as senior liability | yes | yes |
 | Unsettled carry | Protocol-recorded carry debt on an account | `CfdEngine.unsettledCarryUsdc[accountId]` | engine carry-checkpoint paths | no | yes, as carry drag on account equity | no | no |
 | Accumulated protocol fees | Protocol/treasury | `CfdEngine.accumulatedFeesUsdc` + canonical pool cash | engine accrual, owner withdraw | no | reduces net physical assets | yes | yes |
 | Accumulated bad debt | Protocol loss / LP impairment | `CfdEngine.accumulatedBadDebtUsdc` | engine realization, bad debt clear path | n/a | yes, as realized deficit | yes | yes |
@@ -134,7 +134,7 @@ Reachability note:
 ### Fail-soft liquidation bounty servicing
 
 - Liveness problem: liquidation should not fail solely because immediate vault cash is unavailable.
-- Chosen tradeoff: keeper bounty may become a deferred clearer claim.
+- Chosen tradeoff: keeper bounty may become deferred keeper credit.
 - New risk: keeper payment timing becomes state-dependent.
 - Protecting invariant: liquidation still completes, and the clearer claim remains senior until paid.
 

@@ -132,9 +132,9 @@ Profitable closes and some liquidation residuals can create deferred trader payo
 Liquidation bounties are fail-soft when the vault is illiquid.
 
 - The liquidation still completes.
-- Any unpaid bounty is recorded in `deferredClearerBountyUsdc[keeper]`.
-- `claimDeferredClearerBounty()` is permissionless and settles to clearinghouse credit rather than direct wallet transfer.
-- Deferred trader payouts and deferred clearer balances are included in reserve and solvency accounting.
+- Any unpaid keeper value is recorded in `deferredKeeperCreditUsdc[keeper]`.
+- `claimDeferredKeeperCredit()` is permissionless and settles to clearinghouse credit rather than direct wallet transfer.
+- Deferred trader payouts and deferred keeper credit are included in reserve and solvency accounting.
 
 ## LP Lifecycle
 
@@ -235,7 +235,7 @@ Open-risk projection credits skew-reducing trade rebates into reachable collater
 The system can complete terminal transitions even when immediate vault cash is insufficient.
 
 - Trader gains can become deferred trader payouts.
-- Liquidation bounties can become deferred clearer balances.
+- Liquidation bounties can become deferred keeper credit.
 - Both are included in reserve and solvency accounting.
 - Deferred balances are beneficiary-based, not queue-based.
 

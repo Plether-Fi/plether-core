@@ -431,7 +431,7 @@ contract PerpAccountingHandler is Test {
             }
             _syncGhostDeferredTraderPayout(accountId);
             if (shouldDefer) {
-                ghost.increaseDeferredClearerBounty(address(this), keeperBountyUsdc);
+                ghost.increaseDeferredKeeperCredit(address(this), keeperBountyUsdc);
             }
             uint256 badDebtAfter = engine.accumulatedBadDebtUsdc();
             if (badDebtAfter > badDebtBefore) {
@@ -443,11 +443,11 @@ contract PerpAccountingHandler is Test {
         } catch {}
     }
 
-    function claimDeferredClearerBounty() external {
+    function claimDeferredKeeperCredit() external {
         _clearLastBadDebtDeferredEvent();
         _clearTerminalReservationSet();
-        try engine.claimDeferredClearerBounty() {
-            _syncGhostDeferredClearerBounty(address(this));
+        try engine.claimDeferredKeeperCredit() {
+            _syncGhostDeferredKeeperCredit(address(this));
         } catch {}
     }
 
@@ -634,8 +634,8 @@ contract PerpAccountingHandler is Test {
         return ghost.totalCommittedMarginSnapshot();
     }
 
-    function deferredClearerBountySnapshot() external view returns (uint256) {
-        return ghost.deferredClearerBountySnapshot(address(this));
+    function deferredKeeperCreditSnapshot() external view returns (uint256) {
+        return ghost.deferredKeeperCreditSnapshot(address(this));
     }
 
     function deferredTraderPayoutSnapshot(
@@ -729,15 +729,15 @@ contract PerpAccountingHandler is Test {
         }
     }
 
-    function _syncGhostDeferredClearerBounty(
+    function _syncGhostDeferredKeeperCredit(
         address keeper
     ) internal {
-        uint256 ghostDeferredBounty = ghost.deferredClearerBountySnapshot(keeper);
-        uint256 liveDeferredBounty = engine.deferredClearerBountyUsdc(keeper);
+        uint256 ghostDeferredBounty = ghost.deferredKeeperCreditSnapshot(keeper);
+        uint256 liveDeferredBounty = engine.deferredKeeperCreditUsdc(keeper);
         if (liveDeferredBounty > ghostDeferredBounty) {
-            ghost.increaseDeferredClearerBounty(keeper, liveDeferredBounty - ghostDeferredBounty);
+            ghost.increaseDeferredKeeperCredit(keeper, liveDeferredBounty - ghostDeferredBounty);
         } else if (ghostDeferredBounty > liveDeferredBounty) {
-            ghost.decreaseDeferredClearerBounty(keeper, ghostDeferredBounty - liveDeferredBounty);
+            ghost.decreaseDeferredKeeperCredit(keeper, ghostDeferredBounty - liveDeferredBounty);
         }
     }
 
@@ -930,8 +930,8 @@ contract PerpAccountingHandler is Test {
         }
     }
 
-    function totalDeferredClearerBountySnapshot() external view returns (uint256) {
-        return ghost.totalDeferredClearerBountySnapshot();
+    function totalDeferredKeeperCreditSnapshot() external view returns (uint256) {
+        return ghost.totalDeferredKeeperCreditSnapshot();
     }
 
     function _ensureFreeSettlement(

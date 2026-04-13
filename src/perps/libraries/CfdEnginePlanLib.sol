@@ -417,7 +417,7 @@ library CfdEnginePlanLib {
             snap.accumulatedFeesUsdc,
             SolvencyAccountingLib.getMaxLiability(snap.bullSide.maxProfitUsdc, snap.bearSide.maxProfitUsdc),
             snap.totalDeferredPayoutUsdc,
-            snap.totalDeferredClearerBountyUsdc
+            snap.totalDeferredKeeperCreditUsdc
         );
         SolvencyAccountingLib.PreviewResult memory result = SolvencyAccountingLib.previewPostOpSolvency(
             currentState,
@@ -426,7 +426,7 @@ library CfdEnginePlanLib {
                 protocolFeesDeltaUsdc: delta.executionFeeUsdc,
                 maxLiabilityAfterUsdc: postMaxLiability,
                 deferredTraderPayoutDeltaUsdc: 0,
-                deferredLiquidationBountyDeltaUsdc: 0,
+                deferredKeeperCreditDeltaUsdc: 0,
                 pendingVaultPayoutUsdc: 0
             }),
             snap.degradedMode
@@ -534,7 +534,7 @@ library CfdEnginePlanLib {
             effectiveVaultCash,
             snap.accumulatedFeesUsdc,
             snap.totalDeferredPayoutUsdc,
-            snap.totalDeferredClearerBountyUsdc
+            snap.totalDeferredKeeperCreditUsdc
         )
         .freeCashUsdc;
 
@@ -609,7 +609,7 @@ library CfdEnginePlanLib {
             snap.accumulatedFeesUsdc,
             SolvencyAccountingLib.getMaxLiability(snap.bullSide.maxProfitUsdc, snap.bearSide.maxProfitUsdc),
             snap.totalDeferredPayoutUsdc,
-            snap.totalDeferredClearerBountyUsdc
+            snap.totalDeferredKeeperCreditUsdc
         );
 
         SolvencyAccountingLib.PreviewResult memory result = SolvencyAccountingLib.previewPostOpSolvency(
@@ -620,7 +620,7 @@ library CfdEnginePlanLib {
                 maxLiabilityAfterUsdc: postMaxLiability,
                 deferredTraderPayoutDeltaUsdc: int256(deferredTraderPayoutIncrease)
                     - int256(delta.existingDeferredConsumedUsdc),
-                deferredLiquidationBountyDeltaUsdc: 0,
+                deferredKeeperCreditDeltaUsdc: 0,
                 pendingVaultPayoutUsdc: 0
             }),
             snap.degradedMode
@@ -740,7 +740,7 @@ library CfdEnginePlanLib {
                     snap.vaultCashUsdc,
                     snap.accumulatedFeesUsdc,
                     deferredTraderPayoutAfterConsumption,
-                    snap.totalDeferredClearerBountyUsdc
+                    snap.totalDeferredKeeperCreditUsdc
                 )
                 .freeCashUsdc >= delta.freshTraderPayoutUsdc;
             delta.freshPayoutIsDeferred = !delta.freshPayoutIsImmediate;
@@ -763,7 +763,7 @@ library CfdEnginePlanLib {
             snap.accumulatedFeesUsdc,
             SolvencyAccountingLib.getMaxLiability(snap.bullSide.maxProfitUsdc, snap.bearSide.maxProfitUsdc),
             snap.totalDeferredPayoutUsdc,
-            snap.totalDeferredClearerBountyUsdc
+            snap.totalDeferredKeeperCreditUsdc
         );
 
         int256 physicalAssetsDelta = int256(delta.residualPlan.settlementSeizedUsdc)
@@ -777,7 +777,7 @@ library CfdEnginePlanLib {
                 maxLiabilityAfterUsdc: postMaxLiability,
                 deferredTraderPayoutDeltaUsdc: int256(delta.freshPayoutIsDeferred ? delta.freshTraderPayoutUsdc : 0)
                     - int256(delta.existingDeferredConsumedUsdc),
-                deferredLiquidationBountyDeltaUsdc: 0,
+                deferredKeeperCreditDeltaUsdc: 0,
                 pendingVaultPayoutUsdc: delta.keeperBountyUsdc
             }),
             snap.degradedMode

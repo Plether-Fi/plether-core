@@ -65,7 +65,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
         selectors[3] = handler.commitCloseOrder.selector;
         selectors[4] = handler.executeNextOrderBatch.selector;
         selectors[5] = handler.liquidate.selector;
-        selectors[6] = handler.claimDeferredClearerBounty.selector;
+        selectors[6] = handler.claimDeferredKeeperCredit.selector;
         selectors[7] = handler.setRouterPayoutFailureMode.selector;
         selectors[8] = handler.setVaultAssets.selector;
         selectors[9] = handler.fundVault.selector;

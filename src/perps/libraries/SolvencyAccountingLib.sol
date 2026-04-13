@@ -10,7 +10,7 @@ library SolvencyAccountingLib {
         uint256 protocolFeesDeltaUsdc;
         uint256 maxLiabilityAfterUsdc;
         int256 deferredTraderPayoutDeltaUsdc;
-        int256 deferredLiquidationBountyDeltaUsdc;
+        int256 deferredKeeperCreditDeltaUsdc;
         uint256 pendingVaultPayoutUsdc;
     }
 
@@ -27,7 +27,7 @@ library SolvencyAccountingLib {
         uint256 netPhysicalAssetsUsdc;
         uint256 maxLiabilityUsdc;
         uint256 deferredTraderPayoutUsdc;
-        uint256 deferredClearerBountyUsdc;
+        uint256 deferredKeeperCreditUsdc;
         uint256 withdrawalReservedUsdc;
         uint256 freeWithdrawableUsdc;
         uint256 effectiveAssetsUsdc;
@@ -59,16 +59,16 @@ library SolvencyAccountingLib {
         uint256 protocolFeesUsdc,
         uint256 maxLiabilityUsdc,
         uint256 deferredTraderPayoutUsdc,
-        uint256 deferredClearerBountyUsdc
+        uint256 deferredKeeperCreditUsdc
     ) internal pure returns (SolvencyState memory state) {
         state.physicalAssetsUsdc = physicalAssetsUsdc;
         state.protocolFeesUsdc = protocolFeesUsdc;
         state.netPhysicalAssetsUsdc = physicalAssetsUsdc > protocolFeesUsdc ? physicalAssetsUsdc - protocolFeesUsdc : 0;
         state.maxLiabilityUsdc = maxLiabilityUsdc;
         state.deferredTraderPayoutUsdc = deferredTraderPayoutUsdc;
-        state.deferredClearerBountyUsdc = deferredClearerBountyUsdc;
+        state.deferredKeeperCreditUsdc = deferredKeeperCreditUsdc;
 
-        uint256 deferredLiabilitiesUsdc = deferredTraderPayoutUsdc + deferredClearerBountyUsdc;
+        uint256 deferredLiabilitiesUsdc = deferredTraderPayoutUsdc + deferredKeeperCreditUsdc;
         state.withdrawalReservedUsdc = maxLiabilityUsdc + protocolFeesUsdc + deferredLiabilitiesUsdc;
         state.freeWithdrawableUsdc =
             physicalAssetsUsdc > state.withdrawalReservedUsdc ? physicalAssetsUsdc - state.withdrawalReservedUsdc : 0;
@@ -109,15 +109,15 @@ library SolvencyAccountingLib {
 
         uint256 deferredTraderPayoutAfterUsdc =
             _applySignedDelta(currentState.deferredTraderPayoutUsdc, delta.deferredTraderPayoutDeltaUsdc);
-        uint256 deferredClearerBountyAfterUsdc =
-            _applySignedDelta(currentState.deferredClearerBountyUsdc, delta.deferredLiquidationBountyDeltaUsdc);
+        uint256 deferredKeeperCreditAfterUsdc =
+            _applySignedDelta(currentState.deferredKeeperCreditUsdc, delta.deferredKeeperCreditDeltaUsdc);
 
         SolvencyState memory afterState = buildSolvencyState(
             physicalAssetsAfterUsdc,
             currentState.protocolFeesUsdc + delta.protocolFeesDeltaUsdc,
             delta.maxLiabilityAfterUsdc,
             deferredTraderPayoutAfterUsdc,
-            deferredClearerBountyAfterUsdc
+            deferredKeeperCreditAfterUsdc
         );
 
         result.maxLiabilityAfterUsdc = afterState.maxLiabilityUsdc;

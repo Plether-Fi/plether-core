@@ -155,18 +155,18 @@ abstract contract BasePerpInvariantTest is Test {
         return (notionalUsdc * requiredBps) / 10_000;
     }
 
-    function _deferredPayoutStatus(
+    function _deferredCreditStatus(
         bytes32 accountId,
         address keeper
-    ) internal view returns (DeferredEngineViewTypes.DeferredPayoutStatus memory status) {
+    ) internal view returns (DeferredEngineViewTypes.DeferredCreditStatus memory status) {
         uint256 deferredPayoutUsdc = engine.deferredPayoutUsdc(accountId);
-        uint256 deferredClearerBountyUsdc = engine.deferredClearerBountyUsdc(keeper);
+        uint256 deferredKeeperCreditUsdc = engine.deferredKeeperCreditUsdc(keeper);
         bool anyLiquidity = vault.totalAssets() > 0;
 
         status.deferredTraderPayoutUsdc = deferredPayoutUsdc;
         status.traderPayoutClaimableNow = deferredPayoutUsdc > 0 && anyLiquidity;
-        status.deferredClearerBountyUsdc = deferredClearerBountyUsdc;
-        status.liquidationBountyClaimableNow = deferredClearerBountyUsdc > 0 && anyLiquidity;
+        status.deferredKeeperCreditUsdc = deferredKeeperCreditUsdc;
+        status.keeperCreditClaimableNow = deferredKeeperCreditUsdc > 0 && anyLiquidity;
     }
 
 }

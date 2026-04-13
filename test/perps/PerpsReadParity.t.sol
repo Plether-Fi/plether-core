@@ -181,8 +181,8 @@ contract PerpsReadParityTest is BasePerpTest {
             "Protocol lens deferred trader payout should match engine state"
         );
         assertEq(
-            protocolSnapshot.totalDeferredClearerBountyUsdc,
-            engine.totalDeferredClearerBountyUsdc(),
+            protocolSnapshot.totalDeferredKeeperCreditUsdc,
+            engine.totalDeferredKeeperCreditUsdc(),
             "Protocol lens deferred clearer bounty should match engine state"
         );
         assertEq(

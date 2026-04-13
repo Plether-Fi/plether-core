@@ -604,15 +604,15 @@ contract PerpInvariantTest is BasePerpTest {
             "Protocol view trader deferred payouts must match storage"
         );
         assertEq(
-            protocolView.totalDeferredClearerBountyUsdc,
-            engine.totalDeferredClearerBountyUsdc(),
-            "Protocol view deferred liquidation bounties must match storage"
+            protocolView.totalDeferredKeeperCreditUsdc,
+            engine.totalDeferredKeeperCreditUsdc(),
+            "Protocol view deferred keeper credit must match storage"
         );
     }
 
     function invariant_WithdrawalReserveIncludesDeferredLiabilities() public view {
         uint256 expectedReserved = _maxLiability() + engine.accumulatedFeesUsdc() + engine.totalDeferredPayoutUsdc()
-            + engine.totalDeferredClearerBountyUsdc();
+            + engine.totalDeferredKeeperCreditUsdc();
 
         expectedReserved += uint256(0);
 
@@ -677,7 +677,7 @@ contract AdversarialPerpHandler is Test {
     uint256 public ghost_batchAttempts;
     uint256 public ghost_batchAdvances;
     uint256 public ghost_starvationEvents;
-    uint256 public ghost_expectedDeferredClearerBounty;
+    uint256 public ghost_expectedDeferredKeeperCredit;
     uint256 public ghost_failSoftLiquidations;
     uint256 public ghost_lastRetryableSlippageBatch;
     uint64 public ghost_lastRetryableSlippageOrderId;
@@ -942,14 +942,14 @@ contract AdversarialPerpHandler is Test {
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(oraclePrice);
 
-        uint256 beforeDeferred = engine.deferredClearerBountyUsdc(address(this));
+        uint256 beforeDeferred = engine.deferredKeeperCreditUsdc(address(this));
         vm.mockCallRevert(address(pool), abi.encodeWithSelector(pool.payOut.selector), bytes("vault illiquid"));
         vm.roll(block.number + 1);
 
         try router.executeLiquidation(accountId, priceData) {
-            uint256 afterDeferred = engine.deferredClearerBountyUsdc(address(this));
+            uint256 afterDeferred = engine.deferredKeeperCreditUsdc(address(this));
             if (afterDeferred == beforeDeferred + preview.keeperBountyUsdc) {
-                ghost_expectedDeferredClearerBounty += preview.keeperBountyUsdc;
+                ghost_expectedDeferredKeeperCredit += preview.keeperBountyUsdc;
                 ghost_failSoftLiquidations++;
             }
         } catch {}
@@ -1114,17 +1114,17 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
 
     function invariant_AdversarialLiquidationPayoutFailureOnlyDefersBounty() public view {
         assertEq(
-            engine.deferredClearerBountyUsdc(address(handler)),
-            handler.ghost_expectedDeferredClearerBounty(),
+            engine.deferredKeeperCreditUsdc(address(handler)),
+            handler.ghost_expectedDeferredKeeperCredit(),
             "Liquidation payout failures must only create deferred bounty claims"
         );
     }
 
-    function invariant_DeferredClearerBountyTotalsConserveClaims() public view {
+    function invariant_DeferredKeeperCreditTotalsConserveClaims() public view {
         assertEq(
-            engine.totalDeferredClearerBountyUsdc(),
-            engine.deferredClearerBountyUsdc(address(handler)),
-            "Deferred clearer bounty total must equal tracked keeper claims in invariant harness"
+            engine.totalDeferredKeeperCreditUsdc(),
+            engine.deferredKeeperCreditUsdc(address(handler)),
+            "Deferred keeper credit total must equal tracked keeper claims in invariant harness"
         );
     }
 

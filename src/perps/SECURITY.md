@@ -89,7 +89,7 @@ These are the highest-value properties an auditor should expect to hold.
 | Degraded containment | If a close or liquidation reveals post-op insolvency, `degradedMode` latches and blocks further risk expansion while still permitting protective transitions |
 | Bounded payout | No trader payout can exceed the capped market payoff implied by `CAP_PRICE` |
 | Withdrawal firewall | LP withdrawals are limited to conservative free cash after accounting for bounded liability, deferred liabilities, and protocol-owned balances |
-| Deferred liabilities are senior | Deferred trader payouts and deferred clearer balances remain senior claims on vault liquidity until serviced |
+| Deferred liabilities are senior | Deferred trader payouts and deferred keeper credit remain senior claims on vault liquidity until serviced |
 
 ### Position and engine accounting
 
@@ -254,7 +254,7 @@ Security implication: oracle freshness still gates execution and LP accounting f
 Terminal transitions are fail-soft when the vault lacks immediate cash.
 
 - profitable closes can create deferred trader payouts,
-- liquidation bounties can create deferred clearer balances,
+- liquidation bounties can create deferred keeper credit,
 - both are beneficiary-balance based rather than FIFO queue based,
 - both remain part of reserve and solvency accounting until paid.
 

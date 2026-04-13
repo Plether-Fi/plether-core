@@ -40,8 +40,8 @@ contract HousePoolSnapshotParityTest is BasePerpTest {
             "HousePool input deferred trader payout should match protocol snapshot"
         );
         assertEq(
-            inputSnapshot.deferredClearerBountyUsdc,
-            protocolSnapshot.totalDeferredClearerBountyUsdc,
+            inputSnapshot.deferredKeeperCreditUsdc,
+            protocolSnapshot.totalDeferredKeeperCreditUsdc,
             "HousePool input deferred clearer bounty should match protocol snapshot"
         );
     }

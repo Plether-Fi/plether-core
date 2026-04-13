@@ -312,9 +312,8 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, liquidationPrice);
         vm.assume(preview.liquidatable);
 
-        uint256 traderWalletBefore = usdc.balanceOf(trader);
-        uint256 keeperWalletBefore = usdc.balanceOf(KEEPER);
-        uint256 deferredClearerBefore = engine.deferredClearerBountyUsdc(KEEPER);
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(bytes32(uint256(uint160(KEEPER))));
+        uint256 deferredKeeperCreditBefore = engine.deferredKeeperCreditUsdc(KEEPER);
         uint256 deferredBefore = engine.deferredPayoutUsdc(accountId);
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
         IMarginClearinghouse.AccountUsdcBuckets memory bucketsBefore = clearinghouse.getAccountUsdcBuckets(accountId);
@@ -329,21 +328,16 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         assertEq(sizeAfter, 0, "Liquidation should fully clear the position");
         assertEq(
             bucketsAfter.settlementBalanceUsdc,
-            bucketsBefore.settlementBalanceUsdc - preview.seizedCollateralUsdc,
+            bucketsBefore.settlementBalanceUsdc - preview.seizedCollateralUsdc + preview.immediatePayoutUsdc,
             "Liquidation preview should match the live settlement-balance mutation"
         );
         assertEq(bucketsAfter.activePositionMarginUsdc, 0, "Liquidation should clear the live position-margin bucket");
         assertEq(bucketsAfter.totalLockedMarginUsdc, 0, "Liquidation should clear all locked margin in the simple path");
         assertEq(
-            (usdc.balanceOf(KEEPER) - keeperWalletBefore)
-                + (engine.deferredClearerBountyUsdc(KEEPER) - deferredClearerBefore),
+            (clearinghouse.balanceUsdc(bytes32(uint256(uint160(KEEPER)))) - keeperSettlementBefore)
+                + (engine.deferredKeeperCreditUsdc(KEEPER) - deferredKeeperCreditBefore),
             preview.keeperBountyUsdc,
             "Liquidation preview keeper bounty should match live execution or deferred bounty"
-        );
-        assertEq(
-            usdc.balanceOf(trader) - traderWalletBefore,
-            preview.immediatePayoutUsdc,
-            "Liquidation preview immediate payout should match live wallet delta"
         );
         assertEq(
             engine.deferredPayoutUsdc(accountId) - deferredBefore,
@@ -393,9 +387,8 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, liquidationPrice);
         vm.assume(preview.liquidatable);
 
-        uint256 traderWalletBefore = usdc.balanceOf(trader);
-        uint256 keeperWalletBefore = usdc.balanceOf(KEEPER);
-        uint256 deferredClearerBefore = engine.deferredClearerBountyUsdc(KEEPER);
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(bytes32(uint256(uint160(KEEPER))));
+        uint256 deferredKeeperCreditBefore = engine.deferredKeeperCreditUsdc(KEEPER);
         uint256 deferredBefore = engine.deferredPayoutUsdc(accountId);
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
         IMarginClearinghouse.AccountUsdcBuckets memory bucketsBefore = clearinghouse.getAccountUsdcBuckets(accountId);
@@ -410,21 +403,16 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         assertEq(sizeAfter, 0, "Illiquid liquidation should fully clear the position");
         assertEq(
             bucketsAfter.settlementBalanceUsdc,
-            bucketsBefore.settlementBalanceUsdc - preview.seizedCollateralUsdc,
+            bucketsBefore.settlementBalanceUsdc - preview.seizedCollateralUsdc + preview.immediatePayoutUsdc,
             "Illiquid liquidation preview should match the live settlement-balance mutation"
         );
         assertEq(bucketsAfter.activePositionMarginUsdc, 0, "Illiquid liquidation should clear the live position margin");
         assertEq(bucketsAfter.totalLockedMarginUsdc, 0, "Illiquid liquidation should clear all locked margin in the simple path");
         assertEq(
-            (usdc.balanceOf(KEEPER) - keeperWalletBefore)
-                + (engine.deferredClearerBountyUsdc(KEEPER) - deferredClearerBefore),
+            (clearinghouse.balanceUsdc(bytes32(uint256(uint160(KEEPER)))) - keeperSettlementBefore)
+                + (engine.deferredKeeperCreditUsdc(KEEPER) - deferredKeeperCreditBefore),
             preview.keeperBountyUsdc,
             "Illiquid liquidation preview keeper bounty should match live execution or deferred bounty"
-        );
-        assertEq(
-            usdc.balanceOf(trader) - traderWalletBefore,
-            preview.immediatePayoutUsdc,
-            "Illiquid liquidation preview immediate payout should match live wallet delta"
         );
         assertEq(
             engine.deferredPayoutUsdc(accountId) - deferredBefore,
@@ -472,8 +460,8 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, liquidationPrice);
         AccountLensViewTypes.AccountLedgerSnapshot memory snapshotBefore =
             engineAccountLens.getAccountLedgerSnapshot(accountId);
-        uint256 keeperWalletBefore = usdc.balanceOf(KEEPER);
-        uint256 deferredClearerBefore = engine.deferredClearerBountyUsdc(KEEPER);
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(bytes32(uint256(uint160(KEEPER))));
+        uint256 deferredKeeperCreditBefore = engine.deferredKeeperCreditUsdc(KEEPER);
         uint256 deferredBefore = engine.deferredPayoutUsdc(accountId);
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
         bytes[] memory priceData = new bytes[](1);
@@ -488,8 +476,8 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             "Liquidation preview must exclude router execution escrow from reachable collateral"
         );
         assertEq(
-            (usdc.balanceOf(KEEPER) - keeperWalletBefore)
-                + (engine.deferredClearerBountyUsdc(KEEPER) - deferredClearerBefore),
+            (clearinghouse.balanceUsdc(bytes32(uint256(uint160(KEEPER)))) - keeperSettlementBefore)
+                + (engine.deferredKeeperCreditUsdc(KEEPER) - deferredKeeperCreditBefore),
             preview.keeperBountyUsdc,
             "Queued-escrow liquidation preview keeper bounty should match live outcome"
         );

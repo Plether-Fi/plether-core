@@ -44,16 +44,16 @@ abstract contract BasePerpTest is Test {
         ProtocolLensViewTypes.ProtocolAccountingSnapshot protocol;
         uint256 settlementUsdc;
         uint256 deferredPayoutUsdc;
-        uint256 keeperWalletUsdc;
-        uint256 deferredClearerBountyUsdc;
+        uint256 keeperSettlementUsdc;
+        uint256 deferredKeeperCreditUsdc;
     }
 
     struct LiquidationParityObserved {
         uint256 immediatePayoutUsdc;
         uint256 deferredPayoutUsdc;
         uint256 badDebtUsdc;
-        uint256 keeperWalletUsdc;
-        uint256 deferredClearerBountyUsdc;
+        uint256 keeperSettlementUsdc;
+        uint256 deferredKeeperCreditUsdc;
         uint256 remainingSize;
         bool degradedMode;
         uint256 effectiveAssetsAfterUsdc;
@@ -434,8 +434,8 @@ abstract contract BasePerpTest is Test {
         snapshot.protocol = engineProtocolLens.getProtocolAccountingSnapshot();
         snapshot.settlementUsdc = clearinghouse.balanceUsdc(accountId);
         snapshot.deferredPayoutUsdc = engine.deferredPayoutUsdc(accountId);
-        snapshot.keeperWalletUsdc = usdc.balanceOf(keeper);
-        snapshot.deferredClearerBountyUsdc = engine.deferredClearerBountyUsdc(keeper);
+        snapshot.keeperSettlementUsdc = clearinghouse.balanceUsdc(bytes32(uint256(uint160(keeper))));
+        snapshot.deferredKeeperCreditUsdc = engine.deferredKeeperCreditUsdc(keeper);
     }
 
     function _observeLiquidationParity(
@@ -451,13 +451,13 @@ abstract contract BasePerpTest is Test {
             settlementAfter > beforeSnapshot.settlementUsdc ? settlementAfter - beforeSnapshot.settlementUsdc : 0;
         observed.deferredPayoutUsdc = engine.deferredPayoutUsdc(accountId);
         observed.badDebtUsdc = afterSnapshot.accumulatedBadDebtUsdc - beforeSnapshot.protocol.accumulatedBadDebtUsdc;
-        uint256 keeperWalletAfter = usdc.balanceOf(keeper);
-        observed.keeperWalletUsdc = keeperWalletAfter > beforeSnapshot.keeperWalletUsdc
-            ? keeperWalletAfter - beforeSnapshot.keeperWalletUsdc
+        uint256 keeperSettlementAfter = clearinghouse.balanceUsdc(bytes32(uint256(uint160(keeper))));
+        observed.keeperSettlementUsdc = keeperSettlementAfter > beforeSnapshot.keeperSettlementUsdc
+            ? keeperSettlementAfter - beforeSnapshot.keeperSettlementUsdc
             : 0;
-        uint256 deferredClearerAfter = engine.deferredClearerBountyUsdc(keeper);
-        observed.deferredClearerBountyUsdc = deferredClearerAfter > beforeSnapshot.deferredClearerBountyUsdc
-            ? deferredClearerAfter - beforeSnapshot.deferredClearerBountyUsdc
+        uint256 deferredKeeperCreditAfter = engine.deferredKeeperCreditUsdc(keeper);
+        observed.deferredKeeperCreditUsdc = deferredKeeperCreditAfter > beforeSnapshot.deferredKeeperCreditUsdc
+            ? deferredKeeperCreditAfter - beforeSnapshot.deferredKeeperCreditUsdc
             : 0;
         observed.degradedMode = engine.degradedMode();
         observed.effectiveAssetsAfterUsdc = afterSnapshot.effectiveSolvencyAssetsUsdc;
@@ -481,7 +481,7 @@ abstract contract BasePerpTest is Test {
         );
         assertEq(observed.badDebtUsdc, preview.badDebtUsdc, "Bad debt should match liquidation preview");
         assertEq(
-            observed.keeperWalletUsdc + observed.deferredClearerBountyUsdc,
+            observed.keeperSettlementUsdc + observed.deferredKeeperCreditUsdc,
             preview.keeperBountyUsdc,
             "Keeper bounty settlement should match liquidation preview"
         );
@@ -756,18 +756,18 @@ abstract contract BasePerpTest is Test {
         return publicLens.getProtocolStatus();
     }
 
-    function _deferredPayoutStatus(
+    function _deferredCreditStatus(
         bytes32 accountId,
         address keeper
-    ) internal view returns (DeferredEngineViewTypes.DeferredPayoutStatus memory status) {
+    ) internal view returns (DeferredEngineViewTypes.DeferredCreditStatus memory status) {
         uint256 deferredPayoutUsdc = engine.deferredPayoutUsdc(accountId);
-        uint256 deferredClearerBountyUsdc = engine.deferredClearerBountyUsdc(keeper);
+        uint256 deferredKeeperCreditUsdc = engine.deferredKeeperCreditUsdc(keeper);
         bool anyLiquidity = pool.totalAssets() > 0;
 
         status.deferredTraderPayoutUsdc = deferredPayoutUsdc;
         status.traderPayoutClaimableNow = deferredPayoutUsdc > 0 && anyLiquidity;
-        status.deferredClearerBountyUsdc = deferredClearerBountyUsdc;
-        status.liquidationBountyClaimableNow = deferredClearerBountyUsdc > 0 && anyLiquidity;
+        status.deferredKeeperCreditUsdc = deferredKeeperCreditUsdc;
+        status.keeperCreditClaimableNow = deferredKeeperCreditUsdc > 0 && anyLiquidity;
     }
 
     function _vaultMtmAdjustment() internal view returns (uint256) {

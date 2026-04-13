@@ -69,9 +69,9 @@ interface ICfdEngine {
         uint64 publishTime
     ) external;
 
-    /// @notice Records a deferred clearer bounty when immediate vault payment is unavailable.
-    /// @dev Deferred keeper bounties are later claimed as clearinghouse credit, not direct wallet transfer.
-    function recordDeferredClearerBounty(
+    /// @notice Records deferred keeper credit when immediate clearinghouse settlement is unavailable.
+    /// @dev Deferred keeper value is always later claimed as clearinghouse credit.
+    function recordDeferredKeeperCredit(
         address keeper,
         uint256 amountUsdc
     ) external;
@@ -142,8 +142,8 @@ interface ICfdEngine {
     /// @notice Deferred trader payouts still owed to beneficiaries.
     function totalDeferredPayoutUsdc() external view returns (uint256);
 
-    /// @notice Deferred liquidation bounties still owed after failed immediate payout.
-    function totalDeferredClearerBountyUsdc() external view returns (uint256);
+    /// @notice Deferred keeper credit still owed after failed immediate settlement.
+    function totalDeferredKeeperCreditUsdc() external view returns (uint256);
 
     /// @notice Timestamp of the last mark price update
     function lastMarkTime() external view returns (uint64);

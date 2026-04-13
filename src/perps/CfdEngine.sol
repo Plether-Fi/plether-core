@@ -75,7 +75,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 freeUsdc;
         uint256 accumulatedFeesUsdc;
         uint256 totalDeferredPayoutUsdc;
-        uint256 totalDeferredClearerBountyUsdc;
+        uint256 totalDeferredKeeperCreditUsdc;
         bool degradedMode;
         bool hasLiveLiability;
     }
@@ -125,11 +125,11 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 maxLiabilityAfterUsdc;
     }
 
-    struct DeferredPayoutStatus {
+    struct DeferredCreditStatus {
         uint256 deferredTraderPayoutUsdc;
         bool traderPayoutClaimableNow;
-        uint256 deferredClearerBountyUsdc;
-        bool liquidationBountyClaimableNow;
+        uint256 deferredKeeperCreditUsdc;
+        bool keeperCreditClaimableNow;
     }
 
     struct SideState {
@@ -181,8 +181,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     mapping(bytes32 => StoredPosition) internal _positions;
     mapping(bytes32 => uint256) public deferredPayoutUsdc;
     uint256 public totalDeferredPayoutUsdc;
-    mapping(address => uint256) public deferredClearerBountyUsdc;
-    uint256 public totalDeferredClearerBountyUsdc;
+    mapping(address => uint256) public deferredKeeperCreditUsdc;
+    uint256 public totalDeferredKeeperCreditUsdc;
     address public orderRouter;
 
     mapping(uint256 => bool) public fadDayOverrides;
@@ -216,7 +216,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     error CfdEngine__NoFeesToWithdraw();
     error CfdEngine__NoDeferredPayout();
     error CfdEngine__InsufficientVaultLiquidity();
-    error CfdEngine__NoDeferredClearerBounty();
+    error CfdEngine__NoDeferredKeeperCredit();
     error CfdEngine__MustCloseOpposingPosition();
     error CfdEngine__FundingExceedsMargin();
     error CfdEngine__VaultSolvencyExceeded();
@@ -280,8 +280,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     event DegradedModeCleared();
     event DeferredPayoutRecorded(bytes32 indexed accountId, uint256 amountUsdc);
     event DeferredPayoutClaimed(bytes32 indexed accountId, uint256 amountUsdc);
-    event DeferredClearerBountyRecorded(address indexed keeper, uint256 amountUsdc);
-    event DeferredClearerBountyClaimed(address indexed keeper, uint256 amountUsdc);
+    event DeferredKeeperCreditRecorded(address indexed keeper, uint256 amountUsdc);
+    event DeferredKeeperCreditClaimed(address indexed keeper, uint256 amountUsdc);
     event RiskParamsProposalCancelled();
     event AddFadDaysProposalCancelled();
     event RemoveFadDaysProposalCancelled();
@@ -367,6 +367,21 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         _realizeCarryFromSettlement(accountId, pos, price, _genericReachableCollateralUsdc(accountId));
     }
 
+    function _checkpointDeferredClaimCarryIfPossible(
+        bytes32 accountId,
+        StoredPosition storage pos
+    ) internal {
+        if (pos.size == 0) {
+            return;
+        }
+
+        (bool priceFresh, uint256 price) = _tryGetFreshLiveMarkPrice();
+        if (!priceFresh) {
+            return;
+        }
+        _realizeCarryFromSettlement(accountId, pos, price, _genericReachableCollateralUsdc(accountId));
+    }
+
     function _claimDeferredBalance(
         uint256 amount,
         bytes32 accountId
@@ -378,6 +393,24 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
 
         vault.payOut(address(clearinghouse), claimAmountUsdc);
         clearinghouse.settleUsdc(accountId, int256(claimAmountUsdc));
+    }
+
+    function _increaseDeferredLiability(
+        uint256 currentAmountUsdc,
+        uint256 currentTotalUsdc,
+        uint256 amountUsdc
+    ) internal pure returns (uint256 updatedAmountUsdc, uint256 updatedTotalUsdc) {
+        updatedAmountUsdc = currentAmountUsdc + amountUsdc;
+        updatedTotalUsdc = currentTotalUsdc + amountUsdc;
+    }
+
+    function _decreaseDeferredLiability(
+        uint256 currentAmountUsdc,
+        uint256 currentTotalUsdc,
+        uint256 amountUsdc
+    ) internal pure returns (uint256 updatedAmountUsdc, uint256 updatedTotalUsdc) {
+        updatedAmountUsdc = currentAmountUsdc - amountUsdc;
+        updatedTotalUsdc = currentTotalUsdc - amountUsdc;
     }
 
     modifier onlyRouter() {
@@ -773,36 +806,38 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         emit DeferredPayoutClaimed(accountId, claimAmountUsdc);
     }
 
-    /// @notice Claims a previously deferred clearer bounty when the vault has replenished cash.
-    /// @dev Deferred keeper bounties settle to clearinghouse credit for the recorded keeper address-derived account,
-    ///      rather than attempting a direct USDC wallet transfer.
-    function claimDeferredClearerBounty() external nonReentrant {
+    /// @notice Claims previously deferred keeper credit when the vault has replenished cash.
+    /// @dev Deferred keeper value always settles to clearinghouse credit for the recorded keeper address-derived account.
+    function claimDeferredKeeperCredit() external nonReentrant {
         address beneficiary = msg.sender;
         bytes32 accountId = bytes32(uint256(uint160(beneficiary)));
+        StoredPosition storage pos = _positions[accountId];
+        _checkpointDeferredClaimCarryIfPossible(accountId, pos);
 
-        uint256 amount = deferredClearerBountyUsdc[beneficiary];
+        uint256 amount = deferredKeeperCreditUsdc[beneficiary];
         if (amount == 0) {
-            revert CfdEngine__NoDeferredClearerBounty();
+            revert CfdEngine__NoDeferredKeeperCredit();
         }
 
         uint256 claimAmountUsdc = _claimDeferredBalance(amount, accountId);
 
-        deferredClearerBountyUsdc[beneficiary] -= claimAmountUsdc;
-        totalDeferredClearerBountyUsdc -= claimAmountUsdc;
+        (deferredKeeperCreditUsdc[beneficiary], totalDeferredKeeperCreditUsdc) = _decreaseDeferredLiability(
+            deferredKeeperCreditUsdc[beneficiary], totalDeferredKeeperCreditUsdc, claimAmountUsdc
+        );
 
-        emit DeferredClearerBountyClaimed(beneficiary, claimAmountUsdc);
+        emit DeferredKeeperCreditClaimed(beneficiary, claimAmountUsdc);
     }
 
-    /// @notice Records a liquidation bounty that could not be paid immediately because vault cash was unavailable.
-    function recordDeferredClearerBounty(
+    /// @notice Records keeper credit that could not be serviced immediately because vault cash was unavailable.
+    function recordDeferredKeeperCredit(
         address keeper,
         uint256 amountUsdc
     ) external onlyRouter {
         if (amountUsdc == 0) {
             return;
         }
-        _enqueueOrAccrueDeferredClearerBounty(keeper, amountUsdc);
-        emit DeferredClearerBountyRecorded(keeper, amountUsdc);
+        _enqueueOrAccrueDeferredKeeperCredit(keeper, amountUsdc);
+        emit DeferredKeeperCreditRecorded(keeper, amountUsdc);
     }
 
     function reserveCloseOrderExecutionBounty(
@@ -1038,16 +1073,16 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         bytes32 accountId,
         uint256 amountUsdc
     ) internal {
-        deferredPayoutUsdc[accountId] += amountUsdc;
-        totalDeferredPayoutUsdc += amountUsdc;
+        (deferredPayoutUsdc[accountId], totalDeferredPayoutUsdc) =
+            _increaseDeferredLiability(deferredPayoutUsdc[accountId], totalDeferredPayoutUsdc, amountUsdc);
     }
 
-    function _enqueueOrAccrueDeferredClearerBounty(
+    function _enqueueOrAccrueDeferredKeeperCredit(
         address keeper,
         uint256 amountUsdc
     ) internal {
-        deferredClearerBountyUsdc[keeper] += amountUsdc;
-        totalDeferredClearerBountyUsdc += amountUsdc;
+        (deferredKeeperCreditUsdc[keeper], totalDeferredKeeperCreditUsdc) =
+            _increaseDeferredLiability(deferredKeeperCreditUsdc[keeper], totalDeferredKeeperCreditUsdc, amountUsdc);
     }
 
     function _accountVaultCashInflow(
@@ -1087,7 +1122,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
 
     function _freshVaultReservation() internal view returns (CashPriorityLib.SeniorCashReservation memory reservation) {
         return CashPriorityLib.reserveFreshPayouts(
-            vault.totalAssets(), accumulatedFeesUsdc, totalDeferredPayoutUsdc, totalDeferredClearerBountyUsdc
+            vault.totalAssets(), accumulatedFeesUsdc, totalDeferredPayoutUsdc, totalDeferredKeeperCreditUsdc
         );
     }
 
@@ -1192,7 +1227,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             accumulatedFeesUsdc,
             _maxLiability(),
             totalDeferredPayoutUsdc,
-            totalDeferredClearerBountyUsdc
+            totalDeferredKeeperCreditUsdc
         );
     }
 
@@ -1241,7 +1276,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         snap.accumulatedBadDebtUsdc = accumulatedBadDebtUsdc;
         snap.unsettledCarryUsdc = unsettledCarryUsdc[accountId];
         snap.totalDeferredPayoutUsdc = totalDeferredPayoutUsdc;
-        snap.totalDeferredClearerBountyUsdc = totalDeferredClearerBountyUsdc;
+        snap.totalDeferredKeeperCreditUsdc = totalDeferredKeeperCreditUsdc;
         snap.deferredPayoutForAccount = deferredPayoutUsdc[accountId];
         snap.degradedMode = degradedMode;
 

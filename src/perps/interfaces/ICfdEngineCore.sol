@@ -45,7 +45,7 @@ interface ICfdEngineCore {
         uint64 publishTime
     ) external;
 
-    function recordDeferredClearerBounty(
+    function recordDeferredKeeperCredit(
         address keeper,
         uint256 amountUsdc
     ) external;
@@ -75,7 +75,7 @@ interface ICfdEngineCore {
 
     function totalDeferredPayoutUsdc() external view returns (uint256);
 
-    function totalDeferredClearerBountyUsdc() external view returns (uint256);
+    function totalDeferredKeeperCreditUsdc() external view returns (uint256);
 
     function liquidatePosition(
         bytes32 accountId,

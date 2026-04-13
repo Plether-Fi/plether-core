@@ -31,7 +31,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         selectors[3] = handler.commitCloseOrder.selector;
         selectors[4] = handler.executeNextOrderModelled.selector;
         selectors[5] = handler.liquidate.selector;
-        selectors[6] = handler.claimDeferredClearerBounty.selector;
+        selectors[6] = handler.claimDeferredKeeperCredit.selector;
         selectors[7] = handler.createDeferredTraderPayout.selector;
         selectors[8] = handler.claimDeferredPayout.selector;
         selectors[9] = handler.fundVault.selector;
@@ -65,7 +65,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
 
     function invariant_WithdrawalReserveIncludesKnownDeferredLiabilities() public view {
         uint256 expectedReserved = _maxLiability() + engine.accumulatedFeesUsdc() + engine.totalDeferredPayoutUsdc()
-            + engine.totalDeferredClearerBountyUsdc();
+            + engine.totalDeferredKeeperCreditUsdc();
 
         expectedReserved += uint256(0);
 
@@ -477,8 +477,8 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
             "House-pool snapshot deferred trader payout mismatch"
         );
         assertEq(
-            snapshot.deferredClearerBountyUsdc,
-            engine.totalDeferredClearerBountyUsdc(),
+            snapshot.deferredKeeperCreditUsdc,
+            engine.totalDeferredKeeperCreditUsdc(),
             "House-pool snapshot deferred clearer bounty mismatch"
         );
         assertEq(snapshot.maxLiabilityUsdc, _maxLiability(), "House-pool snapshot max liability mismatch");
@@ -514,8 +514,8 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
             "Protocol snapshot deferred trader payout mismatch"
         );
         assertEq(
-            protocolSnapshot.totalDeferredClearerBountyUsdc,
-            snapshot.deferredClearerBountyUsdc,
+            protocolSnapshot.totalDeferredKeeperCreditUsdc,
+            snapshot.deferredKeeperCreditUsdc,
             "Protocol snapshot deferred clearer bounty mismatch"
         );
     }
