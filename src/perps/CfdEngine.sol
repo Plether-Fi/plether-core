@@ -751,8 +751,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     function claimDeferredClearerBounty() external nonReentrant {
         address beneficiary = msg.sender;
         bytes32 accountId = bytes32(uint256(uint160(beneficiary)));
-        StoredPosition storage pos = _positions[accountId];
-        _prepareDeferredClaim(accountId, pos);
 
         uint256 amount = deferredClearerBountyUsdc[beneficiary];
         if (amount == 0) {
@@ -796,6 +794,10 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
 
         uint256 price = lastMarkPrice;
         if (price == 0) {
+            revert CfdEngine__InsufficientCloseOrderBountyBacking();
+        }
+        uint256 stalenessLimit = engineMarkStalenessLimit * 2;
+        if (lastMarkTime == 0 || block.timestamp > lastMarkTime + stalenessLimit) {
             revert CfdEngine__InsufficientCloseOrderBountyBacking();
         }
 

@@ -442,12 +442,17 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         }
         (, CfdTypes.Order memory order) = _pendingOrder(orderId);
 
-        (uint256 executionPrice, uint64 oraclePublishTime, uint256 pythFee) =
-            _resolveOraclePrice(pythUpdateData, order.targetPrice);
-
         RouterExecutionContext memory executionContext;
+        uint256 maxStaleness;
         if (address(pyth) != address(0)) {
             executionContext = _currentRouterExecutionContext();
+            maxStaleness = executionContext.policy.maxStaleness;
+        }
+
+        (uint256 executionPrice, uint64 oraclePublishTime, uint256 pythFee) =
+            _resolveOraclePrice(pythUpdateData, order.targetPrice, maxStaleness, orderExecutionStalenessLimit);
+
+        if (address(pyth) != address(0)) {
             if (OrderOraclePolicyLib.isStale(oraclePublishTime, executionContext.policy.maxStaleness, block.timestamp))
             {
                 revert OrderRouter__OraclePriceTooStale();
@@ -485,11 +490,17 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
             revert OrderRouter__MaxOrderIdNotCommitted();
         }
 
-        (uint256 executionPrice, uint64 oraclePublishTime, uint256 pythFee) = _resolveOraclePrice(pythUpdateData, 1e8);
-
         RouterExecutionContext memory executionContext;
+        uint256 maxStaleness;
         if (address(pyth) != address(0)) {
             executionContext = _currentRouterExecutionContext();
+            maxStaleness = executionContext.policy.maxStaleness;
+        }
+
+        (uint256 executionPrice, uint64 oraclePublishTime, uint256 pythFee) =
+            _resolveOraclePrice(pythUpdateData, 1e8, maxStaleness, liquidationStalenessLimit);
+
+        if (address(pyth) != address(0)) {
             if (OrderOraclePolicyLib.isStale(oraclePublishTime, executionContext.policy.maxStaleness, block.timestamp))
             {
                 revert OrderRouter__OraclePriceTooStale();
@@ -502,6 +513,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
 
         uint256 capPrice = engine.CAP_PRICE();
         uint256 clampedPrice = executionPrice > capPrice ? capPrice : executionPrice;
+        uint256 expiredPrunes;
 
         while (nextExecuteId != 0 && nextExecuteId <= maxOrderId) {
             uint64 orderId = nextExecuteId;
@@ -510,6 +522,16 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
 
             if (record.status != IOrderRouterAccounting.OrderStatus.Pending) {
                 nextExecuteId = record.nextGlobalOrderId;
+                continue;
+            }
+
+            if (maxOrderAge > 0 && block.timestamp - order.commitTime > maxOrderAge) {
+                if (expiredPrunes >= MAX_PRUNE_ORDERS_PER_CALL) {
+                    break;
+                }
+                emit OrderFailed(orderId, OrderFailReason.Expired);
+                _cleanupOrder(orderId, _failedOutcomeForTerminalFailure(order));
+                expiredPrunes++;
                 continue;
             }
 
@@ -530,7 +552,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     function _skipStaleOrders(
         uint64 upToId
     ) internal returns (uint256 skipped) {
-        skipped = _pruneExpiredHeadOrders(upToId, type(uint256).max);
+        skipped = _pruneExpiredHeadOrders(upToId, MAX_PRUNE_ORDERS_PER_CALL);
     }
 
     function _currentRouterExecutionContext() internal view returns (RouterExecutionContext memory context) {
@@ -709,7 +731,9 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
 
     function _resolveOraclePrice(
         bytes[] calldata pythUpdateData,
-        uint256 mockFallbackPrice
+        uint256 mockFallbackPrice,
+        uint256 maxStaleness,
+        uint256 maxPublishTimeDivergence
     ) internal returns (uint256 price, uint64 publishTime, uint256 pythFee) {
         if (address(pyth) != address(0)) {
             if (pythUpdateData.length == 0) {
@@ -721,7 +745,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
             }
             pyth.updatePriceFeeds{value: pythFee}(pythUpdateData);
             uint256 minPublishTime;
-            (price, minPublishTime) = _computeBasketPrice();
+            (price, minPublishTime) = _computeBasketPrice(maxStaleness, maxPublishTimeDivergence);
             publishTime = uint64(minPublishTime);
         } else {
             if (block.chainid != 31_337) {
@@ -1127,12 +1151,19 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         USDC.safeTransfer(msg.sender, usdcAmount);
     }
 
-    function _computeBasketPrice() internal view returns (uint256 basketPrice, uint256 minPublishTime) {
+    function _computeBasketPrice(
+        uint256 maxStaleness,
+        uint256 maxPublishTimeDivergence
+    ) internal view returns (uint256 basketPrice, uint256 minPublishTime) {
         minPublishTime = type(uint256).max;
+        uint256 maxPublishTime;
         uint256 len = pythFeedIds.length;
 
         for (uint256 i = 0; i < len; i++) {
             PythStructs.Price memory p = pyth.getPriceUnsafe(pythFeedIds[i]);
+            if (OrderOraclePolicyLib.isStale(uint64(p.publishTime), maxStaleness, block.timestamp)) {
+                revert OrderRouter__OraclePriceTooStale();
+            }
             uint256 norm = inversions[i] ? _invertPythPrice(p.price, p.expo) : _normalizePythPrice(p.price, p.expo);
 
             basketPrice += (norm * quantities[i]) / (basePrices[i] * DecimalConstants.CHAINLINK_TO_TOKEN_SCALE);
@@ -1140,6 +1171,13 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
             if (p.publishTime < minPublishTime) {
                 minPublishTime = p.publishTime;
             }
+            if (p.publishTime > maxPublishTime) {
+                maxPublishTime = p.publishTime;
+            }
+        }
+
+        if (maxPublishTime > minPublishTime + maxPublishTimeDivergence) {
+            revert OrderRouter__OraclePriceTooStale();
         }
 
         if (basketPrice == 0) {
@@ -1223,7 +1261,8 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     function updateMarkPrice(
         bytes[] calldata pythUpdateData
     ) external payable {
-        (uint256 executionPrice, uint64 oraclePublishTime, uint256 pythFee) = _resolveOraclePrice(pythUpdateData, 1e8);
+        (uint256 executionPrice, uint64 oraclePublishTime, uint256 pythFee) =
+            _resolveOraclePrice(pythUpdateData, 1e8, orderExecutionStalenessLimit, orderExecutionStalenessLimit);
 
         if (address(pyth) != address(0)) {
             OrderOraclePolicyLib.OracleExecutionPolicy memory policy = OrderOraclePolicyLib.getOracleExecutionPolicy(
@@ -1257,7 +1296,8 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         bytes32 accountId,
         bytes[] calldata pythUpdateData
     ) external payable {
-        (uint256 executionPrice, uint64 oraclePublishTime, uint256 pythFee) = _resolveOraclePrice(pythUpdateData, 1e8);
+        (uint256 executionPrice, uint64 oraclePublishTime, uint256 pythFee) =
+            _resolveOraclePrice(pythUpdateData, 1e8, liquidationStalenessLimit, liquidationStalenessLimit);
 
         if (address(pyth) != address(0)) {
             OrderOraclePolicyLib.OracleExecutionPolicy memory policy = OrderOraclePolicyLib.getOracleExecutionPolicy(

@@ -2211,7 +2211,7 @@ contract OrderRouterPythTest is BasePerpTest {
         mockPyth.setPrice(FEED_A, int64(120_000_000), int32(-8), 1001);
         mockPyth.setPrice(FEED_B, int64(80_000_000), int32(-8), 1001);
 
-        (uint256 price, uint256 minPt) = harness.computeBasketPrice();
+        (uint256 price, uint256 minPt) = harness.computeBasketPrice(60, 60);
         assertEq(price, 108_000_000, "70/30 basket should compute $1.08");
         assertEq(minPt, 1001, "minPublishTime should be weakest link");
     }
@@ -2248,6 +2248,17 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
         vm.roll(block.number + 1);
         router.executeOrderBatch(1, empty);
+    }
+
+    function test_BasketPrice_RevertsWhenFeedPublishTimesDivergeTooFar() public {
+        vm.warp(1000);
+
+        mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1000);
+        mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 930);
+
+        BasketPriceHarness harness = new BasketPriceHarness(address(mockPyth), feedIds, weights, bases, new bool[](2));
+        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
+        harness.computeBasketPrice(3 days, 60);
     }
 
     function test_Slippage_ClampedBeforeCheck_BullClose() public {
@@ -2292,8 +2303,8 @@ contract BasketPriceHarness is OrderRouter {
         bool[] memory _inversions
     ) OrderRouter(address(1), address(1), address(1), _pyth, _feedIds, _quantities, _basePrices, _inversions) {}
 
-    function computeBasketPrice() external view returns (uint256, uint256) {
-        return _computeBasketPrice();
+    function computeBasketPrice(uint256 maxStaleness, uint256 maxPublishTimeDivergence) external view returns (uint256, uint256) {
+        return _computeBasketPrice(maxStaleness, maxPublishTimeDivergence);
     }
 
 }
@@ -3376,7 +3387,7 @@ contract InversionTest is Test {
         BasketPriceHarness harness = new BasketPriceHarness(address(mockPyth), ids, w, b, inv);
 
         mockPyth.setPrice(FEED_JPY, int64(156_700), int32(-3), 1001);
-        (uint256 price,) = harness.computeBasketPrice();
+        (uint256 price,) = harness.computeBasketPrice(60, 60);
 
         uint256 expectedNorm = uint256(1e11) / 156_700;
         uint256 expectedBasket = (expectedNorm * 1e18) / (uint256(638_163) * 1e10);
@@ -3418,7 +3429,7 @@ contract InversionTest is Test {
         mockPyth.setPrice(FEED_EUR, int64(108_000_000), int32(-8), 1001);
         mockPyth.setPrice(FEED_JPY, int64(156_700), int32(-3), 1001);
 
-        (uint256 price,) = harness.computeBasketPrice();
+        (uint256 price,) = harness.computeBasketPrice(60, 60);
 
         assertApproxEqAbs(price, 100_000_000, 100, "Mixed basket at base prices should be ~$1.00");
     }
@@ -3469,7 +3480,7 @@ contract InversionTest is Test {
         mockPyth.setPrice(pythIds[2], int64(126_000_000), int32(-8), 1001);
         mockPyth.setPrice(pythIds[3], int64(8800), int32(-4), 1001);
 
-        (uint256 pythPrice,) = harness.computeBasketPrice();
+        (uint256 pythPrice,) = harness.computeBasketPrice(60, 60);
 
         assertApproxEqAbs(
             uint256(chainlinkPrice), pythPrice, 100, "BasketOracle and OrderRouter must agree within rounding"
@@ -3728,7 +3739,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
     }
 
     // Regression: queue liveness hardening
-    function test_BatchExecutionDrainsExpiredOrdersInSinglePass() public {
+    function test_BatchExecution_PrunesExpiredOrdersInBoundedSlices() public {
         _fundJunior(bob, 1_000_000 * 1e6);
 
         uint256 traderCount = 13;
@@ -3753,7 +3764,11 @@ contract StaleOrderExpiryTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrderBatch(66, empty);
 
-        assertEq(router.nextExecuteId(), 0, "Batch should drain all expired orders in a single pass");
+        assertEq(router.nextExecuteId(), 65, "Batch should prune only a bounded number of expired orders per call");
+
+        vm.roll(block.number + 1);
+        router.executeOrderBatch(66, empty);
+        assertEq(router.nextExecuteId(), 0, "Second batch call should finish pruning the remaining expired orders");
     }
 
     // Regression: H-03

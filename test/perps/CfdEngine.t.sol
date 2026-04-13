@@ -4042,7 +4042,7 @@ contract CfdEngineTest is BasePerpTest {
         engine.checkWithdraw(accountId);
     }
 
-    function test_ReserveCloseOrderExecutionBounty_AllowsStaleLastMarkPrice() public {
+    function test_ReserveCloseOrderExecutionBounty_AllowsBoundedlyStaleLastMarkPrice() public {
         pool.proposeMarkStalenessLimit(300);
         vm.warp(block.timestamp + 48 hours + 1);
         pool.finalizeMarkStalenessLimit();
@@ -4061,8 +4061,25 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         engine.reserveCloseOrderExecutionBounty(accountId, 1e6, address(router));
 
-        vm.warp(block.timestamp + 270);
+        vm.warp(block.timestamp + (engine.engineMarkStalenessLimit() * 2) - 31);
         vm.prank(address(router));
+        engine.reserveCloseOrderExecutionBounty(accountId, 1e6, address(router));
+    }
+
+    function test_ReserveCloseOrderExecutionBounty_RevertsWhenStoredMarkTooStale() public {
+        address trader = address(0x51595);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address counterparty = address(0x51596);
+        bytes32 counterpartyId = bytes32(uint256(uint160(counterparty)));
+
+        _fundTrader(trader, 10_000e6);
+        _fundTrader(counterparty, 50_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 1500e6, 1e8);
+        _open(counterpartyId, CfdTypes.Side.BEAR, 10_000e18, 50_000e6, 1e8);
+
+        vm.warp(block.timestamp + (engine.engineMarkStalenessLimit() * 2) + 1);
+        vm.prank(address(router));
+        vm.expectRevert(CfdEngine.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
         engine.reserveCloseOrderExecutionBounty(accountId, 1e6, address(router));
     }
 
@@ -4220,6 +4237,30 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         vm.expectRevert(CfdEngine.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
         engine.reserveCloseOrderExecutionBounty(accountId, 1400e6, address(router));
+    }
+
+    function test_ClaimDeferredClearerBounty_DoesNotRequireFreshMarkForKeeperPosition() public {
+        address keeper = address(0x51597);
+        address counterparty = address(0x51598);
+        bytes32 keeperAccountId = bytes32(uint256(uint160(keeper)));
+        bytes32 counterpartyId = bytes32(uint256(uint160(counterparty)));
+
+        _fundTrader(keeper, 10_000e6);
+        _fundTrader(counterparty, 50_000e6);
+        _open(keeperAccountId, CfdTypes.Side.BULL, 10_000e18, 1_500e6, 1e8);
+        _open(counterpartyId, CfdTypes.Side.BEAR, 10_000e18, 50_000e6, 1e8);
+
+        vm.prank(address(router));
+        engine.recordDeferredClearerBounty(keeper, 100e6);
+
+        vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
+
+        uint256 settlementBefore = clearinghouse.balanceUsdc(keeperAccountId);
+        vm.prank(keeper);
+        engine.claimDeferredClearerBounty();
+
+        assertEq(clearinghouse.balanceUsdc(keeperAccountId), settlementBefore + 100e6);
+        assertEq(engine.deferredClearerBountyUsdc(keeper), 0);
     }
 
     function test_VpiDepthManipulation_NeutralizedByStatefulBound() public {
