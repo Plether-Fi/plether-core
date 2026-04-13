@@ -267,14 +267,12 @@ library CfdEnginePlanLib {
         delta.netMarginChange = int256(order.marginDelta) - openState.tradeCostUsdc;
         delta.vaultRebatePayoutUsdc = openState.tradeCostUsdc < 0 ? uint256(-openState.tradeCostUsdc) : 0;
 
-        (bool marginDrained, uint256 computedMarginAfter) =
-            computeOpenMarginAfter(effectiveSnap.position.margin, delta.netMarginChange);
-        if (marginDrained) {
+        MarginClearinghouseAccountingLib.OpenCostPlan memory openCostPlan =
+            MarginClearinghouseAccountingLib.planOpenCostApplication(
+                effectiveSnap.accountBuckets, delta.marginDeltaUsdc, delta.tradeCostUsdc
+            );
+        if (openCostPlan.insufficientFreeEquity || openCostPlan.insufficientPositionMargin) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES;
-            return delta;
-        }
-        if (delta.netMarginChange < 0 && uint256(-delta.netMarginChange) > effectiveSnap.position.margin) {
-            delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED;
             return delta;
         }
 
@@ -282,7 +280,7 @@ library CfdEnginePlanLib {
         delta.newPosEntryPrice = openState.newEntryPrice;
         delta.posVpiAccruedDelta = openState.vpiUsdc;
         delta.posMaxProfitIncrease = openState.addedMaxProfitUsdc;
-        delta.positionMarginAfterOpen = computedMarginAfter;
+        delta.positionMarginAfterOpen = openCostPlan.resultingPositionMarginUsdc;
 
         delta.sideOiIncrease = order.sizeDelta;
         if (openState.newEntryNotional >= openState.oldEntryNotional) {
@@ -306,7 +304,7 @@ library CfdEnginePlanLib {
         PositionRiskAccountingLib.PositionRiskState memory postOpenRiskState =
             _buildPostOpenRiskState(effectiveSnap, delta);
         if (
-            computedMarginAfter < openState.initialMarginRequirementUsdc || postOpenRiskState.liquidatable
+            delta.positionMarginAfterOpen < openState.initialMarginRequirementUsdc || postOpenRiskState.liquidatable
                 || postOpenRiskState.equityUsdc < int256(openState.initialMarginRequirementUsdc)
         ) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN;

@@ -3551,6 +3551,47 @@ contract CfdEngineTest is BasePerpTest {
         engine.processOrderTyped(order, 1e8, vaultDepth, uint64(block.timestamp));
     }
 
+    function test_PreviewOpen_ClassifiesCarryDrainedReleasedFreeSettlementAsUserInvalid() public {
+        address trader = address(0xCA2211);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 20_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+
+        uint256 sizeDelta = 10_000e18;
+        uint256 marginDelta = _freeSettlementUsdc(accountId);
+        CfdTypes.Order memory order = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: sizeDelta,
+            marginDelta: marginDelta,
+            targetPrice: 1e8,
+            commitTime: uint64(block.timestamp),
+            commitBlock: uint64(block.number),
+            orderId: 1,
+            side: CfdTypes.Side.BULL,
+            isClose: false
+        });
+
+        vm.warp(block.timestamp + 30 days);
+
+        uint8 revertCode = engineLens.previewOpenRevertCode(
+            accountId, CfdTypes.Side.BULL, sizeDelta, marginDelta, 1e8, uint64(block.timestamp)
+        );
+        CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory = engineLens.previewOpenFailurePolicyCategory(
+            accountId, CfdTypes.Side.BULL, sizeDelta, marginDelta, 1e8, uint64(block.timestamp)
+        );
+
+        assertEq(
+            revertCode,
+            uint8(CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES),
+            "Preview should catch carry-drained free settlement before apply"
+        );
+        assertEq(
+            uint256(failureCategory),
+            uint256(CfdEnginePlanTypes.OpenFailurePolicyCategory.ExecutionTimeUserInvalid),
+            "Preview should classify carry-drained opens as execution-time user invalid"
+        );
+    }
+
     function test_OpenOrder_IMRPrecedesSkewWhenBothFail() public {
         uint256 vaultDepth = 1_000_000 * 1e6;
         bytes32 accountId = bytes32(uint256(11));

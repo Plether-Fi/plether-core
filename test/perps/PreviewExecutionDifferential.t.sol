@@ -2,14 +2,77 @@
 pragma solidity 0.8.33;
 
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
+import {CfdEnginePlanTypes} from "../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {AccountLensViewTypes} from "../../src/perps/interfaces/AccountLensViewTypes.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
+import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 
 contract PreviewExecutionDifferentialTest is BasePerpTest {
 
     address internal constant KEEPER = address(0xC0FFEE);
+
+    function testFuzz_ValidPreviewOpen_DoesNotUntypedRevertOnSameStateExecution(
+        uint256 initialMarginFuzz,
+        uint256 marginDeltaFuzz,
+        uint256 sizeDeltaFuzz,
+        uint256 oraclePriceFuzz,
+        uint256 carryDelayFuzz
+    ) public {
+        address trader = address(0xC108);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        uint256 initialMargin = bound(initialMarginFuzz, 5_000e6, 25_000e6);
+        uint256 sizeDelta = bound(sizeDeltaFuzz, 1_000e18, 50_000e18);
+        uint256 oraclePrice = bound(oraclePriceFuzz, 80_000_000, 120_000_000);
+        uint256 carryDelay = bound(carryDelayFuzz, 0, 30 days);
+
+        _fundTrader(trader, 60_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, initialMargin, 1e8);
+
+        if (carryDelay > 0) {
+            vm.warp(block.timestamp + carryDelay);
+        }
+
+        uint256 marginDelta = bound(marginDeltaFuzz, 0, _freeSettlementUsdc(accountId));
+        CfdTypes.Order memory order = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: sizeDelta,
+            marginDelta: marginDelta,
+            targetPrice: oraclePrice,
+            commitTime: uint64(block.timestamp),
+            commitBlock: uint64(block.number),
+            orderId: 0,
+            side: CfdTypes.Side.BULL,
+            isClose: false
+        });
+
+        uint8 revertCode =
+            engineLens.previewOpenRevertCode(accountId, CfdTypes.Side.BULL, sizeDelta, marginDelta, oraclePrice, uint64(block.timestamp));
+        CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory = engineLens.previewOpenFailurePolicyCategory(
+            accountId, CfdTypes.Side.BULL, sizeDelta, marginDelta, oraclePrice, uint64(block.timestamp)
+        );
+
+        vm.assume(revertCode == uint8(CfdEnginePlanTypes.OpenRevertCode.OK));
+        assertEq(
+            uint256(failureCategory),
+            uint256(CfdEnginePlanTypes.OpenFailurePolicyCategory.None),
+            "Valid preview open should not carry a failure category"
+        );
+
+        vm.startPrank(address(router));
+        try engine.processOrderTyped(order, oraclePrice, pool.totalAssets(), uint64(block.timestamp)) {
+            vm.stopPrank();
+        } catch (bytes memory revertData) {
+            vm.stopPrank();
+            assertEq(
+                _revertSelector(revertData),
+                ICfdEngine.CfdEngine__TypedOrderFailure.selector,
+                "Valid preview open unexpectedly hit an untyped revert"
+            );
+            fail("Valid preview open unexpectedly reverted on the live open path");
+        }
+    }
 
     function testFuzz_PreviewClose_FullCloseMatchesLiveExecution_LiquidVault(
         uint256 closePriceFuzz
@@ -27,6 +90,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
 
+        IMarginClearinghouse.AccountUsdcBuckets memory bucketsBefore = clearinghouse.getAccountUsdcBuckets(accountId);
         uint256 settlementBefore = clearinghouse.balanceUsdc(accountId);
         uint256 deferredBefore = engine.deferredPayoutUsdc(accountId);
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
@@ -36,9 +100,25 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         vm.prank(KEEPER);
         router.executeOrder(1, priceData);
 
+        IMarginClearinghouse.AccountUsdcBuckets memory bucketsAfter = clearinghouse.getAccountUsdcBuckets(accountId);
         (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(accountId);
         assertEq(sizeAfter, preview.remainingSize, "Close preview remaining size should match live execution");
         assertEq(marginAfter, preview.remainingMargin, "Close preview remaining margin should match live execution");
+        assertEq(
+            bucketsAfter.settlementBalanceUsdc,
+            bucketsBefore.settlementBalanceUsdc + preview.immediatePayoutUsdc - preview.seizedCollateralUsdc,
+            "Close preview should match the live settlement-balance mutation"
+        );
+        assertEq(
+            bucketsAfter.activePositionMarginUsdc,
+            preview.remainingMargin,
+            "Close preview remaining margin should match the live position-margin bucket"
+        );
+        assertEq(
+            bucketsAfter.totalLockedMarginUsdc,
+            preview.remainingMargin,
+            "Full close should leave no locked margin beyond the surviving position margin"
+        );
         assertEq(
             clearinghouse.balanceUsdc(accountId) - settlementBefore,
             preview.immediatePayoutUsdc,
@@ -81,6 +161,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
 
+        IMarginClearinghouse.AccountUsdcBuckets memory bucketsBefore = clearinghouse.getAccountUsdcBuckets(accountId);
         uint256 settlementBefore = clearinghouse.balanceUsdc(accountId);
         uint256 deferredBefore = engine.deferredPayoutUsdc(accountId);
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
@@ -90,10 +171,26 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         vm.prank(KEEPER);
         router.executeOrder(1, priceData);
 
+        IMarginClearinghouse.AccountUsdcBuckets memory bucketsAfter = clearinghouse.getAccountUsdcBuckets(accountId);
         (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(accountId);
         assertEq(sizeAfter, preview.remainingSize, "Illiquid close preview remaining size should match live execution");
         assertEq(
             marginAfter, preview.remainingMargin, "Illiquid close preview remaining margin should match live execution"
+        );
+        assertEq(
+            bucketsAfter.settlementBalanceUsdc,
+            bucketsBefore.settlementBalanceUsdc + preview.immediatePayoutUsdc - preview.seizedCollateralUsdc,
+            "Illiquid close preview should match the live settlement-balance mutation"
+        );
+        assertEq(
+            bucketsAfter.activePositionMarginUsdc,
+            preview.remainingMargin,
+            "Illiquid close preview remaining margin should match the live position-margin bucket"
+        );
+        assertEq(
+            bucketsAfter.totalLockedMarginUsdc,
+            preview.remainingMargin,
+            "Illiquid full close should leave no locked margin beyond the surviving position margin"
         );
         assertEq(
             clearinghouse.balanceUsdc(accountId) - settlementBefore,
@@ -220,14 +317,23 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         uint256 deferredClearerBefore = engine.deferredClearerBountyUsdc(KEEPER);
         uint256 deferredBefore = engine.deferredPayoutUsdc(accountId);
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
+        IMarginClearinghouse.AccountUsdcBuckets memory bucketsBefore = clearinghouse.getAccountUsdcBuckets(accountId);
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(liquidationPrice);
 
         vm.prank(KEEPER);
         router.executeLiquidation(accountId, priceData);
 
+        IMarginClearinghouse.AccountUsdcBuckets memory bucketsAfter = clearinghouse.getAccountUsdcBuckets(accountId);
         (uint256 sizeAfter,,,,,,) = engine.positions(accountId);
         assertEq(sizeAfter, 0, "Liquidation should fully clear the position");
+        assertEq(
+            bucketsAfter.settlementBalanceUsdc,
+            bucketsBefore.settlementBalanceUsdc - preview.seizedCollateralUsdc,
+            "Liquidation preview should match the live settlement-balance mutation"
+        );
+        assertEq(bucketsAfter.activePositionMarginUsdc, 0, "Liquidation should clear the live position-margin bucket");
+        assertEq(bucketsAfter.totalLockedMarginUsdc, 0, "Liquidation should clear all locked margin in the simple path");
         assertEq(
             (usdc.balanceOf(KEEPER) - keeperWalletBefore)
                 + (engine.deferredClearerBountyUsdc(KEEPER) - deferredClearerBefore),
@@ -292,14 +398,23 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         uint256 deferredClearerBefore = engine.deferredClearerBountyUsdc(KEEPER);
         uint256 deferredBefore = engine.deferredPayoutUsdc(accountId);
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
+        IMarginClearinghouse.AccountUsdcBuckets memory bucketsBefore = clearinghouse.getAccountUsdcBuckets(accountId);
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(liquidationPrice);
 
         vm.prank(KEEPER);
         router.executeLiquidation(accountId, priceData);
 
+        IMarginClearinghouse.AccountUsdcBuckets memory bucketsAfter = clearinghouse.getAccountUsdcBuckets(accountId);
         (uint256 sizeAfter,,,,,,) = engine.positions(accountId);
         assertEq(sizeAfter, 0, "Illiquid liquidation should fully clear the position");
+        assertEq(
+            bucketsAfter.settlementBalanceUsdc,
+            bucketsBefore.settlementBalanceUsdc - preview.seizedCollateralUsdc,
+            "Illiquid liquidation preview should match the live settlement-balance mutation"
+        );
+        assertEq(bucketsAfter.activePositionMarginUsdc, 0, "Illiquid liquidation should clear the live position margin");
+        assertEq(bucketsAfter.totalLockedMarginUsdc, 0, "Illiquid liquidation should clear all locked margin in the simple path");
         assertEq(
             (usdc.balanceOf(KEEPER) - keeperWalletBefore)
                 + (engine.deferredClearerBountyUsdc(KEEPER) - deferredClearerBefore),

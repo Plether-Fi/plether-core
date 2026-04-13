@@ -459,6 +459,71 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         assertTrue(delta.valid, "Planner should accept opens whose IMR is satisfied only after rebate credit");
     }
 
+    function test_PlanOpen_RejectsWhenCarryLeavesFreeSettlementBelowMarginDelta() public view {
+        bytes32 accountId = bytes32(uint256(0xCA2201));
+        CfdEnginePlanTypes.RawSnapshot memory snap;
+        snap.accountId = accountId;
+        snap.position = CfdTypes.Position({
+            size: 10_000e18,
+            margin: 100e6,
+            entryPrice: 1e8,
+            maxProfitUsdc: 100_000e6,
+            side: CfdTypes.Side.BULL,
+            lastUpdateTime: 0,
+            lastCarryTimestamp: 1,
+            vpiAccrued: 0
+        });
+        snap.currentTimestamp = uint64(30 days + 1);
+        snap.lastMarkPrice = 1e8;
+        snap.lastMarkTime = uint64(block.timestamp);
+        snap.bullSide = CfdEnginePlanTypes.SideSnapshot({
+            maxProfitUsdc: 100_000e6,
+            openInterest: 10_000e18,
+            entryNotional: 10_000e18 * 1e8,
+            totalMargin: 100e6
+        });
+        snap.bearSide = CfdEnginePlanTypes.SideSnapshot({
+            maxProfitUsdc: 100_000e6,
+            openInterest: 10_000e18,
+            entryNotional: 10_000e18 * 1e8,
+            totalMargin: 100e6
+        });
+        snap.vaultAssetsUsdc = 50_000_000e6;
+        snap.vaultCashUsdc = 50_000_000e6;
+        snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
+            settlementBalanceUsdc: 200e6,
+            totalLockedMarginUsdc: 100e6,
+            activePositionMarginUsdc: 100e6,
+            otherLockedMarginUsdc: 0,
+            freeSettlementUsdc: 100e6
+        });
+        snap.lockedBuckets = IMarginClearinghouse.LockedMarginBuckets({
+            positionMarginUsdc: 100e6,
+            committedOrderMarginUsdc: 0,
+            reservedSettlementUsdc: 0,
+            totalLockedMarginUsdc: 100e6
+        });
+        snap.capPrice = CAP_PRICE;
+        snap.riskParams = _riskParams();
+
+        CfdTypes.Order memory order = _openOrder(accountId, CfdTypes.Side.BULL, 10_000e18, 100e6, 1e8);
+        CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(snap, order, 1e8, uint64(block.timestamp));
+        uint256 freeSettlementAfterCarry = snap.accountBuckets.freeSettlementUsdc - delta.pendingCarryUsdc;
+
+        assertGt(delta.pendingCarryUsdc, 0, "Setup must accrue pending carry");
+        assertLt(
+            freeSettlementAfterCarry,
+            order.marginDelta,
+            "Carry should leave too little free settlement to re-lock the requested margin"
+        );
+        assertEq(
+            uint8(delta.revertCode),
+            uint8(CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES),
+            "Planner should surface the typed fee-drained failure before clearinghouse execution"
+        );
+        assertFalse(delta.valid, "Planner should reject opens whose carry-drained free settlement cannot cover marginDelta");
+    }
+
     function test_PlanClose_ReportsPendingCarry() public {
         bytes32 accountId = bytes32(uint256(uint160(freshBullTrader)));
         _fundTrader(freshBullTrader, 20_000e6);

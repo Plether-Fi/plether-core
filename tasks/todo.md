@@ -1,3 +1,35 @@
+- [x] Audit open-path apply-time economic preconditions across clearinghouse, engine, and settlement flow
+- [x] Centralize shared open-cost economic preconditions into one accounting helper
+- [x] Add planner/live parity regressions for free-settlement exhaustion and position-margin underflow
+- [x] Run focused Forge verification for planner, clearinghouse, engine, and router failure policy
+
+Review:
+- Enumerated the live open-path economic guards that can fail after planning: carry realization affordability, open-cost settlement debit + re-lock affordability, and physical position-margin availability during net margin unlocks.
+- Centralized the clearinghouse-side open-cost economics in `src/perps/libraries/MarginClearinghouseAccountingLib.sol` via `planOpenCostApplication(...)`, which now simulates the exact `applyOpenCost(...)` mutation order and exposes the two meaningful insufficiency states: free-equity exhaustion and position-margin underflow.
+- Rewired `src/perps/libraries/CfdEnginePlanLib.sol` to use that shared helper for open-path typed rejection, so the planner and clearinghouse now derive open-cost validity from the same logic instead of duplicate local checks.
+- Rewired `src/perps/MarginClearinghouse.sol` to consume the same helper before mutating storage, preserving the live revert semantics (`InsufficientFreeEquity` / `InsufficientBucketMargin`) while removing drift from the plan/apply path.
+- Added focused live regressions in `test/perps/MarginClearinghouse.t.sol` for both failure modes, and kept the planner/engine/router parity coverage in `test/perps/CfdEnginePlanRegression.t.sol`, `test/perps/CfdEngine.t.sol`, and `test/perps/OrderRouterPolicyMatrix.t.sol`.
+- Verified green with `forge test --match-path test/perps/MarginClearinghouse.t.sol --match-test "test_ApplyOpenCost_DebitsSettlementAndLeavesRemainingFreeBalance|test_ApplyOpenCost_UnlocksPositionMarginBeforeDebitingTradeCost|test_ApplyOpenCost_RevertsWhenTradeCostAndMarginLockExceedFreeSettlement|test_ApplyOpenCost_RevertsWhenUnlockExceedsPositionMargin"`, `forge test --match-path test/perps/CfdEnginePlanRegression.t.sol --match-test "test_PlanOpen_RejectsWhenCarryLeavesFreeSettlementBelowMarginDelta|test_PlanOpen_RejectsInsufficientPhysicalMargin"`, `forge test --match-path test/perps/CfdEngine.t.sol --match-test "test_PreviewOpen_ClassifiesCarryDrainedReleasedFreeSettlementAsUserInvalid|test_MarginDrained_ByFees_Reverts"`, and `forge test --match-path test/perps/OrderRouterPolicyMatrix.t.sol --match-test "test_MarginDrainedByFeesTypedRevertMapsToClearerFull|test_UserInvalidPaysClearer|test_ProtocolInvalidationRefundsTrader"`.
+
+- [x] Fuzz shared open-cost planning against live clearinghouse apply
+- [x] Sweep close/liquidation preconditions for planner/apply drift and centralization gaps
+- [x] Add close/liquidation live parity tests around the shared accounting helpers
+
+Review:
+- Added `MarginClearinghouseAccountingHarness` in `test/perps/MarginClearinghouse.t.sol` to expose the shared pure accounting helpers used by the planner and clearinghouse.
+- Added `testFuzz_ApplyOpenCost_MatchesSharedOpenPlan(...)`, which fuzzes settlement balance, locked buckets, margin delta, and trade cost, then proves the live `applyOpenCost(...)` result or revert selector matches `planOpenCostApplication(...)` across 256 runs.
+- Swept the close and liquidation apply paths: `consumeCloseLoss(...)` already shares `planTerminalLossConsumption(...)`/`applyTerminalLossMutation(...)` with the planner, and liquidation already shares `planLiquidationResidual(...)` with the planner. The remaining apply-only reverts are reservation-ledger integrity checks (`IncompleteReservationCoverage`) rather than uncovered economic preconditions.
+- Added live parity tests `test_ConsumeCloseLoss_MatchesSharedTerminalLossPlan()` and `test_ApplyLiquidationSettlementPlan_MatchesSharedResidualPlan()` so future drift between the shared helpers and the clearinghouse mutation path is caught immediately without adding unnecessary production refactors.
+- Verified green with `forge test --match-path test/perps/MarginClearinghouse.t.sol --match-test "testFuzz_ApplyOpenCost_MatchesSharedOpenPlan|test_ConsumeCloseLoss_MatchesSharedTerminalLossPlan|test_ApplyLiquidationSettlementPlan_MatchesSharedResidualPlan|test_ApplyOpenCost_RevertsWhenTradeCostAndMarginLockExceedFreeSettlement|test_ApplyOpenCost_RevertsWhenUnlockExceedsPositionMargin"`, plus the focused planner/engine/router suites already covering the typed failure path.
+
+- [x] Add broader preview/live property tests for open, close, and liquidation execution parity
+
+Review:
+- Extended `test/perps/PreviewExecutionDifferential.t.sol` with `testFuzz_ValidPreviewOpen_DoesNotUntypedRevertOnSameStateExecution(...)`, which fuzzes same-side increase orders after optional carry accrual and proves that `previewOpenRevertCode == OK` plus `previewOpenFailurePolicyCategory == None` does not devolve into an untyped live open-path revert on same-state execution.
+- Tightened the existing fuzzed full-close and liquidation preview tests to assert observed clearinghouse bucket mutations, not just payout/bad-debt outcomes. The differential suite now checks settlement-balance and locked-position-margin transitions against the preview deltas for both liquid and illiquid vault states.
+- The first draft of the open property test surfaced `CfdEngine__Unauthorized()` because the low-level test call bypassed the normal router-authorized invocation style; switching to `try/catch` under `vm.startPrank(address(router))` fixed the harness and confirmed the real property.
+- Verified green with `forge test --match-path test/perps/PreviewExecutionDifferential.t.sol --match-test "testFuzz_ValidPreviewOpen_DoesNotUntypedRevertOnSameStateExecution|testFuzz_PreviewClose_FullCloseMatchesLiveExecution_LiquidVault|testFuzz_PreviewClose_FullCloseMatchesLiveExecution_IlliquidVault|testFuzz_PreviewLiquidation_MatchesLiveExecution_LiquidVault|testFuzz_PreviewLiquidation_MatchesLiveExecution_IlliquidVault"`, plus the accounting, planner, and router-policy suites to keep the whole prevention chain aligned.
+
 - [x] Fix open-path post-realization risk check so pending carry is not double-counted
 - [x] Add a carry-aware keeper bounty credit path for clearinghouse settlement credits
 - [x] Add regressions covering both verified findings and run targeted Forge verification

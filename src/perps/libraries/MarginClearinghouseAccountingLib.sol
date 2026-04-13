@@ -19,6 +19,19 @@ library MarginClearinghouseAccountingLib {
         uint256 otherLockedMarginUnlockedUsdc;
     }
 
+    struct OpenCostPlan {
+        int256 netMarginChangeUsdc;
+        uint256 settlementCreditUsdc;
+        uint256 settlementDebitUsdc;
+        uint256 positionMarginUnlockedUsdc;
+        uint256 positionMarginLockedUsdc;
+        uint256 resultingSettlementBalanceUsdc;
+        uint256 resultingPositionMarginUsdc;
+        uint256 resultingFreeSettlementUsdc;
+        bool insufficientFreeEquity;
+        bool insufficientPositionMargin;
+    }
+
     struct LiquidationResidualPlan {
         uint256 settlementRetainedUsdc;
         uint256 settlementSeizedUsdc;
@@ -68,6 +81,61 @@ library MarginClearinghouseAccountingLib {
             buckets.activePositionMarginUsdc > remainingLossUsdc ? remainingLossUsdc : buckets.activePositionMarginUsdc;
         consumption.totalConsumedUsdc = consumption.freeSettlementConsumedUsdc + consumption.activeMarginConsumedUsdc;
         consumption.uncoveredUsdc = remainingLossUsdc - consumption.activeMarginConsumedUsdc;
+    }
+
+    function planOpenCostApplication(
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets,
+        uint256 marginDeltaUsdc,
+        int256 tradeCostUsdc
+    ) internal pure returns (OpenCostPlan memory plan) {
+        plan.netMarginChangeUsdc = int256(marginDeltaUsdc) - tradeCostUsdc;
+
+        uint256 settlementBalanceUsdc = buckets.settlementBalanceUsdc;
+        uint256 positionMarginUsdc = buckets.activePositionMarginUsdc;
+        uint256 otherLockedMarginUsdc = buckets.otherLockedMarginUsdc;
+
+        if (tradeCostUsdc < 0) {
+            plan.settlementCreditUsdc = uint256(-tradeCostUsdc);
+            settlementBalanceUsdc += plan.settlementCreditUsdc;
+        }
+
+        if (plan.netMarginChangeUsdc < 0) {
+            plan.positionMarginUnlockedUsdc = uint256(-plan.netMarginChangeUsdc);
+            if (plan.positionMarginUnlockedUsdc > positionMarginUsdc) {
+                plan.insufficientPositionMargin = true;
+                return plan;
+            }
+            positionMarginUsdc -= plan.positionMarginUnlockedUsdc;
+        }
+
+        uint256 totalLockedMarginUsdc = positionMarginUsdc + otherLockedMarginUsdc;
+        uint256 freeSettlementUsdc = settlementBalanceUsdc > totalLockedMarginUsdc
+            ? settlementBalanceUsdc - totalLockedMarginUsdc
+            : 0;
+
+        if (tradeCostUsdc > 0) {
+            plan.settlementDebitUsdc = uint256(tradeCostUsdc);
+            if (plan.settlementDebitUsdc > freeSettlementUsdc) {
+                plan.insufficientFreeEquity = true;
+                return plan;
+            }
+            settlementBalanceUsdc -= plan.settlementDebitUsdc;
+            freeSettlementUsdc -= plan.settlementDebitUsdc;
+        }
+
+        if (plan.netMarginChangeUsdc > 0) {
+            plan.positionMarginLockedUsdc = uint256(plan.netMarginChangeUsdc);
+            if (plan.positionMarginLockedUsdc > freeSettlementUsdc) {
+                plan.insufficientFreeEquity = true;
+                return plan;
+            }
+            positionMarginUsdc += plan.positionMarginLockedUsdc;
+            freeSettlementUsdc -= plan.positionMarginLockedUsdc;
+        }
+
+        plan.resultingSettlementBalanceUsdc = settlementBalanceUsdc;
+        plan.resultingPositionMarginUsdc = positionMarginUsdc;
+        plan.resultingFreeSettlementUsdc = freeSettlementUsdc;
     }
 
     function getTerminalReachableUsdc(

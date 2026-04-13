@@ -1,12 +1,43 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
+import {CfdEnginePlanTypes} from "../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
+import {OrderRouter} from "../../src/perps/OrderRouter.sol";
+import {ICfdEngineCore} from "../../src/perps/interfaces/ICfdEngineCore.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {PositionRiskAccountingLib} from "../../src/perps/libraries/PositionRiskAccountingLib.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
+
+contract OrderRouterFailurePolicyHarness is OrderRouter {
+
+    constructor(
+        address engine_,
+        address engineLens_,
+        address vault_
+    )
+        OrderRouter(
+            engine_,
+            engineLens_,
+            vault_,
+            address(0),
+            new bytes32[](0),
+            new uint256[](0),
+            new uint256[](0),
+            new bool[](0)
+        )
+    {}
+
+    function failedOutcomeFromEngineRevert(
+        CfdTypes.Order memory order,
+        bytes memory revertData
+    ) external pure returns (uint8) {
+        return uint8(_failedOutcomeFromEngineRevert(order, revertData));
+    }
+
+}
 
 contract OrderRouterPolicyMatrixTest is BasePerpTest {
 
@@ -315,6 +346,34 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
             uint256(router.getOrderRecord(1).status),
             uint256(IOrderRouterAccounting.OrderStatus.Failed),
             "User-invalid order should fail terminally"
+        );
+    }
+
+    function test_MarginDrainedByFeesTypedRevertMapsToClearerFull() public {
+        OrderRouterFailurePolicyHarness harness =
+            new OrderRouterFailurePolicyHarness(address(engine), address(engineLens), address(pool));
+        CfdTypes.Order memory order = CfdTypes.Order({
+            accountId: bytes32(uint256(uint160(ALICE))),
+            sizeDelta: 10_000e18,
+            marginDelta: 100e6,
+            targetPrice: 1e8,
+            commitTime: uint64(block.timestamp),
+            commitBlock: uint64(block.number),
+            orderId: 1,
+            side: CfdTypes.Side.BULL,
+            isClose: false
+        });
+        bytes memory revertData = abi.encodeWithSelector(
+            ICfdEngineCore.CfdEngine__TypedOrderFailure.selector,
+            CfdEnginePlanTypes.ExecutionFailurePolicyCategory.ProtocolStateInvalidated,
+            uint8(CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES),
+            false
+        );
+
+        assertEq(
+            harness.failedOutcomeFromEngineRevert(order, revertData),
+            0,
+            "MARGIN_DRAINED_BY_FEES must stay on the clearer-paid path even if failure-category wiring drifts"
         );
     }
 

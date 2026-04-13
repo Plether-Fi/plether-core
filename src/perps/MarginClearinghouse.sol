@@ -526,27 +526,33 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step {
         int256 tradeCostUsdc,
         address recipient
     ) external onlyOperator returns (int256 netMarginChangeUsdc) {
-        netMarginChangeUsdc = int256(marginDeltaUsdc) - tradeCostUsdc;
-        if (tradeCostUsdc < 0) {
-            _creditSettlementUsdc(accountId, uint256(-tradeCostUsdc));
+        MarginClearinghouseAccountingLib.OpenCostPlan memory plan = MarginClearinghouseAccountingLib
+            .planOpenCostApplication(_buildAccountUsdcBuckets(accountId), marginDeltaUsdc, tradeCostUsdc);
+
+        if (plan.insufficientPositionMargin) {
+            revert MarginClearinghouse__InsufficientBucketMargin();
+        }
+        if (plan.insufficientFreeEquity) {
+            revert MarginClearinghouse__InsufficientFreeEquity();
         }
 
-        if (netMarginChangeUsdc < 0) {
-            _unlockMargin(accountId, IMarginClearinghouse.MarginBucket.Position, uint256(-netMarginChangeUsdc));
+        netMarginChangeUsdc = plan.netMarginChangeUsdc;
+        if (plan.settlementCreditUsdc > 0) {
+            _creditSettlementUsdc(accountId, plan.settlementCreditUsdc);
         }
 
-        if (tradeCostUsdc > 0) {
-            uint256 costUsdc = uint256(tradeCostUsdc);
-            if (costUsdc > _buildAccountUsdcBuckets(accountId).freeSettlementUsdc) {
-                revert MarginClearinghouse__InsufficientFreeEquity();
-            }
-            settlementBalances[accountId] -= costUsdc;
-            IERC20(settlementAsset).safeTransfer(recipient, costUsdc);
-            emit AssetSeized(accountId, settlementAsset, costUsdc, recipient);
+        if (plan.positionMarginUnlockedUsdc > 0) {
+            _unlockMargin(accountId, IMarginClearinghouse.MarginBucket.Position, plan.positionMarginUnlockedUsdc);
         }
 
-        if (netMarginChangeUsdc > 0) {
-            _lockMargin(accountId, IMarginClearinghouse.MarginBucket.Position, uint256(netMarginChangeUsdc));
+        if (plan.settlementDebitUsdc > 0) {
+            settlementBalances[accountId] -= plan.settlementDebitUsdc;
+            IERC20(settlementAsset).safeTransfer(recipient, plan.settlementDebitUsdc);
+            emit AssetSeized(accountId, settlementAsset, plan.settlementDebitUsdc, recipient);
+        }
+
+        if (plan.positionMarginLockedUsdc > 0) {
+            _lockMargin(accountId, IMarginClearinghouse.MarginBucket.Position, plan.positionMarginLockedUsdc);
         }
     }
 

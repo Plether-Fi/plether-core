@@ -8,6 +8,7 @@ import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
+import {MarginClearinghouseAccountingLib} from "../../src/perps/libraries/MarginClearinghouseAccountingLib.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
@@ -63,9 +64,59 @@ contract MockClearinghouseEngine {
 
 }
 
+contract MarginClearinghouseAccountingHarness {
+
+    function planOpenCostApplication(
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets,
+        uint256 marginDeltaUsdc,
+        int256 tradeCostUsdc
+    ) external pure returns (MarginClearinghouseAccountingLib.OpenCostPlan memory) {
+        return MarginClearinghouseAccountingLib.planOpenCostApplication(buckets, marginDeltaUsdc, tradeCostUsdc);
+    }
+
+    function buildAccountUsdcBuckets(
+        uint256 settlementBalanceUsdc,
+        uint256 positionMarginUsdc,
+        uint256 committedOrderMarginUsdc,
+        uint256 reservedSettlementUsdc
+    ) external pure returns (IMarginClearinghouse.AccountUsdcBuckets memory) {
+        return MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(
+            settlementBalanceUsdc, positionMarginUsdc, committedOrderMarginUsdc, reservedSettlementUsdc
+        );
+    }
+
+    function buildPartialCloseUsdcBuckets(
+        uint256 settlementBalanceUsdc,
+        uint256 positionMarginUsdc,
+        uint256 committedOrderMarginUsdc,
+        uint256 reservedSettlementUsdc
+    ) external pure returns (IMarginClearinghouse.AccountUsdcBuckets memory) {
+        return MarginClearinghouseAccountingLib.buildPartialCloseUsdcBuckets(
+            settlementBalanceUsdc, positionMarginUsdc, committedOrderMarginUsdc, reservedSettlementUsdc
+        );
+    }
+
+    function planTerminalLossConsumption(
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets,
+        uint256 protectedLockedMarginUsdc,
+        uint256 lossUsdc
+    ) external pure returns (MarginClearinghouseAccountingLib.SettlementConsumption memory) {
+        return MarginClearinghouseAccountingLib.planTerminalLossConsumption(buckets, protectedLockedMarginUsdc, lossUsdc);
+    }
+
+    function planLiquidationResidual(
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets,
+        int256 residualUsdc
+    ) external pure returns (MarginClearinghouseAccountingLib.LiquidationResidualPlan memory) {
+        return MarginClearinghouseAccountingLib.planLiquidationResidual(buckets, residualUsdc);
+    }
+
+}
+
 contract MarginClearinghouseTest is Test {
 
     MarginClearinghouse clearinghouse;
+    MarginClearinghouseAccountingHarness accountingHarness;
     MockToken usdc;
     MockClearinghouseEngine mockEngine;
 
@@ -77,6 +128,7 @@ contract MarginClearinghouseTest is Test {
         usdc = new MockToken("USDC", "USDC", 6);
         mockEngine = new MockClearinghouseEngine();
         engine = address(mockEngine);
+        accountingHarness = new MarginClearinghouseAccountingHarness();
 
         clearinghouse = new MarginClearinghouse(address(usdc));
         aliceId = bytes32(uint256(uint160(alice)));
@@ -656,6 +708,175 @@ contract MarginClearinghouseTest is Test {
         assertEq(buckets.settlementBalanceUsdc, 80 * 1e6);
         assertEq(buckets.activePositionMarginUsdc, 80 * 1e6);
         assertEq(buckets.freeSettlementUsdc, 0);
+    }
+
+    function test_ApplyOpenCost_RevertsWhenTradeCostAndMarginLockExceedFreeSettlement() public {
+        vm.prank(alice);
+        clearinghouse.deposit(aliceId, 99 * 1e6);
+
+        vm.prank(engine);
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientFreeEquity.selector);
+        clearinghouse.applyOpenCost(aliceId, 100 * 1e6, int256(20 * 1e6), engine);
+    }
+
+    function test_ApplyOpenCost_RevertsWhenUnlockExceedsPositionMargin() public {
+        vm.prank(alice);
+        clearinghouse.deposit(aliceId, 10 * 1e6);
+
+        vm.prank(engine);
+        clearinghouse.lockPositionMargin(aliceId, 10 * 1e6);
+
+        vm.prank(engine);
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientBucketMargin.selector);
+        clearinghouse.applyOpenCost(aliceId, 0, int256(20 * 1e6), engine);
+    }
+
+    function testFuzz_ApplyOpenCost_MatchesSharedOpenPlan(
+        uint256 settlementBalanceUsdc,
+        uint256 positionMarginUsdc,
+        uint256 committedOrderMarginUsdc,
+        uint256 reservedSettlementUsdc,
+        uint256 marginDeltaUsdc,
+        int256 tradeCostUsdc
+    ) public {
+        settlementBalanceUsdc = bound(settlementBalanceUsdc, 1, 5000e6);
+        positionMarginUsdc = bound(positionMarginUsdc, 0, settlementBalanceUsdc);
+        uint256 remainingAfterPosition = settlementBalanceUsdc - positionMarginUsdc;
+        committedOrderMarginUsdc = bound(committedOrderMarginUsdc, 0, remainingAfterPosition);
+        uint256 remainingAfterCommitted = remainingAfterPosition - committedOrderMarginUsdc;
+        reservedSettlementUsdc = bound(reservedSettlementUsdc, 0, remainingAfterCommitted);
+        marginDeltaUsdc = bound(marginDeltaUsdc, 0, 5000e6);
+        tradeCostUsdc = int256(bound(tradeCostUsdc, -5000e6, 5000e6));
+
+        vm.prank(alice);
+        clearinghouse.deposit(aliceId, settlementBalanceUsdc);
+
+        vm.startPrank(engine);
+        if (positionMarginUsdc > 0) {
+            clearinghouse.lockPositionMargin(aliceId, positionMarginUsdc);
+        }
+        if (committedOrderMarginUsdc > 0) {
+            clearinghouse.lockCommittedOrderMargin(aliceId, committedOrderMarginUsdc);
+        }
+        if (reservedSettlementUsdc > 0) {
+            clearinghouse.lockReservedSettlement(aliceId, reservedSettlementUsdc);
+        }
+        vm.stopPrank();
+
+        IMarginClearinghouse.AccountUsdcBuckets memory bucketsBefore = clearinghouse.getAccountUsdcBuckets(aliceId);
+        MarginClearinghouseAccountingLib.OpenCostPlan memory plan =
+            accountingHarness.planOpenCostApplication(bucketsBefore, marginDeltaUsdc, tradeCostUsdc);
+
+        vm.startPrank(engine);
+        if (plan.insufficientPositionMargin) {
+            vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientBucketMargin.selector);
+            clearinghouse.applyOpenCost(aliceId, marginDeltaUsdc, tradeCostUsdc, engine);
+        } else if (plan.insufficientFreeEquity) {
+            vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientFreeEquity.selector);
+            clearinghouse.applyOpenCost(aliceId, marginDeltaUsdc, tradeCostUsdc, engine);
+        } else {
+            int256 netMarginChangeUsdc = clearinghouse.applyOpenCost(aliceId, marginDeltaUsdc, tradeCostUsdc, engine);
+            IMarginClearinghouse.AccountUsdcBuckets memory bucketsAfter = clearinghouse.getAccountUsdcBuckets(aliceId);
+            assertEq(netMarginChangeUsdc, plan.netMarginChangeUsdc, "Live open-cost net margin change should match plan");
+            assertEq(
+                bucketsAfter.settlementBalanceUsdc,
+                plan.resultingSettlementBalanceUsdc,
+                "Live settlement balance should match planned open-cost mutation"
+            );
+            assertEq(
+                bucketsAfter.activePositionMarginUsdc,
+                plan.resultingPositionMarginUsdc,
+                "Live position margin should match planned open-cost mutation"
+            );
+            assertEq(
+                bucketsAfter.freeSettlementUsdc,
+                plan.resultingFreeSettlementUsdc,
+                "Live free settlement should match planned open-cost mutation"
+            );
+        }
+        vm.stopPrank();
+    }
+
+    function test_ConsumeCloseLoss_MatchesSharedTerminalLossPlan() public {
+        vm.prank(alice);
+        clearinghouse.deposit(aliceId, 2000 * 1e6);
+
+        vm.startPrank(engine);
+        clearinghouse.lockPositionMargin(aliceId, 600 * 1e6);
+        clearinghouse.reserveCommittedOrderMargin(aliceId, 31, 300 * 1e6);
+        vm.stopPrank();
+
+        IMarginClearinghouse.AccountUsdcBuckets memory bucketsBefore = clearinghouse.getAccountUsdcBuckets(aliceId);
+        MarginClearinghouseAccountingLib.SettlementConsumption memory plan =
+            accountingHarness.planTerminalLossConsumption(bucketsBefore, 0, 1800 * 1e6);
+        uint64[] memory reservationIds = new uint64[](1);
+        reservationIds[0] = 31;
+
+        vm.prank(engine);
+        (uint256 seizedUsdc, uint256 shortfallUsdc) =
+            clearinghouse.consumeCloseLoss(aliceId, reservationIds, 1800 * 1e6, 0, true, engine);
+
+        IMarginClearinghouse.AccountUsdcBuckets memory bucketsAfter = clearinghouse.getAccountUsdcBuckets(aliceId);
+        IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(31);
+        assertEq(seizedUsdc, plan.totalConsumedUsdc, "Close loss seized amount should match planned terminal consumption");
+        assertEq(shortfallUsdc, plan.uncoveredUsdc, "Close loss shortfall should match planned terminal consumption");
+        assertEq(
+            bucketsAfter.settlementBalanceUsdc,
+            bucketsBefore.settlementBalanceUsdc - plan.totalConsumedUsdc,
+            "Close loss settlement debit should match shared plan"
+        );
+        assertEq(
+            bucketsAfter.activePositionMarginUsdc,
+            bucketsBefore.activePositionMarginUsdc - plan.activeMarginConsumedUsdc,
+            "Close loss position margin unlock should match shared plan"
+        );
+        assertEq(
+            reservation.remainingAmountUsdc,
+            300 * 1e6 - plan.otherLockedMarginConsumedUsdc,
+            "Close loss reservation consumption should match shared plan"
+        );
+    }
+
+    function test_ApplyLiquidationSettlementPlan_MatchesSharedResidualPlan() public {
+        vm.prank(alice);
+        clearinghouse.deposit(aliceId, 2000 * 1e6);
+
+        vm.startPrank(engine);
+        clearinghouse.lockPositionMargin(aliceId, 600 * 1e6);
+        clearinghouse.reserveCommittedOrderMargin(aliceId, 41, 300 * 1e6);
+        vm.stopPrank();
+
+        IMarginClearinghouse.AccountUsdcBuckets memory bucketsBefore = clearinghouse.getAccountUsdcBuckets(aliceId);
+        MarginClearinghouseAccountingLib.LiquidationResidualPlan memory plan =
+            accountingHarness.planLiquidationResidual(bucketsBefore, int256(200 * 1e6));
+        uint64[] memory reservationIds = new uint64[](1);
+        reservationIds[0] = 41;
+        IMarginClearinghouse.LiquidationSettlementPlan memory settlementPlan = IMarginClearinghouse.LiquidationSettlementPlan({
+            settlementRetainedUsdc: plan.settlementRetainedUsdc,
+            settlementSeizedUsdc: plan.settlementSeizedUsdc,
+            freshTraderPayoutUsdc: plan.freshTraderPayoutUsdc,
+            badDebtUsdc: plan.badDebtUsdc,
+            positionMarginUnlockedUsdc: plan.mutation.positionMarginUnlockedUsdc,
+            otherLockedMarginUnlockedUsdc: plan.mutation.otherLockedMarginUnlockedUsdc
+        });
+
+        vm.prank(engine);
+        uint256 seizedUsdc = clearinghouse.applyLiquidationSettlementPlan(aliceId, reservationIds, settlementPlan, engine);
+
+        IMarginClearinghouse.AccountUsdcBuckets memory bucketsAfter = clearinghouse.getAccountUsdcBuckets(aliceId);
+        IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(41);
+        assertEq(seizedUsdc, plan.settlementSeizedUsdc, "Liquidation seized amount should match shared residual plan");
+        assertEq(
+            bucketsAfter.settlementBalanceUsdc,
+            bucketsBefore.settlementBalanceUsdc - plan.settlementSeizedUsdc,
+            "Liquidation settlement debit should match shared residual plan"
+        );
+        assertEq(bucketsAfter.activePositionMarginUsdc, 0, "Liquidation should unlock the full live position margin");
+        assertEq(
+            reservation.remainingAmountUsdc,
+            300 * 1e6 - plan.mutation.otherLockedMarginUnlockedUsdc,
+            "Liquidation reservation consumption should match shared residual plan"
+        );
     }
 
     function test_Deposit_ZeroAmount_Reverts() public {
