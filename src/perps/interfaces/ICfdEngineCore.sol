@@ -108,17 +108,20 @@ interface ICfdEngineCore {
 
     function isOracleFrozen() external view returns (bool);
 
-    function hasOpenPosition(
+    function positions(
         bytes32 accountId
-    ) external view returns (bool);
-
-    function getPositionSize(
-        bytes32 accountId
-    ) external view returns (uint256);
-
-    function getPositionSide(
-        bytes32 accountId
-    ) external view returns (CfdTypes.Side);
+    )
+        external
+        view
+        returns (
+            uint256 size,
+            uint256 margin,
+            uint256 entryPrice,
+            uint256 maxProfitUsdc,
+            CfdTypes.Side side,
+            uint64 lastUpdateTime,
+            int256 vpiAccrued
+        );
 
     function degradedMode() external view returns (bool);
 

@@ -728,6 +728,18 @@ abstract contract BasePerpTest is Test {
         return clearinghouse.getAccountUsdcBuckets(accountId).freeSettlementUsdc;
     }
 
+    function _accountIdOf(
+        address account
+    ) internal pure returns (bytes32) {
+        return bytes32(uint256(uint160(account)));
+    }
+
+    function _settlementBalance(
+        address account
+    ) internal view returns (uint256) {
+        return clearinghouse.balanceUsdc(_accountIdOf(account));
+    }
+
     function _terminalReachableUsdc(
         bytes32 accountId
     ) internal view returns (uint256) {

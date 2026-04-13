@@ -6,12 +6,12 @@ import {CfdTypes} from "../CfdTypes.sol";
 /// @notice Trader-facing action surface aligned with the current delayed-order router model.
 interface IPerpsTraderActions {
 
-    function submitOrder(
+    function commitOrder(
         CfdTypes.Side side,
         uint256 sizeDelta,
-        uint256 marginDeltaUsdc,
-        uint256 acceptablePrice,
-        bool isReduceOnly
+        uint256 marginDelta,
+        uint256 targetPrice,
+        bool isClose
     ) external;
 
 }

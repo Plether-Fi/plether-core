@@ -7,7 +7,7 @@ For audit review that needs policy tables and read-surface canonicality in one p
 ## Traders
 
 - Margin actions: `MarginClearinghouse.depositMargin(uint256)` and `MarginClearinghouse.withdrawMargin(uint256)`
-- Trade actions: `OrderRouter.submitOrder(CfdTypes.Side side, uint256 sizeDelta, uint256 marginDeltaUsdc, uint256 acceptablePrice, bool isReduceOnly)`
+- Trade actions: `OrderRouter.commitOrder(CfdTypes.Side side, uint256 sizeDelta, uint256 marginDelta, uint256 targetPrice, bool isClose)`
 - Compact reads: `PerpsPublicLens`
 
 Use these interfaces:

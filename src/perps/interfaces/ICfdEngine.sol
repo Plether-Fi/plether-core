@@ -167,20 +167,21 @@ interface ICfdEngine {
     /// @notice True only when FX markets are actually closed and oracle freshness can be relaxed.
     function isOracleFrozen() external view returns (bool);
 
-    /// @notice Returns true when the account currently has an open position.
-    function hasOpenPosition(
+    /// @notice Returns the current position tuple for an account.
+    function positions(
         bytes32 accountId
-    ) external view returns (bool);
-
-    /// @notice Returns the current position size for an account (18 decimals).
-    function getPositionSize(
-        bytes32 accountId
-    ) external view returns (uint256);
-
-    /// @notice Returns the stored side for an open position.
-    function getPositionSide(
-        bytes32 accountId
-    ) external view returns (CfdTypes.Side);
+    )
+        external
+        view
+        returns (
+            uint256 size,
+            uint256 margin,
+            uint256 entryPrice,
+            uint256 maxProfitUsdc,
+            CfdTypes.Side side,
+            uint64 lastUpdateTime,
+            int256 vpiAccrued
+        );
 
     /// @notice Returns the timestamp through which carry has been realized for the position.
     function getPositionLastCarryTimestamp(

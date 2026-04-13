@@ -60,6 +60,20 @@ Review:
 - Added `test/perps/AccountDomainParity.t.sol` as the dedicated safety net for this lesson. It proves the helper layer separates generic vs terminal reachability and that the account/public read surfaces keep using the same canonical domain logic.
 - Verified green with `forge test --match-path test/perps/AccountDomainParity.t.sol`, `forge test --match-path test/perps/CfdEnginePlanRegression.t.sol --match-test "test_PlanOpen_CarryBasisExcludesQueuedReservations|test_PlanOpen_RejectsWhenCarryLeavesFreeSettlementBelowMarginDelta|test_PlanOpen_RejectsInsufficientPhysicalMargin"`, `forge test --match-path test/perps/PerpsReadParity.t.sol`, and `forge test --match-path test/perps/PreviewExecutionDifferential.t.sol --match-test "testFuzz_ValidPreviewOpen_DoesNotUntypedRevertOnSameStateExecution|testFuzz_PreviewClose_FullCloseMatchesLiveExecution_LiquidVault|testFuzz_PreviewClose_FullCloseMatchesLiveExecution_IlliquidVault|testFuzz_PreviewLiquidation_MatchesLiveExecution_LiquidVault|testFuzz_PreviewLiquidation_MatchesLiveExecution_IlliquidVault"`.
 
+- [x] Reduce `CfdEngine` and `OrderRouter` deployed bytecode below EIP-170
+
+Review:
+- Trimmed `CfdEngine` by removing redundant position wrapper getters in favor of the existing `positions(...)` getter and by consolidating deferred-claim preparation/claim settlement helpers. The engine now measures `24,525` bytes via `forge inspect src/perps/CfdEngine.sol:CfdEngine deployedBytecode`.
+- Trimmed `OrderRouter` with a sequence of low-risk cuts: shared uint timelock helpers, removal of the unused `TerminalFailureKind` / unused `_processTypedOrderExecution(...)` args, pruning-loop deduplication, collapsing the duplicate `submitOrder(...)` wrapper, removing public getters for `MAX_PENDING_ORDERS` / `TIMELOCK_DELAY`, internalizing claimable-balance mappings, inlining the single-caller commit path, and consolidating the stranded-balance claim entrypoint. The router now measures `24,495` bytes via `forge inspect src/perps/OrderRouter.sol:OrderRouter deployedBytecode`.
+- Added an end-to-end stale-mark close-commit regression in `test/perps/OrderRouter.t.sol` to ensure the size pass did not regress the new risk-reducing close-bounty behavior.
+- Verified green with focused suites that reflect the current clearinghouse-credit policy and preview/live parity:
+  - `forge test --match-path test/perps/CfdEnginePlanRegression.t.sol`
+  - `forge test --match-path test/perps/OrderRouterPolicyMatrix.t.sol`
+  - `forge test --match-path test/perps/PerpsReadParity.t.sol`
+  - `forge test --match-path test/perps/PreviewExecutionDifferential.t.sol`
+  - `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_CloseCommit_CanReserveKeeperBountyFromPositionMarginWhenFullyUtilized|test_CloseCommit_CanReserveKeeperBountyFromPositionMarginWithStaleStoredMark|test_ReserveCloseOrderExecutionBounty_RevertsWhenMarginBackedBountyWouldBreakMaintenance"`
+- Note: the legacy catch-all `test/perps/OrderRouter.t.sol` mega-suite still contains numerous older wallet-payout assertions that do not match the current clearinghouse-credit bounty/refund model, so it is not a reliable green gate for this size pass without a broader expectation update.
+
 - [x] Fix open-path post-realization risk check so pending carry is not double-counted
 - [x] Add a carry-aware keeper bounty credit path for clearinghouse settlement credits
 - [x] Add regressions covering both verified findings and run targeted Forge verification

@@ -44,7 +44,6 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     struct RouterExecutionContext {
         bool oracleFrozen;
         bool isFadWindow;
-        bool degradedMode;
         OrderOraclePolicyLib.OracleExecutionPolicy policy;
     }
 
@@ -59,13 +58,6 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         RefundUser
     }
 
-    enum TerminalFailureKind {
-        Expired,
-        CloseOnly,
-        Slippage,
-        EngineRevert
-    }
-
     ICfdVault internal immutable vault;
     ICfdEngineLens internal immutable engineLens;
     IPyth public pyth;
@@ -78,7 +70,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     uint64 public nextExecuteId = 1;
 
     uint256 public maxOrderAge;
-    uint256 public constant TIMELOCK_DELAY = 48 hours;
+    uint256 internal constant TIMELOCK_DELAY = 48 hours;
     uint256 internal constant MIN_ENGINE_GAS = 600_000;
     uint256 internal constant DEFAULT_MAX_ORDER_AGE = 60;
     uint256 internal constant MAX_PRUNE_ORDERS_PER_CALL = 64;
@@ -86,7 +78,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     uint256 internal constant MIN_OPEN_ORDER_EXECUTION_BOUNTY_USDC = 50_000;
     uint256 internal constant MAX_OPEN_ORDER_EXECUTION_BOUNTY_USDC = DecimalConstants.ONE_USDC;
     uint256 internal constant CLOSE_ORDER_EXECUTION_BOUNTY_USDC = DecimalConstants.ONE_USDC;
-    uint256 public constant MAX_PENDING_ORDERS = 5;
+    uint256 internal constant MAX_PENDING_ORDERS = 5;
 
     uint256 public pendingMaxOrderAge;
     uint256 public maxOrderAgeActivationTime;
@@ -97,7 +89,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     uint256 public pendingLiquidationStalenessLimit;
     uint256 public liquidationStalenessActivationTime;
 
-    mapping(address => uint256) public claimableEth;
+    mapping(address => uint256) internal claimableEth;
     uint64 public globalTailOrderId;
 
     error OrderRouter__ZeroSize();
@@ -138,6 +130,11 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     error OrderRouter__OraclePublishTimeOutOfOrder();
     error OrderRouter__InvalidStalenessLimit();
     error OrderRouter__PredictableOpenInvalid(uint8 code);
+
+    struct TimelockedUintProposal {
+        uint256 value;
+        uint256 activationTime;
+    }
 
     enum OrderFailReason {
         Expired,
@@ -216,14 +213,12 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     function proposeMaxOrderAge(
         uint256 _maxOrderAge
     ) external onlyOwner {
-        pendingMaxOrderAge = _maxOrderAge;
-        maxOrderAgeActivationTime = _timelockReadyAt();
+        (pendingMaxOrderAge, maxOrderAgeActivationTime) = _proposeUint(_maxOrderAge);
     }
 
     /// @notice Finalizes the pending maxOrderAge after timelock expires.
     function finalizeMaxOrderAge() external onlyOwner {
-        _requireTimelockReady(maxOrderAgeActivationTime);
-        maxOrderAge = pendingMaxOrderAge;
+        maxOrderAge = _finalizeUint(TimelockedUintProposal(pendingMaxOrderAge, maxOrderAgeActivationTime));
         pendingMaxOrderAge = 0;
         maxOrderAgeActivationTime = 0;
     }
@@ -235,14 +230,14 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         if (limit == 0) {
             revert OrderRouter__InvalidStalenessLimit();
         }
-        pendingOrderExecutionStalenessLimit = limit;
-        orderExecutionStalenessActivationTime = _timelockReadyAt();
+        (pendingOrderExecutionStalenessLimit, orderExecutionStalenessActivationTime) = _proposeUint(limit);
     }
 
     /// @notice Finalizes the pending live-market execution staleness limit after timelock expiry.
     function finalizeOrderExecutionStalenessLimit() external onlyOwner {
-        _requireTimelockReady(orderExecutionStalenessActivationTime);
-        orderExecutionStalenessLimit = pendingOrderExecutionStalenessLimit;
+        orderExecutionStalenessLimit = _finalizeUint(
+            TimelockedUintProposal(pendingOrderExecutionStalenessLimit, orderExecutionStalenessActivationTime)
+        );
         pendingOrderExecutionStalenessLimit = 0;
         orderExecutionStalenessActivationTime = 0;
     }
@@ -254,14 +249,14 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         if (limit == 0) {
             revert OrderRouter__InvalidStalenessLimit();
         }
-        pendingLiquidationStalenessLimit = limit;
-        liquidationStalenessActivationTime = _timelockReadyAt();
+        (pendingLiquidationStalenessLimit, liquidationStalenessActivationTime) = _proposeUint(limit);
     }
 
     /// @notice Finalizes the pending liquidation staleness limit after timelock expiry.
     function finalizeLiquidationStalenessLimit() external onlyOwner {
-        _requireTimelockReady(liquidationStalenessActivationTime);
-        liquidationStalenessLimit = pendingLiquidationStalenessLimit;
+        liquidationStalenessLimit = _finalizeUint(
+            TimelockedUintProposal(pendingLiquidationStalenessLimit, liquidationStalenessActivationTime)
+        );
         pendingLiquidationStalenessLimit = 0;
         liquidationStalenessActivationTime = 0;
     }
@@ -295,27 +290,6 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         uint256 targetPrice,
         bool isClose
     ) external {
-        _commitOrder(side, sizeDelta, marginDelta, targetPrice, isClose);
-    }
-
-    /// @notice Trader-facing wrapper that maps the simplified action surface onto the current router semantics.
-    function submitOrder(
-        CfdTypes.Side side,
-        uint256 sizeDelta,
-        uint256 marginDeltaUsdc,
-        uint256 acceptablePrice,
-        bool isReduceOnly
-    ) external {
-        _commitOrder(side, sizeDelta, marginDeltaUsdc, acceptablePrice, isReduceOnly);
-    }
-
-    function _commitOrder(
-        CfdTypes.Side side,
-        uint256 sizeDelta,
-        uint256 marginDelta,
-        uint256 targetPrice,
-        bool isClose
-    ) internal {
         if (!isClose) {
             _requireNotPaused();
             if (engine.degradedMode()) {
@@ -339,11 +313,13 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         }
         bytes32 accountId = bytes32(uint256(uint160(msg.sender)));
         if (!isClose && _canUseCommitMarkForOpenPrefilter()) {
+            uint256 commitPrice = _commitReferencePrice();
+            uint64 commitMarkTime = engine.lastMarkTime();
             CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory = engineLens.previewOpenFailurePolicyCategory(
-                accountId, side, sizeDelta, marginDelta, _commitReferencePrice(), engine.lastMarkTime()
+                accountId, side, sizeDelta, marginDelta, commitPrice, commitMarkTime
             );
             uint8 revertCode = engineLens.previewOpenRevertCode(
-                accountId, side, sizeDelta, marginDelta, _commitReferencePrice(), engine.lastMarkTime()
+                accountId, side, sizeDelta, marginDelta, commitPrice, commitMarkTime
             );
             if (OrderFailurePolicyLib.isPredictablyInvalidOpen(failureCategory)) {
                 revert OrderRouter__PredictableOpenInvalid(revertCode);
@@ -365,7 +341,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
             }
         }
         uint256 executionBountyUsdc = isClose
-            ? _quoteCloseOrderExecutionBountyUsdc()
+            ? CLOSE_ORDER_EXECUTION_BOUNTY_USDC
             : _quoteOpenOrderExecutionBountyUsdc(sizeDelta, _commitReferencePrice());
 
         uint64 orderId = nextCommitId++;
@@ -554,8 +530,28 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     function _skipStaleOrders(
         uint64 upToId
     ) internal returns (uint256 skipped) {
+        skipped = _pruneExpiredHeadOrders(upToId, type(uint256).max);
+    }
+
+    function _currentRouterExecutionContext() internal view returns (RouterExecutionContext memory context) {
+        context.oracleFrozen = _isOracleFrozen();
+        context.isFadWindow = engine.isFadWindow();
+        context.policy = OrderOraclePolicyLib.getOracleExecutionPolicy(
+            OrderOraclePolicyLib.OracleAction.OrderExecution,
+            context.oracleFrozen,
+            context.isFadWindow,
+            orderExecutionStalenessLimit,
+            liquidationStalenessLimit,
+            engine.fadMaxStaleness()
+        );
+    }
+
+    function _pruneExpiredHeadOrders(
+        uint64 upToId,
+        uint256 maxPrunes
+    ) internal returns (uint256 pruned) {
         uint256 age = maxOrderAge;
-        while (nextExecuteId != 0 && nextExecuteId <= upToId) {
+        while (nextExecuteId != 0 && nextExecuteId <= upToId && pruned < maxPrunes) {
             uint64 headId = nextExecuteId;
             OrderRecord storage record = _orderRecord(headId);
             if (record.status != IOrderRouterAccounting.OrderStatus.Pending) {
@@ -570,33 +566,16 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
                 break;
             }
             emit OrderFailed(headId, OrderFailReason.Expired);
-            _cleanupOrder(headId, false, _failedOutcomeForTerminalFailure(order, TerminalFailureKind.Expired));
-            skipped++;
+            _cleanupOrder(headId, _failedOutcomeForTerminalFailure(order));
+            pruned++;
         }
-    }
-
-    function _currentRouterExecutionContext() internal view returns (RouterExecutionContext memory context) {
-        context.oracleFrozen = _isOracleFrozen();
-        context.isFadWindow = engine.isFadWindow();
-        context.degradedMode = engine.degradedMode();
-        context.policy = OrderOraclePolicyLib.getOracleExecutionPolicy(
-            OrderOraclePolicyLib.OracleAction.OrderExecution,
-            context.oracleFrozen,
-            context.isFadWindow,
-            orderExecutionStalenessLimit,
-            liquidationStalenessLimit,
-            engine.fadMaxStaleness()
-        );
     }
 
     function _processTypedOrderExecution(
         CfdTypes.Order memory order,
         uint256 executionPrice,
         uint256 vaultDepth,
-        uint64 oraclePublishTime,
-        bool,
-        bool,
-        bool
+        uint64 oraclePublishTime
     ) internal returns (bool success, OrderFailReason failureReason, FailedOrderOutcome failureOutcome) {
         try engine.processOrderTyped(order, executionPrice, vaultDepth, oraclePublishTime) {
             return (true, OrderFailReason.EngineRevert, FailedOrderOutcome.ClearerFull);
@@ -626,7 +605,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
                 orderId,
                 pythFee,
                 false,
-                _failedOutcomeForTerminalFailure(order, TerminalFailureKind.Expired),
+                _failedOutcomeForTerminalFailure(order),
                 revertOnBlockedExecution
             );
             return revertOnBlockedExecution ? OrderExecutionStepResult.Return : OrderExecutionStepResult.Continue;
@@ -638,7 +617,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
                 orderId,
                 pythFee,
                 false,
-                _failedOutcomeForTerminalFailure(order, TerminalFailureKind.CloseOnly),
+                _failedOutcomeForTerminalFailure(order),
                 revertOnBlockedExecution
             );
             return revertOnBlockedExecution ? OrderExecutionStepResult.Return : OrderExecutionStepResult.Continue;
@@ -664,7 +643,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
                 orderId,
                 pythFee,
                 false,
-                _failedOutcomeForTerminalFailure(order, TerminalFailureKind.Slippage),
+                _failedOutcomeForTerminalFailure(order),
                 revertOnBlockedExecution
             );
             return revertOnBlockedExecution ? OrderExecutionStepResult.Return : OrderExecutionStepResult.Continue;
@@ -685,10 +664,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
             order,
             executionPrice,
             vaultDepth,
-            oraclePublishTime,
-            executionContext.oracleFrozen,
-            executionContext.isFadWindow,
-            executionContext.degradedMode
+            oraclePublishTime
         );
         if (executionSucceeded) {
             emit OrderExecuted(orderId, executionPrice);
@@ -712,7 +688,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
             _finalizeExecution(orderId, pythFee, success, failedOutcome);
             return;
         }
-        _cleanupOrder(orderId, success, failedOutcome);
+        _cleanupOrder(orderId, failedOutcome);
     }
 
     /// @notice Prunes expired head-of-queue orders in bounded slices.
@@ -728,26 +704,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         if (boundedPrunes == 0) {
             return;
         }
-        uint256 pruned;
-        uint256 age = maxOrderAge;
-        while (nextExecuteId != 0 && nextExecuteId <= upToId && pruned < boundedPrunes) {
-            uint64 headId = nextExecuteId;
-            OrderRecord storage record = _orderRecord(headId);
-            if (record.status != IOrderRouterAccounting.OrderStatus.Pending) {
-                nextExecuteId = record.nextGlobalOrderId;
-                continue;
-            }
-            if (headId == upToId || age == 0) {
-                break;
-            }
-            CfdTypes.Order memory order = record.core;
-            if (block.timestamp - order.commitTime <= age) {
-                break;
-            }
-            emit OrderFailed(headId, OrderFailReason.Expired);
-            _cleanupOrder(headId, false, _failedOutcomeForTerminalFailure(order, TerminalFailureKind.Expired));
-            pruned++;
-        }
+        _pruneExpiredHeadOrders(upToId, boundedPrunes);
     }
 
     function _resolveOraclePrice(
@@ -819,10 +776,11 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     function _getQueuedPositionView(
         bytes32 accountId
     ) internal view returns (QueuedPositionView memory queuedPosition) {
-        if (engine.hasOpenPosition(accountId)) {
+        (uint256 positionSize,,,, CfdTypes.Side side,,) = engine.positions(accountId);
+        if (positionSize > 0) {
             queuedPosition.exists = true;
-            queuedPosition.side = engine.getPositionSide(accountId);
-            queuedPosition.size = engine.getPositionSize(accountId);
+            queuedPosition.side = side;
+            queuedPosition.size = positionSize;
         }
 
         for (
@@ -886,32 +844,24 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
             }
         }
 
-        return _failedOutcomeForTerminalFailure(order, TerminalFailureKind.EngineRevert);
+        return _failedOutcomeForTerminalFailure(order);
     }
 
     function _failedOutcomeForTerminalFailure(
-        CfdTypes.Order memory order,
-        TerminalFailureKind failureKind
+        CfdTypes.Order memory order
     ) internal pure returns (FailedOrderOutcome outcome) {
         if (order.isClose) {
             return FailedOrderOutcome.ClearerFull;
         }
-
-        failureKind;
         return FailedOrderOutcome.RefundUser;
     }
 
     function _cleanupOrder(
         uint64 orderId,
-        bool success,
         FailedOrderOutcome failedOutcome
     ) internal returns (uint256 executionBountyUsdc) {
-        executionBountyUsdc = _consumeOrderEscrow(orderId, success, _failedOutcomeCode(failedOutcome));
-        _deleteOrder(
-            orderId,
-            true,
-            success ? IOrderRouterAccounting.OrderStatus.Executed : IOrderRouterAccounting.OrderStatus.Failed
-        );
+        executionBountyUsdc = _consumeOrderEscrow(orderId, false, _failedOutcomeCode(failedOutcome));
+        _deleteOrder(orderId, IOrderRouterAccounting.OrderStatus.Failed);
     }
 
     function _finalizeExecution(
@@ -921,11 +871,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         FailedOrderOutcome failedOutcome
     ) internal {
         _consumeOrderEscrow(orderId, success, _failedOutcomeCode(failedOutcome));
-        _deleteOrder(
-            orderId,
-            true,
-            success ? IOrderRouterAccounting.OrderStatus.Executed : IOrderRouterAccounting.OrderStatus.Failed
-        );
+        _deleteOrder(orderId, success ? IOrderRouterAccounting.OrderStatus.Executed : IOrderRouterAccounting.OrderStatus.Failed);
         _sendEth(msg.sender, msg.value - pythFee);
     }
 
@@ -996,7 +942,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
             uint64 nextOrderId = record.nextAccountOrderId;
             _releaseCommittedMargin(orderId);
             emit OrderFailed(orderId, OrderFailReason.AccountLiquidated);
-            _deleteOrder(orderId, orderId == nextExecuteId, IOrderRouterAccounting.OrderStatus.Failed);
+            _deleteOrder(orderId, IOrderRouterAccounting.OrderStatus.Failed);
             orderId = nextOrderId;
         }
     }
@@ -1013,10 +959,6 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         return executionBountyUsdc > MAX_OPEN_ORDER_EXECUTION_BOUNTY_USDC
             ? MAX_OPEN_ORDER_EXECUTION_BOUNTY_USDC
             : executionBountyUsdc;
-    }
-
-    function _quoteCloseOrderExecutionBountyUsdc() internal pure returns (uint256) {
-        return CLOSE_ORDER_EXECUTION_BOUNTY_USDC;
     }
 
     function _commitReferencePrice() internal view returns (uint256 price) {
@@ -1116,7 +1058,6 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
 
     function _deleteOrder(
         uint64 orderId,
-        bool advanceHead,
         IOrderRouterAccounting.OrderStatus terminalStatus
     ) internal {
         OrderRecord storage record = _orderRecord(orderId);
@@ -1133,7 +1074,30 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         if (accountId != bytes32(0) && record.core.isClose && pendingCloseSize[accountId] >= record.core.sizeDelta) {
             pendingCloseSize[accountId] -= record.core.sizeDelta;
         }
-        advanceHead;
+    }
+
+    function _proposeUint(
+        uint256 value
+    ) internal view returns (uint256 pendingValue, uint256 activationTime) {
+        pendingValue = value;
+        activationTime = _timelockReadyAt();
+    }
+
+    function _finalizeUint(
+        TimelockedUintProposal memory proposal
+    ) internal view returns (uint256) {
+        _requireTimelockReady(proposal.activationTime);
+        return proposal.value;
+    }
+
+    function _claimAmount(
+        mapping(address => uint256) storage claimable
+    ) internal returns (uint256 amount) {
+        amount = claimable[msg.sender];
+        if (amount == 0) {
+            revert OrderRouter__NothingToClaim();
+        }
+        claimable[msg.sender] = 0;
     }
 
     function _nextCommitId() internal view override returns (uint64) {
@@ -1146,27 +1110,21 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         _releaseCommittedMargin(orderId);
     }
 
-    /// @notice Claims ETH stuck from failed refund transfers.
-    function claimEth() external {
-        uint256 amount = claimableEth[msg.sender];
-        if (amount == 0) {
-            revert OrderRouter__NothingToClaim();
+    /// @notice Claims ETH or USDC balances that could not be pushed during prior cleanup/refund flows.
+    function claimBalance(
+        bool ethBalance
+    ) external {
+        if (ethBalance) {
+            uint256 ethAmount = _claimAmount(claimableEth);
+            (bool success,) = payable(msg.sender).call{value: ethAmount}("");
+            if (!success) {
+                revert OrderRouter__EthTransferFailed();
+            }
+            return;
         }
-        claimableEth[msg.sender] = 0;
-        (bool success,) = payable(msg.sender).call{value: amount}("");
-        if (!success) {
-            revert OrderRouter__EthTransferFailed();
-        }
-    }
 
-    /// @notice Claims USDC bounty refunds that could not be pushed during failed-order cleanup.
-    function claimUsdc() external {
-        uint256 amount = claimableUsdc[msg.sender];
-        if (amount == 0) {
-            revert OrderRouter__NothingToClaim();
-        }
-        claimableUsdc[msg.sender] = 0;
-        USDC.safeTransfer(msg.sender, amount);
+        uint256 usdcAmount = _claimAmount(claimableUsdc);
+        USDC.safeTransfer(msg.sender, usdcAmount);
     }
 
     function _computeBasketPrice() internal view returns (uint256 basketPrice, uint256 minPublishTime) {

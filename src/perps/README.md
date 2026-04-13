@@ -52,7 +52,7 @@ In practice, the compact public API is:
 - Traders:
   - `MarginClearinghouse.depositMargin(uint256)`
   - `MarginClearinghouse.withdrawMargin(uint256)`
-  - `OrderRouter.submitOrder(CfdTypes.Side side, uint256 sizeDelta, uint256 marginDeltaUsdc, uint256 acceptablePrice, bool isReduceOnly)`
+- `OrderRouter.commitOrder(CfdTypes.Side side, uint256 sizeDelta, uint256 marginDelta, uint256 targetPrice, bool isClose)`
 - Keepers:
   - `OrderRouter.executeOrder(uint64,bytes[])`
   - `OrderRouter.executeOrderBatch(uint64,bytes[])`
@@ -102,7 +102,7 @@ The main runtime and read surfaces are:
 ## Trader Lifecycle
 
 1. Deposit USDC into `MarginClearinghouse`.
-2. Submit an open or close intent through `OrderRouter.submitOrder(...)`.
+2. Submit an open or close intent through `OrderRouter.commitOrder(...)`.
 3. The router records a FIFO order, reserves committed margin, and escrows a keeper execution bounty.
 4. A keeper later calls `executeOrder(...)` or `executeOrderBatch(...)` with Pyth update data.
 5. `OrderRouter` validates oracle freshness, live-market `publishTime > commitTime` ordering, slippage, and queue eligibility, then calls `CfdEngine.processOrderTyped(...)`.

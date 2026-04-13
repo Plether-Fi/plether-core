@@ -115,7 +115,6 @@ contract AuditC02_KeeperFeeRefund is BasePerpTest {
         vm.prank(keeper);
         router.executeOrder{value: 0}(1, empty);
 
-        assertEq(router.claimableEth(spammer), 0, "Refund should be delivered directly to the user");
         assertEq(keeper.balance - keeperBefore, 0, "Keeper should not receive failed-order fee");
         assertEq(spammer.balance, 10 ether, "Failed-order keeper fee should restore the user's ETH balance");
     }

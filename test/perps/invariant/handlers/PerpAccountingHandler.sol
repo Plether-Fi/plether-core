@@ -241,7 +241,7 @@ contract PerpAccountingHandler is Test {
             accountId: accountId,
             routerOpenAllowed: !router.paused() && !engine.degradedMode() && !engine.isOracleFrozen()
                 && !engine.isFadWindow() && vault.canIncreaseRisk()
-                && router.pendingOrderCounts(accountId) < router.MAX_PENDING_ORDERS(),
+                && router.pendingOrderCounts(accountId) < 5,
             prefilterActive: _canUseCommitMarkForOpenPrefilter(),
             failureCategory: engineLens.previewOpenFailurePolicyCategory(
                 accountId, side, sizeDelta, marginDelta, _commitReferencePrice(), engine.lastMarkTime()

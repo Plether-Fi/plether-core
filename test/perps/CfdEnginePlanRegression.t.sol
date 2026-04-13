@@ -196,7 +196,8 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         assertTrue(delta.valid, "Planner should accept the fresh-account open");
 
         _open(freshBullId, CfdTypes.Side.BULL, 10_000e18, 5000e6, 1e8);
-        assertEq(engine.getPositionSize(freshBullId), 10_000e18, "Live open should succeed for the fresh account");
+        (uint256 size,,,,,,) = engine.positions(freshBullId);
+        assertEq(size, 10_000e18, "Live open should succeed for the fresh account");
     }
 
     function test_ComputeOpenMarginAfter_PositiveOffsetDoesNotPanic() public view {

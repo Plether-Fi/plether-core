@@ -324,6 +324,50 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         }
     }
 
+    function _proposeScalarTimelock(
+        uint256 value,
+        uint256 activationTime
+    ) internal view returns (uint256 pendingValue, uint256 readyAt) {
+        pendingValue = value;
+        readyAt = activationTime == 0 ? block.timestamp + TIMELOCK_DELAY : activationTime;
+    }
+
+    function _finalizeScalarTimelock(
+        uint256 pendingValue,
+        uint256 activationTime
+    ) internal view returns (uint256) {
+        _requireTimelockReady(activationTime);
+        return pendingValue;
+    }
+
+    function _prepareDeferredClaim(
+        bytes32 accountId,
+        StoredPosition storage pos
+    ) internal {
+        if (pos.size == 0) {
+            return;
+        }
+
+        (bool priceFresh, uint256 price) = _tryGetFreshLiveMarkPrice();
+        if (!priceFresh) {
+            revert CfdEngine__MarkPriceStale();
+        }
+        _realizeCarryFromSettlement(accountId, pos, price, _genericReachableCollateralUsdc(accountId));
+    }
+
+    function _claimDeferredBalance(
+        uint256 amount,
+        bytes32 accountId
+    ) internal returns (uint256 claimAmountUsdc) {
+        claimAmountUsdc = amount < vault.totalAssets() ? amount : vault.totalAssets();
+        if (claimAmountUsdc == 0) {
+            revert CfdEngine__InsufficientVaultLiquidity();
+        }
+
+        vault.payOut(address(clearinghouse), claimAmountUsdc);
+        clearinghouse.settleUsdc(accountId, int256(claimAmountUsdc));
+    }
+
     modifier onlyRouter() {
         if (msg.sender != orderRouter) {
             revert CfdEngine__Unauthorized();
@@ -389,7 +433,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     ) external onlyOwner {
         _validateRiskParams(_riskParams);
         pendingRiskParams = _riskParams;
-        riskParamsActivationTime = block.timestamp + TIMELOCK_DELAY;
+        (, riskParamsActivationTime) = _proposeScalarTimelock(0, 0);
         emit RiskParamsProposed(riskParamsActivationTime);
     }
 
@@ -477,15 +521,13 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         if (_seconds == 0) {
             revert CfdEngine__ZeroStaleness();
         }
-        pendingFadMaxStaleness = _seconds;
-        fadMaxStalenessActivationTime = block.timestamp + TIMELOCK_DELAY;
+        (pendingFadMaxStaleness, fadMaxStalenessActivationTime) = _proposeScalarTimelock(_seconds, 0);
         emit FadMaxStalenessProposed(_seconds, fadMaxStalenessActivationTime);
     }
 
     /// @notice Applies proposed fadMaxStaleness after timelock expires
     function finalizeFadMaxStaleness() external onlyOwner {
-        _requireTimelockReady(fadMaxStalenessActivationTime);
-        fadMaxStaleness = pendingFadMaxStaleness;
+        fadMaxStaleness = _finalizeScalarTimelock(pendingFadMaxStaleness, fadMaxStalenessActivationTime);
         pendingFadMaxStaleness = 0;
         fadMaxStalenessActivationTime = 0;
         emit FadMaxStalenessUpdated(fadMaxStaleness);
@@ -505,15 +547,13 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         if (_seconds > 24 hours) {
             revert CfdEngine__RunwayTooLong();
         }
-        pendingFadRunway = _seconds;
-        fadRunwayActivationTime = block.timestamp + TIMELOCK_DELAY;
+        (pendingFadRunway, fadRunwayActivationTime) = _proposeScalarTimelock(_seconds, 0);
         emit FadRunwayProposed(_seconds, fadRunwayActivationTime);
     }
 
     /// @notice Applies proposed fadRunway after timelock expires
     function finalizeFadRunway() external onlyOwner {
-        _requireTimelockReady(fadRunwayActivationTime);
-        fadRunwaySeconds = pendingFadRunway;
+        fadRunwaySeconds = _finalizeScalarTimelock(pendingFadRunway, fadRunwayActivationTime);
         pendingFadRunway = 0;
         fadRunwayActivationTime = 0;
         emit FadRunwayUpdated(fadRunwaySeconds);
@@ -533,20 +573,14 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         if (newStaleness == 0) {
             revert CfdEngine__ZeroStaleness();
         }
-        pendingEngineMarkStalenessLimit = newStaleness;
-        engineMarkStalenessActivationTime = block.timestamp + TIMELOCK_DELAY;
+        (pendingEngineMarkStalenessLimit, engineMarkStalenessActivationTime) = _proposeScalarTimelock(newStaleness, 0);
         emit EngineMarkStalenessLimitProposed(newStaleness, engineMarkStalenessActivationTime);
     }
 
     /// @notice Finalizes the pending engine mark staleness limit after the timelock expires.
     function finalizeEngineMarkStalenessLimit() external onlyOwner {
-        if (engineMarkStalenessActivationTime == 0) {
-            revert CfdEngine__NoProposal();
-        }
-        if (block.timestamp < engineMarkStalenessActivationTime) {
-            revert CfdEngine__TimelockNotReady();
-        }
-        engineMarkStalenessLimit = pendingEngineMarkStalenessLimit;
+        engineMarkStalenessLimit =
+            _finalizeScalarTimelock(pendingEngineMarkStalenessLimit, engineMarkStalenessActivationTime);
         pendingEngineMarkStalenessLimit = 0;
         engineMarkStalenessActivationTime = 0;
         emit EngineMarkStalenessLimitUpdated(engineMarkStalenessLimit);
@@ -697,27 +731,16 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         bytes32 accountId
     ) external nonReentrant {
         StoredPosition storage pos = _positions[accountId];
-        if (pos.size > 0) {
-            (bool priceFresh, uint256 price) = _tryGetFreshLiveMarkPrice();
-            if (!priceFresh) {
-                revert CfdEngine__MarkPriceStale();
-            }
-            _realizeCarryFromSettlement(accountId, pos, price, _genericReachableCollateralUsdc(accountId));
-        }
+        _prepareDeferredClaim(accountId, pos);
 
         uint256 amount = deferredPayoutUsdc[accountId];
         if (amount == 0) {
             revert CfdEngine__NoDeferredPayout();
         }
-        uint256 claimAmountUsdc = amount < vault.totalAssets() ? amount : vault.totalAssets();
-        if (claimAmountUsdc == 0) {
-            revert CfdEngine__InsufficientVaultLiquidity();
-        }
+        uint256 claimAmountUsdc = _claimDeferredBalance(amount, accountId);
 
         deferredPayoutUsdc[accountId] -= claimAmountUsdc;
         totalDeferredPayoutUsdc -= claimAmountUsdc;
-        vault.payOut(address(clearinghouse), claimAmountUsdc);
-        clearinghouse.settleUsdc(accountId, int256(claimAmountUsdc));
 
         emit DeferredPayoutClaimed(accountId, claimAmountUsdc);
     }
@@ -729,28 +752,17 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         address beneficiary = msg.sender;
         bytes32 accountId = bytes32(uint256(uint160(beneficiary)));
         StoredPosition storage pos = _positions[accountId];
-        if (pos.size > 0) {
-            (bool priceFresh, uint256 price) = _tryGetFreshLiveMarkPrice();
-            if (!priceFresh) {
-                revert CfdEngine__MarkPriceStale();
-            }
-            _realizeCarryFromSettlement(accountId, pos, price, _genericReachableCollateralUsdc(accountId));
-        }
+        _prepareDeferredClaim(accountId, pos);
 
         uint256 amount = deferredClearerBountyUsdc[beneficiary];
         if (amount == 0) {
             revert CfdEngine__NoDeferredClearerBounty();
         }
 
-        uint256 claimAmountUsdc = amount < vault.totalAssets() ? amount : vault.totalAssets();
-        if (claimAmountUsdc == 0) {
-            revert CfdEngine__InsufficientVaultLiquidity();
-        }
+        uint256 claimAmountUsdc = _claimDeferredBalance(amount, accountId);
 
         deferredClearerBountyUsdc[beneficiary] -= claimAmountUsdc;
         totalDeferredClearerBountyUsdc -= claimAmountUsdc;
-        vault.payOut(address(clearinghouse), claimAmountUsdc);
-        clearinghouse.settleUsdc(accountId, int256(claimAmountUsdc));
 
         emit DeferredClearerBountyClaimed(beneficiary, claimAmountUsdc);
     }
@@ -1048,12 +1060,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         return MarketCalendarLib.isOracleFrozen(block.timestamp, fadDayOverrides[block.timestamp / 86_400]);
     }
 
-    function hasOpenPosition(
-        bytes32 accountId
-    ) external view returns (bool) {
-        return _positions[accountId].size > 0;
-    }
-
     function positions(
         bytes32 accountId
     )
@@ -1071,18 +1077,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     {
         CfdTypes.Position memory pos = _loadPosition(accountId);
         return (pos.size, pos.margin, pos.entryPrice, pos.maxProfitUsdc, pos.side, pos.lastUpdateTime, pos.vpiAccrued);
-    }
-
-    function getPositionSize(
-        bytes32 accountId
-    ) external view returns (uint256) {
-        return _positions[accountId].size;
-    }
-
-    function getPositionSide(
-        bytes32 accountId
-    ) external view returns (CfdTypes.Side) {
-        return _positions[accountId].side;
     }
 
     function getPositionLastCarryTimestamp(

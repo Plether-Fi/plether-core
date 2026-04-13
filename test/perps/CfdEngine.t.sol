@@ -2490,7 +2490,7 @@ contract CfdEngineTest is BasePerpTest {
         _open(accountId, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
 
         vm.startPrank(trader);
-        uint256 queuedOrderCount = router.MAX_PENDING_ORDERS();
+        uint256 queuedOrderCount = 5;
         for (uint256 i = 0; i < queuedOrderCount; i++) {
             router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 100e6, type(uint256).max, false);
         }
@@ -2859,7 +2859,7 @@ contract CfdEngineTest is BasePerpTest {
         _open(accountId, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
 
         vm.startPrank(trader);
-        uint256 queuedOrderCount = router.MAX_PENDING_ORDERS();
+        uint256 queuedOrderCount = 5;
         for (uint256 i = 0; i < queuedOrderCount; i++) {
             router.commitOrder(CfdTypes.Side.BULL, 1000e18, 0, type(uint256).max, true);
         }
@@ -4571,7 +4571,7 @@ contract CfdEngineAuditTest is BasePerpTest {
         (uint256 sizeBefore,,,,,,) = engine.positions(carolAccount);
 
         router.proposeMaxOrderAge(0);
-        vm.warp(block.timestamp + router.TIMELOCK_DELAY() + 1);
+        vm.warp(block.timestamp + 48 hours + 1);
         router.finalizeMaxOrderAge();
 
         vm.prank(carol);
