@@ -890,7 +890,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         if (priceFresh) {
             clearinghouse.seizePositionMarginUsdc(accountId, amountUsdc, recipient);
         } else {
-            clearinghouse.seizePositionMarginUsdcWithoutCarryCheckpoint(accountId, amountUsdc, recipient);
+            clearinghouse.reserveStaleCloseExecutionBountyFromPositionMargin(accountId, amountUsdc, recipient);
         }
     }
 

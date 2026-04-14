@@ -189,9 +189,9 @@ interface IMarginClearinghouse {
         uint256 amount,
         address recipient
     ) external;
-    /// @notice Transfers free-settlement USDC from an account without forcing a fresh-mark carry checkpoint.
-    /// @dev Intended only for stale close-commit bounty reservation, where generic carry-checkpoint liveness is relaxed.
-    function seizeUsdcWithoutCarryCheckpoint(
+    /// @notice Reserves free-settlement USDC for a stale close-order execution bounty without checkpointing carry.
+    /// @dev Restricted to the order router's stale close-bounty path.
+    function reserveStaleCloseExecutionBountyFromSettlement(
         bytes32 accountId,
         uint256 amount,
         address recipient
@@ -202,9 +202,9 @@ interface IMarginClearinghouse {
         uint256 amount,
         address recipient
     ) external;
-    /// @notice Transfers active position margin without forcing a fresh-mark carry checkpoint.
-    /// @dev Intended only for stale close-commit bounty reservation after the engine has already bounded the result.
-    function seizePositionMarginUsdcWithoutCarryCheckpoint(
+    /// @notice Reserves active position margin for a stale close-order execution bounty without checkpointing carry.
+    /// @dev Restricted to the engine's bounded stale close-bounty path.
+    function reserveStaleCloseExecutionBountyFromPositionMargin(
         bytes32 accountId,
         uint256 amount,
         address recipient

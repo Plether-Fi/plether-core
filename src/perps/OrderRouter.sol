@@ -293,11 +293,13 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
             uint256 commitPrice = _commitReferencePrice();
             if (_canUseCommitMarkForOpenPrefilter()) {
                 uint64 commitMarkTime = engine.lastMarkTime();
-                CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory = engineLens.previewOpenFailurePolicyCategory(
+                CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory =
+                    engineLens.previewOpenFailurePolicyCategory(
+                        accountId, side, sizeDelta, marginDelta, commitPrice, commitMarkTime
+                    );
+                uint8 revertCode = engineLens.previewOpenRevertCode(
                     accountId, side, sizeDelta, marginDelta, commitPrice, commitMarkTime
                 );
-                uint8 revertCode =
-                    engineLens.previewOpenRevertCode(accountId, side, sizeDelta, marginDelta, commitPrice, commitMarkTime);
                 if (OrderFailurePolicyLib.isPredictablyInvalidOpen(failureCategory)) {
                     revert OrderRouter__PredictableOpenInvalid(revertCode);
                 }
@@ -454,15 +456,16 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
                     break;
                 }
                 emit OrderFailed(orderId, OrderFailReason.Expired);
-                _cleanupOrder(orderId, _failedOutcomeForTerminalFailure(order), update.executionPrice, update.oraclePublishTime);
+                _cleanupOrder(
+                    orderId, _failedOutcomeForTerminalFailure(order), update.executionPrice, update.oraclePublishTime
+                );
                 expiredPrunes++;
                 continue;
             }
 
-            OrderExecutionStepResult result =
-                _executePendingOrder(
-                    orderId, order, update.executionPrice, update.oraclePublishTime, executionContext, false, 0
-                );
+            OrderExecutionStepResult result = _executePendingOrder(
+                orderId, order, update.executionPrice, update.oraclePublishTime, executionContext, false, 0
+            );
             if (result == OrderExecutionStepResult.Break) {
                 break;
             }
@@ -662,7 +665,9 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
             if (hasFreshCarryCheckpointMark) {
                 clearinghouse.seizeUsdc(accountId, freeBackedBountyUsdc, address(this));
             } else {
-                clearinghouse.seizeUsdcWithoutCarryCheckpoint(accountId, freeBackedBountyUsdc, address(this));
+                clearinghouse.reserveStaleCloseExecutionBountyFromSettlement(
+                    accountId, freeBackedBountyUsdc, address(this)
+                );
             }
         }
 

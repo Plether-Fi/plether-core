@@ -84,6 +84,22 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         _;
     }
 
+    modifier onlyOrderRouter() {
+        address engine_ = engine;
+        if (engine_ == address(0) || msg.sender != ICfdEngineCore(engine_).orderRouter()) {
+            revert MarginClearinghouse__NotOperator();
+        }
+        _;
+    }
+
+    modifier onlyEngine() {
+        address engine_ = engine;
+        if (engine_ == address(0) || msg.sender != engine_) {
+            revert MarginClearinghouse__NotOperator();
+        }
+        _;
+    }
+
     /// @param _settlementAsset USDC address used for PnL settlement and margin backing
     constructor(
         address _settlementAsset
@@ -939,14 +955,12 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         emit AssetSeized(accountId, settlementAsset, amount, recipient);
     }
 
-    /// @notice Transfers free settlement without forcing a fresh-mark carry checkpoint.
-    /// @dev This narrow escape hatch is reserved for stale close-commit bounty reservation, where
-    ///      risk-reducing liveness takes priority over the generic fresh-mark carry checkpoint path.
-    function seizeUsdcWithoutCarryCheckpoint(
+    /// @notice Reserves free settlement for the router's stale close-bounty path without checkpointing carry.
+    function reserveStaleCloseExecutionBountyFromSettlement(
         bytes32 accountId,
         uint256 amount,
         address recipient
-    ) external onlyOperator {
+    ) external onlyOrderRouter {
         if (recipient != msg.sender) {
             revert MarginClearinghouse__InvalidSeizeRecipient();
         }
@@ -986,14 +1000,12 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         emit AssetSeized(accountId, settlementAsset, amount, recipient);
     }
 
-    /// @notice Transfers active position margin without forcing a fresh-mark carry checkpoint.
-    /// @dev This narrow escape hatch is reserved for stale close-commit bounty reservation after
-    ///      the engine has already validated the stored-mark maintenance constraints.
-    function seizePositionMarginUsdcWithoutCarryCheckpoint(
+    /// @notice Reserves active position margin for the engine's stale close-bounty path without checkpointing carry.
+    function reserveStaleCloseExecutionBountyFromPositionMargin(
         bytes32 accountId,
         uint256 amount,
         address recipient
-    ) external onlyOperator {
+    ) external onlyEngine {
         if (recipient == address(0)) {
             revert MarginClearinghouse__ZeroAddress();
         }
