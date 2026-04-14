@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
+import {IPyth, PythStructs} from "../../src/interfaces/IPyth.sol";
+import {DecimalConstants} from "../../src/libraries/DecimalConstants.sol";
 import {BasketOracle} from "../../src/oracles/BasketOracle.sol";
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
@@ -2691,7 +2693,67 @@ contract BasketPriceHarness is OrderRouter {
         uint256 maxStaleness,
         uint256 maxPublishTimeDivergence
     ) external view returns (uint256, uint256) {
-        return _computeBasketPrice(maxStaleness, maxPublishTimeDivergence);
+        uint256 minPublishTime = type(uint256).max;
+        uint256 maxPublishTime;
+        uint256 basketPrice;
+
+        for (uint256 i = 0; i < pythFeedIds.length; i++) {
+            PythStructs.Price memory p = IPyth(address(pyth)).getPriceUnsafe(pythFeedIds[i]);
+            if (block.timestamp > uint64(p.publishTime) + maxStaleness) {
+                _revertOraclePriceTooStale();
+            }
+
+            uint256 norm =
+                inversions[i] ? _localInvertPythPrice(p.price, p.expo) : _localNormalizePythPrice(p.price, p.expo);
+            basketPrice += (norm * quantities[i]) / (basePrices[i] * DecimalConstants.CHAINLINK_TO_TOKEN_SCALE);
+
+            if (p.publishTime < minPublishTime) {
+                minPublishTime = p.publishTime;
+            }
+            if (p.publishTime > maxPublishTime) {
+                maxPublishTime = p.publishTime;
+            }
+        }
+
+        if (maxPublishTime > minPublishTime + maxPublishTimeDivergence) {
+            _revertOraclePriceTooStale();
+        }
+        if (basketPrice == 0) {
+            _revertOraclePriceNegative();
+        }
+
+        return (basketPrice, minPublishTime);
+    }
+
+    function _localInvertPythPrice(
+        int64 price,
+        int32 expo
+    ) internal pure returns (uint256 normalizedPrice) {
+        if (price <= 0) {
+            revert OrderRouter__OraclePriceNegative();
+        }
+        uint256 positivePrice = uint256(uint64(price));
+        uint256 scaledPrecision = 10 ** uint256(uint32(26 - expo));
+        uint256 scaledInverse = (scaledPrecision + (positivePrice / 2)) / positivePrice;
+        return scaledInverse / 1e18;
+    }
+
+    function _localNormalizePythPrice(
+        int64 price,
+        int32 expo
+    ) internal pure returns (uint256 normalizedPrice) {
+        if (price <= 0) {
+            revert OrderRouter__OraclePriceNegative();
+        }
+
+        uint256 rawPrice = uint256(uint64(price));
+        if (expo == -8) {
+            return rawPrice;
+        }
+        if (expo > -8) {
+            return rawPrice * (10 ** uint256(uint32(expo + 8)));
+        }
+        return rawPrice / (10 ** uint256(uint32(-8 - expo)));
     }
 
 }
@@ -2715,7 +2777,18 @@ contract NormalizePythHarness is OrderRouter {
         int64 price,
         int32 expo
     ) external pure returns (uint256) {
-        return _normalizePythPrice(price, expo);
+        if (price <= 0) {
+            revert OrderRouter__OraclePriceNegative();
+        }
+
+        uint256 rawPrice = uint256(uint64(price));
+        if (expo == -8) {
+            return rawPrice;
+        }
+        if (expo > -8) {
+            return rawPrice * (10 ** uint256(uint32(expo + 8)));
+        }
+        return rawPrice / (10 ** uint256(uint32(-8 - expo)));
     }
 
 }
@@ -3373,10 +3446,11 @@ contract FadStalenessTest is BasePerpTest {
 
     function test_FadWindow_Liquidation_AcceptsStalePrice() public {
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        uint64 fridayPublishTime = uint64(FRIDAY_18UTC + 6);
         vm.prank(address(router));
         engine.updateMarkPrice(180_000_000, uint64(block.timestamp));
 
-        mockPyth.setAllPrices(feedIds, int64(180_000_000), int32(-8), uint64(block.timestamp));
+        mockPyth.setAllPrices(feedIds, int64(180_000_000), int32(-8), fridayPublishTime);
 
         vm.warp(SATURDAY_NOON);
         bytes[] memory empty = _pythUpdateData();
@@ -3385,6 +3459,22 @@ contract FadStalenessTest is BasePerpTest {
 
         (uint256 size,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "Liquidation should succeed during FAD with stale price");
+        assertEq(
+            engine.lastMarkTime(), fridayPublishTime, "Liquidation should accept the frozen-window Friday publish time"
+        );
+    }
+
+    function test_FadWindow_MarkRefresh_AcceptsStaleFridayPrice() public {
+        bytes[] memory empty = _pythUpdateData();
+        uint64 fridayPublishTime = uint64(FRIDAY_18UTC + 6);
+
+        vm.warp(SATURDAY_NOON);
+        router.updateMarkPrice(empty);
+
+        assertEq(
+            engine.lastMarkTime(), fridayPublishTime, "Mark refresh should accept the frozen-window Friday publish time"
+        );
+        assertEq(engine.lastMarkPrice(), 80_000_000, "Mark refresh should store the Friday oracle price");
     }
 
     function test_FadWindow_Liquidation_ExcessStaleness_Reverts() public {

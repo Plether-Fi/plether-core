@@ -10,13 +10,10 @@ import {IPerpsKeeper} from "./interfaces/IPerpsKeeper.sol";
 import {IPerpsTraderActions} from "./interfaces/IPerpsTraderActions.sol";
 import {CashPriorityLib} from "./libraries/CashPriorityLib.sol";
 import {MarginClearinghouseAccountingLib} from "./libraries/MarginClearinghouseAccountingLib.sol";
-import {MarketCalendarLib} from "./libraries/MarketCalendarLib.sol";
 import {OracleFreshnessPolicyLib} from "./libraries/OracleFreshnessPolicyLib.sol";
 import {OrderFailurePolicyLib} from "./libraries/OrderFailurePolicyLib.sol";
-import {OrderEscrowAccounting} from "./modules/OrderEscrowAccounting.sol";
 import {OrderExecutionOrchestrator} from "./modules/OrderExecutionOrchestrator.sol";
 import {OrderOracleExecution} from "./modules/OrderOracleExecution.sol";
-import {OrderQueueBook} from "./modules/OrderQueueBook.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -161,6 +158,14 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         revert OrderRouter__OraclePriceTooStale();
     }
 
+    function _revertOraclePublishTimeOutOfOrder() internal pure override {
+        revert OrderRouter__OraclePublishTimeOutOfOrder();
+    }
+
+    function _revertMevOraclePriceTooStale() internal pure override {
+        revert OrderRouter__MevOraclePriceTooStale();
+    }
+
     function _revertOraclePriceNegative() internal pure override {
         revert OrderRouter__OraclePriceNegative();
     }
@@ -271,21 +276,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
             revert OrderRouter__CloseMarginDeltaNotAllowed();
         }
         bytes32 accountId = bytes32(uint256(uint160(msg.sender)));
-        if (!isClose && _canUseCommitMarkForOpenPrefilter()) {
-            uint256 commitPrice = _commitReferencePrice();
-            uint64 commitMarkTime = engine.lastMarkTime();
-            CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory = engineLens.previewOpenFailurePolicyCategory(
-                accountId, side, sizeDelta, marginDelta, commitPrice, commitMarkTime
-            );
-            uint8 revertCode =
-                engineLens.previewOpenRevertCode(accountId, side, sizeDelta, marginDelta, commitPrice, commitMarkTime);
-            if (OrderFailurePolicyLib.isPredictablyInvalidOpen(failureCategory)) {
-                revert OrderRouter__PredictableOpenInvalid(revertCode);
-            }
-        }
-        if (pendingOrderCounts[accountId] >= MAX_PENDING_ORDERS) {
-            revert OrderRouter__TooManyPendingOrders();
-        }
+        uint256 executionBountyUsdc;
         if (isClose) {
             QueuedPositionView memory queuedPosition = _getQueuedPositionView(accountId);
             if (!queuedPosition.exists || queuedPosition.size == 0) {
@@ -297,10 +288,22 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
             if (sizeDelta > queuedPosition.size) {
                 revert OrderRouter__CloseSizeExceedsPosition();
             }
+            executionBountyUsdc = CLOSE_ORDER_EXECUTION_BOUNTY_USDC;
+        } else {
+            uint256 commitPrice = _commitReferencePrice();
+            if (_canUseCommitMarkForOpenPrefilter()) {
+                uint64 commitMarkTime = engine.lastMarkTime();
+                CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory = engineLens.previewOpenFailurePolicyCategory(
+                    accountId, side, sizeDelta, marginDelta, commitPrice, commitMarkTime
+                );
+                uint8 revertCode =
+                    engineLens.previewOpenRevertCode(accountId, side, sizeDelta, marginDelta, commitPrice, commitMarkTime);
+                if (OrderFailurePolicyLib.isPredictablyInvalidOpen(failureCategory)) {
+                    revert OrderRouter__PredictableOpenInvalid(revertCode);
+                }
+            }
+            executionBountyUsdc = _quoteOpenOrderExecutionBountyUsdc(sizeDelta, commitPrice);
         }
-        uint256 executionBountyUsdc = isClose
-            ? CLOSE_ORDER_EXECUTION_BOUNTY_USDC
-            : _quoteOpenOrderExecutionBountyUsdc(sizeDelta, _commitReferencePrice());
 
         uint64 orderId = nextCommitId++;
 
@@ -325,7 +328,9 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         }
         _linkGlobalOrder(orderId);
         _linkAccountOrder(accountId, orderId);
-        pendingOrderCounts[accountId]++;
+        if (++pendingOrderCounts[accountId] > MAX_PENDING_ORDERS) {
+            revert OrderRouter__TooManyPendingOrders();
+        }
         emit OrderCommitted(orderId, accountId, side);
     }
 
@@ -391,37 +396,10 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         uint64 initialHeadOrderId = nextExecuteId;
         (, CfdTypes.Order memory initialHeadOrder) = _pendingOrder(initialHeadOrderId);
 
-        RouterExecutionContext memory executionContext;
-        uint256 maxStaleness;
-        if (address(pyth) != address(0)) {
-            executionContext = _currentRouterExecutionContext();
-            maxStaleness = executionContext.policy.maxStaleness;
-        }
+        (OracleUpdateResult memory update, RouterExecutionContext memory executionContext) =
+            _prepareOrderExecutionOracle(pythUpdateData, initialHeadOrder.targetPrice);
 
-        (uint256 executionPrice, uint64 oraclePublishTime, uint256 pythFee) = _resolveOraclePrice(
-            pythUpdateData, initialHeadOrder.targetPrice, maxStaleness, orderExecutionStalenessLimit
-        );
-
-        if (address(pyth) != address(0)) {
-            if (OracleFreshnessPolicyLib.isStale(
-                    oraclePublishTime, executionContext.policy.maxStaleness, block.timestamp
-                )) {
-                revert OrderRouter__OraclePriceTooStale();
-            }
-        }
-
-        if (oraclePublishTime < engine.lastMarkTime()) {
-            revert OrderRouter__OraclePublishTimeOutOfOrder();
-        }
-
-        uint256 capPrice = engine.CAP_PRICE();
-        if (executionPrice > capPrice) {
-            executionPrice = capPrice;
-        }
-
-        engine.updateMarkPrice(executionPrice, oraclePublishTime);
-
-        _skipStaleOrders(orderId, executionPrice, oraclePublishTime);
+        _skipStaleOrders(orderId, update.executionPrice, update.oraclePublishTime);
         if (nextExecuteId == 0) {
             revert OrderRouter__NoOrdersToExecute();
         }
@@ -433,7 +411,9 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         }
         (, CfdTypes.Order memory order) = _pendingOrder(orderId);
 
-        _executePendingOrder(orderId, order, executionPrice, oraclePublishTime, executionContext, true, pythFee);
+        _executePendingOrder(
+            orderId, order, update.executionPrice, update.oraclePublishTime, executionContext, true, update.pythFee
+        );
     }
 
     /// @notice Executes queued pending orders against a single Pyth price tick.
@@ -455,33 +435,9 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
             revert OrderRouter__MaxOrderIdNotCommitted();
         }
 
-        RouterExecutionContext memory executionContext;
-        uint256 maxStaleness;
-        if (address(pyth) != address(0)) {
-            executionContext = _currentRouterExecutionContext();
-            maxStaleness = executionContext.policy.maxStaleness;
-        }
-
-        (uint256 executionPrice, uint64 oraclePublishTime, uint256 pythFee) =
-            _resolveOraclePrice(pythUpdateData, 1e8, maxStaleness, orderExecutionStalenessLimit);
-
-        if (address(pyth) != address(0)) {
-            if (OracleFreshnessPolicyLib.isStale(
-                    oraclePublishTime, executionContext.policy.maxStaleness, block.timestamp
-                )) {
-                revert OrderRouter__OraclePriceTooStale();
-            }
-        }
-
-        if (oraclePublishTime < engine.lastMarkTime()) {
-            revert OrderRouter__OraclePublishTimeOutOfOrder();
-        }
-
-        uint256 capPrice = engine.CAP_PRICE();
-        uint256 clampedPrice = executionPrice > capPrice ? capPrice : executionPrice;
+        (OracleUpdateResult memory update, RouterExecutionContext memory executionContext) =
+            _prepareOrderExecutionOracle(pythUpdateData, 1e8);
         uint256 expiredPrunes;
-
-        engine.updateMarkPrice(clampedPrice, oraclePublishTime);
 
         while (nextExecuteId != 0 && nextExecuteId <= maxOrderId) {
             uint64 orderId = nextExecuteId;
@@ -498,19 +454,21 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
                     break;
                 }
                 emit OrderFailed(orderId, OrderFailReason.Expired);
-                _cleanupOrder(orderId, _failedOutcomeForTerminalFailure(order), executionPrice, oraclePublishTime);
+                _cleanupOrder(orderId, _failedOutcomeForTerminalFailure(order), update.executionPrice, update.oraclePublishTime);
                 expiredPrunes++;
                 continue;
             }
 
             OrderExecutionStepResult result =
-                _executePendingOrder(orderId, order, clampedPrice, oraclePublishTime, executionContext, false, 0);
+                _executePendingOrder(
+                    orderId, order, update.executionPrice, update.oraclePublishTime, executionContext, false, 0
+                );
             if (result == OrderExecutionStepResult.Break) {
                 break;
             }
         }
 
-        _sendEth(msg.sender, msg.value - pythFee);
+        _sendEth(msg.sender, msg.value - update.pythFee);
     }
 
     // ==========================================
@@ -547,10 +505,6 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
 
     function _revertNoOrdersToExecute() internal pure override {
         revert OrderRouter__NoOrdersToExecute();
-    }
-
-    function _revertOraclePublishTimeOutOfOrder() internal pure override {
-        revert OrderRouter__OraclePublishTimeOutOfOrder();
     }
 
     function _revertInsufficientGas() internal pure override {
@@ -699,33 +653,17 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         bytes32 accountId,
         uint256 executionBountyUsdc
     ) internal override {
-        if (!_hasFreshCarryCheckpointMark()) {
-            uint256 staleModeFreeSettlementUsdc =
-                MarginClearinghouseAccountingLib.getFreeSettlementUsdc(clearinghouse.getAccountUsdcBuckets(accountId));
-            uint256 staleModeFreeBackedBountyUsdc =
-                staleModeFreeSettlementUsdc > executionBountyUsdc ? executionBountyUsdc : staleModeFreeSettlementUsdc;
-            if (staleModeFreeBackedBountyUsdc > 0) {
-                clearinghouse.seizeUsdcWithoutCarryCheckpoint(accountId, staleModeFreeBackedBountyUsdc, address(this));
-            }
-
-            uint256 staleModeMarginBackedBountyUsdc = executionBountyUsdc - staleModeFreeBackedBountyUsdc;
-            if (staleModeMarginBackedBountyUsdc == 0) {
-                return;
-            }
-
-            try engine.reserveCloseOrderExecutionBounty(accountId, staleModeMarginBackedBountyUsdc, address(this)) {}
-            catch {
-                revert OrderRouter__InsufficientFreeEquity();
-            }
-            return;
-        }
-
+        bool hasFreshCarryCheckpointMark = _hasFreshCarryCheckpointMark();
         uint256 freeSettlementUsdc =
             MarginClearinghouseAccountingLib.getFreeSettlementUsdc(clearinghouse.getAccountUsdcBuckets(accountId));
         uint256 freeBackedBountyUsdc =
             freeSettlementUsdc > executionBountyUsdc ? executionBountyUsdc : freeSettlementUsdc;
         if (freeBackedBountyUsdc > 0) {
-            clearinghouse.seizeUsdc(accountId, freeBackedBountyUsdc, address(this));
+            if (hasFreshCarryCheckpointMark) {
+                clearinghouse.seizeUsdc(accountId, freeBackedBountyUsdc, address(this));
+            } else {
+                clearinghouse.seizeUsdcWithoutCarryCheckpoint(accountId, freeBackedBountyUsdc, address(this));
+            }
         }
 
         uint256 marginBackedBountyUsdc = executionBountyUsdc - freeBackedBountyUsdc;
@@ -838,28 +776,8 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     function updateMarkPrice(
         bytes[] calldata pythUpdateData
     ) external payable {
-        (uint256 executionPrice, uint64 oraclePublishTime, uint256 pythFee) =
-            _resolveOraclePrice(pythUpdateData, 1e8, orderExecutionStalenessLimit, orderExecutionStalenessLimit);
-
-        if (address(pyth) != address(0)) {
-            OracleFreshnessPolicyLib.Policy memory policy = OracleFreshnessPolicyLib.getPolicy(
-                OracleFreshnessPolicyLib.Mode.MarkRefresh,
-                _isOracleFrozen(),
-                engine.isFadWindow(),
-                engine.engineMarkStalenessLimit(),
-                vault.markStalenessLimit(),
-                orderExecutionStalenessLimit,
-                liquidationStalenessLimit,
-                engine.fadMaxStaleness()
-            );
-            if (OracleFreshnessPolicyLib.isStale(oraclePublishTime, policy.maxStaleness, block.timestamp)) {
-                revert OrderRouter__OraclePriceTooStale();
-            }
-        }
-
-        engine.updateMarkPrice(executionPrice, oraclePublishTime);
-
-        _sendEth(msg.sender, msg.value - pythFee);
+        OracleUpdateResult memory update = _prepareMarkRefreshOracle(pythUpdateData);
+        _sendEth(msg.sender, msg.value - update.pythFee);
     }
 
     // ==========================================
@@ -875,34 +793,18 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         bytes32 accountId,
         bytes[] calldata pythUpdateData
     ) external payable {
-        (uint256 executionPrice, uint64 oraclePublishTime, uint256 pythFee) =
-            _resolveOraclePrice(pythUpdateData, 1e8, liquidationStalenessLimit, liquidationStalenessLimit);
-
-        if (address(pyth) != address(0)) {
-            OracleFreshnessPolicyLib.Policy memory policy = OracleFreshnessPolicyLib.getPolicy(
-                OracleFreshnessPolicyLib.Mode.Liquidation,
-                _isOracleFrozen(),
-                engine.isFadWindow(),
-                engine.engineMarkStalenessLimit(),
-                vault.markStalenessLimit(),
-                orderExecutionStalenessLimit,
-                liquidationStalenessLimit,
-                engine.fadMaxStaleness()
-            );
-            if (OracleFreshnessPolicyLib.isStale(oraclePublishTime, policy.maxStaleness, block.timestamp)) {
-                revert OrderRouter__MevOraclePriceTooStale();
-            }
-        }
+        OracleUpdateResult memory update = _prepareLiquidationOracle(pythUpdateData);
 
         _forfeitEscrowedOrderBountiesOnLiquidation(accountId);
         uint256 vaultDepth = vault.totalAssets();
-        uint256 keeperBountyUsdc = engine.liquidatePosition(accountId, executionPrice, vaultDepth, oraclePublishTime);
+        uint256 keeperBountyUsdc =
+            engine.liquidatePosition(accountId, update.executionPrice, vaultDepth, update.oraclePublishTime);
 
         _clearLiquidatedAccountOrders(accountId);
 
-        _creditOrDeferLiquidationBounty(keeperBountyUsdc, executionPrice, oraclePublishTime);
+        _creditOrDeferLiquidationBounty(keeperBountyUsdc, update.executionPrice, update.oraclePublishTime);
 
-        _sendEth(msg.sender, msg.value - pythFee);
+        _sendEth(msg.sender, msg.value - update.pythFee);
     }
 
     function _revertInsufficientFreeEquity() internal pure override {

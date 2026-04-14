@@ -18,6 +18,12 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
         OracleFreshnessPolicyLib.Policy policy;
     }
 
+    struct OracleUpdateResult {
+        uint256 executionPrice;
+        uint64 oraclePublishTime;
+        uint256 pythFee;
+    }
+
     ICfdVault internal immutable vault;
     ICfdEngineLens internal immutable engineLens;
     IPyth public pyth;
@@ -42,6 +48,8 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
     function _revertInsufficientPythFee() internal pure virtual;
     function _revertMockModeDisabled() internal pure virtual;
     function _revertOraclePriceTooStale() internal pure virtual;
+    function _revertOraclePublishTimeOutOfOrder() internal pure virtual;
+    function _revertMevOraclePriceTooStale() internal pure virtual;
     function _revertOraclePriceNegative() internal pure virtual;
 
     constructor(
@@ -93,6 +101,88 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
         context.oracleFrozen = _isOracleFrozen();
         context.isFadWindow = engine.isFadWindow();
         context.policy = _executionPolicyForOrder(false, context.oracleFrozen, context.isFadWindow);
+    }
+
+    function _prepareOrderExecutionOracle(
+        bytes[] calldata pythUpdateData,
+        uint256 mockFallbackPrice
+    ) internal returns (OracleUpdateResult memory update, RouterExecutionContext memory executionContext) {
+        uint256 maxStaleness;
+        if (address(pyth) != address(0)) {
+            executionContext = _currentRouterExecutionContext();
+            maxStaleness = executionContext.policy.maxStaleness;
+        }
+
+        (update.executionPrice, update.oraclePublishTime, update.pythFee) = _resolveOraclePrice(
+            pythUpdateData, mockFallbackPrice, maxStaleness, orderExecutionStalenessLimit
+        );
+
+        if (address(pyth) != address(0)) {
+            if (OracleFreshnessPolicyLib.isStale(
+                    update.oraclePublishTime, executionContext.policy.maxStaleness, block.timestamp
+                )) {
+                _revertOraclePriceTooStale();
+            }
+        }
+
+        if (update.oraclePublishTime < engine.lastMarkTime()) {
+            _revertOraclePublishTimeOutOfOrder();
+        }
+
+        uint256 capPrice = engine.CAP_PRICE();
+        if (update.executionPrice > capPrice) {
+            update.executionPrice = capPrice;
+        }
+
+        engine.updateMarkPrice(update.executionPrice, update.oraclePublishTime);
+    }
+
+    function _prepareMarkRefreshOracle(
+        bytes[] calldata pythUpdateData
+    ) internal returns (OracleUpdateResult memory update) {
+        (update.executionPrice, update.oraclePublishTime, update.pythFee) =
+            _resolveOraclePrice(pythUpdateData, 1e8, orderExecutionStalenessLimit, orderExecutionStalenessLimit);
+
+        if (address(pyth) != address(0)) {
+            OracleFreshnessPolicyLib.Policy memory policy = OracleFreshnessPolicyLib.getPolicy(
+                OracleFreshnessPolicyLib.Mode.MarkRefresh,
+                _isOracleFrozen(),
+                engine.isFadWindow(),
+                engine.engineMarkStalenessLimit(),
+                vault.markStalenessLimit(),
+                orderExecutionStalenessLimit,
+                liquidationStalenessLimit,
+                engine.fadMaxStaleness()
+            );
+            if (OracleFreshnessPolicyLib.isStale(update.oraclePublishTime, policy.maxStaleness, block.timestamp)) {
+                _revertOraclePriceTooStale();
+            }
+        }
+
+        engine.updateMarkPrice(update.executionPrice, update.oraclePublishTime);
+    }
+
+    function _prepareLiquidationOracle(
+        bytes[] calldata pythUpdateData
+    ) internal returns (OracleUpdateResult memory update) {
+        (update.executionPrice, update.oraclePublishTime, update.pythFee) =
+            _resolveOraclePrice(pythUpdateData, 1e8, liquidationStalenessLimit, liquidationStalenessLimit);
+
+        if (address(pyth) != address(0)) {
+            OracleFreshnessPolicyLib.Policy memory policy = OracleFreshnessPolicyLib.getPolicy(
+                OracleFreshnessPolicyLib.Mode.Liquidation,
+                _isOracleFrozen(),
+                engine.isFadWindow(),
+                engine.engineMarkStalenessLimit(),
+                vault.markStalenessLimit(),
+                orderExecutionStalenessLimit,
+                liquidationStalenessLimit,
+                engine.fadMaxStaleness()
+            );
+            if (OracleFreshnessPolicyLib.isStale(update.oraclePublishTime, policy.maxStaleness, block.timestamp)) {
+                _revertMevOraclePriceTooStale();
+            }
+        }
     }
 
     function _executionPolicyForOrder(
@@ -212,7 +302,8 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
             return false;
         }
 
-        OracleFreshnessPolicyLib.Policy memory policy = _executionPolicyForOrder(false, _isOracleFrozen(), engine.isFadWindow());
+        OracleFreshnessPolicyLib.Policy memory policy =
+            _executionPolicyForOrder(false, _isOracleFrozen(), engine.isFadWindow());
         return !OracleFreshnessPolicyLib.isStale(lastMarkTime, policy.maxStaleness, block.timestamp);
     }
 
