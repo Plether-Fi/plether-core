@@ -123,7 +123,7 @@ Profitable closes and some liquidation residuals can create deferred trader payo
 
 - Deferred payouts are tracked by beneficiary balance: `deferredPayoutUsdc[accountId]`.
 - There is no FIFO deferred-claim queue.
-- `claimDeferredPayout(accountId)` is permissionless.
+- `claimDeferredPayout(accountId)` is beneficiary-only and requires the caller to own `accountId`.
 - Claims can be partial if current vault cash is insufficient.
 - Claimed amounts are credited into `MarginClearinghouse`, not sent directly to the wallet.
 
@@ -133,7 +133,7 @@ Liquidation bounties are fail-soft when the vault is illiquid.
 
 - The liquidation still completes.
 - Any unpaid keeper value is recorded in `deferredKeeperCreditUsdc[keeper]`.
-- `claimDeferredKeeperCredit()` is permissionless and settles to clearinghouse credit rather than direct wallet transfer.
+- `claimDeferredKeeperCredit()` is beneficiary-only and settles to clearinghouse credit rather than direct wallet transfer.
 - Deferred trader payouts and deferred keeper credit are included in reserve and solvency accounting.
 
 ## LP Lifecycle

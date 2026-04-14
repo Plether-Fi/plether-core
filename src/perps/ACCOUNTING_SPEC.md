@@ -272,14 +272,14 @@ The protocol supports fail-soft terminal settlement.
 ### Deferred trader payouts
 
 - profitable closes and some liquidation residuals may create `deferredPayoutUsdc[accountId]`,
-- claims are permissionless,
+- only the beneficiary account owner may call `claimDeferredPayout(accountId)`,
 - claims may be partial,
 - settlement is credited into `MarginClearinghouse`.
 
 ### Deferred clearer balances
 
 - illiquid liquidation bounties may create `deferredKeeperCreditUsdc[beneficiary]`,
-- claims are permissionless,
+- only the recorded beneficiary may call `claimDeferredKeeperCredit()`,
 - settlement is credited into `MarginClearinghouse`.
 
 Rules:
