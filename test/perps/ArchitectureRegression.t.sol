@@ -147,9 +147,11 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         engine.claimDeferredPayout(aliceId);
 
         uint256 aliceClaimed = clearinghouse.balanceUsdc(aliceId) - aliceSettlementBefore;
-        assertGt(aliceClaimed, 0, "oldest claim should absorb partial liquidity first");
+        assertGt(aliceClaimed, 0, "beneficiary claim should absorb available partial liquidity");
         assertEq(
-            engine.deferredPayoutUsdc(aliceId), aliceDeferred - aliceClaimed, "head claim should shrink by paid amount"
+            engine.deferredPayoutUsdc(aliceId),
+            aliceDeferred - aliceClaimed,
+            "Claimed beneficiary balance should shrink by the paid amount"
         );
         assertEq(engine.deferredPayoutUsdc(bobId), bobDeferred, "Unclaimed later balance should remain unchanged");
 

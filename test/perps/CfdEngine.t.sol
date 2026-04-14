@@ -845,16 +845,16 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(
             clearinghouse.balanceUsdc(accountId),
             clearinghouseBefore + claimableNow,
-            "Head claim should consume all currently available head liquidity"
+            "Deferred beneficiary claim should consume all currently available liquidity"
         );
         assertEq(
             engine.deferredPayoutUsdc(accountId),
             deferred - claimableNow,
-            "Partial head claim should leave remainder queued"
+            "Partial deferred claim should leave the remainder outstanding"
         );
     }
 
-    function test_ClaimDeferredPayout_HeadConsumesPartialLiquidityBeforeLaterClaims() public {
+    function test_ClaimDeferredPayout_BeneficiaryConsumesPartialLiquidityWithoutQueueOrdering() public {
         address trader = address(0xD309);
         address keeper = address(0xD30A);
         bytes32 accountId = bytes32(uint256(uint160(trader)));

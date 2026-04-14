@@ -17,29 +17,31 @@ contract CashPriorityLibTest is Test {
         assertEq(
             reservation.freeCashUsdc, 40e6, "Fresh payouts may only use cash above deferred claims and protocol fees"
         );
-        assertEq(reservation.headClaimServiceableUsdc, 0, "Fresh payout reservations do not service deferred claims");
+        assertEq(reservation.deferredClaimServiceableUsdc, 0, "Fresh payout reservations do not service deferred claims");
     }
 
-    function test_ReserveDeferredHeadClaim_PrioritizesHeadOverLaterClaims() public pure {
+    function test_ReserveDeferredClaim_PrioritizesDeferredClaimsOverFees() public pure {
         CashPriorityLib.SeniorCashReservation memory reservation =
-            CashPriorityLib.reserveDeferredHeadClaim(40e6, 10e6, 70e6, 30e6, 70e6);
+            CashPriorityLib.reserveDeferredClaim(40e6, 10e6, 70e6, 30e6, 70e6);
 
         assertEq(reservation.totalSeniorClaimsUsdc, 100e6, "Total senior claims should include both deferred classes");
         assertEq(
             reservation.reservedSeniorCashUsdc, 100e6, "Fresh reservation accounting should still see all senior claims"
         );
         assertEq(reservation.freeCashUsdc, 0, "No fresh cash should remain while senior claims exceed physical cash");
-        assertEq(reservation.headClaimServiceableUsdc, 40e6, "Head claims should be serviced before protocol fees");
+        assertEq(reservation.deferredClaimServiceableUsdc, 40e6, "Deferred claims should be serviced before protocol fees");
     }
 
-    function test_ReserveDeferredHeadClaim_UsesCashEvenWhenFeesAlsoExceedLiquidity() public pure {
+    function test_ReserveDeferredClaim_UsesCashEvenWhenFeesAlsoExceedLiquidity() public pure {
         CashPriorityLib.SeniorCashReservation memory reservation =
-            CashPriorityLib.reserveDeferredHeadClaim(100e6, 100e6, 100e6, 0, 100e6);
+            CashPriorityLib.reserveDeferredClaim(100e6, 100e6, 100e6, 0, 100e6);
 
         assertEq(
-            reservation.headClaimServiceableUsdc, 100e6, "Head deferred claim should use all available physical cash"
+            reservation.deferredClaimServiceableUsdc,
+            100e6,
+            "Deferred beneficiary claim should use all available physical cash"
         );
-        assertEq(reservation.protocolFeeWithdrawalUsdc, 0, "Fees should wait until deferred head claims are funded");
+        assertEq(reservation.protocolFeeWithdrawalUsdc, 0, "Fees should wait until deferred claims are funded");
         assertEq(reservation.freeCashUsdc, 0, "No fresh cash remains while deferred claims consume all liquidity");
     }
 
