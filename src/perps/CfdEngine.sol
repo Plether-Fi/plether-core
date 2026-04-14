@@ -362,11 +362,11 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             return;
         }
 
-        (bool priceFresh, uint256 price) = _tryGetFreshLiveMarkPrice();
-        if (!priceFresh) {
+        uint256 price = lastMarkPrice;
+        if (price == 0) {
             return;
         }
-        _realizeCarryFromSettlement(accountId, pos, price, _genericReachableCollateralUsdc(accountId));
+        _checkpointCarryBeforeBasisChange(accountId, pos, price, _genericReachableCollateralUsdc(accountId));
     }
 
     function _claimDeferredBalance(
@@ -681,9 +681,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
 
     /// @notice Credits a router-collected execution bounty into the beneficiary's clearinghouse account.
     /// @dev Realizes carry first when the beneficiary currently has an open position because the
-    ///      clearinghouse settlement credit changes the carry basis. This helper intentionally uses
-    ///      the current cached mark instead of requiring a fresh mark so failed-order cleanup does not
-    ///      depend on the clearer's or trader's own mark-freshness state.
+    ///      clearinghouse settlement credit changes the carry basis. Router execution already validates
+    ///      the oracle publish time, so this helper only enforces monotonic publish ordering before
+    ///      checkpointing against the validated cached mark.
     function creditKeeperExecutionBounty(
         address beneficiary,
         uint256 amountUsdc,
@@ -696,9 +696,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
 
         if (publishTime < lastMarkTime) {
             revert CfdEngine__MarkPriceOutOfOrder();
-        }
-        if (block.timestamp > publishTime + _liveMarkStalenessLimit()) {
-            revert CfdEngine__MarkPriceStale();
         }
 
         uint256 clampedPrice = price > CAP_PRICE ? CAP_PRICE : price;

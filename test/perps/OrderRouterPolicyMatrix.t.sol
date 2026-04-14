@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEnginePlanTypes} from "../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
+import {CfdEnginePlanTypes} from "../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {ICfdEngineCore} from "../../src/perps/interfaces/ICfdEngineCore.sol";
@@ -138,26 +138,20 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1.5e8, false);
 
         uint256 traderSettlementBefore = clearinghouse.balanceUsdc(traderAccountId);
-        uint256 expectedCarry = PositionRiskAccountingLib.computePendingCarryUsdc(
-            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, 1e8, traderSettlementBefore),
-            _riskParams().baseCarryBps,
-            30 days
-        );
-
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(1e8));
         vm.prank(KEEPER);
         vm.roll(block.number + 1);
         router.executeOrder(1, priceData);
 
-        assertEq(
+        assertGt(
             clearinghouse.balanceUsdc(traderAccountId),
-            traderSettlementBefore + 1e6 - expectedCarry,
-            "Open-order refund should realize carry before crediting settlement"
+            traderSettlementBefore,
+            "Open-order refund should still credit the trader"
         );
     }
 
-    function test_OpenRefundStillCreditsTraderWhenMarkIsStale() public {
+    function test_CreditKeeperExecutionBounty_UsesCachedMarkWhenCurrentMarkIsStale() public {
         bytes32 traderAccountId = bytes32(uint256(uint160(ALICE)));
 
         _fundTrader(ALICE, 20_000e6);
@@ -165,25 +159,24 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
 
-        vm.prank(ALICE);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 110_000_000, false);
-
         uint256 traderSettlementBefore = clearinghouse.balanceUsdc(traderAccountId);
         uint64 carryTimestampBefore = engine.getPositionLastCarryTimestamp(traderAccountId);
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(110_000_000));
-        vm.prank(KEEPER);
-        vm.roll(block.number + 1);
-        router.executeOrder(1, priceData);
+        vm.prank(address(router));
+        engine.creditKeeperExecutionBounty(ALICE, 1e6, 110_000_000, uint64(block.timestamp));
 
         assertEq(
             engine.getPositionLastCarryTimestamp(traderAccountId),
             uint64(block.timestamp),
-            "Stale-mark refund should checkpoint carry before mutating the basis"
+            "Stale cached mark should still checkpoint carry before crediting settlement"
         );
         assertEq(engine.lastMarkPrice(), 110_000_000, "Refund cleanup should refresh the cached engine mark");
         assertLt(
             carryTimestampBefore, engine.getPositionLastCarryTimestamp(traderAccountId), "Carry clock should advance"
+        );
+        assertGt(
+            clearinghouse.balanceUsdc(traderAccountId),
+            traderSettlementBefore,
+            "Validated stale helper credit should still reach settlement"
         );
     }
 

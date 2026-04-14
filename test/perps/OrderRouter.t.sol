@@ -425,9 +425,17 @@ contract OrderRouterTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 0, 0, true);
 
         (, uint256 marginAfter,,,,,) = engine.positions(accountId);
-        assertEq(_executionBountyReserve(1), 1_000_000, "Stale-mark close commits should still escrow the flat router bounty");
-        assertEq(marginAfter, marginBefore - 1_000_000, "Stale-mark close bounty should still fall back to active margin");
-        assertEq(usdc.balanceOf(address(router)), 1_000_000, "Router should custody the stale-mark close bounty after fallback");
+        assertEq(
+            _executionBountyReserve(1), 1_000_000, "Stale-mark close commits should still escrow the flat router bounty"
+        );
+        assertEq(
+            marginAfter, marginBefore - 1_000_000, "Stale-mark close bounty should still fall back to active margin"
+        );
+        assertEq(
+            usdc.balanceOf(address(router)),
+            1_000_000,
+            "Router should custody the stale-mark close bounty after fallback"
+        );
     }
 
     function test_ReserveCloseOrderExecutionBounty_RevertsWhenMarginBackedBountyWouldBreakMaintenance() public {
@@ -1298,6 +1306,38 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(router.nextExecuteId(), 0, "Router execution staleness limit should control live order execution");
     }
 
+    function test_OrderRefund_DoesNotRevertWhenRouterLimitExceedsEngineHelperLimit() public {
+        engine.proposeEngineMarkStalenessLimit(60);
+        router.proposeOrderExecutionStalenessLimit(300);
+        vm.warp(block.timestamp + 48 hours + 1);
+        engine.finalizeEngineMarkStalenessLimit();
+        router.finalizeOrderExecutionStalenessLimit();
+
+        vm.warp(1050);
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 0.9e8, false);
+
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1120);
+        bytes[] memory empty = _pythUpdateData();
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        uint256 settlementBefore = clearinghouse.balanceUsdc(aliceId);
+
+        vm.warp(1200);
+        vm.roll(block.number + 1);
+        router.executeOrder(1, empty);
+
+        assertEq(
+            router.nextExecuteId(),
+            0,
+            "Router-validated refund path should not revert during settlement credit finalization"
+        );
+        assertEq(
+            clearinghouse.balanceUsdc(aliceId) - settlementBefore,
+            1e6,
+            "Trader refund should succeed even when engine helper freshness would otherwise be stricter"
+        );
+    }
+
     function test_Slippage_CancelsGracefully() public {
         vm.warp(1000);
 
@@ -1493,9 +1533,7 @@ contract OrderRouterPythTest is BasePerpTest {
         (uint256 size,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "Order should fail once post-commit skew exceeds the cap");
         assertEq(
-            _settlementBalance(address(this)) - keeperBefore,
-            0,
-            "Keeper should not receive bounty on skew invalidation"
+            _settlementBalance(address(this)) - keeperBefore, 0, "Keeper should not receive bounty on skew invalidation"
         );
         assertEq(
             clearinghouse.balanceUsdc(aliceId) - traderSettlementBefore,
@@ -2335,7 +2373,10 @@ contract BasketPriceHarness is OrderRouter {
         bool[] memory _inversions
     ) OrderRouter(address(1), address(1), address(1), _pyth, _feedIds, _quantities, _basePrices, _inversions) {}
 
-    function computeBasketPrice(uint256 maxStaleness, uint256 maxPublishTimeDivergence) external view returns (uint256, uint256) {
+    function computeBasketPrice(
+        uint256 maxStaleness,
+        uint256 maxPublishTimeDivergence
+    ) external view returns (uint256, uint256) {
         return _computeBasketPrice(maxStaleness, maxPublishTimeDivergence);
     }
 
@@ -3738,7 +3779,6 @@ contract StaleOrderExpiryTest is BasePerpTest {
         vm.prank(keeper);
         vm.roll(block.number + 1);
         router.executeOrder(2, empty);
-
     }
 
     // Regression: H-03
@@ -3829,7 +3869,6 @@ contract StaleOrderExpiryTest is BasePerpTest {
         vm.prank(keeper);
         vm.roll(block.number + 1);
         router.executeOrder(2, empty);
-
     }
 
     function test_ExpiredOpenOrderRefundsUsdcBountyToTrader_NotKeeper() public {
@@ -3850,9 +3889,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
         router.executeOrder(1, empty);
 
         assertEq(
-            _settlementBalance(localKeeper) - keeperSettlementBefore,
-            0,
-            "Expired open order should not pay the keeper"
+            _settlementBalance(localKeeper) - keeperSettlementBefore, 0, "Expired open order should not pay the keeper"
         );
         assertEq(
             _settlementBalance(spammer) - traderSettlementBefore,
@@ -3952,14 +3989,7 @@ contract MarkPriceStalenessTest is BasePerpTest {
     function test_Constructor_ZeroEngineLensReverts() public {
         vm.expectRevert(OrderRouter.OrderRouter__ZeroAddress.selector);
         new OrderRouter(
-            address(engine),
-            address(0),
-            address(pool),
-            address(mockPyth),
-            feedIds,
-            weights,
-            bases,
-            new bool[](2)
+            address(engine), address(0), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
         );
     }
 

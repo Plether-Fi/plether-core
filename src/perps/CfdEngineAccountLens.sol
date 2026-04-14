@@ -50,7 +50,9 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
     function getWithdrawableUsdc(
         bytes32 accountId
     ) external view returns (uint256 withdrawableUsdc) {
-        withdrawableUsdc = engineContract.clearinghouse().getFreeBuyingPowerUsdc(accountId);
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets =
+            engineContract.clearinghouse().getAccountUsdcBuckets(accountId);
+        withdrawableUsdc = MarginClearinghouseAccountingLib.getFreeSettlementUsdc(buckets);
 
         CfdTypes.Position memory pos = _position(accountId);
         if (pos.size == 0) {
@@ -66,7 +68,8 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
             return 0;
         }
         ICfdVault vault = engineContract.vault();
-        uint256 maxStaleness = OracleFreshnessPolicyLib.getPolicy(
+        uint256 maxStaleness =
+            OracleFreshnessPolicyLib.getPolicy(
             OracleFreshnessPolicyLib.Mode.PoolReconcile,
             engineContract.isOracleFrozen(),
             engineContract.isFadWindow(),
@@ -75,14 +78,13 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
             0,
             0,
             engineContract.fadMaxStaleness()
-        ).maxStaleness;
+        )
+        .maxStaleness;
         if (block.timestamp > lastMarkTime + maxStaleness) {
             return 0;
         }
 
-        uint256 reachableUsdc = MarginClearinghouseAccountingLib.getGenericReachableUsdc(
-            engineContract.clearinghouse().getAccountUsdcBuckets(accountId)
-        );
+        uint256 reachableUsdc = MarginClearinghouseAccountingLib.getGenericReachableUsdc(buckets);
         uint256 pendingCarryUsdc = engineContract.unsettledCarryUsdc(accountId);
         if (pos.size > 0 && pos.lastCarryTimestamp > 0 && block.timestamp > pos.lastCarryTimestamp) {
             uint256 lpBackedNotionalUsdc =
@@ -91,6 +93,20 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
                 lpBackedNotionalUsdc, _riskParams().baseCarryBps, block.timestamp - pos.lastCarryTimestamp
             );
         }
+        if (pendingCarryUsdc > 0) {
+            MarginClearinghouseAccountingLib.SettlementConsumption memory carryConsumption =
+                MarginClearinghouseAccountingLib.planFundingLossConsumption(buckets, pendingCarryUsdc);
+            buckets = MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(
+                buckets.settlementBalanceUsdc - carryConsumption.totalConsumedUsdc,
+                buckets.activePositionMarginUsdc - carryConsumption.activeMarginConsumedUsdc,
+                buckets.otherLockedMarginUsdc,
+                0
+            );
+            pendingCarryUsdc = carryConsumption.uncoveredUsdc;
+        }
+
+        withdrawableUsdc = MarginClearinghouseAccountingLib.getFreeSettlementUsdc(buckets);
+        reachableUsdc = MarginClearinghouseAccountingLib.getGenericReachableUsdc(buckets);
         PositionRiskAccountingLib.PositionRiskState memory riskState =
             PositionRiskAccountingLib.buildPositionRiskStateWithCarry(
                 pos, price, engineContract.CAP_PRICE(), pendingCarryUsdc, reachableUsdc, _riskParams().initMarginBps

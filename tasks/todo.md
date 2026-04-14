@@ -1298,3 +1298,20 @@ Review:
 - Strengthened `test_BatchExecution_AllSucceed()` in `test/perps/OrderRouter.t.sol` to assert all successfully batched orders end in `OrderStatus.Executed`.
 - Added `test_BatchExecution_SuccessfulOrdersEndExecuted()` in `test/perps/OrderRouter.t.sol` to pin the terminal executed status and cleared margin/bounty escrow for successful batched orders.
 - Verified green with `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_(StateMachine_BatchClearsSlippageFailedHeadAndContinues|BatchExecution_AllSucceed|BatchExecution_SuccessfulOrdersEndExecuted|BatchExecution_MixedResults|OrderRecord_PreservesExecutedLifecycle)"`.
+- [x] Preserve deferred-claim carry basis during stale windows
+- [x] Simulate live carry realization in withdrawable lens
+- [x] Remove engine/router freshness drift on keeper credit finalization
+- [x] Add regressions for stale deferred claims, withdrawable parity, and staleness drift
+
+Review:
+- Updated `src/perps/CfdEngine.sol` so deferred payout and deferred keeper-credit claims now checkpoint carry against the cached mark even when the live mark is stale, preserving the basis-change invariant without blocking already-owed claims.
+- Removed the redundant staleness gate from `creditKeeperExecutionBounty()` in `src/perps/CfdEngine.sol` so router-validated executions/refunds/liquidation payouts cannot roll back later during settlement credit finalization due to stricter engine-side freshness policy.
+- Updated `src/perps/CfdEngineAccountLens.sol` so `getWithdrawableUsdc()` now simulates the same carry-realization loss consumption as the live withdraw path before computing post-carry free settlement and IMR headroom.
+- Added stale-window deferred-claim regressions in `test/perps/CfdEngine.t.sol` for both trader deferred payouts and deferred keeper credits, proving cached-mark carry checkpointing still occurs before settlement credit.
+- Added `test_GetTraderAccount_WithdrawableMatchesLiveCarryRealizationSequence()` in `test/perps/PerpsPublicLens.t.sol` to pin the account/public-lens withdrawable amount against the actual live withdraw sequence under material carry drag.
+- Added router freshness regressions in `test/perps/OrderRouter.t.sol` and `test/perps/OrderRouterPolicyMatrix.t.sol` showing router-validated refund/credit flows complete even when the engine helper would previously have considered the publish time stale.
+- Verified green with:
+- `forge test --match-path test/perps/CfdEngine.t.sol --match-test "test_(ClaimDeferredPayout_UsesCachedMarkToCheckpointCarryWhenStale|ClaimDeferredKeeperCredit_UsesCachedMarkToCheckpointCarryWhenStale|ClaimDeferredPayout_RealizesCarryBeforeCreditingSettlement|ClaimDeferredKeeperCredit_RealizesCarryBeforeCreditingSettlement)"`
+- `forge test --match-path test/perps/PerpsPublicLens.t.sol --match-test "test_(GetTraderAccount_WithdrawableMatchesLiveCarryRealizationSequence|GetTraderAccount_WithdrawableIncludesUnsettledCarryParity)"`
+- `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_(OrderRefund_DoesNotRevertWhenRouterLimitExceedsEngineHelperLimit|OrderExecution_UsesRouterExecutionStalenessLimit_NotPoolMarkLimit)"`
+- `forge test --match-path test/perps/OrderRouterPolicyMatrix.t.sol --match-test "test_(CreditKeeperExecutionBounty_RealizesCarryBeforeCreditingSettlement|CreditKeeperExecutionBounty_UsesCachedMarkWhenCurrentMarkIsStale|OpenRefundRealizesTraderCarryBeforeCreditingSettlement)"`
