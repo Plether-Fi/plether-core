@@ -1315,3 +1315,14 @@ Review:
 - `forge test --match-path test/perps/PerpsPublicLens.t.sol --match-test "test_(GetTraderAccount_WithdrawableMatchesLiveCarryRealizationSequence|GetTraderAccount_WithdrawableIncludesUnsettledCarryParity)"`
 - `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_(OrderRefund_DoesNotRevertWhenRouterLimitExceedsEngineHelperLimit|OrderExecution_UsesRouterExecutionStalenessLimit_NotPoolMarkLimit)"`
 - `forge test --match-path test/perps/OrderRouterPolicyMatrix.t.sol --match-test "test_(CreditKeeperExecutionBounty_RealizesCarryBeforeCreditingSettlement|CreditKeeperExecutionBounty_UsesCachedMarkWhenCurrentMarkIsStale|OpenRefundRealizesTraderCarryBeforeCreditingSettlement)"`
+- [x] Collapse HousePool claimant inflow API into one entrypoint
+- [x] Migrate engine and settlement modules to claimant inflow enums
+- [x] Update HousePool/docs/tests for the simplified inflow surface
+
+Review:
+- Replaced the old dual claimant-owned inflow surface in `src/perps/interfaces/ICfdVault.sol` (`recordRecapitalizationInflow`, `routeLpValue`, `LpValueMode`) with one explicit `recordClaimantInflow(amount, kind, cashMode)` API and the new `ClaimantInflowKind` / `ClaimantInflowCashMode` enums.
+- Updated `src/perps/HousePool.sol` so claimant-owned value now enters through one function while preserving the existing economics: `Revenue` still only queues `pendingTradingRevenueUsdc` when no live claimants exist, `Recapitalization` still queues `pendingRecapitalizationUsdc`, and only `CashArrived` increments `accountedAssets`.
+- Migrated all live callers in `src/perps/CfdEngine.sol` and `src/perps/CfdEngineSettlementModule.sol` to the new surface, leaving `recordProtocolInflow(...)` as the only separate protocol-owned inflow concept.
+- Updated the invariant mock vault plus the HousePool/audit tests to use the new claimant-inflow enums, keeping recap/revenue semantics explicit without exposing routing mechanics as a first-class API.
+- Updated `src/perps/README.md`, `PRE_AUDIT_GUIDE.md`, `INTERNAL_ARCHITECTURE_MAP.md`, and `ACCOUNTING_SPEC.md` so the documentation now describes the simplified inflow model consistently.
+- Verified green with `forge test --match-path test/perps/HousePool.t.sol --match-test "test_(RecordImplicitTradingRevenue_RestoresSeededSeniorBeforeJuniorWhenBothAreZero|Reconcile_RestoresSeededClaimantsBeforeUnassignedWhenClaimedEquityZero|SeniorPrincipal_RestoredBeforeJuniorSurplus)"`, `forge test --match-path test/perps/CfdEngine.t.sol --match-test "test_Liquidation_ClawsBackDepthManipulatedVpiRebate_EndToEnd"`, and `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_(OrderRefund_DoesNotRevertWhenRouterLimitExceedsEngineHelperLimit|BatchExecution_SuccessfulOrdersEndExecuted)"`.

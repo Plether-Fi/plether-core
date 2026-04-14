@@ -5,6 +5,11 @@ import {HousePoolWaterfallAccountingLib} from "./HousePoolWaterfallAccountingLib
 
 library HousePoolPendingPreviewLib {
 
+    struct ClaimantPendingBuckets {
+        uint256 recapitalizationUsdc;
+        uint256 revenueUsdc;
+    }
+
     struct PendingAccountingState {
         HousePoolWaterfallAccountingLib.WaterfallState waterfall;
         uint256 unassignedAssets;
@@ -12,20 +17,19 @@ library HousePoolPendingPreviewLib {
         uint256 juniorSupply;
     }
 
-    function applyPendingBucketsPreview(
+    function applyPendingClaimantBucketsPreview(
         PendingAccountingState memory state,
-        uint256 pendingRecapitalizationUsdc,
-        uint256 pendingTradingRevenueUsdc
+        ClaimantPendingBuckets memory claimantBuckets
     ) internal pure {
-        if (pendingRecapitalizationUsdc > 0) {
-            applyRecapitalizationIntent(state, pendingRecapitalizationUsdc);
+        if (claimantBuckets.recapitalizationUsdc > 0) {
+            applyClaimantRecapitalizationIntent(state, claimantBuckets.recapitalizationUsdc);
         }
-        if (pendingTradingRevenueUsdc > 0) {
-            routeSeededRevenue(state, pendingTradingRevenueUsdc);
+        if (claimantBuckets.revenueUsdc > 0) {
+            applyRevenueIntent(state, claimantBuckets.revenueUsdc);
         }
     }
 
-    function applyRecapitalizationIntent(
+    function applyClaimantRecapitalizationIntent(
         PendingAccountingState memory state,
         uint256 amount
     ) internal pure {
@@ -51,7 +55,7 @@ library HousePoolPendingPreviewLib {
         }
     }
 
-    function routeSeededRevenue(
+    function applyRevenueIntent(
         PendingAccountingState memory state,
         uint256 amount
     ) internal pure {

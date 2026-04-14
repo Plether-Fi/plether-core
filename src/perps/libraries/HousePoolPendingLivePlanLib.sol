@@ -10,16 +10,13 @@ library HousePoolPendingLivePlanLib {
         bool seniorPrincipalChanged;
     }
 
-    function planApplyPendingBuckets(
+    function planApplyPendingClaimantBuckets(
         HousePoolPendingPreviewLib.PendingAccountingState memory state,
         uint256 currentSeniorPrincipal,
-        uint256 pendingRecapitalizationUsdc,
-        uint256 pendingTradingRevenueUsdc
+        HousePoolPendingPreviewLib.ClaimantPendingBuckets memory claimantBuckets
     ) internal pure returns (PendingLivePlan memory plan) {
         plan.state = state;
-        HousePoolPendingPreviewLib.applyPendingBucketsPreview(
-            plan.state, pendingRecapitalizationUsdc, pendingTradingRevenueUsdc
-        );
+        HousePoolPendingPreviewLib.applyPendingClaimantBucketsPreview(plan.state, claimantBuckets);
 
         plan.seniorPrincipalChanged = plan.state.waterfall.seniorPrincipal != currentSeniorPrincipal;
     }

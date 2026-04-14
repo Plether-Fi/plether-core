@@ -12,6 +12,7 @@ import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
+import {ICfdVault} from "../../src/perps/interfaces/ICfdVault.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
@@ -335,7 +336,9 @@ contract AuditConfirmedFindingsFailing_HwmRouteConsistency is BasePerpTest {
 
         usdc.mint(address(recapPool), recapAmount);
         vm.prank(address(engine));
-        recapPool.recordRecapitalizationInflow(recapAmount);
+        recapPool.recordClaimantInflow(
+            recapAmount, ICfdVault.ClaimantInflowKind.Recapitalization, ICfdVault.ClaimantInflowCashMode.CashArrived
+        );
         vm.prank(address(recapJuniorVault));
         recapPool.reconcile();
 

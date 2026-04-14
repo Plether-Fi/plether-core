@@ -126,9 +126,11 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
     event ExcessAccounted(uint256 amountUsdc, uint256 accountedAssetsUsdc);
     event ExcessSwept(address indexed recipient, uint256 amountUsdc);
     event ProtocolInflowAccounted(address indexed caller, uint256 amountUsdc, uint256 accountedAssetsUsdc);
-    event RecapitalizationInflowAccounted(address indexed caller, uint256 amountUsdc, uint256 seniorRestorationUsdc);
-    event TradingRevenueInflowAccounted(
-        address indexed caller, uint256 amountUsdc, uint256 seniorAssignedUsdc, uint256 juniorAssignedUsdc
+    event ClaimantInflowAccounted(
+        address indexed caller,
+        ICfdVault.ClaimantInflowKind kind,
+        ICfdVault.ClaimantInflowCashMode cashMode,
+        uint256 amountUsdc
     );
     event UnassignedAssetsAssigned(
         bool indexed toSenior, address indexed receiver, uint256 amountUsdc, uint256 sharesMinted
@@ -236,7 +238,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
             if (seniorPrincipal == 0) {
                 lastReconcileTime = staleCheckpointTime;
             }
-            _applyPendingBucketsLive(accountingSnapshot, statusSnapshot);
+            _applyPendingClaimantBucketsLive(accountingSnapshot, statusSnapshot);
             lastSeniorYieldCheckpointTime = staleCheckpointTime;
         }
         seniorRateBps = pendingSeniorRate;
@@ -422,29 +424,12 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         emit ProtocolInflowAccounted(msg.sender, amount, accountedAssets);
     }
 
-    /// @notice Accounts a governance recapitalization inflow and routes it toward senior restoration when possible.
-    /// @dev This narrows the cases that fall into generic unassigned accounting when a seeded senior tranche exists.
-    function recordRecapitalizationInflow(
-        uint256 amount
-    ) external {
-        if (msg.sender != address(ENGINE)) {
-            revert HousePool__Unauthorized();
-        }
-        if (amount == 0) {
-            return;
-        }
-
-        accountedAssets += amount;
-        pendingRecapitalizationUsdc += amount;
-        emit RecapitalizationInflowAccounted(msg.sender, amount, 0);
-    }
-
-    /// @notice Routes LP-owned value into the tranche claimant path.
-    /// @dev `ExplicitCashInflow` increments `accountedAssets` because raw USDC arrived in this flow.
-    ///      `ImplicitRetainedValue` only routes ownership for value already retained by the vault.
-    function routeLpValue(
+    /// @notice Records claimant-owned value into the tranche claimant path.
+    /// @dev Revenue and recapitalization remain distinct economic buckets, but share one API.
+    function recordClaimantInflow(
         uint256 amount,
-        ICfdVault.LpValueMode mode
+        ICfdVault.ClaimantInflowKind kind,
+        ICfdVault.ClaimantInflowCashMode cashMode
     ) external {
         if (msg.sender != address(ENGINE) && msg.sender != ENGINE.settlementModule()) {
             revert HousePool__Unauthorized();
@@ -453,14 +438,21 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
             return;
         }
 
-        if (mode == ICfdVault.LpValueMode.ExplicitCashInflow) {
-            accountedAssets += amount;
-            emit TradingRevenueInflowAccounted(msg.sender, amount, 0, 0);
+        if (kind == ICfdVault.ClaimantInflowKind.Recapitalization && msg.sender != address(ENGINE)) {
+            revert HousePool__Unauthorized();
         }
 
-        if (seniorPrincipal + juniorPrincipal == 0) {
-            pendingTradingRevenueUsdc += amount;
+        if (cashMode == ICfdVault.ClaimantInflowCashMode.CashArrived) {
+            accountedAssets += amount;
         }
+
+        if (kind == ICfdVault.ClaimantInflowKind.Recapitalization) {
+            _recordPendingClaimantInflow(kind, amount);
+        } else if (seniorPrincipal + juniorPrincipal == 0) {
+            _recordPendingClaimantInflow(kind, amount);
+        }
+
+        emit ClaimantInflowAccounted(msg.sender, kind, cashMode, amount);
     }
 
     /// @notice Explicitly bootstraps quarantined LP assets into a tranche by minting matching shares.
@@ -767,7 +759,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
                     juniorSupply: _juniorShareSupply()
                 }),
                 HousePoolAccountingLib.buildReconcileSnapshot(accountingSnapshot),
-                _pendingBucketAssets(),
+                _pendingClaimantBucketAssets(),
                 seniorRateBps,
                 yieldElapsed,
                 markFresh
@@ -786,7 +778,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
             }
         }
 
-        _applyPendingBucketsLive(accountingSnapshot, _getHousePoolStatusSnapshot());
+        _applyPendingClaimantBucketsLive(accountingSnapshot, _getHousePoolStatusSnapshot());
     }
 
     function _getWithdrawalSnapshot()
@@ -822,7 +814,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         if (_markIsFreshForReconcile(accountingSnapshot, statusSnapshot)) {
             HousePoolAccountingLib.ReconcileSnapshot memory snapshot =
                 HousePoolAccountingLib.buildReconcileSnapshot(accountingSnapshot);
-            uint256 pendingAssets = _pendingBucketAssets();
+            uint256 pendingAssets = _pendingClaimantBucketAssets();
             if (pendingAssets > 0) {
                 snapshot.distributable =
                     snapshot.distributable > pendingAssets ? snapshot.distributable - pendingAssets : 0;
@@ -861,7 +853,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
             }
         }
 
-        _applyPendingBucketsPreview(pendingState);
+        _applyPendingClaimantBucketsPreview(pendingState);
     }
 
     function _markIsFreshForReconcile(
@@ -914,7 +906,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
     ) internal view returns (HousePoolAccountingLib.WithdrawalSnapshot memory snapshot) {
         snapshot = HousePoolAccountingLib.buildWithdrawalSnapshot(accountingSnapshot);
         if (!isProjected) {
-            uint256 pendingAssets = _pendingBucketAssets();
+            uint256 pendingAssets = _pendingClaimantBucketAssets();
             snapshot = HousePoolWithdrawalPreviewLib.reserveAssets(snapshot, pendingAssets);
         }
         snapshot = HousePoolWithdrawalPreviewLib.reserveAssets(snapshot, reservedUnassignedAssets);
@@ -944,29 +936,31 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         lastSeniorYieldCheckpointTime = block.timestamp;
     }
 
-    function _applyPendingBucketsLive(
+    function _applyPendingClaimantBucketsLive(
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
         HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
     ) internal {
-        if (pendingRecapitalizationUsdc == 0 && pendingTradingRevenueUsdc == 0) {
+        HousePoolPendingPreviewLib.ClaimantPendingBuckets memory claimantBuckets = _getPendingClaimantBuckets();
+        if (claimantBuckets.recapitalizationUsdc == 0 && claimantBuckets.revenueUsdc == 0) {
             return;
         }
 
-        HousePoolPendingLivePlanLib.PendingLivePlan memory plan = HousePoolPendingLivePlanLib.planApplyPendingBuckets(
-            _copyPendingAccountingState(
-                PendingAccountingState({
-                    waterfall: _getWaterfallState(),
-                    unassignedAssets: unassignedAssets,
-                    seniorSupply: _seniorShareSupply(),
-                    juniorSupply: _juniorShareSupply()
+        HousePoolPendingLivePlanLib.PendingLivePlan memory plan =
+            HousePoolPendingLivePlanLib.planApplyPendingClaimantBuckets(
+                _copyPendingAccountingState(
+                    PendingAccountingState({
+                        waterfall: _getWaterfallState(),
+                        unassignedAssets: unassignedAssets,
+                        seniorSupply: _seniorShareSupply(),
+                        juniorSupply: _juniorShareSupply()
+                    })
+                ),
+                seniorPrincipal,
+                HousePoolPendingPreviewLib.ClaimantPendingBuckets({
+                    recapitalizationUsdc: claimantBuckets.recapitalizationUsdc, revenueUsdc: claimantBuckets.revenueUsdc
                 })
-            ),
-            seniorPrincipal,
-            pendingRecapitalizationUsdc,
-            pendingTradingRevenueUsdc
-        );
-        pendingRecapitalizationUsdc = 0;
-        pendingTradingRevenueUsdc = 0;
+            );
+        _clearPendingClaimantBuckets();
 
         if (plan.seniorPrincipalChanged) {
             _checkpointSeniorYieldBeforePrincipalMutation(accountingSnapshot, statusSnapshot);
@@ -977,15 +971,44 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         unassignedAssets = plan.state.unassignedAssets;
     }
 
-    function _applyPendingBucketsPreview(
+    function _applyPendingClaimantBucketsPreview(
         PendingAccountingState memory state
     ) internal view {
         HousePoolPendingPreviewLib.PendingAccountingState memory previewState = _copyPendingAccountingState(state);
-        HousePoolPendingPreviewLib.applyPendingBucketsPreview(
-            previewState, pendingRecapitalizationUsdc, pendingTradingRevenueUsdc
+        HousePoolPendingPreviewLib.ClaimantPendingBuckets memory claimantBuckets = _getPendingClaimantBuckets();
+        HousePoolPendingPreviewLib.applyPendingClaimantBucketsPreview(
+            previewState,
+            HousePoolPendingPreviewLib.ClaimantPendingBuckets({
+                recapitalizationUsdc: claimantBuckets.recapitalizationUsdc, revenueUsdc: claimantBuckets.revenueUsdc
+            })
         );
         state.waterfall = previewState.waterfall;
         state.unassignedAssets = previewState.unassignedAssets;
+    }
+
+    function _getPendingClaimantBuckets()
+        internal
+        view
+        returns (HousePoolPendingPreviewLib.ClaimantPendingBuckets memory buckets)
+    {
+        buckets.recapitalizationUsdc = pendingRecapitalizationUsdc;
+        buckets.revenueUsdc = pendingTradingRevenueUsdc;
+    }
+
+    function _clearPendingClaimantBuckets() internal {
+        pendingRecapitalizationUsdc = 0;
+        pendingTradingRevenueUsdc = 0;
+    }
+
+    function _recordPendingClaimantInflow(
+        ICfdVault.ClaimantInflowKind kind,
+        uint256 amount
+    ) internal {
+        if (kind == ICfdVault.ClaimantInflowKind.Recapitalization) {
+            pendingRecapitalizationUsdc += amount;
+        } else {
+            pendingTradingRevenueUsdc += amount;
+        }
     }
 
     function _copyPendingAccountingState(
@@ -999,7 +1022,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         });
     }
 
-    function _pendingBucketAssets() internal view returns (uint256) {
+    function _pendingClaimantBucketAssets() internal view returns (uint256) {
         return pendingRecapitalizationUsdc + pendingTradingRevenueUsdc;
     }
 

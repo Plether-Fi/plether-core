@@ -230,9 +230,9 @@ Not every inflow into `HousePool` is LP equity.
 Keep these categories separate:
 
 - `recordProtocolInflow`: protocol-owned value such as fees
-- `recordRecapitalizationInflow`: recapitalization intended to restore waterfall claimants
-- `routeLpValue(amount, ExplicitCashInflow)`: LP-owned value where fresh cash entered the vault in this flow
-- `routeLpValue(amount, ImplicitRetainedValue)`: LP-owned value already retained physically by the vault and only needing ownership routing
+- `recordClaimantInflow(amount, Recapitalization, CashArrived)`: recapitalization intended to restore waterfall claimants
+- `recordClaimantInflow(amount, Revenue, CashArrived)`: claimant-owned value where fresh cash entered the vault in this flow
+- `recordClaimantInflow(amount, Revenue, AlreadyRetained)`: claimant-owned value already retained physically by the vault and only needing ownership routing
 
 Rules:
 

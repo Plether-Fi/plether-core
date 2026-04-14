@@ -47,7 +47,7 @@ library HousePoolReconcilePlanLib {
             uint256 seededDistributableToClaims = snapshot.distributable > plan.state.unassignedAssets
                 ? snapshot.distributable - plan.state.unassignedAssets
                 : 0;
-            HousePoolPendingPreviewLib.routeSeededRevenue(plan.state, seededDistributableToClaims);
+            HousePoolPendingPreviewLib.applyRevenueIntent(plan.state, seededDistributableToClaims);
             return plan;
         }
 

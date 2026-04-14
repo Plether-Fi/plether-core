@@ -82,17 +82,10 @@ contract MockInvariantVault is ICfdVault {
         }
     }
 
-    function recordRecapitalizationInflow(
-        uint256
-    ) external view {
-        if (msg.sender != engine) {
-            revert("unauthorized");
-        }
-    }
-
-    function routeLpValue(
+    function recordClaimantInflow(
         uint256,
-        ICfdVault.LpValueMode
+        ICfdVault.ClaimantInflowKind,
+        ICfdVault.ClaimantInflowCashMode
     ) external view {
         if (msg.sender != engine) {
             revert("unauthorized");

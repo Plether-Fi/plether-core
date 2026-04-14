@@ -29,7 +29,7 @@ If reviewing quickly, focus on these questions in order:
 | `CfdEngine.processOrderTyped` / `liquidatePosition` / fee bookkeeping | `orderRouter` only | router is the external execution boundary |
 | `MarginClearinghouse` operator paths | `engine`, `orderRouter`, `settlementModule` | router for queue escrow, engine/module for settlement |
 | `HousePool.payOut` / `recordProtocolInflow` | `engine`, `orderRouter`, `settlementModule` | payout/inflow authority is intentionally narrow |
-| `HousePool.routeLpValue` | `engine`, `settlementModule` | LP-owned value routing only |
+| `HousePool.recordClaimantInflow` | `engine`, `settlementModule` | claimant-owned revenue/recap routing only |
 
 Any new helper/module contract that can reach these sets should be treated as security-critical and explicitly access-controlled.
 

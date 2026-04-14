@@ -898,7 +898,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         }
         if (amount > 0) {
             USDC.safeTransferFrom(msg.sender, address(vault), amount);
-            vault.recordRecapitalizationInflow(amount);
+            vault.recordClaimantInflow(
+                amount, ICfdVault.ClaimantInflowKind.Recapitalization, ICfdVault.ClaimantInflowCashMode.CashArrived
+            );
         }
         accumulatedBadDebtUsdc = badDebt - amount;
         emit BadDebtCleared(amount, accumulatedBadDebtUsdc);
@@ -1086,7 +1088,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             vault.recordProtocolInflow(inflow.protocolOwnedUsdc);
         }
         if (inflow.lpOwnedUsdc > 0) {
-            vault.routeLpValue(inflow.lpOwnedUsdc, ICfdVault.LpValueMode.ExplicitCashInflow);
+            vault.recordClaimantInflow(
+                inflow.lpOwnedUsdc, ICfdVault.ClaimantInflowKind.Revenue, ICfdVault.ClaimantInflowCashMode.CashArrived
+            );
         }
     }
 
@@ -1598,7 +1602,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
 
         if (realizedCarryUsdc > 0) {
             USDC.safeTransfer(address(vault), realizedCarryUsdc);
-            vault.routeLpValue(realizedCarryUsdc, ICfdVault.LpValueMode.ExplicitCashInflow);
+            vault.recordClaimantInflow(
+                realizedCarryUsdc, ICfdVault.ClaimantInflowKind.Revenue, ICfdVault.ClaimantInflowCashMode.CashArrived
+            );
         }
         emit CarryRealized(
             accountId, realizedCarryUsdc, freeSettlementConsumedUsdc, marginConsumedUsdc, unsettledCarryUsdc[accountId]

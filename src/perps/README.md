@@ -259,7 +259,7 @@ The perps system intentionally splits accounting into separate kernels:
 - `LiquidationAccountingLib`: reachable collateral, keeper bounty, residual payout, and bad debt for forced close.
 - `SolvencyAccountingLib`: effective assets, bounded max liability, withdrawal reserves, and free vault cash.
 - `OrderEscrowAccounting`: router-held execution bounty reserves and margin-queue bookkeeping.
-- `HousePool.routeLpValue(amount, mode)`: LP-owned value routing for both fresh cash inflows and implicit retained value.
+- `HousePool.recordClaimantInflow(amount, kind, cashMode)`: claimant-owned value routing for both revenue and recapitalization, with explicit cash-arrival vs retained-value modes.
 
 These domains answer different questions. They should not silently share assumptions just because the inputs look similar.
 

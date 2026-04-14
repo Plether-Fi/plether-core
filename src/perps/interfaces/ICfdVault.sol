@@ -4,9 +4,14 @@ pragma solidity 0.8.33;
 /// @notice Vault that custodies USDC backing the CFD trading system.
 interface ICfdVault {
 
-    enum LpValueMode {
-        ExplicitCashInflow,
-        ImplicitRetainedValue
+    enum ClaimantInflowKind {
+        Revenue,
+        Recapitalization
+    }
+
+    enum ClaimantInflowCashMode {
+        CashArrived,
+        AlreadyRetained
     }
 
     /// @notice Canonical economic USDC backing recognized by the vault (6 decimals).
@@ -31,17 +36,13 @@ interface ICfdVault {
         uint256 amount
     ) external;
 
-    /// @notice Records an explicit recapitalization inflow intended to restore senior first.
-    function recordRecapitalizationInflow(
-        uint256 amount
-    ) external;
-
-    /// @notice Routes LP-owned value into the tranche claimant path.
-    /// @dev `ExplicitCashInflow` increments canonical accounted assets because raw USDC arrived in this flow.
-    ///      `ImplicitRetainedValue` only routes ownership for value already retained by the vault.
-    function routeLpValue(
+    /// @notice Records claimant-owned value that should ultimately flow through the tranche waterfall.
+    /// @dev `CashArrived` increments canonical accounted assets because raw USDC arrived in this flow.
+    ///      `AlreadyRetained` only routes ownership for value already retained physically by the vault.
+    function recordClaimantInflow(
         uint256 amount,
-        LpValueMode mode
+        ClaimantInflowKind kind,
+        ClaimantInflowCashMode cashMode
     ) external;
 
     /// @notice Maximum age for mark price freshness checks outside FAD mode (seconds)

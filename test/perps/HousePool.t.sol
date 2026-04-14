@@ -410,7 +410,9 @@ contract HousePoolTest is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        assertGt(pool.unpaidSeniorYield(), 0, "Yield after the last fresh mark should still accrue once freshness returns");
+        assertGt(
+            pool.unpaidSeniorYield(), 0, "Yield after the last fresh mark should still accrue once freshness returns"
+        );
     }
 
     function test_FinalizeSeniorRate_NoCarrySyncNeededBeforeReconcile() public {
@@ -665,7 +667,9 @@ contract HousePoolTest is BasePerpTest {
 
         usdc.mint(address(pool), 25_000e6);
         vm.prank(address(engine));
-        pool.recordRecapitalizationInflow(25_000e6);
+        pool.recordClaimantInflow(
+            25_000e6, ICfdVault.ClaimantInflowKind.Recapitalization, ICfdVault.ClaimantInflowCashMode.CashArrived
+        );
 
         (uint256 pendingSenior,,,) = pool.getPendingTrancheState();
         assertEq(pendingSenior, 85_000e6, "Pending state should reflect queued senior restoration immediately");
@@ -691,7 +695,9 @@ contract HousePoolTest is BasePerpTest {
 
         usdc.mint(address(pool), 10_000e6);
         vm.prank(address(engine));
-        pool.recordRecapitalizationInflow(10_000e6);
+        pool.recordClaimantInflow(
+            10_000e6, ICfdVault.ClaimantInflowKind.Recapitalization, ICfdVault.ClaimantInflowCashMode.CashArrived
+        );
 
         (uint256 pendingSenior,,, uint256 maxJuniorWithdraw) = pool.getPendingTrancheState();
         assertEq(pendingSenior, 10_000e6, "Pending state should attach recapitalization to seeded senior ownership");
@@ -721,7 +727,9 @@ contract HousePoolTest is BasePerpTest {
 
         usdc.mint(address(pool), 10_000e6);
         vm.prank(address(engine));
-        pool.recordRecapitalizationInflow(10_000e6);
+        pool.recordClaimantInflow(
+            10_000e6, ICfdVault.ClaimantInflowKind.Recapitalization, ICfdVault.ClaimantInflowCashMode.CashArrived
+        );
 
         (uint256 pendingSenior,, uint256 maxSeniorWithdraw,) = pool.getPendingTrancheState();
         assertEq(pendingSenior, 10_000e6, "Projected recapitalization should credit senior principal");
@@ -731,7 +739,9 @@ contract HousePoolTest is BasePerpTest {
     function helper_RecordRecapitalizationInflow_NoClaimantPathFallsBackToUnassignedAssets() public {
         usdc.mint(address(pool), 10_000e6);
         vm.prank(address(engine));
-        pool.recordRecapitalizationInflow(10_000e6);
+        pool.recordClaimantInflow(
+            10_000e6, ICfdVault.ClaimantInflowKind.Recapitalization, ICfdVault.ClaimantInflowCashMode.CashArrived
+        );
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -758,7 +768,9 @@ contract HousePoolTest is BasePerpTest {
 
         usdc.mint(address(pool), 7000e6);
         vm.prank(address(engine));
-        pool.routeLpValue(7000e6, ICfdVault.LpValueMode.ExplicitCashInflow);
+        pool.recordClaimantInflow(
+            7000e6, ICfdVault.ClaimantInflowKind.Revenue, ICfdVault.ClaimantInflowCashMode.CashArrived
+        );
 
         (, uint256 pendingJunior,,) = pool.getPendingTrancheState();
         assertEq(pendingJunior, 7000e6, "Pending state should reflect queued trading revenue immediately");
@@ -771,7 +783,9 @@ contract HousePoolTest is BasePerpTest {
     function helper_RecordTradingRevenueInflow_NoClaimantPathFallsBackToUnassignedAssets() public {
         usdc.mint(address(pool), 7000e6);
         vm.prank(address(engine));
-        pool.routeLpValue(7000e6, ICfdVault.LpValueMode.ExplicitCashInflow);
+        pool.recordClaimantInflow(
+            7000e6, ICfdVault.ClaimantInflowKind.Revenue, ICfdVault.ClaimantInflowCashMode.CashArrived
+        );
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -796,7 +810,9 @@ contract HousePoolTest is BasePerpTest {
 
         usdc.mint(address(pool), 35_000e6);
         vm.prank(address(engine));
-        pool.routeLpValue(35_000e6, ICfdVault.LpValueMode.ExplicitCashInflow);
+        pool.recordClaimantInflow(
+            35_000e6, ICfdVault.ClaimantInflowKind.Revenue, ICfdVault.ClaimantInflowCashMode.CashArrived
+        );
 
         (uint256 pendingSenior, uint256 pendingJunior,,) = pool.getPendingTrancheState();
         assertEq(pendingSenior, 30_000e6, "Pending state should restore seeded senior to its HWM first");
@@ -908,7 +924,9 @@ contract HousePoolTest is BasePerpTest {
 
         usdc.mint(address(pool), 50_000e6);
         vm.prank(address(engine));
-        pool.recordRecapitalizationInflow(50_000e6);
+        pool.recordClaimantInflow(
+            50_000e6, ICfdVault.ClaimantInflowKind.Recapitalization, ICfdVault.ClaimantInflowCashMode.CashArrived
+        );
 
         assertEq(pool.unpaidSeniorYield(), 0, "Stale-window principal mutation should not accrue yield");
         uint256 reconcileBefore = pool.lastReconcileTime();
@@ -956,7 +974,9 @@ contract HousePoolTest is BasePerpTest {
 
         usdc.mint(address(pool), 50_000e6);
         vm.prank(address(engine));
-        pool.recordRecapitalizationInflow(50_000e6);
+        pool.recordClaimantInflow(
+            50_000e6, ICfdVault.ClaimantInflowKind.Recapitalization, ICfdVault.ClaimantInflowCashMode.CashArrived
+        );
 
         uint256 checkpointBefore = pool.lastSeniorYieldCheckpointTime();
 
@@ -1007,7 +1027,9 @@ contract HousePoolTest is BasePerpTest {
 
         usdc.mint(address(pool), 50_000e6);
         vm.prank(address(engine));
-        pool.recordRecapitalizationInflow(50_000e6);
+        pool.recordClaimantInflow(
+            50_000e6, ICfdVault.ClaimantInflowKind.Recapitalization, ICfdVault.ClaimantInflowCashMode.CashArrived
+        );
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -1253,18 +1275,18 @@ contract HousePoolTest is BasePerpTest {
         uint256 seniorAfterYield = pool.seniorPrincipal();
         assertGt(seniorAfterYield, originalSeniorPrincipal, "Setup should pay senior yield into principal");
         assertEq(
-            pool.seniorHighWaterMark(),
-            seniorAfterYield,
-            "Paid senior yield should ratchet the protected HWM upward"
+            pool.seniorHighWaterMark(), seniorAfterYield, "Paid senior yield should ratchet the protected HWM upward"
         );
         assertGt(pool.seniorHighWaterMark(), hwmBeforeYield, "HWM should rise after paying senior yield");
 
         vm.prank(address(pool));
-        usdc.transfer(address(0xdead), 5_000e6);
+        usdc.transfer(address(0xdead), 5000e6);
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        assertGt(pool.seniorPrincipal(), originalSeniorPrincipal, "Senior can stay above original principal after the loss");
+        assertGt(
+            pool.seniorPrincipal(), originalSeniorPrincipal, "Senior can stay above original principal after the loss"
+        );
         assertLt(
             pool.seniorPrincipal(),
             pool.seniorHighWaterMark(),
@@ -1277,10 +1299,14 @@ contract HousePoolTest is BasePerpTest {
         _fundJunior(bob, 300_000e6);
         usdc.mint(address(pool), 50_000e6);
         vm.prank(address(engine));
-        pool.recordRecapitalizationInflow(50_000e6);
+        pool.recordClaimantInflow(
+            50_000e6, ICfdVault.ClaimantInflowKind.Recapitalization, ICfdVault.ClaimantInflowCashMode.CashArrived
+        );
         usdc.mint(address(pool), 20_000e6);
         vm.prank(address(engine));
-        pool.routeLpValue(20_000e6, ICfdVault.LpValueMode.ExplicitCashInflow);
+        pool.recordClaimantInflow(
+            20_000e6, ICfdVault.ClaimantInflowKind.Revenue, ICfdVault.ClaimantInflowCashMode.CashArrived
+        );
 
         HousePool.VaultLiquidityView memory viewData = pool.getVaultLiquidityView();
         assertEq(viewData.totalAssetsUsdc, pool.totalAssets());
@@ -2077,7 +2103,9 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         assertEq(pool.seniorPrincipal(), 60_000e6);
         usdc.mint(address(pool), 25_000e6);
         vm.prank(address(engine));
-        pool.recordRecapitalizationInflow(25_000e6);
+        pool.recordClaimantInflow(
+            25_000e6, ICfdVault.ClaimantInflowKind.Recapitalization, ICfdVault.ClaimantInflowCashMode.CashArrived
+        );
         (uint256 pendingSenior,,,) = pool.getPendingTrancheState();
         assertEq(pendingSenior, 85_000e6);
         vm.prank(address(juniorVault));
@@ -2098,7 +2126,9 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         assertGt(seniorVault.totalSupply(), 0);
         usdc.mint(address(pool), 10_000e6);
         vm.prank(address(engine));
-        pool.recordRecapitalizationInflow(10_000e6);
+        pool.recordClaimantInflow(
+            10_000e6, ICfdVault.ClaimantInflowKind.Recapitalization, ICfdVault.ClaimantInflowCashMode.CashArrived
+        );
         (uint256 pendingSenior,,, uint256 maxJuniorWithdraw) = pool.getPendingTrancheState();
         assertEq(pendingSenior, 10_000e6);
         assertEq(maxJuniorWithdraw, 0);
@@ -2118,7 +2148,9 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         pool.reconcile();
         usdc.mint(address(pool), 10_000e6);
         vm.prank(address(engine));
-        pool.recordRecapitalizationInflow(10_000e6);
+        pool.recordClaimantInflow(
+            10_000e6, ICfdVault.ClaimantInflowKind.Recapitalization, ICfdVault.ClaimantInflowCashMode.CashArrived
+        );
         (uint256 pendingSenior,, uint256 maxSeniorWithdraw,) = pool.getPendingTrancheState();
         assertEq(pendingSenior, 10_000e6);
         assertEq(maxSeniorWithdraw, 10_000e6);
@@ -2127,7 +2159,9 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
     function helper_RecordRecapitalizationInflow_NoClaimantPathFallsBackToUnassignedAssets() public {
         usdc.mint(address(pool), 10_000e6);
         vm.prank(address(engine));
-        pool.recordRecapitalizationInflow(10_000e6);
+        pool.recordClaimantInflow(
+            10_000e6, ICfdVault.ClaimantInflowKind.Recapitalization, ICfdVault.ClaimantInflowCashMode.CashArrived
+        );
         vm.prank(address(juniorVault));
         pool.reconcile();
         assertEq(pool.seniorPrincipal(), 0);
@@ -2146,7 +2180,9 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         assertGt(juniorVault.totalSupply(), 0);
         usdc.mint(address(pool), 7000e6);
         vm.prank(address(engine));
-        pool.routeLpValue(7000e6, ICfdVault.LpValueMode.ExplicitCashInflow);
+        pool.recordClaimantInflow(
+            7000e6, ICfdVault.ClaimantInflowKind.Revenue, ICfdVault.ClaimantInflowCashMode.CashArrived
+        );
         (, uint256 pendingJunior,,) = pool.getPendingTrancheState();
         assertEq(pendingJunior, 7000e6);
         vm.prank(address(juniorVault));
@@ -2209,7 +2245,9 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
     function helper_RecordTradingRevenueInflow_NoClaimantPathFallsBackToUnassignedAssets() public {
         usdc.mint(address(pool), 7000e6);
         vm.prank(address(engine));
-        pool.routeLpValue(7000e6, ICfdVault.LpValueMode.ExplicitCashInflow);
+        pool.recordClaimantInflow(
+            7000e6, ICfdVault.ClaimantInflowKind.Revenue, ICfdVault.ClaimantInflowCashMode.CashArrived
+        );
         vm.prank(address(juniorVault));
         pool.reconcile();
         assertEq(pool.seniorPrincipal(), 0);
@@ -2229,7 +2267,9 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         pool.reconcile();
         usdc.mint(address(pool), 35_000e6);
         vm.prank(address(engine));
-        pool.routeLpValue(35_000e6, ICfdVault.LpValueMode.ExplicitCashInflow);
+        pool.recordClaimantInflow(
+            35_000e6, ICfdVault.ClaimantInflowKind.Revenue, ICfdVault.ClaimantInflowCashMode.CashArrived
+        );
         (uint256 pendingSenior, uint256 pendingJunior,,) = pool.getPendingTrancheState();
         assertEq(pendingSenior, 30_000e6);
         assertEq(pendingJunior, 5000e6);
@@ -2254,7 +2294,9 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         usdc.mint(address(pool), 35_000e6);
         uint256 accountedBefore = pool.accountedAssets();
         vm.prank(address(engine));
-        pool.routeLpValue(35_000e6, ICfdVault.LpValueMode.ImplicitRetainedValue);
+        pool.recordClaimantInflow(
+            35_000e6, ICfdVault.ClaimantInflowKind.Revenue, ICfdVault.ClaimantInflowCashMode.AlreadyRetained
+        );
 
         assertEq(
             pool.accountedAssets(), accountedBefore, "Implicit retained revenue must not increment accounted assets"
@@ -2423,7 +2465,9 @@ contract HousePoolSeededBaseSetupTest is BasePerpTest {
         uint256 recapAmount = 500e6;
         usdc.mint(address(pool), recapAmount);
         vm.prank(address(engine));
-        pool.recordRecapitalizationInflow(recapAmount);
+        pool.recordClaimantInflow(
+            recapAmount, ICfdVault.ClaimantInflowKind.Recapitalization, ICfdVault.ClaimantInflowCashMode.CashArrived
+        );
 
         assertTrue(
             pool.canAcceptTrancheDeposits(true),

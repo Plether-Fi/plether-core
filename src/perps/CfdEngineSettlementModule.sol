@@ -62,8 +62,10 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
             }
             if (uint256(delta.tradeCostUsdc) > protocolFeeInflowUsdc) {
                 ICfdVault(host.vault())
-                    .routeLpValue(
-                        uint256(delta.tradeCostUsdc) - protocolFeeInflowUsdc, ICfdVault.LpValueMode.ExplicitCashInflow
+                    .recordClaimantInflow(
+                        uint256(delta.tradeCostUsdc) - protocolFeeInflowUsdc,
+                        ICfdVault.ClaimantInflowKind.Revenue,
+                        ICfdVault.ClaimantInflowCashMode.CashArrived
                     );
             }
         }
@@ -122,7 +124,11 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
             }
             if (delta.pendingCarryUsdc > 0) {
                 ICfdVault(host.vault())
-                    .routeLpValue(delta.pendingCarryUsdc, ICfdVault.LpValueMode.ImplicitRetainedValue);
+                    .recordClaimantInflow(
+                        delta.pendingCarryUsdc,
+                        ICfdVault.ClaimantInflowKind.Revenue,
+                        ICfdVault.ClaimantInflowCashMode.AlreadyRetained
+                    );
             }
         } else if (delta.settlementType == CfdEnginePlanTypes.SettlementType.LOSS) {
             uint64[] memory reservationOrderIds =
@@ -147,7 +153,11 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
                 }
                 if (seizedUsdc > protocolFeeInflowUsdc) {
                     ICfdVault(host.vault())
-                        .routeLpValue(seizedUsdc - protocolFeeInflowUsdc, ICfdVault.LpValueMode.ExplicitCashInflow);
+                        .recordClaimantInflow(
+                            seizedUsdc - protocolFeeInflowUsdc,
+                            ICfdVault.ClaimantInflowKind.Revenue,
+                            ICfdVault.ClaimantInflowCashMode.CashArrived
+                        );
                 }
             }
             if (delta.syncMarginQueueAmount > 0) {
@@ -160,7 +170,12 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
                 host.settlementAccumulateBadDebt(delta.badDebtUsdc);
             }
         } else if (delta.pendingCarryUsdc > 0) {
-            ICfdVault(host.vault()).routeLpValue(delta.pendingCarryUsdc, ICfdVault.LpValueMode.ImplicitRetainedValue);
+            ICfdVault(host.vault())
+                .recordClaimantInflow(
+                    delta.pendingCarryUsdc,
+                    ICfdVault.ClaimantInflowKind.Revenue,
+                    ICfdVault.ClaimantInflowCashMode.AlreadyRetained
+                );
         }
 
         if (delta.executionFeeUsdc > 0) {
@@ -223,7 +238,11 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
             }
             if (seizedUsdc > keeperBountyInflowUsdc) {
                 ICfdVault(host.vault())
-                    .routeLpValue(seizedUsdc - keeperBountyInflowUsdc, ICfdVault.LpValueMode.ExplicitCashInflow);
+                    .recordClaimantInflow(
+                        seizedUsdc - keeperBountyInflowUsdc,
+                        ICfdVault.ClaimantInflowKind.Revenue,
+                        ICfdVault.ClaimantInflowCashMode.CashArrived
+                    );
             }
         }
         if (delta.syncMarginQueueAmount > 0) {
@@ -235,9 +254,12 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
         if (delta.freshTraderPayoutUsdc > 0) {
             host.settlementRecordDeferredTraderPayout(delta.accountId, delta.freshTraderPayoutUsdc);
             if (delta.pendingCarryUsdc > 0) {
-                ICfdVault(host.vault()).routeLpValue(
-                    delta.pendingCarryUsdc, ICfdVault.LpValueMode.ImplicitRetainedValue
-                );
+                ICfdVault(host.vault())
+                    .recordClaimantInflow(
+                        delta.pendingCarryUsdc,
+                        ICfdVault.ClaimantInflowKind.Revenue,
+                        ICfdVault.ClaimantInflowCashMode.AlreadyRetained
+                    );
             }
         }
         if (delta.badDebtUsdc > 0) {
