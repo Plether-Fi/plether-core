@@ -44,6 +44,9 @@ contract MockToken is ERC20 {
 contract MockClearinghouseEngine {
 
     address public orderRouter;
+    uint256 public carryCheckpointCalls;
+    bytes32 public lastCarryAccountId;
+    uint256 public lastReachableCollateralBasisUsdc;
 
     function setOrderRouter(
         address router
@@ -56,9 +59,13 @@ contract MockClearinghouseEngine {
     ) external pure {}
 
     function realizeCarryBeforeMarginChange(
-        bytes32,
-        uint256
-    ) external pure {}
+        bytes32 accountId,
+        uint256 reachableCollateralBasisUsdc
+    ) external {
+        carryCheckpointCalls += 1;
+        lastCarryAccountId = accountId;
+        lastReachableCollateralBasisUsdc = reachableCollateralBasisUsdc;
+    }
 
     function syncLegacyPlaceholder() external {}
 
@@ -251,6 +258,26 @@ contract MarginClearinghouseTest is Test {
         assertEq(buckets.totalLockedMarginUsdc, 400 * 1e6);
     }
 
+    function test_UnlockCommittedOrderMargin_CheckpointsCarryBeforeUnlock() public {
+        vm.prank(alice);
+        clearinghouse.deposit(aliceId, 1000 * 1e6);
+
+        vm.prank(engine);
+        clearinghouse.lockCommittedOrderMargin(aliceId, 200 * 1e6);
+
+        uint256 checkpointCallsBeforeUnlock = mockEngine.carryCheckpointCalls();
+
+        vm.prank(engine);
+        clearinghouse.unlockCommittedOrderMargin(aliceId, 200 * 1e6);
+
+        assertEq(
+            mockEngine.carryCheckpointCalls(),
+            checkpointCallsBeforeUnlock + 1,
+            "Committed-margin unlock should checkpoint carry before funds become reachable again"
+        );
+        assertEq(mockEngine.lastCarryAccountId(), aliceId, "Unlock should checkpoint carry for the unlocked account");
+    }
+
     function test_ReserveCommittedOrderMargin_CreatesReservationAndMatchesBucketTotals() public {
         vm.prank(alice);
         clearinghouse.deposit(aliceId, 1000 * 1e6);
@@ -318,6 +345,26 @@ contract MarginClearinghouseTest is Test {
         assertEq(summary.activeCommittedOrderMarginUsdc, 0);
         assertEq(summary.activeReservationCount, 0);
         assertEq(clearinghouse.reservationHeadIndex(aliceId), 1, "Head index should advance past released reservations");
+    }
+
+    function test_ReleaseOrderReservationIfActive_CheckpointsCarryBeforeRelease() public {
+        vm.prank(alice);
+        clearinghouse.deposit(aliceId, 1000 * 1e6);
+
+        vm.prank(engine);
+        clearinghouse.reserveCommittedOrderMargin(aliceId, 15, 180 * 1e6);
+
+        uint256 checkpointCallsBeforeRelease = mockEngine.carryCheckpointCalls();
+
+        vm.prank(engine);
+        clearinghouse.releaseOrderReservationIfActive(15);
+
+        assertEq(
+            mockEngine.carryCheckpointCalls(),
+            checkpointCallsBeforeRelease + 1,
+            "Reservation release should checkpoint carry before committed margin becomes reachable again"
+        );
+        assertEq(mockEngine.lastCarryAccountId(), aliceId, "Release should checkpoint carry for the released account");
     }
 
     function test_ConsumeOrderReservation_ReducesResidualAndKeepsAggregateParity() public {

@@ -1484,6 +1484,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.warp(block.timestamp + carryElapsed);
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        vm.roll(block.number + 1);
 
         uint256 expectedCarry = PositionRiskAccountingLib.computePendingCarryUsdc(
             PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, 1e8, settlementBefore),
@@ -1521,6 +1522,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.warp(block.timestamp + carryElapsed);
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        vm.roll(block.number + 1);
 
         uint256 expectedCarry = PositionRiskAccountingLib.computePendingCarryUsdc(
             PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, 1e8, settlementBefore),
@@ -1598,6 +1600,70 @@ contract CfdEngineTest is BasePerpTest {
             settlementBefore - expectedCarry - seizedAmount + depositAmount,
             "Later deposits must not retroactively apply the post-seizure carry basis to prior time"
         );
+    }
+
+    function test_UnlockReservedSettlement_CheckpointsCarryBeforeReachabilityRises() public {
+        address trader = address(0xABD6);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        uint256 reservedAmount = 3000e6;
+        uint256 carryElapsed = 30 days;
+
+        _fundTrader(trader, 10_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+
+        vm.prank(address(router));
+        clearinghouse.lockReservedSettlement(accountId, reservedAmount);
+
+        uint256 settlementBeforeUnlock = clearinghouse.balanceUsdc(accountId);
+        uint256 reservedReachable =
+            MarginClearinghouseAccountingLib.getGenericReachableUsdc(clearinghouse.getAccountUsdcBuckets(accountId));
+
+        vm.warp(block.timestamp + carryElapsed);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+
+        uint256 expectedCarry = PositionRiskAccountingLib.computePendingCarryUsdc(
+            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, 1e8, reservedReachable),
+            _riskParams().baseCarryBps,
+            carryElapsed
+        );
+
+        vm.prank(address(router));
+        clearinghouse.unlockReservedSettlement(accountId, reservedAmount);
+
+        assertEq(
+            clearinghouse.balanceUsdc(accountId),
+            settlementBeforeUnlock - expectedCarry,
+            "Reserved-settlement unlock should checkpoint carry before reserved funds become reachable again"
+        );
+        assertEq(engine.unsettledCarryUsdc(accountId), 0, "Unlock should not leave elapsed carry uncheckpointed");
+    }
+
+    function test_SeizeUsdc_RechecksFreeSettlementAfterCarryCheckpoint() public {
+        address trader = address(0xABD7);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        uint256 carryElapsed = 30 days;
+
+        _fundTrader(trader, 10_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+
+        uint256 freeSettlementBefore =
+            MarginClearinghouseAccountingLib.getFreeSettlementUsdc(clearinghouse.getAccountUsdcBuckets(accountId));
+
+        vm.warp(block.timestamp + carryElapsed);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+
+        uint256 expectedCarry = PositionRiskAccountingLib.computePendingCarryUsdc(
+            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, 1e8, clearinghouse.balanceUsdc(accountId)),
+            _riskParams().baseCarryBps,
+            carryElapsed
+        );
+        assertGt(expectedCarry, 0, "Setup must accrue carry before seizure");
+
+        vm.prank(address(router));
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientAssetToSeize.selector);
+        clearinghouse.seizeUsdc(accountId, freeSettlementBefore, address(router));
     }
 
     function test_ProfitableClose_DoesNotDoubleBookCarryIntoAccountedAssets() public {

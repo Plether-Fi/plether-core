@@ -311,6 +311,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         bytes32 accountId,
         uint256 amountUsdc
     ) external onlyOperator {
+        _checkpointCarryBeforeMarginChange(accountId);
         _unlockMargin(accountId, IMarginClearinghouse.MarginBucket.CommittedOrder, amountUsdc);
     }
 
@@ -318,6 +319,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         uint64 orderId
     ) external onlyOperator returns (uint256 releasedUsdc) {
         IMarginClearinghouse.OrderReservation storage reservation = _activeReservation(orderId);
+        _checkpointCarryBeforeMarginChange(reservation.accountId);
         releasedUsdc = _releaseReservation(reservation, true);
         emit ReservationReleased(orderId, reservation.accountId, releasedUsdc);
     }
@@ -330,6 +332,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
             return 0;
         }
 
+        _checkpointCarryBeforeMarginChange(reservation.accountId);
         releasedUsdc = _releaseReservation(reservation, true);
         emit ReservationReleased(orderId, reservation.accountId, releasedUsdc);
     }
@@ -488,6 +491,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         bytes32 accountId,
         uint256 amountUsdc
     ) external onlyOperator {
+        _checkpointCarryBeforeMarginChange(accountId);
         _unlockMargin(accountId, IMarginClearinghouse.MarginBucket.ReservedSettlement, amountUsdc);
     }
 
@@ -921,6 +925,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         if (recipient != msg.sender) {
             revert MarginClearinghouse__InvalidSeizeRecipient();
         }
+        _checkpointCarryBeforeMarginChange(accountId);
         if (settlementBalances[accountId] < amount) {
             revert MarginClearinghouse__InsufficientAssetToSeize();
         }
@@ -928,7 +933,6 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
             revert MarginClearinghouse__InsufficientAssetToSeize();
         }
 
-        _checkpointCarryBeforeMarginChange(accountId);
         settlementBalances[accountId] -= amount;
         IERC20(settlementAsset).safeTransfer(recipient, amount);
 
