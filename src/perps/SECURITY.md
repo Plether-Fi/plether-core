@@ -77,6 +77,19 @@ The owner cannot:
 - directly seize arbitrary user funds,
 - bypass the core solvency and withdrawal accounting model.
 
+## Critical Capability Boundaries
+
+Several perps contracts intentionally expose narrow but high-authority capability surfaces.
+
+- `OrderRouter` is the external execution boundary and can reach engine settlement paths plus `HousePool.payOut(...)` / `recordProtocolInflow(...)` through the approved caller set.
+- `CfdEngineSettlementModule` is engine-gated, but any external function added there is automatically security-critical because it can reach engine-owned settlement hooks.
+- `MarginClearinghouse` operator paths trust `engine`, `orderRouter`, and `settlementModule` to move trader custody across settlement, escrow, and seizure buckets.
+- `HousePool.payOut(...)` and `HousePool.recordProtocolInflow(...)` trust `engine`, `orderRouter`, and `settlementModule` as capability-bearing callers.
+
+Practical rule:
+
+- any new external function on `OrderRouter` or `CfdEngineSettlementModule`, and any new helper/module that can reach these caller sets, must be treated as security-critical and reviewed like a core custody or settlement change.
+
 ## Critical Protocol Invariants
 
 These are the highest-value properties an auditor should expect to hold.

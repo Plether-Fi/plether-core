@@ -34,6 +34,14 @@ For normative semantics, use [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md). For mod
 | `CfdEngineSettlementModule` | Execute externalized close/liquidation settlement orchestration through engine-owned host hooks | Own storage or bypass engine authorization boundaries |
 | `HousePool` | Maintain canonical pool asset ledger, LP principal waterfall, fee segregation, and exceptional excess/unassigned buckets | Inspect raw trader balances or execute order logic |
 
+## Critical Capability Boundaries
+
+- `OrderRouter` is the main external capability boundary: it can drive engine settlement paths and, through approved caller checks, reach `HousePool.payOut(...)` and `recordProtocolInflow(...)`.
+- `CfdEngineSettlementModule` is engine-gated, but any external surface added there is security-critical because it inherits engine settlement authority.
+- `MarginClearinghouse` operator paths trust `engine`, `orderRouter`, and `settlementModule` to move trader custody across settlement, escrow, and seizure buckets.
+- `HousePool.payOut(...)` and `HousePool.recordProtocolInflow(...)` trust `engine`, `orderRouter`, and `settlementModule` as high-authority callers.
+- Any new helper/module that can reach these caller sets should be treated as a core custody/settlement boundary and reviewed accordingly.
+
 ## Accounting Readers
 
 | View | Canonical readers | Buckets intentionally visible |
