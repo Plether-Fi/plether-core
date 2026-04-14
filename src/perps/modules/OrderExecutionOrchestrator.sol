@@ -48,7 +48,6 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
     ) internal virtual override;
 
     function _revertNoOrdersToExecute() internal pure virtual;
-    function _revertOraclePublishTimeOutOfOrder() internal pure virtual;
     function _revertInsufficientGas() internal pure virtual;
     function _revertMevDetected() internal pure virtual;
     function _revertCloseOnlyMode() internal pure virtual;
