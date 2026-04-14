@@ -3037,8 +3037,7 @@ contract CfdEngineTest is BasePerpTest {
         DeferredEngineViewTypes.DeferredCreditStatus memory status = _deferredCreditStatus(accountId, keeper);
         assertTrue(status.traderPayoutClaimableNow, "Deferred trader claim should be claimable under partial liquidity");
         assertTrue(
-            status.keeperCreditClaimableNow,
-            "Deferred clearer claim should also be claimable without FIFO ordering"
+            status.keeperCreditClaimableNow, "Deferred clearer claim should also be claimable without FIFO ordering"
         );
     }
 
@@ -4125,14 +4124,14 @@ contract CfdEngineTest is BasePerpTest {
 
         _fundTrader(trader, 10_000e6);
         _fundTrader(counterparty, 50_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 2_000e6, 1e8);
+        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 2000e6, 1e8);
         _open(counterpartyId, CfdTypes.Side.BEAR, 10_000e18, 50_000e6, 1e8);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 4_000e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 4000e6, type(uint256).max, false);
 
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(accountId);
-        assertEq(buckets.otherLockedMarginUsdc, 4_000e6, "Setup should reserve queued order funds");
+        assertEq(buckets.otherLockedMarginUsdc, 4000e6, "Setup should reserve queued order funds");
         assertEq(
             MarginClearinghouseAccountingLib.getGenericReachableUsdc(buckets),
             buckets.settlementBalanceUsdc - buckets.otherLockedMarginUsdc,
@@ -4141,7 +4140,7 @@ contract CfdEngineTest is BasePerpTest {
 
         vm.prank(address(router));
         vm.expectRevert(CfdEngine.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
-        engine.reserveCloseOrderExecutionBounty(accountId, 6_000e6, address(router));
+        engine.reserveCloseOrderExecutionBounty(accountId, 6000e6, address(router));
     }
 
     function test_CheckWithdraw_RevertsWhenOpenPositionHasZeroMarkPrice() public {
@@ -4273,6 +4272,56 @@ contract CfdEngineTest is BasePerpTest {
         engine.reserveCloseOrderExecutionBounty(accountId, 1400e6, address(router));
     }
 
+    function test_ReserveCloseOrderExecutionBounty_RecomputesCarryAfterReservationReachabilityDrop() public {
+        CfdTypes.RiskParams memory params = _riskParams();
+        _setRiskParams(params);
+
+        address trader = address(0x51584);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        uint256 price = 1e8;
+        uint256 size = 100_000e18;
+        uint256 marginUsdc = 1600e6;
+        uint256 bountyUsdc = 1e6;
+        uint256 carryTimeDelta = 3_839_405;
+
+        _fundTrader(trader, marginUsdc);
+        _open(accountId, CfdTypes.Side.BULL, size, marginUsdc, price);
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(price, uint64(block.timestamp));
+        vm.warp(block.timestamp + carryTimeDelta);
+
+        uint256 postReservationReachableUsdc = marginUsdc - bountyUsdc;
+        uint256 staleCarryUsdc = PositionRiskAccountingLib.computePendingCarryUsdc(
+            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(size, price, marginUsdc),
+            params.baseCarryBps,
+            carryTimeDelta
+        );
+        uint256 recomputedCarryUsdc = PositionRiskAccountingLib.computePendingCarryUsdc(
+            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(size, price, postReservationReachableUsdc),
+            params.baseCarryBps,
+            carryTimeDelta
+        );
+        uint256 maintMarginUsdc = ((size * price) / CfdMath.USDC_TO_TOKEN_SCALE) * params.maintMarginBps / 10_000;
+
+        assertEq(staleCarryUsdc, 598_993_930, "Setup must pin the pre-reservation carry projection");
+        assertEq(recomputedCarryUsdc, 599_000_018, "Setup must increase carry once reachability drops by the bounty");
+        assertGt(
+            postReservationReachableUsdc - staleCarryUsdc,
+            maintMarginUsdc,
+            "Pre-patch carry snapshot would leave the account barely above maintenance"
+        );
+        assertLe(
+            postReservationReachableUsdc - recomputedCarryUsdc,
+            maintMarginUsdc,
+            "Recomputed carry must make the reservation fail once maintenance is breached"
+        );
+
+        vm.prank(address(router));
+        vm.expectRevert(CfdEngine.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
+        engine.reserveCloseOrderExecutionBounty(accountId, bountyUsdc, address(router));
+    }
+
     function test_ClaimDeferredKeeperCredit_DoesNotRequireFreshMarkForKeeperPosition() public {
         address keeper = address(0x51597);
         address counterparty = address(0x51598);
@@ -4281,7 +4330,7 @@ contract CfdEngineTest is BasePerpTest {
 
         _fundTrader(keeper, 10_000e6);
         _fundTrader(counterparty, 50_000e6);
-        _open(keeperAccountId, CfdTypes.Side.BULL, 10_000e18, 1_500e6, 1e8);
+        _open(keeperAccountId, CfdTypes.Side.BULL, 10_000e18, 1500e6, 1e8);
         _open(counterpartyId, CfdTypes.Side.BEAR, 10_000e18, 50_000e6, 1e8);
 
         vm.prank(address(router));

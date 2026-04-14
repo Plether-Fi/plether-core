@@ -21,8 +21,8 @@ import {CfdEnginePlanLib} from "./libraries/CfdEnginePlanLib.sol";
 import {CfdEngineSnapshotsLib} from "./libraries/CfdEngineSnapshotsLib.sol";
 import {MarginClearinghouseAccountingLib} from "./libraries/MarginClearinghouseAccountingLib.sol";
 import {MarketCalendarLib} from "./libraries/MarketCalendarLib.sol";
-import {PositionRiskAccountingLib} from "./libraries/PositionRiskAccountingLib.sol";
 import {OracleFreshnessPolicyLib} from "./libraries/OracleFreshnessPolicyLib.sol";
+import {PositionRiskAccountingLib} from "./libraries/PositionRiskAccountingLib.sol";
 import {SolvencyAccountingLib} from "./libraries/SolvencyAccountingLib.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
@@ -285,7 +285,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     event RiskParamsProposalCancelled();
     event AddFadDaysProposalCancelled();
     event RemoveFadDaysProposalCancelled();
-    event CarryCheckpointed(bytes32 indexed accountId, uint256 addedUnsettledCarryUsdc, uint256 totalUnsettledCarryUsdc);
+    event CarryCheckpointed(
+        bytes32 indexed accountId, uint256 addedUnsettledCarryUsdc, uint256 totalUnsettledCarryUsdc
+    );
     event CarryRealized(
         bytes32 indexed accountId,
         uint256 realizedCarryUsdc,
@@ -861,8 +863,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         }
 
         uint256 reachableUsdc = _genericReachableCollateralUsdc(accountId);
-        uint256 pendingCarryUsdc =
-            _totalPendingCarryUsdc(accountId, _loadPosition(accountId), price, reachableUsdc, block.timestamp);
         if (reachableUsdc < amountUsdc) {
             revert CfdEngine__InsufficientCloseOrderBountyBacking();
         }
@@ -871,6 +871,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
 
         CfdTypes.Position memory positionAfter = _loadPosition(accountId);
         positionAfter.margin = positionMarginUsdc - amountUsdc;
+        uint256 pendingCarryUsdc =
+            _totalPendingCarryUsdc(accountId, positionAfter, price, postReservationReachableUsdc, block.timestamp);
         PositionRiskAccountingLib.PositionRiskState memory riskState =
             PositionRiskAccountingLib.buildPositionRiskStateWithCarry(
                 positionAfter,
@@ -1602,11 +1604,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             vault.routeLpValue(realizedCarryUsdc, ICfdVault.LpValueMode.ExplicitCashInflow);
         }
         emit CarryRealized(
-            accountId,
-            realizedCarryUsdc,
-            freeSettlementConsumedUsdc,
-            marginConsumedUsdc,
-            unsettledCarryUsdc[accountId]
+            accountId, realizedCarryUsdc, freeSettlementConsumedUsdc, marginConsumedUsdc, unsettledCarryUsdc[accountId]
         );
         pos.lastCarryTimestamp = uint64(block.timestamp);
     }
@@ -1621,7 +1619,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             0,
             0,
             fadMaxStaleness
-        ).maxStaleness;
+        )
+        .maxStaleness;
     }
 
     function _consumeDeferredTraderPayout(
