@@ -368,7 +368,7 @@ This preserves terminal liveness without requiring an unbounded global queue sca
 
 ### VPI limitations
 
-- liquidation does not charge VPI,
+- liquidation does not compute a fresh VPI delta, but negative accrued VPI is clawed back into liquidation shortfall,
 - VPI depends on live vault depth,
 - the lifetime clamp intentionally zeroes otherwise extractable rebate-only round trips,
 - partial-close VPI release is a bounded linear approximation.

@@ -198,7 +198,7 @@ contract CfdEngineLens is ICfdEngineLens {
         preview.liquidatable = delta.liquidatable;
         preview.reachableCollateralUsdc = delta.liquidationReachableCollateralUsdc;
         preview.pnlUsdc = delta.riskState.unrealizedPnlUsdc;
-        preview.equityUsdc = delta.riskState.equityUsdc;
+        preview.equityUsdc = delta.liquidationState.equityUsdc;
         preview.keeperBountyUsdc = delta.keeperBountyUsdc;
         preview.seizedCollateralUsdc = delta.residualPlan.settlementSeizedUsdc;
         preview.settlementRetainedUsdc = delta.settlementRetainedUsdc;

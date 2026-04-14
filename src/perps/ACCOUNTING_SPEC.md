@@ -375,6 +375,7 @@ Keeper bounty rule:
 Required property:
 
 - liquidation eligibility, bounty caps, and residual planning must use carry-adjusted equity,
+- negative accrued VPI must reduce liquidation equity before keeper-bounty and residual planning,
 - preview and live liquidation should share the same liquidation-accounting kernel.
 
 ### Three-bucket liquidation residual accounting

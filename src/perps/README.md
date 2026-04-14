@@ -337,6 +337,7 @@ This is a containment latch, not a pause. The protocol still allows transitions 
 
 - Liquidations are proportional and bounded by actually reachable collateral.
 - The keeper bounty is proportional with a floor.
+- Liquidation does not compute a fresh VPI delta, but any negative accrued VPI rebate debt is clawed back before residual/bad-debt planning.
 - Residual trader value is preserved when positive.
 - Same-account deferred payout is not treated as liquidation-reachable collateral; it is only netted once as terminal settlement bookkeeping.
 - Bad debt is socialized to LP capital if losses exceed reachable collateral.

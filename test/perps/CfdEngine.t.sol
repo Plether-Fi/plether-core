@@ -149,6 +149,55 @@ contract CfdEnginePlanLibHarness {
         return CfdEnginePlanLib.planLiquidation(snap, oraclePrice, 0);
     }
 
+    function planLiquidationWithVpiAccrued(
+        uint256 settlementReachableUsdc,
+        uint256 deferredPayoutUsdc,
+        uint256 size,
+        uint256 entryPrice,
+        uint256 oraclePrice,
+        int256 vpiAccrued
+    ) external pure returns (CfdEnginePlanTypes.LiquidationDelta memory delta) {
+        CfdEnginePlanTypes.RawSnapshot memory snap;
+        snap.position = CfdTypes.Position({
+            size: size,
+            margin: 0,
+            entryPrice: entryPrice,
+            maxProfitUsdc: 0,
+            side: CfdTypes.Side.BEAR,
+            lastUpdateTime: 0,
+            lastCarryTimestamp: 0,
+            vpiAccrued: vpiAccrued
+        });
+        snap.currentTimestamp = 1;
+        snap.lastMarkPrice = oraclePrice;
+        snap.lastMarkTime = 1;
+        snap.bearSide.openInterest = size;
+        snap.vaultAssetsUsdc = 1_000_000e6;
+        snap.vaultCashUsdc = 1;
+        snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
+            settlementBalanceUsdc: settlementReachableUsdc,
+            totalLockedMarginUsdc: 0,
+            activePositionMarginUsdc: 0,
+            otherLockedMarginUsdc: 0,
+            freeSettlementUsdc: settlementReachableUsdc
+        });
+        snap.totalDeferredPayoutUsdc = deferredPayoutUsdc;
+        snap.deferredPayoutForAccount = deferredPayoutUsdc;
+        snap.capPrice = 2e8;
+        snap.riskParams = CfdTypes.RiskParams({
+            vpiFactor: 0,
+            maxSkewRatio: 0.4e18,
+            maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
+            fadMarginBps: 300,
+            baseCarryBps: 500,
+            minBountyUsdc: 5e6,
+            bountyBps: 15
+        });
+
+        return CfdEnginePlanLib.planLiquidation(snap, oraclePrice, 0);
+    }
+
 }
 
 contract CfdEngineTest is BasePerpTest {
@@ -2280,6 +2329,37 @@ contract CfdEngineTest is BasePerpTest {
             delta.badDebtUsdc,
             delta.residualPlan.badDebtUsdc - expectedConsumed,
             "Bad debt must only reflect the shortfall left after deferred netting"
+        );
+    }
+
+    function test_PlanLiquidation_ClawsBackNegativeAccruedVpiIntoBadDebt() public {
+        CfdEnginePlanLibHarness harness = new CfdEnginePlanLibHarness();
+
+        CfdEnginePlanTypes.LiquidationDelta memory withoutClawback =
+            harness.planLiquidationWithVpiAccrued(5e6, 0, 2000e18, 100_000_000, 99_000_000, 0);
+        CfdEnginePlanTypes.LiquidationDelta memory withClawback =
+            harness.planLiquidationWithVpiAccrued(5e6, 0, 2000e18, 100_000_000, 99_000_000, -7e6);
+
+        assertTrue(withClawback.liquidatable, "Setup must remain liquidatable");
+        assertEq(
+            withClawback.riskState.equityUsdc,
+            withoutClawback.riskState.equityUsdc,
+            "Base risk equity should stay unchanged"
+        );
+        assertEq(
+            withClawback.liquidationState.equityUsdc,
+            withoutClawback.liquidationState.equityUsdc - 7e6,
+            "Liquidation equity must include the negative accrued VPI clawback"
+        );
+        assertEq(
+            withClawback.badDebtUsdc,
+            withoutClawback.badDebtUsdc + 7e6,
+            "Negative accrued VPI should flow into liquidation shortfall / bad debt"
+        );
+        assertEq(
+            withClawback.keeperBountyUsdc,
+            withoutClawback.keeperBountyUsdc,
+            "Underwater keeper cap should still be bounded by reachable collateral"
         );
     }
 
@@ -5501,6 +5581,102 @@ contract VpiDepthTest is BasePerpTest {
         uint256 aliceBalAfter = clearinghouse.balanceUsdc(aliceAccount);
 
         assertLe(aliceBalAfter, aliceBalBefore, "Size addition VPI bypass must not be profitable");
+    }
+
+    function test_Liquidation_ClawsBackDepthManipulatedVpiRebate_EndToEnd() public {
+        address deepLp = address(0x444);
+        address skewTrader = address(0x555);
+        address rebateTrader = address(0x666);
+
+        bytes32 skewId = bytes32(uint256(uint160(skewTrader)));
+        bytes32 rebateId = bytes32(uint256(uint160(rebateTrader)));
+
+        _fundJunior(bob, 1_000_000 * 1e6);
+        _fundJunior(deepLp, 10_000_000 * 1e6);
+        _fundTrader(skewTrader, 100_000 * 1e6);
+        _fundTrader(rebateTrader, 20_000 * 1e6);
+
+        uint256 largeDepth = pool.totalAssets();
+        _open(skewId, CfdTypes.Side.BEAR, 500_000 * 1e18, 50_000 * 1e6, 1e8, largeDepth);
+
+        vm.warp(block.timestamp + 2 hours);
+        bytes[] memory freshPrice = new bytes[](1);
+        freshPrice[0] = abi.encode(uint256(1e8));
+        router.updateMarkPrice(freshPrice);
+
+        vm.startPrank(deepLp);
+        uint256 juniorWithdrawable = juniorVault.maxWithdraw(deepLp);
+        juniorVault.withdraw(juniorWithdrawable, deepLp, deepLp);
+        vm.stopPrank();
+
+        uint256 smallDepth = pool.totalAssets();
+        assertLt(smallDepth, largeDepth, "LP withdrawal should shrink live vault depth");
+
+        uint256 rebateSettlementBeforeOpen = clearinghouse.balanceUsdc(rebateId);
+        uint64 rebatePublishTime = engine.lastMarkTime();
+        vm.prank(address(router));
+        engine.processOrderTyped(
+            CfdTypes.Order({
+                accountId: rebateId,
+                sizeDelta: 500_000 * 1e18,
+                marginDelta: 7000 * 1e6,
+                targetPrice: 1e8,
+                commitTime: rebatePublishTime,
+                commitBlock: uint64(block.number),
+                orderId: 0,
+                side: CfdTypes.Side.BULL,
+                isClose: false
+            }),
+            1e8,
+            smallDepth,
+            rebatePublishTime
+        );
+
+        (,,,,,, int256 storedVpi) = engine.positions(rebateId);
+        assertLt(storedVpi, 0, "Setup must create negative accrued VPI on the rebate-bearing leg");
+        assertGt(
+            clearinghouse.balanceUsdc(rebateId),
+            rebateSettlementBeforeOpen,
+            "Skew-healing open should credit net rebate into settlement balance"
+        );
+
+        uint256 withdrawableUsdc = engineAccountLens.getWithdrawableUsdc(rebateId);
+        assertGt(withdrawableUsdc, 0, "Rebate-bearing account should have withdrawable headroom before liquidation");
+
+        vm.prank(rebateTrader);
+        clearinghouse.withdraw(rebateId, withdrawableUsdc);
+
+        uint256 liquidationPrice = 101_400_000;
+        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(rebateId, liquidationPrice);
+        assertTrue(
+            preview.liquidatable,
+            "Manipulated rebate-bearing position should become liquidatable after headroom withdrawal"
+        );
+        assertGt(preview.badDebtUsdc, 0, "Clawed-back rebate debt should surface as liquidation bad debt in this setup");
+
+        int256 unclawedEquityUsdc = int256(preview.reachableCollateralUsdc) + preview.pnlUsdc;
+        assertEq(
+            preview.equityUsdc,
+            unclawedEquityUsdc - int256(uint256(-storedVpi)),
+            "Liquidation preview equity must claw back the stored negative VPI rebate"
+        );
+
+        uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
+        uint256 liquidationDepth = pool.totalAssets();
+        uint64 liquidationPublishTime = engine.lastMarkTime();
+
+        vm.prank(address(router));
+        uint256 keeperBountyUsdc =
+            engine.liquidatePosition(rebateId, liquidationPrice, liquidationDepth, liquidationPublishTime);
+
+        (uint256 remainingSize,,,,,,) = engine.positions(rebateId);
+        assertEq(remainingSize, 0, "Liquidation should fully delete the rebate-bearing position");
+        assertEq(keeperBountyUsdc, preview.keeperBountyUsdc, "Live keeper bounty should match preview");
+        assertEq(
+            engine.accumulatedBadDebtUsdc() - badDebtBefore,
+            preview.badDebtUsdc,
+            "Live liquidation bad debt should include the clawed-back VPI debt"
+        );
     }
 
 }

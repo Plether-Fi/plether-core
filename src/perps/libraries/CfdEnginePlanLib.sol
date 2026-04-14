@@ -22,6 +22,12 @@ uint256 constant EXECUTION_FEE_BPS = 4;
 ///         No storage reads, no external calls — purely deterministic over memory inputs.
 library CfdEnginePlanLib {
 
+    function _liquidationVpiClawbackUsdc(
+        int256 vpiAccrued
+    ) private pure returns (uint256) {
+        return vpiAccrued < 0 ? uint256(-vpiAccrued) : 0;
+    }
+
     // ──────────────────────────────────────────────
     //  HELPERS
     // ──────────────────────────────────────────────
@@ -207,7 +213,8 @@ library CfdEnginePlanLib {
             && effectiveSnap.currentTimestamp > effectiveSnap.position.lastCarryTimestamp
             ? effectiveSnap.currentTimestamp - effectiveSnap.position.lastCarryTimestamp
             : 0;
-        uint256 genericReachableUsdc = MarginClearinghouseAccountingLib.getGenericReachableUsdc(effectiveSnap.accountBuckets);
+        uint256 genericReachableUsdc =
+            MarginClearinghouseAccountingLib.getGenericReachableUsdc(effectiveSnap.accountBuckets);
         uint256 carryBaseUsdc = PositionRiskAccountingLib.computeLpBackedNotionalUsdc(
             effectiveSnap.position.size, price, genericReachableUsdc
         );
@@ -338,8 +345,8 @@ library CfdEnginePlanLib {
             return true;
         }
 
-        uint256 settlementBalanceUsdc =
-            MarginClearinghouseAccountingLib.getSettlementBalanceUsdc(snap.accountBuckets) - consumption.totalConsumedUsdc;
+        uint256 settlementBalanceUsdc = MarginClearinghouseAccountingLib.getSettlementBalanceUsdc(snap.accountBuckets)
+            - consumption.totalConsumedUsdc;
         snap.lockedBuckets.positionMarginUsdc -= consumption.activeMarginConsumedUsdc;
         snap.position.margin -= consumption.activeMarginConsumedUsdc;
         snap.vaultAssetsUsdc += pendingCarryUsdc;
@@ -453,9 +460,8 @@ library CfdEnginePlanLib {
             ? snap.currentTimestamp - snap.position.lastCarryTimestamp
             : 0;
         uint256 genericReachableUsdc = MarginClearinghouseAccountingLib.getGenericReachableUsdc(snap.accountBuckets);
-        uint256 carryBaseUsdc = PositionRiskAccountingLib.computeLpBackedNotionalUsdc(
-            snap.position.size, price, genericReachableUsdc
-        );
+        uint256 carryBaseUsdc =
+            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(snap.position.size, price, genericReachableUsdc);
         delta.pendingCarryUsdc = snap.unsettledCarryUsdc
             + PositionRiskAccountingLib.computePendingCarryUsdc(
                 carryBaseUsdc, snap.riskParams.baseCarryBps, carryTimeDelta
@@ -707,11 +713,14 @@ library CfdEnginePlanLib {
         }
         delta.liquidatable = true;
 
+        uint256 vpiClawbackUsdc = _liquidationVpiClawbackUsdc(pos.vpiAccrued);
+        int256 liquidationEquityUsdc = delta.riskState.equityUsdc - int256(vpiClawbackUsdc);
+
         delta.liquidationState = LiquidationAccountingLib.buildLiquidationState(
             pos.size,
             price,
             settlementReachableUsdc,
-            delta.riskState.equityUsdc,
+            liquidationEquityUsdc,
             maintMarginBps,
             snap.riskParams.minBountyUsdc,
             snap.riskParams.bountyBps,
@@ -724,7 +733,7 @@ library CfdEnginePlanLib {
         delta.sideEntryNotionalReduction = pos.size * pos.entryPrice;
         delta.sideTotalMarginReduction = pos.margin;
 
-        delta.residualUsdc = delta.riskState.equityUsdc - int256(delta.keeperBountyUsdc);
+        delta.residualUsdc = liquidationEquityUsdc - int256(delta.keeperBountyUsdc);
         delta.residualPlan =
             MarginClearinghouseAccountingLib.planLiquidationResidual(snap.accountBuckets, delta.residualUsdc);
         delta.settlementRetainedUsdc = delta.residualPlan.settlementRetainedUsdc;
