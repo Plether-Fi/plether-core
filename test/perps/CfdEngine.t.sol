@@ -1463,6 +1463,100 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
+    function test_ReserveCommittedOrderMargin_CheckpointsCarryBeforeReachabilityDrops() public {
+        address trader = address(0xABD3);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        uint256 reserveAmount = 4000e6;
+        uint256 depositAmount = 1000e6;
+        uint256 carryElapsed = 30 days;
+
+        _fundTrader(trader, 10_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+
+        uint256 settlementBefore = clearinghouse.balanceUsdc(accountId);
+
+        vm.warp(block.timestamp + carryElapsed);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+
+        uint256 expectedCarry = PositionRiskAccountingLib.computePendingCarryUsdc(
+            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, 1e8, settlementBefore),
+            _riskParams().baseCarryBps,
+            carryElapsed
+        );
+
+        vm.prank(address(router));
+        clearinghouse.reserveCommittedOrderMargin(accountId, 77, reserveAmount);
+
+        assertEq(
+            clearinghouse.balanceUsdc(accountId),
+            settlementBefore - expectedCarry,
+            "Committed-order reservation should realize carry before lowering reachable collateral"
+        );
+        assertEq(
+            engine.unsettledCarryUsdc(accountId), 0, "Reservation checkpoint should settle elapsed carry immediately"
+        );
+
+        usdc.mint(trader, depositAmount);
+        vm.startPrank(trader);
+        usdc.approve(address(clearinghouse), type(uint256).max);
+        clearinghouse.depositMargin(depositAmount);
+        vm.stopPrank();
+
+        assertEq(
+            clearinghouse.balanceUsdc(accountId),
+            settlementBefore - expectedCarry + depositAmount,
+            "Later deposits must not retroactively reprice pre-reservation carry on the reduced basis"
+        );
+    }
+
+    function test_SeizeUsdc_CheckpointsCarryBeforeReachabilityDrops() public {
+        address trader = address(0xABD4);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        uint256 seizedAmount = 1e6;
+        uint256 depositAmount = 1000e6;
+        uint256 carryElapsed = 30 days;
+
+        _fundTrader(trader, 10_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+
+        uint256 settlementBefore = clearinghouse.balanceUsdc(accountId);
+
+        vm.warp(block.timestamp + carryElapsed);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+
+        uint256 expectedCarry = PositionRiskAccountingLib.computePendingCarryUsdc(
+            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, 1e8, settlementBefore),
+            _riskParams().baseCarryBps,
+            carryElapsed
+        );
+
+        vm.prank(address(router));
+        clearinghouse.seizeUsdc(accountId, seizedAmount, address(router));
+
+        assertEq(
+            clearinghouse.balanceUsdc(accountId),
+            settlementBefore - expectedCarry - seizedAmount,
+            "Settlement seizure should realize carry before debiting trader cash"
+        );
+        assertEq(
+            engine.unsettledCarryUsdc(accountId), 0, "Settlement seizure should not leave elapsed carry uncheckpointed"
+        );
+
+        usdc.mint(trader, depositAmount);
+        vm.startPrank(trader);
+        usdc.approve(address(clearinghouse), type(uint256).max);
+        clearinghouse.depositMargin(depositAmount);
+        vm.stopPrank();
+
+        assertEq(
+            clearinghouse.balanceUsdc(accountId),
+            settlementBefore - expectedCarry - seizedAmount + depositAmount,
+            "Later deposits must not retroactively apply the post-seizure carry basis to prior time"
+        );
+    }
+
     function test_ProfitableClose_DoesNotDoubleBookCarryIntoAccountedAssets() public {
         address trader = address(0xABD2);
         bytes32 accountId = bytes32(uint256(uint160(trader)));

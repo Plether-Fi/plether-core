@@ -161,10 +161,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
 
         settlementBalances[accountId] += amount;
 
-        address engine_ = engine;
-        if (engine_ != address(0)) {
-            ICfdEngineCore(engine_).realizeCarryBeforeMarginChange(accountId, reachableCollateralBasisUsdc);
-        }
+        _checkpointCarryBeforeMarginChange(accountId, reachableCollateralBasisUsdc);
 
         emit Deposit(accountId, settlementAsset, amount);
     }
@@ -184,10 +181,9 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         uint256 reachableCollateralBasisUsdc =
             MarginClearinghouseAccountingLib.getGenericReachableUsdc(getAccountUsdcBuckets(accountId));
 
+        _checkpointCarryBeforeMarginChange(accountId, reachableCollateralBasisUsdc);
+
         address engine_ = engine;
-        if (engine_ != address(0)) {
-            ICfdEngineCore(engine_).realizeCarryBeforeMarginChange(accountId, reachableCollateralBasisUsdc);
-        }
 
         if (settlementBalances[accountId] < amount) {
             revert MarginClearinghouse__InsufficientBalance();
@@ -275,6 +271,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         bytes32 accountId,
         uint256 amountUsdc
     ) external onlyOperator {
+        _checkpointCarryBeforeMarginChange(accountId);
         _lockMargin(accountId, IMarginClearinghouse.MarginBucket.CommittedOrder, amountUsdc);
     }
 
@@ -290,6 +287,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
             revert MarginClearinghouse__ZeroAmount();
         }
 
+        _checkpointCarryBeforeMarginChange(accountId);
         _lockMargin(accountId, IMarginClearinghouse.MarginBucket.CommittedOrder, amountUsdc);
         uint96 amount96 = _toUint96(amountUsdc);
         orderReservations[orderId] = IMarginClearinghouse.OrderReservation({
@@ -482,6 +480,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         bytes32 accountId,
         uint256 amountUsdc
     ) external onlyOperator {
+        _checkpointCarryBeforeMarginChange(accountId);
         _lockMargin(accountId, IMarginClearinghouse.MarginBucket.ReservedSettlement, amountUsdc);
     }
 
@@ -527,8 +526,10 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         int256 tradeCostUsdc,
         address recipient
     ) external onlyOperator returns (int256 netMarginChangeUsdc) {
-        MarginClearinghouseAccountingLib.OpenCostPlan memory plan = MarginClearinghouseAccountingLib
-            .planOpenCostApplication(_buildAccountUsdcBuckets(accountId), marginDeltaUsdc, tradeCostUsdc);
+        MarginClearinghouseAccountingLib.OpenCostPlan memory plan =
+            MarginClearinghouseAccountingLib.planOpenCostApplication(
+                _buildAccountUsdcBuckets(accountId), marginDeltaUsdc, tradeCostUsdc
+            );
 
         if (plan.insufficientPositionMargin) {
             revert MarginClearinghouse__InsufficientBucketMargin();
@@ -699,6 +700,31 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         uint256 amountUsdc
     ) internal {
         settlementBalances[accountId] += amountUsdc;
+    }
+
+    function _checkpointCarryBeforeMarginChange(
+        bytes32 accountId
+    ) internal {
+        address engine_ = engine;
+        if (engine_ == address(0)) {
+            return;
+        }
+
+        uint256 reachableCollateralBasisUsdc =
+            MarginClearinghouseAccountingLib.getGenericReachableUsdc(getAccountUsdcBuckets(accountId));
+        _checkpointCarryBeforeMarginChange(accountId, reachableCollateralBasisUsdc);
+    }
+
+    function _checkpointCarryBeforeMarginChange(
+        bytes32 accountId,
+        uint256 reachableCollateralBasisUsdc
+    ) internal {
+        address engine_ = engine;
+        if (engine_ == address(0)) {
+            return;
+        }
+
+        ICfdEngineCore(engine_).realizeCarryBeforeMarginChange(accountId, reachableCollateralBasisUsdc);
     }
 
     function _debitSettlementUsdc(
@@ -902,6 +928,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
             revert MarginClearinghouse__InsufficientAssetToSeize();
         }
 
+        _checkpointCarryBeforeMarginChange(accountId);
         settlementBalances[accountId] -= amount;
         IERC20(settlementAsset).safeTransfer(recipient, amount);
 
@@ -923,6 +950,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
             revert MarginClearinghouse__InsufficientAssetToSeize();
         }
 
+        _checkpointCarryBeforeMarginChange(accountId);
         _consumeLockedMargin(accountId, IMarginClearinghouse.MarginBucket.Position, amount);
         settlementBalances[accountId] -= amount;
         IERC20(settlementAsset).safeTransfer(recipient, amount);
