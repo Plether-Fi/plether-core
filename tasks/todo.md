@@ -1290,3 +1290,11 @@ Review:
 - Added `test_Liquidation_ClawsBackDepthManipulatedVpiRebate_EndToEnd()` in `test/perps/CfdEngine.t.sol`, which uses real junior-vault depth inflation/withdrawal, opens the rebate-bearing skew-healing leg at the manipulated shallow depth, withdraws the attacker’s headroom, and proves the subsequent live liquidation includes the stored negative VPI in liquidation equity and bad debt.
 - Updated `src/perps/README.md`, `src/perps/ACCOUNTING_SPEC.md`, and `src/perps/SECURITY.md` so the audit packet now describes the liquidation-time VPI clawback accurately.
 - Verified green with `forge test --match-path test/perps/CfdEngine.t.sol --match-test "test_PlanLiquidation_ClawsBackNegativeAccruedVpiIntoBadDebt|test_Liquidation_ClawsBackDepthManipulatedVpiRebate_EndToEnd|test_LiquidationPreviewAndPositionView_UseCurrentNotionalThreshold|testFuzz_PlanLiquidation_NegativeResidualNetsDeferredExactlyOnce|testFuzz_PlanLiquidation_PositiveResidualPreservesDeferredAndUsesOnlyPhysicalReachability"` and `forge test --match-path test/perps/PreviewExecutionDifferential.t.sol --match-test "testFuzz_PreviewLiquidation_MatchesLiveExecution_LiquidVault|testFuzz_PreviewLiquidation_MatchesLiveExecution_IlliquidVault"`.
+- [x] Route batched successful orders through executed finalization
+- [x] Add regression for successful batched order terminal status
+
+Review:
+- Updated `src/perps/modules/OrderExecutionOrchestrator.sol` so `_finalizeOrCleanupOrder` now branches on `success` rather than `refundEthNow`. Successful batch executions now consume escrow with `success = true`, delete the order with `OrderStatus.Executed`, and only gate the ETH refund transfer on `refundEthNow`.
+- Strengthened `test_BatchExecution_AllSucceed()` in `test/perps/OrderRouter.t.sol` to assert all successfully batched orders end in `OrderStatus.Executed`.
+- Added `test_BatchExecution_SuccessfulOrdersEndExecuted()` in `test/perps/OrderRouter.t.sol` to pin the terminal executed status and cleared margin/bounty escrow for successful batched orders.
+- Verified green with `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_(StateMachine_BatchClearsSlippageFailedHeadAndContinues|BatchExecution_AllSucceed|BatchExecution_SuccessfulOrdersEndExecuted|BatchExecution_MixedResults|OrderRecord_PreservesExecutedLifecycle)"`.

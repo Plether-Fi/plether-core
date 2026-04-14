@@ -870,6 +870,38 @@ contract OrderRouterTest is BasePerpTest {
 
         uint256 keeperAfter = _settlementBalance(address(this));
         assertEq(keeperAfter - keeperBefore, 2_500_000, "Keeper should receive min(1 bp, 1 USDC) per successful order");
+
+        assertEq(uint256(_orderRecord(1).status), uint256(IOrderRouterAccounting.OrderStatus.Executed));
+        assertEq(uint256(_orderRecord(2).status), uint256(IOrderRouterAccounting.OrderStatus.Executed));
+        assertEq(uint256(_orderRecord(3).status), uint256(IOrderRouterAccounting.OrderStatus.Executed));
+    }
+
+    function test_BatchExecution_SuccessfulOrdersEndExecuted() public {
+        address carol = address(0x334);
+        usdc.mint(carol, 10_000 * 1e6);
+        vm.deal(carol, 10 ether);
+        vm.startPrank(carol);
+        usdc.approve(address(clearinghouse), type(uint256).max);
+        clearinghouse.deposit(bytes32(uint256(uint160(carol))), 10_000 * 1e6);
+        vm.stopPrank();
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+
+        bytes[] memory empty;
+        vm.roll(block.number + 1);
+        router.executeOrderBatch(2, empty);
+
+        OrderRouter.OrderRecord memory firstRecord = _orderRecord(1);
+        OrderRouter.OrderRecord memory secondRecord = _orderRecord(2);
+        assertEq(uint256(firstRecord.status), uint256(IOrderRouterAccounting.OrderStatus.Executed));
+        assertEq(uint256(secondRecord.status), uint256(IOrderRouterAccounting.OrderStatus.Executed));
+        assertEq(_remainingCommittedMargin(1), 0, "Executed batch order should clear committed margin escrow");
+        assertEq(_remainingCommittedMargin(2), 0, "Executed batch order should clear committed margin escrow");
+        assertEq(firstRecord.executionBountyUsdc, 0, "Executed batch order should clear execution bounty escrow");
+        assertEq(secondRecord.executionBountyUsdc, 0, "Executed batch order should clear execution bounty escrow");
     }
 
     function test_BatchExecution_MixedResults() public {

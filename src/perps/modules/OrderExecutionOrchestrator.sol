@@ -222,11 +222,15 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
         uint256 executionPrice,
         uint64 oraclePublishTime
     ) internal {
-        if (refundEthNow) {
-            _finalizeExecution(orderId, pythFee, success, failedOutcome, executionPrice, oraclePublishTime);
-            return;
+        if (success) {
+            _finalizeExecution(orderId, executionPrice, oraclePublishTime);
+        } else {
+            _cleanupOrder(orderId, failedOutcome, executionPrice, oraclePublishTime);
         }
-        _cleanupOrder(orderId, failedOutcome, executionPrice, oraclePublishTime);
+
+        if (refundEthNow) {
+            _sendEth(msg.sender, msg.value - pythFee);
+        }
     }
 
     function _decodeTypedOrderFailure(
@@ -285,15 +289,11 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
 
     function _finalizeExecution(
         uint64 orderId,
-        uint256 pythFee,
-        bool success,
-        FailedOrderOutcome failedOutcome,
         uint256 executionPrice,
         uint64 oraclePublishTime
     ) internal {
-        _consumeOrderEscrow(orderId, success, _failedOutcomeCode(failedOutcome), executionPrice, oraclePublishTime);
-        _deleteOrder(orderId, success ? IOrderRouterAccounting.OrderStatus.Executed : IOrderRouterAccounting.OrderStatus.Failed);
-        _sendEth(msg.sender, msg.value - pythFee);
+        _consumeOrderEscrow(orderId, true, 0, executionPrice, oraclePublishTime);
+        _deleteOrder(orderId, IOrderRouterAccounting.OrderStatus.Executed);
     }
 
     function _failedOutcomeCode(
