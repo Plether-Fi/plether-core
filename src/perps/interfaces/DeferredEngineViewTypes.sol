@@ -5,7 +5,7 @@ library DeferredEngineViewTypes {
 
     /// @notice Aggregate deferred-credit status under the current beneficiary-balance model.
     struct DeferredCreditStatus {
-        uint256 deferredTraderPayoutUsdc;
+        uint256 deferredTraderCreditUsdc;
         bool traderPayoutClaimableNow;
         uint256 deferredKeeperCreditUsdc;
         bool keeperCreditClaimableNow;

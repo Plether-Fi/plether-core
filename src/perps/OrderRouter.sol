@@ -618,7 +618,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         CashPriorityLib.SeniorCashReservation memory reservation = CashPriorityLib.reserveFreshPayouts(
             vault.totalAssets(),
             engine.accumulatedFeesUsdc(),
-            engine.totalDeferredPayoutUsdc(),
+            engine.totalDeferredTraderCreditUsdc(),
             engine.totalDeferredKeeperCreditUsdc()
         );
         if (liquidationBountyUsdc > reservation.freeCashUsdc) {

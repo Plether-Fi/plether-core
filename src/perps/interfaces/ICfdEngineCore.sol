@@ -73,7 +73,7 @@ interface ICfdEngineCore {
 
     function accumulatedFeesUsdc() external view returns (uint256);
 
-    function totalDeferredPayoutUsdc() external view returns (uint256);
+    function totalDeferredTraderCreditUsdc() external view returns (uint256);
 
     function totalDeferredKeeperCreditUsdc() external view returns (uint256);
 

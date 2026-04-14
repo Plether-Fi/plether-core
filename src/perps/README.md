@@ -117,24 +117,24 @@ Important details:
 - Close orders can still execute during genuine frozen-oracle windows using the last valid mark subject to the relaxed frozen-market rules.
 - Close-intent queue validation is account-local and bounded by the per-account pending-order queue.
 
-### Deferred trader payouts
+### Deferred trader credit
 
-Profitable closes and some liquidation residuals can create deferred trader payouts if the vault cannot immediately fund them.
+Profitable closes and some liquidation residuals can create deferred trader credit if the vault cannot immediately fund them.
 
-- Deferred payouts are tracked by beneficiary balance: `deferredPayoutUsdc[accountId]`.
+- Deferred trader credit is tracked by beneficiary balance: `deferredTraderCreditUsdc[accountId]`.
 - There is no FIFO deferred-claim queue.
-- `claimDeferredPayout(accountId)` is beneficiary-only and requires the caller to own `accountId`.
+- `claimDeferredTraderCredit(accountId)` is beneficiary-only and requires the caller to own `accountId`.
 - Claims can be partial if current vault cash is insufficient.
 - Claimed amounts are credited into `MarginClearinghouse`, not sent directly to the wallet.
 
-### Deferred clearer balances
+### Deferred keeper credit
 
 Liquidation bounties are fail-soft when the vault is illiquid.
 
 - The liquidation still completes.
 - Any unpaid keeper value is recorded in `deferredKeeperCreditUsdc[keeper]`.
 - `claimDeferredKeeperCredit()` is beneficiary-only and settles to clearinghouse credit rather than direct wallet transfer.
-- Deferred trader payouts and deferred keeper credit are included in reserve and solvency accounting.
+- Deferred trader credit and deferred keeper credit are included in reserve and solvency accounting.
 
 ## LP Lifecycle
 
@@ -236,7 +236,7 @@ Open-risk projection credits skew-reducing trade rebates into reachable collater
 
 The system can complete terminal transitions even when immediate vault cash is insufficient.
 
-- Trader gains can become deferred trader payouts.
+- Trader gains can become deferred trader credit.
 - Liquidation bounties can become deferred keeper credit.
 - Both are included in reserve and solvency accounting.
 - Deferred balances are beneficiary-based, not queue-based.
@@ -339,7 +339,7 @@ This is a containment latch, not a pause. The protocol still allows transitions 
 - The keeper bounty is proportional with a floor.
 - Liquidation does not compute a fresh VPI delta, but any negative accrued VPI rebate debt is clawed back before residual/bad-debt planning.
 - Residual trader value is preserved when positive.
-- Same-account deferred payout is not treated as liquidation-reachable collateral; it is only netted once as terminal settlement bookkeeping.
+- Same-account deferred trader credit is not treated as liquidation-reachable collateral; it is only netted once as terminal settlement bookkeeping.
 - Bad debt is socialized to LP capital if losses exceed reachable collateral.
 - Voluntary closes on underwater positions seize what is reachable and let the vault absorb the shortfall rather than trapping the user in an impossible state.
 

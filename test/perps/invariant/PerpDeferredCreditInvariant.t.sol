@@ -22,8 +22,8 @@ contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
         selectors[0] = handler.depositCollateral.selector;
         selectors[1] = handler.withdrawCollateral.selector;
         selectors[2] = handler.commitOpenOrder.selector;
-        selectors[3] = handler.createDeferredTraderPayout.selector;
-        selectors[4] = handler.claimDeferredPayout.selector;
+        selectors[3] = handler.createDeferredTraderCredit.selector;
+        selectors[4] = handler.claimDeferredTraderCredit.selector;
         selectors[5] = handler.setVaultAssets.selector;
         selectors[6] = handler.fundVault.selector;
         selectors[7] = handler.liquidate.selector;
@@ -33,55 +33,55 @@ contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
     }
 
     function invariant_DeferredCreditStatusMatchesEngineAndVaultLiquidity() public view {
-        uint256 totalDeferredPayoutUsdc;
+        uint256 totalDeferredTraderCreditUsdc;
         bool anyLiquidity = vault.totalAssets() > 0;
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
             DeferredEngineViewTypes.DeferredCreditStatus memory status =
                 _deferredCreditStatus(accountId, address(handler));
-            uint256 deferredPayoutUsdc = engine.deferredPayoutUsdc(accountId);
+            uint256 deferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(accountId);
             uint256 deferredKeeperCreditUsdc = engine.deferredKeeperCreditUsdc(address(handler));
 
-            assertEq(status.deferredTraderPayoutUsdc, deferredPayoutUsdc, "Deferred payout status amount mismatch");
+            assertEq(status.deferredTraderCreditUsdc, deferredTraderCreditUsdc, "Deferred payout status amount mismatch");
             assertEq(
                 status.traderPayoutClaimableNow,
-                deferredPayoutUsdc > 0 && anyLiquidity,
+                deferredTraderCreditUsdc > 0 && anyLiquidity,
                 "Deferred payout claimability mismatch"
             );
             assertEq(
                 status.keeperCreditClaimableNow,
                 deferredKeeperCreditUsdc > 0 && anyLiquidity,
-                "Deferred clearer bounty claimability mismatch"
+                "Deferred keeper credit claimability mismatch"
             );
 
-            totalDeferredPayoutUsdc += deferredPayoutUsdc;
+            totalDeferredTraderCreditUsdc += deferredTraderCreditUsdc;
         }
 
-        assertEq(totalDeferredPayoutUsdc, engine.totalDeferredPayoutUsdc(), "Total deferred payout mismatch");
+        assertEq(totalDeferredTraderCreditUsdc, engine.totalDeferredTraderCreditUsdc(), "Total deferred payout mismatch");
     }
 
-    function invariant_GhostDeferredTraderPayoutsRemainFullyModelDerived() public view {
-        uint256 ghostTotalDeferredPayoutUsdc;
+    function invariant_GhostDeferredTraderCreditsRemainFullyModelDerived() public view {
+        uint256 ghostTotalDeferredTraderCreditUsdc;
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
-            uint256 ghostDeferredPayoutUsdc = handler.deferredTraderPayoutSnapshot(accountId);
-            uint256 liveDeferredPayoutUsdc = engine.deferredPayoutUsdc(accountId);
+            uint256 ghostDeferredTraderCreditUsdc = handler.deferredTraderCreditSnapshot(accountId);
+            uint256 liveDeferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(accountId);
 
             assertEq(
-                ghostDeferredPayoutUsdc, liveDeferredPayoutUsdc, "Ghost deferred trader payout must match engine state"
+                ghostDeferredTraderCreditUsdc, liveDeferredTraderCreditUsdc, "Ghost deferred trader credit must match engine state"
             );
-            ghostTotalDeferredPayoutUsdc += ghostDeferredPayoutUsdc;
+            ghostTotalDeferredTraderCreditUsdc += ghostDeferredTraderCreditUsdc;
         }
 
         assertEq(
-            handler.totalDeferredTraderPayoutSnapshot(),
-            ghostTotalDeferredPayoutUsdc,
+            handler.totalDeferredTraderCreditSnapshot(),
+            ghostTotalDeferredTraderCreditUsdc,
             "Ghost deferred payout total must match tracked account sum"
         );
         assertEq(
-            engine.totalDeferredPayoutUsdc(), ghostTotalDeferredPayoutUsdc, "Engine deferred payout total mismatch"
+            engine.totalDeferredTraderCreditUsdc(), ghostTotalDeferredTraderCreditUsdc, "Engine deferred payout total mismatch"
         );
     }
 
@@ -100,26 +100,26 @@ contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
                 continue;
             }
 
-            uint256 totalPayoutUsdc = preview.immediatePayoutUsdc + preview.deferredPayoutUsdc;
+            uint256 totalPayoutUsdc = preview.immediatePayoutUsdc + preview.deferredTraderCreditUsdc;
             if (totalPayoutUsdc == 0) {
                 continue;
             }
 
             assertEq(
                 preview.immediatePayoutUsdc == 0,
-                preview.deferredPayoutUsdc > 0,
+                preview.deferredTraderCreditUsdc > 0,
                 "Close preview must choose immediate or deferred payout"
             );
             uint256 freeCashForFreshPayouts =
                 CashPriorityLib.reserveFreshPayouts(
                 vault.totalAssets(),
                 engine.accumulatedFeesUsdc(),
-                engine.totalDeferredPayoutUsdc(),
+                engine.totalDeferredTraderCreditUsdc(),
                 engine.totalDeferredKeeperCreditUsdc()
             )
             .freeCashUsdc;
             if (freeCashForFreshPayouts >= totalPayoutUsdc) {
-                assertEq(preview.deferredPayoutUsdc, 0, "Close preview must not defer when vault is liquid");
+                assertEq(preview.deferredTraderCreditUsdc, 0, "Close preview must not defer when vault is liquid");
             } else {
                 assertEq(preview.immediatePayoutUsdc, 0, "Close preview must fully defer when vault is illiquid");
             }
@@ -132,10 +132,10 @@ contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
             CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, oraclePrice);
-            uint256 freshDeferredPayoutUsdc = preview.deferredPayoutUsdc > preview.existingDeferredRemainingUsdc
-                ? preview.deferredPayoutUsdc - preview.existingDeferredRemainingUsdc
+            uint256 freshDeferredTraderCreditUsdc = preview.deferredTraderCreditUsdc > preview.existingDeferredRemainingUsdc
+                ? preview.deferredTraderCreditUsdc - preview.existingDeferredRemainingUsdc
                 : 0;
-            uint256 totalFreshPayoutUsdc = preview.immediatePayoutUsdc + freshDeferredPayoutUsdc;
+            uint256 totalFreshPayoutUsdc = preview.immediatePayoutUsdc + freshDeferredTraderCreditUsdc;
 
             if (totalFreshPayoutUsdc == 0) {
                 continue;
@@ -143,12 +143,12 @@ contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
 
             assertEq(
                 preview.immediatePayoutUsdc == 0,
-                freshDeferredPayoutUsdc > 0,
+                freshDeferredTraderCreditUsdc > 0,
                 "Fresh liquidation payout must choose immediate or deferred settlement"
             );
             if (vault.totalAssets() >= totalFreshPayoutUsdc) {
                 assertEq(
-                    freshDeferredPayoutUsdc,
+                    freshDeferredTraderCreditUsdc,
                     0,
                     "Liquidation preview must not defer the fresh payout when vault liquidity is sufficient"
                 );

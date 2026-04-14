@@ -41,7 +41,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         viewData.terminalReachableUsdc = MarginClearinghouseAccountingLib.getTerminalReachableUsdc(buckets);
         viewData.accountEquityUsdc = engineContract.clearinghouse().getAccountEquityUsdc(accountId);
         viewData.freeBuyingPowerUsdc = engineContract.clearinghouse().getFreeBuyingPowerUsdc(accountId);
-        viewData.deferredPayoutUsdc = engineContract.deferredPayoutUsdc(accountId);
+        viewData.deferredTraderCreditUsdc = engineContract.deferredTraderCreditUsdc(accountId);
     }
 
     /// @notice Returns the current withdrawable USDC for an account under engine-side guards.
@@ -132,7 +132,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         viewData.otherLockedMarginUsdc = snapshot.otherLockedMarginUsdc;
         viewData.executionEscrowUsdc = snapshot.executionEscrowUsdc;
         viewData.committedMarginUsdc = snapshot.committedMarginUsdc;
-        viewData.deferredPayoutUsdc = snapshot.deferredPayoutUsdc;
+        viewData.deferredTraderCreditUsdc = snapshot.deferredTraderCreditUsdc;
         viewData.pendingOrderCount = snapshot.pendingOrderCount;
     }
 
@@ -162,7 +162,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         snapshot.reservedSettlementBucketUsdc = lockedBuckets.reservedSettlementUsdc;
         snapshot.executionEscrowUsdc = escrow.executionBountyUsdc;
         snapshot.committedMarginUsdc = escrow.committedMarginUsdc;
-        snapshot.deferredPayoutUsdc = engineContract.deferredPayoutUsdc(accountId);
+        snapshot.deferredTraderCreditUsdc = engineContract.deferredTraderCreditUsdc(accountId);
         snapshot.pendingOrderCount = escrow.pendingOrderCount;
         snapshot.closeReachableUsdc = MarginClearinghouseAccountingLib.getFreeSettlementUsdc(buckets);
         snapshot.terminalReachableUsdc = MarginClearinghouseAccountingLib.getTerminalReachableUsdc(buckets);

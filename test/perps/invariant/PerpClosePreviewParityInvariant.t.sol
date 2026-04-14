@@ -244,19 +244,19 @@ contract PerpClosePreviewParityInvariantTest is Test {
     ) internal view {
         CfdEngine.ClosePreview memory preview = engineLens.previewClose(accountId, sizeDelta, oraclePrice);
 
-        if (!preview.valid || (preview.immediatePayoutUsdc == 0 && preview.deferredPayoutUsdc == 0)) {
+        if (!preview.valid || (preview.immediatePayoutUsdc == 0 && preview.deferredTraderCreditUsdc == 0)) {
             return;
         }
 
         uint256 adjustedCash = vault.totalAssets();
-        uint256 totalOwed = preview.immediatePayoutUsdc + preview.deferredPayoutUsdc;
+        uint256 totalOwed = preview.immediatePayoutUsdc + preview.deferredTraderCreditUsdc;
 
         if (preview.immediatePayoutUsdc > 0) {
             assertGe(adjustedCash, preview.immediatePayoutUsdc, "Post-carry vault cash must cover immediate payout");
-            assertEq(preview.deferredPayoutUsdc, 0, "Immediate payout excludes deferred payout");
+            assertEq(preview.deferredTraderCreditUsdc, 0, "Immediate payout excludes deferred payout");
         }
 
-        if (preview.deferredPayoutUsdc > 0) {
+        if (preview.deferredTraderCreditUsdc > 0) {
             assertEq(preview.immediatePayoutUsdc, 0, "Deferred payout excludes immediate payout");
             assertLt(adjustedCash, totalOwed, "Deferred payout implies adjusted cash insufficient for full settlement");
         }
@@ -286,7 +286,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
             "Close deferred remainder should match"
         );
         assertEq(actual.immediatePayoutUsdc, expected.immediatePayoutUsdc, "Close immediate payout should match");
-        assertEq(actual.deferredPayoutUsdc, expected.deferredPayoutUsdc, "Close deferred payout should match");
+        assertEq(actual.deferredTraderCreditUsdc, expected.deferredTraderCreditUsdc, "Close deferred payout should match");
         assertEq(actual.seizedCollateralUsdc, expected.seizedCollateralUsdc, "Close seized collateral should match");
         assertEq(actual.badDebtUsdc, expected.badDebtUsdc, "Close bad debt should match");
         assertEq(actual.remainingSize, expected.remainingSize, "Close remaining size should match");

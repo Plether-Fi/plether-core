@@ -160,7 +160,7 @@ contract CfdEngineLens is ICfdEngineLens {
         preview.existingDeferredConsumedUsdc = delta.existingDeferredConsumedUsdc;
         preview.existingDeferredRemainingUsdc = delta.existingDeferredRemainingUsdc;
         preview.immediatePayoutUsdc = delta.freshPayoutIsImmediate ? delta.freshTraderPayoutUsdc : 0;
-        preview.deferredPayoutUsdc =
+        preview.deferredTraderCreditUsdc =
             delta.existingDeferredRemainingUsdc + (delta.freshPayoutIsDeferred ? delta.freshTraderPayoutUsdc : 0);
         if (delta.settlementType == CfdEnginePlanTypes.SettlementType.LOSS) {
             preview.seizedCollateralUsdc = delta.lossResult.seizedUsdc;
@@ -206,9 +206,9 @@ contract CfdEngineLens is ICfdEngineLens {
         preview.existingDeferredConsumedUsdc = delta.existingDeferredConsumedUsdc;
         preview.existingDeferredRemainingUsdc = delta.existingDeferredRemainingUsdc;
         preview.immediatePayoutUsdc = delta.freshPayoutIsImmediate ? delta.freshTraderPayoutUsdc : 0;
-        preview.deferredPayoutUsdc = delta.existingDeferredRemainingUsdc;
+        preview.deferredTraderCreditUsdc = delta.existingDeferredRemainingUsdc;
         if (delta.freshPayoutIsDeferred) {
-            preview.deferredPayoutUsdc += delta.freshTraderPayoutUsdc;
+            preview.deferredTraderCreditUsdc += delta.freshTraderPayoutUsdc;
         }
         preview.badDebtUsdc = delta.badDebtUsdc;
         preview.triggersDegradedMode = delta.solvency.triggersDegradedMode;
@@ -254,9 +254,9 @@ contract CfdEngineLens is ICfdEngineLens {
         snap.accumulatedFeesUsdc = engineContract.accumulatedFeesUsdc();
         snap.accumulatedBadDebtUsdc = engineContract.accumulatedBadDebtUsdc();
         snap.unsettledCarryUsdc = engineContract.unsettledCarryUsdc(accountId);
-        snap.totalDeferredPayoutUsdc = engineContract.totalDeferredPayoutUsdc();
+        snap.totalDeferredTraderCreditUsdc = engineContract.totalDeferredTraderCreditUsdc();
         snap.totalDeferredKeeperCreditUsdc = engineContract.totalDeferredKeeperCreditUsdc();
-        snap.deferredPayoutForAccount = engineContract.deferredPayoutUsdc(accountId);
+        snap.deferredTraderCreditForAccount = engineContract.deferredTraderCreditUsdc(accountId);
         snap.degradedMode = engineContract.degradedMode();
         snap.capPrice = engineContract.CAP_PRICE();
         snap.riskParams = _riskParams();

@@ -93,8 +93,8 @@ contract PerpsReadParityTest is BasePerpTest {
             "Buying power should match collateral view"
         );
         assertEq(
-            snapshot.deferredPayoutUsdc,
-            engine.deferredPayoutUsdc(accountId),
+            snapshot.deferredTraderCreditUsdc,
+            engine.deferredTraderCreditUsdc(accountId),
             "Deferred payout should match engine state"
         );
         assertEq(snapshot.size, size, "Account lens size should match engine position");
@@ -176,14 +176,14 @@ contract PerpsReadParityTest is BasePerpTest {
             "Protocol lens bad debt should match engine state"
         );
         assertEq(
-            protocolSnapshot.totalDeferredPayoutUsdc,
-            engine.totalDeferredPayoutUsdc(),
-            "Protocol lens deferred trader payout should match engine state"
+            protocolSnapshot.totalDeferredTraderCreditUsdc,
+            engine.totalDeferredTraderCreditUsdc(),
+            "Protocol lens deferred trader credit should match engine state"
         );
         assertEq(
             protocolSnapshot.totalDeferredKeeperCreditUsdc,
             engine.totalDeferredKeeperCreditUsdc(),
-            "Protocol lens deferred clearer bounty should match engine state"
+            "Protocol lens deferred keeper credit should match engine state"
         );
         assertEq(
             protocolSnapshot.degradedMode,

@@ -55,14 +55,14 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
 
         assertEq(accountingView.degradedMode, engine.degradedMode(), "Protocol accounting view degraded flag mismatch");
         assertEq(
-            accountingView.totalDeferredPayoutUsdc,
-            engine.totalDeferredPayoutUsdc(),
-            "Protocol accounting view deferred trader payout mismatch"
+            accountingView.totalDeferredTraderCreditUsdc,
+            engine.totalDeferredTraderCreditUsdc(),
+            "Protocol accounting view deferred trader credit mismatch"
         );
         assertEq(
             accountingView.totalDeferredKeeperCreditUsdc,
             engine.totalDeferredKeeperCreditUsdc(),
-            "Protocol accounting view deferred clearer bounty mismatch"
+            "Protocol accounting view deferred keeper credit mismatch"
         );
         assertEq(
             accountingView.accumulatedFeesUsdc,
@@ -315,7 +315,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
             "Deferred remainder should match"
         );
         assertEq(actual.immediatePayoutUsdc, expected.immediatePayoutUsdc, "Immediate payout should match");
-        assertEq(actual.deferredPayoutUsdc, expected.deferredPayoutUsdc, "Deferred payout should match");
+        assertEq(actual.deferredTraderCreditUsdc, expected.deferredTraderCreditUsdc, "Deferred payout should match");
         assertEq(actual.badDebtUsdc, expected.badDebtUsdc, "Bad debt should match");
         assertEq(actual.triggersDegradedMode, expected.triggersDegradedMode, "Degraded trigger should match");
         assertEq(actual.postOpDegradedMode, expected.postOpDegradedMode, "Post-op degraded mode should match");

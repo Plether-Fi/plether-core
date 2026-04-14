@@ -111,7 +111,7 @@ freeUsdc = netPhysicalAssets - withdrawalReservedUsdc
 Where `withdrawalReservedUsdc` is built from the canonical reserve model, including at least:
 
 - bounded trader liability,
-- deferred trader payouts,
+- deferred trader credit,
 - deferred keeper credit,
 - protocol-owned inventory.
 
@@ -158,7 +158,7 @@ Question answered:
 Rules:
 
 - use physically reachable clearinghouse collateral for generic views and withdraw checks,
-- same-account deferred payout is a separate explicit netting bucket rather than generic collateral,
+- same-account deferred trader credit is a separate explicit netting bucket rather than generic collateral,
 - liquidation and close settlement must cap seizure and payout logic by actually reachable value,
 - pending-order reservations and router escrow must be handled explicitly rather than assumed to be free cash.
 
@@ -178,7 +178,7 @@ Key fields:
 - `maxLiabilityUsdc`
 - `supplementalReservedUsdc`: reserved extension slot for LP-withdrawal accounting; currently zero in the carry model
 - `unrealizedMtmLiabilityUsdc`
-- `deferredTraderPayoutUsdc`
+- `deferredTraderCreditUsdc`
 - `deferredKeeperCreditUsdc`
 - `protocolFeesUsdc`
 - `markFreshnessRequired`
@@ -271,14 +271,14 @@ Rules:
 
 The protocol supports fail-soft terminal settlement.
 
-### Deferred trader payouts
+### Deferred trader credit
 
-- profitable closes and some liquidation residuals may create `deferredPayoutUsdc[accountId]`,
-- only the beneficiary account owner may call `claimDeferredPayout(accountId)`,
+- profitable closes and some liquidation residuals may create `deferredTraderCreditUsdc[accountId]`,
+- only the beneficiary account owner may call `claimDeferredTraderCredit(accountId)`,
 - claims may be partial,
 - settlement is credited into `MarginClearinghouse`.
 
-### Deferred clearer balances
+### Deferred keeper credit
 
 - illiquid liquidation bounties may create `deferredKeeperCreditUsdc[beneficiary]`,
 - only the recorded beneficiary may call `claimDeferredKeeperCredit()`,
@@ -383,7 +383,7 @@ Required property:
 Liquidation residuals must be modeled explicitly as:
 
 - settlement retained on-ledger in the clearinghouse,
-- existing deferred payout consumed / remaining,
+- existing deferred trader credit consumed / remaining,
 - fresh trader payout created by the liquidation itself.
 
 This prevents overloading one residual bucket with multiple meanings.

@@ -102,7 +102,7 @@ These are the highest-value properties an auditor should expect to hold.
 | Degraded containment | If a close or liquidation reveals post-op insolvency, `degradedMode` latches and blocks further risk expansion while still permitting protective transitions |
 | Bounded payout | No trader payout can exceed the capped market payoff implied by `CAP_PRICE` |
 | Withdrawal firewall | LP withdrawals are limited to conservative free cash after accounting for bounded liability, deferred liabilities, and protocol-owned balances |
-| Deferred liabilities are senior | Deferred trader payouts and deferred keeper credit remain senior claims on vault liquidity until serviced |
+| Deferred liabilities are senior | Deferred trader credit and deferred keeper credit remain senior claims on vault liquidity until serviced |
 
 ### Position and engine accounting
 
@@ -266,7 +266,7 @@ Security implication: oracle freshness still gates execution and LP accounting f
 
 Terminal transitions are fail-soft when the vault lacks immediate cash.
 
-- profitable closes can create deferred trader payouts,
+- profitable closes can create deferred trader credit,
 - liquidation bounties can create deferred keeper credit,
 - both are beneficiary-balance based rather than FIFO queue based,
 - both remain part of reserve and solvency accounting until paid.
@@ -275,10 +275,10 @@ This preserves risk reduction and liquidation liveness under temporary cash shor
 
 ### Explicit netting boundary
 
-Same-account deferred payout is not generic collateral.
+Same-account deferred trader credit is not generic collateral.
 
 - generic account-health and withdraw checks use physically reachable clearinghouse collateral,
-- terminal settlement paths may still explicitly net same-account deferred payout,
+- terminal settlement paths may still explicitly net same-account deferred trader credit,
 - this avoids accidentally reusing a vault IOU as immediately spendable account cash.
 
 ## HousePool And LP-Specific Risks
@@ -335,7 +335,7 @@ Trade-off:
 - liquidation accounting is constrained by actually reachable collateral,
 - keeper bounty is proportional with a floor but capped by reachable value,
 - residual trader value is preserved when positive,
-- same-account deferred payout does not support liquidation reachability and is only netted once against terminal shortfall,
+- same-account deferred trader credit does not support liquidation reachability and is only netted once against terminal shortfall,
 - remaining deficit becomes bad debt socialized to LP capital.
 
 ### Queue interaction during liquidation

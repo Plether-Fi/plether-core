@@ -26,7 +26,7 @@ library SolvencyAccountingLib {
         uint256 protocolFeesUsdc;
         uint256 netPhysicalAssetsUsdc;
         uint256 maxLiabilityUsdc;
-        uint256 deferredTraderPayoutUsdc;
+        uint256 deferredTraderCreditUsdc;
         uint256 deferredKeeperCreditUsdc;
         uint256 withdrawalReservedUsdc;
         uint256 freeWithdrawableUsdc;
@@ -58,17 +58,17 @@ library SolvencyAccountingLib {
         uint256 physicalAssetsUsdc,
         uint256 protocolFeesUsdc,
         uint256 maxLiabilityUsdc,
-        uint256 deferredTraderPayoutUsdc,
+        uint256 deferredTraderCreditUsdc,
         uint256 deferredKeeperCreditUsdc
     ) internal pure returns (SolvencyState memory state) {
         state.physicalAssetsUsdc = physicalAssetsUsdc;
         state.protocolFeesUsdc = protocolFeesUsdc;
         state.netPhysicalAssetsUsdc = physicalAssetsUsdc > protocolFeesUsdc ? physicalAssetsUsdc - protocolFeesUsdc : 0;
         state.maxLiabilityUsdc = maxLiabilityUsdc;
-        state.deferredTraderPayoutUsdc = deferredTraderPayoutUsdc;
+        state.deferredTraderCreditUsdc = deferredTraderCreditUsdc;
         state.deferredKeeperCreditUsdc = deferredKeeperCreditUsdc;
 
-        uint256 deferredLiabilitiesUsdc = deferredTraderPayoutUsdc + deferredKeeperCreditUsdc;
+        uint256 deferredLiabilitiesUsdc = deferredTraderCreditUsdc + deferredKeeperCreditUsdc;
         state.withdrawalReservedUsdc = maxLiabilityUsdc + protocolFeesUsdc + deferredLiabilitiesUsdc;
         state.freeWithdrawableUsdc =
             physicalAssetsUsdc > state.withdrawalReservedUsdc ? physicalAssetsUsdc - state.withdrawalReservedUsdc : 0;
@@ -108,7 +108,7 @@ library SolvencyAccountingLib {
         }
 
         uint256 deferredTraderPayoutAfterUsdc =
-            _applySignedDelta(currentState.deferredTraderPayoutUsdc, delta.deferredTraderPayoutDeltaUsdc);
+            _applySignedDelta(currentState.deferredTraderCreditUsdc, delta.deferredTraderPayoutDeltaUsdc);
         uint256 deferredKeeperCreditAfterUsdc =
             _applySignedDelta(currentState.deferredKeeperCreditUsdc, delta.deferredKeeperCreditDeltaUsdc);
 

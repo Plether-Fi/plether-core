@@ -172,7 +172,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         uint256 ghostDeferredBounty = handler.deferredKeeperCreditSnapshot();
         uint256 liveDeferredBounty = engine.deferredKeeperCreditUsdc(address(handler));
 
-        assertEq(ghostDeferredBounty, liveDeferredBounty, "Ghost deferred clearer bounty must match engine storage");
+        assertEq(ghostDeferredBounty, liveDeferredBounty, "Ghost deferred keeper credit must match engine storage");
         assertEq(
             handler.totalDeferredKeeperCreditSnapshot(),
             ghostDeferredBounty,

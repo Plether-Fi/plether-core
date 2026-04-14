@@ -17,11 +17,11 @@ contract PayoutModesMatrixTest is BasePerpTest {
         _open(accountId, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
 
         CfdEngine.ClosePreview memory preview = engineLens.previewClose(accountId, 100_000e18, 80_000_000);
-        assertEq(preview.deferredPayoutUsdc, 0, "Immediate close payout should not defer trader funds");
+        assertEq(preview.deferredTraderCreditUsdc, 0, "Immediate close payout should not defer trader funds");
         assertGt(preview.immediatePayoutUsdc, 0, "Immediate close payout should credit settlement immediately");
     }
 
-    function test_CloseDeferredPayoutMode() public {
+    function test_CloseDeferredTraderCreditMode() public {
         address trader = address(0xA002);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         _fundTrader(trader, 11_000e6);
@@ -30,7 +30,7 @@ contract PayoutModesMatrixTest is BasePerpTest {
 
         CfdEngine.ClosePreview memory preview = engineLens.previewClose(accountId, 100_000e18, 80_000_000);
         assertEq(preview.immediatePayoutUsdc, 0, "Illiquid close payout should not credit settlement immediately");
-        assertGt(preview.deferredPayoutUsdc, 0, "Illiquid close payout should become deferred");
+        assertGt(preview.deferredTraderCreditUsdc, 0, "Illiquid close payout should become deferred");
     }
 
     function test_LiquidationImmediateKeeperCreditMode() public {

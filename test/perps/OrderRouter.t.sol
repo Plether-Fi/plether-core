@@ -1864,7 +1864,7 @@ contract OrderRouterPythTest is BasePerpTest {
         );
     }
 
-    function test_DeferredPayout_CloseDoesNotBlockLaterQueuedOrders() public {
+    function test_DeferredTraderCredit_CloseDoesNotBlockLaterQueuedOrders() public {
         bytes32 accountId = bytes32(uint256(uint160(alice)));
 
         vm.startPrank(alice);
@@ -1893,7 +1893,7 @@ contract OrderRouterPythTest is BasePerpTest {
             "Deferred-payout close should not stall the FIFO queue and should drain it when no orders remain"
         );
         assertGt(
-            engine.deferredPayoutUsdc(accountId), 0, "Deferred payout should remain recorded after batch execution"
+            engine.deferredTraderCreditUsdc(accountId), 0, "Deferred payout should remain recorded after batch execution"
         );
         assertEq(
             engine.deferredKeeperCreditUsdc(address(this)),
@@ -2502,7 +2502,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         assertEq(
             observed.deferredKeeperCreditUsdc,
             preview.keeperBountyUsdc,
-            "Failed immediate keeper credit should defer the previewed keeper bounty into deferred clearer liability"
+            "Failed immediate keeper credit should defer the previewed keeper bounty into deferred keeper credit liability"
         );
     }
 
@@ -4414,7 +4414,7 @@ contract KeeperFeeRefundTest is Test {
         assertEq(
             engine.totalDeferredKeeperCreditUsdc(),
             deferredKeeperCreditBefore,
-            "Slippage failure should not leak failed-order bounty into deferred clearer liabilities"
+            "Slippage failure should not leak failed-order bounty into deferred keeper credit liabilities"
         );
     }
 

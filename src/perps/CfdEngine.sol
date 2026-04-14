@@ -50,7 +50,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 terminalReachableUsdc;
         uint256 accountEquityUsdc;
         uint256 freeBuyingPowerUsdc;
-        uint256 deferredPayoutUsdc;
+        uint256 deferredTraderCreditUsdc;
     }
 
     struct PositionView {
@@ -61,7 +61,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 entryPrice;
         uint256 entryNotionalUsdc;
         uint256 physicalReachableCollateralUsdc;
-        uint256 nettableDeferredPayoutUsdc;
+        uint256 nettableDeferredTraderCreditUsdc;
         int256 unrealizedPnlUsdc;
         int256 netEquityUsdc;
         uint256 maxProfitUsdc;
@@ -74,7 +74,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 withdrawalReservedUsdc;
         uint256 freeUsdc;
         uint256 accumulatedFeesUsdc;
-        uint256 totalDeferredPayoutUsdc;
+        uint256 totalDeferredTraderCreditUsdc;
         uint256 totalDeferredKeeperCreditUsdc;
         bool degradedMode;
         bool hasLiveLiability;
@@ -93,7 +93,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 existingDeferredConsumedUsdc;
         uint256 existingDeferredRemainingUsdc;
         uint256 immediatePayoutUsdc;
-        uint256 deferredPayoutUsdc;
+        uint256 deferredTraderCreditUsdc;
         uint256 seizedCollateralUsdc;
         uint256 badDebtUsdc;
         uint256 remainingSize;
@@ -117,7 +117,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 existingDeferredConsumedUsdc;
         uint256 existingDeferredRemainingUsdc;
         uint256 immediatePayoutUsdc;
-        uint256 deferredPayoutUsdc;
+        uint256 deferredTraderCreditUsdc;
         uint256 badDebtUsdc;
         bool triggersDegradedMode;
         bool postOpDegradedMode;
@@ -126,7 +126,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     }
 
     struct DeferredCreditStatus {
-        uint256 deferredTraderPayoutUsdc;
+        uint256 deferredTraderCreditUsdc;
         bool traderPayoutClaimableNow;
         uint256 deferredKeeperCreditUsdc;
         bool keeperCreditClaimableNow;
@@ -179,8 +179,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
 
     CfdTypes.RiskParams public riskParams;
     mapping(bytes32 => StoredPosition) internal _positions;
-    mapping(bytes32 => uint256) public deferredPayoutUsdc;
-    uint256 public totalDeferredPayoutUsdc;
+    mapping(bytes32 => uint256) public deferredTraderCreditUsdc;
+    uint256 public totalDeferredTraderCreditUsdc;
     mapping(address => uint256) public deferredKeeperCreditUsdc;
     uint256 public totalDeferredKeeperCreditUsdc;
     address public orderRouter;
@@ -214,7 +214,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     error CfdEngine__VaultAlreadySet();
     error CfdEngine__RouterAlreadySet();
     error CfdEngine__NoFeesToWithdraw();
-    error CfdEngine__NoDeferredPayout();
+    error CfdEngine__NoDeferredTraderCredit();
     error CfdEngine__InsufficientVaultLiquidity();
     error CfdEngine__NoDeferredKeeperCredit();
     error CfdEngine__MustCloseOpposingPosition();
@@ -278,8 +278,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     event BadDebtCleared(uint256 amount, uint256 remaining);
     event DegradedModeEntered(uint256 effectiveAssets, uint256 maxLiability, bytes32 indexed triggeringAccount);
     event DegradedModeCleared();
-    event DeferredPayoutRecorded(bytes32 indexed accountId, uint256 amountUsdc);
-    event DeferredPayoutClaimed(bytes32 indexed accountId, uint256 amountUsdc);
+    event DeferredTraderCreditRecorded(bytes32 indexed accountId, uint256 amountUsdc);
+    event DeferredTraderCreditClaimed(bytes32 indexed accountId, uint256 amountUsdc);
     event DeferredKeeperCreditRecorded(address indexed keeper, uint256 amountUsdc);
     event DeferredKeeperCreditClaimed(address indexed keeper, uint256 amountUsdc);
     event RiskParamsProposalCancelled();
@@ -766,12 +766,12 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         _realizeCarryFromSettlement(accountId, pos, price, reachableCollateralBasisUsdc);
     }
 
-    /// @notice Claims deferred trader payout balance into the clearinghouse.
+    /// @notice Claims deferred trader credit balance into the clearinghouse.
     /// @dev The claim can be partial if current vault cash is insufficient. Funds are credited to the
     ///      clearinghouse first, so beneficiaries access them through the normal account-balance path.
     ///      Carry is checkpointed when a fresh mark is available, but stale marks do not block access to
     ///      already-owed deferred cash.
-    function claimDeferredPayout(
+    function claimDeferredTraderCredit(
         bytes32 accountId
     ) external nonReentrant {
         if (bytes32(uint256(uint160(msg.sender))) != accountId) {
@@ -780,16 +780,16 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         StoredPosition storage pos = _positions[accountId];
         _checkpointDeferredClaimCarryIfPossible(accountId, pos);
 
-        uint256 amount = deferredPayoutUsdc[accountId];
+        uint256 amount = deferredTraderCreditUsdc[accountId];
         if (amount == 0) {
-            revert CfdEngine__NoDeferredPayout();
+            revert CfdEngine__NoDeferredTraderCredit();
         }
         uint256 claimAmountUsdc = _claimDeferredBalance(amount, accountId);
 
-        deferredPayoutUsdc[accountId] -= claimAmountUsdc;
-        totalDeferredPayoutUsdc -= claimAmountUsdc;
+        deferredTraderCreditUsdc[accountId] -= claimAmountUsdc;
+        totalDeferredTraderCreditUsdc -= claimAmountUsdc;
 
-        emit DeferredPayoutClaimed(accountId, claimAmountUsdc);
+        emit DeferredTraderCreditClaimed(accountId, claimAmountUsdc);
     }
 
     /// @notice Claims previously deferred keeper credit when the vault has replenished cash.
@@ -1051,7 +1051,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             clearinghouse.settleUsdc(accountId, int256(amountUsdc));
         } else {
             _enqueueOrAccrueDeferredTraderPayout(accountId, amountUsdc);
-            emit DeferredPayoutRecorded(accountId, amountUsdc);
+            emit DeferredTraderCreditRecorded(accountId, amountUsdc);
         }
     }
 
@@ -1059,8 +1059,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         bytes32 accountId,
         uint256 amountUsdc
     ) internal {
-        (deferredPayoutUsdc[accountId], totalDeferredPayoutUsdc) =
-            _increaseDeferredLiability(deferredPayoutUsdc[accountId], totalDeferredPayoutUsdc, amountUsdc);
+        (deferredTraderCreditUsdc[accountId], totalDeferredTraderCreditUsdc) =
+            _increaseDeferredLiability(deferredTraderCreditUsdc[accountId], totalDeferredTraderCreditUsdc, amountUsdc);
     }
 
     function _enqueueOrAccrueDeferredKeeperCredit(
@@ -1108,7 +1108,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
 
     function _freshVaultReservation() internal view returns (CashPriorityLib.SeniorCashReservation memory reservation) {
         return CashPriorityLib.reserveFreshPayouts(
-            vault.totalAssets(), accumulatedFeesUsdc, totalDeferredPayoutUsdc, totalDeferredKeeperCreditUsdc
+            vault.totalAssets(), accumulatedFeesUsdc, totalDeferredTraderCreditUsdc, totalDeferredKeeperCreditUsdc
         );
     }
 
@@ -1212,7 +1212,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             vault.totalAssets(),
             accumulatedFeesUsdc,
             _maxLiability(),
-            totalDeferredPayoutUsdc,
+            totalDeferredTraderCreditUsdc,
             totalDeferredKeeperCreditUsdc
         );
     }
@@ -1261,9 +1261,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         snap.accumulatedFeesUsdc = accumulatedFeesUsdc;
         snap.accumulatedBadDebtUsdc = accumulatedBadDebtUsdc;
         snap.unsettledCarryUsdc = unsettledCarryUsdc[accountId];
-        snap.totalDeferredPayoutUsdc = totalDeferredPayoutUsdc;
+        snap.totalDeferredTraderCreditUsdc = totalDeferredTraderCreditUsdc;
         snap.totalDeferredKeeperCreditUsdc = totalDeferredKeeperCreditUsdc;
-        snap.deferredPayoutForAccount = deferredPayoutUsdc[accountId];
+        snap.deferredTraderCreditForAccount = deferredTraderCreditUsdc[accountId];
         snap.degradedMode = degradedMode;
 
         snap.capPrice = CAP_PRICE;
@@ -1628,8 +1628,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             return;
         }
 
-        deferredPayoutUsdc[accountId] -= amountUsdc;
-        totalDeferredPayoutUsdc -= amountUsdc;
+        deferredTraderCreditUsdc[accountId] -= amountUsdc;
+        totalDeferredTraderCreditUsdc -= amountUsdc;
     }
 
     function _validateRiskParams(

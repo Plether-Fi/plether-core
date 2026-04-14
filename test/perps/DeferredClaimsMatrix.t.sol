@@ -15,11 +15,11 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
         usdc.burn(address(pool), pool.totalAssets() - 20e6);
         _close(accountId, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
 
-        uint256 deferredBefore = engine.deferredPayoutUsdc(accountId);
+        uint256 deferredBefore = engine.deferredTraderCreditUsdc(accountId);
         uint256 settlementBefore = clearinghouse.balanceUsdc(accountId);
 
         vm.prank(trader);
-        engine.claimDeferredPayout(accountId);
+        engine.claimDeferredTraderCredit(accountId);
 
         assertEq(
             clearinghouse.balanceUsdc(accountId),
@@ -27,7 +27,7 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
             "Claim should service only currently liquid amount"
         );
         assertEq(
-            engine.deferredPayoutUsdc(accountId), deferredBefore - 20e6, "Remaining deferred balance should stay queued"
+            engine.deferredTraderCreditUsdc(accountId), deferredBefore - 20e6, "Remaining deferred balance should stay queued"
         );
     }
 

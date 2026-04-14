@@ -69,7 +69,7 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
 
         _close(aliceId, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
-        uint256 aliceDeferred = engine.deferredPayoutUsdc(aliceId);
+        uint256 aliceDeferred = engine.deferredTraderCreditUsdc(aliceId);
         assertGt(aliceDeferred, 0, "setup must create a deferred senior claim");
 
         usdc.mint(address(pool), aliceDeferred);
@@ -77,7 +77,7 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         uint256 bobSettlementBefore = clearinghouse.balanceUsdc(bobId);
         _close(bobId, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
 
-        assertGt(engine.deferredPayoutUsdc(bobId), 0, "new payout must defer while older deferred claims reserve cash");
+        assertGt(engine.deferredTraderCreditUsdc(bobId), 0, "new payout must defer while older deferred claims reserve cash");
         assertEq(
             clearinghouse.balanceUsdc(bobId),
             bobSettlementBefore,
@@ -95,16 +95,16 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
 
         _close(aliceId, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
-        uint256 deferredPayout = engine.deferredPayoutUsdc(aliceId);
-        assertGt(deferredPayout, 0, "setup must create a deferred payout");
+        uint256 deferredTraderCredit = engine.deferredTraderCreditUsdc(aliceId);
+        assertGt(deferredTraderCredit, 0, "setup must create a deferred payout");
 
         vm.prank(address(router));
-        engine.recordDeferredKeeperCredit(keeper, deferredPayout);
+        engine.recordDeferredKeeperCredit(keeper, deferredTraderCredit);
 
-        usdc.mint(address(pool), deferredPayout);
+        usdc.mint(address(pool), deferredTraderCredit);
 
         DeferredEngineViewTypes.DeferredCreditStatus memory status = _deferredCreditStatus(aliceId, keeper);
-        assertTrue(status.traderPayoutClaimableNow, "Deferred trader payout should be claimable when liquidity exists");
+        assertTrue(status.traderPayoutClaimableNow, "Deferred trader credit should be claimable when liquidity exists");
         assertTrue(
             status.keeperCreditClaimableNow, "Deferred keeper credit should also be claimable without FIFO gating"
         );
@@ -135,8 +135,8 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         _close(aliceId, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
         _close(bobId, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
 
-        uint256 aliceDeferred = engine.deferredPayoutUsdc(aliceId);
-        uint256 bobDeferred = engine.deferredPayoutUsdc(bobId);
+        uint256 aliceDeferred = engine.deferredTraderCreditUsdc(aliceId);
+        uint256 bobDeferred = engine.deferredTraderCreditUsdc(bobId);
         assertGt(aliceDeferred, 0, "setup must create oldest deferred claim");
         assertGt(bobDeferred, 0, "setup must create second deferred claim");
 
@@ -144,21 +144,21 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
 
         uint256 aliceSettlementBefore = clearinghouse.balanceUsdc(aliceId);
         vm.prank(alice);
-        engine.claimDeferredPayout(aliceId);
+        engine.claimDeferredTraderCredit(aliceId);
 
         uint256 aliceClaimed = clearinghouse.balanceUsdc(aliceId) - aliceSettlementBefore;
         assertGt(aliceClaimed, 0, "beneficiary claim should absorb available partial liquidity");
         assertEq(
-            engine.deferredPayoutUsdc(aliceId),
+            engine.deferredTraderCreditUsdc(aliceId),
             aliceDeferred - aliceClaimed,
             "Claimed beneficiary balance should shrink by the paid amount"
         );
-        assertEq(engine.deferredPayoutUsdc(bobId), bobDeferred, "Unclaimed later balance should remain unchanged");
+        assertEq(engine.deferredTraderCreditUsdc(bobId), bobDeferred, "Unclaimed later balance should remain unchanged");
 
         usdc.mint(address(pool), bobDeferred / 2);
         uint256 bobSettlementBefore = clearinghouse.balanceUsdc(bobId);
         vm.prank(bob);
-        engine.claimDeferredPayout(bobId);
+        engine.claimDeferredTraderCredit(bobId);
         assertGt(
             clearinghouse.balanceUsdc(bobId) - bobSettlementBefore,
             0,

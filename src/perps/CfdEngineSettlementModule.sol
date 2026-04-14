@@ -96,7 +96,7 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
     }
 
     /// @notice Applies the live close/decrease settlement plan produced by the planner.
-    /// @dev Can record deferred trader payout, bad debt, and realized carry depending on the close result.
+    /// @dev Can record deferred trader credit, bad debt, and realized carry depending on the close result.
     function executeClose(
         ICfdEngineSettlementHost host,
         CfdEnginePlanTypes.CloseDelta calldata delta,

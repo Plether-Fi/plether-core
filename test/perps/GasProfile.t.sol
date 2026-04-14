@@ -334,8 +334,8 @@ contract GasProfileTest is Test {
         emit log_named_uint("09_addMargin", gas);
     }
 
-    // --- 10. claimDeferredPayout ---
-    function test_gas_10_claimDeferredPayout() public {
+    // --- 10. claimDeferredTraderCredit ---
+    function test_gas_10_claimDeferredTraderCredit() public {
         _depositToClearinghouse(alice, 11_000e6);
         _openPosition(alice, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
 
@@ -349,17 +349,17 @@ contract GasProfileTest is Test {
         // Close at profit — payout gets deferred (use external call for clean timestamp reads)
         this._closeAtPrice(alice, CfdTypes.Side.BULL, 100_000e18, int64(80_000_000));
 
-        uint256 deferred = engine.deferredPayoutUsdc(aliceId);
-        require(deferred > 0, "Setup failed: no deferred payout");
+        uint256 deferred = engine.deferredTraderCreditUsdc(aliceId);
+        require(deferred > 0, "Setup failed: no deferred trader credit");
 
         // Replenish pool so claim can succeed
         _mintUsdc(address(pool), deferred);
 
         vm.prank(alice);
         uint256 g0 = gasleft();
-        engine.claimDeferredPayout(aliceId);
+        engine.claimDeferredTraderCredit(aliceId);
         uint256 gas = g0 - gasleft();
-        emit log_named_uint("10_claimDeferredPayout", gas);
+        emit log_named_uint("10_claimDeferredTraderCredit", gas);
     }
 
     // --- 11. clearinghouse.deposit ---

@@ -32,8 +32,8 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         selectors[4] = handler.executeNextOrderModelled.selector;
         selectors[5] = handler.liquidate.selector;
         selectors[6] = handler.claimDeferredKeeperCredit.selector;
-        selectors[7] = handler.createDeferredTraderPayout.selector;
-        selectors[8] = handler.claimDeferredPayout.selector;
+        selectors[7] = handler.createDeferredTraderCredit.selector;
+        selectors[8] = handler.claimDeferredTraderCredit.selector;
         selectors[9] = handler.fundVault.selector;
         selectors[10] = handler.setRouterPayoutFailureMode.selector;
         selectors[11] = handler.setVaultAssets.selector;
@@ -64,7 +64,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
     }
 
     function invariant_WithdrawalReserveIncludesKnownDeferredLiabilities() public view {
-        uint256 expectedReserved = _maxLiability() + engine.accumulatedFeesUsdc() + engine.totalDeferredPayoutUsdc()
+        uint256 expectedReserved = _maxLiability() + engine.accumulatedFeesUsdc() + engine.totalDeferredTraderCreditUsdc()
             + engine.totalDeferredKeeperCreditUsdc();
 
         expectedReserved += uint256(0);
@@ -152,8 +152,8 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
                 ledgerView.committedMarginUsdc, escrow.committedMarginUsdc, "Account ledger committed margin mismatch"
             );
             assertEq(
-                ledgerView.deferredPayoutUsdc,
-                engine.deferredPayoutUsdc(accountId),
+                ledgerView.deferredTraderCreditUsdc,
+                engine.deferredTraderCreditUsdc(accountId),
                 "Account ledger deferred payout mismatch"
             );
             assertEq(
@@ -167,14 +167,14 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
     function invariant_TrackedAccountLedgerTotalsMatchProtocolCustodyAndObligations() public view {
         uint256 totalSettlementUsdc;
         uint256 totalExecutionEscrowUsdc;
-        uint256 totalDeferredPayoutUsdc;
+        uint256 totalDeferredTraderCreditUsdc;
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             AccountLensViewTypes.AccountLedgerView memory ledgerView =
                 engineAccountLens.getAccountLedgerView(_accountId(handler.actorAt(i)));
             totalSettlementUsdc += ledgerView.settlementBalanceUsdc;
             totalExecutionEscrowUsdc += ledgerView.executionEscrowUsdc;
-            totalDeferredPayoutUsdc += ledgerView.deferredPayoutUsdc;
+            totalDeferredTraderCreditUsdc += ledgerView.deferredTraderCreditUsdc;
         }
 
         assertEq(
@@ -188,13 +188,13 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
             "Tracked execution escrow totals must match router custody"
         );
         assertEq(
-            totalDeferredPayoutUsdc,
-            engine.totalDeferredPayoutUsdc(),
+            totalDeferredTraderCreditUsdc,
+            engine.totalDeferredTraderCreditUsdc(),
             "Tracked deferred payout totals must match engine obligations"
         );
     }
 
-    function invariant_BadDebtEventCannotLeaveLegacyDeferredPayoutOnSameAccount() public view {
+    function invariant_BadDebtEventCannotLeaveLegacyDeferredTraderCreditOnSameAccount() public view {
         PerpAccountingHandler.BadDebtDeferredEvent memory eventSnapshot = handler.lastBadDebtDeferredEventSnapshot();
         if (!eventSnapshot.active) {
             return;
@@ -206,7 +206,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
             "Bad debt event snapshot should describe the current bad debt-producing step"
         );
         assertLe(
-            engine.deferredPayoutUsdc(eventSnapshot.accountId),
+            engine.deferredTraderCreditUsdc(eventSnapshot.accountId),
             eventSnapshot.allowedDeferredAfterUsdc,
             "Bad debt-producing close/liquidation may only leave newly created deferred payout on the same account"
         );
@@ -220,7 +220,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
 
         address trader = address(uint160(uint256(eventSnapshot.accountId)));
         uint256 actualFinalResidualUsdc =
-            clearinghouse.balanceUsdc(eventSnapshot.accountId) + engine.deferredPayoutUsdc(eventSnapshot.accountId);
+            clearinghouse.balanceUsdc(eventSnapshot.accountId) + engine.deferredTraderCreditUsdc(eventSnapshot.accountId);
         if (eventSnapshot.walletPayoutExpected) {
             actualFinalResidualUsdc += usdc.balanceOf(trader) - eventSnapshot.traderWalletBeforeUsdc;
         }
@@ -301,7 +301,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
                 "Account snapshot committed margin mismatch"
             );
             assertEq(
-                snapshot.deferredPayoutUsdc, ledgerView.deferredPayoutUsdc, "Account snapshot deferred payout mismatch"
+                snapshot.deferredTraderCreditUsdc, ledgerView.deferredTraderCreditUsdc, "Account snapshot deferred payout mismatch"
             );
             assertEq(
                 snapshot.pendingOrderCount,
@@ -426,8 +426,8 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
                 "Snapshot must subsume compact execution escrow"
             );
             assertEq(
-                snapshot.deferredPayoutUsdc,
-                compactView.deferredPayoutUsdc,
+                snapshot.deferredTraderCreditUsdc,
+                compactView.deferredTraderCreditUsdc,
                 "Snapshot must subsume compact deferred payout"
             );
             assertEq(
@@ -472,14 +472,14 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         );
         assertEq(snapshot.protocolFeesUsdc, feesUsdc, "House-pool snapshot fees must match engine fees");
         assertEq(
-            snapshot.deferredTraderPayoutUsdc,
-            engine.totalDeferredPayoutUsdc(),
-            "House-pool snapshot deferred trader payout mismatch"
+            snapshot.deferredTraderCreditUsdc,
+            engine.totalDeferredTraderCreditUsdc(),
+            "House-pool snapshot deferred trader credit mismatch"
         );
         assertEq(
             snapshot.deferredKeeperCreditUsdc,
             engine.totalDeferredKeeperCreditUsdc(),
-            "House-pool snapshot deferred clearer bounty mismatch"
+            "House-pool snapshot deferred keeper credit mismatch"
         );
         assertEq(snapshot.maxLiabilityUsdc, _maxLiability(), "House-pool snapshot max liability mismatch");
         assertEq(
@@ -509,14 +509,14 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
             protocolSnapshot.maxLiabilityUsdc, snapshot.maxLiabilityUsdc, "Protocol snapshot max liability mismatch"
         );
         assertEq(
-            protocolSnapshot.totalDeferredPayoutUsdc,
-            snapshot.deferredTraderPayoutUsdc,
-            "Protocol snapshot deferred trader payout mismatch"
+            protocolSnapshot.totalDeferredTraderCreditUsdc,
+            snapshot.deferredTraderCreditUsdc,
+            "Protocol snapshot deferred trader credit mismatch"
         );
         assertEq(
             protocolSnapshot.totalDeferredKeeperCreditUsdc,
             snapshot.deferredKeeperCreditUsdc,
-            "Protocol snapshot deferred clearer bounty mismatch"
+            "Protocol snapshot deferred keeper credit mismatch"
         );
     }
 
@@ -547,34 +547,34 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
                 clearinghouse.balanceUsdc(accountId), 0, "Bad debt cannot coexist with tracked clearinghouse balance"
             );
             assertEq(
-                engine.deferredPayoutUsdc(accountId), 0, "Bad debt cannot coexist with deferred trader payout claims"
+                engine.deferredTraderCreditUsdc(accountId), 0, "Bad debt cannot coexist with deferred trader credit claims"
             );
         }
     }
 
-    function invariant_GhostTrackedDeferredTraderPayoutsMatchEngine() public view {
-        uint256 ghostTotalDeferredTraderPayouts;
+    function invariant_GhostTrackedDeferredTraderCreditsMatchEngine() public view {
+        uint256 ghostTotalDeferredTraderCredits;
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
-            uint256 ghostDeferredPayoutUsdc = handler.deferredTraderPayoutSnapshot(accountId);
-            uint256 liveDeferredPayoutUsdc = engine.deferredPayoutUsdc(accountId);
+            uint256 ghostDeferredTraderCreditUsdc = handler.deferredTraderCreditSnapshot(accountId);
+            uint256 liveDeferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(accountId);
 
             assertEq(
-                ghostDeferredPayoutUsdc,
-                liveDeferredPayoutUsdc,
-                "Ghost tracked deferred trader payout must match engine storage"
+                ghostDeferredTraderCreditUsdc,
+                liveDeferredTraderCreditUsdc,
+                "Ghost tracked deferred trader credit must match engine storage"
             );
-            ghostTotalDeferredTraderPayouts += ghostDeferredPayoutUsdc;
+            ghostTotalDeferredTraderCredits += ghostDeferredTraderCreditUsdc;
         }
 
         assertEq(
-            handler.totalDeferredTraderPayoutSnapshot(),
-            ghostTotalDeferredTraderPayouts,
-            "Ghost deferred trader payout total must match tracked account sum"
+            handler.totalDeferredTraderCreditSnapshot(),
+            ghostTotalDeferredTraderCredits,
+            "Ghost deferred trader credit total must match tracked account sum"
         );
         assertEq(
-            engine.totalDeferredPayoutUsdc(),
-            ghostTotalDeferredTraderPayouts,
+            engine.totalDeferredTraderCreditUsdc(),
+            ghostTotalDeferredTraderCredits,
             "Engine deferred payout total must match tracked ghost sum"
         );
     }

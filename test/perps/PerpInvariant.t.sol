@@ -599,8 +599,8 @@ contract PerpInvariantTest is BasePerpTest {
             protocolView.accumulatedFeesUsdc, engine.accumulatedFeesUsdc(), "Protocol view fees must match accessor"
         );
         assertEq(
-            protocolView.totalDeferredPayoutUsdc,
-            engine.totalDeferredPayoutUsdc(),
+            protocolView.totalDeferredTraderCreditUsdc,
+            engine.totalDeferredTraderCreditUsdc(),
             "Protocol view trader deferred payouts must match storage"
         );
         assertEq(
@@ -611,7 +611,7 @@ contract PerpInvariantTest is BasePerpTest {
     }
 
     function invariant_WithdrawalReserveIncludesDeferredLiabilities() public view {
-        uint256 expectedReserved = _maxLiability() + engine.accumulatedFeesUsdc() + engine.totalDeferredPayoutUsdc()
+        uint256 expectedReserved = _maxLiability() + engine.accumulatedFeesUsdc() + engine.totalDeferredTraderCreditUsdc()
             + engine.totalDeferredKeeperCreditUsdc();
 
         expectedReserved += uint256(0);

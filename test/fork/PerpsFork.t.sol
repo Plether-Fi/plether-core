@@ -639,7 +639,7 @@ contract PerpsForkTest is Test {
         assertEq(aliceUsdcAfter - aliceUsdcBefore, aliceBalance, "Real USDC withdrawal should match");
     }
 
-    function test_DeferredPayoutClaimFlow_RealUsdc() public {
+    function test_DeferredTraderCreditClaimFlow_RealUsdc() public {
         _depositToClearinghouse(alice, 11_000e6);
 
         this._commitAndExecute(alice, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8, int64(100_000_000), false);
@@ -661,7 +661,7 @@ contract PerpsForkTest is Test {
         vm.prank(keeper);
         router.executeOrder(2, _pythUpdateData());
 
-        uint256 deferred = engine.deferredPayoutUsdc(aliceId);
+        uint256 deferred = engine.deferredTraderCreditUsdc(aliceId);
         assertGt(deferred, 0, "Illiquid profitable close should record a deferred payout");
         (uint256 size,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "Position should be closed even when payout is deferred");
@@ -682,9 +682,9 @@ contract PerpsForkTest is Test {
         pool.recordProtocolInflow(deferred);
 
         vm.prank(alice);
-        engine.claimDeferredPayout(aliceId);
+        engine.claimDeferredTraderCredit(aliceId);
 
-        assertEq(engine.deferredPayoutUsdc(aliceId), 0, "Claim should clear deferred payout state");
+        assertEq(engine.deferredTraderCreditUsdc(aliceId), 0, "Claim should clear deferred payout state");
         assertEq(
             clearinghouse.balanceUsdc(aliceId),
             chAfterClose + deferred,
@@ -692,7 +692,7 @@ contract PerpsForkTest is Test {
         );
     }
 
-    function test_DeferredPayoutBatchDoesNotBlockTailOrder_RealUsdc() public {
+    function test_DeferredTraderCreditBatchDoesNotBlockTailOrder_RealUsdc() public {
         _depositToClearinghouse(alice, 20_000e6);
 
         this._commitAndExecute(alice, CfdTypes.Side.BULL, 100_000e18, 8000e6, 1e8, int64(100_000_000), false);
@@ -721,7 +721,7 @@ contract PerpsForkTest is Test {
             0,
             "Batch execution should continue past a deferred-payout close and clear the queue when exhausted"
         );
-        assertGt(engine.deferredPayoutUsdc(aliceId), 0, "Deferred payout should remain recorded after the batch");
+        assertGt(engine.deferredTraderCreditUsdc(aliceId), 0, "Deferred payout should remain recorded after the batch");
 
         (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(aliceId);
         assertEq(

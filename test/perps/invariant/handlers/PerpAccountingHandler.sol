@@ -336,7 +336,7 @@ contract PerpAccountingHandler is Test {
         uint256 marginDelta = orderRecord.core.marginDelta;
         uint256 targetPrice = orderRecord.core.targetPrice;
         bool isClose = orderRecord.core.isClose;
-        uint256 deferredTraderPayoutUsdc;
+        uint256 deferredTraderCreditUsdc;
         uint256 allowedDeferredAfterUsdc;
         uint256 expectedBadDebtDeltaUsdc;
         uint256 expectedFinalResidualUsdc;
@@ -347,15 +347,15 @@ contract PerpAccountingHandler is Test {
         if (isClose && marginDelta == 0) {
             CfdEngine.ClosePreview memory preview = engineLens.previewClose(accountId, sizeDelta, targetPrice);
             if (preview.valid) {
-                deferredTraderPayoutUsdc = preview.deferredPayoutUsdc;
-                allowedDeferredAfterUsdc = preview.deferredPayoutUsdc > preview.existingDeferredRemainingUsdc
-                    ? preview.deferredPayoutUsdc - preview.existingDeferredRemainingUsdc
+                deferredTraderCreditUsdc = preview.deferredTraderCreditUsdc;
+                allowedDeferredAfterUsdc = preview.deferredTraderCreditUsdc > preview.existingDeferredRemainingUsdc
+                    ? preview.deferredTraderCreditUsdc - preview.existingDeferredRemainingUsdc
                     : 0;
                 if (preview.remainingSize == 0) {
                     terminalClose = true;
                     expectedBadDebtDeltaUsdc = preview.badDebtUsdc;
                     uint256 grossResidualUsdc =
-                        beforeSnapshot.settlementBalanceUsdc + preview.immediatePayoutUsdc + preview.deferredPayoutUsdc;
+                        beforeSnapshot.settlementBalanceUsdc + preview.immediatePayoutUsdc + preview.deferredTraderCreditUsdc;
                     expectedFinalResidualUsdc = grossResidualUsdc > preview.seizedCollateralUsdc
                         ? grossResidualUsdc - preview.seizedCollateralUsdc
                         : 0;
@@ -368,10 +368,10 @@ contract PerpAccountingHandler is Test {
         bytes[] memory empty;
         try router.executeOrder(orderId, empty) {
             _reconcileCommittedMarginAfterProcessedOrders(committedBefore, orderId, router.nextExecuteId());
-            if (deferredTraderPayoutUsdc > 0) {
-                ghost.increaseDeferredTraderPayout(accountId, deferredTraderPayoutUsdc);
+            if (deferredTraderCreditUsdc > 0) {
+                ghost.increaseDeferredTraderCredit(accountId, deferredTraderCreditUsdc);
             }
-            _syncGhostDeferredTraderPayout(accountId);
+            _syncGhostDeferredTraderCredit(accountId);
             uint256 badDebtAfter = engine.accumulatedBadDebtUsdc();
             if (isClose && badDebtAfter > badDebtBefore) {
                 _recordBadDebtDeferredEvent(accountId, badDebtAfter, allowedDeferredAfterUsdc);
@@ -411,13 +411,13 @@ contract PerpAccountingHandler is Test {
         CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, price);
         uint256 keeperBountyUsdc = preview.keeperBountyUsdc;
         bool shouldDefer = vault.failRouterPayouts() && keeperBountyUsdc > 0;
-        uint256 deferredTraderPayoutUsdc = preview.deferredPayoutUsdc;
-        uint256 allowedDeferredAfterUsdc = preview.deferredPayoutUsdc > preview.existingDeferredRemainingUsdc
-            ? preview.deferredPayoutUsdc - preview.existingDeferredRemainingUsdc
+        uint256 deferredTraderCreditUsdc = preview.deferredTraderCreditUsdc;
+        uint256 allowedDeferredAfterUsdc = preview.deferredTraderCreditUsdc > preview.existingDeferredRemainingUsdc
+            ? preview.deferredTraderCreditUsdc - preview.existingDeferredRemainingUsdc
             : 0;
         uint256 traderWalletBeforeUsdc = usdc.balanceOf(actor);
         uint256 expectedFinalResidualUsdc =
-            preview.settlementRetainedUsdc + preview.immediatePayoutUsdc + preview.deferredPayoutUsdc;
+            preview.settlementRetainedUsdc + preview.immediatePayoutUsdc + preview.deferredTraderCreditUsdc;
         uint256 committedBefore = _trackedCommittedMargin(accountId);
         _recordTerminalReservationSet(accountId);
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
@@ -426,10 +426,10 @@ contract PerpAccountingHandler is Test {
             ghost.recordLiquidation(accountId, usdc.balanceOf(actor), engine.accumulatedBadDebtUsdc());
             ghostSuccessfulLiquidations++;
             _reconcileCommittedMarginAfterLiquidation(accountId, committedBefore);
-            if (deferredTraderPayoutUsdc > 0) {
-                ghost.increaseDeferredTraderPayout(accountId, deferredTraderPayoutUsdc);
+            if (deferredTraderCreditUsdc > 0) {
+                ghost.increaseDeferredTraderCredit(accountId, deferredTraderCreditUsdc);
             }
-            _syncGhostDeferredTraderPayout(accountId);
+            _syncGhostDeferredTraderCredit(accountId);
             if (shouldDefer) {
                 ghost.increaseDeferredKeeperCredit(address(this), keeperBountyUsdc);
             }
@@ -451,7 +451,7 @@ contract PerpAccountingHandler is Test {
         } catch {}
     }
 
-    function createDeferredTraderPayout(
+    function createDeferredTraderCredit(
         uint256 actorIndex
     ) external {
         _clearLastBadDebtDeferredEvent();
@@ -498,7 +498,7 @@ contract PerpAccountingHandler is Test {
         uint256 closeOraclePrice = side == CfdTypes.Side.BULL ? uint256(15e7) : uint256(5e7);
 
         CfdEngine.ClosePreview memory closePreview = engineLens.previewClose(accountId, size, closeOraclePrice);
-        uint256 deferredTraderPayoutUsdc = closePreview.deferredPayoutUsdc;
+        uint256 deferredTraderCreditUsdc = closePreview.deferredTraderCreditUsdc;
         _recordTerminalReservationSet(accountId);
 
         uint64 closeOrderId = router.nextCommitId();
@@ -517,28 +517,28 @@ contract PerpAccountingHandler is Test {
             _reconcileCommittedMarginAfterProcessedOrders(
                 closeCommittedBefore, closeStartExecuteId, router.nextExecuteId()
             );
-            if (deferredTraderPayoutUsdc > 0) {
-                ghost.increaseDeferredTraderPayout(accountId, deferredTraderPayoutUsdc);
+            if (deferredTraderCreditUsdc > 0) {
+                ghost.increaseDeferredTraderCredit(accountId, deferredTraderCreditUsdc);
             }
-            _syncGhostDeferredTraderPayout(accountId);
+            _syncGhostDeferredTraderCredit(accountId);
         } catch {}
     }
 
-    function claimDeferredPayout(
+    function claimDeferredTraderCredit(
         uint256 actorIndex
     ) external {
         _clearLastBadDebtDeferredEvent();
         _clearTerminalReservationSet();
         address actor = actors[actorIndex % actors.length];
         bytes32 accountId = _accountId(actor);
-        uint256 ghostDeferredPayout = ghost.deferredTraderPayoutSnapshot(accountId);
+        uint256 ghostDeferredTraderCredit = ghost.deferredTraderCreditSnapshot(accountId);
 
         vm.prank(actor);
-        try engine.claimDeferredPayout(accountId) {
-            if (ghostDeferredPayout > 0) {
-                ghost.decreaseDeferredTraderPayout(accountId, ghostDeferredPayout);
+        try engine.claimDeferredTraderCredit(accountId) {
+            if (ghostDeferredTraderCredit > 0) {
+                ghost.decreaseDeferredTraderCredit(accountId, ghostDeferredTraderCredit);
             }
-            _syncGhostDeferredTraderPayout(accountId);
+            _syncGhostDeferredTraderCredit(accountId);
         } catch {}
     }
 
@@ -638,10 +638,10 @@ contract PerpAccountingHandler is Test {
         return ghost.deferredKeeperCreditSnapshot(address(this));
     }
 
-    function deferredTraderPayoutSnapshot(
+    function deferredTraderCreditSnapshot(
         bytes32 accountId
     ) external view returns (uint256) {
-        return ghost.deferredTraderPayoutSnapshot(accountId);
+        return ghost.deferredTraderCreditSnapshot(accountId);
     }
 
     function _clearLastBadDebtDeferredEvent() internal {
@@ -717,15 +717,15 @@ contract PerpAccountingHandler is Test {
         });
     }
 
-    function _syncGhostDeferredTraderPayout(
+    function _syncGhostDeferredTraderCredit(
         bytes32 accountId
     ) internal {
-        uint256 ghostDeferredPayout = ghost.deferredTraderPayoutSnapshot(accountId);
-        uint256 liveDeferredPayout = engine.deferredPayoutUsdc(accountId);
-        if (liveDeferredPayout > ghostDeferredPayout) {
-            ghost.increaseDeferredTraderPayout(accountId, liveDeferredPayout - ghostDeferredPayout);
-        } else if (ghostDeferredPayout > liveDeferredPayout) {
-            ghost.decreaseDeferredTraderPayout(accountId, ghostDeferredPayout - liveDeferredPayout);
+        uint256 ghostDeferredTraderCredit = ghost.deferredTraderCreditSnapshot(accountId);
+        uint256 liveDeferredTraderCredit = engine.deferredTraderCreditUsdc(accountId);
+        if (liveDeferredTraderCredit > ghostDeferredTraderCredit) {
+            ghost.increaseDeferredTraderCredit(accountId, liveDeferredTraderCredit - ghostDeferredTraderCredit);
+        } else if (ghostDeferredTraderCredit > liveDeferredTraderCredit) {
+            ghost.decreaseDeferredTraderCredit(accountId, ghostDeferredTraderCredit - liveDeferredTraderCredit);
         }
     }
 
@@ -741,8 +741,8 @@ contract PerpAccountingHandler is Test {
         }
     }
 
-    function totalDeferredTraderPayoutSnapshot() external view returns (uint256) {
-        return ghost.totalDeferredTraderPayoutSnapshot();
+    function totalDeferredTraderCreditSnapshot() external view returns (uint256) {
+        return ghost.totalDeferredTraderCreditSnapshot();
     }
 
     function ghostOrderLifecycleState(

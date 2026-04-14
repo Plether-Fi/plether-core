@@ -159,12 +159,12 @@ abstract contract BasePerpInvariantTest is Test {
         bytes32 accountId,
         address keeper
     ) internal view returns (DeferredEngineViewTypes.DeferredCreditStatus memory status) {
-        uint256 deferredPayoutUsdc = engine.deferredPayoutUsdc(accountId);
+        uint256 deferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(accountId);
         uint256 deferredKeeperCreditUsdc = engine.deferredKeeperCreditUsdc(keeper);
         bool anyLiquidity = vault.totalAssets() > 0;
 
-        status.deferredTraderPayoutUsdc = deferredPayoutUsdc;
-        status.traderPayoutClaimableNow = deferredPayoutUsdc > 0 && anyLiquidity;
+        status.deferredTraderCreditUsdc = deferredTraderCreditUsdc;
+        status.traderPayoutClaimableNow = deferredTraderCreditUsdc > 0 && anyLiquidity;
         status.deferredKeeperCreditUsdc = deferredKeeperCreditUsdc;
         status.keeperCreditClaimableNow = deferredKeeperCreditUsdc > 0 && anyLiquidity;
     }

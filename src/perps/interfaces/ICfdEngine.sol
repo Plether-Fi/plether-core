@@ -39,7 +39,7 @@ interface ICfdEngine {
         uint256 existingDeferredConsumedUsdc;
         uint256 existingDeferredRemainingUsdc;
         uint256 immediatePayoutUsdc;
-        uint256 deferredPayoutUsdc;
+        uint256 deferredTraderCreditUsdc;
         uint256 badDebtUsdc;
         bool triggersDegradedMode;
         bool postOpDegradedMode;
@@ -139,8 +139,8 @@ interface ICfdEngine {
     /// @notice Accumulated execution fees awaiting withdrawal (6 decimals)
     function accumulatedFeesUsdc() external view returns (uint256);
 
-    /// @notice Deferred trader payouts still owed to beneficiaries.
-    function totalDeferredPayoutUsdc() external view returns (uint256);
+    /// @notice Deferred trader credit still owed to beneficiaries.
+    function totalDeferredTraderCreditUsdc() external view returns (uint256);
 
     /// @notice Deferred keeper credit still owed after failed immediate settlement.
     function totalDeferredKeeperCreditUsdc() external view returns (uint256);

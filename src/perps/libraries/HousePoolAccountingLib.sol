@@ -34,7 +34,7 @@ library HousePoolAccountingLib {
         snapshot.maxLiability = engineSnapshot.maxLiabilityUsdc;
         snapshot.protocolFees = engineSnapshot.protocolFeesUsdc;
         snapshot.reserved = engineSnapshot.maxLiabilityUsdc + engineSnapshot.protocolFeesUsdc
-            + engineSnapshot.deferredTraderPayoutUsdc + engineSnapshot.deferredKeeperCreditUsdc
+            + engineSnapshot.deferredTraderCreditUsdc + engineSnapshot.deferredKeeperCreditUsdc
             + engineSnapshot.supplementalReservedUsdc;
         snapshot.freeUsdc =
             snapshot.physicalAssets > snapshot.reserved ? snapshot.physicalAssets - snapshot.reserved : 0;
@@ -46,7 +46,7 @@ library HousePoolAccountingLib {
         snapshot.physicalAssets = engineSnapshot.physicalAssetsUsdc;
         snapshot.protocolFees = engineSnapshot.protocolFeesUsdc;
         snapshot.deferredLiabilities =
-            engineSnapshot.deferredTraderPayoutUsdc + engineSnapshot.deferredKeeperCreditUsdc;
+            engineSnapshot.deferredTraderCreditUsdc + engineSnapshot.deferredKeeperCreditUsdc;
         snapshot.cashMinusFees = engineSnapshot.netPhysicalAssetsUsdc > snapshot.deferredLiabilities
             ? engineSnapshot.netPhysicalAssetsUsdc - snapshot.deferredLiabilities
             : 0;

@@ -13,10 +13,10 @@ contract PerpGhostLedger {
 
     mapping(bytes32 => LiquidationSnapshot) internal liquidationSnapshots;
     mapping(bytes32 => uint256) internal committedMarginUsdc;
-    mapping(bytes32 => uint256) internal deferredTraderPayoutUsdc;
+    mapping(bytes32 => uint256) internal deferredTraderCreditUsdc;
     mapping(address => uint256) internal deferredKeeperCreditUsdc;
     uint256 internal totalTrackedCommittedMarginUsdc;
-    uint256 internal totalTrackedDeferredTraderPayoutUsdc;
+    uint256 internal totalTrackedDeferredTraderCreditUsdc;
     uint256 internal totalTrackedDeferredKeeperCreditUsdc;
 
     error PerpGhostLedger__Unauthorized();
@@ -88,7 +88,7 @@ contract PerpGhostLedger {
         totalTrackedDeferredKeeperCreditUsdc -= amountUsdc;
     }
 
-    function increaseDeferredTraderPayout(
+    function increaseDeferredTraderCredit(
         bytes32 accountId,
         uint256 amountUsdc
     ) external {
@@ -96,11 +96,11 @@ contract PerpGhostLedger {
             revert PerpGhostLedger__Unauthorized();
         }
 
-        deferredTraderPayoutUsdc[accountId] += amountUsdc;
-        totalTrackedDeferredTraderPayoutUsdc += amountUsdc;
+        deferredTraderCreditUsdc[accountId] += amountUsdc;
+        totalTrackedDeferredTraderCreditUsdc += amountUsdc;
     }
 
-    function decreaseDeferredTraderPayout(
+    function decreaseDeferredTraderCredit(
         bytes32 accountId,
         uint256 amountUsdc
     ) external {
@@ -108,8 +108,8 @@ contract PerpGhostLedger {
             revert PerpGhostLedger__Unauthorized();
         }
 
-        deferredTraderPayoutUsdc[accountId] -= amountUsdc;
-        totalTrackedDeferredTraderPayoutUsdc -= amountUsdc;
+        deferredTraderCreditUsdc[accountId] -= amountUsdc;
+        totalTrackedDeferredTraderCreditUsdc -= amountUsdc;
     }
 
     function liquidationSnapshot(
@@ -130,18 +130,18 @@ contract PerpGhostLedger {
         return deferredKeeperCreditUsdc[clearer];
     }
 
-    function deferredTraderPayoutSnapshot(
+    function deferredTraderCreditSnapshot(
         bytes32 accountId
     ) external view returns (uint256) {
-        return deferredTraderPayoutUsdc[accountId];
+        return deferredTraderCreditUsdc[accountId];
     }
 
     function totalCommittedMarginSnapshot() external view returns (uint256) {
         return totalTrackedCommittedMarginUsdc;
     }
 
-    function totalDeferredTraderPayoutSnapshot() external view returns (uint256) {
-        return totalTrackedDeferredTraderPayoutUsdc;
+    function totalDeferredTraderCreditSnapshot() external view returns (uint256) {
+        return totalTrackedDeferredTraderCreditUsdc;
     }
 
     function totalDeferredKeeperCreditSnapshot() external view returns (uint256) {
