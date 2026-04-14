@@ -403,18 +403,6 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         (uint256 executionPrice, uint64 oraclePublishTime, uint256 pythFee) =
             _resolveOraclePrice(pythUpdateData, initialHeadOrder.targetPrice, maxStaleness, orderExecutionStalenessLimit);
 
-        _skipStaleOrders(orderId, executionPrice, oraclePublishTime);
-        if (nextExecuteId == 0) {
-            revert OrderRouter__NoOrdersToExecute();
-        }
-        if (orderId < nextExecuteId) {
-            orderId = nextExecuteId;
-        }
-        if (orderId != nextExecuteId) {
-            revert OrderRouter__FIFOViolation();
-        }
-        (, CfdTypes.Order memory order) = _pendingOrder(orderId);
-
         if (address(pyth) != address(0)) {
             if (OracleFreshnessPolicyLib.isStale(oraclePublishTime, executionContext.policy.maxStaleness, block.timestamp))
             {
@@ -430,6 +418,20 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         if (executionPrice > capPrice) {
             executionPrice = capPrice;
         }
+
+        engine.updateMarkPrice(executionPrice, oraclePublishTime);
+
+        _skipStaleOrders(orderId, executionPrice, oraclePublishTime);
+        if (nextExecuteId == 0) {
+            revert OrderRouter__NoOrdersToExecute();
+        }
+        if (orderId < nextExecuteId) {
+            orderId = nextExecuteId;
+        }
+        if (orderId != nextExecuteId) {
+            revert OrderRouter__FIFOViolation();
+        }
+        (, CfdTypes.Order memory order) = _pendingOrder(orderId);
 
         _executePendingOrder(orderId, order, executionPrice, oraclePublishTime, executionContext, true, pythFee);
     }
@@ -477,6 +479,8 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         uint256 capPrice = engine.CAP_PRICE();
         uint256 clampedPrice = executionPrice > capPrice ? capPrice : executionPrice;
         uint256 expiredPrunes;
+
+        engine.updateMarkPrice(clampedPrice, oraclePublishTime);
 
         while (nextExecuteId != 0 && nextExecuteId <= maxOrderId) {
             uint64 orderId = nextExecuteId;

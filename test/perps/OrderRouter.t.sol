@@ -1606,6 +1606,32 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(usdc.balanceOf(alice), 0, "Trader should not receive bounty refund on margin-drain invalidation");
     }
 
+    function test_StaleCachedMark_DoesNotBlockMarginDrainInvalidationExecution() public {
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        _open(aliceId, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 1e8, false);
+
+        vm.store(address(clearinghouse), keccak256(abi.encode(aliceId, uint256(3))), bytes32(uint256(1e6)));
+
+        vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
+        uint64 freshPublishTime = uint64(block.timestamp);
+        uint64 staleMarkTimeBefore = engine.lastMarkTime();
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), freshPublishTime);
+        bytes[] memory empty = _pythUpdateData();
+        vm.roll(block.number + 1);
+
+        router.executeOrder(1, empty);
+
+        (uint256 size, uint256 margin,,,,,) = engine.positions(aliceId);
+        assertEq(size, 10_000e18, "Fresh execution should fail softly instead of stale-reverting the live position");
+        assertEq(margin, 1e6, "Invalidation should preserve the drained custody-backed margin state");
+        assertEq(engine.lastMarkTime(), freshPublishTime, "Execution should push the fresh resolved mark before release");
+        assertLt(staleMarkTimeBefore, engine.lastMarkTime(), "Execution should advance the stale cached mark");
+        assertEq(router.nextExecuteId(), 0, "Execution should clear the pending head instead of stalling on stale mark");
+    }
+
     function test_BatchPostCommitMarginDrainInvalidationPaysClearerBounty() public {
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
         _open(aliceId, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
@@ -1633,6 +1659,32 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(
             usdc.balanceOf(alice), 0, "Batch execution should not refund trader bounty on margin-drain invalidation"
         );
+    }
+
+    function test_BatchStaleCachedMark_DoesNotBlockMarginDrainInvalidationExecution() public {
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        _open(aliceId, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 1e8, false);
+
+        vm.store(address(clearinghouse), keccak256(abi.encode(aliceId, uint256(3))), bytes32(uint256(1e6)));
+
+        vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
+        uint64 freshPublishTime = uint64(block.timestamp);
+        uint64 staleMarkTimeBefore = engine.lastMarkTime();
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), freshPublishTime);
+        bytes[] memory empty = _pythUpdateData();
+        vm.roll(block.number + 1);
+
+        router.executeOrderBatch(1, empty);
+
+        (uint256 size, uint256 margin,,,,,) = engine.positions(aliceId);
+        assertEq(size, 10_000e18, "Batch execution should fail softly instead of stale-reverting the live position");
+        assertEq(margin, 1e6, "Batch execution should preserve the drained custody-backed margin state");
+        assertEq(engine.lastMarkTime(), freshPublishTime, "Batch execution should push the fresh resolved mark before release");
+        assertLt(staleMarkTimeBefore, engine.lastMarkTime(), "Batch execution should advance the stale cached mark");
+        assertEq(router.nextExecuteId(), 0, "Batch execution should clear the pending head instead of stalling on stale mark");
     }
 
     function test_BatchPostCommitSkewInvalidationRefundsUserBounty() public {
