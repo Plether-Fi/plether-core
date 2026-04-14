@@ -362,8 +362,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             return;
         }
 
-        uint256 price = lastMarkPrice;
-        if (price == 0) {
+        (bool priceFresh, uint256 price) = _tryGetFreshLiveMarkPrice();
+        if (!priceFresh) {
             return;
         }
         _checkpointCarryBeforeBasisChange(accountId, pos, price, _genericReachableCollateralUsdc(accountId));
@@ -841,7 +841,10 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             revert CfdEngine__InsufficientCloseOrderBountyBacking();
         }
 
-        uint256 price = lastMarkPrice;
+        (bool priceFresh, uint256 price) = _tryGetFreshLiveMarkPrice();
+        if (price == 0) {
+            price = lastMarkPrice;
+        }
         if (price == 0) {
             revert CfdEngine__InsufficientCloseOrderBountyBacking();
         }
@@ -884,7 +887,11 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         }
 
         _syncTotalSideMargin(pos.side, positionMarginUsdc, positionMarginUsdc - amountUsdc);
-        clearinghouse.seizePositionMarginUsdc(accountId, amountUsdc, recipient);
+        if (priceFresh) {
+            clearinghouse.seizePositionMarginUsdc(accountId, amountUsdc, recipient);
+        } else {
+            clearinghouse.seizePositionMarginUsdcWithoutCarryCheckpoint(accountId, amountUsdc, recipient);
+        }
     }
 
     /// @notice Reduces accumulated bad debt after governance-confirmed recapitalization

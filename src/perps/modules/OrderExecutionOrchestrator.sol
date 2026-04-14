@@ -3,9 +3,9 @@ pragma solidity 0.8.33;
 
 import {CfdEnginePlanTypes} from "../CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../CfdTypes.sol";
-import {CashPriorityLib} from "../libraries/CashPriorityLib.sol";
 import {ICfdEngineCore} from "../interfaces/ICfdEngineCore.sol";
 import {IOrderRouterAccounting} from "../interfaces/IOrderRouterAccounting.sol";
+import {CashPriorityLib} from "../libraries/CashPriorityLib.sol";
 import {OracleFreshnessPolicyLib} from "../libraries/OracleFreshnessPolicyLib.sol";
 import {OrderOracleExecution} from "./OrderOracleExecution.sol";
 import {OrderQueueBook} from "./OrderQueueBook.sol";
@@ -43,14 +43,22 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
 
     function _maxOrderAge() internal view virtual returns (uint256);
     function _queueHeadOrderId() internal view virtual override returns (uint64);
-    function _setQueueHeadOrderId(uint64 orderId) internal virtual override;
+    function _setQueueHeadOrderId(
+        uint64 orderId
+    ) internal virtual override;
 
     function _revertNoOrdersToExecute() internal pure virtual;
     function _revertOraclePublishTimeOutOfOrder() internal pure virtual;
     function _revertInsufficientGas() internal pure virtual;
     function _revertMevDetected() internal pure virtual;
-    function _releaseCommittedMarginForExecution(uint64 orderId) internal virtual;
-    function _deleteOrder(uint64 orderId, IOrderRouterAccounting.OrderStatus terminalStatus) internal virtual;
+    function _revertCloseOnlyMode() internal pure virtual;
+    function _releaseCommittedMarginForExecution(
+        uint64 orderId
+    ) internal virtual;
+    function _deleteOrder(
+        uint64 orderId,
+        IOrderRouterAccounting.OrderStatus terminalStatus
+    ) internal virtual;
 
     function _skipStaleOrders(
         uint64 upToId,
@@ -132,17 +140,10 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
         }
 
         if (orderPolicy.closeOnly) {
-            emit OrderFailed(orderId, OrderFailReason.CloseOnly);
-            _finalizeOrCleanupOrder(
-                orderId,
-                pythFee,
-                false,
-                _failedOutcomeForTerminalFailure(order),
-                revertOnBlockedExecution,
-                executionPrice,
-                oraclePublishTime
-            );
-            return revertOnBlockedExecution ? OrderExecutionStepResult.Return : OrderExecutionStepResult.Continue;
+            if (revertOnBlockedExecution) {
+                _revertCloseOnlyMode();
+            }
+            return OrderExecutionStepResult.Break;
         }
 
         if (address(pyth) != address(0) && !executionContext.oracleFrozen && block.number == order.commitBlock) {
@@ -202,13 +203,7 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
 
         emit OrderFailed(orderId, failureReason);
         _finalizeOrCleanupOrder(
-            orderId,
-            pythFee,
-            false,
-            failureOutcome,
-            revertOnBlockedExecution,
-            executionPrice,
-            oraclePublishTime
+            orderId, pythFee, false, failureOutcome, revertOnBlockedExecution, executionPrice, oraclePublishTime
         );
         return revertOnBlockedExecution ? OrderExecutionStepResult.Return : OrderExecutionStepResult.Continue;
     }
@@ -235,7 +230,11 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
 
     function _decodeTypedOrderFailure(
         bytes memory revertData
-    ) internal pure returns (CfdEnginePlanTypes.ExecutionFailurePolicyCategory failureCategory, uint8 failureCode, bool isClose) {
+    )
+        internal
+        pure
+        returns (CfdEnginePlanTypes.ExecutionFailurePolicyCategory failureCategory, uint8 failureCode, bool isClose)
+    {
         assembly {
             failureCategory := mload(add(revertData, 36))
             failureCode := mload(add(revertData, 68))
@@ -302,6 +301,9 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
         return outcome == FailedOrderOutcome.ClearerFull ? 1 : 2;
     }
 
-    function _sendEth(address to, uint256 amount) internal virtual;
+    function _sendEth(
+        address to,
+        uint256 amount
+    ) internal virtual;
 
 }

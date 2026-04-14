@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
+import {DecimalConstants} from "../libraries/DecimalConstants.sol";
 import {CfdEnginePlanTypes} from "./CfdEnginePlanTypes.sol";
 import {CfdTypes} from "./CfdTypes.sol";
 import {ICfdEngineCore} from "./interfaces/ICfdEngineCore.sol";
 import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
 import {IPerpsKeeper} from "./interfaces/IPerpsKeeper.sol";
 import {IPerpsTraderActions} from "./interfaces/IPerpsTraderActions.sol";
-import {DecimalConstants} from "../libraries/DecimalConstants.sol";
 import {CashPriorityLib} from "./libraries/CashPriorityLib.sol";
-import {MarketCalendarLib} from "./libraries/MarketCalendarLib.sol";
 import {MarginClearinghouseAccountingLib} from "./libraries/MarginClearinghouseAccountingLib.sol";
-import {OrderFailurePolicyLib} from "./libraries/OrderFailurePolicyLib.sol";
+import {MarketCalendarLib} from "./libraries/MarketCalendarLib.sol";
 import {OracleFreshnessPolicyLib} from "./libraries/OracleFreshnessPolicyLib.sol";
+import {OrderFailurePolicyLib} from "./libraries/OrderFailurePolicyLib.sol";
 import {OrderEscrowAccounting} from "./modules/OrderEscrowAccounting.sol";
 import {OrderExecutionOrchestrator} from "./modules/OrderExecutionOrchestrator.sol";
 import {OrderOracleExecution} from "./modules/OrderOracleExecution.sol";
@@ -171,9 +171,9 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
 
     /// @notice Proposes a new maxOrderAge value, subject to 48h timelock.
     function proposeMaxOrderAge(
-        uint256 _maxOrderAge
+        uint256 newMaxOrderAge
     ) external onlyOwner {
-        (pendingMaxOrderAge, maxOrderAgeActivationTime) = _proposeUint(_maxOrderAge);
+        (pendingMaxOrderAge, maxOrderAgeActivationTime) = _proposeUint(newMaxOrderAge);
     }
 
     /// @notice Finalizes the pending maxOrderAge after timelock expires.
@@ -214,9 +214,8 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
 
     /// @notice Finalizes the pending liquidation staleness limit after timelock expiry.
     function finalizeLiquidationStalenessLimit() external onlyOwner {
-        liquidationStalenessLimit = _finalizeUint(
-            TimelockedUintProposal(pendingLiquidationStalenessLimit, liquidationStalenessActivationTime)
-        );
+        liquidationStalenessLimit =
+            _finalizeUint(TimelockedUintProposal(pendingLiquidationStalenessLimit, liquidationStalenessActivationTime));
         pendingLiquidationStalenessLimit = 0;
         liquidationStalenessActivationTime = 0;
     }
@@ -278,9 +277,8 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
             CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory = engineLens.previewOpenFailurePolicyCategory(
                 accountId, side, sizeDelta, marginDelta, commitPrice, commitMarkTime
             );
-            uint8 revertCode = engineLens.previewOpenRevertCode(
-                accountId, side, sizeDelta, marginDelta, commitPrice, commitMarkTime
-            );
+            uint8 revertCode =
+                engineLens.previewOpenRevertCode(accountId, side, sizeDelta, marginDelta, commitPrice, commitMarkTime);
             if (OrderFailurePolicyLib.isPredictablyInvalidOpen(failureCategory)) {
                 revert OrderRouter__PredictableOpenInvalid(revertCode);
             }
@@ -400,12 +398,14 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
             maxStaleness = executionContext.policy.maxStaleness;
         }
 
-        (uint256 executionPrice, uint64 oraclePublishTime, uint256 pythFee) =
-            _resolveOraclePrice(pythUpdateData, initialHeadOrder.targetPrice, maxStaleness, orderExecutionStalenessLimit);
+        (uint256 executionPrice, uint64 oraclePublishTime, uint256 pythFee) = _resolveOraclePrice(
+            pythUpdateData, initialHeadOrder.targetPrice, maxStaleness, orderExecutionStalenessLimit
+        );
 
         if (address(pyth) != address(0)) {
-            if (OracleFreshnessPolicyLib.isStale(oraclePublishTime, executionContext.policy.maxStaleness, block.timestamp))
-            {
+            if (OracleFreshnessPolicyLib.isStale(
+                    oraclePublishTime, executionContext.policy.maxStaleness, block.timestamp
+                )) {
                 revert OrderRouter__OraclePriceTooStale();
             }
         }
@@ -463,11 +463,12 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         }
 
         (uint256 executionPrice, uint64 oraclePublishTime, uint256 pythFee) =
-            _resolveOraclePrice(pythUpdateData, 1e8, maxStaleness, liquidationStalenessLimit);
+            _resolveOraclePrice(pythUpdateData, 1e8, maxStaleness, orderExecutionStalenessLimit);
 
         if (address(pyth) != address(0)) {
-            if (OracleFreshnessPolicyLib.isStale(oraclePublishTime, executionContext.policy.maxStaleness, block.timestamp))
-            {
+            if (OracleFreshnessPolicyLib.isStale(
+                    oraclePublishTime, executionContext.policy.maxStaleness, block.timestamp
+                )) {
                 revert OrderRouter__OraclePriceTooStale();
             }
         }
@@ -560,6 +561,10 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         revert OrderRouter__MevDetected();
     }
 
+    function _revertCloseOnlyMode() internal pure override {
+        revert OrderRouter__CloseOnlyMode();
+    }
+
     /// @notice Prunes expired head-of-queue orders in bounded slices.
     /// @dev This is a maintenance path for advancing the global FIFO without requiring a full execute call.
     function pruneExpiredOrders(
@@ -632,8 +637,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
 
         try vault.payOut(address(clearinghouse), liquidationBountyUsdc) {
             engine.creditKeeperExecutionBounty(msg.sender, liquidationBountyUsdc, executionPrice, oraclePublishTime);
-        }
-        catch {
+        } catch {
             engine.recordDeferredKeeperCredit(msg.sender, liquidationBountyUsdc);
         }
     }
@@ -695,9 +699,29 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         bytes32 accountId,
         uint256 executionBountyUsdc
     ) internal override {
-        uint256 freeSettlementUsdc = MarginClearinghouseAccountingLib.getFreeSettlementUsdc(
-            clearinghouse.getAccountUsdcBuckets(accountId)
-        );
+        if (!_hasFreshCarryCheckpointMark()) {
+            uint256 staleModeFreeSettlementUsdc =
+                MarginClearinghouseAccountingLib.getFreeSettlementUsdc(clearinghouse.getAccountUsdcBuckets(accountId));
+            uint256 staleModeFreeBackedBountyUsdc =
+                staleModeFreeSettlementUsdc > executionBountyUsdc ? executionBountyUsdc : staleModeFreeSettlementUsdc;
+            if (staleModeFreeBackedBountyUsdc > 0) {
+                clearinghouse.seizeUsdcWithoutCarryCheckpoint(accountId, staleModeFreeBackedBountyUsdc, address(this));
+            }
+
+            uint256 staleModeMarginBackedBountyUsdc = executionBountyUsdc - staleModeFreeBackedBountyUsdc;
+            if (staleModeMarginBackedBountyUsdc == 0) {
+                return;
+            }
+
+            try engine.reserveCloseOrderExecutionBounty(accountId, staleModeMarginBackedBountyUsdc, address(this)) {}
+            catch {
+                revert OrderRouter__InsufficientFreeEquity();
+            }
+            return;
+        }
+
+        uint256 freeSettlementUsdc =
+            MarginClearinghouseAccountingLib.getFreeSettlementUsdc(clearinghouse.getAccountUsdcBuckets(accountId));
         uint256 freeBackedBountyUsdc =
             freeSettlementUsdc > executionBountyUsdc ? executionBountyUsdc : freeSettlementUsdc;
         if (freeBackedBountyUsdc > 0) {
@@ -713,6 +737,26 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         catch {
             revert OrderRouter__InsufficientFreeEquity();
         }
+    }
+
+    function _hasFreshCarryCheckpointMark() internal view returns (bool) {
+        uint256 lastMarkPrice = engine.lastMarkPrice();
+        uint64 lastMarkTime = engine.lastMarkTime();
+        if (lastMarkPrice == 0 || lastMarkTime == 0) {
+            return false;
+        }
+
+        OracleFreshnessPolicyLib.Policy memory liveMarkPolicy = OracleFreshnessPolicyLib.getPolicy(
+            OracleFreshnessPolicyLib.Mode.PoolReconcile,
+            _isOracleFrozen(),
+            engine.isFadWindow(),
+            engine.engineMarkStalenessLimit(),
+            vault.markStalenessLimit(),
+            orderExecutionStalenessLimit,
+            liquidationStalenessLimit,
+            engine.fadMaxStaleness()
+        );
+        return !OracleFreshnessPolicyLib.isStale(lastMarkTime, liveMarkPolicy.maxStaleness, block.timestamp);
     }
 
     function _deleteOrder(

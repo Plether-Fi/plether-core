@@ -112,7 +112,7 @@ Important details:
 
 - `acceptablePrice == 0` behaves like a delayed market-style order.
 - Open orders are rejected during degraded mode and close-only windows.
-- Failed orders are finalized from router-custodied bounty escrow; they are not requeued.
+- Failed orders are finalized from router-custodied bounty escrow; blocked FIFO heads remain pending.
 - Execution-time user-invalid opens and terminal-invalid closes pay the clearer from escrow, while genuine protocol-state invalidations refund the trader into clearinghouse settlement.
 - Close orders can still execute during genuine frozen-oracle windows using the last valid mark subject to the relaxed frozen-market rules.
 - Close-intent queue validation is account-local and bounded by the per-account pending-order queue.
@@ -280,7 +280,7 @@ These domains answer different questions. They should not silently share assumpt
 - Risk-increasing orders reserve an execution bounty quoted from the engine mark and bounded to `[0.05 USDC, 1.00 USDC]`.
 - Close intents reserve a flat `1.00 USDC` bounty.
 - Open bounties come from free settlement.
-- Close bounties come from free settlement first and can fall back to active position margin so risk-reducing exits remain committable.
+- Close bounties use free settlement first when carry can be checkpointed from a fresh live mark; otherwise they fall back to bounded active position margin so stale-mark closes remain committable.
 - Failed-order rewards stay independent from vault liquidity because they are paid from router escrow rather than LP cash.
 
 ### Execute rules
@@ -288,7 +288,7 @@ These domains answer different questions. They should not silently share assumpt
 - Keepers execute from the global queue head.
 - Pyth update data is required for live-market execution and the caller must attach ETH for the Pyth fee.
 - Publish-time ordering and staleness rules enforce MEV resistance when the oracle is live.
-- Slippage, expiry, and typed engine failures finalize the order; they do not create a retry queue.
+- Slippage, expiry, and typed engine failures finalize the order; close-only ineligibility for queued opens blocks execution without consuming the FIFO head.
 
 ### Basket oracle and publish-time checks
 

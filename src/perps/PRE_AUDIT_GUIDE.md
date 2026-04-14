@@ -75,6 +75,7 @@ Any new helper/module contract that can reach these sets should be treated as se
 | Expired close order | `Failed` | clearer paid from escrow under the current terminal-close policy | dequeue |
 | Stale oracle | blocked, not terminal | no distribution | keep pending |
 | Live-market publish-time ordering failure | blocked, not terminal | no distribution | keep pending |
+| Close-only ineligibility for queued open | blocked, not terminal | no distribution | keep pending |
 
 ### Bounty-flow table
 
@@ -164,7 +165,7 @@ Reachability note:
 ### Profitable close with immediate payout
 
 1. Trader has a live position and commits a close.
-2. Router escrows the close execution bounty, using free settlement first and bounded active-margin fallback if needed.
+2. Router escrows the close execution bounty, using free settlement first when a fresh carry-checkpoint mark exists and otherwise using the bounded active-margin fallback.
 3. Keeper executes the FIFO head under the current oracle regime.
 4. Planner computes canonical close settlement, including fees and pending carry.
 5. Engine realizes carry and applies the close using the planner's exact loss/gain result.

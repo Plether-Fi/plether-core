@@ -438,6 +438,40 @@ contract OrderRouterTest is BasePerpTest {
         );
     }
 
+    function test_CloseCommit_StaleFallbackDoesNotRevertWhenFreeSettlementExists() public {
+        address trader = address(0x3342);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        usdc.mint(trader, 251_500_000);
+        vm.startPrank(trader);
+        usdc.approve(address(clearinghouse), 251_500_000);
+        clearinghouse.deposit(accountId, 251_500_000);
+        vm.stopPrank();
+
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8, false);
+        bytes[] memory openPrice = new bytes[](1);
+        openPrice[0] = abi.encode(uint256(1e8));
+        vm.roll(block.number + 1);
+        router.executeOrder(1, openPrice);
+
+        uint256 freeSettlementBefore = clearinghouse.getAccountUsdcBuckets(accountId).freeSettlementUsdc;
+        assertEq(
+            freeSettlementBefore, 500_000, "Setup should leave partial free settlement before the stale close commit"
+        );
+
+        vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
+
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 0, true);
+
+        assertEq(_executionBountyReserve(2), 1_000_000, "Stale close commit should still escrow the full bounty");
+        assertEq(
+            clearinghouse.getAccountUsdcBuckets(accountId).freeSettlementUsdc,
+            0,
+            "Stale close fallback should still be allowed to consume the remaining free-settlement slice"
+        );
+    }
+
     function test_ReserveCloseOrderExecutionBounty_RevertsWhenMarginBackedBountyWouldBreakMaintenance() public {
         address trader = address(0x336);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
@@ -1627,7 +1661,9 @@ contract OrderRouterPythTest is BasePerpTest {
         (uint256 size, uint256 margin,,,,,) = engine.positions(aliceId);
         assertEq(size, 10_000e18, "Fresh execution should fail softly instead of stale-reverting the live position");
         assertEq(margin, 1e6, "Invalidation should preserve the drained custody-backed margin state");
-        assertEq(engine.lastMarkTime(), freshPublishTime, "Execution should push the fresh resolved mark before release");
+        assertEq(
+            engine.lastMarkTime(), freshPublishTime, "Execution should push the fresh resolved mark before release"
+        );
         assertLt(staleMarkTimeBefore, engine.lastMarkTime(), "Execution should advance the stale cached mark");
         assertEq(router.nextExecuteId(), 0, "Execution should clear the pending head instead of stalling on stale mark");
     }
@@ -1682,9 +1718,38 @@ contract OrderRouterPythTest is BasePerpTest {
         (uint256 size, uint256 margin,,,,,) = engine.positions(aliceId);
         assertEq(size, 10_000e18, "Batch execution should fail softly instead of stale-reverting the live position");
         assertEq(margin, 1e6, "Batch execution should preserve the drained custody-backed margin state");
-        assertEq(engine.lastMarkTime(), freshPublishTime, "Batch execution should push the fresh resolved mark before release");
+        assertEq(
+            engine.lastMarkTime(),
+            freshPublishTime,
+            "Batch execution should push the fresh resolved mark before release"
+        );
         assertLt(staleMarkTimeBefore, engine.lastMarkTime(), "Batch execution should advance the stale cached mark");
-        assertEq(router.nextExecuteId(), 0, "Batch execution should clear the pending head instead of stalling on stale mark");
+        assertEq(
+            router.nextExecuteId(), 0, "Batch execution should clear the pending head instead of stalling on stale mark"
+        );
+    }
+
+    function test_BatchExecution_UsesOrderExecutionPublishTimeDivergenceLimit() public {
+        uint256 basePublishTime = block.timestamp + 6;
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
+
+        mockPyth.setPrice(feedIds[0], int64(100_000_000), int32(-8), basePublishTime);
+        for (uint256 i = 1; i < feedIds.length; i++) {
+            mockPyth.setPrice(feedIds[i], int64(100_000_000), int32(-8), basePublishTime + 30);
+        }
+
+        vm.warp(basePublishTime + 30);
+        vm.roll(block.number + 1);
+        router.executeOrderBatch(1, _pythUpdateData());
+
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        (uint256 size,,,,,,) = engine.positions(aliceId);
+        assertEq(
+            size, 10_000e18, "Batch execution should accept feed publish dispersion allowed for normal order execution"
+        );
+        assertEq(router.nextExecuteId(), 0, "Successful batch execution should clear the queue head");
     }
 
     function test_BatchPostCommitSkewInvalidationRefundsUserBounty() public {
@@ -1945,7 +2010,9 @@ contract OrderRouterPythTest is BasePerpTest {
             "Deferred-payout close should not stall the FIFO queue and should drain it when no orders remain"
         );
         assertGt(
-            engine.deferredTraderCreditUsdc(accountId), 0, "Deferred payout should remain recorded after batch execution"
+            engine.deferredTraderCreditUsdc(accountId),
+            0,
+            "Deferred payout should remain recorded after batch execution"
         );
         assertEq(
             engine.deferredKeeperCreditUsdc(address(this)),
@@ -2411,6 +2478,201 @@ contract OrderRouterPythTest is BasePerpTest {
 
         (size,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "BULL close should succeed against clamped price");
+    }
+
+}
+
+contract OrderRouterBlockedExecutionTest is BasePerpTest {
+
+    MockPyth mockPyth;
+
+    bytes32 constant FEED_A = bytes32(uint256(1));
+    bytes32 constant FEED_B = bytes32(uint256(2));
+
+    address alice = address(0x111);
+    address bob = address(0x222);
+
+    bytes32[] feedIds;
+    uint256[] weights;
+    uint256[] bases;
+
+    uint256 internal constant TEST_FRIDAY_18UTC = 604_951_200;
+
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
+            vpiFactor: 0.0005e18,
+            maxSkewRatio: 0.4e18,
+            maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
+            fadMarginBps: 300,
+            baseCarryBps: 500,
+            minBountyUsdc: 5 * 1e6,
+            bountyBps: 15
+        });
+    }
+
+    function setUp() public override {
+        usdc = new MockUSDC();
+        mockPyth = new MockPyth();
+
+        clearinghouse = new MarginClearinghouse(address(usdc));
+        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        pool = new HousePool(address(usdc), address(engine));
+
+        seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");
+        juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
+        pool.setSeniorVault(address(seniorVault));
+        pool.setJuniorVault(address(juniorVault));
+        engine.setVault(address(pool));
+
+        feedIds.push(FEED_A);
+        feedIds.push(FEED_B);
+        weights.push(0.5e18);
+        weights.push(0.5e18);
+        bases.push(1e8);
+        bases.push(1e8);
+
+        router = new OrderRouter(
+            address(engine),
+            address(new CfdEngineLens(address(engine))),
+            address(pool),
+            address(mockPyth),
+            feedIds,
+            weights,
+            bases,
+            new bool[](2)
+        );
+        engine.setOrderRouter(address(router));
+        pool.setOrderRouter(address(router));
+
+        _bypassAllTimelocks();
+
+        uint256 seedAmount = 1000e6;
+        usdc.mint(address(this), seedAmount * 2);
+        usdc.approve(address(pool), seedAmount * 2);
+        pool.initializeSeedPosition(false, seedAmount, address(this));
+        pool.initializeSeedPosition(true, seedAmount, address(this));
+        pool.activateTrading();
+
+        usdc.mint(bob, 1_000_000 * 1e6);
+        vm.startPrank(bob);
+        usdc.approve(address(juniorVault), type(uint256).max);
+        juniorVault.deposit(1_000_000 * 1e6, bob);
+        vm.stopPrank();
+
+        usdc.mint(alice, 10_000 * 1e6);
+        vm.startPrank(alice);
+        usdc.approve(address(clearinghouse), type(uint256).max);
+        clearinghouse.deposit(bytes32(uint256(uint160(alice))), 10_000 * 1e6);
+        vm.deal(alice, 10 ether);
+        vm.stopPrank();
+
+        vm.warp(1);
+    }
+
+    function _pythUpdateData() internal pure returns (bytes[] memory updateData) {
+        updateData = new bytes[](1);
+        updateData[0] = "";
+    }
+
+    function test_FadWindow_OpenOrderStaysPendingAtExecution() public {
+        router.proposeMaxOrderAge(7 days);
+        vm.warp(block.timestamp + 48 hours);
+        router.finalizeMaxOrderAge();
+
+        uint256 fadPublishTime = TEST_FRIDAY_18UTC + 2 hours + 1;
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), fadPublishTime);
+
+        vm.warp(TEST_FRIDAY_18UTC);
+        uint64 orderId = router.nextCommitId();
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+
+        uint256 keeperBefore = _settlementBalance(address(this));
+        uint256 reservedBounty = _executionBountyReserve(orderId);
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(aliceId);
+        (uint256 sizeBefore,,,,,,) = engine.positions(aliceId);
+
+        vm.warp(TEST_FRIDAY_18UTC + 2 hours + 1);
+        bytes[] memory empty = _pythUpdateData();
+        vm.roll(block.number + 1);
+
+        vm.expectRevert(OrderRouter.OrderRouter__CloseOnlyMode.selector);
+        router.executeOrder(orderId, empty);
+
+        (uint256 size,,,,,,) = engine.positions(aliceId);
+        assertEq(size, sizeBefore, "Open order should remain unexecuted during close-only mode");
+        assertEq(
+            _settlementBalance(address(this)) - keeperBefore,
+            0,
+            "Blocked close-only execution should not pay the keeper"
+        );
+        assertEq(
+            clearinghouse.balanceUsdc(aliceId) - traderSettlementBefore,
+            0,
+            "Blocked close-only execution should not refund the trader"
+        );
+        assertEq(
+            _executionBountyReserve(orderId),
+            reservedBounty,
+            "Blocked close-only execution should preserve bounty escrow"
+        );
+        assertEq(router.nextExecuteId(), orderId, "Blocked close-only execution should leave the FIFO head pending");
+        assertEq(
+            router.pendingOrderCounts(aliceId), 1, "Blocked close-only execution should preserve pending order count"
+        );
+        assertEq(
+            uint256(router.getOrderRecord(orderId).status),
+            uint256(IOrderRouterAccounting.OrderStatus.Pending),
+            "Blocked close-only execution should keep the order pending"
+        );
+    }
+
+    function test_FadWindow_BatchOpenOrderStaysPendingAtBlockedHead() public {
+        router.proposeMaxOrderAge(7 days);
+        vm.warp(block.timestamp + 48 hours);
+        router.finalizeMaxOrderAge();
+
+        uint256 fadPublishTime = TEST_FRIDAY_18UTC + 2 hours + 1;
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), fadPublishTime);
+
+        vm.warp(TEST_FRIDAY_18UTC);
+        uint64 orderId = router.nextCommitId();
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+
+        uint256 keeperBefore = _settlementBalance(address(this));
+        uint256 reservedBounty = _executionBountyReserve(orderId);
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(aliceId);
+        (uint256 sizeBefore,,,,,,) = engine.positions(aliceId);
+
+        vm.warp(TEST_FRIDAY_18UTC + 2 hours + 1);
+        bytes[] memory empty = _pythUpdateData();
+        vm.roll(block.number + 1);
+        router.executeOrderBatch(orderId, empty);
+
+        (uint256 size,,,,,,) = engine.positions(aliceId);
+        assertEq(size, sizeBefore, "Open order should remain unexecuted while the batch head is close-only blocked");
+        assertEq(
+            _settlementBalance(address(this)) - keeperBefore, 0, "Blocked batch execution should not pay the keeper"
+        );
+        assertEq(
+            clearinghouse.balanceUsdc(aliceId) - traderSettlementBefore,
+            0,
+            "Blocked batch execution should not refund the trader"
+        );
+        assertEq(
+            _executionBountyReserve(orderId), reservedBounty, "Blocked batch execution should preserve bounty escrow"
+        );
+        assertEq(router.nextExecuteId(), orderId, "Blocked batch execution should stop at the pending FIFO head");
+        assertEq(router.pendingOrderCounts(aliceId), 1, "Blocked batch execution should preserve pending order count");
+        assertEq(
+            uint256(router.getOrderRecord(orderId).status),
+            uint256(IOrderRouterAccounting.OrderStatus.Pending),
+            "Blocked batch execution should keep the order pending"
+        );
     }
 
 }
@@ -2978,13 +3240,13 @@ contract FadStalenessTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
     }
 
-    function test_FadWindow_InvalidOpenOrderPaysClearerAtExecution() public {
+    function helper_FadWindow_OpenOrderStaysPendingAtExecution() public {
         router.proposeMaxOrderAge(7 days);
         vm.warp(block.timestamp + 48 hours);
         router.finalizeMaxOrderAge();
 
-        uint256 fridayClose = FRIDAY_18UTC + 4 hours;
-        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), fridayClose);
+        uint256 fadPublishTime = FRIDAY_18UTC + 2 hours + 1;
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), fadPublishTime);
 
         vm.warp(FRIDAY_18UTC);
         uint64 orderId = router.nextCommitId();
@@ -2996,32 +3258,48 @@ contract FadStalenessTest is BasePerpTest {
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
         uint256 traderSettlementBefore = clearinghouse.balanceUsdc(aliceId);
         (uint256 sizeBefore,,,,,,) = engine.positions(aliceId);
-        vm.warp(SATURDAY_NOON + 1);
+        vm.warp(FRIDAY_18UTC + 2 hours + 1);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
+
+        vm.expectRevert(OrderRouter.OrderRouter__CloseOnlyMode.selector);
         router.executeOrder(orderId, empty);
 
         (uint256 size,,,,,,) = engine.positions(aliceId);
-        assertEq(size, sizeBefore, "Open order should fail once the router enters close-only mode");
+        assertEq(size, sizeBefore, "Open order should remain unexecuted during close-only mode");
         assertEq(
             _settlementBalance(address(this)) - keeperBefore,
             0,
-            "Clearer should not be paid for post-commit close-only invalidation"
+            "Blocked close-only execution should not pay the keeper"
         );
         assertEq(
             clearinghouse.balanceUsdc(aliceId) - traderSettlementBefore,
+            0,
+            "Blocked close-only execution should not refund the trader"
+        );
+        assertEq(
+            _executionBountyReserve(orderId),
             reservedBounty,
-            "Trader should receive the bounty refund into clearinghouse settlement for close-only invalidation"
+            "Blocked close-only execution should preserve bounty escrow"
+        );
+        assertEq(router.nextExecuteId(), orderId, "Blocked close-only execution should leave the FIFO head pending");
+        assertEq(
+            router.pendingOrderCounts(aliceId), 1, "Blocked close-only execution should preserve pending order count"
+        );
+        assertEq(
+            uint256(router.getOrderRecord(orderId).status),
+            uint256(IOrderRouterAccounting.OrderStatus.Pending),
+            "Blocked close-only execution should keep the order pending"
         );
     }
 
-    function test_FadWindow_BatchInvalidOpenOrderRefundsUserAtExecution() public {
+    function helper_FadWindow_BatchOpenOrderStaysPendingAtBlockedHead() public {
         router.proposeMaxOrderAge(7 days);
         vm.warp(block.timestamp + 48 hours);
         router.finalizeMaxOrderAge();
 
-        uint256 fridayClose = FRIDAY_18UTC + 4 hours;
-        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), fridayClose);
+        uint256 fadPublishTime = FRIDAY_18UTC + 2 hours + 1;
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), fadPublishTime);
 
         vm.warp(FRIDAY_18UTC);
         uint64 orderId = router.nextCommitId();
@@ -3033,22 +3311,30 @@ contract FadStalenessTest is BasePerpTest {
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
         uint256 traderSettlementBefore = clearinghouse.balanceUsdc(aliceId);
         (uint256 sizeBefore,,,,,,) = engine.positions(aliceId);
-        vm.warp(SATURDAY_NOON + 1);
+        vm.warp(FRIDAY_18UTC + 2 hours + 1);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrderBatch(orderId, empty);
 
         (uint256 size,,,,,,) = engine.positions(aliceId);
-        assertEq(size, sizeBefore, "Open order should fail once the router enters close-only mode");
+        assertEq(size, sizeBefore, "Open order should remain unexecuted while the batch head is close-only blocked");
         assertEq(
-            _settlementBalance(address(this)) - keeperBefore,
-            0,
-            "Batch clearer should not be paid for post-commit close-only invalidation"
+            _settlementBalance(address(this)) - keeperBefore, 0, "Blocked batch execution should not pay the keeper"
         );
         assertEq(
             clearinghouse.balanceUsdc(aliceId) - traderSettlementBefore,
-            reservedBounty,
-            "Batch execution should refund the trader bounty into clearinghouse settlement on close-only invalidation"
+            0,
+            "Blocked batch execution should not refund the trader"
+        );
+        assertEq(
+            _executionBountyReserve(orderId), reservedBounty, "Blocked batch execution should preserve bounty escrow"
+        );
+        assertEq(router.nextExecuteId(), orderId, "Blocked batch execution should stop at the pending FIFO head");
+        assertEq(router.pendingOrderCounts(aliceId), 1, "Blocked batch execution should preserve pending order count");
+        assertEq(
+            uint256(router.getOrderRecord(orderId).status),
+            uint256(IOrderRouterAccounting.OrderStatus.Pending),
+            "Blocked batch execution should keep the order pending"
         );
     }
 

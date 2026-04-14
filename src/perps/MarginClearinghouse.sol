@@ -939,6 +939,30 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         emit AssetSeized(accountId, settlementAsset, amount, recipient);
     }
 
+    /// @notice Transfers free settlement without forcing a fresh-mark carry checkpoint.
+    /// @dev This narrow escape hatch is reserved for stale close-commit bounty reservation, where
+    ///      risk-reducing liveness takes priority over the generic fresh-mark carry checkpoint path.
+    function seizeUsdcWithoutCarryCheckpoint(
+        bytes32 accountId,
+        uint256 amount,
+        address recipient
+    ) external onlyOperator {
+        if (recipient != msg.sender) {
+            revert MarginClearinghouse__InvalidSeizeRecipient();
+        }
+        if (settlementBalances[accountId] < amount) {
+            revert MarginClearinghouse__InsufficientAssetToSeize();
+        }
+        if (amount > MarginClearinghouseAccountingLib.getFreeSettlementUsdc(_buildAccountUsdcBuckets(accountId))) {
+            revert MarginClearinghouse__InsufficientAssetToSeize();
+        }
+
+        settlementBalances[accountId] -= amount;
+        IERC20(settlementAsset).safeTransfer(recipient, amount);
+
+        emit AssetSeized(accountId, settlementAsset, amount, recipient);
+    }
+
     function seizePositionMarginUsdc(
         bytes32 accountId,
         uint256 amount,
@@ -955,6 +979,31 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         }
 
         _checkpointCarryBeforeMarginChange(accountId);
+        _consumeLockedMargin(accountId, IMarginClearinghouse.MarginBucket.Position, amount);
+        settlementBalances[accountId] -= amount;
+        IERC20(settlementAsset).safeTransfer(recipient, amount);
+
+        emit AssetSeized(accountId, settlementAsset, amount, recipient);
+    }
+
+    /// @notice Transfers active position margin without forcing a fresh-mark carry checkpoint.
+    /// @dev This narrow escape hatch is reserved for stale close-commit bounty reservation after
+    ///      the engine has already validated the stored-mark maintenance constraints.
+    function seizePositionMarginUsdcWithoutCarryCheckpoint(
+        bytes32 accountId,
+        uint256 amount,
+        address recipient
+    ) external onlyOperator {
+        if (recipient == address(0)) {
+            revert MarginClearinghouse__ZeroAddress();
+        }
+        if (amount == 0) {
+            return;
+        }
+        if (settlementBalances[accountId] < amount) {
+            revert MarginClearinghouse__InsufficientAssetToSeize();
+        }
+
         _consumeLockedMargin(accountId, IMarginClearinghouse.MarginBucket.Position, amount);
         settlementBalances[accountId] -= amount;
         IERC20(settlementAsset).safeTransfer(recipient, amount);

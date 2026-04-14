@@ -674,7 +674,9 @@ contract CfdEngineTest is BasePerpTest {
 
         (uint256 size,,,,,,) = engine.positions(bearId);
         assertEq(size, 0, "Illiquid profitable close close should still destroy the position");
-        assertEq(engine.deferredTraderCreditUsdc(bearId), preview.deferredTraderCreditUsdc, "Live close should match preview");
+        assertEq(
+            engine.deferredTraderCreditUsdc(bearId), preview.deferredTraderCreditUsdc, "Live close should match preview"
+        );
     }
 
     function test_PreviewClose_UsesCanonicalVaultDepthWhileSimulateCloseAllowsWhatIfDepth() public {
@@ -842,7 +844,7 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
-    function test_ClaimDeferredTraderCredit_UsesCachedMarkToCheckpointCarryWhenStale() public {
+    function test_ClaimDeferredTraderCredit_SkipsCarryCheckpointWhenMarkIsStale() public {
         address trader = address(0xD30C);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         _fundTrader(trader, 20_000e6);
@@ -856,11 +858,7 @@ contract CfdEngineTest is BasePerpTest {
 
         uint256 settlementBefore = clearinghouse.balanceUsdc(accountId);
         uint64 carryTimestampBefore = engine.getPositionLastCarryTimestamp(accountId);
-        uint256 expectedCarry = PositionRiskAccountingLib.computePendingCarryUsdc(
-            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, 1e8, settlementBefore),
-            _riskParams().baseCarryBps,
-            block.timestamp - carryTimestampBefore
-        );
+        uint256 unsettledCarryBefore = engine.unsettledCarryUsdc(accountId);
 
         usdc.mint(address(pool), 5000e6);
 
@@ -870,13 +868,18 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(engine.deferredTraderCreditUsdc(accountId), 0, "Claim should clear deferred payout state");
         assertEq(
             clearinghouse.balanceUsdc(accountId),
-            settlementBefore + 5000e6 - expectedCarry,
-            "Stale deferred payout claim should checkpoint carry using the cached mark before crediting settlement"
+            settlementBefore + 5000e6,
+            "Stale deferred payout claim should still credit the deferred amount without checkpointing carry"
         );
         assertEq(
             engine.getPositionLastCarryTimestamp(accountId),
-            uint64(block.timestamp),
-            "Stale deferred payout claim should advance the carry clock"
+            carryTimestampBefore,
+            "Stale deferred payout claim should not advance the carry clock"
+        );
+        assertEq(
+            engine.unsettledCarryUsdc(accountId),
+            unsettledCarryBefore,
+            "Stale deferred payout claim should not mutate unsettled carry"
         );
     }
 
@@ -981,7 +984,9 @@ contract CfdEngineTest is BasePerpTest {
             clearinghouseBefore + claimableNow,
             "Head deferred trader claim should consume partial liquidity before later claims"
         );
-        assertEq(engine.deferredTraderCreditUsdc(accountId), deferred - claimableNow, "Head deferred payout should shrink");
+        assertEq(
+            engine.deferredTraderCreditUsdc(accountId), deferred - claimableNow, "Head deferred payout should shrink"
+        );
         assertEq(engine.deferredKeeperCreditUsdc(keeper), deferred, "Later deferred bounty should remain untouched");
     }
 
@@ -1301,7 +1306,7 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
-    function test_ClaimDeferredKeeperCredit_UsesCachedMarkToCheckpointCarryWhenStale() public {
+    function test_ClaimDeferredKeeperCredit_SkipsCarryCheckpointWhenMarkIsStale() public {
         address keeper = address(0xFEE7);
         bytes32 keeperAccountId = bytes32(uint256(uint160(keeper)));
         _fundTrader(keeper, 20_000e6);
@@ -1314,11 +1319,7 @@ contract CfdEngineTest is BasePerpTest {
 
         uint256 settlementBefore = clearinghouse.balanceUsdc(keeperAccountId);
         uint64 carryTimestampBefore = engine.getPositionLastCarryTimestamp(keeperAccountId);
-        uint256 expectedCarry = PositionRiskAccountingLib.computePendingCarryUsdc(
-            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, 1e8, settlementBefore),
-            _riskParams().baseCarryBps,
-            block.timestamp - carryTimestampBefore
-        );
+        uint256 unsettledCarryBefore = engine.unsettledCarryUsdc(keeperAccountId);
 
         usdc.mint(address(pool), 5000e6);
 
@@ -1327,13 +1328,18 @@ contract CfdEngineTest is BasePerpTest {
 
         assertEq(
             clearinghouse.balanceUsdc(keeperAccountId),
-            settlementBefore + 5000e6 - expectedCarry,
-            "Stale deferred keeper claim should checkpoint carry using the cached mark before crediting settlement"
+            settlementBefore + 5000e6,
+            "Stale deferred keeper claim should still credit the deferred amount without checkpointing carry"
         );
         assertEq(
             engine.getPositionLastCarryTimestamp(keeperAccountId),
-            uint64(block.timestamp),
-            "Stale deferred keeper claim should advance the carry clock"
+            carryTimestampBefore,
+            "Stale deferred keeper claim should not advance the carry clock"
+        );
+        assertEq(
+            engine.unsettledCarryUsdc(keeperAccountId),
+            unsettledCarryBefore,
+            "Stale deferred keeper claim should not mutate unsettled carry"
         );
     }
 
@@ -1655,7 +1661,9 @@ contract CfdEngineTest is BasePerpTest {
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
         uint256 expectedCarry = PositionRiskAccountingLib.computePendingCarryUsdc(
-            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, 1e8, clearinghouse.balanceUsdc(accountId)),
+            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(
+                100_000e18, 1e8, clearinghouse.balanceUsdc(accountId)
+            ),
             _riskParams().baseCarryBps,
             carryElapsed
         );
@@ -1958,7 +1966,9 @@ contract CfdEngineTest is BasePerpTest {
             snapshot.unrealizedMtmLiabilityUsdc, _vaultMtmAdjustment(), "Snapshot MtM liability must match accessor"
         );
         assertEq(
-            snapshot.deferredTraderCreditUsdc, engine.totalDeferredTraderCreditUsdc(), "Snapshot payout must match storage"
+            snapshot.deferredTraderCreditUsdc,
+            engine.totalDeferredTraderCreditUsdc(),
+            "Snapshot payout must match storage"
         );
         assertEq(
             snapshot.deferredKeeperCreditUsdc,
@@ -2381,7 +2391,9 @@ contract CfdEngineTest is BasePerpTest {
             15e6,
             "Fresh physical payout should be funded independently of the legacy claim"
         );
-        assertEq(preview.deferredTraderCreditUsdc, 10e6, "Deferred payout should only reflect the untouched legacy claim");
+        assertEq(
+            preview.deferredTraderCreditUsdc, 10e6, "Deferred payout should only reflect the untouched legacy claim"
+        );
         assertEq(preview.badDebtUsdc, 0, "Positive residual should not report bad debt");
 
         uint256 settlementBefore = clearinghouse.balanceUsdc(accountId);
@@ -2405,7 +2417,9 @@ contract CfdEngineTest is BasePerpTest {
             preview.immediatePayoutUsdc,
             "Live settlement credit should match preview"
         );
-        assertEq(engine.deferredTraderCreditUsdc(accountId), 10e6, "Live liquidation should preserve the old deferred claim");
+        assertEq(
+            engine.deferredTraderCreditUsdc(accountId), 10e6, "Live liquidation should preserve the old deferred claim"
+        );
         assertEq(
             preview.effectiveAssetsAfterUsdc,
             liveEffective,
@@ -2468,8 +2482,9 @@ contract CfdEngineTest is BasePerpTest {
         settlementReachableUsdc = bound(settlementReachableUsdc, 0, 20e6);
         deferredTraderCreditUsdc = bound(deferredTraderCreditUsdc, 1, 20e6);
 
-        CfdEnginePlanTypes.LiquidationDelta memory delta =
-            harness.planLiquidation(settlementReachableUsdc, deferredTraderCreditUsdc, 2000e18, 99_600_000, 100_000_000);
+        CfdEnginePlanTypes.LiquidationDelta memory delta = harness.planLiquidation(
+            settlementReachableUsdc, deferredTraderCreditUsdc, 2000e18, 99_600_000, 100_000_000
+        );
 
         vm.assume(delta.liquidatable);
         vm.assume(delta.residualUsdc >= 0);
@@ -2510,8 +2525,9 @@ contract CfdEngineTest is BasePerpTest {
         vm.assume(delta.liquidatable);
         vm.assume(delta.residualUsdc < 0);
 
-        uint256 expectedConsumed =
-            deferredTraderCreditUsdc < delta.residualPlan.badDebtUsdc ? deferredTraderCreditUsdc : delta.residualPlan.badDebtUsdc;
+        uint256 expectedConsumed = deferredTraderCreditUsdc < delta.residualPlan.badDebtUsdc
+            ? deferredTraderCreditUsdc
+            : delta.residualPlan.badDebtUsdc;
 
         assertEq(
             delta.liquidationReachableCollateralUsdc,
@@ -2767,7 +2783,8 @@ contract CfdEngineTest is BasePerpTest {
         CfdEngine.LiquidationPreview memory fundedPreview = engineLens.previewLiquidation(bearId, 85_000_000);
         assertTrue(fundedPreview.liquidatable, "Deferred payout should not count toward liquidation equity");
 
-        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(bytes32)").with_key(bearId).checked_write(uint256(0));
+        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(bytes32)").with_key(bearId)
+            .checked_write(uint256(0));
         CfdEngine.LiquidationPreview memory strippedPreview = engineLens.previewLiquidation(bearId, 85_000_000);
         assertEq(
             uint256(fundedPreview.liquidatable ? 1 : 0),
@@ -3320,7 +3337,8 @@ contract CfdEngineTest is BasePerpTest {
         DeferredEngineViewTypes.DeferredCreditStatus memory status = _deferredCreditStatus(accountId, keeper);
         assertTrue(status.traderPayoutClaimableNow, "Deferred trader claim should be claimable under partial liquidity");
         assertTrue(
-            status.keeperCreditClaimableNow, "Deferred keeper credit claim should also be claimable without FIFO ordering"
+            status.keeperCreditClaimableNow,
+            "Deferred keeper credit claim should also be claimable without FIFO ordering"
         );
     }
 
