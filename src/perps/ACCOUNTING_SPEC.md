@@ -261,7 +261,9 @@ Rules:
 - both sides pay when they consume LP-backed capital,
 - pending carry reduces equity for guard and risk checks before realization,
 - basis-changing settlement credits must checkpoint carry even when physical collection is deferred,
-- carry is realized on open, close, add-margin, and clearinghouse deposit/withdraw balance mutations before those mutations change the carry basis,
+- carry is computed on clearinghouse deposit/withdraw using the pre-mutation reachable basis,
+- on deposit, realized carry may be collected from post-deposit settlement in the same transaction,
+- on withdraw, carry is realized before settlement balance is reduced,
 - liquidation does not have its own separate carry-realization path,
 - realized carry is booked as LP trading revenue.
 

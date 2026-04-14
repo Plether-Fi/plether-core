@@ -222,7 +222,9 @@ Carry behavior:
 - Continues accruing even during stale or frozen oracle windows.
 - Applies to whichever side is consuming LP capital.
 - Can be checkpointed into `unsettledCarryUsdc` when a basis-changing settlement credit occurs before physical collection is possible.
-- Is realized on open, close, add-margin, and clearinghouse deposit/withdraw balance mutations before those mutations change the carry basis.
+- Is computed on clearinghouse deposit/withdraw using the pre-mutation reachable basis.
+- On deposit, realized carry may be collected from post-deposit settlement in the same transaction.
+- On withdraw, carry is realized before settlement balance is reduced.
 - Flows to LP trading revenue once realized.
 - Affects guard and risk checks before realization.
 
