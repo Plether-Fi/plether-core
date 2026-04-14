@@ -4329,6 +4329,9 @@ contract CfdEngineTest is BasePerpTest {
         );
         assertEq(pool.excessAssets(), 0, "Bad-debt recapitalization should not strand excess assets");
 
+        vm.expectRevert(CfdEngine.CfdEngine__ZeroAmount.selector);
+        engine.clearBadDebt(0);
+
         vm.expectRevert(CfdEngine.CfdEngine__BadDebtTooLarge.selector);
         engine.clearBadDebt(badDebt + 1);
     }

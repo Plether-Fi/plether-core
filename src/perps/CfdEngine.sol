@@ -230,6 +230,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     error CfdEngine__WithdrawBlockedByOpenPosition();
     error CfdEngine__EmptyDays();
     error CfdEngine__ZeroStaleness();
+    error CfdEngine__ZeroAmount();
     error CfdEngine__RunwayTooLong();
     error CfdEngine__PartialCloseUnderwaterFunding();
     error CfdEngine__DustPosition();
@@ -899,16 +900,17 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     function clearBadDebt(
         uint256 amount
     ) external onlyOwner {
+        if (amount == 0) {
+            revert CfdEngine__ZeroAmount();
+        }
         uint256 badDebt = accumulatedBadDebtUsdc;
         if (amount > badDebt) {
             revert CfdEngine__BadDebtTooLarge();
         }
-        if (amount > 0) {
-            USDC.safeTransferFrom(msg.sender, address(vault), amount);
-            vault.recordClaimantInflow(
-                amount, ICfdVault.ClaimantInflowKind.Recapitalization, ICfdVault.ClaimantInflowCashMode.CashArrived
-            );
-        }
+        USDC.safeTransferFrom(msg.sender, address(vault), amount);
+        vault.recordClaimantInflow(
+            amount, ICfdVault.ClaimantInflowKind.Recapitalization, ICfdVault.ClaimantInflowCashMode.CashArrived
+        );
         accumulatedBadDebtUsdc = badDebt - amount;
         emit BadDebtCleared(amount, accumulatedBadDebtUsdc);
     }
