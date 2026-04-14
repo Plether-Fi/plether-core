@@ -100,4 +100,28 @@ contract AccountDomainParityTest is BasePerpTest {
         );
     }
 
+    function test_WithdrawableParity_UsesSharedFreshnessPolicyWhenPoolLimitIsTighter() public {
+        pool.proposeMarkStalenessLimit(30);
+        vm.warp(block.timestamp + 48 hours + 1);
+        pool.finalizeMarkStalenessLimit();
+
+        address trader = address(0xD011A4);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+
+        _fundTrader(trader, 10_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2_000e6, 1e8);
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+
+        vm.warp(block.timestamp + 31);
+
+        assertEq(engineAccountLens.getWithdrawableUsdc(accountId), 0, "Account lens should honor tighter pool freshness");
+        assertEq(publicLens.getTraderAccount(accountId).withdrawableUsdc, 0, "Public lens should inherit account-lens freshness");
+
+        vm.prank(trader);
+        vm.expectRevert(CfdEngine.CfdEngine__MarkPriceStale.selector);
+        clearinghouse.withdraw(accountId, 1);
+    }
+
 }

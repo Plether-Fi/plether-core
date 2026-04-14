@@ -5,9 +5,11 @@ import {CfdEngine} from "./CfdEngine.sol";
 import {CfdTypes} from "./CfdTypes.sol";
 import {AccountLensViewTypes} from "./interfaces/AccountLensViewTypes.sol";
 import {ICfdEngineAccountLens} from "./interfaces/ICfdEngineAccountLens.sol";
+import {ICfdVault} from "./interfaces/ICfdVault.sol";
 import {IMarginClearinghouse} from "./interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
 import {MarginClearinghouseAccountingLib} from "./libraries/MarginClearinghouseAccountingLib.sol";
+import {OracleFreshnessPolicyLib} from "./libraries/OracleFreshnessPolicyLib.sol";
 import {PositionRiskAccountingLib} from "./libraries/PositionRiskAccountingLib.sol";
 
 /// @title CfdEngineAccountLens
@@ -63,9 +65,17 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         if (price == 0) {
             return 0;
         }
-        uint256 maxStaleness = engineContract.isOracleFrozen()
-            ? engineContract.fadMaxStaleness()
-            : engineContract.engineMarkStalenessLimit();
+        ICfdVault vault = engineContract.vault();
+        uint256 maxStaleness = OracleFreshnessPolicyLib.getPolicy(
+            OracleFreshnessPolicyLib.Mode.PoolReconcile,
+            engineContract.isOracleFrozen(),
+            engineContract.isFadWindow(),
+            engineContract.engineMarkStalenessLimit(),
+            address(vault) == address(0) ? 0 : vault.markStalenessLimit(),
+            0,
+            0,
+            engineContract.fadMaxStaleness()
+        ).maxStaleness;
         if (block.timestamp > lastMarkTime + maxStaleness) {
             return 0;
         }
