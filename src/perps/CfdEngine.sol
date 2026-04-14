@@ -352,21 +352,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         return pendingValue;
     }
 
-    function _prepareDeferredClaim(
-        bytes32 accountId,
-        StoredPosition storage pos
-    ) internal {
-        if (pos.size == 0) {
-            return;
-        }
-
-        (bool priceFresh, uint256 price) = _tryGetFreshLiveMarkPrice();
-        if (!priceFresh) {
-            revert CfdEngine__MarkPriceStale();
-        }
-        _realizeCarryFromSettlement(accountId, pos, price, _genericReachableCollateralUsdc(accountId));
-    }
-
     function _checkpointDeferredClaimCarryIfPossible(
         bytes32 accountId,
         StoredPosition storage pos
@@ -785,6 +770,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     /// @notice Claims deferred trader payout balance into the clearinghouse.
     /// @dev The claim can be partial if current vault cash is insufficient. Funds are credited to the
     ///      clearinghouse first, so beneficiaries access them through the normal account-balance path.
+    ///      Carry is checkpointed when a fresh mark is available, but stale marks do not block access to
+    ///      already-owed deferred cash.
     function claimDeferredPayout(
         bytes32 accountId
     ) external nonReentrant {
@@ -792,7 +779,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             revert CfdEngine__NotAccountOwner();
         }
         StoredPosition storage pos = _positions[accountId];
-        _prepareDeferredClaim(accountId, pos);
+        _checkpointDeferredClaimCarryIfPossible(accountId, pos);
 
         uint256 amount = deferredPayoutUsdc[accountId];
         if (amount == 0) {

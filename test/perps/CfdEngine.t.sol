@@ -793,6 +793,37 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
+    function test_ClaimDeferredPayout_DoesNotRequireFreshMarkForLivePosition() public {
+        address trader = address(0xD30C);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 11_000e6);
+
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+
+        uint256 poolAssets = pool.totalAssets();
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
+
+        _close(accountId, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
+
+        uint256 deferred = engine.deferredPayoutUsdc(accountId);
+        assertGt(deferred, 0, "Setup should create a deferred payout");
+
+        usdc.mint(address(pool), deferred);
+        vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
+
+        uint256 clearinghouseBefore = clearinghouse.balanceUsdc(accountId);
+        vm.prank(trader);
+        engine.claimDeferredPayout(accountId);
+
+        assertEq(engine.deferredPayoutUsdc(accountId), 0, "Claim should clear deferred payout state");
+        assertEq(
+            clearinghouse.balanceUsdc(accountId),
+            clearinghouseBefore + deferred,
+            "Stale marks should not block an already-owed deferred payout"
+        );
+    }
+
     function test_ClaimDeferredPayout_RevertsForNonOwner() public {
         address trader = address(0xD307);
         address relayer = address(0xD308);
