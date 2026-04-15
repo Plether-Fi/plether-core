@@ -71,6 +71,29 @@ contract MockClearinghouseEngine {
 
 }
 
+contract MockMarginReservationRouter {
+
+    mapping(bytes32 => uint64[]) internal reservationIdsByAccount;
+
+    function setMarginReservationIds(bytes32 accountId, uint64[] calldata orderIds) external {
+        delete reservationIdsByAccount[accountId];
+        for (uint256 i = 0; i < orderIds.length; ++i) {
+            reservationIdsByAccount[accountId].push(orderIds[i]);
+        }
+    }
+
+    function getMarginReservationIds(
+        bytes32 accountId
+    ) external view returns (uint64[] memory orderIds) {
+        uint64[] storage stored = reservationIdsByAccount[accountId];
+        orderIds = new uint64[](stored.length);
+        for (uint256 i = 0; i < stored.length; ++i) {
+            orderIds[i] = stored[i];
+        }
+    }
+
+}
+
 contract MarginClearinghouseAccountingHarness {
 
     function planOpenCostApplication(
@@ -126,6 +149,7 @@ contract MarginClearinghouseTest is Test {
     MarginClearinghouseAccountingHarness accountingHarness;
     MockToken usdc;
     MockClearinghouseEngine mockEngine;
+    MockMarginReservationRouter mockRouter;
 
     address alice = address(0x111);
     address engine;
@@ -134,6 +158,7 @@ contract MarginClearinghouseTest is Test {
     function setUp() public {
         usdc = new MockToken("USDC", "USDC", 6);
         mockEngine = new MockClearinghouseEngine();
+        mockRouter = new MockMarginReservationRouter();
         engine = address(mockEngine);
         accountingHarness = new MarginClearinghouseAccountingHarness();
 
@@ -142,6 +167,7 @@ contract MarginClearinghouseTest is Test {
 
         // Authorize our mock Engine to lock/seize funds
         clearinghouse.setEngine(engine);
+        mockEngine.setOrderRouter(address(mockRouter));
 
         // Fund Alice
         usdc.mint(alice, 5000 * 1e6); // $5k USDC
@@ -344,7 +370,6 @@ contract MarginClearinghouseTest is Test {
         assertEq(buckets.committedOrderMarginUsdc, 0);
         assertEq(summary.activeCommittedOrderMarginUsdc, 0);
         assertEq(summary.activeReservationCount, 0);
-        assertEq(clearinghouse.reservationHeadIndex(aliceId), 1, "Head index should advance past released reservations");
     }
 
     function test_ReleaseOrderReservationIfActive_CheckpointsCarryBeforeRelease() public {
@@ -397,6 +422,10 @@ contract MarginClearinghouseTest is Test {
         vm.startPrank(engine);
         clearinghouse.reserveCommittedOrderMargin(aliceId, 21, 100 * 1e6);
         clearinghouse.reserveCommittedOrderMargin(aliceId, 22, 120 * 1e6);
+        uint64[] memory reservationIds = new uint64[](2);
+        reservationIds[0] = 21;
+        reservationIds[1] = 22;
+        mockRouter.setMarginReservationIds(aliceId, reservationIds);
         uint256 consumedUsdc = clearinghouse.consumeAccountOrderReservations(aliceId, 150 * 1e6);
         vm.stopPrank();
 
@@ -414,9 +443,6 @@ contract MarginClearinghouseTest is Test {
         assertEq(buckets.committedOrderMarginUsdc, 70 * 1e6);
         assertEq(summary.activeCommittedOrderMarginUsdc, 70 * 1e6);
         assertEq(summary.activeReservationCount, 1);
-        assertEq(
-            clearinghouse.reservationHeadIndex(aliceId), 1, "Head index should advance past terminal reservation prefix"
-        );
     }
 
     function test_ConsumeOrderReservationsById_UsesSuppliedReservationOrder() public {
@@ -440,14 +466,9 @@ contract MarginClearinghouseTest is Test {
         assertEq(second.remainingAmountUsdc, 0);
         assertEq(uint256(first.status), uint256(IMarginClearinghouse.ReservationStatus.Active));
         assertEq(first.remainingAmountUsdc, 70 * 1e6);
-        assertEq(
-            clearinghouse.reservationHeadIndex(aliceId),
-            0,
-            "Out-of-order explicit consumption must not advance the FIFO head index past an active prefix"
-        );
     }
 
-    function test_ReleaseOrderReservation_AdvancesHeadIndexAcrossTerminalPrefix() public {
+    function test_ReleaseOrderReservation_ClearsTerminalReservationsWithoutHistoricalHeadTracking() public {
         vm.prank(alice);
         clearinghouse.deposit(aliceId, 1000 * 1e6);
 
@@ -457,16 +478,16 @@ contract MarginClearinghouseTest is Test {
         clearinghouse.releaseOrderReservation(71);
         vm.stopPrank();
 
-        assertEq(clearinghouse.reservationHeadIndex(aliceId), 1, "Head index should skip released prefix reservations");
+        IMarginClearinghouse.OrderReservation memory first = clearinghouse.getOrderReservation(71);
+        assertEq(uint256(first.status), uint256(IMarginClearinghouse.ReservationStatus.Released));
 
         vm.prank(engine);
         clearinghouse.releaseOrderReservation(72);
 
-        assertEq(
-            clearinghouse.reservationHeadIndex(aliceId),
-            2,
-            "Head index should advance to array end once all reservations are terminal"
-        );
+        IMarginClearinghouse.OrderReservation memory second = clearinghouse.getOrderReservation(72);
+        IMarginClearinghouse.AccountReservationSummary memory summary = clearinghouse.getAccountReservationSummary(aliceId);
+        assertEq(uint256(second.status), uint256(IMarginClearinghouse.ReservationStatus.Released));
+        assertEq(summary.activeReservationCount, 0, "All terminal reservations should clear the active summary");
     }
 
     function test_Withdraw_WrongOwner_Reverts() public {

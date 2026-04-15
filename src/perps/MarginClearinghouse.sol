@@ -4,6 +4,7 @@ pragma solidity 0.8.33;
 import {ICfdEngineCore} from "./interfaces/ICfdEngineCore.sol";
 import {IMarginAccount} from "./interfaces/IMarginAccount.sol";
 import {IMarginClearinghouse} from "./interfaces/IMarginClearinghouse.sol";
+import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
 import {IWithdrawGuard} from "./interfaces/IWithdrawGuard.sol";
 import {MarginClearinghouseAccountingLib} from "./libraries/MarginClearinghouseAccountingLib.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
@@ -26,8 +27,6 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     mapping(bytes32 => uint256) internal committedOrderMarginUsdc;
     mapping(bytes32 => uint256) internal reservedSettlementUsdc;
     mapping(uint64 => IMarginClearinghouse.OrderReservation) internal orderReservations;
-    mapping(bytes32 => uint64[]) internal reservationIdsByAccount;
-    mapping(bytes32 => uint256) internal reservationHeadIndexByAccount;
     mapping(bytes32 => uint256) internal activeCommittedOrderReservationUsdc;
     mapping(bytes32 => uint256) internal activeReservedSettlementReservationUsdc;
     mapping(bytes32 => uint256) internal activeReservationCount;
@@ -313,7 +312,6 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
             originalAmountUsdc: amount96,
             remainingAmountUsdc: amount96
         });
-        reservationIdsByAccount[accountId].push(orderId);
         activeCommittedOrderReservationUsdc[accountId] += amountUsdc;
         activeReservationCount[accountId] += 1;
 
@@ -424,9 +422,9 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
             return 0;
         }
 
-        uint64[] storage reservationIds = reservationIdsByAccount[accountId];
+        uint64[] memory reservationIds = _activeMarginReservationIds(accountId);
         uint256 remainingUsdc = amountUsdc;
-        for (uint256 i = reservationHeadIndexByAccount[accountId]; i < reservationIds.length && remainingUsdc > 0; i++) {
+        for (uint256 i = 0; i < reservationIds.length && remainingUsdc > 0; i++) {
             IMarginClearinghouse.OrderReservation storage reservation = orderReservations[reservationIds[i]];
             if (reservation.status != IMarginClearinghouse.ReservationStatus.Active) {
                 continue;
@@ -448,8 +446,6 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
                 reservationIds[i], accountId, reservationConsumedUsdc, reservation.remainingAmountUsdc
             );
         }
-
-        _advanceReservationHead(accountId);
     }
 
     function _releaseReservation(
@@ -856,21 +852,19 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         reservation.status = terminalStatus;
         reservation.remainingAmountUsdc = 0;
         activeReservationCount[reservation.accountId] -= 1;
-        _advanceReservationHead(reservation.accountId);
     }
 
-    function _advanceReservationHead(
+    /// @dev The router already maintains the active reservation FIFO for each account, so the
+    ///      clearinghouse no longer needs an append-only historical reservation index.
+    function _activeMarginReservationIds(
         bytes32 accountId
-    ) internal {
-        uint64[] storage reservationIds = reservationIdsByAccount[accountId];
-        uint256 headIndex = reservationHeadIndexByAccount[accountId];
-        while (headIndex < reservationIds.length) {
-            if (orderReservations[reservationIds[headIndex]].status == IMarginClearinghouse.ReservationStatus.Active) {
-                break;
-            }
-            headIndex++;
+    ) internal view returns (uint64[] memory reservationIds) {
+        address engine_ = engine;
+        if (engine_ == address(0)) {
+            return new uint64[](0);
         }
-        reservationHeadIndexByAccount[accountId] = headIndex;
+
+        return IOrderRouterAccounting(ICfdEngineCore(engine_).orderRouter()).getMarginReservationIds(accountId);
     }
 
     function _consumeLockedMargin(
@@ -1056,12 +1050,6 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         summary.activeCommittedOrderMarginUsdc = activeCommittedOrderReservationUsdc[accountId];
         summary.activeReservedSettlementUsdc = activeReservedSettlementReservationUsdc[accountId];
         summary.activeReservationCount = activeReservationCount[accountId];
-    }
-
-    function reservationHeadIndex(
-        bytes32 accountId
-    ) external view returns (uint256) {
-        return reservationHeadIndexByAccount[accountId];
     }
 
     function _toUint96(

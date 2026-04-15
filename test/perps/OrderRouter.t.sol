@@ -1097,6 +1097,55 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(carolSize, 5000 * 1e18, "tail order should execute once the failed head is cleared");
     }
 
+    function test_HistoricalFailedReservations_DoNotBrickLaterHeadCleanup() public {
+        address carol = address(0x559);
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        bytes32 carolId = bytes32(uint256(uint160(carol)));
+
+        usdc.mint(carol, 20_000 * 1e6);
+        vm.startPrank(carol);
+        usdc.approve(address(clearinghouse), type(uint256).max);
+        clearinghouse.deposit(carolId, 20_000 * 1e6);
+        vm.stopPrank();
+
+        bytes[] memory empty;
+        uint256 failedCycles = 24;
+
+        for (uint256 i = 0; i < failedCycles; ++i) {
+            vm.prank(alice);
+            router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+
+            vm.warp(block.timestamp + router.maxOrderAge() + 1);
+            vm.roll(block.number + 1);
+            router.executeOrder(uint64(i + 1), empty);
+
+            assertEq(router.nextExecuteId(), 0, "failed slippage head should clear immediately each cycle");
+            assertEq(
+                clearinghouse.getAccountReservationSummary(aliceId).activeReservationCount,
+                0,
+                "historical failed reservations must not leave active residue"
+            );
+        }
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 500 * 1e6, 1e8, false);
+
+        vm.roll(block.number + 1);
+        uint256 gasBefore = gasleft();
+        router.executeOrderBatch(26, empty);
+        uint256 gasUsed = gasBefore - gasleft();
+
+        assertEq(router.nextExecuteId(), 0, "later valid head cleanup should still drain the queue");
+        (uint256 aliceSize,,,,,,) = engine.positions(aliceId);
+        (uint256 carolSize,,,,,,) = engine.positions(carolId);
+        assertEq(aliceSize, 10_000 * 1e18, "historical failed reservations must not block later head execution");
+        assertEq(carolSize, 5000 * 1e18, "tail order should execute after the cleaned head");
+        assertLt(gasUsed, 40_000_000, "historical failed reservations should not cause unbounded cleanup gas");
+    }
+
     function test_BoundedForeignQueue_FullCloseExecutesAndLeavesTailLive() public {
         address spammer = address(0x557);
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
