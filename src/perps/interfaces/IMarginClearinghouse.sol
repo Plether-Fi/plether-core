@@ -22,8 +22,7 @@ interface IMarginClearinghouse {
     }
 
     enum ReservationBucket {
-        CommittedOrder,
-        ReservedSettlement
+        CommittedOrder
     }
 
     enum ReservationStatus {
@@ -43,7 +42,6 @@ interface IMarginClearinghouse {
 
     struct AccountReservationSummary {
         uint256 activeCommittedOrderMarginUsdc;
-        uint256 activeReservedSettlementUsdc;
         uint256 activeReservationCount;
     }
 

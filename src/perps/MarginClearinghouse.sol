@@ -28,7 +28,6 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     mapping(bytes32 => uint256) internal reservedSettlementUsdc;
     mapping(uint64 => IMarginClearinghouse.OrderReservation) internal orderReservations;
     mapping(bytes32 => uint256) internal activeCommittedOrderReservationUsdc;
-    mapping(bytes32 => uint256) internal activeReservedSettlementReservationUsdc;
     mapping(bytes32 => uint256) internal activeReservationCount;
 
     address public immutable settlementAsset;
@@ -481,14 +480,10 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
 
     function _decreaseActiveReservation(
         bytes32 accountId,
-        IMarginClearinghouse.ReservationBucket bucket,
+        IMarginClearinghouse.ReservationBucket,
         uint256 amountUsdc
     ) internal {
-        if (bucket == IMarginClearinghouse.ReservationBucket.CommittedOrder) {
-            activeCommittedOrderReservationUsdc[accountId] -= amountUsdc;
-        } else {
-            activeReservedSettlementReservationUsdc[accountId] -= amountUsdc;
-        }
+        activeCommittedOrderReservationUsdc[accountId] -= amountUsdc;
     }
 
     function lockReservedSettlement(
@@ -826,8 +821,6 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     ) internal {
         if (bucket == IMarginClearinghouse.ReservationBucket.CommittedOrder) {
             _consumeLockedMargin(accountId, IMarginClearinghouse.MarginBucket.CommittedOrder, amountUsdc);
-        } else if (bucket == IMarginClearinghouse.ReservationBucket.ReservedSettlement) {
-            _consumeLockedMargin(accountId, IMarginClearinghouse.MarginBucket.ReservedSettlement, amountUsdc);
         } else {
             revert MarginClearinghouse__InvalidMarginBucket();
         }
@@ -1048,7 +1041,6 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         bytes32 accountId
     ) external view returns (IMarginClearinghouse.AccountReservationSummary memory summary) {
         summary.activeCommittedOrderMarginUsdc = activeCommittedOrderReservationUsdc[accountId];
-        summary.activeReservedSettlementUsdc = activeReservedSettlementReservationUsdc[accountId];
         summary.activeReservationCount = activeReservationCount[accountId];
     }
 
