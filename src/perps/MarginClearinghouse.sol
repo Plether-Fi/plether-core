@@ -756,9 +756,6 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         if (getFreeBuyingPowerUsdc(accountId) < amountUsdc) {
             revert MarginClearinghouse__InsufficientFreeEquity();
         }
-        if (settlementBalances[accountId] < _totalLockedMarginUsdc(accountId) + amountUsdc) {
-            revert MarginClearinghouse__InsufficientUsdcForSettlement();
-        }
         _setBucketStorage(bucket, accountId, _bucketStorage(bucket, accountId) + amountUsdc);
         emit MarginLocked(accountId, bucket, amountUsdc);
     }
