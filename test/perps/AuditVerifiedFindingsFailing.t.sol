@@ -9,6 +9,7 @@ import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
+import {OrderRouterAdmin} from "../../src/perps/OrderRouterAdmin.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
@@ -161,6 +162,7 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
     TrancheVault seniorVault;
     TrancheVault juniorVault;
     OrderRouter router;
+    OrderRouterAdmin routerAdmin;
 
     bytes32 constant FEED_A = bytes32(uint256(1));
     bytes32 constant FEED_B = bytes32(uint256(2));
@@ -206,6 +208,7 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
             bases,
             inversions
         );
+        routerAdmin = OrderRouterAdmin(router.admin());
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 
@@ -223,9 +226,9 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
     }
 
     function test_F3_StaleOracleCancellationMustNotPayKeeperUsdc() public {
-        router.proposeMaxOrderAge(3600);
+        routerAdmin.proposeMaxOrderAge(3600);
         vm.warp(block.timestamp + 48 hours + 1);
-        router.finalizeMaxOrderAge();
+        routerAdmin.finalizeMaxOrderAge();
 
         uint256 t0 = 2_000_000_000;
         vm.warp(t0);
@@ -245,7 +248,7 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
         vm.warp(t0 + 61);
         vm.roll(101);
         vm.prank(keeper);
-        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
         router.executeOrder(1, updateData);
 
         assertEq(

@@ -35,6 +35,7 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
 
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        _syncEngineAdmin();
         pool = new HousePool(address(usdc), address(engine));
 
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");
@@ -159,7 +160,7 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
         vm.warp(1001);
         vm.roll(block.number + 1);
         vm.prank(keeper);
-        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
         router.executeOrder(1, updateData);
 
         assertEq(keeper.balance, keeperBalanceBefore, "Keeper should not collect fee when cancelling a stale order");
@@ -189,6 +190,7 @@ contract AuditConfirmedFindingsFailing_OutOfOrderMarkCancellation is BasePerpTes
 
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        _syncEngineAdmin();
         pool = new HousePool(address(usdc), address(engine));
 
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");
@@ -245,7 +247,7 @@ contract AuditConfirmedFindingsFailing_OutOfOrderMarkCancellation is BasePerpTes
         vm.warp(1025);
         vm.roll(101);
         vm.prank(keeper);
-        vm.expectRevert(OrderRouter.OrderRouter__OraclePublishTimeOutOfOrder.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 9));
         router.executeOrder(1, updateData);
 
         assertEq(router.nextExecuteId(), 1, "Out-of-order keeper input must not consume the order");
@@ -275,7 +277,7 @@ contract AuditConfirmedFindingsFailing_OutOfOrderMarkCancellation is BasePerpTes
         vm.warp(1025);
         vm.roll(101);
         vm.prank(keeper);
-        vm.expectRevert(OrderRouter.OrderRouter__OraclePublishTimeOutOfOrder.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 9));
         router.executeOrderBatch(2, updateData);
 
         assertEq(router.nextExecuteId(), 1, "Batch execution must not burn queued orders on out-of-order marks");
@@ -383,21 +385,21 @@ contract AuditConfirmedFindingsFailing_RiskParams is BasePerpTest {
         params.maxSkewRatio = params.maxSkewRatio;
 
         vm.expectRevert();
-        engine.proposeRiskParams(params);
+        engineAdmin.proposeRiskParams(params);
     }
 
     function obsolete_M1_ProposeRiskParamsRejectsZeroKinkSkew() public {
         CfdTypes.RiskParams memory params = _riskParams();
 
         vm.expectRevert();
-        engine.proposeRiskParams(params);
+        engineAdmin.proposeRiskParams(params);
     }
 
     function obsolete_M1_ProposeRiskParamsRejectsKinkAboveMaxSkew() public {
         CfdTypes.RiskParams memory params = _riskParams();
 
         vm.expectRevert();
-        engine.proposeRiskParams(params);
+        engineAdmin.proposeRiskParams(params);
     }
 
 }

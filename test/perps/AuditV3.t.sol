@@ -61,6 +61,7 @@ contract AuditV3_C01_FIFODeadlockTest is BasePerpTest {
 
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        _syncEngineAdmin();
         pool = new HousePool(address(usdc), address(engine));
 
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior", "sUSDC");
@@ -305,9 +306,9 @@ contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
 
     function test_H01_KeeperReceivesFullFeeOnExpiredOrder() public {
         // Set maxOrderAge so orders can expire
-        router.proposeMaxOrderAge(60);
+        routerAdmin.proposeMaxOrderAge(60);
         vm.warp(block.timestamp + 48 hours + 1);
-        router.finalizeMaxOrderAge();
+        routerAdmin.finalizeMaxOrderAge();
 
         _fundTrader(alice, 50_000e6);
         vm.deal(alice, 1 ether);
@@ -332,9 +333,9 @@ contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
     function test_H01_FinalizeExecutionSuccessParamIsDeadCode() public {
         // Demonstrate that both successful and failed processing pay the keeper
         // from the order's reserved USDC fee.
-        router.proposeMaxOrderAge(60);
+        routerAdmin.proposeMaxOrderAge(60);
         vm.warp(block.timestamp + 48 hours + 1);
-        router.finalizeMaxOrderAge();
+        routerAdmin.finalizeMaxOrderAge();
 
         _fundTrader(alice, 100_000e6);
         vm.deal(alice, 2 ether);

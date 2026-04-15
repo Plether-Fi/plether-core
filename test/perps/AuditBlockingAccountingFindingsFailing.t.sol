@@ -344,9 +344,9 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
 
-        router.proposeMaxOrderAge(60);
+        routerAdmin.proposeMaxOrderAge(60);
         vm.warp(block.timestamp + 48 hours + 1);
-        router.finalizeMaxOrderAge();
+        routerAdmin.finalizeMaxOrderAge();
 
         vm.warp(block.timestamp + 61);
 

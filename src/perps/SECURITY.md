@@ -32,20 +32,22 @@ All perps contracts are non-upgradeable.
 
 ### Timelocked admin state
 
-The following parameter families are owner-controlled behind a 48-hour propose/finalize delay:
+The following parameter families are owner-controlled behind a 48-hour propose/finalize delay.
+Engine risk controls live in `CfdEngineAdmin`, and router risk controls live in `OrderRouterAdmin`, with each admin module applying finalized values onto its host contract:
 
 | Parameter | Contract | Guard |
 |-----------|----------|-------|
-| `riskParams` (VPI, carry, margins, bounty) | `CfdEngine` | `onlyOwner`, 48-hour timelock |
-| `fadDayOverrides` | `CfdEngine` | `onlyOwner`, 48-hour timelock |
-| `fadMaxStaleness` | `CfdEngine` | `onlyOwner`, 48-hour timelock |
-| `fadRunwaySeconds` | `CfdEngine` | `onlyOwner`, 48-hour timelock |
-| `engineMarkStalenessLimit` | `CfdEngine` | `onlyOwner`, 48-hour timelock |
+| `riskParams` (VPI, carry, margins, bounty) | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 48-hour timelock |
+| `fadDayOverrides` | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 48-hour timelock |
+| `fadMaxStaleness` | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 48-hour timelock |
+| `fadRunwaySeconds` | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 48-hour timelock |
+| `engineMarkStalenessLimit` | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 48-hour timelock |
 | `seniorRateBps` | `HousePool` | `onlyOwner`, 48-hour timelock |
 | `markStalenessLimit` | `HousePool` | `onlyOwner`, 48-hour timelock |
-| `orderExecutionStalenessLimit` | `OrderRouter` | `onlyOwner`, 48-hour timelock |
-| `liquidationStalenessLimit` | `OrderRouter` | `onlyOwner`, 48-hour timelock |
-| `maxOrderAge` | `OrderRouter` | `onlyOwner`, 48-hour timelock |
+| `orderExecutionStalenessLimit` | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
+| `liquidationStalenessLimit` | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
+| `maxOrderAge` | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
+| `pythMaxConfidenceRatioBps` | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
 
 ### One-time wiring
 
@@ -64,7 +66,7 @@ These are one-time configuration setters rather than mutable governance knobs:
 
 The owner can act immediately to:
 
-- pause and unpause `OrderRouter`,
+- pause and unpause `OrderRouter` through `OrderRouterAdmin`,
 - pause and unpause `HousePool`,
 - withdraw protocol fees,
 - transfer ownership.

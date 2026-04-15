@@ -48,10 +48,15 @@ interface IOrderRouterAccounting {
         bytes32 accountId
     ) external view returns (AccountEscrowView memory escrow);
 
-    /// @notice Returns pending orders for an account with escrow-aware queue details.
-    function getPendingOrdersForAccount(
+    /// @notice Returns the current account-queue head id for pending-order traversal.
+    function accountHeadOrderId(
         bytes32 accountId
-    ) external view returns (PendingOrderView[] memory pending);
+    ) external view returns (uint64 headOrderId);
+
+    /// @notice Returns the pending-order view for a specific order plus the next account-queue order id.
+    function getPendingOrderView(
+        uint64 orderId
+    ) external view returns (PendingOrderView memory pending, uint64 nextAccountOrderId);
 
     /// @notice Returns the number of pending orders currently attributed to an account.
     function pendingOrderCounts(

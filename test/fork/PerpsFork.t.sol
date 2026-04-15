@@ -7,6 +7,7 @@ import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
+import {OrderRouterAdmin} from "../../src/perps/OrderRouterAdmin.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -77,6 +78,7 @@ contract PerpsForkTest is Test {
     TrancheVault seniorVault;
     TrancheVault juniorVault;
     OrderRouter router;
+    OrderRouterAdmin routerAdmin;
     ControllablePyth pyth;
 
     bytes32[] feedIds;
@@ -132,6 +134,7 @@ contract PerpsForkTest is Test {
             b,
             new bool[](1)
         );
+        routerAdmin = OrderRouterAdmin(router.admin());
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 
@@ -207,9 +210,9 @@ contract PerpsForkTest is Test {
     }
 
     function _configureLongOrderExpiry() internal {
-        router.proposeMaxOrderAge(1000);
+        routerAdmin.proposeMaxOrderAge(1000);
         vm.warp(block.timestamp + 48 hours + 1);
-        router.finalizeMaxOrderAge();
+        routerAdmin.finalizeMaxOrderAge();
     }
 
     function _commitOrderDeterministic(
@@ -344,7 +347,7 @@ contract PerpsForkTest is Test {
         vm.roll(commitBlock + 2);
 
         vm.prank(keeper);
-        vm.expectRevert(OrderRouter.OrderRouter__MevDetected.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 13));
         router.executeOrder(orderId, _pythUpdateData());
 
         vm.warp(commitTime + 1001);
@@ -374,7 +377,7 @@ contract PerpsForkTest is Test {
         vm.roll(commitBlock + 2);
 
         vm.prank(keeper);
-        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
         router.executeOrder(orderId, _pythUpdateData());
 
         bytes32 aliceId = _accountId(alice);
@@ -415,7 +418,7 @@ contract PerpsForkTest is Test {
         vm.warp(liqPublishTime + 16);
 
         vm.prank(keeper);
-        vm.expectRevert(OrderRouter.OrderRouter__MevOraclePriceTooStale.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 12));
         router.executeLiquidation(aliceId, _pythUpdateData());
     }
 

@@ -393,7 +393,7 @@ contract AuditFollowupFindingsFailing_RiskParamValidation is BasePerpTest {
         CfdTypes.RiskParams memory params = _riskParams();
 
         vm.expectRevert();
-        engine.proposeRiskParams(params);
+        engineAdmin.proposeRiskParams(params);
     }
 
     function test_M2_ProposeRiskParamsRejectsMaxSkewRatioAboveOne() public {
@@ -401,7 +401,7 @@ contract AuditFollowupFindingsFailing_RiskParamValidation is BasePerpTest {
         params.maxSkewRatio = 1e18 + 1;
 
         vm.expectRevert();
-        engine.proposeRiskParams(params);
+        engineAdmin.proposeRiskParams(params);
     }
 
 }

@@ -34,7 +34,7 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
     mapping(uint64 => OrderRecord) internal orderRecords;
     mapping(bytes32 => uint256) public pendingOrderCounts;
     mapping(bytes32 => uint256) public pendingCloseSize;
-    mapping(bytes32 => uint64) internal accountHeadOrderId;
+    mapping(bytes32 => uint64) public accountHeadOrderId;
     mapping(bytes32 => uint64) internal accountTailOrderId;
     mapping(bytes32 => uint64) public marginHeadOrderId;
     mapping(bytes32 => uint64) public marginTailOrderId;

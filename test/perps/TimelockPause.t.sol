@@ -2,9 +2,11 @@
 pragma solidity 0.8.33;
 
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
+import {CfdEngineAdmin} from "../../src/perps/CfdEngineAdmin.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
+import {OrderRouterAdmin} from "../../src/perps/OrderRouterAdmin.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
@@ -53,8 +55,8 @@ contract TimelockPauseTest is BasePerpTest {
             bountyBps: 20
         });
 
-        engine.proposeRiskParams(newParams);
-        assertGt(engine.riskParamsActivationTime(), 0);
+        engineAdmin.proposeRiskParams(newParams);
+        assertGt(engineAdmin.riskParamsActivationTime(), 0);
     }
 
     function test_FinalizeRiskParams_BeforeTimelock_Reverts() public {
@@ -69,10 +71,10 @@ contract TimelockPauseTest is BasePerpTest {
             bountyBps: 20
         });
 
-        engine.proposeRiskParams(newParams);
+        engineAdmin.proposeRiskParams(newParams);
 
-        vm.expectRevert(CfdEngine.CfdEngine__TimelockNotReady.selector);
-        engine.finalizeRiskParams();
+        vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__TimelockNotReady.selector);
+        engineAdmin.finalizeRiskParams();
     }
 
     function test_FinalizeRiskParams_AfterTimelock_Succeeds() public {
@@ -87,18 +89,18 @@ contract TimelockPauseTest is BasePerpTest {
             bountyBps: 20
         });
 
-        engine.proposeRiskParams(newParams);
+        engineAdmin.proposeRiskParams(newParams);
         _warpForward(48 hours + 1);
-        engine.finalizeRiskParams();
+        engineAdmin.finalizeRiskParams();
 
         (,, uint256 maintMarginBps,,,,,) = engine.riskParams();
         assertEq(maintMarginBps, 200);
-        assertEq(engine.riskParamsActivationTime(), 0);
+        assertEq(engineAdmin.riskParamsActivationTime(), 0);
     }
 
     function test_FinalizeRiskParams_NoProposal_Reverts() public {
-        vm.expectRevert(CfdEngine.CfdEngine__NoProposal.selector);
-        engine.finalizeRiskParams();
+        vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__NoProposal.selector);
+        engineAdmin.finalizeRiskParams();
     }
 
     function test_CancelRiskParams_ClearsPending() public {
@@ -113,14 +115,14 @@ contract TimelockPauseTest is BasePerpTest {
             bountyBps: 20
         });
 
-        engine.proposeRiskParams(newParams);
+        engineAdmin.proposeRiskParams(newParams);
         vm.expectEmit(false, false, false, true);
         emit RiskParamsProposalCancelled();
-        engine.cancelRiskParamsProposal();
-        assertEq(engine.riskParamsActivationTime(), 0);
+        engineAdmin.cancelRiskParamsProposal();
+        assertEq(engineAdmin.riskParamsActivationTime(), 0);
 
-        vm.expectRevert(CfdEngine.CfdEngine__NoProposal.selector);
-        engine.finalizeRiskParams();
+        vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__NoProposal.selector);
+        engineAdmin.finalizeRiskParams();
     }
 
     function test_ProposeRiskParams_OnlyOwner() public {
@@ -137,7 +139,7 @@ contract TimelockPauseTest is BasePerpTest {
 
         vm.prank(nonOwner);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
-        engine.proposeRiskParams(newParams);
+        engineAdmin.proposeRiskParams(newParams);
     }
 
     function test_RePropose_OverwritesPendingAndResetsTimer() public {
@@ -152,8 +154,8 @@ contract TimelockPauseTest is BasePerpTest {
             bountyBps: 15
         });
 
-        engine.proposeRiskParams(first);
-        uint256 firstActivation = engine.riskParamsActivationTime();
+        engineAdmin.proposeRiskParams(first);
+        uint256 firstActivation = engineAdmin.riskParamsActivationTime();
 
         _warpForward(24 hours);
 
@@ -168,8 +170,8 @@ contract TimelockPauseTest is BasePerpTest {
             bountyBps: 15
         });
 
-        engine.proposeRiskParams(second);
-        uint256 secondActivation = engine.riskParamsActivationTime();
+        engineAdmin.proposeRiskParams(second);
+        uint256 secondActivation = engineAdmin.riskParamsActivationTime();
 
         assertGt(secondActivation, firstActivation);
     }
@@ -222,27 +224,27 @@ contract TimelockPauseTest is BasePerpTest {
     // ==========================================
 
     function test_ProposeMaxOrderAge_TimelockFlow() public {
-        router.proposeMaxOrderAge(600);
+        routerAdmin.proposeMaxOrderAge(600);
 
-        vm.expectRevert(OrderRouter.OrderRouter__TimelockNotReady.selector);
-        router.finalizeMaxOrderAge();
+        vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__TimelockNotReady.selector);
+        routerAdmin.finalizeMaxOrderAge();
 
         _warpForward(48 hours + 1);
-        router.finalizeMaxOrderAge();
+        routerAdmin.finalizeMaxOrderAge();
 
         assertEq(router.maxOrderAge(), 600);
-        assertEq(router.maxOrderAgeActivationTime(), 0);
+        assertEq(routerAdmin.maxOrderAgeActivationTime(), 0);
     }
 
     function test_FinalizeMaxOrderAge_NoProposal_Reverts() public {
-        vm.expectRevert(OrderRouter.OrderRouter__NoProposal.selector);
-        router.finalizeMaxOrderAge();
+        vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__NoProposal.selector);
+        routerAdmin.finalizeMaxOrderAge();
     }
 
     function test_OrderRouter_OnlyOwner() public {
         vm.prank(nonOwner);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
-        router.proposeMaxOrderAge(600);
+        routerAdmin.proposeMaxOrderAge(600);
     }
 
     // ==========================================
@@ -277,7 +279,7 @@ contract TimelockPauseTest is BasePerpTest {
     // ==========================================
 
     function test_CommitOrder_RevertsWhenPaused() public {
-        router.pause();
+        routerAdmin.pause();
 
         vm.prank(alice);
         vm.expectRevert(Pausable.EnforcedPause.selector);
@@ -288,7 +290,7 @@ contract TimelockPauseTest is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
-        router.pause();
+        routerAdmin.pause();
 
         bytes[] memory empty;
         router.executeOrder(1, empty);
@@ -302,7 +304,7 @@ contract TimelockPauseTest is BasePerpTest {
         bytes[] memory empty;
         router.executeOrder(1, empty);
 
-        router.pause();
+        routerAdmin.pause();
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
         bytes[] memory pythData = new bytes[](1);
@@ -315,7 +317,7 @@ contract TimelockPauseTest is BasePerpTest {
     }
 
     function test_UpdateMarkPrice_WorksWhenPaused() public {
-        router.pause();
+        routerAdmin.pause();
 
         bytes[] memory pythData = new bytes[](1);
         pythData[0] = abi.encode(1.05e8);
@@ -327,17 +329,17 @@ contract TimelockPauseTest is BasePerpTest {
     function test_Pause_OnlyOwner() public {
         vm.prank(nonOwner);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
-        router.pause();
+        routerAdmin.pause();
     }
 
     function test_Unpause_RestoresCommitOrder() public {
-        router.pause();
+        routerAdmin.pause();
 
         vm.prank(alice);
         vm.expectRevert(Pausable.EnforcedPause.selector);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
-        router.unpause();
+        routerAdmin.unpause();
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);

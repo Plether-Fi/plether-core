@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
+import {CfdEngineAdmin} from "../../../../src/perps/CfdEngineAdmin.sol";
 import {CfdEngine} from "../../../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../../../src/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "../../../../src/perps/MarginClearinghouse.sol";
@@ -12,6 +13,7 @@ contract PerpOracleHandler is Test {
 
     MockUSDC public immutable usdc;
     CfdEngine public immutable engine;
+    CfdEngineAdmin public immutable engineAdmin;
     MarginClearinghouse public immutable clearinghouse;
     OrderRouter public immutable router;
     address public immutable owner;
@@ -26,6 +28,7 @@ contract PerpOracleHandler is Test {
     ) {
         usdc = _usdc;
         engine = _engine;
+        engineAdmin = CfdEngineAdmin(_engine.admin());
         clearinghouse = _clearinghouse;
         router = _router;
         owner = msg.sender;
@@ -96,12 +99,12 @@ contract PerpOracleHandler is Test {
         timestamps[0] = ((block.timestamp / 86_400) + 1) * 86_400;
 
         vm.startPrank(owner);
-        engine.proposeAddFadDays(timestamps);
+        engineAdmin.proposeAddFadDays(timestamps);
         vm.warp(block.timestamp + 7 days);
-        engine.finalizeAddFadDays();
-        engine.proposeFadRunway(bound(runwayFuzz, 0, 24 hours));
+        engineAdmin.finalizeAddFadDays();
+        engineAdmin.proposeFadRunway(bound(runwayFuzz, 0, 24 hours));
         vm.warp(block.timestamp + 7 days);
-        engine.finalizeFadRunway();
+        engineAdmin.finalizeFadRunway();
         vm.stopPrank();
     }
 
@@ -110,9 +113,9 @@ contract PerpOracleHandler is Test {
     ) external {
         uint256 seconds_ = bound(secondsFuzz, 1 hours, 7 days);
         vm.startPrank(owner);
-        engine.proposeFadMaxStaleness(seconds_);
+        engineAdmin.proposeFadMaxStaleness(seconds_);
         vm.warp(block.timestamp + 7 days);
-        engine.finalizeFadMaxStaleness();
+        engineAdmin.finalizeFadMaxStaleness();
         vm.stopPrank();
     }
 

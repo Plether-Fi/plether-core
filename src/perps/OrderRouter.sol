@@ -4,7 +4,9 @@ pragma solidity 0.8.33;
 import {DecimalConstants} from "../libraries/DecimalConstants.sol";
 import {CfdEnginePlanTypes} from "./CfdEnginePlanTypes.sol";
 import {CfdTypes} from "./CfdTypes.sol";
+import {OrderRouterAdmin} from "./OrderRouterAdmin.sol";
 import {ICfdEngineCore} from "./interfaces/ICfdEngineCore.sol";
+import {IOrderRouterAdminHost} from "./interfaces/IOrderRouterAdminHost.sol";
 import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
 import {IPerpsKeeper} from "./interfaces/IPerpsKeeper.sol";
 import {IPerpsTraderActions} from "./interfaces/IPerpsTraderActions.sol";
@@ -14,8 +16,6 @@ import {OracleFreshnessPolicyLib} from "./libraries/OracleFreshnessPolicyLib.sol
 import {OrderFailurePolicyLib} from "./libraries/OrderFailurePolicyLib.sol";
 import {OrderExecutionOrchestrator} from "./modules/OrderExecutionOrchestrator.sol";
 import {OrderOracleExecution} from "./modules/OrderOracleExecution.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
@@ -24,15 +24,15 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 /// @notice Manages Commit-Reveal, MEV protection, and the un-brickable FIFO queue.
 /// @dev Holds only non-trader-owned keeper execution reserves. Trader collateral remains in MarginClearinghouse.
 /// @custom:security-contact contact@plether.com
-contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausable, OrderExecutionOrchestrator {
+contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, IOrderRouterAdminHost, OrderExecutionOrchestrator {
 
     using SafeERC20 for IERC20;
 
     uint64 public nextCommitId = 1;
     uint64 public nextExecuteId = 1;
+    address public immutable admin;
 
     uint256 public maxOrderAge;
-    uint256 internal constant TIMELOCK_DELAY = 48 hours;
     uint256 internal constant DEFAULT_MAX_ORDER_AGE = 60;
     uint256 internal constant OPEN_ORDER_EXECUTION_BOUNTY_BPS = 1;
     uint256 internal constant MIN_OPEN_ORDER_EXECUTION_BOUNTY_USDC = 50_000;
@@ -40,65 +40,27 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     uint256 internal constant CLOSE_ORDER_EXECUTION_BOUNTY_USDC = DecimalConstants.ONE_USDC;
     uint256 internal constant MAX_PENDING_ORDERS = 5;
 
-    uint256 public pendingMaxOrderAge;
-    uint256 public maxOrderAgeActivationTime;
-
-    mapping(address => uint256) internal claimableEth;
     uint64 public globalTailOrderId;
 
     error OrderRouter__ZeroSize();
-    error OrderRouter__CloseMarginDeltaNotAllowed();
-    error OrderRouter__TimelockNotReady();
-    error OrderRouter__NoProposal();
-    error OrderRouter__FIFOViolation();
-    error OrderRouter__OrderNotPending();
-    error OrderRouter__InsufficientPythFee();
-    error OrderRouter__MockModeDisabled();
-    error OrderRouter__NoOrdersToExecute();
-    error OrderRouter__MaxOrderIdNotCommitted();
-    error OrderRouter__OraclePriceTooStale();
-    error OrderRouter__OracleConfidenceTooWide();
-    error OrderRouter__NothingToClaim();
-    error OrderRouter__EthTransferFailed();
-    error OrderRouter__OraclePriceNegative();
-    error OrderRouter__MevOraclePriceTooStale();
-    error OrderRouter__LengthMismatch();
-    error OrderRouter__InvalidWeights();
-    error OrderRouter__InvalidBasePrice();
-    error OrderRouter__EmptyFeeds();
-    error OrderRouter__MevDetected();
-    error OrderRouter__MissingPythUpdateData();
-    error OrderRouter__OracleFrozen();
+    error OrderRouter__OracleValidation(uint8 code);
+    error OrderRouter__QueueState(uint8 code);
+    error OrderRouter__CommitValidation(uint8 code);
     error OrderRouter__InsufficientGas();
-    error OrderRouter__NoOpenPosition();
-    error OrderRouter__CloseSideMismatch();
-    error OrderRouter__CloseSizeExceedsPosition();
-    error OrderRouter__InsufficientFreeEquity();
-    error OrderRouter__MarginOrderLinkCorrupted();
-    error OrderRouter__PendingOrderLinkCorrupted();
-    error OrderRouter__Unauthorized();
-    error OrderRouter__TooManyPendingOrders();
-    error OrderRouter__DegradedMode();
-    error OrderRouter__CloseOnlyMode();
-    error OrderRouter__SeedLifecycleIncomplete();
-    error OrderRouter__TradingNotActive();
-    error OrderRouter__OraclePublishTimeOutOfOrder();
-    error OrderRouter__InvalidStalenessLimit();
-    error OrderRouter__InvalidConfidenceRatio();
-    error OrderRouter__ZeroAddress();
     error OrderRouter__PredictableOpenInvalid(uint8 code);
 
-    struct TimelockedUintProposal {
-        uint256 value;
-        uint256 activationTime;
+    event OrderCommitted(uint64 indexed orderId, bytes32 indexed accountId, CfdTypes.Side side);
+
+    function _onlyEngine() internal view {
+        if (msg.sender != address(engine) && msg.sender != address(engine.settlementModule())) {
+            _revertCommitValidation(8);
+        }
     }
 
-    event OrderCommitted(uint64 indexed orderId, bytes32 indexed accountId, CfdTypes.Side side);
-    modifier onlyEngine() {
-        if (msg.sender != address(engine) && msg.sender != address(engine.settlementModule())) {
-            revert OrderRouter__Unauthorized();
+    function _onlyAdmin() internal view {
+        if (msg.sender != admin) {
+            _revertCommitValidation(8);
         }
-        _;
     }
 
     /// @param _engine CfdEngine that processes trades and liquidations
@@ -117,149 +79,84 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         uint256[] memory _quantities,
         uint256[] memory _basePrices,
         bool[] memory _inversions
-    )
-        Ownable(msg.sender)
-        OrderOracleExecution(_engine, _engineLens, _vault, _pyth, _feedIds, _quantities, _basePrices, _inversions)
-    {
+    ) OrderOracleExecution(_engine, _engineLens, _vault, _pyth, _feedIds, _quantities, _basePrices, _inversions) {
+        admin = address(new OrderRouterAdmin(address(this), msg.sender));
         maxOrderAge = DEFAULT_MAX_ORDER_AGE;
     }
 
     function _revertZeroAddress() internal pure override {
-        revert OrderRouter__ZeroAddress();
+        _revertOracleValidation(7);
+    }
+
+    function _revertOracleValidation(
+        uint8 code
+    ) internal pure {
+        revert OrderRouter__OracleValidation(code);
+    }
+
+    function _revertQueueState(
+        uint8 code
+    ) internal pure {
+        revert OrderRouter__QueueState(code);
+    }
+
+    function _revertCommitValidation(
+        uint8 code
+    ) internal pure {
+        revert OrderRouter__CommitValidation(code);
     }
 
     function _revertEmptyFeeds() internal pure override {
-        revert OrderRouter__EmptyFeeds();
+        _revertOracleValidation(0);
     }
 
     function _revertLengthMismatch() internal pure override {
-        revert OrderRouter__LengthMismatch();
+        _revertOracleValidation(1);
     }
 
     function _revertInvalidBasePrice() internal pure override {
-        revert OrderRouter__InvalidBasePrice();
+        _revertOracleValidation(2);
     }
 
     function _revertInvalidWeights() internal pure override {
-        revert OrderRouter__InvalidWeights();
+        _revertOracleValidation(3);
     }
 
     function _revertMissingPythUpdateData() internal pure override {
-        revert OrderRouter__MissingPythUpdateData();
+        _revertOracleValidation(5);
     }
 
     function _revertInsufficientPythFee() internal pure override {
-        revert OrderRouter__InsufficientPythFee();
+        _revertOracleValidation(6);
     }
 
     function _revertMockModeDisabled() internal pure override {
-        revert OrderRouter__MockModeDisabled();
+        _revertOracleValidation(4);
     }
 
     function _revertOraclePriceTooStale() internal pure override {
-        revert OrderRouter__OraclePriceTooStale();
+        _revertOracleValidation(10);
     }
 
     function _revertOracleConfidenceTooWide() internal pure override {
-        revert OrderRouter__OracleConfidenceTooWide();
+        _revertOracleValidation(11);
     }
 
     function _revertOraclePublishTimeOutOfOrder() internal pure override {
-        revert OrderRouter__OraclePublishTimeOutOfOrder();
+        _revertOracleValidation(9);
     }
 
     function _revertMevOraclePriceTooStale() internal pure override {
-        revert OrderRouter__MevOraclePriceTooStale();
+        _revertOracleValidation(12);
     }
 
     function _revertOraclePriceNegative() internal pure override {
-        revert OrderRouter__OraclePriceNegative();
+        _revertOracleValidation(8);
     }
 
     // ==========================================
     // ADMIN
     // ==========================================
-
-    /// @notice Proposes a new maxOrderAge value, subject to 48h timelock.
-    function proposeMaxOrderAge(
-        uint256 newMaxOrderAge
-    ) external onlyOwner {
-        (pendingMaxOrderAge, maxOrderAgeActivationTime) = _proposeUint(newMaxOrderAge);
-    }
-
-    /// @notice Finalizes the pending maxOrderAge after timelock expires.
-    function finalizeMaxOrderAge() external onlyOwner {
-        maxOrderAge = _finalizeUint(TimelockedUintProposal(pendingMaxOrderAge, maxOrderAgeActivationTime));
-        pendingMaxOrderAge = 0;
-        maxOrderAgeActivationTime = 0;
-    }
-
-    /// @notice Proposes the live-market staleness limit for normal order execution and mark refresh.
-    function proposeOrderExecutionStalenessLimit(
-        uint256 limit
-    ) external onlyOwner {
-        if (limit == 0) {
-            revert OrderRouter__InvalidStalenessLimit();
-        }
-        (pendingOrderExecutionStalenessLimit, orderExecutionStalenessActivationTime) = _proposeUint(limit);
-    }
-
-    /// @notice Finalizes the pending live-market execution staleness limit after timelock expiry.
-    function finalizeOrderExecutionStalenessLimit() external onlyOwner {
-        orderExecutionStalenessLimit = _finalizeUint(
-            TimelockedUintProposal(pendingOrderExecutionStalenessLimit, orderExecutionStalenessActivationTime)
-        );
-        pendingOrderExecutionStalenessLimit = 0;
-        orderExecutionStalenessActivationTime = 0;
-    }
-
-    /// @notice Proposes the live-market staleness limit for liquidations.
-    function proposeLiquidationStalenessLimit(
-        uint256 limit
-    ) external onlyOwner {
-        if (limit == 0) {
-            revert OrderRouter__InvalidStalenessLimit();
-        }
-        (pendingLiquidationStalenessLimit, liquidationStalenessActivationTime) = _proposeUint(limit);
-    }
-
-    /// @notice Finalizes the pending liquidation staleness limit after timelock expiry.
-    function finalizeLiquidationStalenessLimit() external onlyOwner {
-        liquidationStalenessLimit =
-            _finalizeUint(TimelockedUintProposal(pendingLiquidationStalenessLimit, liquidationStalenessActivationTime));
-        pendingLiquidationStalenessLimit = 0;
-        liquidationStalenessActivationTime = 0;
-    }
-
-    /// @notice Proposes the maximum acceptable per-feed Pyth confidence ratio, in basis points of `conf / abs(price)`.
-    function proposePythMaxConfidenceRatioBps(
-        uint256 ratioBps
-    ) external onlyOwner {
-        if (ratioBps > 10_000) {
-            revert OrderRouter__InvalidConfidenceRatio();
-        }
-        (pendingPythMaxConfidenceRatioBps, pythMaxConfidenceRatioActivationTime) = _proposeUint(ratioBps);
-    }
-
-    /// @notice Finalizes the pending Pyth confidence ratio threshold after timelock expiry.
-    function finalizePythMaxConfidenceRatioBps() external onlyOwner {
-        pythMaxConfidenceRatioBps = _finalizeUint(
-            TimelockedUintProposal(pendingPythMaxConfidenceRatioBps, pythMaxConfidenceRatioActivationTime)
-        );
-        pendingPythMaxConfidenceRatioBps = 0;
-        pythMaxConfidenceRatioActivationTime = 0;
-    }
-
-    /// @notice Pauses new risk-increasing order commits.
-    /// @dev Keeper execution and liquidation remain available.
-    function pause() external onlyOwner {
-        _pause();
-    }
-
-    /// @notice Unpauses new risk-increasing order commits.
-    function unpause() external onlyOwner {
-        _unpause();
-    }
 
     // ==========================================
     // STEP 1: THE COMMITMENT (User Intent)
@@ -280,38 +177,40 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         bool isClose
     ) external {
         if (!isClose) {
-            _requireNotPaused();
+            if (OrderRouterAdmin(admin).paused()) {
+                revert Pausable.EnforcedPause();
+            }
             if (engine.degradedMode()) {
-                revert OrderRouter__DegradedMode();
+                _revertCommitValidation(9);
             }
             if (_isCloseOnlyWindow()) {
-                revert OrderRouter__CloseOnlyMode();
+                _revertCommitValidation(10);
             }
             if (!vault.canIncreaseRisk()) {
                 if (!vault.isSeedLifecycleComplete()) {
-                    revert OrderRouter__SeedLifecycleIncomplete();
+                    _revertCommitValidation(0);
                 }
-                revert OrderRouter__TradingNotActive();
+                _revertCommitValidation(1);
             }
         }
         if (sizeDelta == 0) {
             revert OrderRouter__ZeroSize();
         }
         if (isClose && marginDelta > 0) {
-            revert OrderRouter__CloseMarginDeltaNotAllowed();
+            _revertCommitValidation(2);
         }
         bytes32 accountId = bytes32(uint256(uint160(msg.sender)));
         uint256 executionBountyUsdc;
         if (isClose) {
             QueuedPositionView memory queuedPosition = _getQueuedPositionView(accountId);
             if (!queuedPosition.exists || queuedPosition.size == 0) {
-                revert OrderRouter__NoOpenPosition();
+                _revertCommitValidation(3);
             }
             if (queuedPosition.side != side) {
-                revert OrderRouter__CloseSideMismatch();
+                _revertCommitValidation(4);
             }
             if (sizeDelta > queuedPosition.size) {
-                revert OrderRouter__CloseSizeExceedsPosition();
+                _revertCommitValidation(5);
             }
             executionBountyUsdc = CLOSE_ORDER_EXECUTION_BOUNTY_USDC;
         } else {
@@ -356,51 +255,37 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         _linkGlobalOrder(orderId);
         _linkAccountOrder(accountId, orderId);
         if (++pendingOrderCounts[accountId] > MAX_PENDING_ORDERS) {
-            revert OrderRouter__TooManyPendingOrders();
+            _revertCommitValidation(7);
         }
         emit OrderCommitted(orderId, accountId, side);
-    }
-
-    /// @dev Legacy raw order-record getter kept for tests and migration only.
-    function getOrderRecord(
-        uint64 orderId
-    ) external view returns (OrderRecord memory) {
-        return orderRecords[orderId];
     }
 
     /// @notice Returns the total queued escrow state for an account across all pending orders.
     function syncMarginQueue(
         bytes32 accountId
-    ) external onlyEngine {
+    ) external {
+        _onlyEngine();
         _pruneMarginQueue(accountId);
     }
 
-    function getPendingOrdersForAccount(
-        bytes32 accountId
-    ) external view returns (IOrderRouterAccounting.PendingOrderView[] memory pending) {
-        pending = new IOrderRouterAccounting.PendingOrderView[](pendingOrderCounts[accountId]);
-        uint256 index;
-        for (
-            uint64 orderId = accountHeadOrderId[accountId];
-            orderId != 0;
-            orderId = orderRecords[orderId].nextAccountOrderId
-        ) {
-            OrderRecord storage record = orderRecords[orderId];
-            CfdTypes.Order memory order = record.core;
-            pending[index] = IOrderRouterAccounting.PendingOrderView({
-                orderId: orderId,
-                isClose: order.isClose,
-                side: order.side,
-                sizeDelta: order.sizeDelta,
-                marginDelta: order.marginDelta,
-                targetPrice: order.targetPrice,
-                commitTime: order.commitTime,
-                commitBlock: order.commitBlock,
-                committedMarginUsdc: clearinghouse.getOrderReservation(orderId).remainingAmountUsdc,
-                executionBountyUsdc: record.executionBountyUsdc
-            });
-            index++;
-        }
+    function getPendingOrderView(
+        uint64 orderId
+    ) external view returns (IOrderRouterAccounting.PendingOrderView memory pending, uint64 nextAccountOrderId) {
+        OrderRecord storage record = orderRecords[orderId];
+        CfdTypes.Order memory order = record.core;
+        pending = IOrderRouterAccounting.PendingOrderView({
+            orderId: orderId,
+            isClose: order.isClose,
+            side: order.side,
+            sizeDelta: order.sizeDelta,
+            marginDelta: order.marginDelta,
+            targetPrice: order.targetPrice,
+            commitTime: order.commitTime,
+            commitBlock: order.commitBlock,
+            committedMarginUsdc: clearinghouse.getOrderReservation(orderId).remainingAmountUsdc,
+            executionBountyUsdc: record.executionBountyUsdc
+        });
+        nextAccountOrderId = record.nextAccountOrderId;
     }
 
     // ==========================================
@@ -418,7 +303,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         bytes[] calldata pythUpdateData
     ) external payable {
         if (nextExecuteId == 0) {
-            revert OrderRouter__NoOrdersToExecute();
+            _revertQueueState(0);
         }
         uint64 initialHeadOrderId = nextExecuteId;
         (, CfdTypes.Order memory initialHeadOrder) = _pendingOrder(initialHeadOrderId);
@@ -428,13 +313,13 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
 
         _skipStaleOrders(orderId, update.executionPrice, update.oraclePublishTime);
         if (nextExecuteId == 0) {
-            revert OrderRouter__NoOrdersToExecute();
+            _revertQueueState(0);
         }
         if (orderId < nextExecuteId) {
             orderId = nextExecuteId;
         }
         if (orderId != nextExecuteId) {
-            revert OrderRouter__FIFOViolation();
+            _revertQueueState(1);
         }
         (, CfdTypes.Order memory order) = _pendingOrder(orderId);
 
@@ -453,13 +338,13 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         bytes[] calldata pythUpdateData
     ) external payable {
         if (nextExecuteId == 0) {
-            revert OrderRouter__NoOrdersToExecute();
+            _revertQueueState(0);
         }
         if (maxOrderId < nextExecuteId) {
-            revert OrderRouter__NoOrdersToExecute();
+            _revertQueueState(2);
         }
         if (maxOrderId >= nextCommitId) {
-            revert OrderRouter__MaxOrderIdNotCommitted();
+            _revertQueueState(3);
         }
 
         (OracleUpdateResult memory update, RouterExecutionContext memory executionContext) =
@@ -524,7 +409,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     }
 
     function _revertOrderNotPending() internal pure override {
-        revert OrderRouter__OrderNotPending();
+        _revertQueueState(4);
     }
 
     function _maxOrderAge() internal view override returns (uint256) {
@@ -532,7 +417,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     }
 
     function _revertNoOrdersToExecute() internal pure override {
-        revert OrderRouter__NoOrdersToExecute();
+        _revertQueueState(0);
     }
 
     function _revertInsufficientGas() internal pure override {
@@ -540,46 +425,11 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     }
 
     function _revertMevDetected() internal pure override {
-        revert OrderRouter__MevDetected();
+        _revertOracleValidation(13);
     }
 
     function _revertCloseOnlyMode() internal pure override {
-        revert OrderRouter__CloseOnlyMode();
-    }
-
-    /// @notice Prunes expired head-of-queue orders in bounded slices.
-    /// @dev This is a maintenance path for advancing the global FIFO without requiring a full execute call.
-    function pruneExpiredOrders(
-        uint64 upToId,
-        uint256 maxPrunes
-    ) external {
-        if (nextExecuteId == 0) {
-            revert OrderRouter__NoOrdersToExecute();
-        }
-        uint256 boundedPrunes = maxPrunes > MAX_PRUNE_ORDERS_PER_CALL ? MAX_PRUNE_ORDERS_PER_CALL : maxPrunes;
-        if (boundedPrunes == 0) {
-            return;
-        }
-        uint64 cachedMarkTime = engine.lastMarkTime();
-        if (cachedMarkTime == 0 || block.timestamp > cachedMarkTime + orderExecutionStalenessLimit) {
-            return;
-        }
-        _pruneExpiredHeadOrders(upToId, boundedPrunes, engine.lastMarkPrice(), cachedMarkTime);
-    }
-
-    function _timelockReadyAt() internal view returns (uint256) {
-        return block.timestamp + TIMELOCK_DELAY;
-    }
-
-    function _requireTimelockReady(
-        uint256 readyAt
-    ) internal view {
-        if (readyAt == 0) {
-            revert OrderRouter__NoProposal();
-        }
-        if (block.timestamp < readyAt) {
-            revert OrderRouter__TimelockNotReady();
-        }
+        _revertCommitValidation(10);
     }
 
     function _sendEth(
@@ -589,7 +439,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         if (amount > 0) {
             (bool ok,) = payable(to).call{value: amount}("");
             if (!ok) {
-                claimableEth[to] += amount;
+                OrderRouterAdmin(admin).creditClaimableEth(to, amount);
             }
         }
     }
@@ -703,7 +553,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
 
         try engine.reserveCloseOrderExecutionBounty(accountId, marginBackedBountyUsdc, address(this)) {}
         catch {
-            revert OrderRouter__InsufficientFreeEquity();
+            _revertCommitValidation(6);
         }
     }
 
@@ -747,28 +597,32 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         }
     }
 
-    function _proposeUint(
-        uint256 value
-    ) internal view returns (uint256 pendingValue, uint256 activationTime) {
-        pendingValue = value;
-        activationTime = _timelockReadyAt();
+    function setMaxOrderAge(
+        uint256 newMaxOrderAge
+    ) external {
+        _onlyAdmin();
+        maxOrderAge = newMaxOrderAge;
     }
 
-    function _finalizeUint(
-        TimelockedUintProposal memory proposal
-    ) internal view returns (uint256) {
-        _requireTimelockReady(proposal.activationTime);
-        return proposal.value;
+    function setOrderExecutionStalenessLimit(
+        uint256 limit
+    ) external {
+        _onlyAdmin();
+        orderExecutionStalenessLimit = limit;
     }
 
-    function _claimAmount(
-        mapping(address => uint256) storage claimable
-    ) internal returns (uint256 amount) {
-        amount = claimable[msg.sender];
-        if (amount == 0) {
-            revert OrderRouter__NothingToClaim();
-        }
-        claimable[msg.sender] = 0;
+    function setLiquidationStalenessLimit(
+        uint256 limit
+    ) external {
+        _onlyAdmin();
+        liquidationStalenessLimit = limit;
+    }
+
+    function setPythMaxConfidenceRatioBps(
+        uint256 ratioBps
+    ) external {
+        _onlyAdmin();
+        pythMaxConfidenceRatioBps = ratioBps;
     }
 
     function _nextCommitId() internal view override returns (uint64) {
@@ -779,21 +633,6 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         uint64 orderId
     ) internal override {
         _releaseCommittedMargin(orderId);
-    }
-
-    /// @notice Claims ETH balances that could not be pushed during prior cleanup/refund flows.
-    function claimBalance(
-        bool ethBalance
-    ) external {
-        if (!ethBalance) {
-            revert OrderRouter__NothingToClaim();
-        }
-
-        uint256 ethAmount = _claimAmount(claimableEth);
-        (bool success,) = payable(msg.sender).call{value: ethAmount}("");
-        if (!success) {
-            revert OrderRouter__EthTransferFailed();
-        }
     }
 
     // ==========================================
@@ -838,15 +677,15 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     }
 
     function _revertInsufficientFreeEquity() internal pure override {
-        revert OrderRouter__InsufficientFreeEquity();
+        _revertCommitValidation(6);
     }
 
     function _revertMarginOrderLinkCorrupted() internal pure override {
-        revert OrderRouter__MarginOrderLinkCorrupted();
+        _revertQueueState(5);
     }
 
     function _revertPendingOrderLinkCorrupted() internal pure override {
-        revert OrderRouter__PendingOrderLinkCorrupted();
+        _revertQueueState(6);
     }
 
 }

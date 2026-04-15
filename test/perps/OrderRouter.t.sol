@@ -4,12 +4,14 @@ pragma solidity 0.8.33;
 import {IPyth, PythStructs} from "../../src/interfaces/IPyth.sol";
 import {DecimalConstants} from "../../src/libraries/DecimalConstants.sol";
 import {BasketOracle} from "../../src/oracles/BasketOracle.sol";
+import {CfdEngineAdmin} from "../../src/perps/CfdEngineAdmin.sol";
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
 import {CfdEnginePlanTypes} from "../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
+import {OrderRouterAdmin} from "../../src/perps/OrderRouterAdmin.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {AccountLensViewTypes} from "../../src/perps/interfaces/AccountLensViewTypes.sol";
@@ -19,6 +21,7 @@ import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAcc
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {MockOracle} from "../utils/MockOracle.sol";
+import {OrderRouterDebugLens} from "../utils/OrderRouterDebugLens.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -192,7 +195,7 @@ contract OrderRouterTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        vm.expectRevert(OrderRouter.OrderRouter__NoOrdersToExecute.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__QueueState.selector, 0));
         vm.roll(10);
         router.executeOrder(1, empty);
     }
@@ -215,10 +218,10 @@ contract OrderRouterTest is BasePerpTest {
         clearinghouse.withdraw(otherId, 70e6);
 
         vm.prank(address(this));
-        router.proposeMaxOrderAge(0);
+        routerAdmin.proposeMaxOrderAge(0);
         vm.warp(block.timestamp + 48 hours);
         vm.prank(address(this));
-        router.finalizeMaxOrderAge();
+        routerAdmin.finalizeMaxOrderAge();
 
         bytes[] memory pythPrice = new bytes[](1);
         pythPrice[0] = abi.encode(uint256(150_000_000));
@@ -257,7 +260,7 @@ contract OrderRouterTest is BasePerpTest {
         vm.stopPrank();
 
         bytes[] memory empty;
-        vm.expectRevert(OrderRouter.OrderRouter__FIFOViolation.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__QueueState.selector, 1));
         vm.roll(10);
         router.executeOrder(2, empty);
     }
@@ -303,7 +306,7 @@ contract OrderRouterTest is BasePerpTest {
         for (uint256 i = 0; i < limit; i++) {
             router.commitOrder(CfdTypes.Side.BULL, 1000e18, 100e6, 1e8, false);
         }
-        vm.expectRevert(OrderRouter.OrderRouter__TooManyPendingOrders.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__CommitValidation.selector, 7));
         router.commitOrder(CfdTypes.Side.BULL, 1000e18, 100e6, 1e8, false);
         vm.stopPrank();
     }
@@ -362,7 +365,7 @@ contract OrderRouterTest is BasePerpTest {
         vm.stopPrank();
 
         IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
-        IOrderRouterAccounting.PendingOrderView[] memory pending = router.getPendingOrdersForAccount(accountId);
+        IOrderRouterAccounting.PendingOrderView[] memory pending = _pendingOrders(accountId);
         assertEq(escrow.pendingOrderCount, 2);
         assertEq(escrow.committedMarginUsdc, 1000 * 1e6);
         assertEq(escrow.executionBountyUsdc, 2_000_000);
@@ -601,7 +604,7 @@ contract OrderRouterTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 0, 1e8, true);
         vm.stopPrank();
 
-        IOrderRouterAccounting.PendingOrderView[] memory pending = router.getPendingOrdersForAccount(accountId);
+        IOrderRouterAccounting.PendingOrderView[] memory pending = _pendingOrders(accountId);
         assertEq(pending.length, 2);
         assertEq(pending[0].orderId, 1);
         assertFalse(pending[0].isClose);
@@ -627,7 +630,7 @@ contract OrderRouterTest is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 500 * 1e6, 1e8, false);
 
-        IOrderRouterAccounting.PendingOrderView[] memory alicePending = router.getPendingOrdersForAccount(aliceId);
+        IOrderRouterAccounting.PendingOrderView[] memory alicePending = _pendingOrders(aliceId);
         assertEq(alicePending.length, 2, "Alice should see only her own queued orders");
         assertEq(alicePending[0].orderId, 1, "Alice queue should preserve per-account FIFO order");
         assertEq(alicePending[1].orderId, 3, "Alice tail should remain reachable after foreign inserts");
@@ -876,7 +879,7 @@ contract OrderRouterTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        IOrderRouterAccounting.PendingOrderView[] memory alicePending = router.getPendingOrdersForAccount(aliceId);
+        IOrderRouterAccounting.PendingOrderView[] memory alicePending = _pendingOrders(aliceId);
         assertEq(alicePending.length, 1, "Only Alice's trailing queued order should remain");
         assertEq(alicePending[0].orderId, 3, "Alice residual queue should still be reachable after execution");
     }
@@ -971,7 +974,7 @@ contract OrderRouterTest is BasePerpTest {
 
     function test_BatchExecution_NoOrders_Reverts() public {
         bytes[] memory empty;
-        vm.expectRevert(OrderRouter.OrderRouter__NoOrdersToExecute.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__QueueState.selector, 0));
         vm.roll(block.number + 1);
         router.executeOrderBatch(0, empty);
     }
@@ -985,7 +988,7 @@ contract OrderRouterTest is BasePerpTest {
         router.executeOrderBatch(1, empty);
 
         assertEq(router.nextExecuteId(), 0, "Queue should be empty after draining the only batch order");
-        vm.expectRevert(OrderRouter.OrderRouter__NoOrdersToExecute.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__QueueState.selector, 0));
         router.executeOrderBatch(1, empty);
     }
 
@@ -994,7 +997,7 @@ contract OrderRouterTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         bytes[] memory empty;
-        vm.expectRevert(OrderRouter.OrderRouter__MaxOrderIdNotCommitted.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__QueueState.selector, 3));
         vm.roll(block.number + 1);
         router.executeOrderBatch(5, empty);
     }
@@ -1273,6 +1276,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        _syncEngineAdmin();
         pool = new HousePool(address(usdc), address(engine));
 
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");
@@ -1298,6 +1302,7 @@ contract OrderRouterPythTest is BasePerpTest {
             bases,
             new bool[](2)
         );
+        _syncRouterAdmin();
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 
@@ -1342,7 +1347,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
-        vm.expectRevert(OrderRouter.OrderRouter__MevDetected.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 13));
         router.executeOrder(1, empty);
 
         assertEq(
@@ -1360,7 +1365,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(1050);
 
         bytes[] memory empty = _pythUpdateData();
-        vm.expectRevert(OrderRouter.OrderRouter__MevDetected.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 13));
         router.executeOrder(1, empty);
 
         assertEq(router.nextExecuteId(), 1, "Order stays in queue when executed in same block");
@@ -1379,12 +1384,13 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(1200);
         vm.roll(block.number + 1);
 
-        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
         router.executeOrder(1, _pythUpdateData());
 
-        router.proposeOrderExecutionStalenessLimit(300);
+        routerAdmin.proposeOrderExecutionStalenessLimit(300);
         vm.warp(1200 + 48 hours + 1);
-        router.finalizeOrderExecutionStalenessLimit();
+        routerAdmin.finalizeOrderExecutionStalenessLimit();
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), uint64(block.timestamp - 10));
 
         router.executeOrder(1, _pythUpdateData());
 
@@ -1392,11 +1398,11 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_OrderRefund_DoesNotRevertWhenRouterLimitExceedsEngineHelperLimit() public {
-        engine.proposeEngineMarkStalenessLimit(60);
-        router.proposeOrderExecutionStalenessLimit(300);
+        engineAdmin.proposeEngineMarkStalenessLimit(60);
+        routerAdmin.proposeOrderExecutionStalenessLimit(300);
         vm.warp(block.timestamp + 48 hours + 1);
-        engine.finalizeEngineMarkStalenessLimit();
-        router.finalizeOrderExecutionStalenessLimit();
+        engineAdmin.finalizeEngineMarkStalenessLimit();
+        routerAdmin.finalizeOrderExecutionStalenessLimit();
 
         vm.warp(1050);
         vm.prank(alice);
@@ -1429,14 +1435,14 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
-        router.proposePythMaxConfidenceRatioBps(100);
+        routerAdmin.proposePythMaxConfidenceRatioBps(100);
         vm.warp(1000 + 48 hours + 1);
-        router.finalizePythMaxConfidenceRatioBps();
+        routerAdmin.finalizePythMaxConfidenceRatioBps();
 
-        mockPyth.setAllPrices(feedIds, int64(100_000_000), uint64(2_000_000), int32(-8), 1006);
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), uint64(2_000_000), int32(-8), uint64(block.timestamp - 10));
 
         vm.roll(block.number + 1);
-        vm.expectRevert(OrderRouter.OrderRouter__OracleConfidenceTooWide.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 11));
         router.executeOrder(1, _pythUpdateData());
     }
 
@@ -1446,9 +1452,9 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
-        router.proposePythMaxConfidenceRatioBps(100);
+        routerAdmin.proposePythMaxConfidenceRatioBps(100);
         vm.warp(1000 + 48 hours + 1);
-        router.finalizePythMaxConfidenceRatioBps();
+        routerAdmin.finalizePythMaxConfidenceRatioBps();
 
         mockPyth.setAllPrices(feedIds, int64(100_000_000), uint64(500_000), int32(-8), 1006);
 
@@ -1599,7 +1605,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.prank(eve);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 100e6, 1e8, false);
 
-        IOrderRouterAccounting.PendingOrderView[] memory pending = router.getPendingOrdersForAccount(eveId);
+        IOrderRouterAccounting.PendingOrderView[] memory pending = _pendingOrders(eveId);
         assertEq(pending.length, 1, "Stale cached marks should skip commit-time predictable-open rejection");
         assertEq(pending[0].sizeDelta, 100_000e18, "Queued order should preserve the requested open intent");
     }
@@ -1986,7 +1992,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         vm.startPrank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 6000 * 1e18, 0, 0, true);
-        vm.expectRevert(OrderRouter.OrderRouter__CloseSizeExceedsPosition.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__CommitValidation.selector, 5));
         router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 0, 0, true);
         vm.stopPrank();
 
@@ -2022,7 +2028,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(1000);
         bytes[] memory empty = _pythUpdateData();
 
-        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
         router.executeOrder(1, empty);
 
         IOrderRouterAccounting.AccountEscrowView memory afterRevertEscrow = router.getAccountEscrow(accountId);
@@ -2130,7 +2136,7 @@ contract OrderRouterPythTest is BasePerpTest {
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 2000 - age);
 
         bytes[] memory empty = _pythUpdateData();
-        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
         router.executeOrder(1, empty);
 
         IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
@@ -2172,7 +2178,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         assertEq(router.nextExecuteId(), 0, "Queue head should clear to zero sentinel when empty");
 
-        vm.expectRevert(OrderRouter.OrderRouter__NoOrdersToExecute.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__QueueState.selector, 0));
         router.executeOrder(1, empty);
     }
 
@@ -2217,7 +2223,7 @@ contract OrderRouterPythTest is BasePerpTest {
         data[0] = hex"00";
 
         vm.warp(1050);
-        vm.expectRevert(OrderRouter.OrderRouter__InsufficientPythFee.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 6));
         vm.roll(block.number + 1);
         router.executeOrder(1, data);
     }
@@ -2236,11 +2242,11 @@ contract OrderRouterPythTest is BasePerpTest {
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
 
-        router.proposeOrderExecutionStalenessLimit(60);
-        router.proposeLiquidationStalenessLimit(15);
+        routerAdmin.proposeOrderExecutionStalenessLimit(60);
+        routerAdmin.proposeLiquidationStalenessLimit(15);
         vm.warp(block.timestamp + 48 hours + 1);
-        router.finalizeOrderExecutionStalenessLimit();
-        router.finalizeLiquidationStalenessLimit();
+        routerAdmin.finalizeOrderExecutionStalenessLimit();
+        routerAdmin.finalizeLiquidationStalenessLimit();
 
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 2040);
         vm.warp(2050);
@@ -2248,7 +2254,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         vm.warp(2056);
         vm.roll(block.number + 1);
-        vm.expectRevert(OrderRouter.OrderRouter__MevOraclePriceTooStale.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 12));
         router.executeLiquidation(accountId, empty);
     }
 
@@ -2273,12 +2279,12 @@ contract OrderRouterPythTest is BasePerpTest {
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 2000);
 
         vm.warp(2061);
-        vm.expectRevert(OrderRouter.OrderRouter__MevOraclePriceTooStale.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 12));
         router.executeLiquidation(accountId, empty);
 
-        router.proposeLiquidationStalenessLimit(61);
+        routerAdmin.proposeLiquidationStalenessLimit(61);
         vm.warp(2061 + 48 hours + 1);
-        router.finalizeLiquidationStalenessLimit();
+        routerAdmin.finalizeLiquidationStalenessLimit();
 
         vm.warp(2061);
         vm.expectRevert(CfdEngine.CfdEngine__PositionIsSolvent.selector);
@@ -2415,7 +2421,7 @@ contract OrderRouterPythTest is BasePerpTest {
         bytes[] memory empty = _pythUpdateData();
         vm.prank(keeper);
         vm.roll(block.number + 1);
-        vm.expectRevert(OrderRouter.OrderRouter__MevDetected.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 13));
         router.executeOrder(1, empty);
 
         assertEq(router.nextExecuteId(), 1, "Live execution should reject publish times that predate commit");
@@ -2446,7 +2452,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         vm.warp(1000);
         bytes[] memory empty = _pythUpdateData();
-        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
         vm.roll(block.number + 1);
         router.executeOrderBatch(1, empty);
     }
@@ -2503,7 +2509,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(1050);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
-        vm.expectRevert(OrderRouter.OrderRouter__MevDetected.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 13));
         router.executeOrder(1, empty);
 
         assertEq(router.nextExecuteId(), 1, "Weakest-link publish time should still trigger MEV protection");
@@ -2520,7 +2526,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         vm.warp(1001);
         bytes[] memory empty = _pythUpdateData();
-        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
         vm.roll(block.number + 1);
         router.executeOrderBatch(1, empty);
     }
@@ -2532,7 +2538,7 @@ contract OrderRouterPythTest is BasePerpTest {
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 930);
 
         BasketPriceHarness harness = new BasketPriceHarness(address(mockPyth), feedIds, weights, bases, new bool[](2));
-        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
         harness.computeBasketPrice(3 days, 60);
     }
 
@@ -2603,6 +2609,7 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
 
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        _syncEngineAdmin();
         pool = new HousePool(address(usdc), address(engine));
 
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");
@@ -2662,9 +2669,9 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
     }
 
     function test_FadWindow_OpenOrderStaysPendingAtExecution() public {
-        router.proposeMaxOrderAge(7 days);
+        routerAdmin.proposeMaxOrderAge(7 days);
         vm.warp(block.timestamp + 48 hours);
-        router.finalizeMaxOrderAge();
+        routerAdmin.finalizeMaxOrderAge();
 
         uint256 fadPublishTime = TEST_FRIDAY_18UTC + 2 hours + 1;
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), fadPublishTime);
@@ -2684,7 +2691,7 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
 
-        vm.expectRevert(OrderRouter.OrderRouter__CloseOnlyMode.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__CommitValidation.selector, 10));
         router.executeOrder(orderId, empty);
 
         (uint256 size,,,,,,) = engine.positions(aliceId);
@@ -2709,16 +2716,16 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
             router.pendingOrderCounts(aliceId), 1, "Blocked close-only execution should preserve pending order count"
         );
         assertEq(
-            uint256(router.getOrderRecord(orderId).status),
+            uint256(_orderRecord(orderId).status),
             uint256(IOrderRouterAccounting.OrderStatus.Pending),
             "Blocked close-only execution should keep the order pending"
         );
     }
 
     function test_FadWindow_BatchOpenOrderStaysPendingAtBlockedHead() public {
-        router.proposeMaxOrderAge(7 days);
+        routerAdmin.proposeMaxOrderAge(7 days);
         vm.warp(block.timestamp + 48 hours);
-        router.finalizeMaxOrderAge();
+        routerAdmin.finalizeMaxOrderAge();
 
         uint256 fadPublishTime = TEST_FRIDAY_18UTC + 2 hours + 1;
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), fadPublishTime);
@@ -2755,7 +2762,7 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
         assertEq(router.nextExecuteId(), orderId, "Blocked batch execution should stop at the pending FIFO head");
         assertEq(router.pendingOrderCounts(aliceId), 1, "Blocked batch execution should preserve pending order count");
         assertEq(
-            uint256(router.getOrderRecord(orderId).status),
+            uint256(_orderRecord(orderId).status),
             uint256(IOrderRouterAccounting.OrderStatus.Pending),
             "Blocked batch execution should keep the order pending"
         );
@@ -3050,9 +3057,9 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         clearinghouse.withdraw(accountId, 70e6);
         vm.stopPrank();
 
-        engine.proposeEngineMarkStalenessLimit(90 days);
-        vm.warp(engine.engineMarkStalenessActivationTime() + 1);
-        engine.finalizeEngineMarkStalenessLimit();
+        engineAdmin.proposeEngineMarkStalenessLimit(90 days);
+        vm.warp(engineAdmin.engineMarkStalenessActivationTime() + 1);
+        engineAdmin.finalizeEngineMarkStalenessLimit();
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
@@ -3151,7 +3158,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         );
 
         vm.prank(trader);
-        vm.expectRevert(OrderRouter.OrderRouter__NoOrdersToExecute.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__QueueState.selector, 0));
         router.executeOrderBatch(uint64(queuedOrderCount), priceData);
 
         assertEq(
@@ -3191,7 +3198,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         assertEq(router.pendingOrderCounts(traderId), 0, "Liquidation should clear only the liquidated account queue");
         assertEq(router.pendingOrderCounts(otherId), 2, "Unrelated account queue should remain intact");
 
-        IOrderRouterAccounting.PendingOrderView[] memory otherPending = router.getPendingOrdersForAccount(otherId);
+        IOrderRouterAccounting.PendingOrderView[] memory otherPending = _pendingOrders(otherId);
         assertEq(otherPending.length, 2, "Per-account traversal should still expose unrelated pending orders");
         assertEq(otherPending[0].orderId, 3, "Unrelated account should retain FIFO order ids after cleanup");
         assertEq(otherPending[1].orderId, 4, "Unrelated account queue should preserve its tail order");
@@ -3216,7 +3223,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 15_000e18, 0, type(uint256).max, true);
 
-        IOrderRouterAccounting.PendingOrderView[] memory traderPending = router.getPendingOrdersForAccount(traderId);
+        IOrderRouterAccounting.PendingOrderView[] memory traderPending = _pendingOrders(traderId);
         assertEq(traderPending.length, 2, "Trader should be able to queue closes using only its own pending orders");
         assertEq(traderPending[0].sizeDelta, 5000e18, "First close should remain queued");
         assertEq(traderPending[1].sizeDelta, 15_000e18, "Second close should consume only the trader's residual size");
@@ -3263,6 +3270,7 @@ contract FadStalenessTest is BasePerpTest {
 
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        _syncEngineAdmin();
         pool = new HousePool(address(usdc), address(engine));
 
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");
@@ -3341,33 +3349,33 @@ contract FadStalenessTest is BasePerpTest {
     function _addFadDays(
         uint256[] memory timestamps
     ) internal {
-        engine.proposeAddFadDays(timestamps);
+        engineAdmin.proposeAddFadDays(timestamps);
         vm.warp(_currentTimestamp() + 48 hours + 1);
-        engine.finalizeAddFadDays();
+        engineAdmin.finalizeAddFadDays();
     }
 
     function _removeFadDays(
         uint256[] memory timestamps
     ) internal {
-        engine.proposeRemoveFadDays(timestamps);
+        engineAdmin.proposeRemoveFadDays(timestamps);
         vm.warp(_currentTimestamp() + 48 hours + 1);
-        engine.finalizeRemoveFadDays();
+        engineAdmin.finalizeRemoveFadDays();
     }
 
     function _setFadMaxStaleness(
         uint256 val
     ) internal {
-        engine.proposeFadMaxStaleness(val);
+        engineAdmin.proposeFadMaxStaleness(val);
         vm.warp(_currentTimestamp() + 48 hours + 1);
-        engine.finalizeFadMaxStaleness();
+        engineAdmin.finalizeFadMaxStaleness();
     }
 
     function _setFadRunway(
         uint256 val
     ) internal {
-        engine.proposeFadRunway(val);
+        engineAdmin.proposeFadRunway(val);
         vm.warp(_currentTimestamp() + 48 hours + 1);
-        engine.finalizeFadRunway();
+        engineAdmin.finalizeFadRunway();
     }
 
     function test_FadWindow_CloseOrder_AllowedDuringFrozenWithPreFreezeCommit() public {
@@ -3393,14 +3401,14 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(SATURDAY_NOON);
 
         vm.prank(alice);
-        vm.expectRevert(OrderRouter.OrderRouter__CloseOnlyMode.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__CommitValidation.selector, 10));
         router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
     }
 
     function helper_FadWindow_OpenOrderStaysPendingAtExecution() public {
-        router.proposeMaxOrderAge(7 days);
+        routerAdmin.proposeMaxOrderAge(7 days);
         vm.warp(block.timestamp + 48 hours);
-        router.finalizeMaxOrderAge();
+        routerAdmin.finalizeMaxOrderAge();
 
         uint256 fadPublishTime = FRIDAY_18UTC + 2 hours + 1;
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), fadPublishTime);
@@ -3419,7 +3427,7 @@ contract FadStalenessTest is BasePerpTest {
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
 
-        vm.expectRevert(OrderRouter.OrderRouter__CloseOnlyMode.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__CommitValidation.selector, 10));
         router.executeOrder(orderId, empty);
 
         (uint256 size,,,,,,) = engine.positions(aliceId);
@@ -3444,16 +3452,16 @@ contract FadStalenessTest is BasePerpTest {
             router.pendingOrderCounts(aliceId), 1, "Blocked close-only execution should preserve pending order count"
         );
         assertEq(
-            uint256(router.getOrderRecord(orderId).status),
+            uint256(_orderRecord(orderId).status),
             uint256(IOrderRouterAccounting.OrderStatus.Pending),
             "Blocked close-only execution should keep the order pending"
         );
     }
 
     function helper_FadWindow_BatchOpenOrderStaysPendingAtBlockedHead() public {
-        router.proposeMaxOrderAge(7 days);
+        routerAdmin.proposeMaxOrderAge(7 days);
         vm.warp(block.timestamp + 48 hours);
-        router.finalizeMaxOrderAge();
+        routerAdmin.finalizeMaxOrderAge();
 
         uint256 fadPublishTime = FRIDAY_18UTC + 2 hours + 1;
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), fadPublishTime);
@@ -3489,7 +3497,7 @@ contract FadStalenessTest is BasePerpTest {
         assertEq(router.nextExecuteId(), orderId, "Blocked batch execution should stop at the pending FIFO head");
         assertEq(router.pendingOrderCounts(aliceId), 1, "Blocked batch execution should preserve pending order count");
         assertEq(
-            uint256(router.getOrderRecord(orderId).status),
+            uint256(_orderRecord(orderId).status),
             uint256(IOrderRouterAccounting.OrderStatus.Pending),
             "Blocked batch execution should keep the order pending"
         );
@@ -3524,7 +3532,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(SATURDAY_NOON + 50);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
-        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
         router.executeOrder(2, empty);
     }
 
@@ -3568,7 +3576,7 @@ contract FadStalenessTest is BasePerpTest {
         bytes[] memory empty = _pythUpdateData();
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
 
-        vm.expectRevert(OrderRouter.OrderRouter__MevOraclePriceTooStale.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 12));
         router.executeLiquidation(aliceId, empty);
     }
 
@@ -3600,7 +3608,7 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.warp(SATURDAY_NOON + 50);
         bytes[] memory empty = _pythUpdateData();
-        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
         vm.roll(block.number + 1);
         router.executeOrderBatch(2, empty);
     }
@@ -3615,7 +3623,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(WEDNESDAY_NOON + 67);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
-        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
         router.executeOrder(2, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
@@ -3677,8 +3685,8 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function test_Admin_SetFadMaxStaleness_ZeroReverts() public {
-        vm.expectRevert(CfdEngine.CfdEngine__ZeroStaleness.selector);
-        engine.proposeFadMaxStaleness(0);
+        vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__ZeroStaleness.selector);
+        engineAdmin.proposeFadMaxStaleness(0);
     }
 
     function test_Admin_AddFadDays_NonOwner_Reverts() public {
@@ -3687,13 +3695,13 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.prank(alice);
         vm.expectRevert();
-        engine.proposeAddFadDays(timestamps);
+        engineAdmin.proposeAddFadDays(timestamps);
     }
 
     function test_Admin_EmptyDays_Reverts() public {
         uint256[] memory empty = new uint256[](0);
         vm.expectRevert(CfdEngine.CfdEngine__EmptyDays.selector);
-        engine.proposeAddFadDays(empty);
+        engineAdmin.proposeAddFadDays(empty);
     }
 
     function test_AdminFadDay_BlockedDuringFrozen() public {
@@ -3704,7 +3712,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(MONDAY_NOON);
 
         vm.prank(alice);
-        vm.expectRevert(OrderRouter.OrderRouter__CloseOnlyMode.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__CommitValidation.selector, 10));
         router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
     }
 
@@ -3722,7 +3730,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(FRIDAY_20UTC + 30);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
-        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
         router.executeOrder(2, empty);
     }
 
@@ -3752,7 +3760,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(FRIDAY_20UTC);
 
         vm.prank(alice);
-        vm.expectRevert(OrderRouter.OrderRouter__CloseOnlyMode.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__CommitValidation.selector, 10));
         router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
     }
 
@@ -3785,7 +3793,7 @@ contract FadStalenessTest is BasePerpTest {
         bytes[] memory empty = _pythUpdateData();
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
 
-        vm.expectRevert(OrderRouter.OrderRouter__MevOraclePriceTooStale.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 12));
         router.executeLiquidation(aliceId, empty);
     }
 
@@ -3819,7 +3827,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(SUNDAY_21UTC + 30);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
-        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
         router.executeOrder(2, empty);
     }
 
@@ -3827,7 +3835,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(SUNDAY_21UTC);
 
         vm.prank(alice);
-        vm.expectRevert(OrderRouter.OrderRouter__CloseOnlyMode.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__CommitValidation.selector, 10));
         router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
     }
 
@@ -3842,7 +3850,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(SUNDAY_21UTC + 50);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
-        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
         router.executeOrder(2, empty);
     }
 
@@ -3877,7 +3885,7 @@ contract FadStalenessTest is BasePerpTest {
         assertTrue(engine.isFadWindow());
 
         vm.prank(alice);
-        vm.expectRevert(OrderRouter.OrderRouter__CloseOnlyMode.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__CommitValidation.selector, 10));
         router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
 
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), wednesdayMidnight - 3 hours + 6);
@@ -3911,7 +3919,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(runwayTime + 30);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
-        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
         router.executeOrder(2, empty);
     }
 
@@ -3922,8 +3930,8 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function test_Runway_TooLong_Reverts() public {
-        vm.expectRevert(CfdEngine.CfdEngine__RunwayTooLong.selector);
-        engine.proposeFadRunway(25 hours);
+        vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__RunwayTooLong.selector);
+        engineAdmin.proposeFadRunway(25 hours);
     }
 
     function test_Runway_ZeroDisablesLookahead() public {
@@ -3985,7 +3993,7 @@ contract InversionTest is Test {
         b[1] = 1e8;
         bool[] memory inv = new bool[](1);
 
-        vm.expectRevert(OrderRouter.OrderRouter__LengthMismatch.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 1));
         new BasketPriceHarness(address(mockPyth), ids, w, b, inv);
     }
 
@@ -4126,16 +4134,16 @@ contract OrderRouterAuditTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
         bytes[] memory empty;
 
-        vm.expectRevert(OrderRouter.OrderRouter__MockModeDisabled.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 4));
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
     }
 
     // Regression: H-02 — stale order executes via executeOrder
     function test_StaleOrderExecutesViaExecuteOrder() public {
-        router.proposeMaxOrderAge(300);
+        routerAdmin.proposeMaxOrderAge(300);
         _warpForward(48 hours + 1);
-        router.finalizeMaxOrderAge();
+        routerAdmin.finalizeMaxOrderAge();
 
         _fundJunior(bob, 1_000_000e6);
         _fundTrader(alice, 50_000e6);
@@ -4182,7 +4190,7 @@ contract OrderRouterAuditTest is BasePerpTest {
         (uint256 size,,,,,,) = engine.positions(accountId);
         assertGt(size, 0, "Position should be open");
 
-        router.pause();
+        routerAdmin.pause();
 
         vm.prank(alice);
         vm.expectRevert(Pausable.EnforcedPause.selector);
@@ -4191,7 +4199,7 @@ contract OrderRouterAuditTest is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, size, 0, 0, true);
 
-        router.unpause();
+        routerAdmin.unpause();
         vm.roll(10);
         router.executeOrder(2, empty);
 
@@ -4227,9 +4235,9 @@ contract StaleOrderExpiryTest is BasePerpTest {
 
     function setUp() public override {
         super.setUp();
-        router.proposeMaxOrderAge(300);
+        routerAdmin.proposeMaxOrderAge(300);
         _warpForward(48 hours + 1);
-        router.finalizeMaxOrderAge();
+        routerAdmin.finalizeMaxOrderAge();
     }
 
     // Regression: H-03
@@ -4353,11 +4361,11 @@ contract StaleOrderExpiryTest is BasePerpTest {
     function test_SetMaxOrderAge_OnlyOwner() public {
         vm.prank(spammer);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, spammer));
-        router.proposeMaxOrderAge(600);
+        routerAdmin.proposeMaxOrderAge(600);
 
-        router.proposeMaxOrderAge(600);
+        routerAdmin.proposeMaxOrderAge(600);
         _warpForward(48 hours + 1);
-        router.finalizeMaxOrderAge();
+        routerAdmin.finalizeMaxOrderAge();
         assertEq(router.maxOrderAge(), 600);
     }
 
@@ -4444,6 +4452,7 @@ contract MarkPriceStalenessTest is BasePerpTest {
         usdc = new MockUSDC();
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        _syncEngineAdmin();
         pool = new HousePool(address(usdc), address(engine));
 
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC");
@@ -4484,7 +4493,7 @@ contract MarkPriceStalenessTest is BasePerpTest {
         bytes[] memory updateData = new bytes[](1);
         updateData[0] = "";
 
-        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
         router.updateMarkPrice(updateData);
     }
 
@@ -4499,7 +4508,7 @@ contract MarkPriceStalenessTest is BasePerpTest {
     }
 
     function test_Constructor_ZeroEngineLensReverts() public {
-        vm.expectRevert(OrderRouter.OrderRouter__ZeroAddress.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 7));
         new OrderRouter(
             address(engine), address(0), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
         );
@@ -4544,6 +4553,7 @@ contract StalenessGriefTest is BasePerpTest {
         usdc = new MockUSDC();
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        _syncEngineAdmin();
         pool = new HousePool(address(usdc), address(engine));
 
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC");
@@ -4598,7 +4608,7 @@ contract StalenessGriefTest is BasePerpTest {
         bytes[] memory empty = _pythUpdateData();
         vm.prank(attacker);
         vm.roll(block.number + 1);
-        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
         router.executeOrder(1, empty);
 
         bytes32 aliceAccount = bytes32(uint256(uint160(alice)));
@@ -4618,6 +4628,7 @@ contract VpiImrBypassTest is Test {
     TrancheVault juniorVault;
     MarginClearinghouse clearinghouse;
     OrderRouter router;
+    OrderRouterAdmin routerAdmin;
 
     uint256 constant CAP_PRICE = 2e8;
     address alice = address(0x111);
@@ -4677,6 +4688,7 @@ contract VpiImrBypassTest is Test {
             new uint256[](0),
             new bool[](0)
         );
+        routerAdmin = OrderRouterAdmin(router.admin());
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 
@@ -4706,6 +4718,12 @@ contract VpiImrBypassTest is Test {
         usdc.approve(address(clearinghouse), amount);
         clearinghouse.deposit(accountId, amount);
         vm.stopPrank();
+    }
+
+    function _orderStatus(
+        uint64 orderId
+    ) internal view returns (IOrderRouterAccounting.OrderStatus) {
+        return OrderRouterDebugLens.loadOrderStatus(vm, router, orderId);
     }
 
     // Rebate-aware open validation should allow commits when a skew-reducing rebate
@@ -4760,7 +4778,7 @@ contract VpiImrBypassTest is Test {
             "Typed user-invalid open should pay the clearer as clearinghouse credit"
         );
         assertEq(
-            uint256(router.getOrderRecord(1).status),
+            uint256(_orderStatus(1)),
             uint256(IOrderRouterAccounting.OrderStatus.Failed),
             "Order should fail"
         );
@@ -4787,6 +4805,7 @@ contract KeeperFeeRefundTest is Test {
     TrancheVault juniorVault;
     MarginClearinghouse clearinghouse;
     OrderRouter router;
+    OrderRouterAdmin routerAdmin;
 
     uint256 constant CAP_PRICE = 2e8;
     address alice = address(0x111);
@@ -4853,14 +4872,15 @@ contract KeeperFeeRefundTest is Test {
             new uint256[](0),
             new bool[](0)
         );
+        routerAdmin = OrderRouterAdmin(router.admin());
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 
         _warpPastTimelock();
-        router.proposeMaxOrderAge(300);
+        routerAdmin.proposeMaxOrderAge(300);
         _warpPastTimelock();
         clearinghouse.setEngine(address(engine));
-        router.finalizeMaxOrderAge();
+        routerAdmin.finalizeMaxOrderAge();
         _bootstrapSeededLifecycle();
 
         usdc.mint(bob, 1_000_000e6);

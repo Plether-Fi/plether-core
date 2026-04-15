@@ -142,7 +142,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
             IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
-            IOrderRouterAccounting.PendingOrderView[] memory pending = router.getPendingOrdersForAccount(accountId);
+            IOrderRouterAccounting.PendingOrderView[] memory pending = _pendingOrders(accountId);
 
             uint256 pendingCloseSize;
             for (uint256 j = 0; j < pending.length; j++) {

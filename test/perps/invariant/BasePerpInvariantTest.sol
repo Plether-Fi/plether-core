@@ -2,16 +2,20 @@
 pragma solidity 0.8.33;
 
 import {CfdEngine} from "../../../src/perps/CfdEngine.sol";
+import {CfdEngineAdmin} from "../../../src/perps/CfdEngineAdmin.sol";
 import {CfdEngineAccountLens} from "../../../src/perps/CfdEngineAccountLens.sol";
 import {CfdEngineLens} from "../../../src/perps/CfdEngineLens.sol";
 import {CfdEngineProtocolLens} from "../../../src/perps/CfdEngineProtocolLens.sol";
 import {CfdTypes} from "../../../src/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "../../../src/perps/MarginClearinghouse.sol";
+import {OrderRouterAdmin} from "../../../src/perps/OrderRouterAdmin.sol";
 import {OrderRouter} from "../../../src/perps/OrderRouter.sol";
 import {PerpsPublicLens} from "../../../src/perps/PerpsPublicLens.sol";
 import {DeferredEngineViewTypes} from "../../../src/perps/interfaces/DeferredEngineViewTypes.sol";
+import {IOrderRouterAccounting} from "../../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {PerpsViewTypes} from "../../../src/perps/interfaces/PerpsViewTypes.sol";
 import {MockUSDC} from "../../mocks/MockUSDC.sol";
+import {OrderRouterDebugLens} from "../../utils/OrderRouterDebugLens.sol";
 import {MockInvariantVault} from "./mocks/MockInvariantVault.sol";
 import {Test} from "forge-std/Test.sol";
 
@@ -19,12 +23,14 @@ abstract contract BasePerpInvariantTest is Test {
 
     MockUSDC internal usdc;
     CfdEngine internal engine;
+    CfdEngineAdmin internal engineAdmin;
     CfdEngineAccountLens internal engineAccountLens;
     CfdEngineLens internal engineLens;
     CfdEngineProtocolLens internal engineProtocolLens;
     MarginClearinghouse internal clearinghouse;
     MockInvariantVault internal vault;
     OrderRouter internal router;
+    OrderRouterAdmin internal routerAdmin;
     PerpsPublicLens internal publicLens;
 
     uint256 internal constant SETUP_TIMESTAMP = 1_709_532_000;
@@ -35,6 +41,7 @@ abstract contract BasePerpInvariantTest is Test {
         clearinghouse = new MarginClearinghouse(address(usdc));
 
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        _syncEngineAdmin();
         engineAccountLens = new CfdEngineAccountLens(address(engine));
         engineLens = new CfdEngineLens(address(engine));
         engineProtocolLens = new CfdEngineProtocolLens(address(engine));
@@ -49,6 +56,7 @@ abstract contract BasePerpInvariantTest is Test {
             new uint256[](0),
             new bool[](0)
         );
+        _syncRouterAdmin();
 
         clearinghouse.setEngine(address(engine));
         vm.warp(SETUP_TIMESTAMP);
@@ -81,10 +89,29 @@ abstract contract BasePerpInvariantTest is Test {
         return 1_000_000_000e6;
     }
 
+    function _syncEngineAdmin() internal {
+        engineAdmin = CfdEngineAdmin(engine.admin());
+    }
+
+    function _syncRouterAdmin() internal {
+        routerAdmin = OrderRouterAdmin(router.admin());
+    }
+
     function _orderRecord(
         uint64 orderId
     ) internal view returns (OrderRouter.OrderRecord memory record) {
-        return router.getOrderRecord(orderId);
+        return OrderRouterDebugLens.loadOrderRecord(vm, router, orderId);
+    }
+
+    function _pendingOrders(
+        bytes32 accountId
+    ) internal view returns (IOrderRouterAccounting.PendingOrderView[] memory pending) {
+        uint64 orderId = router.accountHeadOrderId(accountId);
+        uint256 pendingCount = router.pendingOrderCounts(accountId);
+        pending = new IOrderRouterAccounting.PendingOrderView[](pendingCount);
+        for (uint256 i; i < pendingCount; ++i) {
+            (pending[i], orderId) = router.getPendingOrderView(orderId);
+        }
     }
 
     function _remainingCommittedMargin(

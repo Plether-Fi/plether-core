@@ -367,20 +367,22 @@ The important runtime invariants are:
 ## Governance and Admin Controls
 
 Most risk-sensitive parameter changes are timelocked for 48 hours.
+Engine risk controls live on `CfdEngineAdmin`, and router risk controls plus pause state now live on `OrderRouterAdmin`, with both admin modules finalizing changes onto their host contracts.
 
 Timelocked surfaces include:
 
-- `CfdEngine.riskParams`
-- `CfdEngine.fadMaxStaleness`
-- `CfdEngine.fadRunwaySeconds`
-- `CfdEngine.engineMarkStalenessLimit`
+- `CfdEngineAdmin` -> `CfdEngine.riskParams`
+- `CfdEngineAdmin` -> `CfdEngine.fadMaxStaleness`
+- `CfdEngineAdmin` -> `CfdEngine.fadRunwaySeconds`
+- `CfdEngineAdmin` -> `CfdEngine.engineMarkStalenessLimit`
 - `HousePool.seniorRateBps`
 - `HousePool.markStalenessLimit`
-- `OrderRouter.maxOrderAge`
-- `OrderRouter.orderExecutionStalenessLimit`
-- `OrderRouter.liquidationStalenessLimit`
+- `OrderRouterAdmin` -> `OrderRouter.maxOrderAge`
+- `OrderRouterAdmin` -> `OrderRouter.orderExecutionStalenessLimit`
+- `OrderRouterAdmin` -> `OrderRouter.liquidationStalenessLimit`
+- `OrderRouterAdmin` -> `OrderRouter.pythMaxConfidenceRatioBps`
 
-Instant controls remain for one-time wiring, emergency pause, and fee withdrawal.
+Instant controls remain for one-time wiring and fee withdrawal. `OrderRouter` pause/unpause is now owner-gated on `OrderRouterAdmin` rather than the router itself.
 
 ### Pause behavior
 

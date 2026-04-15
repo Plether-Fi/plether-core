@@ -257,9 +257,9 @@ contract CfdEngineTest is BasePerpTest {
     function _setFadMaxStaleness(
         uint256 val
     ) internal {
-        engine.proposeFadMaxStaleness(val);
+        engineAdmin.proposeFadMaxStaleness(val);
         vm.warp(block.timestamp + 48 hours + 1);
-        engine.finalizeFadMaxStaleness();
+        engineAdmin.finalizeFadMaxStaleness();
     }
 
     function _nextSaturdayNoon() internal view returns (uint256 timestamp) {
@@ -328,9 +328,9 @@ contract CfdEngineTest is BasePerpTest {
     function test_OpenPosition_UsesExplicitInitMarginBps() public {
         CfdTypes.RiskParams memory params = _riskParams();
         params.initMarginBps = 400;
-        engine.proposeRiskParams(params);
+        engineAdmin.proposeRiskParams(params);
         vm.warp(block.timestamp + 7 days);
-        engine.finalizeRiskParams();
+        engineAdmin.finalizeRiskParams();
 
         (,,, uint256 initMarginBps,,,,) = engine.riskParams();
         assertEq(initMarginBps, 400, "Setup must finalize the explicit init margin config");
@@ -3717,7 +3717,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         engine.liquidatePosition(accountId, 1e8, vaultDepth, uint64(block.timestamp));
 
-        engine.proposeRiskParams(
+        engineAdmin.proposeRiskParams(
             CfdTypes.RiskParams({
                 vpiFactor: 0.0005e18,
                 maxSkewRatio: 0.4e18,
@@ -3730,7 +3730,7 @@ contract CfdEngineTest is BasePerpTest {
             })
         );
         vm.warp(block.timestamp + 48 hours + 1);
-        engine.finalizeRiskParams();
+        engineAdmin.finalizeRiskParams();
 
         vm.prank(address(router));
         uint256 bounty = engine.liquidatePosition(accountId, 1e8, vaultDepth, uint64(block.timestamp));
@@ -3768,7 +3768,7 @@ contract CfdEngineTest is BasePerpTest {
         params.maintMarginBps = 0;
 
         vm.expectRevert(CfdEngine.CfdEngine__InvalidRiskParams.selector);
-        engine.proposeRiskParams(params);
+        engineAdmin.proposeRiskParams(params);
     }
 
     function test_ProposeRiskParams_RevertsOnZeroInitMargin() public {
@@ -3776,7 +3776,7 @@ contract CfdEngineTest is BasePerpTest {
         params.initMarginBps = 0;
 
         vm.expectRevert(CfdEngine.CfdEngine__InvalidRiskParams.selector);
-        engine.proposeRiskParams(params);
+        engineAdmin.proposeRiskParams(params);
     }
 
     function test_ProposeRiskParams_RevertsWhenInitMarginBelowMaint() public {
@@ -3784,7 +3784,7 @@ contract CfdEngineTest is BasePerpTest {
         params.initMarginBps = params.maintMarginBps - 1;
 
         vm.expectRevert(CfdEngine.CfdEngine__InvalidRiskParams.selector);
-        engine.proposeRiskParams(params);
+        engineAdmin.proposeRiskParams(params);
     }
 
     function test_ProposeRiskParams_RevertsWhenFadMarginBelowMaint() public {
@@ -3792,7 +3792,7 @@ contract CfdEngineTest is BasePerpTest {
         params.fadMarginBps = params.maintMarginBps - 1;
 
         vm.expectRevert(CfdEngine.CfdEngine__InvalidRiskParams.selector);
-        engine.proposeRiskParams(params);
+        engineAdmin.proposeRiskParams(params);
     }
 
     function test_ProposeRiskParams_RevertsWhenFadMarginExceeds100Percent() public {
@@ -3800,7 +3800,7 @@ contract CfdEngineTest is BasePerpTest {
         params.fadMarginBps = 10_001;
 
         vm.expectRevert(CfdEngine.CfdEngine__InvalidRiskParams.selector);
-        engine.proposeRiskParams(params);
+        engineAdmin.proposeRiskParams(params);
     }
 
     function test_ProposeRiskParams_RevertsOnZeroMinBounty() public {
@@ -3808,7 +3808,7 @@ contract CfdEngineTest is BasePerpTest {
         params.minBountyUsdc = 0;
 
         vm.expectRevert(CfdEngine.CfdEngine__InvalidRiskParams.selector);
-        engine.proposeRiskParams(params);
+        engineAdmin.proposeRiskParams(params);
     }
 
     function test_ProposeRiskParams_RevertsOnZeroBountyBps() public {
@@ -3816,7 +3816,7 @@ contract CfdEngineTest is BasePerpTest {
         params.bountyBps = 0;
 
         vm.expectRevert(CfdEngine.CfdEngine__InvalidRiskParams.selector);
-        engine.proposeRiskParams(params);
+        engineAdmin.proposeRiskParams(params);
     }
 
     function test_CloseSize_ExceedsPosition_Reverts() public {
@@ -3921,7 +3921,7 @@ contract CfdEngineTest is BasePerpTest {
         bytes32 accountId = bytes32(uint256(11));
         _fundTrader(address(uint160(uint256(accountId))), 5000 * 1e6);
 
-        engine.proposeRiskParams(
+        engineAdmin.proposeRiskParams(
             CfdTypes.RiskParams({
                 vpiFactor: 0.0005e18,
                 maxSkewRatio: 0.4e18,
@@ -3934,7 +3934,7 @@ contract CfdEngineTest is BasePerpTest {
             })
         );
         vm.warp(block.timestamp + 48 hours + 1);
-        engine.finalizeRiskParams();
+        engineAdmin.finalizeRiskParams();
 
         CfdTypes.Order memory order = CfdTypes.Order({
             accountId: accountId,
@@ -4262,7 +4262,7 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(uint160(uint256(accountId)));
         _fundTrader(trader, 200 * 1e6);
 
-        engine.proposeRiskParams(
+        engineAdmin.proposeRiskParams(
             CfdTypes.RiskParams({
                 vpiFactor: 0,
                 maxSkewRatio: 0.4e18,
@@ -4275,7 +4275,7 @@ contract CfdEngineTest is BasePerpTest {
             })
         );
         vm.warp(block.timestamp + 48 hours + 1);
-        engine.finalizeRiskParams();
+        engineAdmin.finalizeRiskParams();
 
         CfdTypes.Order memory openOrder = CfdTypes.Order({
             accountId: accountId,
@@ -4357,9 +4357,9 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(clearinghouse));
         engine.checkWithdraw(accountId);
 
-        engine.proposeEngineMarkStalenessLimit(300);
-        vm.warp(engine.engineMarkStalenessActivationTime() + 1);
-        engine.finalizeEngineMarkStalenessLimit();
+        engineAdmin.proposeEngineMarkStalenessLimit(300);
+        vm.warp(engineAdmin.engineMarkStalenessActivationTime() + 1);
+        engineAdmin.finalizeEngineMarkStalenessLimit();
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
@@ -4507,9 +4507,9 @@ contract CfdEngineTest is BasePerpTest {
         _fundTrader(trader, 10_000e6);
         _open(accountId, CfdTypes.Side.BULL, 100_000e18, 1600e6, 1e8);
 
-        engine.proposeEngineMarkStalenessLimit(300);
-        vm.warp(engine.engineMarkStalenessActivationTime() + 1);
-        engine.finalizeEngineMarkStalenessLimit();
+        engineAdmin.proposeEngineMarkStalenessLimit(300);
+        vm.warp(engineAdmin.engineMarkStalenessActivationTime() + 1);
+        engineAdmin.finalizeEngineMarkStalenessLimit();
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
@@ -4527,9 +4527,9 @@ contract CfdEngineTest is BasePerpTest {
 
         CfdTypes.RiskParams memory params = _riskParams();
         params.initMarginBps = 300;
-        engine.proposeRiskParams(params);
+        engineAdmin.proposeRiskParams(params);
         vm.warp(block.timestamp + 7 days);
-        engine.finalizeRiskParams();
+        engineAdmin.finalizeRiskParams();
 
         (,,, uint256 initMarginBps,,,,) = engine.riskParams();
         assertEq(initMarginBps, 300, "Setup must finalize the explicit init margin config");
@@ -4998,9 +4998,9 @@ contract CfdEngineAuditTest is BasePerpTest {
         bytes32 carolAccount = bytes32(uint256(uint160(carol)));
         (uint256 sizeBefore,,,,,,) = engine.positions(carolAccount);
 
-        router.proposeMaxOrderAge(0);
+        routerAdmin.proposeMaxOrderAge(0);
         vm.warp(block.timestamp + 48 hours + 1);
-        router.finalizeMaxOrderAge();
+        routerAdmin.finalizeMaxOrderAge();
 
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
@@ -5091,10 +5091,10 @@ contract CfdEngineAuditTest is BasePerpTest {
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
         });
-        engine.proposeRiskParams(newParams);
+        engineAdmin.proposeRiskParams(newParams);
 
         vm.warp(T_FINALIZE);
-        engine.finalizeRiskParams();
+        engineAdmin.finalizeRiskParams();
 
         vm.warp(T_ORDER2);
 
