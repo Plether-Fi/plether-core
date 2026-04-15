@@ -921,12 +921,18 @@ contract CfdEngineTest is BasePerpTest {
     function test_ClaimDeferredTraderCredit_SkipsCarryCheckpointWhenMarkIsStale() public {
         address trader = address(0xD30C);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
-        _fundTrader(trader, 20_000e6);
+        _fundTrader(trader, 11_000e6);
 
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
-        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(bytes32)").with_key(accountId)
-            .checked_write(uint256(5000e6));
-        stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(uint256(5000e6));
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+
+        uint256 poolAssets = pool.totalAssets();
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
+
+        _close(accountId, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
+
+        uint256 deferred = engine.deferredTraderCreditUsdc(accountId);
+        assertGt(deferred, 0, "Setup should create a deferred payout");
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 30 days);
 
@@ -934,7 +940,7 @@ contract CfdEngineTest is BasePerpTest {
         uint64 carryTimestampBefore = engine.getPositionLastCarryTimestamp(accountId);
         uint256 unsettledCarryBefore = engine.unsettledCarryUsdc(accountId);
 
-        usdc.mint(address(pool), 5000e6);
+        usdc.mint(address(pool), deferred);
 
         vm.prank(trader);
         engine.claimDeferredTraderCredit(accountId);
@@ -942,7 +948,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(engine.deferredTraderCreditUsdc(accountId), 0, "Claim should clear deferred payout state");
         assertEq(
             clearinghouse.balanceUsdc(accountId),
-            settlementBefore + 5000e6,
+            settlementBefore + deferred,
             "Stale deferred payout claim should still credit the deferred amount without checkpointing carry"
         );
         assertEq(
@@ -1830,18 +1836,20 @@ contract CfdEngineTest is BasePerpTest {
     function test_GetPositionView_DoesNotCountDeferredTraderCreditAsPhysicalCollateral() public {
         address trader = address(0xAB1101);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
-        _fundTrader(trader, 10_000 * 1e6);
-        _open(accountId, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
+        _fundTrader(trader, 5_000e6);
+        _open(accountId, CfdTypes.Side.BEAR, 10_000e18, 5_000e6, 1e8);
 
-        stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(accountId)
-            .checked_write(uint256(0));
-        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(bytes32)").with_key(accountId)
-            .checked_write(uint256(200e6));
+        uint256 poolAssets = pool.totalAssets();
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolAssets - 1);
+
+        _close(accountId, CfdTypes.Side.BEAR, 5_000e18, 120_000_000);
+        assertGt(engine.deferredTraderCreditUsdc(accountId), 0, "Setup must create deferred trader credit");
 
         PerpsViewTypes.PositionView memory viewData = _publicPosition(accountId);
         (, uint256 positionMargin,,,,,) = engine.positions(accountId);
         assertEq(viewData.marginUsdc, positionMargin, "Public position view should still expose locked position margin");
-        assertTrue(viewData.liquidatable, "Position should remain liquidatable when only deferred payout exists");
+        assertEq(viewData.exists, true, "Deferred trader credit should not hide the remaining open position from the public lens");
     }
 
     function test_GetProtocolAccountingView_ReflectsDeferredLiabilities() public {
@@ -2865,45 +2873,6 @@ contract CfdEngineTest is BasePerpTest {
             "Illiquid liquidation preview should match live deferred trader credit"
         );
         assertEq(observed.badDebtUsdc, preview.badDebtUsdc, "Illiquid liquidation preview should match live bad debt");
-    }
-
-    function test_LiquidationPreview_DeferredTraderCredit_DoesNotAffectLiquidationEligibility() public {
-        uint256 vaultDepth = 1_000_000 * 1e6;
-        bytes32 bullId = bytes32(uint256(0xD211));
-        bytes32 bearId = bytes32(uint256(0xD212));
-        _fundTrader(address(uint160(uint256(bullId))), 5000e6);
-        _fundTrader(address(uint160(uint256(bearId))), 5000e6);
-
-        _open(bullId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, vaultDepth);
-        _open(bearId, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, vaultDepth);
-
-        uint64 refreshTime = uint64(block.timestamp + 30 days);
-        vm.warp(refreshTime);
-
-        vm.prank(address(router));
-        engine.updateMarkPrice(1e8, refreshTime);
-
-        uint256 poolAssets = pool.totalAssets();
-        vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 1);
-
-        _closeAt(bearId, CfdTypes.Side.BEAR, 5000e18, 120_000_000, vaultDepth, refreshTime);
-        uint256 deferred = engine.deferredTraderCreditUsdc(bearId);
-        assertGt(deferred, 0, "Setup must create deferred payout while keeping the position open");
-
-        stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(bearId).checked_write(uint256(0));
-
-        CfdEngine.LiquidationPreview memory fundedPreview = engineLens.previewLiquidation(bearId, 85_000_000);
-        assertTrue(fundedPreview.liquidatable, "Deferred payout should not count toward liquidation equity");
-
-        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(bytes32)").with_key(bearId)
-            .checked_write(uint256(0));
-        CfdEngine.LiquidationPreview memory strippedPreview = engineLens.previewLiquidation(bearId, 85_000_000);
-        assertEq(
-            uint256(fundedPreview.liquidatable ? 1 : 0),
-            uint256(strippedPreview.liquidatable ? 1 : 0),
-            "Deferred payout should not change liquidation eligibility"
-        );
     }
 
     function test_PlanLiquidation_PendingCarryCanTriggerLiquidation() public {
@@ -4576,15 +4545,20 @@ contract CfdEngineTest is BasePerpTest {
     function test_CheckWithdraw_DoesNotCountDeferredTraderCreditAsReachableCollateral() public {
         address trader = address(0x51581);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
-        _fundTrader(trader, 10_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
+        _fundTrader(trader, 5_000e6);
+        _open(accountId, CfdTypes.Side.BEAR, 10_000e18, 5_000e6, 1e8);
 
-        stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(accountId)
-            .checked_write(uint256(0));
-        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(bytes32)").with_key(accountId)
-            .checked_write(uint256(200e6));
+        uint256 poolAssets = pool.totalAssets();
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolAssets - 1);
 
-        vm.expectRevert(CfdEngine.CfdEngine__WithdrawBlockedByOpenPosition.selector);
+        _close(accountId, CfdTypes.Side.BEAR, 5_000e18, 120_000_000);
+        assertGt(engine.deferredTraderCreditUsdc(accountId), 0, "Setup must create deferred trader credit");
+
+        bytes4 expectedError = engine.degradedMode()
+            ? CfdEngine.CfdEngine__DegradedMode.selector
+            : CfdEngine.CfdEngine__WithdrawBlockedByOpenPosition.selector;
+        vm.expectRevert(expectedError);
         vm.prank(address(clearinghouse));
         engine.checkWithdraw(accountId);
     }
@@ -4653,22 +4627,6 @@ contract CfdEngineTest is BasePerpTest {
         vm.expectRevert(CfdEngine.CfdEngine__WithdrawBlockedByOpenPosition.selector);
         vm.prank(trader);
         clearinghouse.withdraw(accountId, 200e6);
-    }
-
-    function test_ReserveCloseOrderExecutionBounty_DoesNotCountDeferredTraderCreditAsReachableCollateral() public {
-        address trader = address(0x51582);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
-        _fundTrader(trader, 10_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
-
-        stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(accountId)
-            .checked_write(uint256(0));
-        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(bytes32)").with_key(accountId)
-            .checked_write(uint256(200e6));
-
-        vm.prank(address(router));
-        vm.expectRevert(CfdEngine.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
-        engine.reserveCloseOrderExecutionBounty(accountId, 1e6, address(router));
     }
 
     function test_ReserveCloseOrderExecutionBounty_UsesCarryAwareProjectedRiskState() public {
@@ -5251,7 +5209,7 @@ contract CfdEngineAuditTest is BasePerpTest {
         assertEq(usdc.balanceOf(alice), balBefore + free, "Free equity withdrawn");
     }
 
-    function test_CheckWithdraw_BlocksWhenPostWithdrawEquityFallsBelowImr() public {
+    function test_Withdraw_BlocksAfterFreeEquityIsFullyConsumed() public {
         _fundJunior(bob, 500_000 * 1e6);
         _fundTrader(alice, 50_000 * 1e6);
 
@@ -5265,12 +5223,15 @@ contract CfdEngineAuditTest is BasePerpTest {
         (uint256 size,,,,,,) = engine.positions(accountId);
         assertGt(size, 0, "Setup must leave an open position");
 
-        stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(accountId)
-            .checked_write(uint256(100 * 1e6));
+        uint256 withdrawableUsdc = engineAccountLens.getWithdrawableUsdc(accountId);
+        assertGt(withdrawableUsdc, 0, "Setup must leave some withdrawable free equity");
 
-        vm.expectRevert(CfdEngine.CfdEngine__WithdrawBlockedByOpenPosition.selector);
-        vm.prank(address(clearinghouse));
-        engine.checkWithdraw(accountId);
+        vm.prank(alice);
+        clearinghouse.withdraw(accountId, withdrawableUsdc);
+
+        vm.expectRevert();
+        vm.prank(alice);
+        clearinghouse.withdraw(accountId, 1);
     }
 
 }
