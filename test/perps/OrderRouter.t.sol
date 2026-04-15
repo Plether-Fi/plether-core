@@ -1374,6 +1374,41 @@ contract OrderRouterPythTest is BasePerpTest {
         );
     }
 
+    function test_PythConfidenceTooWide_RevertsExecution() public {
+        vm.warp(1000);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+
+        router.proposePythMaxConfidenceRatioBps(100);
+        vm.warp(1000 + 48 hours + 1);
+        router.finalizePythMaxConfidenceRatioBps();
+
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), uint64(2_000_000), int32(-8), 1006);
+
+        vm.roll(block.number + 1);
+        vm.expectRevert(OrderRouter.OrderRouter__OracleConfidenceTooWide.selector);
+        router.executeOrder(1, _pythUpdateData());
+    }
+
+    function test_PythConfidenceWithinThreshold_AllowsExecution() public {
+        vm.warp(1000);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+
+        router.proposePythMaxConfidenceRatioBps(100);
+        vm.warp(1000 + 48 hours + 1);
+        router.finalizePythMaxConfidenceRatioBps();
+
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), uint64(500_000), int32(-8), 1006);
+
+        vm.roll(block.number + 1);
+        router.executeOrder(1, _pythUpdateData());
+
+        assertEq(router.nextExecuteId(), 0, "Execution should succeed when all Pyth confidences are within threshold");
+    }
+
     function test_Slippage_CancelsGracefully() public {
         vm.warp(1000);
 

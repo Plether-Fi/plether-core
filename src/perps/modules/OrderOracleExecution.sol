@@ -38,6 +38,9 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
     uint256 public liquidationStalenessLimit = 15;
     uint256 public pendingLiquidationStalenessLimit;
     uint256 public liquidationStalenessActivationTime;
+    uint256 public pythMaxConfidenceRatioBps = 10_000;
+    uint256 public pendingPythMaxConfidenceRatioBps;
+    uint256 public pythMaxConfidenceRatioActivationTime;
 
     function _revertZeroAddress() internal pure virtual;
     function _revertEmptyFeeds() internal pure virtual;
@@ -48,6 +51,7 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
     function _revertInsufficientPythFee() internal pure virtual;
     function _revertMockModeDisabled() internal pure virtual;
     function _revertOraclePriceTooStale() internal pure virtual;
+    function _revertOracleConfidenceTooWide() internal pure virtual;
     function _revertOraclePublishTimeOutOfOrder() internal pure virtual;
     function _revertMevOraclePriceTooStale() internal pure virtual;
     function _revertOraclePriceNegative() internal pure virtual;
@@ -113,9 +117,8 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
             maxStaleness = executionContext.policy.maxStaleness;
         }
 
-        (update.executionPrice, update.oraclePublishTime, update.pythFee) = _resolveOraclePrice(
-            pythUpdateData, mockFallbackPrice, maxStaleness, orderExecutionStalenessLimit
-        );
+        (update.executionPrice, update.oraclePublishTime, update.pythFee) =
+            _resolveOraclePrice(pythUpdateData, mockFallbackPrice, maxStaleness, orderExecutionStalenessLimit);
 
         if (address(pyth) != address(0)) {
             if (OracleFreshnessPolicyLib.isStale(
@@ -245,6 +248,12 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
             PythStructs.Price memory p = pyth.getPriceUnsafe(pythFeedIds[i]);
             if (OracleFreshnessPolicyLib.isStale(uint64(p.publishTime), maxStaleness, block.timestamp)) {
                 _revertOraclePriceTooStale();
+            }
+            if (p.price <= 0) {
+                _revertOraclePriceNegative();
+            }
+            if (uint256(uint64(p.conf)) * 10_000 > uint256(uint64(p.price)) * pythMaxConfidenceRatioBps) {
+                _revertOracleConfidenceTooWide();
             }
             uint256 norm = inversions[i] ? _invertPythPrice(p.price, p.expo) : _normalizePythPrice(p.price, p.expo);
 

@@ -57,6 +57,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     error OrderRouter__NoOrdersToExecute();
     error OrderRouter__MaxOrderIdNotCommitted();
     error OrderRouter__OraclePriceTooStale();
+    error OrderRouter__OracleConfidenceTooWide();
     error OrderRouter__NothingToClaim();
     error OrderRouter__EthTransferFailed();
     error OrderRouter__OraclePriceNegative();
@@ -83,6 +84,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     error OrderRouter__TradingNotActive();
     error OrderRouter__OraclePublishTimeOutOfOrder();
     error OrderRouter__InvalidStalenessLimit();
+    error OrderRouter__InvalidConfidenceRatio();
     error OrderRouter__ZeroAddress();
     error OrderRouter__PredictableOpenInvalid(uint8 code);
 
@@ -158,6 +160,10 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         revert OrderRouter__OraclePriceTooStale();
     }
 
+    function _revertOracleConfidenceTooWide() internal pure override {
+        revert OrderRouter__OracleConfidenceTooWide();
+    }
+
     function _revertOraclePublishTimeOutOfOrder() internal pure override {
         revert OrderRouter__OraclePublishTimeOutOfOrder();
     }
@@ -223,6 +229,25 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
             _finalizeUint(TimelockedUintProposal(pendingLiquidationStalenessLimit, liquidationStalenessActivationTime));
         pendingLiquidationStalenessLimit = 0;
         liquidationStalenessActivationTime = 0;
+    }
+
+    /// @notice Proposes the maximum acceptable per-feed Pyth confidence ratio, in basis points of `conf / abs(price)`.
+    function proposePythMaxConfidenceRatioBps(
+        uint256 ratioBps
+    ) external onlyOwner {
+        if (ratioBps > 10_000) {
+            revert OrderRouter__InvalidConfidenceRatio();
+        }
+        (pendingPythMaxConfidenceRatioBps, pythMaxConfidenceRatioActivationTime) = _proposeUint(ratioBps);
+    }
+
+    /// @notice Finalizes the pending Pyth confidence ratio threshold after timelock expiry.
+    function finalizePythMaxConfidenceRatioBps() external onlyOwner {
+        pythMaxConfidenceRatioBps = _finalizeUint(
+            TimelockedUintProposal(pendingPythMaxConfidenceRatioBps, pythMaxConfidenceRatioActivationTime)
+        );
+        pendingPythMaxConfidenceRatioBps = 0;
+        pythMaxConfidenceRatioActivationTime = 0;
     }
 
     /// @notice Pauses new risk-increasing order commits.

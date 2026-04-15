@@ -7,6 +7,7 @@ contract MockPyth {
 
     struct MockPrice {
         int64 price;
+        uint64 conf;
         int32 expo;
         uint256 publishTime;
     }
@@ -17,10 +18,32 @@ contract MockPyth {
     function setPrice(
         bytes32 feedId,
         int64 _price,
+        uint64 _conf,
         int32 _expo,
         uint256 _publishTime
     ) external {
-        prices[feedId] = MockPrice(_price, _expo, _publishTime);
+        prices[feedId] = MockPrice(_price, _conf, _expo, _publishTime);
+    }
+
+    function setAllPrices(
+        bytes32[] memory feedIds,
+        int64 _price,
+        uint64 _conf,
+        int32 _expo,
+        uint256 _publishTime
+    ) external {
+        for (uint256 i = 0; i < feedIds.length; i++) {
+            prices[feedIds[i]] = MockPrice(_price, _conf, _expo, _publishTime);
+        }
+    }
+
+    function setPrice(
+        bytes32 feedId,
+        int64 _price,
+        int32 _expo,
+        uint256 _publishTime
+    ) external {
+        prices[feedId] = MockPrice(_price, 0, _expo, _publishTime);
     }
 
     function setAllPrices(
@@ -30,7 +53,7 @@ contract MockPyth {
         uint256 _publishTime
     ) external {
         for (uint256 i = 0; i < feedIds.length; i++) {
-            prices[feedIds[i]] = MockPrice(_price, _expo, _publishTime);
+            prices[feedIds[i]] = MockPrice(_price, 0, _expo, _publishTime);
         }
     }
 
@@ -38,7 +61,7 @@ contract MockPyth {
         bytes32 id
     ) external view returns (PythStructs.Price memory) {
         MockPrice memory p = prices[id];
-        return PythStructs.Price({price: p.price, conf: 0, expo: p.expo, publishTime: p.publishTime});
+        return PythStructs.Price({price: p.price, conf: p.conf, expo: p.expo, publishTime: p.publishTime});
     }
 
     function setFee(
