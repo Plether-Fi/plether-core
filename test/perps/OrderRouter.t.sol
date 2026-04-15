@@ -1534,8 +1534,8 @@ contract OrderRouterPythTest is BasePerpTest {
         bytes32 accountId = bytes32(uint256(uint160(alice)));
         assertEq(
             clearinghouse.balanceUsdc(accountId),
-            10_000 * 1e6,
-            "Open-order slippage failure should refund the reserved execution bounty into clearinghouse settlement"
+            10_000 * 1e6 - 1e6,
+            "Open-order slippage failure should forfeit the reserved execution bounty from trader settlement"
         );
         assertEq(
             _settlementBalance(address(this)) - keeperUsdcBefore,
@@ -1543,7 +1543,9 @@ contract OrderRouterPythTest is BasePerpTest {
             "Terminal slippage failures should not pay the executor"
         );
         assertEq(
-            engine.accumulatedFeesUsdc(), 0, "Failed binding open-order bounty should not be routed to protocol revenue"
+            engine.accumulatedFeesUsdc(),
+            1e6,
+            "Failed binding open-order bounty should be routed to protocol revenue"
         );
         assertEq(router.nextExecuteId(), 0, "Terminal slippage miss should clear the pending order");
         assertEq(_executionBountyReserve(1), 0, "Terminal slippage miss should clear bounty escrow");
@@ -4953,8 +4955,8 @@ contract KeeperFeeRefundTest is Test {
         assertEq(alice.balance, 1 ether, "User receives failed-order fee refund");
     }
 
-    // Regression: H-01 — fee refunded to user on slippage failure
-    function test_SlippageFailFeeRefundedToUser() public {
+    // Regression: H-01 — open slippage failure forfeits the bounty instead of refunding it.
+    function test_OpenSlippageFailForfeitsBountyToProtocol() public {
         usdc.mint(bob, 1_000_000e6);
         vm.startPrank(bob);
         usdc.approve(address(juniorVault), 1_000_000e6);
@@ -4980,8 +4982,13 @@ contract KeeperFeeRefundTest is Test {
         vm.roll(block.number + 1);
         router.executeOrder(1, priceData);
 
+        assertEq(
+            clearinghouse.balanceUsdc(accountId),
+            49_999e6,
+            "Open slippage failure should forfeit the reserved bounty from trader settlement"
+        );
         assertEq(keeper.balance - keeperBefore, 0, "Keeper should not receive fee on slippage failure");
-        assertEq(alice.balance, 1 ether, "User receives slippage-failure refund");
+        assertEq(alice.balance, 1 ether, "Open slippage failure should not route any ETH refund to the trader");
         assertEq(
             engine.totalDeferredKeeperCreditUsdc(),
             deferredKeeperCreditBefore,
