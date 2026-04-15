@@ -12,6 +12,7 @@ import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {PositionRiskAccountingLib} from "../../src/perps/libraries/PositionRiskAccountingLib.sol";
 import {AccountLensViewTypes} from "../../src/perps/interfaces/AccountLensViewTypes.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
 import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
@@ -471,6 +472,59 @@ contract OrderRouterTest is BasePerpTest {
             clearinghouse.getAccountUsdcBuckets(accountId).freeSettlementUsdc,
             0,
             "Stale close fallback should still be allowed to consume the remaining free-settlement slice"
+        );
+    }
+
+    function test_CloseCommit_FreshCarryCheckpointStillFallsBackToMargin() public {
+        address trader = address(0x3343);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        usdc.mint(trader, 252_000_000);
+        vm.startPrank(trader);
+        usdc.approve(address(clearinghouse), 252_000_000);
+        clearinghouse.deposit(accountId, 252_000_000);
+        vm.stopPrank();
+
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8, false);
+        bytes[] memory openPrice = new bytes[](1);
+        openPrice[0] = abi.encode(uint256(1e8));
+        vm.roll(block.number + 1);
+        router.executeOrder(1, openPrice);
+
+        uint256 freeSettlementBefore = clearinghouse.getAccountUsdcBuckets(accountId).freeSettlementUsdc;
+        (, uint256 marginBefore,,,,,) = engine.positions(accountId);
+        assertEq(freeSettlementBefore, 1_000_000, "Setup should leave exactly one USDC of free settlement");
+
+        uint256 carryElapsed = 12 hours;
+        vm.warp(block.timestamp + 12 hours);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+
+        uint256 expectedCarry = PositionRiskAccountingLib.computePendingCarryUsdc(
+            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(
+                10_000e18, 1e8, clearinghouse.balanceUsdc(accountId)
+            ),
+            _riskParams().baseCarryBps,
+            carryElapsed
+        );
+        uint256 expectedSettlementSlice = freeSettlementBefore - expectedCarry;
+
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 0, true);
+
+        (, uint256 marginAfter,,,,,) = engine.positions(accountId);
+        uint256 marginConsumed = marginBefore - marginAfter;
+        assertEq(_executionBountyReserve(2), 1_000_000, "Fresh carry checkpoint should still escrow the full bounty");
+        assertEq(
+            clearinghouse.getAccountUsdcBuckets(accountId).freeSettlementUsdc,
+            0,
+            "Carry-aware reservation should consume the post-carry free-settlement remainder"
+        );
+        assertEq(marginConsumed, expectedCarry, "Margin-backed bounty slice should exactly match realized carry");
+        assertEq(
+            usdc.balanceOf(address(router)),
+            expectedSettlementSlice + expectedCarry,
+            "Router escrow should equal the exact settlement slice plus the carry-backed margin slice"
         );
     }
 

@@ -681,27 +681,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         bytes32 accountId,
         uint256 executionBountyUsdc
     ) internal override {
-        bool hasFreshCarryCheckpointMark = _hasFreshCarryCheckpointMark();
-        uint256 freeSettlementUsdc =
-            MarginClearinghouseAccountingLib.getFreeSettlementUsdc(clearinghouse.getAccountUsdcBuckets(accountId));
-        uint256 freeBackedBountyUsdc =
-            freeSettlementUsdc > executionBountyUsdc ? executionBountyUsdc : freeSettlementUsdc;
-        if (freeBackedBountyUsdc > 0) {
-            if (hasFreshCarryCheckpointMark) {
-                clearinghouse.seizeUsdc(accountId, freeBackedBountyUsdc, address(this));
-            } else {
-                clearinghouse.reserveStaleCloseExecutionBountyFromSettlement(
-                    accountId, freeBackedBountyUsdc, address(this)
-                );
-            }
-        }
-
-        uint256 marginBackedBountyUsdc = executionBountyUsdc - freeBackedBountyUsdc;
-        if (marginBackedBountyUsdc == 0) {
-            return;
-        }
-
-        try engine.reserveCloseOrderExecutionBounty(accountId, marginBackedBountyUsdc, address(this)) {}
+        try engine.reserveCloseOrderExecutionBounty(accountId, executionBountyUsdc, address(this)) {}
         catch {
             revert OrderRouter__InsufficientFreeEquity();
         }

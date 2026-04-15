@@ -942,14 +942,37 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         emit AssetSeized(accountId, settlementAsset, amount, recipient);
     }
 
-    /// @notice Reserves free settlement for the router's stale close-bounty path without checkpointing carry.
+    /// @notice Reserves free settlement for the engine's fresh close-bounty path with carry checkpointing.
+    function reserveCloseExecutionBountyFromSettlement(
+        bytes32 accountId,
+        uint256 amount,
+        address recipient
+    ) external onlyEngine {
+        if (recipient == address(0)) {
+            revert MarginClearinghouse__ZeroAddress();
+        }
+        _checkpointCarryBeforeMarginChange(accountId);
+        if (settlementBalances[accountId] < amount) {
+            revert MarginClearinghouse__InsufficientAssetToSeize();
+        }
+        if (amount > MarginClearinghouseAccountingLib.getFreeSettlementUsdc(_buildAccountUsdcBuckets(accountId))) {
+            revert MarginClearinghouse__InsufficientAssetToSeize();
+        }
+
+        settlementBalances[accountId] -= amount;
+        IERC20(settlementAsset).safeTransfer(recipient, amount);
+
+        emit AssetSeized(accountId, settlementAsset, amount, recipient);
+    }
+
+    /// @notice Reserves free settlement for the engine's stale close-bounty path without checkpointing carry.
     function reserveStaleCloseExecutionBountyFromSettlement(
         bytes32 accountId,
         uint256 amount,
         address recipient
-    ) external onlyOrderRouter {
-        if (recipient != msg.sender) {
-            revert MarginClearinghouse__InvalidSeizeRecipient();
+    ) external onlyEngine {
+        if (recipient == address(0)) {
+            revert MarginClearinghouse__ZeroAddress();
         }
         if (settlementBalances[accountId] < amount) {
             revert MarginClearinghouse__InsufficientAssetToSeize();
