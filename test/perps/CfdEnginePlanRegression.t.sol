@@ -207,13 +207,14 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         assertEq(marginAfter, 150e6, "Single-frame margin should equal base plus net change");
     }
 
-    function test_PlannerWrapper_ComputeOpenMarginAfterMatchesLibrary() public view {
-        CfdEnginePlanHarness harness = CfdEnginePlanHarness(address(engine));
-        (bool libDrained, uint256 libMarginAfter) = harness.computeOpenMarginAfter(200e6, -50e6);
-        (bool plannerDrained, uint256 plannerMarginAfter) = planner.computeOpenMarginAfter(200e6, -50e6);
+    function test_PlannerWrapper_ComputeOpenMarginAfter_UsesExpectedArithmetic() public view {
+        (bool healthyDrained, uint256 healthyMarginAfter) = planner.computeOpenMarginAfter(200e6, -50e6);
+        assertFalse(healthyDrained, "Planner wrapper should keep healthy offsets above zero");
+        assertEq(healthyMarginAfter, 150e6, "Planner wrapper should subtract the negative net change exactly once");
 
-        assertEq(plannerDrained, libDrained, "Planner wrapper should match library drained flag");
-        assertEq(plannerMarginAfter, libMarginAfter, "Planner wrapper should match library margin result");
+        (bool drained, uint256 drainedMarginAfter) = planner.computeOpenMarginAfter(40e6, -50e6);
+        assertTrue(drained, "Planner wrapper should flag margin exhaustion when costs exceed margin");
+        assertEq(drainedMarginAfter, 0, "Planner wrapper should floor drained margin at zero");
     }
 
     function test_ComputeOpenMarginAfter_NegativePathSubtractsOnce() public view {

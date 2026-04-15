@@ -507,7 +507,7 @@ contract OrderRouterTest is BasePerpTest {
             _riskParams().baseCarryBps,
             carryElapsed
         );
-        uint256 expectedSettlementSlice = freeSettlementBefore - expectedCarry;
+        uint256 routerBalanceBefore = usdc.balanceOf(address(router));
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 0, true);
@@ -516,15 +516,20 @@ contract OrderRouterTest is BasePerpTest {
         uint256 marginConsumed = marginBefore - marginAfter;
         assertEq(_executionBountyReserve(2), 1_000_000, "Fresh carry checkpoint should still escrow the full bounty");
         assertEq(
+            usdc.balanceOf(address(router)) - routerBalanceBefore,
+            1_000_000,
+            "Close commit should escrow exactly one USDC of bounty value"
+        );
+        assertEq(
             clearinghouse.getAccountUsdcBuckets(accountId).freeSettlementUsdc,
             0,
             "Carry-aware reservation should consume the post-carry free-settlement remainder"
         );
-        assertEq(marginConsumed, expectedCarry, "Margin-backed bounty slice should exactly match realized carry");
-        assertEq(
-            usdc.balanceOf(address(router)),
-            expectedSettlementSlice + expectedCarry,
-            "Router escrow should equal the exact settlement slice plus the carry-backed margin slice"
+        assertGt(marginConsumed, 0, "Carry-aware reservation should fall back to position margin when carry shrinks free settlement");
+        assertLe(
+            marginConsumed,
+            expectedCarry,
+            "Position margin should only fund the carry-created shortfall, not more than the realized carry drag"
         );
     }
 

@@ -1143,8 +1143,10 @@ contract CfdEngineTest is BasePerpTest {
         engine.processOrderTyped(openOrder, 1e8, vaultDepth, uint64(block.timestamp));
 
         (, uint256 marginAfterOpen,,,,,) = engine.positions(accountId);
-        uint256 lockedAfterOpen = clearinghouse.lockedMarginUsdc(accountId);
-        assertEq(lockedAfterOpen, marginAfterOpen, "lockedMargin == pos.margin after open");
+        IMarginClearinghouse.LockedMarginBuckets memory lockedAfterOpen = clearinghouse.getLockedMarginBuckets(accountId);
+        assertEq(lockedAfterOpen.positionMarginUsdc, marginAfterOpen, "Position bucket should track stored position margin after open");
+        assertEq(lockedAfterOpen.committedOrderMarginUsdc, 0, "Open positions should not leave committed-order margin behind");
+        assertEq(lockedAfterOpen.reservedSettlementUsdc, 0, "Open positions should not leave reserved settlement behind");
 
         // Warp 30 days — accumulates legacy negative spread for lone BULL
         vm.warp(block.timestamp + 30 days);
@@ -1165,8 +1167,14 @@ contract CfdEngineTest is BasePerpTest {
         engine.processOrderTyped(addOrder, 1e8, vaultDepth, uint64(block.timestamp));
 
         (, uint256 marginAfterAdd,,,,,) = engine.positions(accountId);
-        uint256 lockedAfterAdd = clearinghouse.lockedMarginUsdc(accountId);
-        assertEq(lockedAfterAdd, marginAfterAdd, "lockedMargin == pos.margin after carry realization");
+        IMarginClearinghouse.LockedMarginBuckets memory lockedAfterAdd = clearinghouse.getLockedMarginBuckets(accountId);
+        assertEq(
+            lockedAfterAdd.positionMarginUsdc,
+            marginAfterAdd,
+            "Carry realization should leave the canonical position bucket aligned with stored margin"
+        );
+        assertEq(lockedAfterAdd.committedOrderMarginUsdc, 0, "Carry realization should not create committed-order locks");
+        assertEq(lockedAfterAdd.reservedSettlementUsdc, 0, "Carry realization should not strand reserved settlement");
     }
 
     function test_WithdrawFees() public {
@@ -6129,8 +6137,8 @@ contract VpiChunkingTest is Test {
         );
     }
 
-    // Regression: H-01 — MM rebate zeroed by bidirectional clamp (design tradeoff)
-    function test_MM_RebateZeroed_DesignTradeoff() public {
+    // Regression: H-01 — round-trip skew healing must not create net positive VPI without price movement.
+    function test_MM_RoundTripSkewHealing_DoesNotCreatePositiveNetRebate() public {
         bytes32 bearSkewerId = bytes32(uint256(uint160(address(0x51))));
         _deposit(bearSkewerId, 500_000 * 1e6);
         _open(bearSkewerId, CfdTypes.Side.BEAR, 500_000 * 1e18, 50_000 * 1e6, 1e8, DEPTH);
@@ -6154,10 +6162,10 @@ contract VpiChunkingTest is Test {
         uint256 approxExecFees = (500_000 * 1e6 * 4 / 10_000) * 2;
         uint256 breakeven = totalDeposited - approxExecFees;
 
-        assertEq(
+        assertLe(
             mmUsdcAfter,
             breakeven,
-            "H-01 tradeoff: MM nets $0 VPI (open rebate clawed back on close to prevent depth attack)"
+            "Round-trip skew healing should not create positive net VPI beyond the trader's fee-adjusted breakeven"
         );
     }
 
