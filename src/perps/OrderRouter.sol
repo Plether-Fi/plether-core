@@ -45,6 +45,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
 
     mapping(address => uint256) internal claimableEth;
     uint64 public globalTailOrderId;
+    address public pauser;
 
     error OrderRouter__ZeroSize();
     error OrderRouter__CloseMarginDeltaNotAllowed();
@@ -86,6 +87,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     error OrderRouter__InvalidStalenessLimit();
     error OrderRouter__InvalidConfidenceRatio();
     error OrderRouter__ZeroAddress();
+    error OrderRouter__UnauthorizedPauser();
     error OrderRouter__PredictableOpenInvalid(uint8 code);
 
     struct TimelockedUintProposal {
@@ -94,6 +96,15 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     }
 
     event OrderCommitted(uint64 indexed orderId, bytes32 indexed accountId, CfdTypes.Side side);
+    event PauserUpdated(address indexed previousPauser, address indexed newPauser);
+
+    modifier onlyPauserOrOwner() {
+        if (msg.sender != owner() && msg.sender != pauser) {
+            revert OrderRouter__UnauthorizedPauser();
+        }
+        _;
+    }
+
     modifier onlyEngine() {
         if (msg.sender != address(engine) && msg.sender != address(engine.settlementModule())) {
             revert OrderRouter__Unauthorized();
@@ -250,9 +261,18 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         pythMaxConfidenceRatioActivationTime = 0;
     }
 
+    /// @notice Updates the dedicated emergency pauser.
+    /// @dev The owner retains unpause authority and may still pause directly.
+    function setPauser(
+        address newPauser
+    ) external onlyOwner {
+        emit PauserUpdated(pauser, newPauser);
+        pauser = newPauser;
+    }
+
     /// @notice Pauses new risk-increasing order commits.
     /// @dev Keeper execution and liquidation remain available.
-    function pause() external onlyOwner {
+    function pause() external onlyPauserOrOwner {
         _pause();
     }
 

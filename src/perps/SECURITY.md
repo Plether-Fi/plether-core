@@ -66,6 +66,7 @@ The owner can act immediately to:
 
 - pause and unpause `OrderRouter`,
 - pause and unpause `HousePool`,
+- assign the dedicated `pauser` role on `OrderRouter` and `HousePool`,
 - withdraw protocol fees,
 - transfer ownership.
 
@@ -174,6 +175,14 @@ The system relies on standard audited libraries and treats them as trusted build
 ### Owner
 
 The owner can tune risk and liveness configuration and activate pauses, but cannot arbitrarily rewrite custody state.
+
+### Dedicated pauser
+
+`OrderRouter` and `HousePool` each support an owner-assigned `pauser` address.
+
+- The `pauser` can call `pause()` immediately.
+- The `pauser` cannot call `unpause()` or change configuration.
+- The owner retains both `pause()` and `unpause()` authority plus role assignment.
 
 ### Keepers
 
