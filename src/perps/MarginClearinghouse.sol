@@ -21,6 +21,8 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
 
     using SafeERC20 for IERC20;
 
+    bytes4 internal constant MARK_PRICE_STALE_SELECTOR = bytes4(keccak256("CfdEngine__MarkPriceStale()"));
+
     mapping(bytes32 => uint256) internal settlementBalances;
 
     mapping(bytes32 => uint256) internal positionMarginUsdc;
@@ -175,7 +177,14 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
 
         settlementBalances[accountId] += amount;
 
-        _checkpointCarryBeforeMarginChange(accountId, reachableCollateralBasisUsdc);
+        try ICfdEngineCore(engine).realizeCarryBeforeMarginChange(accountId, reachableCollateralBasisUsdc) {}
+        catch (bytes memory revertData) {
+            if (revertData.length < 4 || bytes4(revertData) != MARK_PRICE_STALE_SELECTOR) {
+                assembly {
+                    revert(add(revertData, 32), mload(revertData))
+                }
+            }
+        }
 
         emit Deposit(accountId, settlementAsset, amount);
     }

@@ -1601,6 +1601,43 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
+    function test_DepositMargin_SucceedsOnStaleMarkWithoutCheckpointingCarry() public {
+        address trader = address(0xABD1A);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        uint256 depositAmount = 500e6;
+
+        _fundTrader(trader, 10_000e6);
+        usdc.mint(trader, depositAmount);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2_000e6, 1e8);
+
+        uint256 settlementBefore = clearinghouse.balanceUsdc(accountId);
+        uint64 carryTimestampBefore = engine.getPositionLastCarryTimestamp(accountId);
+        uint256 unsettledCarryBefore = engine.unsettledCarryUsdc(accountId);
+
+        vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 30 days);
+
+        vm.startPrank(trader);
+        usdc.approve(address(clearinghouse), type(uint256).max);
+        clearinghouse.depositMargin(depositAmount);
+        vm.stopPrank();
+
+        assertEq(
+            clearinghouse.balanceUsdc(accountId),
+            settlementBefore + depositAmount,
+            "Stale-mark deposit should still credit the full settlement amount"
+        );
+        assertEq(
+            engine.getPositionLastCarryTimestamp(accountId),
+            carryTimestampBefore,
+            "Stale-mark deposit should not advance the carry checkpoint"
+        );
+        assertEq(
+            engine.unsettledCarryUsdc(accountId),
+            unsettledCarryBefore,
+            "Stale-mark deposit should not synthesize unsettled carry just to preserve liveness"
+        );
+    }
+
     function test_ReserveCommittedOrderMargin_CheckpointsCarryBeforeReachabilityDrops() public {
         address trader = address(0xABD3);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
