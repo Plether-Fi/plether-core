@@ -18,9 +18,12 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
         Return
     }
 
+    /// @dev ClearerFull routes the reserved bounty to the executor, RefundUser restores the trader-owned
+    ///      bounty, and ProtocolFull forfeits the router-held bounty into protocol fees.
     enum FailedOrderOutcome {
         ClearerFull,
-        RefundUser
+        RefundUser,
+        ProtocolFull
     }
 
     enum OrderFailReason {
@@ -165,7 +168,7 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
                 orderId,
                 pythFee,
                 false,
-                _failedOutcomeForTerminalFailure(order),
+                _failedOutcomeForSlippageFailure(order),
                 revertOnBlockedExecution,
                 executionPrice,
                 oraclePublishTime
@@ -274,6 +277,17 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
         return FailedOrderOutcome.RefundUser;
     }
 
+    function _failedOutcomeForSlippageFailure(
+        CfdTypes.Order memory order
+    ) internal pure returns (FailedOrderOutcome outcome) {
+        // Close slippage failures remain terminal so the FIFO keeps moving, but the forfeited bounty must
+        // accrue to LPs instead of rewarding the executor for choosing an out-of-bounds execution price.
+        if (order.isClose) {
+            return FailedOrderOutcome.ProtocolFull;
+        }
+        return FailedOrderOutcome.RefundUser;
+    }
+
     function _cleanupOrder(
         uint64 orderId,
         FailedOrderOutcome failedOutcome,
@@ -297,7 +311,13 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
     function _failedOutcomeCode(
         FailedOrderOutcome outcome
     ) internal pure returns (uint8) {
-        return outcome == FailedOrderOutcome.ClearerFull ? 1 : 2;
+        if (outcome == FailedOrderOutcome.ClearerFull) {
+            return 1;
+        }
+        if (outcome == FailedOrderOutcome.RefundUser) {
+            return 2;
+        }
+        return 3;
     }
 
     function _sendEth(

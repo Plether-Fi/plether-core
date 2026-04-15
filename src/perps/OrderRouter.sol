@@ -133,6 +133,9 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         OrderOracleExecution(_engine, _engineLens, _vault, _pyth, _feedIds, _quantities, _basePrices, _inversions)
     {
         maxOrderAge = DEFAULT_MAX_ORDER_AGE;
+        if (_engine.code.length > 0) {
+            USDC.forceApprove(_engine, type(uint256).max);
+        }
     }
 
     function _revertZeroAddress() internal pure override {

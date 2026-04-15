@@ -180,7 +180,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         );
     }
 
-    function test_SlippageClosePaysClearer() public {
+    function test_SlippageCloseForfeitsBountyToProtocol() public {
         bytes32 accountId = bytes32(uint256(uint160(ALICE)));
         bytes32 keeperAccountId = bytes32(uint256(uint160(KEEPER)));
         usdc.mint(ALICE, 400_500_000);
@@ -200,6 +200,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 0.8e8, true);
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccountId);
+        uint256 feesBefore = engine.accumulatedFeesUsdc();
         bytes[] memory closePrice = new bytes[](1);
         closePrice[0] = abi.encode(uint256(1e8));
         vm.prank(KEEPER);
@@ -208,9 +209,10 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
 
         assertEq(
             clearinghouse.balanceUsdc(keeperAccountId) - keeperSettlementBefore,
-            1e6,
-            "Close slippage miss should credit the clearer clearinghouse balance"
+            0,
+            "Close slippage miss should not credit the clearer clearinghouse balance"
         );
+        assertEq(engine.accumulatedFeesUsdc() - feesBefore, 1e6, "Close slippage miss should forfeit the full bounty");
     }
 
     function test_CreditKeeperExecutionBounty_RealizesCarryBeforeCreditingSettlement() public {
@@ -393,6 +395,32 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         );
         assertEq(
             usdc.balanceOf(ALICE) - traderWalletBefore, 0, "Untyped close revert should not refund the trader wallet"
+        );
+    }
+
+    function test_NonSlippageCloseTerminalFailureStillPaysClearer() public {
+        bytes32 accountId = bytes32(uint256(uint160(ALICE)));
+        bytes32 keeperAccountId = bytes32(uint256(uint160(KEEPER)));
+        _fundTrader(ALICE, 20_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
+
+        vm.prank(ALICE);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 1e8, true);
+
+        bytes32 positionMarginSlot = keccak256(abi.encode(accountId, uint256(1)));
+        vm.store(address(clearinghouse), positionMarginSlot, bytes32(uint256(0)));
+
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccountId);
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(1e8));
+        vm.roll(block.number + 1);
+        vm.prank(KEEPER);
+        router.executeOrder(1, priceData);
+
+        assertEq(
+            clearinghouse.balanceUsdc(keeperAccountId) - keeperSettlementBefore,
+            1e6,
+            "Non-slippage close terminal failures should stay on the clearer-paid path"
         );
     }
 

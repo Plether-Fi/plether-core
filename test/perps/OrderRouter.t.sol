@@ -1282,8 +1282,8 @@ contract OrderRouterTest is BasePerpTest {
         uint256 executorReward = _settlementBalance(address(this)) - executorBefore;
         assertEq(
             executorReward,
-            2_000_000,
-            "Terminal close slippage and the valid tail should both pay the executor under current policy"
+            1_000_000,
+            "Only the valid tail should pay the executor when the close-slippage head is forfeited to protocol fees"
         );
         assertEq(
             router.nextExecuteId(),
@@ -2235,7 +2235,7 @@ contract OrderRouterPythTest is BasePerpTest {
         router.executeOrder(1, empty);
     }
 
-    function test_SlippageFailedCloseOrderRefundsEscrowedBounty() public {
+    function test_SlippageFailedCloseOrderForfeitsEscrowedBountyToProtocol() public {
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
 
         _open(aliceId, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
@@ -2255,14 +2255,14 @@ contract OrderRouterPythTest is BasePerpTest {
 
         assertEq(
             _settlementBalance(address(this)) - keeperBefore,
-            1e6,
-            "Terminal close slippage miss should pay keeper bounty as clearinghouse credit under current policy"
+            0,
+            "Terminal close slippage miss should not pay keeper bounty"
         );
         assertEq(
-            engine.accumulatedFeesUsdc() - feesBefore, 0, "Slippage-failed close order should not book protocol revenue"
+            engine.accumulatedFeesUsdc() - feesBefore, 1e6, "Slippage-failed close order should book protocol revenue"
         );
         assertEq(router.nextExecuteId(), 0, "Terminal close slippage miss should clear the order");
-        assertEq(_executionBountyReserve(closeOrderId), 0, "Close bounty should be refunded on terminal failure");
+        assertEq(_executionBountyReserve(closeOrderId), 0, "Close bounty should be consumed on terminal failure");
     }
 
     function test_InsufficientPythFee_Reverts() public {
@@ -4835,7 +4835,7 @@ contract KeeperFeeRefundTest is Test {
     // - expired open -> trader refunded: test_ExpiredOrderFeeRefundedToUser, test_ExpiredOpenOrderRefundsUsdcBountyToTrader_NotKeeper
     // - expired close -> clearer paid: test_ExitedAccount_ExpiredCloseOrderPaysClearerBounty
     // - slippage open -> trader refunded: test_SlippageFailFeeRefundedToUser
-    // - slippage close -> clearer paid: test_CloseSlippageFailPaysClearerWhenBountyIsMarginBacked
+    // - slippage close -> protocol forfeiture: test_CloseSlippageFailForfeitsBountyToProtocolWhenMarginBacked
     // - protocol invalidation -> trader refunded: test_PostCommitDegradedModeRefundsUserBounty
     // - user invalid -> clearer paid: test_TypedUserInvalidOpenPaysClearer
 
@@ -4989,7 +4989,7 @@ contract KeeperFeeRefundTest is Test {
         );
     }
 
-    function test_CloseSlippageFailPaysClearerWhenBountyIsMarginBacked() public {
+    function test_CloseSlippageFailForfeitsBountyToProtocolWhenMarginBacked() public {
         bytes32 accountId = bytes32(uint256(uint160(alice)));
         usdc.mint(alice, 251_500_000);
         vm.startPrank(alice);
@@ -5013,6 +5013,7 @@ contract KeeperFeeRefundTest is Test {
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 0.8e8, true);
 
         uint256 keeperUsdcBefore = _settlementBalance(keeper);
+        uint256 protocolFeesBefore = engine.accumulatedFeesUsdc();
         bytes[] memory closePrice = new bytes[](1);
         closePrice[0] = abi.encode(uint256(1e8));
         vm.prank(keeper);
@@ -5023,8 +5024,13 @@ contract KeeperFeeRefundTest is Test {
         assertEq(sizeAfter, 10_000e18, "Terminal slippage failure should leave the position open");
         assertEq(
             _settlementBalance(keeper) - keeperUsdcBefore,
+            0,
+            "Terminal close slippage should not pay the clearer"
+        );
+        assertEq(
+            engine.accumulatedFeesUsdc() - protocolFeesBefore,
             1e6,
-            "Terminal close slippage should pay the clearer as clearinghouse credit"
+            "Terminal close slippage should forfeit the full bounty to protocol fees"
         );
         assertEq(usdc.balanceOf(alice), 0, "Trader wallet should not receive margin-backed close bounty refunds");
     }
