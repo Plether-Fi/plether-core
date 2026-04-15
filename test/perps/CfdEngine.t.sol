@@ -16,6 +16,7 @@ import {HousePoolEngineViewTypes} from "../../src/perps/interfaces/HousePoolEngi
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
 import {ICfdEngineSettlementHost} from "../../src/perps/interfaces/ICfdEngineSettlementHost.sol";
 import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
+import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {PerpsViewTypes} from "../../src/perps/interfaces/PerpsViewTypes.sol";
 import {ProtocolLensViewTypes} from "../../src/perps/interfaces/ProtocolLensViewTypes.sol";
@@ -4998,9 +4999,15 @@ contract CfdEngineAuditTest is BasePerpTest {
         bytes32 carolAccount = bytes32(uint256(uint160(carol)));
         (uint256 sizeBefore,,,,,,) = engine.positions(carolAccount);
 
-        routerAdmin.proposeMaxOrderAge(0);
+        IOrderRouterAdminHost.RouterConfig memory config = IOrderRouterAdminHost.RouterConfig({
+            maxOrderAge: 0,
+            orderExecutionStalenessLimit: router.orderExecutionStalenessLimit(),
+            liquidationStalenessLimit: router.liquidationStalenessLimit(),
+            pythMaxConfidenceRatioBps: router.pythMaxConfidenceRatioBps()
+        });
+        routerAdmin.proposeRouterConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
-        routerAdmin.finalizeMaxOrderAge();
+        routerAdmin.finalizeRouterConfig();
 
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);

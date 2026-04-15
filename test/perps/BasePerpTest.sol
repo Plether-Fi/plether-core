@@ -17,6 +17,7 @@ import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {DeferredEngineViewTypes} from "../../src/perps/interfaces/DeferredEngineViewTypes.sol";
 import {HousePoolEngineViewTypes} from "../../src/perps/interfaces/HousePoolEngineViewTypes.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
+import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {PerpsViewTypes} from "../../src/perps/interfaces/PerpsViewTypes.sol";
 import {ProtocolLensViewTypes} from "../../src/perps/interfaces/ProtocolLensViewTypes.sol";
@@ -597,6 +598,21 @@ abstract contract BasePerpTest is Test {
         engineAdmin.proposeRiskParams(params);
         vm.warp(block.timestamp + 48 hours + 1);
         engineAdmin.finalizeRiskParams();
+    }
+
+    function _routerConfig() internal view returns (IOrderRouterAdminHost.RouterConfig memory config) {
+        config.maxOrderAge = router.maxOrderAge();
+        config.orderExecutionStalenessLimit = router.orderExecutionStalenessLimit();
+        config.liquidationStalenessLimit = router.liquidationStalenessLimit();
+        config.pythMaxConfidenceRatioBps = router.pythMaxConfidenceRatioBps();
+    }
+
+    function _setRouterConfig(
+        IOrderRouterAdminHost.RouterConfig memory config
+    ) internal {
+        routerAdmin.proposeRouterConfig(config);
+        vm.warp(block.timestamp + 48 hours + 1);
+        routerAdmin.finalizeRouterConfig();
     }
 
     function _syncEngineAdmin() internal {

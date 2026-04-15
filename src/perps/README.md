@@ -377,10 +377,7 @@ Timelocked surfaces include:
 - `CfdEngineAdmin` -> `CfdEngine.engineMarkStalenessLimit`
 - `HousePool.seniorRateBps`
 - `HousePool.markStalenessLimit`
-- `OrderRouterAdmin` -> `OrderRouter.maxOrderAge`
-- `OrderRouterAdmin` -> `OrderRouter.orderExecutionStalenessLimit`
-- `OrderRouterAdmin` -> `OrderRouter.liquidationStalenessLimit`
-- `OrderRouterAdmin` -> `OrderRouter.pythMaxConfidenceRatioBps`
+- `OrderRouterAdmin` -> `OrderRouter.RouterConfig`
 
 Instant controls remain for one-time wiring and fee withdrawal. `OrderRouter` pause/unpause is now owner-gated on `OrderRouterAdmin` rather than the router itself.
 

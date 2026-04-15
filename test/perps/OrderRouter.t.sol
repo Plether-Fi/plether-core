@@ -17,6 +17,7 @@ import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {AccountLensViewTypes} from "../../src/perps/interfaces/AccountLensViewTypes.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
 import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
+import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
@@ -218,10 +219,12 @@ contract OrderRouterTest is BasePerpTest {
         clearinghouse.withdraw(otherId, 70e6);
 
         vm.prank(address(this));
-        routerAdmin.proposeMaxOrderAge(0);
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.maxOrderAge = 0;
+        routerAdmin.proposeRouterConfig(config);
         vm.warp(block.timestamp + 48 hours);
         vm.prank(address(this));
-        routerAdmin.finalizeMaxOrderAge();
+        routerAdmin.finalizeRouterConfig();
 
         bytes[] memory pythPrice = new bytes[](1);
         pythPrice[0] = abi.encode(uint256(150_000_000));
@@ -1387,9 +1390,11 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
         router.executeOrder(1, _pythUpdateData());
 
-        routerAdmin.proposeOrderExecutionStalenessLimit(300);
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.orderExecutionStalenessLimit = 300;
+        routerAdmin.proposeRouterConfig(config);
         vm.warp(1200 + 48 hours + 1);
-        routerAdmin.finalizeOrderExecutionStalenessLimit();
+        routerAdmin.finalizeRouterConfig();
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), uint64(block.timestamp - 10));
 
         router.executeOrder(1, _pythUpdateData());
@@ -1399,10 +1404,12 @@ contract OrderRouterPythTest is BasePerpTest {
 
     function test_OrderRefund_DoesNotRevertWhenRouterLimitExceedsEngineHelperLimit() public {
         engineAdmin.proposeEngineMarkStalenessLimit(60);
-        routerAdmin.proposeOrderExecutionStalenessLimit(300);
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.orderExecutionStalenessLimit = 300;
+        routerAdmin.proposeRouterConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
         engineAdmin.finalizeEngineMarkStalenessLimit();
-        routerAdmin.finalizeOrderExecutionStalenessLimit();
+        routerAdmin.finalizeRouterConfig();
 
         vm.warp(1050);
         vm.prank(alice);
@@ -1435,9 +1442,11 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
-        routerAdmin.proposePythMaxConfidenceRatioBps(100);
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.pythMaxConfidenceRatioBps = 100;
+        routerAdmin.proposeRouterConfig(config);
         vm.warp(1000 + 48 hours + 1);
-        routerAdmin.finalizePythMaxConfidenceRatioBps();
+        routerAdmin.finalizeRouterConfig();
 
         mockPyth.setAllPrices(feedIds, int64(100_000_000), uint64(2_000_000), int32(-8), uint64(block.timestamp - 10));
 
@@ -1452,9 +1461,11 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
-        routerAdmin.proposePythMaxConfidenceRatioBps(100);
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.pythMaxConfidenceRatioBps = 100;
+        routerAdmin.proposeRouterConfig(config);
         vm.warp(1000 + 48 hours + 1);
-        routerAdmin.finalizePythMaxConfidenceRatioBps();
+        routerAdmin.finalizeRouterConfig();
 
         mockPyth.setAllPrices(feedIds, int64(100_000_000), uint64(500_000), int32(-8), 1006);
 
@@ -2242,11 +2253,12 @@ contract OrderRouterPythTest is BasePerpTest {
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
 
-        routerAdmin.proposeOrderExecutionStalenessLimit(60);
-        routerAdmin.proposeLiquidationStalenessLimit(15);
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.orderExecutionStalenessLimit = 60;
+        config.liquidationStalenessLimit = 15;
+        routerAdmin.proposeRouterConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
-        routerAdmin.finalizeOrderExecutionStalenessLimit();
-        routerAdmin.finalizeLiquidationStalenessLimit();
+        routerAdmin.finalizeRouterConfig();
 
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 2040);
         vm.warp(2050);
@@ -2254,7 +2266,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         vm.warp(2056);
         vm.roll(block.number + 1);
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 12));
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
         router.executeLiquidation(accountId, empty);
     }
 
@@ -2279,12 +2291,14 @@ contract OrderRouterPythTest is BasePerpTest {
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 2000);
 
         vm.warp(2061);
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 12));
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
         router.executeLiquidation(accountId, empty);
 
-        routerAdmin.proposeLiquidationStalenessLimit(61);
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.liquidationStalenessLimit = 61;
+        routerAdmin.proposeRouterConfig(config);
         vm.warp(2061 + 48 hours + 1);
-        routerAdmin.finalizeLiquidationStalenessLimit();
+        routerAdmin.finalizeRouterConfig();
 
         vm.warp(2061);
         vm.expectRevert(CfdEngine.CfdEngine__PositionIsSolvent.selector);
@@ -2669,9 +2683,11 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
     }
 
     function test_FadWindow_OpenOrderStaysPendingAtExecution() public {
-        routerAdmin.proposeMaxOrderAge(7 days);
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.maxOrderAge = 7 days;
+        routerAdmin.proposeRouterConfig(config);
         vm.warp(block.timestamp + 48 hours);
-        routerAdmin.finalizeMaxOrderAge();
+        routerAdmin.finalizeRouterConfig();
 
         uint256 fadPublishTime = TEST_FRIDAY_18UTC + 2 hours + 1;
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), fadPublishTime);
@@ -2723,9 +2739,11 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
     }
 
     function test_FadWindow_BatchOpenOrderStaysPendingAtBlockedHead() public {
-        routerAdmin.proposeMaxOrderAge(7 days);
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.maxOrderAge = 7 days;
+        routerAdmin.proposeRouterConfig(config);
         vm.warp(block.timestamp + 48 hours);
-        routerAdmin.finalizeMaxOrderAge();
+        routerAdmin.finalizeRouterConfig();
 
         uint256 fadPublishTime = TEST_FRIDAY_18UTC + 2 hours + 1;
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), fadPublishTime);
@@ -2821,7 +2839,7 @@ contract BasketPriceHarness is OrderRouter {
         int32 expo
     ) internal pure returns (uint256 normalizedPrice) {
         if (price <= 0) {
-            revert OrderRouter__OraclePriceNegative();
+            revert OrderRouter.OrderRouter__OracleValidation(8);
         }
         uint256 positivePrice = uint256(uint64(price));
         uint256 scaledPrecision = 10 ** uint256(uint32(26 - expo));
@@ -2834,7 +2852,7 @@ contract BasketPriceHarness is OrderRouter {
         int32 expo
     ) internal pure returns (uint256 normalizedPrice) {
         if (price <= 0) {
-            revert OrderRouter__OraclePriceNegative();
+            revert OrderRouter.OrderRouter__OracleValidation(8);
         }
 
         uint256 rawPrice = uint256(uint64(price));
@@ -2869,7 +2887,7 @@ contract NormalizePythHarness is OrderRouter {
         int32 expo
     ) external pure returns (uint256) {
         if (price <= 0) {
-            revert OrderRouter__OraclePriceNegative();
+            revert OrderRouter.OrderRouter__OracleValidation(8);
         }
 
         uint256 rawPrice = uint256(uint64(price));
@@ -3406,9 +3424,11 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function helper_FadWindow_OpenOrderStaysPendingAtExecution() public {
-        routerAdmin.proposeMaxOrderAge(7 days);
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.maxOrderAge = 7 days;
+        routerAdmin.proposeRouterConfig(config);
         vm.warp(block.timestamp + 48 hours);
-        routerAdmin.finalizeMaxOrderAge();
+        routerAdmin.finalizeRouterConfig();
 
         uint256 fadPublishTime = FRIDAY_18UTC + 2 hours + 1;
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), fadPublishTime);
@@ -3459,9 +3479,11 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function helper_FadWindow_BatchOpenOrderStaysPendingAtBlockedHead() public {
-        routerAdmin.proposeMaxOrderAge(7 days);
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.maxOrderAge = 7 days;
+        routerAdmin.proposeRouterConfig(config);
         vm.warp(block.timestamp + 48 hours);
-        routerAdmin.finalizeMaxOrderAge();
+        routerAdmin.finalizeRouterConfig();
 
         uint256 fadPublishTime = FRIDAY_18UTC + 2 hours + 1;
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), fadPublishTime);
@@ -3777,7 +3799,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(FRIDAY_20UTC + 63);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
-        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
         router.executeOrder(2, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
@@ -4141,9 +4163,11 @@ contract OrderRouterAuditTest is BasePerpTest {
 
     // Regression: H-02 — stale order executes via executeOrder
     function test_StaleOrderExecutesViaExecuteOrder() public {
-        routerAdmin.proposeMaxOrderAge(300);
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.maxOrderAge = 300;
+        routerAdmin.proposeRouterConfig(config);
         _warpForward(48 hours + 1);
-        routerAdmin.finalizeMaxOrderAge();
+        routerAdmin.finalizeRouterConfig();
 
         _fundJunior(bob, 1_000_000e6);
         _fundTrader(alice, 50_000e6);
@@ -4235,9 +4259,11 @@ contract StaleOrderExpiryTest is BasePerpTest {
 
     function setUp() public override {
         super.setUp();
-        routerAdmin.proposeMaxOrderAge(300);
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.maxOrderAge = 300;
+        routerAdmin.proposeRouterConfig(config);
         _warpForward(48 hours + 1);
-        routerAdmin.finalizeMaxOrderAge();
+        routerAdmin.finalizeRouterConfig();
     }
 
     // Regression: H-03
@@ -4359,13 +4385,15 @@ contract StaleOrderExpiryTest is BasePerpTest {
 
     // Regression: H-03
     function test_SetMaxOrderAge_OnlyOwner() public {
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.maxOrderAge = 600;
         vm.prank(spammer);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, spammer));
-        routerAdmin.proposeMaxOrderAge(600);
+        routerAdmin.proposeRouterConfig(config);
 
-        routerAdmin.proposeMaxOrderAge(600);
+        routerAdmin.proposeRouterConfig(config);
         _warpForward(48 hours + 1);
-        routerAdmin.finalizeMaxOrderAge();
+        routerAdmin.finalizeRouterConfig();
         assertEq(router.maxOrderAge(), 600);
     }
 
@@ -4877,10 +4905,16 @@ contract KeeperFeeRefundTest is Test {
         pool.setOrderRouter(address(router));
 
         _warpPastTimelock();
-        routerAdmin.proposeMaxOrderAge(300);
+        IOrderRouterAdminHost.RouterConfig memory config = IOrderRouterAdminHost.RouterConfig({
+            maxOrderAge: 300,
+            orderExecutionStalenessLimit: router.orderExecutionStalenessLimit(),
+            liquidationStalenessLimit: router.liquidationStalenessLimit(),
+            pythMaxConfidenceRatioBps: router.pythMaxConfidenceRatioBps()
+        });
+        routerAdmin.proposeRouterConfig(config);
         _warpPastTimelock();
         clearinghouse.setEngine(address(engine));
-        routerAdmin.finalizeMaxOrderAge();
+        routerAdmin.finalizeRouterConfig();
         _bootstrapSeededLifecycle();
 
         usdc.mint(bob, 1_000_000e6);

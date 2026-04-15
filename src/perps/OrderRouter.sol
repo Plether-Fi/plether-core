@@ -597,32 +597,14 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, IOrderRouterAdminHost
         }
     }
 
-    function setMaxOrderAge(
-        uint256 newMaxOrderAge
+    function applyRouterConfig(
+        IOrderRouterAdminHost.RouterConfig calldata config
     ) external {
         _onlyAdmin();
-        maxOrderAge = newMaxOrderAge;
-    }
-
-    function setOrderExecutionStalenessLimit(
-        uint256 limit
-    ) external {
-        _onlyAdmin();
-        orderExecutionStalenessLimit = limit;
-    }
-
-    function setLiquidationStalenessLimit(
-        uint256 limit
-    ) external {
-        _onlyAdmin();
-        liquidationStalenessLimit = limit;
-    }
-
-    function setPythMaxConfidenceRatioBps(
-        uint256 ratioBps
-    ) external {
-        _onlyAdmin();
-        pythMaxConfidenceRatioBps = ratioBps;
+        maxOrderAge = config.maxOrderAge;
+        orderExecutionStalenessLimit = config.orderExecutionStalenessLimit;
+        liquidationStalenessLimit = config.liquidationStalenessLimit;
+        pythMaxConfidenceRatioBps = config.pythMaxConfidenceRatioBps;
     }
 
     function _nextCommitId() internal view override returns (uint64) {

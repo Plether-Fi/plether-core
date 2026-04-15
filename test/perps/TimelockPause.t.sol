@@ -8,6 +8,7 @@ import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouterAdmin} from "../../src/perps/OrderRouterAdmin.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
+import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
@@ -224,27 +225,30 @@ contract TimelockPauseTest is BasePerpTest {
     // ==========================================
 
     function test_ProposeMaxOrderAge_TimelockFlow() public {
-        routerAdmin.proposeMaxOrderAge(600);
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.maxOrderAge = 600;
+        routerAdmin.proposeRouterConfig(config);
 
         vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__TimelockNotReady.selector);
-        routerAdmin.finalizeMaxOrderAge();
+        routerAdmin.finalizeRouterConfig();
 
         _warpForward(48 hours + 1);
-        routerAdmin.finalizeMaxOrderAge();
+        routerAdmin.finalizeRouterConfig();
 
         assertEq(router.maxOrderAge(), 600);
-        assertEq(routerAdmin.maxOrderAgeActivationTime(), 0);
+        assertEq(routerAdmin.routerConfigActivationTime(), 0);
     }
 
     function test_FinalizeMaxOrderAge_NoProposal_Reverts() public {
         vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__NoProposal.selector);
-        routerAdmin.finalizeMaxOrderAge();
+        routerAdmin.finalizeRouterConfig();
     }
 
     function test_OrderRouter_OnlyOwner() public {
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         vm.prank(nonOwner);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
-        routerAdmin.proposeMaxOrderAge(600);
+        routerAdmin.proposeRouterConfig(config);
     }
 
     // ==========================================

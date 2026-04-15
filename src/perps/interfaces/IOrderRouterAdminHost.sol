@@ -3,19 +3,14 @@ pragma solidity 0.8.33;
 
 interface IOrderRouterAdminHost {
 
-    function setMaxOrderAge(
-        uint256 newMaxOrderAge
-    ) external;
+    struct RouterConfig {
+        uint256 maxOrderAge;
+        uint256 orderExecutionStalenessLimit;
+        uint256 liquidationStalenessLimit;
+        uint256 pythMaxConfidenceRatioBps;
+    }
 
-    function setOrderExecutionStalenessLimit(
-        uint256 limit
-    ) external;
-
-    function setLiquidationStalenessLimit(
-        uint256 limit
-    ) external;
-
-    function setPythMaxConfidenceRatioBps(
-        uint256 ratioBps
+    function applyRouterConfig(
+        RouterConfig calldata config
     ) external;
 }

@@ -44,10 +44,7 @@ Engine risk controls live in `CfdEngineAdmin`, and router risk controls live in 
 | `engineMarkStalenessLimit` | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 48-hour timelock |
 | `seniorRateBps` | `HousePool` | `onlyOwner`, 48-hour timelock |
 | `markStalenessLimit` | `HousePool` | `onlyOwner`, 48-hour timelock |
-| `orderExecutionStalenessLimit` | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
-| `liquidationStalenessLimit` | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
-| `maxOrderAge` | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
-| `pythMaxConfidenceRatioBps` | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
+| `RouterConfig` (`maxOrderAge`, `orderExecutionStalenessLimit`, `liquidationStalenessLimit`, `pythMaxConfidenceRatioBps`) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
 
 ### One-time wiring
 

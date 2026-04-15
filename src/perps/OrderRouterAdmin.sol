@@ -12,17 +12,8 @@ contract OrderRouterAdmin is Ownable, Pausable {
     IOrderRouterAdminHost public immutable router;
     mapping(address => uint256) public claimableEth;
 
-    uint256 public pendingMaxOrderAge;
-    uint256 public maxOrderAgeActivationTime;
-
-    uint256 public pendingOrderExecutionStalenessLimit;
-    uint256 public orderExecutionStalenessActivationTime;
-
-    uint256 public pendingLiquidationStalenessLimit;
-    uint256 public liquidationStalenessActivationTime;
-
-    uint256 public pendingPythMaxConfidenceRatioBps;
-    uint256 public pythMaxConfidenceRatioActivationTime;
+    IOrderRouterAdminHost.RouterConfig public pendingRouterConfig;
+    uint256 public routerConfigActivationTime;
 
     error OrderRouterAdmin__TimelockNotReady();
     error OrderRouterAdmin__NoProposal();
@@ -32,14 +23,9 @@ contract OrderRouterAdmin is Ownable, Pausable {
     error OrderRouterAdmin__NothingToClaim();
     error OrderRouterAdmin__EthTransferFailed();
 
-    event MaxOrderAgeProposed(uint256 newMaxOrderAge, uint256 activationTime);
-    event MaxOrderAgeFinalized(uint256 newMaxOrderAge);
-    event OrderExecutionStalenessLimitProposed(uint256 newLimit, uint256 activationTime);
-    event OrderExecutionStalenessLimitFinalized(uint256 newLimit);
-    event LiquidationStalenessLimitProposed(uint256 newLimit, uint256 activationTime);
-    event LiquidationStalenessLimitFinalized(uint256 newLimit);
-    event PythMaxConfidenceRatioBpsProposed(uint256 newRatioBps, uint256 activationTime);
-    event PythMaxConfidenceRatioBpsFinalized(uint256 newRatioBps);
+    event RouterConfigProposed(IOrderRouterAdminHost.RouterConfig config, uint256 activationTime);
+    event RouterConfigFinalized(IOrderRouterAdminHost.RouterConfig config);
+    event RouterConfigCancelled();
 
     constructor(address router_, address initialOwner) Ownable(initialOwner) {
         router = IOrderRouterAdminHost(router_);
@@ -52,81 +38,28 @@ contract OrderRouterAdmin is Ownable, Pausable {
         _;
     }
 
-    function proposeMaxOrderAge(
-        uint256 newMaxOrderAge
+    function proposeRouterConfig(
+        IOrderRouterAdminHost.RouterConfig calldata config
     ) external onlyOwner {
-        pendingMaxOrderAge = newMaxOrderAge;
-        maxOrderAgeActivationTime = block.timestamp + TIMELOCK_DELAY;
-        emit MaxOrderAgeProposed(newMaxOrderAge, maxOrderAgeActivationTime);
+        _validateRouterConfig(config);
+        pendingRouterConfig = config;
+        routerConfigActivationTime = block.timestamp + TIMELOCK_DELAY;
+        emit RouterConfigProposed(config, routerConfigActivationTime);
     }
 
-    function finalizeMaxOrderAge() external onlyOwner {
-        _requireTimelockReady(maxOrderAgeActivationTime);
-        uint256 nextValue = pendingMaxOrderAge;
-        pendingMaxOrderAge = 0;
-        maxOrderAgeActivationTime = 0;
-        router.setMaxOrderAge(nextValue);
-        emit MaxOrderAgeFinalized(nextValue);
+    function finalizeRouterConfig() external onlyOwner {
+        _requireTimelockReady(routerConfigActivationTime);
+        IOrderRouterAdminHost.RouterConfig memory config = pendingRouterConfig;
+        delete pendingRouterConfig;
+        routerConfigActivationTime = 0;
+        router.applyRouterConfig(config);
+        emit RouterConfigFinalized(config);
     }
 
-    function proposeOrderExecutionStalenessLimit(
-        uint256 limit
-    ) external onlyOwner {
-        if (limit == 0) {
-            revert OrderRouterAdmin__InvalidStalenessLimit();
-        }
-        pendingOrderExecutionStalenessLimit = limit;
-        orderExecutionStalenessActivationTime = block.timestamp + TIMELOCK_DELAY;
-        emit OrderExecutionStalenessLimitProposed(limit, orderExecutionStalenessActivationTime);
-    }
-
-    function finalizeOrderExecutionStalenessLimit() external onlyOwner {
-        _requireTimelockReady(orderExecutionStalenessActivationTime);
-        uint256 nextValue = pendingOrderExecutionStalenessLimit;
-        pendingOrderExecutionStalenessLimit = 0;
-        orderExecutionStalenessActivationTime = 0;
-        router.setOrderExecutionStalenessLimit(nextValue);
-        emit OrderExecutionStalenessLimitFinalized(nextValue);
-    }
-
-    function proposeLiquidationStalenessLimit(
-        uint256 limit
-    ) external onlyOwner {
-        if (limit == 0) {
-            revert OrderRouterAdmin__InvalidStalenessLimit();
-        }
-        pendingLiquidationStalenessLimit = limit;
-        liquidationStalenessActivationTime = block.timestamp + TIMELOCK_DELAY;
-        emit LiquidationStalenessLimitProposed(limit, liquidationStalenessActivationTime);
-    }
-
-    function finalizeLiquidationStalenessLimit() external onlyOwner {
-        _requireTimelockReady(liquidationStalenessActivationTime);
-        uint256 nextValue = pendingLiquidationStalenessLimit;
-        pendingLiquidationStalenessLimit = 0;
-        liquidationStalenessActivationTime = 0;
-        router.setLiquidationStalenessLimit(nextValue);
-        emit LiquidationStalenessLimitFinalized(nextValue);
-    }
-
-    function proposePythMaxConfidenceRatioBps(
-        uint256 ratioBps
-    ) external onlyOwner {
-        if (ratioBps > 10_000) {
-            revert OrderRouterAdmin__InvalidConfidenceRatio();
-        }
-        pendingPythMaxConfidenceRatioBps = ratioBps;
-        pythMaxConfidenceRatioActivationTime = block.timestamp + TIMELOCK_DELAY;
-        emit PythMaxConfidenceRatioBpsProposed(ratioBps, pythMaxConfidenceRatioActivationTime);
-    }
-
-    function finalizePythMaxConfidenceRatioBps() external onlyOwner {
-        _requireTimelockReady(pythMaxConfidenceRatioActivationTime);
-        uint256 nextValue = pendingPythMaxConfidenceRatioBps;
-        pendingPythMaxConfidenceRatioBps = 0;
-        pythMaxConfidenceRatioActivationTime = 0;
-        router.setPythMaxConfidenceRatioBps(nextValue);
-        emit PythMaxConfidenceRatioBpsFinalized(nextValue);
+    function cancelRouterConfig() external onlyOwner {
+        delete pendingRouterConfig;
+        routerConfigActivationTime = 0;
+        emit RouterConfigCancelled();
     }
 
     function pause() external onlyOwner {
@@ -169,6 +102,17 @@ contract OrderRouterAdmin is Ownable, Pausable {
         }
         if (block.timestamp < activationTime) {
             revert OrderRouterAdmin__TimelockNotReady();
+        }
+    }
+
+    function _validateRouterConfig(
+        IOrderRouterAdminHost.RouterConfig memory config
+    ) internal pure {
+        if (config.orderExecutionStalenessLimit == 0 || config.liquidationStalenessLimit == 0) {
+            revert OrderRouterAdmin__InvalidStalenessLimit();
+        }
+        if (config.pythMaxConfidenceRatioBps > 10_000) {
+            revert OrderRouterAdmin__InvalidConfidenceRatio();
         }
     }
 }

@@ -10,6 +10,7 @@ import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
+import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {CfdEnginePlanLib} from "../../src/perps/libraries/CfdEnginePlanLib.sol";
 import {CfdEngineSnapshotsLib} from "../../src/perps/libraries/CfdEngineSnapshotsLib.sol";
@@ -344,9 +345,15 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
 
-        routerAdmin.proposeMaxOrderAge(60);
+        IOrderRouterAdminHost.RouterConfig memory config = IOrderRouterAdminHost.RouterConfig({
+            maxOrderAge: 60,
+            orderExecutionStalenessLimit: router.orderExecutionStalenessLimit(),
+            liquidationStalenessLimit: router.liquidationStalenessLimit(),
+            pythMaxConfidenceRatioBps: router.pythMaxConfidenceRatioBps()
+        });
+        routerAdmin.proposeRouterConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
-        routerAdmin.finalizeMaxOrderAge();
+        routerAdmin.finalizeRouterConfig();
 
         vm.warp(block.timestamp + 61);
 

@@ -12,6 +12,7 @@ import {OrderRouterAdmin} from "../../../src/perps/OrderRouterAdmin.sol";
 import {OrderRouter} from "../../../src/perps/OrderRouter.sol";
 import {PerpsPublicLens} from "../../../src/perps/PerpsPublicLens.sol";
 import {TrancheVault} from "../../../src/perps/TrancheVault.sol";
+import {IOrderRouterAdminHost} from "../../../src/perps/interfaces/IOrderRouterAdminHost.sol";
 import {MockUSDC} from "../../mocks/MockUSDC.sol";
 import {MockPyth} from "../../mocks/MockPyth.sol";
 import {BasePerpTest} from "../BasePerpTest.sol";
@@ -72,9 +73,15 @@ contract PerpOraclePathHandler is Test {
     ) external {
         uint256 limit = bound(limitFuzz, 1, 600);
         vm.startPrank(owner);
-        routerAdmin.proposeOrderExecutionStalenessLimit(limit);
+        IOrderRouterAdminHost.RouterConfig memory config = IOrderRouterAdminHost.RouterConfig({
+            maxOrderAge: router.maxOrderAge(),
+            orderExecutionStalenessLimit: limit,
+            liquidationStalenessLimit: router.liquidationStalenessLimit(),
+            pythMaxConfidenceRatioBps: router.pythMaxConfidenceRatioBps()
+        });
+        routerAdmin.proposeRouterConfig(config);
         vm.warp(block.timestamp + 48 hours);
-        routerAdmin.finalizeOrderExecutionStalenessLimit();
+        routerAdmin.finalizeRouterConfig();
         vm.stopPrank();
     }
 
@@ -83,9 +90,15 @@ contract PerpOraclePathHandler is Test {
     ) external {
         uint256 limit = bound(limitFuzz, 1, 600);
         vm.startPrank(owner);
-        routerAdmin.proposeLiquidationStalenessLimit(limit);
+        IOrderRouterAdminHost.RouterConfig memory config = IOrderRouterAdminHost.RouterConfig({
+            maxOrderAge: router.maxOrderAge(),
+            orderExecutionStalenessLimit: router.orderExecutionStalenessLimit(),
+            liquidationStalenessLimit: limit,
+            pythMaxConfidenceRatioBps: router.pythMaxConfidenceRatioBps()
+        });
+        routerAdmin.proposeRouterConfig(config);
         vm.warp(block.timestamp + 48 hours);
-        routerAdmin.finalizeLiquidationStalenessLimit();
+        routerAdmin.finalizeRouterConfig();
         vm.stopPrank();
     }
 

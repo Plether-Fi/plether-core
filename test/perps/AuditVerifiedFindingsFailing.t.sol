@@ -12,6 +12,7 @@ import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouterAdmin} from "../../src/perps/OrderRouterAdmin.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
@@ -226,9 +227,15 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
     }
 
     function test_F3_StaleOracleCancellationMustNotPayKeeperUsdc() public {
-        routerAdmin.proposeMaxOrderAge(3600);
+        IOrderRouterAdminHost.RouterConfig memory config = IOrderRouterAdminHost.RouterConfig({
+            maxOrderAge: 3600,
+            orderExecutionStalenessLimit: router.orderExecutionStalenessLimit(),
+            liquidationStalenessLimit: router.liquidationStalenessLimit(),
+            pythMaxConfidenceRatioBps: router.pythMaxConfidenceRatioBps()
+        });
+        routerAdmin.proposeRouterConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
-        routerAdmin.finalizeMaxOrderAge();
+        routerAdmin.finalizeRouterConfig();
 
         uint256 t0 = 2_000_000_000;
         vm.warp(t0);
