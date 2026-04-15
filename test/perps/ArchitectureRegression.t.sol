@@ -77,7 +77,9 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         uint256 bobSettlementBefore = clearinghouse.balanceUsdc(bobId);
         _close(bobId, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
 
-        assertGt(engine.deferredTraderCreditUsdc(bobId), 0, "new payout must defer while older deferred claims reserve cash");
+        assertGt(
+            engine.deferredTraderCreditUsdc(bobId), 0, "new payout must defer while older deferred claims reserve cash"
+        );
         assertEq(
             clearinghouse.balanceUsdc(bobId),
             bobSettlementBefore,

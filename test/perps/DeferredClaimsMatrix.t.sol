@@ -27,7 +27,9 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
             "Claim should service only currently liquid amount"
         );
         assertEq(
-            engine.deferredTraderCreditUsdc(accountId), deferredBefore - 20e6, "Remaining deferred balance should stay queued"
+            engine.deferredTraderCreditUsdc(accountId),
+            deferredBefore - 20e6,
+            "Remaining deferred balance should stay queued"
         );
     }
 
@@ -48,9 +50,7 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
             keeperSettlementBefore + 2000e6,
             "Clearer claim should service only liquid amount"
         );
-        assertEq(
-            engine.deferredKeeperCreditUsdc(keeper), 3000e6, "Remaining deferred keeper credit should stay queued"
-        );
+        assertEq(engine.deferredKeeperCreditUsdc(keeper), 3000e6, "Remaining deferred keeper credit should stay queued");
     }
 
 }

@@ -15,11 +15,15 @@ abstract contract OrderQueueBook is OrderEscrowAccounting {
 
     function _queueHeadOrderId() internal view virtual returns (uint64);
 
-    function _setQueueHeadOrderId(uint64 orderId) internal virtual;
+    function _setQueueHeadOrderId(
+        uint64 orderId
+    ) internal virtual;
 
     function _queueTailOrderId() internal view virtual returns (uint64);
 
-    function _setQueueTailOrderId(uint64 orderId) internal virtual;
+    function _setQueueTailOrderId(
+        uint64 orderId
+    ) internal virtual;
 
     function _revertOrderNotPending() internal pure virtual;
 

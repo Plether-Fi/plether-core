@@ -45,8 +45,7 @@ library HousePoolAccountingLib {
     ) internal pure returns (ReconcileSnapshot memory snapshot) {
         snapshot.physicalAssets = engineSnapshot.physicalAssetsUsdc;
         snapshot.protocolFees = engineSnapshot.protocolFeesUsdc;
-        snapshot.deferredLiabilities =
-            engineSnapshot.deferredTraderCreditUsdc + engineSnapshot.deferredKeeperCreditUsdc;
+        snapshot.deferredLiabilities = engineSnapshot.deferredTraderCreditUsdc + engineSnapshot.deferredKeeperCreditUsdc;
         snapshot.cashMinusFees = engineSnapshot.netPhysicalAssetsUsdc > snapshot.deferredLiabilities
             ? engineSnapshot.netPhysicalAssetsUsdc - snapshot.deferredLiabilities
             : 0;

@@ -77,7 +77,6 @@ contract PlanApplyRegressionTest is BasePerpTest {
         (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(bullId);
         assertEq(sizeAfter, preview.remainingSize, "Post-close size matches preview");
         assertEq(marginAfter, preview.remainingMargin, "Post-close margin matches preview");
-
     }
 
     // ──────────────────────────────────────────────

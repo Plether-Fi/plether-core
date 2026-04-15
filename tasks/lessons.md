@@ -11,3 +11,4 @@
 - When introducing a shared cash-reservation helper, audit every caller class separately: fresh payouts, deferred claims, liquidation bounties, previews, and fee withdrawals often need the same inputs but not the same serviceability rule.
 - When the contracts are undeployed, do not preserve misleading or redundant APIs for backward compatibility; prefer renaming/removing the wrong surface and updating callers in the same pass.
 - When the user explicitly says compatibility does not matter, remove legacy fields outright instead of documenting them as compatibility placeholders; stale zero-valued fields are audit bait.
+- When reducing EIP-170 bytecode size, do not count internal helper extraction as a real size lever; inherited/internal refactors mostly inline, so start with actual external call boundaries or dispatch-surface removal.

@@ -22,8 +22,8 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
     ) public {
         address trader = address(0xC108);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
-        uint256 initialMargin = bound(initialMarginFuzz, 5_000e6, 25_000e6);
-        uint256 sizeDelta = bound(sizeDeltaFuzz, 1_000e18, 50_000e18);
+        uint256 initialMargin = bound(initialMarginFuzz, 5000e6, 25_000e6);
+        uint256 sizeDelta = bound(sizeDeltaFuzz, 1000e18, 50_000e18);
         uint256 oraclePrice = bound(oraclePriceFuzz, 80_000_000, 120_000_000);
         uint256 carryDelay = bound(carryDelayFuzz, 0, 30 days);
 
@@ -47,8 +47,9 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             isClose: false
         });
 
-        uint8 revertCode =
-            engineLens.previewOpenRevertCode(accountId, CfdTypes.Side.BULL, sizeDelta, marginDelta, oraclePrice, uint64(block.timestamp));
+        uint8 revertCode = engineLens.previewOpenRevertCode(
+            accountId, CfdTypes.Side.BULL, sizeDelta, marginDelta, oraclePrice, uint64(block.timestamp)
+        );
         CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory = engineLens.previewOpenFailurePolicyCategory(
             accountId, CfdTypes.Side.BULL, sizeDelta, marginDelta, oraclePrice, uint64(block.timestamp)
         );
@@ -407,7 +408,11 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             "Illiquid liquidation preview should match the live settlement-balance mutation"
         );
         assertEq(bucketsAfter.activePositionMarginUsdc, 0, "Illiquid liquidation should clear the live position margin");
-        assertEq(bucketsAfter.totalLockedMarginUsdc, 0, "Illiquid liquidation should clear all locked margin in the simple path");
+        assertEq(
+            bucketsAfter.totalLockedMarginUsdc,
+            0,
+            "Illiquid liquidation should clear all locked margin in the simple path"
+        );
         assertEq(
             (clearinghouse.balanceUsdc(bytes32(uint256(uint160(KEEPER)))) - keeperSettlementBefore)
                 + (engine.deferredKeeperCreditUsdc(KEEPER) - deferredKeeperCreditBefore),

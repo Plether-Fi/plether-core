@@ -286,7 +286,9 @@ contract PerpClosePreviewParityInvariantTest is Test {
             "Close deferred remainder should match"
         );
         assertEq(actual.immediatePayoutUsdc, expected.immediatePayoutUsdc, "Close immediate payout should match");
-        assertEq(actual.deferredTraderCreditUsdc, expected.deferredTraderCreditUsdc, "Close deferred payout should match");
+        assertEq(
+            actual.deferredTraderCreditUsdc, expected.deferredTraderCreditUsdc, "Close deferred payout should match"
+        );
         assertEq(actual.seizedCollateralUsdc, expected.seizedCollateralUsdc, "Close seized collateral should match");
         assertEq(actual.badDebtUsdc, expected.badDebtUsdc, "Close bad debt should match");
         assertEq(actual.remainingSize, expected.remainingSize, "Close remaining size should match");

@@ -240,8 +240,7 @@ contract PerpAccountingHandler is Test {
             active: true,
             accountId: accountId,
             routerOpenAllowed: !router.paused() && !engine.degradedMode() && !engine.isOracleFrozen()
-                && !engine.isFadWindow() && vault.canIncreaseRisk()
-                && router.pendingOrderCounts(accountId) < 5,
+                && !engine.isFadWindow() && vault.canIncreaseRisk() && router.pendingOrderCounts(accountId) < 5,
             prefilterActive: _canUseCommitMarkForOpenPrefilter(),
             failureCategory: engineLens.previewOpenFailurePolicyCategory(
                 accountId, side, sizeDelta, marginDelta, _commitReferencePrice(), engine.lastMarkTime()
@@ -354,8 +353,8 @@ contract PerpAccountingHandler is Test {
                 if (preview.remainingSize == 0) {
                     terminalClose = true;
                     expectedBadDebtDeltaUsdc = preview.badDebtUsdc;
-                    uint256 grossResidualUsdc =
-                        beforeSnapshot.settlementBalanceUsdc + preview.immediatePayoutUsdc + preview.deferredTraderCreditUsdc;
+                    uint256 grossResidualUsdc = beforeSnapshot.settlementBalanceUsdc + preview.immediatePayoutUsdc
+                        + preview.deferredTraderCreditUsdc;
                     expectedFinalResidualUsdc = grossResidualUsdc > preview.seizedCollateralUsdc
                         ? grossResidualUsdc - preview.seizedCollateralUsdc
                         : 0;

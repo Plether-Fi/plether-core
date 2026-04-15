@@ -17,7 +17,9 @@ contract CashPriorityLibTest is Test {
         assertEq(
             reservation.freeCashUsdc, 40e6, "Fresh payouts may only use cash above deferred claims and protocol fees"
         );
-        assertEq(reservation.deferredClaimServiceableUsdc, 0, "Fresh payout reservations do not service deferred claims");
+        assertEq(
+            reservation.deferredClaimServiceableUsdc, 0, "Fresh payout reservations do not service deferred claims"
+        );
     }
 
     function test_ReserveDeferredClaim_PrioritizesDeferredClaimsOverFees() public pure {
@@ -29,7 +31,9 @@ contract CashPriorityLibTest is Test {
             reservation.reservedSeniorCashUsdc, 100e6, "Fresh reservation accounting should still see all senior claims"
         );
         assertEq(reservation.freeCashUsdc, 0, "No fresh cash should remain while senior claims exceed physical cash");
-        assertEq(reservation.deferredClaimServiceableUsdc, 40e6, "Deferred claims should be serviced before protocol fees");
+        assertEq(
+            reservation.deferredClaimServiceableUsdc, 40e6, "Deferred claims should be serviced before protocol fees"
+        );
     }
 
     function test_ReserveDeferredClaim_UsesCashEvenWhenFeesAlsoExceedLiquidity() public pure {

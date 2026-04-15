@@ -369,7 +369,11 @@ abstract contract BasePerpTest is Test {
         assertEq(
             observed.immediatePayoutUsdc, preview.immediatePayoutUsdc, "Immediate payout should match close preview"
         );
-        assertEq(observed.deferredTraderCreditUsdc, preview.deferredTraderCreditUsdc, "Deferred payout should match close preview");
+        assertEq(
+            observed.deferredTraderCreditUsdc,
+            preview.deferredTraderCreditUsdc,
+            "Deferred payout should match close preview"
+        );
         assertEq(observed.badDebtUsdc, preview.badDebtUsdc, "Bad debt should match close preview");
         assertEq(observed.remainingSize, preview.remainingSize, "Remaining size should match close preview");
         assertEq(observed.remainingMargin, preview.remainingMargin, "Remaining margin should match close preview");
@@ -414,7 +418,9 @@ abstract contract BasePerpTest is Test {
             "Close deferred remainder should match"
         );
         assertEq(actual.immediatePayoutUsdc, expected.immediatePayoutUsdc, "Close immediate payout should match");
-        assertEq(actual.deferredTraderCreditUsdc, expected.deferredTraderCreditUsdc, "Close deferred payout should match");
+        assertEq(
+            actual.deferredTraderCreditUsdc, expected.deferredTraderCreditUsdc, "Close deferred payout should match"
+        );
         assertEq(actual.seizedCollateralUsdc, expected.seizedCollateralUsdc, "Close seized collateral should match");
         assertEq(actual.badDebtUsdc, expected.badDebtUsdc, "Close bad debt should match");
         assertEq(actual.remainingSize, expected.remainingSize, "Close remaining size should match");

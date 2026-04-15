@@ -342,7 +342,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         snap.accountId = accountId;
         snap.position = CfdTypes.Position({
             size: 100_000e18,
-            margin: 2_500e6,
+            margin: 2500e6,
             entryPrice: 1e8,
             maxProfitUsdc: 100_000e6,
             side: CfdTypes.Side.BULL,
@@ -354,42 +354,37 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         snap.lastMarkPrice = 1e8;
         snap.lastMarkTime = uint64(block.timestamp);
         snap.bullSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: 100_000e6,
-            openInterest: 100_000e18,
-            entryNotional: 100_000e6,
-            totalMargin: 2_500e6
+            maxProfitUsdc: 100_000e6, openInterest: 100_000e18, entryNotional: 100_000e6, totalMargin: 2500e6
         });
         snap.bearSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: 100_000e6,
-            openInterest: 100_000e18,
-            entryNotional: 100_000e6,
-            totalMargin: 2_500e6
+            maxProfitUsdc: 100_000e6, openInterest: 100_000e18, entryNotional: 100_000e6, totalMargin: 2500e6
         });
         snap.vaultAssetsUsdc = 2_000_000e6;
         snap.vaultCashUsdc = 2_000_000e6;
         snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
-            settlementBalanceUsdc: 2_500e6,
-            totalLockedMarginUsdc: 2_500e6,
-            activePositionMarginUsdc: 2_500e6,
+            settlementBalanceUsdc: 2500e6,
+            totalLockedMarginUsdc: 2500e6,
+            activePositionMarginUsdc: 2500e6,
             otherLockedMarginUsdc: 0,
             freeSettlementUsdc: 0
         });
         snap.lockedBuckets = IMarginClearinghouse.LockedMarginBuckets({
-            positionMarginUsdc: 2_500e6,
+            positionMarginUsdc: 2500e6,
             committedOrderMarginUsdc: 0,
             reservedSettlementUsdc: 0,
-            totalLockedMarginUsdc: 2_500e6
+            totalLockedMarginUsdc: 2500e6
         });
         snap.capPrice = CAP_PRICE;
         snap.riskParams = _riskParams();
 
         CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(
-            snap, _openOrder(accountId, CfdTypes.Side.BULL, 5_000e18, 0, 1e8), 1e8, uint64(block.timestamp)
+            snap, _openOrder(accountId, CfdTypes.Side.BULL, 5000e18, 0, 1e8), 1e8, uint64(block.timestamp)
         );
 
         MarginClearinghouseAccountingLib.SettlementConsumption memory consumption =
             MarginClearinghouseAccountingLib.planFundingLossConsumption(snap.accountBuckets, delta.pendingCarryUsdc);
-        uint256 reachableCollateralAfterCarry = snap.accountBuckets.settlementBalanceUsdc - consumption.totalConsumedUsdc;
+        uint256 reachableCollateralAfterCarry =
+            snap.accountBuckets.settlementBalanceUsdc - consumption.totalConsumedUsdc;
         uint256 reachableCollateralAfterTrade = reachableCollateralAfterCarry - uint256(delta.tradeCostUsdc);
 
         assertTrue(delta.valid, "Planner should accept opens once the carry-realized snapshot still clears IMR");
@@ -478,16 +473,10 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         snap.lastMarkPrice = 1e8;
         snap.lastMarkTime = uint64(block.timestamp);
         snap.bullSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: 100_000e6,
-            openInterest: 10_000e18,
-            entryNotional: 10_000e18 * 1e8,
-            totalMargin: 100e6
+            maxProfitUsdc: 100_000e6, openInterest: 10_000e18, entryNotional: 10_000e18 * 1e8, totalMargin: 100e6
         });
         snap.bearSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: 100_000e6,
-            openInterest: 10_000e18,
-            entryNotional: 10_000e18 * 1e8,
-            totalMargin: 100e6
+            maxProfitUsdc: 100_000e6, openInterest: 10_000e18, entryNotional: 10_000e18 * 1e8, totalMargin: 100e6
         });
         snap.vaultAssetsUsdc = 50_000_000e6;
         snap.vaultCashUsdc = 50_000_000e6;
@@ -522,7 +511,9 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             uint8(CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES),
             "Planner should surface the typed fee-drained failure before clearinghouse execution"
         );
-        assertFalse(delta.valid, "Planner should reject opens whose carry-drained free settlement cannot cover marginDelta");
+        assertFalse(
+            delta.valid, "Planner should reject opens whose carry-drained free settlement cannot cover marginDelta"
+        );
     }
 
     function test_PlanClose_ReportsPendingCarry() public {
@@ -656,7 +647,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         snap.accountId = accountId;
         snap.position = CfdTypes.Position({
             size: 100_000e18,
-            margin: 2_000e6,
+            margin: 2000e6,
             entryPrice: 1e8,
             maxProfitUsdc: 100_000e6,
             side: CfdTypes.Side.BULL,
@@ -668,31 +659,25 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         snap.lastMarkPrice = 1e8;
         snap.lastMarkTime = uint64(block.timestamp);
         snap.bullSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: 100_000e6,
-            openInterest: 100_000e18,
-            entryNotional: 100_000e18 * 1e8,
-            totalMargin: 2_000e6
+            maxProfitUsdc: 100_000e6, openInterest: 100_000e18, entryNotional: 100_000e18 * 1e8, totalMargin: 2000e6
         });
         snap.bearSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: 100_000e6,
-            openInterest: 100_000e18,
-            entryNotional: 100_000e18 * 1e8,
-            totalMargin: 2_000e6
+            maxProfitUsdc: 100_000e6, openInterest: 100_000e18, entryNotional: 100_000e18 * 1e8, totalMargin: 2000e6
         });
         snap.vaultAssetsUsdc = 50_000_000e6;
         snap.vaultCashUsdc = 50_000_000e6;
         snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
-            settlementBalanceUsdc: 5_000e6,
-            totalLockedMarginUsdc: 4_000e6,
-            activePositionMarginUsdc: 2_000e6,
-            otherLockedMarginUsdc: 2_000e6,
-            freeSettlementUsdc: 1_000e6
+            settlementBalanceUsdc: 5000e6,
+            totalLockedMarginUsdc: 4000e6,
+            activePositionMarginUsdc: 2000e6,
+            otherLockedMarginUsdc: 2000e6,
+            freeSettlementUsdc: 1000e6
         });
         snap.lockedBuckets = IMarginClearinghouse.LockedMarginBuckets({
-            positionMarginUsdc: 2_000e6,
-            committedOrderMarginUsdc: 2_000e6,
+            positionMarginUsdc: 2000e6,
+            committedOrderMarginUsdc: 2000e6,
             reservedSettlementUsdc: 0,
-            totalLockedMarginUsdc: 4_000e6
+            totalLockedMarginUsdc: 4000e6
         });
         snap.capPrice = CAP_PRICE;
         snap.riskParams = _riskParams();

@@ -11,8 +11,8 @@ import {MarginClearinghouse} from "../../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../../src/perps/OrderRouter.sol";
 import {PerpsPublicLens} from "../../../src/perps/PerpsPublicLens.sol";
 import {TrancheVault} from "../../../src/perps/TrancheVault.sol";
-import {MockUSDC} from "../../mocks/MockUSDC.sol";
 import {MockPyth} from "../../mocks/MockPyth.sol";
+import {MockUSDC} from "../../mocks/MockUSDC.sol";
 import {BasePerpTest} from "../BasePerpTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Test} from "forge-std/Test.sol";
@@ -176,6 +176,7 @@ contract PerpOraclePathHandler is Test {
             }
         }
     }
+
 }
 
 contract PerpOraclePathInvariantTest is BasePerpTest {
@@ -226,14 +227,7 @@ contract PerpOraclePathInvariantTest is BasePerpTest {
         inversions.push(false);
 
         router = new OrderRouter(
-            address(engine),
-            address(engineLens),
-            address(pool),
-            address(mockPyth),
-            feedIds,
-            weights,
-            bases,
-            inversions
+            address(engine), address(engineLens), address(pool), address(mockPyth), feedIds, weights, bases, inversions
         );
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
@@ -258,16 +252,21 @@ contract PerpOraclePathInvariantTest is BasePerpTest {
     }
 
     function invariant_MarkRefreshStateMatchesLastSuccessfulOracleUpdate() public view {
-        assertEq(engine.lastMarkPrice(), handler.ghostExpectedMarkPrice(), "engine mark price drifted from last success");
+        assertEq(
+            engine.lastMarkPrice(), handler.ghostExpectedMarkPrice(), "engine mark price drifted from last success"
+        );
         assertEq(engine.lastMarkTime(), handler.ghostExpectedMarkTime(), "engine mark time drifted from last success");
     }
 
     function invariant_RouterCustodiesOnlyTrackedStrandedRefundEth() public view {
-        assertEq(address(router).balance, handler.ghostPendingRefundEth(), "router ETH balance must equal stranded refunds");
+        assertEq(
+            address(router).balance, handler.ghostPendingRefundEth(), "router ETH balance must equal stranded refunds"
+        );
     }
 
     function invariant_OracleStalenessLimitsRemainPositive() public view {
         assertGt(router.orderExecutionStalenessLimit(), 0, "order execution staleness limit must stay positive");
         assertGt(router.liquidationStalenessLimit(), 0, "liquidation staleness limit must stay positive");
     }
+
 }

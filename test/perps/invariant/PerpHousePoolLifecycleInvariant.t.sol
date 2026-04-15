@@ -243,6 +243,7 @@ contract PerpHousePoolLifecycleHandler is Test {
     function lastTransferSnapshot() external view returns (LastTransfer memory) {
         return lastTransfer;
     }
+
 }
 
 contract PerpHousePoolLifecycleInvariantTest is BasePerpTest {
@@ -304,9 +305,7 @@ contract PerpHousePoolLifecycleInvariantTest is BasePerpTest {
             lifecycleComplete && pool.isTradingActive(),
             "ordinary deposit gate mismatch"
         );
-        assertEq(
-            pool.canIncreaseRisk(), lifecycleComplete && pool.isTradingActive(), "risk-increase gate mismatch"
-        );
+        assertEq(pool.canIncreaseRisk(), lifecycleComplete && pool.isTradingActive(), "risk-increase gate mismatch");
         if (pool.isTradingActive()) {
             assertTrue(lifecycleComplete, "trading cannot be active before both seeds initialize");
         }
@@ -412,4 +411,5 @@ contract PerpHousePoolLifecycleInvariantTest is BasePerpTest {
             unlockedShares = unlockedShares > floor ? unlockedShares - floor : 0;
         }
     }
+
 }

@@ -64,8 +64,8 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
     }
 
     function invariant_WithdrawalReserveIncludesKnownDeferredLiabilities() public view {
-        uint256 expectedReserved = _maxLiability() + engine.accumulatedFeesUsdc() + engine.totalDeferredTraderCreditUsdc()
-            + engine.totalDeferredKeeperCreditUsdc();
+        uint256 expectedReserved = _maxLiability() + engine.accumulatedFeesUsdc()
+            + engine.totalDeferredTraderCreditUsdc() + engine.totalDeferredKeeperCreditUsdc();
 
         expectedReserved += uint256(0);
 
@@ -219,8 +219,8 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         }
 
         address trader = address(uint160(uint256(eventSnapshot.accountId)));
-        uint256 actualFinalResidualUsdc =
-            clearinghouse.balanceUsdc(eventSnapshot.accountId) + engine.deferredTraderCreditUsdc(eventSnapshot.accountId);
+        uint256 actualFinalResidualUsdc = clearinghouse.balanceUsdc(eventSnapshot.accountId)
+            + engine.deferredTraderCreditUsdc(eventSnapshot.accountId);
         if (eventSnapshot.walletPayoutExpected) {
             actualFinalResidualUsdc += usdc.balanceOf(trader) - eventSnapshot.traderWalletBeforeUsdc;
         }
@@ -301,7 +301,9 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
                 "Account snapshot committed margin mismatch"
             );
             assertEq(
-                snapshot.deferredTraderCreditUsdc, ledgerView.deferredTraderCreditUsdc, "Account snapshot deferred payout mismatch"
+                snapshot.deferredTraderCreditUsdc,
+                ledgerView.deferredTraderCreditUsdc,
+                "Account snapshot deferred payout mismatch"
             );
             assertEq(
                 snapshot.pendingOrderCount,
@@ -483,9 +485,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         );
         assertEq(snapshot.maxLiabilityUsdc, _maxLiability(), "House-pool snapshot max liability mismatch");
         assertEq(
-            snapshot.supplementalReservedUsdc,
-            uint256(0),
-            "House-pool snapshot supplemental reserved amount mismatch"
+            snapshot.supplementalReservedUsdc, uint256(0), "House-pool snapshot supplemental reserved amount mismatch"
         );
         assertEq(
             snapshot.physicalAssetsUsdc,
@@ -547,7 +547,9 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
                 clearinghouse.balanceUsdc(accountId), 0, "Bad debt cannot coexist with tracked clearinghouse balance"
             );
             assertEq(
-                engine.deferredTraderCreditUsdc(accountId), 0, "Bad debt cannot coexist with deferred trader credit claims"
+                engine.deferredTraderCreditUsdc(accountId),
+                0,
+                "Bad debt cannot coexist with deferred trader credit claims"
             );
         }
     }
