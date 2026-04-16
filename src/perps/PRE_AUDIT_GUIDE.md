@@ -217,7 +217,7 @@ Reachability note:
 3. Deferred-liability seniority: deferred trader and keeper credit claims remain senior until serviced.
 4. Carry-aware risk: pending carry reduces relevant equity before realization on guard and risk checks.
 5. Bounded queue behavior: cleanup and close-intent projection are account-local.
-6. Escrow conservation: execution bounty escrow is distributed, refunded, forfeited, or left claimable exactly once.
+6. Escrow conservation: router-held USDC execution bounty escrow and admin-held ETH refund claims are each distributed, refunded, forfeited, or left claimable exactly once.
 7. No speculative LP asset inflation: unrealized trader losses are not counted as spendable LP assets.
 
 ## Test Map
@@ -231,10 +231,16 @@ Use the suites below as the highest-signal audit companions.
 | Liquidation | `test/perps/CfdEngine.t.sol`, `test/perps/OrderRouter.t.sol`, `test/perps/invariant/PerpDeferredCreditInvariant.t.sol` |
 | Payout modes | `test/perps/PayoutModesMatrix.t.sol`, `test/perps/CfdEngine.t.sol` |
 | Deferred liabilities | `test/perps/CfdEngine.t.sol`, `test/perps/invariant/PerpDeferredCreditInvariant.t.sol` |
+| Economic conservation | `test/perps/invariant/PerpEconomicConservationInvariant.t.sol`, `test/perps/invariant/PerpAccountingInvariant.t.sol` |
+| Multi-account isolation | `test/perps/invariant/PerpMultiAccountInvariant.t.sol` |
 | FIFO / expiry / queue | `test/perps/OrderRouter.t.sol` |
-| Frozen oracle / FAD | `test/perps/OrderRouter.t.sol` |
+| Frozen oracle / FAD | `test/perps/OrderRouter.t.sol`, `test/perps/invariant/PerpOracleBoundaryInvariant.t.sol` |
+| Oracle refresh / ETH refunds | `test/perps/invariant/PerpOraclePathInvariant.t.sol` |
+| Fee accounting | `test/perps/invariant/PerpFeeFlowInvariant.t.sol` |
+| Open/close/liquidation preview parity | `test/perps/invariant/PerpPreviewInvariant.t.sol`, `test/perps/invariant/PerpClosePreviewParityInvariant.t.sol`, `test/perps/PreviewExecutionDifferential.t.sol` |
 | LP reserve / withdrawals | `test/perps/MarginClearinghouse.t.sol`, `test/perps/CfdEngine.t.sol`, `test/perps/HousePool.t.sol` |
 | HousePool snapshot parity | `test/perps/HousePoolSnapshotParity.t.sol`, `test/perps/PerpsReadParity.t.sol` |
+| HousePool lifecycle / cooldown | `test/perps/invariant/PerpHousePoolLifecycleInvariant.t.sol` |
 | Router policy matrix | `test/perps/OrderRouterPolicyMatrix.t.sol` |
 | Stale-mark / reconcile behavior | `test/perps/HousePool.t.sol`, `test/perps/CfdEngine.t.sol`, `test/perps/AuditV2.t.sol`, `test/perps/AuditV3.t.sol` |
 | Audit-history regressions | `test/perps/AuditCurrentFindingsVerification.t.sol`, `test/perps/AuditFindings.t.sol`, `test/perps/AuditV2.t.sol`, `test/perps/AuditV3.t.sol` |

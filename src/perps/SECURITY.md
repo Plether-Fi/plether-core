@@ -121,7 +121,7 @@ These are the highest-value properties an auditor should expect to hold.
 |-----------|-------------|
 | Global FIFO | Execution always starts from the current global queue head |
 | Binding intents | Users cannot cancel queued orders once committed |
-| Bounty conservation | Router-custodied execution bounty escrow is conserved across order lifecycle transitions until distributed or absorbed |
+| Bounty conservation | Router-custodied USDC execution bounty escrow is conserved across order lifecycle transitions until distributed or absorbed |
 | Reservation source of truth | Clearinghouse reservation records remain the source of truth for committed order margin |
 | Bounded cleanup | Queue cleanup, liquidation cleanup, and close-intent position projection are account-local and intentionally bounded |
 
@@ -133,6 +133,23 @@ These are the highest-value properties an auditor should expect to hold.
 | Conservative MtM | Unrealized trader losses do not count as instantly withdrawable LP assets |
 | High-water-mark protection | Senior impairment must be restored before junior extracts surplus |
 | Shared accounting inputs | Reconcile, withdrawal limits, and LP status views consume the same canonical engine snapshots |
+
+### Coverage map
+
+The tables above describe the intended safety properties. The suites below are the highest-signal places where those properties are exercised today.
+
+| Invariant family | Primary coverage |
+|-----------|-------------|
+| Bounded entry solvency / margin sufficiency | `test/perps/OrderRouter.t.sol`, `test/perps/CfdEnginePlanRegression.t.sol`, `test/perps/invariant/PerpPreviewInvariant.t.sol` |
+| Degraded containment / post-op degraded-mode parity | `test/perps/PerpInvariant.t.sol`, `test/perps/invariant/PerpPreviewInvariant.t.sol`, `test/perps/PreviewExecutionDifferential.t.sol` |
+| Bounded payout / preview-live settlement parity | `test/perps/CfdEngine.t.sol`, `test/perps/invariant/PerpPreviewInvariant.t.sol`, `test/perps/invariant/PerpClosePreviewParityInvariant.t.sol` |
+| Withdrawal firewall / deferred-liability seniority | `test/perps/PerpInvariant.t.sol`, `test/perps/invariant/PerpEconomicConservationInvariant.t.sol`, `test/perps/invariant/PerpDeferredCreditInvariant.t.sol`, `test/perps/HousePool.t.sol` |
+| Single direction / side symmetry / total-margin conservation | `test/perps/PerpInvariant.t.sol`, `test/perps/invariant/PerpMultiAccountInvariant.t.sol` |
+| Global FIFO / binding intents / bounded cleanup | `test/perps/OrderRouter.t.sol`, `test/perps/invariant/PerpAccountingInvariant.t.sol` |
+| Bounty conservation / reservation source of truth | `test/perps/OrderRouter.t.sol`, `test/perps/invariant/PerpAccountingInvariant.t.sol`, `test/perps/invariant/PerpEconomicConservationInvariant.t.sol` |
+| Canonical asset boundary / conservative MtM / high-water-mark protection | `test/perps/PerpInvariant.t.sol`, `test/perps/HousePool.t.sol`, `test/perps/invariant/PerpHousePoolLifecycleInvariant.t.sol` |
+| Oracle freshness / FAD boundaries / ETH refund custody | `test/perps/OrderRouter.t.sol`, `test/perps/invariant/PerpOracleBoundaryInvariant.t.sol`, `test/perps/invariant/PerpOraclePathInvariant.t.sol` |
+| Fee custody / protocol accounting snapshots | `test/perps/invariant/PerpFeeFlowInvariant.t.sol`, `test/perps/PerpsReadParity.t.sol` |
 
 ## Trust Assumptions
 

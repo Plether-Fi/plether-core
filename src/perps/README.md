@@ -362,10 +362,10 @@ The owner can also add admin FAD days for expected FX-market holidays.
 The important runtime invariants are:
 
 - each account holds at most one live directional position,
-- side-local cached accounting remains symmetric and conservative,
+- side-local cached accounting stays consistent with the live position set and never overstates bounded payoff or margin state,
 - `sides[BULL].totalMargin + sides[BEAR].totalMargin == sum(pos.margin)` across live positions,
-- preview/live parity must hold for close and liquidation accounting,
-- router-custodied execution bounties are conserved across the order lifecycle.
+- commit-time open preview must not admit orders the router can already classify as commit-time rejectable, and close/liquidation preview math must match live accounting semantics,
+- router-custodied USDC execution bounty escrow and admin-custodied ETH refund claims are each conserved across their respective lifecycle transitions.
 
 ## Governance and Admin Controls
 
