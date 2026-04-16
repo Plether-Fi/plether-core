@@ -8,9 +8,12 @@ import {CfdEngineProtocolLens} from "../../../src/perps/CfdEngineProtocolLens.so
 import {CfdTypes} from "../../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../../src/perps/MarginClearinghouse.sol";
+import {OrderRouterAdmin} from "../../../src/perps/OrderRouterAdmin.sol";
 import {OrderRouter} from "../../../src/perps/OrderRouter.sol";
 import {PerpsPublicLens} from "../../../src/perps/PerpsPublicLens.sol";
 import {TrancheVault} from "../../../src/perps/TrancheVault.sol";
+import {IOrderRouterAdminHost} from "../../../src/perps/interfaces/IOrderRouterAdminHost.sol";
+import {MockUSDC} from "../../mocks/MockUSDC.sol";
 import {MockPyth} from "../../mocks/MockPyth.sol";
 import {MockUSDC} from "../../mocks/MockUSDC.sol";
 import {BasePerpTest} from "../BasePerpTest.sol";
@@ -21,6 +24,7 @@ contract PerpOraclePathHandler is Test {
 
     MockPyth public immutable mockPyth;
     OrderRouter public immutable router;
+    OrderRouterAdmin public immutable routerAdmin;
     CfdEngine public immutable engine;
     address public immutable owner;
     bytes32[] internal feedIds;
@@ -45,6 +49,7 @@ contract PerpOraclePathHandler is Test {
     ) {
         mockPyth = _mockPyth;
         router = _router;
+        routerAdmin = OrderRouterAdmin(_router.admin());
         engine = _engine;
         owner = _owner;
         feedIds = _feedIds;
@@ -69,9 +74,15 @@ contract PerpOraclePathHandler is Test {
     ) external {
         uint256 limit = bound(limitFuzz, 1, 600);
         vm.startPrank(owner);
-        router.proposeOrderExecutionStalenessLimit(limit);
+        IOrderRouterAdminHost.RouterConfig memory config = IOrderRouterAdminHost.RouterConfig({
+            maxOrderAge: router.maxOrderAge(),
+            orderExecutionStalenessLimit: limit,
+            liquidationStalenessLimit: router.liquidationStalenessLimit(),
+            pythMaxConfidenceRatioBps: router.pythMaxConfidenceRatioBps()
+        });
+        routerAdmin.proposeRouterConfig(config);
         vm.warp(block.timestamp + 48 hours);
-        router.finalizeOrderExecutionStalenessLimit();
+        routerAdmin.finalizeRouterConfig();
         vm.stopPrank();
     }
 
@@ -80,9 +91,15 @@ contract PerpOraclePathHandler is Test {
     ) external {
         uint256 limit = bound(limitFuzz, 1, 600);
         vm.startPrank(owner);
-        router.proposeLiquidationStalenessLimit(limit);
+        IOrderRouterAdminHost.RouterConfig memory config = IOrderRouterAdminHost.RouterConfig({
+            maxOrderAge: router.maxOrderAge(),
+            orderExecutionStalenessLimit: router.orderExecutionStalenessLimit(),
+            liquidationStalenessLimit: limit,
+            pythMaxConfidenceRatioBps: router.pythMaxConfidenceRatioBps()
+        });
+        routerAdmin.proposeRouterConfig(config);
         vm.warp(block.timestamp + 48 hours);
-        router.finalizeLiquidationStalenessLimit();
+        routerAdmin.finalizeRouterConfig();
         vm.stopPrank();
     }
 
@@ -137,7 +154,7 @@ contract PerpOraclePathHandler is Test {
         } catch (bytes memory err) {
             bytes4 selector = _revertSelector(err);
             if (expectStale) {
-                if (selector != OrderRouter.OrderRouter__OraclePriceTooStale.selector) {
+                if (selector != OrderRouter.OrderRouter__OracleValidation.selector) {
                     revert PerpOraclePathHandler__UnexpectedRevert(selector);
                 }
                 return;
@@ -160,7 +177,7 @@ contract PerpOraclePathHandler is Test {
         acceptEthRefunds = true;
         uint256 pending = ghostPendingRefundEth;
         uint256 beforeBalance = address(this).balance;
-        router.claimBalance(true);
+        routerAdmin.claimBalance(true);
         uint256 claimed = address(this).balance - beforeBalance;
         assertEq(claimed, pending, "claim must transfer the full stranded ETH amount");
         ghostPendingRefundEth = 0;
@@ -203,7 +220,8 @@ contract PerpOraclePathInvariantTest is BasePerpTest {
         usdc = new MockUSDC();
         clearinghouse = new MarginClearinghouse(address(usdc));
 
-        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        engine = _deployEngine(_riskParams());
+        _syncEngineAdmin();
         engineAccountLens = new CfdEngineAccountLens(address(engine));
         engineLens = new CfdEngineLens(address(engine));
         engineProtocolLens = new CfdEngineProtocolLens(address(engine));

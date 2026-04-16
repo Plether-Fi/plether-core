@@ -7,6 +7,7 @@ pragma solidity 0.8.33;
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {ICfdEngineAdminHost} from "../../src/perps/interfaces/ICfdEngineAdminHost.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
@@ -391,17 +392,21 @@ contract AuditFollowupFindingsFailing_RiskParamValidation is BasePerpTest {
 
     function obsolete_M2_ProposeRiskParamsRejectsBaseApyAboveMaxApy() public {
         CfdTypes.RiskParams memory params = _riskParams();
+        ICfdEngineAdminHost.EngineRiskConfig memory config;
+        config.riskParams = params;
 
         vm.expectRevert();
-        engine.proposeRiskParams(params);
+        engineAdmin.proposeRiskConfig(config);
     }
 
     function test_M2_ProposeRiskParamsRejectsMaxSkewRatioAboveOne() public {
         CfdTypes.RiskParams memory params = _riskParams();
         params.maxSkewRatio = 1e18 + 1;
+        ICfdEngineAdminHost.EngineRiskConfig memory config;
+        config.riskParams = params;
 
         vm.expectRevert();
-        engine.proposeRiskParams(params);
+        engineAdmin.proposeRiskConfig(config);
     }
 
 }

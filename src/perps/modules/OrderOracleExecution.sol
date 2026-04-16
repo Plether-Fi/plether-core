@@ -33,14 +33,8 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
     bool[] public inversions;
 
     uint256 public orderExecutionStalenessLimit = 60;
-    uint256 public pendingOrderExecutionStalenessLimit;
-    uint256 public orderExecutionStalenessActivationTime;
     uint256 public liquidationStalenessLimit = 15;
-    uint256 public pendingLiquidationStalenessLimit;
-    uint256 public liquidationStalenessActivationTime;
     uint256 public pythMaxConfidenceRatioBps = 10_000;
-    uint256 public pendingPythMaxConfidenceRatioBps;
-    uint256 public pythMaxConfidenceRatioActivationTime;
 
     function _revertZeroAddress() internal pure virtual;
     function _revertEmptyFeeds() internal pure virtual;

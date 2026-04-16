@@ -3,8 +3,11 @@ pragma solidity 0.8.33;
 
 import {IPyth, PythStructs} from "../../src/interfaces/IPyth.sol";
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
+import {CfdEngineAdmin} from "../../src/perps/CfdEngineAdmin.sol";
 import {CfdEngineAccountLens} from "../../src/perps/CfdEngineAccountLens.sol";
 import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
+import {CfdEnginePlanner} from "../../src/perps/CfdEnginePlanner.sol";
+import {CfdEngineSettlementModule} from "../../src/perps/CfdEngineSettlementModule.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
@@ -112,6 +115,10 @@ contract GasProfileTest is Test {
 
         clearinghouse = new MarginClearinghouse(usdc);
         engine = new CfdEngine(usdc, address(clearinghouse), CAP_PRICE, params);
+        CfdEnginePlanner planner = new CfdEnginePlanner();
+        CfdEngineSettlementModule settlement = new CfdEngineSettlementModule(address(engine));
+        CfdEngineAdmin adminModule = new CfdEngineAdmin(address(engine), address(this));
+        engine.setDependencies(address(planner), address(settlement), address(adminModule));
         engineAccountLens = new CfdEngineAccountLens(address(engine));
         engineLens = new CfdEngineLens(address(engine));
         pool = new HousePool(usdc, address(engine));

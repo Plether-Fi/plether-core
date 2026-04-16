@@ -2,7 +2,9 @@
 pragma solidity 0.8.33;
 
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
+import {CfdEngineAdmin} from "../../src/perps/CfdEngineAdmin.sol";
 import {CfdEnginePlanTypes} from "../../src/perps/CfdEnginePlanTypes.sol";
+import {CfdEnginePlanner} from "../../src/perps/CfdEnginePlanner.sol";
 import {CfdEngineSettlementModule} from "../../src/perps/CfdEngineSettlementModule.sol";
 import {CfdMath} from "../../src/perps/CfdMath.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
@@ -14,8 +16,10 @@ import {AccountLensViewTypes} from "../../src/perps/interfaces/AccountLensViewTy
 import {DeferredEngineViewTypes} from "../../src/perps/interfaces/DeferredEngineViewTypes.sol";
 import {HousePoolEngineViewTypes} from "../../src/perps/interfaces/HousePoolEngineViewTypes.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
+import {ICfdEngineAdminHost} from "../../src/perps/interfaces/ICfdEngineAdminHost.sol";
 import {ICfdEngineSettlementHost} from "../../src/perps/interfaces/ICfdEngineSettlementHost.sol";
 import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
+import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {PerpsViewTypes} from "../../src/perps/interfaces/PerpsViewTypes.sol";
 import {ProtocolLensViewTypes} from "../../src/perps/interfaces/ProtocolLensViewTypes.sol";
@@ -331,9 +335,9 @@ contract CfdEngineTest is BasePerpTest {
     function _setFadMaxStaleness(
         uint256 val
     ) internal {
-        engine.proposeFadMaxStaleness(val);
-        vm.warp(block.timestamp + 48 hours + 1);
-        engine.finalizeFadMaxStaleness();
+        ICfdEngineAdminHost.EngineFreshnessConfig memory config = _engineFreshnessConfig();
+        config.fadMaxStaleness = val;
+        _setFreshnessConfig(config);
     }
 
     function _nextSaturdayNoon() internal view returns (uint256 timestamp) {
@@ -402,9 +406,7 @@ contract CfdEngineTest is BasePerpTest {
     function test_OpenPosition_UsesExplicitInitMarginBps() public {
         CfdTypes.RiskParams memory params = _riskParams();
         params.initMarginBps = 400;
-        engine.proposeRiskParams(params);
-        vm.warp(block.timestamp + 7 days);
-        engine.finalizeRiskParams();
+        _setRiskParams(params);
 
         (,,, uint256 initMarginBps,,,,) = engine.riskParams();
         assertEq(initMarginBps, 400, "Setup must finalize the explicit init margin config");
@@ -3836,7 +3838,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         engine.liquidatePosition(accountId, 1e8, vaultDepth, uint64(block.timestamp));
 
-        engine.proposeRiskParams(
+        _setRiskParams(
             CfdTypes.RiskParams({
                 vpiFactor: 0.0005e18,
                 maxSkewRatio: 0.4e18,
@@ -3848,8 +3850,6 @@ contract CfdEngineTest is BasePerpTest {
                 bountyBps: 15
             })
         );
-        vm.warp(block.timestamp + 48 hours + 1);
-        engine.finalizeRiskParams();
 
         vm.prank(address(router));
         uint256 bounty = engine.liquidatePosition(accountId, 1e8, vaultDepth, uint64(block.timestamp));
@@ -3885,57 +3885,71 @@ contract CfdEngineTest is BasePerpTest {
     function test_ProposeRiskParams_RevertsOnZeroMaintMargin() public {
         CfdTypes.RiskParams memory params = _riskParams();
         params.maintMarginBps = 0;
+        ICfdEngineAdminHost.EngineRiskConfig memory config;
+        config.riskParams = params;
 
-        vm.expectRevert(CfdEngine.CfdEngine__InvalidRiskParams.selector);
-        engine.proposeRiskParams(params);
+        vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__InvalidRiskParams.selector);
+        engineAdmin.proposeRiskConfig(config);
     }
 
     function test_ProposeRiskParams_RevertsOnZeroInitMargin() public {
         CfdTypes.RiskParams memory params = _riskParams();
         params.initMarginBps = 0;
+        ICfdEngineAdminHost.EngineRiskConfig memory config;
+        config.riskParams = params;
 
-        vm.expectRevert(CfdEngine.CfdEngine__InvalidRiskParams.selector);
-        engine.proposeRiskParams(params);
+        vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__InvalidRiskParams.selector);
+        engineAdmin.proposeRiskConfig(config);
     }
 
     function test_ProposeRiskParams_RevertsWhenInitMarginBelowMaint() public {
         CfdTypes.RiskParams memory params = _riskParams();
         params.initMarginBps = params.maintMarginBps - 1;
+        ICfdEngineAdminHost.EngineRiskConfig memory config;
+        config.riskParams = params;
 
-        vm.expectRevert(CfdEngine.CfdEngine__InvalidRiskParams.selector);
-        engine.proposeRiskParams(params);
+        vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__InvalidRiskParams.selector);
+        engineAdmin.proposeRiskConfig(config);
     }
 
     function test_ProposeRiskParams_RevertsWhenFadMarginBelowMaint() public {
         CfdTypes.RiskParams memory params = _riskParams();
         params.fadMarginBps = params.maintMarginBps - 1;
+        ICfdEngineAdminHost.EngineRiskConfig memory config;
+        config.riskParams = params;
 
-        vm.expectRevert(CfdEngine.CfdEngine__InvalidRiskParams.selector);
-        engine.proposeRiskParams(params);
+        vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__InvalidRiskParams.selector);
+        engineAdmin.proposeRiskConfig(config);
     }
 
     function test_ProposeRiskParams_RevertsWhenFadMarginExceeds100Percent() public {
         CfdTypes.RiskParams memory params = _riskParams();
         params.fadMarginBps = 10_001;
+        ICfdEngineAdminHost.EngineRiskConfig memory config;
+        config.riskParams = params;
 
-        vm.expectRevert(CfdEngine.CfdEngine__InvalidRiskParams.selector);
-        engine.proposeRiskParams(params);
+        vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__InvalidRiskParams.selector);
+        engineAdmin.proposeRiskConfig(config);
     }
 
     function test_ProposeRiskParams_RevertsOnZeroMinBounty() public {
         CfdTypes.RiskParams memory params = _riskParams();
         params.minBountyUsdc = 0;
+        ICfdEngineAdminHost.EngineRiskConfig memory config;
+        config.riskParams = params;
 
-        vm.expectRevert(CfdEngine.CfdEngine__InvalidRiskParams.selector);
-        engine.proposeRiskParams(params);
+        vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__InvalidRiskParams.selector);
+        engineAdmin.proposeRiskConfig(config);
     }
 
     function test_ProposeRiskParams_RevertsOnZeroBountyBps() public {
         CfdTypes.RiskParams memory params = _riskParams();
         params.bountyBps = 0;
+        ICfdEngineAdminHost.EngineRiskConfig memory config;
+        config.riskParams = params;
 
-        vm.expectRevert(CfdEngine.CfdEngine__InvalidRiskParams.selector);
-        engine.proposeRiskParams(params);
+        vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__InvalidRiskParams.selector);
+        engineAdmin.proposeRiskConfig(config);
     }
 
     function test_CloseSize_ExceedsPosition_Reverts() public {
@@ -4040,7 +4054,7 @@ contract CfdEngineTest is BasePerpTest {
         bytes32 accountId = bytes32(uint256(11));
         _fundTrader(address(uint160(uint256(accountId))), 5000 * 1e6);
 
-        engine.proposeRiskParams(
+        _setRiskParams(
             CfdTypes.RiskParams({
                 vpiFactor: 0.0005e18,
                 maxSkewRatio: 0.4e18,
@@ -4052,8 +4066,6 @@ contract CfdEngineTest is BasePerpTest {
                 bountyBps: 15
             })
         );
-        vm.warp(block.timestamp + 48 hours + 1);
-        engine.finalizeRiskParams();
 
         CfdTypes.Order memory order = CfdTypes.Order({
             accountId: accountId,
@@ -4381,7 +4393,7 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(uint160(uint256(accountId)));
         _fundTrader(trader, 200 * 1e6);
 
-        engine.proposeRiskParams(
+        _setRiskParams(
             CfdTypes.RiskParams({
                 vpiFactor: 0,
                 maxSkewRatio: 0.4e18,
@@ -4393,8 +4405,6 @@ contract CfdEngineTest is BasePerpTest {
                 bountyBps: 100
             })
         );
-        vm.warp(block.timestamp + 48 hours + 1);
-        engine.finalizeRiskParams();
 
         CfdTypes.Order memory openOrder = CfdTypes.Order({
             accountId: accountId,
@@ -4476,9 +4486,11 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(clearinghouse));
         engine.checkWithdraw(accountId);
 
-        engine.proposeEngineMarkStalenessLimit(300);
-        vm.warp(engine.engineMarkStalenessActivationTime() + 1);
-        engine.finalizeEngineMarkStalenessLimit();
+        ICfdEngineAdminHost.EngineFreshnessConfig memory config = _engineFreshnessConfig();
+        config.engineMarkStalenessLimit = 300;
+        engineAdmin.proposeFreshnessConfig(config);
+        vm.warp(engineAdmin.freshnessConfigActivationTime() + 1);
+        engineAdmin.finalizeFreshnessConfig();
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
@@ -4631,9 +4643,11 @@ contract CfdEngineTest is BasePerpTest {
         _fundTrader(trader, 10_000e6);
         _open(accountId, CfdTypes.Side.BULL, 100_000e18, 1600e6, 1e8);
 
-        engine.proposeEngineMarkStalenessLimit(300);
-        vm.warp(engine.engineMarkStalenessActivationTime() + 1);
-        engine.finalizeEngineMarkStalenessLimit();
+        ICfdEngineAdminHost.EngineFreshnessConfig memory config = _engineFreshnessConfig();
+        config.engineMarkStalenessLimit = 300;
+        engineAdmin.proposeFreshnessConfig(config);
+        vm.warp(engineAdmin.freshnessConfigActivationTime() + 1);
+        engineAdmin.finalizeFreshnessConfig();
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
@@ -4651,9 +4665,7 @@ contract CfdEngineTest is BasePerpTest {
 
         CfdTypes.RiskParams memory params = _riskParams();
         params.initMarginBps = 300;
-        engine.proposeRiskParams(params);
-        vm.warp(block.timestamp + 7 days);
-        engine.finalizeRiskParams();
+        _setRiskParams(params);
 
         (,,, uint256 initMarginBps,,,,) = engine.riskParams();
         assertEq(initMarginBps, 300, "Setup must finalize the explicit init margin config");
@@ -5106,9 +5118,15 @@ contract CfdEngineAuditTest is BasePerpTest {
         bytes32 carolAccount = bytes32(uint256(uint160(carol)));
         (uint256 sizeBefore,,,,,,) = engine.positions(carolAccount);
 
-        router.proposeMaxOrderAge(0);
+        IOrderRouterAdminHost.RouterConfig memory config = IOrderRouterAdminHost.RouterConfig({
+            maxOrderAge: 0,
+            orderExecutionStalenessLimit: router.orderExecutionStalenessLimit(),
+            liquidationStalenessLimit: router.liquidationStalenessLimit(),
+            pythMaxConfidenceRatioBps: router.pythMaxConfidenceRatioBps()
+        });
+        routerAdmin.proposeRouterConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
-        router.finalizeMaxOrderAge();
+        routerAdmin.finalizeRouterConfig();
 
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
@@ -5199,10 +5217,12 @@ contract CfdEngineAuditTest is BasePerpTest {
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
         });
-        engine.proposeRiskParams(newParams);
+        ICfdEngineAdminHost.EngineRiskConfig memory config;
+        config.riskParams = newParams;
+        engineAdmin.proposeRiskConfig(config);
 
         vm.warp(T_FINALIZE);
-        engine.finalizeRiskParams();
+        engineAdmin.finalizeRiskConfig();
 
         vm.warp(T_ORDER2);
 
@@ -6038,6 +6058,10 @@ contract VpiChunkingTest is Test {
 
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
+        CfdEnginePlanner planner = new CfdEnginePlanner();
+        CfdEngineSettlementModule settlement = new CfdEngineSettlementModule(address(engine));
+        CfdEngineAdmin adminModule = new CfdEngineAdmin(address(engine), address(this));
+        engine.setDependencies(address(planner), address(settlement), address(adminModule));
         pool = new HousePool(address(usdc), address(engine));
         TrancheVault seniorVault =
             new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior LP", "seniorUSDC");

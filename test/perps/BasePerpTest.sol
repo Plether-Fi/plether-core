@@ -2,22 +2,30 @@
 pragma solidity 0.8.33;
 
 import {DecimalConstants} from "../../src/libraries/DecimalConstants.sol";
+import {CfdEngineAdmin} from "../../src/perps/CfdEngineAdmin.sol";
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdEngineAccountLens} from "../../src/perps/CfdEngineAccountLens.sol";
 import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
+import {CfdEnginePlanner} from "../../src/perps/CfdEnginePlanner.sol";
 import {CfdEngineProtocolLens} from "../../src/perps/CfdEngineProtocolLens.sol";
+import {CfdEngineSettlementModule} from "../../src/perps/CfdEngineSettlementModule.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
+import {OrderRouterAdmin} from "../../src/perps/OrderRouterAdmin.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {PerpsPublicLens} from "../../src/perps/PerpsPublicLens.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {DeferredEngineViewTypes} from "../../src/perps/interfaces/DeferredEngineViewTypes.sol";
 import {HousePoolEngineViewTypes} from "../../src/perps/interfaces/HousePoolEngineViewTypes.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
+import {ICfdEngineAdminHost} from "../../src/perps/interfaces/ICfdEngineAdminHost.sol";
+import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
+import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {PerpsViewTypes} from "../../src/perps/interfaces/PerpsViewTypes.sol";
 import {ProtocolLensViewTypes} from "../../src/perps/interfaces/ProtocolLensViewTypes.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
+import {OrderRouterDebugLens} from "../utils/OrderRouterDebugLens.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Test} from "forge-std/Test.sol";
 
@@ -69,6 +77,7 @@ abstract contract BasePerpTest is Test {
 
     MockUSDC usdc;
     CfdEngine engine;
+    CfdEngineAdmin engineAdmin;
     CfdEngineAccountLens engineAccountLens;
     CfdEngineLens engineLens;
     CfdEngineProtocolLens engineProtocolLens;
@@ -77,6 +86,7 @@ abstract contract BasePerpTest is Test {
     TrancheVault seniorVault;
     TrancheVault juniorVault;
     OrderRouter router;
+    OrderRouterAdmin routerAdmin;
     PerpsPublicLens publicLens;
 
     /// @dev Monday 2024-03-04 10:00 UTC. Avoids FAD window.
@@ -89,7 +99,8 @@ abstract contract BasePerpTest is Test {
         usdc = new MockUSDC();
         clearinghouse = new MarginClearinghouse(address(usdc));
 
-        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        engine = _deployEngine(_riskParams());
+        _syncEngineAdmin();
         engineAccountLens = new CfdEngineAccountLens(address(engine));
         engineLens = new CfdEngineLens(address(engine));
         engineProtocolLens = new CfdEngineProtocolLens(address(engine));
@@ -112,6 +123,7 @@ abstract contract BasePerpTest is Test {
             new uint256[](0),
             new bool[](0)
         );
+        _syncRouterAdmin();
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
         publicLens = new PerpsPublicLens(address(engineAccountLens), address(engine), address(router), address(pool));
@@ -589,12 +601,93 @@ abstract contract BasePerpTest is Test {
 
     // --- Governance helpers ---
 
+    function _engineRiskConfig() internal view returns (ICfdEngineAdminHost.EngineRiskConfig memory config) {
+        (
+            config.riskParams.vpiFactor,
+            config.riskParams.maxSkewRatio,
+            config.riskParams.maintMarginBps,
+            config.riskParams.initMarginBps,
+            config.riskParams.fadMarginBps,
+            config.riskParams.baseCarryBps,
+            config.riskParams.minBountyUsdc,
+            config.riskParams.bountyBps
+        ) = engine.riskParams();
+    }
+
+    function _engineCalendarConfig()
+        internal
+        view
+        returns (ICfdEngineAdminHost.EngineCalendarConfig memory config)
+    {
+        config.fadRunwaySeconds = engine.fadRunwaySeconds();
+    }
+
+    function _engineFreshnessConfig()
+        internal
+        view
+        returns (ICfdEngineAdminHost.EngineFreshnessConfig memory config)
+    {
+        config.fadMaxStaleness = engine.fadMaxStaleness();
+        config.engineMarkStalenessLimit = engine.engineMarkStalenessLimit();
+    }
+
     function _setRiskParams(
         CfdTypes.RiskParams memory params
     ) internal {
-        engine.proposeRiskParams(params);
+        ICfdEngineAdminHost.EngineRiskConfig memory config;
+        config.riskParams = params;
+        engineAdmin.proposeRiskConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
-        engine.finalizeRiskParams();
+        engineAdmin.finalizeRiskConfig();
+    }
+
+    function _setCalendarConfig(
+        ICfdEngineAdminHost.EngineCalendarConfig memory config
+    ) internal {
+        engineAdmin.proposeCalendarConfig(config);
+        vm.warp(block.timestamp + 48 hours + 1);
+        engineAdmin.finalizeCalendarConfig();
+    }
+
+    function _setFreshnessConfig(
+        ICfdEngineAdminHost.EngineFreshnessConfig memory config
+    ) internal {
+        engineAdmin.proposeFreshnessConfig(config);
+        vm.warp(block.timestamp + 48 hours + 1);
+        engineAdmin.finalizeFreshnessConfig();
+    }
+
+    function _routerConfig() internal view returns (IOrderRouterAdminHost.RouterConfig memory config) {
+        config.maxOrderAge = router.maxOrderAge();
+        config.orderExecutionStalenessLimit = router.orderExecutionStalenessLimit();
+        config.liquidationStalenessLimit = router.liquidationStalenessLimit();
+        config.pythMaxConfidenceRatioBps = router.pythMaxConfidenceRatioBps();
+    }
+
+    function _setRouterConfig(
+        IOrderRouterAdminHost.RouterConfig memory config
+    ) internal {
+        routerAdmin.proposeRouterConfig(config);
+        vm.warp(block.timestamp + 48 hours + 1);
+        routerAdmin.finalizeRouterConfig();
+    }
+
+    function _syncEngineAdmin() internal {
+        engineAdmin = CfdEngineAdmin(engine.admin());
+    }
+
+    function _deployEngine(
+        CfdTypes.RiskParams memory riskParams_
+    ) internal returns (CfdEngine deployedEngine) {
+        deployedEngine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, riskParams_);
+        CfdEnginePlanner planner = new CfdEnginePlanner();
+        CfdEngineSettlementModule settlement = new CfdEngineSettlementModule(address(deployedEngine));
+        CfdEngineAdmin adminModule = new CfdEngineAdmin(address(deployedEngine), address(this));
+        deployedEngine.setDependencies(address(planner), address(settlement), address(adminModule));
+    }
+
+    function _syncRouterAdmin() internal {
+        routerAdmin = OrderRouterAdmin(router.admin());
     }
 
     // --- Time helpers ---
@@ -707,7 +800,18 @@ abstract contract BasePerpTest is Test {
     function _orderRecord(
         uint64 orderId
     ) internal view returns (OrderRouter.OrderRecord memory record) {
-        return router.getOrderRecord(orderId);
+        return OrderRouterDebugLens.loadOrderRecord(vm, router, orderId);
+    }
+
+    function _pendingOrders(
+        bytes32 accountId
+    ) internal view returns (IOrderRouterAccounting.PendingOrderView[] memory pending) {
+        uint64 orderId = router.accountHeadOrderId(accountId);
+        uint256 pendingCount = router.pendingOrderCounts(accountId);
+        pending = new IOrderRouterAccounting.PendingOrderView[](pendingCount);
+        for (uint256 i; i < pendingCount; ++i) {
+            (pending[i], orderId) = router.getPendingOrderView(orderId);
+        }
     }
 
     function _remainingCommittedMargin(

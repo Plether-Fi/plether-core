@@ -172,7 +172,8 @@ contract AuditCurrentFindingsVerifiedInvalid_Mev is BasePerpTest {
         mockPyth = new MockPyth();
 
         clearinghouse = new MarginClearinghouse(address(usdc));
-        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        engine = _deployEngine(_riskParams());
+        _syncEngineAdmin();
         pool = new HousePool(address(usdc), address(engine));
 
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");

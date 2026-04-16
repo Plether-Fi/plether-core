@@ -7,12 +7,14 @@ import {CfdEngineLens} from "../../../../src/perps/CfdEngineLens.sol";
 import {CfdEnginePlanTypes} from "../../../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../../../../src/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "../../../../src/perps/MarginClearinghouse.sol";
+import {OrderRouterAdmin} from "../../../../src/perps/OrderRouterAdmin.sol";
 import {OrderRouter} from "../../../../src/perps/OrderRouter.sol";
 import {AccountLensViewTypes} from "../../../../src/perps/interfaces/AccountLensViewTypes.sol";
 import {ICfdEngine} from "../../../../src/perps/interfaces/ICfdEngine.sol";
 import {IMarginClearinghouse} from "../../../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "../../../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {MockUSDC} from "../../../mocks/MockUSDC.sol";
+import {OrderRouterDebugLens} from "../../../utils/OrderRouterDebugLens.sol";
 import {PerpGhostLedger} from "../ghost/PerpGhostLedger.sol";
 import {MockInvariantVault} from "../mocks/MockInvariantVault.sol";
 import {Test} from "forge-std/Test.sol";
@@ -78,6 +80,7 @@ contract PerpAccountingHandler is Test {
     CfdEngineLens public immutable engineLens;
     MarginClearinghouse public immutable clearinghouse;
     OrderRouter public immutable router;
+    OrderRouterAdmin public immutable routerAdmin;
     MockInvariantVault public immutable vault;
     PerpGhostLedger public immutable ghost;
 
@@ -119,6 +122,7 @@ contract PerpAccountingHandler is Test {
         engineLens = new CfdEngineLens(address(_engine));
         clearinghouse = _clearinghouse;
         router = _router;
+        routerAdmin = OrderRouterAdmin(_router.admin());
         vault = _vault;
 
         actors[0] = address(0x5101);
@@ -239,8 +243,9 @@ contract PerpAccountingHandler is Test {
         lastOpenCommitAttempt = OpenCommitAttempt({
             active: true,
             accountId: accountId,
-            routerOpenAllowed: !router.paused() && !engine.degradedMode() && !engine.isOracleFrozen()
-                && !engine.isFadWindow() && vault.canIncreaseRisk() && router.pendingOrderCounts(accountId) < 5,
+            routerOpenAllowed: !routerAdmin.paused() && !engine.degradedMode() && !engine.isOracleFrozen()
+                && !engine.isFadWindow() && vault.canIncreaseRisk()
+                && router.pendingOrderCounts(accountId) < 5,
             prefilterActive: _canUseCommitMarkForOpenPrefilter(),
             failureCategory: engineLens.previewOpenFailurePolicyCategory(
                 accountId, side, sizeDelta, marginDelta, _commitReferencePrice(), engine.lastMarkTime()
@@ -1191,7 +1196,7 @@ contract PerpAccountingHandler is Test {
     function _orderRecord(
         uint64 orderId
     ) internal view returns (OrderRouter.OrderRecord memory record) {
-        return router.getOrderRecord(orderId);
+        return OrderRouterDebugLens.loadOrderRecord(vm, router, orderId);
     }
 
     function _remainingCommittedMargin(

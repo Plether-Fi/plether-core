@@ -334,7 +334,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
             "User-invalid open should pay the clearer into clearinghouse custody"
         );
         assertEq(
-            uint256(router.getOrderRecord(1).status),
+            uint256(_orderRecord(1).status),
             uint256(IOrderRouterAccounting.OrderStatus.Failed),
             "User-invalid order should fail terminally"
         );

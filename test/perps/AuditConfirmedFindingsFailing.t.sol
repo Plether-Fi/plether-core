@@ -11,6 +11,7 @@ import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {ICfdEngineAdminHost} from "../../src/perps/interfaces/ICfdEngineAdminHost.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
 import {ICfdVault} from "../../src/perps/interfaces/ICfdVault.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
@@ -34,7 +35,8 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
         mockPyth = new MockPyth();
 
         clearinghouse = new MarginClearinghouse(address(usdc));
-        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        engine = _deployEngine(_riskParams());
+        _syncEngineAdmin();
         pool = new HousePool(address(usdc), address(engine));
 
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");
@@ -159,7 +161,7 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
         vm.warp(1001);
         vm.roll(block.number + 1);
         vm.prank(keeper);
-        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
         router.executeOrder(1, updateData);
 
         assertEq(keeper.balance, keeperBalanceBefore, "Keeper should not collect fee when cancelling a stale order");
@@ -188,7 +190,8 @@ contract AuditConfirmedFindingsFailing_OutOfOrderMarkCancellation is BasePerpTes
         mockPyth = new MockPyth();
 
         clearinghouse = new MarginClearinghouse(address(usdc));
-        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        engine = _deployEngine(_riskParams());
+        _syncEngineAdmin();
         pool = new HousePool(address(usdc), address(engine));
 
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");
@@ -245,7 +248,7 @@ contract AuditConfirmedFindingsFailing_OutOfOrderMarkCancellation is BasePerpTes
         vm.warp(1025);
         vm.roll(101);
         vm.prank(keeper);
-        vm.expectRevert(OrderRouter.OrderRouter__OraclePublishTimeOutOfOrder.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 9));
         router.executeOrder(1, updateData);
 
         assertEq(router.nextExecuteId(), 1, "Out-of-order keeper input must not consume the order");
@@ -275,7 +278,7 @@ contract AuditConfirmedFindingsFailing_OutOfOrderMarkCancellation is BasePerpTes
         vm.warp(1025);
         vm.roll(101);
         vm.prank(keeper);
-        vm.expectRevert(OrderRouter.OrderRouter__OraclePublishTimeOutOfOrder.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 9));
         router.executeOrderBatch(2, updateData);
 
         assertEq(router.nextExecuteId(), 1, "Batch execution must not burn queued orders on out-of-order marks");
@@ -381,23 +384,29 @@ contract AuditConfirmedFindingsFailing_RiskParams is BasePerpTest {
     function obsolete_M1_ProposeRiskParamsRejectsEqualKinkAndMaxSkew() public {
         CfdTypes.RiskParams memory params = _riskParams();
         params.maxSkewRatio = params.maxSkewRatio;
+        ICfdEngineAdminHost.EngineRiskConfig memory config;
+        config.riskParams = params;
 
         vm.expectRevert();
-        engine.proposeRiskParams(params);
+        engineAdmin.proposeRiskConfig(config);
     }
 
     function obsolete_M1_ProposeRiskParamsRejectsZeroKinkSkew() public {
         CfdTypes.RiskParams memory params = _riskParams();
+        ICfdEngineAdminHost.EngineRiskConfig memory config;
+        config.riskParams = params;
 
         vm.expectRevert();
-        engine.proposeRiskParams(params);
+        engineAdmin.proposeRiskConfig(config);
     }
 
     function obsolete_M1_ProposeRiskParamsRejectsKinkAboveMaxSkew() public {
         CfdTypes.RiskParams memory params = _riskParams();
+        ICfdEngineAdminHost.EngineRiskConfig memory config;
+        config.riskParams = params;
 
         vm.expectRevert();
-        engine.proposeRiskParams(params);
+        engineAdmin.proposeRiskConfig(config);
     }
 
 }

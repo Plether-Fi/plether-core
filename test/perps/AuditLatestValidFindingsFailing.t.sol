@@ -38,7 +38,8 @@ contract AuditLatestValidFindingsFailing_Mev is BasePerpTest {
         mockPyth = new MockPyth();
 
         clearinghouse = new MarginClearinghouse(address(usdc));
-        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        engine = _deployEngine(_riskParams());
+        _syncEngineAdmin();
         pool = new HousePool(address(usdc), address(engine));
 
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");
@@ -87,7 +88,7 @@ contract AuditLatestValidFindingsFailing_Mev is BasePerpTest {
         bytes[] memory updateData = new bytes[](1);
         updateData[0] = "";
 
-        vm.expectRevert(OrderRouter.OrderRouter__MevDetected.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 13));
         router.executeOrder(1, updateData);
     }
 
@@ -102,7 +103,7 @@ contract AuditLatestValidFindingsFailing_Mev is BasePerpTest {
 
         bytes[] memory updateData = new bytes[](1);
         updateData[0] = "";
-        vm.expectRevert(OrderRouter.OrderRouter__MevDetected.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 13));
         router.executeOrder(1, updateData);
     }
 

@@ -2,12 +2,11 @@
 pragma solidity 0.8.33;
 
 import {CfdEnginePlanTypes} from "./CfdEnginePlanTypes.sol";
-import {CfdEnginePlanner} from "./CfdEnginePlanner.sol";
-import {CfdEngineSettlementModule} from "./CfdEngineSettlementModule.sol";
 import {CfdMath} from "./CfdMath.sol";
 import {CfdTypes} from "./CfdTypes.sol";
 import {CfdEngineSettlementTypes} from "./interfaces/CfdEngineSettlementTypes.sol";
 import {EngineStatusViewTypes} from "./interfaces/EngineStatusViewTypes.sol";
+import {ICfdEngineAdminHost} from "./interfaces/ICfdEngineAdminHost.sol";
 import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
 import {ICfdEnginePlanner} from "./interfaces/ICfdEnginePlanner.sol";
 import {ICfdEngineSettlementHost} from "./interfaces/ICfdEngineSettlementHost.sol";
@@ -17,7 +16,6 @@ import {IMarginClearinghouse} from "./interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
 import {IWithdrawGuard} from "./interfaces/IWithdrawGuard.sol";
 import {CashPriorityLib} from "./libraries/CashPriorityLib.sol";
-import {CfdEnginePlanLib} from "./libraries/CfdEnginePlanLib.sol";
 import {CfdEngineSnapshotsLib} from "./libraries/CfdEngineSnapshotsLib.sol";
 import {MarginClearinghouseAccountingLib} from "./libraries/MarginClearinghouseAccountingLib.sol";
 import {MarketCalendarLib} from "./libraries/MarketCalendarLib.sol";
@@ -34,7 +32,7 @@ import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/Reentrancy
 /// @notice The core mathematical ledger for Plether CFDs.
 /// @dev Settles all funds through the MarginClearinghouse and CfdVault.
 /// @custom:security-contact contact@plether.com
-contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
+contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, ReentrancyGuardTransient {
 
     using SafeERC20 for IERC20;
 
@@ -161,8 +159,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     IERC20 public immutable USDC;
     IMarginClearinghouse public immutable clearinghouse;
     ICfdVault public vault;
-    ICfdEnginePlanner public immutable planner;
-    ICfdEngineSettlementModule public immutable settlementModule;
+    ICfdEnginePlanner public planner;
+    ICfdEngineSettlementModule public settlementModule;
+    address public admin;
 
     // ==========================================
     // GLOBAL STATE & SOLVENCY BOUNDS
@@ -186,33 +185,16 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     address public orderRouter;
 
     mapping(uint256 => bool) public fadDayOverrides;
+    uint256[] private _fadOverrideDays;
     uint256 public fadMaxStaleness = 3 days;
     uint256 public fadRunwaySeconds = 3 hours;
     uint256 public engineMarkStalenessLimit = 60;
 
     uint256 public constant EXECUTION_FEE_BPS = 4;
-    uint256 public constant TIMELOCK_DELAY = 48 hours;
-
-    CfdTypes.RiskParams public pendingRiskParams;
-    uint256 public riskParamsActivationTime;
-
-    uint256[] private _pendingAddFadDays;
-    uint256 public addFadDaysActivationTime;
-
-    uint256[] private _pendingRemoveFadDays;
-    uint256 public removeFadDaysActivationTime;
-
-    uint256 public pendingFadMaxStaleness;
-    uint256 public fadMaxStalenessActivationTime;
-
-    uint256 public pendingFadRunway;
-    uint256 public fadRunwayActivationTime;
-
-    uint256 public pendingEngineMarkStalenessLimit;
-    uint256 public engineMarkStalenessActivationTime;
     error CfdEngine__Unauthorized();
     error CfdEngine__VaultAlreadySet();
     error CfdEngine__RouterAlreadySet();
+    error CfdEngine__DependenciesAlreadySet();
     error CfdEngine__NoFeesToWithdraw();
     error CfdEngine__NoDeferredTraderCredit();
     error CfdEngine__InsufficientVaultLiquidity();
@@ -239,8 +221,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     error CfdEngine__NotClearinghouse();
     error CfdEngine__NotAccountOwner();
     error CfdEngine__NoOpenPosition();
-    error CfdEngine__TimelockNotReady();
-    error CfdEngine__NoProposal();
     error CfdEngine__BadDebtTooLarge();
     error CfdEngine__InvalidRiskParams();
     error CfdEngine__SkewTooHigh();
@@ -264,18 +244,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     event FadDaysRemoved(uint256[] timestamps);
     event FadMaxStalenessUpdated(uint256 newStaleness);
     event FadRunwayUpdated(uint256 newRunway);
-    event EngineMarkStalenessLimitProposed(uint256 newStaleness, uint256 activationTime);
     event EngineMarkStalenessLimitUpdated(uint256 newStaleness);
-    event RiskParamsProposed(uint256 activationTime);
-    event RiskParamsFinalized();
-    event AddFadDaysProposed(uint256[] timestamps, uint256 activationTime);
-    event AddFadDaysFinalized();
-    event RemoveFadDaysProposed(uint256[] timestamps, uint256 activationTime);
-    event RemoveFadDaysFinalized();
-    event FadMaxStalenessProposed(uint256 newStaleness, uint256 activationTime);
-    event FadMaxStalenessFinalized();
-    event FadRunwayProposed(uint256 newRunway, uint256 activationTime);
-    event FadRunwayFinalized();
     event BadDebtCleared(uint256 amount, uint256 remaining);
     event DegradedModeEntered(uint256 effectiveAssets, uint256 maxLiability, bytes32 indexed triggeringAccount);
     event DegradedModeCleared();
@@ -283,9 +252,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     event DeferredTraderCreditClaimed(bytes32 indexed accountId, uint256 amountUsdc);
     event DeferredKeeperCreditRecorded(address indexed keeper, uint256 amountUsdc);
     event DeferredKeeperCreditClaimed(address indexed keeper, uint256 amountUsdc);
-    event RiskParamsProposalCancelled();
-    event AddFadDaysProposalCancelled();
-    event RemoveFadDaysProposalCancelled();
     event CarryCheckpointed(
         bytes32 indexed accountId, uint256 addedUnsettledCarryUsdc, uint256 totalUnsettledCarryUsdc
     );
@@ -326,33 +292,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     function _bullAndBearStates() internal view returns (SideState storage bullState, SideState storage bearState) {
         bullState = _sideState(CfdTypes.Side.BULL);
         bearState = _sideState(CfdTypes.Side.BEAR);
-    }
-
-    function _requireTimelockReady(
-        uint256 activationTime
-    ) internal view {
-        if (activationTime == 0) {
-            revert CfdEngine__NoProposal();
-        }
-        if (block.timestamp < activationTime) {
-            revert CfdEngine__TimelockNotReady();
-        }
-    }
-
-    function _proposeScalarTimelock(
-        uint256 value,
-        uint256 activationTime
-    ) internal view returns (uint256 pendingValue, uint256 readyAt) {
-        pendingValue = value;
-        readyAt = activationTime == 0 ? block.timestamp + TIMELOCK_DELAY : activationTime;
-    }
-
-    function _finalizeScalarTimelock(
-        uint256 pendingValue,
-        uint256 activationTime
-    ) internal view returns (uint256) {
-        _requireTimelockReady(activationTime);
-        return pendingValue;
     }
 
     function _checkpointDeferredClaimCarryIfPossible(
@@ -415,6 +354,13 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         _;
     }
 
+    modifier onlyAdmin() {
+        if (msg.sender != admin) {
+            revert CfdEngine__Unauthorized();
+        }
+        _;
+    }
+
     /// @param _usdc USDC token used as margin and settlement currency
     /// @param _clearinghouse Margin clearinghouse that custodies trader balances
     /// @param _capPrice Maximum oracle price — positions are clamped here (also determines BULL max profit)
@@ -426,12 +372,23 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         CfdTypes.RiskParams memory _riskParams
     ) Ownable(msg.sender) {
         _validateRiskParams(_riskParams);
-        planner = new CfdEnginePlanner();
-        settlementModule = new CfdEngineSettlementModule(address(this));
         USDC = IERC20(_usdc);
         clearinghouse = IMarginClearinghouse(_clearinghouse);
         CAP_PRICE = _capPrice;
         riskParams = _riskParams;
+    }
+
+    /// @notice One-time setter for planner, settlement module, and admin sidecars.
+    function setDependencies(address planner_, address settlementModule_, address admin_) external onlyOwner {
+        if (planner_ == address(0) || settlementModule_ == address(0) || admin_ == address(0)) {
+            revert CfdEngine__ZeroAddress();
+        }
+        if (address(planner) != address(0) || address(settlementModule) != address(0) || admin != address(0)) {
+            revert CfdEngine__DependenciesAlreadySet();
+        }
+        planner = ICfdEnginePlanner(planner_);
+        settlementModule = ICfdEngineSettlementModule(settlementModule_);
+        admin = admin_;
     }
 
     /// @notice One-time setter for the HousePool vault backing all positions
@@ -458,174 +415,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             revert CfdEngine__RouterAlreadySet();
         }
         orderRouter = _router;
-    }
-
-    /// @notice Proposes new risk parameters (margin BPS, carry rate, bounty config) subject to timelock.
-    function proposeRiskParams(
-        CfdTypes.RiskParams memory _riskParams
-    ) external onlyOwner {
-        _validateRiskParams(_riskParams);
-        pendingRiskParams = _riskParams;
-        (, riskParamsActivationTime) = _proposeScalarTimelock(0, 0);
-        emit RiskParamsProposed(riskParamsActivationTime);
-    }
-
-    /// @notice Applies proposed risk parameters after timelock expiry.
-    function finalizeRiskParams() external onlyOwner {
-        _requireTimelockReady(riskParamsActivationTime);
-        riskParams = pendingRiskParams;
-        delete pendingRiskParams;
-        riskParamsActivationTime = 0;
-        emit RiskParamsFinalized();
-    }
-
-    /// @notice Cancels a pending risk parameters proposal
-    function cancelRiskParamsProposal() external onlyOwner {
-        delete pendingRiskParams;
-        riskParamsActivationTime = 0;
-        emit RiskParamsProposalCancelled();
-    }
-
-    /// @notice Proposes adding FAD (Friday Afternoon Deleverage) override days — elevated margin on those dates
-    function proposeAddFadDays(
-        uint256[] calldata timestamps
-    ) external onlyOwner {
-        if (timestamps.length == 0) {
-            revert CfdEngine__EmptyDays();
-        }
-        _pendingAddFadDays = timestamps;
-        addFadDaysActivationTime = block.timestamp + TIMELOCK_DELAY;
-        emit AddFadDaysProposed(timestamps, addFadDaysActivationTime);
-    }
-
-    /// @notice Applies proposed FAD day additions after timelock expires
-    function finalizeAddFadDays() external onlyOwner {
-        _requireTimelockReady(addFadDaysActivationTime);
-        uint256[] memory timestamps = _pendingAddFadDays;
-        for (uint256 i; i < timestamps.length; i++) {
-            fadDayOverrides[timestamps[i] / 86_400] = true;
-        }
-        delete _pendingAddFadDays;
-        addFadDaysActivationTime = 0;
-        emit FadDaysAdded(timestamps);
-        emit AddFadDaysFinalized();
-    }
-
-    /// @notice Cancels a pending add-FAD-days proposal
-    function cancelAddFadDaysProposal() external onlyOwner {
-        delete _pendingAddFadDays;
-        addFadDaysActivationTime = 0;
-        emit AddFadDaysProposalCancelled();
-    }
-
-    /// @notice Proposes removing FAD override days (restores normal margin on those dates)
-    function proposeRemoveFadDays(
-        uint256[] calldata timestamps
-    ) external onlyOwner {
-        if (timestamps.length == 0) {
-            revert CfdEngine__EmptyDays();
-        }
-        _pendingRemoveFadDays = timestamps;
-        removeFadDaysActivationTime = block.timestamp + TIMELOCK_DELAY;
-        emit RemoveFadDaysProposed(timestamps, removeFadDaysActivationTime);
-    }
-
-    /// @notice Applies proposed FAD day removals after timelock expires
-    function finalizeRemoveFadDays() external onlyOwner {
-        _requireTimelockReady(removeFadDaysActivationTime);
-        uint256[] memory timestamps = _pendingRemoveFadDays;
-        for (uint256 i; i < timestamps.length; i++) {
-            delete fadDayOverrides[timestamps[i] / 86_400];
-        }
-        delete _pendingRemoveFadDays;
-        removeFadDaysActivationTime = 0;
-        emit FadDaysRemoved(timestamps);
-        emit RemoveFadDaysFinalized();
-    }
-
-    /// @notice Cancels a pending remove-FAD-days proposal
-    function cancelRemoveFadDaysProposal() external onlyOwner {
-        delete _pendingRemoveFadDays;
-        removeFadDaysActivationTime = 0;
-        emit RemoveFadDaysProposalCancelled();
-    }
-
-    /// @notice Proposes a new fadMaxStaleness — max age of the last mark price before FAD kicks in
-    function proposeFadMaxStaleness(
-        uint256 _seconds
-    ) external onlyOwner {
-        if (_seconds == 0) {
-            revert CfdEngine__ZeroStaleness();
-        }
-        (pendingFadMaxStaleness, fadMaxStalenessActivationTime) = _proposeScalarTimelock(_seconds, 0);
-        emit FadMaxStalenessProposed(_seconds, fadMaxStalenessActivationTime);
-    }
-
-    /// @notice Applies proposed fadMaxStaleness after timelock expires
-    function finalizeFadMaxStaleness() external onlyOwner {
-        fadMaxStaleness = _finalizeScalarTimelock(pendingFadMaxStaleness, fadMaxStalenessActivationTime);
-        pendingFadMaxStaleness = 0;
-        fadMaxStalenessActivationTime = 0;
-        emit FadMaxStalenessUpdated(fadMaxStaleness);
-        emit FadMaxStalenessFinalized();
-    }
-
-    /// @notice Cancels a pending fadMaxStaleness proposal
-    function cancelFadMaxStalenessProposal() external onlyOwner {
-        pendingFadMaxStaleness = 0;
-        fadMaxStalenessActivationTime = 0;
-    }
-
-    /// @notice Proposes a new fadRunway — how many seconds before an FAD day the elevated margin activates
-    function proposeFadRunway(
-        uint256 _seconds
-    ) external onlyOwner {
-        if (_seconds > 24 hours) {
-            revert CfdEngine__RunwayTooLong();
-        }
-        (pendingFadRunway, fadRunwayActivationTime) = _proposeScalarTimelock(_seconds, 0);
-        emit FadRunwayProposed(_seconds, fadRunwayActivationTime);
-    }
-
-    /// @notice Applies proposed fadRunway after timelock expires
-    function finalizeFadRunway() external onlyOwner {
-        fadRunwaySeconds = _finalizeScalarTimelock(pendingFadRunway, fadRunwayActivationTime);
-        pendingFadRunway = 0;
-        fadRunwayActivationTime = 0;
-        emit FadRunwayUpdated(fadRunwaySeconds);
-        emit FadRunwayFinalized();
-    }
-
-    /// @notice Cancels a pending fadRunway proposal
-    function cancelFadRunwayProposal() external onlyOwner {
-        pendingFadRunway = 0;
-        fadRunwayActivationTime = 0;
-    }
-
-    /// @notice Proposes a new mark staleness limit used by engine-side withdraw and close-bounty guards.
-    function proposeEngineMarkStalenessLimit(
-        uint256 newStaleness
-    ) external onlyOwner {
-        if (newStaleness == 0) {
-            revert CfdEngine__ZeroStaleness();
-        }
-        (pendingEngineMarkStalenessLimit, engineMarkStalenessActivationTime) = _proposeScalarTimelock(newStaleness, 0);
-        emit EngineMarkStalenessLimitProposed(newStaleness, engineMarkStalenessActivationTime);
-    }
-
-    /// @notice Finalizes the pending engine mark staleness limit after the timelock expires.
-    function finalizeEngineMarkStalenessLimit() external onlyOwner {
-        engineMarkStalenessLimit =
-            _finalizeScalarTimelock(pendingEngineMarkStalenessLimit, engineMarkStalenessActivationTime);
-        pendingEngineMarkStalenessLimit = 0;
-        engineMarkStalenessActivationTime = 0;
-        emit EngineMarkStalenessLimitUpdated(engineMarkStalenessLimit);
-    }
-
-    /// @notice Cancels a pending engine mark staleness limit proposal.
-    function cancelEngineMarkStalenessLimitProposal() external onlyOwner {
-        pendingEngineMarkStalenessLimit = 0;
-        engineMarkStalenessActivationTime = 0;
     }
 
     /// @notice Withdraws accumulated execution fees from the vault to a recipient.
@@ -961,6 +750,49 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         }
         degradedMode = false;
         emit DegradedModeCleared();
+    }
+
+    function applyRiskConfig(
+        ICfdEngineAdminHost.EngineRiskConfig calldata config
+    ) external onlyAdmin {
+        _validateRiskParams(config.riskParams);
+        riskParams = config.riskParams;
+    }
+
+    function applyCalendarConfig(
+        ICfdEngineAdminHost.EngineCalendarConfig calldata config
+    ) external onlyAdmin {
+        if (config.fadRunwaySeconds > 24 hours) {
+            revert CfdEngine__RunwayTooLong();
+        }
+        uint256 oldLength = _fadOverrideDays.length;
+        for (uint256 i; i < oldLength; i++) {
+            delete fadDayOverrides[_fadOverrideDays[i]];
+        }
+        delete _fadOverrideDays;
+        for (uint256 i; i < config.fadDayTimestamps.length; i++) {
+            uint256 day = config.fadDayTimestamps[i] / 86_400;
+            if (!fadDayOverrides[day]) {
+                fadDayOverrides[day] = true;
+                _fadOverrideDays.push(day);
+            }
+        }
+        fadRunwaySeconds = config.fadRunwaySeconds;
+        emit FadDaysRemoved(new uint256[](0));
+        emit FadDaysAdded(config.fadDayTimestamps);
+        emit FadRunwayUpdated(config.fadRunwaySeconds);
+    }
+
+    function applyFreshnessConfig(
+        ICfdEngineAdminHost.EngineFreshnessConfig calldata config
+    ) external onlyAdmin {
+        if (config.fadMaxStaleness == 0 || config.engineMarkStalenessLimit == 0) {
+            revert CfdEngine__ZeroStaleness();
+        }
+        fadMaxStaleness = config.fadMaxStaleness;
+        engineMarkStalenessLimit = config.engineMarkStalenessLimit;
+        emit FadMaxStalenessUpdated(config.fadMaxStaleness);
+        emit EngineMarkStalenessLimitUpdated(config.engineMarkStalenessLimit);
     }
 
     // ==========================================

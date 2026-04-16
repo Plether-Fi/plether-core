@@ -73,19 +73,23 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
     function getPendingOrders(
         bytes32 accountId
     ) external view returns (PerpsViewTypes.PendingOrderView[] memory pending) {
-        IOrderRouterAccounting.PendingOrderView[] memory current = ORDER_ROUTER.getPendingOrdersForAccount(accountId);
-        pending = new PerpsViewTypes.PendingOrderView[](current.length);
+        uint64 orderId = ORDER_ROUTER.accountHeadOrderId(accountId);
+        uint256 pendingCount = ORDER_ROUTER.pendingOrderCounts(accountId);
+        pending = new PerpsViewTypes.PendingOrderView[](pendingCount);
 
-        for (uint256 i; i < current.length; ++i) {
+        for (uint256 i; i < pendingCount; ++i) {
+            (IOrderRouterAccounting.PendingOrderView memory current, uint64 nextAccountOrderId) =
+                ORDER_ROUTER.getPendingOrderView(orderId);
             pending[i] = PerpsViewTypes.PendingOrderView({
-                orderId: current[i].orderId,
-                side: current[i].side,
-                sizeDelta: current[i].sizeDelta,
-                marginDeltaUsdc: int256(current[i].marginDelta),
-                acceptablePrice: current[i].targetPrice,
-                isReduceOnly: current[i].isClose,
+                orderId: current.orderId,
+                side: current.side,
+                sizeDelta: current.sizeDelta,
+                marginDeltaUsdc: int256(current.marginDelta),
+                acceptablePrice: current.targetPrice,
+                isReduceOnly: current.isClose,
                 status: PerpsViewTypes.OrderStatus.Pending
             });
+            orderId = nextAccountOrderId;
         }
     }
 

@@ -171,7 +171,7 @@ contract LiquidationTest is BasePerpTest {
 
     function obsolete_LiquidationEquity_IncludesLegacySpread() public {
         // Enable nonzero carry (setUp has baseCarryBps=0)
-        engine.proposeRiskParams(
+        _setRiskParams(
             CfdTypes.RiskParams({
                 vpiFactor: 0,
                 maxSkewRatio: 0.4e18,
@@ -183,8 +183,6 @@ contract LiquidationTest is BasePerpTest {
                 bountyBps: 15
             })
         );
-        vm.warp(block.timestamp + 48 hours + 1);
-        engine.finalizeRiskParams();
 
         vm.warp(WEDNESDAY_NOON);
 

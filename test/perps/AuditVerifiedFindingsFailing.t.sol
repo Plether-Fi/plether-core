@@ -5,12 +5,17 @@ pragma solidity 0.8.33;
 // They are intentionally not statements about the live carry model or current accounting semantics.
 
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
+import {CfdEngineAdmin} from "../../src/perps/CfdEngineAdmin.sol";
 import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
+import {CfdEnginePlanner} from "../../src/perps/CfdEnginePlanner.sol";
+import {CfdEngineSettlementModule} from "../../src/perps/CfdEngineSettlementModule.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
+import {OrderRouterAdmin} from "../../src/perps/OrderRouterAdmin.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
@@ -161,6 +166,7 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
     TrancheVault seniorVault;
     TrancheVault juniorVault;
     OrderRouter router;
+    OrderRouterAdmin routerAdmin;
 
     bytes32 constant FEED_A = bytes32(uint256(1));
     bytes32 constant FEED_B = bytes32(uint256(2));
@@ -177,6 +183,10 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
 
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        CfdEnginePlanner planner = new CfdEnginePlanner();
+        CfdEngineSettlementModule settlement = new CfdEngineSettlementModule(address(engine));
+        CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
+        engine.setDependencies(address(planner), address(settlement), address(engineAdmin));
         pool = new HousePool(address(usdc), address(engine));
 
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");
@@ -206,6 +216,7 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
             bases,
             inversions
         );
+        routerAdmin = OrderRouterAdmin(router.admin());
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 
@@ -223,9 +234,15 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
     }
 
     function test_F3_StaleOracleCancellationMustNotPayKeeperUsdc() public {
-        router.proposeMaxOrderAge(3600);
+        IOrderRouterAdminHost.RouterConfig memory config = IOrderRouterAdminHost.RouterConfig({
+            maxOrderAge: 3600,
+            orderExecutionStalenessLimit: router.orderExecutionStalenessLimit(),
+            liquidationStalenessLimit: router.liquidationStalenessLimit(),
+            pythMaxConfidenceRatioBps: router.pythMaxConfidenceRatioBps()
+        });
+        routerAdmin.proposeRouterConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
-        router.finalizeMaxOrderAge();
+        routerAdmin.finalizeRouterConfig();
 
         uint256 t0 = 2_000_000_000;
         vm.warp(t0);
@@ -245,7 +262,7 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
         vm.warp(t0 + 61);
         vm.roll(101);
         vm.prank(keeper);
-        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
         router.executeOrder(1, updateData);
 
         assertEq(

@@ -8,6 +8,7 @@ import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
@@ -60,7 +61,8 @@ contract AuditV3_C01_FIFODeadlockTest is BasePerpTest {
         mockPyth = new MockPyth();
 
         clearinghouse = new MarginClearinghouse(address(usdc));
-        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        engine = _deployEngine(_riskParams());
+        _syncEngineAdmin();
         pool = new HousePool(address(usdc), address(engine));
 
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior", "sUSDC");
@@ -305,9 +307,15 @@ contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
 
     function test_H01_KeeperReceivesFullFeeOnExpiredOrder() public {
         // Set maxOrderAge so orders can expire
-        router.proposeMaxOrderAge(60);
+        IOrderRouterAdminHost.RouterConfig memory config = IOrderRouterAdminHost.RouterConfig({
+            maxOrderAge: 60,
+            orderExecutionStalenessLimit: router.orderExecutionStalenessLimit(),
+            liquidationStalenessLimit: router.liquidationStalenessLimit(),
+            pythMaxConfidenceRatioBps: router.pythMaxConfidenceRatioBps()
+        });
+        routerAdmin.proposeRouterConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
-        router.finalizeMaxOrderAge();
+        routerAdmin.finalizeRouterConfig();
 
         _fundTrader(alice, 50_000e6);
         vm.deal(alice, 1 ether);
@@ -332,9 +340,15 @@ contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
     function test_H01_FinalizeExecutionSuccessParamIsDeadCode() public {
         // Demonstrate that both successful and failed processing pay the keeper
         // from the order's reserved USDC fee.
-        router.proposeMaxOrderAge(60);
+        IOrderRouterAdminHost.RouterConfig memory config = IOrderRouterAdminHost.RouterConfig({
+            maxOrderAge: 60,
+            orderExecutionStalenessLimit: router.orderExecutionStalenessLimit(),
+            liquidationStalenessLimit: router.liquidationStalenessLimit(),
+            pythMaxConfidenceRatioBps: router.pythMaxConfidenceRatioBps()
+        });
+        routerAdmin.proposeRouterConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
-        router.finalizeMaxOrderAge();
+        routerAdmin.finalizeRouterConfig();
 
         _fundTrader(alice, 100_000e6);
         vm.deal(alice, 2 ether);

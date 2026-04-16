@@ -15,6 +15,7 @@ import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAcc
 import {PerpsViewTypes} from "../../src/perps/interfaces/PerpsViewTypes.sol";
 import {ProtocolLensViewTypes} from "../../src/perps/interfaces/ProtocolLensViewTypes.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
+import {OrderRouterDebugLens} from "../utils/OrderRouterDebugLens.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {Test} from "forge-std/Test.sol";
 
@@ -918,7 +919,7 @@ contract AdversarialPerpHandler is Test {
     function _orderRecord(
         uint64 orderId
     ) internal view returns (OrderRouter.OrderRecord memory record) {
-        return router.getOrderRecord(orderId);
+        return OrderRouterDebugLens.loadOrderRecord(vm, router, orderId);
     }
 
     function liquidateWithPayoutFailure(

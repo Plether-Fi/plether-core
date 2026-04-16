@@ -254,7 +254,7 @@ contract AuditV3Failing_CloseSlippageInversion is BasePerpTest {
         _open(accountId, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
 
         vm.prank(alice);
-        vm.expectRevert(OrderRouter.OrderRouter__CloseSideMismatch.selector);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__CommitValidation.selector, 4));
         router.commitOrder(CfdTypes.Side.BEAR, 20_000e18, 0, 0, true);
     }
 
