@@ -99,6 +99,11 @@ interface ICfdEngineCore {
         uint256 reachableCollateralBasisUsdc
     ) external;
 
+    function checkpointCarryUsingStoredMark(
+        bytes32 accountId,
+        uint256 reachableCollateralBasisUsdc
+    ) external;
+
     function isFadWindow() external view returns (bool);
 
     function fadMaxStaleness() external view returns (uint256);

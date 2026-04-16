@@ -312,7 +312,9 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         uint256 amount,
         bytes32 accountId
     ) internal returns (uint256 claimAmountUsdc) {
-        claimAmountUsdc = amount < vault.totalAssets() ? amount : vault.totalAssets();
+        claimAmountUsdc = CashPriorityLib.availableCashForDeferredBeneficiaryClaim(
+            vault.totalAssets(), accumulatedFeesUsdc, totalDeferredTraderCreditUsdc, totalDeferredKeeperCreditUsdc, amount
+        );
         if (claimAmountUsdc == 0) {
             revert CfdEngine__InsufficientVaultLiquidity();
         }
@@ -553,6 +555,29 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         }
 
         _realizeCarryFromSettlement(accountId, pos, price, reachableCollateralBasisUsdc);
+    }
+
+    /// @notice Checkpoints carry against the cached stored mark when fresh-mark liveness is unavailable.
+    /// @dev Restricted to the clearinghouse stale-deposit path so deposits preserve pre-mutation carry basis.
+    function checkpointCarryUsingStoredMark(
+        bytes32 accountId,
+        uint256 reachableCollateralBasisUsdc
+    ) external nonReentrant {
+        if (msg.sender != address(clearinghouse)) {
+            revert CfdEngine__NotClearinghouse();
+        }
+
+        StoredPosition storage pos = _positions[accountId];
+        if (pos.size == 0 || pos.lastCarryTimestamp == 0) {
+            return;
+        }
+
+        uint256 price = lastMarkPrice;
+        if (price == 0 || lastMarkTime == 0) {
+            revert CfdEngine__MarkPriceStale();
+        }
+
+        _checkpointCarryBeforeBasisChange(accountId, pos, price, reachableCollateralBasisUsdc);
     }
 
     /// @notice Claims deferred trader credit balance into the clearinghouse.

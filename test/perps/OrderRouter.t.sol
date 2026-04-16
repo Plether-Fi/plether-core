@@ -5109,6 +5109,43 @@ contract KeeperFeeRefundTest is Test {
         );
     }
 
+    function test_FIFOCleanupImpossibleHeadOrderHasEconomicCleanupIncentive() public {
+        usdc.mint(bob, 1_000_000e6);
+        vm.startPrank(bob);
+        usdc.approve(address(juniorVault), 1_000_000e6);
+        juniorVault.deposit(1_000_000e6, bob);
+        vm.stopPrank();
+
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        usdc.mint(alice, 50_000e6);
+        vm.startPrank(alice);
+        usdc.approve(address(clearinghouse), 50_000e6);
+        clearinghouse.deposit(accountId, 50_000e6);
+        vm.stopPrank();
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1.5e8, false);
+
+        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(accountId);
+        uint256 keeperSettlementBefore = _settlementBalance(keeper);
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(1e8));
+
+        vm.prank(keeper);
+        vm.roll(block.number + 1);
+        router.executeOrder(1, priceData);
+
+        uint256 traderPenaltyUsdc = traderSettlementBefore - clearinghouse.balanceUsdc(accountId);
+        uint256 keeperRewardUsdc = _settlementBalance(keeper) - keeperSettlementBefore;
+
+        assertEq(router.nextExecuteId(), 0, "Impossible slippage head should still be removed from the FIFO queue");
+        assertEq(router.getAccountEscrow(accountId).executionBountyUsdc, 0, "Cleanup should clear the escrowed head-order bounty");
+        assertTrue(
+            traderPenaltyUsdc > 0 || keeperRewardUsdc > 0,
+            "Impossible head cleanup must either penalize the submitter or compensate the clearer"
+        );
+    }
+
     function test_CloseSlippageFailForfeitsBountyToProtocolWhenMarginBacked() public {
         bytes32 accountId = bytes32(uint256(uint160(alice)));
         usdc.mint(alice, 251_500_000);

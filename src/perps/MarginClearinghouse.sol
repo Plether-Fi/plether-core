@@ -184,6 +184,8 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
                     revert(add(revertData, 32), mload(revertData))
                 }
             }
+
+            ICfdEngineCore(engine).checkpointCarryUsingStoredMark(accountId, reachableCollateralBasisUsdc);
         }
 
         emit Deposit(accountId, settlementAsset, amount);

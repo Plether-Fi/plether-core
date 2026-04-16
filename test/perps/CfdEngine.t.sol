@@ -966,6 +966,88 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
+    function test_DeferredClaimConsistency_TraderClaimPreservesOtherReservedCash() public {
+        address trader = address(0xD30D1);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address keeperAccount = address(this);
+        uint256 deferredTraderCredit = 5_000e6;
+        uint256 deferredKeeperCredit = 700e6;
+
+        _fundTrader(trader, 20_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+
+        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(bytes32)").with_key(accountId).checked_write(
+            deferredTraderCredit
+        );
+        stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(deferredTraderCredit);
+
+        vm.prank(address(router));
+        engine.recordDeferredKeeperCredit(keeperAccount, deferredKeeperCredit);
+
+        ProtocolLensViewTypes.ProtocolAccountingSnapshot memory beforeSnapshot =
+            engineProtocolLens.getProtocolAccountingSnapshot();
+
+        vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
+        usdc.mint(address(pool), deferredTraderCredit);
+
+        vm.prank(trader);
+        engine.claimDeferredTraderCredit(accountId);
+
+        ProtocolLensViewTypes.ProtocolAccountingSnapshot memory afterSnapshot =
+            engineProtocolLens.getProtocolAccountingSnapshot();
+
+        assertEq(afterSnapshot.accumulatedFeesUsdc, beforeSnapshot.accumulatedFeesUsdc, "Trader deferred claim must not consume protocol fee reserve");
+        assertEq(
+            afterSnapshot.totalDeferredKeeperCreditUsdc,
+            beforeSnapshot.totalDeferredKeeperCreditUsdc,
+            "Trader deferred claim must not consume keeper deferred reserve"
+        );
+        assertEq(afterSnapshot.totalDeferredTraderCreditUsdc, 0, "Claim should extinguish the trader deferred liability");
+        assertEq(
+            beforeSnapshot.withdrawalReservedUsdc - afterSnapshot.withdrawalReservedUsdc,
+            deferredTraderCredit,
+            "Withdrawal reserve should drop only by the trader deferred amount that was actually claimed"
+        );
+    }
+
+    function test_StaleDeposit_PreservesPreMutationCarryBasis() public {
+        address trader = address(0xD30D2);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        uint256 depositAmount = 500e6;
+
+        _fundTrader(trader, 10_000e6);
+        usdc.mint(trader, depositAmount);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2_000e6, 1e8);
+
+        uint256 settlementBefore = clearinghouse.balanceUsdc(accountId);
+        uint256 reachableBefore = MarginClearinghouseAccountingLib.getGenericReachableUsdc(clearinghouse.getAccountUsdcBuckets(accountId));
+
+        vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 30 days);
+        uint256 elapsed = 30 days + engine.engineMarkStalenessLimit();
+        uint256 expectedCarry = PositionRiskAccountingLib.computePendingCarryUsdc(
+            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, 1e8, reachableBefore),
+            _riskParams().baseCarryBps,
+            elapsed
+        );
+
+        vm.startPrank(trader);
+        usdc.approve(address(clearinghouse), type(uint256).max);
+        clearinghouse.depositMargin(depositAmount);
+        vm.stopPrank();
+
+        assertEq(
+            clearinghouse.balanceUsdc(accountId),
+            settlementBefore + depositAmount - expectedCarry,
+            "Stale deposit should checkpoint carry on the pre-deposit basis before increasing collateral"
+        );
+        assertEq(engine.unsettledCarryUsdc(accountId), 0, "Covered stale deposit carry should not leave residual unsettled carry");
+        assertEq(
+            engine.getPositionLastCarryTimestamp(accountId),
+            block.timestamp,
+            "Stored-mark carry checkpoint should advance the carry timestamp at the stale deposit time"
+        );
+    }
+
     function test_ClaimDeferredTraderCredit_RevertsForNonOwner() public {
         address trader = address(0xD307);
         address relayer = address(0xD308);
