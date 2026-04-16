@@ -394,7 +394,7 @@ contract AuditFollowupFindingsFailing_RiskParamValidation is BasePerpTest {
         CfdTypes.RiskParams memory params = _riskParams();
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = params;
-
+        config.executionFeeBps = engine.executionFeeBps();
         vm.expectRevert();
         engineAdmin.proposeRiskConfig(config);
     }
@@ -404,7 +404,7 @@ contract AuditFollowupFindingsFailing_RiskParamValidation is BasePerpTest {
         params.maxSkewRatio = 1e18 + 1;
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = params;
-
+        config.executionFeeBps = engine.executionFeeBps();
         vm.expectRevert();
         engineAdmin.proposeRiskConfig(config);
     }

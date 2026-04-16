@@ -377,7 +377,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         });
         snap.capPrice = CAP_PRICE;
         snap.riskParams = _riskParams();
-
+        snap.executionFeeBps = engine.executionFeeBps();
         CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(
             snap, _openOrder(accountId, CfdTypes.Side.BULL, 5000e18, 0, 1e8), 1e8, uint64(block.timestamp)
         );
@@ -435,7 +435,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         });
         snap.capPrice = CAP_PRICE;
         snap.riskParams = params;
-
+        snap.executionFeeBps = engine.executionFeeBps();
         CfdTypes.Order memory order = CfdTypes.Order({
             accountId: accountId,
             sizeDelta: 300_000e18,
@@ -496,7 +496,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         });
         snap.capPrice = CAP_PRICE;
         snap.riskParams = _riskParams();
-
+        snap.executionFeeBps = engine.executionFeeBps();
         CfdTypes.Order memory order = _openOrder(accountId, CfdTypes.Side.BULL, 10_000e18, 100e6, 1e8);
         CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(snap, order, 1e8, uint64(block.timestamp));
         uint256 freeSettlementAfterCarry = snap.accountBuckets.freeSettlementUsdc - delta.pendingCarryUsdc;
@@ -624,7 +624,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         });
         snap.capPrice = CAP_PRICE;
         snap.riskParams = params;
-
+        snap.executionFeeBps = engine.executionFeeBps();
         CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(
             snap, _openOrder(accountId, CfdTypes.Side.BEAR, 10_000e18, 0, 1e8), 1e8, uint64(block.timestamp)
         );
@@ -682,7 +682,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         });
         snap.capPrice = CAP_PRICE;
         snap.riskParams = _riskParams();
-
+        snap.executionFeeBps = engine.executionFeeBps();
         uint256 terminalCarryUsdc = PositionRiskAccountingLib.computePendingCarryUsdc(
             PositionRiskAccountingLib.computeLpBackedNotionalUsdc(
                 snap.position.size, 1e8, snap.accountBuckets.settlementBalanceUsdc

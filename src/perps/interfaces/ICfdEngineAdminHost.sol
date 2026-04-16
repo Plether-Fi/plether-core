@@ -7,6 +7,7 @@ interface ICfdEngineAdminHost {
 
     struct EngineRiskConfig {
         CfdTypes.RiskParams riskParams;
+        uint256 executionFeeBps;
     }
 
     struct EngineCalendarConfig {

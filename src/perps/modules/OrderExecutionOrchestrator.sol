@@ -38,8 +38,8 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
     event OrderExecuted(uint64 indexed orderId, uint256 executionPrice);
     event OrderFailed(uint64 indexed orderId, OrderFailReason reason);
 
-    uint256 internal constant MIN_ENGINE_GAS = 600_000;
-    uint256 internal constant MAX_PRUNE_ORDERS_PER_CALL = 64;
+    uint256 public minEngineGas;
+    uint256 public maxPruneOrdersPerCall;
     bytes4 internal constant PANIC_SELECTOR = 0x4e487b71;
     bytes4 internal constant TYPED_ORDER_FAILURE_SELECTOR = ICfdEngineCore.CfdEngine__TypedOrderFailure.selector;
     bytes4 internal constant MARK_PRICE_OUT_OF_ORDER_SELECTOR = ICfdEngineCore.CfdEngine__MarkPriceOutOfOrder.selector;
@@ -67,7 +67,7 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
         uint256 executionPrice,
         uint64 oraclePublishTime
     ) internal returns (uint256 skipped) {
-        skipped = _pruneExpiredHeadOrders(upToId, MAX_PRUNE_ORDERS_PER_CALL, executionPrice, oraclePublishTime);
+        skipped = _pruneExpiredHeadOrders(upToId, maxPruneOrdersPerCall, executionPrice, oraclePublishTime);
     }
 
     function _pruneExpiredHeadOrders(
@@ -177,7 +177,7 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
         }
 
         uint256 forwardedGas = gasleft() - (gasleft() / 64);
-        if (forwardedGas < MIN_ENGINE_GAS) {
+        if (forwardedGas < minEngineGas) {
             if (revertOnBlockedExecution) {
                 _revertInsufficientGas();
             }

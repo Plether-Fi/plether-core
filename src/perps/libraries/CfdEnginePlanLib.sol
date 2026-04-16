@@ -14,8 +14,6 @@ import {OpenAccountingLib} from "./OpenAccountingLib.sol";
 import {PositionRiskAccountingLib} from "./PositionRiskAccountingLib.sol";
 import {SolvencyAccountingLib} from "./SolvencyAccountingLib.sol";
 
-uint256 constant EXECUTION_FEE_BPS = 4;
-
 /// @title CfdEnginePlanLib
 /// @notice Pure plan functions for the CfdEngine plan→apply architecture.
 ///         Each function takes a RawSnapshot and returns a typed delta describing all effects.
@@ -257,7 +255,7 @@ library CfdEnginePlanLib {
                 preSkewUsdc: preSkewUsdc,
                 postSkewUsdc: postSkewUsdc,
                 vaultDepthUsdc: effectiveSnap.vaultAssetsUsdc,
-                executionFeeBps: EXECUTION_FEE_BPS,
+                executionFeeBps: effectiveSnap.executionFeeBps,
                 riskParams: effectiveSnap.riskParams
             })
         );
@@ -509,7 +507,7 @@ library CfdEnginePlanLib {
             postSkewUsdc,
             snap.vaultAssetsUsdc,
             snap.riskParams.vpiFactor,
-            EXECUTION_FEE_BPS
+            snap.executionFeeBps
         );
 
         CloseAccountingLib.CloseState memory cs = delta.closeState;

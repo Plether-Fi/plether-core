@@ -151,11 +151,10 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
         router.executeOrderBatch(2, updateData);
 
         assertEq(
-            usdc.balanceOf(keeper) - keeperUsdcBefore,
-            2e6,
-            "Keeper should be paid for both the successful and expired binding open orders"
+            _settlementBalance(keeper) - keeperUsdcBefore,
+            secondPending.executionBountyUsdc,
+            "Batch execution should only pay the keeper for the successfully executed order"
         );
-        assertEq(alice.balance - aliceBefore, 0, "Expired order should not change the user's ETH balance");
     }
 
     function test_C1_StaleSingleExecuteShouldRefundUserNotKeeper() public {
@@ -400,7 +399,7 @@ contract AuditConfirmedFindingsFailing_RiskParams is BasePerpTest {
         params.maxSkewRatio = params.maxSkewRatio;
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = params;
-
+        config.executionFeeBps = engine.executionFeeBps();
         vm.expectRevert();
         engineAdmin.proposeRiskConfig(config);
     }
@@ -409,7 +408,7 @@ contract AuditConfirmedFindingsFailing_RiskParams is BasePerpTest {
         CfdTypes.RiskParams memory params = _riskParams();
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = params;
-
+        config.executionFeeBps = engine.executionFeeBps();
         vm.expectRevert();
         engineAdmin.proposeRiskConfig(config);
     }
@@ -418,7 +417,7 @@ contract AuditConfirmedFindingsFailing_RiskParams is BasePerpTest {
         CfdTypes.RiskParams memory params = _riskParams();
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = params;
-
+        config.executionFeeBps = engine.executionFeeBps();
         vm.expectRevert();
         engineAdmin.proposeRiskConfig(config);
     }

@@ -5029,7 +5029,14 @@ contract KeeperFeeRefundTest is Test {
             maxOrderAge: 300,
             orderExecutionStalenessLimit: router.orderExecutionStalenessLimit(),
             liquidationStalenessLimit: router.liquidationStalenessLimit(),
-            pythMaxConfidenceRatioBps: router.pythMaxConfidenceRatioBps()
+            pythMaxConfidenceRatioBps: router.pythMaxConfidenceRatioBps(),
+            openOrderExecutionBountyBps: router.openOrderExecutionBountyBps(),
+            minOpenOrderExecutionBountyUsdc: router.minOpenOrderExecutionBountyUsdc(),
+            maxOpenOrderExecutionBountyUsdc: router.maxOpenOrderExecutionBountyUsdc(),
+            closeOrderExecutionBountyUsdc: router.closeOrderExecutionBountyUsdc(),
+            maxPendingOrders: router.maxPendingOrders(),
+            minEngineGas: router.minEngineGas(),
+            maxPruneOrdersPerCall: router.maxPruneOrdersPerCall()
         });
         routerAdmin.proposeRouterConfig(config);
         _warpPastTimelock();

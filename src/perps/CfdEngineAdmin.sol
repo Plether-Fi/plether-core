@@ -26,6 +26,7 @@ contract CfdEngineAdmin is Ownable {
     error CfdEngineAdmin__ZeroStaleness();
     error CfdEngineAdmin__RunwayTooLong();
     error CfdEngineAdmin__InvalidRiskParams();
+    error CfdEngineAdmin__InvalidExecutionFee();
 
     event RiskConfigProposed(ICfdEngineAdminHost.EngineRiskConfig config, uint256 activationTime);
     event RiskConfigFinalized(ICfdEngineAdminHost.EngineRiskConfig config);
@@ -45,6 +46,9 @@ contract CfdEngineAdmin is Ownable {
         ICfdEngineAdminHost.EngineRiskConfig calldata config
     ) external onlyOwner {
         _validateRiskParams(config.riskParams);
+        if (config.executionFeeBps == 0 || config.executionFeeBps > 10_000) {
+            revert CfdEngineAdmin__InvalidExecutionFee();
+        }
         pendingRiskConfig = config;
         riskConfigActivationTime = block.timestamp + TIMELOCK_DELAY;
         emit RiskConfigProposed(config, riskConfigActivationTime);

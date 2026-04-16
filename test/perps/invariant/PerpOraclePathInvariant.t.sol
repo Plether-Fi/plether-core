@@ -78,7 +78,14 @@ contract PerpOraclePathHandler is Test {
             maxOrderAge: router.maxOrderAge(),
             orderExecutionStalenessLimit: limit,
             liquidationStalenessLimit: router.liquidationStalenessLimit(),
-            pythMaxConfidenceRatioBps: router.pythMaxConfidenceRatioBps()
+            pythMaxConfidenceRatioBps: router.pythMaxConfidenceRatioBps(),
+            openOrderExecutionBountyBps: router.openOrderExecutionBountyBps(),
+            minOpenOrderExecutionBountyUsdc: router.minOpenOrderExecutionBountyUsdc(),
+            maxOpenOrderExecutionBountyUsdc: router.maxOpenOrderExecutionBountyUsdc(),
+            closeOrderExecutionBountyUsdc: router.closeOrderExecutionBountyUsdc(),
+            maxPendingOrders: router.maxPendingOrders(),
+            minEngineGas: router.minEngineGas(),
+            maxPruneOrdersPerCall: router.maxPruneOrdersPerCall()
         });
         routerAdmin.proposeRouterConfig(config);
         vm.warp(block.timestamp + 48 hours);
@@ -95,7 +102,14 @@ contract PerpOraclePathHandler is Test {
             maxOrderAge: router.maxOrderAge(),
             orderExecutionStalenessLimit: router.orderExecutionStalenessLimit(),
             liquidationStalenessLimit: limit,
-            pythMaxConfidenceRatioBps: router.pythMaxConfidenceRatioBps()
+            pythMaxConfidenceRatioBps: router.pythMaxConfidenceRatioBps(),
+            openOrderExecutionBountyBps: router.openOrderExecutionBountyBps(),
+            minOpenOrderExecutionBountyUsdc: router.minOpenOrderExecutionBountyUsdc(),
+            maxOpenOrderExecutionBountyUsdc: router.maxOpenOrderExecutionBountyUsdc(),
+            closeOrderExecutionBountyUsdc: router.closeOrderExecutionBountyUsdc(),
+            maxPendingOrders: router.maxPendingOrders(),
+            minEngineGas: router.minEngineGas(),
+            maxPruneOrdersPerCall: router.maxPruneOrdersPerCall()
         });
         routerAdmin.proposeRouterConfig(config);
         vm.warp(block.timestamp + 48 hours);

@@ -69,6 +69,7 @@ library CfdEnginePlanTypes {
 
         uint256 capPrice;
         CfdTypes.RiskParams riskParams;
+        uint256 executionFeeBps;
         bool isFadWindow;
     }
 

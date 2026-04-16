@@ -636,6 +636,7 @@ abstract contract BasePerpTest is Test {
     ) internal {
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = params;
+        config.executionFeeBps = engine.executionFeeBps();
         engineAdmin.proposeRiskConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
         engineAdmin.finalizeRiskConfig();
@@ -662,6 +663,13 @@ abstract contract BasePerpTest is Test {
         config.orderExecutionStalenessLimit = router.orderExecutionStalenessLimit();
         config.liquidationStalenessLimit = router.liquidationStalenessLimit();
         config.pythMaxConfidenceRatioBps = router.pythMaxConfidenceRatioBps();
+        config.openOrderExecutionBountyBps = router.openOrderExecutionBountyBps();
+        config.minOpenOrderExecutionBountyUsdc = router.minOpenOrderExecutionBountyUsdc();
+        config.maxOpenOrderExecutionBountyUsdc = router.maxOpenOrderExecutionBountyUsdc();
+        config.closeOrderExecutionBountyUsdc = router.closeOrderExecutionBountyUsdc();
+        config.maxPendingOrders = router.maxPendingOrders();
+        config.minEngineGas = router.minEngineGas();
+        config.maxPruneOrdersPerCall = router.maxPruneOrdersPerCall();
     }
 
     function _setRouterConfig(

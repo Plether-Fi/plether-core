@@ -60,6 +60,7 @@ contract TimelockPauseTest is BasePerpTest {
 
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = newParams;
+        config.executionFeeBps = 7;
         engineAdmin.proposeRiskConfig(config);
         assertGt(engineAdmin.riskConfigActivationTime(), 0);
     }
@@ -78,6 +79,7 @@ contract TimelockPauseTest is BasePerpTest {
 
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = newParams;
+        config.executionFeeBps = 7;
         engineAdmin.proposeRiskConfig(config);
 
         vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__TimelockNotReady.selector);
@@ -98,12 +100,14 @@ contract TimelockPauseTest is BasePerpTest {
 
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = newParams;
+        config.executionFeeBps = 7;
         engineAdmin.proposeRiskConfig(config);
         _warpForward(48 hours + 1);
         engineAdmin.finalizeRiskConfig();
 
         (,, uint256 maintMarginBps,,,,,) = engine.riskParams();
         assertEq(maintMarginBps, 200);
+        assertEq(engine.executionFeeBps(), 7);
         assertEq(engineAdmin.riskConfigActivationTime(), 0);
     }
 
@@ -126,6 +130,7 @@ contract TimelockPauseTest is BasePerpTest {
 
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = newParams;
+        config.executionFeeBps = engine.executionFeeBps();
         engineAdmin.proposeRiskConfig(config);
         vm.expectEmit(false, false, false, true);
         emit RiskConfigCancelled();
@@ -148,10 +153,11 @@ contract TimelockPauseTest is BasePerpTest {
             bountyBps: 10
         });
 
-        vm.prank(nonOwner);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = newParams;
+        config.executionFeeBps = engine.executionFeeBps();
+        vm.prank(nonOwner);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
         engineAdmin.proposeRiskConfig(config);
     }
 
@@ -169,6 +175,7 @@ contract TimelockPauseTest is BasePerpTest {
 
         ICfdEngineAdminHost.EngineRiskConfig memory firstConfig;
         firstConfig.riskParams = first;
+        firstConfig.executionFeeBps = engine.executionFeeBps();
         engineAdmin.proposeRiskConfig(firstConfig);
         uint256 firstActivation = engineAdmin.riskConfigActivationTime();
 
@@ -187,6 +194,7 @@ contract TimelockPauseTest is BasePerpTest {
 
         ICfdEngineAdminHost.EngineRiskConfig memory secondConfig;
         secondConfig.riskParams = second;
+        secondConfig.executionFeeBps = engine.executionFeeBps();
         engineAdmin.proposeRiskConfig(secondConfig);
         uint256 secondActivation = engineAdmin.riskConfigActivationTime();
 
@@ -243,6 +251,13 @@ contract TimelockPauseTest is BasePerpTest {
     function test_ProposeMaxOrderAge_TimelockFlow() public {
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         config.maxOrderAge = 600;
+        config.openOrderExecutionBountyBps = 2;
+        config.minOpenOrderExecutionBountyUsdc = 20_000;
+        config.maxOpenOrderExecutionBountyUsdc = 300_000;
+        config.closeOrderExecutionBountyUsdc = 250_000;
+        config.maxPendingOrders = 7;
+        config.minEngineGas = 700_000;
+        config.maxPruneOrdersPerCall = 32;
         routerAdmin.proposeRouterConfig(config);
 
         vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__TimelockNotReady.selector);
@@ -252,6 +267,13 @@ contract TimelockPauseTest is BasePerpTest {
         routerAdmin.finalizeRouterConfig();
 
         assertEq(router.maxOrderAge(), 600);
+        assertEq(router.openOrderExecutionBountyBps(), 2);
+        assertEq(router.minOpenOrderExecutionBountyUsdc(), 20_000);
+        assertEq(router.maxOpenOrderExecutionBountyUsdc(), 300_000);
+        assertEq(router.closeOrderExecutionBountyUsdc(), 250_000);
+        assertEq(router.maxPendingOrders(), 7);
+        assertEq(router.minEngineGas(), 700_000);
+        assertEq(router.maxPruneOrdersPerCall(), 32);
         assertEq(routerAdmin.routerConfigActivationTime(), 0);
     }
 
@@ -348,7 +370,7 @@ contract TimelockPauseTest is BasePerpTest {
 
     function test_Pause_OnlyOwner() public {
         vm.prank(nonOwner);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
+        vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__UnauthorizedPauser.selector);
         routerAdmin.pause();
     }
 

@@ -99,7 +99,7 @@ contract CfdEnginePlanLibHarness {
             minBountyUsdc: 1e6,
             bountyBps: 10
         });
-
+        snap.executionFeeBps = 4;
         return CfdEnginePlanLib.planLiquidation(snap, oraclePrice, 0);
     }
 
@@ -149,7 +149,7 @@ contract CfdEnginePlanLibHarness {
             minBountyUsdc: 1e6,
             bountyBps: 10
         });
-
+        snap.executionFeeBps = 4;
         return CfdEnginePlanLib.planLiquidation(snap, oraclePrice, 0);
     }
 
@@ -198,7 +198,7 @@ contract CfdEnginePlanLibHarness {
             minBountyUsdc: 1e6,
             bountyBps: 10
         });
-
+        snap.executionFeeBps = 4;
         return CfdEnginePlanLib.planLiquidation(snap, oraclePrice, 0);
     }
 
@@ -255,6 +255,7 @@ contract CfdEnginePlanLibHarness {
             minBountyUsdc: 1e6,
             bountyBps: 10
         });
+        snap.executionFeeBps = 4;
         snap.vaultAssetsUsdc = 1_000_000e6;
         snap.vaultCashUsdc = 1_000_000e6;
 
@@ -3921,7 +3922,7 @@ contract CfdEngineTest is BasePerpTest {
         params.maintMarginBps = 0;
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = params;
-
+        config.executionFeeBps = engine.executionFeeBps();
         vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__InvalidRiskParams.selector);
         engineAdmin.proposeRiskConfig(config);
     }
@@ -3931,7 +3932,7 @@ contract CfdEngineTest is BasePerpTest {
         params.initMarginBps = 0;
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = params;
-
+        config.executionFeeBps = engine.executionFeeBps();
         vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__InvalidRiskParams.selector);
         engineAdmin.proposeRiskConfig(config);
     }
@@ -3941,7 +3942,7 @@ contract CfdEngineTest is BasePerpTest {
         params.initMarginBps = params.maintMarginBps - 1;
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = params;
-
+        config.executionFeeBps = engine.executionFeeBps();
         vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__InvalidRiskParams.selector);
         engineAdmin.proposeRiskConfig(config);
     }
@@ -3951,7 +3952,7 @@ contract CfdEngineTest is BasePerpTest {
         params.fadMarginBps = params.maintMarginBps - 1;
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = params;
-
+        config.executionFeeBps = engine.executionFeeBps();
         vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__InvalidRiskParams.selector);
         engineAdmin.proposeRiskConfig(config);
     }
@@ -3961,7 +3962,7 @@ contract CfdEngineTest is BasePerpTest {
         params.fadMarginBps = 10_001;
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = params;
-
+        config.executionFeeBps = engine.executionFeeBps();
         vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__InvalidRiskParams.selector);
         engineAdmin.proposeRiskConfig(config);
     }
@@ -3971,7 +3972,7 @@ contract CfdEngineTest is BasePerpTest {
         params.minBountyUsdc = 0;
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = params;
-
+        config.executionFeeBps = engine.executionFeeBps();
         vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__InvalidRiskParams.selector);
         engineAdmin.proposeRiskConfig(config);
     }
@@ -3981,7 +3982,7 @@ contract CfdEngineTest is BasePerpTest {
         params.bountyBps = 0;
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = params;
-
+        config.executionFeeBps = engine.executionFeeBps();
         vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__InvalidRiskParams.selector);
         engineAdmin.proposeRiskConfig(config);
     }
@@ -5184,7 +5185,14 @@ contract CfdEngineAuditTest is BasePerpTest {
             maxOrderAge: 0,
             orderExecutionStalenessLimit: router.orderExecutionStalenessLimit(),
             liquidationStalenessLimit: router.liquidationStalenessLimit(),
-            pythMaxConfidenceRatioBps: router.pythMaxConfidenceRatioBps()
+            pythMaxConfidenceRatioBps: router.pythMaxConfidenceRatioBps(),
+            openOrderExecutionBountyBps: router.openOrderExecutionBountyBps(),
+            minOpenOrderExecutionBountyUsdc: router.minOpenOrderExecutionBountyUsdc(),
+            maxOpenOrderExecutionBountyUsdc: router.maxOpenOrderExecutionBountyUsdc(),
+            closeOrderExecutionBountyUsdc: router.closeOrderExecutionBountyUsdc(),
+            maxPendingOrders: router.maxPendingOrders(),
+            minEngineGas: router.minEngineGas(),
+            maxPruneOrdersPerCall: router.maxPruneOrdersPerCall()
         });
         routerAdmin.proposeRouterConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
@@ -5281,6 +5289,7 @@ contract CfdEngineAuditTest is BasePerpTest {
         });
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = newParams;
+        config.executionFeeBps = engine.executionFeeBps();
         engineAdmin.proposeRiskConfig(config);
 
         vm.warp(T_FINALIZE);

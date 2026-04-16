@@ -189,8 +189,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     uint256 public fadMaxStaleness = 3 days;
     uint256 public fadRunwaySeconds = 3 hours;
     uint256 public engineMarkStalenessLimit = 60;
-
-    uint256 public constant EXECUTION_FEE_BPS = 4;
+    uint256 public executionFeeBps = 4;
     error CfdEngine__Unauthorized();
     error CfdEngine__VaultAlreadySet();
     error CfdEngine__RouterAlreadySet();
@@ -755,8 +754,12 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     function applyRiskConfig(
         ICfdEngineAdminHost.EngineRiskConfig calldata config
     ) external onlyAdmin {
+        if (config.executionFeeBps == 0 || config.executionFeeBps > 10_000) {
+            revert CfdEngine__InvalidRiskParams();
+        }
         _validateRiskParams(config.riskParams);
         riskParams = config.riskParams;
+        executionFeeBps = config.executionFeeBps;
     }
 
     function applyCalendarConfig(
@@ -1137,6 +1140,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
 
         snap.capPrice = CAP_PRICE;
         snap.riskParams = riskParams;
+        snap.executionFeeBps = executionFeeBps;
         snap.isFadWindow = isFadWindow();
     }
 

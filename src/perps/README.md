@@ -389,7 +389,7 @@ Instant controls remain for one-time wiring and fee withdrawal. `OrderRouter` pa
 - Keeper execution, liquidation, and other protective paths remain available.
 - Pausing `HousePool` blocks new LP deposits but not protective withdrawals or reconcile.
 
-## Key Constants
+## Default Parameters
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
@@ -399,9 +399,9 @@ Instant controls remain for one-time wiring and fee withdrawal. `OrderRouter` pa
 | `baseCarryBps` | 500 (5%) | Annualized carry on LP-backed notional |
 | `bountyBps` | 10 (0.10%) | Liquidation bounty rate |
 | `minBountyUsdc` | 1,000,000 ($1) | Liquidation bounty floor |
-| `EXECUTION_FEE_BPS` | 4 (0.04%) | Protocol trading fee |
-| Open execution bounty | 0.01 to 0.20 USDC | Reserved at commit |
-| Close execution bounty | 0.20 USDC | Reserved at commit |
+| `executionFeeBps` | 4 (0.04%) | Timelocked protocol trading fee |
+| Open execution bounty | 0.01 to 0.20 USDC | Timelocked router reserve bounds |
+| Close execution bounty | 0.20 USDC | Timelocked router reserve amount |
 | Normal execution staleness | 60s | Normal order execution freshness |
 | Liquidation staleness | 15s | Live-market liquidation freshness |
 | `engineMarkStalenessLimit` | 60s | Engine-side mark freshness |
@@ -411,6 +411,8 @@ Instant controls remain for one-time wiring and fee withdrawal. `OrderRouter` pa
 | `fadRunwaySeconds` | 3 hours | Admin FAD pre-close runway |
 | `seniorRateBps` | 800 (8% APY) | Senior fixed-rate target |
 | `DEPOSIT_COOLDOWN` | 1 hour | LP anti-flash cooldown |
+
+OrderRouter also exposes timelocked admin control over `maxPendingOrders`, `minEngineGas`, and `maxPruneOrdersPerCall`.
 
 ## Further Reading
 

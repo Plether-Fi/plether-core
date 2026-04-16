@@ -34,11 +34,11 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, IOrderRouterAdminHost
 
     uint256 public maxOrderAge;
     uint256 internal constant DEFAULT_MAX_ORDER_AGE = 60;
-    uint256 internal constant OPEN_ORDER_EXECUTION_BOUNTY_BPS = 1;
-    uint256 internal constant MIN_OPEN_ORDER_EXECUTION_BOUNTY_USDC = 10_000;
-    uint256 internal constant MAX_OPEN_ORDER_EXECUTION_BOUNTY_USDC = 200_000;
-    uint256 internal constant CLOSE_ORDER_EXECUTION_BOUNTY_USDC = 200_000;
-    uint256 internal constant MAX_PENDING_ORDERS = 5;
+    uint256 public openOrderExecutionBountyBps;
+    uint256 public minOpenOrderExecutionBountyUsdc;
+    uint256 public maxOpenOrderExecutionBountyUsdc;
+    uint256 public closeOrderExecutionBountyUsdc;
+    uint256 public maxPendingOrders;
 
     uint64 public globalTailOrderId;
     error OrderRouter__ZeroSize();
@@ -81,6 +81,13 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, IOrderRouterAdminHost
     ) OrderOracleExecution(_engine, _engineLens, _vault, _pyth, _feedIds, _quantities, _basePrices, _inversions) {
         admin = address(new OrderRouterAdmin(address(this), msg.sender));
         maxOrderAge = DEFAULT_MAX_ORDER_AGE;
+        openOrderExecutionBountyBps = 1;
+        minOpenOrderExecutionBountyUsdc = 10_000;
+        maxOpenOrderExecutionBountyUsdc = 200_000;
+        closeOrderExecutionBountyUsdc = 200_000;
+        maxPendingOrders = 5;
+        minEngineGas = 600_000;
+        maxPruneOrdersPerCall = 64;
         if (_engine.code.length > 0) {
             USDC.forceApprove(_engine, type(uint256).max);
         }
@@ -214,7 +221,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, IOrderRouterAdminHost
             if (sizeDelta > queuedPosition.size) {
                 _revertCommitValidation(5);
             }
-            executionBountyUsdc = CLOSE_ORDER_EXECUTION_BOUNTY_USDC;
+            executionBountyUsdc = closeOrderExecutionBountyUsdc;
         } else {
             uint256 commitPrice = _commitReferencePrice();
             if (_canUseCommitMarkForOpenPrefilter()) {
@@ -256,7 +263,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, IOrderRouterAdminHost
         }
         _linkGlobalOrder(orderId);
         _linkAccountOrder(accountId, orderId);
-        if (++pendingOrderCounts[accountId] > MAX_PENDING_ORDERS) {
+        if (++pendingOrderCounts[accountId] > maxPendingOrders) {
             _revertCommitValidation(7);
         }
         emit OrderCommitted(orderId, accountId, side);
@@ -364,7 +371,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, IOrderRouterAdminHost
             }
 
             if (maxOrderAge > 0 && block.timestamp - order.commitTime > maxOrderAge) {
-                if (expiredPrunes >= MAX_PRUNE_ORDERS_PER_CALL) {
+                if (expiredPrunes >= maxPruneOrdersPerCall) {
                     break;
                 }
                 emit OrderFailed(orderId, OrderFailReason.Expired);
@@ -518,14 +525,14 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, IOrderRouterAdminHost
     function _quoteOpenOrderExecutionBountyUsdc(
         uint256 sizeDelta,
         uint256 price
-    ) internal pure returns (uint256) {
+    ) internal view returns (uint256) {
         uint256 notionalUsdc = (sizeDelta * price) / DecimalConstants.USDC_TO_TOKEN_SCALE;
-        uint256 executionBountyUsdc = (notionalUsdc * OPEN_ORDER_EXECUTION_BOUNTY_BPS) / 10_000;
-        if (executionBountyUsdc < MIN_OPEN_ORDER_EXECUTION_BOUNTY_USDC) {
-            executionBountyUsdc = MIN_OPEN_ORDER_EXECUTION_BOUNTY_USDC;
+        uint256 executionBountyUsdc = (notionalUsdc * openOrderExecutionBountyBps) / 10_000;
+        if (executionBountyUsdc < minOpenOrderExecutionBountyUsdc) {
+            executionBountyUsdc = minOpenOrderExecutionBountyUsdc;
         }
-        return executionBountyUsdc > MAX_OPEN_ORDER_EXECUTION_BOUNTY_USDC
-            ? MAX_OPEN_ORDER_EXECUTION_BOUNTY_USDC
+        return executionBountyUsdc > maxOpenOrderExecutionBountyUsdc
+            ? maxOpenOrderExecutionBountyUsdc
             : executionBountyUsdc;
     }
 
@@ -587,6 +594,13 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, IOrderRouterAdminHost
         orderExecutionStalenessLimit = config.orderExecutionStalenessLimit;
         liquidationStalenessLimit = config.liquidationStalenessLimit;
         pythMaxConfidenceRatioBps = config.pythMaxConfidenceRatioBps;
+        openOrderExecutionBountyBps = config.openOrderExecutionBountyBps;
+        minOpenOrderExecutionBountyUsdc = config.minOpenOrderExecutionBountyUsdc;
+        maxOpenOrderExecutionBountyUsdc = config.maxOpenOrderExecutionBountyUsdc;
+        closeOrderExecutionBountyUsdc = config.closeOrderExecutionBountyUsdc;
+        maxPendingOrders = config.maxPendingOrders;
+        minEngineGas = config.minEngineGas;
+        maxPruneOrdersPerCall = config.maxPruneOrdersPerCall;
     }
 
     function _nextCommitId() internal view override returns (uint64) {

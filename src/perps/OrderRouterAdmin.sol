@@ -20,6 +20,9 @@ contract OrderRouterAdmin is Ownable, Pausable {
     error OrderRouterAdmin__NoProposal();
     error OrderRouterAdmin__InvalidStalenessLimit();
     error OrderRouterAdmin__InvalidConfidenceRatio();
+    error OrderRouterAdmin__InvalidExecutionBounty();
+    error OrderRouterAdmin__InvalidPendingOrderLimit();
+    error OrderRouterAdmin__InvalidGasLimit();
     error OrderRouterAdmin__Unauthorized();
     error OrderRouterAdmin__UnauthorizedPauser();
     error OrderRouterAdmin__NothingToClaim();
@@ -130,6 +133,20 @@ contract OrderRouterAdmin is Ownable, Pausable {
         }
         if (config.pythMaxConfidenceRatioBps > 10_000) {
             revert OrderRouterAdmin__InvalidConfidenceRatio();
+        }
+        if (
+            config.openOrderExecutionBountyBps == 0 || config.openOrderExecutionBountyBps > 10_000
+                || config.minOpenOrderExecutionBountyUsdc == 0 || config.maxOpenOrderExecutionBountyUsdc == 0
+                || config.closeOrderExecutionBountyUsdc == 0
+                || config.minOpenOrderExecutionBountyUsdc > config.maxOpenOrderExecutionBountyUsdc
+        ) {
+            revert OrderRouterAdmin__InvalidExecutionBounty();
+        }
+        if (config.maxPendingOrders == 0) {
+            revert OrderRouterAdmin__InvalidPendingOrderLimit();
+        }
+        if (config.minEngineGas == 0 || config.maxPruneOrdersPerCall == 0) {
+            revert OrderRouterAdmin__InvalidGasLimit();
         }
     }
 }

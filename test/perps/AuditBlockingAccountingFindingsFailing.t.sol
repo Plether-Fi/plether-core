@@ -349,7 +349,14 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
             maxOrderAge: 60,
             orderExecutionStalenessLimit: router.orderExecutionStalenessLimit(),
             liquidationStalenessLimit: router.liquidationStalenessLimit(),
-            pythMaxConfidenceRatioBps: router.pythMaxConfidenceRatioBps()
+            pythMaxConfidenceRatioBps: router.pythMaxConfidenceRatioBps(),
+            openOrderExecutionBountyBps: router.openOrderExecutionBountyBps(),
+            minOpenOrderExecutionBountyUsdc: router.minOpenOrderExecutionBountyUsdc(),
+            maxOpenOrderExecutionBountyUsdc: router.maxOpenOrderExecutionBountyUsdc(),
+            closeOrderExecutionBountyUsdc: router.closeOrderExecutionBountyUsdc(),
+            maxPendingOrders: router.maxPendingOrders(),
+            minEngineGas: router.minEngineGas(),
+            maxPruneOrdersPerCall: router.maxPruneOrdersPerCall()
         });
         routerAdmin.proposeRouterConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
