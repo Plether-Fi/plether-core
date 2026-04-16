@@ -65,7 +65,7 @@
 <body>
 
 <h1>Plether Perps — Trading Cost Simulator</h1>
-<p class="subtitle">Simulates all trading costs (execution fees, VPI, funding) for a perpetual position from the trader's perspective.</p>
+<p class="subtitle">Simulates current Plether trader economics more closely: open/close execution fees, entry/exit VPI, and continuous carry on LP-backed notional.</p>
 
 <div class="scenario-bar">
   <button onclick="loadScenario('smallRetail')">Small Retail</button>
@@ -116,6 +116,14 @@
       <label>Bear OI (notional USD) <span class="val" id="v-bearoi"></span></label>
       <input type="range" id="bearoi" min="0" max="25000000" step="50000" value="2500000" oninput="calc()">
     </div>
+    <div class="field">
+      <label>Exit bull OI (notional USD) <span class="val" id="v-exitbulloi"></span></label>
+      <input type="range" id="exitbulloi" min="0" max="25000000" step="50000" value="2200000" oninput="calc()">
+    </div>
+    <div class="field">
+      <label>Exit bear OI (notional USD) <span class="val" id="v-exitbearoi"></span></label>
+      <input type="range" id="exitbearoi" min="0" max="25000000" step="50000" value="2400000" oninput="calc()">
+    </div>
     <div class="derived" id="d-skew"></div>
   </div>
 
@@ -130,20 +138,25 @@
       <input type="range" id="vpi" min="0" max="0.2" step="0.002" value="0.02" oninput="calc()">
     </div>
     <div class="field">
+      <label>Initial margin <span class="val" id="v-imr"></span></label>
+      <input type="range" id="imr" min="100" max="500" step="25" value="150" oninput="calc()">
+    </div>
+    <div class="field">
       <label>Maintenance margin <span class="val" id="v-mmr"></span></label>
       <input type="range" id="mmr" min="50" max="500" step="25" value="100" oninput="calc()">
     </div>
     <div class="field">
-      <label>Funding at kink (baseApy) <span class="val" id="v-baseapy"></span></label>
-      <input type="range" id="baseapy" min="0" max="100" step="1" value="15" oninput="calc()">
+      <label>Base carry <span class="val" id="v-carrybps"></span></label>
+      <input type="range" id="carrybps" min="0" max="2000" step="25" value="500" oninput="calc()">
     </div>
     <div class="field">
-      <label>Funding at max (maxApy) <span class="val" id="v-maxapy"></span></label>
-      <input type="range" id="maxapy" min="50" max="1000" step="10" value="300" oninput="calc()">
+      <label>Keeper bounty rate <span class="val" id="v-bountybps"></span></label>
+      <input type="range" id="bountybps" min="5" max="50" step="1" value="15" oninput="calc()">
+      <div class="hint">Liquidation bounty = max(min bounty, notional × bounty rate), then capped by available equity at liquidation.</div>
     </div>
     <div class="field">
-      <label>Kink skew ratio <span class="val" id="v-kink"></span></label>
-      <input type="range" id="kink" min="5" max="40" step="1" value="25" oninput="calc()">
+      <label>Minimum keeper bounty</label>
+      <div class="fixed-val">$5.00 (hardcoded default)</div>
     </div>
     <div class="field">
       <label>Max skew ratio <span class="val" id="v-maxskew"></span></label>
@@ -199,21 +212,22 @@
   </table>
 </div>
 
-<p class="note">Assumptions: constant skew and pool depth during hold. VPI is shown for entry only — exit VPI depends on market state at close (unknown). Funding accrues linearly. Exec fee charged at both open and close.</p>
+<p class="note">Assumptions: full close at the modeled exit market state. Carry accrues linearly on LP-backed notional (`max(notional - collateral, 0)`). Exit VPI uses the same close-path clamp as the onchain close accounting, so net lifetime VPI cannot go negative on a full round trip.</p>
 
 <script>
-const EXEC_FEE_BPS = 4;
-const CAP = 2.00;
-const SECONDS_PER_YEAR = 31_536_000;
+  const EXEC_FEE_BPS = 4;
+  const CAP = 2.00;
+  const MIN_BOUNTY_USD = 5.00;
+  const SECONDS_PER_YEAR = 31_536_000;
 
 let currentSide = 'BULL';
 
 const scenarios = {
-  smallRetail:  { side:'BULL', notional:1000,    entry:1.00, leverage:5,   hold:30, depth:5e6,  bulloi:2e6,   bearoi:2.5e6, vpi:0.02, mmr:100, baseapy:15, maxapy:300, kink:25, maxskew:40 },
-  whale:        { side:'BULL', notional:2000000, entry:1.00, leverage:3,   hold:50, depth:5e6,  bulloi:2e6,   bearoi:2.5e6, vpi:0.02, mmr:100, baseapy:15, maxapy:300, kink:25, maxskew:40 },
-  highSkew:     { side:'BEAR', notional:50000,   entry:1.00, leverage:10,  hold:65, depth:5e6,  bulloi:1e6,   bearoi:4e6,   vpi:0.02, mmr:100, baseapy:15, maxapy:300, kink:25, maxskew:40 },
-  marketMaker:  { side:'BULL', notional:100000,  entry:1.00, leverage:2,   hold:40, depth:5e6,  bulloi:1.5e6, bearoi:3.5e6, vpi:0.02, mmr:100, baseapy:15, maxapy:300, kink:25, maxskew:40 },
-  maxLeverage:  { side:'BULL', notional:10000,   entry:1.00, leverage:100, hold:20, depth:5e6,  bulloi:2e6,   bearoi:2.5e6, vpi:0.02, mmr:100, baseapy:15, maxapy:300, kink:25, maxskew:40 },
+  smallRetail:  { side:'BULL', notional:1000,    entry:1.00, leverage:5,  hold:30, depth:5e6, bulloi:2e6,   bearoi:2.5e6, exitbulloi:2.1e6, exitbearoi:2.4e6, vpi:0.02, imr:150, mmr:100, carrybps:500, bountybps:15, maxskew:40 },
+  whale:        { side:'BULL', notional:2000000, entry:1.00, leverage:3,  hold:50, depth:5e6, bulloi:2e6,   bearoi:2.5e6, exitbulloi:2.6e6, exitbearoi:1.8e6, vpi:0.02, imr:150, mmr:100, carrybps:500, bountybps:15, maxskew:40 },
+  highSkew:     { side:'BEAR', notional:50000,   entry:1.00, leverage:10, hold:65, depth:5e6, bulloi:1e6,   bearoi:4e6,   exitbulloi:1.4e6, exitbearoi:3.2e6, vpi:0.02, imr:150, mmr:100, carrybps:500, bountybps:15, maxskew:40 },
+  marketMaker:  { side:'BULL', notional:100000,  entry:1.00, leverage:2,  hold:40, depth:5e6, bulloi:1.5e6, bearoi:3.5e6, exitbulloi:1.8e6, exitbearoi:3.1e6, vpi:0.02, imr:150, mmr:100, carrybps:500, bountybps:15, maxskew:40 },
+  maxLeverage:  { side:'BULL', notional:10000,   entry:1.00, leverage:66, hold:20, depth:5e6, bulloi:2e6,   bearoi:2.5e6, exitbulloi:2.3e6, exitbearoi:2.2e6, vpi:0.02, imr:150, mmr:100, carrybps:500, bountybps:15, maxskew:40 },
 };
 
 function loadScenario(name) {
@@ -284,16 +298,6 @@ function skewCost(skew, depth, k) {
   return 0.5 * k * (skew * skew) / depth;
 }
 
-function fundingApy(skewRatio, kinkRatio, baseApy, maxSkewRatio, maxApy) {
-  if (skewRatio <= 0) return 0;
-  if (skewRatio >= maxSkewRatio) skewRatio = maxSkewRatio;
-  if (skewRatio <= kinkRatio) return baseApy * skewRatio / kinkRatio;
-  const excess = skewRatio - kinkRatio;
-  const dangerZone = maxSkewRatio - kinkRatio;
-  const t = excess / dangerZone;
-  return baseApy + (maxApy - baseApy) * t * t;
-}
-
 function bar(label, val, maxAbs) {
   const pctW = Math.min(Math.abs(val) / maxAbs * 100, 100);
   const isGood = val < 0;
@@ -314,11 +318,13 @@ function calc() {
   const depth        = +document.getElementById('depth').value;
   const bullOi       = +document.getElementById('bulloi').value;
   const bearOi       = +document.getElementById('bearoi').value;
+  const exitBullOi   = +document.getElementById('exitbulloi').value;
+  const exitBearOi   = +document.getElementById('exitbearoi').value;
   const k            = +document.getElementById('vpi').value;
+  const imrBps       = +document.getElementById('imr').value;
   const mmrBps       = +document.getElementById('mmr').value;
-  const baseApyPct   = +document.getElementById('baseapy').value;
-  const maxApyPct    = +document.getElementById('maxapy').value;
-  const kinkPct      = +document.getElementById('kink').value;
+  const carryBps     = +document.getElementById('carrybps').value;
+  const bountyBps    = +document.getElementById('bountybps').value;
   const maxSkewPct   = +document.getElementById('maxskew').value;
 
   const holdHours = holdSliderToHours(holdSlider);
@@ -334,11 +340,13 @@ function calc() {
   document.getElementById('v-depth').textContent = fmt(depth);
   document.getElementById('v-bulloi').textContent = fmt(bullOi);
   document.getElementById('v-bearoi').textContent = fmt(bearOi);
+  document.getElementById('v-exitbulloi').textContent = fmt(exitBullOi);
+  document.getElementById('v-exitbearoi').textContent = fmt(exitBearOi);
   document.getElementById('v-vpi').textContent = k.toFixed(3);
+  document.getElementById('v-imr').textContent = imrBps + ' bps (' + (imrBps/100).toFixed(1) + '%)';
   document.getElementById('v-mmr').textContent = mmrBps + ' bps (' + (mmrBps/100).toFixed(1) + '%)';
-  document.getElementById('v-baseapy').textContent = baseApyPct + '% APY';
-  document.getElementById('v-maxapy').textContent = maxApyPct + '% APY';
-  document.getElementById('v-kink').textContent = kinkPct + '%';
+  document.getElementById('v-carrybps').textContent = carryBps + ' bps APY';
+  document.getElementById('v-bountybps').textContent = bountyBps + ' bps';
   document.getElementById('v-maxskew').textContent = maxSkewPct + '%';
 
   // Skew calculations (pre-trade)
@@ -353,41 +361,41 @@ function calc() {
   else postBearOi += notional;
   const postSkew = Math.abs(postBullOi - postBearOi);
   const postSkewRatio = depth > 0 ? postSkew / depth : 0;
+  const exitPreSkew = Math.abs(exitBullOi - exitBearOi);
+  let exitPostBullOi = exitBullOi;
+  let exitPostBearOi = exitBearOi;
+  if (currentSide === 'BULL') exitPostBullOi = Math.max(exitBullOi - notional, 0);
+  else exitPostBearOi = Math.max(exitBearOi - notional, 0);
+  const exitPostSkew = Math.abs(exitPostBullOi - exitPostBearOi);
+  const exitPreSkewRatio = depth > 0 ? exitPreSkew / depth : 0;
+  const exitPostSkewRatio = depth > 0 ? exitPostSkew / depth : 0;
 
   document.getElementById('d-skew').innerHTML =
     `<div style="font-size:0.75rem; color:var(--accent); margin-top:4px;">` +
-    `Skew: ${fmt(preSkew)} | Ratio: ${pct(preSkewRatio)} | Majority: ${majoritySide}` +
-    `</div>`;
+     `Entry skew: ${fmt(preSkew)} → ${fmt(postSkew)} | Exit skew: ${fmt(exitPreSkew)} → ${fmt(exitPostSkew)}` +
+     `</div>`;
 
   // === 1. Execution Fees (charged at open and close) ===
   const execFeeOpen = notional * EXEC_FEE_BPS / 10000;
   const execFeeClose = notional * EXEC_FEE_BPS / 10000;
 
-  // === 2. VPI (entry cost — close VPI depends on unknown future skew) ===
+  // === 2. VPI (entry + exit, matching close clamp semantics) ===
   const vpiOpen = skewCost(postSkew, depth, k) - skewCost(preSkew, depth, k);
+  const vpiCloseRaw = skewCost(exitPostSkew, depth, k) - skewCost(exitPreSkew, depth, k);
+  const vpiClose = (vpiOpen + vpiCloseRaw < 0) ? -vpiOpen : vpiCloseRaw;
 
-  // === 3. Funding ===
-  const kinkRatio = kinkPct / 100;
-  const maxSkewRatio = maxSkewPct / 100;
-  const baseApy = baseApyPct / 100;
-  const maxApy = maxApyPct / 100;
-
-  const fundingSkewRatio = depth > 0 ? postSkew / depth : 0;
-  const annualizedRate = fundingApy(fundingSkewRatio, kinkRatio, baseApy, maxSkewRatio, maxApy);
-
-  const postMajority = postBullOi > postBearOi ? 'BULL' : postBearOi > postBullOi ? 'BEAR' : 'BALANCED';
-  const paysOrReceives = (postMajority === 'BALANCED') ? 0 :
-    (currentSide === postMajority ? 1 : -1);
-
-  const fundingCost = paysOrReceives * annualizedRate * notional * holdSeconds / SECONDS_PER_YEAR;
+  // === 3. Carry (current on-chain model) ===
+  const lpBackedNotional = Math.max(notional - margin, 0);
+  const carryCost = lpBackedNotional * (carryBps / 10000) * holdSeconds / SECONDS_PER_YEAR;
 
   // === Total cost (positive = cost to trader) ===
-  const totalCost = execFeeOpen + execFeeClose + vpiOpen + fundingCost;
+  const totalCost = execFeeOpen + execFeeClose + vpiOpen + vpiClose + carryCost;
   const totalBps = notional > 0 ? totalCost / notional * 10000 : 0;
   const breakEvenPct = notional > 0 ? totalCost / notional : 0;
 
   // === Liquidation distance ===
   const maintMarginUsd = notional * mmrBps / 10000;
+  const rawKeeperBounty = Math.max(MIN_BOUNTY_USD, notional * bountyBps / 10000);
   const maxLossBeforeLiq = Math.max(margin - maintMarginUsd, 0);
   const liqMovePct = notional > 0 ? maxLossBeforeLiq / notional : 0;
 
@@ -418,17 +426,20 @@ function calc() {
   const kpiLiqEl = document.getElementById('kpi-liq');
   kpiLiqEl.textContent = pct(liqMovePct);
   kpiLiqEl.className = 'big ' + (liqMovePct > 0.05 ? 'positive' : liqMovePct > 0.02 ? 'neutral' : 'negative');
-  document.getElementById('kpi-liq-desc').textContent = leverage + 'x leverage, ' + mmrBps + ' bps maint margin';
+  const maxLeverage = 10000 / imrBps;
+  const leverageValidity = leverage <= maxLeverage ? 'within IMR' : 'above IMR limit';
+  document.getElementById('kpi-liq-desc').textContent = leverage + 'x leverage, ' + mmrBps + ' bps maint margin, ' + leverageValidity;
 
   // === Bar chart ===
-  const costs = [execFeeOpen, execFeeClose, vpiOpen, fundingCost];
+  const costs = [execFeeOpen, execFeeClose, vpiOpen, vpiClose, carryCost];
   const maxAbs = Math.max(...costs.map(Math.abs), 0.01);
 
   let bars = '';
   bars += bar('Exec fee (open)', execFeeOpen, maxAbs);
   bars += bar('Exec fee (close)', execFeeClose, maxAbs);
-  bars += bar('VPI (entry)', vpiOpen, maxAbs);
-  bars += bar('Funding (' + formatHold(holdHours) + ')', fundingCost, maxAbs);
+  bars += bar('VPI (open)', vpiOpen, maxAbs);
+  bars += bar('VPI (close)', vpiClose, maxAbs);
+  bars += bar('Carry (' + formatHold(holdHours) + ')', carryCost, maxAbs);
   bars += `<div class="bar-row" style="margin-top:8px; border-top:1px solid var(--border); padding-top:8px;">
     <span class="bar-label"><strong>Total</strong></span>
     <div class="bar-track"><div class="bar-fill ${totalCost <= 0 ? 'pos' : 'neg'}" style="width:${Math.min(Math.abs(totalCost)/maxAbs*100,100)}%"></div></div>
@@ -441,11 +452,12 @@ function calc() {
   detail += `<tr><td colspan="3" style="color:var(--muted);font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em;padding-top:8px"><strong>One-time costs</strong></td></tr>`;
   detail += row('Execution fee (open)', execFeeOpen, notional);
   detail += row('Execution fee (close)', execFeeClose, notional);
-  detail += row('VPI (entry)', vpiOpen, notional);
-  detail += rowBold('Subtotal (one-time)', execFeeOpen + execFeeClose + vpiOpen, notional);
+  detail += row('VPI (open)', vpiOpen, notional);
+  detail += row('VPI (close)', vpiClose, notional);
+  detail += rowBold('Subtotal (one-time)', execFeeOpen + execFeeClose + vpiOpen + vpiClose, notional);
   detail += sep();
   detail += `<tr><td colspan="3" style="color:var(--muted);font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em;padding-top:8px"><strong>Recurring costs</strong></td></tr>`;
-  detail += row('Funding over ' + formatHold(holdHours), fundingCost, notional);
+  detail += row('Carry over ' + formatHold(holdHours), carryCost, notional);
   detail += sep();
   detail += rowBold('Total', totalCost, notional);
   document.getElementById('tbody-detail').innerHTML = detail;
@@ -459,17 +471,26 @@ function calc() {
   inter += intRow('Side', currentSide);
   inter += `<tr><td colspan="2" style="height:6px"></td></tr>`;
   inter += intRow('Pre-trade skew', fmt(preSkew));
-  inter += intRow('Post-trade skew', fmt(postSkew));
+  inter += intRow('Post-open skew', fmt(postSkew));
+  inter += intRow('Pre-close skew', fmt(exitPreSkew));
+  inter += intRow('Post-close skew', fmt(exitPostSkew));
   inter += intRow('Pre-trade skew ratio', pct(preSkewRatio));
-  inter += intRow('Post-trade skew ratio', pct(postSkewRatio));
-  inter += intRow('Majority side (post-trade)', postMajority);
-  inter += intRow('Trader is', paysOrReceives > 0 ? 'paying funding' : paysOrReceives < 0 ? 'receiving funding' : 'neutral (balanced)');
+  inter += intRow('Post-open skew ratio', pct(postSkewRatio));
+  inter += intRow('Pre-close skew ratio', pct(exitPreSkewRatio));
+  inter += intRow('Post-close skew ratio', pct(exitPostSkewRatio));
   inter += `<tr><td colspan="2" style="height:6px"></td></tr>`;
-  inter += intRow('Funding rate (annualized)', pct(annualizedRate));
-  inter += intRow('Funding for hold period', fmt(fundingCost));
+  inter += intRow('LP-backed notional', fmt(lpBackedNotional));
+  inter += intRow('Base carry APY', (carryBps / 100).toFixed(2) + '%');
+  inter += intRow('Carry for hold period', fmt(carryCost));
   inter += intRow('Hold duration', formatHold(holdHours) + ' (' + holdHours.toLocaleString() + ' hours)');
   inter += `<tr><td colspan="2" style="height:6px"></td></tr>`;
+  inter += intRow('Open VPI', fmt(vpiOpen));
+  inter += intRow('Close VPI (raw)', fmt(vpiCloseRaw));
+  inter += intRow('Close VPI (clamped)', fmt(vpiClose));
+  inter += `<tr><td colspan="2" style="height:6px"></td></tr>`;
+  inter += intRow('Initial margin requirement', fmt(notional * imrBps / 10000) + ' (' + imrBps + ' bps)');
   inter += intRow('Maintenance margin', fmt(maintMarginUsd) + ' (' + mmrBps + ' bps)');
+  inter += intRow('Keeper bounty (raw)', fmt(rawKeeperBounty) + ' (' + bountyBps + ' bps, min ' + fmt(MIN_BOUNTY_USD) + ')');
   inter += intRow('Max loss before liquidation', fmt(maxLossBeforeLiq));
   inter += intRow('Liquidation distance', pct(liqMovePct));
   inter += intRow('Max profit', fmt(maxProfit));
