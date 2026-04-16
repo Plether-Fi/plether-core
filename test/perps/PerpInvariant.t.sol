@@ -181,7 +181,7 @@ contract PerpInvariantTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 5e6,
-            bountyBps: 15
+            bountyBps: 10
         });
     }
 
@@ -973,7 +973,7 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 5e6,
-            bountyBps: 15
+            bountyBps: 10
         });
     }
 

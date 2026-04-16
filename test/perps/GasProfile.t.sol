@@ -110,7 +110,7 @@ contract GasProfileTest is Test {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 5e6,
-            bountyBps: 15
+            bountyBps: 10
         });
 
         clearinghouse = new MarginClearinghouse(usdc);

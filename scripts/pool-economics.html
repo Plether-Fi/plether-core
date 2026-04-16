@@ -104,7 +104,7 @@
     </div>
     <div class="field">
       <label>Keeper Bounty <span class="val" id="v-bounty"></span></label>
-      <input type="range" id="bounty" min="5" max="50" step="1" value="15" oninput="calc()">
+      <input type="range" id="bounty" min="5" max="50" step="1" value="10" oninput="calc()">
       <div class="hint">bountyBps — paid from vault to liquidation keepers</div>
     </div>
     <div class="field">
@@ -191,14 +191,14 @@
 
 <script>
 const scenarios = {
-  conservative: { tvl:1e6, ratio:50, sr:800, vpi:0.01, execfee:4, mmr:100, bounty:15, carry:500, vol:1, oi:0.5, lev:4, skew:0.1, ndf:15, liq:0.3, behav:3 },
-  moderate:     { tvl:5e6, ratio:50, sr:800, vpi:0.02, execfee:4, mmr:100, bounty:15, carry:500, vol:2, oi:0.8, lev:5, skew:0.15, ndf:20, liq:0.5, behav:5 },
-  optimistic:   { tvl:20e6, ratio:40, sr:800, vpi:0.03, execfee:4, mmr:100, bounty:15, carry:500, vol:3, oi:1.2, lev:6, skew:0.2, ndf:25, liq:0.8, behav:8 },
-  bear:         { tvl:2e6, ratio:60, sr:800, vpi:0.02, execfee:4, mmr:100, bounty:15, carry:500, vol:0.5, oi:0.3, lev:3, skew:0.05, ndf:10, liq:1.5, behav:-5 },
-  highVpi:      { tvl:5e6, ratio:50, sr:800, vpi:0.08, execfee:4, mmr:100, bounty:15, carry:500, vol:1.5, oi:0.6, lev:5, skew:0.25, ndf:30, liq:0.4, behav:3 },
+  conservative: { tvl:1e6, ratio:50, sr:800, vpi:0.01, execfee:4, mmr:100, bounty:10, carry:500, vol:1, oi:0.5, lev:4, skew:0.1, ndf:15, liq:0.3, behav:3 },
+  moderate:     { tvl:5e6, ratio:50, sr:800, vpi:0.02, execfee:4, mmr:100, bounty:10, carry:500, vol:2, oi:0.8, lev:5, skew:0.15, ndf:20, liq:0.5, behav:5 },
+  optimistic:   { tvl:20e6, ratio:40, sr:800, vpi:0.03, execfee:4, mmr:100, bounty:10, carry:500, vol:3, oi:1.2, lev:6, skew:0.2, ndf:25, liq:0.8, behav:8 },
+  bear:         { tvl:2e6, ratio:60, sr:800, vpi:0.02, execfee:4, mmr:100, bounty:10, carry:500, vol:0.5, oi:0.3, lev:3, skew:0.05, ndf:10, liq:1.5, behav:-5 },
+  highVpi:      { tvl:5e6, ratio:50, sr:800, vpi:0.08, execfee:4, mmr:100, bounty:10, carry:500, vol:1.5, oi:0.6, lev:5, skew:0.25, ndf:30, liq:0.4, behav:3 },
 };
 
-const MIN_BOUNTY_USD = 5;
+const MIN_BOUNTY_USD = 1;
 
 function loadScenario(name) {
   const s = scenarios[name];
@@ -215,7 +215,7 @@ function fmt(n) {
   return sign + '$' + a.toFixed(0);
 }
 function pct(n) { return (n * 100).toFixed(1) + '%'; }
-function bps(n) { return (n * 10000).toFixed(1) + ' bps'; }
+function bps(n) { return n.toFixed(1) + ' bps'; }
 function cls(n) { return n > 0.001 ? 'positive' : n < -0.001 ? 'negative' : 'neutral'; }
 
 function row(label, recipient, val, cssClass) {

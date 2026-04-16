@@ -44,7 +44,7 @@ contract AuditFollowupFindingsFailing_CloseSolvency is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 5e6,
-            bountyBps: 15
+            bountyBps: 10
         });
     }
 
@@ -224,7 +224,7 @@ contract AuditFollowupFindingsFailing_LegacySpreadReserve is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 5e6,
-            bountyBps: 15
+            bountyBps: 10
         });
     }
 

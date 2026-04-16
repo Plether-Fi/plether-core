@@ -56,8 +56,8 @@ library CfdTypes {
         uint256 initMarginBps; // e.g., 150 (1.5%)
         uint256 fadMarginBps; // e.g., 300 (3%)
         uint256 baseCarryBps; // e.g., 500 (5% annualized carry on LP-backed notional)
-        uint256 minBountyUsdc; // e.g., 5_000_000 ($5 USDC floor)
-        uint256 bountyBps; // e.g., 15 (0.15% of Notional Size)
+        uint256 minBountyUsdc; // e.g., 1_000_000 ($1 USDC floor)
+        uint256 bountyBps; // e.g., 10 (0.10% of Notional Size)
     }
 
 }

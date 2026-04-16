@@ -35,9 +35,9 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, IOrderRouterAdminHost
     uint256 public maxOrderAge;
     uint256 internal constant DEFAULT_MAX_ORDER_AGE = 60;
     uint256 internal constant OPEN_ORDER_EXECUTION_BOUNTY_BPS = 1;
-    uint256 internal constant MIN_OPEN_ORDER_EXECUTION_BOUNTY_USDC = 50_000;
-    uint256 internal constant MAX_OPEN_ORDER_EXECUTION_BOUNTY_USDC = DecimalConstants.ONE_USDC;
-    uint256 internal constant CLOSE_ORDER_EXECUTION_BOUNTY_USDC = DecimalConstants.ONE_USDC;
+    uint256 internal constant MIN_OPEN_ORDER_EXECUTION_BOUNTY_USDC = 10_000;
+    uint256 internal constant MAX_OPEN_ORDER_EXECUTION_BOUNTY_USDC = 200_000;
+    uint256 internal constant CLOSE_ORDER_EXECUTION_BOUNTY_USDC = 200_000;
     uint256 internal constant MAX_PENDING_ORDERS = 5;
 
     uint64 public globalTailOrderId;

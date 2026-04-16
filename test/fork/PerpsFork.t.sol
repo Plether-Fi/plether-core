@@ -107,8 +107,8 @@ contract PerpsForkTest is Test {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5e6,
-            bountyBps: 15
+            minBountyUsdc: 1e6,
+            bountyBps: 10
         });
 
         clearinghouse = new MarginClearinghouse(USDC);

@@ -64,7 +64,7 @@ contract LiquidationTest is BasePerpTest {
         );
 
         // Keeper liquidates. $3k required but only ~$2k margin → liquidatable.
-        uint256 keeperBalBefore = usdc.balanceOf(keeper);
+        uint256 keeperSettlementBefore = _settlementBalance(keeper);
 
         vm.startPrank(keeper);
         router.executeLiquidation(accountId, empty);
@@ -73,16 +73,12 @@ contract LiquidationTest is BasePerpTest {
         (uint256 size,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Position should be wiped");
 
-        uint256 bounty = usdc.balanceOf(keeper) - keeperBalBefore;
-        assertEq(bounty, 150 * 1e6, "Keeper should receive $150 USDC bounty (0.15% of $100k)");
+        uint256 bounty = _settlementBalance(keeper) - keeperSettlementBefore;
+        assertEq(bounty, 100 * 1e6, "Keeper should receive $100 USDC bounty (0.10% of $100k)");
 
-        // Ethical: Alice keeps surplus equity
-        // Opening: exec fee = 4 bps of $100k = $40. pos.margin = $2000 - $40 = $1960.
-        // Clearinghouse after open and withdrawing free USDC: locked margin remains $1960.
-        // Liquidation: equity = $1960 + $0 (PnL) = $1960. Bounty = $150.
-        // residual = $1960 - $150 = $1810. toSeize = $1960 - $1810 = $150.
+        // Ethical: Alice keeps surplus equity after the keeper bounty and the carry accrued between open and FAD liquidation.
         uint256 chBalance = clearinghouse.balanceUsdc(accountId);
-        assertEq(chBalance, 1810 * 1e6, "Alice keeps surplus equity after ethical liquidation");
+        assertApproxEqAbs(chBalance, 1_828_663_014, 1, "Alice keeps surplus equity after ethical liquidation");
     }
 
     function test_LiquidationOnPriceDrop() public {
@@ -101,13 +97,13 @@ contract LiquidationTest is BasePerpTest {
         bytes[] memory pythData = new bytes[](1);
         pythData[0] = abi.encode(1.015e8);
 
-        uint256 keeperBalBefore = usdc.balanceOf(keeper);
+        uint256 keeperSettlementBefore = _settlementBalance(keeper);
 
         vm.startPrank(keeper);
         router.executeLiquidation(accountId, pythData);
         vm.stopPrank();
 
-        uint256 bounty = usdc.balanceOf(keeper) - keeperBalBefore;
+        uint256 bounty = _settlementBalance(keeper) - keeperSettlementBefore;
         assertTrue(bounty > 0, "Keeper should get bounty");
 
         (uint256 size,,,,,,) = engine.positions(accountId);
@@ -115,10 +111,10 @@ contract LiquidationTest is BasePerpTest {
 
         // Ethical: user should retain equity - bounty
         // PnL = -$1500, Margin = $1960 (after 4 bps fee), Equity = $460
-        // Bounty ~ 0.15% * $101.5k = $152.25, but min $5 → $152.25
-        // Residual = $460 - $152.25 = $307.75
+        // Bounty ~ 0.10% * $101.5k = $101.50, above the $5 floor.
+        // Residual = $460 - $101.50 = $358.50
         uint256 chBalance = clearinghouse.balanceUsdc(accountId);
-        assertApproxEqAbs(chBalance, 307_750_000, 1, "Alice retains equity net of keeper bounty");
+        assertApproxEqAbs(chBalance, 358_500_000, 1, "Alice retains equity net of keeper bounty");
     }
 
     function test_SolventPosition_RevertsLiquidation() public {
@@ -140,9 +136,9 @@ contract LiquidationTest is BasePerpTest {
     function test_KeeperBounty_CappedAtEquity() public {
         vm.warp(WEDNESDAY_NOON);
 
-        // 4000 tokens at $1 = $4000 notional (above $3,333 minimum)
+        // 6000 tokens at $1 = $6000 notional (above the $5000 minimum)
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 4000 * 1e18, 200 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 6000 * 1e18, 200 * 1e6, 1e8, false);
 
         bytes[] memory empty;
         router.executeOrder(1, empty);
@@ -152,18 +148,18 @@ contract LiquidationTest is BasePerpTest {
         (, uint256 posMargin,,,,,) = engine.positions(accountId);
 
         // BULL loses when price rises. At $1.06:
-        // PnL = 4000 * $0.06 = -$240. equity = posMargin - $240 < 0 → liquidatable.
+        // PnL = 6000 * $0.06 = -$360. equity = posMargin - $360 < 0 → liquidatable.
         // Bounty capped at posMargin (vault never pays more than it recovers).
         bytes[] memory pythData = new bytes[](1);
         pythData[0] = abi.encode(1.06e8);
 
         uint256 poolBefore = usdc.balanceOf(address(pool));
-        uint256 keeperBalBefore = usdc.balanceOf(keeper);
+        uint256 keeperSettlementBefore = _settlementBalance(keeper);
         vm.prank(keeper);
         router.executeLiquidation(accountId, pythData);
-        uint256 bounty = usdc.balanceOf(keeper) - keeperBalBefore;
+        uint256 bounty = _settlementBalance(keeper) - keeperSettlementBefore;
 
-        // Proportional bounty (0.15% of ~$4240 = ~$6.36) is below posMargin, so cap doesn't bind
+        // Proportional bounty (0.10% of ~$6360 = ~$6.36) stays below posMargin, so the cap does not bind.
         assertGt(bounty, 0, "Keeper still incentivized on negative-equity liquidation");
         assertLe(bounty, posMargin, "Bounty never exceeds margin vault can seize");
         assertGe(usdc.balanceOf(address(pool)), poolBefore, "Vault never pays more than it seizes");
@@ -179,8 +175,8 @@ contract LiquidationTest is BasePerpTest {
                 initMarginBps: ((100) * 15) / 10,
                 fadMarginBps: 300,
                 baseCarryBps: 500,
-                minBountyUsdc: 5 * 1e6,
-                bountyBps: 15
+                minBountyUsdc: 1 * 1e6,
+                bountyBps: 10
             })
         );
 
@@ -203,14 +199,14 @@ contract LiquidationTest is BasePerpTest {
         vm.warp(WEDNESDAY_NOON + 180 days);
 
         // Now liquidatable due to carry erosion (no price change needed)
-        uint256 keeperBal = usdc.balanceOf(keeper);
+        uint256 keeperSettlementBefore = _settlementBalance(keeper);
         vm.prank(keeper);
         router.executeLiquidation(accountId, empty);
 
         (uint256 size,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Position liquidated by carry drain alone");
         // Carry drain pushes equity negative -> bounty capped at remaining margin
-        assertGe(usdc.balanceOf(keeper), keeperBal, "Keeper gets bounty from remaining margin");
+        assertGe(_settlementBalance(keeper), keeperSettlementBefore, "Keeper gets bounty from remaining margin");
     }
 
     function test_KeeperBounty_PaidFromVault() public {
@@ -223,10 +219,9 @@ contract LiquidationTest is BasePerpTest {
         _withdrawFreeUsdc(alice, 0);
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
-        (, uint256 posMargin,,,,,) = engine.positions(accountId);
-
         uint256 poolBefore = usdc.balanceOf(address(pool));
         uint256 chBefore = clearinghouse.balanceUsdc(accountId);
+        uint256 keeperSettlementBefore = _settlementBalance(keeper);
 
         bytes[] memory pythData = new bytes[](1);
         pythData[0] = abi.encode(1.015e8);
@@ -234,7 +229,7 @@ contract LiquidationTest is BasePerpTest {
         vm.prank(keeper);
         router.executeLiquidation(accountId, pythData);
 
-        uint256 bounty = usdc.balanceOf(keeper);
+        uint256 bounty = _settlementBalance(keeper) - keeperSettlementBefore;
         uint256 chAfter = clearinghouse.balanceUsdc(accountId);
         uint256 poolAfter = usdc.balanceOf(address(pool));
 

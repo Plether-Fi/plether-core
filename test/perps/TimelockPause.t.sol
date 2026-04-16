@@ -145,7 +145,7 @@ contract TimelockPauseTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
-            bountyBps: 15
+            bountyBps: 10
         });
 
         vm.prank(nonOwner);
@@ -164,7 +164,7 @@ contract TimelockPauseTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
-            bountyBps: 15
+            bountyBps: 10
         });
 
         ICfdEngineAdminHost.EngineRiskConfig memory firstConfig;
@@ -182,7 +182,7 @@ contract TimelockPauseTest is BasePerpTest {
             fadMarginBps: 500,
             baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
-            bountyBps: 15
+            bountyBps: 10
         });
 
         ICfdEngineAdminHost.EngineRiskConfig memory secondConfig;

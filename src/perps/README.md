@@ -280,8 +280,8 @@ These domains answer different questions. They should not silently share assumpt
 ### Queue and bounty economics
 
 - Execution always starts from the global queue head.
-- Risk-increasing orders reserve an execution bounty quoted from the engine mark and bounded to `[0.05 USDC, 1.00 USDC]`.
-- Close intents reserve a flat `1.00 USDC` bounty.
+- Risk-increasing orders reserve an execution bounty quoted from the engine mark and bounded to `[0.01 USDC, 0.20 USDC]`.
+- Close intents reserve a flat `0.20 USDC` bounty.
 - Open bounties come from free settlement.
 - Close bounties use free settlement first when carry can be checkpointed from a fresh live mark; otherwise they fall back to bounded active position margin so stale-mark closes remain committable.
 - Failed-order rewards stay independent from vault liquidity because they are paid from router escrow rather than LP cash.
@@ -397,11 +397,11 @@ Instant controls remain for one-time wiring and fee withdrawal. `OrderRouter` pa
 | `initMarginBps` | 150 (1.5%) | Initial margin requirement |
 | `fadMarginBps` | 300 (3%) | FAD margin requirement |
 | `baseCarryBps` | 500 (5%) | Annualized carry on LP-backed notional |
-| `bountyBps` | 15 (0.15%) | Liquidation bounty rate |
-| `minBountyUsdc` | 5,000,000 ($5) | Liquidation bounty floor |
+| `bountyBps` | 10 (0.10%) | Liquidation bounty rate |
+| `minBountyUsdc` | 1,000,000 ($1) | Liquidation bounty floor |
 | `EXECUTION_FEE_BPS` | 4 (0.04%) | Protocol trading fee |
-| Open execution bounty | 0.05 to 1.00 USDC | Reserved at commit |
-| Close execution bounty | 1.00 USDC | Reserved at commit |
+| Open execution bounty | 0.01 to 0.20 USDC | Reserved at commit |
+| Close execution bounty | 0.20 USDC | Reserved at commit |
 | Normal execution staleness | 60s | Normal order execution freshness |
 | Liquidation staleness | 15s | Live-market liquidation freshness |
 | `engineMarkStalenessLimit` | 60s | Engine-side mark freshness |

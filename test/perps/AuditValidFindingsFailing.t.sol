@@ -172,7 +172,7 @@ contract AuditValidFindingsFailingVpi is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
-            bountyBps: 15
+            bountyBps: 10
         });
     }
 

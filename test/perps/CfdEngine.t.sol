@@ -96,8 +96,8 @@ contract CfdEnginePlanLibHarness {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5e6,
-            bountyBps: 15
+            minBountyUsdc: 1e6,
+            bountyBps: 10
         });
 
         return CfdEnginePlanLib.planLiquidation(snap, oraclePrice, 0);
@@ -146,8 +146,8 @@ contract CfdEnginePlanLibHarness {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5e6,
-            bountyBps: 15
+            minBountyUsdc: 1e6,
+            bountyBps: 10
         });
 
         return CfdEnginePlanLib.planLiquidation(snap, oraclePrice, 0);
@@ -195,8 +195,8 @@ contract CfdEnginePlanLibHarness {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5e6,
-            bountyBps: 15
+            minBountyUsdc: 1e6,
+            bountyBps: 10
         });
 
         return CfdEnginePlanLib.planLiquidation(snap, oraclePrice, 0);
@@ -252,8 +252,8 @@ contract CfdEnginePlanLibHarness {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5e6,
-            bountyBps: 15
+            minBountyUsdc: 1e6,
+            bountyBps: 10
         });
         snap.vaultAssetsUsdc = 1_000_000e6;
         snap.vaultCashUsdc = 1_000_000e6;
@@ -327,8 +327,8 @@ contract CfdEngineTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5 * 1e6,
-            bountyBps: 15
+            minBountyUsdc: 1 * 1e6,
+            bountyBps: 10
         });
     }
 
@@ -3846,8 +3846,8 @@ contract CfdEngineTest is BasePerpTest {
                 initMarginBps: ((300) * 15) / 10,
                 fadMarginBps: 500,
                 baseCarryBps: 500,
-                minBountyUsdc: 5 * 1e6,
-                bountyBps: 15
+                minBountyUsdc: 1 * 1e6,
+                bountyBps: 10
             })
         );
 
@@ -4062,8 +4062,8 @@ contract CfdEngineTest is BasePerpTest {
                 initMarginBps: ((100) * 15) / 10,
                 fadMarginBps: 300,
                 baseCarryBps: 500,
-                minBountyUsdc: 5 * 1e6,
-                bountyBps: 15
+                minBountyUsdc: 1 * 1e6,
+                bountyBps: 10
             })
         );
 
@@ -4401,7 +4401,7 @@ contract CfdEngineTest is BasePerpTest {
                 initMarginBps: ((10) * 15) / 10,
                 fadMarginBps: 10,
                 baseCarryBps: 500,
-                minBountyUsdc: 5 * 1e6,
+                minBountyUsdc: 1 * 1e6,
                 bountyBps: 100
             })
         );
@@ -4847,8 +4847,8 @@ contract CfdEngineCarryRegressionTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5 * 1e6,
-            bountyBps: 15
+            minBountyUsdc: 1 * 1e6,
+            bountyBps: 10
         });
     }
 
@@ -4867,7 +4867,7 @@ contract CfdEngineCarryRegressionTest is BasePerpTest {
         _fundTrader(address(0xB1), 500_000 * 1e6);
         _open(counterId, CfdTypes.Side.BEAR, 500_000 * 1e18, 50_000 * 1e6, 1e8, depth);
 
-        uint256 minNotional = (uint256(5) * 1e6 * 10_000) / 15 + 1e6;
+        uint256 minNotional = (uint256(1) * 1e6 * 10_000) / 10 + 1e6;
         uint256 minSize = (minNotional * 1e20) / 1e8;
         _open(attackerId, CfdTypes.Side.BULL, minSize, 50_000 * 1e6, 1e8, depth);
 
@@ -4963,8 +4963,8 @@ contract CfdEngineAuditTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5 * 1e6,
-            bountyBps: 15
+            minBountyUsdc: 1 * 1e6,
+            bountyBps: 10
         });
     }
 
@@ -5214,8 +5214,8 @@ contract CfdEngineAuditTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5 * 1e6,
-            bountyBps: 15
+            minBountyUsdc: 1 * 1e6,
+            bountyBps: 10
         });
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = newParams;
@@ -5311,8 +5311,8 @@ contract MarginCappedMtmTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5 * 1e6,
-            bountyBps: 15
+            minBountyUsdc: 1 * 1e6,
+            bountyBps: 10
         });
     }
 
@@ -5493,8 +5493,8 @@ contract PhantomExecFeeTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5 * 1e6,
-            bountyBps: 15
+            minBountyUsdc: 1 * 1e6,
+            bountyBps: 10
         });
     }
 
@@ -5558,8 +5558,8 @@ contract CarryModelFreeUsdcTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5 * 1e6,
-            bountyBps: 15
+            minBountyUsdc: 1 * 1e6,
+            bountyBps: 10
         });
     }
 
@@ -5643,8 +5643,8 @@ contract DegradedModeLifecycleTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5e6,
-            bountyBps: 15
+            minBountyUsdc: 1e6,
+            bountyBps: 10
         });
     }
 
@@ -5758,8 +5758,8 @@ contract ProtocolPhaseTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5e6,
-            bountyBps: 15
+            minBountyUsdc: 1e6,
+            bountyBps: 10
         });
     }
 
@@ -5857,8 +5857,8 @@ contract VpiDepthTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5 * 1e6,
-            bountyBps: 15
+            minBountyUsdc: 1 * 1e6,
+            bountyBps: 10
         });
     }
 
@@ -6052,8 +6052,8 @@ contract VpiChunkingTest is Test {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5 * 1e6,
-            bountyBps: 15
+            minBountyUsdc: 1 * 1e6,
+            bountyBps: 10
         });
 
         clearinghouse = new MarginClearinghouse(address(usdc));
@@ -6237,8 +6237,8 @@ contract SolvencySnapshotRegressionTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5e6,
-            bountyBps: 15
+            minBountyUsdc: 1e6,
+            bountyBps: 10
         });
     }
 

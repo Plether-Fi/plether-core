@@ -50,8 +50,8 @@ contract OrderRouterTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5 * 1e6,
-            bountyBps: 15
+            minBountyUsdc: 1 * 1e6,
+            bountyBps: 10
         });
     }
 
@@ -133,8 +133,8 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(fees, 20_000_000, "Protocol should still retain the full 4 bps execution fee");
         assertEq(
             _settlementBalance(address(this)) - keeperUsdcBefore,
-            1e6,
-            "Keeper should receive the 1 USDC capped reward as clearinghouse credit"
+            200_000,
+            "Keeper should receive the 0.20 USDC capped reward as clearinghouse credit"
         );
         assertGt(freeUsdc, 951_000 * 1e6, "Free USDC should include the seeded junior floor plus unencumbered capital");
         assertLt(freeUsdc, 953_000 * 1e6, "Free USDC bounded above");
@@ -323,12 +323,12 @@ contract OrderRouterTest is BasePerpTest {
 
         vm.startPrank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
-        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 0, 1e8, true);
+        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 500 * 1e6, 1e8, false);
         vm.stopPrank();
 
         IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
         assertEq(escrow.committedMarginUsdc, 1000 * 1e6, "Escrow view should sum committed margin");
-        assertEq(escrow.executionBountyUsdc, 2_000_000, "Open and close orders should both escrow execution bounties");
+        assertEq(escrow.executionBountyUsdc, 400_000, "Open and close orders should both escrow execution bounties");
         assertEq(escrow.pendingOrderCount, 2, "Escrow view should count queued orders");
     }
 
@@ -341,7 +341,7 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(record.core.orderId, 1);
         assertEq(record.core.accountId, bytes32(uint256(uint160(alice))));
         assertEq(_remainingCommittedMargin(1), 1000 * 1e6);
-        assertEq(record.executionBountyUsdc, 1_000_000);
+        assertEq(record.executionBountyUsdc, 200_000);
         assertEq(record.nextMarginOrderId, 0);
         assertEq(record.prevMarginOrderId, 0);
         assertTrue(record.inMarginQueue, "Positive-margin pending order should advertise margin-queue membership");
@@ -368,16 +368,16 @@ contract OrderRouterTest is BasePerpTest {
 
         vm.startPrank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
-        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 0, 1e8, true);
+        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 500 * 1e6, 1e8, false);
         vm.stopPrank();
 
         IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
         IOrderRouterAccounting.PendingOrderView[] memory pending = _pendingOrders(accountId);
         assertEq(escrow.pendingOrderCount, 2);
-        assertEq(escrow.committedMarginUsdc, 1000 * 1e6);
-        assertEq(escrow.executionBountyUsdc, 2_000_000);
+        assertEq(escrow.committedMarginUsdc, 1500 * 1e6);
+        assertEq(escrow.executionBountyUsdc, 400_000);
         assertEq(pending.length, 2);
-        assertTrue(pending[1].isClose);
+        assertFalse(pending[1].isClose);
     }
 
     function test_CloseCommit_ReservesPrefundedKeeperBounty() public {
@@ -390,7 +390,7 @@ contract OrderRouterTest is BasePerpTest {
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 0, 0, true);
 
-        assertEq(_executionBountyReserve(1), 1_000_000, "Close orders should pre-seize the flat router bounty");
+        assertEq(_executionBountyReserve(1), 200_000, "Close orders should pre-seize the flat router bounty");
     }
 
     function test_CloseCommit_CanReserveKeeperBountyFromPositionMarginWhenFullyUtilized() public {
@@ -411,9 +411,9 @@ contract OrderRouterTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 0, 0, true);
 
         (, uint256 marginAfter,,,,,) = engine.positions(accountId);
-        assertEq(_executionBountyReserve(1), 1_000_000, "Close orders should still escrow full bounty");
-        assertEq(marginAfter, marginBefore - 1_000_000, "Close bounty should fall back to active margin");
-        assertEq(usdc.balanceOf(address(router)), 1_000_000, "Router should custody the close bounty after fallback");
+        assertEq(_executionBountyReserve(1), 200_000, "Close orders should still escrow full bounty");
+        assertEq(marginAfter, marginBefore - 200_000, "Close bounty should fall back to active margin");
+        assertEq(usdc.balanceOf(address(router)), 200_000, "Router should custody the close bounty after fallback");
     }
 
     function test_CloseCommit_CanReserveKeeperBountyFromPositionMarginWithStaleStoredMark() public {
@@ -438,14 +438,14 @@ contract OrderRouterTest is BasePerpTest {
 
         (, uint256 marginAfter,,,,,) = engine.positions(accountId);
         assertEq(
-            _executionBountyReserve(1), 1_000_000, "Stale-mark close commits should still escrow the flat router bounty"
+            _executionBountyReserve(1), 200_000, "Stale-mark close commits should still escrow the flat router bounty"
         );
         assertEq(
-            marginAfter, marginBefore - 1_000_000, "Stale-mark close bounty should still fall back to active margin"
+            marginAfter, marginBefore - 200_000, "Stale-mark close bounty should still fall back to active margin"
         );
         assertEq(
             usdc.balanceOf(address(router)),
-            1_000_000,
+            200_000,
             "Router should custody the stale-mark close bounty after fallback"
         );
     }
@@ -468,7 +468,9 @@ contract OrderRouterTest is BasePerpTest {
 
         uint256 freeSettlementBefore = clearinghouse.getAccountUsdcBuckets(accountId).freeSettlementUsdc;
         assertEq(
-            freeSettlementBefore, 500_000, "Setup should leave partial free settlement before the stale close commit"
+            freeSettlementBefore,
+            1_300_000,
+            "Setup should leave the larger partial free settlement before the stale close commit"
         );
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
@@ -476,11 +478,11 @@ contract OrderRouterTest is BasePerpTest {
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 0, true);
 
-        assertEq(_executionBountyReserve(2), 1_000_000, "Stale close commit should still escrow the full bounty");
+        assertEq(_executionBountyReserve(2), 200_000, "Stale close commit should still escrow the full bounty");
         assertEq(
             clearinghouse.getAccountUsdcBuckets(accountId).freeSettlementUsdc,
-            0,
-            "Stale close fallback should still be allowed to consume the remaining free-settlement slice"
+            1_100_000,
+            "Stale close fallback should only consume the reduced close-order bounty from free settlement"
         );
     }
 
@@ -502,7 +504,7 @@ contract OrderRouterTest is BasePerpTest {
 
         uint256 freeSettlementBefore = clearinghouse.getAccountUsdcBuckets(accountId).freeSettlementUsdc;
         (, uint256 marginBefore,,,,,) = engine.positions(accountId);
-        assertEq(freeSettlementBefore, 1_000_000, "Setup should leave exactly one USDC of free settlement");
+        assertEq(freeSettlementBefore, 1_800_000, "Setup should leave the larger free-settlement buffer under the lower open bounty cap");
 
         uint256 carryElapsed = 12 hours;
         vm.warp(block.timestamp + 12 hours);
@@ -523,18 +525,22 @@ contract OrderRouterTest is BasePerpTest {
 
         (, uint256 marginAfter,,,,,) = engine.positions(accountId);
         uint256 marginConsumed = marginBefore - marginAfter;
-        assertEq(_executionBountyReserve(2), 1_000_000, "Fresh carry checkpoint should still escrow the full bounty");
+        assertEq(_executionBountyReserve(2), 200_000, "Fresh carry checkpoint should still escrow the full bounty");
         assertEq(
             usdc.balanceOf(address(router)) - routerBalanceBefore,
-            1_000_000,
-            "Close commit should escrow exactly one USDC of bounty value"
+            200_000,
+            "Close commit should escrow exactly 0.20 USDC of bounty value"
         );
         assertEq(
             clearinghouse.getAccountUsdcBuckets(accountId).freeSettlementUsdc,
-            0,
-            "Carry-aware reservation should consume the post-carry free-settlement remainder"
+            932_040,
+            "Carry-aware reservation should only consume the reduced close-order bounty from post-carry free settlement"
         );
-        assertGt(marginConsumed, 0, "Carry-aware reservation should fall back to position margin when carry shrinks free settlement");
+        assertEq(
+            marginConsumed,
+            0,
+            "The lower close-order bounty should now fit inside post-carry free settlement without falling back to margin"
+        );
         assertLe(
             marginConsumed,
             expectedCarry,
@@ -574,7 +580,7 @@ contract OrderRouterTest is BasePerpTest {
         _fundTrader(counterparty, 500_000e6);
         _open(counterpartyId, CfdTypes.Side.BEAR, 500_000e18, 50_000e6, 1e8, depth);
 
-        uint256 minNotional = (uint256(5) * 1e6 * 10_000) / 15 + 1e6;
+        uint256 minNotional = (uint256(1) * 1e6 * 10_000) / 10 + 1e6;
         uint256 minSize = (minNotional * 1e20) / 1e8;
         _open(accountId, CfdTypes.Side.BULL, minSize, 50_000e6, 1e8, depth);
 
@@ -626,7 +632,7 @@ contract OrderRouterTest is BasePerpTest {
         _fundTrader(counterparty, 500_000e6);
         _open(counterpartyId, CfdTypes.Side.BEAR, 500_000e18, 50_000e6, 1e8, depth);
 
-        uint256 minNotional = (uint256(5) * 1e6 * 10_000) / 15 + 1e6;
+        uint256 minNotional = (uint256(1) * 1e6 * 10_000) / 10 + 1e6;
         uint256 minSize = (minNotional * 1e20) / 1e8;
         _open(accountId, CfdTypes.Side.BULL, minSize, 50_000e6, 1e8, depth);
 
@@ -639,7 +645,7 @@ contract OrderRouterTest is BasePerpTest {
 
         assertEq(
             _freeSettlementUsdc(accountId),
-            freeSettlementBeforeCommit - 1e6,
+            freeSettlementBeforeCommit - 200_000,
             "commit should temporarily seize the close bounty from free settlement"
         );
 
@@ -650,13 +656,13 @@ contract OrderRouterTest is BasePerpTest {
 
         assertEq(
             _freeSettlementUsdc(accountId),
-            freeSettlementBeforeCommit - 1e6,
+            freeSettlementBeforeCommit - 200_000,
             "failed invalid close should keep the free-backed bounty consumed"
         );
         assertEq(usdc.balanceOf(trader), 0, "free-backed bounty refund should not escape to the trader wallet");
         assertEq(
             _settlementBalance(address(this)) - keeperBefore,
-            1e6,
+            200_000,
             "keeper should receive the free-backed bounty as clearinghouse credit"
         );
     }
@@ -666,7 +672,7 @@ contract OrderRouterTest is BasePerpTest {
 
         vm.startPrank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
-        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 0, 1e8, true);
+        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 500 * 1e6, 1e8, false);
         vm.stopPrank();
 
         IOrderRouterAccounting.PendingOrderView[] memory pending = _pendingOrders(accountId);
@@ -674,10 +680,10 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(pending[0].orderId, 1);
         assertFalse(pending[0].isClose);
         assertEq(pending[0].committedMarginUsdc, 1000 * 1e6);
-        assertEq(pending[0].executionBountyUsdc, 1_000_000);
+        assertEq(pending[0].executionBountyUsdc, 200_000);
         assertEq(pending[1].orderId, 2);
-        assertTrue(pending[1].isClose);
-        assertEq(pending[1].executionBountyUsdc, 1_000_000);
+        assertFalse(pending[1].isClose);
+        assertEq(pending[1].executionBountyUsdc, 200_000);
     }
 
     function test_PendingOrderPointers_LinkPerAccountInFIFOOrder() public {
@@ -981,7 +987,7 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(carolSize, 10_000 * 1e18, "Carol should have 10k BEAR");
 
         uint256 keeperAfter = _settlementBalance(address(this));
-        assertEq(keeperAfter - keeperBefore, 2_500_000, "Keeper should receive min(1 bp, 1 USDC) per successful order");
+        assertEq(keeperAfter - keeperBefore, 500_000, "Keeper should receive min(1 bp, 0.20 USDC) per successful order");
 
         assertEq(uint256(_orderRecord(1).status), uint256(IOrderRouterAccounting.OrderStatus.Executed));
         assertEq(uint256(_orderRecord(2).status), uint256(IOrderRouterAccounting.OrderStatus.Executed));
@@ -1084,7 +1090,7 @@ contract OrderRouterTest is BasePerpTest {
             keeperEthAfter - keeperEthBefore, 0, "Batch execution should refund unused ETH when no Pyth fee is due"
         );
         assertEq(
-            keeperUsdcAfter - keeperUsdcBefore, 1_500_000, "Keeper should receive capped USDC rewards for both orders"
+            keeperUsdcAfter - keeperUsdcBefore, 400_000, "Keeper should receive capped USDC rewards for both orders"
         );
     }
 
@@ -1291,7 +1297,7 @@ contract OrderRouterTest is BasePerpTest {
         uint256 executorReward = _settlementBalance(address(this)) - executorBefore;
         assertEq(
             executorReward,
-            1_000_000,
+            200_000,
             "Only the valid tail should pay the executor when the close-slippage head is forfeited to protocol fees"
         );
         assertEq(
@@ -1330,8 +1336,8 @@ contract OrderRouterPythTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5 * 1e6,
-            bountyBps: 15
+            minBountyUsdc: 1 * 1e6,
+            bountyBps: 10
         });
     }
 
@@ -2025,7 +2031,7 @@ contract OrderRouterPythTest is BasePerpTest {
         _fundTrader(counterparty, 500_000e6);
         _open(counterpartyId, CfdTypes.Side.BEAR, 500_000e18, 50_000e6, 1e8, depth);
 
-        uint256 minNotional = (uint256(5) * 1e6 * 10_000) / 15 + 1e6;
+        uint256 minNotional = (uint256(1) * 1e6 * 10_000) / 10 + 1e6;
         uint256 minSize = (minNotional * 1e20) / 1e8;
         _open(accountId, CfdTypes.Side.BULL, minSize, 50_000e6, 1e8, depth);
 
@@ -2038,7 +2044,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         assertEq(
             _freeSettlementUsdc(accountId),
-            freeSettlementBeforeCommit - 1e6,
+            freeSettlementBeforeCommit - 200_000,
             "commit should temporarily seize the close bounty from free settlement"
         );
 
@@ -2051,13 +2057,13 @@ contract OrderRouterPythTest is BasePerpTest {
 
         assertEq(
             _freeSettlementUsdc(accountId),
-            freeSettlementBeforeCommit - 1e6,
+            freeSettlementBeforeCommit - 200_000,
             "failed invalid close should keep the free-backed bounty consumed"
         );
         assertEq(usdc.balanceOf(trader), 0, "free-backed bounty refund should not escape to the trader wallet");
         assertEq(
             _settlementBalance(address(this)) - keeperBefore,
-            1e6,
+            200_000,
             "keeper should receive the free-backed bounty as clearinghouse credit"
         );
     }
@@ -2678,8 +2684,8 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5 * 1e6,
-            bountyBps: 15
+            minBountyUsdc: 1 * 1e6,
+            bountyBps: 10
         });
     }
 
@@ -3345,8 +3351,8 @@ contract FadStalenessTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5 * 1e6,
-            bountyBps: 15
+            minBountyUsdc: 1 * 1e6,
+            bountyBps: 10
         });
     }
 
@@ -4187,8 +4193,8 @@ contract OrderRouterAuditTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5 * 1e6,
-            bountyBps: 15
+            minBountyUsdc: 1 * 1e6,
+            bountyBps: 10
         });
     }
 
@@ -4323,8 +4329,8 @@ contract StaleOrderExpiryTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5 * 1e6,
-            bountyBps: 15
+            minBountyUsdc: 1 * 1e6,
+            bountyBps: 10
         });
     }
 
@@ -4542,8 +4548,8 @@ contract MarkPriceStalenessTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5 * 1e6,
-            bountyBps: 15
+            minBountyUsdc: 1 * 1e6,
+            bountyBps: 10
         });
     }
 
@@ -4643,8 +4649,8 @@ contract StalenessGriefTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5 * 1e6,
-            bountyBps: 15
+            minBountyUsdc: 1 * 1e6,
+            bountyBps: 10
         });
     }
 
@@ -4768,8 +4774,8 @@ contract VpiImrBypassTest is Test {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5 * 1e6,
-            bountyBps: 15
+            minBountyUsdc: 1 * 1e6,
+            bountyBps: 10
         });
 
         clearinghouse = new MarginClearinghouse(address(usdc));
@@ -4957,8 +4963,8 @@ contract KeeperFeeRefundTest is Test {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5 * 1e6,
-            bountyBps: 15
+            minBountyUsdc: 1 * 1e6,
+            bountyBps: 10
         });
 
         clearinghouse = new MarginClearinghouse(address(usdc));
@@ -5217,8 +5223,8 @@ contract WeekendArbitrageTest is Test {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5 * 1e6,
-            bountyBps: 15
+            minBountyUsdc: 1 * 1e6,
+            bountyBps: 10
         });
 
         clearinghouse = new MarginClearinghouse(address(usdc));

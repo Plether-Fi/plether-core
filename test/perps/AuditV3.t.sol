@@ -48,7 +48,7 @@ contract AuditV3_C01_FIFODeadlockTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 5e6,
-            bountyBps: 15
+            bountyBps: 10
         });
     }
 
@@ -211,7 +211,7 @@ contract AuditV3_C03_AsymmetricStalenessTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 5e6,
-            bountyBps: 15
+            bountyBps: 10
         });
     }
 
@@ -407,7 +407,7 @@ contract AuditV3_H02_JuniorWipeoutDilutionTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 5e6,
-            bountyBps: 15
+            bountyBps: 10
         });
     }
 

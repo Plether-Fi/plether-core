@@ -983,7 +983,7 @@ contract MarginClearinghouseAuditTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
-            bountyBps: 15
+            bountyBps: 10
         });
     }
 
@@ -1117,7 +1117,7 @@ contract NonUsdcCollateralTest is Test {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
-            bountyBps: 15
+            bountyBps: 10
         });
 
         clearinghouse = new MarginClearinghouse(address(usdc));
