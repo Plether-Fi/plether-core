@@ -271,19 +271,15 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
     function _failedOutcomeForTerminalFailure(
         CfdTypes.Order memory order
     ) internal pure returns (FailedOrderOutcome outcome) {
-        if (order.isClose) {
-            return FailedOrderOutcome.ClearerFull;
-        }
-        return FailedOrderOutcome.RefundUser;
+        order;
+        return FailedOrderOutcome.ClearerFull;
     }
 
     function _failedOutcomeForSlippageFailure(
         CfdTypes.Order memory order
     ) internal pure returns (FailedOrderOutcome outcome) {
-        // Terminal slippage failures keep the FIFO moving, but the forfeited bounty must accrue to LPs
-        // instead of rewarding either the clearer or the submitting trader for an out-of-bounds order.
         order;
-        return FailedOrderOutcome.ProtocolFull;
+        return FailedOrderOutcome.ClearerFull;
     }
 
     function _cleanupOrder(

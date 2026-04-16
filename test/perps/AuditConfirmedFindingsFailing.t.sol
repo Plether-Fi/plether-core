@@ -103,13 +103,13 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
 
         assertEq(
             _settlementBalance(keeper) - keeperBalanceBefore,
-            0,
-            "Expired open orders should not pay the clearer under the current refund path"
+            pending.executionBountyUsdc,
+            "Expired open orders should pay the clearer so bad head orders remain economical to prune"
         );
         assertEq(
             _settlementBalance(alice) - aliceBalanceBefore,
-            pending.executionBountyUsdc,
-            "Expired open orders should refund the reserved bounty back to trader settlement"
+            0,
+            "Expired open orders should not refund the reserved bounty to the submitting trader"
         );
     }
 
@@ -139,7 +139,7 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
         mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), t0 + 61);
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), t0 + 61);
 
-        (, uint64 nextAfterFirst) = router.getPendingOrderView(1);
+        (IOrderRouterAccounting.PendingOrderView memory firstPending, uint64 nextAfterFirst) = router.getPendingOrderView(1);
         (IOrderRouterAccounting.PendingOrderView memory secondPending,) = router.getPendingOrderView(nextAfterFirst);
 
         uint256 keeperUsdcBefore = _settlementBalance(keeper);
@@ -152,8 +152,8 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
 
         assertEq(
             _settlementBalance(keeper) - keeperUsdcBefore,
-            secondPending.executionBountyUsdc,
-            "Batch execution should only pay the keeper for the successfully executed order"
+            firstPending.executionBountyUsdc + secondPending.executionBountyUsdc,
+            "Batch execution should pay the keeper for both expired and successful head orders"
         );
     }
 

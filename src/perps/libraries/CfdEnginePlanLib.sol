@@ -712,8 +712,7 @@ library CfdEnginePlanLib {
         }
         delta.liquidatable = true;
 
-        uint256 vpiClawbackUsdc = _liquidationVpiClawbackUsdc(pos.vpiAccrued);
-        int256 liquidationEquityUsdc = delta.riskState.equityUsdc - int256(vpiClawbackUsdc);
+        int256 liquidationEquityUsdc = delta.riskState.equityUsdc;
 
         delta.liquidationState = LiquidationAccountingLib.buildLiquidationState(
             pos.size,

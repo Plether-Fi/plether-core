@@ -4520,12 +4520,14 @@ contract StaleOrderExpiryTest is BasePerpTest {
         router.executeOrder(1, empty);
 
         assertEq(
-            _settlementBalance(localKeeper) - keeperSettlementBefore, 0, "Expired open order should not pay the keeper"
+            _settlementBalance(localKeeper) - keeperSettlementBefore,
+            pending.executionBountyUsdc,
+            "Expired open order should pay the clearer from the reserved bounty"
         );
         assertEq(
             _settlementBalance(spammer) - traderSettlementBefore,
-            pending.executionBountyUsdc,
-            "Expired open order should refund the trader bounty into clearinghouse settlement"
+            0,
+            "Expired open order should not refund the trader bounty once the clearer prunes it"
         );
     }
 

@@ -830,13 +830,15 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         pos = _loadPosition(accountId);
         reachableUsdc = _genericReachableCollateralUsdc(accountId);
         uint256 pendingCarryUsdc = _totalPendingCarryUsdc(accountId, pos, price, reachableUsdc, block.timestamp);
+        uint256 currentMarginBps = isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps;
+        uint256 effectiveMarginBps = riskParams.initMarginBps > currentMarginBps ? riskParams.initMarginBps : currentMarginBps;
         PositionRiskAccountingLib.PositionRiskState memory riskState =
             PositionRiskAccountingLib.buildPositionRiskStateWithCarry(
-                pos, price, CAP_PRICE, pendingCarryUsdc, reachableUsdc, riskParams.initMarginBps
+                pos, price, CAP_PRICE, pendingCarryUsdc, reachableUsdc, effectiveMarginBps
             );
 
-        uint256 initialMarginRequirementUsdc = (riskState.currentNotionalUsdc * riskParams.initMarginBps) / 10_000;
-        if (riskState.equityUsdc < int256(initialMarginRequirementUsdc)) {
+        uint256 initialMarginRequirementUsdc = (riskState.currentNotionalUsdc * effectiveMarginBps) / 10_000;
+        if (riskState.equityUsdc < int256(initialMarginRequirementUsdc) || riskState.liquidatable) {
             revert CfdEngine__WithdrawBlockedByOpenPosition();
         }
     }
