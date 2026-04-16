@@ -1,3 +1,24 @@
+- [x] Add failing H-01 test proving fallback ETH refunds are not actually funded in `OrderRouterAdmin`
+- [x] Add failing H-02 test proving the open prefilter misses `executionFeeBps`-driven invalid opens
+- [x] Run targeted Forge tests to confirm both repros fail on current code
+
+Review:
+- Added `test/perps/AuditExecutionPathFindingsFailing.t.sol` with two isolated repros. `test_H1_FallbackRefundMustFundRouterAdminClaimBalance()` drives the real `MockPyth` overpay refund path through a rejecting receiver and fails because `routerAdmin.claimableEth(receiver)` increases while `address(routerAdmin).balance` stays zero.
+- Added `test_H2_CommitPrefilterMustRejectFeeDrainedOpen()`, which opens the exact-threshold margin case (`100_000e18` at `$1.00` with `1_500e6` margin) and fails because `engineLens.previewOpenRevertCode(...)` returns `OK` instead of `INSUFFICIENT_INITIAL_MARGIN`, proving the lens omitted `executionFeeBps`.
+- Verified with `forge test --match-path test/perps/AuditExecutionPathFindingsFailing.t.sol`, which fails as intended on both tests.
+
+- [x] Fund `OrderRouterAdmin` during fallback ETH refund crediting and enforce credited-value parity
+- [x] Populate `executionFeeBps` in `CfdEngineLens` raw snapshots
+- [x] Update the oracle refund invariant to track corrected admin-side ETH custody
+- [x] Re-run focused Forge coverage for the fixed findings and adjacent refund/prefilter paths
+
+Review:
+- Updated `src/perps/OrderRouter.sol` so failed `_sendEth(...)` refunds now forward `value: amount` into `OrderRouterAdmin.creditClaimableEth(...)` instead of only incrementing accounting.
+- Updated `src/perps/OrderRouterAdmin.sol` so `creditClaimableEth(...)` is `payable` and reverts on ETH/accounting mismatches via `OrderRouterAdmin__EthAmountMismatch()`.
+- Updated `src/perps/CfdEngineLens.sol` so `_buildRawSnapshot(...)` now includes `snap.executionFeeBps = engineContract.executionFeeBps()` and commit-time preview/open planning uses the same execution fee as the live engine.
+- Updated `test/perps/invariant/PerpOraclePathInvariant.t.sol` to assert stranded refund ETH is custodied by `OrderRouterAdmin`, and synced the suite's local `routerAdmin` handle after router deployment.
+- Verified green with `forge test --match-path test/perps/AuditExecutionPathFindingsFailing.t.sol`, `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_CommitOrder_RevertsOnPredictableInsufficientInitialMargin|test_CommitOrder_RevertsOnPredictableMustCloseOpposing"`, and `forge test --match-path test/perps/invariant/PerpOraclePathInvariant.t.sol`.
+
 - [x] Remove CfdEngine constructor-side sidecar deployments so initcode drops under EIP-3860
 - [x] Rewire tests and local deployment paths to call `CfdEngine.setDependencies(...)` after deploy
 - [x] Verify CfdEngine runtime/initcode limits and focused engine/router smoke tests after explicit sidecar wiring

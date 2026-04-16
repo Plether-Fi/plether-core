@@ -448,7 +448,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, IOrderRouterAdminHost
         if (amount > 0) {
             (bool ok,) = payable(to).call{value: amount}("");
             if (!ok) {
-                OrderRouterAdmin(admin).creditClaimableEth(to, amount);
+                OrderRouterAdmin(admin).creditClaimableEth{value: amount}(to, amount);
             }
         }
     }

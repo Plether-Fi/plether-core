@@ -27,6 +27,7 @@ contract OrderRouterAdmin is Ownable, Pausable {
     error OrderRouterAdmin__UnauthorizedPauser();
     error OrderRouterAdmin__NothingToClaim();
     error OrderRouterAdmin__EthTransferFailed();
+    error OrderRouterAdmin__EthAmountMismatch();
 
     event RouterConfigProposed(IOrderRouterAdminHost.RouterConfig config, uint256 activationTime);
     event RouterConfigFinalized(IOrderRouterAdminHost.RouterConfig config);
@@ -90,9 +91,12 @@ contract OrderRouterAdmin is Ownable, Pausable {
         _unpause();
     }
 
-    function creditClaimableEth(address beneficiary, uint256 amount) external onlyRouterHost {
+    function creditClaimableEth(address beneficiary, uint256 amount) external payable onlyRouterHost {
         if (amount == 0) {
             return;
+        }
+        if (msg.value != amount) {
+            revert OrderRouterAdmin__EthAmountMismatch();
         }
         claimableEth[beneficiary] += amount;
     }

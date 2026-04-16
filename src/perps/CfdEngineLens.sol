@@ -260,6 +260,7 @@ contract CfdEngineLens is ICfdEngineLens {
         snap.degradedMode = engineContract.degradedMode();
         snap.capPrice = engineContract.CAP_PRICE();
         snap.riskParams = _riskParams();
+        snap.executionFeeBps = engineContract.executionFeeBps();
         snap.isFadWindow = engineContract.isFadWindow();
         liveMarkAge;
         maxStaleness;

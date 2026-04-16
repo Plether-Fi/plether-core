@@ -261,6 +261,7 @@ contract PerpOraclePathInvariantTest is BasePerpTest {
         router = new OrderRouter(
             address(engine), address(engineLens), address(pool), address(mockPyth), feedIds, weights, bases, inversions
         );
+        _syncRouterAdmin();
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
         publicLens = new PerpsPublicLens(address(engineAccountLens), address(engine), address(router), address(pool));
@@ -290,9 +291,11 @@ contract PerpOraclePathInvariantTest is BasePerpTest {
         assertEq(engine.lastMarkTime(), handler.ghostExpectedMarkTime(), "engine mark time drifted from last success");
     }
 
-    function invariant_RouterCustodiesOnlyTrackedStrandedRefundEth() public view {
+    function invariant_RouterAdminCustodiesOnlyTrackedStrandedRefundEth() public view {
         assertEq(
-            address(router).balance, handler.ghostPendingRefundEth(), "router ETH balance must equal stranded refunds"
+            address(routerAdmin).balance,
+            handler.ghostPendingRefundEth(),
+            "router admin ETH balance must equal stranded refunds"
         );
     }
 
