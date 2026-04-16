@@ -218,7 +218,7 @@ contract PerpOraclePathInvariantTest is BasePerpTest {
         usdc = new MockUSDC();
         clearinghouse = new MarginClearinghouse(address(usdc));
 
-        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        engine = _deployEngine(_riskParams());
         _syncEngineAdmin();
         engineAccountLens = new CfdEngineAccountLens(address(engine));
         engineLens = new CfdEngineLens(address(engine));

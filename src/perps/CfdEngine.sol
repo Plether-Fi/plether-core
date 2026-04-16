@@ -2,9 +2,6 @@
 pragma solidity 0.8.33;
 
 import {CfdEnginePlanTypes} from "./CfdEnginePlanTypes.sol";
-import {CfdEnginePlanner} from "./CfdEnginePlanner.sol";
-import {CfdEngineAdmin} from "./CfdEngineAdmin.sol";
-import {CfdEngineSettlementModule} from "./CfdEngineSettlementModule.sol";
 import {CfdMath} from "./CfdMath.sol";
 import {CfdTypes} from "./CfdTypes.sol";
 import {CfdEngineSettlementTypes} from "./interfaces/CfdEngineSettlementTypes.sol";
@@ -162,9 +159,9 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     IERC20 public immutable USDC;
     IMarginClearinghouse public immutable clearinghouse;
     ICfdVault public vault;
-    ICfdEnginePlanner public immutable planner;
-    ICfdEngineSettlementModule public immutable settlementModule;
-    address public immutable admin;
+    ICfdEnginePlanner public planner;
+    ICfdEngineSettlementModule public settlementModule;
+    address public admin;
 
     // ==========================================
     // GLOBAL STATE & SOLVENCY BOUNDS
@@ -196,6 +193,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     error CfdEngine__Unauthorized();
     error CfdEngine__VaultAlreadySet();
     error CfdEngine__RouterAlreadySet();
+    error CfdEngine__DependenciesAlreadySet();
     error CfdEngine__NoFeesToWithdraw();
     error CfdEngine__NoDeferredTraderCredit();
     error CfdEngine__InsufficientVaultLiquidity();
@@ -373,13 +371,23 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         CfdTypes.RiskParams memory _riskParams
     ) Ownable(msg.sender) {
         _validateRiskParams(_riskParams);
-        planner = new CfdEnginePlanner();
-        settlementModule = new CfdEngineSettlementModule(address(this));
-        admin = address(new CfdEngineAdmin(address(this), msg.sender));
         USDC = IERC20(_usdc);
         clearinghouse = IMarginClearinghouse(_clearinghouse);
         CAP_PRICE = _capPrice;
         riskParams = _riskParams;
+    }
+
+    /// @notice One-time setter for planner, settlement module, and admin sidecars.
+    function setDependencies(address planner_, address settlementModule_, address admin_) external onlyOwner {
+        if (planner_ == address(0) || settlementModule_ == address(0) || admin_ == address(0)) {
+            revert CfdEngine__ZeroAddress();
+        }
+        if (address(planner) != address(0) || address(settlementModule) != address(0) || admin != address(0)) {
+            revert CfdEngine__DependenciesAlreadySet();
+        }
+        planner = ICfdEnginePlanner(planner_);
+        settlementModule = ICfdEngineSettlementModule(settlementModule_);
+        admin = admin_;
     }
 
     /// @notice One-time setter for the HousePool vault backing all positions

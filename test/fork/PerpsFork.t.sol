@@ -3,7 +3,10 @@ pragma solidity 0.8.33;
 
 import {IPyth, PythStructs} from "../../src/interfaces/IPyth.sol";
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
+import {CfdEngineAdmin} from "../../src/perps/CfdEngineAdmin.sol";
 import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
+import {CfdEnginePlanner} from "../../src/perps/CfdEnginePlanner.sol";
+import {CfdEngineSettlementModule} from "../../src/perps/CfdEngineSettlementModule.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
@@ -111,6 +114,10 @@ contract PerpsForkTest is Test {
         clearinghouse = new MarginClearinghouse(USDC);
 
         engine = new CfdEngine(USDC, address(clearinghouse), CAP_PRICE, params);
+        CfdEnginePlanner planner = new CfdEnginePlanner();
+        CfdEngineSettlementModule settlement = new CfdEngineSettlementModule(address(engine));
+        CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
+        engine.setDependencies(address(planner), address(settlement), address(engineAdmin));
         pool = new HousePool(USDC, address(engine));
 
         seniorVault = new TrancheVault(IERC20(USDC), address(pool), true, "Senior LP", "senUSDC");

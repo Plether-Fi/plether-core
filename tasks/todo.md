@@ -1,3 +1,14 @@
+- [x] Remove CfdEngine constructor-side sidecar deployments so initcode drops under EIP-3860
+- [x] Rewire tests and local deployment paths to call `CfdEngine.setDependencies(...)` after deploy
+- [x] Verify CfdEngine runtime/initcode limits and focused engine/router smoke tests after explicit sidecar wiring
+
+Review:
+- `CfdEngine` no longer deploys `CfdEnginePlanner`, `CfdEngineSettlementModule`, or `CfdEngineAdmin` inside its constructor. Instead, the engine now starts with those addresses unset and exposes a one-time owner-only `setDependencies(planner, settlementModule, admin)` wiring step.
+- This keeps the runtime architecture intact while cutting constructor payload dramatically. The engine still stores and exposes the same planner/admin/settlement addresses after wiring; only the deployment sequence changed.
+- Updated the shared perps harnesses (`BasePerpTest`, invariant base) to deploy the planner, settlement module, and admin sidecars explicitly and wire them into the engine before the rest of setup proceeds. Patched standalone setups in fork, gas-profile, router, clearinghouse, and a few audit-history tests that instantiate their own engines outside the shared harness.
+- Updated perps docs to note that `CfdEngine`, `CfdEnginePlanner`, `CfdEngineSettlementModule`, and `CfdEngineAdmin` are now deployed separately and wired once through `setDependencies(...)` rather than being constructor-created by the engine.
+- Verified with `forge build --skip test --sizes`: `CfdEngine` runtime is now `23,108` bytes and initcode is `23,875` bytes, both under EIP-170 / EIP-3860. Focused verification also passed with `forge test --match-path test/perps/TimelockPause.t.sol --match-test "test_ProposeMaxOrderAge_TimelockFlow|test_OrderRouter_OnlyOwner"`, `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_SetMaxOrderAge_OnlyOwner|test_StaleOrderExecutesViaExecuteOrder"`, and `forge test --match-path test/perps/CfdEngine.t.sol --match-test "test_ConfiguringPhase"`.
+
 - [x] Extract OrderRouter timelocked governance surface into a dedicated admin contract and rewire pause ownership
 - [x] Finish router admin test/harness migration, including standalone perps and invariant helpers
 - [x] Trim cold router read/claim surface enough to bring deployed runtime below EIP-170

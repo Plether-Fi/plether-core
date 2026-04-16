@@ -2,7 +2,9 @@
 pragma solidity 0.8.33;
 
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
+import {CfdEngineAdmin} from "../../src/perps/CfdEngineAdmin.sol";
 import {CfdEnginePlanTypes} from "../../src/perps/CfdEnginePlanTypes.sol";
+import {CfdEnginePlanner} from "../../src/perps/CfdEnginePlanner.sol";
 import {CfdEngineSettlementModule} from "../../src/perps/CfdEngineSettlementModule.sol";
 import {CfdMath} from "../../src/perps/CfdMath.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
@@ -5960,6 +5962,10 @@ contract VpiChunkingTest is Test {
 
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
+        CfdEnginePlanner planner = new CfdEnginePlanner();
+        CfdEngineSettlementModule settlement = new CfdEngineSettlementModule(address(engine));
+        CfdEngineAdmin adminModule = new CfdEngineAdmin(address(engine), address(this));
+        engine.setDependencies(address(planner), address(settlement), address(adminModule));
         pool = new HousePool(address(usdc), address(engine));
         TrancheVault seniorVault =
             new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior LP", "seniorUSDC");

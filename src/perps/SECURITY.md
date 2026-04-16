@@ -35,6 +35,8 @@ All perps contracts are non-upgradeable.
 The following parameter families are owner-controlled behind a 48-hour propose/finalize delay.
 Engine risk controls live in `CfdEngineAdmin`, and router risk controls live in `OrderRouterAdmin`, with each admin module applying finalized values onto its host contract:
 
+`CfdEngine` sidecars (`CfdEnginePlanner`, `CfdEngineSettlementModule`, `CfdEngineAdmin`) are now deployed separately and wired once via `setDependencies(...)`. That wiring is owner-only and one-time.
+
 | Parameter | Contract | Guard |
 |-----------|----------|-------|
 | `riskParams` (VPI, carry, margins, bounty) | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 48-hour timelock |

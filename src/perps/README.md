@@ -84,6 +84,7 @@ The main runtime and read surfaces are:
 - `OrderRouter`: delayed-order queue, Pyth validation, and keeper bounty escrow.
 - `CfdEngine`: canonical execution ledger and solvency boundary.
 - `CfdEngineSettlementModule`: externalized close/liquidation settlement orchestration used by the engine.
+- `CfdEnginePlanner`: externalized open/close/liquidation plan builder wired into the engine after deployment.
 - `HousePool`: LP capital, liabilities, reserves, and tranche waterfall.
 - `TrancheVault`: ERC-4626 LP vault wrappers for senior and junior capital.
 - `PerpsPublicLens`: compact product-facing read layer.
@@ -93,6 +94,7 @@ The main runtime and read surfaces are:
 
 - `CfdEngine` and `ICfdEngineCore` are the canonical runtime truth for execution, liquidation, and protocol status.
 - `CfdEngineSettlementModule` executes close and liquidation choreography, while `CfdEngine` remains the storage owner.
+- `CfdEngine`, `CfdEnginePlanner`, `CfdEngineSettlementModule`, and `CfdEngineAdmin` are now deployed separately and wired once through `CfdEngine.setDependencies(...)` to keep engine initcode under EIP-3860.
 - `MarginClearinghouse` owns trader settlement balances and locked-margin custody buckets.
 - `OrderRouter` owns queued order records and router-custodied execution bounty escrow.
 - `HousePool` owns LP capital and pays protocol obligations that must leave the vault.

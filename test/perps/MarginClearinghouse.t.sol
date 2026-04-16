@@ -2,6 +2,9 @@
 pragma solidity 0.8.33;
 
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
+import {CfdEngineAdmin} from "../../src/perps/CfdEngineAdmin.sol";
+import {CfdEnginePlanner} from "../../src/perps/CfdEnginePlanner.sol";
+import {CfdEngineSettlementModule} from "../../src/perps/CfdEngineSettlementModule.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
@@ -1108,6 +1111,10 @@ contract NonUsdcCollateralTest is Test {
 
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
+        CfdEnginePlanner planner = new CfdEnginePlanner();
+        CfdEngineSettlementModule settlement = new CfdEngineSettlementModule(address(engine));
+        CfdEngineAdmin adminModule = new CfdEngineAdmin(address(engine), address(this));
+        engine.setDependencies(address(planner), address(settlement), address(adminModule));
         pool = new HousePool(address(usdc), address(engine));
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "juniorUSDC");
         pool.setJuniorVault(address(juniorVault));

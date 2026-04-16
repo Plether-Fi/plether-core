@@ -5,7 +5,9 @@ import {CfdEngine} from "../../../src/perps/CfdEngine.sol";
 import {CfdEngineAdmin} from "../../../src/perps/CfdEngineAdmin.sol";
 import {CfdEngineAccountLens} from "../../../src/perps/CfdEngineAccountLens.sol";
 import {CfdEngineLens} from "../../../src/perps/CfdEngineLens.sol";
+import {CfdEnginePlanner} from "../../../src/perps/CfdEnginePlanner.sol";
 import {CfdEngineProtocolLens} from "../../../src/perps/CfdEngineProtocolLens.sol";
+import {CfdEngineSettlementModule} from "../../../src/perps/CfdEngineSettlementModule.sol";
 import {CfdTypes} from "../../../src/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "../../../src/perps/MarginClearinghouse.sol";
 import {OrderRouterAdmin} from "../../../src/perps/OrderRouterAdmin.sol";
@@ -40,7 +42,7 @@ abstract contract BasePerpInvariantTest is Test {
         usdc = new MockUSDC();
         clearinghouse = new MarginClearinghouse(address(usdc));
 
-        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        engine = _deployEngine(_riskParams());
         _syncEngineAdmin();
         engineAccountLens = new CfdEngineAccountLens(address(engine));
         engineLens = new CfdEngineLens(address(engine));
@@ -91,6 +93,16 @@ abstract contract BasePerpInvariantTest is Test {
 
     function _syncEngineAdmin() internal {
         engineAdmin = CfdEngineAdmin(engine.admin());
+    }
+
+    function _deployEngine(
+        CfdTypes.RiskParams memory riskParams_
+    ) internal returns (CfdEngine deployedEngine) {
+        deployedEngine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, riskParams_);
+        CfdEnginePlanner planner = new CfdEnginePlanner();
+        CfdEngineSettlementModule settlement = new CfdEngineSettlementModule(address(deployedEngine));
+        CfdEngineAdmin adminModule = new CfdEngineAdmin(address(deployedEngine), address(this));
+        deployedEngine.setDependencies(address(planner), address(settlement), address(adminModule));
     }
 
     function _syncRouterAdmin() internal {

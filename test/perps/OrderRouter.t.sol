@@ -8,6 +8,8 @@ import {CfdEngineAdmin} from "../../src/perps/CfdEngineAdmin.sol";
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
 import {CfdEnginePlanTypes} from "../../src/perps/CfdEnginePlanTypes.sol";
+import {CfdEnginePlanner} from "../../src/perps/CfdEnginePlanner.sol";
+import {CfdEngineSettlementModule} from "../../src/perps/CfdEngineSettlementModule.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
@@ -1278,7 +1280,7 @@ contract OrderRouterPythTest is BasePerpTest {
         mockPyth = new MockPyth();
 
         clearinghouse = new MarginClearinghouse(address(usdc));
-        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        engine = _deployEngine(_riskParams());
         _syncEngineAdmin();
         pool = new HousePool(address(usdc), address(engine));
 
@@ -2622,7 +2624,7 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
         mockPyth = new MockPyth();
 
         clearinghouse = new MarginClearinghouse(address(usdc));
-        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        engine = _deployEngine(_riskParams());
         _syncEngineAdmin();
         pool = new HousePool(address(usdc), address(engine));
 
@@ -3287,7 +3289,7 @@ contract FadStalenessTest is BasePerpTest {
         mockPyth = new MockPyth();
 
         clearinghouse = new MarginClearinghouse(address(usdc));
-        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        engine = _deployEngine(_riskParams());
         _syncEngineAdmin();
         pool = new HousePool(address(usdc), address(engine));
 
@@ -4479,7 +4481,7 @@ contract MarkPriceStalenessTest is BasePerpTest {
     function setUp() public override {
         usdc = new MockUSDC();
         clearinghouse = new MarginClearinghouse(address(usdc));
-        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        engine = _deployEngine(_riskParams());
         _syncEngineAdmin();
         pool = new HousePool(address(usdc), address(engine));
 
@@ -4580,7 +4582,7 @@ contract StalenessGriefTest is BasePerpTest {
     function setUp() public override {
         usdc = new MockUSDC();
         clearinghouse = new MarginClearinghouse(address(usdc));
-        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        engine = _deployEngine(_riskParams());
         _syncEngineAdmin();
         pool = new HousePool(address(usdc), address(engine));
 
@@ -4700,6 +4702,10 @@ contract VpiImrBypassTest is Test {
         clearinghouse = new MarginClearinghouse(address(usdc));
 
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
+        CfdEnginePlanner planner = new CfdEnginePlanner();
+        CfdEngineSettlementModule settlement = new CfdEngineSettlementModule(address(engine));
+        CfdEngineAdmin adminModule = new CfdEngineAdmin(address(engine), address(this));
+        engine.setDependencies(address(planner), address(settlement), address(adminModule));
         pool = new HousePool(address(usdc), address(engine));
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior LP", "sUSDC");
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC");
@@ -4884,6 +4890,10 @@ contract KeeperFeeRefundTest is Test {
 
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
+        CfdEnginePlanner planner = new CfdEnginePlanner();
+        CfdEngineSettlementModule settlement = new CfdEngineSettlementModule(address(engine));
+        CfdEngineAdmin adminModule = new CfdEngineAdmin(address(engine), address(this));
+        engine.setDependencies(address(planner), address(settlement), address(adminModule));
         pool = new HousePool(address(usdc), address(engine));
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior LP", "sUSDC");
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC");
@@ -5129,6 +5139,10 @@ contract WeekendArbitrageTest is Test {
 
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
+        CfdEnginePlanner planner = new CfdEnginePlanner();
+        CfdEngineSettlementModule settlement = new CfdEngineSettlementModule(address(engine));
+        CfdEngineAdmin adminModule = new CfdEngineAdmin(address(engine), address(this));
+        engine.setDependencies(address(planner), address(settlement), address(adminModule));
         pool = new HousePool(address(usdc), address(engine));
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior LP", "sUSDC");
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC");
