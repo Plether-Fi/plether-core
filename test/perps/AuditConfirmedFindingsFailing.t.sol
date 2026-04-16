@@ -13,6 +13,7 @@ import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {ICfdEngineAdminHost} from "../../src/perps/interfaces/ICfdEngineAdminHost.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
+import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {ICfdVault} from "../../src/perps/interfaces/ICfdVault.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
@@ -84,12 +85,15 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
 
+        (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(1);
+
         vm.warp(t0 + 61);
         vm.roll(200);
         mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), t0 + 61);
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), t0 + 61);
 
-        uint256 keeperBalanceBefore = keeper.balance;
+        uint256 keeperBalanceBefore = _settlementBalance(keeper);
+        uint256 aliceBalanceBefore = _settlementBalance(alice);
 
         bytes[] memory updateData = new bytes[](1);
         updateData[0] = "";
@@ -97,8 +101,16 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
         vm.prank(keeper);
         router.executeOrderBatch(1, updateData);
 
-        assertEq(keeper.balance, keeperBalanceBefore, "Keeper should not profit from expired orders in batch execution");
-        assertEq(alice.balance, 1 ether, "User should be refunded keeper fee on expired batch order");
+        assertEq(
+            _settlementBalance(keeper) - keeperBalanceBefore,
+            0,
+            "Expired open orders should not pay the clearer under the current refund path"
+        );
+        assertEq(
+            _settlementBalance(alice) - aliceBalanceBefore,
+            pending.executionBountyUsdc,
+            "Expired open orders should refund the reserved bounty back to trader settlement"
+        );
     }
 
     function test_C1_BatchMixedSuccessOnlyPaysKeeperForSuccessful() public {
@@ -127,8 +139,10 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
         mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), t0 + 61);
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), t0 + 61);
 
-        uint256 aliceBefore = alice.balance;
-        uint256 keeperUsdcBefore = usdc.balanceOf(keeper);
+        (, uint64 nextAfterFirst) = router.getPendingOrderView(1);
+        (IOrderRouterAccounting.PendingOrderView memory secondPending,) = router.getPendingOrderView(nextAfterFirst);
+
+        uint256 keeperUsdcBefore = _settlementBalance(keeper);
 
         bytes[] memory updateData = new bytes[](1);
         updateData[0] = "";

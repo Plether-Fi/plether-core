@@ -2696,18 +2696,52 @@ contract CfdEngineTest is BasePerpTest {
         );
         assertEq(
             withClawback.liquidationState.equityUsdc,
-            withoutClawback.liquidationState.equityUsdc - 14e6,
-            "Liquidation equity should reflect both risk-state and settlement-stage VPI clawback"
+            withoutClawback.liquidationState.equityUsdc - 7e6,
+            "Liquidation equity should apply the negative accrued VPI clawback exactly once"
         );
         assertEq(
             withClawback.badDebtUsdc,
-            withoutClawback.badDebtUsdc + 14e6,
-            "Negative accrued VPI should reduce trigger equity and flow into liquidation shortfall / bad debt"
+            withoutClawback.badDebtUsdc + 7e6,
+            "Negative accrued VPI should reduce liquidation residual by exactly the clawback amount"
         );
         assertEq(
             withClawback.keeperBountyUsdc,
             withoutClawback.keeperBountyUsdc,
             "Underwater keeper cap should still be bounded by reachable collateral"
+        );
+    }
+
+    function testFuzz_PlanLiquidation_NegativeVpiClawbackAppliedOnce(
+        uint256 reachableUsdc,
+        uint256 size,
+        uint256 oraclePrice,
+        uint256 clawbackUsdc
+    ) public {
+        CfdEnginePlanLibHarness harness = new CfdEnginePlanLibHarness();
+
+        reachableUsdc = bound(reachableUsdc, 1, 25_000_000e6);
+        size = bound(size, 1e18, 1_000_000e18);
+        oraclePrice = bound(oraclePrice, 1, 2e8);
+        clawbackUsdc = bound(clawbackUsdc, 1, 50_000_000e6);
+
+        CfdEnginePlanTypes.LiquidationDelta memory withoutClawback =
+            harness.planLiquidationWithVpiAccrued(reachableUsdc, 0, size, 1e8, oraclePrice, 0);
+        CfdEnginePlanTypes.LiquidationDelta memory withClawback =
+            harness.planLiquidationWithVpiAccrued(reachableUsdc, 0, size, 1e8, oraclePrice, -int256(clawbackUsdc));
+
+        assertEq(
+            withClawback.riskState.equityUsdc,
+            withoutClawback.riskState.equityUsdc - int256(clawbackUsdc),
+            "Risk equity must include the accrued VPI liability exactly once"
+        );
+        if (!withoutClawback.liquidatable || !withClawback.liquidatable) {
+            return;
+        }
+
+        assertEq(
+            withClawback.liquidationState.equityUsdc,
+            withoutClawback.liquidationState.equityUsdc - int256(clawbackUsdc),
+            "Liquidation equity must not subtract the accrued VPI clawback a second time"
         );
     }
 
@@ -4676,6 +4710,34 @@ contract CfdEngineTest is BasePerpTest {
         vm.expectRevert(CfdEngine.CfdEngine__WithdrawBlockedByOpenPosition.selector);
         vm.prank(trader);
         clearinghouse.withdraw(accountId, 200e6);
+    }
+
+    function test_CheckWithdraw_UsesActiveFadMarginRequirement() public {
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.maintMarginBps = 10;
+        params.initMarginBps = 15;
+        params.fadMarginBps = 1000;
+        params.minBountyUsdc = 1e6;
+        params.bountyBps = 1000;
+        _setRiskParams(params);
+
+        address trader = address(0x515817);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 100e6);
+        _open(accountId, CfdTypes.Side.BULL, 100e18, 6e6, 1e8);
+
+        vm.warp(1_709_971_200);
+        assertTrue(engine.isFadWindow(), "Setup must execute inside the FAD window");
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+
+        uint256 withdrawableUsdc = engineAccountLens.getWithdrawableUsdc(accountId);
+        assertGt(withdrawableUsdc, 0, "Buggy init-margin path should expose withdrawable headroom during FAD");
+
+        vm.expectRevert(CfdEngine.CfdEngine__WithdrawBlockedByOpenPosition.selector);
+        vm.prank(trader);
+        clearinghouse.withdraw(accountId, withdrawableUsdc);
     }
 
     function test_ReserveCloseOrderExecutionBounty_UsesCarryAwareProjectedRiskState() public {

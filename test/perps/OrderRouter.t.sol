@@ -4508,6 +4508,8 @@ contract StaleOrderExpiryTest is BasePerpTest {
         vm.prank(spammer);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
 
+        (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(1);
+
         uint256 traderSettlementBefore = _settlementBalance(spammer);
         uint256 keeperSettlementBefore = _settlementBalance(localKeeper);
 
@@ -4522,8 +4524,37 @@ contract StaleOrderExpiryTest is BasePerpTest {
         );
         assertEq(
             _settlementBalance(spammer) - traderSettlementBefore,
-            1e6,
+            pending.executionBountyUsdc,
             "Expired open order should refund the trader bounty into clearinghouse settlement"
+        );
+    }
+
+    function test_ExpiredOpenOrder_ClearerMustBePaidOrTraderMustForfeitPartOfBounty() public {
+        address localKeeper = address(0x998);
+        _fundJunior(bob, 1_000_000e6);
+        _fundTrader(spammer, 10_000e6);
+
+        vm.prank(spammer);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+
+        (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(1);
+        uint256 traderSettlementBefore = _settlementBalance(spammer);
+        uint256 keeperSettlementBefore = _settlementBalance(localKeeper);
+        uint256 feesBefore = engine.accumulatedFeesUsdc();
+
+        vm.warp(block.timestamp + 301);
+        bytes[] memory empty;
+        vm.prank(localKeeper);
+        vm.roll(block.number + 1);
+        router.executeOrder(1, empty);
+
+        uint256 traderRefund = _settlementBalance(spammer) - traderSettlementBefore;
+        uint256 keeperReward = _settlementBalance(localKeeper) - keeperSettlementBefore;
+        uint256 protocolRetained = engine.accumulatedFeesUsdc() - feesBefore;
+
+        assertTrue(
+            keeperReward > 0 || protocolRetained > 0 || traderRefund < pending.executionBountyUsdc,
+            "Clearing an expired head order must either pay the clearer or burn part of the reserved bounty"
         );
     }
 

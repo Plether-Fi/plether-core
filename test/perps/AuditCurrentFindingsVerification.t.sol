@@ -9,6 +9,7 @@ import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
@@ -269,8 +270,8 @@ contract AuditCurrentFindingsVerifiedInvalid_RebateIlliquidity is BasePerpTest {
         );
         assertEq(
             code,
-            uint8(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED),
-            "rebate illiquidity should be surfaced as typed solvency invalidation before execution"
+            uint8(CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES),
+            "rebate-drained opens should surface the fee-drain typed failure before execution"
         );
     }
 
@@ -285,6 +286,8 @@ contract AuditCurrentFindingsVerifiedInvalid_RebateIlliquidity is BasePerpTest {
         vm.deal(bob, 1 ether);
         vm.prank(bob);
         router.commitOrder(CfdTypes.Side.BEAR, 300_000e18, 10_000e6, 1e8, false);
+
+        (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(1);
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
@@ -303,7 +306,7 @@ contract AuditCurrentFindingsVerifiedInvalid_RebateIlliquidity is BasePerpTest {
         );
         assertEq(
             clearinghouse.balanceUsdc(bobId) - bobSettlementBefore,
-            1e6,
+            pending.executionBountyUsdc,
             "user should receive the reserved bounty refund in clearinghouse custody"
         );
     }
