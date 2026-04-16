@@ -12,198 +12,119 @@ contract CfdEngineAdmin is Ownable {
 
     ICfdEngineAdminHost public immutable engine;
 
-    CfdTypes.RiskParams public pendingRiskParams;
-    uint256 public riskParamsActivationTime;
+    ICfdEngineAdminHost.EngineRiskConfig public pendingRiskConfig;
+    uint256 public riskConfigActivationTime;
 
-    uint256[] private _pendingAddFadDays;
-    uint256 public addFadDaysActivationTime;
+    ICfdEngineAdminHost.EngineCalendarConfig private _pendingCalendarConfig;
+    uint256 public calendarConfigActivationTime;
 
-    uint256[] private _pendingRemoveFadDays;
-    uint256 public removeFadDaysActivationTime;
-
-    uint256 public pendingFadMaxStaleness;
-    uint256 public fadMaxStalenessActivationTime;
-
-    uint256 public pendingFadRunway;
-    uint256 public fadRunwayActivationTime;
-
-    uint256 public pendingEngineMarkStalenessLimit;
-    uint256 public engineMarkStalenessActivationTime;
+    ICfdEngineAdminHost.EngineFreshnessConfig public pendingFreshnessConfig;
+    uint256 public freshnessConfigActivationTime;
 
     error CfdEngineAdmin__NoProposal();
     error CfdEngineAdmin__TimelockNotReady();
-    error CfdEngineAdmin__EmptyDays();
     error CfdEngineAdmin__ZeroStaleness();
     error CfdEngineAdmin__RunwayTooLong();
     error CfdEngineAdmin__InvalidRiskParams();
 
-    event RiskParamsProposed(uint256 activationTime);
-    event RiskParamsFinalized();
-    event RiskParamsProposalCancelled();
-    event AddFadDaysProposed(uint256[] timestamps, uint256 activationTime);
-    event AddFadDaysFinalized();
-    event AddFadDaysProposalCancelled();
-    event RemoveFadDaysProposed(uint256[] timestamps, uint256 activationTime);
-    event RemoveFadDaysFinalized();
-    event RemoveFadDaysProposalCancelled();
-    event FadMaxStalenessProposed(uint256 newStaleness, uint256 activationTime);
-    event FadMaxStalenessFinalized();
-    event FadRunwayProposed(uint256 newRunway, uint256 activationTime);
-    event FadRunwayFinalized();
-    event EngineMarkStalenessLimitProposed(uint256 newStaleness, uint256 activationTime);
+    event RiskConfigProposed(ICfdEngineAdminHost.EngineRiskConfig config, uint256 activationTime);
+    event RiskConfigFinalized(ICfdEngineAdminHost.EngineRiskConfig config);
+    event RiskConfigCancelled();
+    event CalendarConfigProposed(ICfdEngineAdminHost.EngineCalendarConfig config, uint256 activationTime);
+    event CalendarConfigFinalized(ICfdEngineAdminHost.EngineCalendarConfig config);
+    event CalendarConfigCancelled();
+    event FreshnessConfigProposed(ICfdEngineAdminHost.EngineFreshnessConfig config, uint256 activationTime);
+    event FreshnessConfigFinalized(ICfdEngineAdminHost.EngineFreshnessConfig config);
+    event FreshnessConfigCancelled();
 
     constructor(address engine_, address initialOwner) Ownable(initialOwner) {
         engine = ICfdEngineAdminHost(engine_);
     }
 
-    function proposeRiskParams(
-        CfdTypes.RiskParams memory riskParams_
+    function proposeRiskConfig(
+        ICfdEngineAdminHost.EngineRiskConfig calldata config
     ) external onlyOwner {
-        _validateRiskParams(riskParams_);
-        pendingRiskParams = riskParams_;
-        riskParamsActivationTime = block.timestamp + TIMELOCK_DELAY;
-        emit RiskParamsProposed(riskParamsActivationTime);
+        _validateRiskParams(config.riskParams);
+        pendingRiskConfig = config;
+        riskConfigActivationTime = block.timestamp + TIMELOCK_DELAY;
+        emit RiskConfigProposed(config, riskConfigActivationTime);
     }
 
-    function finalizeRiskParams() external onlyOwner {
-        _requireTimelockReady(riskParamsActivationTime);
-        CfdTypes.RiskParams memory nextRiskParams = pendingRiskParams;
-        delete pendingRiskParams;
-        riskParamsActivationTime = 0;
-        engine.applyRiskParams(nextRiskParams);
-        emit RiskParamsFinalized();
+    function finalizeRiskConfig() external onlyOwner {
+        _requireTimelockReady(riskConfigActivationTime);
+        ICfdEngineAdminHost.EngineRiskConfig memory config = pendingRiskConfig;
+        delete pendingRiskConfig;
+        riskConfigActivationTime = 0;
+        engine.applyRiskConfig(config);
+        emit RiskConfigFinalized(config);
     }
 
-    function cancelRiskParamsProposal() external onlyOwner {
-        delete pendingRiskParams;
-        riskParamsActivationTime = 0;
-        emit RiskParamsProposalCancelled();
+    function cancelRiskConfig() external onlyOwner {
+        delete pendingRiskConfig;
+        riskConfigActivationTime = 0;
+        emit RiskConfigCancelled();
     }
 
-    function proposeAddFadDays(
-        uint256[] calldata timestamps
+    function proposeCalendarConfig(
+        ICfdEngineAdminHost.EngineCalendarConfig calldata config
     ) external onlyOwner {
-        if (timestamps.length == 0) {
-            revert CfdEngineAdmin__EmptyDays();
-        }
-        _pendingAddFadDays = timestamps;
-        addFadDaysActivationTime = block.timestamp + TIMELOCK_DELAY;
-        emit AddFadDaysProposed(timestamps, addFadDaysActivationTime);
-    }
-
-    function finalizeAddFadDays() external onlyOwner {
-        _requireTimelockReady(addFadDaysActivationTime);
-        uint256[] memory timestamps = _pendingAddFadDays;
-        delete _pendingAddFadDays;
-        addFadDaysActivationTime = 0;
-        engine.addFadDays(timestamps);
-        emit AddFadDaysFinalized();
-    }
-
-    function cancelAddFadDaysProposal() external onlyOwner {
-        delete _pendingAddFadDays;
-        addFadDaysActivationTime = 0;
-        emit AddFadDaysProposalCancelled();
-    }
-
-    function proposeRemoveFadDays(
-        uint256[] calldata timestamps
-    ) external onlyOwner {
-        if (timestamps.length == 0) {
-            revert CfdEngineAdmin__EmptyDays();
-        }
-        _pendingRemoveFadDays = timestamps;
-        removeFadDaysActivationTime = block.timestamp + TIMELOCK_DELAY;
-        emit RemoveFadDaysProposed(timestamps, removeFadDaysActivationTime);
-    }
-
-    function finalizeRemoveFadDays() external onlyOwner {
-        _requireTimelockReady(removeFadDaysActivationTime);
-        uint256[] memory timestamps = _pendingRemoveFadDays;
-        delete _pendingRemoveFadDays;
-        removeFadDaysActivationTime = 0;
-        engine.removeFadDays(timestamps);
-        emit RemoveFadDaysFinalized();
-    }
-
-    function cancelRemoveFadDaysProposal() external onlyOwner {
-        delete _pendingRemoveFadDays;
-        removeFadDaysActivationTime = 0;
-        emit RemoveFadDaysProposalCancelled();
-    }
-
-    function proposeFadMaxStaleness(
-        uint256 seconds_
-    ) external onlyOwner {
-        if (seconds_ == 0) {
-            revert CfdEngineAdmin__ZeroStaleness();
-        }
-        pendingFadMaxStaleness = seconds_;
-        fadMaxStalenessActivationTime = block.timestamp + TIMELOCK_DELAY;
-        emit FadMaxStalenessProposed(seconds_, fadMaxStalenessActivationTime);
-    }
-
-    function finalizeFadMaxStaleness() external onlyOwner {
-        _requireTimelockReady(fadMaxStalenessActivationTime);
-        uint256 nextValue = pendingFadMaxStaleness;
-        pendingFadMaxStaleness = 0;
-        fadMaxStalenessActivationTime = 0;
-        engine.setFadMaxStaleness(nextValue);
-        emit FadMaxStalenessFinalized();
-    }
-
-    function cancelFadMaxStalenessProposal() external onlyOwner {
-        pendingFadMaxStaleness = 0;
-        fadMaxStalenessActivationTime = 0;
-    }
-
-    function proposeFadRunway(
-        uint256 seconds_
-    ) external onlyOwner {
-        if (seconds_ > 24 hours) {
+        if (config.fadRunwaySeconds > 24 hours) {
             revert CfdEngineAdmin__RunwayTooLong();
         }
-        pendingFadRunway = seconds_;
-        fadRunwayActivationTime = block.timestamp + TIMELOCK_DELAY;
-        emit FadRunwayProposed(seconds_, fadRunwayActivationTime);
+        delete _pendingCalendarConfig.fadDayTimestamps;
+        _pendingCalendarConfig.fadDayTimestamps = config.fadDayTimestamps;
+        _pendingCalendarConfig.fadRunwaySeconds = config.fadRunwaySeconds;
+        calendarConfigActivationTime = block.timestamp + TIMELOCK_DELAY;
+        emit CalendarConfigProposed(config, calendarConfigActivationTime);
     }
 
-    function finalizeFadRunway() external onlyOwner {
-        _requireTimelockReady(fadRunwayActivationTime);
-        uint256 nextValue = pendingFadRunway;
-        pendingFadRunway = 0;
-        fadRunwayActivationTime = 0;
-        engine.setFadRunway(nextValue);
-        emit FadRunwayFinalized();
+    function finalizeCalendarConfig() external onlyOwner {
+        _requireTimelockReady(calendarConfigActivationTime);
+        ICfdEngineAdminHost.EngineCalendarConfig memory config = _pendingCalendarConfig;
+        delete _pendingCalendarConfig.fadDayTimestamps;
+        calendarConfigActivationTime = 0;
+        engine.applyCalendarConfig(config);
+        emit CalendarConfigFinalized(config);
     }
 
-    function cancelFadRunwayProposal() external onlyOwner {
-        pendingFadRunway = 0;
-        fadRunwayActivationTime = 0;
+    function cancelCalendarConfig() external onlyOwner {
+        delete _pendingCalendarConfig.fadDayTimestamps;
+        calendarConfigActivationTime = 0;
+        emit CalendarConfigCancelled();
     }
 
-    function proposeEngineMarkStalenessLimit(
-        uint256 newStaleness
+    function getPendingCalendarConfig()
+        external
+        view
+        returns (ICfdEngineAdminHost.EngineCalendarConfig memory config)
+    {
+        config = _pendingCalendarConfig;
+    }
+
+    function proposeFreshnessConfig(
+        ICfdEngineAdminHost.EngineFreshnessConfig calldata config
     ) external onlyOwner {
-        if (newStaleness == 0) {
+        if (config.fadMaxStaleness == 0 || config.engineMarkStalenessLimit == 0) {
             revert CfdEngineAdmin__ZeroStaleness();
         }
-        pendingEngineMarkStalenessLimit = newStaleness;
-        engineMarkStalenessActivationTime = block.timestamp + TIMELOCK_DELAY;
-        emit EngineMarkStalenessLimitProposed(newStaleness, engineMarkStalenessActivationTime);
+        pendingFreshnessConfig = config;
+        freshnessConfigActivationTime = block.timestamp + TIMELOCK_DELAY;
+        emit FreshnessConfigProposed(config, freshnessConfigActivationTime);
     }
 
-    function finalizeEngineMarkStalenessLimit() external onlyOwner {
-        _requireTimelockReady(engineMarkStalenessActivationTime);
-        uint256 nextValue = pendingEngineMarkStalenessLimit;
-        pendingEngineMarkStalenessLimit = 0;
-        engineMarkStalenessActivationTime = 0;
-        engine.setEngineMarkStalenessLimit(nextValue);
+    function finalizeFreshnessConfig() external onlyOwner {
+        _requireTimelockReady(freshnessConfigActivationTime);
+        ICfdEngineAdminHost.EngineFreshnessConfig memory config = pendingFreshnessConfig;
+        delete pendingFreshnessConfig;
+        freshnessConfigActivationTime = 0;
+        engine.applyFreshnessConfig(config);
+        emit FreshnessConfigFinalized(config);
     }
 
-    function cancelEngineMarkStalenessLimitProposal() external onlyOwner {
-        pendingEngineMarkStalenessLimit = 0;
-        engineMarkStalenessActivationTime = 0;
+    function cancelFreshnessConfig() external onlyOwner {
+        delete pendingFreshnessConfig;
+        freshnessConfigActivationTime = 0;
+        emit FreshnessConfigCancelled();
     }
 
     function _requireTimelockReady(

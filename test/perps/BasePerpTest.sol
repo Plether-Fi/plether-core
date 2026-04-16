@@ -19,6 +19,7 @@ import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {DeferredEngineViewTypes} from "../../src/perps/interfaces/DeferredEngineViewTypes.sol";
 import {HousePoolEngineViewTypes} from "../../src/perps/interfaces/HousePoolEngineViewTypes.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
+import {ICfdEngineAdminHost} from "../../src/perps/interfaces/ICfdEngineAdminHost.sol";
 import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {PerpsViewTypes} from "../../src/perps/interfaces/PerpsViewTypes.sol";
@@ -594,12 +595,60 @@ abstract contract BasePerpTest is Test {
 
     // --- Governance helpers ---
 
+    function _engineRiskConfig() internal view returns (ICfdEngineAdminHost.EngineRiskConfig memory config) {
+        (
+            config.riskParams.vpiFactor,
+            config.riskParams.maxSkewRatio,
+            config.riskParams.maintMarginBps,
+            config.riskParams.initMarginBps,
+            config.riskParams.fadMarginBps,
+            config.riskParams.baseCarryBps,
+            config.riskParams.minBountyUsdc,
+            config.riskParams.bountyBps
+        ) = engine.riskParams();
+    }
+
+    function _engineCalendarConfig()
+        internal
+        view
+        returns (ICfdEngineAdminHost.EngineCalendarConfig memory config)
+    {
+        config.fadRunwaySeconds = engine.fadRunwaySeconds();
+    }
+
+    function _engineFreshnessConfig()
+        internal
+        view
+        returns (ICfdEngineAdminHost.EngineFreshnessConfig memory config)
+    {
+        config.fadMaxStaleness = engine.fadMaxStaleness();
+        config.engineMarkStalenessLimit = engine.engineMarkStalenessLimit();
+    }
+
     function _setRiskParams(
         CfdTypes.RiskParams memory params
     ) internal {
-        engineAdmin.proposeRiskParams(params);
+        ICfdEngineAdminHost.EngineRiskConfig memory config;
+        config.riskParams = params;
+        engineAdmin.proposeRiskConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
-        engineAdmin.finalizeRiskParams();
+        engineAdmin.finalizeRiskConfig();
+    }
+
+    function _setCalendarConfig(
+        ICfdEngineAdminHost.EngineCalendarConfig memory config
+    ) internal {
+        engineAdmin.proposeCalendarConfig(config);
+        vm.warp(block.timestamp + 48 hours + 1);
+        engineAdmin.finalizeCalendarConfig();
+    }
+
+    function _setFreshnessConfig(
+        ICfdEngineAdminHost.EngineFreshnessConfig memory config
+    ) internal {
+        engineAdmin.proposeFreshnessConfig(config);
+        vm.warp(block.timestamp + 48 hours + 1);
+        engineAdmin.finalizeFreshnessConfig();
     }
 
     function _routerConfig() internal view returns (IOrderRouterAdminHost.RouterConfig memory config) {

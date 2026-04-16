@@ -18,6 +18,7 @@ import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {AccountLensViewTypes} from "../../src/perps/interfaces/AccountLensViewTypes.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
+import {ICfdEngineAdminHost} from "../../src/perps/interfaces/ICfdEngineAdminHost.sol";
 import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
@@ -1405,12 +1406,14 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_OrderRefund_DoesNotRevertWhenRouterLimitExceedsEngineHelperLimit() public {
-        engineAdmin.proposeEngineMarkStalenessLimit(60);
+        ICfdEngineAdminHost.EngineFreshnessConfig memory freshnessConfig = _engineFreshnessConfig();
+        freshnessConfig.engineMarkStalenessLimit = 60;
+        engineAdmin.proposeFreshnessConfig(freshnessConfig);
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         config.orderExecutionStalenessLimit = 300;
         routerAdmin.proposeRouterConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
-        engineAdmin.finalizeEngineMarkStalenessLimit();
+        engineAdmin.finalizeFreshnessConfig();
         routerAdmin.finalizeRouterConfig();
 
         vm.warp(1050);
@@ -3077,9 +3080,11 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         clearinghouse.withdraw(accountId, 70e6);
         vm.stopPrank();
 
-        engineAdmin.proposeEngineMarkStalenessLimit(90 days);
-        vm.warp(engineAdmin.engineMarkStalenessActivationTime() + 1);
-        engineAdmin.finalizeEngineMarkStalenessLimit();
+        ICfdEngineAdminHost.EngineFreshnessConfig memory freshnessConfig = _engineFreshnessConfig();
+        freshnessConfig.engineMarkStalenessLimit = 90 days;
+        engineAdmin.proposeFreshnessConfig(freshnessConfig);
+        vm.warp(engineAdmin.freshnessConfigActivationTime() + 1);
+        engineAdmin.finalizeFreshnessConfig();
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
@@ -3369,33 +3374,33 @@ contract FadStalenessTest is BasePerpTest {
     function _addFadDays(
         uint256[] memory timestamps
     ) internal {
-        engineAdmin.proposeAddFadDays(timestamps);
-        vm.warp(_currentTimestamp() + 48 hours + 1);
-        engineAdmin.finalizeAddFadDays();
+        ICfdEngineAdminHost.EngineCalendarConfig memory config = _engineCalendarConfig();
+        config.fadDayTimestamps = timestamps;
+        _setCalendarConfig(config);
     }
 
     function _removeFadDays(
-        uint256[] memory timestamps
+        uint256[] memory
     ) internal {
-        engineAdmin.proposeRemoveFadDays(timestamps);
-        vm.warp(_currentTimestamp() + 48 hours + 1);
-        engineAdmin.finalizeRemoveFadDays();
+        ICfdEngineAdminHost.EngineCalendarConfig memory config = _engineCalendarConfig();
+        config.fadDayTimestamps = new uint256[](0);
+        _setCalendarConfig(config);
     }
 
     function _setFadMaxStaleness(
         uint256 val
     ) internal {
-        engineAdmin.proposeFadMaxStaleness(val);
-        vm.warp(_currentTimestamp() + 48 hours + 1);
-        engineAdmin.finalizeFadMaxStaleness();
+        ICfdEngineAdminHost.EngineFreshnessConfig memory config = _engineFreshnessConfig();
+        config.fadMaxStaleness = val;
+        _setFreshnessConfig(config);
     }
 
     function _setFadRunway(
         uint256 val
     ) internal {
-        engineAdmin.proposeFadRunway(val);
-        vm.warp(_currentTimestamp() + 48 hours + 1);
-        engineAdmin.finalizeFadRunway();
+        ICfdEngineAdminHost.EngineCalendarConfig memory config = _engineCalendarConfig();
+        config.fadRunwaySeconds = val;
+        _setCalendarConfig(config);
     }
 
     function test_FadWindow_CloseOrder_AllowedDuringFrozenWithPreFreezeCommit() public {
@@ -3709,23 +3714,28 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function test_Admin_SetFadMaxStaleness_ZeroReverts() public {
+        ICfdEngineAdminHost.EngineFreshnessConfig memory config = _engineFreshnessConfig();
+        config.fadMaxStaleness = 0;
         vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__ZeroStaleness.selector);
-        engineAdmin.proposeFadMaxStaleness(0);
+        engineAdmin.proposeFreshnessConfig(config);
     }
 
     function test_Admin_AddFadDays_NonOwner_Reverts() public {
         uint256[] memory timestamps = new uint256[](1);
         timestamps[0] = WEDNESDAY_NOON;
 
+        ICfdEngineAdminHost.EngineCalendarConfig memory config = _engineCalendarConfig();
+        config.fadDayTimestamps = timestamps;
         vm.prank(alice);
         vm.expectRevert();
-        engineAdmin.proposeAddFadDays(timestamps);
+        engineAdmin.proposeCalendarConfig(config);
     }
 
     function test_Admin_EmptyDays_Reverts() public {
-        uint256[] memory empty = new uint256[](0);
-        vm.expectRevert(CfdEngine.CfdEngine__EmptyDays.selector);
-        engineAdmin.proposeAddFadDays(empty);
+        ICfdEngineAdminHost.EngineCalendarConfig memory config = _engineCalendarConfig();
+        config.fadDayTimestamps = new uint256[](0);
+        _setCalendarConfig(config);
+        assertEq(engine.fadDayOverrides(MONDAY_NOON / 86_400), false);
     }
 
     function test_AdminFadDay_BlockedDuringFrozen() public {
@@ -3954,8 +3964,10 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function test_Runway_TooLong_Reverts() public {
+        ICfdEngineAdminHost.EngineCalendarConfig memory config = _engineCalendarConfig();
+        config.fadRunwaySeconds = 25 hours;
         vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__RunwayTooLong.selector);
-        engineAdmin.proposeFadRunway(25 hours);
+        engineAdmin.proposeCalendarConfig(config);
     }
 
     function test_Runway_ZeroDisablesLookahead() public {

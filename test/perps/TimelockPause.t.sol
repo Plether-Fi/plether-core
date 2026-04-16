@@ -8,6 +8,7 @@ import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouterAdmin} from "../../src/perps/OrderRouterAdmin.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
+import {ICfdEngineAdminHost} from "../../src/perps/interfaces/ICfdEngineAdminHost.sol";
 import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
@@ -16,7 +17,7 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 
 contract TimelockPauseTest is BasePerpTest {
 
-    event RiskParamsProposalCancelled();
+    event RiskConfigCancelled();
 
     address alice = address(0x111);
     address nonOwner = address(0xBAD);
@@ -56,8 +57,10 @@ contract TimelockPauseTest is BasePerpTest {
             bountyBps: 20
         });
 
-        engineAdmin.proposeRiskParams(newParams);
-        assertGt(engineAdmin.riskParamsActivationTime(), 0);
+        ICfdEngineAdminHost.EngineRiskConfig memory config;
+        config.riskParams = newParams;
+        engineAdmin.proposeRiskConfig(config);
+        assertGt(engineAdmin.riskConfigActivationTime(), 0);
     }
 
     function test_FinalizeRiskParams_BeforeTimelock_Reverts() public {
@@ -72,10 +75,12 @@ contract TimelockPauseTest is BasePerpTest {
             bountyBps: 20
         });
 
-        engineAdmin.proposeRiskParams(newParams);
+        ICfdEngineAdminHost.EngineRiskConfig memory config;
+        config.riskParams = newParams;
+        engineAdmin.proposeRiskConfig(config);
 
         vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__TimelockNotReady.selector);
-        engineAdmin.finalizeRiskParams();
+        engineAdmin.finalizeRiskConfig();
     }
 
     function test_FinalizeRiskParams_AfterTimelock_Succeeds() public {
@@ -90,18 +95,20 @@ contract TimelockPauseTest is BasePerpTest {
             bountyBps: 20
         });
 
-        engineAdmin.proposeRiskParams(newParams);
+        ICfdEngineAdminHost.EngineRiskConfig memory config;
+        config.riskParams = newParams;
+        engineAdmin.proposeRiskConfig(config);
         _warpForward(48 hours + 1);
-        engineAdmin.finalizeRiskParams();
+        engineAdmin.finalizeRiskConfig();
 
         (,, uint256 maintMarginBps,,,,,) = engine.riskParams();
         assertEq(maintMarginBps, 200);
-        assertEq(engineAdmin.riskParamsActivationTime(), 0);
+        assertEq(engineAdmin.riskConfigActivationTime(), 0);
     }
 
     function test_FinalizeRiskParams_NoProposal_Reverts() public {
         vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__NoProposal.selector);
-        engineAdmin.finalizeRiskParams();
+        engineAdmin.finalizeRiskConfig();
     }
 
     function test_CancelRiskParams_ClearsPending() public {
@@ -116,14 +123,16 @@ contract TimelockPauseTest is BasePerpTest {
             bountyBps: 20
         });
 
-        engineAdmin.proposeRiskParams(newParams);
+        ICfdEngineAdminHost.EngineRiskConfig memory config;
+        config.riskParams = newParams;
+        engineAdmin.proposeRiskConfig(config);
         vm.expectEmit(false, false, false, true);
-        emit RiskParamsProposalCancelled();
-        engineAdmin.cancelRiskParamsProposal();
-        assertEq(engineAdmin.riskParamsActivationTime(), 0);
+        emit RiskConfigCancelled();
+        engineAdmin.cancelRiskConfig();
+        assertEq(engineAdmin.riskConfigActivationTime(), 0);
 
         vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__NoProposal.selector);
-        engineAdmin.finalizeRiskParams();
+        engineAdmin.finalizeRiskConfig();
     }
 
     function test_ProposeRiskParams_OnlyOwner() public {
@@ -140,7 +149,9 @@ contract TimelockPauseTest is BasePerpTest {
 
         vm.prank(nonOwner);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
-        engineAdmin.proposeRiskParams(newParams);
+        ICfdEngineAdminHost.EngineRiskConfig memory config;
+        config.riskParams = newParams;
+        engineAdmin.proposeRiskConfig(config);
     }
 
     function test_RePropose_OverwritesPendingAndResetsTimer() public {
@@ -155,8 +166,10 @@ contract TimelockPauseTest is BasePerpTest {
             bountyBps: 15
         });
 
-        engineAdmin.proposeRiskParams(first);
-        uint256 firstActivation = engineAdmin.riskParamsActivationTime();
+        ICfdEngineAdminHost.EngineRiskConfig memory firstConfig;
+        firstConfig.riskParams = first;
+        engineAdmin.proposeRiskConfig(firstConfig);
+        uint256 firstActivation = engineAdmin.riskConfigActivationTime();
 
         _warpForward(24 hours);
 
@@ -171,8 +184,10 @@ contract TimelockPauseTest is BasePerpTest {
             bountyBps: 15
         });
 
-        engineAdmin.proposeRiskParams(second);
-        uint256 secondActivation = engineAdmin.riskParamsActivationTime();
+        ICfdEngineAdminHost.EngineRiskConfig memory secondConfig;
+        secondConfig.riskParams = second;
+        engineAdmin.proposeRiskConfig(secondConfig);
+        uint256 secondActivation = engineAdmin.riskConfigActivationTime();
 
         assertGt(secondActivation, firstActivation);
     }

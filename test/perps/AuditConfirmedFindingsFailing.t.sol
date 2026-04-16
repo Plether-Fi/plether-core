@@ -11,6 +11,7 @@ import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {ICfdEngineAdminHost} from "../../src/perps/interfaces/ICfdEngineAdminHost.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
 import {ICfdVault} from "../../src/perps/interfaces/ICfdVault.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
@@ -383,23 +384,29 @@ contract AuditConfirmedFindingsFailing_RiskParams is BasePerpTest {
     function obsolete_M1_ProposeRiskParamsRejectsEqualKinkAndMaxSkew() public {
         CfdTypes.RiskParams memory params = _riskParams();
         params.maxSkewRatio = params.maxSkewRatio;
+        ICfdEngineAdminHost.EngineRiskConfig memory config;
+        config.riskParams = params;
 
         vm.expectRevert();
-        engineAdmin.proposeRiskParams(params);
+        engineAdmin.proposeRiskConfig(config);
     }
 
     function obsolete_M1_ProposeRiskParamsRejectsZeroKinkSkew() public {
         CfdTypes.RiskParams memory params = _riskParams();
+        ICfdEngineAdminHost.EngineRiskConfig memory config;
+        config.riskParams = params;
 
         vm.expectRevert();
-        engineAdmin.proposeRiskParams(params);
+        engineAdmin.proposeRiskConfig(config);
     }
 
     function obsolete_M1_ProposeRiskParamsRejectsKinkAboveMaxSkew() public {
         CfdTypes.RiskParams memory params = _riskParams();
+        ICfdEngineAdminHost.EngineRiskConfig memory config;
+        config.riskParams = params;
 
         vm.expectRevert();
-        engineAdmin.proposeRiskParams(params);
+        engineAdmin.proposeRiskConfig(config);
     }
 
 }

@@ -4,6 +4,7 @@ pragma solidity 0.8.33;
 import {CfdEngineAdmin} from "../../../../src/perps/CfdEngineAdmin.sol";
 import {CfdEngine} from "../../../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../../../src/perps/CfdTypes.sol";
+import {ICfdEngineAdminHost} from "../../../../src/perps/interfaces/ICfdEngineAdminHost.sol";
 import {MarginClearinghouse} from "../../../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../../../src/perps/OrderRouter.sol";
 import {MockUSDC} from "../../../mocks/MockUSDC.sol";
@@ -99,12 +100,12 @@ contract PerpOracleHandler is Test {
         timestamps[0] = ((block.timestamp / 86_400) + 1) * 86_400;
 
         vm.startPrank(owner);
-        engineAdmin.proposeAddFadDays(timestamps);
+        ICfdEngineAdminHost.EngineCalendarConfig memory config;
+        config.fadDayTimestamps = timestamps;
+        config.fadRunwaySeconds = bound(runwayFuzz, 0, 24 hours);
+        engineAdmin.proposeCalendarConfig(config);
         vm.warp(block.timestamp + 7 days);
-        engineAdmin.finalizeAddFadDays();
-        engineAdmin.proposeFadRunway(bound(runwayFuzz, 0, 24 hours));
-        vm.warp(block.timestamp + 7 days);
-        engineAdmin.finalizeFadRunway();
+        engineAdmin.finalizeCalendarConfig();
         vm.stopPrank();
     }
 
@@ -113,9 +114,12 @@ contract PerpOracleHandler is Test {
     ) external {
         uint256 seconds_ = bound(secondsFuzz, 1 hours, 7 days);
         vm.startPrank(owner);
-        engineAdmin.proposeFadMaxStaleness(seconds_);
+        ICfdEngineAdminHost.EngineFreshnessConfig memory config;
+        config.fadMaxStaleness = seconds_;
+        config.engineMarkStalenessLimit = engine.engineMarkStalenessLimit();
+        engineAdmin.proposeFreshnessConfig(config);
         vm.warp(block.timestamp + 7 days);
-        engineAdmin.finalizeFadMaxStaleness();
+        engineAdmin.finalizeFreshnessConfig();
         vm.stopPrank();
     }
 

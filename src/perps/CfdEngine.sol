@@ -185,6 +185,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     address public orderRouter;
 
     mapping(uint256 => bool) public fadDayOverrides;
+    uint256[] private _fadOverrideDays;
     uint256 public fadMaxStaleness = 3 days;
     uint256 public fadRunwaySeconds = 3 hours;
     uint256 public engineMarkStalenessLimit = 60;
@@ -727,65 +728,47 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         emit DegradedModeCleared();
     }
 
-    function applyRiskParams(
-        CfdTypes.RiskParams memory riskParams_
+    function applyRiskConfig(
+        ICfdEngineAdminHost.EngineRiskConfig calldata config
     ) external onlyAdmin {
-        _validateRiskParams(riskParams_);
-        riskParams = riskParams_;
+        _validateRiskParams(config.riskParams);
+        riskParams = config.riskParams;
     }
 
-    function addFadDays(
-        uint256[] calldata timestamps
+    function applyCalendarConfig(
+        ICfdEngineAdminHost.EngineCalendarConfig calldata config
     ) external onlyAdmin {
-        if (timestamps.length == 0) {
-            revert CfdEngine__EmptyDays();
-        }
-        for (uint256 i; i < timestamps.length; i++) {
-            fadDayOverrides[timestamps[i] / 86_400] = true;
-        }
-        emit FadDaysAdded(timestamps);
-    }
-
-    function removeFadDays(
-        uint256[] calldata timestamps
-    ) external onlyAdmin {
-        if (timestamps.length == 0) {
-            revert CfdEngine__EmptyDays();
-        }
-        for (uint256 i; i < timestamps.length; i++) {
-            delete fadDayOverrides[timestamps[i] / 86_400];
-        }
-        emit FadDaysRemoved(timestamps);
-    }
-
-    function setFadMaxStaleness(
-        uint256 seconds_
-    ) external onlyAdmin {
-        if (seconds_ == 0) {
-            revert CfdEngine__ZeroStaleness();
-        }
-        fadMaxStaleness = seconds_;
-        emit FadMaxStalenessUpdated(seconds_);
-    }
-
-    function setFadRunway(
-        uint256 seconds_
-    ) external onlyAdmin {
-        if (seconds_ > 24 hours) {
+        if (config.fadRunwaySeconds > 24 hours) {
             revert CfdEngine__RunwayTooLong();
         }
-        fadRunwaySeconds = seconds_;
-        emit FadRunwayUpdated(seconds_);
+        uint256 oldLength = _fadOverrideDays.length;
+        for (uint256 i; i < oldLength; i++) {
+            delete fadDayOverrides[_fadOverrideDays[i]];
+        }
+        delete _fadOverrideDays;
+        for (uint256 i; i < config.fadDayTimestamps.length; i++) {
+            uint256 day = config.fadDayTimestamps[i] / 86_400;
+            if (!fadDayOverrides[day]) {
+                fadDayOverrides[day] = true;
+                _fadOverrideDays.push(day);
+            }
+        }
+        fadRunwaySeconds = config.fadRunwaySeconds;
+        emit FadDaysRemoved(new uint256[](0));
+        emit FadDaysAdded(config.fadDayTimestamps);
+        emit FadRunwayUpdated(config.fadRunwaySeconds);
     }
 
-    function setEngineMarkStalenessLimit(
-        uint256 newStaleness
+    function applyFreshnessConfig(
+        ICfdEngineAdminHost.EngineFreshnessConfig calldata config
     ) external onlyAdmin {
-        if (newStaleness == 0) {
+        if (config.fadMaxStaleness == 0 || config.engineMarkStalenessLimit == 0) {
             revert CfdEngine__ZeroStaleness();
         }
-        engineMarkStalenessLimit = newStaleness;
-        emit EngineMarkStalenessLimitUpdated(newStaleness);
+        fadMaxStaleness = config.fadMaxStaleness;
+        engineMarkStalenessLimit = config.engineMarkStalenessLimit;
+        emit FadMaxStalenessUpdated(config.fadMaxStaleness);
+        emit EngineMarkStalenessLimitUpdated(config.engineMarkStalenessLimit);
     }
 
     // ==========================================

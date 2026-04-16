@@ -39,11 +39,9 @@ Engine risk controls live in `CfdEngineAdmin`, and router risk controls live in 
 
 | Parameter | Contract | Guard |
 |-----------|----------|-------|
-| `riskParams` (VPI, carry, margins, bounty) | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 48-hour timelock |
-| `fadDayOverrides` | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 48-hour timelock |
-| `fadMaxStaleness` | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 48-hour timelock |
-| `fadRunwaySeconds` | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 48-hour timelock |
-| `engineMarkStalenessLimit` | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 48-hour timelock |
+| `EngineRiskConfig` (`riskParams`) | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 48-hour timelock |
+| `EngineCalendarConfig` (`fadDayOverrides`, `fadRunwaySeconds`) | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 48-hour timelock |
+| `EngineFreshnessConfig` (`fadMaxStaleness`, `engineMarkStalenessLimit`) | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 48-hour timelock |
 | `seniorRateBps` | `HousePool` | `onlyOwner`, 48-hour timelock |
 | `markStalenessLimit` | `HousePool` | `onlyOwner`, 48-hour timelock |
 | `RouterConfig` (`maxOrderAge`, `orderExecutionStalenessLimit`, `liquidationStalenessLimit`, `pythMaxConfidenceRatioBps`) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |

@@ -5,27 +5,29 @@ import {CfdTypes} from "../CfdTypes.sol";
 
 interface ICfdEngineAdminHost {
 
-    function applyRiskParams(
-        CfdTypes.RiskParams memory riskParams_
+    struct EngineRiskConfig {
+        CfdTypes.RiskParams riskParams;
+    }
+
+    struct EngineCalendarConfig {
+        uint256[] fadDayTimestamps;
+        uint256 fadRunwaySeconds;
+    }
+
+    struct EngineFreshnessConfig {
+        uint256 fadMaxStaleness;
+        uint256 engineMarkStalenessLimit;
+    }
+
+    function applyRiskConfig(
+        EngineRiskConfig calldata config
     ) external;
 
-    function addFadDays(
-        uint256[] calldata timestamps
+    function applyCalendarConfig(
+        EngineCalendarConfig calldata config
     ) external;
 
-    function removeFadDays(
-        uint256[] calldata timestamps
-    ) external;
-
-    function setFadMaxStaleness(
-        uint256 seconds_
-    ) external;
-
-    function setFadRunway(
-        uint256 seconds_
-    ) external;
-
-    function setEngineMarkStalenessLimit(
-        uint256 seconds_
+    function applyFreshnessConfig(
+        EngineFreshnessConfig calldata config
     ) external;
 }

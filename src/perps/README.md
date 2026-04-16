@@ -373,10 +373,9 @@ Engine risk controls live on `CfdEngineAdmin`, and router risk controls plus pau
 
 Timelocked surfaces include:
 
-- `CfdEngineAdmin` -> `CfdEngine.riskParams`
-- `CfdEngineAdmin` -> `CfdEngine.fadMaxStaleness`
-- `CfdEngineAdmin` -> `CfdEngine.fadRunwaySeconds`
-- `CfdEngineAdmin` -> `CfdEngine.engineMarkStalenessLimit`
+- `CfdEngineAdmin.EngineRiskConfig` -> `CfdEngine.riskParams`
+- `CfdEngineAdmin.EngineCalendarConfig` -> `CfdEngine.fadDayOverrides`, `CfdEngine.fadRunwaySeconds`
+- `CfdEngineAdmin.EngineFreshnessConfig` -> `CfdEngine.fadMaxStaleness`, `CfdEngine.engineMarkStalenessLimit`
 - `HousePool.seniorRateBps`
 - `HousePool.markStalenessLimit`
 - `OrderRouterAdmin` -> `OrderRouter.RouterConfig`
@@ -406,6 +405,7 @@ Instant controls remain for one-time wiring and fee withdrawal. `OrderRouter` pa
 | Liquidation staleness | 15s | Live-market liquidation freshness |
 | `engineMarkStalenessLimit` | 60s | Engine-side mark freshness |
 | `markStalenessLimit` | 60s | HousePool mark freshness |
+| FAD override days | empty | Admin-set calendar override set |
 | `fadMaxStaleness` | 3 days | Frozen-market max staleness |
 | `fadRunwaySeconds` | 3 hours | Admin FAD pre-close runway |
 | `seniorRateBps` | 800 (8% APY) | Senior fixed-rate target |

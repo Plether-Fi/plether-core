@@ -1473,7 +1473,7 @@ contract HousePoolTest is BasePerpTest {
     // ==========================================
 
     function test_C01_LiquidationClearsLegacySideSpreadState() public {
-        engineAdmin.proposeRiskParams(
+        _setRiskParams(
             CfdTypes.RiskParams({
                 vpiFactor: 0,
                 maxSkewRatio: 1e18,
@@ -1485,8 +1485,6 @@ contract HousePoolTest is BasePerpTest {
                 bountyBps: 15
             })
         );
-        vm.warp(block.timestamp + 48 hours + 1);
-        engineAdmin.finalizeRiskParams();
 
         _fundJunior(bob, 1_000_000 * 1e6);
 
@@ -1514,7 +1512,7 @@ contract HousePoolTest is BasePerpTest {
     // ==========================================
 
     function test_C03_GetFreeUSDC_NoSupplementalReserveInCarryModel() public {
-        engineAdmin.proposeRiskParams(
+        _setRiskParams(
             CfdTypes.RiskParams({
                 vpiFactor: 0,
                 maxSkewRatio: 0.4e18,
@@ -1526,8 +1524,6 @@ contract HousePoolTest is BasePerpTest {
                 bountyBps: 15
             })
         );
-        vm.warp(block.timestamp + 48 hours + 1);
-        engineAdmin.finalizeRiskParams();
 
         _fundJunior(bob, 1_000_000 * 1e6);
 
@@ -1561,7 +1557,7 @@ contract HousePoolTest is BasePerpTest {
     // ==========================================
 
     function test_C03b_Reconcile_NoSupplementalReserveInCarryModel() public {
-        engineAdmin.proposeRiskParams(
+        _setRiskParams(
             CfdTypes.RiskParams({
                 vpiFactor: 0,
                 maxSkewRatio: 0.4e18,
@@ -1573,8 +1569,6 @@ contract HousePoolTest is BasePerpTest {
                 bountyBps: 15
             })
         );
-        vm.warp(block.timestamp + 48 hours + 1);
-        engineAdmin.finalizeRiskParams();
 
         _fundJunior(bob, 1_000_000 * 1e6);
         address trader1 = address(0x444);
