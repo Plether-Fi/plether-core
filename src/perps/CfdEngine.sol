@@ -617,6 +617,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
 
     function reserveCloseOrderExecutionBounty(
         bytes32 accountId,
+        uint256 sizeDelta,
         uint256 amountUsdc,
         address recipient
     ) external onlyRouter {
@@ -626,6 +627,9 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
 
         StoredPosition storage pos = _positions[accountId];
         if (pos.size == 0) {
+            revert CfdEngine__InsufficientCloseOrderBountyBacking();
+        }
+        if (sizeDelta == 0 || sizeDelta > pos.size) {
             revert CfdEngine__InsufficientCloseOrderBountyBacking();
         }
 
@@ -672,6 +676,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
 
         CfdTypes.Position memory positionAfter = _loadPosition(accountId);
         positionAfter.margin = positionMarginUsdc - marginBackedBountyUsdc;
+        bool isFullClose = sizeDelta == positionAfter.size;
         uint256 pendingCarryUsdc =
             _totalPendingCarryUsdc(accountId, positionAfter, price, postReservationReachableUsdc, block.timestamp);
         PositionRiskAccountingLib.PositionRiskState memory riskState =
@@ -683,7 +688,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
                 postReservationReachableUsdc,
                 isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps
             );
-        if (riskState.liquidatable) {
+        if (riskState.liquidatable && !isFullClose) {
             revert CfdEngine__InsufficientCloseOrderBountyBacking();
         }
 

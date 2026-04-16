@@ -566,7 +566,7 @@ contract OrderRouterTest is BasePerpTest {
 
         vm.prank(address(router));
         vm.expectRevert(CfdEngine.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
-        engine.reserveCloseOrderExecutionBounty(accountId, 1e6, address(router));
+        engine.reserveCloseOrderExecutionBounty(accountId, 25_000e18, 1e6, address(router));
     }
 
     function test_InvalidClose_MarginBackedBountyPaysKeeper() public {

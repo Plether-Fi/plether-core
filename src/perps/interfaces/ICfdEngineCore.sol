@@ -52,6 +52,7 @@ interface ICfdEngineCore {
 
     function reserveCloseOrderExecutionBounty(
         bytes32 accountId,
+        uint256 sizeDelta,
         uint256 amountUsdc,
         address recipient
     ) external;

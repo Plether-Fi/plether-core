@@ -79,6 +79,7 @@ interface ICfdEngine {
     /// @notice Reserves close-order execution bounty from free settlement first, then active position margin.
     function reserveCloseOrderExecutionBounty(
         bytes32 accountId,
+        uint256 sizeDelta,
         uint256 amountUsdc,
         address recipient
     ) external;

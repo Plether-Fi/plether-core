@@ -108,6 +108,7 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
     function _reserveExecutionBounty(
         bytes32 accountId,
         uint64 orderId,
+        uint256 sizeDelta,
         uint256 executionBountyUsdc,
         bool isClose
     ) internal {
@@ -116,7 +117,7 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
         }
 
         if (isClose) {
-            _reserveCloseExecutionBounty(accountId, executionBountyUsdc);
+            _reserveCloseExecutionBounty(accountId, sizeDelta, executionBountyUsdc);
         } else {
             if (
                 MarginClearinghouseAccountingLib.getFreeSettlementUsdc(clearinghouse.getAccountUsdcBuckets(accountId))
@@ -353,6 +354,7 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
 
     function _reserveCloseExecutionBounty(
         bytes32 accountId,
+        uint256 sizeDelta,
         uint256 executionBountyUsdc
     ) internal virtual;
 

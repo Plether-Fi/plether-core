@@ -242,7 +242,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, IOrderRouterAdminHost
 
         uint64 orderId = nextCommitId++;
 
-        _reserveExecutionBounty(accountId, orderId, executionBountyUsdc, isClose);
+        _reserveExecutionBounty(accountId, orderId, sizeDelta, executionBountyUsdc, isClose);
         _reserveCommittedMargin(accountId, orderId, isClose, marginDelta);
 
         OrderRecord storage record = orderRecords[orderId];
@@ -538,9 +538,10 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, IOrderRouterAdminHost
 
     function _reserveCloseExecutionBounty(
         bytes32 accountId,
+        uint256 sizeDelta,
         uint256 executionBountyUsdc
     ) internal override {
-        try engine.reserveCloseOrderExecutionBounty(accountId, executionBountyUsdc, address(this)) {}
+        try engine.reserveCloseOrderExecutionBounty(accountId, sizeDelta, executionBountyUsdc, address(this)) {}
         catch {
             _revertCommitValidation(6);
         }

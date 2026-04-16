@@ -4561,11 +4561,11 @@ contract CfdEngineTest is BasePerpTest {
 
         vm.warp(block.timestamp + 31);
         vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(accountId, 1e6, address(router));
+        engine.reserveCloseOrderExecutionBounty(accountId, 10_000e18, 1e6, address(router));
 
         vm.warp(block.timestamp + 30 days);
         vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(accountId, 1e6, address(router));
+        engine.reserveCloseOrderExecutionBounty(accountId, 10_000e18, 1e6, address(router));
     }
 
     function test_ReserveCloseOrderExecutionBounty_RevertsWhenNoStoredMarkExists() public {
@@ -4583,7 +4583,7 @@ contract CfdEngineTest is BasePerpTest {
         engine.updateMarkPrice(0, uint64(block.timestamp));
         vm.prank(address(router));
         vm.expectRevert(CfdEngine.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
-        engine.reserveCloseOrderExecutionBounty(accountId, 1e6, address(router));
+        engine.reserveCloseOrderExecutionBounty(accountId, 10_000e18, 1e6, address(router));
     }
 
     function test_ReserveCloseOrderExecutionBounty_ExcludesQueuedReservationsFromGenericReachability() public {
@@ -4610,7 +4610,7 @@ contract CfdEngineTest is BasePerpTest {
 
         vm.prank(address(router));
         vm.expectRevert(CfdEngine.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
-        engine.reserveCloseOrderExecutionBounty(accountId, 6000e6, address(router));
+        engine.reserveCloseOrderExecutionBounty(accountId, 10_000e18, 6000e6, address(router));
     }
 
     function test_CheckWithdraw_RevertsWhenOpenPositionHasZeroMarkPrice() public {
@@ -4756,7 +4756,7 @@ contract CfdEngineTest is BasePerpTest {
 
         vm.prank(address(router));
         vm.expectRevert(CfdEngine.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
-        engine.reserveCloseOrderExecutionBounty(accountId, 1400e6, address(router));
+        engine.reserveCloseOrderExecutionBounty(accountId, 50_000e18, 1400e6, address(router));
     }
 
     function test_ReserveCloseOrderExecutionBounty_RecomputesCarryAfterReservationReachabilityDrop() public {
@@ -4806,7 +4806,49 @@ contract CfdEngineTest is BasePerpTest {
 
         vm.prank(address(router));
         vm.expectRevert(CfdEngine.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
-        engine.reserveCloseOrderExecutionBounty(accountId, bountyUsdc, address(router));
+        engine.reserveCloseOrderExecutionBounty(accountId, size / 2, bountyUsdc, address(router));
+
+    }
+
+    function test_ReserveCloseOrderExecutionBounty_AllowsFullCloseNearMaintenance() public {
+        address trader = address(0x515991);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address counterparty = address(0x515992);
+        bytes32 counterpartyId = bytes32(uint256(uint160(counterparty)));
+        uint256 size = 50_000e18;
+
+        _fundTrader(trader, 1000e6);
+        _fundTrader(counterparty, 50_000e6);
+        _open(accountId, CfdTypes.Side.BULL, size, 1000e6, 1e8);
+        _open(counterpartyId, CfdTypes.Side.BEAR, size, 50_000e6, 1e8);
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(103_000_000, uint64(block.timestamp));
+
+        assertEq(_freeSettlementUsdc(accountId), 0, "setup must fully consume free settlement");
+
+        vm.prank(address(router));
+        engine.reserveCloseOrderExecutionBounty(accountId, size, 1e6, address(router));
+    }
+
+    function test_ReserveCloseOrderExecutionBounty_PartialCloseStillRevertsNearMaintenance() public {
+        address trader = address(0x515993);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address counterparty = address(0x515994);
+        bytes32 counterpartyId = bytes32(uint256(uint160(counterparty)));
+        uint256 size = 50_000e18;
+
+        _fundTrader(trader, 1000e6);
+        _fundTrader(counterparty, 50_000e6);
+        _open(accountId, CfdTypes.Side.BULL, size, 1000e6, 1e8);
+        _open(counterpartyId, CfdTypes.Side.BEAR, size, 50_000e6, 1e8);
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(103_000_000, uint64(block.timestamp));
+
+        vm.prank(address(router));
+        vm.expectRevert(CfdEngine.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
+        engine.reserveCloseOrderExecutionBounty(accountId, size / 2, 1e6, address(router));
     }
 
     function test_ClaimDeferredKeeperCredit_DoesNotRequireFreshMarkForKeeperPosition() public {
