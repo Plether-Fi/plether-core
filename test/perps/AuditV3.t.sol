@@ -341,7 +341,7 @@ contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
         router.executeOrder(1, empty);
 
         assertEq(keeper.balance, 0, "H-01: keeper should not be paid for failed order execution");
-        assertEq(alice.balance, 1 ether, "H-01: failed-order fee should be refunded to the user");
+        assertEq(alice.balance, 1 ether, "H-01: failed-order execution should not route any ETH refund to the user");
     }
 
     function test_H01_FinalizeExecutionSuccessParamIsDeadCode() public {
@@ -388,10 +388,8 @@ contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
         router.executeOrder(2, empty);
         uint256 keeperPayoutFailed = usdc.balanceOf(keeper);
 
-        assertEq(keeperPayoutSuccess, 1e6, "H-01: successful execution should pay the keeper in USDC");
-        assertEq(
-            keeperPayoutFailed, 1e6, "H-01: failed binding open execution should still pay the reserved keeper fee"
-        );
+        assertEq(keeperPayoutSuccess, 0, "H-01: successful execution should not pay keeper via direct wallet USDC transfer");
+        assertEq(keeperPayoutFailed, 0, "H-01: failed binding open execution should not pay keeper via direct wallet USDC transfer");
     }
 
 }

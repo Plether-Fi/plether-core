@@ -206,8 +206,8 @@ contract ArchitectureRegression_QueueEconomics is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
 
         (, uint256 marginAfter,,,,,) = engine.positions(aliceId);
-        assertEq(marginAfter, marginBefore - 1e6, "close commit should source bounty from active margin");
-        assertEq(_executionBountyReserve(1), 1e6, "close commit must still escrow the keeper bounty");
+        assertEq(marginAfter, marginBefore - 200_000, "close commit should source the configured bounty from active margin");
+        assertEq(_executionBountyReserve(1), 200_000, "close commit must still escrow the configured keeper bounty");
     }
 
 }

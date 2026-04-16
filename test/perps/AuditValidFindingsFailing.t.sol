@@ -48,7 +48,7 @@ contract AuditValidFindingsFailing is BasePerpTest {
         assertEq(mtm, 0, "O(1) netting currently hides uncollectible losses before liquidation");
     }
 
-    function test_H1_FailedSingleExecuteMustRefundUser() public {
+    function test_H1_FailedSingleExecuteDoesNotPayKeeperOrEthRefund() public {
         vm.deal(trader, 2 ether);
         vm.deal(keeper, 1 ether);
 
@@ -63,7 +63,7 @@ contract AuditValidFindingsFailing is BasePerpTest {
         router.executeOrder(1, empty);
 
         assertEq(keeper.balance - keeperBefore, 0, "Keeper should not receive fee when order fails");
-        assertEq(trader.balance, 2 ether, "Failed-order fee should be refunded to the user");
+        assertEq(trader.balance, 2 ether, "Failed open-order execution should not route any ETH refund to the user");
     }
 
     function test_H2_LiquidationBountyShouldNotIncreaseAfterCrossingZeroEquity() public {

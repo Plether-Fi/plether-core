@@ -2,12 +2,18 @@
 pragma solidity 0.8.33;
 
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
+import {CfdEngineAccountLens} from "../../src/perps/CfdEngineAccountLens.sol";
+import {CfdEngineAdmin} from "../../src/perps/CfdEngineAdmin.sol";
+import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
 import {CfdEnginePlanTypes} from "../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdEnginePlanner} from "../../src/perps/CfdEnginePlanner.sol";
+import {CfdEngineProtocolLens} from "../../src/perps/CfdEngineProtocolLens.sol";
+import {CfdEngineSettlementModule} from "../../src/perps/CfdEngineSettlementModule.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
+import {PerpsPublicLens} from "../../src/perps/PerpsPublicLens.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {CfdEnginePlanLib} from "../../src/perps/libraries/CfdEnginePlanLib.sol";
@@ -85,6 +91,14 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         clearinghouse = new MarginClearinghouse(address(usdc));
 
         engine = new CfdEnginePlanHarness(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        CfdEnginePlanner plannerModule = new CfdEnginePlanner();
+        CfdEngineSettlementModule settlementModule = new CfdEngineSettlementModule(address(engine));
+        CfdEngineAdmin adminModule = new CfdEngineAdmin(address(engine), address(this));
+        engine.setDependencies(address(plannerModule), address(settlementModule), address(adminModule));
+        _syncEngineAdmin();
+        engineAccountLens = new CfdEngineAccountLens(address(engine));
+        engineLens = new CfdEngineLens(address(engine));
+        engineProtocolLens = new CfdEngineProtocolLens(address(engine));
         pool = new HousePool(address(usdc), address(engine));
 
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");
@@ -103,8 +117,10 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             new uint256[](0),
             new bool[](0)
         );
+        _syncRouterAdmin();
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
+        publicLens = new PerpsPublicLens(address(engineAccountLens), address(engine), address(router), address(pool));
 
         _bypassAllTimelocks();
         _bootstrapSeededLifecycle();

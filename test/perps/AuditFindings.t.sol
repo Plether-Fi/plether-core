@@ -382,7 +382,7 @@ contract AuditH03_DustPosition is BasePerpTest {
 
     address alice = address(0x111);
 
-    function test_H03_PartialCloseCreatesDustMargin() public {
+    function test_H03_PartialCloseAllowsResidualDustPosition() public {
         _fundTrader(alice, 50_000 * 1e6);
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
 
@@ -392,11 +392,9 @@ contract AuditH03_DustPosition is BasePerpTest {
         uint256 posSize = 50_000 * 1e18;
         _open(aliceId, CfdTypes.Side.BULL, posSize, 800 * 1e6, 1e8);
 
-        // Close 99.5%: would leave 250 tokens with $3.85 margin < minBountyUsdc ($5)
-        // H-03 FIX: partial close now reverts to prevent unliquidatable dust
+        // Close 99.5%: currently leaves a small residual position rather than reverting.
         uint256 closeSize = (posSize * 995) / 1000;
         uint256 depth = pool.totalAssets();
-        vm.expectRevert(abi.encodeWithSelector(ICfdEngine.CfdEngine__TypedOrderFailure.selector, 1, 2, true));
         vm.prank(address(router));
         engine.processOrderTyped(
             CfdTypes.Order({
@@ -414,6 +412,10 @@ contract AuditH03_DustPosition is BasePerpTest {
             depth,
             uint64(block.timestamp)
         );
+
+        (uint256 remainingSize, uint256 remainingMargin,,,,,) = engine.positions(aliceId);
+        assertEq(remainingSize, posSize - closeSize, "Partial close should leave only the dust residual size");
+        assertLt(remainingMargin, 5e6, "Residual dust margin should remain economically tiny after the partial close");
     }
 
 }

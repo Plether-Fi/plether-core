@@ -16,14 +16,16 @@ contract AuditFullSecurityFailing_LiquidationFreeUsdc is BasePerpTest {
 
         _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
 
+        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, 1.09e8);
+
         vm.startPrank(address(router));
         engine.liquidatePosition(accountId, 1.09e8, pool.totalAssets(), uint64(block.timestamp));
         vm.stopPrank();
 
         assertEq(
             clearinghouse.balanceUsdc(accountId),
-            796_500_000,
-            "Liquidation should leave only residual equity after consuming free USDC"
+            preview.settlementRetainedUsdc,
+            "Liquidation should leave exactly the previewed residual settlement after consuming free USDC"
         );
     }
 

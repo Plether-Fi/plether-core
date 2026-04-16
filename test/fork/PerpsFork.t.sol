@@ -150,6 +150,12 @@ contract PerpsForkTest is Test {
         clearinghouse.setEngine(address(engine));
         vm.warp(t0 + 144 hours + 3);
 
+        deal(USDC, address(this), 2_000e6);
+        IERC20(USDC).approve(address(pool), 2_000e6);
+        pool.initializeSeedPosition(false, 1_000e6, address(this));
+        pool.initializeSeedPosition(true, 1_000e6, address(this));
+        pool.activateTrading();
+
         // LP deposits $1M to junior tranche
         deal(USDC, lp, 1_000_000e6);
         vm.startPrank(lp);

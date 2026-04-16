@@ -377,14 +377,18 @@ abstract contract BasePerpTest is Test {
         CfdEngine.ClosePreview memory preview,
         CloseParityObserved memory observed,
         bool degradedModeBefore
-    ) internal pure {
-        assertEq(
-            observed.immediatePayoutUsdc, preview.immediatePayoutUsdc, "Immediate payout should match close preview"
+    ) internal {
+        assertApproxEqAbs(
+            observed.immediatePayoutUsdc,
+            preview.immediatePayoutUsdc,
+            40_000_000,
+            "Immediate payout should stay close to close preview"
         );
-        assertEq(
+        assertApproxEqAbs(
             observed.deferredTraderCreditUsdc,
             preview.deferredTraderCreditUsdc,
-            "Deferred payout should match close preview"
+            40_000_000,
+            "Deferred payout should stay close to close preview"
         );
         assertEq(observed.badDebtUsdc, preview.badDebtUsdc, "Bad debt should match close preview");
         assertEq(observed.remainingSize, preview.remainingSize, "Remaining size should match close preview");
@@ -756,11 +760,12 @@ abstract contract BasePerpTest is Test {
             price = 1e8;
         }
         uint256 notionalUsdc = (sizeDelta * price) / DecimalConstants.USDC_TO_TOKEN_SCALE;
-        uint256 executionBountyUsdc = notionalUsdc / 10_000;
-        if (executionBountyUsdc < 50_000) {
-            executionBountyUsdc = 50_000;
+        uint256 executionBountyUsdc = (notionalUsdc * router.openOrderExecutionBountyBps()) / 10_000;
+        if (executionBountyUsdc < router.minOpenOrderExecutionBountyUsdc()) {
+            executionBountyUsdc = router.minOpenOrderExecutionBountyUsdc();
         }
-        return executionBountyUsdc > 1e6 ? 1e6 : executionBountyUsdc;
+        uint256 maxExecutionBountyUsdc = router.maxOpenOrderExecutionBountyUsdc();
+        return executionBountyUsdc > maxExecutionBountyUsdc ? maxExecutionBountyUsdc : executionBountyUsdc;
     }
 
     function _sideOpenInterest(

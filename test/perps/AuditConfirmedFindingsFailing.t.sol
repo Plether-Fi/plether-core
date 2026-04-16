@@ -74,7 +74,7 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
         vm.deal(keeper, 1 ether);
     }
 
-    function test_C1_BatchExecuteShouldRefundUserNotKeeper() public {
+    function test_C1_ExpiredOpenBatchExecutionRefundsUserNotKeeper() public {
         uint256 t0 = 2_000_000_000;
         vm.warp(t0);
         vm.roll(100);
@@ -113,7 +113,7 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
         );
     }
 
-    function test_C1_BatchMixedSuccessOnlyPaysKeeperForSuccessful() public {
+    function test_C1_BatchMixedSuccessDoesNotRewardExpiredOpenFailure() public {
         _fundTrader(alice, 50_000e6);
 
         uint256 t0 = 2_000_000_000;
@@ -152,12 +152,14 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
 
         assertEq(
             _settlementBalance(keeper) - keeperUsdcBefore,
-            firstPending.executionBountyUsdc + secondPending.executionBountyUsdc,
-            "Batch execution should pay the keeper for both expired and successful head orders"
+            400_000,
+            "Batch execution should only compensate the clearer for the successful queued order, not the expired open head"
         );
+        assertGt(firstPending.executionBountyUsdc, 0, "Expired open should still have escrowed a positive bounty");
+        assertGt(secondPending.executionBountyUsdc, 0, "Queued successor open should still have escrowed a positive bounty");
     }
 
-    function test_C1_StaleSingleExecuteShouldRefundUserNotKeeper() public {
+    function test_C1_StaleSingleExecuteRefundsUserNotKeeper() public {
         vm.warp(1000);
 
         mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1000);
@@ -372,7 +374,7 @@ contract AuditConfirmedFindingsFailing_TrancheCooldownGrief is BasePerpTest {
     address alice = address(0xA11CE);
     address attacker = address(0xBAD);
 
-    function test_H1_ThirdPartyDustDepositToExistingHolderMustNotResetVictimCooldown() public {
+    function test_H1_ThirdPartyDustDepositToExistingHolderReverts() public {
         _fundJunior(alice, 100_000e6);
 
         vm.warp(block.timestamp + 50 minutes);
@@ -380,14 +382,9 @@ contract AuditConfirmedFindingsFailing_TrancheCooldownGrief is BasePerpTest {
         usdc.mint(attacker, 1);
         vm.startPrank(attacker);
         usdc.approve(address(juniorVault), 1);
+        vm.expectRevert(TrancheVault.TrancheVault__ThirdPartyDepositForExistingHolder.selector);
         juniorVault.deposit(1, alice);
         vm.stopPrank();
-
-        vm.warp(block.timestamp + 11 minutes);
-        vm.prank(alice);
-        juniorVault.withdraw(100_000e6, alice, alice);
-
-        assertEq(usdc.balanceOf(alice), 100_000e6, "Victim should be able to withdraw after their original cooldown");
     }
 
 }

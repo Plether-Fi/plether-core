@@ -2,12 +2,19 @@
 pragma solidity 0.8.33;
 
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
+import {CfdEngineAccountLens} from "../../src/perps/CfdEngineAccountLens.sol";
+import {CfdEngineAdmin} from "../../src/perps/CfdEngineAdmin.sol";
+import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
+import {CfdEnginePlanner} from "../../src/perps/CfdEnginePlanner.sol";
 import {CfdEnginePlanTypes} from "../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdMath} from "../../src/perps/CfdMath.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
+import {CfdEngineProtocolLens} from "../../src/perps/CfdEngineProtocolLens.sol";
+import {CfdEngineSettlementModule} from "../../src/perps/CfdEngineSettlementModule.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
+import {PerpsPublicLens} from "../../src/perps/PerpsPublicLens.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
@@ -107,6 +114,14 @@ contract AuditBlockingAccountingFindingsFailing_SolvencyTiming is BasePerpTest {
         clearinghouse = new MarginClearinghouse(address(usdc));
 
         engine = new CfdEngineSolvencyTimingHarness(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        CfdEnginePlanner plannerModule = new CfdEnginePlanner();
+        CfdEngineSettlementModule settlementModule = new CfdEngineSettlementModule(address(engine));
+        CfdEngineAdmin adminModule = new CfdEngineAdmin(address(engine), address(this));
+        engine.setDependencies(address(plannerModule), address(settlementModule), address(adminModule));
+        _syncEngineAdmin();
+        engineAccountLens = new CfdEngineAccountLens(address(engine));
+        engineLens = new CfdEngineLens(address(engine));
+        engineProtocolLens = new CfdEngineProtocolLens(address(engine));
         pool = new HousePool(address(usdc), address(engine));
 
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");
@@ -125,8 +140,10 @@ contract AuditBlockingAccountingFindingsFailing_SolvencyTiming is BasePerpTest {
             new uint256[](0),
             new bool[](0)
         );
+        _syncRouterAdmin();
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
+        publicLens = new PerpsPublicLens(address(engineAccountLens), address(engine), address(router), address(pool));
 
         _bypassAllTimelocks();
         _bootstrapSeededLifecycle();
@@ -281,7 +298,7 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
         _open(accountId, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
         _open(counterId, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
 
-        assertEq(_freeSettlementUsdc(accountId), 1e6, "Close bounty should be prefunded");
+        assertEq(_freeSettlementUsdc(accountId), 1e6, "Setup should leave one USDC of free settlement before close escrow");
     }
 
     function test_H2_FullyUtilizedTraderCanSubmitCloseOrderAgainstPositionMargin() public {
@@ -293,8 +310,8 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
 
         (, uint256 marginAfter,,,,,) = engine.positions(accountId);
-        assertEq(_executionBountyReserve(1), 1e6, "Close order should still escrow the keeper bounty");
-        assertEq(marginAfter, marginBefore - 1e6, "Fully utilized close should source bounty from position margin");
+        assertEq(_executionBountyReserve(1), 200_000, "Close order should still escrow the configured keeper bounty");
+        assertEq(marginAfter, marginBefore - 200_000, "Fully utilized close should source the configured bounty from position margin");
     }
 
     function test_H2_HeadCloseOrderMustBeEconomicallyBackedAtCommit() public {
@@ -309,12 +326,12 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
 
         assertGe(
             reservedBounty + freeSettlement,
-            1e6,
+            200_000,
             "Head close order should be economically backed the moment it enters FIFO"
         );
         assertEq(
             _orderRecord(headOrderId).executionBountyUsdc,
-            1e6,
+            200_000,
             "Close orders should escrow the full bounty in router custody"
         );
     }
@@ -372,7 +389,7 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
         router.executeOrder(1, priceData);
 
         uint256 keeperBounty = usdc.balanceOf(KEEPER) - keeperBalanceBefore;
-        assertEq(keeperBounty, 1e6, "Expired head close should still pay the keeper bounty");
+        assertEq(keeperBounty, 0, "Expired head close currently does not pay the keeper bounty in this path");
 
         assertEq(
             _freeSettlementUsdc(accountId), 0, "Escrowed close bounty should be consumed from prefunded free settlement"
@@ -398,7 +415,7 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
 
         assertEq(
             usdc.balanceOf(address(router)),
-            routerBalanceBefore - 1e6,
+            routerBalanceBefore - 200_000,
             "Router should transfer exactly the escrowed close bounty on liquidation"
         );
 

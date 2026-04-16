@@ -32,7 +32,7 @@ contract AuditLatestStateFindingsFailing_QueueEconomics is BasePerpTest {
 
     address attacker = address(0xBAD);
 
-    function test_H1_TinyInvalidCloseBehindQueuedIntentTracksEscrowAndPendingCount() public {
+    function test_H1_TinyInvalidCloseBehindQueuedIntentIsRejectedAtCommit() public {
         bytes32 accountId = bytes32(uint256(uint160(attacker)));
         _fundTrader(attacker, 2e6);
 
@@ -40,17 +40,11 @@ contract AuditLatestStateFindingsFailing_QueueEconomics is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 1, 0, 0, false);
 
         vm.prank(attacker);
+        vm.expectRevert();
         router.commitOrder(CfdTypes.Side.BULL, 1, 0, 0, true);
 
         IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
-        assertEq(escrow.pendingOrderCount, 2, "Async close intent should be queueable behind a pending open");
-        uint256 openBounty = _quoteOpenOrderExecutionBountyUsdc(1);
-        uint256 closeBounty = 1e6;
-        assertEq(
-            escrow.executionBountyUsdc,
-            openBounty + closeBounty,
-            "Both open and close intents should escrow execution bounties"
-        );
+        assertEq(escrow.pendingOrderCount, 1, "Rejected close intent should not be queued behind the pending open");
     }
 
 }
@@ -64,18 +58,16 @@ contract AuditLatestStateFindingsFailing_TrancheCooldownBypass is BasePerpTest {
         return 0;
     }
 
-    function test_M1_SmallThirdPartyTopUpDoesNotRefreshCooldown() public {
+    function test_M1_SmallThirdPartyTopUpForExistingHolderReverts() public {
         _fundJunior(alice, 100_000e6);
         vm.warp(block.timestamp + 1 hours + 1);
 
         usdc.mint(helper, 1000e6);
         vm.startPrank(helper);
         usdc.approve(address(juniorVault), 1000e6);
+        vm.expectRevert(TrancheVault.TrancheVault__ThirdPartyDepositForExistingHolder.selector);
         juniorVault.deposit(1000e6, alice);
         vm.stopPrank();
-
-        vm.prank(alice);
-        juniorVault.withdraw(101_000e6, alice, alice);
     }
 
 }

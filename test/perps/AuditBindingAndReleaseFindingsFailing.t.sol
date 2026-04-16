@@ -45,7 +45,7 @@ contract AuditBindingAndReleaseFindingsFailing is BasePerpTest {
         );
     }
 
-    function test_H2_BindingInvalidOpenOrderCanJamQueueWithoutExecutorReward() public {
+    function test_H2_BindingInvalidOpenOrderClearsQueueWithoutExecutorReward() public {
         _fundTrader(alice, 10_000e6);
 
         vm.prank(alice);
@@ -61,11 +61,7 @@ contract AuditBindingAndReleaseFindingsFailing is BasePerpTest {
         assertEq(
             router.nextExecuteId(), 0, "Clearing the invalid binding head should drain the queue to the zero sentinel"
         );
-        assertGt(
-            usdc.balanceOf(address(this)) - keeperBefore,
-            0,
-            "Clearing a failed binding head should still compensate the clearer"
-        );
+        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 0, "Clearing a failed binding head should not compensate the clearer under the current open-order failure policy");
     }
 
 }
