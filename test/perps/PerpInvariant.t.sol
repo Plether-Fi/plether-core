@@ -333,7 +333,7 @@ contract PerpInvariantTest is BasePerpTest {
     }
 
     function invariant_ClearinghouseBalanceMatchesTrackedAccounts() public view {
-        uint256 trackedBalances;
+        uint256 trackedBalances = clearinghouse.balanceUsdc(bytes32(uint256(uint160(address(handler)))));
         for (uint256 i = 0; i < 3; i++) {
             bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
             trackedBalances += clearinghouse.balanceUsdc(accountId);

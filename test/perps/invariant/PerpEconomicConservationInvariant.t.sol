@@ -51,7 +51,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
     }
 
     function invariant_ClearinghouseCustodyMatchesTrackedAccountBalances() public view {
-        uint256 trackedBalances;
+        uint256 trackedBalances = clearinghouse.balanceUsdc(_accountId(address(handler)));
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             trackedBalances += clearinghouse.balanceUsdc(_accountId(handler.actorAt(i)));
         }
@@ -165,7 +165,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
     }
 
     function invariant_TrackedAccountLedgerTotalsMatchProtocolCustodyAndObligations() public view {
-        uint256 totalSettlementUsdc;
+        uint256 totalSettlementUsdc = engineAccountLens.getAccountLedgerView(_accountId(address(handler))).settlementBalanceUsdc;
         uint256 totalExecutionEscrowUsdc;
         uint256 totalDeferredTraderCreditUsdc;
 
