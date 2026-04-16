@@ -51,7 +51,8 @@ library OracleFreshnessPolicyLib {
             return policy;
         }
 
-        policy.maxStaleness = oracleFrozen ? fadMaxStaleness : _effectiveLiveMarkLimit(engineMarkStalenessLimit, poolMarkStalenessLimit);
+        policy.maxStaleness =
+            oracleFrozen ? fadMaxStaleness : _effectiveLiveMarkLimit(engineMarkStalenessLimit, poolMarkStalenessLimit);
     }
 
     function isStale(

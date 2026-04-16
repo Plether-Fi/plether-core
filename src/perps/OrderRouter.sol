@@ -41,7 +41,6 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, IOrderRouterAdminHost
     uint256 internal constant MAX_PENDING_ORDERS = 5;
 
     uint64 public globalTailOrderId;
-
     error OrderRouter__ZeroSize();
     error OrderRouter__OracleValidation(uint8 code);
     error OrderRouter__QueueState(uint8 code);
@@ -82,6 +81,9 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, IOrderRouterAdminHost
     ) OrderOracleExecution(_engine, _engineLens, _vault, _pyth, _feedIds, _quantities, _basePrices, _inversions) {
         admin = address(new OrderRouterAdmin(address(this), msg.sender));
         maxOrderAge = DEFAULT_MAX_ORDER_AGE;
+        if (_engine.code.length > 0) {
+            USDC.forceApprove(_engine, type(uint256).max);
+        }
     }
 
     function _revertZeroAddress() internal pure override {
@@ -531,27 +533,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, IOrderRouterAdminHost
         bytes32 accountId,
         uint256 executionBountyUsdc
     ) internal override {
-        bool hasFreshCarryCheckpointMark = _hasFreshCarryCheckpointMark();
-        uint256 freeSettlementUsdc =
-            MarginClearinghouseAccountingLib.getFreeSettlementUsdc(clearinghouse.getAccountUsdcBuckets(accountId));
-        uint256 freeBackedBountyUsdc =
-            freeSettlementUsdc > executionBountyUsdc ? executionBountyUsdc : freeSettlementUsdc;
-        if (freeBackedBountyUsdc > 0) {
-            if (hasFreshCarryCheckpointMark) {
-                clearinghouse.seizeUsdc(accountId, freeBackedBountyUsdc, address(this));
-            } else {
-                clearinghouse.reserveStaleCloseExecutionBountyFromSettlement(
-                    accountId, freeBackedBountyUsdc, address(this)
-                );
-            }
-        }
-
-        uint256 marginBackedBountyUsdc = executionBountyUsdc - freeBackedBountyUsdc;
-        if (marginBackedBountyUsdc == 0) {
-            return;
-        }
-
-        try engine.reserveCloseOrderExecutionBounty(accountId, marginBackedBountyUsdc, address(this)) {}
+        try engine.reserveCloseOrderExecutionBounty(accountId, executionBountyUsdc, address(this)) {}
         catch {
             _revertCommitValidation(6);
         }

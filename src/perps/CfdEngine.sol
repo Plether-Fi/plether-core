@@ -626,8 +626,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         }
 
         StoredPosition storage pos = _positions[accountId];
-        uint256 positionMarginUsdc = _positionMarginBucketUsdc(accountId);
-        if (pos.size == 0 || positionMarginUsdc < amountUsdc) {
+        if (pos.size == 0) {
             revert CfdEngine__InsufficientCloseOrderBountyBacking();
         }
 
@@ -652,6 +651,19 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
             revert CfdEngine__InsufficientCloseOrderBountyBacking();
         }
 
+        if (priceFresh) {
+            _realizeCarryFromSettlement(accountId, pos, price, _genericReachableCollateralUsdc(accountId));
+        }
+
+        uint256 positionMarginUsdc = _positionMarginBucketUsdc(accountId);
+        uint256 freeSettlementUsdc =
+            MarginClearinghouseAccountingLib.getFreeSettlementUsdc(clearinghouse.getAccountUsdcBuckets(accountId));
+        uint256 freeBackedBountyUsdc = freeSettlementUsdc > amountUsdc ? amountUsdc : freeSettlementUsdc;
+        uint256 marginBackedBountyUsdc = amountUsdc - freeBackedBountyUsdc;
+        if (positionMarginUsdc < marginBackedBountyUsdc) {
+            revert CfdEngine__InsufficientCloseOrderBountyBacking();
+        }
+
         uint256 reachableUsdc = _genericReachableCollateralUsdc(accountId);
         if (reachableUsdc < amountUsdc) {
             revert CfdEngine__InsufficientCloseOrderBountyBacking();
@@ -660,7 +672,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         uint256 postReservationReachableUsdc = reachableUsdc - amountUsdc;
 
         CfdTypes.Position memory positionAfter = _loadPosition(accountId);
-        positionAfter.margin = positionMarginUsdc - amountUsdc;
+        positionAfter.margin = positionMarginUsdc - marginBackedBountyUsdc;
         uint256 pendingCarryUsdc =
             _totalPendingCarryUsdc(accountId, positionAfter, price, postReservationReachableUsdc, block.timestamp);
         PositionRiskAccountingLib.PositionRiskState memory riskState =
@@ -676,11 +688,23 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
             revert CfdEngine__InsufficientCloseOrderBountyBacking();
         }
 
-        _syncTotalSideMargin(pos.side, positionMarginUsdc, positionMarginUsdc - amountUsdc);
+        _syncTotalSideMargin(pos.side, positionMarginUsdc, positionMarginUsdc - marginBackedBountyUsdc);
+        if (freeBackedBountyUsdc > 0) {
+            if (priceFresh) {
+                clearinghouse.reserveCloseExecutionBountyFromSettlement(accountId, freeBackedBountyUsdc, recipient);
+            } else {
+                clearinghouse.reserveStaleCloseExecutionBountyFromSettlement(accountId, freeBackedBountyUsdc, recipient);
+            }
+        }
+        if (marginBackedBountyUsdc == 0) {
+            return;
+        }
         if (priceFresh) {
-            clearinghouse.seizePositionMarginUsdc(accountId, amountUsdc, recipient);
+            clearinghouse.seizePositionMarginUsdc(accountId, marginBackedBountyUsdc, recipient);
         } else {
-            clearinghouse.reserveStaleCloseExecutionBountyFromPositionMargin(accountId, amountUsdc, recipient);
+            clearinghouse.reserveStaleCloseExecutionBountyFromPositionMargin(
+                accountId, marginBackedBountyUsdc, recipient
+            );
         }
     }
 

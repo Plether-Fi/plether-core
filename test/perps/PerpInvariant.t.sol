@@ -612,8 +612,8 @@ contract PerpInvariantTest is BasePerpTest {
     }
 
     function invariant_WithdrawalReserveIncludesDeferredLiabilities() public view {
-        uint256 expectedReserved = _maxLiability() + engine.accumulatedFeesUsdc() + engine.totalDeferredTraderCreditUsdc()
-            + engine.totalDeferredKeeperCreditUsdc();
+        uint256 expectedReserved = _maxLiability() + engine.accumulatedFeesUsdc()
+            + engine.totalDeferredTraderCreditUsdc() + engine.totalDeferredKeeperCreditUsdc();
 
         expectedReserved += uint256(0);
 

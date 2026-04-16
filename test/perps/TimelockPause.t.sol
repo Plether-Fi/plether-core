@@ -21,6 +21,7 @@ contract TimelockPauseTest is BasePerpTest {
 
     address alice = address(0x111);
     address nonOwner = address(0xBAD);
+    address pauser = address(0xCAFE);
 
     function _initialSeniorDeposit() internal pure override returns (uint256) {
         return 500_000 * 1e6;
@@ -351,6 +352,24 @@ contract TimelockPauseTest is BasePerpTest {
         routerAdmin.pause();
     }
 
+    function test_SetPauser_OnlyOwner() public {
+        vm.prank(nonOwner);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
+        routerAdmin.setPauser(pauser);
+    }
+
+    function test_Pauser_CanPauseRouter_ButNotUnpause() public {
+        routerAdmin.setPauser(pauser);
+
+        vm.prank(pauser);
+        routerAdmin.pause();
+        assertTrue(routerAdmin.paused());
+
+        vm.prank(pauser);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, pauser));
+        routerAdmin.unpause();
+    }
+
     function test_Unpause_RestoresCommitOrder() public {
         routerAdmin.pause();
 
@@ -415,8 +434,26 @@ contract TimelockPauseTest is BasePerpTest {
 
     function test_HousePool_Pause_OnlyOwner() public {
         vm.prank(nonOwner);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
+        vm.expectRevert(HousePool.HousePool__UnauthorizedPauser.selector);
         pool.pause();
+    }
+
+    function test_HousePool_SetPauser_OnlyOwner() public {
+        vm.prank(nonOwner);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
+        pool.setPauser(pauser);
+    }
+
+    function test_HousePool_Pauser_CanPause_ButNotUnpause() public {
+        pool.setPauser(pauser);
+
+        vm.prank(pauser);
+        pool.pause();
+        assertTrue(pool.paused());
+
+        vm.prank(pauser);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, pauser));
+        pool.unpause();
     }
 
     function test_HousePool_Unpause_RestoresDeposits() public {

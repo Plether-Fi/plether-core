@@ -4,6 +4,10 @@ pragma solidity 0.8.33;
 /// @notice Administrative surface for perps configuration, emergency controls, and one-time setup.
 interface IPerpsAdmin {
 
+    function setPauser(
+        address newPauser
+    ) external;
+
     function pause() external;
 
     function unpause() external;

@@ -78,7 +78,10 @@ contract MockMarginReservationRouter {
 
     mapping(bytes32 => uint64[]) internal reservationIdsByAccount;
 
-    function setMarginReservationIds(bytes32 accountId, uint64[] calldata orderIds) external {
+    function setMarginReservationIds(
+        bytes32 accountId,
+        uint64[] calldata orderIds
+    ) external {
         delete reservationIdsByAccount[accountId];
         for (uint256 i = 0; i < orderIds.length; ++i) {
             reservationIdsByAccount[accountId].push(orderIds[i]);
@@ -134,7 +137,8 @@ contract MarginClearinghouseAccountingHarness {
         uint256 protectedLockedMarginUsdc,
         uint256 lossUsdc
     ) external pure returns (MarginClearinghouseAccountingLib.SettlementConsumption memory) {
-        return MarginClearinghouseAccountingLib.planTerminalLossConsumption(buckets, protectedLockedMarginUsdc, lossUsdc);
+        return
+            MarginClearinghouseAccountingLib.planTerminalLossConsumption(buckets, protectedLockedMarginUsdc, lossUsdc);
     }
 
     function planLiquidationResidual(
@@ -488,7 +492,8 @@ contract MarginClearinghouseTest is Test {
         clearinghouse.releaseOrderReservation(72);
 
         IMarginClearinghouse.OrderReservation memory second = clearinghouse.getOrderReservation(72);
-        IMarginClearinghouse.AccountReservationSummary memory summary = clearinghouse.getAccountReservationSummary(aliceId);
+        IMarginClearinghouse.AccountReservationSummary memory summary =
+            clearinghouse.getAccountReservationSummary(aliceId);
         assertEq(uint256(second.status), uint256(IMarginClearinghouse.ReservationStatus.Released));
         assertEq(summary.activeReservationCount, 0, "All terminal reservations should clear the active summary");
     }
@@ -848,7 +853,9 @@ contract MarginClearinghouseTest is Test {
         } else {
             int256 netMarginChangeUsdc = clearinghouse.applyOpenCost(aliceId, marginDeltaUsdc, tradeCostUsdc, engine);
             IMarginClearinghouse.AccountUsdcBuckets memory bucketsAfter = clearinghouse.getAccountUsdcBuckets(aliceId);
-            assertEq(netMarginChangeUsdc, plan.netMarginChangeUsdc, "Live open-cost net margin change should match plan");
+            assertEq(
+                netMarginChangeUsdc, plan.netMarginChangeUsdc, "Live open-cost net margin change should match plan"
+            );
             assertEq(
                 bucketsAfter.settlementBalanceUsdc,
                 plan.resultingSettlementBalanceUsdc,
@@ -889,7 +896,9 @@ contract MarginClearinghouseTest is Test {
 
         IMarginClearinghouse.AccountUsdcBuckets memory bucketsAfter = clearinghouse.getAccountUsdcBuckets(aliceId);
         IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(31);
-        assertEq(seizedUsdc, plan.totalConsumedUsdc, "Close loss seized amount should match planned terminal consumption");
+        assertEq(
+            seizedUsdc, plan.totalConsumedUsdc, "Close loss seized amount should match planned terminal consumption"
+        );
         assertEq(shortfallUsdc, plan.uncoveredUsdc, "Close loss shortfall should match planned terminal consumption");
         assertEq(
             bucketsAfter.settlementBalanceUsdc,
@@ -922,17 +931,19 @@ contract MarginClearinghouseTest is Test {
             accountingHarness.planLiquidationResidual(bucketsBefore, int256(200 * 1e6));
         uint64[] memory reservationIds = new uint64[](1);
         reservationIds[0] = 41;
-        IMarginClearinghouse.LiquidationSettlementPlan memory settlementPlan = IMarginClearinghouse.LiquidationSettlementPlan({
-            settlementRetainedUsdc: plan.settlementRetainedUsdc,
-            settlementSeizedUsdc: plan.settlementSeizedUsdc,
-            freshTraderPayoutUsdc: plan.freshTraderPayoutUsdc,
-            badDebtUsdc: plan.badDebtUsdc,
-            positionMarginUnlockedUsdc: plan.mutation.positionMarginUnlockedUsdc,
-            otherLockedMarginUnlockedUsdc: plan.mutation.otherLockedMarginUnlockedUsdc
-        });
+        IMarginClearinghouse.LiquidationSettlementPlan memory settlementPlan =
+            IMarginClearinghouse.LiquidationSettlementPlan({
+                settlementRetainedUsdc: plan.settlementRetainedUsdc,
+                settlementSeizedUsdc: plan.settlementSeizedUsdc,
+                freshTraderPayoutUsdc: plan.freshTraderPayoutUsdc,
+                badDebtUsdc: plan.badDebtUsdc,
+                positionMarginUnlockedUsdc: plan.mutation.positionMarginUnlockedUsdc,
+                otherLockedMarginUnlockedUsdc: plan.mutation.otherLockedMarginUnlockedUsdc
+            });
 
         vm.prank(engine);
-        uint256 seizedUsdc = clearinghouse.applyLiquidationSettlementPlan(aliceId, reservationIds, settlementPlan, engine);
+        uint256 seizedUsdc =
+            clearinghouse.applyLiquidationSettlementPlan(aliceId, reservationIds, settlementPlan, engine);
 
         IMarginClearinghouse.AccountUsdcBuckets memory bucketsAfter = clearinghouse.getAccountUsdcBuckets(aliceId);
         IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(41);

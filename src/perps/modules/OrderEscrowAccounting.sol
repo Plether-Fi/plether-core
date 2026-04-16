@@ -158,6 +158,8 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
             return _collectExecutionBounty(orderId, executionPrice, oraclePublishTime);
         } else if (failedPolicy == 2) {
             _refundExecutionBounty(orderId, executionPrice, oraclePublishTime);
+        } else if (failedPolicy == 3) {
+            _forfeitExecutionBountyToProtocol(orderId);
         }
         return 0;
     }
@@ -194,6 +196,19 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
         engine.creditKeeperExecutionBounty(
             address(uint160(uint256(record.core.accountId))), bounty, executionPrice, oraclePublishTime
         );
+    }
+
+    function _forfeitExecutionBountyToProtocol(
+        uint64 orderId
+    ) internal {
+        OrderRecord storage record = _orderRecord(orderId);
+        uint256 bounty = record.executionBountyUsdc;
+        if (bounty == 0) {
+            return;
+        }
+
+        record.executionBountyUsdc = 0;
+        engine.absorbRouterCancellationFee(bounty);
     }
 
     function _releaseCommittedMargin(

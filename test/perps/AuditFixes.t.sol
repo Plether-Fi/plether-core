@@ -16,9 +16,8 @@ contract AuditFixesTest is BasePerpTest {
         _fundTrader(trader, 100_000e6);
         _open(accountId, CfdTypes.Side.BULL, 100_000e18, 50_000e6, 1e8);
 
-        stdstore.target(address(engine)).sig("unsettledCarryUsdc(bytes32)").with_key(accountId).checked_write(
-            uint256(10e6)
-        );
+        stdstore.target(address(engine)).sig("unsettledCarryUsdc(bytes32)").with_key(accountId)
+            .checked_write(uint256(10e6));
 
         _close(accountId, CfdTypes.Side.BULL, 100_000e18, 1e8);
 
@@ -36,9 +35,8 @@ contract AuditFixesTest is BasePerpTest {
         vm.prank(trader);
         clearinghouse.withdraw(accountId, 8000e6);
 
-        stdstore.target(address(engine)).sig("unsettledCarryUsdc(bytes32)").with_key(accountId).checked_write(
-            uint256(1e6)
-        );
+        stdstore.target(address(engine)).sig("unsettledCarryUsdc(bytes32)").with_key(accountId)
+            .checked_write(uint256(1e6));
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(195_000_000));

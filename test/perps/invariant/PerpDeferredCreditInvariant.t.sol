@@ -43,7 +43,9 @@ contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
             uint256 deferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(accountId);
             uint256 deferredKeeperCreditUsdc = engine.deferredKeeperCreditUsdc(address(handler));
 
-            assertEq(status.deferredTraderCreditUsdc, deferredTraderCreditUsdc, "Deferred payout status amount mismatch");
+            assertEq(
+                status.deferredTraderCreditUsdc, deferredTraderCreditUsdc, "Deferred payout status amount mismatch"
+            );
             assertEq(
                 status.traderPayoutClaimableNow,
                 deferredTraderCreditUsdc > 0 && anyLiquidity,
@@ -58,7 +60,9 @@ contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
             totalDeferredTraderCreditUsdc += deferredTraderCreditUsdc;
         }
 
-        assertEq(totalDeferredTraderCreditUsdc, engine.totalDeferredTraderCreditUsdc(), "Total deferred payout mismatch");
+        assertEq(
+            totalDeferredTraderCreditUsdc, engine.totalDeferredTraderCreditUsdc(), "Total deferred payout mismatch"
+        );
     }
 
     function invariant_GhostDeferredTraderCreditsRemainFullyModelDerived() public view {
@@ -70,7 +74,9 @@ contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
             uint256 liveDeferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(accountId);
 
             assertEq(
-                ghostDeferredTraderCreditUsdc, liveDeferredTraderCreditUsdc, "Ghost deferred trader credit must match engine state"
+                ghostDeferredTraderCreditUsdc,
+                liveDeferredTraderCreditUsdc,
+                "Ghost deferred trader credit must match engine state"
             );
             ghostTotalDeferredTraderCreditUsdc += ghostDeferredTraderCreditUsdc;
         }
@@ -81,7 +87,9 @@ contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
             "Ghost deferred payout total must match tracked account sum"
         );
         assertEq(
-            engine.totalDeferredTraderCreditUsdc(), ghostTotalDeferredTraderCreditUsdc, "Engine deferred payout total mismatch"
+            engine.totalDeferredTraderCreditUsdc(),
+            ghostTotalDeferredTraderCreditUsdc,
+            "Engine deferred payout total mismatch"
         );
     }
 
@@ -132,7 +140,8 @@ contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
             CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, oraclePrice);
-            uint256 freshDeferredTraderCreditUsdc = preview.deferredTraderCreditUsdc > preview.existingDeferredRemainingUsdc
+            uint256 freshDeferredTraderCreditUsdc = preview.deferredTraderCreditUsdc
+                > preview.existingDeferredRemainingUsdc
                 ? preview.deferredTraderCreditUsdc - preview.existingDeferredRemainingUsdc
                 : 0;
             uint256 totalFreshPayoutUsdc = preview.immediatePayoutUsdc + freshDeferredTraderCreditUsdc;

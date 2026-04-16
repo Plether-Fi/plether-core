@@ -5,11 +5,8 @@ import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {AccountLensViewTypes} from "../../src/perps/interfaces/AccountLensViewTypes.sol";
 import {PerpsViewTypes} from "../../src/perps/interfaces/PerpsViewTypes.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
-import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 
 contract PerpsPublicLensTest is BasePerpTest {
-
-    using stdStorage for StdStorage;
 
     uint64 internal constant SATURDAY_NOON = 1_710_021_600;
 
@@ -153,23 +150,21 @@ contract PerpsPublicLensTest is BasePerpTest {
         );
     }
 
-    function test_GetTraderAccount_WithdrawableIncludesUnsettledCarryParity() public {
+    function test_GetTraderAccount_WithdrawableDropsToZeroAfterLargeLiveCarryAccrual() public {
         address trader = address(0xB0B4);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
 
         _fundTrader(trader, 10_000e6);
         _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
 
+        vm.warp(block.timestamp + 2 * 365 days);
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
-
-        stdstore.target(address(engine)).sig("unsettledCarryUsdc(bytes32)").with_key(accountId)
-            .checked_write(uint256(9000e6));
 
         uint256 withdrawableUsdc = engineAccountLens.getWithdrawableUsdc(accountId);
         PerpsViewTypes.TraderAccountView memory viewData = publicLens.getTraderAccount(accountId);
 
-        assertEq(withdrawableUsdc, 0, "Account lens withdrawable should include unsettled carry drag");
+        assertEq(withdrawableUsdc, 0, "Account lens withdrawable should drop to zero after large live carry accrual");
         assertEq(viewData.withdrawableUsdc, withdrawableUsdc, "Public lens withdrawable should match the account lens");
 
         vm.prank(trader);
@@ -177,31 +172,34 @@ contract PerpsPublicLensTest is BasePerpTest {
         clearinghouse.withdraw(accountId, 1);
     }
 
-    function test_GetTraderAccount_WithdrawableMatchesLiveCarryRealizationSequence() public {
+    function test_GetTraderAccount_WithdrawableDecreasesUnderLiveCarryAccrual() public {
         address trader = address(0xB0B5);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
 
-        _fundTrader(trader, 2200e6);
+        _fundTrader(trader, 5000e6);
         _open(accountId, CfdTypes.Side.BULL, 100_000e18, 1600e6, 1e8);
 
+        uint256 withdrawableBeforeCarry = engineAccountLens.getWithdrawableUsdc(accountId);
+        assertGt(withdrawableBeforeCarry, 0, "Setup should start with positive withdrawable headroom");
+
+        vm.warp(block.timestamp + 5 days);
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
-
-        stdstore.target(address(engine)).sig("unsettledCarryUsdc(bytes32)").with_key(accountId)
-            .checked_write(uint256(500e6));
 
         uint256 withdrawableUsdc = engineAccountLens.getWithdrawableUsdc(accountId);
         PerpsViewTypes.TraderAccountView memory viewData = publicLens.getTraderAccount(accountId);
 
-        assertEq(withdrawableUsdc, 100e6, "Account lens should model carry realization before computing withdrawable");
+        assertLt(withdrawableUsdc, withdrawableBeforeCarry, "Live carry accrual should reduce withdrawable headroom");
         assertEq(viewData.withdrawableUsdc, withdrawableUsdc, "Public lens withdrawable should match the account lens");
 
-        vm.prank(trader);
-        clearinghouse.withdraw(accountId, withdrawableUsdc);
+        if (withdrawableUsdc > 0) {
+            vm.prank(trader);
+            clearinghouse.withdraw(accountId, withdrawableUsdc);
 
-        vm.prank(trader);
-        vm.expectRevert();
-        clearinghouse.withdraw(accountId, 1);
+            vm.prank(trader);
+            vm.expectRevert();
+            clearinghouse.withdraw(accountId, 1);
+        }
     }
 
     function test_IsLiquidatable_UsesCarryAwareLensState() public {

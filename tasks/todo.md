@@ -33,6 +33,33 @@ Review:
 - Updated the shared perps test harnesses to track `engineAdmin`, rewired focused governance/timelock assertions to use the new module, and cleaned up standalone tests that instantiate fresh engines outside `BasePerpTest`.
 - Updated `src/perps/README.md` and `src/perps/SECURITY.md` so the docs no longer claim the engine itself holds the timelock workflow.
 - Verified with `forge build --skip test --sizes`, which now reports `CfdEngine` runtime size `23,527` bytes and `CfdEngineAdmin` runtime size `4,841` bytes. `CfdEngine` is back under the EIP-170 `24,576` byte limit. Focused coverage also passed with `forge test --match-path test/perps/TimelockPause.t.sol`, `forge test --match-path test/perps/CfdEngine.t.sol --match-test "test_CheckWithdraw_UsesMinimumOfEngineAndPoolMarkStalenessLimits|helper_CheckWithdrawParity_NoCarryProjectionWithoutPriorSync|test_CheckWithdraw_UsesExplicitInitMarginBps|test_SyncState_DoesNotAdvanceOnFrozenMarkPastFadMaxStaleness|test_ProtocolAccounting_DoesNotProjectCarryFromFrozenMarkPastFadMaxStaleness"`, and `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_Admin_AddFadDay|test_Admin_RemoveFadDay|test_Admin_SetFadMaxStaleness|test_Admin_SetFadMaxStaleness_ZeroReverts|test_Admin_AddFadDays_NonOwner_Reverts|test_Runway_SetFadRunway|test_OrderExecution_UsesRouterExecutionStalenessLimit_NotPoolMarkLimit"`.
+- [x] Patch router oracle prep to apply frozen-market freshness before basket resolution
+- [x] Add focused frozen-market regressions for mark refresh and liquidation
+- [x] Run targeted Forge verification for the new frozen-market coverage
+
+Review:
+- Updated `src/perps/modules/OrderOracleExecution.sol` so order execution, mark refresh, and liquidation all derive frozen-window freshness before calling `_resolveOraclePrice(...)`, and they now use that same dynamic bound for cross-feed publish-time divergence as well.
+- Added a focused frozen mark-refresh regression in `test/perps/OrderRouter.t.sol` and strengthened the existing frozen liquidation regression to assert the stale Friday publish time is accepted and stored during the Saturday frozen window.
+- Restored the local test harnesses in `test/perps/OrderRouter.t.sol` after the router oracle extraction by inlining the basket/normalization helpers they used to reach through the old internal functions.
+- Verified green with `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_FadWindow_(Liquidation_AcceptsStalePrice|MarkRefresh_AcceptsStaleFridayPrice)"`.
+
+- [x] Add a real `HousePool`/`TrancheVault` invariant harness covering seed lifecycle, trading activation, ordinary LP deposits/withdrawals, share cooldown transfer semantics, seed-floor preservation, and tranche/principal parity
+- [ ] Add governance/timelock invariants for `CfdEngine`, `OrderRouter`, and `HousePool` covering propose/finalize/cancel/pause state machines
+- [x] Add real-router oracle invariants covering mark refresh, publish-time monotonicity, staleness windows, and Pyth ETH refund accounting
+- [ ] Add multi-keeper isolation invariants for deferred keeper credit and stranded ETH claims
+
+Review:
+- Coverage gap backlog from the perps invariant sweep:
+- The focused invariant suites under `test/perps/invariant/` are strong on engine/router accounting, queue bookkeeping, preview parity, and deferred-credit conservation.
+- The largest remaining blind spot is that those suites run against `MockInvariantVault`, so they do not stress the real `HousePool`/`TrancheVault` lifecycle and share-accounting state machine.
+- Implemented `test/perps/invariant/PerpHousePoolLifecycleInvariant.t.sol`, a real-stack invariant harness on `BasePerpTest` that fuzzes seed initialization, trading activation, pool pause/unpause, tranche deposits, withdrawals, redeems, share transfers, time passage, and excess accounting against the actual `HousePool` and `TrancheVault` contracts.
+- The first property set proves lifecycle-flag consistency, seed-floor preservation, positive deposit capacity only during an active lifecycle, reconcile-first withdraw bounds for both tranches, raw-assets/excess accounting parity, and cooldown timestamp propagation across share transfers.
+- Verified green with `forge test --match-path test/perps/invariant/PerpHousePoolLifecycleInvariant.t.sol`.
+- Implemented `test/perps/invariant/PerpOraclePathInvariant.t.sol`, which deploys a real `OrderRouter` against `MockPyth` and fuzzes order-execution/liquidation staleness-limit updates, real mark refresh attempts, stale/divergent publish-time rejection, out-of-order publish-time rejection, overpaid Pyth-fee refunds, and stranded-ETH claims.
+- The oracle properties prove that engine mark state matches the last successful refresh, router ETH custody equals tracked stranded refunds, and both live staleness limits remain positive under timelocked admin updates.
+- Made a minimal compile fix in `src/perps/modules/OrderExecutionOrchestrator.sol` so `_revertOraclePublishTimeOutOfOrder()` correctly overrides the declaration inherited from `OrderOracleExecution`.
+- Verified green with `forge test --match-path test/perps/invariant/PerpOraclePathInvariant.t.sol`.
+- The next highest-value additions after that are admin/timelock invariants, followed by multi-keeper isolation checks.
 
 - [x] Rename deferred clearer bounty surfaces to deferred keeper credit across engine, views, tests, and docs
 - [x] Collapse deferred liability increment/claim bookkeeping into shared helpers for trader payout and keeper credit
@@ -1362,3 +1389,28 @@ Review:
 - Updated the invariant mock vault plus the HousePool/audit tests to use the new claimant-inflow enums, keeping recap/revenue semantics explicit without exposing routing mechanics as a first-class API.
 - Updated `src/perps/README.md`, `PRE_AUDIT_GUIDE.md`, `INTERNAL_ARCHITECTURE_MAP.md`, and `ACCOUNTING_SPEC.md` so the documentation now describes the simplified inflow model consistently.
 - Verified green with `forge test --match-path test/perps/HousePool.t.sol --match-test "test_(RecordImplicitTradingRevenue_RestoresSeededSeniorBeforeJuniorWhenBothAreZero|Reconcile_RestoresSeededClaimantsBeforeUnassignedWhenClaimedEquityZero|SeniorPrincipal_RestoredBeforeJuniorSurplus)"`, `forge test --match-path test/perps/CfdEngine.t.sol --match-test "test_Liquidation_ClawsBackDepthManipulatedVpiRebate_EndToEnd"`, and `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_(OrderRefund_DoesNotRevertWhenRouterLimitExceedsEngineHelperLimit|BatchExecution_SuccessfulOrdersEndExecuted)"`.
+- [x] Start `OrderRouter` size reduction by extracting shared oracle execution prep into `OrderOracleExecution`
+
+Review:
+- Extracted the repeated order-execution, mark-refresh, and liquidation oracle-preparation boilerplate into `src/perps/modules/OrderOracleExecution.sol` via `_prepareOrderExecutionOracle(...)`, `_prepareMarkRefreshOracle(...)`, and `_prepareLiquidationOracle(...)`.
+- Slimmed `src/perps/OrderRouter.sol` so the four entrypoints now delegate their oracle resolution, staleness validation, mark monotonicity checks, CAP clamping, and mark updates to the module before continuing with queue/liquidation orchestration.
+- Verified green with `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_BatchExecution_MixedResults|test_BasketPrice_RevertsWhenFeedPublishTimesDivergeTooFar|test_ExecuteLiquidation_CreditsImmediateKeeperBountyToClearinghouse|test_ExecuteLiquidation_DefersKeeperCreditPerPreviewWhenVaultPayoutFails"`.
+- Measured `OrderRouter` deployed runtime size at `27,342` bytes via `forge inspect src/perps/OrderRouter.sol:OrderRouter deployedBytecode`, down slightly from the prior `27,386`-byte baseline. This confirms the abstraction is behavior-safe but that the next meaningful reduction likely requires moving heavier oracle/runtime code across a real external call boundary rather than just inherited internal helpers.
+- [x] Start `commitOrder` runtime-size reduction in `OrderRouter`
+
+Review:
+- Tightened `src/perps/OrderRouter.sol`'s `commitOrder(...)` without changing its external surface: the open path now computes the commit reference price once and reuses it for both the predictable-open prefilter and the open-order bounty quote.
+- Folded the pending-order cap check into the final `pendingOrderCounts[accountId]` increment, removing the separate precheck branch while preserving revert semantics via full-transaction rollback.
+- Verified green with `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_CommitOrder_RevertsWhenPendingOrderCountHitsCap|test_CommitOrder_RevertsOnPredictableInsufficientInitialMargin|test_CommitOrder_RevertsOnPredictableMustCloseOpposing|test_CommitOrder_RevertsOnPredictablePositionTooSmall|test_CommitOrder_DoesNotUseStaleCachedMarkForPredictableOpenPrefilter|test_CommitOrder_RevertsOnPredictableSkewInvalidation|test_CommitOrder_RevertsOnPredictableSolvencyInvalidation"`.
+- Measured `OrderRouter` deployed runtime size at `27,304` bytes via `forge inspect src/perps/OrderRouter.sol:OrderRouter deployedBytecode`, down `38` bytes from the prior `27,342`-byte baseline. `commitOrder` is therefore a real but weak size lever compared with the remaining larger targets.
+- [ ] Add a dedicated perps pauser role to `OrderRouter` and `HousePool`
+- [ ] Cover pauser assignment and pause authorization with focused Forge tests
+- [ ] Update perps admin docs/interfaces for the new emergency role split
+- [x] Add a dedicated perps pauser role to `OrderRouter` and `HousePool`
+- [x] Cover pauser assignment and pause authorization with focused Forge tests
+- [x] Update perps admin docs/interfaces for the new emergency role split
+
+Review:
+- Added owner-assigned `pauser` storage, `setPauser(...)`, and `onlyPauserOrOwner` pause gating to `src/perps/OrderRouter.sol` and `src/perps/HousePool.sol`, while keeping `unpause()` owner-only.
+- Extended `src/perps/interfaces/IPerpsAdmin.sol` and the perps docs so the emergency-role split is explicit: owner assigns the pauser, both owner and pauser can trigger `pause()`, and only owner can resume.
+- Verified green with `forge test --match-path test/perps/TimelockPause.t.sol`.

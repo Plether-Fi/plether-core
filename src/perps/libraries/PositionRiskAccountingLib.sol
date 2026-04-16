@@ -14,6 +14,12 @@ library PositionRiskAccountingLib {
         bool liquidatable;
     }
 
+    function _vpiClawbackUsdc(
+        int256 vpiAccrued
+    ) private pure returns (uint256) {
+        return vpiAccrued < 0 ? uint256(-vpiAccrued) : 0;
+    }
+
     function computeLpBackedNotionalUsdc(
         uint256 size,
         uint256 price,
@@ -43,7 +49,8 @@ library PositionRiskAccountingLib {
     ) internal pure returns (PositionRiskState memory state) {
         (bool isProfit, uint256 pnlAbs) = CfdMath.calculatePnL(pos, price, capPrice);
         state.unrealizedPnlUsdc = isProfit ? int256(pnlAbs) : -int256(pnlAbs);
-        state.equityUsdc = int256(reachableCollateralUsdc) + state.unrealizedPnlUsdc;
+        state.equityUsdc =
+            int256(reachableCollateralUsdc) - int256(_vpiClawbackUsdc(pos.vpiAccrued)) + state.unrealizedPnlUsdc;
         state.currentNotionalUsdc = (pos.size * price) / CfdMath.USDC_TO_TOKEN_SCALE;
         state.maintenanceMarginUsdc = (state.currentNotionalUsdc * requiredBps) / 10_000;
         state.liquidatable = state.equityUsdc <= int256(state.maintenanceMarginUsdc);
@@ -59,7 +66,8 @@ library PositionRiskAccountingLib {
     ) internal pure returns (PositionRiskState memory state) {
         (bool isProfit, uint256 pnlAbs) = CfdMath.calculatePnL(pos, price, capPrice);
         state.unrealizedPnlUsdc = isProfit ? int256(pnlAbs) : -int256(pnlAbs);
-        state.equityUsdc = int256(reachableCollateralUsdc) - int256(pendingCarryUsdc) + state.unrealizedPnlUsdc;
+        state.equityUsdc = int256(reachableCollateralUsdc) - int256(pendingCarryUsdc)
+            - int256(_vpiClawbackUsdc(pos.vpiAccrued)) + state.unrealizedPnlUsdc;
         state.currentNotionalUsdc = (pos.size * price) / CfdMath.USDC_TO_TOKEN_SCALE;
         state.maintenanceMarginUsdc = (state.currentNotionalUsdc * requiredBps) / 10_000;
         state.liquidatable = state.equityUsdc <= int256(state.maintenanceMarginUsdc);

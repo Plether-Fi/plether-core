@@ -11,6 +11,7 @@ contract OrderRouterAdmin is Ownable, Pausable {
 
     IOrderRouterAdminHost public immutable router;
     mapping(address => uint256) public claimableEth;
+    address public pauser;
 
     IOrderRouterAdminHost.RouterConfig public pendingRouterConfig;
     uint256 public routerConfigActivationTime;
@@ -20,12 +21,14 @@ contract OrderRouterAdmin is Ownable, Pausable {
     error OrderRouterAdmin__InvalidStalenessLimit();
     error OrderRouterAdmin__InvalidConfidenceRatio();
     error OrderRouterAdmin__Unauthorized();
+    error OrderRouterAdmin__UnauthorizedPauser();
     error OrderRouterAdmin__NothingToClaim();
     error OrderRouterAdmin__EthTransferFailed();
 
     event RouterConfigProposed(IOrderRouterAdminHost.RouterConfig config, uint256 activationTime);
     event RouterConfigFinalized(IOrderRouterAdminHost.RouterConfig config);
     event RouterConfigCancelled();
+    event PauserUpdated(address indexed previousPauser, address indexed newPauser);
 
     constructor(address router_, address initialOwner) Ownable(initialOwner) {
         router = IOrderRouterAdminHost(router_);
@@ -34,6 +37,13 @@ contract OrderRouterAdmin is Ownable, Pausable {
     modifier onlyRouterHost() {
         if (msg.sender != address(router)) {
             revert OrderRouterAdmin__Unauthorized();
+        }
+        _;
+    }
+
+    modifier onlyPauserOrOwner() {
+        if (msg.sender != owner() && msg.sender != pauser) {
+            revert OrderRouterAdmin__UnauthorizedPauser();
         }
         _;
     }
@@ -62,7 +72,14 @@ contract OrderRouterAdmin is Ownable, Pausable {
         emit RouterConfigCancelled();
     }
 
-    function pause() external onlyOwner {
+    function setPauser(
+        address newPauser
+    ) external onlyOwner {
+        emit PauserUpdated(pauser, newPauser);
+        pauser = newPauser;
+    }
+
+    function pause() external onlyPauserOrOwner {
         _pause();
     }
 

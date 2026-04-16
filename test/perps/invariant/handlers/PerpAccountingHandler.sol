@@ -358,8 +358,8 @@ contract PerpAccountingHandler is Test {
                 if (preview.remainingSize == 0) {
                     terminalClose = true;
                     expectedBadDebtDeltaUsdc = preview.badDebtUsdc;
-                    uint256 grossResidualUsdc =
-                        beforeSnapshot.settlementBalanceUsdc + preview.immediatePayoutUsdc + preview.deferredTraderCreditUsdc;
+                    uint256 grossResidualUsdc = beforeSnapshot.settlementBalanceUsdc + preview.immediatePayoutUsdc
+                        + preview.deferredTraderCreditUsdc;
                     expectedFinalResidualUsdc = grossResidualUsdc > preview.seizedCollateralUsdc
                         ? grossResidualUsdc - preview.seizedCollateralUsdc
                         : 0;

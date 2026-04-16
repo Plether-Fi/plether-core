@@ -182,7 +182,8 @@ library CfdEnginePlanLib {
             return (0, deferredTraderCreditUsdc, 0, lossResult.badDebtUsdc);
         }
 
-        consumedUsdc = deferredTraderCreditUsdc < lossResult.shortfallUsdc ? deferredTraderCreditUsdc : lossResult.shortfallUsdc;
+        consumedUsdc =
+            deferredTraderCreditUsdc < lossResult.shortfallUsdc ? deferredTraderCreditUsdc : lossResult.shortfallUsdc;
         remainingUsdc = deferredTraderCreditUsdc - consumedUsdc;
 
         uint256 feeShortfallUsdc =
@@ -738,7 +739,9 @@ library CfdEnginePlanLib {
             MarginClearinghouseAccountingLib.planLiquidationResidual(snap.accountBuckets, delta.residualUsdc);
         delta.settlementRetainedUsdc = delta.residualPlan.settlementRetainedUsdc;
         (delta.existingDeferredConsumedUsdc, delta.existingDeferredRemainingUsdc, delta.badDebtUsdc) =
-            _planDeferredTraderCreditConsumption(snap.deferredTraderCreditForAccount, delta.residualPlan.badDebtUsdc, false);
+            _planDeferredTraderCreditConsumption(
+                snap.deferredTraderCreditForAccount, delta.residualPlan.badDebtUsdc, false
+            );
         delta.syncMarginQueueAmount = delta.residualPlan.mutation.otherLockedMarginUnlockedUsdc;
 
         if (delta.residualPlan.freshTraderPayoutUsdc > 0) {

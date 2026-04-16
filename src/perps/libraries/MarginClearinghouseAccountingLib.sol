@@ -98,9 +98,7 @@ library MarginClearinghouseAccountingLib {
     ) internal pure returns (uint256 reachableUsdc) {
         uint256 settlementBalanceUsdc = getSettlementBalanceUsdc(buckets);
         uint256 queuedReservedUsdc = getQueuedReservedUsdc(buckets);
-        reachableUsdc = settlementBalanceUsdc > queuedReservedUsdc
-            ? settlementBalanceUsdc - queuedReservedUsdc
-            : 0;
+        reachableUsdc = settlementBalanceUsdc > queuedReservedUsdc ? settlementBalanceUsdc - queuedReservedUsdc : 0;
     }
 
     function planFundingLossConsumption(
@@ -144,9 +142,8 @@ library MarginClearinghouseAccountingLib {
         }
 
         uint256 totalLockedMarginUsdc = positionMarginUsdc + otherLockedMarginUsdc;
-        uint256 freeSettlementUsdc = settlementBalanceUsdc > totalLockedMarginUsdc
-            ? settlementBalanceUsdc - totalLockedMarginUsdc
-            : 0;
+        uint256 freeSettlementUsdc =
+            settlementBalanceUsdc > totalLockedMarginUsdc ? settlementBalanceUsdc - totalLockedMarginUsdc : 0;
 
         if (tradeCostUsdc > 0) {
             plan.settlementDebitUsdc = uint256(tradeCostUsdc);
@@ -197,15 +194,13 @@ library MarginClearinghouseAccountingLib {
         consumption.totalConsumedUsdc = reachableUsdc > lossUsdc ? lossUsdc : reachableUsdc;
         consumption.uncoveredUsdc = lossUsdc - consumption.totalConsumedUsdc;
         uint256 freeSettlementUsdc = getFreeSettlementUsdc(buckets);
-        consumption.freeSettlementConsumedUsdc = freeSettlementUsdc > consumption.totalConsumedUsdc
-            ? consumption.totalConsumedUsdc
-            : freeSettlementUsdc;
+        consumption.freeSettlementConsumedUsdc =
+            freeSettlementUsdc > consumption.totalConsumedUsdc ? consumption.totalConsumedUsdc : freeSettlementUsdc;
 
         uint256 remainingConsumedUsdc = consumption.totalConsumedUsdc - consumption.freeSettlementConsumedUsdc;
         uint256 positionMarginUsdc = getPositionMarginUsdc(buckets);
-        uint256 consumableActiveMarginUsdc = positionMarginUsdc > protectedLockedMarginUsdc
-            ? positionMarginUsdc - protectedLockedMarginUsdc
-            : 0;
+        uint256 consumableActiveMarginUsdc =
+            positionMarginUsdc > protectedLockedMarginUsdc ? positionMarginUsdc - protectedLockedMarginUsdc : 0;
         consumption.activeMarginConsumedUsdc =
             consumableActiveMarginUsdc > remainingConsumedUsdc ? remainingConsumedUsdc : consumableActiveMarginUsdc;
         consumption.otherLockedMarginConsumedUsdc = remainingConsumedUsdc - consumption.activeMarginConsumedUsdc;

@@ -21,6 +21,8 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
 
     using SafeERC20 for IERC20;
 
+    bytes4 internal constant MARK_PRICE_STALE_SELECTOR = bytes4(keccak256("CfdEngine__MarkPriceStale()"));
+
     mapping(bytes32 => uint256) internal settlementBalances;
 
     mapping(bytes32 => uint256) internal positionMarginUsdc;
@@ -175,7 +177,14 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
 
         settlementBalances[accountId] += amount;
 
-        _checkpointCarryBeforeMarginChange(accountId, reachableCollateralBasisUsdc);
+        try ICfdEngineCore(engine).realizeCarryBeforeMarginChange(accountId, reachableCollateralBasisUsdc) {}
+        catch (bytes memory revertData) {
+            if (revertData.length < 4 || bytes4(revertData) != MARK_PRICE_STALE_SELECTOR) {
+                assembly {
+                    revert(add(revertData, 32), mload(revertData))
+                }
+            }
+        }
 
         emit Deposit(accountId, settlementAsset, amount);
     }
@@ -756,9 +765,6 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         if (getFreeBuyingPowerUsdc(accountId) < amountUsdc) {
             revert MarginClearinghouse__InsufficientFreeEquity();
         }
-        if (settlementBalances[accountId] < _totalLockedMarginUsdc(accountId) + amountUsdc) {
-            revert MarginClearinghouse__InsufficientUsdcForSettlement();
-        }
         _setBucketStorage(bucket, accountId, _bucketStorage(bucket, accountId) + amountUsdc);
         emit MarginLocked(accountId, bucket, amountUsdc);
     }
@@ -942,14 +948,37 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         emit AssetSeized(accountId, settlementAsset, amount, recipient);
     }
 
-    /// @notice Reserves free settlement for the router's stale close-bounty path without checkpointing carry.
+    /// @notice Reserves free settlement for the engine's fresh close-bounty path with carry checkpointing.
+    function reserveCloseExecutionBountyFromSettlement(
+        bytes32 accountId,
+        uint256 amount,
+        address recipient
+    ) external onlyEngine {
+        if (recipient == address(0)) {
+            revert MarginClearinghouse__ZeroAddress();
+        }
+        _checkpointCarryBeforeMarginChange(accountId);
+        if (settlementBalances[accountId] < amount) {
+            revert MarginClearinghouse__InsufficientAssetToSeize();
+        }
+        if (amount > MarginClearinghouseAccountingLib.getFreeSettlementUsdc(_buildAccountUsdcBuckets(accountId))) {
+            revert MarginClearinghouse__InsufficientAssetToSeize();
+        }
+
+        settlementBalances[accountId] -= amount;
+        IERC20(settlementAsset).safeTransfer(recipient, amount);
+
+        emit AssetSeized(accountId, settlementAsset, amount, recipient);
+    }
+
+    /// @notice Reserves free settlement for the engine's stale close-bounty path without checkpointing carry.
     function reserveStaleCloseExecutionBountyFromSettlement(
         bytes32 accountId,
         uint256 amount,
         address recipient
-    ) external onlyOrderRouter {
-        if (recipient != msg.sender) {
-            revert MarginClearinghouse__InvalidSeizeRecipient();
+    ) external onlyEngine {
+        if (recipient == address(0)) {
+            revert MarginClearinghouse__ZeroAddress();
         }
         if (settlementBalances[accountId] < amount) {
             revert MarginClearinghouse__InsufficientAssetToSeize();

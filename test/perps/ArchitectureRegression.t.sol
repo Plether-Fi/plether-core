@@ -46,13 +46,19 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
     }
 
     function test_Reconcile_MustSubtractDeferredLiquidationBounties() public {
+        uint256 juniorPrincipalBefore = pool.juniorPrincipal();
+
         vm.prank(address(router));
         engine.recordDeferredKeeperCredit(keeper, 100_000e6);
 
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        assertEq(pool.juniorPrincipal(), 901_000e6, "deferred liquidation bounties must reduce LP distributable equity");
+        assertEq(
+            juniorPrincipalBefore - pool.juniorPrincipal(),
+            100_000e6,
+            "Deferred liquidation bounties must reduce junior distributable equity by the reserved keeper amount"
+        );
     }
 
     function test_FreshClosePayout_MustNotLeapfrogExistingDeferredClaims() public {
@@ -77,7 +83,9 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         uint256 bobSettlementBefore = clearinghouse.balanceUsdc(bobId);
         _close(bobId, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
 
-        assertGt(engine.deferredTraderCreditUsdc(bobId), 0, "new payout must defer while older deferred claims reserve cash");
+        assertGt(
+            engine.deferredTraderCreditUsdc(bobId), 0, "new payout must defer while older deferred claims reserve cash"
+        );
         assertEq(
             clearinghouse.balanceUsdc(bobId),
             bobSettlementBefore,

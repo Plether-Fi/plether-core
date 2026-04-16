@@ -26,6 +26,7 @@ If you want the accounting model first, read [`ACCOUNTING_SPEC.md`](ACCOUNTING_S
 - Keepers execute queued orders and liquidations using Pyth update data.
 - LPs deposit USDC into `HousePool` through senior and junior `TrancheVault`s.
 - `CfdEngine` is the canonical ledger. It does the math but does not custody raw tokens.
+- The owner can delegate emergency `pause()` authority on `OrderRouter` and `HousePool` to a dedicated `pauser` address while retaining owner-only `unpause()` and role assignment.
 
 ### Core product rules
 

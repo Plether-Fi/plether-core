@@ -187,8 +187,15 @@ interface IMarginClearinghouse {
         uint256 amount,
         address recipient
     ) external;
+    /// @notice Reserves free-settlement USDC for a close-order execution bounty with carry checkpointing.
+    /// @dev Restricted to the engine's atomic fresh close-bounty path.
+    function reserveCloseExecutionBountyFromSettlement(
+        bytes32 accountId,
+        uint256 amount,
+        address recipient
+    ) external;
     /// @notice Reserves free-settlement USDC for a stale close-order execution bounty without checkpointing carry.
-    /// @dev Restricted to the order router's stale close-bounty path.
+    /// @dev Restricted to the engine's atomic stale close-bounty path.
     function reserveStaleCloseExecutionBountyFromSettlement(
         bytes32 accountId,
         uint256 amount,

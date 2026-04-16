@@ -12,17 +12,17 @@ contract AccountDomainParityTest is BasePerpTest {
     function test_DomainHelpers_SeparateGenericAndTerminalReachability() public pure {
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = IMarginClearinghouse.AccountUsdcBuckets({
             settlementBalanceUsdc: 12_000e6,
-            totalLockedMarginUsdc: 9_000e6,
-            activePositionMarginUsdc: 3_000e6,
-            otherLockedMarginUsdc: 6_000e6,
-            freeSettlementUsdc: 3_000e6
+            totalLockedMarginUsdc: 9000e6,
+            activePositionMarginUsdc: 3000e6,
+            otherLockedMarginUsdc: 6000e6,
+            freeSettlementUsdc: 3000e6
         });
 
         assertEq(MarginClearinghouseAccountingLib.getSettlementBalanceUsdc(buckets), 12_000e6);
-        assertEq(MarginClearinghouseAccountingLib.getFreeSettlementUsdc(buckets), 3_000e6);
-        assertEq(MarginClearinghouseAccountingLib.getPositionMarginUsdc(buckets), 3_000e6);
-        assertEq(MarginClearinghouseAccountingLib.getQueuedReservedUsdc(buckets), 6_000e6);
-        assertEq(MarginClearinghouseAccountingLib.getGenericReachableUsdc(buckets), 6_000e6);
+        assertEq(MarginClearinghouseAccountingLib.getFreeSettlementUsdc(buckets), 3000e6);
+        assertEq(MarginClearinghouseAccountingLib.getPositionMarginUsdc(buckets), 3000e6);
+        assertEq(MarginClearinghouseAccountingLib.getQueuedReservedUsdc(buckets), 6000e6);
+        assertEq(MarginClearinghouseAccountingLib.getGenericReachableUsdc(buckets), 6000e6);
         assertEq(MarginClearinghouseAccountingLib.getTerminalReachableUsdc(buckets), 12_000e6);
     }
 
@@ -34,11 +34,11 @@ contract AccountDomainParityTest is BasePerpTest {
 
         _fundTrader(trader, 10_000e6);
         _fundTrader(counterparty, 50_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 2_000e6, 1e8);
+        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 2000e6, 1e8);
         _open(counterpartyId, CfdTypes.Side.BEAR, 10_000e18, 50_000e6, 1e8);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 4_000e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 4000e6, type(uint256).max, false);
 
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(accountId);
         CfdEngine.AccountCollateralView memory collateralView = engineAccountLens.getAccountCollateralView(accountId);
@@ -85,7 +85,7 @@ contract AccountDomainParityTest is BasePerpTest {
         bytes32 accountId = bytes32(uint256(uint160(trader)));
 
         _fundTrader(trader, 10_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2_000e6, 1e8);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
@@ -109,15 +109,21 @@ contract AccountDomainParityTest is BasePerpTest {
         bytes32 accountId = bytes32(uint256(uint160(trader)));
 
         _fundTrader(trader, 10_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2_000e6, 1e8);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
         vm.warp(block.timestamp + 31);
 
-        assertEq(engineAccountLens.getWithdrawableUsdc(accountId), 0, "Account lens should honor tighter pool freshness");
-        assertEq(publicLens.getTraderAccount(accountId).withdrawableUsdc, 0, "Public lens should inherit account-lens freshness");
+        assertEq(
+            engineAccountLens.getWithdrawableUsdc(accountId), 0, "Account lens should honor tighter pool freshness"
+        );
+        assertEq(
+            publicLens.getTraderAccount(accountId).withdrawableUsdc,
+            0,
+            "Public lens should inherit account-lens freshness"
+        );
 
         vm.prank(trader);
         vm.expectRevert(CfdEngine.CfdEngine__MarkPriceStale.selector);

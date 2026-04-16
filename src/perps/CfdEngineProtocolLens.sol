@@ -55,7 +55,8 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         ICfdEngine.SideState memory bearState = _sideState(CfdTypes.Side.BEAR);
         snapshot.markFreshnessRequired = bullState.maxProfitUsdc + bearState.maxProfitUsdc > 0;
         if (snapshot.markFreshnessRequired) {
-            snapshot.maxMarkStaleness = OracleFreshnessPolicyLib.getPolicy(
+            snapshot.maxMarkStaleness =
+            OracleFreshnessPolicyLib.getPolicy(
                 OracleFreshnessPolicyLib.Mode.PoolReconcile,
                 engineContract.isOracleFrozen(),
                 engineContract.isFadWindow(),
@@ -64,7 +65,8 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
                 0,
                 0,
                 engineContract.fadMaxStaleness()
-            ).maxStaleness;
+            )
+            .maxStaleness;
         }
     }
 
@@ -144,7 +146,8 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
     function _sideState(
         CfdTypes.Side side
     ) internal view returns (ICfdEngine.SideState memory state) {
-        (state.maxProfitUsdc, state.openInterest, state.entryNotional, state.totalMargin) = engineContract.sides(uint8(side));
+        (state.maxProfitUsdc, state.openInterest, state.entryNotional, state.totalMargin) =
+            engineContract.sides(uint8(side));
     }
 
     function _riskParams() internal view returns (CfdTypes.RiskParams memory params) {

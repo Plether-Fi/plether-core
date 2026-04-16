@@ -71,7 +71,9 @@ contract AuditTightenedFindingsFailing is BasePerpTest {
         _close(bullId, CfdTypes.Side.BULL, 100_000 * 1e18, 1e8);
 
         assertEq(
-            _sideTotalMargin(CfdTypes.Side.BULL), 0, "Full close should remove all bull margin, including legacy-spread gains in the obsolete model"
+            _sideTotalMargin(CfdTypes.Side.BULL),
+            0,
+            "Full close should remove all bull margin, including legacy-spread gains in the obsolete model"
         );
     }
 

@@ -67,6 +67,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
     address public orderRouter;
     address public seniorVault;
     address public juniorVault;
+    address public pauser;
 
     uint256 public seniorPrincipal;
     uint256 public juniorPrincipal;
@@ -115,6 +116,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
     error HousePool__BootstrapSharesZero();
     error HousePool__SeedAlreadyInitialized();
     error HousePool__TradingActivationNotReady();
+    error HousePool__UnauthorizedPauser();
 
     event Reconciled(uint256 seniorPrincipal, uint256 juniorPrincipal, int256 delta);
     event SeniorRateUpdated(uint256 newRateBps);
@@ -139,6 +141,14 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         bool indexed toSenior, address indexed receiver, uint256 amountUsdc, uint256 sharesMinted
     );
     event TradingActivated();
+    event PauserUpdated(address indexed previousPauser, address indexed newPauser);
+
+    modifier onlyPauserOrOwner() {
+        if (msg.sender != owner() && msg.sender != pauser) {
+            revert HousePool__UnauthorizedPauser();
+        }
+        _;
+    }
 
     modifier onlyVault() {
         if (msg.sender != seniorVault && msg.sender != juniorVault) {
@@ -287,8 +297,17 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         markStalenessLimitActivationTime = 0;
     }
 
+    /// @notice Updates the dedicated emergency pauser.
+    /// @dev The owner retains unpause authority and may still pause directly.
+    function setPauser(
+        address newPauser
+    ) external onlyOwner {
+        emit PauserUpdated(pauser, newPauser);
+        pauser = newPauser;
+    }
+
     /// @notice Pause deposits into both tranches
-    function pause() external onlyOwner {
+    function pause() external onlyPauserOrOwner {
         _pause();
     }
 
