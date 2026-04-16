@@ -19,7 +19,7 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
     }
 
     /// @dev ClearerFull routes the reserved bounty to the executor, RefundUser restores the trader-owned
-    ///      bounty, and ProtocolFull forfeits the router-held bounty into protocol fees.
+    ///      bounty, and ProtocolFull forfeits the router-held bounty into protocol fees when that path is used.
     enum FailedOrderOutcome {
         ClearerFull,
         RefundUser,

@@ -138,12 +138,6 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         uint256 totalMargin;
     }
 
-    struct VaultCashInflow {
-        uint256 physicalCashReceivedUsdc;
-        uint256 protocolOwnedUsdc;
-        uint256 lpOwnedUsdc;
-    }
-
     struct StoredPosition {
         uint256 size;
         uint256 entryPrice;
@@ -228,8 +222,6 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     error CfdEngine__StillInsolvent();
     error CfdEngine__ZeroAddress();
     error CfdEngine__InsufficientCloseOrderBountyBacking();
-    error CfdEngine__InvalidVaultCashInflow();
-
     event FundingUpdated(int256 bullIndex, int256 bearIndex, uint256 absSkewUsdc);
     event PositionOpened(
         bytes32 indexed accountId, CfdTypes.Side side, uint256 sizeDelta, uint256 price, uint256 marginDelta
@@ -799,8 +791,11 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
             revert CfdEngine__RunwayTooLong();
         }
         uint256 oldLength = _fadOverrideDays.length;
+        uint256[] memory removedTimestamps = new uint256[](oldLength);
         for (uint256 i; i < oldLength; i++) {
-            delete fadDayOverrides[_fadOverrideDays[i]];
+            uint256 day = _fadOverrideDays[i];
+            removedTimestamps[i] = day * 86_400;
+            delete fadDayOverrides[day];
         }
         delete _fadOverrideDays;
         for (uint256 i; i < config.fadDayTimestamps.length; i++) {
@@ -811,7 +806,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
             }
         }
         fadRunwaySeconds = config.fadRunwaySeconds;
-        emit FadDaysRemoved(new uint256[](0));
+        emit FadDaysRemoved(removedTimestamps);
         emit FadDaysAdded(config.fadDayTimestamps);
         emit FadRunwayUpdated(config.fadRunwaySeconds);
     }
@@ -971,27 +966,6 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     ) internal {
         (deferredKeeperCreditUsdc[keeper], totalDeferredKeeperCreditUsdc) =
             _increaseDeferredLiability(deferredKeeperCreditUsdc[keeper], totalDeferredKeeperCreditUsdc, amountUsdc);
-    }
-
-    function _accountVaultCashInflow(
-        VaultCashInflow memory inflow
-    ) internal {
-        if (inflow.physicalCashReceivedUsdc == 0) {
-            return;
-        }
-
-        if (inflow.protocolOwnedUsdc + inflow.lpOwnedUsdc > inflow.physicalCashReceivedUsdc) {
-            revert CfdEngine__InvalidVaultCashInflow();
-        }
-
-        if (inflow.protocolOwnedUsdc > 0) {
-            vault.recordProtocolInflow(inflow.protocolOwnedUsdc);
-        }
-        if (inflow.lpOwnedUsdc > 0) {
-            vault.recordClaimantInflow(
-                inflow.lpOwnedUsdc, ICfdVault.ClaimantInflowKind.Revenue, ICfdVault.ClaimantInflowCashMode.CashArrived
-            );
-        }
     }
 
     function _canPayFreshVaultPayout(

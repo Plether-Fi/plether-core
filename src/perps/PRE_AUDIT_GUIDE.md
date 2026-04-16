@@ -69,7 +69,7 @@ Any new helper/module contract that can reach these sets should be treated as se
 | Typed `UserInvalid` open | `Failed` | clearer paid | dequeue |
 | Typed `ProtocolStateInvalidated` open | `Failed` | trader refunded into clearinghouse settlement | dequeue |
 | Terminal invalid close | `Failed` | clearer paid | dequeue |
-| Slippage failure on open | `Failed` | trader refunded into clearinghouse settlement | dequeue |
+| Slippage failure on open | `Failed` | clearer paid under the current terminal-failure policy | dequeue |
 | Slippage failure on close | `Failed` | clearer paid | dequeue |
 | Expired open order | `Failed` | trader refunded into clearinghouse settlement | dequeue |
 | Expired close order | `Failed` | clearer paid from escrow under the current terminal-close policy | dequeue |
@@ -81,7 +81,7 @@ Any new helper/module contract that can reach these sets should be treated as se
 
 | Bounty type | Source of funds | Custody while pending | Success path | Illiquid path | Terminal failure path |
 |-------------|-----------------|-----------------------|--------------|---------------|-----------------------|
-| Order execution bounty | Trader free settlement, then bounded close fallback from active position margin | `OrderRouter` escrow | clearinghouse credit for the clearer | n/a | trader refund or clearer payment via clearinghouse credit depending on failure category |
+| Order execution bounty | Trader free settlement, then bounded close fallback from active position margin | `OrderRouter` escrow | clearinghouse credit for the clearer | n/a | clearer payment or trader refund via clearinghouse credit depending on failure category/policy |
 | Liquidation bounty | Capped from canonical liquidation value derived from reachable collateral and carry-adjusted equity | planned in engine, then serviced through the liquidation settlement path | immediate keeper clearinghouse credit if cash is available after the settlement path | deferred keeper credit senior claim | n/a |
 
 ### Oracle regime table
