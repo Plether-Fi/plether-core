@@ -127,7 +127,7 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         );
     }
 
-    function test_DeferredClaims_NoLongerEnforceOldestFirstUnderPartialLiquidity() public {
+    function test_DeferredClaims_FreezeForAllClaimantsDuringAggregateShortfall() public {
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
         bytes32 bobId = bytes32(uint256(uint160(bob)));
 
@@ -150,28 +150,19 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
 
         usdc.mint(address(pool), aliceDeferred / 2);
 
-        uint256 aliceSettlementBefore = clearinghouse.balanceUsdc(aliceId);
+        vm.expectRevert(CfdEngine.CfdEngine__InsufficientVaultLiquidity.selector);
         vm.prank(alice);
         engine.claimDeferredTraderCredit(aliceId);
 
-        uint256 aliceClaimed = clearinghouse.balanceUsdc(aliceId) - aliceSettlementBefore;
-        assertGt(aliceClaimed, 0, "beneficiary claim should absorb available partial liquidity");
-        assertEq(
-            engine.deferredTraderCreditUsdc(aliceId),
-            aliceDeferred - aliceClaimed,
-            "Claimed beneficiary balance should shrink by the paid amount"
-        );
+        assertEq(engine.deferredTraderCreditUsdc(aliceId), aliceDeferred, "Oldest deferred claim should remain frozen");
         assertEq(engine.deferredTraderCreditUsdc(bobId), bobDeferred, "Unclaimed later balance should remain unchanged");
 
         usdc.mint(address(pool), bobDeferred / 2);
-        uint256 bobSettlementBefore = clearinghouse.balanceUsdc(bobId);
+        vm.expectRevert(CfdEngine.CfdEngine__InsufficientVaultLiquidity.selector);
         vm.prank(bob);
         engine.claimDeferredTraderCredit(bobId);
-        assertGt(
-            clearinghouse.balanceUsdc(bobId) - bobSettlementBefore,
-            0,
-            "Later deferred claimant should also be able to claim available liquidity without FIFO ordering"
-        );
+
+        assertEq(engine.deferredTraderCreditUsdc(bobId), bobDeferred, "Later deferred claimant should remain frozen too");
     }
 
 }

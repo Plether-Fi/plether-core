@@ -1078,7 +1078,7 @@ contract CfdEngineTest is BasePerpTest {
         engine.claimDeferredTraderCredit(accountId);
     }
 
-    function test_ClaimDeferredTraderCredit_AllowsPartialHeadClaimWhenLiquidityReturnsGradually() public {
+    function test_ClaimDeferredTraderCredit_RevertsUntilDeferredLiabilitiesAreFullyCovered() public {
         address trader = address(0xD306);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         _fundTrader(trader, 11_000e6);
@@ -1096,28 +1096,19 @@ contract CfdEngineTest is BasePerpTest {
 
         uint256 partialLiquidity = deferred / 2;
         usdc.mint(address(pool), partialLiquidity);
-        uint256 claimableNow = pool.totalAssets();
-        if (claimableNow > deferred) {
-            claimableNow = deferred;
-        }
 
-        uint256 clearinghouseBefore = clearinghouse.balanceUsdc(accountId);
+        vm.expectRevert(CfdEngine.CfdEngine__InsufficientVaultLiquidity.selector);
         vm.prank(trader);
         engine.claimDeferredTraderCredit(accountId);
 
         assertEq(
-            clearinghouse.balanceUsdc(accountId),
-            clearinghouseBefore + claimableNow,
-            "Deferred beneficiary claim should consume all currently available liquidity"
-        );
-        assertEq(
             engine.deferredTraderCreditUsdc(accountId),
-            deferred - claimableNow,
-            "Partial deferred claim should leave the remainder outstanding"
+            deferred,
+            "Deferred beneficiary should remain fully queued until aggregate deferred liabilities are fully covered"
         );
     }
 
-    function test_ClaimDeferredTraderCredit_BeneficiaryConsumesPartialLiquidityWithoutQueueOrdering() public {
+    function test_ClaimDeferredTraderCredit_RevertsDuringAggregateShortfallEvenForLargestClaimant() public {
         address trader = address(0xD309);
         address keeper = address(0xD30A);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
@@ -1143,22 +1134,13 @@ contract CfdEngineTest is BasePerpTest {
 
         uint256 partialLiquidity = deferred / 2;
         usdc.mint(address(pool), partialLiquidity);
-        uint256 claimableNow = pool.totalAssets();
-        if (claimableNow > deferred) {
-            claimableNow = deferred;
-        }
 
-        uint256 clearinghouseBefore = clearinghouse.balanceUsdc(accountId);
+        vm.expectRevert(CfdEngine.CfdEngine__InsufficientVaultLiquidity.selector);
         vm.prank(trader);
         engine.claimDeferredTraderCredit(accountId);
 
         assertEq(
-            clearinghouse.balanceUsdc(accountId),
-            clearinghouseBefore + claimableNow,
-            "Head deferred trader claim should consume partial liquidity before later claims"
-        );
-        assertEq(
-            engine.deferredTraderCreditUsdc(accountId), deferred - claimableNow, "Head deferred payout should shrink"
+            engine.deferredTraderCreditUsdc(accountId), deferred, "Head deferred payout should remain fully queued"
         );
         assertEq(engine.deferredKeeperCreditUsdc(keeper), deferred, "Later deferred bounty should remain untouched");
     }

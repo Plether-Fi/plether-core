@@ -22,25 +22,25 @@ contract CashPriorityLibTest is Test {
         );
     }
 
-    function test_ReserveDeferredClaim_UsesCashAfterOtherDeferredClaimsEvenWhenFeesAreOutstanding() public pure {
+    function test_ReserveDeferredClaim_FreezesWhenPhysicalCashFallsBelowAggregateDeferredClaims() public pure {
         CashPriorityLib.SeniorCashReservation memory reservation =
             CashPriorityLib.reserveDeferredClaim(40e6, 20e6, 30e6, 20e6, 30e6);
 
         assertEq(
             reservation.deferredClaimServiceableUsdc,
-            20e6,
-            "Deferred claim service should consume cash ahead of protocol fees once other deferred claims are reserved"
+            0,
+            "Deferred claim service should freeze while aggregate deferred liabilities exceed physical cash"
         );
     }
 
-    function test_ReserveDeferredClaim_UsesOnlyResidualCashAfterOtherDeferredClaims() public pure {
+    function test_ReserveDeferredClaim_RemainsFrozenDuringShortfallEvenIfCurrentClaimCouldBeCovered() public pure {
         CashPriorityLib.SeniorCashReservation memory reservation =
             CashPriorityLib.reserveDeferredClaim(40e6, 20e6, 60e6, 10e6, 60e6);
 
         assertEq(
             reservation.deferredClaimServiceableUsdc,
-            30e6,
-            "Deferred beneficiary claim should use only cash left after preserving other deferred claims"
+            0,
+            "Deferred beneficiary claim should remain frozen until aggregate deferred liabilities are fully covered"
         );
         assertEq(
             reservation.protocolFeeWithdrawalUsdc,
@@ -50,19 +50,19 @@ contract CashPriorityLibTest is Test {
         assertEq(reservation.freeCashUsdc, 0, "No fresh cash remains above total deferred claims and fees");
     }
 
-    function test_ReserveDeferredClaim_BreaksCircularDeadlockByFavoringDeferredClaimsOverFees() public pure {
+    function test_ReserveDeferredClaim_ClaimsFullAmountWhenAggregateDeferredLiabilitiesAreFullyCovered() public pure {
         CashPriorityLib.SeniorCashReservation memory reservation =
             CashPriorityLib.reserveDeferredClaim(20e6, 20e6, 20e6, 0, 20e6);
 
         assertEq(
             reservation.protocolFeeWithdrawalUsdc,
             0,
-            "No fee cash should remain once deferred claims absorb the shortfall"
+            "No fee cash should remain once deferred claims fully reserve the available cash"
         );
         assertEq(
             reservation.deferredClaimServiceableUsdc,
             20e6,
-            "Deferred claims should still be fully serviceable when only fee-backed cash remains"
+            "Deferred claims should be fully serviceable once aggregate deferred liabilities are fully covered"
         );
     }
 

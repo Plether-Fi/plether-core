@@ -1,3 +1,13 @@
+- [x] Freeze deferred-claim servicing whenever physical cash falls below aggregate deferred liabilities
+- [x] Update deferred-claim unit/integration/regression tests for explicit freeze semantics
+- [x] Run targeted Forge verification for deferred-claim behavior after the freeze change
+
+Review:
+- Updated `src/perps/libraries/CashPriorityLib.sol` so `reserveDeferredClaim(...)` now freezes all deferred-claim servicing whenever `physicalAssetsUsdc < totalDeferredClaimsUsdc`. Under aggregate deferred shortfall the library returns zero claimable cash, and `CfdEngine` continues to surface that as `CfdEngine__InsufficientVaultLiquidity`.
+- Reworked deferred-claim coverage in `test/perps/CashPriorityLib.t.sol`, `test/perps/DeferredClaimsMatrix.t.sol`, `test/perps/CfdEngine.t.sol`, and `test/perps/ArchitectureRegression.t.sol` to assert the new all-claimants freeze semantics instead of partial claimant-vs-claimant servicing.
+- Clarified the policy in `src/perps/ACCOUNTING_SPEC.md`: deferred claims remain senior to fees, but servicing is fully frozen while aggregate deferred liabilities exceed physical vault cash.
+- Verified green with `forge test --match-path test/perps/CashPriorityLib.t.sol`, `forge test --match-path test/perps/DeferredClaimsMatrix.t.sol`, `forge test --match-path test/perps/CfdEngine.t.sol --match-test "test_ClaimDeferredTraderCredit_RevertsUntilDeferredLiabilitiesAreFullyCovered|test_ClaimDeferredTraderCredit_RevertsDuringAggregateShortfallEvenForLargestClaimant|test_WithdrawFees_ThenDeferredClaims_DrainsResidualCashWithoutDeadlock"`, `forge test --match-path test/perps/ArchitectureRegression.t.sol --match-test "test_DeferredClaims_FreezeForAllClaimantsDuringAggregateShortfall"`, and `forge test --match-path test/perps/invariant/PerpDeferredCreditInvariant.t.sol --match-test "invariant_DeferredCreditStatusMatchesEngineAndVaultLiquidity"`.
+
 - [x] Make deferred claims strictly senior to protocol fee withdrawals in `CashPriorityLib`
 - [x] Update focused deferred-claim tests and invariant expectations for the new priority order
 - [x] Run targeted Forge verification for cash-priority and deferred-claim suites

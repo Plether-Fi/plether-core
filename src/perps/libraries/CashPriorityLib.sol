@@ -37,6 +37,10 @@ library CashPriorityLib {
             physicalAssetsUsdc, protocolFeesUsdc, deferredTraderCreditUsdc, deferredKeeperCreditUsdc
         );
 
+        if (physicalAssetsUsdc < reservation.totalSeniorClaimsUsdc) {
+            return reservation;
+        }
+
         uint256 otherDeferredClaimsUsdc = reservation.totalSeniorClaimsUsdc > deferredClaimAmountUsdc
             ? reservation.totalSeniorClaimsUsdc - deferredClaimAmountUsdc
             : 0;
