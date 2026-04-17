@@ -1,3 +1,14 @@
+- [x] Inspect HousePool preview and existing seeded-state tests for the smallest parity fix
+- [x] Route preview pending-state logic through HousePoolReconcilePlanLib
+- [x] Add focused parity regressions for zero-claim seeded states
+- [x] Run targeted Forge verification for HousePool preview/live parity
+
+Review:
+- Updated `src/perps/HousePool.sol` so `_previewPendingAccountingState(...)` now uses `HousePoolReconcilePlanLib.planReconcile(...)` instead of hand-rolled zero-claim preview math. This makes the read path follow the same seeded-ownership continuity logic as live `reconcile()`.
+- Mirrored the live-path `juniorRevenueWithoutOwners(...)` post-processing in preview as well, so pending views no longer over-assign revenue to junior principal when no junior owners exist.
+- Added `test_PendingTrancheStateMatchesSeededZeroClaimReconcileOutcome()` to `test/perps/HousePoolSnapshotParity.t.sol` to lock in preview/live parity for the previously divergent zero-claim seeded revenue case, including `TrancheVault.totalAssets()` parity through reconcile.
+- Verified green with `forge test --match-path test/perps/HousePoolSnapshotParity.t.sol` and `forge test --match-path test/perps/HousePool.t.sol --match-test "helper_RecordTradingRevenueInflow_RestoresSeededSeniorBeforeJuniorWhenBothAreZero|test_RecordImplicitTradingRevenue_RestoresSeededSeniorBeforeJuniorWhenBothAreZero"`.
+
 - [x] Inspect config/admin and clearinghouse tests for the smallest valid fix points
 - [x] Enforce documented close-order bounty cap in router config validation
 - [x] Unify stale carry fallback across all basis-changing clearinghouse paths

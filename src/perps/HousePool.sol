@@ -855,45 +855,35 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         pendingState.seniorSupply = _seniorShareSupply();
         pendingState.juniorSupply = _juniorShareSupply();
 
-        if (_markIsFreshForReconcile(accountingSnapshot, statusSnapshot)) {
-            HousePoolAccountingLib.ReconcileSnapshot memory snapshot =
-                HousePoolAccountingLib.buildReconcileSnapshot(accountingSnapshot);
-            uint256 pendingAssets = _pendingClaimantBucketAssets();
-            if (pendingAssets > 0) {
-                snapshot.distributable =
-                    snapshot.distributable > pendingAssets ? snapshot.distributable - pendingAssets : 0;
-            }
-            pendingState.unassignedAssets = _normalizeUnassignedAssets(snapshot.distributable);
-            if (pendingState.waterfall.seniorPrincipal + pendingState.waterfall.juniorPrincipal == 0) {
-                pendingState.unassignedAssets = snapshot.distributable;
-            } else {
-                uint256 elapsed = block.timestamp > lastSeniorYieldCheckpointTime
-                    ? block.timestamp - lastSeniorYieldCheckpointTime
-                    : 0;
-                uint256 distributableToClaims = snapshot.distributable > pendingState.unassignedAssets
-                    ? snapshot.distributable - pendingState.unassignedAssets
-                    : 0;
-                HousePoolWaterfallAccountingLib.ReconcilePlan memory plan = HousePoolWaterfallAccountingLib.planReconcile(
-                    pendingState.waterfall.seniorPrincipal,
-                    pendingState.waterfall.juniorPrincipal,
-                    distributableToClaims,
-                    poolConfig.seniorRateBps,
-                    elapsed
-                );
-                pendingState.waterfall.unpaidSeniorYield += plan.yieldAccrued;
+        bool markFresh = _markIsFreshForReconcile(accountingSnapshot, statusSnapshot);
+        if (markFresh) {
+            uint256 yieldElapsed =
+                block.timestamp > lastSeniorYieldCheckpointTime ? block.timestamp - lastSeniorYieldCheckpointTime : 0;
+            HousePoolReconcilePlanLib.ReconcilePlan memory plan = HousePoolReconcilePlanLib.planReconcile(
+                HousePoolPendingPreviewLib.PendingAccountingState({
+                    waterfall: pendingState.waterfall,
+                    unassignedAssets: pendingState.unassignedAssets,
+                    seniorSupply: pendingState.seniorSupply,
+                    juniorSupply: pendingState.juniorSupply
+                }),
+                HousePoolAccountingLib.buildReconcileSnapshot(accountingSnapshot),
+                _pendingClaimantBucketAssets(),
+                poolConfig.seniorRateBps,
+                yieldElapsed,
+                markFresh
+            );
 
-                if (plan.isRevenue) {
-                    uint256 juniorBefore = pendingState.waterfall.juniorPrincipal;
-                    pendingState.waterfall =
-                        HousePoolWaterfallAccountingLib.distributeRevenue(pendingState.waterfall, plan.deltaUsdc);
-                    if (pendingState.juniorSupply == 0 && pendingState.waterfall.juniorPrincipal > juniorBefore) {
-                        pendingState.unassignedAssets += pendingState.waterfall.juniorPrincipal - juniorBefore;
-                        pendingState.waterfall.juniorPrincipal = juniorBefore;
-                    }
-                } else if (plan.deltaUsdc > 0) {
-                    pendingState.waterfall =
-                        HousePoolWaterfallAccountingLib.absorbLoss(pendingState.waterfall, plan.deltaUsdc);
-                }
+            pendingState = PendingAccountingState({
+                waterfall: plan.state.waterfall,
+                unassignedAssets: plan.state.unassignedAssets,
+                seniorSupply: plan.state.seniorSupply,
+                juniorSupply: plan.state.juniorSupply
+            });
+
+            uint256 juniorRevenueWithoutOwners = HousePoolReconcilePlanLib.juniorRevenueWithoutOwners(plan);
+            if (juniorRevenueWithoutOwners > 0) {
+                pendingState.waterfall.juniorPrincipal -= juniorRevenueWithoutOwners;
+                pendingState.unassignedAssets += juniorRevenueWithoutOwners;
             }
         }
 
