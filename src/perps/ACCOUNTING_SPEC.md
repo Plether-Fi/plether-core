@@ -144,6 +144,7 @@ Rules:
 - temporary under-recognition is acceptable,
 - value with no valid claimant path must sit in explicit `unassignedAssets`.
 - during `oracleFrozen`, tranche entry/exit pricing remains live by applying fixed tranche-local LP surcharges instead of requiring a fresh live mark.
+- during `oracleFrozen`, bootstrap admin flows (`initializeSeedPosition`, `assignUnassignedAssets`) are blocked rather than inheriting LP frozen-fee pricing.
 
 Required consequences:
 

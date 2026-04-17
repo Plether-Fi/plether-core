@@ -125,7 +125,7 @@ contract TrancheVault is ERC4626 {
         if (feeBps == 0) {
             return super.previewDeposit(assets);
         }
-        return _applyFeeToShares(_convertToShares(assets, Math.Rounding.Floor), feeBps);
+        return _previewFrozenDepositShares(assets, feeBps);
     }
 
     function previewMint(
@@ -135,7 +135,7 @@ contract TrancheVault is ERC4626 {
         if (feeBps == 0) {
             return super.previewMint(shares);
         }
-        return _convertToAssets(_grossUpSharesForFee(shares, feeBps), Math.Rounding.Ceil);
+        return _previewFrozenMintAssets(shares, feeBps);
     }
 
     /// @notice Returns the current max deposit if lifecycle, freshness, and impairment gates allow deposits.
@@ -400,6 +400,27 @@ contract TrancheVault is ERC4626 {
             return netShares;
         }
         return Math.mulDiv(netShares, 10_000, 10_000 - feeBps, Math.Rounding.Ceil);
+    }
+
+    function _previewFrozenDepositShares(
+        uint256 assets,
+        uint256 feeBps
+    ) internal view returns (uint256) {
+        uint256 netAssets = _applyFee(assets, feeBps);
+        uint256 adjustedShares = totalSupply() + 10 ** _decimalsOffset();
+        uint256 adjustedAssetsAfterDeposit = totalAssets() + assets + 1;
+        uint256 denominator = adjustedAssetsAfterDeposit - netAssets;
+        return Math.mulDiv(netAssets, adjustedShares, denominator, Math.Rounding.Floor);
+    }
+
+    function _previewFrozenMintAssets(
+        uint256 shares,
+        uint256 feeBps
+    ) internal view returns (uint256) {
+        uint256 adjustedShares = totalSupply() + 10 ** _decimalsOffset();
+        uint256 adjustedAssets = totalAssets() + 1;
+        uint256 denominator = ((10_000 - feeBps) * adjustedShares) - (feeBps * shares);
+        return Math.mulDiv(10_000 * shares, adjustedAssets, denominator, Math.Rounding.Ceil);
     }
 
 }

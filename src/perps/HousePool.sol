@@ -122,6 +122,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
     error HousePool__SeedAlreadyInitialized();
     error HousePool__TradingActivationNotReady();
     error HousePool__UnauthorizedPauser();
+    error HousePool__OracleFrozen();
 
     event Reconciled(uint256 seniorPrincipal, uint256 juniorPrincipal, int256 delta);
     event SeniorRateUpdated(uint256 newRateBps);
@@ -469,6 +470,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         }
 
         HousePoolContext memory ctx = _buildCurrentHousePoolContext();
+        _requireBootstrapOracleLive(ctx.statusSnapshot);
         _requireFreshMark(ctx.accountingSnapshot, ctx.statusSnapshot);
         _reconcile(ctx.accountingSnapshot);
 
@@ -523,6 +525,8 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         if (toSenior ? seniorSeedInitialized : juniorSeedInitialized) {
             revert HousePool__SeedAlreadyInitialized();
         }
+
+        _requireBootstrapOracleLive(_getHousePoolStatusSnapshot());
 
         uint256 shares = ITrancheVaultBootstrap(targetVault).previewDeposit(amount);
         if (shares == 0) {
@@ -773,6 +777,14 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
     ) internal view {
         if (!HousePoolFreshnessLib.markFresh(accountingSnapshot, statusSnapshot, block.timestamp)) {
             revert HousePool__MarkPriceStale();
+        }
+    }
+
+    function _requireBootstrapOracleLive(
+        HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
+    ) internal pure {
+        if (statusSnapshot.oracleFrozen) {
+            revert HousePool__OracleFrozen();
         }
     }
 

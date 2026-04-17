@@ -17,6 +17,10 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         engine.updateMarkPrice(1e8, uint64(SATURDAY_FROZEN - 3 hours));
     }
 
+    function _applyFee(uint256 assets, uint256 feeBps) internal pure returns (uint256) {
+        return (assets * (10_000 - feeBps)) / 10_000;
+    }
+
     function test_SeniorDeposit_ChargesFrozenFeeAndBenefitsIncumbents() public {
         address incumbent = address(0xA11CE);
         address entrant = address(0xBEEF);
@@ -57,8 +61,9 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         _fundJunior(address(0xAAA3), 100_000e6);
         _enterFrozenWindow();
 
+        uint256 frozenFeeBps = pool.frozenLpFeeBps(true);
         uint256 grossShares = seniorVault.convertToShares(assets);
-        uint256 expectedNetShares = (grossShares * (10_000 - pool.frozenLpFeeBps(true))) / 10_000;
+        uint256 expectedNetAssets = _applyFee(assets, frozenFeeBps);
 
         usdc.mint(entrant, assets);
         vm.startPrank(entrant);
@@ -66,7 +71,14 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         uint256 mintedShares = seniorVault.deposit(assets, entrant);
         vm.stopPrank();
 
-        assertEq(mintedShares, expectedNetShares, "Frozen deposit should charge the fee by reducing minted shares");
+        uint256 entrantGrossClaimAfter = seniorVault.convertToAssets(mintedShares);
+
+        assertLt(mintedShares, grossShares, "Frozen deposit should still mint fewer shares than no-fee pricing");
+        assertLe(
+            entrantGrossClaimAfter,
+            expectedNetAssets,
+            "Large entrant should not recapture the frozen fee through post-deposit share-price uplift"
+        );
     }
 
     function test_FrozenDeposit_RetainedFeeNumericallyBenefitsIncumbentOnly() public {
@@ -80,8 +92,7 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         _enterFrozenWindow();
 
         uint256 frozenFeeBps = pool.frozenLpFeeBps(true);
-        uint256 grossShares = seniorVault.convertToShares(entrantAssets);
-        uint256 expectedNetShares = (grossShares * (10_000 - frozenFeeBps)) / 10_000;
+        uint256 expectedNetAssets = _applyFee(entrantAssets, frozenFeeBps);
         uint256 incumbentClaimBefore = seniorVault.convertToAssets(seniorVault.balanceOf(incumbent));
 
         usdc.mint(entrant, entrantAssets);
@@ -93,13 +104,78 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         uint256 entrantGrossClaimAfter = seniorVault.convertToAssets(mintedShares);
         uint256 incumbentClaimAfter = seniorVault.convertToAssets(seniorVault.balanceOf(incumbent));
 
-        assertEq(mintedShares, expectedNetShares, "Frozen deposit should mint the exact fee-discounted share count");
-        assertLt(
+        assertLe(
             entrantGrossClaimAfter,
-            entrantAssets,
+            expectedNetAssets,
             "Entrant should not recapture the retained frozen fee through ownership leakage"
         );
         assertGt(incumbentClaimAfter, incumbentClaimBefore, "Retained frozen fee should increase incumbent gross claim");
+    }
+
+    function testFuzz_FrozenDeposit_EntrantClaimNeverExceedsNetAssets(
+        uint256 incumbentAssetsFuzz,
+        uint256 entrantAssetsFuzz
+    ) public {
+        address incumbent = address(0xAAB8);
+        address entrant = address(0xAAB9);
+        uint256 incumbentAssets = bound(incumbentAssetsFuzz, 1e6, 2_000_000e6);
+        uint256 entrantAssets = bound(entrantAssetsFuzz, 1e6, 20_000_000e6);
+
+        _fundSenior(incumbent, incumbentAssets);
+        _fundJunior(address(0xAAC0), incumbentAssets);
+        _enterFrozenWindow();
+
+        uint256 feeBps = pool.frozenLpFeeBps(true);
+        uint256 previewedShares = seniorVault.previewDeposit(entrantAssets);
+        uint256 expectedNetAssets = _applyFee(entrantAssets, feeBps);
+        uint256 incumbentClaimBefore = seniorVault.convertToAssets(seniorVault.balanceOf(incumbent));
+
+        usdc.mint(entrant, entrantAssets);
+        vm.startPrank(entrant);
+        usdc.approve(address(seniorVault), entrantAssets);
+        uint256 mintedShares = seniorVault.deposit(entrantAssets, entrant);
+        vm.stopPrank();
+
+        uint256 entrantGrossClaimAfter = seniorVault.convertToAssets(mintedShares);
+        uint256 incumbentClaimAfter = seniorVault.convertToAssets(seniorVault.balanceOf(incumbent));
+
+        assertEq(mintedShares, previewedShares, "Frozen deposit should honor previewDeposit across bounded states");
+        assertLe(
+            entrantGrossClaimAfter,
+            expectedNetAssets,
+            "Entrant gross claim should never exceed net assets after the frozen fee"
+        );
+        assertGe(incumbentClaimAfter, incumbentClaimBefore, "Incumbent claim should not fall when the entrant pays the fee");
+    }
+
+    function test_FrozenDeposit_DustDepositStillKeepsFeeWithIncumbents() public {
+        address incumbent = address(0xAAC1);
+        address entrant = address(0xAAC2);
+        uint256 entrantAssets = 1e6;
+
+        _fundSenior(incumbent, 2e6);
+        _fundJunior(address(0xAAC3), 2e6);
+        _enterFrozenWindow();
+
+        uint256 feeBps = pool.frozenLpFeeBps(true);
+        uint256 previewedShares = seniorVault.previewDeposit(entrantAssets);
+        uint256 expectedNetAssets = _applyFee(entrantAssets, feeBps);
+
+        usdc.mint(entrant, entrantAssets);
+        vm.startPrank(entrant);
+        usdc.approve(address(seniorVault), entrantAssets);
+        uint256 mintedShares = seniorVault.deposit(entrantAssets, entrant);
+        vm.stopPrank();
+
+        uint256 entrantGrossClaimAfter = seniorVault.convertToAssets(mintedShares);
+
+        assertEq(mintedShares, previewedShares, "Dust frozen deposit should honor previewDeposit");
+        assertGt(mintedShares, 0, "Dust frozen deposit should still mint shares above the virtual offset floor");
+        assertLe(
+            entrantGrossClaimAfter,
+            expectedNetAssets,
+            "Dust entrant should not recover more than the intended net assets through share-price uplift"
+        );
     }
 
     function test_FrozenMint_GrossesUpSharesFeeAndHonorsPreview() public {
@@ -156,6 +232,48 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
             depositShares, seniorVault.balanceOf(mintLp), "Mint path should deliver the same net share ownership target"
         );
         assertEq(mintAssets, mintQuotedAssets, "Mint path should honor previewMint for the same net share target");
+    }
+
+    function testFuzz_FrozenDepositAndMint_MatchEquivalentNetOwnershipAcrossAsymmetricStates(
+        uint256 seniorSeedFuzz,
+        uint256 juniorSeedFuzz,
+        uint256 assetsFuzz
+    ) public {
+        address depositLp = address(0xAAC4);
+        address mintLp = address(0xAAC5);
+        uint256 seniorSeed = bound(seniorSeedFuzz, 10_000e6, 2_000_000e6);
+        uint256 juniorSeed = bound(juniorSeedFuzz, 10_000e6, 2_000_000e6);
+        uint256 assets = bound(assetsFuzz, 1e6, 500_000e6);
+
+        _fundSenior(address(0xAAC6), seniorSeed);
+        _fundJunior(address(0xAAC7), juniorSeed);
+        _enterFrozenWindow();
+
+        uint256 snap = vm.snapshotState();
+        uint256 depositQuotedShares = seniorVault.previewDeposit(assets);
+
+        usdc.mint(depositLp, assets);
+        vm.startPrank(depositLp);
+        usdc.approve(address(seniorVault), assets);
+        uint256 depositShares = seniorVault.deposit(assets, depositLp);
+        vm.stopPrank();
+
+        vm.revertToState(snap);
+        uint256 mintQuotedAssets = seniorVault.previewMint(depositQuotedShares);
+
+        usdc.mint(mintLp, mintQuotedAssets);
+        vm.startPrank(mintLp);
+        usdc.approve(address(seniorVault), mintQuotedAssets);
+        uint256 mintAssets = seniorVault.mint(depositQuotedShares, mintLp);
+        vm.stopPrank();
+
+        assertEq(depositShares, depositQuotedShares, "Deposit path should mint the previewed frozen shares across asymmetric states");
+        assertEq(
+            depositShares,
+            seniorVault.balanceOf(mintLp),
+            "Mint path should deliver the same net share ownership target across asymmetric states"
+        );
+        assertEq(mintAssets, mintQuotedAssets, "Mint path should honor previewMint across asymmetric states");
     }
 
     function test_JuniorRedeem_ChargesFrozenFee() public {
@@ -235,18 +353,24 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
 
         uint256 quotedShares = seniorVault.previewDeposit(assets);
         uint256 noFeeShares = seniorVault.convertToShares(assets);
-        uint256 expectedShares = (noFeeShares * (10_000 - 40)) / 10_000;
+        uint256 expectedNetAssets = _applyFee(assets, 40);
 
         vm.startPrank(lp);
         usdc.approve(address(seniorVault), assets);
         uint256 mintedShares = seniorVault.deposit(assets, lp);
         vm.stopPrank();
 
+        uint256 entrantGrossClaimAfter = seniorVault.convertToAssets(mintedShares);
+
         assertEq(pool.frozenLpFeeBps(true), 40, "Updated governed senior frozen fee should become active");
-        assertEq(quotedShares, expectedShares, "Preview should reflect the updated governed frozen fee");
         assertEq(mintedShares, quotedShares, "Live deposit should match governed frozen-fee preview");
         assertLt(
             mintedShares, noFeeShares, "Updated governed fee should still discount minted shares versus no-fee pricing"
+        );
+        assertLe(
+            entrantGrossClaimAfter,
+            expectedNetAssets,
+            "Governed frozen fee should still stay with incumbents rather than leaking back to the entrant"
         );
     }
 

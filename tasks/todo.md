@@ -1,3 +1,33 @@
+- [x] Inspect HousePool bootstrap flows and choose the smallest frozen-oracle gate point
+- [x] Block seed initialization and unassigned-asset assignment during oracleFrozen
+- [x] Add focused HousePool regressions for frozen-oracle bootstrap blocking
+- [x] Run targeted Forge verification for the new bootstrap gating
+
+Review:
+- Updated `src/perps/HousePool.sol` so both bootstrap admin flows now explicitly require a live oracle: `assignUnassignedAssets(...)` and `initializeSeedPosition(...)` revert with `HousePool__OracleFrozen()` whenever the current house-pool status snapshot reports `oracleFrozen == true`.
+- Kept the policy simple instead of adding more pricing exceptions: ordinary ERC4626 deposits/withdrawals still use frozen-window LP fees, while bootstrap/admin share-minting flows must wait for live oracle conditions.
+- Added focused regressions in `test/perps/HousePool.t.sol` proving both bootstrap paths revert during `oracleFrozen`, while adjacent live bootstrap behavior still works.
+- Updated `src/perps/README.md` and `src/perps/ACCOUNTING_SPEC.md` so the bootstrap policy is explicit in the docs.
+- Verified green with `forge test --match-path test/perps/HousePool.t.sol --match-test "test_AssignUnassignedAssets_RevertsWhenOracleFrozen|test_InitializeSeedPosition_RevertsWhenOracleFrozen|test_AssignUnassignedAssets_ResetsSeniorHwmWhenSeniorIsEmptyButJuniorStillExists|helper_AssignUnassignedAssets_ReconcilesBeforeBootstrappingAndAvoidsPhantomAssets"`.
+
+- [x] Inspect TrancheVault fee helpers and derive minimal post-trade-equation implementation
+- [x] Implement corrected frozen-window previewDeposit/previewMint math
+- [x] Add focused tests for incumbent-only fee retention and preview/live parity
+- [x] Run targeted Forge verification for frozen LP fee behavior
+
+Review:
+- Updated `src/perps/TrancheVault.sol` so frozen-window `previewDeposit(...)` and `previewMint(...)` now solve the post-trade net-claim equation instead of simply hair-cutting the pre-trade share quote. This preserves preview/live parity while ensuring the retained stale-window fee stays with incumbents rather than leaking back to the entrant through the post-deposit share-price uplift.
+- Kept the change minimal and local to the frozen entry path: withdraw/redeem pricing is unchanged, and live non-frozen ERC4626 behavior still uses the standard OZ conversions.
+- Updated `test/perps/FrozenLpFeePolicy.t.sol` to validate the corrected economic invariant directly: large entrants' post-deposit gross claim must not exceed the intended net assets after the frozen fee, while preview/live deposit and mint parity still hold.
+- Verified green with `forge test --match-path test/perps/FrozenLpFeePolicy.t.sol`.
+
+- [x] Expand frozen LP fee coverage with dust and bounded-fuzz entry math tests
+
+Review:
+- Added bounded fuzz coverage in `test/perps/FrozenLpFeePolicy.t.sol` for frozen deposits across a wide range of incumbent/entrant sizes and asymmetric senior/junior seed states. The new tests assert that `deposit()` always matches `previewDeposit()`, `mint()` always matches `previewMint()`, and entrants' post-deposit gross claim never exceeds the intended net assets after the frozen fee.
+- Added a dust-sized frozen deposit regression near the ERC4626 virtual-offset regime to ensure tiny deposits still mint nonzero shares while keeping the retained fee with incumbents.
+- Re-verified with `forge test --match-path test/perps/FrozenLpFeePolicy.t.sol`, which now passes 15 tests including the new fuzz coverage.
+
 - [x] Freeze deferred-claim servicing whenever physical cash falls below aggregate deferred liabilities
 - [x] Update deferred-claim unit/integration/regression tests for explicit freeze semantics
 - [x] Run targeted Forge verification for deferred-claim behavior after the freeze change

@@ -36,6 +36,17 @@ contract HousePoolTest is BasePerpTest {
         pool.accountExcess();
     }
 
+    function _enterFrozenWindow() internal {
+        uint256 saturdayFrozen = 1_710_021_600;
+        vm.warp(saturdayFrozen - 12 hours);
+        assertTrue(engine.isOracleFrozen(), "setup should enter a frozen-oracle window");
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(saturdayFrozen - 12 hours));
+
+        vm.warp(saturdayFrozen);
+    }
+
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
@@ -1127,6 +1138,33 @@ contract HousePoolTest is BasePerpTest {
         );
         assertEq(pool.juniorPrincipal(), juniorAssets, "Junior principal should remain untouched");
         assertEq(pool.unassignedAssets(), 0, "Assignment should consume the unassigned bucket");
+    }
+
+    function test_AssignUnassignedAssets_RevertsWhenOracleFrozen() public {
+        usdc.mint(address(pool), 100_000e6);
+        pool.accountExcess();
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        _enterFrozenWindow();
+
+        vm.expectRevert(HousePool.HousePool__OracleFrozen.selector);
+        pool.assignUnassignedAssets(false, alice);
+    }
+
+    function test_InitializeSeedPosition_RevertsWhenOracleFrozen() public {
+        uint256 seedAssets = 50_000e6;
+        bytes32 seedFlagsSlot = vm.load(address(pool), bytes32(uint256(20)));
+        bytes32 seniorSeedCleared = (seedFlagsSlot & ~bytes32(uint256(0xff << 8)));
+        vm.store(address(pool), bytes32(uint256(20)), seniorSeedCleared);
+
+        usdc.mint(address(this), seedAssets);
+        usdc.approve(address(pool), seedAssets);
+
+        _enterFrozenWindow();
+
+        vm.expectRevert(HousePool.HousePool__OracleFrozen.selector);
+        pool.initializeSeedPosition(true, seedAssets, address(this));
     }
 
     function test_SweepExcess_RemovesDonationWithoutChangingAccountedAssets() public {
@@ -2496,6 +2534,7 @@ contract HousePoolSeededBaseSetupTest is BasePerpTest {
     }
 
 }
+
 
 contract HousePoolAuditTest is BasePerpTest {
 
