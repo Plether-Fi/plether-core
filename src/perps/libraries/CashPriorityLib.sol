@@ -36,12 +36,16 @@ library CashPriorityLib {
         reservation = _buildSeniorCashReservation(
             physicalAssetsUsdc, protocolFeesUsdc, deferredTraderCreditUsdc, deferredKeeperCreditUsdc
         );
-        uint256 claimableUsdc = reservation.freeCashUsdc + deferredClaimAmountUsdc;
-        if (claimableUsdc > physicalAssetsUsdc) {
-            claimableUsdc = physicalAssetsUsdc;
-        }
-        reservation.deferredClaimServiceableUsdc =
-            deferredClaimAmountUsdc < claimableUsdc ? deferredClaimAmountUsdc : claimableUsdc;
+
+        uint256 otherDeferredClaimsUsdc = reservation.totalSeniorClaimsUsdc > deferredClaimAmountUsdc
+            ? reservation.totalSeniorClaimsUsdc - deferredClaimAmountUsdc
+            : 0;
+        uint256 cashAfterFeesAndOtherClaims = _saturatingSub(
+            _saturatingSub(physicalAssetsUsdc, protocolFeesUsdc), otherDeferredClaimsUsdc
+        );
+        reservation.deferredClaimServiceableUsdc = deferredClaimAmountUsdc < cashAfterFeesAndOtherClaims
+            ? deferredClaimAmountUsdc
+            : cashAfterFeesAndOtherClaims;
     }
 
     function reservedSeniorCashUsdc(
