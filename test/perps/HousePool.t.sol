@@ -2499,7 +2499,6 @@ contract HousePoolSeededBaseSetupTest is BasePerpTest {
 
 }
 
-
 contract HousePoolAuditTest is BasePerpTest {
 
     address alice = address(0x111);

@@ -784,7 +784,9 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
     function _requireRateChangeMarkFresh(
         HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
     ) internal view {
-        if (!HousePoolAccountingLib.isMarkFresh(statusSnapshot.lastMarkTime, poolConfig.markStalenessLimit, block.timestamp)) {
+        if (!HousePoolAccountingLib.isMarkFresh(
+                statusSnapshot.lastMarkTime, poolConfig.markStalenessLimit, block.timestamp
+            )) {
             revert HousePool__MarkPriceStale();
         }
     }

@@ -31,7 +31,9 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
         engine.claimDeferredTraderCredit(accountId);
 
         assertEq(
-            engine.deferredTraderCreditUsdc(accountId), 30e6, "Trader deferred claim should remain fully queued during freeze"
+            engine.deferredTraderCreditUsdc(accountId),
+            30e6,
+            "Trader deferred claim should remain fully queued during freeze"
         );
         assertEq(engine.deferredKeeperCreditUsdc(otherKeeper), 20e6, "Other deferred claims should remain preserved");
         assertEq(engine.accumulatedFeesUsdc(), 20e6, "Protocol fees should remain preserved");
@@ -52,7 +54,9 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
         engine.claimDeferredTraderCredit(accountId);
 
         assertEq(
-            engine.deferredTraderCreditUsdc(accountId), 50e6, "Claim should remain fully queued until the shortfall is cured"
+            engine.deferredTraderCreditUsdc(accountId),
+            50e6,
+            "Claim should remain fully queued until the shortfall is cured"
         );
     }
 
@@ -94,7 +98,9 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
         engine.claimDeferredKeeperCredit();
 
         assertEq(clearinghouse.balanceUsdc(keeperAccountId), 0, "Frozen keeper credit should not settle any amount");
-        assertEq(engine.deferredKeeperCreditUsdc(keeper), 5000e6, "Keeper credit should stay fully queued during freeze");
+        assertEq(
+            engine.deferredKeeperCreditUsdc(keeper), 5000e6, "Keeper credit should stay fully queued during freeze"
+        );
     }
 
     function test_ClearerDeferredClaim_RevertsUntilTraderQueueAndKeeperCreditAreFullyCovered() public {
@@ -119,7 +125,9 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
         engine.claimDeferredKeeperCredit();
 
         assertEq(clearinghouse.balanceUsdc(keeperAccountId), 0, "Frozen keeper credit should not settle any amount");
-        assertEq(engine.deferredKeeperCreditUsdc(keeper), 30e6, "Keeper residual deferred balance should stay fully queued");
+        assertEq(
+            engine.deferredKeeperCreditUsdc(keeper), 30e6, "Keeper residual deferred balance should stay fully queued"
+        );
         assertEq(
             engine.deferredTraderCreditUsdc(traderAccountId), 20e6, "Trader deferred queue should remain preserved"
         );

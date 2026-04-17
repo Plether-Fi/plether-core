@@ -162,7 +162,9 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         vm.prank(bob);
         engine.claimDeferredTraderCredit(bobId);
 
-        assertEq(engine.deferredTraderCreditUsdc(bobId), bobDeferred, "Later deferred claimant should remain frozen too");
+        assertEq(
+            engine.deferredTraderCreditUsdc(bobId), bobDeferred, "Later deferred claimant should remain frozen too"
+        );
     }
 
 }

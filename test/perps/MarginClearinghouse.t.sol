@@ -367,7 +367,9 @@ contract MarginClearinghouseTest is Test {
         clearinghouse.lockCommittedOrderMargin(aliceId, 200 * 1e6);
 
         assertEq(mockEngine.carryCheckpointCalls(), 1, "Initial deposit should be the only fresh carry realization");
-        assertEq(mockEngine.storedMarkCheckpointCalls(), 1, "Stale committed-margin lock should checkpoint using stored mark");
+        assertEq(
+            mockEngine.storedMarkCheckpointCalls(), 1, "Stale committed-margin lock should checkpoint using stored mark"
+        );
         assertEq(mockEngine.lastCarryAccountId(), aliceId, "Fallback checkpoint should use the mutated account id");
     }
 
@@ -471,8 +473,12 @@ contract MarginClearinghouseTest is Test {
         vm.prank(engine);
         clearinghouse.releaseOrderReservationIfActive(16);
 
-        assertEq(mockEngine.storedMarkCheckpointCalls(), 1, "Stale reservation release should checkpoint using stored mark");
-        assertEq(mockEngine.lastCarryAccountId(), aliceId, "Fallback release checkpoint should use the reservation account");
+        assertEq(
+            mockEngine.storedMarkCheckpointCalls(), 1, "Stale reservation release should checkpoint using stored mark"
+        );
+        assertEq(
+            mockEngine.lastCarryAccountId(), aliceId, "Fallback release checkpoint should use the reservation account"
+        );
     }
 
     function test_UnlockReservedSettlement_UsesStoredMarkFallbackWhenFreshCarryIsStale() public {
@@ -487,8 +493,16 @@ contract MarginClearinghouseTest is Test {
         vm.prank(engine);
         clearinghouse.unlockReservedSettlement(aliceId, 200 * 1e6);
 
-        assertEq(mockEngine.storedMarkCheckpointCalls(), 1, "Stale reserved-settlement unlock should checkpoint using stored mark");
-        assertEq(mockEngine.lastCarryAccountId(), aliceId, "Fallback reserved-settlement checkpoint should use the mutated account");
+        assertEq(
+            mockEngine.storedMarkCheckpointCalls(),
+            1,
+            "Stale reserved-settlement unlock should checkpoint using stored mark"
+        );
+        assertEq(
+            mockEngine.lastCarryAccountId(),
+            aliceId,
+            "Fallback reserved-settlement checkpoint should use the mutated account"
+        );
     }
 
     function test_ConsumeOrderReservation_ReducesResidualAndKeepsAggregateParity() public {

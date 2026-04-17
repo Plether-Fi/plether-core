@@ -95,7 +95,9 @@ contract HousePoolSnapshotParityTest is BasePerpTest {
 
         usdc.mint(address(pool), 35_000e6);
         vm.prank(address(engine));
-        pool.recordClaimantInflow(35_000e6, ICfdVault.ClaimantInflowKind.Revenue, ICfdVault.ClaimantInflowCashMode.CashArrived);
+        pool.recordClaimantInflow(
+            35_000e6, ICfdVault.ClaimantInflowKind.Revenue, ICfdVault.ClaimantInflowCashMode.CashArrived
+        );
 
         (uint256 pendingSenior, uint256 pendingJunior, uint256 pendingSeniorWithdraw, uint256 pendingJuniorWithdraw) =
             pool.getPendingTrancheState();
@@ -107,12 +109,32 @@ contract HousePoolSnapshotParityTest is BasePerpTest {
 
         assertEq(pendingSenior, 1000e6, "Pending state should restore seeded senior before junior in zero-claim states");
         assertEq(pendingJunior, 34_000e6, "Pending state should route only residual revenue to seeded junior");
-        assertEq(pool.seniorPrincipal(), pendingSenior, "Pending senior principal should match post-reconcile principal");
-        assertEq(pool.juniorPrincipal(), pendingJunior, "Pending junior principal should match post-reconcile principal");
-        assertEq(pool.getMaxSeniorWithdraw(), pendingSeniorWithdraw, "Pending senior withdraw cap should match post-reconcile cap");
-        assertEq(pool.getMaxJuniorWithdraw(), pendingJuniorWithdraw, "Pending junior withdraw cap should match post-reconcile cap");
-        assertEq(seniorVault.totalAssets(), pendingSeniorAssets, "Senior vault preview assets should match post-reconcile assets");
-        assertEq(juniorVault.totalAssets(), pendingJuniorAssets, "Junior vault preview assets should match post-reconcile assets");
+        assertEq(
+            pool.seniorPrincipal(), pendingSenior, "Pending senior principal should match post-reconcile principal"
+        );
+        assertEq(
+            pool.juniorPrincipal(), pendingJunior, "Pending junior principal should match post-reconcile principal"
+        );
+        assertEq(
+            pool.getMaxSeniorWithdraw(),
+            pendingSeniorWithdraw,
+            "Pending senior withdraw cap should match post-reconcile cap"
+        );
+        assertEq(
+            pool.getMaxJuniorWithdraw(),
+            pendingJuniorWithdraw,
+            "Pending junior withdraw cap should match post-reconcile cap"
+        );
+        assertEq(
+            seniorVault.totalAssets(),
+            pendingSeniorAssets,
+            "Senior vault preview assets should match post-reconcile assets"
+        );
+        assertEq(
+            juniorVault.totalAssets(),
+            pendingJuniorAssets,
+            "Junior vault preview assets should match post-reconcile assets"
+        );
         assertEq(pool.unassignedAssets(), 0, "Seeded continuity should keep zero-claim revenue out of quarantine");
     }
 

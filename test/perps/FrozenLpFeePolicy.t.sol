@@ -17,7 +17,10 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         engine.updateMarkPrice(1e8, uint64(SATURDAY_FROZEN - 3 hours));
     }
 
-    function _applyFee(uint256 assets, uint256 feeBps) internal pure returns (uint256) {
+    function _applyFee(
+        uint256 assets,
+        uint256 feeBps
+    ) internal pure returns (uint256) {
         return (assets * (10_000 - feeBps)) / 10_000;
     }
 
@@ -145,7 +148,9 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
             expectedNetAssets,
             "Entrant gross claim should never exceed net assets after the frozen fee"
         );
-        assertGe(incumbentClaimAfter, incumbentClaimBefore, "Incumbent claim should not fall when the entrant pays the fee");
+        assertGe(
+            incumbentClaimAfter, incumbentClaimBefore, "Incumbent claim should not fall when the entrant pays the fee"
+        );
     }
 
     function test_FrozenDeposit_DustDepositStillKeepsFeeWithIncumbents() public {
@@ -267,7 +272,11 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         uint256 mintAssets = seniorVault.mint(depositQuotedShares, mintLp);
         vm.stopPrank();
 
-        assertEq(depositShares, depositQuotedShares, "Deposit path should mint the previewed frozen shares across asymmetric states");
+        assertEq(
+            depositShares,
+            depositQuotedShares,
+            "Deposit path should mint the previewed frozen shares across asymmetric states"
+        );
         assertEq(
             depositShares,
             seniorVault.balanceOf(mintLp),
