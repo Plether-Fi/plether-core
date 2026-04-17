@@ -319,6 +319,7 @@ Rules:
 
 - deferred liabilities are beneficiary-balance based, not FIFO queue based,
 - they are senior claims on vault cash,
+- deferred claim servicing outranks protocol fee withdrawals when cash is insufficient to satisfy both,
 - fee withdrawal, fresh payout funding, fresh liquidation bounty payment, and deferred servicing must all agree on what cash is actually free.
 
 ## Pending-Order Escrow Model

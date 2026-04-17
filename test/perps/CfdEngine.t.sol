@@ -1388,6 +1388,59 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
+    function test_WithdrawFees_ThenDeferredClaims_DrainsResidualCashWithoutDeadlock() public {
+        address trader = address(0xFEA1);
+        address keeper = address(0xFEA2);
+        address treasury = address(0xFEA3);
+        bytes32 traderAccountId = bytes32(uint256(uint160(trader)));
+        bytes32 keeperAccountId = bytes32(uint256(uint160(keeper)));
+
+        usdc.burn(address(pool), pool.totalAssets());
+        usdc.mint(address(pool), 100e6);
+
+        stdstore.target(address(engine)).sig("accumulatedFeesUsdc()").checked_write(uint256(60e6));
+        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(bytes32)").with_key(traderAccountId).checked_write(
+            uint256(40e6)
+        );
+        stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(uint256(40e6));
+
+        vm.prank(address(router));
+        engine.recordDeferredKeeperCredit(keeper, 20e6);
+
+        engine.withdrawFees(treasury, 40e6);
+
+        assertEq(usdc.balanceOf(treasury), 40e6, "Treasury should receive the withdrawable fee slice");
+        assertEq(pool.totalAssets(), 60e6, "Fee withdrawal should leave the expected residual vault cash");
+        assertEq(engine.accumulatedFeesUsdc(), 20e6, "Fee accounting should retain the unwithdrawn remainder");
+
+        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(traderAccountId);
+        vm.prank(trader);
+        engine.claimDeferredTraderCredit(traderAccountId);
+
+        assertEq(
+            clearinghouse.balanceUsdc(traderAccountId) - traderSettlementBefore,
+            40e6,
+            "Trader should receive the first deferred claim ahead of remaining protocol fees"
+        );
+        assertEq(pool.totalAssets(), 20e6, "Trader claim should move the vault into the exact 20/20/20 residual state");
+        assertEq(engine.accumulatedFeesUsdc(), 20e6, "Servicing deferred claims must not burn fee accounting");
+        assertEq(engine.deferredTraderCreditUsdc(traderAccountId), 0, "Trader deferred balance should be fully consumed");
+        assertEq(engine.deferredKeeperCreditUsdc(keeper), 20e6, "Keeper deferred balance should remain queued");
+
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccountId);
+        vm.prank(keeper);
+        engine.claimDeferredKeeperCredit();
+
+        assertEq(
+            clearinghouse.balanceUsdc(keeperAccountId) - keeperSettlementBefore,
+            20e6,
+            "Keeper should be able to drain the last 20e6 instead of deadlocking behind fee accounting"
+        );
+        assertEq(pool.totalAssets(), 0, "Final deferred claim should consume the last residual vault cash");
+        assertEq(engine.deferredKeeperCreditUsdc(keeper), 0, "Keeper deferred balance should clear after the final claim");
+        assertEq(engine.accumulatedFeesUsdc(), 20e6, "Fee accounting should remain recorded even after deferred claims drain cash");
+    }
+
     function test_WithdrawFees_AllowsPartialWithdrawal() public {
         address trader = address(0xFEE4A);
         bytes32 accountId = bytes32(uint256(uint160(trader)));

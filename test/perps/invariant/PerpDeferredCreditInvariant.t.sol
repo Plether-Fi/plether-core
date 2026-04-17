@@ -34,26 +34,47 @@ contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
 
     function invariant_DeferredCreditStatusMatchesEngineAndVaultLiquidity() public view {
         uint256 totalDeferredTraderCreditUsdc;
-        bool anyLiquidity = vault.totalAssets() > 0;
+        uint256 vaultAssets = vault.totalAssets();
+        uint256 protocolFeesUsdc = engine.accumulatedFeesUsdc();
+        uint256 totalDeferredTraderCreditUsdc_ = engine.totalDeferredTraderCreditUsdc();
+        uint256 totalDeferredKeeperCreditUsdc = engine.totalDeferredKeeperCreditUsdc();
+        uint256 handlerKeeperCreditUsdc = engine.deferredKeeperCreditUsdc(address(handler));
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
             DeferredEngineViewTypes.DeferredCreditStatus memory status =
                 _deferredCreditStatus(accountId, address(handler));
             uint256 deferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(accountId);
-            uint256 deferredKeeperCreditUsdc = engine.deferredKeeperCreditUsdc(address(handler));
+            uint256 deferredKeeperCreditUsdc = handlerKeeperCreditUsdc;
+            uint256 otherDeferredTraderCreditUsdc = totalDeferredTraderCreditUsdc_ > deferredTraderCreditUsdc
+                ? totalDeferredTraderCreditUsdc_ - deferredTraderCreditUsdc
+                : 0;
+            uint256 expectedTraderClaimableNow = CashPriorityLib.availableCashForDeferredBeneficiaryClaim(
+                vaultAssets,
+                protocolFeesUsdc,
+                totalDeferredTraderCreditUsdc_,
+                totalDeferredKeeperCreditUsdc,
+                deferredTraderCreditUsdc
+            );
+            uint256 expectedKeeperClaimableNow = CashPriorityLib.availableCashForDeferredBeneficiaryClaim(
+                vaultAssets,
+                protocolFeesUsdc,
+                otherDeferredTraderCreditUsdc,
+                deferredKeeperCreditUsdc,
+                deferredKeeperCreditUsdc
+            );
 
             assertEq(
                 status.deferredTraderCreditUsdc, deferredTraderCreditUsdc, "Deferred payout status amount mismatch"
             );
             assertEq(
                 status.traderPayoutClaimableNow,
-                deferredTraderCreditUsdc > 0 && anyLiquidity,
+                deferredTraderCreditUsdc > 0 && expectedTraderClaimableNow > 0,
                 "Deferred payout claimability mismatch"
             );
             assertEq(
                 status.keeperCreditClaimableNow,
-                deferredKeeperCreditUsdc > 0 && anyLiquidity,
+                deferredKeeperCreditUsdc > 0 && expectedKeeperClaimableNow > 0,
                 "Deferred keeper credit claimability mismatch"
             );
 

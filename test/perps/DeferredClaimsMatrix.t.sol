@@ -10,7 +10,7 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
 
     using stdStorage for StdStorage;
 
-    function test_TraderDeferredClaim_PreservesFeesAndOtherSeniorClaimsUnderShortfall() public {
+    function test_TraderDeferredClaim_PartialAheadOfFeesUnderShortfall() public {
         address trader = address(0xDC00);
         address otherKeeper = address(0xDC04);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
@@ -27,14 +27,18 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
         vm.prank(address(router));
         engine.recordDeferredKeeperCredit(otherKeeper, 20e6);
 
-        vm.expectRevert(CfdEngine.CfdEngine__InsufficientVaultLiquidity.selector);
+        uint256 settlementBefore = clearinghouse.balanceUsdc(accountId);
         vm.prank(trader);
         engine.claimDeferredTraderCredit(accountId);
 
-        assertEq(engine.deferredTraderCreditUsdc(accountId), 30e6, "Trader deferred credit should remain queued");
+        assertEq(
+            clearinghouse.balanceUsdc(accountId),
+            settlementBefore + 20e6,
+            "Trader claim should consume shortfall cash ahead of protocol fees once other deferred claims are reserved"
+        );
+        assertEq(engine.deferredTraderCreditUsdc(accountId), 10e6, "Only the unpaid trader remainder should stay queued");
         assertEq(engine.deferredKeeperCreditUsdc(otherKeeper), 20e6, "Other deferred claims should remain preserved");
         assertEq(engine.accumulatedFeesUsdc(), 20e6, "Protocol fees should remain preserved");
-        assertEq(clearinghouse.balanceUsdc(accountId), 0, "No settlement should be credited under senior-claim shortfall");
     }
 
     function test_TraderDeferredClaim_PartialWhenVaultIlliquid() public {
@@ -66,7 +70,7 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
         );
     }
 
-    function test_TraderDeferredClaim_PartialAfterPreservingFeesAndKeeperQueue() public {
+    function test_TraderDeferredClaim_PartialAfterPreservingKeeperQueue() public {
         address trader = address(0xDC02);
         address otherKeeper = address(0xDC05);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
@@ -90,10 +94,10 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
 
         assertEq(
             clearinghouse.balanceUsdc(accountId),
-            settlementBefore + 5e6,
-            "Trader claim should use only residual cash after preserving fees and keeper deferred claims"
+            settlementBefore + 25e6,
+            "Trader claim should use all residual cash after preserving keeper deferred claims"
         );
-        assertEq(engine.deferredTraderCreditUsdc(accountId), 25e6, "Trader residual deferred balance should stay queued");
+        assertEq(engine.deferredTraderCreditUsdc(accountId), 5e6, "Trader residual deferred balance should stay queued");
         assertEq(engine.deferredKeeperCreditUsdc(otherKeeper), 20e6, "Keeper deferred queue should remain preserved");
         assertEq(engine.accumulatedFeesUsdc(), 20e6, "Protocol fees should remain preserved");
     }
@@ -118,7 +122,7 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
         assertEq(engine.deferredKeeperCreditUsdc(keeper), 3000e6, "Remaining deferred keeper credit should stay queued");
     }
 
-    function test_ClearerDeferredClaim_PartialAfterPreservingFeesAndTraderQueue() public {
+    function test_ClearerDeferredClaim_PartialAfterPreservingTraderQueue() public {
         address keeper = address(0xDC06);
         address trader = address(0xDC07);
         bytes32 traderAccountId = bytes32(uint256(uint160(trader)));
@@ -143,10 +147,10 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
 
         assertEq(
             clearinghouse.balanceUsdc(keeperAccountId),
-            keeperSettlementBefore + 5e6,
-            "Keeper claim should use only residual cash after preserving fees and trader deferred claims"
+            keeperSettlementBefore + 25e6,
+            "Keeper claim should use all residual cash after preserving trader deferred claims"
         );
-        assertEq(engine.deferredKeeperCreditUsdc(keeper), 25e6, "Keeper residual deferred balance should stay queued");
+        assertEq(engine.deferredKeeperCreditUsdc(keeper), 5e6, "Keeper residual deferred balance should stay queued");
         assertEq(engine.deferredTraderCreditUsdc(traderAccountId), 20e6, "Trader deferred queue should remain preserved");
         assertEq(engine.accumulatedFeesUsdc(), 20e6, "Protocol fees should remain preserved");
     }

@@ -1,3 +1,21 @@
+- [x] Make deferred claims strictly senior to protocol fee withdrawals in `CashPriorityLib`
+- [x] Update focused deferred-claim tests and invariant expectations for the new priority order
+- [x] Run targeted Forge verification for cash-priority and deferred-claim suites
+
+Review:
+- Updated `src/perps/libraries/CashPriorityLib.sol` so deferred-claim servicing now subtracts only other deferred liabilities, not protocol fees. Fee withdrawals still only use cash above the full deferred-liability reserve, which removes the circular shortfall deadlock and makes deferred claims strictly senior when cash is scarce.
+- Rewrote the focused library and engine matrix tests in `test/perps/CashPriorityLib.t.sol` and `test/perps/DeferredClaimsMatrix.t.sol` to assert the new policy, including the deadlock repro shape where residual cash must now drain to deferred claims rather than getting stranded behind fee accounting.
+- Updated `test/perps/invariant/PerpDeferredCreditInvariant.t.sol` so claimability is derived from `CashPriorityLib.availableCashForDeferredBeneficiaryClaim(...)` instead of the old `any vault cash` heuristic, keeping the invariant aligned with the actual reservation model.
+- Clarified the normative priority rule in `src/perps/ACCOUNTING_SPEC.md`: deferred claim servicing outranks protocol fee withdrawals during cash shortfalls.
+- Verified green with `forge test --match-path test/perps/CashPriorityLib.t.sol`, `forge test --match-path test/perps/DeferredClaimsMatrix.t.sol`, and `forge test --match-path test/perps/invariant/PerpDeferredCreditInvariant.t.sol --match-test "invariant_DeferredCreditStatusMatchesEngineAndVaultLiquidity"`.
+
+- [x] Add end-to-end `CfdEngine` regression for the `100/60/60 -> 20/20/20` cash-shortfall sequence
+
+Review:
+- Added `test_WithdrawFees_ThenDeferredClaims_DrainsResidualCashWithoutDeadlock()` to `test/perps/CfdEngine.t.sol`. The test seeds `100e6` vault cash, `60e6` accumulated fees, `40e6` deferred trader credit, and `20e6` deferred keeper credit, then performs a real `engine.withdrawFees(treasury, 40e6)` followed by trader and keeper deferred-claim calls.
+- The regression now proves the protocol reaches the exact intermediate `20e6 assets / 20e6 fees / 20e6 deferred keeper credit` state after the fee withdrawal and trader claim, and that the final keeper claim can still drain the last `20e6` instead of deadlocking at zero claimable cash.
+- Verified green with `forge test --match-path test/perps/CfdEngine.t.sol --match-test "test_WithdrawFees_ThenDeferredClaims_DrainsResidualCashWithoutDeadlock|test_WithdrawFees_RespectsSeniorCashReservation|test_ClaimDeferredKeeperCredit_UsesFeeOnlyLiquidityWhenAtQueueHead"`.
+
 - [x] Add failing H-01 test proving fallback ETH refunds are not actually funded in `OrderRouterAdmin`
 - [x] Add failing H-02 test proving the open prefilter misses `executionFeeBps`-driven invalid opens
 - [x] Run targeted Forge tests to confirm both repros fail on current code

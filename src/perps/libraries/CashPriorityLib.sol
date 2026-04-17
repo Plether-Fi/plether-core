@@ -40,12 +40,10 @@ library CashPriorityLib {
         uint256 otherDeferredClaimsUsdc = reservation.totalSeniorClaimsUsdc > deferredClaimAmountUsdc
             ? reservation.totalSeniorClaimsUsdc - deferredClaimAmountUsdc
             : 0;
-        uint256 cashAfterFeesAndOtherClaims = _saturatingSub(
-            _saturatingSub(physicalAssetsUsdc, protocolFeesUsdc), otherDeferredClaimsUsdc
-        );
-        reservation.deferredClaimServiceableUsdc = deferredClaimAmountUsdc < cashAfterFeesAndOtherClaims
+        uint256 cashAfterOtherDeferredClaims = _saturatingSub(physicalAssetsUsdc, otherDeferredClaimsUsdc);
+        reservation.deferredClaimServiceableUsdc = deferredClaimAmountUsdc < cashAfterOtherDeferredClaims
             ? deferredClaimAmountUsdc
-            : cashAfterFeesAndOtherClaims;
+            : cashAfterOtherDeferredClaims;
     }
 
     function reservedSeniorCashUsdc(
