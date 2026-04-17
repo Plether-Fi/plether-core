@@ -116,7 +116,7 @@ Important details:
 - `acceptablePrice == 0` behaves like a delayed market-style order.
 - Open orders are rejected during degraded mode and close-only windows.
 - Failed orders are finalized from router-custodied bounty escrow; blocked FIFO heads remain pending.
-- Execution-time user-invalid opens and terminal-invalid closes pay the clearer from escrow, while genuine protocol-state invalidations refund the trader into clearinghouse settlement.
+- Execution-time user-invalid opens, protocol-state invalidations, and terminal-invalid closes pay the clearer from escrow so FIFO cleanup remains incentive compatible.
 - Close orders can still execute during genuine frozen-oracle windows using the last valid mark subject to the relaxed frozen-market rules.
 - Close-intent queue validation is account-local and bounded by the per-account pending-order queue.
 
@@ -146,7 +146,7 @@ LPs provide USDC to the `HousePool`, which is split into senior and junior ERC-4
 - Senior gets fixed-rate yield and last-loss protection.
 - Junior absorbs first loss and receives residual upside.
 - LP withdrawals are gated by solvency, reserved liabilities, lifecycle state, mark freshness policy, and holder cooldown rules.
-- During `oracleFrozen`, tranche deposits and withdrawals remain live but use stale-priced ERC4626 math with a fixed surcharge that stays in the same tranche: senior `25 bps`, junior `75 bps`.
+- During `oracleFrozen`, tranche deposits and withdrawals remain live under stale-priced ERC4626 math with a fixed tranche-local surcharge: entry charges the fee by minting fewer net shares, exit charges the fee by paying fewer net assets, and the retained value stays in that same tranche (senior `25 bps`, junior `75 bps`).
 
 The withdrawal firewall is the key LP safety mechanism:
 

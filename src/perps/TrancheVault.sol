@@ -125,7 +125,7 @@ contract TrancheVault is ERC4626 {
         if (feeBps == 0) {
             return super.previewDeposit(assets);
         }
-        return _convertToShares(_applyFee(assets, feeBps), Math.Rounding.Floor);
+        return _applyFeeToShares(_convertToShares(assets, Math.Rounding.Floor), feeBps);
     }
 
     function previewMint(
@@ -135,7 +135,7 @@ contract TrancheVault is ERC4626 {
         if (feeBps == 0) {
             return super.previewMint(shares);
         }
-        return _grossUpForFee(_convertToAssets(shares, Math.Rounding.Ceil), feeBps);
+        return _convertToAssets(_grossUpSharesForFee(shares, feeBps), Math.Rounding.Ceil);
     }
 
     /// @notice Returns the current max deposit if lifecycle, freshness, and impairment gates allow deposits.
@@ -221,11 +221,10 @@ contract TrancheVault is ERC4626 {
             return 0;
         }
         uint256 ownerShares = _unlockedOwnerShares(_owner);
-        uint256 ownerAssets = _convertToAssets(ownerShares, Math.Rounding.Floor);
+        uint256 ownerAssets = previewRedeem(ownerShares);
         (,, uint256 maxSeniorWithdrawUsdc, uint256 maxJuniorWithdrawUsdc) = POOL.getPendingTrancheState();
         uint256 poolMax = IS_SENIOR ? maxSeniorWithdrawUsdc : maxJuniorWithdrawUsdc;
-        uint256 grossMax = ownerAssets < poolMax ? ownerAssets : poolMax;
-        return _applyFee(grossMax, _frozenLpFeeBps());
+        return ownerAssets < poolMax ? ownerAssets : poolMax;
     }
 
     /// @notice Returns the redeemable share amount after cooldown and pool-level withdrawal gates.
@@ -241,7 +240,7 @@ contract TrancheVault is ERC4626 {
         uint256 ownerShares = _unlockedOwnerShares(_owner);
         (,, uint256 maxSeniorWithdrawUsdc, uint256 maxJuniorWithdrawUsdc) = POOL.getPendingTrancheState();
         uint256 poolMax = IS_SENIOR ? maxSeniorWithdrawUsdc : maxJuniorWithdrawUsdc;
-        uint256 maxShares = _convertToShares(poolMax, Math.Rounding.Floor);
+        uint256 maxShares = previewWithdraw(poolMax);
         return ownerShares < maxShares ? ownerShares : maxShares;
     }
 
@@ -381,6 +380,26 @@ contract TrancheVault is ERC4626 {
             return netAssets;
         }
         return Math.mulDiv(netAssets, 10_000, 10_000 - feeBps, Math.Rounding.Ceil);
+    }
+
+    function _applyFeeToShares(
+        uint256 grossShares,
+        uint256 feeBps
+    ) internal pure returns (uint256) {
+        if (feeBps == 0) {
+            return grossShares;
+        }
+        return Math.mulDiv(grossShares, 10_000 - feeBps, 10_000, Math.Rounding.Floor);
+    }
+
+    function _grossUpSharesForFee(
+        uint256 netShares,
+        uint256 feeBps
+    ) internal pure returns (uint256) {
+        if (feeBps == 0) {
+            return netShares;
+        }
+        return Math.mulDiv(netShares, 10_000, 10_000 - feeBps, Math.Rounding.Ceil);
     }
 
 }

@@ -222,7 +222,7 @@ Governance model:
 
 Accounting rules:
 
-- `deposit` and `mint` move gross USDC into the tranche while minting shares against fee-adjusted effective assets,
+- `deposit` and `mint` move gross USDC into the tranche while charging the frozen fee by minting fewer net shares (or grossing up the requested share target for `mint`),
 - `withdraw` and `redeem` burn shares against the gross tranche claim while paying only net user assets after the frozen fee,
 - the fee does not become protocol revenue,
 - the fee does not increase `accumulatedFeesUsdc`,
@@ -232,7 +232,8 @@ Consequences:
 
 - senior frozen-window actions must not reprice junior shares,
 - junior frozen-window actions must not reprice senior shares,
-- preview and live ERC4626 paths must match under the active frozen fee.
+- preview and live ERC4626 paths must match under the active frozen fee,
+- `maxWithdraw` and `maxRedeem` must be derived from the same live net-payout constraint used by `withdraw` and `redeem`.
 
 ### Preview and simulation solvency outputs
 
