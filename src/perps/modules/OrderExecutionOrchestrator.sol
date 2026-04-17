@@ -258,7 +258,7 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
                 return FailedOrderOutcome.ClearerFull;
             }
             if (failureCategory == CfdEnginePlanTypes.ExecutionFailurePolicyCategory.ProtocolStateInvalidated) {
-                return FailedOrderOutcome.RefundUser;
+                return FailedOrderOutcome.ClearerFull;
             }
             if (failureCategory == CfdEnginePlanTypes.ExecutionFailurePolicyCategory.UserInvalid) {
                 return FailedOrderOutcome.ClearerFull;

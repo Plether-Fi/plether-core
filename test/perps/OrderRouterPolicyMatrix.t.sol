@@ -295,27 +295,34 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         );
     }
 
-    function test_ProtocolInvalidationRefundsTrader() public {
+    function test_ProtocolInvalidationPaysClearerAndDoesNotRefundTrader() public {
         _fundTrader(ALICE, 10_000e6);
         bytes32 traderAccountId = bytes32(uint256(uint160(ALICE)));
+        bytes32 keeperAccountId = bytes32(uint256(uint160(KEEPER)));
 
         vm.prank(ALICE);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
 
         stdstore.target(address(engine)).sig("degradedMode()").checked_write(true);
 
-        uint256 keeperWalletBefore = usdc.balanceOf(KEEPER);
+        (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(1);
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccountId);
+        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(traderAccountId);
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(1e8));
         vm.roll(block.number + 1);
         vm.prank(KEEPER);
         router.executeOrder(1, priceData);
 
-        assertEq(usdc.balanceOf(KEEPER) - keeperWalletBefore, 0, "Protocol invalidation should not pay the clearer");
         assertEq(
-            clearinghouse.balanceUsdc(traderAccountId),
-            10_000e6,
-            "Protocol invalidation should restore the trader bounty inside clearinghouse custody"
+            clearinghouse.balanceUsdc(keeperAccountId) - keeperSettlementBefore,
+            pending.executionBountyUsdc,
+            "Protocol invalidation should pay the clearer so queue-head cleanup remains incentive compatible"
+        );
+        assertEq(
+            clearinghouse.balanceUsdc(traderAccountId) - traderSettlementBefore,
+            0,
+            "Protocol invalidation should not refund the trader once the reserved bounty funds the clearer cleanup"
         );
     }
 
