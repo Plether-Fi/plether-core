@@ -107,12 +107,15 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
 
         withdrawableUsdc = MarginClearinghouseAccountingLib.getFreeSettlementUsdc(buckets);
         reachableUsdc = MarginClearinghouseAccountingLib.getGenericReachableUsdc(buckets);
+        CfdTypes.RiskParams memory params = _riskParams();
+        uint256 currentMarginBps = engineContract.isFadWindow() ? params.fadMarginBps : params.maintMarginBps;
+        uint256 effectiveMarginBps = params.initMarginBps > currentMarginBps ? params.initMarginBps : currentMarginBps;
         PositionRiskAccountingLib.PositionRiskState memory riskState =
             PositionRiskAccountingLib.buildPositionRiskStateWithCarry(
-                pos, price, engineContract.CAP_PRICE(), pendingCarryUsdc, reachableUsdc, _riskParams().initMarginBps
+                pos, price, engineContract.CAP_PRICE(), pendingCarryUsdc, reachableUsdc, effectiveMarginBps
             );
 
-        uint256 initialMarginRequirementUsdc = (riskState.currentNotionalUsdc * _riskParams().initMarginBps) / 10_000;
+        uint256 initialMarginRequirementUsdc = (riskState.currentNotionalUsdc * effectiveMarginBps) / 10_000;
         if (riskState.equityUsdc <= int256(initialMarginRequirementUsdc)) {
             return 0;
         }
