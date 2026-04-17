@@ -1,3 +1,13 @@
+- [x] Inspect TrancheVault frozen withdraw path and existing fee-policy coverage
+- [x] Reset `lastDepositTime` on withdraw/redeem to block same-address chunking loops
+- [x] Add focused regression proving repeated frozen withdrawals in the same block revert
+- [x] Run targeted Forge verification for frozen withdrawal cooldown behavior
+
+Review:
+- Updated `src/perps/TrancheVault.sol` so `_withdraw(...)` now resets `lastDepositTime[_owner] = block.timestamp` immediately after the existing cooldown gate. This keeps the fix minimal while blocking same-address frozen-window withdraw/redeem chunking loops in a single transaction or cooldown window.
+- Added `test_FrozenRedeem_SecondSameBlockRedeemRevertsOnCooldown()` to `test/perps/FrozenLpFeePolicy.t.sol` and imported `TrancheVault` there so the test can assert the exact `TrancheVault__DepositCooldown` custom error on the second same-block redeem.
+- Verified green with `forge test --match-path test/perps/FrozenLpFeePolicy.t.sol`.
+
 - [x] Inspect current order-failure and clearinghouse helper tests for the smallest safe cleanup
 - [x] Remove unreachable failed-order outcome branches and dead escrow helpers
 - [x] Guard direct committed-margin helpers against reservation-ledger desync

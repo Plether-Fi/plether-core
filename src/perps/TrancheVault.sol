@@ -278,6 +278,7 @@ contract TrancheVault is ERC4626 {
         if (block.timestamp < lastDepositTime[_owner] + DEPOSIT_COOLDOWN) {
             revert TrancheVault__DepositCooldown();
         }
+        lastDepositTime[_owner] = block.timestamp;
         if (caller != _owner) {
             _spendAllowance(_owner, caller, shares);
         }

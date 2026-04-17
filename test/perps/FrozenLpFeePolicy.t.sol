@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {HousePool} from "../../src/perps/HousePool.sol";
+import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 
 contract FrozenLpFeePolicyTest is BasePerpTest {
@@ -317,6 +318,22 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
             "Junior frozen redeem fee should improve remaining junior LP share price"
         );
         assertEq(seniorPriceAfter, seniorPriceBefore, "Junior frozen fee should not reprice the senior tranche");
+    }
+
+    function test_FrozenRedeem_SecondSameBlockRedeemRevertsOnCooldown() public {
+        address incumbent = address(0xB0C);
+        uint256 firstShares = 10_000e9;
+
+        _fundJunior(incumbent, 500_000e6);
+        _fundSenior(address(0xD00E), 500_000e6);
+        vm.warp(block.timestamp + juniorVault.DEPOSIT_COOLDOWN() + 1);
+        _enterFrozenWindow();
+
+        vm.startPrank(incumbent);
+        juniorVault.redeem(firstShares, incumbent, incumbent);
+        vm.expectRevert(TrancheVault.TrancheVault__DepositCooldown.selector);
+        juniorVault.redeem(firstShares, incumbent, incumbent);
+        vm.stopPrank();
     }
 
     function test_FadOnlyHour_DoesNotActivateFrozenFee() public {
