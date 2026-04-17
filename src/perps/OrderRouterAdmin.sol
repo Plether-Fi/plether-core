@@ -8,6 +8,10 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 contract OrderRouterAdmin is Ownable, Pausable {
 
     uint256 public constant TIMELOCK_DELAY = 48 hours;
+    uint256 internal constant MAX_PENDING_ORDERS_LIMIT = 32;
+    uint256 internal constant MIN_ENGINE_GAS_FLOOR = 100_000;
+    uint256 internal constant MIN_ENGINE_GAS_CAP = 5_000_000;
+    uint256 internal constant MAX_PRUNE_ORDERS_PER_CALL_LIMIT = 256;
 
     IOrderRouterAdminHost public immutable router;
     mapping(address => uint256) public claimableEth;
@@ -146,10 +150,14 @@ contract OrderRouterAdmin is Ownable, Pausable {
         ) {
             revert OrderRouterAdmin__InvalidExecutionBounty();
         }
-        if (config.maxPendingOrders == 0) {
+        if (config.maxPendingOrders == 0 || config.maxPendingOrders > MAX_PENDING_ORDERS_LIMIT) {
             revert OrderRouterAdmin__InvalidPendingOrderLimit();
         }
-        if (config.minEngineGas == 0 || config.maxPruneOrdersPerCall == 0) {
+        if (
+            config.minEngineGas < MIN_ENGINE_GAS_FLOOR || config.minEngineGas > MIN_ENGINE_GAS_CAP
+                || config.maxPruneOrdersPerCall == 0
+                || config.maxPruneOrdersPerCall > MAX_PRUNE_ORDERS_PER_CALL_LIMIT
+        ) {
             revert OrderRouterAdmin__InvalidGasLimit();
         }
     }

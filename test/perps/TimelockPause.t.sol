@@ -344,6 +344,36 @@ contract TimelockPauseTest is BasePerpTest {
         routerAdmin.proposeRouterConfig(config);
     }
 
+    function test_OrderRouter_InvalidPendingOrderLimit_Reverts() public {
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.maxPendingOrders = 33;
+
+        vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__InvalidPendingOrderLimit.selector);
+        routerAdmin.proposeRouterConfig(config);
+    }
+
+    function test_OrderRouter_InvalidMinEngineGas_Reverts() public {
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.minEngineGas = 99_999;
+
+        vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__InvalidGasLimit.selector);
+        routerAdmin.proposeRouterConfig(config);
+
+        config = _routerConfig();
+        config.minEngineGas = 5_000_001;
+
+        vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__InvalidGasLimit.selector);
+        routerAdmin.proposeRouterConfig(config);
+    }
+
+    function test_OrderRouter_InvalidMaxPruneOrdersPerCall_Reverts() public {
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.maxPruneOrdersPerCall = 257;
+
+        vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__InvalidGasLimit.selector);
+        routerAdmin.proposeRouterConfig(config);
+    }
+
     // ==========================================
     // MarginClearinghouse CONFIG TESTS
     // ==========================================
