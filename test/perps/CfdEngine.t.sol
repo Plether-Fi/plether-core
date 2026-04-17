@@ -921,29 +921,27 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
-    function test_ClaimDeferredTraderCredit_SkipsCarryCheckpointWhenMarkIsStale() public {
+    function test_ClaimDeferredTraderCredit_UsesStoredMarkCarryCheckpointWhenMarkIsStale() public {
         address trader = address(0xD30C);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
-        _fundTrader(trader, 11_000e6);
+        _fundTrader(trader, 20_000e6);
 
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
-
-        uint256 poolAssets = pool.totalAssets();
-        vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
-
-        _close(accountId, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
-
-        uint256 deferred = engine.deferredTraderCreditUsdc(accountId);
-        assertGt(deferred, 0, "Setup should create a deferred payout");
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(bytes32)").with_key(accountId)
+            .checked_write(uint256(5000e6));
+        stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(uint256(5000e6));
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 30 days);
 
         uint256 settlementBefore = clearinghouse.balanceUsdc(accountId);
         uint64 carryTimestampBefore = engine.getPositionLastCarryTimestamp(accountId);
-        uint256 unsettledCarryBefore = engine.unsettledCarryUsdc(accountId);
+        uint256 expectedCarry = PositionRiskAccountingLib.computePendingCarryUsdc(
+            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, engine.lastMarkPrice(), settlementBefore),
+            _riskParams().baseCarryBps,
+            block.timestamp - carryTimestampBefore
+        );
 
-        usdc.mint(address(pool), deferred);
+        usdc.mint(address(pool), 5000e6);
 
         vm.prank(trader);
         engine.claimDeferredTraderCredit(accountId);
@@ -951,18 +949,18 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(engine.deferredTraderCreditUsdc(accountId), 0, "Claim should clear deferred payout state");
         assertEq(
             clearinghouse.balanceUsdc(accountId),
-            settlementBefore + deferred,
-            "Stale deferred payout claim should still credit the deferred amount without checkpointing carry"
+            settlementBefore + 5000e6 - expectedCarry,
+            "Stale deferred payout claim should checkpoint carry against the stored mark before crediting settlement"
         );
         assertEq(
             engine.getPositionLastCarryTimestamp(accountId),
-            carryTimestampBefore,
-            "Stale deferred payout claim should not advance the carry clock"
+            block.timestamp,
+            "Stale deferred payout claim should advance the carry clock after checkpointing carry"
         );
         assertEq(
             engine.unsettledCarryUsdc(accountId),
-            unsettledCarryBefore,
-            "Stale deferred payout claim should not mutate unsettled carry"
+            0,
+            "Stale deferred payout claim should not leave carry deferred once the claim-funded settlement can satisfy it"
         );
     }
 
@@ -1479,7 +1477,7 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
-    function test_ClaimDeferredKeeperCredit_SkipsCarryCheckpointWhenMarkIsStale() public {
+    function test_ClaimDeferredKeeperCredit_UsesStoredMarkCarryCheckpointWhenMarkIsStale() public {
         address keeper = address(0xFEE7);
         bytes32 keeperAccountId = bytes32(uint256(uint160(keeper)));
         _fundTrader(keeper, 20_000e6);
@@ -1492,7 +1490,11 @@ contract CfdEngineTest is BasePerpTest {
 
         uint256 settlementBefore = clearinghouse.balanceUsdc(keeperAccountId);
         uint64 carryTimestampBefore = engine.getPositionLastCarryTimestamp(keeperAccountId);
-        uint256 unsettledCarryBefore = engine.unsettledCarryUsdc(keeperAccountId);
+        uint256 expectedCarry = PositionRiskAccountingLib.computePendingCarryUsdc(
+            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, engine.lastMarkPrice(), settlementBefore),
+            _riskParams().baseCarryBps,
+            block.timestamp - carryTimestampBefore
+        );
 
         usdc.mint(address(pool), 5000e6);
 
@@ -1501,18 +1503,18 @@ contract CfdEngineTest is BasePerpTest {
 
         assertEq(
             clearinghouse.balanceUsdc(keeperAccountId),
-            settlementBefore + 5000e6,
-            "Stale deferred keeper claim should still credit the deferred amount without checkpointing carry"
+            settlementBefore + 5000e6 - expectedCarry,
+            "Stale deferred keeper claim should checkpoint carry against the stored mark before crediting settlement"
         );
         assertEq(
             engine.getPositionLastCarryTimestamp(keeperAccountId),
-            carryTimestampBefore,
-            "Stale deferred keeper claim should not advance the carry clock"
+            block.timestamp,
+            "Stale deferred keeper claim should advance the carry clock after checkpointing carry"
         );
         assertEq(
             engine.unsettledCarryUsdc(keeperAccountId),
-            unsettledCarryBefore,
-            "Stale deferred keeper claim should not mutate unsettled carry"
+            0,
+            "Stale deferred keeper claim should not leave carry deferred once the claim-funded settlement can satisfy it"
         );
     }
 

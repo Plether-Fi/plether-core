@@ -294,9 +294,16 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         }
 
         (bool priceFresh, uint256 price) = _tryGetFreshLiveMarkPrice();
-        if (!priceFresh) {
+        if (priceFresh) {
+            _checkpointCarryBeforeBasisChange(accountId, pos, price, _genericReachableCollateralUsdc(accountId));
             return;
         }
+
+        price = lastMarkPrice;
+        if (price == 0 || lastMarkTime == 0) {
+            revert CfdEngine__MarkPriceStale();
+        }
+
         _checkpointCarryBeforeBasisChange(accountId, pos, price, _genericReachableCollateralUsdc(accountId));
     }
 
@@ -575,8 +582,8 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     /// @notice Claims deferred trader credit balance into the clearinghouse.
     /// @dev The claim can be partial if current vault cash is insufficient. Funds are credited to the
     ///      clearinghouse first, so beneficiaries access them through the normal account-balance path.
-    ///      Carry is checkpointed when a fresh mark is available, but stale marks do not block access to
-    ///      already-owed deferred cash.
+    ///      Carry is checkpointed before the settlement-basis change using a fresh mark when available,
+    ///      otherwise the cached stored mark is used.
     function claimDeferredTraderCredit(
         bytes32 accountId
     ) external nonReentrant {

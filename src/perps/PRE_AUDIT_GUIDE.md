@@ -19,6 +19,32 @@ If reviewing quickly, focus on these questions in order:
 3. Does the path use the correct oracle regime and failure policy for the current market state?
 4. Does the path preserve bounded queue behavior and deferred-liability seniority?
 
+## Test Taxonomy
+
+Treat test files as belonging to one of three buckets:
+
+1. `spec`: asserts intended product or accounting behavior sourced from `ACCOUNTING_SPEC.md`, `README.md`, or the policy tables below.
+2. `invariant`: asserts properties that must hold across many action sequences and internal implementations.
+3. `regression`: preserves a deliberately chosen edge case, legacy fix, or historical bug repro.
+
+Rules:
+
+- Every new non-trivial test should state its bucket and the source-of-truth rule it is asserting.
+- `spec` tests should prefer parity or end-state economics over mirroring internal implementation steps.
+- `invariant` tests should avoid asserting incidental storage details when a stronger economic property is available.
+- `regression` tests must not be the only place that defines correctness for a behavior; pair them with a `spec` or `invariant` test when the behavior is normative.
+- Tests that only describe current behavior should be prefixed `legacy_`, `current_behavior_`, or `obsolete_` unless the behavior is explicitly intended by spec.
+
+### Test Review Checklist
+
+Before trusting a test as a source of truth, ask:
+
+1. Would this still be correct if the implementation were rewritten but the economics stayed the same?
+2. Is the assertion derived from a spec rule, or only from observed current code behavior?
+3. Does the test compare two equivalent policy paths (`fresh` vs `stale stored-mark`, `preview` vs `live`) rather than hard-coding one path's internals?
+4. Is the test preserving stale state (`should not advance`, `should remain unchanged`) where the spec actually requires a checkpoint or recomputation?
+5. If this test disagrees with docs/spec, is the disagreement intentional and documented?
+
 ## Policy Spec
 
 ### Privileged caller table
