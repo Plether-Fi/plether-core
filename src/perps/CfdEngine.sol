@@ -6,8 +6,8 @@ import {CfdMath} from "./CfdMath.sol";
 import {CfdTypes} from "./CfdTypes.sol";
 import {CfdEngineSettlementTypes} from "./interfaces/CfdEngineSettlementTypes.sol";
 import {EngineStatusViewTypes} from "./interfaces/EngineStatusViewTypes.sol";
-import {ICfdEngineAdminHost} from "./interfaces/ICfdEngineAdminHost.sol";
 import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
+import {ICfdEngineAdminHost} from "./interfaces/ICfdEngineAdminHost.sol";
 import {ICfdEnginePlanner} from "./interfaces/ICfdEnginePlanner.sol";
 import {ICfdEngineSettlementHost} from "./interfaces/ICfdEngineSettlementHost.sol";
 import {ICfdEngineSettlementModule} from "./interfaces/ICfdEngineSettlementModule.sol";
@@ -312,7 +312,11 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         bytes32 accountId
     ) internal returns (uint256 claimAmountUsdc) {
         claimAmountUsdc = CashPriorityLib.availableCashForDeferredBeneficiaryClaim(
-            vault.totalAssets(), accumulatedFeesUsdc, totalDeferredTraderCreditUsdc, totalDeferredKeeperCreditUsdc, amount
+            vault.totalAssets(),
+            accumulatedFeesUsdc,
+            totalDeferredTraderCreditUsdc,
+            totalDeferredKeeperCreditUsdc,
+            amount
         );
         if (claimAmountUsdc == 0) {
             revert CfdEngine__InsufficientVaultLiquidity();
@@ -379,7 +383,11 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     }
 
     /// @notice One-time setter for planner, settlement module, and admin sidecars.
-    function setDependencies(address planner_, address settlementModule_, address admin_) external onlyOwner {
+    function setDependencies(
+        address planner_,
+        address settlementModule_,
+        address admin_
+    ) external onlyOwner {
         if (planner_ == address(0) || settlementModule_ == address(0) || admin_ == address(0)) {
             revert CfdEngine__ZeroAddress();
         }
@@ -863,7 +871,8 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         reachableUsdc = _genericReachableCollateralUsdc(accountId);
         uint256 pendingCarryUsdc = _totalPendingCarryUsdc(accountId, pos, price, reachableUsdc, block.timestamp);
         uint256 currentMarginBps = isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps;
-        uint256 effectiveMarginBps = riskParams.initMarginBps > currentMarginBps ? riskParams.initMarginBps : currentMarginBps;
+        uint256 effectiveMarginBps =
+            riskParams.initMarginBps > currentMarginBps ? riskParams.initMarginBps : currentMarginBps;
         PositionRiskAccountingLib.PositionRiskState memory riskState =
             PositionRiskAccountingLib.buildPositionRiskStateWithCarry(
                 pos, price, CAP_PRICE, pendingCarryUsdc, reachableUsdc, effectiveMarginBps

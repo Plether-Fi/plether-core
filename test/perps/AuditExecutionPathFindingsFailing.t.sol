@@ -36,6 +36,7 @@ contract RejectingRefundReceiver {
     ) external payable {
         router.updateMarkPrice{value: msg.value}(updateData);
     }
+
 }
 
 contract AuditExecutionPathFindingsFailing_EthRefundFallback is BasePerpTest {
@@ -126,9 +127,9 @@ contract AuditExecutionPathFindingsFailing_CommitPrefilterFeeParity is BasePerpT
         address trader = address(0xE113);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         uint256 sizeDelta = 100_000e18;
-        uint256 marginDelta = 1_500e6;
+        uint256 marginDelta = 1500e6;
 
-        _fundTrader(trader, 2_000e6);
+        _fundTrader(trader, 2000e6);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));

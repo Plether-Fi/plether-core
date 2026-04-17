@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdTypes} from "./CfdTypes.sol";
 import {CfdMath} from "./CfdMath.sol";
+import {CfdTypes} from "./CfdTypes.sol";
 import {ICfdEngineAdminHost} from "./interfaces/ICfdEngineAdminHost.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
@@ -38,7 +38,10 @@ contract CfdEngineAdmin is Ownable {
     event FreshnessConfigFinalized(ICfdEngineAdminHost.EngineFreshnessConfig config);
     event FreshnessConfigCancelled();
 
-    constructor(address engine_, address initialOwner) Ownable(initialOwner) {
+    constructor(
+        address engine_,
+        address initialOwner
+    ) Ownable(initialOwner) {
         engine = ICfdEngineAdminHost(engine_);
     }
 
@@ -97,11 +100,7 @@ contract CfdEngineAdmin is Ownable {
         emit CalendarConfigCancelled();
     }
 
-    function getPendingCalendarConfig()
-        external
-        view
-        returns (ICfdEngineAdminHost.EngineCalendarConfig memory config)
-    {
+    function getPendingCalendarConfig() external view returns (ICfdEngineAdminHost.EngineCalendarConfig memory config) {
         config = _pendingCalendarConfig;
     }
 
@@ -161,4 +160,5 @@ contract CfdEngineAdmin is Ownable {
             revert CfdEngineAdmin__InvalidRiskParams();
         }
     }
+
 }

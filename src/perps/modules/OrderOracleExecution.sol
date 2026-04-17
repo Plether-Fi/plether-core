@@ -139,7 +139,8 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
     ) internal returns (OracleUpdateResult memory update) {
         uint256 maxStaleness = orderExecutionStalenessLimit;
         if (address(pyth) != address(0)) {
-            maxStaleness = OracleFreshnessPolicyLib.getPolicy(
+            maxStaleness =
+            OracleFreshnessPolicyLib.getPolicy(
                 OracleFreshnessPolicyLib.Mode.MarkRefresh,
                 _isOracleFrozen(),
                 engine.isFadWindow(),
@@ -148,7 +149,8 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
                 orderExecutionStalenessLimit,
                 liquidationStalenessLimit,
                 engine.fadMaxStaleness()
-            ).maxStaleness;
+            )
+            .maxStaleness;
         }
 
         (update.executionPrice, update.oraclePublishTime, update.pythFee) =
@@ -178,7 +180,8 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
     ) internal returns (OracleUpdateResult memory update) {
         uint256 maxStaleness = liquidationStalenessLimit;
         if (address(pyth) != address(0)) {
-            maxStaleness = OracleFreshnessPolicyLib.getPolicy(
+            maxStaleness =
+            OracleFreshnessPolicyLib.getPolicy(
                 OracleFreshnessPolicyLib.Mode.Liquidation,
                 _isOracleFrozen(),
                 engine.isFadWindow(),
@@ -187,7 +190,8 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
                 orderExecutionStalenessLimit,
                 liquidationStalenessLimit,
                 engine.fadMaxStaleness()
-            ).maxStaleness;
+            )
+            .maxStaleness;
         }
 
         (update.executionPrice, update.oraclePublishTime, update.pythFee) =

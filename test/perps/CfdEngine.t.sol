@@ -1399,9 +1399,8 @@ contract CfdEngineTest is BasePerpTest {
         usdc.mint(address(pool), 100e6);
 
         stdstore.target(address(engine)).sig("accumulatedFeesUsdc()").checked_write(uint256(60e6));
-        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(bytes32)").with_key(traderAccountId).checked_write(
-            uint256(40e6)
-        );
+        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(bytes32)").with_key(traderAccountId)
+            .checked_write(uint256(40e6));
         stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(uint256(40e6));
 
         vm.prank(address(router));
@@ -1424,7 +1423,9 @@ contract CfdEngineTest is BasePerpTest {
         );
         assertEq(pool.totalAssets(), 20e6, "Trader claim should move the vault into the exact 20/20/20 residual state");
         assertEq(engine.accumulatedFeesUsdc(), 20e6, "Servicing deferred claims must not burn fee accounting");
-        assertEq(engine.deferredTraderCreditUsdc(traderAccountId), 0, "Trader deferred balance should be fully consumed");
+        assertEq(
+            engine.deferredTraderCreditUsdc(traderAccountId), 0, "Trader deferred balance should be fully consumed"
+        );
         assertEq(engine.deferredKeeperCreditUsdc(keeper), 20e6, "Keeper deferred balance should remain queued");
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccountId);
@@ -1437,8 +1438,14 @@ contract CfdEngineTest is BasePerpTest {
             "Keeper should be able to drain the last 20e6 instead of deadlocking behind fee accounting"
         );
         assertEq(pool.totalAssets(), 0, "Final deferred claim should consume the last residual vault cash");
-        assertEq(engine.deferredKeeperCreditUsdc(keeper), 0, "Keeper deferred balance should clear after the final claim");
-        assertEq(engine.accumulatedFeesUsdc(), 20e6, "Fee accounting should remain recorded even after deferred claims drain cash");
+        assertEq(
+            engine.deferredKeeperCreditUsdc(keeper), 0, "Keeper deferred balance should clear after the final claim"
+        );
+        assertEq(
+            engine.accumulatedFeesUsdc(),
+            20e6,
+            "Fee accounting should remain recorded even after deferred claims drain cash"
+        );
     }
 
     function test_WithdrawFees_AllowsPartialWithdrawal() public {

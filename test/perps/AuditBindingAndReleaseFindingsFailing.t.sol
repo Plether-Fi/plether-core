@@ -61,7 +61,11 @@ contract AuditBindingAndReleaseFindingsFailing is BasePerpTest {
         assertEq(
             router.nextExecuteId(), 0, "Clearing the invalid binding head should drain the queue to the zero sentinel"
         );
-        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 0, "Clearing a failed binding head should not compensate the clearer under the current open-order failure policy");
+        assertEq(
+            usdc.balanceOf(address(this)) - keeperBefore,
+            0,
+            "Clearing a failed binding head should not compensate the clearer under the current open-order failure policy"
+        );
     }
 
 }

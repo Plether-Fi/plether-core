@@ -7,8 +7,8 @@ import {CfdEngineLens} from "../../../../src/perps/CfdEngineLens.sol";
 import {CfdEnginePlanTypes} from "../../../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../../../../src/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "../../../../src/perps/MarginClearinghouse.sol";
-import {OrderRouterAdmin} from "../../../../src/perps/OrderRouterAdmin.sol";
 import {OrderRouter} from "../../../../src/perps/OrderRouter.sol";
+import {OrderRouterAdmin} from "../../../../src/perps/OrderRouterAdmin.sol";
 import {AccountLensViewTypes} from "../../../../src/perps/interfaces/AccountLensViewTypes.sol";
 import {ICfdEngine} from "../../../../src/perps/interfaces/ICfdEngine.sol";
 import {IMarginClearinghouse} from "../../../../src/perps/interfaces/IMarginClearinghouse.sol";
@@ -244,8 +244,7 @@ contract PerpAccountingHandler is Test {
             active: true,
             accountId: accountId,
             routerOpenAllowed: !routerAdmin.paused() && !engine.degradedMode() && !engine.isOracleFrozen()
-                && !engine.isFadWindow() && vault.canIncreaseRisk()
-                && router.pendingOrderCounts(accountId) < 5,
+                && !engine.isFadWindow() && vault.canIncreaseRisk() && router.pendingOrderCounts(accountId) < 5,
             prefilterActive: _canUseCommitMarkForOpenPrefilter(),
             failureCategory: engineLens.previewOpenFailurePolicyCategory(
                 accountId, side, sizeDelta, marginDelta, _commitReferencePrice(), engine.lastMarkTime()

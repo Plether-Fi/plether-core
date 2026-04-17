@@ -31,4 +31,5 @@ interface ICfdEngineAdminHost {
     function applyFreshnessConfig(
         EngineFreshnessConfig calldata config
     ) external;
+
 }

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {Vm} from "forge-std/Vm.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
+import {Vm} from "forge-std/Vm.sol";
 
 library OrderRouterDebugLens {
 
@@ -27,7 +27,8 @@ library OrderRouterDebugLens {
         record.core.side = CfdTypes.Side(uint8(packedCore >> 192));
         record.core.isClose = ((packedCore >> 200) & 0xff) != 0;
 
-        record.status = IOrderRouterAccounting.OrderStatus(uint8(uint256(vm_.load(address(router), bytes32(baseSlot + 5)))));
+        record.status =
+            IOrderRouterAccounting.OrderStatus(uint8(uint256(vm_.load(address(router), bytes32(baseSlot + 5)))));
         record.executionBountyUsdc = uint256(vm_.load(address(router), bytes32(baseSlot + 6)));
 
         uint256 packedLinks = uint256(vm_.load(address(router), bytes32(baseSlot + 7)));
@@ -51,4 +52,5 @@ library OrderRouterDebugLens {
         uint256 baseSlot = uint256(keccak256(abi.encode(orderId, uint256(0))));
         return IOrderRouterAccounting.OrderStatus(uint8(uint256(vm_.load(address(router), bytes32(baseSlot + 5)))));
     }
+
 }

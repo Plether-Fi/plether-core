@@ -206,7 +206,9 @@ contract AuditFollowupFindingsFailing_LiquidationBounty is BasePerpTest {
         vm.stopPrank();
 
         assertGt(bounty, 0, "Keeper bounty should stay positive for a still-positive-equity liquidation");
-        assertLt(bounty, 5e6, "Keeper bounty should remain capped below the trader's remaining positive equity in this setup");
+        assertLt(
+            bounty, 5e6, "Keeper bounty should remain capped below the trader's remaining positive equity in this setup"
+        );
     }
 
 }
@@ -357,7 +359,9 @@ contract AuditFollowupFindingsFailing_AsyncCloseIntent is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 20_000e18, 0, 0, true);
         vm.stopPrank();
 
-        assertEq(router.nextCommitId(), 2, "Rejected close intent should not advance the queue behind the pending open order");
+        assertEq(
+            router.nextCommitId(), 2, "Rejected close intent should not advance the queue behind the pending open order"
+        );
     }
 
 }

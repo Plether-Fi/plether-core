@@ -94,7 +94,11 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         uint256 incumbentClaimAfter = seniorVault.convertToAssets(seniorVault.balanceOf(incumbent));
 
         assertEq(mintedShares, expectedNetShares, "Frozen deposit should mint the exact fee-discounted share count");
-        assertLt(entrantGrossClaimAfter, entrantAssets, "Entrant should not recapture the retained frozen fee through ownership leakage");
+        assertLt(
+            entrantGrossClaimAfter,
+            entrantAssets,
+            "Entrant should not recapture the retained frozen fee through ownership leakage"
+        );
         assertGt(incumbentClaimAfter, incumbentClaimBefore, "Retained frozen fee should increase incumbent gross claim");
     }
 
@@ -148,7 +152,9 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         vm.stopPrank();
 
         assertEq(depositShares, depositQuotedShares, "Deposit path should mint the previewed net shares");
-        assertEq(depositShares, seniorVault.balanceOf(mintLp), "Mint path should deliver the same net share ownership target");
+        assertEq(
+            depositShares, seniorVault.balanceOf(mintLp), "Mint path should deliver the same net share ownership target"
+        );
         assertEq(mintAssets, mintQuotedAssets, "Mint path should honor previewMint for the same net share target");
     }
 
@@ -286,13 +292,16 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
 
         uint256 quotedAssets = seniorVault.maxWithdraw(lp);
         uint256 ownerNetAssets = seniorVault.previewRedeem(seniorVault.balanceOf(lp));
-        uint256 expectedAssets = ownerNetAssets < pool.getMaxSeniorWithdraw() ? ownerNetAssets : pool.getMaxSeniorWithdraw();
+        uint256 expectedAssets =
+            ownerNetAssets < pool.getMaxSeniorWithdraw() ? ownerNetAssets : pool.getMaxSeniorWithdraw();
         assertEq(quotedAssets, expectedAssets, "maxWithdraw should use the same net-payout bound as live withdraw");
 
         uint256 balanceBefore = usdc.balanceOf(lp);
         vm.prank(lp);
         seniorVault.withdraw(quotedAssets, lp, lp);
-        assertEq(usdc.balanceOf(lp), balanceBefore + quotedAssets, "Withdraw should succeed for quoted maxWithdraw assets");
+        assertEq(
+            usdc.balanceOf(lp), balanceBefore + quotedAssets, "Withdraw should succeed for quoted maxWithdraw assets"
+        );
     }
 
     function test_FrozenWindow_MaxRedeem_UsesPreviewWithdrawPoolCap() public {
@@ -315,8 +324,12 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         uint256 balanceBefore = usdc.balanceOf(lp);
         vm.prank(lp);
         uint256 redeemedAssets = juniorVault.redeem(quotedShares, lp, lp);
-        assertEq(redeemedAssets, expectedAssets, "Redeem should realize the previewed net assets for quoted maxRedeem shares");
-        assertEq(usdc.balanceOf(lp), balanceBefore + redeemedAssets, "Redeem should succeed for quoted maxRedeem shares");
+        assertEq(
+            redeemedAssets, expectedAssets, "Redeem should realize the previewed net assets for quoted maxRedeem shares"
+        );
+        assertEq(
+            usdc.balanceOf(lp), balanceBefore + redeemedAssets, "Redeem should succeed for quoted maxRedeem shares"
+        );
     }
 
 }

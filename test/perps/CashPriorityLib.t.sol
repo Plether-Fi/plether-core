@@ -42,7 +42,11 @@ contract CashPriorityLibTest is Test {
             30e6,
             "Deferred beneficiary claim should use only cash left after preserving other deferred claims"
         );
-        assertEq(reservation.protocolFeeWithdrawalUsdc, 0, "Protocol fees should remain non-withdrawable while senior claims exhaust liquidity");
+        assertEq(
+            reservation.protocolFeeWithdrawalUsdc,
+            0,
+            "Protocol fees should remain non-withdrawable while senior claims exhaust liquidity"
+        );
         assertEq(reservation.freeCashUsdc, 0, "No fresh cash remains above total deferred claims and fees");
     }
 
@@ -50,7 +54,11 @@ contract CashPriorityLibTest is Test {
         CashPriorityLib.SeniorCashReservation memory reservation =
             CashPriorityLib.reserveDeferredClaim(20e6, 20e6, 20e6, 0, 20e6);
 
-        assertEq(reservation.protocolFeeWithdrawalUsdc, 0, "No fee cash should remain once deferred claims absorb the shortfall");
+        assertEq(
+            reservation.protocolFeeWithdrawalUsdc,
+            0,
+            "No fee cash should remain once deferred claims absorb the shortfall"
+        );
         assertEq(
             reservation.deferredClaimServiceableUsdc,
             20e6,

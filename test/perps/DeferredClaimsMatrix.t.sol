@@ -19,9 +19,8 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
         usdc.mint(address(pool), 40e6);
 
         stdstore.target(address(engine)).sig("accumulatedFeesUsdc()").checked_write(uint256(20e6));
-        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(bytes32)").with_key(accountId).checked_write(
-            uint256(30e6)
-        );
+        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(bytes32)").with_key(accountId)
+            .checked_write(uint256(30e6));
         stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(uint256(30e6));
 
         vm.prank(address(router));
@@ -36,7 +35,9 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
             settlementBefore + 20e6,
             "Trader claim should consume shortfall cash ahead of protocol fees once other deferred claims are reserved"
         );
-        assertEq(engine.deferredTraderCreditUsdc(accountId), 10e6, "Only the unpaid trader remainder should stay queued");
+        assertEq(
+            engine.deferredTraderCreditUsdc(accountId), 10e6, "Only the unpaid trader remainder should stay queued"
+        );
         assertEq(engine.deferredKeeperCreditUsdc(otherKeeper), 20e6, "Other deferred claims should remain preserved");
         assertEq(engine.accumulatedFeesUsdc(), 20e6, "Protocol fees should remain preserved");
     }
@@ -47,9 +48,8 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
         usdc.burn(address(pool), pool.totalAssets());
         usdc.mint(address(pool), 20e6);
 
-        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(bytes32)").with_key(accountId).checked_write(
-            uint256(50e6)
-        );
+        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(bytes32)").with_key(accountId)
+            .checked_write(uint256(50e6));
         stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(uint256(50e6));
 
         uint256 deferredBefore = engine.deferredTraderCreditUsdc(accountId);
@@ -79,9 +79,8 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
         usdc.mint(address(pool), 45e6);
 
         stdstore.target(address(engine)).sig("accumulatedFeesUsdc()").checked_write(uint256(20e6));
-        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(bytes32)").with_key(accountId).checked_write(
-            uint256(30e6)
-        );
+        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(bytes32)").with_key(accountId)
+            .checked_write(uint256(30e6));
         stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(uint256(30e6));
 
         vm.prank(address(router));
@@ -132,9 +131,8 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
         usdc.mint(address(pool), 45e6);
 
         stdstore.target(address(engine)).sig("accumulatedFeesUsdc()").checked_write(uint256(20e6));
-        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(bytes32)").with_key(traderAccountId).checked_write(
-            uint256(20e6)
-        );
+        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(bytes32)").with_key(traderAccountId)
+            .checked_write(uint256(20e6));
         stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(uint256(20e6));
 
         vm.prank(address(router));
@@ -151,7 +149,9 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
             "Keeper claim should use all residual cash after preserving trader deferred claims"
         );
         assertEq(engine.deferredKeeperCreditUsdc(keeper), 5e6, "Keeper residual deferred balance should stay queued");
-        assertEq(engine.deferredTraderCreditUsdc(traderAccountId), 20e6, "Trader deferred queue should remain preserved");
+        assertEq(
+            engine.deferredTraderCreditUsdc(traderAccountId), 20e6, "Trader deferred queue should remain preserved"
+        );
         assertEq(engine.accumulatedFeesUsdc(), 20e6, "Protocol fees should remain preserved");
     }
 

@@ -165,7 +165,8 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
     }
 
     function invariant_TrackedAccountLedgerTotalsMatchProtocolCustodyAndObligations() public view {
-        uint256 totalSettlementUsdc = engineAccountLens.getAccountLedgerView(_accountId(address(handler))).settlementBalanceUsdc;
+        uint256 totalSettlementUsdc =
+            engineAccountLens.getAccountLedgerView(_accountId(address(handler))).settlementBalanceUsdc;
         uint256 totalExecutionEscrowUsdc;
         uint256 totalDeferredTraderCreditUsdc;
 

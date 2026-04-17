@@ -10,8 +10,8 @@ import {CfdEngineSettlementModule} from "../../src/perps/CfdEngineSettlementModu
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
-import {OrderRouterAdmin} from "../../src/perps/OrderRouterAdmin.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
+import {OrderRouterAdmin} from "../../src/perps/OrderRouterAdmin.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -150,10 +150,10 @@ contract PerpsForkTest is Test {
         clearinghouse.setEngine(address(engine));
         vm.warp(t0 + 144 hours + 3);
 
-        deal(USDC, address(this), 2_000e6);
-        IERC20(USDC).approve(address(pool), 2_000e6);
-        pool.initializeSeedPosition(false, 1_000e6, address(this));
-        pool.initializeSeedPosition(true, 1_000e6, address(this));
+        deal(USDC, address(this), 2000e6);
+        IERC20(USDC).approve(address(pool), 2000e6);
+        pool.initializeSeedPosition(false, 1000e6, address(this));
+        pool.initializeSeedPosition(true, 1000e6, address(this));
         pool.activateTrading();
 
         // LP deposits $1M to junior tranche

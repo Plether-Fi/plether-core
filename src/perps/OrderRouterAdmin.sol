@@ -38,7 +38,10 @@ contract OrderRouterAdmin is Ownable, Pausable {
     event RouterConfigCancelled();
     event PauserUpdated(address indexed previousPauser, address indexed newPauser);
 
-    constructor(address router_, address initialOwner) Ownable(initialOwner) {
+    constructor(
+        address router_,
+        address initialOwner
+    ) Ownable(initialOwner) {
         router = IOrderRouterAdminHost(router_);
     }
 
@@ -95,7 +98,10 @@ contract OrderRouterAdmin is Ownable, Pausable {
         _unpause();
     }
 
-    function creditClaimableEth(address beneficiary, uint256 amount) external payable onlyRouterHost {
+    function creditClaimableEth(
+        address beneficiary,
+        uint256 amount
+    ) external payable onlyRouterHost {
         if (amount == 0) {
             return;
         }
@@ -155,10 +161,10 @@ contract OrderRouterAdmin is Ownable, Pausable {
         }
         if (
             config.minEngineGas < MIN_ENGINE_GAS_FLOOR || config.minEngineGas > MIN_ENGINE_GAS_CAP
-                || config.maxPruneOrdersPerCall == 0
-                || config.maxPruneOrdersPerCall > MAX_PRUNE_ORDERS_PER_CALL_LIMIT
+                || config.maxPruneOrdersPerCall == 0 || config.maxPruneOrdersPerCall > MAX_PRUNE_ORDERS_PER_CALL_LIMIT
         ) {
             revert OrderRouterAdmin__InvalidGasLimit();
         }
     }
+
 }

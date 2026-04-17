@@ -6,8 +6,8 @@ import {CfdEnginePlanTypes} from "./CfdEnginePlanTypes.sol";
 import {CfdTypes} from "./CfdTypes.sol";
 import {OrderRouterAdmin} from "./OrderRouterAdmin.sol";
 import {ICfdEngineCore} from "./interfaces/ICfdEngineCore.sol";
-import {IOrderRouterAdminHost} from "./interfaces/IOrderRouterAdminHost.sol";
 import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
+import {IOrderRouterAdminHost} from "./interfaces/IOrderRouterAdminHost.sol";
 import {IPerpsKeeper} from "./interfaces/IPerpsKeeper.sol";
 import {IPerpsTraderActions} from "./interfaces/IPerpsTraderActions.sol";
 import {CashPriorityLib} from "./libraries/CashPriorityLib.sol";
@@ -531,9 +531,10 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, IOrderRouterAdminHost
         if (executionBountyUsdc < minOpenOrderExecutionBountyUsdc) {
             executionBountyUsdc = minOpenOrderExecutionBountyUsdc;
         }
-        return executionBountyUsdc > maxOpenOrderExecutionBountyUsdc
-            ? maxOpenOrderExecutionBountyUsdc
-            : executionBountyUsdc;
+        return
+            executionBountyUsdc > maxOpenOrderExecutionBountyUsdc
+                ? maxOpenOrderExecutionBountyUsdc
+                : executionBountyUsdc;
     }
 
     function _reserveCloseExecutionBounty(

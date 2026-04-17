@@ -11,10 +11,10 @@ import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
-import {ICfdEngineAdminHost} from "../../src/perps/interfaces/ICfdEngineAdminHost.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
-import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
+import {ICfdEngineAdminHost} from "../../src/perps/interfaces/ICfdEngineAdminHost.sol";
 import {ICfdVault} from "../../src/perps/interfaces/ICfdVault.sol";
+import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
@@ -139,7 +139,8 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
         mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), t0 + 61);
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), t0 + 61);
 
-        (IOrderRouterAccounting.PendingOrderView memory firstPending, uint64 nextAfterFirst) = router.getPendingOrderView(1);
+        (IOrderRouterAccounting.PendingOrderView memory firstPending, uint64 nextAfterFirst) =
+            router.getPendingOrderView(1);
         (IOrderRouterAccounting.PendingOrderView memory secondPending,) = router.getPendingOrderView(nextAfterFirst);
 
         uint256 keeperUsdcBefore = _settlementBalance(keeper);
@@ -156,7 +157,9 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
             "Batch execution should only compensate the clearer for the successful queued order, not the expired open head"
         );
         assertGt(firstPending.executionBountyUsdc, 0, "Expired open should still have escrowed a positive bounty");
-        assertGt(secondPending.executionBountyUsdc, 0, "Queued successor open should still have escrowed a positive bounty");
+        assertGt(
+            secondPending.executionBountyUsdc, 0, "Queued successor open should still have escrowed a positive bounty"
+        );
     }
 
     function test_C1_StaleSingleExecuteRefundsUserNotKeeper() public {
