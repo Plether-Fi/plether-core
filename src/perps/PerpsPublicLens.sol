@@ -114,6 +114,7 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
     function getLpStatus() external view returns (PerpsViewTypes.LpStatusView memory viewData) {
         viewData.tradingActive = HOUSE_POOL.isTradingActive();
         viewData.withdrawalLive = HOUSE_POOL.isWithdrawalLive();
+        viewData.oracleFrozen = HOUSE_POOL.isOracleFrozen();
 
         PerpsViewTypes.ProtocolStatusView memory status = _getProtocolStatusView();
         viewData.lastMarkTime = status.lastMarkTime;
@@ -169,8 +170,10 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
         viewData.totalShares = totalShares;
         viewData.sharePrice = totalShares == 0 ? 1e18 : (totalAssetsUsdc * 1e18) / totalShares;
         viewData.maxWithdrawUsdc = isSenior ? HOUSE_POOL.getMaxSeniorWithdraw() : HOUSE_POOL.getMaxJuniorWithdraw();
+        viewData.frozenLpFeeBps = HOUSE_POOL.frozenLpFeeBps(isSenior);
         viewData.depositEnabled = HOUSE_POOL.canAcceptTrancheDeposits(isSenior);
         viewData.withdrawEnabled = HOUSE_POOL.isWithdrawalLive();
+        viewData.oracleFrozen = HOUSE_POOL.isOracleFrozen();
     }
 
     function _getProtocolStatusView() internal view returns (PerpsViewTypes.ProtocolStatusView memory viewData) {

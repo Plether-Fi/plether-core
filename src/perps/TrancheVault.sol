@@ -92,6 +92,12 @@ contract TrancheVault is ERC4626 {
         POOL.reconcile();
         _requireLifecycleActiveForOrdinaryDeposit();
         _requireActiveTranche();
+        uint256 feeBps = _frozenLpFeeBps();
+        if (feeBps > 0) {
+            uint256 shares = previewDeposit(assets);
+            _deposit(msg.sender, receiver, assets, shares);
+            return shares;
+        }
         return super.deposit(assets, receiver);
     }
 
@@ -103,7 +109,33 @@ contract TrancheVault is ERC4626 {
         POOL.reconcile();
         _requireLifecycleActiveForOrdinaryDeposit();
         _requireActiveTranche();
+        uint256 feeBps = _frozenLpFeeBps();
+        if (feeBps > 0) {
+            uint256 assets = previewMint(shares);
+            _deposit(msg.sender, receiver, assets, shares);
+            return assets;
+        }
         return super.mint(shares, receiver);
+    }
+
+    function previewDeposit(
+        uint256 assets
+    ) public view override returns (uint256) {
+        uint256 feeBps = _frozenLpFeeBps();
+        if (feeBps == 0) {
+            return super.previewDeposit(assets);
+        }
+        return _convertToShares(_applyFee(assets, feeBps), Math.Rounding.Floor);
+    }
+
+    function previewMint(
+        uint256 shares
+    ) public view override returns (uint256) {
+        uint256 feeBps = _frozenLpFeeBps();
+        if (feeBps == 0) {
+            return super.previewMint(shares);
+        }
+        return _grossUpForFee(_convertToAssets(shares, Math.Rounding.Ceil), feeBps);
     }
 
     /// @notice Returns the current max deposit if lifecycle, freshness, and impairment gates allow deposits.
@@ -133,6 +165,12 @@ contract TrancheVault is ERC4626 {
         address _owner
     ) public override returns (uint256) {
         POOL.reconcile();
+        uint256 feeBps = _frozenLpFeeBps();
+        if (feeBps > 0) {
+            uint256 shares = previewWithdraw(assets);
+            _withdraw(msg.sender, receiver, _owner, assets, shares);
+            return shares;
+        }
         return super.withdraw(assets, receiver, _owner);
     }
 
@@ -143,7 +181,33 @@ contract TrancheVault is ERC4626 {
         address _owner
     ) public override returns (uint256) {
         POOL.reconcile();
+        uint256 feeBps = _frozenLpFeeBps();
+        if (feeBps > 0) {
+            uint256 assets = previewRedeem(shares);
+            _withdraw(msg.sender, receiver, _owner, assets, shares);
+            return assets;
+        }
         return super.redeem(shares, receiver, _owner);
+    }
+
+    function previewWithdraw(
+        uint256 assets
+    ) public view override returns (uint256) {
+        uint256 feeBps = _frozenLpFeeBps();
+        if (feeBps == 0) {
+            return super.previewWithdraw(assets);
+        }
+        return _convertToShares(_grossUpForFee(assets, feeBps), Math.Rounding.Ceil);
+    }
+
+    function previewRedeem(
+        uint256 shares
+    ) public view override returns (uint256) {
+        uint256 feeBps = _frozenLpFeeBps();
+        if (feeBps == 0) {
+            return super.previewRedeem(shares);
+        }
+        return _applyFee(_convertToAssets(shares, Math.Rounding.Floor), feeBps);
     }
 
     /// @notice Returns the withdrawable asset amount after cooldown and pool-level withdrawal gates.
@@ -160,7 +224,8 @@ contract TrancheVault is ERC4626 {
         uint256 ownerAssets = _convertToAssets(ownerShares, Math.Rounding.Floor);
         (,, uint256 maxSeniorWithdrawUsdc, uint256 maxJuniorWithdrawUsdc) = POOL.getPendingTrancheState();
         uint256 poolMax = IS_SENIOR ? maxSeniorWithdrawUsdc : maxJuniorWithdrawUsdc;
-        return ownerAssets < poolMax ? ownerAssets : poolMax;
+        uint256 grossMax = ownerAssets < poolMax ? ownerAssets : poolMax;
+        return _applyFee(grossMax, _frozenLpFeeBps());
     }
 
     /// @notice Returns the redeemable share amount after cooldown and pool-level withdrawal gates.
@@ -292,6 +357,30 @@ contract TrancheVault is ERC4626 {
 
     function _canDepositNow() internal view returns (bool) {
         return !_isTerminallyWiped() && POOL.canAcceptTrancheDeposits(IS_SENIOR);
+    }
+
+    function _frozenLpFeeBps() internal view returns (uint256) {
+        return POOL.frozenLpFeeBps(IS_SENIOR);
+    }
+
+    function _applyFee(
+        uint256 grossAssets,
+        uint256 feeBps
+    ) internal pure returns (uint256) {
+        if (feeBps == 0) {
+            return grossAssets;
+        }
+        return Math.mulDiv(grossAssets, 10_000 - feeBps, 10_000, Math.Rounding.Floor);
+    }
+
+    function _grossUpForFee(
+        uint256 netAssets,
+        uint256 feeBps
+    ) internal pure returns (uint256) {
+        if (feeBps == 0) {
+            return netAssets;
+        }
+        return Math.mulDiv(netAssets, 10_000, 10_000 - feeBps, Math.Rounding.Ceil);
     }
 
 }

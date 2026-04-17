@@ -123,6 +123,7 @@ Notes:
 
 - this view is intentionally stricter than solvency,
 - it ignores uncollected trader debts as a funding source for withdrawal.
+- during `oracleFrozen`, ERC4626 LP exits remain live but the user-facing withdraw/redeem output is reduced by the tranche's frozen-window surcharge rather than hard-blocking immediately.
 
 ### 3. LP reconciliation view
 
@@ -142,6 +143,7 @@ Rules:
 - over-recognition is forbidden,
 - temporary under-recognition is acceptable,
 - value with no valid claimant path must sit in explicit `unassignedAssets`.
+- during `oracleFrozen`, tranche entry/exit pricing remains live by applying fixed tranche-local LP surcharges instead of requiring a fresh live mark.
 
 Required consequences:
 
@@ -203,6 +205,34 @@ Key fields:
 Rule:
 
 - keep status gating distinct from accounting insufficiency.
+
+## Frozen-Window LP Fees
+
+The protocol keeps LP actions live during `oracleFrozen` by charging fixed stale-price surcharges rather than fully disabling ERC4626 entry and exit.
+
+Default configured fees:
+
+- senior tranche: `25 bps`
+- junior tranche: `75 bps`
+
+Governance model:
+
+- `HousePool` governance may update these fees through the same 48-hour timelock pattern used for other LP-facing config,
+- the active fee is zero whenever `oracleFrozen == false`, even during the FAD-only shoulder windows.
+
+Accounting rules:
+
+- `deposit` and `mint` move gross USDC into the tranche while minting shares against fee-adjusted effective assets,
+- `withdraw` and `redeem` burn shares against the gross tranche claim while paying only net user assets after the frozen fee,
+- the fee does not become protocol revenue,
+- the fee does not increase `accumulatedFeesUsdc`,
+- the fee remains inside the same tranche and therefore benefits incumbent LPs of that tranche only.
+
+Consequences:
+
+- senior frozen-window actions must not reprice junior shares,
+- junior frozen-window actions must not reprice senior shares,
+- preview and live ERC4626 paths must match under the active frozen fee.
 
 ### Preview and simulation solvency outputs
 

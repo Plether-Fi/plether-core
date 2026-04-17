@@ -146,6 +146,7 @@ LPs provide USDC to the `HousePool`, which is split into senior and junior ERC-4
 - Senior gets fixed-rate yield and last-loss protection.
 - Junior absorbs first loss and receives residual upside.
 - LP withdrawals are gated by solvency, reserved liabilities, lifecycle state, mark freshness policy, and holder cooldown rules.
+- During `oracleFrozen`, tranche deposits and withdrawals remain live but use stale-priced ERC4626 math with a fixed surcharge that stays in the same tranche: senior `25 bps`, junior `75 bps`.
 
 The withdrawal firewall is the key LP safety mechanism:
 
@@ -309,6 +310,11 @@ The system distinguishes between:
 
 - `FAD window`: elevated margin and close-only risk policy while FX markets are approaching closure.
 - `Oracle frozen`: relaxed staleness and relaxed commit-time publish ordering once FX feeds are actually offline.
+
+LP policy follows that split as well:
+
+- `FAD` alone does not change LP entry/exit pricing.
+- `oracleFrozen` keeps LP deposits and withdrawals live, but senior and junior tranche actions pay fixed stale-price surcharges that compensate incumbent LPs in that same tranche.
 
 This preserves close and liquidation liveness during real market closures without turning normal live trading into a free option.
 

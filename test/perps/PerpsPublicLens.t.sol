@@ -241,4 +241,32 @@ contract PerpsPublicLensTest is BasePerpTest {
         assertFalse(viewData.oracleFresh, "LP status should mirror the actual house-pool freshness policy");
     }
 
+    function test_GetSeniorTranche_ExposesFrozenLpFeeWhenOracleFrozen() public {
+        _fundSenior(address(0xA11CE), 100_000e6);
+
+        vm.warp(SATURDAY_NOON);
+        assertTrue(engine.isOracleFrozen(), "setup should be inside a frozen-oracle window");
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(SATURDAY_NOON - 3 hours));
+
+        PerpsViewTypes.TrancheView memory viewData = publicLens.getSeniorTranche();
+
+        assertTrue(viewData.oracleFrozen, "Senior tranche view should expose the frozen-oracle flag");
+        assertEq(viewData.frozenLpFeeBps, 25, "Senior tranche view should expose the active frozen LP fee");
+    }
+
+    function test_GetJuniorTranche_DoesNotChargeFrozenFeeDuringFadOnlyHour() public {
+        uint256 sunday2130 = 1_710_106_200;
+        vm.warp(sunday2130);
+
+        assertTrue(engine.isFadWindow(), "setup should remain inside FAD");
+        assertFalse(engine.isOracleFrozen(), "setup should be after the oracle-frozen window");
+
+        PerpsViewTypes.TrancheView memory viewData = publicLens.getJuniorTranche();
+
+        assertFalse(viewData.oracleFrozen, "Junior tranche view should report the live oracle state");
+        assertEq(viewData.frozenLpFeeBps, 0, "FAD alone should not activate the frozen LP fee");
+    }
+
 }

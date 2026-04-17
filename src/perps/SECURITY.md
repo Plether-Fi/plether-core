@@ -257,6 +257,11 @@ The protocol distinguishes two states around market closure:
 - `FAD window`: elevated margins and close-only risk policy while markets are still plausibly live,
 - `oracle frozen`: relaxed staleness and relaxed publish-ordering rules once feeds are genuinely offline.
 
+LP actions intentionally stay live across that split:
+
+- `FAD` alone keeps ordinary LP pricing,
+- `oracle frozen` keeps tranche deposits and withdrawals live but charges fixed stale-price surcharges (`25 bps` senior, `75 bps` junior) that remain in the same tranche for incumbent LPs.
+
 This is a deliberate trade-off: preserve close and liquidation liveness during real closures without weakening live-market MEV protections.
 
 ## Accounting And Solvency Security
@@ -338,6 +343,8 @@ When marks are stale and freshness is required:
 - mark-dependent reconcile math is skipped,
 - already-funded pending buckets may still settle,
 - fresh oracle publication is the recovery path.
+
+Exception: once the protocol enters `oracle frozen`, tranche deposits and withdrawals remain live under fixed stale-price surcharges instead of hard-blocking immediately.
 
 ### Senior yield model
 

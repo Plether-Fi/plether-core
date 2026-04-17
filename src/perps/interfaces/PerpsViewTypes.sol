@@ -48,8 +48,10 @@ library PerpsViewTypes {
         uint256 totalShares;
         uint256 sharePrice;
         uint256 maxWithdrawUsdc;
+        uint256 frozenLpFeeBps;
         bool depositEnabled;
         bool withdrawEnabled;
+        bool oracleFrozen;
     }
 
     struct LpStatusView {
@@ -57,6 +59,7 @@ library PerpsViewTypes {
         bool withdrawalLive;
         uint64 lastMarkTime;
         bool oracleFresh;
+        bool oracleFrozen;
     }
 
     struct ProtocolStatusView {

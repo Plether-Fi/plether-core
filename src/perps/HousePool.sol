@@ -82,6 +82,9 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
     uint256 public lastSeniorYieldCheckpointTime;
     uint256 public seniorRateBps;
     uint256 public markStalenessLimit = 60;
+    uint256 public seniorFrozenLpFeeBps = 25;
+    uint256 public juniorFrozenLpFeeBps = 75;
+    uint256 public constant MAX_FROZEN_LP_FEE_BPS = 1000;
     bool public override(ICfdVault, IHousePool) isTradingActive;
     bool public seniorSeedInitialized;
     bool public juniorSeedInitialized;
@@ -93,6 +96,10 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
 
     uint256 public pendingMarkStalenessLimit;
     uint256 public markStalenessLimitActivationTime;
+
+    uint256 public pendingSeniorFrozenLpFeeBps;
+    uint256 public pendingJuniorFrozenLpFeeBps;
+    uint256 public frozenLpFeeActivationTime;
 
     error HousePool__NotAVault();
     error HousePool__RouterAlreadySet();
@@ -109,6 +116,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
     error HousePool__ZeroAddress();
     error HousePool__ZeroStaleness();
     error HousePool__InvalidSeniorRate();
+    error HousePool__InvalidFrozenLpFee();
     error HousePool__NoExcessAssets();
     error HousePool__ExcessAmountTooHigh();
     error HousePool__PendingBootstrap();
@@ -125,6 +133,9 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
     event SeniorRateFinalized();
     event MarkStalenessLimitProposed(uint256 newLimit, uint256 activationTime);
     event MarkStalenessLimitFinalized();
+    event FrozenLpFeesProposed(uint256 newSeniorFeeBps, uint256 newJuniorFeeBps, uint256 activationTime);
+    event FrozenLpFeesUpdated(uint256 seniorFeeBps, uint256 juniorFeeBps);
+    event FrozenLpFeesFinalized();
     event ExcessAccounted(uint256 amountUsdc, uint256 accountedAssetsUsdc);
     event ExcessSwept(address indexed recipient, uint256 amountUsdc);
     event ProtocolInflowAccounted(address indexed caller, uint256 amountUsdc, uint256 accountedAssetsUsdc);
@@ -295,6 +306,44 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
     function cancelMarkStalenessLimitProposal() external onlyOwner {
         pendingMarkStalenessLimit = 0;
         markStalenessLimitActivationTime = 0;
+    }
+
+    /// @notice Propose new frozen-window LP fees for senior and junior tranches, subject to 48h timelock.
+    function proposeFrozenLpFees(
+        uint256 seniorFeeBps,
+        uint256 juniorFeeBps
+    ) external onlyOwner {
+        if (seniorFeeBps > MAX_FROZEN_LP_FEE_BPS || juniorFeeBps > MAX_FROZEN_LP_FEE_BPS) {
+            revert HousePool__InvalidFrozenLpFee();
+        }
+        pendingSeniorFrozenLpFeeBps = seniorFeeBps;
+        pendingJuniorFrozenLpFeeBps = juniorFeeBps;
+        frozenLpFeeActivationTime = block.timestamp + TIMELOCK_DELAY;
+        emit FrozenLpFeesProposed(seniorFeeBps, juniorFeeBps, frozenLpFeeActivationTime);
+    }
+
+    /// @notice Finalize the proposed frozen-window LP fees after timelock expiry.
+    function finalizeFrozenLpFees() external onlyOwner {
+        if (frozenLpFeeActivationTime == 0) {
+            revert HousePool__NoProposal();
+        }
+        if (block.timestamp < frozenLpFeeActivationTime) {
+            revert HousePool__TimelockNotReady();
+        }
+        seniorFrozenLpFeeBps = pendingSeniorFrozenLpFeeBps;
+        juniorFrozenLpFeeBps = pendingJuniorFrozenLpFeeBps;
+        pendingSeniorFrozenLpFeeBps = 0;
+        pendingJuniorFrozenLpFeeBps = 0;
+        frozenLpFeeActivationTime = 0;
+        emit FrozenLpFeesUpdated(seniorFrozenLpFeeBps, juniorFrozenLpFeeBps);
+        emit FrozenLpFeesFinalized();
+    }
+
+    /// @notice Cancel the pending frozen-window LP fee proposal.
+    function cancelFrozenLpFeeProposal() external onlyOwner {
+        pendingSeniorFrozenLpFeeBps = 0;
+        pendingJuniorFrozenLpFeeBps = 0;
+        frozenLpFeeActivationTime = 0;
     }
 
     /// @notice Updates the dedicated emergency pauser.
@@ -721,6 +770,19 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
 
     function isWithdrawalLive() external view returns (bool) {
         return _withdrawalsLive(_getHousePoolInputSnapshot(), _getHousePoolStatusSnapshot());
+    }
+
+    function isOracleFrozen() public view override returns (bool) {
+        return ENGINE.isOracleFrozen();
+    }
+
+    function frozenLpFeeBps(
+        bool isSenior
+    ) public view override returns (uint256) {
+        if (!isOracleFrozen()) {
+            return 0;
+        }
+        return isSenior ? seniorFrozenLpFeeBps : juniorFrozenLpFeeBps;
     }
 
     /// @notice Snapshot of pool liquidity, tranche principals, and oracle health for frontend consumption

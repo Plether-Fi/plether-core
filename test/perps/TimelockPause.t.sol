@@ -6,8 +6,8 @@ import {CfdEngineAdmin} from "../../src/perps/CfdEngineAdmin.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
-import {OrderRouterAdmin} from "../../src/perps/OrderRouterAdmin.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
+import {OrderRouterAdmin} from "../../src/perps/OrderRouterAdmin.sol";
 import {ICfdEngineAdminHost} from "../../src/perps/interfaces/ICfdEngineAdminHost.sol";
 import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
@@ -242,6 +242,42 @@ contract TimelockPauseTest is BasePerpTest {
         pool.proposeSeniorRate(1500);
         pool.cancelSeniorRateProposal();
         assertEq(pool.seniorRateActivationTime(), 0);
+    }
+
+    function test_ProposeFrozenLpFees_TimelockFlow() public {
+        pool.proposeFrozenLpFees(40, 90);
+        assertGt(pool.frozenLpFeeActivationTime(), 0);
+
+        vm.expectRevert(HousePool.HousePool__TimelockNotReady.selector);
+        pool.finalizeFrozenLpFees();
+
+        _warpForward(48 hours + 1);
+        pool.finalizeFrozenLpFees();
+
+        assertEq(pool.seniorFrozenLpFeeBps(), 40);
+        assertEq(pool.juniorFrozenLpFeeBps(), 90);
+        assertEq(pool.frozenLpFeeActivationTime(), 0);
+    }
+
+    function test_FinalizeFrozenLpFees_NoProposal_Reverts() public {
+        vm.expectRevert(HousePool.HousePool__NoProposal.selector);
+        pool.finalizeFrozenLpFees();
+    }
+
+    function test_CancelFrozenLpFees_ClearsPending() public {
+        pool.proposeFrozenLpFees(40, 90);
+        pool.cancelFrozenLpFeeProposal();
+        assertEq(pool.frozenLpFeeActivationTime(), 0);
+        assertEq(pool.pendingSeniorFrozenLpFeeBps(), 0);
+        assertEq(pool.pendingJuniorFrozenLpFeeBps(), 0);
+    }
+
+    function test_ProposeFrozenLpFees_RevertsAboveCap() public {
+        vm.expectRevert(HousePool.HousePool__InvalidFrozenLpFee.selector);
+        pool.proposeFrozenLpFees(1001, 90);
+
+        vm.expectRevert(HousePool.HousePool__InvalidFrozenLpFee.selector);
+        pool.proposeFrozenLpFees(40, 1001);
     }
 
     // ==========================================

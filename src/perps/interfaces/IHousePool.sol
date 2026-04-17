@@ -81,4 +81,10 @@ interface IHousePool {
 
     function isTradingActive() external view returns (bool);
 
+    function isOracleFrozen() external view returns (bool);
+
+    function frozenLpFeeBps(
+        bool isSenior
+    ) external view returns (uint256);
+
 }
