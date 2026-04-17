@@ -351,7 +351,7 @@ Rules:
 
 - deterministic live-state open failures may be rejected at commit time,
 - execution-time user-invalid opens pay the clearer from router escrow,
-- genuine post-commit protocol-state invalidations refund the trader bounty into clearinghouse settlement,
+- genuine post-commit protocol-state invalidations pay the clearer from router escrow so FIFO head cleanup remains incentive compatible,
 - typed engine policy categories, not raw revert selectors, should drive the split.
 
 ## Settlement Rules
@@ -470,9 +470,9 @@ Freshness policy is action-specific.
 ### LP accounting actions
 
 - withdrawals and reconcile use LP-accounting freshness policy,
-- stale marks may block mark-dependent reconcile math,
+- during `oracleFrozen`, LP entry and exit stay live under the fixed frozen-fee policy rather than introducing a second outer stale-action gate,
 - already-funded pending buckets may still settle through the same settlement entrypoint,
-- conservative stale paths must not back-accrue stale-window yield.
+- preview and live LP paths must agree on the active frozen-fee treatment whenever `oracleFrozen` is true.
 
 ## Order State Model
 

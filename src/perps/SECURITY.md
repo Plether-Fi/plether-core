@@ -395,7 +395,7 @@ This preserves terminal liveness without requiring an unbounded global queue sca
 ### LP accounting limitations
 
 - conservative MtM can temporarily understate junior value,
-- stale marks can block LP actions,
+- `oracleFrozen` keeps LP deposits and withdrawals live under fixed tranche-local frozen fees rather than a separate stale-action gate,
 - senior yield is not guaranteed during flat periods,
 - deposit cooldown can be griefed only by economically irrational donation-style top-ups.
 

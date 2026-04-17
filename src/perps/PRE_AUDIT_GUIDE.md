@@ -93,11 +93,11 @@ Any new helper/module contract that can reach these sets should be treated as se
 |-----------|---------|---------------|--------------|
 | Open/close executes successfully | `Executed` | clearer paid from escrow | dequeue |
 | Typed `UserInvalid` open | `Failed` | clearer paid | dequeue |
-| Typed `ProtocolStateInvalidated` open | `Failed` | trader refunded into clearinghouse settlement | dequeue |
+| Typed `ProtocolStateInvalidated` open | `Failed` | clearer paid from reserved escrow | dequeue |
 | Terminal invalid close | `Failed` | clearer paid | dequeue |
 | Slippage failure on open | `Failed` | clearer paid under the current terminal-failure policy | dequeue |
 | Slippage failure on close | `Failed` | clearer paid | dequeue |
-| Expired open order | `Failed` | trader refunded into clearinghouse settlement | dequeue |
+| Expired open order | `Failed` | clearer paid from reserved escrow | dequeue |
 | Expired close order | `Failed` | clearer paid from escrow under the current terminal-close policy | dequeue |
 | Stale oracle | blocked, not terminal | no distribution | keep pending |
 | Live-market publish-time ordering failure | blocked, not terminal | no distribution | keep pending |
