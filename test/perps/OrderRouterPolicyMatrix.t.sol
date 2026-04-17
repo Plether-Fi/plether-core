@@ -47,15 +47,17 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
     address internal constant BOB = address(0x222);
     address internal constant KEEPER = address(0x999);
 
-    function test_ExpiredOpenRefundsTrader() public {
+    function test_ExpiredOpenPaysClearerAndDoesNotRefundTrader() public {
         _fundTrader(ALICE, 10_000e6);
         bytes32 traderAccountId = bytes32(uint256(uint160(ALICE)));
+        bytes32 keeperAccountId = bytes32(uint256(uint160(KEEPER)));
 
         vm.prank(ALICE);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
 
+        (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(1);
         uint256 traderSettlementBefore = clearinghouse.balanceUsdc(traderAccountId);
-        uint256 keeperWalletBefore = usdc.balanceOf(KEEPER);
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccountId);
 
         vm.warp(block.timestamp + router.maxOrderAge() + 1);
         bytes[] memory empty;
@@ -63,11 +65,15 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        assertEq(usdc.balanceOf(KEEPER) - keeperWalletBefore, 0, "Expired open should not pay the clearer");
+        assertEq(
+            clearinghouse.balanceUsdc(keeperAccountId) - keeperSettlementBefore,
+            pending.executionBountyUsdc,
+            "Expired open should pay the clearer from reserved bounty settlement"
+        );
         assertEq(
             clearinghouse.balanceUsdc(traderAccountId) - traderSettlementBefore,
             0,
-            "Expired open cleanup should not further credit trader settlement after the bounty was already escrowed"
+            "Expired open cleanup should not refund the trader after the bounty was already escrowed"
         );
     }
 

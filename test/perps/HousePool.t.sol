@@ -2650,7 +2650,7 @@ contract HousePoolAuditTest is BasePerpTest {
         );
     }
 
-    function test_FrozenOracle_UsesRelaxedMarkFreshnessForWithdrawals() public {
+    function test_OracleFrozen_DoesNotBlockWithdrawals() public {
         uint256 saturdayFrozen = 1_710_021_600;
         _fundJunior(bob, 500_000e6);
         _fundTrader(alice, 50_000e6);
@@ -2670,9 +2670,7 @@ contract HousePoolAuditTest is BasePerpTest {
         vm.prank(bob);
         juniorVault.withdraw(1e6, bob, bob);
 
-        assertEq(
-            usdc.balanceOf(bob), bobUsdcBefore + 1e6, "Frozen-oracle withdrawals should use the relaxed freshness limit"
-        );
+        assertEq(usdc.balanceOf(bob), bobUsdcBefore + 1e6, "oracleFrozen alone should not block LP withdrawals");
     }
 
     function test_MaxWithdraw_RemainsExecutableWithPendingCarryAccrual() public {
