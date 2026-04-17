@@ -114,14 +114,12 @@ contract AuditLatestStateFindingsFailing_SeniorYieldCheckpoint is BasePerpTest {
         config.seniorRateBps = 1600;
         pool.proposePoolConfig(config);
         vm.warp(block.timestamp + 48 hours + 121);
+        vm.expectRevert(HousePool.HousePool__MarkPriceStale.selector);
         pool.finalizePoolConfig();
 
-        assertEq(pool.lastReconcileTime(), before, "Stale finalize should leave the accrual clock untouched");
-
-        vm.prank(address(router));
-        engine.updateMarkPrice(1e8, uint64(block.timestamp));
-        vm.prank(address(juniorVault));
-        pool.reconcile();
+        assertEq(
+            pool.lastReconcileTime(), before, "Rejected stale finalization should leave the accrual clock untouched"
+        );
     }
 
 }

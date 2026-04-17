@@ -388,6 +388,7 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
         vm.warp(block.timestamp + 61);
 
         uint256 keeperBalanceBefore = usdc.balanceOf(KEEPER);
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(bytes32(uint256(uint160(KEEPER))));
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(1e8));
 
@@ -395,10 +396,19 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
         router.executeOrder(1, priceData);
 
         uint256 keeperBounty = usdc.balanceOf(KEEPER) - keeperBalanceBefore;
-        assertEq(keeperBounty, 0, "Expired head close currently does not pay the keeper bounty in this path");
+        assertEq(
+            keeperBounty, 0, "Expired head close should credit the clearer in clearinghouse custody, not the wallet"
+        );
+        assertEq(
+            clearinghouse.balanceUsdc(bytes32(uint256(uint160(KEEPER)))) - keeperSettlementBefore,
+            200_000,
+            "Expired head close should still pay the configured bounty to the clearer"
+        );
 
         assertEq(
-            _freeSettlementUsdc(accountId), 0, "Escrowed close bounty should be consumed from prefunded free settlement"
+            _freeSettlementUsdc(accountId),
+            800_000,
+            "Only the committed close bounty slice should leave prefunded free settlement"
         );
     }
 
@@ -459,9 +469,10 @@ contract AuditBlockingAccountingFindingsFailing_StaleSeniorYield is BasePerpTest
         config.seniorRateBps = 1600;
         pool.proposePoolConfig(config);
         vm.warp(block.timestamp + 48 hours + 121);
+        vm.expectRevert(HousePool.HousePool__MarkPriceStale.selector);
         pool.finalizePoolConfig();
 
-        assertEq(pool.unpaidSeniorYield(), unpaidBefore, "Stale-mark finalization should not accrue senior yield");
+        assertEq(pool.unpaidSeniorYield(), unpaidBefore, "Rejected stale finalization should not accrue senior yield");
     }
 
 }

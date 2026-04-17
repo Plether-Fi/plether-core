@@ -77,13 +77,10 @@ contract AuditFullSecurityFailing_SeniorRateRetroactive is BasePerpTest {
         config.seniorRateBps = 1600;
         pool.proposePoolConfig(config);
         vm.warp(block.timestamp + 48 hours + 121);
+        vm.expectRevert(HousePool.HousePool__MarkPriceStale.selector);
         pool.finalizePoolConfig();
 
-        vm.prank(address(router));
-        engine.updateMarkPrice(1e8, uint64(block.timestamp));
-        vm.prank(address(juniorVault));
-        pool.reconcile();
-
+        assertEq(pool.seniorRateBps(), 800, "Rejected stale finalization should leave the prior senior rate in place");
         assertEq(pool.unpaidSeniorYield(), 0, "Stale-mark finalization should not back-apply senior yield");
     }
 

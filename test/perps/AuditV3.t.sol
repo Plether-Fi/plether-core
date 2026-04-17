@@ -223,6 +223,8 @@ contract AuditV3_C03_AsymmetricStalenessTest is BasePerpTest {
         config.seniorRateBps = 1000; // 10% APY
         pool.proposePoolConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
         pool.finalizePoolConfig();
 
         _fundTrader(alice, 50_000e6);
@@ -264,6 +266,8 @@ contract AuditV3_C03_AsymmetricStalenessTest is BasePerpTest {
         config.seniorRateBps = 1000; // 10% APY
         pool.proposePoolConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
         pool.finalizePoolConfig();
 
         _fundTrader(alice, 50_000e6);

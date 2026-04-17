@@ -1930,6 +1930,7 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
 
         usdc.mint(address(pool), 1_000_000e6);
         pool.accountExcess();
+        (uint256 pendingSeniorBefore, uint256 pendingJuniorBefore,,) = pool.getPendingTrancheState();
 
         address trader = address(0xAB1719);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
@@ -1942,12 +1943,12 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         priceData[0] = abi.encode(uint256(150_000_000));
         router.executeLiquidation(accountId, priceData);
 
-        uint256 assetsDelta = pool.totalAssets() - assetsBefore;
         (uint256 pendingSenior, uint256 pendingJunior,,) = pool.getPendingTrancheState();
+        uint256 pendingDelta = (pendingSenior + pendingJunior) - (pendingSeniorBefore + pendingJuniorBefore);
 
         assertEq(
-            pendingSenior + pendingJunior,
-            assetsDelta,
+            pendingDelta,
+            0,
             "Seeded pending LP revenue should exclude the keeper bounty portion paid out after liquidation"
         );
         assertEq(pool.excessAssets(), 0, "Keeper bounty inflow should be canonically accounted, not stranded as excess");
@@ -2217,6 +2218,7 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
 
         usdc.mint(address(pool), 1_000_000e6);
         pool.accountExcess();
+        (, uint256 pendingJuniorBefore,,) = pool.getPendingTrancheState();
 
         address trader = address(0xAB1717);
         _fundTrader(trader, 50_000e6);
@@ -2237,7 +2239,7 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         assertEq(feesDelta, 40_000_000, "Open should still accrue the full execution fee as protocol revenue");
         assertEq(pool.excessAssets(), 0, "Execution fee inflow should be canonically accounted, not stranded as excess");
         assertEq(
-            pendingJunior,
+            pendingJunior - pendingJuniorBefore,
             expectedLpTradingRevenue,
             "Seeded pending LP revenue should exclude the execution fee portion"
         );

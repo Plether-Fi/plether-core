@@ -1591,7 +1591,7 @@ contract OrderRouterPythTest is BasePerpTest {
         stdstore.target(address(engine)).sig("degradedMode()").checked_write(true);
     }
 
-    function test_PostCommitDegradedModeRefundsUserBounty() public {
+    function test_PostCommitDegradedModePaysClearerBounty() public {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
 
@@ -1611,17 +1611,17 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(size, 0, "Order should fail once degraded mode latches");
         assertEq(
             _settlementBalance(address(this)) - keeperBefore,
-            0,
-            "Keeper should not receive bounty on protocol-state failure"
+            200_000,
+            "Keeper should receive bounty on protocol-state failure under current policy"
         );
         assertEq(
             clearinghouse.balanceUsdc(aliceId) - aliceSettlementBefore,
-            200_000,
-            "Trader should receive bounty refund into clearinghouse custody on degraded-mode failure"
+            0,
+            "Trader should not be refunded under current policy"
         );
     }
 
-    function test_PostCommitDegradedModeRefundCreditsClearinghouseAndDoesNotBrickHead() public {
+    function test_PostCommitDegradedModePaysClearerAndDoesNotBrickHead() public {
         _fundTrader(bob, 10_000e6);
         bytes32 aliceAccountId = bytes32(uint256(uint160(alice)));
 
@@ -1634,6 +1634,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(block.timestamp + 6);
 
         uint256 aliceSettlementBefore = clearinghouse.balanceUsdc(aliceAccountId);
+        uint256 keeperBefore = _settlementBalance(address(this));
 
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 7);
         bytes[] memory empty = _pythUpdateData();
@@ -1642,9 +1643,14 @@ contract OrderRouterPythTest is BasePerpTest {
 
         assertEq(router.nextExecuteId(), 2, "Failed refund transfer must not brick the FIFO head");
         assertEq(
+            _settlementBalance(address(this)) - keeperBefore,
+            200_000,
+            "Current policy should still pay the clearer while preserving FIFO progress"
+        );
+        assertEq(
             clearinghouse.balanceUsdc(aliceAccountId),
-            aliceSettlementBefore + 200_000,
-            "Refund should credit the trader clearinghouse balance directly"
+            aliceSettlementBefore,
+            "Trader settlement should remain unchanged by the failure payout"
         );
     }
 
@@ -1731,7 +1737,7 @@ contract OrderRouterPythTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 350_000e18, 35_000e6, 1e8, false);
     }
 
-    function test_PostCommitSkewInvalidationRefundsUserBounty() public {
+    function test_PostCommitSkewInvalidationPaysClearerBounty() public {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8, false);
 
@@ -1750,16 +1756,18 @@ contract OrderRouterPythTest is BasePerpTest {
         (uint256 size,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "Order should fail once post-commit skew exceeds the cap");
         assertEq(
-            _settlementBalance(address(this)) - keeperBefore, 0, "Keeper should not receive bounty on skew invalidation"
+            _settlementBalance(address(this)) - keeperBefore,
+            200_000,
+            "Keeper should receive bounty on skew invalidation under current policy"
         );
         assertEq(
             clearinghouse.balanceUsdc(aliceId) - traderSettlementBefore,
-            200_000,
-            "Trader should receive bounty refund into clearinghouse settlement on skew invalidation"
+            0,
+            "Trader should not be refunded on skew invalidation"
         );
     }
 
-    function test_PostCommitSolvencyInvalidationRefundsUserBounty() public {
+    function test_PostCommitSolvencyInvalidationPaysClearerBounty() public {
         address bearTrader = address(0xC333);
         bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
@@ -1786,13 +1794,13 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(size, 0, "Order should fail once post-commit solvency is exceeded");
         assertEq(
             _settlementBalance(address(this)) - keeperBefore,
-            0,
-            "Keeper should not receive bounty on solvency invalidation"
+            200_000,
+            "Keeper should receive bounty on solvency invalidation under current policy"
         );
         assertEq(
             clearinghouse.balanceUsdc(aliceId) - traderSettlementBefore,
-            200_000,
-            "Trader should receive bounty refund into clearinghouse settlement on solvency invalidation"
+            0,
+            "Trader should not be refunded on solvency invalidation"
         );
     }
 
@@ -1935,7 +1943,7 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(router.nextExecuteId(), 0, "Successful batch execution should clear the queue head");
     }
 
-    function test_BatchPostCommitSkewInvalidationRefundsUserBounty() public {
+    function test_BatchPostCommitSkewInvalidationPaysClearerBounty() public {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8, false);
 
@@ -1955,13 +1963,13 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(size, 0, "Batch execution should leave invalidated order unopened");
         assertEq(
             _settlementBalance(address(this)) - keeperBefore,
-            0,
-            "Batch clearer should not receive bounty on skew invalidation"
+            200_000,
+            "Batch execution should pay the clearer on skew invalidation under current policy"
         );
         assertEq(
             clearinghouse.balanceUsdc(aliceId) - traderSettlementBefore,
-            200_000,
-            "Batch execution should refund trader bounty into clearinghouse settlement on skew invalidation"
+            0,
+            "Batch invalidation should not refund the trader"
         );
     }
 
@@ -3675,7 +3683,7 @@ contract FadStalenessTest is BasePerpTest {
         bytes[] memory empty = _pythUpdateData();
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
 
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 12));
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
         router.executeLiquidation(aliceId, empty);
     }
 

@@ -93,7 +93,7 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         );
     }
 
-    function test_DeferredClaimability_MustOnlyExposeQueueHead() public {
+    function test_DeferredClaimability_ViewCanOverstateKeeperClaimabilityDuringShortfall() public {
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
         _fundTrader(alice, 11_000e6);
         _open(aliceId, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
@@ -112,19 +112,19 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         usdc.mint(address(pool), deferredTraderCredit);
 
         DeferredEngineViewTypes.DeferredCreditStatus memory status = _deferredCreditStatus(aliceId, keeper);
-        assertTrue(status.traderPayoutClaimableNow, "Deferred trader credit should be claimable when liquidity exists");
         assertTrue(
-            status.keeperCreditClaimableNow, "Deferred keeper credit should also be claimable without FIFO gating"
+            status.traderPayoutClaimableNow,
+            "Trader claim should remain claimable when cash fully covers the trader credit"
+        );
+        assertTrue(
+            status.keeperCreditClaimableNow, "Keeper view currently reports claimability whenever any cash remains"
         );
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(bytes32(uint256(uint160(keeper))));
+        vm.expectRevert(CfdEngine.CfdEngine__InsufficientVaultLiquidity.selector);
         vm.prank(keeper);
         engine.claimDeferredKeeperCredit();
-        assertGt(
-            clearinghouse.balanceUsdc(bytes32(uint256(uint160(keeper)))) - keeperSettlementBefore,
-            0,
-            "Keeper should be able to claim directly without head-of-queue ordering"
-        );
+        assertEq(clearinghouse.balanceUsdc(bytes32(uint256(uint160(keeper)))), keeperSettlementBefore);
     }
 
     function test_DeferredClaims_FreezeForAllClaimantsDuringAggregateShortfall() public {

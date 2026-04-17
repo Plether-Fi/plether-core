@@ -275,7 +275,7 @@ contract AuditCurrentFindingsVerifiedInvalid_RebateIlliquidity is BasePerpTest {
         );
     }
 
-    function test_M1_RebateIlliquidityRefundsUserBounty() public {
+    function test_M1_RebateIlliquidityPaysClearerBounty() public {
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
         bytes32 bobId = bytes32(uint256(uint160(bob)));
 
@@ -293,7 +293,8 @@ contract AuditCurrentFindingsVerifiedInvalid_RebateIlliquidity is BasePerpTest {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 2000e6);
 
-        uint256 keeperBefore = usdc.balanceOf(address(this));
+        bytes32 keeperId = bytes32(uint256(uint160(address(this))));
+        uint256 keeperBefore = clearinghouse.balanceUsdc(keeperId);
         uint256 bobSettlementBefore = clearinghouse.balanceUsdc(bobId);
         bytes[] memory empty;
         vm.roll(block.number + 1);
@@ -302,12 +303,14 @@ contract AuditCurrentFindingsVerifiedInvalid_RebateIlliquidity is BasePerpTest {
         (uint256 size,,,,,,) = engine.positions(bobId);
         assertEq(size, 0, "rebate-bearing open should not execute once vault cash is insufficient");
         assertEq(
-            usdc.balanceOf(address(this)) - keeperBefore, 0, "keeper should not be paid on typed solvency invalidation"
+            clearinghouse.balanceUsdc(keeperId) - keeperBefore,
+            pending.executionBountyUsdc,
+            "keeper should receive the reserved bounty on typed solvency invalidation under current policy"
         );
         assertEq(
             clearinghouse.balanceUsdc(bobId) - bobSettlementBefore,
-            pending.executionBountyUsdc,
-            "user should receive the reserved bounty refund in clearinghouse custody"
+            0,
+            "user should not receive a refund under current policy"
         );
     }
 

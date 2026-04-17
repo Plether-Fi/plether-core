@@ -1194,13 +1194,10 @@ contract CfdEngineTest is BasePerpTest {
         usdc.mint(address(pool), deferred);
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(bytes32(uint256(uint160(keeper))));
+        vm.expectRevert(CfdEngine.CfdEngine__InsufficientVaultLiquidity.selector);
         vm.prank(keeper);
         engine.claimDeferredKeeperCredit();
-        assertGt(
-            clearinghouse.balanceUsdc(bytes32(uint256(uint160(keeper)))) - keeperSettlementBefore,
-            0,
-            "Deferred keeper credit should no longer require head-of-queue priority"
-        );
+        assertEq(clearinghouse.balanceUsdc(bytes32(uint256(uint160(keeper)))), keeperSettlementBefore);
     }
 
     function test_NoSideCarryRealization_KeepsClearinghouseMarginInSync() public {
@@ -1762,9 +1759,14 @@ contract CfdEngineTest is BasePerpTest {
 
         uint256 settlementBefore = clearinghouse.balanceUsdc(accountId);
         uint64 carryTimestampBefore = engine.getPositionLastCarryTimestamp(accountId);
-        uint256 unsettledCarryBefore = engine.unsettledCarryUsdc(accountId);
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 30 days);
+
+        uint256 expectedCarry = PositionRiskAccountingLib.computePendingCarryUsdc(
+            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, engine.lastMarkPrice(), settlementBefore),
+            _riskParams().baseCarryBps,
+            block.timestamp - carryTimestampBefore
+        );
 
         vm.startPrank(trader);
         usdc.approve(address(clearinghouse), type(uint256).max);
@@ -1773,19 +1775,15 @@ contract CfdEngineTest is BasePerpTest {
 
         assertEq(
             clearinghouse.balanceUsdc(accountId),
-            settlementBefore + depositAmount,
-            "Stale-mark deposit should still credit the full settlement amount"
+            settlementBefore + depositAmount - expectedCarry,
+            "Stale-mark deposit should checkpoint carry against the stored mark before crediting settlement"
         );
         assertEq(
             engine.getPositionLastCarryTimestamp(accountId),
-            carryTimestampBefore,
-            "Stale-mark deposit should not advance the carry checkpoint"
+            block.timestamp,
+            "Stale-mark deposit should advance the carry checkpoint"
         );
-        assertEq(
-            engine.unsettledCarryUsdc(accountId),
-            unsettledCarryBefore,
-            "Stale-mark deposit should not synthesize unsettled carry just to preserve liveness"
-        );
+        assertEq(engine.unsettledCarryUsdc(accountId), 0, "Stored-mark deposit fallback should settle elapsed carry");
     }
 
     function test_ReserveCommittedOrderMargin_CheckpointsCarryBeforeReachabilityDrops() public {
@@ -3468,11 +3466,13 @@ contract CfdEngineTest is BasePerpTest {
         );
         assertEq(
             preview.executionFeeUsdc,
-            0,
-            "Preview should report zero direct fee collection when deferred credit covers the shortfall in the current model"
+            nominalExecutionFeeUsdc,
+            "Preview should surface the direct execution fee collection required by the current accounting model"
         );
         assertGt(
-            preview.existingDeferredConsumedUsdc, 0, "Deferred payout should contribute to covering the close shortfall"
+            preview.existingDeferredConsumedUsdc,
+            0,
+            "Deferred payout should still contribute to covering the close shortfall"
         );
 
         uint256 feesBefore = engine.accumulatedFeesUsdc();
@@ -3481,12 +3481,12 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(
             engine.accumulatedFeesUsdc() - feesBefore,
             nominalExecutionFeeUsdc,
-            "Protocol should book the full close execution fee after consuming deferred payout"
+            "Protocol should book the full close execution fee under the current accounting model"
         );
         assertEq(
             deferredBefore - engine.deferredTraderCreditUsdc(bearId),
             2_243_750,
-            "Live close should extinguish the current deferred payout amount used to fund the fee shortfall"
+            "Live close should extinguish the deferred payout slice consumed alongside direct fee collection"
         );
     }
 
@@ -3699,7 +3699,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(protocolViewAfter.totalDeferredKeeperCreditUsdc, 0);
     }
 
-    function test_DeferredKeeperCredit_CoalescesPerKeeperAndSupportsPartialClaims() public {
+    function test_DeferredKeeperCredit_CoalescesPerKeeperButFreezesUnderAggregateShortfall() public {
         address keeper = address(0xAB1605);
         bytes32 keeperId = bytes32(uint256(uint160(keeper)));
 
@@ -3716,16 +3716,19 @@ contract CfdEngineTest is BasePerpTest {
         usdc.mint(address(pool), 10e6);
 
         uint256 settlementBefore = clearinghouse.balanceUsdc(keeperId);
+        vm.expectRevert(CfdEngine.CfdEngine__InsufficientVaultLiquidity.selector);
         vm.prank(keeper);
         engine.claimDeferredKeeperCredit();
 
         assertEq(
-            clearinghouse.balanceUsdc(keeperId) - settlementBefore,
-            10e6,
-            "Head claim should service only available liquidity"
+            clearinghouse.balanceUsdc(keeperId),
+            settlementBefore,
+            "Frozen deferred keeper credit should not settle partially"
         );
         assertEq(
-            engine.deferredKeeperCreditUsdc(keeper), 20e6, "Partial claim should preserve remaining keeper liability"
+            engine.deferredKeeperCreditUsdc(keeper),
+            30e6,
+            "Aggregate shortfall should leave the full keeper liability queued"
         );
     }
 

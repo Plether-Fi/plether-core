@@ -106,6 +106,8 @@ contract AuditV2_C02_ReconcileTimeConsumptionTest is BasePerpTest {
         config.seniorRateBps = 1000;
         pool.proposePoolConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
         pool.finalizePoolConfig();
 
         _fundTrader(alice, 50_000e6);
