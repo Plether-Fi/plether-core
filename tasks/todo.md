@@ -1,3 +1,16 @@
+- [x] Inspect config/admin and clearinghouse tests for the smallest valid fix points
+- [x] Enforce documented close-order bounty cap in router config validation
+- [x] Unify stale carry fallback across all basis-changing clearinghouse paths
+- [x] Add focused regression coverage for both fixes
+- [x] Run targeted Forge verification
+
+Review:
+- Updated `src/perps/OrderRouterAdmin.sol` to hard-cap `closeOrderExecutionBountyUsdc` at `1 USDC` during router-config validation. This closes the spec/code gap around the documented `MAX_PENDING_ORDERS * 1 USDC` per-account close-bounty escrow bound without adding more moving pieces.
+- Updated `src/perps/MarginClearinghouse.sol` so all basis-changing clearinghouse paths now share the same stale-carry behavior as deposits: try `realizeCarryBeforeMarginChange(...)`, and if the engine reverts with `CfdEngine__MarkPriceStale`, fall back to `checkpointCarryUsingStoredMark(...)` using the same pre-mutation reachable basis.
+- Added focused regressions in `test/perps/TimelockPause.t.sol` and `test/perps/MarginClearinghouse.t.sol` covering the new close-bounty cap and stale-fallback behavior on committed-margin lock, reservation release, and reserved-settlement unlock paths.
+- Updated `src/perps/README.md` and `src/perps/ACCOUNTING_SPEC.md` so the close-order bounty docs now explicitly state the governance-configured `1 USDC` hard cap.
+- Verified green with `forge test --match-path test/perps/TimelockPause.t.sol --match-test "test_OrderRouter_InvalidCloseOrderExecutionBounty_Reverts|test_ProposeMaxOrderAge_TimelockFlow|test_OrderRouter_InvalidPendingOrderLimit_Reverts"` and `forge test --match-path test/perps/MarginClearinghouse.t.sol --match-test "test_LockCommittedOrderMargin_UsesStoredMarkFallbackWhenFreshCarryIsStale|test_ReleaseOrderReservationIfActive_UsesStoredMarkFallbackWhenFreshCarryIsStale|test_UnlockReservedSettlement_UsesStoredMarkFallbackWhenFreshCarryIsStale|test_UnlockCommittedOrderMargin_CheckpointsCarryBeforeUnlock|test_ReleaseOrderReservationIfActive_CheckpointsCarryBeforeRelease"`.
+
 - [x] Inspect HousePool bootstrap flows and choose the smallest frozen-oracle gate point
 - [x] Block seed initialization and unassigned-asset assignment during oracleFrozen
 - [x] Add focused HousePool regressions for frozen-oracle bootstrap blocking

@@ -352,6 +352,14 @@ contract TimelockPauseTest is BasePerpTest {
         routerAdmin.proposeRouterConfig(config);
     }
 
+    function test_OrderRouter_InvalidCloseOrderExecutionBounty_Reverts() public {
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.closeOrderExecutionBountyUsdc = 1_000_001;
+
+        vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__InvalidExecutionBounty.selector);
+        routerAdmin.proposeRouterConfig(config);
+    }
+
     function test_OrderRouter_InvalidMinEngineGas_Reverts() public {
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         config.minEngineGas = 99_999;

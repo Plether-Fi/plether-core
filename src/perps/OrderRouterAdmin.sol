@@ -9,6 +9,7 @@ contract OrderRouterAdmin is Ownable, Pausable {
 
     uint256 public constant TIMELOCK_DELAY = 48 hours;
     uint256 internal constant MAX_PENDING_ORDERS_LIMIT = 32;
+    uint256 internal constant MAX_CLOSE_ORDER_EXECUTION_BOUNTY_USDC = 1_000_000;
     uint256 internal constant MIN_ENGINE_GAS_FLOOR = 100_000;
     uint256 internal constant MIN_ENGINE_GAS_CAP = 5_000_000;
     uint256 internal constant MAX_PRUNE_ORDERS_PER_CALL_LIMIT = 256;
@@ -152,6 +153,7 @@ contract OrderRouterAdmin is Ownable, Pausable {
             config.openOrderExecutionBountyBps == 0 || config.openOrderExecutionBountyBps > 10_000
                 || config.minOpenOrderExecutionBountyUsdc == 0 || config.maxOpenOrderExecutionBountyUsdc == 0
                 || config.closeOrderExecutionBountyUsdc == 0
+                || config.closeOrderExecutionBountyUsdc > MAX_CLOSE_ORDER_EXECUTION_BOUNTY_USDC
                 || config.minOpenOrderExecutionBountyUsdc > config.maxOpenOrderExecutionBountyUsdc
         ) {
             revert OrderRouterAdmin__InvalidExecutionBounty();

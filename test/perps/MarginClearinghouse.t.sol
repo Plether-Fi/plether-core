@@ -46,10 +46,14 @@ contract MockToken is ERC20 {
 
 contract MockClearinghouseEngine {
 
+    error CfdEngine__MarkPriceStale();
+
     address public orderRouter;
     uint256 public carryCheckpointCalls;
+    uint256 public storedMarkCheckpointCalls;
     bytes32 public lastCarryAccountId;
     uint256 public lastReachableCollateralBasisUsdc;
+    bool public carryRealizationStale;
 
     function setOrderRouter(
         address router
@@ -61,11 +65,29 @@ contract MockClearinghouseEngine {
         bytes32
     ) external pure {}
 
+    function setCarryRealizationStale(
+        bool stale
+    ) external {
+        carryRealizationStale = stale;
+    }
+
     function realizeCarryBeforeMarginChange(
         bytes32 accountId,
         uint256 reachableCollateralBasisUsdc
     ) external {
+        if (carryRealizationStale) {
+            revert CfdEngine__MarkPriceStale();
+        }
         carryCheckpointCalls += 1;
+        lastCarryAccountId = accountId;
+        lastReachableCollateralBasisUsdc = reachableCollateralBasisUsdc;
+    }
+
+    function checkpointCarryUsingStoredMark(
+        bytes32 accountId,
+        uint256 reachableCollateralBasisUsdc
+    ) external {
+        storedMarkCheckpointCalls += 1;
         lastCarryAccountId = accountId;
         lastReachableCollateralBasisUsdc = reachableCollateralBasisUsdc;
     }
@@ -311,6 +333,20 @@ contract MarginClearinghouseTest is Test {
         assertEq(mockEngine.lastCarryAccountId(), aliceId, "Unlock should checkpoint carry for the unlocked account");
     }
 
+    function test_LockCommittedOrderMargin_UsesStoredMarkFallbackWhenFreshCarryIsStale() public {
+        vm.prank(alice);
+        clearinghouse.deposit(aliceId, 1000 * 1e6);
+
+        mockEngine.setCarryRealizationStale(true);
+
+        vm.prank(engine);
+        clearinghouse.lockCommittedOrderMargin(aliceId, 200 * 1e6);
+
+        assertEq(mockEngine.carryCheckpointCalls(), 1, "Initial deposit should be the only fresh carry realization");
+        assertEq(mockEngine.storedMarkCheckpointCalls(), 1, "Stale committed-margin lock should checkpoint using stored mark");
+        assertEq(mockEngine.lastCarryAccountId(), aliceId, "Fallback checkpoint should use the mutated account id");
+    }
+
     function test_ReserveCommittedOrderMargin_CreatesReservationAndMatchesBucketTotals() public {
         vm.prank(alice);
         clearinghouse.deposit(aliceId, 1000 * 1e6);
@@ -397,6 +433,38 @@ contract MarginClearinghouseTest is Test {
             "Reservation release should checkpoint carry before committed margin becomes reachable again"
         );
         assertEq(mockEngine.lastCarryAccountId(), aliceId, "Release should checkpoint carry for the released account");
+    }
+
+    function test_ReleaseOrderReservationIfActive_UsesStoredMarkFallbackWhenFreshCarryIsStale() public {
+        vm.prank(alice);
+        clearinghouse.deposit(aliceId, 1000 * 1e6);
+
+        vm.prank(engine);
+        clearinghouse.reserveCommittedOrderMargin(aliceId, 16, 180 * 1e6);
+
+        mockEngine.setCarryRealizationStale(true);
+
+        vm.prank(engine);
+        clearinghouse.releaseOrderReservationIfActive(16);
+
+        assertEq(mockEngine.storedMarkCheckpointCalls(), 1, "Stale reservation release should checkpoint using stored mark");
+        assertEq(mockEngine.lastCarryAccountId(), aliceId, "Fallback release checkpoint should use the reservation account");
+    }
+
+    function test_UnlockReservedSettlement_UsesStoredMarkFallbackWhenFreshCarryIsStale() public {
+        vm.prank(alice);
+        clearinghouse.deposit(aliceId, 1000 * 1e6);
+
+        vm.prank(engine);
+        clearinghouse.lockReservedSettlement(aliceId, 200 * 1e6);
+
+        mockEngine.setCarryRealizationStale(true);
+
+        vm.prank(engine);
+        clearinghouse.unlockReservedSettlement(aliceId, 200 * 1e6);
+
+        assertEq(mockEngine.storedMarkCheckpointCalls(), 1, "Stale reserved-settlement unlock should checkpoint using stored mark");
+        assertEq(mockEngine.lastCarryAccountId(), aliceId, "Fallback reserved-settlement checkpoint should use the mutated account");
     }
 
     function test_ConsumeOrderReservation_ReducesResidualAndKeepsAggregateParity() public {

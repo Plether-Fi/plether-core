@@ -177,16 +177,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
 
         settlementBalances[accountId] += amount;
 
-        try ICfdEngineCore(engine).realizeCarryBeforeMarginChange(accountId, reachableCollateralBasisUsdc) {}
-        catch (bytes memory revertData) {
-            if (revertData.length < 4 || bytes4(revertData) != MARK_PRICE_STALE_SELECTOR) {
-                assembly {
-                    revert(add(revertData, 32), mload(revertData))
-                }
-            }
-
-            ICfdEngineCore(engine).checkpointCarryUsingStoredMark(accountId, reachableCollateralBasisUsdc);
-        }
+        _realizeOrCheckpointCarryBeforeMarginChange(accountId, reachableCollateralBasisUsdc);
 
         emit Deposit(accountId, settlementAsset, amount);
     }
@@ -746,7 +737,28 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
             return;
         }
 
-        ICfdEngineCore(engine_).realizeCarryBeforeMarginChange(accountId, reachableCollateralBasisUsdc);
+        _realizeOrCheckpointCarryBeforeMarginChange(accountId, reachableCollateralBasisUsdc);
+    }
+
+    function _realizeOrCheckpointCarryBeforeMarginChange(
+        bytes32 accountId,
+        uint256 reachableCollateralBasisUsdc
+    ) internal {
+        address engine_ = engine;
+        if (engine_ == address(0)) {
+            return;
+        }
+
+        try ICfdEngineCore(engine_).realizeCarryBeforeMarginChange(accountId, reachableCollateralBasisUsdc) {}
+        catch (bytes memory revertData) {
+            if (revertData.length < 4 || bytes4(revertData) != MARK_PRICE_STALE_SELECTOR) {
+                assembly {
+                    revert(add(revertData, 32), mload(revertData))
+                }
+            }
+
+            ICfdEngineCore(engine_).checkpointCarryUsingStoredMark(accountId, reachableCollateralBasisUsdc);
+        }
     }
 
     function _debitSettlementUsdc(

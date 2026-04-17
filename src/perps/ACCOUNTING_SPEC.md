@@ -347,6 +347,7 @@ Rules:
 
 - close intents may source their flat router-custodied bounty from active position margin when free settlement is exhausted,
 - this is an explicit bounded liveness tradeoff,
+- `closeOrderExecutionBountyUsdc` is governance-configured but hard-capped at `1 USDC`,
 - the amount parked in escrow is bounded by `MAX_PENDING_ORDERS * 1 USDC` per account,
 - collateral reachability should treat that escrow as temporarily unavailable until the order resolves,
 - terminal-invalid close execution must not refund margin-backed bounty escrow to the external wallet.

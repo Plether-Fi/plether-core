@@ -283,7 +283,7 @@ These domains answer different questions. They should not silently share assumpt
 
 - Execution always starts from the global queue head.
 - Risk-increasing orders reserve an execution bounty quoted from the engine mark and bounded to `[0.01 USDC, 0.20 USDC]`.
-- Close intents reserve a flat `0.20 USDC` bounty.
+- Close intents reserve a flat governance-configured bounty capped at `1 USDC` (default `0.20 USDC`).
 - Open bounties come from free settlement.
 - Close bounties use free settlement first when carry can be checkpointed from a fresh live mark; otherwise they fall back to bounded active position margin so stale-mark closes remain committable.
 - Failed-order rewards stay independent from vault liquidity because they are paid from router escrow rather than LP cash.
