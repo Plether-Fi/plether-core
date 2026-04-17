@@ -197,6 +197,7 @@ Operationally:
 
 - If mark freshness is required and stale, it skips mark-dependent yield and waterfall math.
 - That stale path does not back-accrue senior yield across the stale interval.
+- `finalizePoolConfig()` cannot change `seniorRateBps` while the mark is stale; governance must refresh the mark first.
 - Already-funded pending recapitalization or trading-revenue buckets may still apply through the same settlement entrypoint.
 
 This is why the LP docs distinguish freshness-gated repricing from already-funded cash movements.

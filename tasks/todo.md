@@ -1,3 +1,15 @@
+- [x] Inspect HousePool config-finalization tests and existing stale-rate behavior
+- [x] Require fresh mark before senior-rate finalization in HousePool
+- [x] Update tests/docs for stale senior-rate finalization policy
+- [x] Run targeted Forge verification
+
+Review:
+- Updated `src/perps/HousePool.sol` so `finalizePoolConfig()` now requires an actually fresh stored mark whenever `seniorRateBps` changes. This is an unconditional rate-change guard using `poolConfig.markStalenessLimit`, not the conditional reconcile freshness policy, so governance can no longer rerate senior yield across a stale window.
+- Kept the change narrow: non-rate pool-config changes (`markStalenessLimit`, frozen LP fees) still finalize through the existing timelock path without requiring a mark refresh.
+- Reworked the senior-rate tests in `test/perps/HousePool.t.sol` to assert the new policy: stale rate finalization reverts until governance refreshes the mark, fresh rate finalization checkpoints accrued yield at the old rate before applying the new rate, and the existing happy-path/timelock flows now explicitly refresh the mark before finalizing a rate change.
+- Updated `src/perps/README.md` so the docs state that `finalizePoolConfig()` cannot change `seniorRateBps` while the mark is stale.
+- Verified green with `forge test --match-path test/perps/HousePool.t.sol --match-test "test_SeniorRateChange|test_FinalizeSeniorRate_StaleMarkRevertsUntilMarkIsFresh|test_FinalizeSeniorRate_StaleMarkSucceedsAfterFreshMarkUpdate|test_FinalizeSeniorRate_FreshCheckpointAccruesOldRateBeforeChange|test_FinalizeSeniorRate_NoCarrySyncNeededBeforeReconcile"` and `forge test --match-path test/perps/TimelockPause.t.sol --match-test "test_ProposePoolConfig_TimelockFlow|test_ProposePoolConfig_TimelockFlow_ForMarkStalenessLimit|test_ProposePoolConfig_TimelockFlow_ForFrozenLpFees"`.
+
 - [x] Inspect HousePool preview and existing seeded-state tests for the smallest parity fix
 - [x] Route preview pending-state logic through HousePoolReconcilePlanLib
 - [x] Add focused parity regressions for zero-claim seeded states

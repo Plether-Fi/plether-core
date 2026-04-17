@@ -244,7 +244,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
     }
 
     /// @notice Finalizes the proposed pool config after the timelock expires.
-    /// @dev If the senior rate changes and the mark is stale, the new rate is applied without accruing stale-window senior yield.
+    /// @dev Senior-rate changes require a fresh mark so yield accrual cannot be rerated across a stale interval.
     function finalizePoolConfig() external onlyOwner {
         if (poolConfigActivationTime == 0) {
             revert HousePool__NoProposal();
@@ -255,6 +255,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         PoolConfig memory currentConfig = poolConfig;
         PoolConfig memory nextConfig = pendingPoolConfig;
         if (nextConfig.seniorRateBps != currentConfig.seniorRateBps) {
+            _requireRateChangeMarkFresh(_getHousePoolStatusSnapshot());
             _checkpointSeniorYieldBeforeRateChange();
         }
         poolConfig = nextConfig;
@@ -776,6 +777,14 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
     ) internal view {
         if (!HousePoolFreshnessLib.markFresh(accountingSnapshot, statusSnapshot, block.timestamp)) {
+            revert HousePool__MarkPriceStale();
+        }
+    }
+
+    function _requireRateChangeMarkFresh(
+        HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
+    ) internal view {
+        if (!HousePoolAccountingLib.isMarkFresh(statusSnapshot.lastMarkTime, poolConfig.markStalenessLimit, block.timestamp)) {
             revert HousePool__MarkPriceStale();
         }
     }

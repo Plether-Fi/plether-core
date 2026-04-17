@@ -349,6 +349,8 @@ contract HousePoolTest is BasePerpTest {
         config.seniorRateBps = 1200;
         pool.proposePoolConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
         pool.finalizePoolConfig();
 
         // Senior should have received 8% for the first year
@@ -356,96 +358,58 @@ contract HousePoolTest is BasePerpTest {
         assertEq(pool.juniorPrincipal(), 1_120_920 * 1e6, "Junior got surplus");
     }
 
-    function test_FinalizeSeniorRate_StaleMarkDoesNotAccrueYield() public {
-        address trader = address(0x3333);
+    function test_FinalizeSeniorRate_StaleMarkRevertsUntilMarkIsFresh() public {
         _fundSenior(alice, 200_000e6);
         _fundJunior(bob, 200_000e6);
-        _fundTrader(trader, 50_000e6);
-
-        bytes32 traderId = bytes32(uint256(uint160(trader)));
-        _open(traderId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
-
-        uint256 unpaidBefore = pool.unpaidSeniorYield();
 
         HousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 1600;
         pool.proposePoolConfig(config);
         vm.warp(block.timestamp + 48 hours + 121);
+
+        vm.expectRevert(HousePool.HousePool__MarkPriceStale.selector);
         pool.finalizePoolConfig();
 
-        assertEq(pool.unpaidSeniorYield(), unpaidBefore, "Stale-mark finalization should not accrue yield");
-        assertEq(pool.seniorRateBps(), 1600, "Senior rate should still update after stale-mark checkpointing");
+        assertEq(pool.seniorRateBps(), 800, "Senior rate should remain unchanged until a fresh mark is available");
     }
 
-    function test_FinalizeSeniorRate_StaleMarkCheckpointsLastReconcileTime() public {
-        address trader = address(0x3334);
-        _fundSenior(alice, 200_000e6);
-        _fundJunior(bob, 200_000e6);
-        _fundTrader(trader, 50_000e6);
-
-        bytes32 traderId = bytes32(uint256(uint160(trader)));
-        _open(traderId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
-
-        uint256 reconcileBefore = pool.lastReconcileTime();
+    function test_FinalizeSeniorRate_StaleMarkSucceedsAfterFreshMarkUpdate() public {
         HousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 1600;
         pool.proposePoolConfig(config);
         vm.warp(block.timestamp + 48 hours + 121);
+
+        vm.expectRevert(HousePool.HousePool__MarkPriceStale.selector);
         pool.finalizePoolConfig();
-
-        assertEq(
-            pool.lastReconcileTime(),
-            reconcileBefore,
-            "Stale finalize should preserve the senior accrual clock until a fresh reconcile occurs"
-        );
-    }
-
-    function test_FinalizeSeniorRate_StaleMarkCapsCheckpointAtLastFreshMarkTime() public {
-        address trader = address(0x33341);
-        _fundSenior(alice, 200_000e6);
-        _fundJunior(bob, 200_000e6);
-        _fundTrader(trader, 50_000e6);
-
-        bytes32 traderId = bytes32(uint256(uint160(trader)));
-        _open(traderId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
-
-        uint256 lastFreshMarkTime = engine.lastMarkTime();
-        HousePool.PoolConfig memory config = _currentPoolConfig();
-        config.seniorRateBps = 1600;
-        pool.proposePoolConfig(config);
-        vm.warp(block.timestamp + 48 hours + 121);
-        pool.finalizePoolConfig();
-
-        assertEq(
-            pool.lastSeniorYieldCheckpointTime(),
-            lastFreshMarkTime,
-            "Stale rate finalization should only checkpoint senior yield through the last fresh mark"
-        );
-
-        uint256 freshTime = block.timestamp + 1 hours;
-        vm.warp(freshTime);
-        vm.prank(address(router));
-        engine.updateMarkPrice(1e8, uint64(freshTime));
-        vm.prank(address(juniorVault));
-        pool.reconcile();
-
-        assertGt(
-            pool.unpaidSeniorYield(), 0, "Yield after the last fresh mark should still accrue once freshness returns"
-        );
-    }
-
-    function test_FinalizeSeniorRate_NoCarrySyncNeededBeforeReconcile() public {
-        address trader = address(0x4444);
-        bytes32 traderId = bytes32(uint256(uint160(trader)));
-
-        _fundSenior(alice, 200_000e6);
-        _fundJunior(bob, 800_000e6);
-        _fundTrader(trader, 50_000e6);
-        _open(traderId, CfdTypes.Side.BULL, 200_000e18, 20_000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        pool.finalizePoolConfig();
 
+        assertEq(pool.seniorRateBps(), 1600, "Senior rate should update once freshness returns");
+    }
+
+    function test_FinalizeSeniorRate_FreshCheckpointAccruesOldRateBeforeChange() public {
+        _fundSenior(alice, 200_000e6);
+        _fundJunior(bob, 200_000e6);
+        _mintAndAccountPoolExcess(50_000e6);
+
+        uint256 seniorBefore = pool.seniorPrincipal();
+        HousePool.PoolConfig memory config = _currentPoolConfig();
+        config.seniorRateBps = 1600;
+        pool.proposePoolConfig(config);
+        vm.warp(block.timestamp + 48 hours + 1);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        pool.finalizePoolConfig();
+
+        assertGt(
+            pool.seniorPrincipal(), seniorBefore, "Fresh finalization should checkpoint accrued yield at the old rate"
+        );
+        assertEq(pool.seniorRateBps(), 1600, "Senior rate should update after the fresh checkpoint");
+    }
+
+    function test_FinalizeSeniorRate_NoCarrySyncNeededBeforeReconcile() public {
         HousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 1600;
         pool.proposePoolConfig(config);

@@ -215,6 +215,8 @@ contract TimelockPauseTest is BasePerpTest {
         pool.finalizePoolConfig();
 
         _warpForward(48 hours + 1);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
         pool.finalizePoolConfig();
 
         assertEq(pool.seniorRateBps(), 1200);
