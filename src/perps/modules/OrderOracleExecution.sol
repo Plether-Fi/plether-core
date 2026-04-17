@@ -137,8 +137,22 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
     function _prepareMarkRefreshOracle(
         bytes[] calldata pythUpdateData
     ) internal returns (OracleUpdateResult memory update) {
+        uint256 maxStaleness = orderExecutionStalenessLimit;
+        if (address(pyth) != address(0)) {
+            maxStaleness = OracleFreshnessPolicyLib.getPolicy(
+                OracleFreshnessPolicyLib.Mode.MarkRefresh,
+                _isOracleFrozen(),
+                engine.isFadWindow(),
+                engine.engineMarkStalenessLimit(),
+                vault.markStalenessLimit(),
+                orderExecutionStalenessLimit,
+                liquidationStalenessLimit,
+                engine.fadMaxStaleness()
+            ).maxStaleness;
+        }
+
         (update.executionPrice, update.oraclePublishTime, update.pythFee) =
-            _resolveOraclePrice(pythUpdateData, 1e8, orderExecutionStalenessLimit, orderExecutionStalenessLimit);
+            _resolveOraclePrice(pythUpdateData, 1e8, maxStaleness, orderExecutionStalenessLimit);
 
         if (address(pyth) != address(0)) {
             OracleFreshnessPolicyLib.Policy memory policy = OracleFreshnessPolicyLib.getPolicy(
@@ -162,8 +176,22 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
     function _prepareLiquidationOracle(
         bytes[] calldata pythUpdateData
     ) internal returns (OracleUpdateResult memory update) {
+        uint256 maxStaleness = liquidationStalenessLimit;
+        if (address(pyth) != address(0)) {
+            maxStaleness = OracleFreshnessPolicyLib.getPolicy(
+                OracleFreshnessPolicyLib.Mode.Liquidation,
+                _isOracleFrozen(),
+                engine.isFadWindow(),
+                engine.engineMarkStalenessLimit(),
+                vault.markStalenessLimit(),
+                orderExecutionStalenessLimit,
+                liquidationStalenessLimit,
+                engine.fadMaxStaleness()
+            ).maxStaleness;
+        }
+
         (update.executionPrice, update.oraclePublishTime, update.pythFee) =
-            _resolveOraclePrice(pythUpdateData, 1e8, liquidationStalenessLimit, liquidationStalenessLimit);
+            _resolveOraclePrice(pythUpdateData, 1e8, maxStaleness, liquidationStalenessLimit);
 
         if (address(pyth) != address(0)) {
             OracleFreshnessPolicyLib.Policy memory policy = OracleFreshnessPolicyLib.getPolicy(
