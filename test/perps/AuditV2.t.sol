@@ -102,9 +102,11 @@ contract AuditV2_C02_ReconcileTimeConsumptionTest is BasePerpTest {
     }
 
     function test_C02_FrozenWindowReconcile_DoesNotDestroySeniorYieldEntitlement() public {
-        pool.proposeSeniorRate(1000);
+        HousePool.PoolConfig memory config = _currentPoolConfig();
+        config.seniorRateBps = 1000;
+        pool.proposePoolConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
-        pool.finalizeSeniorRate();
+        pool.finalizePoolConfig();
 
         _fundTrader(alice, 50_000e6);
         bytes32 aliceId = bytes32(uint256(uint160(alice)));

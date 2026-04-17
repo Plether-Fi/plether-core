@@ -3,6 +3,7 @@ pragma solidity 0.8.33;
 
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
+import {HousePool} from "../../src/perps/HousePool.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {ICfdVault} from "../../src/perps/interfaces/ICfdVault.sol";
@@ -109,9 +110,11 @@ contract AuditLatestStateFindingsFailing_SeniorYieldCheckpoint is BasePerpTest {
 
         uint256 before = pool.lastReconcileTime();
 
-        pool.proposeSeniorRate(1600);
+        HousePool.PoolConfig memory config = _currentPoolConfig();
+        config.seniorRateBps = 1600;
+        pool.proposePoolConfig(config);
         vm.warp(block.timestamp + 48 hours + 121);
-        pool.finalizeSeniorRate();
+        pool.finalizePoolConfig();
 
         assertEq(pool.lastReconcileTime(), before, "Stale finalize should leave the accrual clock untouched");
 

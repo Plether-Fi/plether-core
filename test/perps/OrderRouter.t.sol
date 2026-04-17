@@ -4,8 +4,8 @@ pragma solidity 0.8.33;
 import {IPyth, PythStructs} from "../../src/interfaces/IPyth.sol";
 import {DecimalConstants} from "../../src/libraries/DecimalConstants.sol";
 import {BasketOracle} from "../../src/oracles/BasketOracle.sol";
-import {CfdEngineAdmin} from "../../src/perps/CfdEngineAdmin.sol";
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
+import {CfdEngineAdmin} from "../../src/perps/CfdEngineAdmin.sol";
 import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
 import {CfdEnginePlanTypes} from "../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdEnginePlanner} from "../../src/perps/CfdEnginePlanner.sol";
@@ -13,16 +13,16 @@ import {CfdEngineSettlementModule} from "../../src/perps/CfdEngineSettlementModu
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
-import {OrderRouterAdmin} from "../../src/perps/OrderRouterAdmin.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
+import {OrderRouterAdmin} from "../../src/perps/OrderRouterAdmin.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
-import {PositionRiskAccountingLib} from "../../src/perps/libraries/PositionRiskAccountingLib.sol";
 import {AccountLensViewTypes} from "../../src/perps/interfaces/AccountLensViewTypes.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
 import {ICfdEngineAdminHost} from "../../src/perps/interfaces/ICfdEngineAdminHost.sol";
 import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
-import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
+import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
+import {PositionRiskAccountingLib} from "../../src/perps/libraries/PositionRiskAccountingLib.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {MockOracle} from "../utils/MockOracle.sol";
@@ -444,13 +444,9 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(
             _executionBountyReserve(1), 200_000, "Stale-mark close commits should still escrow the flat router bounty"
         );
+        assertEq(marginAfter, marginBefore - 200_000, "Stale-mark close bounty should still fall back to active margin");
         assertEq(
-            marginAfter, marginBefore - 200_000, "Stale-mark close bounty should still fall back to active margin"
-        );
-        assertEq(
-            usdc.balanceOf(address(router)),
-            200_000,
-            "Router should custody the stale-mark close bounty after fallback"
+            usdc.balanceOf(address(router)), 200_000, "Router should custody the stale-mark close bounty after fallback"
         );
     }
 
@@ -508,7 +504,11 @@ contract OrderRouterTest is BasePerpTest {
 
         uint256 freeSettlementBefore = clearinghouse.getAccountUsdcBuckets(accountId).freeSettlementUsdc;
         (, uint256 marginBefore,,,,,) = engine.positions(accountId);
-        assertEq(freeSettlementBefore, 1_800_000, "Setup should leave the larger free-settlement buffer under the lower open bounty cap");
+        assertEq(
+            freeSettlementBefore,
+            1_800_000,
+            "Setup should leave the larger free-settlement buffer under the lower open bounty cap"
+        );
 
         uint256 carryElapsed = 12 hours;
         vm.warp(block.timestamp + 12 hours);
@@ -516,9 +516,7 @@ contract OrderRouterTest is BasePerpTest {
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
         uint256 expectedCarry = PositionRiskAccountingLib.computePendingCarryUsdc(
-            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(
-                10_000e18, 1e8, clearinghouse.balanceUsdc(accountId)
-            ),
+            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(10_000e18, 1e8, clearinghouse.balanceUsdc(accountId)),
             _riskParams().baseCarryBps,
             carryElapsed
         );
@@ -991,7 +989,11 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(carolSize, 10_000 * 1e18, "Carol should have 10k BEAR");
 
         uint256 keeperAfter = _settlementBalance(address(this));
-        assertEq(keeperAfter - keeperBefore, 600_000, "Keeper should receive the 0.20 USDC capped reward per successful order");
+        assertEq(
+            keeperAfter - keeperBefore,
+            600_000,
+            "Keeper should receive the 0.20 USDC capped reward per successful order"
+        );
 
         assertEq(uint256(_orderRecord(1).status), uint256(IOrderRouterAccounting.OrderStatus.Executed));
         assertEq(uint256(_orderRecord(2).status), uint256(IOrderRouterAccounting.OrderStatus.Executed));
@@ -1447,9 +1449,11 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_OrderExecution_UsesRouterExecutionStalenessLimit_NotPoolMarkLimit() public {
-        pool.proposeMarkStalenessLimit(300);
+        HousePool.PoolConfig memory poolConfig = _currentPoolConfig();
+        poolConfig.markStalenessLimit = 300;
+        pool.proposePoolConfig(poolConfig);
         vm.warp(block.timestamp + 48 hours + 1);
-        pool.finalizeMarkStalenessLimit();
+        pool.finalizePoolConfig();
 
         vm.warp(1150);
         vm.prank(alice);
@@ -1462,9 +1466,9 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
         router.executeOrder(1, _pythUpdateData());
 
-        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
-        config.orderExecutionStalenessLimit = 300;
-        routerAdmin.proposeRouterConfig(config);
+        IOrderRouterAdminHost.RouterConfig memory routerConfig = _routerConfig();
+        routerConfig.orderExecutionStalenessLimit = 300;
+        routerAdmin.proposeRouterConfig(routerConfig);
         vm.warp(1200 + 48 hours + 1);
         routerAdmin.finalizeRouterConfig();
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), uint64(block.timestamp - 10));
@@ -2157,7 +2161,9 @@ contract OrderRouterPythTest is BasePerpTest {
         );
         assertEq(_executionBountyReserve(1), 0, "Failed head should clear its execution bounty escrow");
         assertEq(
-            _executionBountyReserve(2), 200_000, "Later blocked order should retain its escrow after the failed head clears"
+            _executionBountyReserve(2),
+            200_000,
+            "Later blocked order should retain its escrow after the failed head clears"
         );
     }
 
@@ -2216,7 +2222,9 @@ contract OrderRouterPythTest is BasePerpTest {
         IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
         assertEq(router.nextExecuteId(), 1, "Stale revert should keep queue head pending");
         assertEq(escrow.pendingOrderCount, 1, "Stale revert should preserve escrowed order state");
-        assertEq(usdc.balanceOf(address(router)), 200_000, "Router custody should continue escrowing the keeper reserve");
+        assertEq(
+            usdc.balanceOf(address(router)), 200_000, "Router custody should continue escrowing the keeper reserve"
+        );
     }
 
     function testFuzz_SlippageFailureClearsEscrowAndOrder(
@@ -2280,7 +2288,9 @@ contract OrderRouterPythTest is BasePerpTest {
             "Terminal close slippage miss should still credit the clearer through the carry-aware keeper settlement path"
         );
         assertEq(
-            engine.accumulatedFeesUsdc() - feesBefore, 0, "Slippage-failed close order should not additionally book protocol revenue in this path"
+            engine.accumulatedFeesUsdc() - feesBefore,
+            0,
+            "Slippage-failed close order should not additionally book protocol revenue in this path"
         );
         assertEq(router.nextExecuteId(), 0, "Terminal close slippage miss should clear the order");
         assertEq(_executionBountyReserve(closeOrderId), 0, "Close bounty should be consumed on terminal failure");
@@ -2334,9 +2344,11 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_LiquidationStaleness_UsesRouterLiquidationLimit_NotPoolMarkLimit() public {
-        pool.proposeMarkStalenessLimit(300);
+        HousePool.PoolConfig memory poolConfig = _currentPoolConfig();
+        poolConfig.markStalenessLimit = 300;
+        pool.proposePoolConfig(poolConfig);
         vm.warp(block.timestamp + 48 hours + 1);
-        pool.finalizeMarkStalenessLimit();
+        pool.finalizePoolConfig();
 
         vm.warp(1000);
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1006);
@@ -2357,9 +2369,9 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
         router.executeLiquidation(accountId, empty);
 
-        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
-        config.liquidationStalenessLimit = 61;
-        routerAdmin.proposeRouterConfig(config);
+        IOrderRouterAdminHost.RouterConfig memory routerConfig = _routerConfig();
+        routerConfig.liquidationStalenessLimit = 61;
+        routerAdmin.proposeRouterConfig(routerConfig);
         vm.warp(2061 + 48 hours + 1);
         routerAdmin.finalizeRouterConfig();
 
@@ -3623,7 +3635,7 @@ contract FadStalenessTest is BasePerpTest {
         router.executeOrder(2, empty);
     }
 
-    function obsolete_test_FadWindow_Liquidation_AcceptsStalePrice() public {
+    function test_FadWindow_Liquidation_AcceptsStalePrice() public {
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
         uint64 fridayPublishTime = uint64(FRIDAY_18UTC + 6);
         vm.prank(address(router));
@@ -3643,7 +3655,7 @@ contract FadStalenessTest is BasePerpTest {
         );
     }
 
-    function obsolete_test_FadWindow_MarkRefresh_AcceptsStaleFridayPrice() public {
+    function test_FadWindow_MarkRefresh_AcceptsStaleFridayPrice() public {
         bytes[] memory empty = _pythUpdateData();
         uint64 fridayPublishTime = uint64(FRIDAY_18UTC + 6);
 
@@ -3656,7 +3668,7 @@ contract FadStalenessTest is BasePerpTest {
         assertEq(engine.lastMarkPrice(), 80_000_000, "Mark refresh should store the Friday oracle price");
     }
 
-    function obsolete_test_FadWindow_Liquidation_ExcessStaleness_Reverts() public {
+    function test_FadWindow_Liquidation_ExcessStaleness_Reverts() public {
         mockPyth.setAllPrices(feedIds, int64(86_000_000), int32(-8), SATURDAY_NOON - 4 days);
 
         vm.warp(SATURDAY_NOON);
@@ -4914,11 +4926,7 @@ contract VpiImrBypassTest is Test {
             200_000,
             "Typed user-invalid open should pay the clearer as clearinghouse credit"
         );
-        assertEq(
-            uint256(_orderStatus(1)),
-            uint256(IOrderRouterAccounting.OrderStatus.Failed),
-            "Order should fail"
-        );
+        assertEq(uint256(_orderStatus(1)), uint256(IOrderRouterAccounting.OrderStatus.Failed), "Order should fail");
         assertEq(usdc.balanceOf(address(router)), 0, "Router should not retain consumed user-invalid bounty escrow");
     }
 
@@ -5139,7 +5147,11 @@ contract KeeperFeeRefundTest is Test {
         uint256 keeperRewardUsdc = _settlementBalance(keeper) - keeperSettlementBefore;
 
         assertEq(router.nextExecuteId(), 0, "Impossible slippage head should still be removed from the FIFO queue");
-        assertEq(router.getAccountEscrow(accountId).executionBountyUsdc, 0, "Cleanup should clear the escrowed head-order bounty");
+        assertEq(
+            router.getAccountEscrow(accountId).executionBountyUsdc,
+            0,
+            "Cleanup should clear the escrowed head-order bounty"
+        );
         assertTrue(
             traderPenaltyUsdc > 0 || keeperRewardUsdc > 0,
             "Impossible head cleanup must either penalize the submitter or compensate the clearer"

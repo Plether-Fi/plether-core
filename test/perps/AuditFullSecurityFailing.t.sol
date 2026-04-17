@@ -3,6 +3,7 @@ pragma solidity 0.8.33;
 
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
+import {HousePool} from "../../src/perps/HousePool.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 
@@ -72,9 +73,11 @@ contract AuditFullSecurityFailing_SeniorRateRetroactive is BasePerpTest {
         bytes32 traderId = bytes32(uint256(uint160(trader)));
         _open(traderId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
-        pool.proposeSeniorRate(1600);
+        HousePool.PoolConfig memory config = _currentPoolConfig();
+        config.seniorRateBps = 1600;
+        pool.proposePoolConfig(config);
         vm.warp(block.timestamp + 48 hours + 121);
-        pool.finalizeSeniorRate();
+        pool.finalizePoolConfig();
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));

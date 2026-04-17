@@ -213,9 +213,11 @@ contract AuditC04_StaleOracleMtmBypass is BasePerpTest {
         _fundSenior(alice, 500_000 * 1e6);
         _fundJunior(bob, 500_000 * 1e6);
 
-        pool.proposeSeniorRate(800); // 8% APY
+        HousePool.PoolConfig memory config = _currentPoolConfig();
+        config.seniorRateBps = 800; // 8% APY
+        pool.proposePoolConfig(config);
         _warpForward(48 hours + 1);
-        pool.finalizeSeniorRate();
+        pool.finalizePoolConfig();
 
         _fundTrader(address(0xBBB), 10_000 * 1e6);
         bytes32 traderId = bytes32(uint256(uint160(address(0xBBB))));
@@ -477,9 +479,11 @@ contract AuditH04_UnpaidYieldNotScaled is BasePerpTest {
         _fundSenior(bob, 500_000 * 1e6);
         _fundJunior(address(this), 2_000_000 * 1e6);
 
-        pool.proposeSeniorRate(800); // 8% APY
+        HousePool.PoolConfig memory config = _currentPoolConfig();
+        config.seniorRateBps = 800; // 8% APY
+        pool.proposePoolConfig(config);
         _warpForward(48 hours + 1);
-        pool.finalizeSeniorRate();
+        pool.finalizePoolConfig();
 
         _warpForward(90 days);
         vm.prank(address(seniorVault));

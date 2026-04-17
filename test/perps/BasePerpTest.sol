@@ -2,9 +2,9 @@
 pragma solidity 0.8.33;
 
 import {DecimalConstants} from "../../src/libraries/DecimalConstants.sol";
-import {CfdEngineAdmin} from "../../src/perps/CfdEngineAdmin.sol";
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdEngineAccountLens} from "../../src/perps/CfdEngineAccountLens.sol";
+import {CfdEngineAdmin} from "../../src/perps/CfdEngineAdmin.sol";
 import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
 import {CfdEnginePlanner} from "../../src/perps/CfdEnginePlanner.sol";
 import {CfdEngineProtocolLens} from "../../src/perps/CfdEngineProtocolLens.sol";
@@ -12,16 +12,16 @@ import {CfdEngineSettlementModule} from "../../src/perps/CfdEngineSettlementModu
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
-import {OrderRouterAdmin} from "../../src/perps/OrderRouterAdmin.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
+import {OrderRouterAdmin} from "../../src/perps/OrderRouterAdmin.sol";
 import {PerpsPublicLens} from "../../src/perps/PerpsPublicLens.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {DeferredEngineViewTypes} from "../../src/perps/interfaces/DeferredEngineViewTypes.sol";
 import {HousePoolEngineViewTypes} from "../../src/perps/interfaces/HousePoolEngineViewTypes.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
 import {ICfdEngineAdminHost} from "../../src/perps/interfaces/ICfdEngineAdminHost.sol";
-import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
+import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
 import {PerpsViewTypes} from "../../src/perps/interfaces/PerpsViewTypes.sol";
 import {ProtocolLensViewTypes} from "../../src/perps/interfaces/ProtocolLensViewTypes.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
@@ -261,6 +261,15 @@ abstract contract BasePerpTest is Test {
         usdc.approve(address(clearinghouse), amount);
         clearinghouse.deposit(accountId, amount);
         vm.stopPrank();
+    }
+
+    function _currentPoolConfig() internal view returns (HousePool.PoolConfig memory config) {
+        config = HousePool.PoolConfig({
+            seniorRateBps: pool.seniorRateBps(),
+            markStalenessLimit: pool.markStalenessLimit(),
+            seniorFrozenLpFeeBps: pool.seniorFrozenLpFeeBps(),
+            juniorFrozenLpFeeBps: pool.juniorFrozenLpFeeBps()
+        });
     }
 
     // --- Trading helpers ---
@@ -618,19 +627,11 @@ abstract contract BasePerpTest is Test {
         ) = engine.riskParams();
     }
 
-    function _engineCalendarConfig()
-        internal
-        view
-        returns (ICfdEngineAdminHost.EngineCalendarConfig memory config)
-    {
+    function _engineCalendarConfig() internal view returns (ICfdEngineAdminHost.EngineCalendarConfig memory config) {
         config.fadRunwaySeconds = engine.fadRunwaySeconds();
     }
 
-    function _engineFreshnessConfig()
-        internal
-        view
-        returns (ICfdEngineAdminHost.EngineFreshnessConfig memory config)
-    {
+    function _engineFreshnessConfig() internal view returns (ICfdEngineAdminHost.EngineFreshnessConfig memory config) {
         config.fadMaxStaleness = engine.fadMaxStaleness();
         config.engineMarkStalenessLimit = engine.engineMarkStalenessLimit();
     }

@@ -334,9 +334,11 @@ contract HousePoolTest is BasePerpTest {
 
         vm.warp(block.timestamp + 365 days - 48 hours - 1);
 
-        pool.proposeSeniorRate(1200);
+        HousePool.PoolConfig memory config = _currentPoolConfig();
+        config.seniorRateBps = 1200;
+        pool.proposePoolConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
-        pool.finalizeSeniorRate();
+        pool.finalizePoolConfig();
 
         // Senior should have received 8% for the first year
         assertEq(pool.seniorPrincipal(), 1_081_080 * 1e6, "Senior got 8% before rate change");
@@ -354,9 +356,11 @@ contract HousePoolTest is BasePerpTest {
 
         uint256 unpaidBefore = pool.unpaidSeniorYield();
 
-        pool.proposeSeniorRate(1600);
+        HousePool.PoolConfig memory config = _currentPoolConfig();
+        config.seniorRateBps = 1600;
+        pool.proposePoolConfig(config);
         vm.warp(block.timestamp + 48 hours + 121);
-        pool.finalizeSeniorRate();
+        pool.finalizePoolConfig();
 
         assertEq(pool.unpaidSeniorYield(), unpaidBefore, "Stale-mark finalization should not accrue yield");
         assertEq(pool.seniorRateBps(), 1600, "Senior rate should still update after stale-mark checkpointing");
@@ -372,9 +376,11 @@ contract HousePoolTest is BasePerpTest {
         _open(traderId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
         uint256 reconcileBefore = pool.lastReconcileTime();
-        pool.proposeSeniorRate(1600);
+        HousePool.PoolConfig memory config = _currentPoolConfig();
+        config.seniorRateBps = 1600;
+        pool.proposePoolConfig(config);
         vm.warp(block.timestamp + 48 hours + 121);
-        pool.finalizeSeniorRate();
+        pool.finalizePoolConfig();
 
         assertEq(
             pool.lastReconcileTime(),
@@ -393,9 +399,11 @@ contract HousePoolTest is BasePerpTest {
         _open(traderId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
         uint256 lastFreshMarkTime = engine.lastMarkTime();
-        pool.proposeSeniorRate(1600);
+        HousePool.PoolConfig memory config = _currentPoolConfig();
+        config.seniorRateBps = 1600;
+        pool.proposePoolConfig(config);
         vm.warp(block.timestamp + 48 hours + 121);
-        pool.finalizeSeniorRate();
+        pool.finalizePoolConfig();
 
         assertEq(
             pool.lastSeniorYieldCheckpointTime(),
@@ -427,18 +435,22 @@ contract HousePoolTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
-        pool.proposeSeniorRate(1600);
+        HousePool.PoolConfig memory config = _currentPoolConfig();
+        config.seniorRateBps = 1600;
+        pool.proposePoolConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
-        pool.finalizeSeniorRate();
+        pool.finalizePoolConfig();
     }
 
     function test_ProposeSeniorRate_RevertsAbove100PercentApr() public {
+        HousePool.PoolConfig memory config = _currentPoolConfig();
+        config.seniorRateBps = 10_001;
         vm.expectRevert(HousePool.HousePool__InvalidSeniorRate.selector);
-        pool.proposeSeniorRate(10_001);
+        pool.proposePoolConfig(config);
     }
 
     // ==========================================

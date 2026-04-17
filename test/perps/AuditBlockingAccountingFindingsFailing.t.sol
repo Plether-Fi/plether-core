@@ -5,20 +5,20 @@ import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdEngineAccountLens} from "../../src/perps/CfdEngineAccountLens.sol";
 import {CfdEngineAdmin} from "../../src/perps/CfdEngineAdmin.sol";
 import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
-import {CfdEnginePlanner} from "../../src/perps/CfdEnginePlanner.sol";
 import {CfdEnginePlanTypes} from "../../src/perps/CfdEnginePlanTypes.sol";
-import {CfdMath} from "../../src/perps/CfdMath.sol";
-import {CfdTypes} from "../../src/perps/CfdTypes.sol";
+import {CfdEnginePlanner} from "../../src/perps/CfdEnginePlanner.sol";
 import {CfdEngineProtocolLens} from "../../src/perps/CfdEngineProtocolLens.sol";
 import {CfdEngineSettlementModule} from "../../src/perps/CfdEngineSettlementModule.sol";
+import {CfdMath} from "../../src/perps/CfdMath.sol";
+import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {PerpsPublicLens} from "../../src/perps/PerpsPublicLens.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
-import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
+import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
 import {CfdEnginePlanLib} from "../../src/perps/libraries/CfdEnginePlanLib.sol";
 import {CfdEngineSnapshotsLib} from "../../src/perps/libraries/CfdEngineSnapshotsLib.sol";
 import {MarginClearinghouseAccountingLib} from "../../src/perps/libraries/MarginClearinghouseAccountingLib.sol";
@@ -298,7 +298,9 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
         _open(accountId, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
         _open(counterId, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
 
-        assertEq(_freeSettlementUsdc(accountId), 1e6, "Setup should leave one USDC of free settlement before close escrow");
+        assertEq(
+            _freeSettlementUsdc(accountId), 1e6, "Setup should leave one USDC of free settlement before close escrow"
+        );
     }
 
     function test_H2_FullyUtilizedTraderCanSubmitCloseOrderAgainstPositionMargin() public {
@@ -311,7 +313,11 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
 
         (, uint256 marginAfter,,,,,) = engine.positions(accountId);
         assertEq(_executionBountyReserve(1), 200_000, "Close order should still escrow the configured keeper bounty");
-        assertEq(marginAfter, marginBefore - 200_000, "Fully utilized close should source the configured bounty from position margin");
+        assertEq(
+            marginAfter,
+            marginBefore - 200_000,
+            "Fully utilized close should source the configured bounty from position margin"
+        );
     }
 
     function test_H2_HeadCloseOrderMustBeEconomicallyBackedAtCommit() public {
@@ -449,9 +455,11 @@ contract AuditBlockingAccountingFindingsFailing_StaleSeniorYield is BasePerpTest
 
         uint256 unpaidBefore = pool.unpaidSeniorYield();
 
-        pool.proposeSeniorRate(1600);
+        HousePool.PoolConfig memory config = _currentPoolConfig();
+        config.seniorRateBps = 1600;
+        pool.proposePoolConfig(config);
         vm.warp(block.timestamp + 48 hours + 121);
-        pool.finalizeSeniorRate();
+        pool.finalizePoolConfig();
 
         assertEq(pool.unpaidSeniorYield(), unpaidBefore, "Stale-mark finalization should not accrue senior yield");
     }

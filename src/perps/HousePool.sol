@@ -60,6 +60,13 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         PendingAccountingState pendingState;
     }
 
+    struct PoolConfig {
+        uint256 seniorRateBps;
+        uint256 markStalenessLimit;
+        uint256 seniorFrozenLpFeeBps;
+        uint256 juniorFrozenLpFeeBps;
+    }
+
     IERC20 public immutable USDC;
     ICfdEngineCore public immutable ENGINE;
     ICfdEngineProtocolLens public immutable ENGINE_PROTOCOL_LENS;
@@ -80,10 +87,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
 
     uint256 public lastReconcileTime;
     uint256 public lastSeniorYieldCheckpointTime;
-    uint256 public seniorRateBps;
-    uint256 public markStalenessLimit = 60;
-    uint256 public seniorFrozenLpFeeBps = 25;
-    uint256 public juniorFrozenLpFeeBps = 75;
+    PoolConfig internal poolConfig;
     uint256 public constant MAX_FROZEN_LP_FEE_BPS = 1000;
     bool public override(ICfdVault, IHousePool) isTradingActive;
     bool public seniorSeedInitialized;
@@ -91,15 +95,8 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
 
     uint256 public constant TIMELOCK_DELAY = 48 hours;
 
-    uint256 public pendingSeniorRate;
-    uint256 public seniorRateActivationTime;
-
-    uint256 public pendingMarkStalenessLimit;
-    uint256 public markStalenessLimitActivationTime;
-
-    uint256 public pendingSeniorFrozenLpFeeBps;
-    uint256 public pendingJuniorFrozenLpFeeBps;
-    uint256 public frozenLpFeeActivationTime;
+    PoolConfig public pendingPoolConfig;
+    uint256 public poolConfigActivationTime;
 
     error HousePool__NotAVault();
     error HousePool__RouterAlreadySet();
@@ -129,13 +126,15 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
     event Reconciled(uint256 seniorPrincipal, uint256 juniorPrincipal, int256 delta);
     event SeniorRateUpdated(uint256 newRateBps);
     event MarkStalenessLimitUpdated(uint256 newLimit);
-    event SeniorRateProposed(uint256 newRateBps, uint256 activationTime);
-    event SeniorRateFinalized();
-    event MarkStalenessLimitProposed(uint256 newLimit, uint256 activationTime);
-    event MarkStalenessLimitFinalized();
-    event FrozenLpFeesProposed(uint256 newSeniorFeeBps, uint256 newJuniorFeeBps, uint256 activationTime);
+    event PoolConfigProposed(
+        uint256 seniorRateBps,
+        uint256 markStalenessLimit,
+        uint256 seniorFrozenLpFeeBps,
+        uint256 juniorFrozenLpFeeBps,
+        uint256 activationTime
+    );
+    event PoolConfigFinalized();
     event FrozenLpFeesUpdated(uint256 seniorFeeBps, uint256 juniorFeeBps);
-    event FrozenLpFeesFinalized();
     event ExcessAccounted(uint256 amountUsdc, uint256 accountedAssetsUsdc);
     event ExcessSwept(address indexed recipient, uint256 amountUsdc);
     event ProtocolInflowAccounted(address indexed caller, uint256 amountUsdc, uint256 accountedAssetsUsdc);
@@ -179,7 +178,9 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         ENGINE_PROTOCOL_LENS = ICfdEngineProtocolLens(address(new CfdEngineProtocolLens(_engine)));
         lastReconcileTime = block.timestamp;
         lastSeniorYieldCheckpointTime = block.timestamp;
-        seniorRateBps = 800; // 8% APY default
+        poolConfig = PoolConfig({
+            seniorRateBps: 800, markStalenessLimit: 60, seniorFrozenLpFeeBps: 25, juniorFrozenLpFeeBps: 75
+        });
     }
 
     // ==========================================
@@ -225,125 +226,59 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         juniorVault = _vault;
     }
 
-    /// @notice Propose a new senior yield rate, subject to 48h timelock
-    function proposeSeniorRate(
-        uint256 _rateBps
+    /// @notice Propose a new pool config, subject to a 48h timelock.
+    function proposePoolConfig(
+        PoolConfig calldata newConfig
     ) external onlyOwner {
-        if (_rateBps > 10_000) {
-            revert HousePool__InvalidSeniorRate();
-        }
-        pendingSeniorRate = _rateBps;
-        seniorRateActivationTime = block.timestamp + TIMELOCK_DELAY;
-        emit SeniorRateProposed(_rateBps, seniorRateActivationTime);
+        _validatePoolConfig(newConfig);
+        pendingPoolConfig = newConfig;
+        poolConfigActivationTime = block.timestamp + TIMELOCK_DELAY;
+        emit PoolConfigProposed(
+            newConfig.seniorRateBps,
+            newConfig.markStalenessLimit,
+            newConfig.seniorFrozenLpFeeBps,
+            newConfig.juniorFrozenLpFeeBps,
+            poolConfigActivationTime
+        );
     }
 
-    /// @notice Finalizes the proposed senior rate after the timelock expires.
-    /// @dev If the mark is stale, the new rate is applied without accruing stale-window senior yield.
-    function finalizeSeniorRate() external onlyOwner {
-        if (seniorRateActivationTime == 0) {
+    /// @notice Finalizes the proposed pool config after the timelock expires.
+    /// @dev If the senior rate changes and the mark is stale, the new rate is applied without accruing stale-window senior yield.
+    function finalizePoolConfig() external onlyOwner {
+        if (poolConfigActivationTime == 0) {
             revert HousePool__NoProposal();
         }
-        if (block.timestamp < seniorRateActivationTime) {
+        if (block.timestamp < poolConfigActivationTime) {
             revert HousePool__TimelockNotReady();
         }
-        (
-            HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
-            HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
-        ) = _getHousePoolSnapshots();
-        if (_markIsFreshForReconcile(accountingSnapshot, statusSnapshot)) {
-            _reconcile(accountingSnapshot);
-        } else {
-            uint256 staleCheckpointTime = statusSnapshot.lastMarkTime > lastSeniorYieldCheckpointTime
-                ? statusSnapshot.lastMarkTime
-                : lastSeniorYieldCheckpointTime;
-            if (seniorPrincipal == 0) {
-                lastReconcileTime = staleCheckpointTime;
-            }
-            _applyPendingClaimantBucketsLive(accountingSnapshot, statusSnapshot);
-            lastSeniorYieldCheckpointTime = staleCheckpointTime;
+        PoolConfig memory currentConfig = poolConfig;
+        PoolConfig memory nextConfig = pendingPoolConfig;
+        if (nextConfig.seniorRateBps != currentConfig.seniorRateBps) {
+            _checkpointSeniorYieldBeforeRateChange();
         }
-        seniorRateBps = pendingSeniorRate;
-        pendingSeniorRate = 0;
-        seniorRateActivationTime = 0;
-        emit SeniorRateUpdated(seniorRateBps);
-        emit SeniorRateFinalized();
+        poolConfig = nextConfig;
+        delete pendingPoolConfig;
+        poolConfigActivationTime = 0;
+
+        if (nextConfig.seniorRateBps != currentConfig.seniorRateBps) {
+            emit SeniorRateUpdated(nextConfig.seniorRateBps);
+        }
+        if (nextConfig.markStalenessLimit != currentConfig.markStalenessLimit) {
+            emit MarkStalenessLimitUpdated(nextConfig.markStalenessLimit);
+        }
+        if (
+            nextConfig.seniorFrozenLpFeeBps != currentConfig.seniorFrozenLpFeeBps
+                || nextConfig.juniorFrozenLpFeeBps != currentConfig.juniorFrozenLpFeeBps
+        ) {
+            emit FrozenLpFeesUpdated(nextConfig.seniorFrozenLpFeeBps, nextConfig.juniorFrozenLpFeeBps);
+        }
+        emit PoolConfigFinalized();
     }
 
-    /// @notice Cancel the pending senior rate proposal
-    function cancelSeniorRateProposal() external onlyOwner {
-        pendingSeniorRate = 0;
-        seniorRateActivationTime = 0;
-    }
-
-    /// @notice Propose a new mark-price staleness limit, subject to 48h timelock
-    function proposeMarkStalenessLimit(
-        uint256 _limit
-    ) external onlyOwner {
-        if (_limit == 0) {
-            revert HousePool__ZeroStaleness();
-        }
-        pendingMarkStalenessLimit = _limit;
-        markStalenessLimitActivationTime = block.timestamp + TIMELOCK_DELAY;
-        emit MarkStalenessLimitProposed(_limit, markStalenessLimitActivationTime);
-    }
-
-    /// @notice Finalize the proposed staleness limit after timelock expires
-    function finalizeMarkStalenessLimit() external onlyOwner {
-        if (markStalenessLimitActivationTime == 0) {
-            revert HousePool__NoProposal();
-        }
-        if (block.timestamp < markStalenessLimitActivationTime) {
-            revert HousePool__TimelockNotReady();
-        }
-        markStalenessLimit = pendingMarkStalenessLimit;
-        pendingMarkStalenessLimit = 0;
-        markStalenessLimitActivationTime = 0;
-        emit MarkStalenessLimitUpdated(markStalenessLimit);
-        emit MarkStalenessLimitFinalized();
-    }
-
-    /// @notice Cancel the pending staleness limit proposal
-    function cancelMarkStalenessLimitProposal() external onlyOwner {
-        pendingMarkStalenessLimit = 0;
-        markStalenessLimitActivationTime = 0;
-    }
-
-    /// @notice Propose new frozen-window LP fees for senior and junior tranches, subject to 48h timelock.
-    function proposeFrozenLpFees(
-        uint256 seniorFeeBps,
-        uint256 juniorFeeBps
-    ) external onlyOwner {
-        if (seniorFeeBps > MAX_FROZEN_LP_FEE_BPS || juniorFeeBps > MAX_FROZEN_LP_FEE_BPS) {
-            revert HousePool__InvalidFrozenLpFee();
-        }
-        pendingSeniorFrozenLpFeeBps = seniorFeeBps;
-        pendingJuniorFrozenLpFeeBps = juniorFeeBps;
-        frozenLpFeeActivationTime = block.timestamp + TIMELOCK_DELAY;
-        emit FrozenLpFeesProposed(seniorFeeBps, juniorFeeBps, frozenLpFeeActivationTime);
-    }
-
-    /// @notice Finalize the proposed frozen-window LP fees after timelock expiry.
-    function finalizeFrozenLpFees() external onlyOwner {
-        if (frozenLpFeeActivationTime == 0) {
-            revert HousePool__NoProposal();
-        }
-        if (block.timestamp < frozenLpFeeActivationTime) {
-            revert HousePool__TimelockNotReady();
-        }
-        seniorFrozenLpFeeBps = pendingSeniorFrozenLpFeeBps;
-        juniorFrozenLpFeeBps = pendingJuniorFrozenLpFeeBps;
-        pendingSeniorFrozenLpFeeBps = 0;
-        pendingJuniorFrozenLpFeeBps = 0;
-        frozenLpFeeActivationTime = 0;
-        emit FrozenLpFeesUpdated(seniorFrozenLpFeeBps, juniorFrozenLpFeeBps);
-        emit FrozenLpFeesFinalized();
-    }
-
-    /// @notice Cancel the pending frozen-window LP fee proposal.
-    function cancelFrozenLpFeeProposal() external onlyOwner {
-        pendingSeniorFrozenLpFeeBps = 0;
-        pendingJuniorFrozenLpFeeBps = 0;
-        frozenLpFeeActivationTime = 0;
+    /// @notice Cancel the pending pool config proposal.
+    function cancelPoolConfigProposal() external onlyOwner {
+        delete pendingPoolConfig;
+        poolConfigActivationTime = 0;
     }
 
     /// @notice Updates the dedicated emergency pauser.
@@ -772,6 +707,22 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         return _withdrawalsLive(_getHousePoolInputSnapshot(), _getHousePoolStatusSnapshot());
     }
 
+    function seniorRateBps() public view returns (uint256) {
+        return poolConfig.seniorRateBps;
+    }
+
+    function markStalenessLimit() public view returns (uint256) {
+        return poolConfig.markStalenessLimit;
+    }
+
+    function seniorFrozenLpFeeBps() public view returns (uint256) {
+        return poolConfig.seniorFrozenLpFeeBps;
+    }
+
+    function juniorFrozenLpFeeBps() public view returns (uint256) {
+        return poolConfig.juniorFrozenLpFeeBps;
+    }
+
     function isOracleFrozen() public view override returns (bool) {
         return ENGINE.isOracleFrozen();
     }
@@ -782,7 +733,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         if (!isOracleFrozen()) {
             return 0;
         }
-        return isSenior ? seniorFrozenLpFeeBps : juniorFrozenLpFeeBps;
+        return isSenior ? poolConfig.seniorFrozenLpFeeBps : poolConfig.juniorFrozenLpFeeBps;
     }
 
     /// @notice Snapshot of pool liquidity, tranche principals, and oracle health for frontend consumption
@@ -841,7 +792,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
                 }),
                 HousePoolAccountingLib.buildReconcileSnapshot(accountingSnapshot),
                 _pendingClaimantBucketAssets(),
-                seniorRateBps,
+                poolConfig.seniorRateBps,
                 yieldElapsed,
                 markFresh
             );
@@ -914,7 +865,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
                     pendingState.waterfall.seniorPrincipal,
                     pendingState.waterfall.juniorPrincipal,
                     distributableToClaims,
-                    seniorRateBps,
+                    poolConfig.seniorRateBps,
                     elapsed
                 );
                 pendingState.waterfall.unpaidSeniorYield += plan.yieldAccrued;
@@ -949,6 +900,40 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
     ) internal view returns (bool) {
         return HousePoolFreshnessLib.withdrawalsLive(accountingSnapshot, statusSnapshot, block.timestamp);
+    }
+
+    function _validatePoolConfig(
+        PoolConfig memory config
+    ) internal pure {
+        if (config.seniorRateBps > 10_000) {
+            revert HousePool__InvalidSeniorRate();
+        }
+        if (config.markStalenessLimit == 0) {
+            revert HousePool__ZeroStaleness();
+        }
+        if (config.seniorFrozenLpFeeBps > MAX_FROZEN_LP_FEE_BPS || config.juniorFrozenLpFeeBps > MAX_FROZEN_LP_FEE_BPS)
+        {
+            revert HousePool__InvalidFrozenLpFee();
+        }
+    }
+
+    function _checkpointSeniorYieldBeforeRateChange() internal {
+        (
+            HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
+            HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
+        ) = _getHousePoolSnapshots();
+        if (_markIsFreshForReconcile(accountingSnapshot, statusSnapshot)) {
+            _reconcile(accountingSnapshot);
+            return;
+        }
+        uint256 staleCheckpointTime = statusSnapshot.lastMarkTime > lastSeniorYieldCheckpointTime
+            ? statusSnapshot.lastMarkTime
+            : lastSeniorYieldCheckpointTime;
+        if (seniorPrincipal == 0) {
+            lastReconcileTime = staleCheckpointTime;
+        }
+        _applyPendingClaimantBucketsLive(accountingSnapshot, statusSnapshot);
+        lastSeniorYieldCheckpointTime = staleCheckpointTime;
     }
 
     function _normalizeUnassignedAssets(
@@ -1010,7 +995,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
 
         if (_markIsFreshForReconcile(accountingSnapshot, statusSnapshot)) {
             unpaidSeniorYield += HousePoolWaterfallAccountingLib.accrueSeniorYield(
-                seniorPrincipal, seniorRateBps, elapsed
+                seniorPrincipal, poolConfig.seniorRateBps, elapsed
             );
         }
 
@@ -1112,7 +1097,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         view
         returns (HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot)
     {
-        return ENGINE_PROTOCOL_LENS.getHousePoolInputSnapshot(markStalenessLimit);
+        return ENGINE_PROTOCOL_LENS.getHousePoolInputSnapshot(poolConfig.markStalenessLimit);
     }
 
     function _getHousePoolStatusSnapshot()

@@ -219,9 +219,11 @@ contract AuditV3_C03_AsymmetricStalenessTest is BasePerpTest {
         _fundSenior(address(this), 500_000e6);
         _fundJunior(address(this), 500_000e6);
 
-        pool.proposeSeniorRate(1000); // 10% APY
+        HousePool.PoolConfig memory config = _currentPoolConfig();
+        config.seniorRateBps = 1000; // 10% APY
+        pool.proposePoolConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
-        pool.finalizeSeniorRate();
+        pool.finalizePoolConfig();
 
         _fundTrader(alice, 50_000e6);
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
@@ -258,9 +260,11 @@ contract AuditV3_C03_AsymmetricStalenessTest is BasePerpTest {
         _fundSenior(address(this), 500_000e6);
         _fundJunior(address(this), 500_000e6);
 
-        pool.proposeSeniorRate(1000); // 10% APY
+        HousePool.PoolConfig memory config = _currentPoolConfig();
+        config.seniorRateBps = 1000; // 10% APY
+        pool.proposePoolConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
-        pool.finalizeSeniorRate();
+        pool.finalizePoolConfig();
 
         _fundTrader(alice, 50_000e6);
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
@@ -388,8 +392,14 @@ contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
         router.executeOrder(2, empty);
         uint256 keeperPayoutFailed = usdc.balanceOf(keeper);
 
-        assertEq(keeperPayoutSuccess, 0, "H-01: successful execution should not pay keeper via direct wallet USDC transfer");
-        assertEq(keeperPayoutFailed, 0, "H-01: failed binding open execution should not pay keeper via direct wallet USDC transfer");
+        assertEq(
+            keeperPayoutSuccess, 0, "H-01: successful execution should not pay keeper via direct wallet USDC transfer"
+        );
+        assertEq(
+            keeperPayoutFailed,
+            0,
+            "H-01: failed binding open execution should not pay keeper via direct wallet USDC transfer"
+        );
     }
 
 }

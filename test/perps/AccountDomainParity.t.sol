@@ -3,6 +3,7 @@ pragma solidity 0.8.33;
 
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
+import {HousePool} from "../../src/perps/HousePool.sol";
 import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {MarginClearinghouseAccountingLib} from "../../src/perps/libraries/MarginClearinghouseAccountingLib.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
@@ -101,9 +102,11 @@ contract AccountDomainParityTest is BasePerpTest {
     }
 
     function test_WithdrawableParity_UsesSharedFreshnessPolicyWhenPoolLimitIsTighter() public {
-        pool.proposeMarkStalenessLimit(30);
+        HousePool.PoolConfig memory config = _currentPoolConfig();
+        config.markStalenessLimit = 30;
+        pool.proposePoolConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
-        pool.finalizeMarkStalenessLimit();
+        pool.finalizePoolConfig();
 
         address trader = address(0xD011A4);
         bytes32 accountId = bytes32(uint256(uint160(trader)));

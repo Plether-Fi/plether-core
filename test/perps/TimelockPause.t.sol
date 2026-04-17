@@ -205,79 +205,98 @@ contract TimelockPauseTest is BasePerpTest {
     // HousePool TIMELOCK TESTS
     // ==========================================
 
-    function test_ProposeSeniorRate_TimelockFlow() public {
-        pool.proposeSeniorRate(1200);
-        assertGt(pool.seniorRateActivationTime(), 0);
+    function test_ProposePoolConfig_TimelockFlow() public {
+        HousePool.PoolConfig memory config = _currentPoolConfig();
+        config.seniorRateBps = 1200;
+        pool.proposePoolConfig(config);
+        assertGt(pool.poolConfigActivationTime(), 0);
 
         vm.expectRevert(HousePool.HousePool__TimelockNotReady.selector);
-        pool.finalizeSeniorRate();
+        pool.finalizePoolConfig();
 
         _warpForward(48 hours + 1);
-        pool.finalizeSeniorRate();
+        pool.finalizePoolConfig();
 
         assertEq(pool.seniorRateBps(), 1200);
-        assertEq(pool.seniorRateActivationTime(), 0);
+        assertEq(pool.poolConfigActivationTime(), 0);
     }
 
-    function test_ProposeMarkStalenessLimit_TimelockFlow() public {
-        pool.proposeMarkStalenessLimit(60);
-        assertGt(pool.markStalenessLimitActivationTime(), 0);
+    function test_ProposePoolConfig_TimelockFlow_ForMarkStalenessLimit() public {
+        HousePool.PoolConfig memory config = _currentPoolConfig();
+        config.markStalenessLimit = 60;
+        pool.proposePoolConfig(config);
+        assertGt(pool.poolConfigActivationTime(), 0);
 
         vm.expectRevert(HousePool.HousePool__TimelockNotReady.selector);
-        pool.finalizeMarkStalenessLimit();
+        pool.finalizePoolConfig();
 
         _warpForward(48 hours + 1);
-        pool.finalizeMarkStalenessLimit();
+        pool.finalizePoolConfig();
 
         assertEq(pool.markStalenessLimit(), 60);
-        assertEq(pool.markStalenessLimitActivationTime(), 0);
+        assertEq(pool.poolConfigActivationTime(), 0);
     }
 
-    function test_FinalizeSeniorRate_NoProposal_Reverts() public {
+    function test_FinalizePoolConfig_NoProposal_Reverts() public {
         vm.expectRevert(HousePool.HousePool__NoProposal.selector);
-        pool.finalizeSeniorRate();
+        pool.finalizePoolConfig();
     }
 
-    function test_CancelSeniorRate_ClearsPending() public {
-        pool.proposeSeniorRate(1500);
-        pool.cancelSeniorRateProposal();
-        assertEq(pool.seniorRateActivationTime(), 0);
+    function test_CancelPoolConfig_ClearsPending() public {
+        HousePool.PoolConfig memory config = _currentPoolConfig();
+        config.seniorRateBps = 1500;
+        pool.proposePoolConfig(config);
+        pool.cancelPoolConfigProposal();
+        assertEq(pool.poolConfigActivationTime(), 0);
     }
 
-    function test_ProposeFrozenLpFees_TimelockFlow() public {
-        pool.proposeFrozenLpFees(40, 90);
-        assertGt(pool.frozenLpFeeActivationTime(), 0);
+    function test_ProposePoolConfig_TimelockFlow_ForFrozenLpFees() public {
+        HousePool.PoolConfig memory config = _currentPoolConfig();
+        config.seniorFrozenLpFeeBps = 40;
+        config.juniorFrozenLpFeeBps = 90;
+        pool.proposePoolConfig(config);
+        assertGt(pool.poolConfigActivationTime(), 0);
 
         vm.expectRevert(HousePool.HousePool__TimelockNotReady.selector);
-        pool.finalizeFrozenLpFees();
+        pool.finalizePoolConfig();
 
         _warpForward(48 hours + 1);
-        pool.finalizeFrozenLpFees();
+        pool.finalizePoolConfig();
 
         assertEq(pool.seniorFrozenLpFeeBps(), 40);
         assertEq(pool.juniorFrozenLpFeeBps(), 90);
-        assertEq(pool.frozenLpFeeActivationTime(), 0);
+        assertEq(pool.poolConfigActivationTime(), 0);
     }
 
-    function test_FinalizeFrozenLpFees_NoProposal_Reverts() public {
-        vm.expectRevert(HousePool.HousePool__NoProposal.selector);
-        pool.finalizeFrozenLpFees();
+    function test_CancelPoolConfig_ZeroesPendingStruct() public {
+        HousePool.PoolConfig memory config = _currentPoolConfig();
+        config.seniorFrozenLpFeeBps = 40;
+        config.juniorFrozenLpFeeBps = 90;
+        pool.proposePoolConfig(config);
+        pool.cancelPoolConfigProposal();
+        assertEq(pool.poolConfigActivationTime(), 0);
+        (
+            uint256 pendingSeniorRate,
+            uint256 pendingMarkStaleness,
+            uint256 pendingSeniorFrozenFee,
+            uint256 pendingJuniorFrozenFee
+        ) = pool.pendingPoolConfig();
+        assertEq(pendingSeniorRate, 0);
+        assertEq(pendingMarkStaleness, 0);
+        assertEq(pendingSeniorFrozenFee, 0);
+        assertEq(pendingJuniorFrozenFee, 0);
     }
 
-    function test_CancelFrozenLpFees_ClearsPending() public {
-        pool.proposeFrozenLpFees(40, 90);
-        pool.cancelFrozenLpFeeProposal();
-        assertEq(pool.frozenLpFeeActivationTime(), 0);
-        assertEq(pool.pendingSeniorFrozenLpFeeBps(), 0);
-        assertEq(pool.pendingJuniorFrozenLpFeeBps(), 0);
-    }
-
-    function test_ProposeFrozenLpFees_RevertsAboveCap() public {
+    function test_ProposePoolConfig_RevertsForInvalidFrozenLpFees() public {
+        HousePool.PoolConfig memory config = _currentPoolConfig();
+        config.seniorFrozenLpFeeBps = 1001;
         vm.expectRevert(HousePool.HousePool__InvalidFrozenLpFee.selector);
-        pool.proposeFrozenLpFees(1001, 90);
+        pool.proposePoolConfig(config);
 
+        config = _currentPoolConfig();
+        config.juniorFrozenLpFeeBps = 1001;
         vm.expectRevert(HousePool.HousePool__InvalidFrozenLpFee.selector);
-        pool.proposeFrozenLpFees(40, 1001);
+        pool.proposePoolConfig(config);
     }
 
     // ==========================================
