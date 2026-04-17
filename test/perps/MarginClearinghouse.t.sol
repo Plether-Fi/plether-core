@@ -333,6 +333,30 @@ contract MarginClearinghouseTest is Test {
         assertEq(mockEngine.lastCarryAccountId(), aliceId, "Unlock should checkpoint carry for the unlocked account");
     }
 
+    function test_LockCommittedOrderMargin_RevertsWhenReservationLedgerIsActive() public {
+        vm.prank(alice);
+        clearinghouse.deposit(aliceId, 1000 * 1e6);
+
+        vm.prank(engine);
+        clearinghouse.reserveCommittedOrderMargin(aliceId, 17, 200 * 1e6);
+
+        vm.prank(engine);
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__ReservationLedgerActive.selector);
+        clearinghouse.lockCommittedOrderMargin(aliceId, 100 * 1e6);
+    }
+
+    function test_UnlockCommittedOrderMargin_RevertsWhenReservationLedgerIsActive() public {
+        vm.prank(alice);
+        clearinghouse.deposit(aliceId, 1000 * 1e6);
+
+        vm.startPrank(engine);
+        clearinghouse.lockCommittedOrderMargin(aliceId, 200 * 1e6);
+        clearinghouse.reserveCommittedOrderMargin(aliceId, 18, 100 * 1e6);
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__ReservationLedgerActive.selector);
+        clearinghouse.unlockCommittedOrderMargin(aliceId, 50 * 1e6);
+        vm.stopPrank();
+    }
+
     function test_LockCommittedOrderMargin_UsesStoredMarkFallbackWhenFreshCarryIsStale() public {
         vm.prank(alice);
         clearinghouse.deposit(aliceId, 1000 * 1e6);

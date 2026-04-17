@@ -1,3 +1,16 @@
+- [x] Inspect current order-failure and clearinghouse helper tests for the smallest safe cleanup
+- [x] Remove unreachable failed-order outcome branches and dead escrow helpers
+- [x] Guard direct committed-margin helpers against reservation-ledger desync
+- [x] Add focused regressions for both cleanups
+- [x] Run targeted Forge verification
+
+Review:
+- Simplified the failed-order escrow path in `src/perps/modules/OrderExecutionOrchestrator.sol` and `src/perps/modules/OrderEscrowAccounting.sol` to match the actual live policy surface: failed orders now always follow the single reachable `ClearerFull` path, and the dead `RefundUser` / `ProtocolFull` dispatch branches plus their unreachable escrow helpers were removed.
+- Removed the unused `FailedOrderBountyPolicy` enum from `src/perps/libraries/OrderFailurePolicyLib.sol`, since current policy only uses the open-order predictably-invalid helper there.
+- Hardened `src/perps/MarginClearinghouse.sol` so direct `lockCommittedOrderMargin(...)` and `unlockCommittedOrderMargin(...)` now revert with `MarginClearinghouse__ReservationLedgerActive()` whenever an account has active order reservations. This prevents future integrations from mixing direct committed-bucket mutations with reservation-ledger state and desyncing liquidation coverage.
+- Added focused regressions in `test/perps/MarginClearinghouse.t.sol` for the new reservation-ledger guard, and re-ran the current order failure policy matrix in `test/perps/OrderRouterPolicyMatrix.t.sol` to confirm the live behavior is unchanged after removing the dead failure branches.
+- Verified green with `forge test --match-path test/perps/MarginClearinghouse.t.sol --match-test "test_LockCommittedOrderMargin_RevertsWhenReservationLedgerIsActive|test_UnlockCommittedOrderMargin_RevertsWhenReservationLedgerIsActive|test_UnlockCommittedOrderMargin_CheckpointsCarryBeforeUnlock|test_LockCommittedOrderMargin_UsesStoredMarkFallbackWhenFreshCarryIsStale|test_ConsumeCloseLoss_RevertsWhenReservationIdsDoNotCoverCommittedBucket"` and `forge test --match-path test/perps/OrderRouterPolicyMatrix.t.sol --match-test "test_ExpiredOpenPaysClearerAndDoesNotRefundTrader|test_ExpiredClosePaysClearer|test_ProtocolInvalidationPaysClearerAndDoesNotRefundTrader|test_UserInvalidPaysClearer|test_MarginDrainedByFeesTypedRevertMapsToClearerFull"`.
+
 - [x] Inspect HousePool config-finalization tests and existing stale-rate behavior
 - [x] Require fresh mark before senior-rate finalization in HousePool
 - [x] Update tests/docs for stale senior-rate finalization policy

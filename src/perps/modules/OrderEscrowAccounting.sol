@@ -146,7 +146,6 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
     function _consumeOrderEscrow(
         uint64 orderId,
         bool success,
-        uint8 failedPolicy,
         uint256 executionPrice,
         uint64 oraclePublishTime
     ) internal returns (uint256 executionBountyUsdc) {
@@ -155,14 +154,7 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
         }
 
         _releaseCommittedMargin(orderId);
-        if (failedPolicy == 1) {
-            return _collectExecutionBounty(orderId, executionPrice, oraclePublishTime);
-        } else if (failedPolicy == 2) {
-            _refundExecutionBounty(orderId, executionPrice, oraclePublishTime);
-        } else if (failedPolicy == 3) {
-            _forfeitExecutionBountyToProtocol(orderId);
-        }
-        return 0;
+        return _collectExecutionBounty(orderId, executionPrice, oraclePublishTime);
     }
 
     function _collectExecutionBounty(
@@ -179,37 +171,6 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
         USDC.safeTransfer(address(clearinghouse), executionBountyUsdc);
         engine.creditKeeperExecutionBounty(msg.sender, executionBountyUsdc, executionPrice, oraclePublishTime);
         return executionBountyUsdc;
-    }
-
-    function _refundExecutionBounty(
-        uint64 orderId,
-        uint256 executionPrice,
-        uint64 oraclePublishTime
-    ) internal {
-        OrderRecord storage record = _orderRecord(orderId);
-        uint256 bounty = record.executionBountyUsdc;
-        if (bounty == 0) {
-            return;
-        }
-
-        record.executionBountyUsdc = 0;
-        USDC.safeTransfer(address(clearinghouse), bounty);
-        engine.creditKeeperExecutionBounty(
-            address(uint160(uint256(record.core.accountId))), bounty, executionPrice, oraclePublishTime
-        );
-    }
-
-    function _forfeitExecutionBountyToProtocol(
-        uint64 orderId
-    ) internal {
-        OrderRecord storage record = _orderRecord(orderId);
-        uint256 bounty = record.executionBountyUsdc;
-        if (bounty == 0) {
-            return;
-        }
-
-        record.executionBountyUsdc = 0;
-        engine.absorbRouterCancellationFee(bounty);
     }
 
     function _releaseCommittedMargin(

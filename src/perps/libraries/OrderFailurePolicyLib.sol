@@ -5,12 +5,6 @@ import {CfdEnginePlanTypes} from "../CfdEnginePlanTypes.sol";
 
 library OrderFailurePolicyLib {
 
-    enum FailedOrderBountyPolicy {
-        None,
-        ClearerFull,
-        RefundUser
-    }
-
     function isPredictablyInvalidOpen(
         CfdEnginePlanTypes.OpenFailurePolicyCategory category
     ) internal pure returns (bool) {

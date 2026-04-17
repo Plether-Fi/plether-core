@@ -47,6 +47,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     error MarginClearinghouse__ReservationAlreadyExists();
     error MarginClearinghouse__ReservationNotActive();
     error MarginClearinghouse__IncompleteReservationCoverage();
+    error MarginClearinghouse__ReservationLedgerActive();
     error MarginClearinghouse__EngineAlreadySet();
     error MarginClearinghouse__ZeroAddress();
     error MarginClearinghouse__InsufficientBucketMargin();
@@ -287,6 +288,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         bytes32 accountId,
         uint256 amountUsdc
     ) external onlyOperator {
+        _requireNoActiveReservations(accountId);
         _checkpointCarryBeforeMarginChange(accountId);
         _lockMargin(accountId, IMarginClearinghouse.MarginBucket.CommittedOrder, amountUsdc);
     }
@@ -326,6 +328,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         bytes32 accountId,
         uint256 amountUsdc
     ) external onlyOperator {
+        _requireNoActiveReservations(accountId);
         _checkpointCarryBeforeMarginChange(accountId);
         _unlockMargin(accountId, IMarginClearinghouse.MarginBucket.CommittedOrder, amountUsdc);
     }
@@ -738,6 +741,14 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         }
 
         _realizeOrCheckpointCarryBeforeMarginChange(accountId, reachableCollateralBasisUsdc);
+    }
+
+    function _requireNoActiveReservations(
+        bytes32 accountId
+    ) internal view {
+        if (activeReservationCount[accountId] != 0) {
+            revert MarginClearinghouse__ReservationLedgerActive();
+        }
     }
 
     function _realizeOrCheckpointCarryBeforeMarginChange(

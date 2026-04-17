@@ -18,12 +18,8 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
         Return
     }
 
-    /// @dev ClearerFull routes the reserved bounty to the executor, RefundUser restores the trader-owned
-    ///      bounty, and ProtocolFull forfeits the router-held bounty into protocol fees when that path is used.
     enum FailedOrderOutcome {
-        ClearerFull,
-        RefundUser,
-        ProtocolFull
+        ClearerFull
     }
 
     enum OrderFailReason {
@@ -284,12 +280,11 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
 
     function _cleanupOrder(
         uint64 orderId,
-        FailedOrderOutcome failedOutcome,
+        FailedOrderOutcome,
         uint256 executionPrice,
         uint64 oraclePublishTime
     ) internal returns (uint256 executionBountyUsdc) {
-        executionBountyUsdc =
-            _consumeOrderEscrow(orderId, false, _failedOutcomeCode(failedOutcome), executionPrice, oraclePublishTime);
+        executionBountyUsdc = _consumeOrderEscrow(orderId, false, executionPrice, oraclePublishTime);
         _deleteOrder(orderId, IOrderRouterAccounting.OrderStatus.Failed);
     }
 
@@ -298,20 +293,8 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
         uint256 executionPrice,
         uint64 oraclePublishTime
     ) internal {
-        _consumeOrderEscrow(orderId, true, 0, executionPrice, oraclePublishTime);
+        _consumeOrderEscrow(orderId, true, executionPrice, oraclePublishTime);
         _deleteOrder(orderId, IOrderRouterAccounting.OrderStatus.Executed);
-    }
-
-    function _failedOutcomeCode(
-        FailedOrderOutcome outcome
-    ) internal pure returns (uint8) {
-        if (outcome == FailedOrderOutcome.ClearerFull) {
-            return 1;
-        }
-        if (outcome == FailedOrderOutcome.RefundUser) {
-            return 2;
-        }
-        return 3;
     }
 
     function _sendEth(
