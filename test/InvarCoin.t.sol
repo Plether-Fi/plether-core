@@ -757,12 +757,39 @@ contract InvarCoinTest is Test {
         ic.deployToCurve(0);
     }
 
+    function test_DeployToCurve_RevertsOnSpotPremiumManipulation() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice, 0);
+
+        curve.setSpotPremiumBps(600);
+
+        vm.expectRevert(InvarCoin.InvarCoin__SpotDeviationTooHigh.selector);
+        ic.deployToCurve(0);
+    }
+
     function test_DeployToCurve_AllowsNormalSpotDrift() public {
         vm.prank(alice);
         ic.deposit(20_000e6, alice, 0);
 
         curve.setSpotDiscountBps(30);
 
+        ic.deployToCurve(0);
+    }
+
+    function test_DeployToCurve_SlippageGuardUsesEmaBound() public {
+        oracle.updatePrice(81_000_000);
+        curve.setPriceMultiplier(0.81e18);
+
+        vm.prank(alice);
+        ic.deposit(18_000e6, alice, 0);
+
+        uint256 deploy = 17_640e6;
+        uint256 emaExpectedLp = (deploy * 1e30) / curve.lp_price();
+        uint256 minLpOut = emaExpectedLp * 9950 / 10_000;
+
+        curve.setSpotDiscountBps(30);
+
+        vm.expectCall(address(curve), abi.encodeCall(curve.add_liquidity, ([deploy, uint256(0)], minLpOut)));
         ic.deployToCurve(0);
     }
 
@@ -876,6 +903,49 @@ contract InvarCoinTest is Test {
         // Fee-only yield ≈ 5/105 of LP value. Allow 10% tolerance (mock linear math introduces ~8.7% deviation).
         uint256 expectedFeeYield = (fullLpUsdc * 5) / 105;
         assertApproxEqRel(yieldValue, expectedFeeYield, 0.1e18, "Yield should reflect fees only, not price moves");
+    }
+
+    function test_HarvestMath_MixedBasisIsOutlier() public view {
+        uint256 localUsdc = 200e6;
+        uint256 lpBal = 1000e18;
+        uint256 pessimisticLpPrice = 1.80e18;
+        uint256 optimisticLpPrice = 1.836e18;
+        uint256 supply = 10_000e18;
+
+        uint256 pessimisticLpValue = (lpBal * pessimisticLpPrice) / 1e30;
+        uint256 optimisticLpValue = (lpBal * optimisticLpPrice) / 1e30;
+
+        uint256 pessimisticYield = 50e6;
+        uint256 optimisticYield = Math.mulDiv(optimisticLpValue, pessimisticYield, pessimisticLpValue);
+
+        uint256 pessimisticAssetsBeforeYield = localUsdc + pessimisticLpValue - pessimisticYield;
+        uint256 optimisticAssetsBeforeYield = localUsdc + optimisticLpValue - optimisticYield;
+        uint256 mixedAssetsBeforeYield = localUsdc + optimisticLpValue - pessimisticYield;
+
+        uint256 pessimisticShares = Math.mulDiv(
+            pessimisticYield,
+            supply + ic.VIRTUAL_SHARES(),
+            pessimisticAssetsBeforeYield + ic.VIRTUAL_ASSETS()
+        );
+        uint256 optimisticShares = Math.mulDiv(
+            optimisticYield,
+            supply + ic.VIRTUAL_SHARES(),
+            optimisticAssetsBeforeYield + ic.VIRTUAL_ASSETS()
+        );
+        uint256 mixedShares = Math.mulDiv(
+            pessimisticYield,
+            supply + ic.VIRTUAL_SHARES(),
+            mixedAssetsBeforeYield + ic.VIRTUAL_ASSETS()
+        );
+
+        assertApproxEqRel(
+            pessimisticShares,
+            optimisticShares,
+            0.003e18,
+            "Consistent harvest pricing should be nearly basis-invariant"
+        );
+        assertLt(mixedShares, pessimisticShares, "Mixed pricing under-mints versus current harvest math");
+        assertLt(mixedShares, optimisticShares, "Mixed pricing under-mints versus all-optimistic math");
     }
 
     function test_Harvest_IgnoresDonatedLpTokens() public {
@@ -2645,9 +2715,10 @@ contract InvarCoinTest is Test {
         ic.deposit(18_000e6, alice, 0);
 
         uint256 deploy = 17_640e6;
-        uint256 calcLp = deploy * 1e30 / curve.lp_price();
+        uint256 emaExpectedLp = (deploy * 1e30) / curve.lp_price();
+        uint256 minLpOut = emaExpectedLp * 9950 / 10_000;
 
-        vm.expectCall(address(curve), abi.encodeCall(curve.add_liquidity, ([deploy, uint256(0)], calcLp - 1)));
+        vm.expectCall(address(curve), abi.encodeCall(curve.add_liquidity, ([deploy, uint256(0)], minLpOut)));
         ic.deployToCurve(0);
     }
 
@@ -2721,8 +2792,31 @@ contract InvarCoinTest is Test {
         uint256 bufferTarget = (assets * 200) / 10_000;
         uint256 maxReplenish = bufferTarget - 180e6;
         uint256 lpToBurn = (maxReplenish * 1e30) / curve.lp_price();
-        uint256 calcOut = curve.calc_withdraw_one_coin(lpToBurn, 0);
-        uint256 minAmount = calcOut * (10_000 - 5) / 10_000;
+        uint256 emaExpectedUsdc = (lpToBurn * curve.lp_price()) / 1e30;
+        uint256 minAmount = emaExpectedUsdc * 9950 / 10_000;
+
+        vm.expectCall(address(curve), abi.encodeCall(curve.remove_liquidity_one_coin, (lpToBurn, 0, minAmount)));
+        ic.replenishBuffer(0);
+    }
+
+    function test_ReplenishBuffer_SlippageFloorUsesEmaBound() public {
+        oracle.updatePrice(81_000_000);
+        curve.setPriceMultiplier(0.81e18);
+
+        vm.prank(alice);
+        ic.deposit(18_000e6, alice, 0);
+        ic.deployToCurve(0);
+
+        deal(address(usdc), address(ic), 180e6);
+
+        uint256 assets = ic.totalAssets();
+        uint256 bufferTarget = (assets * 200) / 10_000;
+        uint256 maxReplenish = bufferTarget - 180e6;
+        uint256 lpToBurn = (maxReplenish * 1e30) / curve.lp_price();
+        uint256 emaExpectedUsdc = (lpToBurn * curve.lp_price()) / 1e30;
+        uint256 minAmount = emaExpectedUsdc * 9950 / 10_000;
+
+        curve.setSpotDiscountBps(30);
 
         vm.expectCall(address(curve), abi.encodeCall(curve.remove_liquidity_one_coin, (lpToBurn, 0, minAmount)));
         ic.replenishBuffer(0);

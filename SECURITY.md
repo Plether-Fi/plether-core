@@ -448,9 +448,9 @@ LP tokens are valued using both Curve's `lp_price()` (EMA) and an oracle-derived
 | `DEPLOY_THRESHOLD` | $1,000 | Minimum excess before `deployToCurve` activates |
 | `MAX_SPOT_DEVIATION_BPS` | 50 (0.5%) | Circuit breaker for pool manipulation |
 
-The spot deviation guard compares `calc_token_amount` (spot) against EMA-derived expected LP. It blocks `deployToCurve`, `replenishBuffer`, `lpDeposit`, and `redeployToCurve` when the pool is being manipulated.
+The spot deviation guard compares spot execution against EMA-derived fair value. It blocks `deployToCurve`, `replenishBuffer`, `lpDeposit`, and `redeployToCurve` when the pool is being manipulated in either direction beyond the configured tolerance.
 
-`deployToCurve` checks only downward deviation (getting less LP than expected). Upward deviation (getting more LP) is favorable to the vault and not blocked.
+For permissionless maintenance actions (`deployToCurve` and `replenishBuffer`), Curve min-out parameters are derived from the EMA fair-value bound rather than the current spot quote. This prevents callers from using a manipulated spot quote as the vault's slippage floor.
 
 #### Gauge Integration
 
