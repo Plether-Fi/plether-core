@@ -908,7 +908,7 @@ contract InvarCoinTest is Test {
     function test_HarvestMath_MixedBasisIsOutlier() public view {
         uint256 localUsdc = 200e6;
         uint256 lpBal = 1000e18;
-        uint256 pessimisticLpPrice = 1.80e18;
+        uint256 pessimisticLpPrice = 1.8e18;
         uint256 optimisticLpPrice = 1.836e18;
         uint256 supply = 10_000e18;
 
@@ -923,26 +923,16 @@ contract InvarCoinTest is Test {
         uint256 mixedAssetsBeforeYield = localUsdc + optimisticLpValue - pessimisticYield;
 
         uint256 pessimisticShares = Math.mulDiv(
-            pessimisticYield,
-            supply + ic.VIRTUAL_SHARES(),
-            pessimisticAssetsBeforeYield + ic.VIRTUAL_ASSETS()
+            pessimisticYield, supply + ic.VIRTUAL_SHARES(), pessimisticAssetsBeforeYield + ic.VIRTUAL_ASSETS()
         );
         uint256 optimisticShares = Math.mulDiv(
-            optimisticYield,
-            supply + ic.VIRTUAL_SHARES(),
-            optimisticAssetsBeforeYield + ic.VIRTUAL_ASSETS()
+            optimisticYield, supply + ic.VIRTUAL_SHARES(), optimisticAssetsBeforeYield + ic.VIRTUAL_ASSETS()
         );
-        uint256 mixedShares = Math.mulDiv(
-            pessimisticYield,
-            supply + ic.VIRTUAL_SHARES(),
-            mixedAssetsBeforeYield + ic.VIRTUAL_ASSETS()
-        );
+        uint256 mixedShares =
+            Math.mulDiv(pessimisticYield, supply + ic.VIRTUAL_SHARES(), mixedAssetsBeforeYield + ic.VIRTUAL_ASSETS());
 
         assertApproxEqRel(
-            pessimisticShares,
-            optimisticShares,
-            0.003e18,
-            "Consistent harvest pricing should be nearly basis-invariant"
+            pessimisticShares, optimisticShares, 0.003e18, "Consistent harvest pricing should be nearly basis-invariant"
         );
         assertLt(mixedShares, pessimisticShares, "Mixed pricing under-mints versus current harvest math");
         assertLt(mixedShares, optimisticShares, "Mixed pricing under-mints versus all-optimistic math");
@@ -4095,9 +4085,7 @@ contract HarvestBypassTest is Test {
 
         assertGt(ic.getHarvestableYield(), 0, "yield should be pending");
 
-        vm.mockCallRevert(
-            address(oracle), abi.encodeWithSignature("latestRoundData()"), "oracle deviation"
-        );
+        vm.mockCallRevert(address(oracle), abi.encodeWithSignature("latestRoundData()"), "oracle deviation");
 
         uint256 shares = ic.balanceOf(alice);
 
