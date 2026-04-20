@@ -346,7 +346,7 @@ contract InvarCoinManipulationForkTest is BaseForkTest {
             uint256 minUsdc = (expectedUsdcValue * 95) / 100;
             vm.prank(alice);
             vm.expectRevert(InvarCoin.InvarCoin__SlippageExceeded.selector);
-            ic.lpWithdraw(aliceShares, minUsdc, 0);
+            ic.lpWithdraw(aliceShares, minUsdc, 0, alice);
 
             vm.revertToState(snapshot);
         }
@@ -384,7 +384,7 @@ contract InvarCoinManipulationForkTest is BaseForkTest {
 
         // Same-block sandwich — no warp, no deploy. Attacker exits immediately.
         vm.prank(attacker);
-        (uint256 usdcReturned, uint256 bearReturned) = ic.lpWithdraw(attackerShares, 0, 0);
+        (uint256 usdcReturned, uint256 bearReturned) = ic.lpWithdraw(attackerShares, 0, 0, attacker);
 
         (, int256 clPrice,,,) = AggregatorV3Interface(CL_EUR).latestRoundData();
         uint256 finalUsdc = IERC20(USDC).balanceOf(attacker);
