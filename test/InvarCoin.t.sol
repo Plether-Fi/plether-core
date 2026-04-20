@@ -778,6 +778,17 @@ contract InvarCoinTest is Test {
         ic.harvest();
     }
 
+    function test_Harvest_RevertsWhenNoStakers() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice, 0);
+
+        ic.deployToCurve(0);
+        curve.setVirtualPrice(1.05e18);
+
+        vm.expectRevert(InvarCoin.InvarCoin__NoStakers.selector);
+        ic.harvest();
+    }
+
     function test_Harvest_CurveYield() public {
         vm.prank(alice);
         ic.deposit(20_000e6, alice, 0);
@@ -2592,6 +2603,16 @@ contract InvarCoinTest is Test {
         uint256 donated = ic.harvest();
         assertGt(donated, 26_000e18);
         assertLt(donated, 26_500e18);
+    }
+
+    function test_DonateUsdc_RevertsWhenNoStakers() public {
+        usdc.mint(rewardDist, 1000e6);
+        vm.startPrank(rewardDist);
+        usdc.approve(address(ic), type(uint256).max);
+
+        vm.expectRevert(InvarCoin.InvarCoin__NoStakers.selector);
+        ic.donateUsdc(1000e6);
+        vm.stopPrank();
     }
 
     function test_DeployToCurve_ExactBufferRemaining() public {
