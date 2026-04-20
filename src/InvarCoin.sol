@@ -271,12 +271,21 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         emit GaugeRewardsReceiverSet(gaugeRewardsReceiver);
     }
 
+    function _isCoreRewardProtectedAsset(
+        address token
+    ) private view returns (bool) {
+        return token == address(USDC) || token == address(BEAR) || token == address(CURVE_LP_TOKEN);
+    }
+
     /// @notice Irreversibly marks a token as a protected gauge reward token.
     function protectRewardToken(
         address token
     ) external onlyOwner {
         if (token == address(0)) {
             revert InvarCoin__ZeroAddress();
+        }
+        if (_isCoreRewardProtectedAsset(token)) {
+            revert InvarCoin__CannotRescueCoreAsset();
         }
 
         protectedRewardTokens[token] = true;
@@ -288,6 +297,9 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         address token
     ) external onlyOwner {
         if (!protectedRewardTokens[token]) {
+            revert InvarCoin__CannotRescueCoreAsset();
+        }
+        if (_isCoreRewardProtectedAsset(token)) {
             revert InvarCoin__CannotRescueCoreAsset();
         }
         if (gaugeRewardsReceiver == address(0)) {
