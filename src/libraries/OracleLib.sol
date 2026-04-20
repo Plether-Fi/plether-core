@@ -181,13 +181,27 @@ library OracleLib {
         uint256 timeout
     ) internal view returns (bool success, uint256 price) {
         if (address(sequencerFeed) != address(0)) {
-            (, int256 answer, uint256 startedAt,,) = sequencerFeed.latestRoundData();
+            int256 answer;
+            uint256 startedAt;
+            try sequencerFeed.latestRoundData() returns (uint80, int256 _answer, uint256 _startedAt, uint256, uint80) {
+                answer = _answer;
+                startedAt = _startedAt;
+            } catch {
+                return (false, 0);
+            }
             if (answer != 0 || block.timestamp - startedAt < gracePeriod) {
                 return (false, 0);
             }
         }
 
-        (, int256 rawPrice,, uint256 updatedAt,) = oracle.latestRoundData();
+        int256 rawPrice;
+        uint256 updatedAt;
+        try oracle.latestRoundData() returns (uint80, int256 _rawPrice, uint256, uint256 _updatedAt, uint80) {
+            rawPrice = _rawPrice;
+            updatedAt = _updatedAt;
+        } catch {
+            return (false, 0);
+        }
 
         if (updatedAt < block.timestamp - timeout || rawPrice <= 0) {
             return (false, 0);
