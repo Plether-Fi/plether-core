@@ -529,11 +529,11 @@ The accounting system should preserve the following:
 
 ## Architecture Goal
 
-The goal is not to make the protocol less conservative.
+The system uses multiple conservative accounting kernels because different paths answer different questions: solvency, withdrawal availability, close settlement, liquidation planning, deferred liabilities, and router escrow all need different boundaries.
 
-The goal is to keep each conservative assumption:
+Design rules:
 
-- local,
-- explicit,
-- reusable only where intended,
-- hard to accidentally mix into the wrong accounting question.
+- keep each kernel explicit and local to its purpose,
+- share logic only when the economic question is truly the same,
+- make cross-domain reuse deliberate rather than accidental,
+- prefer duplication over silently mixing assumptions from the wrong domain.

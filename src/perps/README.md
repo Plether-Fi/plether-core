@@ -226,7 +226,8 @@ Carry behavior:
 
 - Accrues continuously by wall-clock time.
 - Continues accruing even during stale or frozen oracle windows.
-- Applies to whichever side is consuming LP capital.
+- Is assessed per position on that position's own LP-backed notional rather than on net market imbalance.
+- Both `BULL` and `BEAR` positions can accrue carry at the same time if both sides are consuming LP capital.
 - Can be checkpointed into `unsettledCarryUsdc` when a basis-changing settlement credit occurs before physical collection is possible.
 - Is computed on clearinghouse deposit/withdraw using the pre-mutation reachable basis.
 - On deposit, realized carry may be collected from post-deposit settlement in the same transaction.
