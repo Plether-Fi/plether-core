@@ -1556,8 +1556,16 @@ contract RewardDistributorPythTest is Test {
             address(0)
         );
 
-        plDxyBear.mint(address(stakedBear), 1000e18);
-        plDxyBull.mint(address(stakedBull), 1000e18);
+        // Seed real stakers so reward donations do not revert on zero share supply.
+        plDxyBear.mint(alice, 1000e18);
+        plDxyBull.mint(alice, 1000e18);
+
+        vm.startPrank(alice);
+        plDxyBear.approve(address(stakedBear), type(uint256).max);
+        plDxyBull.approve(address(stakedBull), type(uint256).max);
+        stakedBear.deposit(1e18, alice);
+        stakedBull.deposit(1e18, alice);
+        vm.stopPrank();
     }
 
     function test_DistributeRewardsWithPriceUpdate_CallsPythAdapter() public {
