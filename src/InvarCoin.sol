@@ -789,10 +789,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         uint256 expectedLp = CURVE_POOL.calc_token_amount(amounts, true);
         uint256 totalUsdcValue = usdcAmount + (bearAmount * oraclePrice) / 1e20;
         uint256 emaExpectedLp = (totalUsdcValue * 1e30) / CURVE_POOL.lp_price();
-        if (
-            expectedLp * BPS < emaExpectedLp * (BPS - MAX_SPOT_DEVIATION_BPS)
-                || expectedLp * BPS > emaExpectedLp * (BPS + MAX_SPOT_DEVIATION_BPS)
-        ) {
+        if (_outsideSpotDeviationBounds(expectedLp, emaExpectedLp)) {
             revert InvarCoin__SpotDeviationTooHigh();
         }
         uint256 lpMinted = CURVE_POOL.add_liquidity(amounts, expectedLp > 0 ? expectedLp - 1 : 0);
@@ -1057,10 +1054,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         uint256 expectedLp = CURVE_POOL.calc_token_amount(amounts, true);
         uint256 totalUsdcValue = usdcToDeploy + (bearBal * oraclePrice) / 1e20;
         uint256 emaExpectedLp = (totalUsdcValue * 1e30) / CURVE_POOL.lp_price();
-        if (
-            expectedLp * BPS < emaExpectedLp * (BPS - MAX_SPOT_DEVIATION_BPS)
-                || expectedLp * BPS > emaExpectedLp * (BPS + MAX_SPOT_DEVIATION_BPS)
-        ) {
+        if (_outsideSpotDeviationBounds(expectedLp, emaExpectedLp)) {
             revert InvarCoin__SpotDeviationTooHigh();
         }
         uint256 lpMinted = CURVE_POOL.add_liquidity(amounts, minLpOut);
