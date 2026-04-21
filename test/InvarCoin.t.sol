@@ -4090,7 +4090,7 @@ contract HarvestBypassTest is Test {
         uint256 shares = ic.balanceOf(alice);
 
         vm.prank(alice);
-        (uint256 usdcOut, uint256 bearOut) = ic.lpWithdraw(shares / 2, 0, 0);
+        (uint256 usdcOut, uint256 bearOut) = ic.lpWithdraw(shares / 2, 0, 0, alice);
         assertGt(usdcOut + bearOut, 0);
     }
 
