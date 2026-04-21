@@ -66,13 +66,19 @@ contract RewardDistributorTest is Test {
             address(0)
         );
 
-        plDxyBear.mint(address(stakedBear), 1000e18);
-        plDxyBull.mint(address(stakedBull), 1000e18);
+        // Seed real stakers so reward donations do not revert on zero share supply.
+        plDxyBear.mint(alice, 1000e18);
+        plDxyBull.mint(alice, 1000e18);
 
         vm.prank(alice);
         plDxyBear.approve(address(stakedBear), type(uint256).max);
         vm.prank(alice);
         plDxyBull.approve(address(stakedBull), type(uint256).max);
+
+        vm.prank(alice);
+        stakedBear.deposit(1e18, alice);
+        vm.prank(alice);
+        stakedBull.deposit(1e18, alice);
     }
 
     function test_DistributeRewards_50_50_Split() public {
