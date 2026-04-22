@@ -1552,3 +1552,20 @@ Review:
 - Added owner-assigned `pauser` storage, `setPauser(...)`, and `onlyPauserOrOwner` pause gating to `src/perps/OrderRouter.sol` and `src/perps/HousePool.sol`, while keeping `unpause()` owner-only.
 - Extended `src/perps/interfaces/IPerpsAdmin.sol` and the perps docs so the emergency-role split is explicit: owner assigns the pauser, both owner and pauser can trigger `pause()`, and only owner can resume.
 - Verified green with `forge test --match-path test/perps/TimelockPause.t.sol`.
+- [x] Add Arbitrum Sepolia perps deployment script with mock USDC
+- [x] Verify the new deployment script compiles
+
+Review:
+- Added `script/DeployPerpsArbitrumSepolia.s.sol`, a minimal perps-only deployment path for Arbitrum Sepolia. It deploys `MockUSDC`, `MarginClearinghouse`, `CfdEngine`, the engine sidecars, `HousePool`, both `TrancheVault`s, the account/public lenses, and `OrderRouter`, then performs the required one-time wiring (`setDependencies`, `setVault`, `setOrderRouter`, `setSeniorVault`, `setJuniorVault`, `setEngine`).
+- The router is configured for Arbitrum Sepolia Pyth at `0x4374e5a8b9C22271E9EB878A2AA31DE97DF15DAF` using a Pyth-only 6-feed basket: direct `EUR/USD` and `GBP/USD`, plus inverted `USD/JPY`, `USD/CAD`, `USD/SEK`, and `USD/CHF`, with the existing DXY weights/base-price normalization.
+- The script intentionally stops before seed initialization and `activateTrading()`, so deployment and operational go-live remain separate.
+- Verified compile succeeds with `forge build --skip test`.
+- [x] Design post-deploy Arbitrum Sepolia bootstrap flow and env inputs
+- [x] Implement bootstrap script for pausers, seed funding, user funding, and trading activation
+- [x] Compile and verify new bootstrap script
+
+Review:
+- Added `script/BootstrapPerpsArbitrumSepolia.s.sol`, a post-deploy operator script for Arbitrum Sepolia that assumes the perps contracts are already deployed and wired.
+- The script reads deployed addresses from env, optionally sets the same `PERPS_PAUSER` on both `HousePool` and `OrderRouterAdmin`, initializes missing senior/junior seed positions, mints mock USDC to listed test-user addresses, and activates trading once both seeds exist.
+- Bootstrap steps are partial-rerun safe: it skips pauser updates when already set, skips seed initialization when a seed already exists, and skips trading activation when already live.
+- Verified compile succeeds with `forge build --skip test`.
