@@ -55,11 +55,11 @@ contract AuditVerifiedFindingsFailing_F1_LegacySpreadSolvency is BasePerpTest {
         _fundTrader(bullTrader, 300_000e6);
         _fundTrader(bearTrader, 100_000e6);
 
-        bytes32 bullId = bytes32(uint256(uint160(bullTrader)));
-        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
+        address bullAccount = bullTrader;
+        address bearAccount = bearTrader;
 
-        _open(bullId, CfdTypes.Side.BULL, 200_000e18, 200_000e6, 1e8);
-        _open(bearId, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
+        _open(bullAccount, CfdTypes.Side.BULL, 200_000e18, 200_000e6, 1e8);
+        _open(bearAccount, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
 
         vm.warp(block.timestamp + 180 days);
         vm.prank(address(router));
@@ -68,11 +68,11 @@ contract AuditVerifiedFindingsFailing_F1_LegacySpreadSolvency is BasePerpTest {
         CfdTypes.Position memory bullPos;
         CfdTypes.Position memory bearPos;
         {
-            (uint256 size, uint256 margin, uint256 entryPrice,, CfdTypes.Side side,,) = engine.positions(bullId);
+            (uint256 size, uint256 margin, uint256 entryPrice,, CfdTypes.Side side,,) = engine.positions(bullAccount);
             bullPos = CfdTypes.Position(size, margin, entryPrice, 0, side, 0, 0, 0);
         }
         {
-            (uint256 size, uint256 margin, uint256 entryPrice,, CfdTypes.Side side,,) = engine.positions(bearId);
+            (uint256 size, uint256 margin, uint256 entryPrice,, CfdTypes.Side side,,) = engine.positions(bearAccount);
             bearPos = CfdTypes.Position(size, margin, entryPrice, 0, side, 0, 0, 0);
         }
 
@@ -109,13 +109,13 @@ contract AuditVerifiedFindingsFailing_F2_SkewCapBypass is BasePerpTest {
 
     function test_F2_EmptyMarketShouldStillEnforceMaxSkewRatio() public {
         address whale = address(0x5E77);
-        bytes32 whaleId = bytes32(uint256(uint160(whale)));
+        address whaleAccount = whale;
 
         _fundTrader(whale, 100_000e6);
 
         uint256 depth = pool.totalAssets();
         vm.expectRevert();
-        _open(whaleId, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8, depth);
+        _open(whaleAccount, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8, depth);
     }
 
 }
@@ -139,18 +139,18 @@ contract AuditVerifiedFindingsFailing_F2_SkewDoubleCount is BasePerpTest {
         address bearTrader = address(0xBEA2);
         address bullTrader = address(0xB011);
 
-        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
-        bytes32 bullId = bytes32(uint256(uint160(bullTrader)));
+        address bearAccount = bearTrader;
+        address bullAccount = bullTrader;
 
         _fundTrader(bearTrader, 60_000e6);
         _fundTrader(bullTrader, 120_000e6);
 
-        _open(bearId, CfdTypes.Side.BEAR, 100_000e18, 20_000e6, 1e8);
-        _open(bullId, CfdTypes.Side.BULL, 100_000e18, 20_000e6, 1e8);
+        _open(bearAccount, CfdTypes.Side.BEAR, 100_000e18, 20_000e6, 1e8);
+        _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 20_000e6, 1e8);
 
-        _open(bullId, CfdTypes.Side.BULL, 100_000e18, 20_000e6, 1e8);
+        _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 20_000e6, 1e8);
 
-        (uint256 bullSize,,,,,,) = engine.positions(bullId);
+        (uint256 bullSize,,,,,,) = engine.positions(bullAccount);
         assertEq(bullSize, 200_000e18, "Skew cap should evaluate the real post-trade open interest");
     }
 
@@ -309,11 +309,11 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
         address trader,
         uint256 amount
     ) internal {
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         usdc.mint(trader, amount);
         vm.startPrank(trader);
         usdc.approve(address(clearinghouse), amount);
-        clearinghouse.deposit(accountId, amount);
+        clearinghouse.deposit(account, amount);
         vm.stopPrank();
     }
 
@@ -324,14 +324,14 @@ contract AuditVerifiedFindingsFailing_F4_PartialCloseLosses is BasePerpTest {
     address trader = address(0xD00D);
 
     function test_F4_UnderwaterPartialCloseMustRevertInsteadOfSocializingLosses() public {
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
 
         _fundTrader(trader, 10_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
         uint256 depth = pool.totalAssets();
         vm.expectRevert();
-        _close(accountId, CfdTypes.Side.BULL, 99_000e18, 110_000_000, depth);
+        _close(account, CfdTypes.Side.BULL, 99_000e18, 110_000_000, depth);
     }
 
 }
@@ -360,23 +360,23 @@ contract AuditVerifiedFindingsFailing_F6_KeeperFeeReserveFreeEquity is BasePerpT
     address trader = address(0xA11CE);
 
     function test_F6_CommitReserveMustNotReduceUsdcBelowLockedMargin() public {
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
 
         _fundTrader(trader, 10_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
 
-        uint256 lockedBefore = clearinghouse.lockedMarginUsdc(accountId);
-        uint256 freeBefore = clearinghouse.getFreeBuyingPowerUsdc(accountId);
+        uint256 lockedBefore = clearinghouse.lockedMarginUsdc(account);
+        uint256 freeBefore = clearinghouse.getFreeBuyingPowerUsdc(account);
         uint256 closeBounty = 1e6;
 
         vm.prank(trader);
-        clearinghouse.withdraw(accountId, freeBefore - closeBounty);
+        clearinghouse.withdraw(account, freeBefore - closeBounty);
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
 
         assertGe(
-            clearinghouse.balanceUsdc(accountId),
+            clearinghouse.balanceUsdc(account),
             lockedBefore,
             "Close commits must not strip locked margin to fund keeper reserves"
         );
@@ -407,21 +407,21 @@ contract AuditVerifiedFindingsFailing_F8_LiquidationDegradedMode is BasePerpTest
     }
 
     function test_F8_LiquidationThatCreatesInsolvencyMustLatchDegradedMode() public {
-        bytes32 winnerId = bytes32(uint256(uint160(winner)));
-        bytes32 loserId = bytes32(uint256(uint160(loser)));
+        address winnerAccount = winner;
+        address loserAccount = loser;
 
         _fundTrader(winner, 100_000e6);
         _fundTrader(loser, 2000e6);
 
-        _open(winnerId, CfdTypes.Side.BULL, 100_000e18, 100_000e6, 1.5e8);
-        _open(loserId, CfdTypes.Side.BEAR, 100_000e18, 2000e6, 0.5e8);
+        _open(winnerAccount, CfdTypes.Side.BULL, 100_000e18, 100_000e6, 1.5e8);
+        _open(loserAccount, CfdTypes.Side.BEAR, 100_000e18, 2000e6, 0.5e8);
 
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), 20_000e6);
 
         uint256 depth = pool.totalAssets();
         vm.prank(address(router));
-        engine.liquidatePosition(loserId, 0.1e8, depth, uint64(block.timestamp));
+        engine.liquidatePosition(loserAccount, 0.1e8, depth, uint64(block.timestamp));
 
         assertTrue(
             engine.degradedMode(),

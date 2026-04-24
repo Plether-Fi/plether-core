@@ -13,18 +13,18 @@ contract AuditRemainingCoverageFindingsFailing_EscrowShielding is BasePerpTest {
     address trader = address(0xC10A);
 
     function test_C1_FullCloseMustConsumeQueuedCommittedMarginBeforeBadDebt() public {
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         _fundTrader(trader, 10_000e6);
 
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 7900e6, type(uint256).max, false);
 
-        _close(accountId, CfdTypes.Side.BULL, 100_000e18, 103_000_000);
+        _close(account, CfdTypes.Side.BULL, 100_000e18, 103_000_000);
 
         assertLt(
-            clearinghouse.lockedMarginUsdc(accountId),
+            clearinghouse.lockedMarginUsdc(account),
             7900e6,
             "Full close should consume queued committed margin before socializing shortfall"
         );
@@ -35,31 +35,31 @@ contract AuditRemainingCoverageFindingsFailing_EscrowShielding is BasePerpTest {
             "Full close should not realize bad debt while queued committed margin remains"
         );
         assertEq(
-            router.pendingOrderCounts(accountId),
+            router.pendingOrderCounts(account),
             1,
             "Queued successor order itself should remain pending after the live position closes"
         );
     }
 
     function test_H1_LiquidationMustConsumeQueuedCommittedMarginBeforeBadDebt() public {
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         _fundTrader(trader, 10_000e6);
 
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 7900e6, type(uint256).max, false);
 
         uint256 depth = pool.totalAssets();
         vm.startPrank(address(router));
-        engine.liquidatePosition(accountId, 110_000_000, depth, uint64(block.timestamp));
+        engine.liquidatePosition(account, 110_000_000, depth, uint64(block.timestamp));
         vm.stopPrank();
 
-        (uint256 size,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Liquidation should still clear the live insolvent position");
         assertEq(_executionBountyReserve(1), 200_000, "Queued execution bounty should remain in router custody");
         assertLt(
-            clearinghouse.lockedMarginUsdc(accountId),
+            clearinghouse.lockedMarginUsdc(account),
             7900e6,
             "Liquidation should consume queued committed margin before bad debt"
         );
@@ -89,17 +89,17 @@ contract AuditRemainingCoverageFindingsFailing_LiquidationBounty is BasePerpTest
 
     function test_H2_PositiveEquityLiquidationBountyUsesExplicitSubsidy() public {
         address trader = address(0xA201);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
 
         _fundTrader(trader, 100e6);
-        _open(accountId, CfdTypes.Side.BULL, 100e18, 6e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100e18, 6e6, 1e8);
 
         vm.prank(trader);
-        clearinghouse.withdraw(accountId, 94e6);
+        clearinghouse.withdraw(account, 94e6);
 
         vm.startPrank(address(router));
         vm.warp(1_709_971_200);
-        uint256 bounty = engine.liquidatePosition(accountId, 101_000_000, pool.totalAssets(), uint64(block.timestamp));
+        uint256 bounty = engine.liquidatePosition(account, 101_000_000, pool.totalAssets(), uint64(block.timestamp));
         vm.stopPrank();
 
         assertGt(bounty, 0, "Keeper bounty should stay positive for a still-positive-equity liquidation");
@@ -115,13 +115,13 @@ contract AuditRemainingCoverageFindingsFailing_ForfeitedOrderBountyFees is BaseP
     address keeper = address(0xA204);
 
     function test_L1_LiquidationForfeitedOrderBountyMustAccrueProtocolFees() public {
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
-        bytes32 counterId = bytes32(uint256(uint160(counterparty)));
+        address account = trader;
+        address counterAccount = counterparty;
 
         _fundTrader(trader, 10_000e6);
         _fundTrader(counterparty, 100_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
-        _open(counterId, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
+        _open(counterAccount, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 100e6, type(uint256).max, false);
@@ -134,7 +134,7 @@ contract AuditRemainingCoverageFindingsFailing_ForfeitedOrderBountyFees is BaseP
 
         vm.roll(block.number + 1);
         vm.prank(keeper);
-        router.executeLiquidation(accountId, priceData);
+        router.executeLiquidation(account, priceData);
 
         assertEq(
             engine.accumulatedFeesUsdc() - feesBefore,
@@ -155,8 +155,8 @@ contract AuditRemainingCoverageFindingsFailing_DustQueueEconomics is BasePerpTes
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 1, 0, 0, false);
 
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
-        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
+        address account = trader;
+        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(account);
         assertEq(
             escrow.executionBountyUsdc, 10_000, "Dust orders should escrow the configured minimum execution bounty"
         );
@@ -190,10 +190,10 @@ contract AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees is BasePerp
     address keeper = address(0xBEEF);
 
     function test_H4_ProfitableCloseMustNotBeDroppedWhenVaultLacksImmediateCash() public {
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         _fundTrader(trader, 11_000e6);
 
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
@@ -209,15 +209,15 @@ contract AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees is BasePerp
         vm.prank(keeper);
         router.executeOrder(1, priceData);
 
-        (uint256 size,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "A profitable close should complete even when profit payout must be deferred");
     }
 
     function test_M2_CloseCommitRequiresPrefundedKeeperBounty() public {
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         _fundTrader(trader, 2001e6);
 
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
@@ -229,11 +229,11 @@ contract AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees is BasePerp
     }
 
     function test_H5_CloseKeeperRewardMustDeferInsteadOfRevertingOnCashShortage() public {
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
-        bytes32 keeperAccountId = bytes32(uint256(uint160(keeper)));
+        address account = trader;
+        address keeperAccount = keeper;
         _fundTrader(trader, 11_000e6);
 
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
@@ -245,12 +245,12 @@ contract AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees is BasePerp
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(80_000_000));
 
-        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccountId);
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
         vm.roll(block.number + 1);
         vm.prank(keeper);
         router.executeOrder(1, priceData);
 
-        (uint256 size,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Close should still succeed even when execution bounty cash is unavailable");
         assertEq(
             engine.deferredKeeperCreditUsdc(keeper),
@@ -258,7 +258,7 @@ contract AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees is BasePerp
             "Illiquid close execution should not touch deferred vault-funded clearer claims"
         );
         assertEq(
-            clearinghouse.balanceUsdc(keeperAccountId) - keeperSettlementBefore,
+            clearinghouse.balanceUsdc(keeperAccount) - keeperSettlementBefore,
             200_000,
             "Illiquid close execution should still pay the keeper from router escrow via clearinghouse settlement"
         );
@@ -273,10 +273,10 @@ contract AuditRemainingCoverageFindingsFailing_TerminalLiveness is BasePerpTest 
     address keeper = address(0x7102);
 
     function test_H6_LiquidationKeeperRewardMustDeferInsteadOfRevertingOnCashShortage() public {
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         _fundTrader(trader, 11_000e6);
 
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(125_000_000));
@@ -285,19 +285,19 @@ contract AuditRemainingCoverageFindingsFailing_TerminalLiveness is BasePerpTest 
 
         vm.roll(block.number + 1);
         vm.prank(keeper);
-        router.executeLiquidation(accountId, priceData);
+        router.executeLiquidation(account, priceData);
 
-        (uint256 size,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Liquidation should still succeed even when bounty cash is unavailable");
         assertGt(engine.deferredKeeperCreditUsdc(keeper), 0, "Liquidation bounty should defer instead of reverting");
     }
 
     function test_M3_TerminalCloseMustRemainExecutableUnderBoundedForeignQueue() public {
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         _fundTrader(trader, 20_000e6);
         _fundTrader(spammer, 250_000e6);
 
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
@@ -313,7 +313,7 @@ contract AuditRemainingCoverageFindingsFailing_TerminalLiveness is BasePerpTest 
         uint64 closeOrderId = router.nextExecuteId();
         router.executeOrder(closeOrderId, empty);
 
-        (uint256 size,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Terminal close should succeed even with the bounded foreign queued orders");
         assertEq(router.nextExecuteId(), closeOrderId + 1, "Queue head should advance after terminal close");
     }

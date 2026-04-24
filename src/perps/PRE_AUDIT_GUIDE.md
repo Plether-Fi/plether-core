@@ -124,14 +124,14 @@ Any new helper/module contract that can reach these sets should be treated as se
 
 | Quantity | Economic owner | Storage/source of truth | Mutators | Counts as reachable collateral? | Counts toward solvency? | Counts toward LP withdrawal reserve? | Counts toward tranche reconcile? |
 |----------|----------------|-------------------------|----------|---------------------------------|-------------------------|-------------------------------------|----------------------------------|
-| Free settlement | Trader | `MarginClearinghouse.balanceUsdc(accountId)` | clearinghouse deposit/withdraw, engine settle/seize | yes, action-dependent | yes, via action-specific view | no | no |
+| Free settlement | Trader | `MarginClearinghouse.balanceUsdc(account)` | clearinghouse deposit/withdraw, engine settle/seize | yes, action-dependent | yes, via action-specific view | no | no |
 | Active position margin | Trader until terminal settlement outcome | clearinghouse locked bucket + engine position mirror | engine open/close/liquidation, bounded router close-bounty sourcing | yes for terminal paths, no for ordinary withdraw | yes, via risk/equity view | no | no |
 | Other locked margin | Trader, but reserved to queued intents until an explicit terminal path unlocks it | clearinghouse reservations | router commit/release/consume | no for ordinary close reachability; only available where terminal settlement explicitly unlocks/consumes it | indirectly and only through explicit terminal settlement plans | no | no |
 | Committed order margin | Trader but reserved to one order | clearinghouse reservation keyed by `orderId` | router commit/execute/fail | no | no | no | no |
 | Router execution bounty escrow | Trader-funded keeper escrow | `OrderRouter` balance + order record | router commit/distribute/refund/forfeit | no | no | no | no |
 | Deferred trader credit | Trader senior claim on vault liquidity | `CfdEngine.deferredTraderCreditUsdc` | engine create/service | no | yes, as senior liability | yes | yes |
 | Deferred keeper credit | Keeper senior claim on vault liquidity | `CfdEngine.deferredKeeperCreditUsdc` | engine create/service | no | yes, as senior liability | yes | yes |
-| Unsettled carry | Protocol-recorded carry debt on an account | `CfdEngine.unsettledCarryUsdc[accountId]` | engine carry-checkpoint paths | no | yes, as carry drag on account equity | no | no |
+| Unsettled carry | Protocol-recorded carry debt on an account | `CfdEngine.unsettledCarryUsdc[account]` | engine carry-checkpoint paths | no | yes, as carry drag on account equity | no | no |
 | Accumulated protocol fees | Protocol/treasury | `CfdEngine.accumulatedFeesUsdc` + canonical pool cash | engine accrual, owner withdraw | no | reduces net physical assets | yes | yes |
 | Accumulated bad debt | Protocol loss / LP impairment | `CfdEngine.accumulatedBadDebtUsdc` | engine realization, bad debt clear path | n/a | yes, as realized deficit | yes | yes |
 | Canonical pool assets | LP/protocol backing | `HousePool.totalAssets()` and accounting ledger | pool deposit/withdraw/accounting hooks | base physical solvency cash | yes | yes | yes |

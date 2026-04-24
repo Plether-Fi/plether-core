@@ -7,7 +7,7 @@ import {CfdTypes} from "../CfdTypes.sol";
 interface ICfdEnginePlanner {
 
     function computeOpenMarginAfter(
-        uint256 marginAfterFunding,
+        uint256 marginAfterCarry,
         int256 netMarginChange
     ) external pure returns (bool drained, uint256 marginAfter);
 

@@ -67,7 +67,7 @@ contract PerpHandler is Test {
         uint256 priceFuzz
     ) external {
         address trader = traders[ghost_tradeCount % 3];
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
 
         priceFuzz = bound(priceFuzz, 0.5e8, 1.5e8);
         sizeFuzz = bound(sizeFuzz, 1000e18, 100_000e18);
@@ -78,7 +78,7 @@ contract PerpHandler is Test {
         usdc.mint(trader, marginFuzz);
         vm.startPrank(trader);
         usdc.approve(address(clearinghouse), marginFuzz);
-        clearinghouse.deposit(accountId, marginFuzz);
+        clearinghouse.deposit(account, marginFuzz);
         vm.stopPrank();
         ghost_totalDeposited += marginFuzz;
 
@@ -97,9 +97,9 @@ contract PerpHandler is Test {
         uint256 priceFuzz
     ) external {
         address trader = traders[traderIdx % 3];
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
 
-        (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(accountId);
+        (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(account);
         if (size == 0) {
             return;
         }
@@ -119,9 +119,9 @@ contract PerpHandler is Test {
         uint256 priceFuzz
     ) external {
         address trader = traders[traderIdx % 3];
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
 
-        (uint256 size,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(account);
         if (size == 0) {
             return;
         }
@@ -131,7 +131,7 @@ contract PerpHandler is Test {
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(priceFuzz);
 
-        try router.executeLiquidation(accountId, priceData) {
+        try router.executeLiquidation(account, priceData) {
             ghost_liquidationCount++;
         } catch {}
     }
@@ -319,7 +319,7 @@ contract PerpInvariantTest is BasePerpTest {
 
         for (uint64 orderId = 1; orderId < nextCommitId; orderId++) {
             OrderRouter.OrderRecord memory record = _orderRecord(orderId);
-            if (record.core.accountId == bytes32(0) || record.core.sizeDelta == 0) {
+            if (record.core.account == address(0) || record.core.sizeDelta == 0) {
                 continue;
             }
             pendingKeeperReserves += record.executionBountyUsdc;
@@ -333,10 +333,10 @@ contract PerpInvariantTest is BasePerpTest {
     }
 
     function invariant_ClearinghouseBalanceMatchesTrackedAccounts() public view {
-        uint256 trackedBalances = clearinghouse.balanceUsdc(bytes32(uint256(uint160(address(handler)))));
+        uint256 trackedBalances = clearinghouse.balanceUsdc(address(handler));
         for (uint256 i = 0; i < 3; i++) {
-            bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
-            trackedBalances += clearinghouse.balanceUsdc(accountId);
+            address account = handler.traders(i);
+            trackedBalances += clearinghouse.balanceUsdc(account);
         }
 
         assertEq(
@@ -370,8 +370,8 @@ contract PerpInvariantTest is BasePerpTest {
 
         for (uint256 i = 0; i < 3; i++) {
             address trader = handler.traders(i);
-            bytes32 accountId = bytes32(uint256(uint160(trader)));
-            (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(accountId);
+            address account = trader;
+            (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(account);
             if (size > 0) {
                 if (side == CfdTypes.Side.BULL) {
                     sumBullSize += size;
@@ -389,10 +389,10 @@ contract PerpInvariantTest is BasePerpTest {
         uint256 capPrice = engine.CAP_PRICE();
 
         for (uint256 i = 0; i < 3; i++) {
-            bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
+            address account = handler.traders(i);
             AccountLensViewTypes.AccountLedgerSnapshot memory positionView =
-                engineAccountLens.getAccountLedgerSnapshot(accountId);
-            (uint256 size, uint256 margin, uint256 entryPrice,, CfdTypes.Side side,,) = engine.positions(accountId);
+                engineAccountLens.getAccountLedgerSnapshot(account);
+            (uint256 size, uint256 margin, uint256 entryPrice,, CfdTypes.Side side,,) = engine.positions(account);
 
             assertEq(positionView.hasPosition, size > 0, "Position view existence must match stored size");
             if (size == 0) {
@@ -429,8 +429,8 @@ contract PerpInvariantTest is BasePerpTest {
 
         for (uint256 i = 0; i < 3; i++) {
             address trader = handler.traders(i);
-            bytes32 accountId = bytes32(uint256(uint160(trader)));
-            (uint256 size,, uint256 entryPrice,, CfdTypes.Side side,,) = engine.positions(accountId);
+            address account = trader;
+            (uint256 size,, uint256 entryPrice,, CfdTypes.Side side,,) = engine.positions(account);
             if (size > 0) {
                 if (side == CfdTypes.Side.BULL) {
                     sumBullNotional += size * entryPrice;
@@ -447,10 +447,10 @@ contract PerpInvariantTest is BasePerpTest {
     function invariant_PositionMarginsBackedByClearinghouse() public view {
         for (uint256 i = 0; i < 3; i++) {
             address trader = handler.traders(i);
-            bytes32 accountId = bytes32(uint256(uint160(trader)));
-            (uint256 size, uint256 margin,,,,,) = engine.positions(accountId);
-            IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
-            uint256 locked = clearinghouse.lockedMarginUsdc(accountId);
+            address account = trader;
+            (uint256 size, uint256 margin,,,,,) = engine.positions(account);
+            IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(account);
+            uint256 locked = clearinghouse.lockedMarginUsdc(account);
 
             if (size > 0) {
                 assertGe(locked, margin, "Clearinghouse must back position margin");
@@ -469,8 +469,8 @@ contract PerpInvariantTest is BasePerpTest {
         uint256 sumBearMargin;
 
         for (uint256 i = 0; i < 3; i++) {
-            bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
-            (uint256 size, uint256 margin,,, CfdTypes.Side side,,) = engine.positions(accountId);
+            address account = handler.traders(i);
+            (uint256 size, uint256 margin,,, CfdTypes.Side side,,) = engine.positions(account);
             if (size == 0) {
                 continue;
             }
@@ -501,8 +501,8 @@ contract PerpInvariantTest is BasePerpTest {
         }
 
         for (uint256 i = 0; i < 3; i++) {
-            bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
-            PerpsViewTypes.PositionView memory positionView = _publicPosition(accountId);
+            address account = handler.traders(i);
+            PerpsViewTypes.PositionView memory positionView = _publicPosition(account);
             if (!positionView.exists) {
                 continue;
             }
@@ -527,8 +527,8 @@ contract PerpInvariantTest is BasePerpTest {
 
     function invariant_ClearinghouseBucketsConserveTrackedState() public view {
         for (uint256 i = 0; i < 3; i++) {
-            bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
-            IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(accountId);
+            address account = handler.traders(i);
+            IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(account);
 
             assertEq(
                 buckets.settlementBalanceUsdc,
@@ -541,7 +541,7 @@ contract PerpInvariantTest is BasePerpTest {
                 "Locked buckets must split into active and other locked margin"
             );
             assertEq(
-                clearinghouse.lockedMarginUsdc(accountId),
+                clearinghouse.lockedMarginUsdc(account),
                 buckets.totalLockedMarginUsdc,
                 "Bucket view must match locked margin storage"
             );
@@ -550,11 +550,11 @@ contract PerpInvariantTest is BasePerpTest {
 
     function invariant_TraderOwnedCollateralRemainsTerminallyReachable() public view {
         for (uint256 i = 0; i < 3; i++) {
-            bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
-            IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(accountId);
+            address account = handler.traders(i);
+            IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(account);
 
             assertEq(
-                _terminalReachableUsdc(accountId),
+                _terminalReachableUsdc(account),
                 buckets.settlementBalanceUsdc,
                 "All trader-owned settlement collateral should remain terminally reachable"
             );
@@ -565,18 +565,18 @@ contract PerpInvariantTest is BasePerpTest {
         uint64 nextCommitId = router.nextCommitId();
 
         for (uint256 i = 0; i < 3; i++) {
-            bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
+            address account = handler.traders(i);
             uint256 rawQueuedCommitted;
 
             for (uint64 orderId = 1; orderId < nextCommitId; orderId++) {
                 OrderRouter.OrderRecord memory record = _orderRecord(orderId);
-                if (record.core.accountId != accountId || record.core.sizeDelta == 0) {
+                if (record.core.account != account || record.core.sizeDelta == 0) {
                     continue;
                 }
                 rawQueuedCommitted += _remainingCommittedMargin(orderId);
             }
 
-            IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
+            IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(account);
             assertEq(
                 escrow.committedMarginUsdc,
                 rawQueuedCommitted,
@@ -646,13 +646,13 @@ contract PerpInvariantTest is BasePerpTest {
 
         uint256 vaultDepth = pool.totalAssets();
         for (uint256 i = 0; i < 3; i++) {
-            bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
-            PerpsViewTypes.PositionView memory positionView = _publicPosition(accountId);
+            address account = handler.traders(i);
+            PerpsViewTypes.PositionView memory positionView = _publicPosition(account);
             if (!positionView.exists) {
                 continue;
             }
 
-            CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, oraclePrice);
+            CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, oraclePrice);
             assertEq(
                 preview.liquidatable, positionView.liquidatable, "Liquidation preview must match live position view"
             );
@@ -712,21 +712,21 @@ contract AdversarialPerpHandler is Test {
         sink = address(0xDEAD);
     }
 
-    function _accountId(
+    function _account(
         address actor
-    ) internal pure returns (bytes32) {
-        return bytes32(uint256(uint160(actor)));
+    ) internal pure returns (address) {
+        return actor;
     }
 
     function _seedTrader(
         address actor,
         uint256 amount
     ) internal {
-        bytes32 accountId = _accountId(actor);
+        address account = _account(actor);
         usdc.mint(actor, amount);
         vm.startPrank(actor);
         usdc.approve(address(clearinghouse), type(uint256).max);
-        clearinghouse.deposit(accountId, amount);
+        clearinghouse.deposit(account, amount);
         vm.stopPrank();
     }
 
@@ -756,11 +756,11 @@ contract AdversarialPerpHandler is Test {
         uint256 marginFuzz
     ) external {
         address actor = actors[actorIdx % actors.length];
-        bytes32 accountId = _accountId(actor);
+        address account = _account(actor);
         uint256 size = bound(sizeFuzz, 1000e18, 25_000e18);
         uint256 margin = bound(marginFuzz, 200e6, 5000e6);
 
-        if (clearinghouse.getAccountUsdcBuckets(accountId).freeSettlementUsdc < margin + 1e6) {
+        if (clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc < margin + 1e6) {
             _seedTrader(actor, margin + 5e6);
         }
 
@@ -780,10 +780,10 @@ contract AdversarialPerpHandler is Test {
         uint256 countFuzz
     ) external {
         address actor = actors[actorIdx % actors.length];
-        bytes32 accountId = _accountId(actor);
+        address account = _account(actor);
         uint256 count = bound(countFuzz, 1, 6);
 
-        if (clearinghouse.getAccountUsdcBuckets(accountId).freeSettlementUsdc < count * 101e6) {
+        if (clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc < count * 101e6) {
             _seedTrader(actor, count * 150e6);
         }
 
@@ -797,8 +797,8 @@ contract AdversarialPerpHandler is Test {
         uint256 actorIdx
     ) external {
         address actor = actors[actorIdx % actors.length];
-        bytes32 accountId = _accountId(actor);
-        (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(accountId);
+        address account = _account(actor);
+        (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(account);
         if (size == 0) {
             return;
         }
@@ -833,14 +833,14 @@ contract AdversarialPerpHandler is Test {
         uint256 oraclePriceFuzz
     ) external {
         address actor = actors[ghost_batchAttempts % actors.length];
-        bytes32 accountId = _accountId(actor);
+        address account = _account(actor);
 
-        if (clearinghouse.getAccountUsdcBuckets(accountId).freeSettlementUsdc < 205e6) {
+        if (clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc < 205e6) {
             _seedTrader(actor, 500e6);
         }
 
         CfdTypes.Side side = CfdTypes.Side.BULL;
-        (uint256 size,,,, CfdTypes.Side existingSide,,) = engine.positions(accountId);
+        (uint256 size,,,, CfdTypes.Side existingSide,,) = engine.positions(account);
         if (size > 0) {
             side = existingSide;
         }
@@ -927,15 +927,15 @@ contract AdversarialPerpHandler is Test {
         uint256 priceFuzz
     ) external {
         address actor = actors[actorIdx % actors.length];
-        bytes32 accountId = _accountId(actor);
-        (uint256 size,,,,,,) = engine.positions(accountId);
+        address account = _account(actor);
+        (uint256 size,,,,,,) = engine.positions(account);
         if (size == 0) {
             return;
         }
 
         uint256 oraclePrice = bound(priceFuzz, 80_000_000, 125_000_000);
         uint256 vaultDepth = pool.totalAssets();
-        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, oraclePrice);
+        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, oraclePrice);
         if (!preview.liquidatable || preview.keeperBountyUsdc == 0) {
             return;
         }
@@ -947,7 +947,7 @@ contract AdversarialPerpHandler is Test {
         vm.mockCallRevert(address(pool), abi.encodeWithSelector(pool.payOut.selector), bytes("vault illiquid"));
         vm.roll(block.number + 1);
 
-        try router.executeLiquidation(accountId, priceData) {
+        try router.executeLiquidation(account, priceData) {
             uint256 afterDeferred = engine.deferredKeeperCreditUsdc(address(this));
             if (afterDeferred == beforeDeferred + preview.keeperBountyUsdc) {
                 ghost_expectedDeferredKeeperCredit += preview.keeperBountyUsdc;
@@ -998,7 +998,7 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         uint256 pendingKeeperReserves;
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
             OrderRouter.OrderRecord memory record = _orderRecord(orderId);
-            if (record.core.accountId == bytes32(0) || record.core.sizeDelta == 0) {
+            if (record.core.account == address(0) || record.core.sizeDelta == 0) {
                 continue;
             }
             pendingKeeperReserves += record.executionBountyUsdc;
@@ -1092,7 +1092,7 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         uint256 pendingKeeperReserves;
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
             OrderRouter.OrderRecord memory record = _orderRecord(orderId);
-            if (record.core.accountId == bytes32(0) || record.core.sizeDelta == 0) {
+            if (record.core.account == address(0) || record.core.sizeDelta == 0) {
                 continue;
             }
             pendingKeeperReserves += record.executionBountyUsdc;
@@ -1107,8 +1107,8 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
 
     function invariant_AdversarialQueuedKeeperReserveNeverReturnsToTraderCollateral() public view {
         for (uint256 i = 0; i < 4; i++) {
-            bytes32 accountId = bytes32(uint256(uint160(handler.actors(i))));
-            IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(accountId);
+            address account = handler.actors(i);
+            IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(account);
             assertEq(buckets.freeSettlementUsdc + buckets.totalLockedMarginUsdc, buckets.settlementBalanceUsdc);
         }
     }

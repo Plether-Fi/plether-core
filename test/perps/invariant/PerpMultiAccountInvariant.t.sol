@@ -39,8 +39,8 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
     function invariant_SumOfPerAccountPendingCountsMatchesLiveOrders() public view {
         uint256 sumPending;
         for (uint256 i = 0; i < handler.actorCount(); i++) {
-            bytes32 accountId = _accountId(handler.actorAt(i));
-            sumPending += router.pendingOrderCounts(accountId);
+            address account = _account(handler.actorAt(i));
+            sumPending += router.pendingOrderCounts(account);
         }
 
         assertEq(sumPending, _livePendingOrderCount(), "Per-account pending counts must sum to live pending orders");
@@ -49,8 +49,8 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
     function invariant_SumOfPerAccountPendingMarginCountsMatchesLiveMarginOrders() public view {
         uint256 sumMarginOrders;
         for (uint256 i = 0; i < handler.actorCount(); i++) {
-            bytes32 accountId = _accountId(handler.actorAt(i));
-            sumMarginOrders += handler.ghostPendingMarginOrderCount(accountId);
+            address account = _account(handler.actorAt(i));
+            sumMarginOrders += handler.ghostPendingMarginOrderCount(account);
         }
 
         assertEq(
@@ -66,19 +66,19 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
             if (uint256(record.status) != uint256(IOrderRouterAccounting.OrderStatus.Pending)) {
                 continue;
             }
-            liveCounts[_actorIndex(record.core.accountId)]++;
+            liveCounts[_actorIndex(record.core.account)]++;
         }
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
-            bytes32 accountId = _accountId(handler.actorAt(i));
+            address account = _account(handler.actorAt(i));
             assertEq(
                 liveCounts[i],
-                router.pendingOrderCounts(accountId),
+                router.pendingOrderCounts(account),
                 "Live order ownership must match account pending count"
             );
             assertEq(
                 liveCounts[i],
-                engineAccountLens.getAccountLedgerView(accountId).pendingOrderCount,
+                engineAccountLens.getAccountLedgerView(account).pendingOrderCount,
                 "Account ledger pending count must match live ownership"
             );
         }
@@ -87,8 +87,8 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
     function invariant_DeferredClaimsRemainAccountIsolated() public view {
         uint256 aggregateDeferredTraderCredits;
         for (uint256 i = 0; i < handler.actorCount(); i++) {
-            bytes32 accountId = _accountId(handler.actorAt(i));
-            AccountLensViewTypes.AccountLedgerView memory ledger = engineAccountLens.getAccountLedgerView(accountId);
+            address account = _account(handler.actorAt(i));
+            AccountLensViewTypes.AccountLedgerView memory ledger = engineAccountLens.getAccountLedgerView(account);
             aggregateDeferredTraderCredits += ledger.deferredTraderCreditUsdc;
         }
 
@@ -104,8 +104,8 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
         uint256 bearTotalMargin;
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
-            bytes32 accountId = _accountId(handler.actorAt(i));
-            (uint256 size, uint256 margin,,, CfdTypes.Side side,,) = engine.positions(accountId);
+            address account = _account(handler.actorAt(i));
+            (uint256 size, uint256 margin,,, CfdTypes.Side side,,) = engine.positions(account);
             if (size == 0) {
                 continue;
             }
@@ -130,11 +130,11 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
 
     function invariant_AccountSnapshotsKeepEngineMarginDistinctFromCustodyBuckets() public view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
-            bytes32 accountId = _accountId(handler.actorAt(i));
+            address account = _account(handler.actorAt(i));
             AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
-                engineAccountLens.getAccountLedgerSnapshot(accountId);
-            (, uint256 margin,,,,,) = engine.positions(accountId);
-            IMarginClearinghouse.LockedMarginBuckets memory buckets = clearinghouse.getLockedMarginBuckets(accountId);
+                engineAccountLens.getAccountLedgerSnapshot(account);
+            (, uint256 margin,,,,,) = engine.positions(account);
+            IMarginClearinghouse.LockedMarginBuckets memory buckets = clearinghouse.getLockedMarginBuckets(account);
 
             assertEq(snapshot.margin, margin, "Account snapshot margin must match engine economic position margin");
             assertEq(
@@ -168,17 +168,17 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function _accountId(
+    function _account(
         address actor
-    ) internal pure returns (bytes32) {
-        return bytes32(uint256(uint160(actor)));
+    ) internal pure returns (address) {
+        return actor;
     }
 
     function _actorIndex(
-        bytes32 accountId
+        address account
     ) internal view returns (uint256) {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
-            if (_accountId(handler.actorAt(i)) == accountId) {
+            if (_account(handler.actorAt(i)) == account) {
                 return i;
             }
         }

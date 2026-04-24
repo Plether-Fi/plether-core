@@ -43,38 +43,38 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
 
     /// @notice Returns the compact trader account summary for a canonical perps account.
     function getTraderAccount(
-        bytes32 accountId
+        address account
     ) external view returns (PerpsViewTypes.TraderAccountView memory viewData) {
-        AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = ACCOUNT_LENS.getAccountLedgerSnapshot(accountId);
+        AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = ACCOUNT_LENS.getAccountLedgerSnapshot(account);
         viewData.equityUsdc = snapshot.hasPosition
             ? (snapshot.netEquityUsdc > 0 ? uint256(snapshot.netEquityUsdc) : 0)
             : snapshot.accountEquityUsdc;
-        viewData.withdrawableUsdc = ACCOUNT_LENS.getWithdrawableUsdc(accountId);
+        viewData.withdrawableUsdc = ACCOUNT_LENS.getWithdrawableUsdc(account);
 
-        IOrderRouterAccounting.AccountEscrowView memory escrow = ORDER_ROUTER.getAccountEscrow(accountId);
+        IOrderRouterAccounting.AccountEscrowView memory escrow = ORDER_ROUTER.getAccountEscrow(account);
         viewData.pendingOrderMarginUsdc = escrow.committedMarginUsdc;
         viewData.pendingExecutionBountyUsdc = escrow.executionBountyUsdc;
 
-        PerpsViewTypes.PositionView memory position = _getPositionView(accountId);
+        PerpsViewTypes.PositionView memory position = _getPositionView(account);
         viewData.hasOpenPosition = position.exists;
         viewData.liquidatable = position.liquidatable;
     }
 
     /// @notice Returns the compact current-position view for an account.
     function getPosition(
-        bytes32 accountId
+        address account
     ) external view returns (PerpsViewTypes.PositionView memory viewData) {
-        return _getPositionView(accountId);
+        return _getPositionView(account);
     }
 
     /// @notice Returns all currently pending orders for an account.
     /// @dev The public surface only returns pending orders because executed and failed orders are not
     ///      part of the compact product-facing queue summary.
     function getPendingOrders(
-        bytes32 accountId
+        address account
     ) external view returns (PerpsViewTypes.PendingOrderView[] memory pending) {
-        uint64 orderId = ORDER_ROUTER.accountHeadOrderId(accountId);
-        uint256 pendingCount = ORDER_ROUTER.pendingOrderCounts(accountId);
+        uint64 orderId = ORDER_ROUTER.accountHeadOrderId(account);
+        uint256 pendingCount = ORDER_ROUTER.pendingOrderCounts(account);
         pending = new PerpsViewTypes.PendingOrderView[](pendingCount);
 
         for (uint256 i; i < pendingCount; ++i) {
@@ -95,9 +95,9 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
 
     /// @notice Returns whether the account's current live position is liquidatable.
     function isLiquidatable(
-        bytes32 accountId
+        address account
     ) external view returns (bool) {
-        return _getPositionView(accountId).liquidatable;
+        return _getPositionView(account).liquidatable;
     }
 
     /// @notice Returns the compact senior tranche view.
@@ -127,9 +127,9 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
     }
 
     function _getPositionView(
-        bytes32 accountId
+        address account
     ) internal view returns (PerpsViewTypes.PositionView memory viewData) {
-        AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = ACCOUNT_LENS.getAccountLedgerSnapshot(accountId);
+        AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = ACCOUNT_LENS.getAccountLedgerSnapshot(account);
         viewData.exists = snapshot.hasPosition;
         if (!viewData.exists) {
             return viewData;

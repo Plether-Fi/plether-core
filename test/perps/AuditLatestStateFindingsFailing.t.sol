@@ -15,9 +15,9 @@ contract AuditLatestStateFindingsFailing_KeeperReserveStripsMargin is BasePerpTe
     address trader = address(0xA11CE);
 
     function test_C1_KeeperReserveMustNotComeFromLockedPositionMargin() public {
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         _fundTrader(trader, 160e6);
-        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 160e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 10_000e18, 160e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(150_000_000, uint64(block.timestamp));
@@ -34,7 +34,7 @@ contract AuditLatestStateFindingsFailing_QueueEconomics is BasePerpTest {
     address attacker = address(0xBAD);
 
     function test_H1_TinyInvalidCloseBehindQueuedIntentIsRejectedAtCommit() public {
-        bytes32 accountId = bytes32(uint256(uint160(attacker)));
+        address account = attacker;
         _fundTrader(attacker, 2e6);
 
         vm.prank(attacker);
@@ -44,7 +44,7 @@ contract AuditLatestStateFindingsFailing_QueueEconomics is BasePerpTest {
         vm.expectRevert();
         router.commitOrder(CfdTypes.Side.BULL, 1, 0, 0, true);
 
-        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
+        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(account);
         assertEq(escrow.pendingOrderCount, 1, "Rejected close intent should not be queued behind the pending open");
     }
 
@@ -105,8 +105,8 @@ contract AuditLatestStateFindingsFailing_SeniorYieldCheckpoint is BasePerpTest {
         _fundJunior(juniorLp, 200_000e6);
         _fundTrader(trader, 50_000e6);
 
-        bytes32 traderId = bytes32(uint256(uint160(trader)));
-        _open(traderId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        address traderAccount = trader;
+        _open(traderAccount, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
         uint256 before = pool.lastReconcileTime();
 
@@ -150,8 +150,8 @@ contract AuditLatestStateFindingsFailing_StaleSeniorMutationYield is BasePerpTes
         assertEq(pool.seniorPrincipal(), 52_000e6, "Setup should impair senior before stale recapitalization");
 
         _fundTrader(trader, 50_000e6);
-        bytes32 traderId = bytes32(uint256(uint160(trader)));
-        _open(traderId, CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8);
+        address traderAccount = trader;
+        _open(traderAccount, CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8);
 
         uint256 staleStart = block.timestamp;
         uint256 staleMutationTime = staleStart + 30 days;

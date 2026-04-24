@@ -29,7 +29,7 @@ library CfdTypes {
 
     /// @notice An intent submitted by a user, waiting for Keeper execution
     struct Order {
-        bytes32 accountId; // Maps to MarginClearinghouse unified account
+        address account; // Maps to MarginClearinghouse unified account
         uint256 sizeDelta; // [18 dec] Amount of size to add/remove
         uint256 marginDelta; // [6 dec] Amount of margin to add/remove
         uint256 targetPrice; // [8 dec] Slippage protection limit

@@ -37,26 +37,25 @@ contract CfdEnginePlanHarness is CfdEngine {
         uint256 executionPrice,
         uint256 vaultDepthUsdc
     ) external view returns (CfdEnginePlanTypes.OpenDelta memory delta) {
-        CfdEnginePlanTypes.RawSnapshot memory snap =
-            _buildRawSnapshot(order.accountId, executionPrice, vaultDepthUsdc, 0);
+        CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(order.account, executionPrice, vaultDepthUsdc, 0);
         snap.vaultCashUsdc = vault.totalAssets();
         return CfdEnginePlanLib.planOpen(snap, order, executionPrice, 0);
     }
 
     function buildRawSnapshotForPlanner(
-        bytes32 accountId,
+        address account,
         uint256 executionPrice,
         uint256 vaultDepthUsdc
     ) external view returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
-        snap = _buildRawSnapshot(accountId, executionPrice, vaultDepthUsdc, 0);
+        snap = _buildRawSnapshot(account, executionPrice, vaultDepthUsdc, 0);
         snap.vaultCashUsdc = vault.totalAssets();
     }
 
     function computeOpenMarginAfter(
-        uint256 marginAfterFunding,
+        uint256 marginAfterCarry,
         int256 netMarginChange
     ) external pure returns (bool drained, uint256 marginAfter) {
-        return CfdEnginePlanLib.computeOpenMarginAfter(marginAfterFunding, netMarginChange);
+        return CfdEnginePlanLib.computeOpenMarginAfter(marginAfterCarry, netMarginChange);
     }
 
 }
@@ -129,21 +128,21 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
     }
 
     function _position(
-        bytes32 accountId
+        address account
     ) internal view returns (CfdTypes.Position memory pos) {
         (pos.size, pos.margin, pos.entryPrice, pos.maxProfitUsdc, pos.side, pos.lastUpdateTime, pos.vpiAccrued) =
-            engine.positions(accountId);
+            engine.positions(account);
     }
 
     function _openOrder(
-        bytes32 accountId,
+        address account,
         CfdTypes.Side side,
         uint256 sizeDelta,
         uint256 marginDelta,
         uint256 targetPrice
     ) internal view returns (CfdTypes.Order memory) {
         return CfdTypes.Order({
-            accountId: accountId,
+            account: account,
             sizeDelta: sizeDelta,
             marginDelta: marginDelta,
             targetPrice: targetPrice,
@@ -176,10 +175,10 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
     }
 
     function test_PlanOpen_FreshAccountUsesGlobalSideMarginBaseline() public {
-        bytes32 bullIdA = bytes32(uint256(uint160(bullTraderA)));
-        bytes32 bullIdB = bytes32(uint256(uint160(bullTraderB)));
-        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
-        bytes32 freshBullId = bytes32(uint256(uint160(freshBullTrader)));
+        address bullIdA = bullTraderA;
+        address bullIdB = bullTraderB;
+        address bearAccount = bearTrader;
+        address freshBullAccount = freshBullTrader;
 
         _fundTrader(bullTraderA, 15_000e6);
         _fundTrader(bullTraderB, 400_000e6);
@@ -188,7 +187,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
 
         _open(bullIdA, CfdTypes.Side.BULL, 390_000e18, 6500e6, 1e8);
         _open(bullIdB, CfdTypes.Side.BULL, 10_000e18, 300_000e6, 1e8);
-        _open(bearId, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
+        _open(bearAccount, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
 
         vm.warp(block.timestamp + 180 days);
         vm.prank(address(router));
@@ -196,7 +195,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
 
         CfdEnginePlanHarness harness = CfdEnginePlanHarness(address(engine));
         CfdEnginePlanTypes.OpenDelta memory delta = harness.previewOpenPlan(
-            _openOrder(freshBullId, CfdTypes.Side.BULL, 10_000e18, 5000e6, 1e8), 1e8, pool.totalAssets()
+            _openOrder(freshBullAccount, CfdTypes.Side.BULL, 10_000e18, 5000e6, 1e8), 1e8, pool.totalAssets()
         );
 
         assertEq(
@@ -211,8 +210,8 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         );
         assertTrue(delta.valid, "Planner should accept the fresh-account open");
 
-        _open(freshBullId, CfdTypes.Side.BULL, 10_000e18, 5000e6, 1e8);
-        (uint256 size,,,,,,) = engine.positions(freshBullId);
+        _open(freshBullAccount, CfdTypes.Side.BULL, 10_000e18, 5000e6, 1e8);
+        (uint256 size,,,,,,) = engine.positions(freshBullAccount);
         assertEq(size, 10_000e18, "Live open should succeed for the fresh account");
     }
 
@@ -248,10 +247,10 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
     }
 
     function test_PlanOpen_TotalMarginAfterOpenMatchesSingleFrameEquation() public {
-        bytes32 bullIdA = bytes32(uint256(uint160(bullTraderA)));
-        bytes32 bullIdB = bytes32(uint256(uint160(bullTraderB)));
-        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
-        bytes32 freshBullId = bytes32(uint256(uint160(freshBullTrader)));
+        address bullIdA = bullTraderA;
+        address bullIdB = bullTraderB;
+        address bearAccount = bearTrader;
+        address freshBullAccount = freshBullTrader;
 
         _fundTrader(bullTraderA, 15_000e6);
         _fundTrader(bullTraderB, 400_000e6);
@@ -260,7 +259,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
 
         _open(bullIdA, CfdTypes.Side.BULL, 390_000e18, 6500e6, 1e8);
         _open(bullIdB, CfdTypes.Side.BULL, 10_000e18, 300_000e6, 1e8);
-        _open(bearId, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
+        _open(bearAccount, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
 
         vm.warp(block.timestamp + 180 days);
         vm.prank(address(router));
@@ -268,7 +267,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
 
         CfdEnginePlanHarness harness = CfdEnginePlanHarness(address(engine));
         CfdEnginePlanTypes.OpenDelta memory delta = harness.previewOpenPlan(
-            _openOrder(freshBullId, CfdTypes.Side.BULL, 10_000e18, 5000e6, 1e8), 1e8, pool.totalAssets()
+            _openOrder(freshBullAccount, CfdTypes.Side.BULL, 10_000e18, 5000e6, 1e8), 1e8, pool.totalAssets()
         );
 
         assertGe(
@@ -279,10 +278,10 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
     }
 
     function test_PlanOpen_HealthyDeltaMatchesLiveOpenState() public {
-        bytes32 accountId = bytes32(uint256(uint160(freshBullTrader)));
+        address account = freshBullTrader;
         _fundTrader(freshBullTrader, 20_000e6);
 
-        CfdTypes.Order memory order = _openOrder(accountId, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
+        CfdTypes.Order memory order = _openOrder(account, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
         CfdEnginePlanHarness harness = CfdEnginePlanHarness(address(engine));
         CfdEnginePlanTypes.OpenDelta memory delta = harness.previewOpenPlan(order, 1e8, pool.totalAssets());
 
@@ -292,9 +291,9 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         );
 
         uint256 feesBefore = engine.accumulatedFeesUsdc();
-        _open(accountId, CfdTypes.Side.BULL, order.sizeDelta, order.marginDelta, 1e8);
+        _open(account, CfdTypes.Side.BULL, order.sizeDelta, order.marginDelta, 1e8);
 
-        (uint256 size, uint256 margin, uint256 entryPrice,,,,) = engine.positions(accountId);
+        (uint256 size, uint256 margin, uint256 entryPrice,,,,) = engine.positions(account);
         assertEq(size, delta.newPosSize, "Live open size should match planner delta");
         assertEq(margin, delta.positionMarginAfterOpen, "Live open margin should match planner delta");
         assertEq(entryPrice, delta.newPosEntryPrice, "Live open entry price should match planner delta");
@@ -311,13 +310,13 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
     }
 
     function test_PlannerWrapper_OpenPlanMatchesLibrary() public {
-        bytes32 accountId = bytes32(uint256(uint160(freshBullTrader)));
+        address account = freshBullTrader;
         _fundTrader(freshBullTrader, 20_000e6);
 
-        CfdTypes.Order memory order = _openOrder(accountId, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
+        CfdTypes.Order memory order = _openOrder(account, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
         CfdEnginePlanHarness harness = CfdEnginePlanHarness(address(engine));
         CfdEnginePlanTypes.RawSnapshot memory snap =
-            harness.buildRawSnapshotForPlanner(order.accountId, 1e8, pool.totalAssets());
+            harness.buildRawSnapshotForPlanner(order.account, 1e8, pool.totalAssets());
         CfdEnginePlanTypes.OpenDelta memory libDelta = harness.previewOpenPlan(order, 1e8, pool.totalAssets());
         CfdEnginePlanTypes.OpenDelta memory plannerDelta = planner.planOpen(snap, order, 1e8, 0);
 
@@ -340,23 +339,23 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
     }
 
     function test_PlanOpen_ReportsPendingCarry() public {
-        bytes32 accountId = bytes32(uint256(uint160(freshBullTrader)));
+        address account = freshBullTrader;
         _fundTrader(freshBullTrader, 20_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
         vm.warp(block.timestamp + 7 days);
 
         CfdEnginePlanHarness harness = CfdEnginePlanHarness(address(engine));
         CfdEnginePlanTypes.OpenDelta memory delta = harness.previewOpenPlan(
-            _openOrder(accountId, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8), 1e8, pool.totalAssets()
+            _openOrder(account, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8), 1e8, pool.totalAssets()
         );
 
         assertGt(delta.pendingCarryUsdc, 0, "Open plan should report observational pending carry");
     }
 
     function test_PlanOpen_DoesNotDoubleCountRealizedCarryInProjectedRisk() public {
-        bytes32 accountId = bytes32(uint256(0xC411));
+        address account = address(uint160(0xC411));
         CfdEnginePlanTypes.RawSnapshot memory snap;
-        snap.accountId = accountId;
+        snap.account = account;
         snap.position = CfdTypes.Position({
             size: 100_000e18,
             margin: 2500e6,
@@ -395,11 +394,11 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         snap.riskParams = _riskParams();
         snap.executionFeeBps = engine.executionFeeBps();
         CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(
-            snap, _openOrder(accountId, CfdTypes.Side.BULL, 5000e18, 0, 1e8), 1e8, uint64(block.timestamp)
+            snap, _openOrder(account, CfdTypes.Side.BULL, 5000e18, 0, 1e8), 1e8, uint64(block.timestamp)
         );
 
         MarginClearinghouseAccountingLib.SettlementConsumption memory consumption =
-            MarginClearinghouseAccountingLib.planFundingLossConsumption(snap.accountBuckets, delta.pendingCarryUsdc);
+            MarginClearinghouseAccountingLib.planCarryLossConsumption(snap.accountBuckets, delta.pendingCarryUsdc);
         uint256 reachableCollateralAfterCarry =
             snap.accountBuckets.settlementBalanceUsdc - consumption.totalConsumedUsdc;
         uint256 reachableCollateralAfterTrade = reachableCollateralAfterCarry - uint256(delta.tradeCostUsdc);
@@ -422,9 +421,9 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         CfdTypes.RiskParams memory params = _riskParams();
         params.vpiFactor = 0.05e18;
 
-        bytes32 accountId = bytes32(uint256(0xB0B0));
+        address account = address(uint160(0xB0B0));
         CfdEnginePlanTypes.RawSnapshot memory snap;
-        snap.accountId = accountId;
+        snap.account = account;
         snap.position = CfdTypes.Position({
             size: 0,
             margin: 0,
@@ -453,7 +452,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         snap.riskParams = params;
         snap.executionFeeBps = engine.executionFeeBps();
         CfdTypes.Order memory order = CfdTypes.Order({
-            accountId: accountId,
+            account: account,
             sizeDelta: 300_000e18,
             marginDelta: 4000e6,
             targetPrice: 1e8,
@@ -473,9 +472,9 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
     }
 
     function test_PlanOpen_RejectsWhenCarryLeavesFreeSettlementBelowMarginDelta() public view {
-        bytes32 accountId = bytes32(uint256(0xCA2201));
+        address account = address(uint160(0xCA2201));
         CfdEnginePlanTypes.RawSnapshot memory snap;
-        snap.accountId = accountId;
+        snap.account = account;
         snap.position = CfdTypes.Position({
             size: 10_000e18,
             margin: 100e6,
@@ -513,7 +512,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         snap.capPrice = CAP_PRICE;
         snap.riskParams = _riskParams();
         snap.executionFeeBps = engine.executionFeeBps();
-        CfdTypes.Order memory order = _openOrder(accountId, CfdTypes.Side.BULL, 10_000e18, 100e6, 1e8);
+        CfdTypes.Order memory order = _openOrder(account, CfdTypes.Side.BULL, 10_000e18, 100e6, 1e8);
         CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(snap, order, 1e8, uint64(block.timestamp));
         uint256 freeSettlementAfterCarry = snap.accountBuckets.freeSettlementUsdc - delta.pendingCarryUsdc;
 
@@ -534,17 +533,17 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
     }
 
     function test_PlanClose_ReportsPendingCarry() public {
-        bytes32 accountId = bytes32(uint256(uint160(freshBullTrader)));
+        address account = freshBullTrader;
         _fundTrader(freshBullTrader, 20_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
         vm.warp(block.timestamp + 7 days);
 
         CfdEnginePlanHarness harness = CfdEnginePlanHarness(address(engine));
         CfdEnginePlanTypes.RawSnapshot memory snap =
-            harness.buildRawSnapshotForPlanner(accountId, 1e8, pool.totalAssets());
-        CfdTypes.Position memory pos = _position(accountId);
+            harness.buildRawSnapshotForPlanner(account, 1e8, pool.totalAssets());
+        CfdTypes.Position memory pos = _position(account);
         CfdTypes.Order memory closeOrder = CfdTypes.Order({
-            accountId: accountId,
+            account: account,
             sizeDelta: pos.size / 2,
             marginDelta: 0,
             targetPrice: 0,
@@ -559,14 +558,14 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
     }
 
     function test_PlanLiquidation_ReportsPendingCarry() public {
-        bytes32 accountId = bytes32(uint256(uint160(freshBullTrader)));
+        address account = freshBullTrader;
         _fundTrader(freshBullTrader, 20_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
         vm.warp(block.timestamp + 7 days);
 
         CfdEnginePlanHarness harness = CfdEnginePlanHarness(address(engine));
         CfdEnginePlanTypes.RawSnapshot memory snap =
-            harness.buildRawSnapshotForPlanner(accountId, 150_000_000, pool.totalAssets());
+            harness.buildRawSnapshotForPlanner(account, 150_000_000, pool.totalAssets());
         CfdEnginePlanTypes.LiquidationDelta memory delta = planner.planLiquidation(snap, 150_000_000, 0);
         assertGt(delta.pendingCarryUsdc, 0, "Liquidation plan should report observational pending carry");
     }
@@ -601,9 +600,9 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         CfdTypes.RiskParams memory params = _riskParams();
         params.vpiFactor = 0;
 
-        bytes32 accountId = bytes32(uint256(0xBEEF));
+        address account = address(uint160(0xBEEF));
         CfdEnginePlanTypes.RawSnapshot memory snap;
-        snap.accountId = accountId;
+        snap.account = account;
         snap.position = CfdTypes.Position({
             size: 100_000e18,
             margin: 1e6,
@@ -642,7 +641,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         snap.riskParams = params;
         snap.executionFeeBps = engine.executionFeeBps();
         CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(
-            snap, _openOrder(accountId, CfdTypes.Side.BEAR, 10_000e18, 0, 1e8), 1e8, uint64(block.timestamp)
+            snap, _openOrder(account, CfdTypes.Side.BEAR, 10_000e18, 0, 1e8), 1e8, uint64(block.timestamp)
         );
 
         assertLt(delta.netMarginChange, 0, "Open must require physical margin to pay trade costs");
@@ -659,9 +658,9 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
     }
 
     function test_PlanOpen_CarryBasisExcludesQueuedReservations() public view {
-        bytes32 accountId = bytes32(uint256(0xC0A771));
+        address account = address(uint160(0xC0A771));
         CfdEnginePlanTypes.RawSnapshot memory snap;
-        snap.accountId = accountId;
+        snap.account = account;
         snap.position = CfdTypes.Position({
             size: 100_000e18,
             margin: 2000e6,
@@ -708,23 +707,23 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         );
 
         CfdEnginePlanTypes.OpenDelta memory delta =
-            CfdEnginePlanLib.planOpen(snap, _openOrder(accountId, CfdTypes.Side.BULL, 10_000e18, 0, 1e8), 1e8, 0);
+            CfdEnginePlanLib.planOpen(snap, _openOrder(account, CfdTypes.Side.BULL, 10_000e18, 0, 1e8), 1e8, 0);
 
         assertGt(delta.pendingCarryUsdc, terminalCarryUsdc, "Planner carry basis must exclude queued reservations");
     }
 
     function test_PlanOpen_SolvencyFailureCategoryMatchesTypedExecutionFailure() public {
-        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
-        bytes32 bullId = bytes32(uint256(uint160(freshBullTrader)));
+        address bearAccount = bearTrader;
+        address bullAccount = freshBullTrader;
 
         _fundTrader(bearTrader, 50_000e6);
         _fundTrader(freshBullTrader, 40_000e6);
-        _open(bearId, CfdTypes.Side.BEAR, 300_000e18, 30_000e6, 1e8);
+        _open(bearAccount, CfdTypes.Side.BEAR, 300_000e18, 30_000e6, 1e8);
 
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), 700_000e6);
 
-        CfdTypes.Order memory order = _openOrder(bullId, CfdTypes.Side.BULL, 350_000e18, 35_000e6, 1e8);
+        CfdTypes.Order memory order = _openOrder(bullAccount, CfdTypes.Side.BULL, 350_000e18, 35_000e6, 1e8);
         CfdEnginePlanHarness harness = CfdEnginePlanHarness(address(engine));
         CfdEnginePlanTypes.OpenDelta memory delta = harness.previewOpenPlan(order, 1e8, pool.totalAssets());
 

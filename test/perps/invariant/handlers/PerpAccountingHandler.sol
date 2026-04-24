@@ -40,14 +40,14 @@ contract PerpAccountingHandler is Test {
 
     struct BadDebtDeferredEvent {
         bool active;
-        bytes32 accountId;
+        address account;
         uint256 badDebtAfterUsdc;
         uint256 allowedDeferredAfterUsdc;
     }
 
     struct TerminalResidualEvent {
         bool active;
-        bytes32 accountId;
+        address account;
         uint256 badDebtBeforeUsdc;
         uint256 expectedBadDebtDeltaUsdc;
         uint256 expectedFinalResidualUsdc;
@@ -57,7 +57,7 @@ contract PerpAccountingHandler is Test {
 
     struct OpenCommitAttempt {
         bool active;
-        bytes32 accountId;
+        address account;
         bool routerOpenAllowed;
         bool prefilterActive;
         CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory;
@@ -67,7 +67,7 @@ contract PerpAccountingHandler is Test {
 
     struct WithdrawParityAttempt {
         bool active;
-        bytes32 accountId;
+        address account;
         bool checkWithdrawPasses;
         bytes4 checkWithdrawSelector;
         bool withdrawPasses;
@@ -90,20 +90,20 @@ contract PerpAccountingHandler is Test {
     uint256 public ghostTotalVaultMinted;
     uint256 public ghostSuccessfulLiquidations;
 
-    mapping(uint64 => bytes32) internal ghostOrderOwner;
+    mapping(uint64 => address) internal ghostOrderOwner;
     mapping(uint64 => uint256) internal ghostOrderCommittedMargin;
     mapping(uint64 => uint8) internal ghostOrderState;
     mapping(uint64 => uint256) internal ghostReservationOriginal;
     mapping(uint64 => uint256) internal ghostReservationConsumed;
     mapping(uint64 => uint256) internal ghostReservationReleased;
-    mapping(bytes32 => ReachabilityTransition) internal reachabilityTransitions;
+    mapping(address => ReachabilityTransition) internal reachabilityTransitions;
 
     BadDebtDeferredEvent internal lastBadDebtDeferredEvent;
     TerminalResidualEvent internal lastTerminalResidualEvent;
     OpenCommitAttempt internal lastOpenCommitAttempt;
     WithdrawParityAttempt internal lastWithdrawParityAttempt;
 
-    bytes32 internal lastTerminalReservationAccountId;
+    address internal lastTerminalReservationAccountId;
     uint256 internal lastTerminalReservationCount;
     uint256 internal lastTerminalActiveReservationCountBefore;
     uint64[5] internal lastTerminalReservationIds;
@@ -167,12 +167,12 @@ contract PerpAccountingHandler is Test {
         }
 
         AccountLensViewTypes.AccountLedgerSnapshot memory beforeSnapshot =
-            engineAccountLens.getAccountLedgerSnapshot(_accountId(actor));
+            engineAccountLens.getAccountLedgerSnapshot(_account(actor));
         uint256 amount = bound(amountFuzz, 1e6, 250_000e6);
         _mintAndDepositTrader(actor, amount);
         AccountLensViewTypes.AccountLedgerSnapshot memory afterSnapshot =
-            engineAccountLens.getAccountLedgerSnapshot(_accountId(actor));
-        _recordReachabilityTransition(_accountId(actor), REACHABILITY_ACTION_DEPOSIT, beforeSnapshot, afterSnapshot);
+            engineAccountLens.getAccountLedgerSnapshot(_account(actor));
+        _recordReachabilityTransition(_account(actor), REACHABILITY_ACTION_DEPOSIT, beforeSnapshot, afterSnapshot);
     }
 
     function withdrawCollateral(
@@ -186,31 +186,31 @@ contract PerpAccountingHandler is Test {
             return;
         }
 
-        bytes32 accountId = _accountId(actor);
-        uint256 freeSettlement = _freeSettlementUsdc(accountId);
+        address account = _account(actor);
+        uint256 freeSettlement = _freeSettlementUsdc(account);
         if (freeSettlement == 0) {
             return;
         }
 
         AccountLensViewTypes.AccountLedgerSnapshot memory beforeSnapshot =
-            engineAccountLens.getAccountLedgerSnapshot(accountId);
+            engineAccountLens.getAccountLedgerSnapshot(account);
         uint256 amount = bound(amountFuzz, 1e6, freeSettlement);
         WithdrawParityAttempt memory attempt;
         attempt.active = true;
-        attempt.accountId = accountId;
+        attempt.account = account;
         vm.prank(address(clearinghouse));
-        try engine.checkWithdraw(accountId) {
+        try engine.checkWithdraw(account) {
             attempt.checkWithdrawPasses = true;
         } catch (bytes memory err) {
             attempt.checkWithdrawSelector = _revertSelector(err);
         }
 
         vm.prank(actor);
-        try clearinghouse.withdraw(accountId, amount) {
+        try clearinghouse.withdraw(account, amount) {
             attempt.withdrawPasses = true;
             AccountLensViewTypes.AccountLedgerSnapshot memory afterSnapshot =
-                engineAccountLens.getAccountLedgerSnapshot(accountId);
-            _recordReachabilityTransition(accountId, REACHABILITY_ACTION_WITHDRAW, beforeSnapshot, afterSnapshot);
+                engineAccountLens.getAccountLedgerSnapshot(account);
+            _recordReachabilityTransition(account, REACHABILITY_ACTION_WITHDRAW, beforeSnapshot, afterSnapshot);
         } catch (bytes memory err) {
             attempt.withdrawSelector = _revertSelector(err);
         }
@@ -239,18 +239,18 @@ contract PerpAccountingHandler is Test {
 
         CfdTypes.Side side = sideRaw % 2 == 0 ? CfdTypes.Side.BULL : CfdTypes.Side.BEAR;
         uint64 orderId = router.nextCommitId();
-        bytes32 accountId = _accountId(actor);
+        address account = _account(actor);
         lastOpenCommitAttempt = OpenCommitAttempt({
             active: true,
-            accountId: accountId,
+            account: account,
             routerOpenAllowed: !routerAdmin.paused() && !engine.degradedMode() && !engine.isOracleFrozen()
-                && !engine.isFadWindow() && vault.canIncreaseRisk() && router.pendingOrderCounts(accountId) < 5,
+                && !engine.isFadWindow() && vault.canIncreaseRisk() && router.pendingOrderCounts(account) < 5,
             prefilterActive: _canUseCommitMarkForOpenPrefilter(),
             failureCategory: engineLens.previewOpenFailurePolicyCategory(
-                accountId, side, sizeDelta, marginDelta, _commitReferencePrice(), engine.lastMarkTime()
+                account, side, sizeDelta, marginDelta, _commitReferencePrice(), engine.lastMarkTime()
             ),
             revertCode: engineLens.previewOpenRevertCode(
-                accountId, side, sizeDelta, marginDelta, _commitReferencePrice(), engine.lastMarkTime()
+                account, side, sizeDelta, marginDelta, _commitReferencePrice(), engine.lastMarkTime()
             ),
             commitSucceeded: false
         });
@@ -258,7 +258,7 @@ contract PerpAccountingHandler is Test {
         vm.prank(actor);
         try router.commitOrder(side, sizeDelta, marginDelta, targetPrice, false) {
             lastOpenCommitAttempt.commitSucceeded = true;
-            _registerPendingOrder(orderId, accountId, marginDelta);
+            _registerPendingOrder(orderId, account, marginDelta);
         } catch {}
     }
 
@@ -291,8 +291,8 @@ contract PerpAccountingHandler is Test {
             return;
         }
 
-        bytes32 accountId = _accountId(actor);
-        (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(accountId);
+        address account = _account(actor);
+        (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(account);
         if (size == 0) {
             return;
         }
@@ -302,7 +302,7 @@ contract PerpAccountingHandler is Test {
 
         vm.prank(actor);
         try router.commitOrder(side, size, 0, targetPrice, true) {
-            _registerPendingOrder(orderId, accountId, 0);
+            _registerPendingOrder(orderId, account, 0);
         } catch {}
     }
 
@@ -334,7 +334,7 @@ contract PerpAccountingHandler is Test {
         }
 
         OrderRouter.OrderRecord memory orderRecord = _orderRecord(orderId);
-        bytes32 accountId = orderRecord.core.accountId;
+        address account = orderRecord.core.account;
         uint256 sizeDelta = orderRecord.core.sizeDelta;
         uint256 marginDelta = orderRecord.core.marginDelta;
         uint256 targetPrice = orderRecord.core.targetPrice;
@@ -345,10 +345,10 @@ contract PerpAccountingHandler is Test {
         uint256 expectedFinalResidualUsdc;
         bool terminalClose;
         AccountLensViewTypes.AccountLedgerSnapshot memory beforeSnapshot =
-            engineAccountLens.getAccountLedgerSnapshot(accountId);
-        uint256 traderWalletBeforeUsdc = usdc.balanceOf(address(uint160(uint256(accountId))));
+            engineAccountLens.getAccountLedgerSnapshot(account);
+        uint256 traderWalletBeforeUsdc = usdc.balanceOf(account);
         if (isClose && marginDelta == 0) {
-            CfdEngine.ClosePreview memory preview = engineLens.previewClose(accountId, sizeDelta, targetPrice);
+            CfdEngine.ClosePreview memory preview = engineLens.previewClose(account, sizeDelta, targetPrice);
             if (preview.valid) {
                 deferredTraderCreditUsdc = preview.deferredTraderCreditUsdc;
                 allowedDeferredAfterUsdc = preview.deferredTraderCreditUsdc > preview.existingDeferredRemainingUsdc
@@ -372,16 +372,16 @@ contract PerpAccountingHandler is Test {
         try router.executeOrder(orderId, empty) {
             _reconcileCommittedMarginAfterProcessedOrders(committedBefore, orderId, router.nextExecuteId());
             if (deferredTraderCreditUsdc > 0) {
-                ghost.increaseDeferredTraderCredit(accountId, deferredTraderCreditUsdc);
+                ghost.increaseDeferredTraderCredit(account, deferredTraderCreditUsdc);
             }
-            _syncGhostDeferredTraderCredit(accountId);
+            _syncGhostDeferredTraderCredit(account);
             uint256 badDebtAfter = engine.accumulatedBadDebtUsdc();
             if (isClose && badDebtAfter > badDebtBefore) {
-                _recordBadDebtDeferredEvent(accountId, badDebtAfter, allowedDeferredAfterUsdc);
+                _recordBadDebtDeferredEvent(account, badDebtAfter, allowedDeferredAfterUsdc);
             }
             if (terminalClose) {
                 _recordTerminalResidualEvent(
-                    accountId,
+                    account,
                     badDebtBefore,
                     expectedBadDebtDeltaUsdc,
                     expectedFinalResidualUsdc,
@@ -402,8 +402,8 @@ contract PerpAccountingHandler is Test {
             return;
         }
 
-        bytes32 accountId = _accountId(actor);
-        (uint256 size,,,,,,) = engine.positions(accountId);
+        address account = _account(actor);
+        (uint256 size,,,,,,) = engine.positions(account);
         if (size == 0) {
             return;
         }
@@ -411,7 +411,7 @@ contract PerpAccountingHandler is Test {
         uint256 price = bound(priceFuzz, 0.3e8, 1.8e8);
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(price);
-        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, price);
+        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, price);
         uint256 keeperBountyUsdc = preview.keeperBountyUsdc;
         bool shouldDefer = vault.failRouterPayouts() && keeperBountyUsdc > 0;
         uint256 deferredTraderCreditUsdc = preview.deferredTraderCreditUsdc;
@@ -421,27 +421,27 @@ contract PerpAccountingHandler is Test {
         uint256 traderWalletBeforeUsdc = usdc.balanceOf(actor);
         uint256 expectedFinalResidualUsdc =
             preview.settlementRetainedUsdc + preview.immediatePayoutUsdc + preview.deferredTraderCreditUsdc;
-        uint256 committedBefore = _trackedCommittedMargin(accountId);
-        _recordTerminalReservationSet(accountId);
+        uint256 committedBefore = _trackedCommittedMargin(account);
+        _recordTerminalReservationSet(account);
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
 
-        try router.executeLiquidation(accountId, priceData) {
-            ghost.recordLiquidation(accountId, usdc.balanceOf(actor), engine.accumulatedBadDebtUsdc());
+        try router.executeLiquidation(account, priceData) {
+            ghost.recordLiquidation(account, usdc.balanceOf(actor), engine.accumulatedBadDebtUsdc());
             ghostSuccessfulLiquidations++;
-            _reconcileCommittedMarginAfterLiquidation(accountId, committedBefore);
+            _reconcileCommittedMarginAfterLiquidation(account, committedBefore);
             if (deferredTraderCreditUsdc > 0) {
-                ghost.increaseDeferredTraderCredit(accountId, deferredTraderCreditUsdc);
+                ghost.increaseDeferredTraderCredit(account, deferredTraderCreditUsdc);
             }
-            _syncGhostDeferredTraderCredit(accountId);
+            _syncGhostDeferredTraderCredit(account);
             if (shouldDefer) {
                 ghost.increaseDeferredKeeperCredit(address(this), keeperBountyUsdc);
             }
             uint256 badDebtAfter = engine.accumulatedBadDebtUsdc();
             if (badDebtAfter > badDebtBefore) {
-                _recordBadDebtDeferredEvent(accountId, badDebtAfter, allowedDeferredAfterUsdc);
+                _recordBadDebtDeferredEvent(account, badDebtAfter, allowedDeferredAfterUsdc);
             }
             _recordTerminalResidualEvent(
-                accountId, badDebtBefore, preview.badDebtUsdc, expectedFinalResidualUsdc, traderWalletBeforeUsdc, true
+                account, badDebtBefore, preview.badDebtUsdc, expectedFinalResidualUsdc, traderWalletBeforeUsdc, true
             );
         } catch {}
     }
@@ -463,18 +463,18 @@ contract PerpAccountingHandler is Test {
             return;
         }
 
-        bytes32 accountId = _accountId(actor);
-        if (router.pendingOrderCounts(accountId) != 0) {
+        address account = _account(actor);
+        if (router.pendingOrderCounts(account) != 0) {
             return;
         }
 
-        (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(accountId);
+        (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(account);
         if (size == 0) {
             _ensureFreeSettlement(actor, 25_000e6);
             uint64 openOrderId = router.nextCommitId();
             vm.prank(actor);
             try router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 20_000e6, 0, false) {
-                _registerPendingOrder(openOrderId, accountId, 20_000e6);
+                _registerPendingOrder(openOrderId, account, 20_000e6);
             } catch {
                 return;
             }
@@ -491,7 +491,7 @@ contract PerpAccountingHandler is Test {
                 return;
             }
 
-            (size,,,, side,,) = engine.positions(accountId);
+            (size,,,, side,,) = engine.positions(account);
             if (size == 0) {
                 return;
             }
@@ -500,14 +500,14 @@ contract PerpAccountingHandler is Test {
         vault.setAssets(0);
         uint256 closeOraclePrice = side == CfdTypes.Side.BULL ? uint256(15e7) : uint256(5e7);
 
-        CfdEngine.ClosePreview memory closePreview = engineLens.previewClose(accountId, size, closeOraclePrice);
+        CfdEngine.ClosePreview memory closePreview = engineLens.previewClose(account, size, closeOraclePrice);
         uint256 deferredTraderCreditUsdc = closePreview.deferredTraderCreditUsdc;
-        _recordTerminalReservationSet(accountId);
+        _recordTerminalReservationSet(account);
 
         uint64 closeOrderId = router.nextCommitId();
         vm.prank(actor);
         try router.commitOrder(side, size, 0, 0, true) {
-            _registerPendingOrder(closeOrderId, accountId, 0);
+            _registerPendingOrder(closeOrderId, account, 0);
         } catch {
             return;
         }
@@ -521,9 +521,9 @@ contract PerpAccountingHandler is Test {
                 closeCommittedBefore, closeStartExecuteId, router.nextExecuteId()
             );
             if (deferredTraderCreditUsdc > 0) {
-                ghost.increaseDeferredTraderCredit(accountId, deferredTraderCreditUsdc);
+                ghost.increaseDeferredTraderCredit(account, deferredTraderCreditUsdc);
             }
-            _syncGhostDeferredTraderCredit(accountId);
+            _syncGhostDeferredTraderCredit(account);
         } catch {}
     }
 
@@ -533,15 +533,15 @@ contract PerpAccountingHandler is Test {
         _clearLastBadDebtDeferredEvent();
         _clearTerminalReservationSet();
         address actor = actors[actorIndex % actors.length];
-        bytes32 accountId = _accountId(actor);
-        uint256 ghostDeferredTraderCredit = ghost.deferredTraderCreditSnapshot(accountId);
+        address account = _account(actor);
+        uint256 ghostDeferredTraderCredit = ghost.deferredTraderCreditSnapshot(account);
 
         vm.prank(actor);
-        try engine.claimDeferredTraderCredit(accountId) {
+        try engine.claimDeferredTraderCredit(account) {
             if (ghostDeferredTraderCredit > 0) {
-                ghost.decreaseDeferredTraderCredit(accountId, ghostDeferredTraderCredit);
+                ghost.decreaseDeferredTraderCredit(account, ghostDeferredTraderCredit);
             }
-            _syncGhostDeferredTraderCredit(accountId);
+            _syncGhostDeferredTraderCredit(account);
         } catch {}
     }
 
@@ -596,11 +596,11 @@ contract PerpAccountingHandler is Test {
     }
 
     function accountRouterEscrow(
-        bytes32 accountId
+        address account
     ) public view returns (uint256 totalEscrowUsdc) {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
             OrderRouter.OrderRecord memory record = _orderRecord(orderId);
-            if (record.core.accountId != accountId || record.core.sizeDelta == 0) {
+            if (record.core.account != account || record.core.sizeDelta == 0) {
                 continue;
             }
             totalEscrowUsdc += record.executionBountyUsdc;
@@ -608,11 +608,11 @@ contract PerpAccountingHandler is Test {
     }
 
     function accountLiveReserveCount(
-        bytes32 accountId
+        address account
     ) external view returns (uint256 count) {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
             OrderRouter.OrderRecord memory record = _orderRecord(orderId);
-            if (record.core.accountId != accountId || record.core.sizeDelta == 0) {
+            if (record.core.account != account || record.core.sizeDelta == 0) {
                 continue;
             }
             if (record.executionBountyUsdc > 0 || _remainingCommittedMargin(orderId) > 0) {
@@ -622,15 +622,15 @@ contract PerpAccountingHandler is Test {
     }
 
     function liquidationSnapshot(
-        bytes32 accountId
+        address account
     ) external view returns (PerpGhostLedger.LiquidationSnapshot memory) {
-        return ghost.liquidationSnapshot(accountId);
+        return ghost.liquidationSnapshot(account);
     }
 
     function committedMarginSnapshot(
-        bytes32 accountId
+        address account
     ) external view returns (uint256) {
-        return ghost.committedMarginSnapshot(accountId);
+        return ghost.committedMarginSnapshot(account);
     }
 
     function totalCommittedMarginSnapshot() external view returns (uint256) {
@@ -642,9 +642,9 @@ contract PerpAccountingHandler is Test {
     }
 
     function deferredTraderCreditSnapshot(
-        bytes32 accountId
+        address account
     ) external view returns (uint256) {
-        return ghost.deferredTraderCreditSnapshot(accountId);
+        return ghost.deferredTraderCreditSnapshot(account);
     }
 
     function _clearLastBadDebtDeferredEvent() internal {
@@ -689,20 +689,20 @@ contract PerpAccountingHandler is Test {
     }
 
     function _recordBadDebtDeferredEvent(
-        bytes32 accountId,
+        address account,
         uint256 badDebtAfterUsdc,
         uint256 allowedDeferredAfterUsdc
     ) internal {
         lastBadDebtDeferredEvent = BadDebtDeferredEvent({
             active: true,
-            accountId: accountId,
+            account: account,
             badDebtAfterUsdc: badDebtAfterUsdc,
             allowedDeferredAfterUsdc: allowedDeferredAfterUsdc
         });
     }
 
     function _recordTerminalResidualEvent(
-        bytes32 accountId,
+        address account,
         uint256 badDebtBeforeUsdc,
         uint256 expectedBadDebtDeltaUsdc,
         uint256 expectedFinalResidualUsdc,
@@ -711,7 +711,7 @@ contract PerpAccountingHandler is Test {
     ) internal {
         lastTerminalResidualEvent = TerminalResidualEvent({
             active: true,
-            accountId: accountId,
+            account: account,
             badDebtBeforeUsdc: badDebtBeforeUsdc,
             expectedBadDebtDeltaUsdc: expectedBadDebtDeltaUsdc,
             expectedFinalResidualUsdc: expectedFinalResidualUsdc,
@@ -721,14 +721,14 @@ contract PerpAccountingHandler is Test {
     }
 
     function _syncGhostDeferredTraderCredit(
-        bytes32 accountId
+        address account
     ) internal {
-        uint256 ghostDeferredTraderCredit = ghost.deferredTraderCreditSnapshot(accountId);
-        uint256 liveDeferredTraderCredit = engine.deferredTraderCreditUsdc(accountId);
+        uint256 ghostDeferredTraderCredit = ghost.deferredTraderCreditSnapshot(account);
+        uint256 liveDeferredTraderCredit = engine.deferredTraderCreditUsdc(account);
         if (liveDeferredTraderCredit > ghostDeferredTraderCredit) {
-            ghost.increaseDeferredTraderCredit(accountId, liveDeferredTraderCredit - ghostDeferredTraderCredit);
+            ghost.increaseDeferredTraderCredit(account, liveDeferredTraderCredit - ghostDeferredTraderCredit);
         } else if (ghostDeferredTraderCredit > liveDeferredTraderCredit) {
-            ghost.decreaseDeferredTraderCredit(accountId, ghostDeferredTraderCredit - liveDeferredTraderCredit);
+            ghost.decreaseDeferredTraderCredit(account, ghostDeferredTraderCredit - liveDeferredTraderCredit);
         }
     }
 
@@ -835,38 +835,34 @@ contract PerpAccountingHandler is Test {
 
     function reservationAccount(
         uint64 orderId
-    ) external view returns (bytes32) {
-        return clearinghouse.getOrderReservation(orderId).accountId;
+    ) external view returns (address) {
+        return clearinghouse.getOrderReservation(orderId).account;
     }
 
     function accountActiveReservationCommittedMargin(
-        bytes32 accountId
+        address account
     ) external view returns (uint256) {
-        return clearinghouse.getAccountReservationSummary(accountId).activeCommittedOrderMarginUsdc;
+        return clearinghouse.getAccountReservationSummary(account).activeCommittedOrderMarginUsdc;
     }
 
     function accountReservationRemainingSum(
-        bytes32 accountId
+        address account
     ) external view returns (uint256 totalRemainingUsdc) {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
             IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(orderId);
-            if (
-                reservation.accountId == accountId
-                    && reservation.status == IMarginClearinghouse.ReservationStatus.Active
-            ) {
+            if (reservation.account == account && reservation.status == IMarginClearinghouse.ReservationStatus.Active) {
                 totalRemainingUsdc += reservation.remainingAmountUsdc;
             }
         }
     }
 
     function activeCommittedReservationCount(
-        bytes32 accountId
+        address account
     ) external view returns (uint256 count) {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
             IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(orderId);
             if (
-                reservation.accountId == accountId
-                    && reservation.status == IMarginClearinghouse.ReservationStatus.Active
+                reservation.account == account && reservation.status == IMarginClearinghouse.ReservationStatus.Active
                     && reservation.bucket == IMarginClearinghouse.ReservationBucket.CommittedOrder
             ) {
                 count++;
@@ -879,16 +875,16 @@ contract PerpAccountingHandler is Test {
     }
 
     function reachabilityTransition(
-        bytes32 accountId
+        address account
     ) external view returns (ReachabilityTransition memory) {
-        return reachabilityTransitions[accountId];
+        return reachabilityTransitions[account];
     }
 
     function lastTerminalReservationInfo()
         external
         view
         returns (
-            bytes32 accountId,
+            address account,
             uint256 count,
             uint256 activeCountBefore,
             uint64[5] memory ids,
@@ -905,12 +901,12 @@ contract PerpAccountingHandler is Test {
     }
 
     function ghostPendingOrderCount(
-        bytes32 accountId
+        address account
     ) external view returns (uint256 count) {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
             OrderRouter.OrderRecord memory record = _orderRecord(orderId);
             if (
-                ghostOrderOwner[orderId] == accountId
+                ghostOrderOwner[orderId] == account
                     && uint8(record.status) == uint8(IOrderRouterAccounting.OrderStatus.Pending)
             ) {
                 count++;
@@ -919,12 +915,12 @@ contract PerpAccountingHandler is Test {
     }
 
     function ghostPendingMarginOrderCount(
-        bytes32 accountId
+        address account
     ) external view returns (uint256 count) {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
             OrderRouter.OrderRecord memory record = _orderRecord(orderId);
             if (
-                ghostOrderOwner[orderId] == accountId
+                ghostOrderOwner[orderId] == account
                     && uint8(record.status) == uint8(IOrderRouterAccounting.OrderStatus.Pending) && record.inMarginQueue
                     && _remainingCommittedMargin(orderId) > 0
             ) {
@@ -941,8 +937,8 @@ contract PerpAccountingHandler is Test {
         address actor,
         uint256 minFreeSettlementUsdc
     ) internal {
-        bytes32 accountId = _accountId(actor);
-        uint256 freeSettlement = _freeSettlementUsdc(accountId);
+        address account = _account(actor);
+        uint256 freeSettlement = _freeSettlementUsdc(account);
         if (freeSettlement >= minFreeSettlementUsdc) {
             return;
         }
@@ -954,11 +950,11 @@ contract PerpAccountingHandler is Test {
         address actor,
         uint256 amount
     ) internal {
-        bytes32 accountId = _accountId(actor);
+        address account = _account(actor);
         usdc.mint(actor, amount);
         vm.startPrank(actor);
         usdc.approve(address(clearinghouse), amount);
-        clearinghouse.deposit(accountId, amount);
+        clearinghouse.deposit(account, amount);
         vm.stopPrank();
 
         ghostTotalTraderMinted += amount;
@@ -966,23 +962,23 @@ contract PerpAccountingHandler is Test {
 
     function _registerPendingOrder(
         uint64 orderId,
-        bytes32 accountId,
+        address account,
         uint256 committedMarginUsdc
     ) internal {
-        ghostOrderOwner[orderId] = accountId;
+        ghostOrderOwner[orderId] = account;
         ghostOrderCommittedMargin[orderId] = committedMarginUsdc;
         ghostOrderState[orderId] = GHOST_ORDER_PENDING;
         if (committedMarginUsdc > 0) {
             ghostReservationOriginal[orderId] = committedMarginUsdc;
-            ghost.increaseCommittedMargin(accountId, committedMarginUsdc);
+            ghost.increaseCommittedMargin(account, committedMarginUsdc);
         }
     }
 
     function _recordTerminalReservationSet(
-        bytes32 accountId
+        address account
     ) internal {
-        uint64[] memory ids = router.getMarginReservationIds(accountId);
-        lastTerminalReservationAccountId = accountId;
+        uint64[] memory ids = router.getMarginReservationIds(account);
+        lastTerminalReservationAccountId = account;
         lastTerminalReservationCount = ids.length;
         lastTerminalActiveReservationCountBefore = 0;
         for (uint256 i = 0; i < 5; i++) {
@@ -999,7 +995,7 @@ contract PerpAccountingHandler is Test {
     }
 
     function _clearTerminalReservationSet() internal {
-        lastTerminalReservationAccountId = bytes32(0);
+        lastTerminalReservationAccountId = address(0);
         lastTerminalReservationCount = 0;
         lastTerminalActiveReservationCountBefore = 0;
         for (uint256 i = 0; i < 5; i++) {
@@ -1009,12 +1005,12 @@ contract PerpAccountingHandler is Test {
     }
 
     function _recordReachabilityTransition(
-        bytes32 accountId,
+        address account,
         uint8 action,
         AccountLensViewTypes.AccountLedgerSnapshot memory beforeSnapshot,
         AccountLensViewTypes.AccountLedgerSnapshot memory afterSnapshot
     ) internal {
-        reachabilityTransitions[accountId] = ReachabilityTransition({
+        reachabilityTransitions[account] = ReachabilityTransition({
             action: action,
             beforeCloseReachableUsdc: beforeSnapshot.closeReachableUsdc,
             afterCloseReachableUsdc: afterSnapshot.closeReachableUsdc,
@@ -1027,7 +1023,7 @@ contract PerpAccountingHandler is Test {
         uint64 orderId,
         uint8 terminalState
     ) internal {
-        bytes32 accountId = ghostOrderOwner[orderId];
+        address account = ghostOrderOwner[orderId];
         uint256 committedMarginUsdc = ghostOrderCommittedMargin[orderId];
         if (ghostOrderState[orderId] == GHOST_ORDER_NONE) {
             return;
@@ -1035,7 +1031,7 @@ contract PerpAccountingHandler is Test {
 
         IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(orderId);
         if (committedMarginUsdc > 0) {
-            ghost.decreaseCommittedMargin(accountId, committedMarginUsdc);
+            ghost.decreaseCommittedMargin(account, committedMarginUsdc);
         }
 
         uint256 terminalizedAmount = ghostReservationOriginal[orderId] - ghostReservationConsumed[orderId]
@@ -1053,12 +1049,12 @@ contract PerpAccountingHandler is Test {
     }
 
     function _consumeCommittedMarginFromAccount(
-        bytes32 accountId,
+        address account,
         uint256 amountUsdc
     ) internal {
         uint256 remainingToConsume = amountUsdc;
         for (uint64 orderId = 1; orderId < router.nextCommitId() && remainingToConsume > 0; orderId++) {
-            if (ghostOrderOwner[orderId] != accountId || ghostOrderState[orderId] != GHOST_ORDER_PENDING) {
+            if (ghostOrderOwner[orderId] != account || ghostOrderState[orderId] != GHOST_ORDER_PENDING) {
                 continue;
             }
 
@@ -1069,7 +1065,7 @@ contract PerpAccountingHandler is Test {
 
             uint256 consumed = ghostRemaining > remainingToConsume ? remainingToConsume : ghostRemaining;
             ghostOrderCommittedMargin[orderId] = ghostRemaining - consumed;
-            ghost.decreaseCommittedMargin(accountId, consumed);
+            ghost.decreaseCommittedMargin(account, consumed);
             ghostReservationConsumed[orderId] += consumed;
             remainingToConsume -= consumed;
         }
@@ -1091,9 +1087,9 @@ contract PerpAccountingHandler is Test {
                     continue;
                 }
 
-                bytes32 accountId = ghostOrderOwner[orderId];
-                if (accountId != bytes32(0)) {
-                    releasedByProcessedOrders[_actorIndex(accountId)] += ghostOrderCommittedMargin[orderId];
+                address account = ghostOrderOwner[orderId];
+                if (account != address(0)) {
+                    releasedByProcessedOrders[_actorIndex(account)] += ghostOrderCommittedMargin[orderId];
                 }
 
                 uint8 terminalState = _ghostTerminalStateForOrder(orderId);
@@ -1102,48 +1098,48 @@ contract PerpAccountingHandler is Test {
         }
 
         for (uint256 i = 0; i < actors.length; i++) {
-            bytes32 accountId = _accountId(actors[i]);
-            uint256 committedAfter = _trackedCommittedMargin(accountId);
+            address account = _account(actors[i]);
+            uint256 committedAfter = _trackedCommittedMargin(account);
             if (committedBefore[i] <= committedAfter) {
                 continue;
             }
 
             uint256 observedReduction = committedBefore[i] - committedAfter;
             if (observedReduction > releasedByProcessedOrders[i]) {
-                _consumeCommittedMarginFromAccount(accountId, observedReduction - releasedByProcessedOrders[i]);
+                _consumeCommittedMarginFromAccount(account, observedReduction - releasedByProcessedOrders[i]);
             }
         }
     }
 
     function _reconcileCommittedMarginAfterLiquidation(
-        bytes32 accountId,
+        address account,
         uint256 committedBefore
     ) internal {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
-            if (ghostOrderOwner[orderId] == accountId && ghostOrderState[orderId] == GHOST_ORDER_PENDING) {
+            if (ghostOrderOwner[orderId] == account && ghostOrderState[orderId] == GHOST_ORDER_PENDING) {
                 _finalizeGhostOrder(orderId, GHOST_ORDER_LIQUIDATED);
             }
         }
 
-        uint256 committedAfter = _trackedCommittedMargin(accountId);
+        uint256 committedAfter = _trackedCommittedMargin(account);
         if (committedBefore > committedAfter) {
             uint256 observedReduction = committedBefore - committedAfter;
             if (observedReduction > 0 && committedAfter > 0) {
-                _consumeCommittedMarginFromAccount(accountId, observedReduction);
+                _consumeCommittedMarginFromAccount(account, observedReduction);
             }
         }
     }
 
     function _snapshotTrackedCommittedMargin() internal view returns (uint256[4] memory committedMarginByActor) {
         for (uint256 i = 0; i < actors.length; i++) {
-            committedMarginByActor[i] = _trackedCommittedMargin(_accountId(actors[i]));
+            committedMarginByActor[i] = _trackedCommittedMargin(_account(actors[i]));
         }
     }
 
     function _trackedCommittedMargin(
-        bytes32 accountId
+        address account
     ) internal view returns (uint256) {
-        return router.getAccountEscrow(accountId).committedMarginUsdc;
+        return router.getAccountEscrow(account).committedMarginUsdc;
     }
 
     function _ghostTerminalStateForOrder(
@@ -1157,10 +1153,10 @@ contract PerpAccountingHandler is Test {
     }
 
     function _actorIndex(
-        bytes32 accountId
+        address account
     ) internal view returns (uint256) {
         for (uint256 i = 0; i < actors.length; i++) {
-            if (_accountId(actors[i]) == accountId) {
+            if (_account(actors[i]) == account) {
                 return i;
             }
         }
@@ -1172,20 +1168,20 @@ contract PerpAccountingHandler is Test {
     }
 
     function _freeSettlementUsdc(
-        bytes32 accountId
+        address account
     ) internal view returns (uint256) {
-        (uint256 size, uint256 margin,,,,,) = engine.positions(accountId);
+        (uint256 size, uint256 margin,,,,,) = engine.positions(account);
         uint256 protectedMargin = size > 0 ? margin : 0;
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(accountId);
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(account);
         return buckets.freeSettlementUsdc;
     }
 
     function _firstPendingCloseOrderId(
-        bytes32 accountId
+        address account
     ) internal view returns (uint64 orderId) {
         for (orderId = 1; orderId < router.nextCommitId(); orderId++) {
             OrderRouter.OrderRecord memory record = _orderRecord(orderId);
-            if (record.core.accountId == accountId && record.core.sizeDelta > 0 && record.core.isClose) {
+            if (record.core.account == account && record.core.sizeDelta > 0 && record.core.isClose) {
                 return orderId;
             }
         }
@@ -1204,16 +1200,16 @@ contract PerpAccountingHandler is Test {
         return clearinghouse.getOrderReservation(orderId).remainingAmountUsdc;
     }
 
-    function _accountId(
+    function _account(
         address actor
-    ) internal pure returns (bytes32) {
-        return bytes32(uint256(uint160(actor)));
+    ) internal pure returns (address) {
+        return actor;
     }
 
     function _isLiquidated(
         address actor
     ) internal view returns (bool) {
-        return ghost.liquidationSnapshot(_accountId(actor)).liquidated;
+        return ghost.liquidationSnapshot(_account(actor)).liquidated;
     }
 
 }

@@ -80,8 +80,8 @@ contract PerpClosePreviewParityInvariantTest is Test {
         (,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
-            bytes32 accountId = _accountId(handler.actorAt(i));
-            (uint256 size, uint256 margin,,,,,) = engine.positions(accountId);
+            address account = _account(handler.actorAt(i));
+            (uint256 size, uint256 margin,,,,,) = engine.positions(account);
             if (size < 2) {
                 continue;
             }
@@ -92,7 +92,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
                     continue;
                 }
 
-                CfdEngine.ClosePreview memory preview = engineLens.previewClose(accountId, fractions[f], oraclePrice);
+                CfdEngine.ClosePreview memory preview = engineLens.previewClose(account, fractions[f], oraclePrice);
 
                 if (!preview.valid) {
                     if (preview.invalidReason == CfdTypes.CloseInvalidReason.DustPosition) {
@@ -121,15 +121,15 @@ contract PerpClosePreviewParityInvariantTest is Test {
         (,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
-            bytes32 accountId = _accountId(handler.actorAt(i));
-            (uint256 size, uint256 margin,,,,,) = engine.positions(accountId);
+            address account = _account(handler.actorAt(i));
+            (uint256 size, uint256 margin,,,,,) = engine.positions(account);
             if (size == 0) {
                 continue;
             }
 
             _assertClosePreviewEquals(
-                engineLens.previewClose(accountId, size, oraclePrice),
-                engineLens.simulateClose(accountId, size, oraclePrice, canonicalDepth)
+                engineLens.previewClose(account, size, oraclePrice),
+                engineLens.simulateClose(account, size, oraclePrice, canonicalDepth)
             );
 
             if (size < 2) {
@@ -143,8 +143,8 @@ contract PerpClosePreviewParityInvariantTest is Test {
                 }
 
                 _assertClosePreviewEquals(
-                    engineLens.previewClose(accountId, fractions[f], oraclePrice),
-                    engineLens.simulateClose(accountId, fractions[f], oraclePrice, canonicalDepth)
+                    engineLens.previewClose(account, fractions[f], oraclePrice),
+                    engineLens.simulateClose(account, fractions[f], oraclePrice, canonicalDepth)
                 );
             }
         }
@@ -155,8 +155,8 @@ contract PerpClosePreviewParityInvariantTest is Test {
         (,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
-            bytes32 accountId = _accountId(handler.actorAt(i));
-            (uint256 size, uint256 margin,,,,,) = engine.positions(accountId);
+            address account = _account(handler.actorAt(i));
+            (uint256 size, uint256 margin,,,,,) = engine.positions(account);
             if (size < 2) {
                 continue;
             }
@@ -166,7 +166,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
                 if (fractions[f] == 0 || fractions[f] >= size) {
                     continue;
                 }
-                engineLens.previewClose(accountId, fractions[f], oraclePrice);
+                engineLens.previewClose(account, fractions[f], oraclePrice);
             }
         }
     }
@@ -176,13 +176,13 @@ contract PerpClosePreviewParityInvariantTest is Test {
         (,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
-            bytes32 accountId = _accountId(handler.actorAt(i));
-            (uint256 size, uint256 margin,,,,,) = engine.positions(accountId);
+            address account = _account(handler.actorAt(i));
+            (uint256 size, uint256 margin,,,,,) = engine.positions(account);
             if (size < 2) {
                 continue;
             }
 
-            CfdEngine.ClosePreview memory fullPreview = engineLens.previewClose(accountId, size, oraclePrice);
+            CfdEngine.ClosePreview memory fullPreview = engineLens.previewClose(account, size, oraclePrice);
             if (!fullPreview.valid) {
                 continue;
             }
@@ -193,7 +193,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
                     continue;
                 }
 
-                CfdEngine.ClosePreview memory preview = engineLens.previewClose(accountId, fractions[f], oraclePrice);
+                CfdEngine.ClosePreview memory preview = engineLens.previewClose(account, fractions[f], oraclePrice);
 
                 if (!preview.valid) {
                     CfdTypes.CloseInvalidReason r = preview.invalidReason;
@@ -213,13 +213,13 @@ contract PerpClosePreviewParityInvariantTest is Test {
         (,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
-            bytes32 accountId = _accountId(handler.actorAt(i));
-            (uint256 size, uint256 margin,,,,,) = engine.positions(accountId);
+            address account = _account(handler.actorAt(i));
+            (uint256 size, uint256 margin,,,,,) = engine.positions(account);
             if (size == 0) {
                 continue;
             }
 
-            _checkPayoutSplit(accountId, size, oraclePrice, vaultDepthUsdc, true);
+            _checkPayoutSplit(account, size, oraclePrice, vaultDepthUsdc, true);
 
             if (size < 2) {
                 continue;
@@ -230,19 +230,19 @@ contract PerpClosePreviewParityInvariantTest is Test {
                 if (fractions[f] == 0 || fractions[f] >= size) {
                     continue;
                 }
-                _checkPayoutSplit(accountId, fractions[f], oraclePrice, vaultDepthUsdc, false);
+                _checkPayoutSplit(account, fractions[f], oraclePrice, vaultDepthUsdc, false);
             }
         }
     }
 
     function _checkPayoutSplit(
-        bytes32 accountId,
+        address account,
         uint256 sizeDelta,
         uint256 oraclePrice,
         uint256 vaultDepthUsdc,
         bool isFullClose
     ) internal view {
-        CfdEngine.ClosePreview memory preview = engineLens.previewClose(accountId, sizeDelta, oraclePrice);
+        CfdEngine.ClosePreview memory preview = engineLens.previewClose(account, sizeDelta, oraclePrice);
 
         if (!preview.valid || (preview.immediatePayoutUsdc == 0 && preview.deferredTraderCreditUsdc == 0)) {
             return;
@@ -339,10 +339,10 @@ contract PerpClosePreviewParityInvariantTest is Test {
         return price == 0 ? 1e8 : price;
     }
 
-    function _accountId(
+    function _account(
         address actor
-    ) internal pure returns (bytes32) {
-        return bytes32(uint256(uint160(actor)));
+    ) internal pure returns (address) {
+        return actor;
     }
 
 }

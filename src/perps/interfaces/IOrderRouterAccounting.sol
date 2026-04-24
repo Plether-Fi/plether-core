@@ -40,17 +40,17 @@ interface IOrderRouterAccounting {
 
     /// @notice Prunes any zero-remaining committed-order reservations out of the router's margin queue for an account.
     function syncMarginQueue(
-        bytes32 accountId
+        address account
     ) external;
 
     /// @notice Returns aggregate queued escrow attributed to an account across all pending orders.
     function getAccountEscrow(
-        bytes32 accountId
+        address account
     ) external view returns (AccountEscrowView memory escrow);
 
     /// @notice Returns the current account-queue head id for pending-order traversal.
     function accountHeadOrderId(
-        bytes32 accountId
+        address account
     ) external view returns (uint64 headOrderId);
 
     /// @notice Returns the pending-order view for a specific order plus the next account-queue order id.
@@ -60,13 +60,13 @@ interface IOrderRouterAccounting {
 
     /// @notice Returns the number of pending orders currently attributed to an account.
     function pendingOrderCounts(
-        bytes32 accountId
+        address account
     ) external view returns (uint256);
 
     /// @notice Returns the current router-maintained margin-queue order ids for an account in FIFO order.
     /// @dev This is a structural traversal helper; committed-margin value remains owned by the clearinghouse reservation ledger.
     function getMarginReservationIds(
-        bytes32 accountId
+        address account
     ) external view returns (uint64[] memory orderIds);
 
 }

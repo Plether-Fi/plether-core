@@ -28,33 +28,33 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
 
     /// @notice Returns detailed clearinghouse bucket and reachability state for an account.
     function getAccountCollateralView(
-        bytes32 accountId
+        address account
     ) external view returns (CfdEngine.AccountCollateralView memory viewData) {
         IMarginClearinghouse.AccountUsdcBuckets memory buckets =
-            engineContract.clearinghouse().getAccountUsdcBuckets(accountId);
-        viewData.settlementBalanceUsdc = MarginClearinghouseAccountingLib.getSettlementBalanceUsdc(buckets);
+            engineContract.clearinghouse().getAccountUsdcBuckets(account);
+        viewData.settlementBalanceUsdc = buckets.settlementBalanceUsdc;
         viewData.lockedMarginUsdc = buckets.totalLockedMarginUsdc;
-        viewData.activePositionMarginUsdc = MarginClearinghouseAccountingLib.getPositionMarginUsdc(buckets);
-        viewData.otherLockedMarginUsdc = MarginClearinghouseAccountingLib.getQueuedReservedUsdc(buckets);
-        viewData.freeSettlementUsdc = MarginClearinghouseAccountingLib.getFreeSettlementUsdc(buckets);
-        viewData.closeReachableUsdc = MarginClearinghouseAccountingLib.getFreeSettlementUsdc(buckets);
+        viewData.activePositionMarginUsdc = buckets.activePositionMarginUsdc;
+        viewData.otherLockedMarginUsdc = buckets.otherLockedMarginUsdc;
+        viewData.freeSettlementUsdc = buckets.freeSettlementUsdc;
+        viewData.closeReachableUsdc = buckets.freeSettlementUsdc;
         viewData.terminalReachableUsdc = MarginClearinghouseAccountingLib.getTerminalReachableUsdc(buckets);
-        viewData.accountEquityUsdc = engineContract.clearinghouse().getAccountEquityUsdc(accountId);
-        viewData.freeBuyingPowerUsdc = engineContract.clearinghouse().getFreeBuyingPowerUsdc(accountId);
-        viewData.deferredTraderCreditUsdc = engineContract.deferredTraderCreditUsdc(accountId);
+        viewData.accountEquityUsdc = engineContract.clearinghouse().getAccountEquityUsdc(account);
+        viewData.freeBuyingPowerUsdc = engineContract.clearinghouse().getFreeBuyingPowerUsdc(account);
+        viewData.deferredTraderCreditUsdc = engineContract.deferredTraderCreditUsdc(account);
     }
 
     /// @notice Returns the current withdrawable USDC for an account under engine-side guards.
     /// @dev Open-position withdrawals are limited by free buying power, degraded mode, mark freshness,
     ///      pending carry, and the post-withdraw initial margin requirement.
     function getWithdrawableUsdc(
-        bytes32 accountId
+        address account
     ) external view returns (uint256 withdrawableUsdc) {
         IMarginClearinghouse.AccountUsdcBuckets memory buckets =
-            engineContract.clearinghouse().getAccountUsdcBuckets(accountId);
-        withdrawableUsdc = MarginClearinghouseAccountingLib.getFreeSettlementUsdc(buckets);
+            engineContract.clearinghouse().getAccountUsdcBuckets(account);
+        withdrawableUsdc = buckets.freeSettlementUsdc;
 
-        CfdTypes.Position memory pos = _position(accountId);
+        CfdTypes.Position memory pos = _position(account);
         if (pos.size == 0) {
             return withdrawableUsdc;
         }
@@ -85,7 +85,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         }
 
         uint256 reachableUsdc = MarginClearinghouseAccountingLib.getGenericReachableUsdc(buckets);
-        uint256 pendingCarryUsdc = engineContract.unsettledCarryUsdc(accountId);
+        uint256 pendingCarryUsdc = engineContract.unsettledCarryUsdc(account);
         if (pos.size > 0 && pos.lastCarryTimestamp > 0 && block.timestamp > pos.lastCarryTimestamp) {
             uint256 lpBackedNotionalUsdc =
                 PositionRiskAccountingLib.computeLpBackedNotionalUsdc(pos.size, price, reachableUsdc);
@@ -95,7 +95,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         }
         if (pendingCarryUsdc > 0) {
             MarginClearinghouseAccountingLib.SettlementConsumption memory carryConsumption =
-                MarginClearinghouseAccountingLib.planFundingLossConsumption(buckets, pendingCarryUsdc);
+                MarginClearinghouseAccountingLib.planCarryLossConsumption(buckets, pendingCarryUsdc);
             buckets = MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(
                 buckets.settlementBalanceUsdc - carryConsumption.totalConsumedUsdc,
                 buckets.activePositionMarginUsdc - carryConsumption.activeMarginConsumedUsdc,
@@ -105,7 +105,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
             pendingCarryUsdc = carryConsumption.uncoveredUsdc;
         }
 
-        withdrawableUsdc = MarginClearinghouseAccountingLib.getFreeSettlementUsdc(buckets);
+        withdrawableUsdc = buckets.freeSettlementUsdc;
         reachableUsdc = MarginClearinghouseAccountingLib.getGenericReachableUsdc(buckets);
         CfdTypes.RiskParams memory params = _riskParams();
         uint256 currentMarginBps = engineContract.isFadWindow() ? params.fadMarginBps : params.maintMarginBps;
@@ -126,9 +126,9 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
 
     /// @notice Returns a compact accounting split for account custody, escrow, and deferred balances.
     function getAccountLedgerView(
-        bytes32 accountId
+        address account
     ) external view returns (AccountLensViewTypes.AccountLedgerView memory viewData) {
-        AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = _buildAccountLedgerSnapshot(accountId);
+        AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = _buildAccountLedgerSnapshot(account);
         viewData.settlementBalanceUsdc = snapshot.settlementBalanceUsdc;
         viewData.freeSettlementUsdc = snapshot.freeSettlementUsdc;
         viewData.activePositionMarginUsdc = snapshot.activePositionMarginUsdc;
@@ -141,36 +141,36 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
 
     /// @notice Returns the full account ledger snapshot used by tests and richer read paths.
     function getAccountLedgerSnapshot(
-        bytes32 accountId
+        address account
     ) external view returns (AccountLensViewTypes.AccountLedgerSnapshot memory snapshot) {
-        return _buildAccountLedgerSnapshot(accountId);
+        return _buildAccountLedgerSnapshot(account);
     }
 
     function _buildAccountLedgerSnapshot(
-        bytes32 accountId
+        address account
     ) internal view returns (AccountLensViewTypes.AccountLedgerSnapshot memory snapshot) {
-        CfdTypes.Position memory pos = _position(accountId);
+        CfdTypes.Position memory pos = _position(account);
         IMarginClearinghouse clearinghouse = engineContract.clearinghouse();
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(accountId);
-        IMarginClearinghouse.LockedMarginBuckets memory lockedBuckets = clearinghouse.getLockedMarginBuckets(accountId);
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(account);
+        IMarginClearinghouse.LockedMarginBuckets memory lockedBuckets = clearinghouse.getLockedMarginBuckets(account);
         IOrderRouterAccounting.AccountEscrowView memory escrow =
-            IOrderRouterAccounting(engineContract.orderRouter()).getAccountEscrow(accountId);
+            IOrderRouterAccounting(engineContract.orderRouter()).getAccountEscrow(account);
 
-        snapshot.settlementBalanceUsdc = MarginClearinghouseAccountingLib.getSettlementBalanceUsdc(buckets);
-        snapshot.freeSettlementUsdc = MarginClearinghouseAccountingLib.getFreeSettlementUsdc(buckets);
-        snapshot.activePositionMarginUsdc = MarginClearinghouseAccountingLib.getPositionMarginUsdc(buckets);
-        snapshot.otherLockedMarginUsdc = MarginClearinghouseAccountingLib.getQueuedReservedUsdc(buckets);
+        snapshot.settlementBalanceUsdc = buckets.settlementBalanceUsdc;
+        snapshot.freeSettlementUsdc = buckets.freeSettlementUsdc;
+        snapshot.activePositionMarginUsdc = buckets.activePositionMarginUsdc;
+        snapshot.otherLockedMarginUsdc = buckets.otherLockedMarginUsdc;
         snapshot.positionMarginBucketUsdc = lockedBuckets.positionMarginUsdc;
         snapshot.committedOrderMarginBucketUsdc = lockedBuckets.committedOrderMarginUsdc;
         snapshot.reservedSettlementBucketUsdc = lockedBuckets.reservedSettlementUsdc;
         snapshot.executionEscrowUsdc = escrow.executionBountyUsdc;
         snapshot.committedMarginUsdc = escrow.committedMarginUsdc;
-        snapshot.deferredTraderCreditUsdc = engineContract.deferredTraderCreditUsdc(accountId);
+        snapshot.deferredTraderCreditUsdc = engineContract.deferredTraderCreditUsdc(account);
         snapshot.pendingOrderCount = escrow.pendingOrderCount;
-        snapshot.closeReachableUsdc = MarginClearinghouseAccountingLib.getFreeSettlementUsdc(buckets);
+        snapshot.closeReachableUsdc = buckets.freeSettlementUsdc;
         snapshot.terminalReachableUsdc = MarginClearinghouseAccountingLib.getTerminalReachableUsdc(buckets);
-        snapshot.accountEquityUsdc = clearinghouse.getAccountEquityUsdc(accountId);
-        snapshot.freeBuyingPowerUsdc = clearinghouse.getFreeBuyingPowerUsdc(accountId);
+        snapshot.accountEquityUsdc = clearinghouse.getAccountEquityUsdc(account);
+        snapshot.freeBuyingPowerUsdc = clearinghouse.getFreeBuyingPowerUsdc(account);
 
         if (pos.size == 0) {
             return snapshot;
@@ -186,7 +186,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
                 lpBackedNotionalUsdc, params.baseCarryBps, block.timestamp - pos.lastCarryTimestamp
             );
         }
-        pendingCarryUsdc += engineContract.unsettledCarryUsdc(accountId);
+        pendingCarryUsdc += engineContract.unsettledCarryUsdc(account);
         PositionRiskAccountingLib.PositionRiskState memory riskState =
             PositionRiskAccountingLib.buildPositionRiskStateWithCarry(
                 pos,
@@ -208,11 +208,11 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
     }
 
     function _position(
-        bytes32 accountId
+        address account
     ) internal view returns (CfdTypes.Position memory pos) {
         (pos.size, pos.margin, pos.entryPrice, pos.maxProfitUsdc, pos.side, pos.lastUpdateTime, pos.vpiAccrued) =
-            engineContract.positions(accountId);
-        pos.lastCarryTimestamp = engineContract.getPositionLastCarryTimestamp(accountId);
+            engineContract.positions(account);
+        pos.lastCarryTimestamp = engineContract.getPositionLastCarryTimestamp(account);
     }
 
     function _riskParams() internal view returns (CfdTypes.RiskParams memory params) {

@@ -31,10 +31,10 @@ library CfdEnginePlanLib {
     // ──────────────────────────────────────────────
 
     function computeOpenMarginAfter(
-        uint256 marginAfterFunding,
+        uint256 marginAfterCarry,
         int256 netMarginChange
     ) internal pure returns (bool drained, uint256 marginAfter) {
-        int256 computedMarginAfterSigned = int256(marginAfterFunding) + netMarginChange;
+        int256 computedMarginAfterSigned = int256(marginAfterCarry) + netMarginChange;
         if (computedMarginAfterSigned < 0) {
             return (true, 0);
         }
@@ -42,13 +42,13 @@ library CfdEnginePlanLib {
     }
 
     function computeSideTotalMarginAfterOpen(
-        uint256 sideTotalMarginAfterFunding,
-        uint256 effectivePositionMarginAfterFunding,
+        uint256 sideTotalMarginAfterCarry,
+        uint256 effectivePositionMarginAfterCarry,
         uint256 positionMarginAfterOpen
     ) internal pure returns (uint256 sideTotalMarginAfterOpen) {
         return uint256(
-            int256(sideTotalMarginAfterFunding) + int256(positionMarginAfterOpen)
-                - int256(effectivePositionMarginAfterFunding)
+            int256(sideTotalMarginAfterCarry) + int256(positionMarginAfterOpen)
+                - int256(effectivePositionMarginAfterCarry)
         );
     }
 
@@ -204,7 +204,7 @@ library CfdEnginePlanLib {
     ) internal pure returns (CfdEnginePlanTypes.OpenDelta memory delta) {
         uint256 price = executionPrice > snap.capPrice ? snap.capPrice : executionPrice;
         CfdEnginePlanTypes.RawSnapshot memory effectiveSnap = snap;
-        delta.accountId = order.accountId;
+        delta.account = order.account;
         delta.sizeDelta = order.sizeDelta;
         delta.price = price;
         delta.posSide = order.side;
@@ -295,7 +295,7 @@ library CfdEnginePlanLib {
         } else {
             delta.sideEntryNotionalDelta = -int256(openState.oldEntryNotional - openState.newEntryNotional);
         }
-        delta.sideEntryFundingContribution = 0;
+        delta.sideEntryCarryContribution = 0;
         delta.sideMaxProfitIncrease = openState.addedMaxProfitUsdc;
 
         delta.executionFeeUsdc = openState.executionFeeUsdc;
@@ -339,13 +339,12 @@ library CfdEnginePlanLib {
         }
 
         MarginClearinghouseAccountingLib.SettlementConsumption memory consumption =
-            MarginClearinghouseAccountingLib.planFundingLossConsumption(snap.accountBuckets, pendingCarryUsdc);
+            MarginClearinghouseAccountingLib.planCarryLossConsumption(snap.accountBuckets, pendingCarryUsdc);
         if (consumption.uncoveredUsdc > 0) {
             return true;
         }
 
-        uint256 settlementBalanceUsdc = MarginClearinghouseAccountingLib.getSettlementBalanceUsdc(snap.accountBuckets)
-            - consumption.totalConsumedUsdc;
+        uint256 settlementBalanceUsdc = snap.accountBuckets.settlementBalanceUsdc - consumption.totalConsumedUsdc;
         snap.lockedBuckets.positionMarginUsdc -= consumption.activeMarginConsumedUsdc;
         snap.position.margin -= consumption.activeMarginConsumedUsdc;
         snap.vaultAssetsUsdc += pendingCarryUsdc;
@@ -451,7 +450,7 @@ library CfdEnginePlanLib {
         uint64 publishTime
     ) internal pure returns (CfdEnginePlanTypes.CloseDelta memory delta) {
         uint256 price = executionPrice > snap.capPrice ? snap.capPrice : executionPrice;
-        delta.accountId = order.accountId;
+        delta.account = order.account;
         delta.sizeDelta = order.sizeDelta;
         delta.price = price;
         uint256 carryTimeDelta = snap.position.lastCarryTimestamp > 0
@@ -644,7 +643,7 @@ library CfdEnginePlanLib {
         uint256 adjustedPosMargin = snap.lockedBuckets.positionMarginUsdc > marginToFreeUsdc
             ? snap.lockedBuckets.positionMarginUsdc - marginToFreeUsdc
             : 0;
-        uint256 settlementBalance = MarginClearinghouseAccountingLib.getSettlementBalanceUsdc(snap.accountBuckets);
+        uint256 settlementBalance = snap.accountBuckets.settlementBalanceUsdc;
         if (includeOtherLockedMargin) {
             return MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(
                 settlementBalance,
@@ -672,7 +671,7 @@ library CfdEnginePlanLib {
         uint64 publishTime
     ) internal pure returns (CfdEnginePlanTypes.LiquidationDelta memory delta) {
         uint256 price = executionPrice > snap.capPrice ? snap.capPrice : executionPrice;
-        delta.accountId = snap.accountId;
+        delta.account = snap.account;
         delta.price = price;
 
         CfdTypes.Position memory pos = snap.position;

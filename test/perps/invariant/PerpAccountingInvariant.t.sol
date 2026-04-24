@@ -59,36 +59,34 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
 
     function invariant_LiquidatedActorsHaveNoPendingOrders() public view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
-            bytes32 accountId = _accountId(handler.actorAt(i));
-            PerpGhostLedger.LiquidationSnapshot memory snapshot = handler.liquidationSnapshot(accountId);
+            address account = _account(handler.actorAt(i));
+            PerpGhostLedger.LiquidationSnapshot memory snapshot = handler.liquidationSnapshot(account);
             if (!snapshot.liquidated) {
                 continue;
             }
 
-            assertEq(router.pendingOrderCounts(accountId), 0, "Liquidated accounts must not keep pending orders");
+            assertEq(router.pendingOrderCounts(account), 0, "Liquidated accounts must not keep pending orders");
         }
     }
 
     function invariant_LiquidatedActorsHaveNoLiveReserves() public view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
-            bytes32 accountId = _accountId(handler.actorAt(i));
-            PerpGhostLedger.LiquidationSnapshot memory snapshot = handler.liquidationSnapshot(accountId);
+            address account = _account(handler.actorAt(i));
+            PerpGhostLedger.LiquidationSnapshot memory snapshot = handler.liquidationSnapshot(account);
             if (!snapshot.liquidated) {
                 continue;
             }
 
-            assertEq(
-                handler.accountRouterEscrow(accountId), 0, "Liquidated accounts must not retain router-held escrow"
-            );
-            assertEq(handler.accountLiveReserveCount(accountId), 0, "Liquidated accounts must not retain live reserves");
+            assertEq(handler.accountRouterEscrow(account), 0, "Liquidated accounts must not retain router-held escrow");
+            assertEq(handler.accountLiveReserveCount(account), 0, "Liquidated accounts must not retain live reserves");
         }
     }
 
     function invariant_LiquidatedActorsCannotRecoverWalletUsdc() public view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address actor = handler.actorAt(i);
-            bytes32 accountId = _accountId(actor);
-            PerpGhostLedger.LiquidationSnapshot memory snapshot = handler.liquidationSnapshot(accountId);
+            address account = _account(actor);
+            PerpGhostLedger.LiquidationSnapshot memory snapshot = handler.liquidationSnapshot(account);
             if (!snapshot.liquidated) {
                 continue;
             }
@@ -100,14 +98,14 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
     function invariant_BadDebtOnlyAppearsAfterAccountEscrowExhaustion() public view {
         uint256 currentBadDebt = engine.accumulatedBadDebtUsdc();
         for (uint256 i = 0; i < handler.actorCount(); i++) {
-            bytes32 accountId = _accountId(handler.actorAt(i));
-            PerpGhostLedger.LiquidationSnapshot memory snapshot = handler.liquidationSnapshot(accountId);
+            address account = _account(handler.actorAt(i));
+            PerpGhostLedger.LiquidationSnapshot memory snapshot = handler.liquidationSnapshot(account);
             if (!snapshot.liquidated || currentBadDebt <= snapshot.badDebtUsdc) {
                 continue;
             }
 
             assertEq(
-                handler.accountRouterEscrow(accountId),
+                handler.accountRouterEscrow(account),
                 0,
                 "Bad debt growth cannot coexist with same-account router escrow"
             );
@@ -117,10 +115,10 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
     function invariant_GhostCommittedMarginMatchesAccountEscrow() public view {
         uint256 ghostTotalCommittedMargin;
         for (uint256 i = 0; i < handler.actorCount(); i++) {
-            bytes32 accountId = _accountId(handler.actorAt(i));
-            uint256 ghostCommittedMargin = handler.committedMarginSnapshot(accountId);
-            uint256 liveCommittedMargin = router.getAccountEscrow(accountId).committedMarginUsdc;
-            uint256 reservationCommittedMargin = handler.accountActiveReservationCommittedMargin(accountId);
+            address account = _account(handler.actorAt(i));
+            uint256 ghostCommittedMargin = handler.committedMarginSnapshot(account);
+            uint256 liveCommittedMargin = router.getAccountEscrow(account).committedMarginUsdc;
+            uint256 reservationCommittedMargin = handler.accountActiveReservationCommittedMargin(account);
 
             assertEq(ghostCommittedMargin, liveCommittedMargin, "Ghost committed margin must match account escrow");
             assertEq(
@@ -140,9 +138,9 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
 
     function invariant_OrderEscrowModuleSummariesMatchAccountEscrow() public view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
-            bytes32 accountId = _accountId(handler.actorAt(i));
-            IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
-            IOrderRouterAccounting.PendingOrderView[] memory pending = _pendingOrders(accountId);
+            address account = _account(handler.actorAt(i));
+            IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(account);
+            IOrderRouterAccounting.PendingOrderView[] memory pending = _pendingOrders(account);
 
             uint256 pendingCloseSize;
             for (uint256 j = 0; j < pending.length; j++) {
@@ -153,7 +151,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
 
             assertEq(pending.length, escrow.pendingOrderCount, "Pending order count must match account escrow");
             assertEq(
-                clearinghouse.getAccountReservationSummary(accountId).activeCommittedOrderMarginUsdc,
+                clearinghouse.getAccountReservationSummary(account).activeCommittedOrderMarginUsdc,
                 escrow.committedMarginUsdc,
                 "Committed margin summary must match account escrow"
             );
@@ -161,7 +159,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
                 escrow.executionBountyUsdc, escrow.executionBountyUsdc, "Execution bounty must remain self-consistent"
             );
             assertEq(
-                router.pendingCloseSize(accountId),
+                router.pendingCloseSize(account),
                 pendingCloseSize,
                 "Pending close size mapping must match pending-order scan"
             );
@@ -226,15 +224,15 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
 
     function invariant_AggregateReservationParityMatchesClearinghouseTotals() public view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
-            bytes32 accountId = _accountId(handler.actorAt(i));
+            address account = _account(handler.actorAt(i));
             assertEq(
-                handler.accountReservationRemainingSum(accountId),
-                handler.accountActiveReservationCommittedMargin(accountId),
+                handler.accountReservationRemainingSum(account),
+                handler.accountActiveReservationCommittedMargin(account),
                 "Committed reservation remaining sum must match clearinghouse account summary"
             );
             assertEq(
-                handler.accountReservationRemainingSum(accountId),
-                router.getAccountEscrow(accountId).committedMarginUsdc,
+                handler.accountReservationRemainingSum(account),
+                router.getAccountEscrow(account).committedMarginUsdc,
                 "Account escrow committed margin must derive from the same clearinghouse reservation source"
             );
         }
@@ -242,13 +240,13 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
 
     function invariant_ExplicitFifoReservationConsumptionUsesSuppliedIdsInOrder() public view {
         (
-            bytes32 accountId,
+            address account,
             uint256 count,
             uint256 activeCountBefore,
             uint64[5] memory ids,
             uint256[5] memory remainingBefore
         ) = handler.lastTerminalReservationInfo();
-        if (accountId == bytes32(0)) {
+        if (account == address(0)) {
             return;
         }
 
@@ -262,7 +260,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
             }
             assertEq(
                 handler.reservationAccount(ids[i]),
-                accountId,
+                account,
                 "Explicit terminal reservation ids must belong to the acted-on account"
             );
             assertGt(
@@ -313,14 +311,14 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
     }
 
     function invariant_TerminalPathExactnessOnlyTouchesExplicitReservationSet() public view {
-        (bytes32 accountId, uint256 count,, uint64[5] memory ids,) = handler.lastTerminalReservationInfo();
-        if (accountId == bytes32(0)) {
+        (address account, uint256 count,, uint64[5] memory ids,) = handler.lastTerminalReservationInfo();
+        if (account == address(0)) {
             return;
         }
 
         uint64 lastKnownOrderId = handler.lastKnownOrderId();
         for (uint64 orderId = 1; orderId <= lastKnownOrderId; orderId++) {
-            if (handler.reservationAccount(orderId) != accountId) {
+            if (handler.reservationAccount(orderId) != account) {
                 continue;
             }
             uint8 status = handler.reservationStatus(orderId);
@@ -340,12 +338,12 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
 
     function invariant_CrossViewParityMatchesReservationSummaryAndTypedBuckets() public view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
-            bytes32 accountId = _accountId(handler.actorAt(i));
+            address account = _account(handler.actorAt(i));
             AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
-                engineAccountLens.getAccountLedgerSnapshot(accountId);
+                engineAccountLens.getAccountLedgerSnapshot(account);
             IMarginClearinghouse.AccountReservationSummary memory summary =
-                clearinghouse.getAccountReservationSummary(accountId);
-            IMarginClearinghouse.LockedMarginBuckets memory buckets = clearinghouse.getLockedMarginBuckets(accountId);
+                clearinghouse.getAccountReservationSummary(account);
+            IMarginClearinghouse.LockedMarginBuckets memory buckets = clearinghouse.getLockedMarginBuckets(account);
 
             assertEq(
                 snapshot.committedMarginUsdc,
@@ -366,15 +364,15 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
 
     function invariant_PendingQueueCountsStayConsistent() public view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
-            bytes32 accountId = _accountId(handler.actorAt(i));
-            uint256 expectedCount = router.pendingOrderCounts(accountId);
-            uint256 ghostCount = handler.ghostPendingOrderCount(accountId);
+            address account = _account(handler.actorAt(i));
+            uint256 expectedCount = router.pendingOrderCounts(account);
+            uint256 ghostCount = handler.ghostPendingOrderCount(account);
 
             uint256 traversed;
             for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
                 OrderRouter.OrderRecord memory record = _orderRecord(orderId);
                 if (
-                    record.core.accountId == accountId
+                    record.core.account == account
                         && uint256(record.status) == uint256(IOrderRouterAccounting.OrderStatus.Pending)
                 ) {
                     traversed++;
@@ -388,17 +386,17 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
 
     function invariant_MarginQueueLinksAndMembershipStayConsistent() public view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
-            bytes32 accountId = _accountId(handler.actorAt(i));
-            uint64 head = router.marginHeadOrderId(accountId);
-            uint64 tail = router.marginTailOrderId(accountId);
-            uint256 expectedCount = handler.ghostPendingMarginOrderCount(accountId);
+            address account = _account(handler.actorAt(i));
+            uint64 head = router.marginHeadOrderId(account);
+            uint64 tail = router.marginTailOrderId(account);
+            uint256 expectedCount = handler.ghostPendingMarginOrderCount(account);
 
             uint256 traversed;
             uint64 current = head;
             uint64 previous;
             while (current != 0) {
                 OrderRouter.OrderRecord memory record = _orderRecord(current);
-                assertEq(record.core.accountId, accountId, "Margin queue owner must match traversed account");
+                assertEq(record.core.account, account, "Margin queue owner must match traversed account");
                 assertEq(
                     uint256(record.status),
                     uint256(IOrderRouterAccounting.OrderStatus.Pending),
@@ -433,17 +431,17 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
     function _sumPendingExecutionBounties() internal view returns (uint256 totalBounties) {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
             OrderRouter.OrderRecord memory record = _orderRecord(orderId);
-            if (record.core.accountId == bytes32(0) || record.core.sizeDelta == 0) {
+            if (record.core.account == address(0) || record.core.sizeDelta == 0) {
                 continue;
             }
             totalBounties += record.executionBountyUsdc;
         }
     }
 
-    function _accountId(
+    function _account(
         address actor
-    ) internal pure returns (bytes32) {
-        return bytes32(uint256(uint160(actor)));
+    ) internal pure returns (address) {
+        return actor;
     }
 
 }

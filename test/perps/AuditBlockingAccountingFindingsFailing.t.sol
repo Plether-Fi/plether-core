@@ -155,13 +155,13 @@ contract AuditBlockingAccountingFindingsFailing_SolvencyTiming is BasePerpTest {
         _fundTrader(bullTraderB, 400_000e6);
         _fundTrader(bearTrader, 100_000e6);
 
-        bytes32 bullIdA = bytes32(uint256(uint160(bullTraderA)));
-        bytes32 bullIdB = bytes32(uint256(uint160(bullTraderB)));
-        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
+        address bullIdA = bullTraderA;
+        address bullIdB = bullTraderB;
+        address bearAccount = bearTrader;
 
         _open(bullIdA, CfdTypes.Side.BULL, 390_000e18, 6500e6, 1e8);
         _open(bullIdB, CfdTypes.Side.BULL, 10_000e18, 300_000e6, 1e8);
-        _open(bearId, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
+        _open(bearAccount, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
 
         vm.warp(block.timestamp + 180 days);
         vm.prank(address(router));
@@ -175,7 +175,7 @@ contract AuditBlockingAccountingFindingsFailing_SolvencyTiming is BasePerpTest {
             uint256 syncedBullMargin
         ) = harness.previewEffectiveAssetsWithoutMarginSync(
             CfdTypes.Order({
-                accountId: bullIdA,
+                account: bullIdA,
                 sizeDelta: 390_000e18,
                 marginDelta: 0,
                 targetPrice: 0,
@@ -208,13 +208,13 @@ contract AuditBlockingAccountingFindingsFailing_PartialCloseWithCommittedMargin 
     address constant KEEPER = address(0xC0FFEE);
 
     function test_H1_PartialCloseWithPendingOrderDoesNotRevert() public {
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
-        bytes32 counterId = bytes32(uint256(uint160(counterparty)));
+        address account = trader;
+        address counterAccount = counterparty;
 
         _fundTrader(trader, 10_000e6);
         _fundTrader(counterparty, 50_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
-        _open(counterId, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
+        _open(counterAccount, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 4000e6, type(uint256).max, false);
@@ -222,23 +222,23 @@ contract AuditBlockingAccountingFindingsFailing_PartialCloseWithCommittedMargin 
         uint256 committedBefore = _remainingCommittedMargin(1);
         assertGt(committedBefore, 0, "Should have committed margin from pending open order");
 
-        uint256 freeSettlement = _freeSettlementUsdc(accountId);
+        uint256 freeSettlement = _freeSettlementUsdc(account);
         assertLt(freeSettlement, 1100e6, "Free settlement should be small after committing margin");
 
-        _close(accountId, CfdTypes.Side.BULL, 50_000e18, 1.05e8);
+        _close(account, CfdTypes.Side.BULL, 50_000e18, 1.05e8);
 
-        (uint256 sizeAfter,,,,,,) = engine.positions(accountId);
+        (uint256 sizeAfter,,,,,,) = engine.positions(account);
         assertEq(sizeAfter, 50_000e18, "Partial close should leave half the position");
     }
 
     function test_H1_PartialCloseLossMustNotConsumeQueuedCommittedMargin() public {
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
-        bytes32 counterId = bytes32(uint256(uint160(counterparty)));
+        address account = trader;
+        address counterAccount = counterparty;
 
         _fundTrader(trader, 10_000e6);
         _fundTrader(counterparty, 50_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
-        _open(counterId, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
+        _open(counterAccount, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 4000e6, type(uint256).max, false);
@@ -246,7 +246,7 @@ contract AuditBlockingAccountingFindingsFailing_PartialCloseWithCommittedMargin 
         uint256 committedBefore = _remainingCommittedMargin(1);
         assertEq(committedBefore, 4000e6, "Committed margin should match order margin delta");
 
-        CfdEngine.ClosePreview memory preview = engineLens.previewClose(accountId, 50_000e18, 1.08e8);
+        CfdEngine.ClosePreview memory preview = engineLens.previewClose(account, 50_000e18, 1.08e8);
 
         assertFalse(preview.valid, "Preview should reject a partial close that would need queued committed margin");
         assertEq(
@@ -277,41 +277,41 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
     address counterparty = address(0xBEA3);
     address constant KEEPER = address(0xC0FFEE);
 
-    function _setupFullyUtilized() internal returns (bytes32 accountId, bytes32 counterId) {
-        accountId = bytes32(uint256(uint160(trader)));
-        counterId = bytes32(uint256(uint160(counterparty)));
+    function _setupFullyUtilized() internal returns (address account, address counterAccount) {
+        account = trader;
+        counterAccount = counterparty;
 
         _fundTrader(trader, 5000e6);
         _fundTrader(counterparty, 50_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
-        _open(counterId, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
+        _open(counterAccount, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
 
-        assertEq(_freeSettlementUsdc(accountId), 0, "Trader should be fully utilized before commit");
+        assertEq(_freeSettlementUsdc(account), 0, "Trader should be fully utilized before commit");
     }
 
-    function _setupCloseBountyBacked() internal returns (bytes32 accountId, bytes32 counterId) {
-        accountId = bytes32(uint256(uint160(trader)));
-        counterId = bytes32(uint256(uint160(counterparty)));
+    function _setupCloseBountyBacked() internal returns (address account, address counterAccount) {
+        account = trader;
+        counterAccount = counterparty;
 
         _fundTrader(trader, 5001e6);
         _fundTrader(counterparty, 50_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
-        _open(counterId, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
+        _open(counterAccount, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
 
         assertEq(
-            _freeSettlementUsdc(accountId), 1e6, "Setup should leave one USDC of free settlement before close escrow"
+            _freeSettlementUsdc(account), 1e6, "Setup should leave one USDC of free settlement before close escrow"
         );
     }
 
     function test_H2_FullyUtilizedTraderCanSubmitCloseOrderAgainstPositionMargin() public {
-        (bytes32 accountId,) = _setupFullyUtilized();
+        (address account,) = _setupFullyUtilized();
 
-        (, uint256 marginBefore,,,,,) = engine.positions(accountId);
+        (, uint256 marginBefore,,,,,) = engine.positions(account);
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
 
-        (, uint256 marginAfter,,,,,) = engine.positions(accountId);
+        (, uint256 marginAfter,,,,,) = engine.positions(account);
         assertEq(_executionBountyReserve(1), 200_000, "Close order should still escrow the configured keeper bounty");
         assertEq(
             marginAfter,
@@ -321,14 +321,14 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
     }
 
     function test_H2_HeadCloseOrderMustBeEconomicallyBackedAtCommit() public {
-        (bytes32 accountId,) = _setupCloseBountyBacked();
+        (address account,) = _setupCloseBountyBacked();
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
 
         uint64 headOrderId = router.nextExecuteId();
         uint256 reservedBounty = _executionBountyReserve(headOrderId);
-        uint256 freeSettlement = _freeSettlementUsdc(accountId);
+        uint256 freeSettlement = _freeSettlementUsdc(account);
 
         assertGe(
             reservedBounty + freeSettlement,
@@ -363,7 +363,7 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
     }
 
     function test_H2_ExpiredHeadCloseMustStillPayKeeper() public {
-        (bytes32 accountId,) = _setupCloseBountyBacked();
+        (address account,) = _setupCloseBountyBacked();
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
@@ -388,7 +388,7 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
         vm.warp(block.timestamp + 61);
 
         uint256 keeperBalanceBefore = usdc.balanceOf(KEEPER);
-        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(bytes32(uint256(uint160(KEEPER))));
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(KEEPER);
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(1e8));
 
@@ -400,20 +400,20 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
             keeperBounty, 0, "Expired head close should credit the clearer in clearinghouse custody, not the wallet"
         );
         assertEq(
-            clearinghouse.balanceUsdc(bytes32(uint256(uint160(KEEPER)))) - keeperSettlementBefore,
+            clearinghouse.balanceUsdc(KEEPER) - keeperSettlementBefore,
             200_000,
             "Expired head close should still pay the configured bounty to the clearer"
         );
 
         assertEq(
-            _freeSettlementUsdc(accountId),
+            _freeSettlementUsdc(account),
             800_000,
             "Only the committed close bounty slice should leave prefunded free settlement"
         );
     }
 
     function test_H2_LiquidationWithQueuedCloseOrderTransfersOnlyEscrowedBounty() public {
-        (bytes32 accountId,) = _setupCloseBountyBacked();
+        (address account,) = _setupCloseBountyBacked();
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
@@ -424,9 +424,9 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
         priceData[0] = abi.encode(uint256(1.96e8));
 
         vm.prank(KEEPER);
-        router.executeLiquidation(accountId, priceData);
+        router.executeLiquidation(account, priceData);
 
-        (uint256 sizeAfter,,,,,,) = engine.positions(accountId);
+        (uint256 sizeAfter,,,,,,) = engine.positions(account);
         assertEq(sizeAfter, 0, "Position should be liquidated");
 
         assertEq(
@@ -456,12 +456,12 @@ contract AuditBlockingAccountingFindingsFailing_StaleSeniorYield is BasePerpTest
 
     function test_L1_FinalizeSeniorRate_StaleMarkMustNotAccrueYield() public {
         address trader = address(0x3333);
-        bytes32 traderId = bytes32(uint256(uint160(trader)));
+        address traderAccount = trader;
 
         _fundSenior(seniorLp, 200_000e6);
         _fundJunior(juniorLp, 200_000e6);
         _fundTrader(trader, 50_000e6);
-        _open(traderId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(traderAccount, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
         uint256 unpaidBefore = pool.unpaidSeniorYield();
 

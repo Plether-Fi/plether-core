@@ -37,7 +37,7 @@ contract TimelockPauseTest is BasePerpTest {
         usdc.mint(alice, 50_000 * 1e6);
         vm.startPrank(alice);
         usdc.approve(address(clearinghouse), type(uint256).max);
-        clearinghouse.deposit(bytes32(uint256(uint160(alice))), 50_000 * 1e6);
+        clearinghouse.deposit(alice, 50_000 * 1e6);
         vm.deal(alice, 10 ether);
         vm.stopPrank();
     }
@@ -443,13 +443,13 @@ contract TimelockPauseTest is BasePerpTest {
 
         routerAdmin.pause();
 
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
         bytes[] memory pythData = new bytes[](1);
         pythData[0] = abi.encode(1.98e8);
 
-        router.executeLiquidation(accountId, pythData);
+        router.executeLiquidation(account, pythData);
 
-        (uint256 size,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0);
     }
 

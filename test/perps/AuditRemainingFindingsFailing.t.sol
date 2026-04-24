@@ -19,25 +19,25 @@ contract AuditRemainingFindingsFailing is BasePerpTest {
     address attacker = address(0xBAD);
 
     function test_H1_UserCanAddMarginWithoutChangingSize() public {
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
         _fundTrader(alice, 50_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
 
-        (, uint256 marginBefore,,,,,) = engine.positions(accountId);
+        (, uint256 marginBefore,,,,,) = engine.positions(account);
         vm.prank(alice);
-        engine.addMargin(accountId, 500e6);
+        engine.addMargin(account, 500e6);
 
-        (, uint256 margin,,,,,) = engine.positions(accountId);
+        (, uint256 margin,,,,,) = engine.positions(account);
         assertEq(margin, marginBefore + 500e6, "User should be able to add margin without changing size");
     }
 
     function test_M1_ExecutionFeesAreProtocolRevenue() public {
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
         _fundTrader(alice, 50_000e6);
 
         uint256 equityBefore = pool.seniorPrincipal() + pool.juniorPrincipal();
 
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
         bytes[] memory priceData = new bytes[](1);
@@ -56,23 +56,23 @@ contract AuditRemainingFindingsFailing is BasePerpTest {
     }
 
     function test_H2_LiquidationMustRespectFreeUsdcCollateral() public {
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
         _fundTrader(alice, 1000e6);
-        _open(accountId, CfdTypes.Side.BULL, 20_000e18, 312e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 20_000e18, 312e6, 1e8);
         uint256 vaultDepth = pool.totalAssets();
 
         vm.prank(address(router));
         vm.expectRevert(CfdEngine.CfdEngine__PositionIsSolvent.selector);
-        engine.liquidatePosition(accountId, 99_500_000, vaultDepth, uint64(block.timestamp));
+        engine.liquidatePosition(account, 99_500_000, vaultDepth, uint64(block.timestamp));
     }
 
     function test_H3_OperatorCannotSeizeToArbitraryRecipient() public {
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
         _fundTrader(alice, 1000e6);
 
         vm.prank(address(router));
         vm.expectRevert();
-        clearinghouse.seizeUsdc(accountId, 100e6, attacker);
+        clearinghouse.seizeUsdc(account, 100e6, attacker);
     }
 
 }
@@ -222,10 +222,10 @@ contract AuditRemainingFindingsFailing_StaleOracleExecution is BasePerpTest {
 
     function test_C2_ExecutingOlderOrderCannotRollbackMarkPriceForWithdrawal() public {
         address trader = address(0xB0B);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         _fundTrader(trader, 1500e6);
         vm.deal(trader, 1 ether);
-        _open(accountId, CfdTypes.Side.BULL, 20_000e18, 1000e6, 100_000_000);
+        _open(account, CfdTypes.Side.BULL, 20_000e18, 1000e6, 100_000_000);
 
         uint64 commitTime = uint64(block.timestamp + 1000);
         uint64 stalePublishTime = commitTime + 6;
@@ -258,7 +258,7 @@ contract AuditRemainingFindingsFailing_StaleOracleExecution is BasePerpTest {
 
         vm.prank(trader);
         vm.expectRevert(CfdEngine.CfdEngine__WithdrawBlockedByOpenPosition.selector);
-        clearinghouse.withdraw(accountId, 500e6);
+        clearinghouse.withdraw(account, 500e6);
     }
 
 }
@@ -281,23 +281,23 @@ contract AuditRemainingFindingsFailing_CarryPathDependence is BasePerpTest {
     }
 
     function test_M4_CarryRealizationShouldBePathIndependent() public {
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
         _fundTrader(alice, 150_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 200_000e18, 100_120e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 200_000e18, 100_120e6, 1e8);
 
         uint256 snap = vm.snapshotState();
 
         vm.warp(block.timestamp + 1 days);
         vm.prank(address(router));
         engine.updateMarkPrice(120_000_000, uint64(block.timestamp));
-        _close(accountId, CfdTypes.Side.BULL, 200_000e18, 120_000_000);
-        uint256 markThenTradeBalance = clearinghouse.balanceUsdc(accountId);
+        _close(account, CfdTypes.Side.BULL, 200_000e18, 120_000_000);
+        uint256 markThenTradeBalance = clearinghouse.balanceUsdc(account);
 
         vm.revertToState(snap);
 
         vm.warp(block.timestamp + 1 days);
-        _close(accountId, CfdTypes.Side.BULL, 200_000e18, 120_000_000);
-        uint256 tradeOnlyBalance = clearinghouse.balanceUsdc(accountId);
+        _close(account, CfdTypes.Side.BULL, 200_000e18, 120_000_000);
+        uint256 tradeOnlyBalance = clearinghouse.balanceUsdc(account);
 
         assertEq(tradeOnlyBalance, markThenTradeBalance, "Carry realization should not depend on update-vs-trade path");
     }

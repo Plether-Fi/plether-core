@@ -307,12 +307,12 @@ contract GasProfileTest is Test {
         _openPosition(alice, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
 
         // Withdraw free margin so position is thinly margined
-        bytes32 aliceId = _accountId(alice);
-        uint256 balance = clearinghouse.balanceUsdc(aliceId);
-        uint256 locked = clearinghouse.lockedMarginUsdc(aliceId);
+        address aliceAccount = _account(alice);
+        uint256 balance = clearinghouse.balanceUsdc(aliceAccount);
+        uint256 locked = clearinghouse.lockedMarginUsdc(aliceAccount);
         if (balance > locked) {
             vm.prank(alice);
-            clearinghouse.withdraw(aliceId, balance - locked);
+            clearinghouse.withdraw(aliceAccount, balance - locked);
         }
 
         // Price rises → BULL loses. $1.10 = -$10k PnL on $100k notional
@@ -322,7 +322,7 @@ contract GasProfileTest is Test {
 
         vm.prank(keeper);
         uint256 g0 = gasleft();
-        router.executeLiquidation(aliceId, _pythUpdateData());
+        router.executeLiquidation(aliceAccount, _pythUpdateData());
         uint256 gas = g0 - gasleft();
         emit log_named_uint("08_executeLiquidation", gas);
     }
@@ -332,11 +332,11 @@ contract GasProfileTest is Test {
         _depositToClearinghouse(alice, 10_000e6);
         _openPosition(alice, CfdTypes.Side.BULL, 50_000e18, 3000e6, 1e8);
 
-        bytes32 aliceId = _accountId(alice);
+        address aliceAccount = _account(alice);
 
         vm.prank(alice);
         uint256 g0 = gasleft();
-        engine.addMargin(aliceId, 1000e6);
+        engine.addMargin(aliceAccount, 1000e6);
         uint256 gas = g0 - gasleft();
         emit log_named_uint("09_addMargin", gas);
     }
@@ -346,7 +346,7 @@ contract GasProfileTest is Test {
         _depositToClearinghouse(alice, 11_000e6);
         _openPosition(alice, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
 
-        bytes32 aliceId = _accountId(alice);
+        address aliceAccount = _account(alice);
 
         // Drain pool to force deferred payout
         uint256 poolAssets = IERC20(usdc).balanceOf(address(pool));
@@ -356,7 +356,7 @@ contract GasProfileTest is Test {
         // Close at profit — payout gets deferred (use external call for clean timestamp reads)
         this._closeAtPrice(alice, CfdTypes.Side.BULL, 100_000e18, int64(80_000_000));
 
-        uint256 deferred = engine.deferredTraderCreditUsdc(aliceId);
+        uint256 deferred = engine.deferredTraderCreditUsdc(aliceAccount);
         require(deferred > 0, "Setup failed: no deferred trader credit");
 
         // Replenish pool so claim can succeed
@@ -364,7 +364,7 @@ contract GasProfileTest is Test {
 
         vm.prank(alice);
         uint256 g0 = gasleft();
-        engine.claimDeferredTraderCredit(aliceId);
+        engine.claimDeferredTraderCredit(aliceAccount);
         uint256 gas = g0 - gasleft();
         emit log_named_uint("10_claimDeferredTraderCredit", gas);
     }
@@ -375,9 +375,9 @@ contract GasProfileTest is Test {
         vm.startPrank(alice);
         IERC20(usdc).approve(address(clearinghouse), type(uint256).max);
 
-        bytes32 aliceId = _accountId(alice);
+        address aliceAccount = _account(alice);
         uint256 g0 = gasleft();
-        clearinghouse.deposit(aliceId, 5000e6);
+        clearinghouse.deposit(aliceAccount, 5000e6);
         uint256 gas = g0 - gasleft();
         vm.stopPrank();
         emit log_named_uint("11_clearinghouse_deposit", gas);
@@ -387,10 +387,10 @@ contract GasProfileTest is Test {
     function test_gas_12_clearinghouse_withdraw() public {
         _depositToClearinghouse(alice, 10_000e6);
 
-        bytes32 aliceId = _accountId(alice);
+        address aliceAccount = _account(alice);
         vm.prank(alice);
         uint256 g0 = gasleft();
-        clearinghouse.withdraw(aliceId, 5000e6);
+        clearinghouse.withdraw(aliceAccount, 5000e6);
         uint256 gas = g0 - gasleft();
         emit log_named_uint("12_clearinghouse_withdraw", gas);
     }
@@ -456,9 +456,9 @@ contract GasProfileTest is Test {
         _depositToClearinghouse(alice, 10_000e6);
         _openPosition(alice, CfdTypes.Side.BULL, 50_000e18, 5000e6, 1e8);
 
-        bytes32 aliceId = _accountId(alice);
+        address aliceAccount = _account(alice);
         uint256 g0 = gasleft();
-        engineLens.previewClose(aliceId, 50_000e18, 0.95e8);
+        engineLens.previewClose(aliceAccount, 50_000e18, 0.95e8);
         uint256 gas = g0 - gasleft();
         emit log_named_uint("17_previewClose", gas);
     }
@@ -468,9 +468,9 @@ contract GasProfileTest is Test {
         _depositToClearinghouse(alice, 10_000e6);
         _openPosition(alice, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
 
-        bytes32 aliceId = _accountId(alice);
+        address aliceAccount = _account(alice);
         uint256 g0 = gasleft();
-        engineLens.previewLiquidation(aliceId, 1.1e8);
+        engineLens.previewLiquidation(aliceAccount, 1.1e8);
         uint256 gas = g0 - gasleft();
         emit log_named_uint("18_previewLiquidation", gas);
     }
@@ -480,9 +480,9 @@ contract GasProfileTest is Test {
         _depositToClearinghouse(alice, 10_000e6);
         _openPosition(alice, CfdTypes.Side.BULL, 50_000e18, 5000e6, 1e8);
 
-        bytes32 aliceId = _accountId(alice);
+        address aliceAccount = _account(alice);
         uint256 g0 = gasleft();
-        engineAccountLens.getAccountLedgerSnapshot(aliceId);
+        engineAccountLens.getAccountLedgerSnapshot(aliceAccount);
         uint256 gas = g0 - gasleft();
         emit log_named_uint("19_getAccountLedgerSnapshot", gas);
     }
@@ -570,7 +570,7 @@ contract GasProfileTest is Test {
         _mintUsdc(trader, amount);
         vm.startPrank(trader);
         IERC20(usdc).approve(address(clearinghouse), amount);
-        clearinghouse.deposit(_accountId(trader), amount);
+        clearinghouse.deposit(_account(trader), amount);
         vm.stopPrank();
     }
 
@@ -616,10 +616,10 @@ contract GasProfileTest is Test {
         router.executeOrder(orderId, _pythUpdateData());
     }
 
-    function _accountId(
+    function _account(
         address trader
-    ) internal pure returns (bytes32) {
-        return bytes32(uint256(uint160(trader)));
+    ) internal pure returns (address) {
+        return trader;
     }
 
     function _pythUpdateData() internal pure returns (bytes[] memory updateData) {

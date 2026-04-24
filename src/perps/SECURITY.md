@@ -109,7 +109,7 @@ These are the highest-value properties an auditor should expect to hold.
 
 | Invariant | Description |
 |-----------|-------------|
-| Single direction per account | An `accountId` holds at most one live directional position at a time |
+| Single direction per account | An account address holds at most one live directional position at a time |
 | Margin sufficiency | Opens and withdraw-facing checks use explicit initial/maintenance/FAD margin policy surfaces |
 | Side symmetry | Side-local cached accounting stays consistent with the live position set |
 | Total margin conservation | `sides[BULL].totalMargin + sides[BEAR].totalMargin == sum(pos.margin)` across all live positions |

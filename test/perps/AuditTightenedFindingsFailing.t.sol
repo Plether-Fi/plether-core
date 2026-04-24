@@ -26,16 +26,16 @@ contract AuditTightenedFindingsFailing is BasePerpTest {
     }
 
     function test_H1_WithdrawScenarioNowBlocksOnOpenPosition() public {
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
         _fundTrader(alice, 10_000 * 1e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000 * 1e18, 5000 * 1e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000 * 1e18, 5000 * 1e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(103_800_000, uint64(block.timestamp));
 
         vm.prank(alice);
         vm.expectRevert(CfdEngine.CfdEngine__WithdrawBlockedByOpenPosition.selector);
-        clearinghouse.withdraw(accountId, 5000 * 1e6);
+        clearinghouse.withdraw(account, 5000 * 1e6);
     }
 
     function test_H2_LowGasKeeperCallMustNotConsumeValidOrder() public {
@@ -58,17 +58,17 @@ contract AuditTightenedFindingsFailing is BasePerpTest {
     function test_M1_FullCloseMustZeroFundedSideMargin() public {
         address bullTrader = address(0x1111);
         address bearTrader = address(0x2222);
-        bytes32 bullId = bytes32(uint256(uint160(bullTrader)));
-        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
+        address bullAccount = bullTrader;
+        address bearAccount = bearTrader;
 
         _fundTrader(bullTrader, 100_000 * 1e6);
         _fundTrader(bearTrader, 600_000 * 1e6);
 
-        _open(bearId, CfdTypes.Side.BEAR, 1_000_000 * 1e18, 100_000 * 1e6, 1e8);
-        _open(bullId, CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8);
+        _open(bearAccount, CfdTypes.Side.BEAR, 1_000_000 * 1e18, 100_000 * 1e6, 1e8);
+        _open(bullAccount, CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8);
 
         vm.warp(block.timestamp + 365 days);
-        _close(bullId, CfdTypes.Side.BULL, 100_000 * 1e18, 1e8);
+        _close(bullAccount, CfdTypes.Side.BULL, 100_000 * 1e18, 1e8);
 
         assertEq(
             _sideTotalMargin(CfdTypes.Side.BULL),
@@ -92,9 +92,9 @@ contract AuditTightenedFindingsFailing is BasePerpTest {
         _fundSenior(alice, 200_000 * 1e6);
         _fundJunior(bob, 200_000 * 1e6);
 
-        bytes32 accountId = bytes32(uint256(uint160(address(0x3333))));
+        address account = address(0x3333);
         _fundTrader(address(0x3333), 50_000 * 1e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8);
 
         uint256 seniorBefore = pool.seniorPrincipal();
 

@@ -18,7 +18,7 @@ interface IPerpsKeeper {
 
     /// @notice Liquidates an unsafe account using fresh oracle data.
     function executeLiquidation(
-        bytes32 accountId,
+        address account,
         bytes[] calldata pythUpdateData
     ) external payable;
 

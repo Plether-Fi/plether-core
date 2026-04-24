@@ -7,6 +7,24 @@ pragma solidity 0.8.33;
 ///      reservation buckets, internal custody buckets, or settlement-path helpers.
 interface IMarginClearinghouse {
 
+    error MarginClearinghouse__NotOperator();
+    error MarginClearinghouse__NotAccountOwner();
+    error MarginClearinghouse__ZeroAmount();
+    error MarginClearinghouse__InsufficientBalance();
+    error MarginClearinghouse__InsufficientFreeEquity();
+    error MarginClearinghouse__InsufficientUsdcForSettlement();
+    error MarginClearinghouse__InsufficientAssetToSeize();
+    error MarginClearinghouse__InvalidSeizeRecipient();
+    error MarginClearinghouse__InvalidMarginBucket();
+    error MarginClearinghouse__ReservationAlreadyExists();
+    error MarginClearinghouse__ReservationNotActive();
+    error MarginClearinghouse__IncompleteReservationCoverage();
+    error MarginClearinghouse__ReservationLedgerActive();
+    error MarginClearinghouse__EngineAlreadySet();
+    error MarginClearinghouse__ZeroAddress();
+    error MarginClearinghouse__InsufficientBucketMargin();
+    error MarginClearinghouse__AmountOverflow();
+
     enum MarginBucket {
         Position,
         CommittedOrder,
@@ -33,7 +51,7 @@ interface IMarginClearinghouse {
     }
 
     struct OrderReservation {
-        bytes32 accountId;
+        address account;
         ReservationBucket bucket;
         ReservationStatus status;
         uint96 originalAmountUsdc;
@@ -64,15 +82,15 @@ interface IMarginClearinghouse {
 
     /// @notice Returns the settlement USDC balance for an account.
     function balanceUsdc(
-        bytes32 accountId
+        address account
     ) external view returns (uint256);
     /// @notice Returns the locked USDC margin for an account
     function lockedMarginUsdc(
-        bytes32 accountId
+        address account
     ) external view returns (uint256);
     /// @notice Returns the typed locked-margin buckets for an account.
     function getLockedMarginBuckets(
-        bytes32 accountId
+        address account
     ) external view returns (LockedMarginBuckets memory buckets);
     /// @notice Returns the reservation record for a specific order id.
     function getOrderReservation(
@@ -80,32 +98,32 @@ interface IMarginClearinghouse {
     ) external view returns (OrderReservation memory reservation);
     /// @notice Returns the aggregate active reservation summary for an account.
     function getAccountReservationSummary(
-        bytes32 accountId
+        address account
     ) external view returns (AccountReservationSummary memory summary);
     /// @notice Locks trader-owned settlement into the active position margin bucket.
     function lockPositionMargin(
-        bytes32 accountId,
+        address account,
         uint256 amountUsdc
     ) external;
     /// @notice Unlocks active position margin back into free settlement.
     function unlockPositionMargin(
-        bytes32 accountId,
+        address account,
         uint256 amountUsdc
     ) external;
     /// @notice Locks trader-owned settlement into the committed-order bucket reserved for queued open orders.
     function lockCommittedOrderMargin(
-        bytes32 accountId,
+        address account,
         uint256 amountUsdc
     ) external;
     /// @notice Reserves committed-order margin for a specific order id inside the clearinghouse reservation ledger.
     function reserveCommittedOrderMargin(
-        bytes32 accountId,
+        address account,
         uint64 orderId,
         uint256 amountUsdc
     ) external;
     /// @notice Unlocks committed-order margin back into free settlement when a queued open order is released.
     function unlockCommittedOrderMargin(
-        bytes32 accountId,
+        address account,
         uint256 amountUsdc
     ) external;
     /// @notice Releases any remaining reservation balance for an order back into free settlement.
@@ -123,7 +141,7 @@ interface IMarginClearinghouse {
     ) external returns (uint256 consumedUsdc);
     /// @notice Consumes active order reservations for an account in FIFO reservation order.
     function consumeAccountOrderReservations(
-        bytes32 accountId,
+        address account,
         uint256 amountUsdc
     ) external returns (uint256 consumedUsdc);
     /// @notice Consumes the supplied active order reservations in FIFO order until the requested amount is exhausted.
@@ -133,41 +151,41 @@ interface IMarginClearinghouse {
     ) external returns (uint256 consumedUsdc);
     /// @notice Locks settlement into a reserved bucket excluded from generic order/position margin release paths.
     function lockReservedSettlement(
-        bytes32 accountId,
+        address account,
         uint256 amountUsdc
     ) external;
     /// @notice Unlocks settlement from the reserved bucket back into free settlement.
     function unlockReservedSettlement(
-        bytes32 accountId,
+        address account,
         uint256 amountUsdc
     ) external;
     /// @notice Adjusts settlement USDC for realized PnL, deferred-claim servicing, or rebates (+credit, -debit).
     function settleUsdc(
-        bytes32 accountId,
+        address account,
         int256 amount
     ) external;
     /// @notice Credits settlement USDC and locks the same amount as active margin.
     function creditSettlementAndLockMargin(
-        bytes32 accountId,
+        address account,
         uint256 amountUsdc
     ) external;
     /// @notice Applies an open/increase trade cost by debiting or crediting settlement and updating locked margin.
     function applyOpenCost(
-        bytes32 accountId,
+        address account,
         uint256 marginDeltaUsdc,
         int256 tradeCostUsdc,
         address recipient
     ) external returns (int256 netMarginChangeUsdc);
     /// @notice Consumes a realized settlement loss from free settlement plus the active position margin bucket.
     function consumeSettlementLoss(
-        bytes32 accountId,
+        address account,
         uint256 lockedPositionMarginUsdc,
         uint256 lossUsdc,
         address recipient
     ) external returns (uint256 marginConsumedUsdc, uint256 freeSettlementConsumedUsdc, uint256 uncoveredUsdc);
     /// @notice Consumes close-path losses from settlement buckets while preserving the remaining live position margin and reserved escrow.
     function consumeCloseLoss(
-        bytes32 accountId,
+        address account,
         uint64[] calldata reservationOrderIds,
         uint256 lossUsdc,
         uint256 protectedLockedMarginUsdc,
@@ -176,55 +194,55 @@ interface IMarginClearinghouse {
     ) external returns (uint256 seizedUsdc, uint256 shortfallUsdc);
     /// @notice Applies a pre-planned liquidation settlement mutation while preserving reserved escrow.
     function applyLiquidationSettlementPlan(
-        bytes32 accountId,
+        address account,
         uint64[] calldata reservationOrderIds,
         LiquidationSettlementPlan calldata plan,
         address recipient
     ) external returns (uint256 seizedUsdc);
     /// @notice Transfers settlement USDC from an account to a recipient (losses, fees, or bad debt)
     function seizeUsdc(
-        bytes32 accountId,
+        address account,
         uint256 amount,
         address recipient
     ) external;
     /// @notice Reserves free-settlement USDC for a close-order execution bounty with carry checkpointing.
     /// @dev Restricted to the engine's atomic fresh close-bounty path.
     function reserveCloseExecutionBountyFromSettlement(
-        bytes32 accountId,
+        address account,
         uint256 amount,
         address recipient
     ) external;
     /// @notice Reserves free-settlement USDC for a stale close-order execution bounty without checkpointing carry.
     /// @dev Restricted to the engine's atomic stale close-bounty path.
     function reserveStaleCloseExecutionBountyFromSettlement(
-        bytes32 accountId,
+        address account,
         uint256 amount,
         address recipient
     ) external;
     /// @notice Transfers settlement USDC from active position margin to a recipient and unlocks the same amount.
     function seizePositionMarginUsdc(
-        bytes32 accountId,
+        address account,
         uint256 amount,
         address recipient
     ) external;
     /// @notice Reserves active position margin for a stale close-order execution bounty without checkpointing carry.
     /// @dev Restricted to the engine's bounded stale close-bounty path.
     function reserveStaleCloseExecutionBountyFromPositionMargin(
-        bytes32 accountId,
+        address account,
         uint256 amount,
         address recipient
     ) external;
     function getAccountUsdcBuckets(
-        bytes32 accountId
+        address account
     ) external view returns (AccountUsdcBuckets memory buckets);
     /// @notice Returns total account equity in settlement USDC (6 decimals)
     function getAccountEquityUsdc(
-        bytes32 accountId
+        address account
     ) external view returns (uint256);
 
     /// @notice Returns strictly free buying power after subtracting locked margin (6 decimals)
     function getFreeBuyingPowerUsdc(
-        bytes32 accountId
+        address account
     ) external view returns (uint256);
 
 }

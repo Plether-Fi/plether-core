@@ -11,7 +11,7 @@ contract AuditBindingAndReleaseFindingsFailing is BasePerpTest {
     address bob = address(0xB0B);
 
     function test_H1_ExecutionReleaseMustNotUnlockConsumedCommittedMargin() public {
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        address aliceAccount = alice;
 
         _fundTrader(alice, 50_000e6);
 
@@ -19,10 +19,10 @@ contract AuditBindingAndReleaseFindingsFailing is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 350_000e18, 35_000e6, 1e8, false);
 
         vm.prank(address(engine));
-        clearinghouse.consumeAccountOrderReservations(aliceId, 35_000e6);
+        clearinghouse.consumeAccountOrderReservations(aliceAccount, 35_000e6);
 
         vm.prank(address(engine));
-        router.syncMarginQueue(aliceId);
+        router.syncMarginQueue(aliceAccount);
 
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), 700_000e6);
@@ -31,7 +31,7 @@ contract AuditBindingAndReleaseFindingsFailing is BasePerpTest {
             _remainingCommittedMargin(1), 0, "Consumed committed margin should be charged to the queued order itself"
         );
 
-        uint256 lockedBeforeExecution = clearinghouse.lockedMarginUsdc(aliceId);
+        uint256 lockedBeforeExecution = clearinghouse.lockedMarginUsdc(aliceAccount);
 
         bytes[] memory empty;
         vm.roll(block.number + 1);
@@ -39,7 +39,7 @@ contract AuditBindingAndReleaseFindingsFailing is BasePerpTest {
         router.executeOrder(1, empty);
 
         assertEq(
-            clearinghouse.lockedMarginUsdc(aliceId),
+            clearinghouse.lockedMarginUsdc(aliceAccount),
             lockedBeforeExecution,
             "Execution release must not unlock consumed committed margin when the open order later reverts"
         );
