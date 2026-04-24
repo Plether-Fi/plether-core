@@ -308,8 +308,9 @@ contract TimelockPauseTest is BasePerpTest {
     function test_ProposeMaxOrderAge_TimelockFlow() public {
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         config.maxOrderAge = 600;
+        config.minOpenNotionalUsdc = 150e6;
         config.openOrderExecutionBountyBps = 2;
-        config.minOpenOrderExecutionBountyUsdc = 20_000;
+        config.minOpenOrderExecutionBountyUsdc = 200_000;
         config.maxOpenOrderExecutionBountyUsdc = 300_000;
         config.closeOrderExecutionBountyUsdc = 250_000;
         config.maxPendingOrders = 7;
@@ -324,8 +325,9 @@ contract TimelockPauseTest is BasePerpTest {
         routerAdmin.finalizeRouterConfig();
 
         assertEq(router.maxOrderAge(), 600);
+        assertEq(router.minOpenNotionalUsdc(), 150e6);
         assertEq(router.openOrderExecutionBountyBps(), 2);
-        assertEq(router.minOpenOrderExecutionBountyUsdc(), 20_000);
+        assertEq(router.minOpenOrderExecutionBountyUsdc(), 200_000);
         assertEq(router.maxOpenOrderExecutionBountyUsdc(), 300_000);
         assertEq(router.closeOrderExecutionBountyUsdc(), 250_000);
         assertEq(router.maxPendingOrders(), 7);

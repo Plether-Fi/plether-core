@@ -8,6 +8,7 @@ interface IOrderRouterAdminHost {
         uint256 orderExecutionStalenessLimit;
         uint256 liquidationStalenessLimit;
         uint256 pythMaxConfidenceRatioBps;
+        uint256 minOpenNotionalUsdc;
         uint256 openOrderExecutionBountyBps;
         uint256 minOpenOrderExecutionBountyUsdc;
         uint256 maxOpenOrderExecutionBountyUsdc;

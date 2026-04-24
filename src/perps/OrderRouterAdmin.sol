@@ -149,6 +149,9 @@ contract OrderRouterAdmin is Ownable, Pausable {
         if (config.pythMaxConfidenceRatioBps > 10_000) {
             revert OrderRouterAdmin__InvalidConfidenceRatio();
         }
+        if (config.minOpenNotionalUsdc == 0) {
+            revert OrderRouterAdmin__InvalidExecutionBounty();
+        }
         if (
             config.openOrderExecutionBountyBps == 0 || config.openOrderExecutionBountyBps > 10_000
                 || config.minOpenOrderExecutionBountyUsdc == 0 || config.maxOpenOrderExecutionBountyUsdc == 0

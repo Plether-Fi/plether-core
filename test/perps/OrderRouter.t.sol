@@ -149,6 +149,12 @@ contract OrderRouterTest is BasePerpTest {
         );
     }
 
+    function test_CommitOrder_OpenRejectsBelowMinimumNotional() public {
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__CommitValidation.selector, 11));
+        router.commitOrder(CfdTypes.Side.BULL, 99e18, 2e6, 1e8, false);
+    }
+
     function test_IncreaseOrder_UsesUnlockedPositionMarginToPayTradeCost() public {
         address trader = address(0xC444);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
@@ -5069,6 +5075,7 @@ contract KeeperFeeRefundTest is Test {
             orderExecutionStalenessLimit: router.orderExecutionStalenessLimit(),
             liquidationStalenessLimit: router.liquidationStalenessLimit(),
             pythMaxConfidenceRatioBps: router.pythMaxConfidenceRatioBps(),
+            minOpenNotionalUsdc: router.minOpenNotionalUsdc(),
             openOrderExecutionBountyBps: router.openOrderExecutionBountyBps(),
             minOpenOrderExecutionBountyUsdc: router.minOpenOrderExecutionBountyUsdc(),
             maxOpenOrderExecutionBountyUsdc: router.maxOpenOrderExecutionBountyUsdc(),
