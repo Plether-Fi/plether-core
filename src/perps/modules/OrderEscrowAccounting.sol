@@ -5,7 +5,7 @@ import {CfdTypes} from "../CfdTypes.sol";
 import {ICfdEngineCore} from "../interfaces/ICfdEngineCore.sol";
 import {IMarginClearinghouse} from "../interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "../interfaces/IOrderRouterAccounting.sol";
-import {MarginClearinghouseAccountingLib} from "../libraries/MarginClearinghouseAccountingLib.sol";
+import {IOrderRouterErrors} from "../interfaces/IOrderRouterErrors.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
@@ -32,12 +32,12 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
     IERC20 internal immutable USDC;
 
     mapping(uint64 => OrderRecord) internal orderRecords;
-    mapping(bytes32 => uint256) public pendingOrderCounts;
-    mapping(bytes32 => uint256) public pendingCloseSize;
-    mapping(bytes32 => uint64) public accountHeadOrderId;
-    mapping(bytes32 => uint64) internal accountTailOrderId;
-    mapping(bytes32 => uint64) public marginHeadOrderId;
-    mapping(bytes32 => uint64) public marginTailOrderId;
+    mapping(address => uint256) public pendingOrderCounts;
+    mapping(address => uint256) public pendingCloseSize;
+    mapping(address => uint64) public accountHeadOrderId;
+    mapping(address => uint64) internal accountTailOrderId;
+    mapping(address => uint64) public marginHeadOrderId;
+    mapping(address => uint64) public marginTailOrderId;
 
     constructor(
         address _engine
@@ -50,16 +50,15 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
     }
 
     function getAccountEscrow(
-        bytes32 accountId
+        address account
     ) public view override returns (IOrderRouterAccounting.AccountEscrowView memory escrow) {
         // Clearinghouse remains the canonical owner of committed-order margin value; this module only composes the view.
-        escrow.committedMarginUsdc =
-        clearinghouse.getAccountReservationSummary(accountId).activeCommittedOrderMarginUsdc;
-        (escrow.pendingOrderCount, escrow.executionBountyUsdc,,) = _summarizePendingOrders(accountId);
+        escrow.committedMarginUsdc = clearinghouse.getAccountReservationSummary(account).activeCommittedOrderMarginUsdc;
+        (escrow.pendingOrderCount, escrow.executionBountyUsdc,,) = _summarizePendingOrders(account);
     }
 
     function _summarizePendingOrders(
-        bytes32 accountId
+        address account
     )
         internal
         view
@@ -70,7 +69,7 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
             bool hasTerminalCloseQueued
         )
     {
-        uint64 orderId = accountHeadOrderId[accountId];
+        uint64 orderId = accountHeadOrderId[account];
         while (orderId != 0) {
             OrderRecord storage record = orderRecords[orderId];
             CfdTypes.Order memory order = record.core;
@@ -87,10 +86,10 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
     function _nextCommitId() internal view virtual returns (uint64);
 
     function getMarginReservationIds(
-        bytes32 accountId
+        address account
     ) public view override returns (uint64[] memory orderIds) {
         // Router queue links expose reservation traversal order only; remaining reservation value lives in MarginClearinghouse.
-        uint64 cursor = marginHeadOrderId[accountId];
+        uint64 cursor = marginHeadOrderId[account];
         uint256 count;
         while (cursor != 0) {
             count++;
@@ -98,7 +97,7 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
         }
 
         orderIds = new uint64[](count);
-        cursor = marginHeadOrderId[accountId];
+        cursor = marginHeadOrderId[account];
         for (uint256 i = 0; i < count; i++) {
             orderIds[i] = cursor;
             cursor = orderRecords[cursor].nextMarginOrderId;
@@ -106,7 +105,7 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
     }
 
     function _reserveExecutionBounty(
-        bytes32 accountId,
+        address account,
         uint64 orderId,
         uint256 sizeDelta,
         uint256 executionBountyUsdc,
@@ -117,21 +116,18 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
         }
 
         if (isClose) {
-            _reserveCloseExecutionBounty(accountId, sizeDelta, executionBountyUsdc);
+            _reserveCloseExecutionBounty(account, sizeDelta, executionBountyUsdc);
         } else {
-            if (
-                MarginClearinghouseAccountingLib.getFreeSettlementUsdc(clearinghouse.getAccountUsdcBuckets(accountId))
-                    < executionBountyUsdc
-            ) {
-                _revertInsufficientFreeEquity();
+            if (clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc < executionBountyUsdc) {
+                revert IOrderRouterErrors.OrderRouter__CommitValidation(6);
             }
-            clearinghouse.seizeUsdc(accountId, executionBountyUsdc, address(this));
+            clearinghouse.seizeUsdc(account, executionBountyUsdc, address(this));
         }
         orderRecords[orderId].executionBountyUsdc = executionBountyUsdc;
     }
 
     function _reserveCommittedMargin(
-        bytes32 accountId,
+        address account,
         uint64 orderId,
         bool isClose,
         uint256 marginDelta
@@ -139,8 +135,8 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
         if (isClose || marginDelta == 0) {
             return;
         }
-        clearinghouse.reserveCommittedOrderMargin(accountId, orderId, marginDelta);
-        _linkMarginOrder(accountId, orderId);
+        clearinghouse.reserveCommittedOrderMargin(account, orderId, marginDelta);
+        _linkMarginOrder(account, orderId);
     }
 
     function _consumeOrderEscrow(
@@ -180,7 +176,7 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
     }
 
     function _linkMarginOrder(
-        bytes32 accountId,
+        address account,
         uint64 orderId
     ) internal {
         OrderRecord storage record = _orderRecord(orderId);
@@ -188,21 +184,21 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
             return;
         }
 
-        uint64 tailOrderId = marginTailOrderId[accountId];
+        uint64 tailOrderId = marginTailOrderId[account];
         if (tailOrderId == 0) {
-            marginHeadOrderId[accountId] = orderId;
-            marginTailOrderId[accountId] = orderId;
+            marginHeadOrderId[account] = orderId;
+            marginTailOrderId[account] = orderId;
         } else {
             orderRecords[tailOrderId].nextMarginOrderId = orderId;
             record.prevMarginOrderId = tailOrderId;
-            marginTailOrderId[accountId] = orderId;
+            marginTailOrderId[account] = orderId;
         }
 
         record.inMarginQueue = true;
     }
 
     function _linkAccountOrder(
-        bytes32 accountId,
+        address account,
         uint64 orderId
     ) internal {
         OrderRecord storage record = _orderRecord(orderId);
@@ -210,21 +206,21 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
             return;
         }
 
-        uint64 tailOrderId = accountTailOrderId[accountId];
+        uint64 tailOrderId = accountTailOrderId[account];
         if (tailOrderId == 0) {
-            accountHeadOrderId[accountId] = orderId;
-            accountTailOrderId[accountId] = orderId;
+            accountHeadOrderId[account] = orderId;
+            accountTailOrderId[account] = orderId;
         } else {
             orderRecords[tailOrderId].nextAccountOrderId = orderId;
             record.prevAccountOrderId = tailOrderId;
-            accountTailOrderId[accountId] = orderId;
+            accountTailOrderId[account] = orderId;
         }
 
         record.inAccountQueue = true;
     }
 
     function _unlinkAccountOrder(
-        bytes32 accountId,
+        address account,
         uint64 orderId
     ) internal {
         OrderRecord storage record = _orderRecord(orderId);
@@ -234,23 +230,23 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
 
         uint64 prevOrderId = record.prevAccountOrderId;
         uint64 nextOrderId = record.nextAccountOrderId;
-        uint64 headOrderId = accountHeadOrderId[accountId];
-        uint64 tailOrderId = accountTailOrderId[accountId];
+        uint64 headOrderId = accountHeadOrderId[account];
+        uint64 tailOrderId = accountTailOrderId[account];
 
         if (headOrderId == orderId) {
-            accountHeadOrderId[accountId] = nextOrderId;
+            accountHeadOrderId[account] = nextOrderId;
         } else if (prevOrderId != 0) {
             orderRecords[prevOrderId].nextAccountOrderId = nextOrderId;
         } else if (tailOrderId != orderId) {
-            _revertPendingOrderLinkCorrupted();
+            revert IOrderRouterErrors.OrderRouter__QueueState(6);
         }
 
         if (tailOrderId == orderId) {
-            accountTailOrderId[accountId] = prevOrderId;
+            accountTailOrderId[account] = prevOrderId;
         } else if (nextOrderId != 0) {
             orderRecords[nextOrderId].prevAccountOrderId = prevOrderId;
         } else if (headOrderId != orderId) {
-            _revertPendingOrderLinkCorrupted();
+            revert IOrderRouterErrors.OrderRouter__QueueState(6);
         }
 
         record.nextAccountOrderId = 0;
@@ -259,7 +255,7 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
     }
 
     function _unlinkMarginOrder(
-        bytes32 accountId,
+        address account,
         uint64 orderId
     ) internal {
         OrderRecord storage record = _orderRecord(orderId);
@@ -269,23 +265,23 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
 
         uint64 prevOrderId = record.prevMarginOrderId;
         uint64 nextOrderId = record.nextMarginOrderId;
-        uint64 headOrderId = marginHeadOrderId[accountId];
-        uint64 tailOrderId = marginTailOrderId[accountId];
+        uint64 headOrderId = marginHeadOrderId[account];
+        uint64 tailOrderId = marginTailOrderId[account];
 
         if (headOrderId == orderId) {
-            marginHeadOrderId[accountId] = nextOrderId;
+            marginHeadOrderId[account] = nextOrderId;
         } else if (prevOrderId != 0) {
             orderRecords[prevOrderId].nextMarginOrderId = nextOrderId;
         } else if (tailOrderId != orderId) {
-            _revertMarginOrderLinkCorrupted();
+            revert IOrderRouterErrors.OrderRouter__QueueState(5);
         }
 
         if (tailOrderId == orderId) {
-            marginTailOrderId[accountId] = prevOrderId;
+            marginTailOrderId[account] = prevOrderId;
         } else if (nextOrderId != 0) {
             orderRecords[nextOrderId].prevMarginOrderId = prevOrderId;
         } else if (headOrderId != orderId) {
-            _revertMarginOrderLinkCorrupted();
+            revert IOrderRouterErrors.OrderRouter__QueueState(5);
         }
 
         record.nextMarginOrderId = 0;
@@ -294,14 +290,14 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
     }
 
     function _pruneMarginQueue(
-        bytes32 accountId
+        address account
     ) internal {
-        uint64 orderId = marginHeadOrderId[accountId];
+        uint64 orderId = marginHeadOrderId[account];
         while (orderId != 0) {
             uint256 remainingCommittedMarginUsdc = clearinghouse.getOrderReservation(orderId).remainingAmountUsdc;
             uint64 nextOrderId = orderRecords[orderId].nextMarginOrderId;
             if (remainingCommittedMarginUsdc == 0) {
-                _unlinkMarginOrder(accountId, orderId);
+                _unlinkMarginOrder(account, orderId);
             }
             orderId = nextOrderId;
         }
@@ -314,15 +310,9 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
     }
 
     function _reserveCloseExecutionBounty(
-        bytes32 accountId,
+        address account,
         uint256 sizeDelta,
         uint256 executionBountyUsdc
     ) internal virtual;
-
-    function _revertInsufficientFreeEquity() internal pure virtual;
-
-    function _revertMarginOrderLinkCorrupted() internal pure virtual;
-
-    function _revertPendingOrderLinkCorrupted() internal pure virtual;
 
 }

@@ -2910,7 +2910,7 @@ contract BasketPriceHarness is OrderRouter {
         for (uint256 i = 0; i < pythFeedIds.length; i++) {
             PythStructs.Price memory p = IPyth(address(pyth)).getPriceUnsafe(pythFeedIds[i]);
             if (p.publishTime > block.timestamp || block.timestamp - p.publishTime > maxStaleness) {
-                _revertOraclePriceTooStale();
+                revert OrderRouter.OrderRouter__OracleValidation(10);
             }
 
             uint256 norm =
@@ -2926,10 +2926,10 @@ contract BasketPriceHarness is OrderRouter {
         }
 
         if (maxPublishTime > minPublishTime + maxPublishTimeDivergence) {
-            _revertOraclePriceTooStale();
+            revert OrderRouter.OrderRouter__OracleValidation(10);
         }
         if (basketPrice == 0) {
-            _revertOraclePriceNegative();
+            revert OrderRouter.OrderRouter__OracleValidation(8);
         }
 
         return (basketPrice, minPublishTime);

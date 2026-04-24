@@ -31,18 +31,18 @@ If you want the accounting model first, read [`ACCOUNTING_SPEC.md`](ACCOUNTING_S
 ### Core product rules
 
 - Delayed orders only. There is no same-tx trader market-order path.
-- One live position per `accountId` at a time. Side flips must pass through a close.
+- One live position per account address at a time. Side flips must pass through a close.
 - Orders are binding once committed. Users cannot cancel queued orders.
 - Queue execution is FIFO from the global head.
 - LP-capital carry is used instead of side-to-side funding.
-- If the vault is short on cash, trader profits and liquidation bounties can become deferred balance claims instead of reverting the state transition.
+- If the HousePool is short on cash, trader profits and liquidation bounties can become deferred balance claims instead of reverting the state transition.
 
-### Units and ids
+### Units and accounts
 
 - USDC amounts and margin accounting use 6 decimals.
 - Prices use 8 decimals.
 - Position size uses 18 decimals.
-- The normal trader `accountId` is `bytes32(uint256(uint160(user)))`.
+- Accounts are tracked directly by trader address.
 
 ## Canonical Entrypoints
 
@@ -82,7 +82,7 @@ The wider engine, clearinghouse, router, and house-pool interfaces still exist f
 The main runtime and read surfaces are:
 
 - `MarginClearinghouse`: trader custody and typed margin buckets.
-- `OrderRouter`: delayed-order queue, Pyth validation, and keeper bounty escrow.
+- `OrderRouter`: thin external shell for delayed-order commits, keeper execution, Pyth validation, and keeper bounty escrow.
 - `CfdEngine`: canonical execution ledger and solvency boundary.
 - `CfdEngineSettlementModule`: externalized close/liquidation settlement orchestration used by the engine.
 - `CfdEnginePlanner`: externalized open/close/liquidation plan builder wired into the engine after deployment.
@@ -97,7 +97,7 @@ The main runtime and read surfaces are:
 - `CfdEngineSettlementModule` executes close and liquidation choreography, while `CfdEngine` remains the storage owner.
 - `CfdEngine`, `CfdEnginePlanner`, `CfdEngineSettlementModule`, and `CfdEngineAdmin` are now deployed separately and wired once through `CfdEngine.setDependencies(...)` to keep engine initcode under EIP-3860.
 - `MarginClearinghouse` owns trader settlement balances and locked-margin custody buckets.
-- `OrderRouter` owns queued order records and router-custodied execution bounty escrow.
+- `OrderRouter` owns queued order records and router-custodied execution bounty escrow; its implementation is split into base storage/hooks, handler, validation, and utility modules.
 - `HousePool` owns LP capital and pays protocol obligations that must leave the vault.
 - `PerpsPublicLens` is the default read surface for product consumers.
 - The account and protocol lenses are for deeper diagnostics, tests, audits, and operator tooling.
@@ -122,17 +122,17 @@ Important details:
 
 ### Deferred trader credit
 
-Profitable closes and some liquidation residuals can create deferred trader credit if the vault cannot immediately fund them.
+Profitable closes and some liquidation residuals can create deferred trader credit if the HousePool cannot immediately fund them.
 
-- Deferred trader credit is tracked by beneficiary balance: `deferredTraderCreditUsdc[accountId]`.
+- Deferred trader credit is tracked by beneficiary balance: `deferredTraderCreditUsdc[account]`.
 - There is no FIFO deferred-claim queue.
-- `claimDeferredTraderCredit(accountId)` is beneficiary-only and requires the caller to own `accountId`.
-- Claims can be partial if current vault cash is insufficient.
+- `claimDeferredTraderCredit(account)` is beneficiary-only and requires the caller to own `account`.
+- Claims can be partial if current HousePool cash is insufficient.
 - Claimed amounts are credited into `MarginClearinghouse`, not sent directly to the wallet.
 
 ### Deferred keeper credit
 
-Liquidation bounties are fail-soft when the vault is illiquid.
+Liquidation bounties are fail-soft when the HousePool is illiquid.
 
 - The liquidation still completes.
 - Any unpaid keeper value is recorded in `deferredKeeperCreditUsdc[keeper]`.
@@ -267,6 +267,7 @@ The perps system intentionally splits accounting into separate kernels:
 - `LiquidationAccountingLib`: reachable collateral, keeper bounty, residual payout, and bad debt for forced close.
 - `SolvencyAccountingLib`: effective assets, bounded max liability, withdrawal reserves, and free vault cash.
 - `OrderEscrowAccounting`: router-held execution bounty reserves and margin-queue bookkeeping.
+- `OrderRouterBase` / `OrderHandler` / `OrderValidation` / `OrderUtils`: shared router state, delayed-order lifecycle handling, preflight validation, and bounty/liquidation helper math.
 - `HousePool.recordClaimantInflow(amount, kind, cashMode)`: claimant-owned value routing for both revenue and recapitalization, with explicit cash-arrival vs retained-value modes.
 
 These domains answer different questions. They should not silently share assumptions just because the inputs look similar.

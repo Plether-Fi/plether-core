@@ -3,6 +3,7 @@ pragma solidity 0.8.33;
 
 import {CfdTypes} from "../CfdTypes.sol";
 import {IOrderRouterAccounting} from "../interfaces/IOrderRouterAccounting.sol";
+import {IOrderRouterErrors} from "../interfaces/IOrderRouterErrors.sol";
 import {OrderEscrowAccounting} from "./OrderEscrowAccounting.sol";
 
 abstract contract OrderQueueBook is OrderEscrowAccounting {
@@ -24,8 +25,6 @@ abstract contract OrderQueueBook is OrderEscrowAccounting {
     function _setQueueTailOrderId(
         uint64 orderId
     ) internal virtual;
-
-    function _revertOrderNotPending() internal pure virtual;
 
     function _linkGlobalOrder(
         uint64 orderId
@@ -56,7 +55,7 @@ abstract contract OrderQueueBook is OrderEscrowAccounting {
         } else if (prevOrderId != 0) {
             orderRecords[prevOrderId].nextGlobalOrderId = nextOrderId;
         } else if (tailOrderId != orderId) {
-            _revertPendingOrderLinkCorrupted();
+            revert IOrderRouterErrors.OrderRouter__QueueState(6);
         }
 
         if (tailOrderId == orderId) {
@@ -64,7 +63,7 @@ abstract contract OrderQueueBook is OrderEscrowAccounting {
         } else if (nextOrderId != 0) {
             orderRecords[nextOrderId].prevGlobalOrderId = prevOrderId;
         } else if (headOrderId != orderId) {
-            _revertPendingOrderLinkCorrupted();
+            revert IOrderRouterErrors.OrderRouter__QueueState(6);
         }
 
         record.nextGlobalOrderId = 0;
@@ -76,15 +75,15 @@ abstract contract OrderQueueBook is OrderEscrowAccounting {
     ) internal view returns (OrderRecord storage record, CfdTypes.Order memory order) {
         record = _orderRecord(orderId);
         if (record.status != IOrderRouterAccounting.OrderStatus.Pending) {
-            _revertOrderNotPending();
+            revert IOrderRouterErrors.OrderRouter__QueueState(4);
         }
         order = record.core;
     }
 
     function _getQueuedPositionView(
-        bytes32 accountId
+        address account
     ) internal view returns (QueuedPositionView memory queuedPosition) {
-        (uint256 positionSize,,,, CfdTypes.Side side,,) = engine.positions(accountId);
+        (uint256 positionSize,,,, CfdTypes.Side side,,) = engine.positions(account);
         if (positionSize > 0) {
             queuedPosition.exists = true;
             queuedPosition.side = side;
@@ -92,7 +91,7 @@ abstract contract OrderQueueBook is OrderEscrowAccounting {
         }
 
         for (
-            uint64 orderId = accountHeadOrderId[accountId];
+            uint64 orderId = accountHeadOrderId[account];
             orderId != 0;
             orderId = orderRecords[orderId].nextAccountOrderId
         ) {
