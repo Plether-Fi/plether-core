@@ -5,8 +5,10 @@ import {CfdEnginePlanTypes} from "../CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../CfdTypes.sol";
 import {ICfdEngineCore} from "../interfaces/ICfdEngineCore.sol";
 import {IOrderRouterAccounting} from "../interfaces/IOrderRouterAccounting.sol";
+import {IOrderRouterErrors} from "../interfaces/IOrderRouterErrors.sol";
 import {CashPriorityLib} from "../libraries/CashPriorityLib.sol";
 import {OracleFreshnessPolicyLib} from "../libraries/OracleFreshnessPolicyLib.sol";
+import {OrderValidationLib} from "../libraries/OrderValidationLib.sol";
 import {OrderOracleExecution} from "./OrderOracleExecution.sol";
 import {OrderQueueBook} from "./OrderQueueBook.sol";
 
@@ -46,10 +48,6 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
         uint64 orderId
     ) internal virtual override;
 
-    function _revertNoOrdersToExecute() internal pure virtual;
-    function _revertInsufficientGas() internal pure virtual;
-    function _revertMevDetected() internal pure virtual;
-    function _revertCloseOnlyMode() internal pure virtual;
     function _releaseCommittedMarginForExecution(
         uint64 orderId
     ) internal virtual;
@@ -96,15 +94,15 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
     function _processTypedOrderExecution(
         CfdTypes.Order memory order,
         uint256 executionPrice,
-        uint256 vaultDepth,
+        uint256 housePoolDepth,
         uint64 oraclePublishTime
     ) internal returns (bool success, OrderFailReason failureReason, FailedOrderOutcome failureOutcome) {
-        try engine.processOrderTyped(order, executionPrice, vaultDepth, oraclePublishTime) {
+        try engine.processOrderTyped(order, executionPrice, housePoolDepth, oraclePublishTime) {
             return (true, OrderFailReason.EngineRevert, FailedOrderOutcome.ClearerFull);
         } catch (bytes memory revertData) {
             bytes4 selector = revertData.length >= 4 ? bytes4(revertData) : bytes4(0);
             if (selector == MARK_PRICE_OUT_OF_ORDER_SELECTOR) {
-                _revertOraclePublishTimeOutOfOrder();
+                revert IOrderRouterErrors.OrderRouter__OracleValidation(9);
             }
             failureReason = selector == PANIC_SELECTOR ? OrderFailReason.EnginePanic : OrderFailReason.EngineRevert;
             failureOutcome = _failedOutcomeFromEngineRevert(order, revertData);
@@ -118,56 +116,43 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
         uint256 executionPrice,
         uint64 oraclePublishTime,
         RouterExecutionContext memory executionContext,
-        bool revertOnBlockedExecution,
-        uint256 pythFee
+        bool revertOnBlockedExecution
     ) internal returns (OrderExecutionStepResult result) {
         OracleFreshnessPolicyLib.Policy memory orderPolicy =
             _executionPolicyForOrder(order.isClose, executionContext.oracleFrozen, executionContext.isFadWindow);
         if (_maxOrderAge() > 0 && block.timestamp - order.commitTime > _maxOrderAge()) {
             emit OrderFailed(orderId, OrderFailReason.Expired);
             _finalizeOrCleanupOrder(
-                orderId,
-                pythFee,
-                false,
-                _failedOutcomeForTerminalFailure(order),
-                revertOnBlockedExecution,
-                executionPrice,
-                oraclePublishTime
+                orderId, false, _failedOutcomeForTerminalFailure(order), executionPrice, oraclePublishTime
             );
             return revertOnBlockedExecution ? OrderExecutionStepResult.Return : OrderExecutionStepResult.Continue;
         }
 
         if (orderPolicy.closeOnly) {
             if (revertOnBlockedExecution) {
-                _revertCloseOnlyMode();
+                revert IOrderRouterErrors.OrderRouter__CommitValidation(10);
             }
             return OrderExecutionStepResult.Break;
         }
 
         if (address(pyth) != address(0) && !executionContext.oracleFrozen && block.number == order.commitBlock) {
             if (revertOnBlockedExecution) {
-                _revertMevDetected();
+                revert IOrderRouterErrors.OrderRouter__OracleValidation(13);
             }
             return OrderExecutionStepResult.Break;
         }
 
         if (address(pyth) != address(0) && !executionContext.oracleFrozen && oraclePublishTime <= order.commitTime) {
             if (revertOnBlockedExecution) {
-                _revertMevDetected();
+                revert IOrderRouterErrors.OrderRouter__OracleValidation(13);
             }
             return OrderExecutionStepResult.Break;
         }
 
-        if (!_checkSlippage(order, executionPrice)) {
+        if (!OrderValidationLib.checkSlippage(order, executionPrice)) {
             emit OrderFailed(orderId, OrderFailReason.SlippageExceeded);
             _finalizeOrCleanupOrder(
-                orderId,
-                pythFee,
-                false,
-                _failedOutcomeForSlippageFailure(order),
-                revertOnBlockedExecution,
-                executionPrice,
-                oraclePublishTime
+                orderId, false, _failedOutcomeForSlippageFailure(order), executionPrice, oraclePublishTime
             );
             return revertOnBlockedExecution ? OrderExecutionStepResult.Return : OrderExecutionStepResult.Continue;
         }
@@ -175,43 +160,31 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
         uint256 forwardedGas = gasleft() - (gasleft() / 64);
         if (forwardedGas < minEngineGas) {
             if (revertOnBlockedExecution) {
-                _revertInsufficientGas();
+                revert IOrderRouterErrors.OrderRouter__InsufficientGas();
             }
             return OrderExecutionStepResult.Break;
         }
 
-        uint256 vaultDepth = vault.totalAssets();
+        uint256 housePoolDepth = housePool.totalAssets();
         _releaseCommittedMarginForExecution(orderId);
 
         (bool executionSucceeded, OrderFailReason failureReason, FailedOrderOutcome failureOutcome) =
-            _processTypedOrderExecution(order, executionPrice, vaultDepth, oraclePublishTime);
+            _processTypedOrderExecution(order, executionPrice, housePoolDepth, oraclePublishTime);
         if (executionSucceeded) {
             emit OrderExecuted(orderId, executionPrice);
-            _finalizeOrCleanupOrder(
-                orderId,
-                pythFee,
-                true,
-                FailedOrderOutcome.ClearerFull,
-                revertOnBlockedExecution,
-                executionPrice,
-                oraclePublishTime
-            );
+            _finalizeOrCleanupOrder(orderId, true, FailedOrderOutcome.ClearerFull, executionPrice, oraclePublishTime);
             return revertOnBlockedExecution ? OrderExecutionStepResult.Return : OrderExecutionStepResult.Continue;
         }
 
         emit OrderFailed(orderId, failureReason);
-        _finalizeOrCleanupOrder(
-            orderId, pythFee, false, failureOutcome, revertOnBlockedExecution, executionPrice, oraclePublishTime
-        );
+        _finalizeOrCleanupOrder(orderId, false, failureOutcome, executionPrice, oraclePublishTime);
         return revertOnBlockedExecution ? OrderExecutionStepResult.Return : OrderExecutionStepResult.Continue;
     }
 
     function _finalizeOrCleanupOrder(
         uint64 orderId,
-        uint256 pythFee,
         bool success,
         FailedOrderOutcome failedOutcome,
-        bool refundEthNow,
         uint256 executionPrice,
         uint64 oraclePublishTime
     ) internal {
@@ -219,10 +192,6 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
             _finalizeExecution(orderId, executionPrice, oraclePublishTime);
         } else {
             _cleanupOrder(orderId, failedOutcome, executionPrice, oraclePublishTime);
-        }
-
-        if (refundEthNow) {
-            _sendEth(msg.sender, msg.value - pythFee);
         }
     }
 
