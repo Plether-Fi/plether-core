@@ -507,7 +507,7 @@ Required transition rules:
 - expiry resolves through the configured bounty and reservation policy,
 - stale or missing oracle data does not destroy a valid pending order,
 - slippage-invalid orders fail terminally and must not pin the FIFO head,
-- live-market execution requires `oraclePublishTime > order.commitTime`; only genuine frozen-oracle close-only windows may relax that ordering.
+- live-market execution requires `order.commitTime < oraclePublishTime <= block.timestamp`; only genuine frozen-oracle close-only windows may relax commit-time ordering.
 
 ![Order state machine](../../assets/diagrams/perps-order-lifecycle.svg)
 

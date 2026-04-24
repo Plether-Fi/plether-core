@@ -272,7 +272,7 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
 
         for (uint256 i = 0; i < len; i++) {
             PythStructs.Price memory p = pyth.getPriceUnsafe(pythFeedIds[i]);
-            if (OracleFreshnessPolicyLib.isStale(uint64(p.publishTime), maxStaleness, block.timestamp)) {
+            if (OracleFreshnessPolicyLib.isStale(p.publishTime, maxStaleness, block.timestamp)) {
                 _revertOraclePriceTooStale();
             }
             if (p.price <= 0) {

@@ -108,7 +108,7 @@ The main runtime and read surfaces are:
 2. Submit an open or close intent through `OrderRouter.commitOrder(...)`.
 3. The router records a FIFO order, reserves committed margin, and escrows a keeper execution bounty.
 4. A keeper later calls `executeOrder(...)` or `executeOrderBatch(...)` with Pyth update data.
-5. `OrderRouter` validates oracle freshness, live-market `publishTime > commitTime` ordering, slippage, and queue eligibility, then calls `CfdEngine.processOrderTyped(...)`.
+5. `OrderRouter` validates oracle freshness, live-market `commitTime < publishTime <= block.timestamp` ordering, slippage, and queue eligibility, then calls `CfdEngine.processOrderTyped(...)`.
 6. `CfdEngine` updates the position, realizes fees and carry, and settles through `MarginClearinghouse` and `HousePool`.
 
 Important details:
@@ -304,7 +304,7 @@ The router is configured with parallel arrays of Pyth feed ids, quantities, and 
 - `_computeBasketPrice()` normalizes each feed to 8 decimals.
 - The router computes the weighted basket price in the same shape as the spot basket oracle.
 - The minimum `publishTime` across feeds drives MEV checks, staleness validation, and `engine.lastMarkTime()` ordering.
-- Live order execution requires `publishTime > order.commitTime`; frozen-oracle close-only windows are the only regime that relaxes that ordering rule.
+- Live order execution requires `order.commitTime < publishTime <= block.timestamp`; frozen-oracle close-only windows are the only regime that relaxes commit-time ordering.
 - The execution price is clamped to `CAP_PRICE` before the slippage check so the user sees the same price the engine executes.
 
 ### Frozen oracle behavior

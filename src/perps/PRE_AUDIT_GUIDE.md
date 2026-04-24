@@ -114,7 +114,7 @@ Any new helper/module contract that can reach these sets should be treated as se
 
 | Regime | Entry condition | Allowed actions | Core checks |
 |--------|-----------------|----------------|-------------|
-| Live market | oracle not frozen, mark fresh enough | opens, closes, liquidations | staleness, `block.number > commitBlock`, `publishTime > commitTime`, `publishTime >= lastMarkTime` |
+| Live market | oracle not frozen, mark fresh enough | opens, closes, liquidations | staleness, `block.number > commitBlock`, `commitTime < publishTime <= block.timestamp`, `publishTime >= lastMarkTime` |
 | Friday gap / runway live-close regime | market not frozen but special weekend/runway timing | live rules still apply | same live checks |
 | Frozen / FAD close-only regime | oracle frozen but within allowed stale window | closes and liquidations only | relaxed publish-ordering rule, frozen-window stale limits |
 | Over-stale frozen regime | oracle frozen beyond allowed stale window | no execution | revert/block |

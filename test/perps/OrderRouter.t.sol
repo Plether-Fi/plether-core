@@ -1432,6 +1432,24 @@ contract OrderRouterPythTest is BasePerpTest {
         );
     }
 
+    function test_FuturePublishTime_Reverts() public {
+        vm.warp(1000);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1010);
+        vm.warp(1005);
+        vm.roll(block.number + 1);
+
+        bytes[] memory empty = _pythUpdateData();
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
+        router.executeOrder(1, empty);
+
+        assertEq(router.nextExecuteId(), 1, "Future oracle publication must not consume the FIFO head");
+        assertEq(engine.lastMarkTime(), 0, "Future oracle publication must not update the cached mark");
+    }
+
     function test_SameBlockExecution_Reverts() public {
         vm.warp(1000);
 
@@ -2891,7 +2909,7 @@ contract BasketPriceHarness is OrderRouter {
 
         for (uint256 i = 0; i < pythFeedIds.length; i++) {
             PythStructs.Price memory p = IPyth(address(pyth)).getPriceUnsafe(pythFeedIds[i]);
-            if (block.timestamp > uint64(p.publishTime) + maxStaleness) {
+            if (p.publishTime > block.timestamp || block.timestamp - p.publishTime > maxStaleness) {
                 _revertOraclePriceTooStale();
             }
 
@@ -4648,6 +4666,18 @@ contract MarkPriceStalenessTest is BasePerpTest {
 
         vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
         router.updateMarkPrice(updateData);
+    }
+
+    function test_UpdateMarkPrice_RevertsOnFutureOracle() public {
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), block.timestamp + 1);
+
+        bytes[] memory updateData = new bytes[](1);
+        updateData[0] = "";
+
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
+        router.updateMarkPrice(updateData);
+
+        assertEq(engine.lastMarkTime(), 0, "Future oracle publication must not update the cached mark");
     }
 
     function test_UpdateMarkPrice_AcceptsFreshOracle() public {

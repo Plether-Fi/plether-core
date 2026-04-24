@@ -159,7 +159,7 @@ The protocol assumes Pyth provides timely and correct FX feed data for the baske
 
 Mitigations:
 
-- delayed-order execution with publish-time ordering while the oracle is live,
+- delayed-order execution with publish-time ordering and future-publication rejection while the oracle is live,
 - distinct staleness thresholds for order execution, liquidation, engine-side guards, and HousePool freshness,
 - shared normalized basket-price construction across execution paths,
 - frozen-oracle regime for close liveness during genuine market closure.
@@ -235,7 +235,7 @@ The router uses delayed commit/execute semantics rather than same-tx market exec
 Security properties:
 
 - trader intent is committed before keeper execution,
-- live-market execution requires `publishTime > commitTime`, which defends against oracle latency arbitrage,
+- live-market execution requires `commitTime < publishTime <= block.timestamp`, which defends against oracle latency arbitrage and future-dated feed drift,
 - FIFO execution prevents later orders from bypassing earlier ones,
 - binding order semantics prevent traders from turning queued intents into free options.
 
