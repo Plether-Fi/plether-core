@@ -5181,8 +5181,8 @@ contract CfdEngineCarryRegressionTest is BasePerpTest {
         uint256 mtm = _vaultMtmAdjustment();
         assertEq(
             mtm,
-            5000e6,
-            "Only the profitable bull side should count toward vault MtM; losing bear exposure must clamp to zero"
+            71_000e6,
+            "MtM should use a conservative max-profit envelope instead of netting side-level paper losses"
         );
     }
 

@@ -274,6 +274,7 @@ That means:
 
 - LP share pricing may temporarily undercount value,
 - junior principal can dip before later realized recovery arrives,
+- same-side loser debt cannot net down live winner liability before settlement,
 - but the protocol avoids phantom-profit withdrawal bugs.
 
 This is an explicit design choice, not an accounting accident.

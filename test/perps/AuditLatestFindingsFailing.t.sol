@@ -56,23 +56,7 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
 
         assertGt(engine.accumulatedBadDebtUsdc(), 0, "Setup must realize bad debt");
 
-        uint256 price = engine.lastMarkPrice();
-        int256 bullPnl =
-            (int256(_sideEntryNotional(CfdTypes.Side.BULL)) - int256(_sideOpenInterest(CfdTypes.Side.BULL) * price))
-                / int256(1e20);
-        int256 bearPnl =
-            (int256(_sideOpenInterest(CfdTypes.Side.BEAR) * price) - int256(_sideEntryNotional(CfdTypes.Side.BEAR)))
-                / int256(1e20);
-
-        uint256 expectedMtm = 0;
-        if (bullPnl > 0) {
-            expectedMtm += uint256(bullPnl);
-        }
-        if (bearPnl > 0) {
-            expectedMtm += uint256(bearPnl);
-        }
-
-        assertEq(_vaultMtmAdjustment(), expectedMtm, "Realized bad debt should already be priced into MtM");
+        assertEq(_vaultMtmAdjustment(), 75_000e6, "MtM should use the conservative post-liquidation envelope");
     }
 
     function test_H1_MarginOnlyUpdateViaRouterReverts() public {

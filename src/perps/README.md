@@ -254,6 +254,7 @@ LP accounting intentionally refuses to count unrealized trader losses as present
 
 - Unrealized profitable trader PnL is treated as a liability.
 - Unrealized trader losses are not booked as instantly withdrawable LP assets.
+- Side MtM uses a conservative max-profit envelope so same-side loser debt cannot net down live winner liability before settlement.
 - Realized losses increase physical pool cash only when settlement actually happens.
 
 This keeps LP share pricing and withdrawal limits conservative.

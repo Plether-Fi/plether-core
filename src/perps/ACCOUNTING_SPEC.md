@@ -65,11 +65,12 @@ For LP accounting, unrealized trader profits may be recognized as liabilities, b
 
 Definition:
 
-- compute unrealized PnL per side,
-- clamp each side at zero,
-- sum the remaining positive values.
+- compute a side-local upper bound from cached max-profit exposure,
+- for BULL, scale side max profit by `(CAP_PRICE - markPrice) / CAP_PRICE`,
+- for BEAR, scale side max profit by `markPrice / CAP_PRICE`,
+- sum the two conservative side liabilities.
 
-This quantity is appropriate for conservative LP equity and tranche reconciliation, not for pretending the vault has already collected losing traders' money.
+This quantity is appropriate for conservative LP equity and tranche reconciliation, not for pretending the vault has already collected losing traders' money. It can temporarily over-reserve LP value when entry prices are dispersed inside a side, but it avoids netting winners against uncollected same-side loser debt.
 
 ## The Four Core Accounting Views
 
