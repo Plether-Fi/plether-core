@@ -9,10 +9,10 @@ import {CfdEnginePlanLib} from "./libraries/CfdEnginePlanLib.sol";
 contract CfdEnginePlanner is ICfdEnginePlanner {
 
     function computeOpenMarginAfter(
-        uint256 marginAfterFunding,
+        uint256 marginAfterCarry,
         int256 netMarginChange
     ) external pure returns (bool drained, uint256 marginAfter) {
-        return CfdEnginePlanLib.computeOpenMarginAfter(marginAfterFunding, netMarginChange);
+        return CfdEnginePlanLib.computeOpenMarginAfter(marginAfterCarry, netMarginChange);
     }
 
     function planOpen(

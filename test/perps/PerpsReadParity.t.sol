@@ -12,56 +12,55 @@ contract PerpsReadParityTest is BasePerpTest {
 
     function test_ClosePreviewMatchesLive() public {
         address trader = address(0xAA11);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         _fundTrader(trader, 11_000e6);
 
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
 
-        CfdEngine.ClosePreview memory preview = engineLens.previewClose(accountId, 100_000e18, 80_000_000);
-        CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(accountId);
-        _close(accountId, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
+        CfdEngine.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 80_000_000);
+        CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(account);
+        _close(account, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
 
-        CloseParityObserved memory observed = _observeCloseParity(accountId, beforeSnapshot);
+        CloseParityObserved memory observed = _observeCloseParity(account, beforeSnapshot);
         _assertClosePreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
     }
 
     function test_LiquidationPreviewMatchesLive() public {
         address trader = address(0xAA12);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         address keeper = address(0xAA13);
 
         _fundTrader(trader, 900e6);
-        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
 
         vm.prank(trader);
-        clearinghouse.withdraw(accountId, 70e6);
+        clearinghouse.withdraw(account, 70e6);
 
-        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, 150_000_000);
-        LiquidationParitySnapshot memory beforeSnapshot = _captureLiquidationParitySnapshot(accountId, keeper);
+        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 150_000_000);
+        LiquidationParitySnapshot memory beforeSnapshot = _captureLiquidationParitySnapshot(account, keeper);
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(150_000_000));
         vm.prank(keeper);
-        router.executeLiquidation(accountId, priceData);
+        router.executeLiquidation(account, priceData);
 
-        LiquidationParityObserved memory observed = _observeLiquidationParity(accountId, keeper, beforeSnapshot);
+        LiquidationParityObserved memory observed = _observeLiquidationParity(account, keeper, beforeSnapshot);
         _assertLiquidationPreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
     }
 
     function test_AccountLensMirrorsLiveCustodyAndEngineState() public {
         address trader = address(0xAA14);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
 
         _fundTrader(trader, 20_000e6);
-        _open(accountId, CfdTypes.Side.BEAR, 80_000e18, 8000e6, 1e8);
+        _open(account, CfdTypes.Side.BEAR, 80_000e18, 8000e6, 1e8);
 
-        AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
-            engineAccountLens.getAccountLedgerSnapshot(accountId);
-        CfdEngine.AccountCollateralView memory collateralView = engineAccountLens.getAccountCollateralView(accountId);
-        (uint256 size, uint256 margin, uint256 entryPrice,, CfdTypes.Side side,,) = engine.positions(accountId);
+        AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(account);
+        CfdEngine.AccountCollateralView memory collateralView = engineAccountLens.getAccountCollateralView(account);
+        (uint256 size, uint256 margin, uint256 entryPrice,, CfdTypes.Side side,,) = engine.positions(account);
 
         assertEq(
             snapshot.settlementBalanceUsdc,
-            clearinghouse.balanceUsdc(accountId),
+            clearinghouse.balanceUsdc(account),
             "Account lens settlement should match clearinghouse"
         );
         assertEq(
@@ -94,7 +93,7 @@ contract PerpsReadParityTest is BasePerpTest {
         );
         assertEq(
             snapshot.deferredTraderCreditUsdc,
-            engine.deferredTraderCreditUsdc(accountId),
+            engine.deferredTraderCreditUsdc(account),
             "Deferred payout should match engine state"
         );
         assertEq(snapshot.size, size, "Account lens size should match engine position");
@@ -105,19 +104,18 @@ contract PerpsReadParityTest is BasePerpTest {
 
     function test_PublicLensMirrorsAccountLens() public {
         address trader = address(0xAA15);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
 
         _fundTrader(trader, 50_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
         vm.warp(block.timestamp + 30 days);
 
-        AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
-            engineAccountLens.getAccountLedgerSnapshot(accountId);
-        PerpsViewTypes.TraderAccountView memory traderView = publicLens.getTraderAccount(accountId);
-        PerpsViewTypes.PositionView memory positionView = publicLens.getPosition(accountId);
+        AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(account);
+        PerpsViewTypes.TraderAccountView memory traderView = publicLens.getTraderAccount(account);
+        PerpsViewTypes.PositionView memory positionView = publicLens.getPosition(account);
 
         assertEq(
             traderView.equityUsdc,
@@ -126,7 +124,7 @@ contract PerpsReadParityTest is BasePerpTest {
         );
         assertEq(
             traderView.withdrawableUsdc,
-            engineAccountLens.getWithdrawableUsdc(accountId),
+            engineAccountLens.getWithdrawableUsdc(account),
             "Public withdrawable should match account lens"
         );
         assertEq(
@@ -143,16 +141,16 @@ contract PerpsReadParityTest is BasePerpTest {
 
     function test_ProtocolLensMirrorsPostOpProtocolSnapshot() public {
         address trader = address(0xAA16);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         _fundTrader(trader, 11_000e6);
 
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
 
-        _close(accountId, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
+        _close(account, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
 
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory protocolSnapshot =
             engineProtocolLens.getProtocolAccountingSnapshot();

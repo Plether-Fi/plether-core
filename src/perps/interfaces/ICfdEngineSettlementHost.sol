@@ -10,7 +10,7 @@ interface ICfdEngineSettlementHost {
     function vault() external view returns (address);
     function orderRouter() external view returns (address);
 
-    function settlementApplyFundingAndMark(
+    function settlementApplyCarryAndMark(
         uint256 newMarkPrice,
         uint64 newMarkTime
     ) external;
@@ -26,11 +26,11 @@ interface ICfdEngineSettlementHost {
         int256 entryNotionalDelta
     ) external;
     function settlementConsumeDeferredTraderPayout(
-        bytes32 accountId,
+        address account,
         uint256 amountUsdc
     ) external;
     function settlementRecordDeferredTraderPayout(
-        bytes32 accountId,
+        address account,
         uint256 amountUsdc
     ) external;
     function settlementAccumulateFees(
@@ -40,11 +40,11 @@ interface ICfdEngineSettlementHost {
         uint256 amountUsdc
     ) external;
     function settlementWritePosition(
-        bytes32 accountId,
+        address account,
         CfdEngineSettlementTypes.PositionState calldata position
     ) external;
     function settlementDeletePosition(
-        bytes32 accountId
+        address account
     ) external;
 
 }

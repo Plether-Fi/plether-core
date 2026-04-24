@@ -285,7 +285,7 @@ Definitions:
 - `positionNotionalUsdc = size * markPrice / scale`
 - `lpBackedNotionalUsdc = max(positionNotionalUsdc - reachableCollateralUsdc, 0)`
 - `pendingCarryUsdc = lpBackedNotionalUsdc * baseCarryBps * elapsedSeconds / (10_000 * 365 days)`
-- `unsettledCarryUsdc[accountId]`: carry that has been checkpointed at a basis change but not yet physically collected
+- `unsettledCarryUsdc[account]`: carry that has been checkpointed at a basis change but not yet physically collected
 
 Rules:
 
@@ -306,8 +306,8 @@ The protocol supports fail-soft terminal settlement.
 
 ### Deferred trader credit
 
-- profitable closes and some liquidation residuals may create `deferredTraderCreditUsdc[accountId]`,
-- only the beneficiary account owner may call `claimDeferredTraderCredit(accountId)`,
+- profitable closes and some liquidation residuals may create `deferredTraderCreditUsdc[account]`,
+- only the beneficiary account owner may call `claimDeferredTraderCredit(account)`,
 - claims may be partial,
 - settlement is credited into `MarginClearinghouse`.
 

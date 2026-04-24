@@ -50,33 +50,33 @@ contract AuditFollowupFindingsFailing_CloseSolvency is BasePerpTest {
     }
 
     function test_C3_ProfitableCloseEntersDegradedModeInsteadOfReverting() public {
-        bytes32 bullId = bytes32(uint256(uint160(bullTrader)));
-        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
+        address bullAccount = bullTrader;
+        address bearAccount = bearTrader;
 
         _fundTrader(bullTrader, 100_000e6);
         _fundTrader(bearTrader, 100_000e6);
 
-        _open(bearId, CfdTypes.Side.BEAR, 1_000_000e18, 50_000e6, 1e8);
-        _open(bullId, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
+        _open(bearAccount, CfdTypes.Side.BEAR, 1_000_000e18, 50_000e6, 1e8);
+        _open(bullAccount, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
 
-        _close(bullId, CfdTypes.Side.BULL, 500_000e18, 20_000_000);
+        _close(bullAccount, CfdTypes.Side.BULL, 500_000e18, 20_000_000);
 
         assertTrue(engine.degradedMode(), "Profitable close should latch degraded mode when it reveals insolvency");
     }
 
     function test_C3_DegradedModeBlocksNewOpensUntilRecapitalized() public {
-        bytes32 bullId = bytes32(uint256(uint160(bullTrader)));
-        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
+        address bullAccount = bullTrader;
+        address bearAccount = bearTrader;
         address newTrader = address(0xCAFE);
-        bytes32 newTraderId = bytes32(uint256(uint160(newTrader)));
+        address newTraderAccount = newTrader;
 
         _fundTrader(bullTrader, 100_000e6);
         _fundTrader(bearTrader, 100_000e6);
         _fundTrader(newTrader, 100_000e6);
 
-        _open(bearId, CfdTypes.Side.BEAR, 1_000_000e18, 50_000e6, 1e8);
-        _open(bullId, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
-        _close(bullId, CfdTypes.Side.BULL, 500_000e18, 20_000_000);
+        _open(bearAccount, CfdTypes.Side.BEAR, 1_000_000e18, 50_000e6, 1e8);
+        _open(bullAccount, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
+        _close(bullAccount, CfdTypes.Side.BULL, 500_000e18, 20_000_000);
 
         assertTrue(engine.degradedMode(), "Setup must enter degraded mode");
         vm.prank(address(router));
@@ -85,7 +85,7 @@ contract AuditFollowupFindingsFailing_CloseSolvency is BasePerpTest {
                 abi.encodeWithSelector(
                     engine.processOrderTyped.selector,
                     CfdTypes.Order({
-                        accountId: newTraderId,
+                        account: newTraderAccount,
                         sizeDelta: 10_000e18,
                         marginDelta: 1000e6,
                         targetPrice: 1e8,
@@ -104,18 +104,18 @@ contract AuditFollowupFindingsFailing_CloseSolvency is BasePerpTest {
     }
 
     function test_C3_OwnerCanClearDegradedModeAfterRecapitalization() public {
-        bytes32 bullId = bytes32(uint256(uint160(bullTrader)));
-        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
+        address bullAccount = bullTrader;
+        address bearAccount = bearTrader;
         address newTrader = address(0xCAFE);
-        bytes32 newTraderId = bytes32(uint256(uint160(newTrader)));
+        address newTraderAccount = newTrader;
 
         _fundTrader(bullTrader, 100_000e6);
         _fundTrader(bearTrader, 100_000e6);
         _fundTrader(newTrader, 100_000e6);
 
-        _open(bearId, CfdTypes.Side.BEAR, 1_000_000e18, 50_000e6, 1e8);
-        _open(bullId, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
-        _close(bullId, CfdTypes.Side.BULL, 500_000e18, 20_000_000);
+        _open(bearAccount, CfdTypes.Side.BEAR, 1_000_000e18, 50_000e6, 1e8);
+        _open(bullAccount, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
+        _close(bullAccount, CfdTypes.Side.BULL, 500_000e18, 20_000_000);
 
         vm.expectRevert(CfdEngine.CfdEngine__StillInsolvent.selector);
         engine.clearDegradedMode();
@@ -124,22 +124,22 @@ contract AuditFollowupFindingsFailing_CloseSolvency is BasePerpTest {
         engine.clearDegradedMode();
 
         assertFalse(engine.degradedMode(), "Owner should clear degraded mode after recapitalization restores solvency");
-        _open(newTraderId, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
+        _open(newTraderAccount, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
     }
 
     function test_C3_DeferredTraderCreditDoesNotRequireDegradedModeWithoutOpenLiability() public {
-        bytes32 bullId = bytes32(uint256(uint160(bullTrader)));
+        address bullAccount = bullTrader;
 
         _fundTrader(bullTrader, 11_000e6);
-        _open(bullId, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+        _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
 
-        _close(bullId, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
+        _close(bullAccount, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
 
-        assertGt(engine.deferredTraderCreditUsdc(bullId), 0, "Setup should create a deferred payout liability");
+        assertGt(engine.deferredTraderCreditUsdc(bullAccount), 0, "Setup should create a deferred payout liability");
         assertFalse(
             engine.degradedMode(),
             "A standalone deferred payout should not force degraded mode once bounded open liability is gone"
@@ -153,16 +153,16 @@ contract AuditFollowupFindingsFailing_LiquidationBadDebt is BasePerpTest {
     address trader = address(0xA11CE);
 
     function test_C1_LiquidationConsumesReachableBalanceWithoutArtificialBadDebt() public {
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         _fundTrader(trader, 10_000e6);
 
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
 
         vm.prank(trader);
-        clearinghouse.withdraw(accountId, 8000e6);
+        clearinghouse.withdraw(account, 8000e6);
 
         vm.startPrank(address(router));
-        engine.liquidatePosition(accountId, 101_900_000, pool.totalAssets(), uint64(block.timestamp));
+        engine.liquidatePosition(account, 101_900_000, pool.totalAssets(), uint64(block.timestamp));
         vm.stopPrank();
 
         assertEq(
@@ -191,18 +191,18 @@ contract AuditFollowupFindingsFailing_LiquidationBounty is BasePerpTest {
 
     function test_H1_PositiveEquityLiquidationUsesExplicitSubsidy() public {
         address trader = address(0xA201);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
 
         _fundTrader(trader, 100e6);
 
-        _open(accountId, CfdTypes.Side.BULL, 100e18, 6e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100e18, 6e6, 1e8);
 
         vm.prank(trader);
-        clearinghouse.withdraw(accountId, 94e6);
+        clearinghouse.withdraw(account, 94e6);
 
         vm.startPrank(address(router));
         vm.warp(1_709_971_200);
-        uint256 bounty = engine.liquidatePosition(accountId, 101_000_000, pool.totalAssets(), uint64(block.timestamp));
+        uint256 bounty = engine.liquidatePosition(account, 101_000_000, pool.totalAssets(), uint64(block.timestamp));
         vm.stopPrank();
 
         assertGt(bounty, 0, "Keeper bounty should stay positive for a still-positive-equity liquidation");
@@ -241,13 +241,13 @@ contract AuditFollowupFindingsFailing_LegacySpreadReserve is BasePerpTest {
         _fundTrader(bullTraderB, 400_000e6);
         _fundTrader(bearTrader, 100_000e6);
 
-        bytes32 bullIdA = bytes32(uint256(uint160(bullTraderA)));
-        bytes32 bullIdB = bytes32(uint256(uint160(bullTraderB)));
-        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
+        address bullIdA = bullTraderA;
+        address bullIdB = bullTraderB;
+        address bearAccount = bearTrader;
 
         _open(bullIdA, CfdTypes.Side.BULL, 390_000e18, 6500e6, 1e8);
         _open(bullIdB, CfdTypes.Side.BULL, 10_000e18, 300_000e6, 1e8);
-        _open(bearId, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
+        _open(bearAccount, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
 
         vm.warp(block.timestamp + 180 days);
         vm.prank(address(router));
@@ -265,7 +265,7 @@ contract AuditFollowupFindingsFailing_LegacySpreadReserve is BasePerpTest {
             bullPosB = CfdTypes.Position(size, margin, entryPrice, 0, side, 0, 0, 0);
         }
         {
-            (uint256 size, uint256 margin, uint256 entryPrice,, CfdTypes.Side side,,) = engine.positions(bearId);
+            (uint256 size, uint256 margin, uint256 entryPrice,, CfdTypes.Side side,,) = engine.positions(bearAccount);
             bearPos = CfdTypes.Position(size, margin, entryPrice, 0, side, 0, 0, 0);
         }
 
@@ -369,15 +369,15 @@ contract AuditFollowupFindingsFailing_SkewCap is BasePerpTest {
     address trader = address(0x5E77);
 
     function test_M1_IncreaseMustRejectPostTradeSkewAboveMaxSkewRatio() public {
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
-        bytes32 counterpartyId = bytes32(uint256(uint160(address(0xBEEF))));
+        address account = trader;
+        address counterpartyAccount = address(0xBEEF);
         _fundTrader(trader, 100_000e6);
         _fundTrader(address(0xBEEF), 100_000e6);
-        _open(counterpartyId, CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8);
+        _open(counterpartyAccount, CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8);
         uint256 depth = pool.totalAssets();
 
         vm.expectRevert();
-        _open(accountId, CfdTypes.Side.BULL, 600_000e18, 50_000e6, 1e8, depth);
+        _open(account, CfdTypes.Side.BULL, 600_000e18, 50_000e6, 1e8, depth);
     }
 
 }

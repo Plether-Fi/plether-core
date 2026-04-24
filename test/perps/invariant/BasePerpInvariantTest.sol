@@ -116,10 +116,10 @@ abstract contract BasePerpInvariantTest is Test {
     }
 
     function _pendingOrders(
-        bytes32 accountId
+        address account
     ) internal view returns (IOrderRouterAccounting.PendingOrderView[] memory pending) {
-        uint64 orderId = router.accountHeadOrderId(accountId);
-        uint256 pendingCount = router.pendingOrderCounts(accountId);
+        uint64 orderId = router.accountHeadOrderId(account);
+        uint256 pendingCount = router.pendingOrderCounts(account);
         pending = new IOrderRouterAccounting.PendingOrderView[](pendingCount);
         for (uint256 i; i < pendingCount; ++i) {
             (pending[i], orderId) = router.getPendingOrderView(orderId);
@@ -139,21 +139,21 @@ abstract contract BasePerpInvariantTest is Test {
     }
 
     function _freeSettlementUsdc(
-        bytes32 accountId
+        address account
     ) internal view returns (uint256) {
-        return clearinghouse.getAccountUsdcBuckets(accountId).freeSettlementUsdc;
+        return clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc;
     }
 
     function _terminalReachableUsdc(
-        bytes32 accountId
+        address account
     ) internal view returns (uint256) {
-        return clearinghouse.getAccountUsdcBuckets(accountId).settlementBalanceUsdc;
+        return clearinghouse.getAccountUsdcBuckets(account).settlementBalanceUsdc;
     }
 
     function _publicPosition(
-        bytes32 accountId
+        address account
     ) internal view returns (PerpsViewTypes.PositionView memory viewData) {
-        return publicLens.getPosition(accountId);
+        return publicLens.getPosition(account);
     }
 
     function _publicProtocolStatus() internal view returns (PerpsViewTypes.ProtocolStatusView memory viewData) {
@@ -195,10 +195,10 @@ abstract contract BasePerpInvariantTest is Test {
     }
 
     function _deferredCreditStatus(
-        bytes32 accountId,
+        address account,
         address keeper
     ) internal view returns (DeferredEngineViewTypes.DeferredCreditStatus memory status) {
-        uint256 deferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(accountId);
+        uint256 deferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(account);
         uint256 deferredKeeperCreditUsdc = engine.deferredKeeperCreditUsdc(keeper);
         bool anyLiquidity = vault.totalAssets() > 0;
 

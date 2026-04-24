@@ -130,8 +130,8 @@ contract AuditV3_C01_FIFODeadlockTest is BasePerpTest {
     }
 
     function test_C01_CloseOrderBlockedByOpenInFrozenQueue() public {
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        _open(aliceId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        address aliceAccount = alice;
+        _open(aliceAccount, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
         // Bob commits an OPEN order on Thursday (before FAD window)
         address bob = address(0xB0B);
@@ -163,7 +163,7 @@ contract AuditV3_C01_FIFODeadlockTest is BasePerpTest {
             abi.encodeWithSelector(router.executeOrder.selector, uint64(2), priceData)
         );
 
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 0, "C-01: close order must not be blocked by open order in frozen queue");
     }
 
@@ -228,8 +228,8 @@ contract AuditV3_C03_AsymmetricStalenessTest is BasePerpTest {
         pool.finalizePoolConfig();
 
         _fundTrader(alice, 50_000e6);
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        _open(aliceId, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
+        address aliceAccount = alice;
+        _open(aliceAccount, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
 
         // Set fresh mark on Friday before freeze
         vm.warp(FRIDAY_BEFORE_FREEZE);
@@ -271,8 +271,8 @@ contract AuditV3_C03_AsymmetricStalenessTest is BasePerpTest {
         pool.finalizePoolConfig();
 
         _fundTrader(alice, 50_000e6);
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        _open(aliceId, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
+        address aliceAccount = alice;
+        _open(aliceAccount, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
 
         // Fresh mark on Friday
         vm.warp(FRIDAY_BEFORE_FREEZE);
@@ -447,11 +447,11 @@ contract AuditV3_H02_JuniorWipeoutDilutionTest is BasePerpTest {
 
         // Trader opens a BULL position. Max profit = $50K = pool total.
         _fundTrader(trader, 50_000e6);
-        bytes32 traderId = bytes32(uint256(uint160(trader)));
-        _open(traderId, CfdTypes.Side.BULL, 50_000e18, 10_000e6, 1e8);
+        address traderAccount = trader;
+        _open(traderAccount, CfdTypes.Side.BULL, 50_000e18, 10_000e6, 1e8);
 
         // BULL profits when oracle drops. Close at 0 for exact max payout.
-        _close(traderId, CfdTypes.Side.BULL, 50_000e18, 0);
+        _close(traderAccount, CfdTypes.Side.BULL, 50_000e18, 0);
 
         // Reconcile: loss exceeds juniorPrincipal → junior wiped to exactly 0.
         vm.prank(address(router));
@@ -541,8 +541,8 @@ contract AuditV3_M02_CarryDesyncTest is BasePerpTest {
 
     function obsolete_M02_UpdateMarkPriceDoesNotRealizeCarry() public {
         _fundTrader(alice, 50_000e6);
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        _open(aliceId, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
+        address aliceAccount = alice;
+        _open(aliceAccount, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
 
         // Warp forward 1 hour in the carry model
         _warpForward(3600);

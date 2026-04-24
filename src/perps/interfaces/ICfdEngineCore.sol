@@ -51,7 +51,7 @@ interface ICfdEngineCore {
     ) external;
 
     function reserveCloseOrderExecutionBounty(
-        bytes32 accountId,
+        address account,
         uint256 sizeDelta,
         uint256 amountUsdc,
         address recipient
@@ -79,7 +79,7 @@ interface ICfdEngineCore {
     function totalDeferredKeeperCreditUsdc() external view returns (uint256);
 
     function liquidatePosition(
-        bytes32 accountId,
+        address account,
         uint256 currentOraclePrice,
         uint256 vaultDepthUsdc,
         uint64 publishTime
@@ -95,12 +95,12 @@ interface ICfdEngineCore {
     function CAP_PRICE() external view returns (uint256);
 
     function realizeCarryBeforeMarginChange(
-        bytes32 accountId,
+        address account,
         uint256 reachableCollateralBasisUsdc
     ) external;
 
     function checkpointCarryUsingStoredMark(
-        bytes32 accountId,
+        address account,
         uint256 reachableCollateralBasisUsdc
     ) external;
 
@@ -117,7 +117,7 @@ interface ICfdEngineCore {
     function isOracleFrozen() external view returns (bool);
 
     function positions(
-        bytes32 accountId
+        address account
     )
         external
         view

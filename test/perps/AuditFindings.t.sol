@@ -56,8 +56,8 @@ contract AuditC01_HwmInflation is BasePerpTest {
         // 100k tokens at $1.00, max profit = 100k * ($2 - $1) = $100k
         // Vault has $150k, so solvency check passes.
         _fundTrader(address(0xAAA), 5000 * 1e6);
-        bytes32 traderId = bytes32(uint256(uint160(address(0xAAA))));
-        _open(traderId, CfdTypes.Side.BEAR, 100_000 * 1e18, 5000 * 1e6, 1e8);
+        address traderAccount = address(0xAAA);
+        _open(traderAccount, CfdTypes.Side.BEAR, 100_000 * 1e18, 5000 * 1e6, 1e8);
 
         // Price rises to $1.80 → BEAR unrealized PnL = 100k * 0.8 = $80k
         // Reconcile: distributable ≈ cash - mtm, loss ≈ $80k
@@ -131,7 +131,7 @@ contract AuditC03_MarginCheck is BasePerpTest {
 
     function test_C03_PostFeeMarginBelowImr() public {
         _fundTrader(alice, 100_000 * 1e6);
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        address aliceAccount = alice;
 
         // Open 200k BULL tokens at $1.00
         // Notional = $200k, MMR = 1% = $2000, explicit IMR = 1.5% = $3000
@@ -143,7 +143,7 @@ contract AuditC03_MarginCheck is BasePerpTest {
         vm.prank(address(router));
         engine.processOrderTyped(
             CfdTypes.Order({
-                accountId: aliceId,
+                account: aliceAccount,
                 sizeDelta: 200_000 * 1e18,
                 marginDelta: 3070 * 1e6,
                 targetPrice: 1e8,
@@ -185,8 +185,8 @@ contract AuditC04_StaleOracleMtmBypass is BasePerpTest {
         // Open a position so staleness path triggers (bullMax+bearMax > 0)
         address trader = address(0xAAA);
         _fundTrader(trader, 50_000 * 1e6);
-        bytes32 traderId = bytes32(uint256(uint160(trader)));
-        _open(traderId, CfdTypes.Side.BULL, 200_000 * 1e18, 20_000 * 1e6, 1e8);
+        address traderAccount = trader;
+        _open(traderAccount, CfdTypes.Side.BULL, 200_000 * 1e18, 20_000 * 1e6, 1e8);
 
         // Crash: BULL loses when oracle rises
         vm.prank(address(router));
@@ -220,8 +220,8 @@ contract AuditC04_StaleOracleMtmBypass is BasePerpTest {
         pool.finalizePoolConfig();
 
         _fundTrader(address(0xBBB), 10_000 * 1e6);
-        bytes32 traderId = bytes32(uint256(uint160(address(0xBBB))));
-        _open(traderId, CfdTypes.Side.BULL, 50_000 * 1e18, 5000 * 1e6, 1e8);
+        address traderAccount = address(0xBBB);
+        _open(traderAccount, CfdTypes.Side.BULL, 50_000 * 1e18, 5000 * 1e6, 1e8);
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -287,8 +287,8 @@ contract AuditC05_ImpairedDeposit is BasePerpTest {
 
         // Create a deficit: BEAR trader profits, wiping junior and dipping into senior
         _fundTrader(address(0xAAA), 5000 * 1e6);
-        bytes32 traderId = bytes32(uint256(uint160(address(0xAAA))));
-        _open(traderId, CfdTypes.Side.BEAR, 100_000 * 1e18, 5000 * 1e6, 1e8);
+        address traderAccount = address(0xAAA);
+        _open(traderAccount, CfdTypes.Side.BEAR, 100_000 * 1e18, 5000 * 1e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1.8e8, uint64(block.timestamp));
@@ -324,8 +324,8 @@ contract AuditH01_MarkTimeLookback is BasePerpTest {
 
     function test_H01_UpdateMarkUsesPublishTime() public {
         _fundTrader(address(0xAAA), 10_000 * 1e6);
-        bytes32 traderId = bytes32(uint256(uint160(address(0xAAA))));
-        _open(traderId, CfdTypes.Side.BULL, 50_000 * 1e18, 5000 * 1e6, 1e8);
+        address traderAccount = address(0xAAA);
+        _open(traderAccount, CfdTypes.Side.BULL, 50_000 * 1e18, 5000 * 1e6, 1e8);
 
         _warpForward(50);
 
@@ -352,17 +352,17 @@ contract AuditH02_WithdrawBlocked is BasePerpTest {
 
     function test_H02_WithdrawBlockedWithAnyPosition() public {
         _fundTrader(alice, 100_000 * 1e6);
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        address aliceAccount = alice;
 
         // Open a small position: 50k tokens, $1000 margin (well above IMR)
         // Notional = $50k, IMR = max(1.5% * $50k, $5) = $750
-        _open(aliceId, CfdTypes.Side.BULL, 50_000 * 1e18, 1000 * 1e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.BULL, 50_000 * 1e18, 1000 * 1e6, 1e8);
 
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertGt(size, 0);
 
-        uint256 balance = clearinghouse.balanceUsdc(aliceId);
-        uint256 locked = clearinghouse.lockedMarginUsdc(aliceId);
+        uint256 balance = clearinghouse.balanceUsdc(aliceAccount);
+        uint256 locked = clearinghouse.lockedMarginUsdc(aliceAccount);
         uint256 freeBalance = balance - locked;
         assertGt(freeBalance, 90_000 * 1e6, "Alice has ~$99k free but can't touch it");
 
@@ -370,7 +370,7 @@ contract AuditH02_WithdrawBlocked is BasePerpTest {
         // Instead, checkWithdraw reverts for ANY size > 0, trapping all excess collateral.
         uint256 aliceBalanceBefore = usdc.balanceOf(alice);
         vm.prank(alice);
-        clearinghouse.withdraw(aliceId, 1e6);
+        clearinghouse.withdraw(aliceAccount, 1e6);
         assertEq(usdc.balanceOf(alice), aliceBalanceBefore + 1e6, "H-02: should withdraw $1 of free equity");
     }
 
@@ -386,13 +386,13 @@ contract AuditH03_DustPosition is BasePerpTest {
 
     function test_H03_PartialCloseAllowsResidualDustPosition() public {
         _fundTrader(alice, 50_000 * 1e6);
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        address aliceAccount = alice;
 
         // Open 50k tokens at $1.00: notional = $50k
         // IMR = max(1.5% * $50k, $5) = $750. Use $800 margin.
         // execFee = 6bps * $50k = $30. pos.margin = $800 - $30 = $770
         uint256 posSize = 50_000 * 1e18;
-        _open(aliceId, CfdTypes.Side.BULL, posSize, 800 * 1e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.BULL, posSize, 800 * 1e6, 1e8);
 
         // Close 99.5%: currently leaves a small residual position rather than reverting.
         uint256 closeSize = (posSize * 995) / 1000;
@@ -400,7 +400,7 @@ contract AuditH03_DustPosition is BasePerpTest {
         vm.prank(address(router));
         engine.processOrderTyped(
             CfdTypes.Order({
-                accountId: aliceId,
+                account: aliceAccount,
                 sizeDelta: closeSize,
                 marginDelta: 0,
                 targetPrice: 0,
@@ -415,7 +415,7 @@ contract AuditH03_DustPosition is BasePerpTest {
             uint64(block.timestamp)
         );
 
-        (uint256 remainingSize, uint256 remainingMargin,,,,,) = engine.positions(aliceId);
+        (uint256 remainingSize, uint256 remainingMargin,,,,,) = engine.positions(aliceAccount);
         assertEq(remainingSize, posSize - closeSize, "Partial close should leave only the dust residual size");
         assertLt(remainingMargin, 5e6, "Residual dust margin should remain economically tiny after the partial close");
     }

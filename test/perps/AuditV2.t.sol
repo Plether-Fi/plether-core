@@ -40,11 +40,11 @@ contract AuditV2_C01_WithdrawGuardTest is BasePerpTest {
     }
 
     function test_C01_WithdrawWhilePositionUnderwater() public {
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        address aliceAccount = alice;
         _fundTrader(alice, 100_000e6);
 
         // BULL profits when price drops, loses when price rises
-        _open(aliceId, CfdTypes.Side.BULL, 500_000e18, 10_000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.BULL, 500_000e18, 10_000e6, 1e8);
 
         // Price rises to 1.15e8 → BULL unrealized loss ≈ 75K.
         // Alice's true cross-margin equity = 100K deposit - fees - 75K loss ≈ 25K.
@@ -53,8 +53,8 @@ contract AuditV2_C01_WithdrawGuardTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(underwaterPrice, uint64(block.timestamp));
 
-        uint256 chBalance = clearinghouse.balanceUsdc(aliceId);
-        uint256 locked = clearinghouse.lockedMarginUsdc(aliceId);
+        uint256 chBalance = clearinghouse.balanceUsdc(aliceAccount);
+        uint256 locked = clearinghouse.lockedMarginUsdc(aliceAccount);
         uint256 withdrawable = chBalance - locked;
 
         // checkWithdraw is a no-op. Clearinghouse ignores unrealized PnL.
@@ -62,7 +62,7 @@ contract AuditV2_C01_WithdrawGuardTest is BasePerpTest {
         // This should revert (withdrawal exceeds PnL-aware equity) but doesn't.
         vm.prank(alice);
         vm.expectRevert();
-        clearinghouse.withdraw(aliceId, withdrawable);
+        clearinghouse.withdraw(aliceAccount, withdrawable);
     }
 
 }
@@ -111,8 +111,8 @@ contract AuditV2_C02_ReconcileTimeConsumptionTest is BasePerpTest {
         pool.finalizePoolConfig();
 
         _fundTrader(alice, 50_000e6);
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        _open(aliceId, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
+        address aliceAccount = alice;
+        _open(aliceAccount, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
 
         uint256 yieldBefore = pool.unpaidSeniorYield();
 
@@ -233,12 +233,12 @@ contract AuditV2_C03_OracleFrozenCloseTest is BasePerpTest {
     }
 
     function test_C03_CloseOrderBlockedDuringOracleFrozen() public {
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        address aliceAccount = alice;
 
         // Open position directly via engine (bypass router oracle timing)
-        _open(aliceId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertGt(size, 0, "Position should be open");
 
         // Warp to Saturday (oracle frozen per _isOracleFrozen: dayOfWeek==6)
@@ -256,7 +256,7 @@ contract AuditV2_C03_OracleFrozenCloseTest is BasePerpTest {
         updateData[0] = "";
         router.executeOrder{value: 0.01 ether}(1, updateData);
 
-        (size,,,,,,) = engine.positions(aliceId);
+        (size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 0, "C-03: close orders must execute during oracle freeze");
     }
 
@@ -285,8 +285,8 @@ contract AuditV2_H01_DepositStaleMark is BasePerpTest {
         _fundJunior(address(this), 500_000e6);
 
         _fundTrader(alice, 50_000e6);
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        _open(aliceId, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
+        address aliceAccount = alice;
+        _open(aliceAccount, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
@@ -307,8 +307,8 @@ contract AuditV2_H01_DepositStaleMark is BasePerpTest {
         _fundJunior(bob, 500_000e6);
 
         _fundTrader(alice, 50_000e6);
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        _open(aliceId, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
+        address aliceAccount = alice;
+        _open(aliceAccount, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
@@ -347,8 +347,8 @@ contract AuditV2_H02_WeekendWithdrawalDoS is BasePerpTest {
         _fundJunior(bob, 100_000e6);
 
         _fundTrader(alice, 50_000e6);
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        _open(aliceId, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
+        address aliceAccount = alice;
+        _open(aliceAccount, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
@@ -401,21 +401,21 @@ contract AuditV2_M01_VPIRebateIMRTest is BasePerpTest {
 
     function test_M01_ZeroMarginPositionViaVPIRebate() public {
         _fundTrader(alice, 200_000e6);
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        address aliceAccount = alice;
         // Alice creates BULL skew; pays VPI to open
-        _open(aliceId, CfdTypes.Side.BULL, 300_000e18, 50_000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.BULL, 300_000e18, 50_000e6, 1e8);
 
         // Bob opens opposing BEAR with 0 margin — the VPI rebate (skew reduction)
         // should NOT satisfy IMR. With vpiFactor=0.05, rebate ≈ 2250 USDC > exec fee 180.
         _fundTrader(bob, 1e6);
-        bytes32 bobId = bytes32(uint256(uint160(bob)));
+        address bobAccount = bob;
 
         uint256 vaultDepth = pool.totalAssets();
         vm.prank(address(router));
         vm.expectRevert();
         engine.processOrderTyped(
             CfdTypes.Order({
-                accountId: bobId,
+                account: bobAccount,
                 sizeDelta: 300_000e18,
                 marginDelta: 0,
                 targetPrice: 1e8,
@@ -478,8 +478,8 @@ contract AuditV2_M02_GasGriefingTest is BasePerpTest {
         vm.prank(keeper);
         router.executeOrderBatch{value: 0.01 ether}(orderId, priceData);
 
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        address aliceAccount = alice;
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
 
         // With enough gas, the order executes fine. The vulnerability is that
         // the same code path with insufficient gas silently cancels instead of

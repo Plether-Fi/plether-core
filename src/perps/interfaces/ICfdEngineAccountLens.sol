@@ -9,19 +9,19 @@ interface ICfdEngineAccountLens {
     /// @dev Legacy detailed account lens kept for internal tooling, tests, and migration.
     ///      Product-facing consumers should prefer `IPerpsTraderViews` via `PerpsPublicLens`.
     function getAccountCollateralView(
-        bytes32 accountId
+        address account
     ) external view returns (CfdEngine.AccountCollateralView memory viewData);
 
     function getWithdrawableUsdc(
-        bytes32 accountId
+        address account
     ) external view returns (uint256 withdrawableUsdc);
 
     function getAccountLedgerView(
-        bytes32 accountId
+        address account
     ) external view returns (AccountLensViewTypes.AccountLedgerView memory viewData);
 
     function getAccountLedgerSnapshot(
-        bytes32 accountId
+        address account
     ) external view returns (AccountLensViewTypes.AccountLedgerSnapshot memory snapshot);
 
 }

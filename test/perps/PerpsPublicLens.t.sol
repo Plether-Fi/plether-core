@@ -12,25 +12,24 @@ contract PerpsPublicLensTest is BasePerpTest {
 
     function test_GetTraderAccount_UsesNetEquityAndEngineAwareWithdrawable() public {
         address trader = address(0xA11CE);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
 
         _fundTrader(trader, 50_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(105_000_000, uint64(block.timestamp));
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
 
-        AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
-            engineAccountLens.getAccountLedgerSnapshot(accountId);
-        PerpsViewTypes.TraderAccountView memory viewData = publicLens.getTraderAccount(accountId);
+        AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(account);
+        PerpsViewTypes.TraderAccountView memory viewData = publicLens.getTraderAccount(account);
 
-        assertGt(clearinghouse.getFreeBuyingPowerUsdc(accountId), 0, "setup should leave free buying power");
+        assertGt(clearinghouse.getFreeBuyingPowerUsdc(account), 0, "setup should leave free buying power");
         assertEq(viewData.equityUsdc, uint256(snapshot.netEquityUsdc), "public equity should use net economic equity");
         assertEq(
             viewData.withdrawableUsdc,
-            engineAccountLens.getWithdrawableUsdc(accountId),
+            engineAccountLens.getWithdrawableUsdc(account),
             "lens should use account-lens withdrawability"
         );
         assertEq(viewData.withdrawableUsdc, 0, "withdrawable should zero when engine withdraws are stale-blocked");
@@ -38,16 +37,16 @@ contract PerpsPublicLensTest is BasePerpTest {
 
     function test_GetTraderAccount_WithdrawableMatchesEngineAndActualWithdrawBound() public {
         address trader = address(0xBEEF);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
 
         _fundTrader(trader, 50_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(105_000_000, uint64(block.timestamp));
 
-        uint256 withdrawableUsdc = engineAccountLens.getWithdrawableUsdc(accountId);
-        PerpsViewTypes.TraderAccountView memory viewData = publicLens.getTraderAccount(accountId);
+        uint256 withdrawableUsdc = engineAccountLens.getWithdrawableUsdc(account);
+        PerpsViewTypes.TraderAccountView memory viewData = publicLens.getTraderAccount(account);
 
         assertGt(withdrawableUsdc, 0, "setup should produce a positive withdrawable amount");
         assertEq(
@@ -55,20 +54,20 @@ contract PerpsPublicLensTest is BasePerpTest {
         );
 
         vm.prank(trader);
-        clearinghouse.withdraw(accountId, withdrawableUsdc);
+        clearinghouse.withdraw(account, withdrawableUsdc);
 
         vm.prank(trader);
         vm.expectRevert();
-        clearinghouse.withdraw(accountId, 1);
+        clearinghouse.withdraw(account, 1);
     }
 
     function test_GetTraderAccount_FlatAccountUsesSettlementEquity() public {
         address trader = address(0xF1A7);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
 
         _fundTrader(trader, 12_345e6);
 
-        PerpsViewTypes.TraderAccountView memory viewData = publicLens.getTraderAccount(accountId);
+        PerpsViewTypes.TraderAccountView memory viewData = publicLens.getTraderAccount(account);
 
         assertEq(viewData.equityUsdc, 12_345e6, "flat accounts should report settlement equity");
         assertEq(viewData.withdrawableUsdc, 12_345e6, "flat accounts should expose full engine withdrawability");
@@ -77,15 +76,15 @@ contract PerpsPublicLensTest is BasePerpTest {
 
     function test_GetPosition_PopulatesMaintenanceMargin() public {
         address trader = address(0xB0B);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
 
         _fundTrader(trader, 20_000e6);
-        _open(accountId, CfdTypes.Side.BEAR, 80_000e18, 8000e6, 1e8);
+        _open(account, CfdTypes.Side.BEAR, 80_000e18, 8000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(95_000_000, uint64(block.timestamp));
 
-        PerpsViewTypes.PositionView memory viewData = publicLens.getPosition(accountId);
+        PerpsViewTypes.PositionView memory viewData = publicLens.getPosition(account);
         assertEq(
             viewData.maintenanceMarginUsdc,
             _maintenanceMarginUsdc(viewData.size, engine.lastMarkPrice()),
@@ -95,18 +94,17 @@ contract PerpsPublicLensTest is BasePerpTest {
 
     function test_GetPosition_MirrorsAccountLensPositionState() public {
         address trader = address(0xB0B3);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
 
         _fundTrader(trader, 20_000e6);
-        _open(accountId, CfdTypes.Side.BEAR, 80_000e18, 8000e6, 1e8);
+        _open(account, CfdTypes.Side.BEAR, 80_000e18, 8000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(95_000_000, uint64(block.timestamp));
         vm.warp(block.timestamp + 14 days);
 
-        AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
-            engineAccountLens.getAccountLedgerSnapshot(accountId);
-        PerpsViewTypes.PositionView memory viewData = publicLens.getPosition(accountId);
+        AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(account);
+        PerpsViewTypes.PositionView memory viewData = publicLens.getPosition(account);
 
         assertEq(viewData.exists, snapshot.hasPosition, "Public position existence should match account lens");
         assertEq(uint8(viewData.side), uint8(snapshot.side), "Public position side should match account lens");
@@ -127,18 +125,17 @@ contract PerpsPublicLensTest is BasePerpTest {
 
     function test_GetTraderAccount_UsesCarryAwareNetEquity() public {
         address trader = address(0xB0B1);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
 
         _fundTrader(trader, 50_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
         vm.warp(block.timestamp + 30 days);
 
-        AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
-            engineAccountLens.getAccountLedgerSnapshot(accountId);
-        PerpsViewTypes.TraderAccountView memory viewData = publicLens.getTraderAccount(accountId);
+        AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(account);
+        PerpsViewTypes.TraderAccountView memory viewData = publicLens.getTraderAccount(account);
 
         assertLt(
             snapshot.netEquityUsdc,
@@ -152,83 +149,82 @@ contract PerpsPublicLensTest is BasePerpTest {
 
     function test_GetTraderAccount_WithdrawableDropsToZeroAfterLargeLiveCarryAccrual() public {
         address trader = address(0xB0B4);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
 
         _fundTrader(trader, 10_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
 
         vm.warp(block.timestamp + 2 * 365 days);
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
-        uint256 withdrawableUsdc = engineAccountLens.getWithdrawableUsdc(accountId);
-        PerpsViewTypes.TraderAccountView memory viewData = publicLens.getTraderAccount(accountId);
+        uint256 withdrawableUsdc = engineAccountLens.getWithdrawableUsdc(account);
+        PerpsViewTypes.TraderAccountView memory viewData = publicLens.getTraderAccount(account);
 
         assertEq(withdrawableUsdc, 0, "Account lens withdrawable should drop to zero after large live carry accrual");
         assertEq(viewData.withdrawableUsdc, withdrawableUsdc, "Public lens withdrawable should match the account lens");
 
         vm.prank(trader);
         vm.expectRevert();
-        clearinghouse.withdraw(accountId, 1);
+        clearinghouse.withdraw(account, 1);
     }
 
     function test_GetTraderAccount_WithdrawableDecreasesUnderLiveCarryAccrual() public {
         address trader = address(0xB0B5);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
 
         _fundTrader(trader, 5000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 1600e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 1600e6, 1e8);
 
-        uint256 withdrawableBeforeCarry = engineAccountLens.getWithdrawableUsdc(accountId);
+        uint256 withdrawableBeforeCarry = engineAccountLens.getWithdrawableUsdc(account);
         assertGt(withdrawableBeforeCarry, 0, "Setup should start with positive withdrawable headroom");
 
         vm.warp(block.timestamp + 5 days);
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
-        uint256 withdrawableUsdc = engineAccountLens.getWithdrawableUsdc(accountId);
-        PerpsViewTypes.TraderAccountView memory viewData = publicLens.getTraderAccount(accountId);
+        uint256 withdrawableUsdc = engineAccountLens.getWithdrawableUsdc(account);
+        PerpsViewTypes.TraderAccountView memory viewData = publicLens.getTraderAccount(account);
 
         assertLt(withdrawableUsdc, withdrawableBeforeCarry, "Live carry accrual should reduce withdrawable headroom");
         assertEq(viewData.withdrawableUsdc, withdrawableUsdc, "Public lens withdrawable should match the account lens");
 
         if (withdrawableUsdc > 0) {
             vm.prank(trader);
-            clearinghouse.withdraw(accountId, withdrawableUsdc);
+            clearinghouse.withdraw(account, withdrawableUsdc);
 
             vm.prank(trader);
             vm.expectRevert();
-            clearinghouse.withdraw(accountId, 1);
+            clearinghouse.withdraw(account, 1);
         }
     }
 
     function test_IsLiquidatable_UsesCarryAwareLensState() public {
         address trader = address(0xB0B2);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
 
         _fundTrader(trader, 820e6);
-        _open(accountId, CfdTypes.Side.BULL, 50_000e18, 800e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 50_000e18, 800e6, 1e8);
 
-        assertFalse(publicLens.isLiquidatable(accountId), "Setup should start above maintenance before carry accrues");
+        assertFalse(publicLens.isLiquidatable(account), "Setup should start above maintenance before carry accrues");
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
         vm.warp(block.timestamp + 100 days);
 
-        AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
-            engineAccountLens.getAccountLedgerSnapshot(accountId);
+        AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(account);
         assertTrue(
             snapshot.liquidatable, "Account lens should become liquidatable once carry erodes maintenance headroom"
         );
-        assertTrue(publicLens.isLiquidatable(accountId), "Public lens should inherit carry-aware liquidatability");
+        assertTrue(publicLens.isLiquidatable(account), "Public lens should inherit carry-aware liquidatability");
     }
 
     function test_GetLpStatus_UsesActualFrozenWindowFreshness() public {
         address trader = address(0xCAFE);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
 
         _fundTrader(trader, 50_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
         vm.warp(SATURDAY_NOON);
         assertTrue(engine.isOracleFrozen(), "setup should be inside a frozen-oracle window");

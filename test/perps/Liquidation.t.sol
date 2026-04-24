@@ -19,7 +19,7 @@ contract LiquidationTest is BasePerpTest {
         usdc.mint(alice, 10_000 * 1e6);
         vm.startPrank(alice);
         usdc.approve(address(clearinghouse), type(uint256).max);
-        clearinghouse.deposit(bytes32(uint256(uint160(alice))), 10_000 * 1e6);
+        clearinghouse.deposit(alice, 10_000 * 1e6);
         vm.stopPrank();
     }
 
@@ -27,13 +27,13 @@ contract LiquidationTest is BasePerpTest {
         address trader,
         uint256 reserveUsdc
     ) internal {
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
-        uint256 balance = clearinghouse.balanceUsdc(accountId);
-        uint256 locked = clearinghouse.lockedMarginUsdc(accountId);
+        address account = trader;
+        uint256 balance = clearinghouse.balanceUsdc(account);
+        uint256 locked = clearinghouse.lockedMarginUsdc(account);
         uint256 withdrawable = balance > locked + reserveUsdc ? balance - locked - reserveUsdc : 0;
         if (withdrawable > 0) {
             vm.prank(trader);
-            clearinghouse.withdraw(accountId, withdrawable);
+            clearinghouse.withdraw(account, withdrawable);
         }
     }
 
@@ -49,12 +49,12 @@ contract LiquidationTest is BasePerpTest {
         router.executeOrder(1, empty);
         _withdrawFreeUsdc(alice, 0);
 
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
 
         // Keeper tries to liquidate immediately. Should REVERT.
         vm.startPrank(keeper);
         vm.expectRevert(CfdEngine.CfdEngine__PositionIsSolvent.selector);
-        router.executeLiquidation(accountId, empty);
+        router.executeLiquidation(account, empty);
         vm.stopPrank();
 
         // FAD Window activates
@@ -67,17 +67,17 @@ contract LiquidationTest is BasePerpTest {
         uint256 keeperSettlementBefore = _settlementBalance(keeper);
 
         vm.startPrank(keeper);
-        router.executeLiquidation(accountId, empty);
+        router.executeLiquidation(account, empty);
         vm.stopPrank();
 
-        (uint256 size,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Position should be wiped");
 
         uint256 bounty = _settlementBalance(keeper) - keeperSettlementBefore;
         assertEq(bounty, 100 * 1e6, "Keeper should receive $100 USDC bounty (0.10% of $100k)");
 
         // Ethical: Alice keeps surplus equity after the keeper bounty and the carry accrued between open and FAD liquidation.
-        uint256 chBalance = clearinghouse.balanceUsdc(accountId);
+        uint256 chBalance = clearinghouse.balanceUsdc(account);
         assertApproxEqAbs(chBalance, 1_828_663_014, 1, "Alice keeps surplus equity after ethical liquidation");
     }
 
@@ -89,7 +89,7 @@ contract LiquidationTest is BasePerpTest {
         router.executeOrder(1, empty);
         _withdrawFreeUsdc(alice, 0);
 
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
 
         // BULL loses when price rises. Price rises to $1.015
         // PnL = -$0.015 * 100k = -$1500. Equity = $2000 - $1500 = $500
@@ -100,20 +100,20 @@ contract LiquidationTest is BasePerpTest {
         uint256 keeperSettlementBefore = _settlementBalance(keeper);
 
         vm.startPrank(keeper);
-        router.executeLiquidation(accountId, pythData);
+        router.executeLiquidation(account, pythData);
         vm.stopPrank();
 
         uint256 bounty = _settlementBalance(keeper) - keeperSettlementBefore;
         assertTrue(bounty > 0, "Keeper should get bounty");
 
-        (uint256 size,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Position should be wiped");
 
         // Ethical: user should retain equity - bounty
         // PnL = -$1500, Margin = $1960 (after 4 bps fee), Equity = $460
         // Bounty ~ 0.10% * $101.5k = $101.50, above the $5 floor.
         // Residual = $460 - $101.50 = $358.50
-        uint256 chBalance = clearinghouse.balanceUsdc(accountId);
+        uint256 chBalance = clearinghouse.balanceUsdc(account);
         assertApproxEqAbs(chBalance, 358_500_000, 1, "Alice retains equity net of keeper bounty");
     }
 
@@ -127,10 +127,10 @@ contract LiquidationTest is BasePerpTest {
         router.executeOrder(1, empty);
         _withdrawFreeUsdc(alice, 0);
 
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
 
         vm.expectRevert(CfdEngine.CfdEngine__PositionIsSolvent.selector);
-        router.executeLiquidation(accountId, empty);
+        router.executeLiquidation(account, empty);
     }
 
     function test_KeeperBounty_CappedAtEquity() public {
@@ -144,8 +144,8 @@ contract LiquidationTest is BasePerpTest {
         router.executeOrder(1, empty);
         _withdrawFreeUsdc(alice, 0);
 
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
-        (, uint256 posMargin,,,,,) = engine.positions(accountId);
+        address account = alice;
+        (, uint256 posMargin,,,,,) = engine.positions(account);
 
         // BULL loses when price rises. At $1.06:
         // PnL = 6000 * $0.06 = -$360. equity = posMargin - $360 < 0 → liquidatable.
@@ -156,7 +156,7 @@ contract LiquidationTest is BasePerpTest {
         uint256 poolBefore = usdc.balanceOf(address(pool));
         uint256 keeperSettlementBefore = _settlementBalance(keeper);
         vm.prank(keeper);
-        router.executeLiquidation(accountId, pythData);
+        router.executeLiquidation(account, pythData);
         uint256 bounty = _settlementBalance(keeper) - keeperSettlementBefore;
 
         // Proportional bounty (0.10% of ~$6360 = ~$6.36) stays below posMargin, so the cap does not bind.
@@ -189,11 +189,11 @@ contract LiquidationTest is BasePerpTest {
         router.executeOrder(1, empty);
         _withdrawFreeUsdc(alice, 0);
 
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
 
         // Without legacy-spread, $3k margin at same price is solvent (MMR = 1% of $100k = $1k)
         vm.expectRevert(CfdEngine.CfdEngine__PositionIsSolvent.selector);
-        router.executeLiquidation(accountId, empty);
+        router.executeLiquidation(account, empty);
 
         // Warp 180 days — massive negative carry drains equity below MMR
         vm.warp(WEDNESDAY_NOON + 180 days);
@@ -201,9 +201,9 @@ contract LiquidationTest is BasePerpTest {
         // Now liquidatable due to carry erosion (no price change needed)
         uint256 keeperSettlementBefore = _settlementBalance(keeper);
         vm.prank(keeper);
-        router.executeLiquidation(accountId, empty);
+        router.executeLiquidation(account, empty);
 
-        (uint256 size,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Position liquidated by carry drain alone");
         // Carry drain pushes equity negative -> bounty capped at remaining margin
         assertGe(_settlementBalance(keeper), keeperSettlementBefore, "Keeper gets bounty from remaining margin");
@@ -218,19 +218,19 @@ contract LiquidationTest is BasePerpTest {
         router.executeOrder(1, empty);
         _withdrawFreeUsdc(alice, 0);
 
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
         uint256 poolBefore = usdc.balanceOf(address(pool));
-        uint256 chBefore = clearinghouse.balanceUsdc(accountId);
+        uint256 chBefore = clearinghouse.balanceUsdc(account);
         uint256 keeperSettlementBefore = _settlementBalance(keeper);
 
         bytes[] memory pythData = new bytes[](1);
         pythData[0] = abi.encode(1.015e8);
 
         vm.prank(keeper);
-        router.executeLiquidation(accountId, pythData);
+        router.executeLiquidation(account, pythData);
 
         uint256 bounty = _settlementBalance(keeper) - keeperSettlementBefore;
-        uint256 chAfter = clearinghouse.balanceUsdc(accountId);
+        uint256 chAfter = clearinghouse.balanceUsdc(account);
         uint256 poolAfter = usdc.balanceOf(address(pool));
 
         uint256 userSeized = chBefore - chAfter;

@@ -21,22 +21,22 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         uint256 carryDelayFuzz
     ) public {
         address trader = address(0xC108);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         uint256 initialMargin = bound(initialMarginFuzz, 5000e6, 25_000e6);
         uint256 sizeDelta = bound(sizeDeltaFuzz, 1000e18, 50_000e18);
         uint256 oraclePrice = bound(oraclePriceFuzz, 80_000_000, 120_000_000);
         uint256 carryDelay = bound(carryDelayFuzz, 0, 30 days);
 
         _fundTrader(trader, 60_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, initialMargin, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, initialMargin, 1e8);
 
         if (carryDelay > 0) {
             vm.warp(block.timestamp + carryDelay);
         }
 
-        uint256 marginDelta = bound(marginDeltaFuzz, 0, _freeSettlementUsdc(accountId));
+        uint256 marginDelta = bound(marginDeltaFuzz, 0, _freeSettlementUsdc(account));
         CfdTypes.Order memory order = CfdTypes.Order({
-            accountId: accountId,
+            account: account,
             sizeDelta: sizeDelta,
             marginDelta: marginDelta,
             targetPrice: oraclePrice,
@@ -48,10 +48,10 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         });
 
         uint8 revertCode = engineLens.previewOpenRevertCode(
-            accountId, CfdTypes.Side.BULL, sizeDelta, marginDelta, oraclePrice, uint64(block.timestamp)
+            account, CfdTypes.Side.BULL, sizeDelta, marginDelta, oraclePrice, uint64(block.timestamp)
         );
         CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory = engineLens.previewOpenFailurePolicyCategory(
-            accountId, CfdTypes.Side.BULL, sizeDelta, marginDelta, oraclePrice, uint64(block.timestamp)
+            account, CfdTypes.Side.BULL, sizeDelta, marginDelta, oraclePrice, uint64(block.timestamp)
         );
 
         vm.assume(revertCode == uint8(CfdEnginePlanTypes.OpenRevertCode.OK));
@@ -79,21 +79,21 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         uint256 closePriceFuzz
     ) public {
         address trader = address(0xC100);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         uint256 closePrice = bound(closePriceFuzz, 60_000_000, 95_000_000);
 
         _fundTrader(trader, 11_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
 
-        CfdEngine.ClosePreview memory preview = engineLens.previewClose(accountId, 100_000e18, closePrice);
+        CfdEngine.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, closePrice);
         vm.assume(preview.valid);
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
 
-        IMarginClearinghouse.AccountUsdcBuckets memory bucketsBefore = clearinghouse.getAccountUsdcBuckets(accountId);
-        uint256 settlementBefore = clearinghouse.balanceUsdc(accountId);
-        uint256 deferredBefore = engine.deferredTraderCreditUsdc(accountId);
+        IMarginClearinghouse.AccountUsdcBuckets memory bucketsBefore = clearinghouse.getAccountUsdcBuckets(account);
+        uint256 settlementBefore = clearinghouse.balanceUsdc(account);
+        uint256 deferredBefore = engine.deferredTraderCreditUsdc(account);
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(closePrice);
@@ -101,8 +101,8 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         vm.prank(KEEPER);
         router.executeOrder(1, priceData);
 
-        IMarginClearinghouse.AccountUsdcBuckets memory bucketsAfter = clearinghouse.getAccountUsdcBuckets(accountId);
-        (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(accountId);
+        IMarginClearinghouse.AccountUsdcBuckets memory bucketsAfter = clearinghouse.getAccountUsdcBuckets(account);
+        (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(account);
         assertEq(sizeAfter, preview.remainingSize, "Close preview remaining size should match live execution");
         assertEq(marginAfter, preview.remainingMargin, "Close preview remaining margin should match live execution");
         assertEq(
@@ -121,12 +121,12 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             "Full close should leave no locked margin beyond the surviving position margin"
         );
         assertEq(
-            clearinghouse.balanceUsdc(accountId) - settlementBefore,
+            clearinghouse.balanceUsdc(account) - settlementBefore,
             preview.immediatePayoutUsdc,
             "Close preview immediate payout should match live settlement delta"
         );
         assertEq(
-            engine.deferredTraderCreditUsdc(accountId) - deferredBefore,
+            engine.deferredTraderCreditUsdc(account) - deferredBefore,
             preview.deferredTraderCreditUsdc,
             "Close preview deferred payout should match live deferred payout delta"
         );
@@ -146,25 +146,25 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         uint256 closePriceFuzz
     ) public {
         address trader = address(0xC101);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         uint256 closePrice = bound(closePriceFuzz, 60_000_000, 95_000_000);
 
         _fundTrader(trader, 11_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 1);
 
-        CfdEngine.ClosePreview memory preview = engineLens.previewClose(accountId, 100_000e18, closePrice);
+        CfdEngine.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, closePrice);
         vm.assume(preview.valid);
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
 
-        IMarginClearinghouse.AccountUsdcBuckets memory bucketsBefore = clearinghouse.getAccountUsdcBuckets(accountId);
-        uint256 settlementBefore = clearinghouse.balanceUsdc(accountId);
-        uint256 deferredBefore = engine.deferredTraderCreditUsdc(accountId);
+        IMarginClearinghouse.AccountUsdcBuckets memory bucketsBefore = clearinghouse.getAccountUsdcBuckets(account);
+        uint256 settlementBefore = clearinghouse.balanceUsdc(account);
+        uint256 deferredBefore = engine.deferredTraderCreditUsdc(account);
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(closePrice);
@@ -172,8 +172,8 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         vm.prank(KEEPER);
         router.executeOrder(1, priceData);
 
-        IMarginClearinghouse.AccountUsdcBuckets memory bucketsAfter = clearinghouse.getAccountUsdcBuckets(accountId);
-        (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(accountId);
+        IMarginClearinghouse.AccountUsdcBuckets memory bucketsAfter = clearinghouse.getAccountUsdcBuckets(account);
+        (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(account);
         assertEq(sizeAfter, preview.remainingSize, "Illiquid close preview remaining size should match live execution");
         assertEq(
             marginAfter, preview.remainingMargin, "Illiquid close preview remaining margin should match live execution"
@@ -194,12 +194,12 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             "Illiquid full close should leave no locked margin beyond the surviving position margin"
         );
         assertEq(
-            clearinghouse.balanceUsdc(accountId) - settlementBefore,
+            clearinghouse.balanceUsdc(account) - settlementBefore,
             preview.immediatePayoutUsdc,
             "Illiquid close preview immediate payout should match live settlement delta"
         );
         assertEq(
-            engine.deferredTraderCreditUsdc(accountId) - deferredBefore,
+            engine.deferredTraderCreditUsdc(account) - deferredBefore,
             preview.deferredTraderCreditUsdc,
             "Illiquid close preview deferred payout should match live deferred payout delta"
         );
@@ -218,33 +218,33 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
     function test_PreviewClose_PartialCloseMatchesLiveExecution_AfterPositiveCarryAccrual() public {
         address bullTrader = address(0xC103);
         address bearTrader = address(0xC104);
-        bytes32 bullId = bytes32(uint256(uint160(bullTrader)));
-        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
+        address bullAccount = bullTrader;
+        address bearAccount = bearTrader;
 
         _fundJunior(address(0xC105), 1_000_000e6);
         _fundTrader(bullTrader, 80_000e6);
         _fundTrader(bearTrader, 80_000e6);
 
-        _open(bullId, CfdTypes.Side.BULL, 500_000e18, 30_000e6, 1e8);
-        _open(bearId, CfdTypes.Side.BEAR, 100_000e18, 20_000e6, 1e8);
+        _open(bullAccount, CfdTypes.Side.BULL, 500_000e18, 30_000e6, 1e8);
+        _open(bearAccount, CfdTypes.Side.BEAR, 100_000e18, 20_000e6, 1e8);
 
         vm.warp(block.timestamp + 180 days);
 
-        CfdEngine.ClosePreview memory preview = engineLens.previewClose(bearId, 50_000e18, 1e8);
+        CfdEngine.ClosePreview memory preview = engineLens.previewClose(bearAccount, 50_000e18, 1e8);
         assertTrue(preview.valid, "Positive-funding partial close preview should remain valid");
 
-        uint256 deferredBefore = engine.deferredTraderCreditUsdc(bearId);
+        uint256 deferredBefore = engine.deferredTraderCreditUsdc(bearAccount);
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
 
-        _close(bearId, CfdTypes.Side.BEAR, 50_000e18, 1e8);
+        _close(bearAccount, CfdTypes.Side.BEAR, 50_000e18, 1e8);
 
-        (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(bearId);
+        (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(bearAccount);
         assertEq(sizeAfter, preview.remainingSize, "Partial close preview remaining size should match live execution");
         assertEq(
             marginAfter, preview.remainingMargin, "Partial close preview remaining margin should match live execution"
         );
         assertEq(
-            engine.deferredTraderCreditUsdc(bearId) - deferredBefore,
+            engine.deferredTraderCreditUsdc(bearAccount) - deferredBefore,
             preview.deferredTraderCreditUsdc,
             "Partial close preview deferred payout should match live deferred payout delta"
         );
@@ -267,13 +267,13 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
 
     function test_PreviewClose_PartialCloseIgnoresQueuedCommittedMarginInLiveExecution() public {
         address trader = address(0xC106);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
 
         _fundJunior(address(0xC107), 1_000_000e6);
         _fundTrader(trader, 8000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 4000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 4000e6, 1e8);
 
-        CfdEngine.ClosePreview memory preview = engineLens.previewClose(accountId, 50_000e18, 110_000_000);
+        CfdEngine.ClosePreview memory preview = engineLens.previewClose(account, 50_000e18, 110_000_000);
         assertTrue(preview.valid, "Partial close preview should remain valid without queued margin support");
 
         vm.prank(trader);
@@ -289,7 +289,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         vm.prank(KEEPER);
         router.executeOrder(1, priceData);
 
-        (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(accountId);
+        (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(account);
         assertEq(sizeAfter, preview.remainingSize, "Queued-margin partial close size should match preview");
         assertEq(marginAfter, preview.remainingMargin, "Queued-margin partial close margin should match preview");
         assertEq(
@@ -301,31 +301,31 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         uint256 liquidationPriceFuzz
     ) public {
         address trader = address(0xC102);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         uint256 liquidationPrice = bound(liquidationPriceFuzz, 101_000_000, 120_000_000);
 
         _fundTrader(trader, 300e6);
-        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 200e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 10_000e18, 200e6, 1e8);
 
         vm.prank(trader);
-        clearinghouse.withdraw(accountId, 100e6);
+        clearinghouse.withdraw(account, 100e6);
 
-        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, liquidationPrice);
+        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, liquidationPrice);
         vm.assume(preview.liquidatable);
 
-        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(bytes32(uint256(uint160(KEEPER))));
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(KEEPER);
         uint256 deferredKeeperCreditBefore = engine.deferredKeeperCreditUsdc(KEEPER);
-        uint256 deferredBefore = engine.deferredTraderCreditUsdc(accountId);
+        uint256 deferredBefore = engine.deferredTraderCreditUsdc(account);
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
-        IMarginClearinghouse.AccountUsdcBuckets memory bucketsBefore = clearinghouse.getAccountUsdcBuckets(accountId);
+        IMarginClearinghouse.AccountUsdcBuckets memory bucketsBefore = clearinghouse.getAccountUsdcBuckets(account);
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(liquidationPrice);
 
         vm.prank(KEEPER);
-        router.executeLiquidation(accountId, priceData);
+        router.executeLiquidation(account, priceData);
 
-        IMarginClearinghouse.AccountUsdcBuckets memory bucketsAfter = clearinghouse.getAccountUsdcBuckets(accountId);
-        (uint256 sizeAfter,,,,,,) = engine.positions(accountId);
+        IMarginClearinghouse.AccountUsdcBuckets memory bucketsAfter = clearinghouse.getAccountUsdcBuckets(account);
+        (uint256 sizeAfter,,,,,,) = engine.positions(account);
         assertEq(sizeAfter, 0, "Liquidation should fully clear the position");
         assertEq(
             bucketsAfter.settlementBalanceUsdc,
@@ -335,13 +335,13 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         assertEq(bucketsAfter.activePositionMarginUsdc, 0, "Liquidation should clear the live position-margin bucket");
         assertEq(bucketsAfter.totalLockedMarginUsdc, 0, "Liquidation should clear all locked margin in the simple path");
         assertEq(
-            (clearinghouse.balanceUsdc(bytes32(uint256(uint160(KEEPER)))) - keeperSettlementBefore)
+            (clearinghouse.balanceUsdc(KEEPER) - keeperSettlementBefore)
                 + (engine.deferredKeeperCreditUsdc(KEEPER) - deferredKeeperCreditBefore),
             preview.keeperBountyUsdc,
             "Liquidation preview keeper bounty should match live execution or deferred bounty"
         );
         assertEq(
-            engine.deferredTraderCreditUsdc(accountId) - deferredBefore,
+            engine.deferredTraderCreditUsdc(account) - deferredBefore,
             preview.deferredTraderCreditUsdc,
             "Liquidation preview deferred payout should match live deferred payout delta"
         );
@@ -372,35 +372,35 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         uint256 liquidationPriceFuzz
     ) public {
         address trader = address(0xC103);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         uint256 liquidationPrice = bound(liquidationPriceFuzz, 101_000_000, 120_000_000);
 
         _fundTrader(trader, 300e6);
-        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 200e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 10_000e18, 200e6, 1e8);
 
         vm.prank(trader);
-        clearinghouse.withdraw(accountId, 100e6);
+        clearinghouse.withdraw(account, 100e6);
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 1);
 
-        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, liquidationPrice);
+        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, liquidationPrice);
         vm.assume(preview.liquidatable);
 
-        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(bytes32(uint256(uint160(KEEPER))));
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(KEEPER);
         uint256 deferredKeeperCreditBefore = engine.deferredKeeperCreditUsdc(KEEPER);
-        uint256 deferredBefore = engine.deferredTraderCreditUsdc(accountId);
+        uint256 deferredBefore = engine.deferredTraderCreditUsdc(account);
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
-        IMarginClearinghouse.AccountUsdcBuckets memory bucketsBefore = clearinghouse.getAccountUsdcBuckets(accountId);
+        IMarginClearinghouse.AccountUsdcBuckets memory bucketsBefore = clearinghouse.getAccountUsdcBuckets(account);
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(liquidationPrice);
 
         vm.prank(KEEPER);
-        router.executeLiquidation(accountId, priceData);
+        router.executeLiquidation(account, priceData);
 
-        IMarginClearinghouse.AccountUsdcBuckets memory bucketsAfter = clearinghouse.getAccountUsdcBuckets(accountId);
-        (uint256 sizeAfter,,,,,,) = engine.positions(accountId);
+        IMarginClearinghouse.AccountUsdcBuckets memory bucketsAfter = clearinghouse.getAccountUsdcBuckets(account);
+        (uint256 sizeAfter,,,,,,) = engine.positions(account);
         assertEq(sizeAfter, 0, "Illiquid liquidation should fully clear the position");
         assertEq(
             bucketsAfter.settlementBalanceUsdc,
@@ -414,13 +414,13 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             "Illiquid liquidation should clear all locked margin in the simple path"
         );
         assertEq(
-            (clearinghouse.balanceUsdc(bytes32(uint256(uint160(KEEPER)))) - keeperSettlementBefore)
+            (clearinghouse.balanceUsdc(KEEPER) - keeperSettlementBefore)
                 + (engine.deferredKeeperCreditUsdc(KEEPER) - deferredKeeperCreditBefore),
             preview.keeperBountyUsdc,
             "Illiquid liquidation preview keeper bounty should match live execution or deferred bounty"
         );
         assertEq(
-            engine.deferredTraderCreditUsdc(accountId) - deferredBefore,
+            engine.deferredTraderCreditUsdc(account) - deferredBefore,
             preview.deferredTraderCreditUsdc,
             "Illiquid liquidation preview deferred payout should match live deferred payout delta"
         );
@@ -453,27 +453,27 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
 
     function test_PreviewLiquidation_MatchesLiveExecution_WithQueuedExecutionEscrowOutsideReachability() public {
         address trader = address(0xC104);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         uint256 liquidationPrice = 102_500_000;
 
         _fundTrader(trader, 260e6);
-        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 0, true);
 
-        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, liquidationPrice);
+        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, liquidationPrice);
         AccountLensViewTypes.AccountLedgerSnapshot memory snapshotBefore =
-            engineAccountLens.getAccountLedgerSnapshot(accountId);
-        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(bytes32(uint256(uint160(KEEPER))));
+            engineAccountLens.getAccountLedgerSnapshot(account);
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(KEEPER);
         uint256 deferredKeeperCreditBefore = engine.deferredKeeperCreditUsdc(KEEPER);
-        uint256 deferredBefore = engine.deferredTraderCreditUsdc(accountId);
+        uint256 deferredBefore = engine.deferredTraderCreditUsdc(account);
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(liquidationPrice);
 
         vm.prank(KEEPER);
-        router.executeLiquidation(accountId, priceData);
+        router.executeLiquidation(account, priceData);
 
         assertEq(
             preview.reachableCollateralUsdc,
@@ -481,13 +481,13 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             "Liquidation preview must exclude router execution escrow from reachable collateral"
         );
         assertEq(
-            (clearinghouse.balanceUsdc(bytes32(uint256(uint160(KEEPER)))) - keeperSettlementBefore)
+            (clearinghouse.balanceUsdc(KEEPER) - keeperSettlementBefore)
                 + (engine.deferredKeeperCreditUsdc(KEEPER) - deferredKeeperCreditBefore),
             preview.keeperBountyUsdc,
             "Queued-escrow liquidation preview keeper bounty should match live outcome"
         );
         assertEq(
-            engine.deferredTraderCreditUsdc(accountId) - deferredBefore,
+            engine.deferredTraderCreditUsdc(account) - deferredBefore,
             preview.deferredTraderCreditUsdc,
             "Queued-escrow liquidation preview deferred payout should match live outcome"
         );

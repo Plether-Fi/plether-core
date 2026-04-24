@@ -52,9 +52,9 @@ contract AuditV3Failing_FadStaleness is BasePerpTest {
     }
 
     function test_2_CheckWithdrawAcceptsStaleMarkDuringLiveMarketFadWindow() public {
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
         _fundTrader(alice, 50_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
 
         // Friday 20:00 UTC: FAD active (starts 19:00) but oracle still live (frozen at 22:00)
         uint256 fridayEvening = _fridayAt(20);
@@ -68,13 +68,13 @@ contract AuditV3Failing_FadStaleness is BasePerpTest {
 
         vm.prank(alice);
         vm.expectRevert(CfdEngine.CfdEngine__MarkPriceStale.selector);
-        clearinghouse.withdraw(accountId, 100e6);
+        clearinghouse.withdraw(account, 100e6);
     }
 
     function test_2_HousePoolAcceptsStaleMarkDuringLiveMarketFadWindow() public {
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
         _fundTrader(alice, 50_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
 
         uint256 fridayEvening = _fridayAt(20);
         vm.warp(fridayEvening);
@@ -135,12 +135,12 @@ contract AuditV3Failing_JuniorWipeout is BasePerpTest {
     }
 
     function test_4_JuniorCannotBeRecapitalizedAfterWipeoutViaOrdinaryDeposit() public {
-        bytes32 accountId = bytes32(uint256(uint160(address(0xA11CE))));
+        address account = address(0xA11CE);
         _fundTrader(address(0xA11CE), 100_000e6);
 
         // BULL profits when price drops. Max profit = 1e8 * 50_000e18 / 1e20 = 50_000e6
-        _open(accountId, CfdTypes.Side.BULL, 50_000e18, 10_000e6, 1e8);
-        _close(accountId, CfdTypes.Side.BULL, 50_000e18, 0);
+        _open(account, CfdTypes.Side.BULL, 50_000e18, 10_000e6, 1e8);
+        _close(account, CfdTypes.Side.BULL, 50_000e18, 0);
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -207,19 +207,19 @@ contract AuditV3Failing_SeniorImpairment is BasePerpTest {
     }
 
     function test_4_SeniorCannotBeRecapitalizedAfterFullWipeoutViaOrdinaryDeposit() public {
-        bytes32 accountId = bytes32(uint256(uint160(address(0xA11CE))));
+        address account = address(0xA11CE);
         _fundTrader(address(0xA11CE), 600_000e6);
 
         // Round 1: Wipe junior (50k).
-        _open(accountId, CfdTypes.Side.BULL, 50_000e18, 10_000e6, 1e8);
-        _close(accountId, CfdTypes.Side.BULL, 50_000e18, 0);
+        _open(account, CfdTypes.Side.BULL, 50_000e18, 10_000e6, 1e8);
+        _close(account, CfdTypes.Side.BULL, 50_000e18, 0);
 
         vm.prank(address(juniorVault));
         pool.reconcile();
 
         // Round 2: Junior is 0, further losses wipe senior completely.
-        _open(accountId, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
-        _close(accountId, CfdTypes.Side.BULL, 500_000e18, 0);
+        _open(account, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
+        _close(account, CfdTypes.Side.BULL, 500_000e18, 0);
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -250,8 +250,8 @@ contract AuditV3Failing_CloseSlippageInversion is BasePerpTest {
     function test_5_RouterAllowsQueuedCloseWithMismatchedSide() public {
         _fundTrader(alice, 50_000e6);
         vm.deal(alice, 1 ether);
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
-        _open(accountId, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
+        address account = alice;
+        _open(account, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
 
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__CommitValidation.selector, 4));

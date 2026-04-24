@@ -4,6 +4,7 @@ pragma solidity 0.8.33;
 import {CfdEnginePlanTypes} from "../CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../CfdTypes.sol";
 import {EngineStatusViewTypes} from "./EngineStatusViewTypes.sol";
+import {ICfdEngineTypes} from "./ICfdEngineTypes.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /// @notice Stateful CFD trading engine: processes orders and liquidates positions.
@@ -12,40 +13,11 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 ///      `IPerpsTraderActions`, `IPerpsTraderViews`, `IPerpsLPActions`, `IPerpsLPViews`,
 ///      `IPerpsKeeper`, `IProtocolViews`, and `IMarginAccount`.
 ///      Live protocol contracts should prefer smaller role-specific interfaces like `ICfdEngineCore`.
-interface ICfdEngine {
+interface ICfdEngine is ICfdEngineTypes {
 
     error CfdEngine__TypedOrderFailure(
         CfdEnginePlanTypes.ExecutionFailurePolicyCategory failureCategory, uint8 failureCode, bool isClose
     );
-    error CfdEngine__MarkPriceOutOfOrder();
-
-    struct SideState {
-        uint256 maxProfitUsdc;
-        uint256 openInterest;
-        uint256 entryNotional;
-        uint256 totalMargin;
-    }
-
-    struct LiquidationPreview {
-        bool liquidatable;
-        uint256 oraclePrice;
-        int256 equityUsdc;
-        int256 pnlUsdc;
-        uint256 reachableCollateralUsdc;
-        uint256 keeperBountyUsdc;
-        uint256 seizedCollateralUsdc;
-        uint256 settlementRetainedUsdc;
-        uint256 freshTraderPayoutUsdc;
-        uint256 existingDeferredConsumedUsdc;
-        uint256 existingDeferredRemainingUsdc;
-        uint256 immediatePayoutUsdc;
-        uint256 deferredTraderCreditUsdc;
-        uint256 badDebtUsdc;
-        bool triggersDegradedMode;
-        bool postOpDegradedMode;
-        uint256 effectiveAssetsAfterUsdc;
-        uint256 maxLiabilityAfterUsdc;
-    }
 
     /// @notice Margin clearinghouse address used for account margin locking/unlocking
     function clearinghouse() external view returns (address);
@@ -78,7 +50,7 @@ interface ICfdEngine {
 
     /// @notice Reserves close-order execution bounty from free settlement first, then active position margin.
     function reserveCloseOrderExecutionBounty(
-        bytes32 accountId,
+        address account,
         uint256 sizeDelta,
         uint256 amountUsdc,
         address recipient
@@ -105,13 +77,13 @@ interface ICfdEngine {
     ) external;
 
     /// @notice Liquidates an undercollateralized position, returns keeper bounty in USDC
-    /// @param accountId          Account holding the position to liquidate
+    /// @param account          Account holding the position to liquidate
     /// @param currentOraclePrice Mark price from the oracle (8 decimals)
     /// @param vaultDepthUsdc     Available vault liquidity (6 decimals)
     /// @param publishTime        Oracle publish timestamp
     /// @return keeperBountyUsdc  Bounty paid to the liquidation keeper (6 decimals)
     function liquidatePosition(
-        bytes32 accountId,
+        address account,
         uint256 currentOraclePrice,
         uint256 vaultDepthUsdc,
         uint64 publishTime
@@ -120,19 +92,19 @@ interface ICfdEngine {
     /// @notice Realizes accrued carry against the current reachable collateral before a user-level
     ///         settlement balance mutation changes the carry basis.
     function realizeCarryBeforeMarginChange(
-        bytes32 accountId,
+        address account,
         uint256 reachableCollateralBasisUsdc
     ) external;
 
     /// @notice Canonical liquidation preview using the vault's current accounted depth.
     function previewLiquidation(
-        bytes32 accountId,
+        address account,
         uint256 oraclePrice
     ) external view returns (LiquidationPreview memory preview);
 
     /// @notice Hypothetical liquidation simulation at a caller-supplied vault depth.
     function simulateLiquidation(
-        bytes32 accountId,
+        address account,
         uint256 oraclePrice,
         uint256 vaultDepthUsdc
     ) external view returns (LiquidationPreview memory preview);
@@ -172,7 +144,7 @@ interface ICfdEngine {
 
     /// @notice Returns the current position tuple for an account.
     function positions(
-        bytes32 accountId
+        address account
     )
         external
         view
@@ -188,7 +160,7 @@ interface ICfdEngine {
 
     /// @notice Returns the timestamp through which carry has been realized for the position.
     function getPositionLastCarryTimestamp(
-        bytes32 accountId
+        address account
     ) external view returns (uint64);
 
     /// @notice True when the engine has latched degraded mode after a close revealed insolvency.

@@ -38,21 +38,21 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
     function test_C1_RealizedBadDebtShouldNotBeDoubleCountedInMtM() public {
         address winner = address(0xAAA1);
         address loser = address(0xBBB1);
-        bytes32 winnerId = bytes32(uint256(uint160(winner)));
-        bytes32 loserId = bytes32(uint256(uint160(loser)));
+        address winnerAccount = winner;
+        address loserAccount = loser;
 
         _fundTrader(winner, 200_000e6);
         _fundTrader(loser, 2000e6);
 
-        _open(winnerId, CfdTypes.Side.BULL, 100_000e18, 100_000e6, 1.5e8);
-        _open(loserId, CfdTypes.Side.BULL, 100_000e18, 1000e6, 0.5e8);
+        _open(winnerAccount, CfdTypes.Side.BULL, 100_000e18, 100_000e6, 1.5e8);
+        _open(loserAccount, CfdTypes.Side.BULL, 100_000e18, 1000e6, 0.5e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
         uint256 depth = pool.totalAssets();
         vm.prank(address(router));
-        engine.liquidatePosition(loserId, 1e8, depth, uint64(block.timestamp));
+        engine.liquidatePosition(loserAccount, 1e8, depth, uint64(block.timestamp));
 
         assertGt(engine.accumulatedBadDebtUsdc(), 0, "Setup must realize bad debt");
 
@@ -60,9 +60,9 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
     }
 
     function test_H1_MarginOnlyUpdateViaRouterReverts() public {
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        address aliceAccount = alice;
         _fundTrader(alice, 50_000e6);
-        _open(aliceId, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
 
         vm.prank(alice);
         (bool ok,) = address(router)
@@ -71,12 +71,12 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
     }
 
     function test_M1_ExecutionFeesAccrueToProtocolNotLpEquity() public {
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        address aliceAccount = alice;
         _fundTrader(alice, 50_000e6);
 
         uint256 equityBefore = pool.seniorPrincipal() + pool.juniorPrincipal();
 
-        _open(aliceId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
         bytes[] memory priceData = new bytes[](1);
@@ -118,9 +118,9 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
     }
 
     function test_I1_CloseWithMarginDeltaMustRevert() public {
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        address aliceAccount = alice;
         _fundTrader(alice, 50_000e6);
-        _open(aliceId, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
 
         vm.prank(alice);
         (bool ok,) = address(router)
@@ -163,7 +163,7 @@ contract AuditLatestFindingsFailing_VPI is BasePerpTest {
         router.executeOrder(1, empty);
 
         _fundTrader(alice, 50_000e6);
-        bytes32 aliceAccount = bytes32(uint256(uint160(alice)));
+        address aliceAccount = alice;
         uint256 aliceBalBefore = clearinghouse.balanceUsdc(aliceAccount);
 
         vm.prank(alice);

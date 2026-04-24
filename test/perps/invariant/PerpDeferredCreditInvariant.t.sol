@@ -41,10 +41,10 @@ contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
         uint256 handlerKeeperCreditUsdc = engine.deferredKeeperCreditUsdc(address(handler));
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
-            bytes32 accountId = _accountId(handler.actorAt(i));
+            address account = _account(handler.actorAt(i));
             DeferredEngineViewTypes.DeferredCreditStatus memory status =
-                _deferredCreditStatus(accountId, address(handler));
-            uint256 deferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(accountId);
+                _deferredCreditStatus(account, address(handler));
+            uint256 deferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(account);
             uint256 deferredKeeperCreditUsdc = handlerKeeperCreditUsdc;
             uint256 otherDeferredTraderCreditUsdc = totalDeferredTraderCreditUsdc_ > deferredTraderCreditUsdc
                 ? totalDeferredTraderCreditUsdc_ - deferredTraderCreditUsdc
@@ -90,9 +90,9 @@ contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
         uint256 ghostTotalDeferredTraderCreditUsdc;
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
-            bytes32 accountId = _accountId(handler.actorAt(i));
-            uint256 ghostDeferredTraderCreditUsdc = handler.deferredTraderCreditSnapshot(accountId);
-            uint256 liveDeferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(accountId);
+            address account = _account(handler.actorAt(i));
+            uint256 ghostDeferredTraderCreditUsdc = handler.deferredTraderCreditSnapshot(account);
+            uint256 liveDeferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(account);
 
             assertEq(
                 ghostDeferredTraderCreditUsdc,
@@ -118,13 +118,13 @@ contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
         uint256 oraclePrice = _previewOraclePrice();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
-            bytes32 accountId = _accountId(handler.actorAt(i));
-            (uint256 size,,,,,,) = engine.positions(accountId);
+            address account = _account(handler.actorAt(i));
+            (uint256 size,,,,,,) = engine.positions(account);
             if (size == 0) {
                 continue;
             }
 
-            CfdEngine.ClosePreview memory preview = engineLens.previewClose(accountId, size, oraclePrice);
+            CfdEngine.ClosePreview memory preview = engineLens.previewClose(account, size, oraclePrice);
             if (!preview.valid) {
                 continue;
             }
@@ -159,8 +159,8 @@ contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
         uint256 oraclePrice = _previewOraclePrice();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
-            bytes32 accountId = _accountId(handler.actorAt(i));
-            CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, oraclePrice);
+            address account = _account(handler.actorAt(i));
+            CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, oraclePrice);
             uint256 freshDeferredTraderCreditUsdc = preview.deferredTraderCreditUsdc
                 > preview.existingDeferredRemainingUsdc
                 ? preview.deferredTraderCreditUsdc - preview.existingDeferredRemainingUsdc
@@ -197,10 +197,10 @@ contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
         return price == 0 ? 1e8 : price;
     }
 
-    function _accountId(
+    function _account(
         address actor
-    ) internal pure returns (bytes32) {
-        return bytes32(uint256(uint160(actor)));
+    ) internal pure returns (address) {
+        return actor;
     }
 
 }

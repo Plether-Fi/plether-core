@@ -6,9 +6,9 @@ interface IWithdrawGuard {
 
     /// @notice Reverts if the account is not allowed to withdraw from the clearinghouse.
     ///         Implementations may inspect current clearinghouse balances after tentative debit.
-    /// @param accountId Cross-margin account to check
+    /// @param account Cross-margin account to check
     function checkWithdraw(
-        bytes32 accountId
+        address account
     ) external;
 
 }

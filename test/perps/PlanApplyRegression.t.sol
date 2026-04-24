@@ -31,21 +31,21 @@ contract PlanApplyRegressionTest is BasePerpTest {
     // ──────────────────────────────────────────────
 
     function test_PartialClose_LegacySideIndexStaysZeroAfterAllClose() public {
-        bytes32 bullId = bytes32(uint256(1));
-        bytes32 bearId = bytes32(uint256(2));
-        _fundTrader(address(uint160(uint256(bullId))), 50_000e6);
-        _fundTrader(address(uint160(uint256(bearId))), 50_000e6);
+        address bullAccount = address(uint160(1));
+        address bearAccount = address(uint160(2));
+        _fundTrader(bullAccount, 50_000e6);
+        _fundTrader(bearAccount, 50_000e6);
 
-        _open(bullId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
-        _open(bearId, CfdTypes.Side.BEAR, 50_000e18, 5000e6, 1e8);
+        _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(bearAccount, CfdTypes.Side.BEAR, 50_000e18, 5000e6, 1e8);
 
         uint256 closeTime = block.timestamp + 30 days;
         vm.warp(closeTime);
-        this.doClose(bullId, CfdTypes.Side.BULL, 50_000e18, 1.2e8);
+        this.doClose(bullAccount, CfdTypes.Side.BULL, 50_000e18, 1.2e8);
         vm.warp(closeTime + 1);
-        this.doClose(bullId, CfdTypes.Side.BULL, 50_000e18, 1.2e8);
+        this.doClose(bullAccount, CfdTypes.Side.BULL, 50_000e18, 1.2e8);
         vm.warp(closeTime + 2);
-        this.doClose(bearId, CfdTypes.Side.BEAR, 50_000e18, 0.8e8);
+        this.doClose(bearAccount, CfdTypes.Side.BEAR, 50_000e18, 0.8e8);
 
         int256 bullLegacySpread = _computeGlobalLegacySpreadPnl(CfdTypes.Side.BULL);
         int256 bearLegacySpread = _computeGlobalLegacySpreadPnl(CfdTypes.Side.BEAR);
@@ -58,23 +58,23 @@ contract PlanApplyRegressionTest is BasePerpTest {
     }
 
     function test_PartialClose_PreviewMatchesExecution_WithCarryAccrual() public {
-        bytes32 bullId = bytes32(uint256(0xA1));
-        bytes32 bearId = bytes32(uint256(0xA2));
-        _fundTrader(address(uint160(uint256(bullId))), 30_000e6);
-        _fundTrader(address(uint160(uint256(bearId))), 30_000e6);
+        address bullAccount = address(uint160(0xA1));
+        address bearAccount = address(uint160(0xA2));
+        _fundTrader(bullAccount, 30_000e6);
+        _fundTrader(bearAccount, 30_000e6);
 
-        _open(bullId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
-        _open(bearId, CfdTypes.Side.BEAR, 30_000e18, 3000e6, 1e8);
+        _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(bearAccount, CfdTypes.Side.BEAR, 30_000e18, 3000e6, 1e8);
 
         vm.warp(block.timestamp + 14 days);
 
         uint256 vaultDepth = pool.totalAssets();
-        CfdEngine.ClosePreview memory preview = engineLens.previewClose(bullId, 40_000e18, 0.9e8);
+        CfdEngine.ClosePreview memory preview = engineLens.previewClose(bullAccount, 40_000e18, 0.9e8);
         assertTrue(preview.valid, "Partial close preview should be valid");
 
-        this.doClose(bullId, CfdTypes.Side.BULL, 40_000e18, 0.9e8);
+        this.doClose(bullAccount, CfdTypes.Side.BULL, 40_000e18, 0.9e8);
 
-        (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(bullId);
+        (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(bullAccount);
         assertEq(sizeAfter, preview.remainingSize, "Post-close size matches preview");
         assertEq(marginAfter, preview.remainingMargin, "Post-close margin matches preview");
     }
@@ -85,25 +85,25 @@ contract PlanApplyRegressionTest is BasePerpTest {
     // ──────────────────────────────────────────────
 
     function test_LiquidationPreview_AsymmetricSides_SolvencyCoherent() public {
-        bytes32 bullId = bytes32(uint256(0xB1));
-        bytes32 bearId = bytes32(uint256(0xB2));
-        _fundTrader(address(uint160(uint256(bullId))), 10_000e6);
-        _fundTrader(address(uint160(uint256(bearId))), 50_000e6);
+        address bullAccount = address(uint160(0xB1));
+        address bearAccount = address(uint160(0xB2));
+        _fundTrader(bullAccount, 10_000e6);
+        _fundTrader(bearAccount, 50_000e6);
 
-        _open(bullId, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
-        _open(bearId, CfdTypes.Side.BEAR, 20_000e18, 2000e6, 1e8);
+        _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
+        _open(bearAccount, CfdTypes.Side.BEAR, 20_000e18, 2000e6, 1e8);
 
         vm.warp(block.timestamp + 60 days);
 
         uint256 liquidationPrice = 1.15e8;
         uint256 vaultDepth = pool.totalAssets();
-        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(bullId, liquidationPrice);
+        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(bullAccount, liquidationPrice);
 
         if (!preview.liquidatable) {
             return;
         }
 
-        (,,, uint256 posMaxProfit,,,) = engine.positions(bullId);
+        (,,, uint256 posMaxProfit,,,) = engine.positions(bullAccount);
         uint256 bullMaxAfter = _sideMaxProfit(CfdTypes.Side.BULL) - posMaxProfit;
         uint256 bearMax = _sideMaxProfit(CfdTypes.Side.BEAR);
         uint256 expectedMaxLiability = bullMaxAfter > bearMax ? bullMaxAfter : bearMax;
@@ -128,25 +128,25 @@ contract PlanApplyRegressionTest is BasePerpTest {
     // ──────────────────────────────────────────────
 
     function test_CloseSolvency_MatchesPostOpStorageState() public {
-        bytes32 bullId = bytes32(uint256(0xC1));
-        bytes32 bearId = bytes32(uint256(0xC2));
-        _fundTrader(address(uint160(uint256(bullId))), 30_000e6);
-        _fundTrader(address(uint160(uint256(bearId))), 30_000e6);
+        address bullAccount = address(uint160(0xC1));
+        address bearAccount = address(uint160(0xC2));
+        _fundTrader(bullAccount, 30_000e6);
+        _fundTrader(bearAccount, 30_000e6);
 
-        _open(bullId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
-        _open(bearId, CfdTypes.Side.BEAR, 60_000e18, 6000e6, 1e8);
+        _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(bearAccount, CfdTypes.Side.BEAR, 60_000e18, 6000e6, 1e8);
 
         vm.warp(block.timestamp + 7 days);
 
         uint256 closePrice = 0.95e8;
         uint256 vaultDepth = pool.totalAssets();
-        CfdEngine.ClosePreview memory preview = engineLens.previewClose(bullId, 100_000e18, closePrice);
+        CfdEngine.ClosePreview memory preview = engineLens.previewClose(bullAccount, 100_000e18, closePrice);
 
         if (!preview.valid) {
             return;
         }
 
-        this.doClose(bullId, CfdTypes.Side.BULL, 100_000e18, closePrice);
+        this.doClose(bullAccount, CfdTypes.Side.BULL, 100_000e18, closePrice);
 
         uint256 postMaxLiability = _sideMaxProfit(CfdTypes.Side.BULL) > _sideMaxProfit(CfdTypes.Side.BEAR)
             ? _sideMaxProfit(CfdTypes.Side.BULL)
@@ -167,26 +167,26 @@ contract PlanApplyRegressionTest is BasePerpTest {
     }
 
     function test_LiquidationSolvency_MatchesPostOpStorageState() public {
-        bytes32 bullId = bytes32(uint256(0xD1));
-        bytes32 bearId = bytes32(uint256(0xD2));
-        _fundTrader(address(uint160(uint256(bullId))), 20_000e6);
-        _fundTrader(address(uint160(uint256(bearId))), 50_000e6);
+        address bullAccount = address(uint160(0xD1));
+        address bearAccount = address(uint160(0xD2));
+        _fundTrader(bullAccount, 20_000e6);
+        _fundTrader(bearAccount, 50_000e6);
 
-        _open(bullId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
-        _open(bearId, CfdTypes.Side.BEAR, 20_000e18, 2000e6, 1e8);
+        _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(bearAccount, CfdTypes.Side.BEAR, 20_000e18, 2000e6, 1e8);
 
         vm.warp(block.timestamp + 30 days);
 
         uint256 liquidationPrice = 1.2e8;
         uint256 vaultDepth = pool.totalAssets();
-        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(bullId, liquidationPrice);
+        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(bullAccount, liquidationPrice);
 
         if (!preview.liquidatable) {
             return;
         }
 
         vm.prank(address(router));
-        engine.liquidatePosition(bullId, liquidationPrice, vaultDepth, uint64(block.timestamp));
+        engine.liquidatePosition(bullAccount, liquidationPrice, vaultDepth, uint64(block.timestamp));
 
         uint256 postMaxLiability = _sideMaxProfit(CfdTypes.Side.BULL) > _sideMaxProfit(CfdTypes.Side.BEAR)
             ? _sideMaxProfit(CfdTypes.Side.BULL)
@@ -206,22 +206,22 @@ contract PlanApplyRegressionTest is BasePerpTest {
     // ──────────────────────────────────────────────
 
     function doClose(
-        bytes32 accountId,
+        address account,
         CfdTypes.Side side,
         uint256 size,
         uint256 price
     ) external {
-        _close(accountId, side, size, price);
+        _close(account, side, size, price);
     }
 
     function doOpen(
-        bytes32 accountId,
+        address account,
         CfdTypes.Side side,
         uint256 size,
         uint256 margin,
         uint256 price
     ) external {
-        _open(accountId, side, size, margin, price);
+        _open(account, side, size, margin, price);
     }
 
     function _computeGlobalLegacySpreadPnl(

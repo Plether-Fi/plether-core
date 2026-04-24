@@ -15,27 +15,27 @@ contract AuditValidFindingsFailing is BasePerpTest {
 
     function test_C1_CommitMustLockMargin() public {
         _fundTrader(trader, 10_000 * 1e6);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 5000 * 1e6, 1e8, false);
 
         vm.prank(trader);
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientFreeEquity.selector);
-        clearinghouse.withdraw(accountId, 9999 * 1e6);
+        clearinghouse.withdraw(account, 9999 * 1e6);
     }
 
     function test_C2_MtmMustAccountForUncollectibleLosses() public {
         _fundTrader(traderA, 200_000 * 1e6);
         _fundTrader(traderB, 1000 * 1e6);
 
-        bytes32 aId = bytes32(uint256(uint160(traderA)));
-        bytes32 bId = bytes32(uint256(uint160(traderB)));
+        address aAccount = traderA;
+        address bAccount = traderB;
 
         // A enters BULL at 1.5e8 → profits when price drops to 1e8 (+$50K)
         // B enters BULL at 0.5e8 → loses when price rises to 1e8 (-$50K, but only $1K margin)
-        _open(aId, CfdTypes.Side.BULL, 100_000 * 1e18, 100_000 * 1e6, 1.5e8);
-        _open(bId, CfdTypes.Side.BULL, 100_000 * 1e18, 1000 * 1e6, 0.5e8);
+        _open(aAccount, CfdTypes.Side.BULL, 100_000 * 1e18, 100_000 * 1e6, 1.5e8);
+        _open(bAccount, CfdTypes.Side.BULL, 100_000 * 1e18, 1000 * 1e6, 0.5e8);
 
         // Move mark to 1e8 — both positions still open (no liquidation).
         // A is winning $50K, B is losing $50K but has only $1K margin.
@@ -70,34 +70,34 @@ contract AuditValidFindingsFailing is BasePerpTest {
     function test_H2_LiquidationBountyShouldNotIncreaseAfterCrossingZeroEquity() public {
         address traderPositive = address(0xA201);
         address traderNegative = address(0xA202);
-        bytes32 positiveId = bytes32(uint256(uint160(traderPositive)));
-        bytes32 negativeId = bytes32(uint256(uint160(traderNegative)));
+        address positiveAccount = traderPositive;
+        address negativeAccount = traderNegative;
 
         _fundTrader(traderPositive, 10_000 * 1e6);
         _fundTrader(traderNegative, 10_000 * 1e6);
 
         // BULL at 1e8, $1,600 margin. Equity hits 0 at price 101,600,000.
-        _open(positiveId, CfdTypes.Side.BULL, 100_000 * 1e18, 1600 * 1e6, 1e8);
-        _open(negativeId, CfdTypes.Side.BULL, 100_000 * 1e18, 1600 * 1e6, 1e8);
+        _open(positiveAccount, CfdTypes.Side.BULL, 100_000 * 1e18, 1600 * 1e6, 1e8);
+        _open(negativeAccount, CfdTypes.Side.BULL, 100_000 * 1e18, 1600 * 1e6, 1e8);
 
         vm.prank(traderPositive);
-        clearinghouse.withdraw(positiveId, 8400 * 1e6);
+        clearinghouse.withdraw(positiveAccount, 8400 * 1e6);
         vm.prank(traderNegative);
-        clearinghouse.withdraw(negativeId, 8400 * 1e6);
+        clearinghouse.withdraw(negativeAccount, 8400 * 1e6);
 
         // Liquidate at equity ≈ +$5 (just above zero)
         // Bounty capped at min(~$152, $5) = $5
         uint256 depth = pool.totalAssets();
         vm.prank(address(router));
         uint256 bountyAtPositiveEquity =
-            engine.liquidatePosition(positiveId, 101_595_000, depth, uint64(block.timestamp));
+            engine.liquidatePosition(positiveAccount, 101_595_000, depth, uint64(block.timestamp));
 
         // Liquidate at equity ≈ -$5 (just below zero)
         // Bounty capped at min(~$152, $1600 margin) = $152
         depth = pool.totalAssets();
         vm.prank(address(router));
         uint256 bountyAtNegativeEquity =
-            engine.liquidatePosition(negativeId, 101_605_000, depth, uint64(block.timestamp));
+            engine.liquidatePosition(negativeAccount, 101_605_000, depth, uint64(block.timestamp));
 
         uint256 jump = bountyAtNegativeEquity > bountyAtPositiveEquity
             ? bountyAtNegativeEquity - bountyAtPositiveEquity
@@ -132,15 +132,15 @@ contract AuditValidFindingsFailing is BasePerpTest {
 
     function test_M1_WithdrawMustRevertWhenMarkIsStale() public {
         _fundTrader(trader, 100_000 * 1e6);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
 
-        _open(accountId, CfdTypes.Side.BULL, 50_000 * 1e18, 1000 * 1e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 50_000 * 1e18, 1000 * 1e6, 1e8);
 
         vm.warp(block.timestamp + 1 days);
 
         vm.prank(trader);
         vm.expectRevert();
-        clearinghouse.withdraw(accountId, 1e6);
+        clearinghouse.withdraw(account, 1e6);
     }
 
     function test_M2_StaleReconcileMustNotAdvanceClock() public {
@@ -148,8 +148,8 @@ contract AuditValidFindingsFailing is BasePerpTest {
         _fundJunior(address(0x777), 200_000 * 1e6);
         _fundTrader(trader, 50_000 * 1e6);
 
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
-        _open(accountId, CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8);
+        address account = trader;
+        _open(account, CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8);
 
         uint256 beforeTime = pool.lastReconcileTime();
         vm.warp(block.timestamp + 121);
@@ -188,17 +188,17 @@ contract AuditValidFindingsFailingVpi is BasePerpTest {
         _fundTrader(marketMaker, 500_000 * 1e6);
         _fundTrader(flipper, 500_000 * 1e6);
 
-        bytes32 skewId = bytes32(uint256(uint160(skewTrader)));
-        bytes32 mmId = bytes32(uint256(uint160(marketMaker)));
-        bytes32 flipId = bytes32(uint256(uint160(flipper)));
+        address skewAccount = skewTrader;
+        address mmAccount = marketMaker;
+        address flipAccount = flipper;
 
-        _open(skewId, CfdTypes.Side.BEAR, 500_000 * 1e18, 50_000 * 1e6, 1e8);
-        _open(mmId, CfdTypes.Side.BULL, 500_000 * 1e18, 50_000 * 1e6, 1e8);
-        _open(flipId, CfdTypes.Side.BULL, 1_000_000 * 1e18, 100_000 * 1e6, 1e8);
+        _open(skewAccount, CfdTypes.Side.BEAR, 500_000 * 1e18, 50_000 * 1e6, 1e8);
+        _open(mmAccount, CfdTypes.Side.BULL, 500_000 * 1e18, 50_000 * 1e6, 1e8);
+        _open(flipAccount, CfdTypes.Side.BULL, 1_000_000 * 1e18, 100_000 * 1e6, 1e8);
 
-        _close(mmId, CfdTypes.Side.BULL, 500_000 * 1e18, 1e8);
+        _close(mmAccount, CfdTypes.Side.BULL, 500_000 * 1e18, 1e8);
 
-        uint256 mmAfter = clearinghouse.balanceUsdc(mmId);
+        uint256 mmAfter = clearinghouse.balanceUsdc(mmAccount);
         uint256 depositAmount = 500_000 * 1e6;
         uint256 execFeesRoundTrip = ((500_000 * 1e6 * 4) / 10_000) * 2;
 

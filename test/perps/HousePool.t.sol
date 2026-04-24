@@ -246,14 +246,14 @@ contract HousePoolTest is BasePerpTest {
     }
 
     function test_JuniorMaxWithdraw_MatchesReconcileFirstWithdraw() public {
-        bytes32 carolId = bytes32(uint256(uint160(carol)));
+        address carolAccount = carol;
 
         _fundSenior(alice, 500_000 * 1e6);
         _fundJunior(bob, 300_000 * 1e6);
         _fundTrader(carol, 50_000 * 1e6);
 
-        _open(carolId, CfdTypes.Side.BULL, 200_000 * 1e18, 20_000 * 1e6, 1e8);
-        _close(carolId, CfdTypes.Side.BULL, 200_000 * 1e18, 0.5e8);
+        _open(carolAccount, CfdTypes.Side.BULL, 200_000 * 1e18, 20_000 * 1e6, 1e8);
+        _close(carolAccount, CfdTypes.Side.BULL, 200_000 * 1e18, 0.5e8);
 
         vm.warp(block.timestamp + 1 hours + 1);
 
@@ -533,9 +533,9 @@ contract HousePoolTest is BasePerpTest {
     function helper_InitializeSeedPosition_AddsDepthWithoutLegacyCheckpoint() public {
         _fundJunior(alice, 200_000e6);
 
-        bytes32 accountId = bytes32(uint256(uint160(bob)));
+        address account = bob;
         _fundTrader(bob, 50_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
         vm.warp(block.timestamp + 30);
         uint256 seedAssets = 100_000e6;
@@ -903,8 +903,8 @@ contract HousePoolTest is BasePerpTest {
         _fundJunior(bob, 100_000e6);
         _fundTrader(trader, 50_000e6);
 
-        bytes32 traderId = bytes32(uint256(uint160(trader)));
-        _open(traderId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        address traderAccount = trader;
+        _open(traderAccount, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
         uint256 staleTime = block.timestamp + 30 days;
         vm.warp(staleTime);
@@ -953,8 +953,8 @@ contract HousePoolTest is BasePerpTest {
 
         address trader = address(0x77771);
         _fundTrader(trader, 50_000e6);
-        bytes32 traderId = bytes32(uint256(uint160(trader)));
-        _open(traderId, CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8);
+        address traderAccount = trader;
+        _open(traderAccount, CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8);
 
         uint256 staleTime = block.timestamp + 30 days;
         vm.warp(staleTime);
@@ -1034,9 +1034,9 @@ contract HousePoolTest is BasePerpTest {
         assertEq(pool.unassignedAssets(), 100_000e6, "Setup should quarantine all assets before bootstrapping");
 
         address trader = address(0x99992);
-        bytes32 traderId = bytes32(uint256(uint160(trader)));
+        address traderAccount = trader;
         _fundTrader(trader, 50_000e6);
-        _open(traderId, CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8);
+        _open(traderAccount, CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1.2e8, uint64(block.timestamp));
@@ -1512,11 +1512,11 @@ contract HousePoolTest is BasePerpTest {
 
         vm.warp(block.timestamp + 60 days);
 
-        bytes32 carolId = bytes32(uint256(uint160(carol)));
+        address carolAccount = carol;
         bytes[] memory pythData = new bytes[](1);
         pythData[0] = abi.encode(1.95e8);
 
-        router.executeLiquidation(carolId, pythData);
+        router.executeLiquidation(carolAccount, pythData);
 
         assertEq(int256(0), 0, "Liquidation clears legacy side spread state for the closed position");
     }
@@ -1768,7 +1768,7 @@ contract HousePoolSeedLifecycleGateTest is BasePerpTest {
         _fundJunior(address(0x445), 1_000_000e6);
         address trader = address(0x444);
         _fundTrader(trader, 300e6);
-        _open(bytes32(uint256(uint160(trader))), CfdTypes.Side.BULL, 10_000e18, 200e6, 1e8);
+        _open(trader, CfdTypes.Side.BULL, 10_000e18, 200e6, 1e8);
 
         vm.warp(block.timestamp + 2 hours);
 
@@ -1933,15 +1933,15 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         (uint256 pendingSeniorBefore, uint256 pendingJuniorBefore,,) = pool.getPendingTrancheState();
 
         address trader = address(0xAB1719);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         _fundTrader(trader, 900e6);
-        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
 
         uint256 assetsBefore = pool.totalAssets();
-        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, 150_000_000);
+        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 150_000_000);
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(150_000_000));
-        router.executeLiquidation(accountId, priceData);
+        router.executeLiquidation(account, priceData);
 
         (uint256 pendingSenior, uint256 pendingJunior,,) = pool.getPendingTrancheState();
         uint256 pendingDelta = (pendingSenior + pendingJunior) - (pendingSeniorBefore + pendingJuniorBefore);
@@ -2015,8 +2015,8 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         pool.activateTrading();
         address trader = address(0x99990);
         _fundTrader(trader, 50_000e6);
-        bytes32 traderId = bytes32(uint256(uint160(trader)));
-        _open(traderId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        address traderAccount = trader;
+        _open(traderAccount, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
         vm.warp(block.timestamp + 30 days);
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
@@ -2381,9 +2381,9 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         pool.reconcile();
         assertEq(pool.unassignedAssets(), 100_000e6);
         address trader = address(0x99992);
-        bytes32 traderId = bytes32(uint256(uint160(trader)));
+        address traderAccount = trader;
         _fundTrader(trader, 50_000e6);
-        _open(traderId, CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8);
+        _open(traderAccount, CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8);
         vm.prank(address(router));
         engine.updateMarkPrice(1.2e8, uint64(block.timestamp));
         pool.assignUnassignedAssets(false, alice);
@@ -2609,7 +2609,7 @@ contract HousePoolAuditTest is BasePerpTest {
         _fundJunior(bob, 500_000e6);
         _fundTrader(alice, 50_000e6);
 
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 5000e6, 1e8, false);
@@ -2620,7 +2620,7 @@ contract HousePoolAuditTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 0, 1e8, true);
         router.executeOrder(2, empty);
 
-        (uint256 size,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0);
 
         assertEq(_sideEntryNotional(CfdTypes.Side.BULL), 0, "Bull entry notional should be zero");
@@ -2924,7 +2924,7 @@ contract HousePoolAuditTest is BasePerpTest {
         vm.prank(address(router));
         engine.processOrderTyped(
             CfdTypes.Order({
-                accountId: bytes32(uint256(uint160(carol))),
+                account: carol,
                 sizeDelta: 200_000e18,
                 marginDelta: 0,
                 targetPrice: 0,
@@ -2970,7 +2970,7 @@ contract HousePoolAuditTest is BasePerpTest {
         vm.prank(address(router));
         engine.processOrderTyped(
             CfdTypes.Order({
-                accountId: bytes32(uint256(uint160(carol))),
+                account: carol,
                 sizeDelta: 100_000e18,
                 marginDelta: 0,
                 targetPrice: 0,

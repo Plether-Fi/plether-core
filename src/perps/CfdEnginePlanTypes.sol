@@ -42,7 +42,7 @@ library CfdEnginePlanTypes {
 
     struct RawSnapshot {
         CfdTypes.Position position;
-        bytes32 accountId;
+        address account;
 
         uint256 currentTimestamp;
         uint256 lastMarkPrice;
@@ -110,7 +110,7 @@ library CfdEnginePlanTypes {
 
         uint256 sideOiIncrease;
         int256 sideEntryNotionalDelta;
-        int256 sideEntryFundingContribution;
+        int256 sideEntryCarryContribution;
         uint256 sideMaxProfitIncrease;
 
         int256 tradeCostUsdc;
@@ -124,7 +124,7 @@ library CfdEnginePlanTypes {
         uint256 sideTotalMarginBefore;
         uint256 sideTotalMarginAfterOpen;
 
-        bytes32 accountId;
+        address account;
         uint256 sizeDelta;
         uint256 price;
     }
@@ -190,7 +190,7 @@ library CfdEnginePlanTypes {
 
         SolvencyPreview solvency;
 
-        bytes32 accountId;
+        address account;
         uint256 sizeDelta;
         uint256 price;
         int256 realizedPnlUsdc;
@@ -237,7 +237,7 @@ library CfdEnginePlanTypes {
 
         SolvencyPreview solvency;
 
-        bytes32 accountId;
+        address account;
         uint256 price;
     }
 
