@@ -213,8 +213,8 @@ Reachability note:
 
 1. Keeper calls liquidation on an under-maintenance account.
 2. Planner computes carry-adjusted liquidation equity using only physically reachable collateral.
-3. Keeper bounty is capped by carry-adjusted positive equity.
-4. Terminal residual plan seizes reachable collateral, pays the bounty, and computes any fresh trader payout.
+3. Keeper bounty is capped by physically reachable collateral, not by the positive-equity sign boundary.
+4. Terminal residual plan seizes reachable collateral, pays the bounty, and computes any fresh trader payout or explicit subsidy shortfall.
 5. Existing deferred trader credit is not treated as reachable collateral; it remains only as a senior claim unless negative residual netting consumes it.
 6. If cash is available, fresh payout is immediate; otherwise it becomes deferred.
 7. Position is removed and queue cleanup runs on the liquidated account's local pending-order queue only.
@@ -223,7 +223,7 @@ Reachability note:
 
 1. Keeper calls liquidation on an account whose reachable collateral cannot cover losses.
 2. Planner computes carry-adjusted negative equity.
-3. Keeper bounty is capped by reachable collateral when equity is non-positive.
+3. Keeper bounty is capped by reachable collateral.
 4. Terminal residual plan consumes all physically reachable collateral.
 5. Existing same-account deferred trader credit is netted exactly once against remaining terminal shortfall.
 6. Any leftover deficit becomes realized bad debt.

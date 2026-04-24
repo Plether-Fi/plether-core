@@ -404,14 +404,15 @@ Liquidation must:
 
 Keeper bounty rule:
 
-- cap by positive equity when available,
-- otherwise cap by physically reachable liquidation collateral,
-- never by stale notions of notional or margin alone.
+- cap by physically reachable liquidation collateral,
+- allow the bounty to exceed positive equity as an explicit liquidation subsidy,
+- never cap by stale notions of notional or margin alone.
 
 Required property:
 
 - liquidation eligibility, bounty caps, and residual planning must use carry-adjusted equity,
 - negative accrued VPI must reduce liquidation equity before keeper-bounty and residual planning,
+- any bounty paid above positive equity must flow through the normal residual shortfall and bad-debt accounting,
 - preview and live liquidation should share the same liquidation-accounting kernel.
 
 ### Three-bucket liquidation residual accounting

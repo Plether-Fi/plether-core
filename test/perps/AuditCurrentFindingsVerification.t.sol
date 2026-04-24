@@ -84,7 +84,7 @@ contract AuditCurrentFindingsFailing_BountyCap is BasePerpTest {
         });
     }
 
-    function test_M2_KeeperBountyShouldUsePositiveEquityNotPositionMargin() public {
+    function test_M2_KeeperBountyShouldUseExplicitSubsidyModel() public {
         address trader = address(uint160(uint256(ACCOUNT_ID)));
         _fundTrader(trader, 100e6);
 
@@ -100,7 +100,7 @@ contract AuditCurrentFindingsFailing_BountyCap is BasePerpTest {
         vm.prank(address(router));
         uint256 bounty = engine.liquidatePosition(ACCOUNT_ID, 1.01e8, depth, uint64(block.timestamp));
 
-        assertEq(bounty, preview.keeperBountyUsdc, "Keeper bounty should cap at carry-adjusted positive equity");
+        assertEq(bounty, preview.keeperBountyUsdc, "Keeper bounty should use the explicit subsidy model");
     }
 
 }

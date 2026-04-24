@@ -367,7 +367,7 @@ Trade-off:
 ### Reachability and bounty bounds
 
 - liquidation accounting is constrained by actually reachable collateral,
-- keeper bounty is proportional with a floor but capped by reachable value,
+- keeper bounty is proportional with a floor, capped by reachable value, and may explicitly subsidize low-equity liquidations,
 - residual trader value is preserved when positive,
 - same-account deferred trader credit does not support liquidation reachability and is only netted once against terminal shortfall,
 - remaining deficit becomes bad debt socialized to LP capital.
