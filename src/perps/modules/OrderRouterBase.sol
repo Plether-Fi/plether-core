@@ -30,7 +30,7 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
 
     uint64 public globalTailOrderId;
 
-    event OrderCommitted(uint64 indexed orderId, address indexed account, CfdTypes.Side side);
+    event OrderCommitted(uint64 indexed orderId, bytes32 indexed accountId, CfdTypes.Side side);
 
     /// @param _engine CfdEngine that processes trades and liquidations
     /// @param _housePool HousePool used for depth queries and liquidation bounty payouts
@@ -110,11 +110,11 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
     }
 
     function _reserveCloseExecutionBounty(
-        address account,
+        bytes32 accountId,
         uint256 sizeDelta,
         uint256 executionBountyUsdc
     ) internal override {
-        try engine.reserveCloseOrderExecutionBounty(account, sizeDelta, executionBountyUsdc, address(this)) {}
+        try engine.reserveCloseOrderExecutionBounty(accountId, sizeDelta, executionBountyUsdc, address(this)) {}
         catch {
             revert IOrderRouterErrors.OrderRouter__CommitValidation(6);
         }
@@ -125,18 +125,18 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
         IOrderRouterAccounting.OrderStatus terminalStatus
     ) internal override {
         OrderRecord storage record = _orderRecord(orderId);
-        address account = record.core.account;
-        if (account != address(0)) {
-            _unlinkAccountOrder(account, orderId);
-            _unlinkMarginOrder(account, orderId);
+        bytes32 accountId = record.core.accountId;
+        if (accountId != bytes32(0)) {
+            _unlinkAccountOrder(accountId, orderId);
+            _unlinkMarginOrder(accountId, orderId);
         }
         _unlinkGlobalOrder(orderId);
         record.status = terminalStatus;
-        if (account != address(0) && pendingOrderCounts[account] > 0) {
-            pendingOrderCounts[account]--;
+        if (accountId != bytes32(0) && pendingOrderCounts[accountId] > 0) {
+            pendingOrderCounts[accountId]--;
         }
-        if (account != address(0) && record.core.isClose && pendingCloseSize[account] >= record.core.sizeDelta) {
-            pendingCloseSize[account] -= record.core.sizeDelta;
+        if (accountId != bytes32(0) && record.core.isClose && pendingCloseSize[accountId] >= record.core.sizeDelta) {
+            pendingCloseSize[accountId] -= record.core.sizeDelta;
         }
     }
 

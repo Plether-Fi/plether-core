@@ -58,11 +58,11 @@ abstract contract OrderUtils is OrderRouterBase {
     }
 
     function _forfeitEscrowedOrderBountiesOnLiquidation(
-        address account
+        bytes32 accountId
     ) internal {
         uint256 forfeitedUsdc;
         for (
-            uint64 orderId = accountHeadOrderId[account];
+            uint64 orderId = accountHeadOrderId[accountId];
             orderId != 0;
             orderId = orderRecords[orderId].nextAccountOrderId
         ) {

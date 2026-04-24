@@ -81,9 +81,9 @@ abstract contract OrderQueueBook is OrderEscrowAccounting {
     }
 
     function _getQueuedPositionView(
-        address account
+        bytes32 accountId
     ) internal view returns (QueuedPositionView memory queuedPosition) {
-        (uint256 positionSize,,,, CfdTypes.Side side,,) = engine.positions(account);
+        (uint256 positionSize,,,, CfdTypes.Side side,,) = engine.positions(accountId);
         if (positionSize > 0) {
             queuedPosition.exists = true;
             queuedPosition.side = side;
@@ -91,7 +91,7 @@ abstract contract OrderQueueBook is OrderEscrowAccounting {
         }
 
         for (
-            uint64 orderId = accountHeadOrderId[account];
+            uint64 orderId = accountHeadOrderId[accountId];
             orderId != 0;
             orderId = orderRecords[orderId].nextAccountOrderId
         ) {

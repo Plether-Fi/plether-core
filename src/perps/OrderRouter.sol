@@ -59,9 +59,9 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
 
     /// @notice Returns the total queued escrow state for an account across all pending orders.
     function syncMarginQueue(
-        address account
+        bytes32 accountId
     ) external {
-        _syncMarginQueue(account);
+        _syncMarginQueue(accountId);
     }
 
     function getPendingOrderView(
@@ -113,13 +113,13 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
     /// @notice Keeper-triggered liquidation using the canonical live-market staleness policy.
     ///         Forfeits any queued-order execution escrow to the HousePool instead of crediting it back to trader settlement,
     ///         then credits the liquidation keeper through the clearinghouse when cash is available.
-    /// @param account The account to liquidate
+    /// @param accountId The account to liquidate (bytes32-encoded address)
     /// @param pythUpdateData Pyth price update blobs; attach ETH to cover the Pyth fee
     function executeLiquidation(
-        address account,
+        bytes32 accountId,
         bytes[] calldata pythUpdateData
     ) external payable {
-        _executeLiquidation(account, pythUpdateData);
+        _executeLiquidation(accountId, pythUpdateData);
     }
 
 }

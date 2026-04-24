@@ -22,19 +22,19 @@ abstract contract OrderHandler is OrderValidation {
         }
         _validateBaseCommit(sizeDelta, marginDelta, isClose);
 
-        address account = msg.sender;
+        bytes32 accountId = bytes32(uint256(uint160(msg.sender)));
         uint256 executionBountyUsdc = isClose
-            ? _validatedCloseExecutionBountyUsdc(account, side, sizeDelta)
-            : _validatedOpenExecutionBountyUsdc(account, side, sizeDelta, marginDelta);
+            ? _validatedCloseExecutionBountyUsdc(accountId, side, sizeDelta)
+            : _validatedOpenExecutionBountyUsdc(accountId, side, sizeDelta, marginDelta);
 
         uint64 orderId = nextCommitId++;
 
-        _reserveExecutionBounty(account, orderId, sizeDelta, executionBountyUsdc, isClose);
-        _reserveCommittedMargin(account, orderId, isClose, marginDelta);
+        _reserveExecutionBounty(accountId, orderId, sizeDelta, executionBountyUsdc, isClose);
+        _reserveCommittedMargin(accountId, orderId, isClose, marginDelta);
 
         OrderRecord storage record = orderRecords[orderId];
         record.core = CfdTypes.Order({
-            account: account,
+            accountId: accountId,
             sizeDelta: sizeDelta,
             marginDelta: marginDelta,
             targetPrice: targetPrice,
@@ -46,21 +46,21 @@ abstract contract OrderHandler is OrderValidation {
         });
         record.status = IOrderRouterAccounting.OrderStatus.Pending;
         if (isClose) {
-            pendingCloseSize[account] += sizeDelta;
+            pendingCloseSize[accountId] += sizeDelta;
         }
         _linkGlobalOrder(orderId);
-        _linkAccountOrder(account, orderId);
-        if (++pendingOrderCounts[account] > maxPendingOrders) {
+        _linkAccountOrder(accountId, orderId);
+        if (++pendingOrderCounts[accountId] > maxPendingOrders) {
             revert IOrderRouterErrors.OrderRouter__CommitValidation(7);
         }
-        emit OrderCommitted(orderId, account, side);
+        emit OrderCommitted(orderId, accountId, side);
     }
 
     function _syncMarginQueue(
-        address account
+        bytes32 accountId
     ) internal {
         _onlyEngine();
-        _pruneMarginQueue(account);
+        _pruneMarginQueue(accountId);
     }
 
     function _getPendingOrderView(
@@ -180,26 +180,26 @@ abstract contract OrderHandler is OrderValidation {
     }
 
     function _executeLiquidation(
-        address account,
+        bytes32 accountId,
         bytes[] calldata pythUpdateData
     ) internal {
         OracleUpdateResult memory update = _prepareLiquidationOracle(pythUpdateData);
 
-        _forfeitEscrowedOrderBountiesOnLiquidation(account);
+        _forfeitEscrowedOrderBountiesOnLiquidation(accountId);
         uint256 housePoolDepth = housePool.totalAssets();
         uint256 keeperBountyUsdc =
-            engine.liquidatePosition(account, update.executionPrice, housePoolDepth, update.oraclePublishTime);
+            engine.liquidatePosition(accountId, update.executionPrice, housePoolDepth, update.oraclePublishTime);
 
-        _clearLiquidatedAccountOrders(account);
+        _clearLiquidatedAccountOrders(accountId);
         _creditOrDeferLiquidationBounty(keeperBountyUsdc, update.executionPrice, update.oraclePublishTime);
 
         _sendEth(msg.sender, msg.value - update.pythFee);
     }
 
     function _clearLiquidatedAccountOrders(
-        address account
+        bytes32 accountId
     ) internal {
-        uint64 orderId = accountHeadOrderId[account];
+        uint64 orderId = accountHeadOrderId[accountId];
         while (orderId != 0) {
             OrderRecord storage record = orderRecords[orderId];
             uint64 nextOrderId = record.nextAccountOrderId;

@@ -46,11 +46,11 @@ abstract contract OrderValidation is OrderUtils {
     }
 
     function _validatedCloseExecutionBountyUsdc(
-        address account,
+        bytes32 accountId,
         CfdTypes.Side side,
         uint256 sizeDelta
     ) internal view returns (uint256) {
-        QueuedPositionView memory queuedPosition = _getQueuedPositionView(account);
+        QueuedPositionView memory queuedPosition = _getQueuedPositionView(accountId);
         uint8 validationCode = OrderValidationLib.validateCloseCommit(
             queuedPosition.exists, queuedPosition.size, queuedPosition.side, side, sizeDelta
         );
@@ -61,7 +61,7 @@ abstract contract OrderValidation is OrderUtils {
     }
 
     function _validatedOpenExecutionBountyUsdc(
-        address account,
+        bytes32 accountId,
         CfdTypes.Side side,
         uint256 sizeDelta,
         uint256 marginDelta
@@ -70,10 +70,10 @@ abstract contract OrderValidation is OrderUtils {
         if (_canUseCommitMarkForOpenPrefilter()) {
             uint64 commitMarkTime = engine.lastMarkTime();
             CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory = engineLens.previewOpenFailurePolicyCategory(
-                account, side, sizeDelta, marginDelta, commitPrice, commitMarkTime
+                accountId, side, sizeDelta, marginDelta, commitPrice, commitMarkTime
             );
             uint8 revertCode =
-                engineLens.previewOpenRevertCode(account, side, sizeDelta, marginDelta, commitPrice, commitMarkTime);
+                engineLens.previewOpenRevertCode(accountId, side, sizeDelta, marginDelta, commitPrice, commitMarkTime);
             if (OrderFailurePolicyLib.isPredictablyInvalidOpen(failureCategory)) {
                 revert IOrderRouterErrors.OrderRouter__PredictableOpenInvalid(revertCode);
             }
