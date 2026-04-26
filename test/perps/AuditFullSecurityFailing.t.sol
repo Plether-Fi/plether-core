@@ -20,7 +20,7 @@ contract AuditFullSecurityFailing_LiquidationFreeUsdc is BasePerpTest {
         CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 1.09e8);
 
         vm.startPrank(address(router));
-        engine.liquidatePosition(account, 1.09e8, pool.totalAssets(), uint64(block.timestamp));
+        engine.liquidatePosition(account, 1.09e8, pool.totalAssets(), uint64(block.timestamp), address(this));
         vm.stopPrank();
 
         assertEq(
@@ -103,7 +103,7 @@ contract AuditFullSecurityFailing_BadDebtClearing is BasePerpTest {
 
         vm.startPrank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
-        engine.liquidatePosition(loserAccount, 1e8, pool.totalAssets(), uint64(block.timestamp));
+        engine.liquidatePosition(loserAccount, 1e8, pool.totalAssets(), uint64(block.timestamp), address(this));
         vm.stopPrank();
 
         uint256 badDebt = engine.accumulatedBadDebtUsdc();

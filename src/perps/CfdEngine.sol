@@ -483,6 +483,15 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         uint256 price,
         uint64 publishTime
     ) external onlyRouter nonReentrant {
+        _creditKeeperExecutionBounty(beneficiary, amountUsdc, price, publishTime);
+    }
+
+    function _creditKeeperExecutionBounty(
+        address beneficiary,
+        uint256 amountUsdc,
+        uint256 price,
+        uint64 publishTime
+    ) internal {
         if (amountUsdc == 0) {
             return;
         }
@@ -628,18 +637,6 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         );
 
         emit DeferredKeeperCreditClaimed(beneficiary, claimAmountUsdc);
-    }
-
-    /// @notice Records keeper credit that could not be serviced immediately because vault cash was unavailable.
-    function recordDeferredKeeperCredit(
-        address keeper,
-        uint256 amountUsdc
-    ) external onlyRouter {
-        if (amountUsdc == 0) {
-            return;
-        }
-        _enqueueOrAccrueDeferredKeeperCredit(keeper, amountUsdc);
-        emit DeferredKeeperCreditRecorded(keeper, amountUsdc);
     }
 
     function reserveCloseOrderExecutionBounty(
@@ -1043,20 +1040,25 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         return _positions[account].lastCarryTimestamp;
     }
 
-    /// @notice Liquidates an undercollateralized position.
+    /// @notice Liquidates an undercollateralized position and services or defers the keeper bounty.
     ///         Surplus equity (after bounty) is returned to the user.
     ///         In bad-debt cases (equity < bounty), all remaining margin is seized by the vault.
     /// @param account Clearinghouse account that owns the position
     /// @param currentOraclePrice Pyth oracle price (8 decimals), clamped to CAP_PRICE
     /// @param vaultDepthUsdc HousePool total assets used for post-op solvency checks and payout affordability
     /// @param publishTime Pyth publish timestamp, stored as lastMarkTime
-    /// @return keeperBountyUsdc Bounty paid to the liquidation keeper (USDC, 6 decimals)
+    /// @param keeper Account receiving immediate liquidation-bounty credit or deferred keeper credit
+    /// @return keeperBountyUsdc Bounty owed to the liquidation keeper (USDC, 6 decimals)
     function liquidatePosition(
         address account,
         uint256 currentOraclePrice,
         uint256 vaultDepthUsdc,
-        uint64 publishTime
+        uint64 publishTime,
+        address keeper
     ) external onlyRouter nonReentrant returns (uint256 keeperBountyUsdc) {
+        if (keeper == address(0)) {
+            revert CfdEngine__ZeroAddress();
+        }
         if (publishTime < lastMarkTime) {
             revert CfdEngine__MarkPriceOutOfOrder();
         }
@@ -1074,7 +1076,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
             revert CfdEngine__PositionIsSolvent();
         }
 
-        return _applyLiquidation(delta, publishTime);
+        return _applyLiquidation(delta, publishTime, keeper);
     }
 
     function _assertPostSolvency() internal view {
@@ -1335,7 +1337,8 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
 
     function _applyLiquidation(
         CfdEnginePlanTypes.LiquidationDelta memory delta,
-        uint64 publishTime
+        uint64 publishTime,
+        address keeper
     ) internal returns (uint256 keeperBountyUsdc) {
         keeperBountyUsdc =
             settlementModule.executeLiquidation(ICfdEngineSettlementHost(address(this)), delta, publishTime);
@@ -1343,7 +1346,30 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
 
         unsettledCarryUsdc[delta.account] = 0;
 
-        _enterDegradedModeIfInsolvent(delta.account, keeperBountyUsdc);
+        _payOrRecordKeeperBounty(keeper, keeperBountyUsdc, delta.price, publishTime);
+
+        _enterDegradedModeIfInsolvent(delta.account, 0);
+    }
+
+    function _payOrRecordKeeperBounty(
+        address keeper,
+        uint256 amountUsdc,
+        uint256 price,
+        uint64 publishTime
+    ) internal {
+        if (amountUsdc == 0) {
+            return;
+        }
+
+        if (_canPayFreshVaultPayout(amountUsdc)) {
+            try vault.payOut(address(clearinghouse), amountUsdc) {
+                _creditKeeperExecutionBounty(keeper, amountUsdc, price, publishTime);
+                return;
+            } catch {}
+        }
+
+        _enqueueOrAccrueDeferredKeeperCredit(keeper, amountUsdc);
+        emit DeferredKeeperCreditRecorded(keeper, amountUsdc);
     }
 
     function _enterDegradedModeIfInsolvent(

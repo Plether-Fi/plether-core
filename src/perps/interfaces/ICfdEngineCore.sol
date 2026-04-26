@@ -45,11 +45,6 @@ interface ICfdEngineCore {
         uint64 publishTime
     ) external;
 
-    function recordDeferredKeeperCredit(
-        address keeper,
-        uint256 amountUsdc
-    ) external;
-
     function reserveCloseOrderExecutionBounty(
         address account,
         uint256 sizeDelta,
@@ -82,7 +77,8 @@ interface ICfdEngineCore {
         address account,
         uint256 currentOraclePrice,
         uint256 vaultDepthUsdc,
-        uint64 publishTime
+        uint64 publishTime,
+        address keeper
     ) external returns (uint256 keeperBountyUsdc);
 
     function lastMarkTime() external view returns (uint64);

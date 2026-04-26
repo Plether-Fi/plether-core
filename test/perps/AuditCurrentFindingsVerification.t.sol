@@ -37,7 +37,7 @@ contract AuditCurrentFindingsFailing is BasePerpTest {
 
         uint256 depth = pool.totalAssets();
         vm.prank(address(router));
-        engine.liquidatePosition(loserAccount, 1e8, depth, uint64(block.timestamp));
+        engine.liquidatePosition(loserAccount, 1e8, depth, uint64(block.timestamp), address(this));
 
         assertEq(_vaultMtmAdjustment(), 75_000e6, "MtM should use the conservative post-liquidation envelope");
     }
@@ -98,7 +98,7 @@ contract AuditCurrentFindingsFailing_BountyCap is BasePerpTest {
         CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(ACCOUNT_ID, 1.01e8);
 
         vm.prank(address(router));
-        uint256 bounty = engine.liquidatePosition(ACCOUNT_ID, 1.01e8, depth, uint64(block.timestamp));
+        uint256 bounty = engine.liquidatePosition(ACCOUNT_ID, 1.01e8, depth, uint64(block.timestamp), address(this));
 
         assertEq(bounty, preview.keeperBountyUsdc, "Keeper bounty should use the explicit subsidy model");
     }

@@ -36,10 +36,11 @@ For normative semantics, use [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md). For mod
 
 ## Critical Capability Boundaries
 
-- `OrderRouter` is the main external capability boundary: it can drive engine settlement paths and, through approved caller checks, reach `HousePool.payOut(...)` and `recordProtocolInflow(...)`.
+- `OrderRouter` is the main external capability boundary: it can drive engine settlement paths and, through approved caller checks, reach `HousePool.recordProtocolInflow(...)` for forfeited escrow it has already funded.
 - `CfdEngineSettlementModule` is engine-gated, but any external surface added there is security-critical because it inherits engine settlement authority.
 - `MarginClearinghouse` operator paths trust `engine`, `orderRouter`, and `settlementModule` to move trader custody across settlement, escrow, and seizure buckets.
-- `HousePool.payOut(...)` and `HousePool.recordProtocolInflow(...)` trust `engine`, `orderRouter`, and `settlementModule` as high-authority callers.
+- `HousePool.payOut(...)` trusts only `engine` and `settlementModule` as high-authority callers.
+- `HousePool.recordProtocolInflow(...)` trusts `engine`, `orderRouter`, and `settlementModule` for explicitly accounted protocol-owned inflows.
 - Any new helper/module that can reach these caller sets should be treated as a core custody/settlement boundary and reviewed accordingly.
 
 ## Accounting Readers
@@ -62,7 +63,7 @@ For normative semantics, use [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md). For mod
 | Execute open | Committed margin -> live position margin; fees / adverse cash -> `HousePool` accounted inflow when realized | `CfdEngine` | Converts pending escrow into live exposure; protocol and trading inflows become canonical pool cash through `HousePool` hooks |
 | Profitable close | Position margin + free settlement + vault cash -> trader settlement or deferred trader credit | `CfdEngine` / `CfdEngineSettlementModule` | Realizes trader claim; may create deferred senior vault liability instead of reverting |
 | Losing close / collectible funding / liquidation seizure | Trader reachable balance -> `HousePool` accounted inflow | `CfdEngine` | Realized trader loss becomes physical pool cash, then routes as protocol fee, trading revenue, or recapitalization by source semantics |
-| Liquidation bounty | Reachable trader value first, otherwise vault cash or deferred bounty queue | `CfdEngine` | Pays or records the keeper claim without overstating reachable collateral |
+| Liquidation bounty | Reachable trader value first, then engine-serviced vault cash or deferred keeper credit | `CfdEngine` | Pays or records the keeper claim without overstating reachable collateral |
 | Carry realization | Trader reachable capital on realizing actions -> `HousePool` claimant revenue routing | `CfdEngine` via open/close/add-margin and clearinghouse deposit/withdraw hooks | Time-based LP-capital rent becomes claimant-owned revenue via `recordClaimantInflow(...)` without a separate liquidation settlement path |
 | Router forfeiture on liquidation cleanup | Router bounty escrow -> `HousePool` protocol-owned cash | `OrderRouter` / `CfdEngine` fee-record path | Converts abandoned queued-order escrow into accounted protocol-fee revenue |
 | LP deposit / redeem | External wallet <-> `HousePool` / `TrancheVault` | LP through vaults | Changes tranche ownership and principal, never trader balances |

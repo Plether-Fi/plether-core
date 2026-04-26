@@ -57,7 +57,7 @@ In practice, the compact public API is:
 - Keepers:
   - `OrderRouter.executeOrder(uint64,bytes[])`
   - `OrderRouter.executeOrderBatch(uint64,bytes[])`
-  - `OrderRouter.executeLiquidation(bytes32,bytes[])`
+  - `OrderRouter.executeLiquidation(address,bytes[])`
 - LPs:
   - `HousePool.depositSenior(uint256)` / `HousePool.withdrawSenior(uint256,address)`
   - `HousePool.depositJunior(uint256)` / `HousePool.withdrawJunior(uint256,address)`
@@ -267,7 +267,7 @@ The perps system intentionally splits accounting into separate kernels:
 - `LiquidationAccountingLib`: reachable collateral, keeper bounty, residual payout, and bad debt for forced close.
 - `SolvencyAccountingLib`: effective assets, bounded max liability, withdrawal reserves, and free vault cash.
 - `OrderEscrowAccounting`: router-held execution bounty reserves and margin-queue bookkeeping.
-- `OrderRouterBase` / `OrderHandler` / `OrderValidation` / `OrderUtils`: shared router state, delayed-order lifecycle handling, preflight validation, and bounty/liquidation helper math.
+- `OrderRouterBase` / `OrderHandler` / `OrderValidation` / `OrderUtils`: shared router state, delayed-order lifecycle handling, preflight validation, and liquidation cleanup helper math.
 - `HousePool.recordClaimantInflow(amount, kind, cashMode)`: claimant-owned value routing for both revenue and recapitalization, with explicit cash-arrival vs retained-value modes.
 
 These domains answer different questions. They should not silently share assumptions just because the inputs look similar.

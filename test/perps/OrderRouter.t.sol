@@ -2821,7 +2821,9 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
         );
         assertEq(router.nextExecuteId(), orderId, "Blocked close-only execution should leave the FIFO head pending");
         assertEq(
-            router.pendingOrderCounts(aliceAccount), 1, "Blocked close-only execution should preserve pending order count"
+            router.pendingOrderCounts(aliceAccount),
+            1,
+            "Blocked close-only execution should preserve pending order count"
         );
         assertEq(
             uint256(_orderRecord(orderId).status),
@@ -2870,7 +2872,9 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
             _executionBountyReserve(orderId), reservedBounty, "Blocked batch execution should preserve bounty escrow"
         );
         assertEq(router.nextExecuteId(), orderId, "Blocked batch execution should stop at the pending FIFO head");
-        assertEq(router.pendingOrderCounts(aliceAccount), 1, "Blocked batch execution should preserve pending order count");
+        assertEq(
+            router.pendingOrderCounts(aliceAccount), 1, "Blocked batch execution should preserve pending order count"
+        );
         assertEq(
             uint256(_orderRecord(orderId).status),
             uint256(IOrderRouterAccounting.OrderStatus.Pending),
@@ -3301,13 +3305,17 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         vm.stopPrank();
 
         assertEq(router.pendingOrderCounts(traderAccount), 2, "Liquidated account should start with two queued orders");
-        assertEq(router.pendingOrderCounts(otherAccount), 2, "Unrelated account should start with its own queued orders");
+        assertEq(
+            router.pendingOrderCounts(otherAccount), 2, "Unrelated account should start with its own queued orders"
+        );
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(150_000_000));
         router.executeLiquidation(traderAccount, priceData);
 
-        assertEq(router.pendingOrderCounts(traderAccount), 0, "Liquidation should clear only the liquidated account queue");
+        assertEq(
+            router.pendingOrderCounts(traderAccount), 0, "Liquidation should clear only the liquidated account queue"
+        );
         assertEq(router.pendingOrderCounts(otherAccount), 2, "Unrelated account queue should remain intact");
 
         IOrderRouterAccounting.PendingOrderView[] memory otherPending = _pendingOrders(otherAccount);
@@ -3563,7 +3571,9 @@ contract FadStalenessTest is BasePerpTest {
         );
         assertEq(router.nextExecuteId(), orderId, "Blocked close-only execution should leave the FIFO head pending");
         assertEq(
-            router.pendingOrderCounts(aliceAccount), 1, "Blocked close-only execution should preserve pending order count"
+            router.pendingOrderCounts(aliceAccount),
+            1,
+            "Blocked close-only execution should preserve pending order count"
         );
         assertEq(
             uint256(_orderRecord(orderId).status),
@@ -3611,7 +3621,9 @@ contract FadStalenessTest is BasePerpTest {
             _executionBountyReserve(orderId), reservedBounty, "Blocked batch execution should preserve bounty escrow"
         );
         assertEq(router.nextExecuteId(), orderId, "Blocked batch execution should stop at the pending FIFO head");
-        assertEq(router.pendingOrderCounts(aliceAccount), 1, "Blocked batch execution should preserve pending order count");
+        assertEq(
+            router.pendingOrderCounts(aliceAccount), 1, "Blocked batch execution should preserve pending order count"
+        );
         assertEq(
             uint256(_orderRecord(orderId).status),
             uint256(IOrderRouterAccounting.OrderStatus.Pending),

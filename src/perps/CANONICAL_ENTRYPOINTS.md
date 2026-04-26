@@ -35,7 +35,7 @@ Treat bootstrap, seed-lifecycle, and other tranche setup mechanics as admin/setu
 
 - Order execution: `OrderRouter.executeOrder(uint64,bytes[])`
 - Batch execution: `OrderRouter.executeOrderBatch(uint64,bytes[])`
-- Liquidation: `OrderRouter.executeLiquidation(bytes32,bytes[])`
+- Liquidation: `OrderRouter.executeLiquidation(address,bytes[])`
 
 Use this interface:
 

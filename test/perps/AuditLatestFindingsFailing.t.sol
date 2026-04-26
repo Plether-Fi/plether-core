@@ -52,7 +52,7 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
 
         uint256 depth = pool.totalAssets();
         vm.prank(address(router));
-        engine.liquidatePosition(loserAccount, 1e8, depth, uint64(block.timestamp));
+        engine.liquidatePosition(loserAccount, 1e8, depth, uint64(block.timestamp), address(this));
 
         assertGt(engine.accumulatedBadDebtUsdc(), 0, "Setup must realize bad debt");
 

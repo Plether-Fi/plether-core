@@ -81,11 +81,12 @@ The owner cannot:
 
 Several perps contracts intentionally expose narrow but high-authority capability surfaces.
 
-- `OrderRouter` is the external execution boundary and can reach engine settlement paths plus `HousePool.payOut(...)` / `recordProtocolInflow(...)` through the approved caller set.
+- `OrderRouter` is the external execution boundary and can reach engine settlement paths plus `HousePool.recordProtocolInflow(...)` for forfeited escrow it has already funded.
 - `CfdEngineSettlementModule` is engine-gated, but any external function added there is automatically security-critical because it can reach engine-owned settlement hooks.
 - `MarginClearinghouse` operator paths trust `engine`, `orderRouter`, and `settlementModule` to move trader custody across settlement, escrow, and seizure buckets.
 - `MarginClearinghouse.reserveStaleCloseExecutionBountyFromSettlement(...)` and `reserveStaleCloseExecutionBountyFromPositionMargin(...)` are intentionally narrow stale close-commit escape hatches; they must remain reserved for risk-reducing stale fallback flows that have already been bounded by router/engine policy.
-- `HousePool.payOut(...)` and `HousePool.recordProtocolInflow(...)` trust `engine`, `orderRouter`, and `settlementModule` as capability-bearing callers.
+- `HousePool.payOut(...)` trusts only `engine` and `settlementModule` as capability-bearing callers.
+- `HousePool.recordProtocolInflow(...)` trusts `engine`, `orderRouter`, and `settlementModule` for explicitly accounted protocol-owned inflows.
 
 Practical rule:
 

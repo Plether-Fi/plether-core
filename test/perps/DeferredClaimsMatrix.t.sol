@@ -19,12 +19,10 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
         usdc.mint(address(pool), 40e6);
 
         stdstore.target(address(engine)).sig("accumulatedFeesUsdc()").checked_write(uint256(20e6));
-        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(bytes32)").with_key(account)
+        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(address)").with_key(account)
             .checked_write(uint256(30e6));
         stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(uint256(30e6));
-
-        vm.prank(address(router));
-        engine.recordDeferredKeeperCredit(otherKeeper, 20e6);
+        _recordDeferredKeeperCreditForTest(otherKeeper, 20e6);
 
         vm.expectRevert(CfdEngine.CfdEngine__InsufficientVaultLiquidity.selector);
         vm.prank(trader);
@@ -45,7 +43,7 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
         usdc.burn(address(pool), pool.totalAssets());
         usdc.mint(address(pool), 20e6);
 
-        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(bytes32)").with_key(account)
+        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(address)").with_key(account)
             .checked_write(uint256(50e6));
         stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(uint256(50e6));
 
@@ -69,12 +67,10 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
         usdc.mint(address(pool), 45e6);
 
         stdstore.target(address(engine)).sig("accumulatedFeesUsdc()").checked_write(uint256(20e6));
-        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(bytes32)").with_key(account)
+        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(address)").with_key(account)
             .checked_write(uint256(30e6));
         stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(uint256(30e6));
-
-        vm.prank(address(router));
-        engine.recordDeferredKeeperCredit(otherKeeper, 20e6);
+        _recordDeferredKeeperCreditForTest(otherKeeper, 20e6);
 
         vm.expectRevert(CfdEngine.CfdEngine__InsufficientVaultLiquidity.selector);
         vm.prank(trader);
@@ -87,8 +83,7 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
 
     function test_ClearerDeferredClaim_RevertsWhenVaultCashFallsBelowKeeperLiability() public {
         address keeper = address(0xDC03);
-        vm.prank(address(router));
-        engine.recordDeferredKeeperCredit(keeper, 5000e6);
+        _recordDeferredKeeperCreditForTest(keeper, 5000e6);
         usdc.burn(address(pool), pool.totalAssets());
         usdc.mint(address(pool), 2000e6);
 
@@ -113,12 +108,10 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
         usdc.mint(address(pool), 45e6);
 
         stdstore.target(address(engine)).sig("accumulatedFeesUsdc()").checked_write(uint256(20e6));
-        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(bytes32)").with_key(traderAccount)
+        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(address)").with_key(traderAccount)
             .checked_write(uint256(20e6));
         stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(uint256(20e6));
-
-        vm.prank(address(router));
-        engine.recordDeferredKeeperCredit(keeper, 30e6);
+        _recordDeferredKeeperCreditForTest(keeper, 30e6);
 
         vm.expectRevert(CfdEngine.CfdEngine__InsufficientVaultLiquidity.selector);
         vm.prank(keeper);
@@ -128,9 +121,7 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
         assertEq(
             engine.deferredKeeperCreditUsdc(keeper), 30e6, "Keeper residual deferred balance should stay fully queued"
         );
-        assertEq(
-            engine.deferredTraderCreditUsdc(traderAccount), 20e6, "Trader deferred queue should remain preserved"
-        );
+        assertEq(engine.deferredTraderCreditUsdc(traderAccount), 20e6, "Trader deferred queue should remain preserved");
         assertEq(engine.accumulatedFeesUsdc(), 20e6, "Protocol fees should remain preserved");
     }
 

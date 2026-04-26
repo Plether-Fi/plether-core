@@ -27,9 +27,12 @@ import {ProtocolLensViewTypes} from "../../src/perps/interfaces/ProtocolLensView
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {OrderRouterDebugLens} from "../utils/OrderRouterDebugLens.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 import {Test} from "forge-std/Test.sol";
 
 abstract contract BasePerpTest is Test {
+
+    using stdStorage for StdStorage;
 
     struct CloseParitySnapshot {
         ProtocolLensViewTypes.ProtocolAccountingSnapshot protocol;
@@ -892,6 +895,21 @@ abstract contract BasePerpTest is Test {
         status.traderPayoutClaimableNow = deferredTraderCreditUsdc > 0 && anyLiquidity;
         status.deferredKeeperCreditUsdc = deferredKeeperCreditUsdc;
         status.keeperCreditClaimableNow = deferredKeeperCreditUsdc > 0 && anyLiquidity;
+    }
+
+    function _recordDeferredKeeperCreditForTest(
+        address keeper,
+        uint256 amountUsdc
+    ) internal {
+        if (amountUsdc == 0) {
+            return;
+        }
+
+        uint256 keeperCredit = engine.deferredKeeperCreditUsdc(keeper) + amountUsdc;
+        uint256 totalKeeperCredit = engine.totalDeferredKeeperCreditUsdc() + amountUsdc;
+        stdstore.target(address(engine)).sig("deferredKeeperCreditUsdc(address)").with_key(keeper)
+            .checked_write(keeperCredit);
+        stdstore.target(address(engine)).sig("totalDeferredKeeperCreditUsdc()").checked_write(totalKeeperCredit);
     }
 
     function _vaultMtmAdjustment() internal view returns (uint256) {

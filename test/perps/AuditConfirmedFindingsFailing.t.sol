@@ -623,7 +623,7 @@ contract AuditConfirmedFindingsFailing_KeeperReserveLiquidation is BasePerpTest 
         uint256 vaultDepth = pool.totalAssets();
         vm.prank(address(router));
         vm.expectRevert(CfdEngine.CfdEngine__PositionIsSolvent.selector);
-        engine.liquidatePosition(account, 100_530_000, vaultDepth, uint64(block.timestamp));
+        engine.liquidatePosition(account, 100_530_000, vaultDepth, uint64(block.timestamp), address(this));
     }
 
 }
