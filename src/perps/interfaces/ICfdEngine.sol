@@ -41,13 +41,6 @@ interface ICfdEngine is ICfdEngineTypes {
         uint64 publishTime
     ) external;
 
-    /// @notice Records deferred keeper credit when immediate clearinghouse settlement is unavailable.
-    /// @dev Deferred keeper value is always later claimed as clearinghouse credit.
-    function recordDeferredKeeperCredit(
-        address keeper,
-        uint256 amountUsdc
-    ) external;
-
     /// @notice Reserves close-order execution bounty from free settlement first, then active position margin.
     function reserveCloseOrderExecutionBounty(
         address account,
@@ -76,17 +69,19 @@ interface ICfdEngine is ICfdEngineTypes {
         uint64 publishTime
     ) external;
 
-    /// @notice Liquidates an undercollateralized position, returns keeper bounty in USDC
+    /// @notice Liquidates an undercollateralized position and services or defers the keeper bounty.
     /// @param account          Account holding the position to liquidate
     /// @param currentOraclePrice Mark price from the oracle (8 decimals)
     /// @param vaultDepthUsdc     Available vault liquidity (6 decimals)
     /// @param publishTime        Oracle publish timestamp
-    /// @return keeperBountyUsdc  Bounty paid to the liquidation keeper (6 decimals)
+    /// @param keeper             Keeper receiving the liquidation bounty or deferred credit
+    /// @return keeperBountyUsdc  Bounty owed to the liquidation keeper (6 decimals)
     function liquidatePosition(
         address account,
         uint256 currentOraclePrice,
         uint256 vaultDepthUsdc,
-        uint64 publishTime
+        uint64 publishTime,
+        address keeper
     ) external returns (uint256 keeperBountyUsdc);
 
     /// @notice Realizes accrued carry against the current reachable collateral before a user-level

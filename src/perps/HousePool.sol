@@ -397,14 +397,14 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         emit ExcessSwept(recipient, amount);
     }
 
-    /// @notice Transfers USDC from the pool for protocol-authorized settlement or keeper payments.
+    /// @notice Transfers USDC from the pool for engine-authorized settlement or keeper payments.
     /// @param recipient Address to receive USDC
     /// @param amount USDC amount to transfer (6 decimals)
     function payOut(
         address recipient,
         uint256 amount
     ) external {
-        if (msg.sender != address(ENGINE) && msg.sender != orderRouter && msg.sender != ENGINE.settlementModule()) {
+        if (msg.sender != address(ENGINE) && msg.sender != ENGINE.settlementModule()) {
             revert HousePool__Unauthorized();
         }
         accountedAssets -= amount;
@@ -412,7 +412,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
     }
 
     /// @notice Accounts a legitimate protocol-owned inflow into canonical vault assets.
-    /// @dev Only the engine or order router may use this path. Unlike `accountExcess()`, this does
+    /// @dev Only the engine, order router, or settlement module may use this path. Unlike `accountExcess()`, this does
     ///      not require raw excess to exist: it is the explicit accounting hook for endogenous
     ///      protocol gains and may also be used to restore canonical accounting after a raw-balance
     ///      shortfall has already reduced effective assets through `totalAssets() = min(raw, accounted)`.

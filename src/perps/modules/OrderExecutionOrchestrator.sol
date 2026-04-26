@@ -6,7 +6,6 @@ import {CfdTypes} from "../CfdTypes.sol";
 import {ICfdEngineCore} from "../interfaces/ICfdEngineCore.sol";
 import {IOrderRouterAccounting} from "../interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterErrors} from "../interfaces/IOrderRouterErrors.sol";
-import {CashPriorityLib} from "../libraries/CashPriorityLib.sol";
 import {OracleFreshnessPolicyLib} from "../libraries/OracleFreshnessPolicyLib.sol";
 import {OrderValidationLib} from "../libraries/OrderValidationLib.sol";
 import {OrderOracleExecution} from "./OrderOracleExecution.sol";

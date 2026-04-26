@@ -33,7 +33,7 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
     event OrderCommitted(uint64 indexed orderId, address indexed account, CfdTypes.Side side);
 
     /// @param _engine CfdEngine that processes trades and liquidations
-    /// @param _housePool HousePool used for depth queries and liquidation bounty payouts
+    /// @param _housePool HousePool used for depth queries and forfeited-escrow accounting
     /// @param _pyth Pyth oracle contract (address(0) enables mock mode on Anvil)
     /// @param _feedIds Pyth price feed IDs for each basket component
     /// @param _quantities Weight of each component (must sum to 1e18)

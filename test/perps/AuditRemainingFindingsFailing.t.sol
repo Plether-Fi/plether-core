@@ -63,7 +63,7 @@ contract AuditRemainingFindingsFailing is BasePerpTest {
 
         vm.prank(address(router));
         vm.expectRevert(CfdEngine.CfdEngine__PositionIsSolvent.selector);
-        engine.liquidatePosition(account, 99_500_000, vaultDepth, uint64(block.timestamp));
+        engine.liquidatePosition(account, 99_500_000, vaultDepth, uint64(block.timestamp), address(this));
     }
 
     function test_H3_OperatorCannotSeizeToArbitraryRecipient() public {

@@ -421,7 +421,7 @@ contract AuditVerifiedFindingsFailing_F8_LiquidationDegradedMode is BasePerpTest
 
         uint256 depth = pool.totalAssets();
         vm.prank(address(router));
-        engine.liquidatePosition(loserAccount, 0.1e8, depth, uint64(block.timestamp));
+        engine.liquidatePosition(loserAccount, 0.1e8, depth, uint64(block.timestamp), address(this));
 
         assertTrue(
             engine.degradedMode(),

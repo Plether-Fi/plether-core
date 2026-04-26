@@ -23,7 +23,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
     error OrderRouter__PredictableOpenInvalid(uint8 code);
 
     /// @param _engine CfdEngine that processes trades and liquidations
-    /// @param _housePool HousePool used for depth queries and liquidation bounty payouts
+    /// @param _housePool HousePool used for depth queries and forfeited-escrow accounting
     /// @param _pyth Pyth oracle contract (address(0) enables mock mode on Anvil)
     /// @param _feedIds Pyth price feed IDs for each basket component
     /// @param _quantities Weight of each component (must sum to 1e18)
@@ -112,7 +112,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
 
     /// @notice Keeper-triggered liquidation using the canonical live-market staleness policy.
     ///         Forfeits any queued-order execution escrow to the HousePool instead of crediting it back to trader settlement,
-    ///         then credits the liquidation keeper through the clearinghouse when cash is available.
+    ///         then asks the engine to service or defer the liquidation keeper bounty.
     /// @param account The account to liquidate
     /// @param pythUpdateData Pyth price update blobs; attach ETH to cover the Pyth fee
     function executeLiquidation(

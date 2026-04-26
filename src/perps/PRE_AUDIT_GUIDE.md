@@ -54,7 +54,8 @@ Before trusting a test as a source of truth, ask:
 | `CfdEngine` settlement host hooks | `settlementModule` only | settlement module itself is engine-gated |
 | `CfdEngine.processOrderTyped` / `liquidatePosition` / fee bookkeeping | `orderRouter` only | router is the external execution boundary |
 | `MarginClearinghouse` operator paths | `engine`, `orderRouter`, `settlementModule` | router for queue escrow, engine/module for settlement |
-| `HousePool.payOut` / `recordProtocolInflow` | `engine`, `orderRouter`, `settlementModule` | payout/inflow authority is intentionally narrow |
+| `HousePool.payOut` | `engine`, `settlementModule` | payout authority stays engine-owned |
+| `HousePool.recordProtocolInflow` | `engine`, `orderRouter`, `settlementModule` | protocol-inflow accounting remains narrow; router only accounts forfeited escrow it has already funded |
 | `HousePool.recordClaimantInflow` | `engine`, `settlementModule` | claimant-owned revenue/recap routing only |
 
 Any new helper/module contract that can reach these sets should be treated as security-critical and explicitly access-controlled.
@@ -108,7 +109,7 @@ Any new helper/module contract that can reach these sets should be treated as se
 | Bounty type | Source of funds | Custody while pending | Success path | Illiquid path | Terminal failure path |
 |-------------|-----------------|-----------------------|--------------|---------------|-----------------------|
 | Order execution bounty | Trader free settlement, then bounded close fallback from active position margin | `OrderRouter` escrow | clearinghouse credit for the clearer | n/a | clearer payment or trader refund via clearinghouse credit depending on failure category/policy |
-| Liquidation bounty | Capped from canonical liquidation value derived from reachable collateral and carry-adjusted equity | planned in engine, then serviced through the liquidation settlement path | immediate keeper clearinghouse credit if cash is available after the settlement path | deferred keeper credit senior claim | n/a |
+| Liquidation bounty | Capped from canonical liquidation value derived from reachable collateral and carry-adjusted equity | planned and serviced by the engine through the liquidation settlement path | immediate keeper clearinghouse credit if cash is available after the settlement path | deferred keeper credit senior claim | n/a |
 
 ### Oracle regime table
 
