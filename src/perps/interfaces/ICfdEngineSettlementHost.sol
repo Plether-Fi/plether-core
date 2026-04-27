@@ -25,11 +25,11 @@ interface ICfdEngineSettlementHost {
         int256 openInterestDelta,
         int256 entryNotionalDelta
     ) external;
-    function settlementConsumeDeferredTraderPayout(
+    function settlementConsumeTraderClaim(
         address account,
         uint256 amountUsdc
     ) external;
-    function settlementRecordDeferredTraderPayout(
+    function settlementRecordTraderPayout(
         address account,
         uint256 amountUsdc
     ) external;

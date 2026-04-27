@@ -16,7 +16,7 @@ library HousePoolAccountingLib {
     struct ReconcileSnapshot {
         uint256 physicalAssets;
         uint256 protocolFees;
-        uint256 deferredLiabilities;
+        uint256 claimLiabilities;
         uint256 cashMinusFees;
         uint256 mtm;
         uint256 distributable;
@@ -34,7 +34,7 @@ library HousePoolAccountingLib {
         snapshot.maxLiability = engineSnapshot.maxLiabilityUsdc;
         snapshot.protocolFees = engineSnapshot.protocolFeesUsdc;
         snapshot.reserved = engineSnapshot.maxLiabilityUsdc + engineSnapshot.protocolFeesUsdc
-            + engineSnapshot.deferredTraderCreditUsdc + engineSnapshot.deferredKeeperCreditUsdc
+            + engineSnapshot.traderClaimBalanceUsdc + engineSnapshot.keeperClaimBalanceUsdc
             + engineSnapshot.supplementalReservedUsdc;
         snapshot.freeUsdc =
             snapshot.physicalAssets > snapshot.reserved ? snapshot.physicalAssets - snapshot.reserved : 0;
@@ -45,9 +45,9 @@ library HousePoolAccountingLib {
     ) internal pure returns (ReconcileSnapshot memory snapshot) {
         snapshot.physicalAssets = engineSnapshot.physicalAssetsUsdc;
         snapshot.protocolFees = engineSnapshot.protocolFeesUsdc;
-        snapshot.deferredLiabilities = engineSnapshot.deferredTraderCreditUsdc + engineSnapshot.deferredKeeperCreditUsdc;
-        snapshot.cashMinusFees = engineSnapshot.netPhysicalAssetsUsdc > snapshot.deferredLiabilities
-            ? engineSnapshot.netPhysicalAssetsUsdc - snapshot.deferredLiabilities
+        snapshot.claimLiabilities = engineSnapshot.traderClaimBalanceUsdc + engineSnapshot.keeperClaimBalanceUsdc;
+        snapshot.cashMinusFees = engineSnapshot.netPhysicalAssetsUsdc > snapshot.claimLiabilities
+            ? engineSnapshot.netPhysicalAssetsUsdc - snapshot.claimLiabilities
             : 0;
         snapshot.mtm = engineSnapshot.unrealizedMtmLiabilityUsdc;
         snapshot.distributable = snapshot.cashMinusFees > snapshot.mtm ? snapshot.cashMinusFees - snapshot.mtm : 0;

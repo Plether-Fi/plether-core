@@ -13,7 +13,7 @@ import {MarginClearinghouse} from "../../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../../src/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "../../../src/perps/OrderRouterAdmin.sol";
 import {PerpsPublicLens} from "../../../src/perps/PerpsPublicLens.sol";
-import {DeferredEngineViewTypes} from "../../../src/perps/interfaces/DeferredEngineViewTypes.sol";
+import {ClaimEngineViewTypes} from "../../../src/perps/interfaces/ClaimEngineViewTypes.sol";
 import {IOrderRouterAccounting} from "../../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {PerpsViewTypes} from "../../../src/perps/interfaces/PerpsViewTypes.sol";
 import {MockUSDC} from "../../mocks/MockUSDC.sol";
@@ -194,18 +194,18 @@ abstract contract BasePerpInvariantTest is Test {
         return (notionalUsdc * requiredBps) / 10_000;
     }
 
-    function _deferredCreditStatus(
+    function _claimStatus(
         address account,
         address keeper
-    ) internal view returns (DeferredEngineViewTypes.DeferredCreditStatus memory status) {
-        uint256 deferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(account);
-        uint256 deferredKeeperCreditUsdc = engine.deferredKeeperCreditUsdc(keeper);
+    ) internal view returns (ClaimEngineViewTypes.ClaimStatus memory status) {
+        uint256 traderClaimBalanceUsdc = clearinghouse.traderClaimBalanceUsdc(account);
+        uint256 keeperClaimBalanceUsdc = clearinghouse.keeperClaimBalanceUsdc(keeper);
         bool anyLiquidity = vault.totalAssets() > 0;
 
-        status.deferredTraderCreditUsdc = deferredTraderCreditUsdc;
-        status.traderPayoutClaimableNow = deferredTraderCreditUsdc > 0 && anyLiquidity;
-        status.deferredKeeperCreditUsdc = deferredKeeperCreditUsdc;
-        status.keeperCreditClaimableNow = deferredKeeperCreditUsdc > 0 && anyLiquidity;
+        status.traderClaimBalanceUsdc = traderClaimBalanceUsdc;
+        status.traderClaimServiceableNow = traderClaimBalanceUsdc > 0 && anyLiquidity;
+        status.keeperClaimBalanceUsdc = keeperClaimBalanceUsdc;
+        status.keeperClaimServiceableNow = keeperClaimBalanceUsdc > 0 && anyLiquidity;
     }
 
 }

@@ -36,14 +36,14 @@ contract HousePoolSnapshotParityTest is BasePerpTest {
             "HousePool input fees should match protocol snapshot"
         );
         assertEq(
-            inputSnapshot.deferredTraderCreditUsdc,
-            protocolSnapshot.totalDeferredTraderCreditUsdc,
-            "HousePool input deferred trader credit should match protocol snapshot"
+            inputSnapshot.traderClaimBalanceUsdc,
+            protocolSnapshot.totalTraderClaimBalanceUsdc,
+            "HousePool input trader claim balance should match protocol snapshot"
         );
         assertEq(
-            inputSnapshot.deferredKeeperCreditUsdc,
-            protocolSnapshot.totalDeferredKeeperCreditUsdc,
-            "HousePool input deferred keeper credit should match protocol snapshot"
+            inputSnapshot.keeperClaimBalanceUsdc,
+            protocolSnapshot.totalKeeperClaimBalanceUsdc,
+            "HousePool input keeper claim balance should match protocol snapshot"
         );
     }
 

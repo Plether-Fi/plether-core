@@ -24,6 +24,7 @@ interface IMarginClearinghouse {
     error MarginClearinghouse__ZeroAddress();
     error MarginClearinghouse__InsufficientBucketMargin();
     error MarginClearinghouse__AmountOverflow();
+    error MarginClearinghouse__InsufficientClaimBalance();
 
     enum MarginBucket {
         Position,
@@ -50,6 +51,11 @@ interface IMarginClearinghouse {
         Released
     }
 
+    enum ClaimKind {
+        Trader,
+        Keeper
+    }
+
     struct OrderReservation {
         address account;
         ReservationBucket bucket;
@@ -71,6 +77,12 @@ interface IMarginClearinghouse {
         uint256 freeSettlementUsdc;
     }
 
+    struct ClaimBalances {
+        uint256 traderClaimBalanceUsdc;
+        uint256 keeperClaimBalanceUsdc;
+        uint256 totalClaimBalanceUsdc;
+    }
+
     struct LiquidationSettlementPlan {
         uint256 settlementRetainedUsdc;
         uint256 settlementSeizedUsdc;
@@ -84,6 +96,28 @@ interface IMarginClearinghouse {
     function balanceUsdc(
         address account
     ) external view returns (uint256);
+    /// @notice Returns all non-spendable USDC claims owed to an account.
+    function claimBalanceUsdc(
+        address account
+    ) external view returns (uint256);
+    /// @notice Returns the trader claim balance owed to an account.
+    function traderClaimBalanceUsdc(
+        address account
+    ) external view returns (uint256);
+    /// @notice Returns the keeper claim balance owed to an account.
+    function keeperClaimBalanceUsdc(
+        address account
+    ) external view returns (uint256);
+    /// @notice Returns all non-spendable claim balances owed by the protocol.
+    function totalClaimBalanceUsdc() external view returns (uint256);
+    /// @notice Returns all trader claim balances owed by the protocol.
+    function totalTraderClaimBalanceUsdc() external view returns (uint256);
+    /// @notice Returns all keeper claim balances owed by the protocol.
+    function totalKeeperClaimBalanceUsdc() external view returns (uint256);
+    /// @notice Returns source-tagged non-spendable claim balances for an account.
+    function getClaimBalances(
+        address account
+    ) external view returns (ClaimBalances memory balances);
     /// @notice Returns the locked USDC margin for an account
     function lockedMarginUsdc(
         address account
@@ -159,10 +193,28 @@ interface IMarginClearinghouse {
         address account,
         uint256 amountUsdc
     ) external;
-    /// @notice Adjusts settlement USDC for realized PnL, deferred-claim servicing, or rebates (+credit, -debit).
+    /// @notice Adjusts settlement USDC for realized PnL, claim-claim servicing, or rebates (+credit, -debit).
     function settleUsdc(
         address account,
         int256 amount
+    ) external;
+    /// @notice Records a non-spendable claim owed to an account.
+    function creditClaim(
+        address account,
+        ClaimKind kind,
+        uint256 amountUsdc
+    ) external;
+    /// @notice Moves a serviced non-spendable claim into spendable settlement balance.
+    function releaseClaimToSettlement(
+        address account,
+        ClaimKind kind,
+        uint256 amountUsdc
+    ) external;
+    /// @notice Consumes a non-spendable claim without crediting settlement.
+    function consumeClaim(
+        address account,
+        ClaimKind kind,
+        uint256 amountUsdc
     ) external;
     /// @notice Credits settlement USDC and locks the same amount as active margin.
     function creditSettlementAndLockMargin(

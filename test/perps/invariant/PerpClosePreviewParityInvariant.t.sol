@@ -65,7 +65,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
         selectors[3] = handler.commitCloseOrder.selector;
         selectors[4] = handler.executeNextOrderBatch.selector;
         selectors[5] = handler.liquidate.selector;
-        selectors[6] = handler.claimDeferredKeeperCredit.selector;
+        selectors[6] = handler.claimKeeperClaim.selector;
         selectors[7] = handler.setRouterPayoutFailureMode.selector;
         selectors[8] = handler.setVaultAssets.selector;
         selectors[9] = handler.fundVault.selector;
@@ -207,7 +207,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
         }
     }
 
-    function invariant_ImmediateDeferredSplitMatchesAdjustedCash() public view {
+    function invariant_ImmediateClaimSplitMatchesAdjustedCash() public view {
         uint256 oraclePrice = _previewOraclePrice();
         uint256 vaultDepthUsdc = vault.totalAssets();
         (,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
@@ -244,21 +244,23 @@ contract PerpClosePreviewParityInvariantTest is Test {
     ) internal view {
         CfdEngine.ClosePreview memory preview = engineLens.previewClose(account, sizeDelta, oraclePrice);
 
-        if (!preview.valid || (preview.immediatePayoutUsdc == 0 && preview.deferredTraderCreditUsdc == 0)) {
+        if (!preview.valid || (preview.immediatePayoutUsdc == 0 && preview.traderClaimBalanceUsdc == 0)) {
             return;
         }
 
         uint256 adjustedCash = vault.totalAssets();
-        uint256 totalOwed = preview.immediatePayoutUsdc + preview.deferredTraderCreditUsdc;
+        uint256 totalOwed = preview.immediatePayoutUsdc + preview.traderClaimBalanceUsdc;
 
         if (preview.immediatePayoutUsdc > 0) {
             assertGe(adjustedCash, preview.immediatePayoutUsdc, "Post-carry vault cash must cover immediate payout");
-            assertEq(preview.deferredTraderCreditUsdc, 0, "Immediate payout excludes deferred payout");
+            assertEq(preview.traderClaimBalanceUsdc, 0, "Immediate payout excludes trader claim balance");
         }
 
-        if (preview.deferredTraderCreditUsdc > 0) {
-            assertEq(preview.immediatePayoutUsdc, 0, "Deferred payout excludes immediate payout");
-            assertLt(adjustedCash, totalOwed, "Deferred payout implies adjusted cash insufficient for full settlement");
+        if (preview.traderClaimBalanceUsdc > 0) {
+            assertEq(preview.immediatePayoutUsdc, 0, "trader claim balance excludes immediate payout");
+            assertLt(
+                adjustedCash, totalOwed, "trader claim balance implies adjusted cash insufficient for full settlement"
+            );
         }
     }
 
@@ -276,18 +278,18 @@ contract PerpClosePreviewParityInvariantTest is Test {
         assertEq(actual.executionFeeUsdc, expected.executionFeeUsdc, "Close execution fee should match");
         assertEq(actual.freshTraderPayoutUsdc, expected.freshTraderPayoutUsdc, "Close fresh payout should match");
         assertEq(
-            actual.existingDeferredConsumedUsdc,
-            expected.existingDeferredConsumedUsdc,
-            "Close deferred consumption should match"
+            actual.existingTraderClaimConsumedUsdc,
+            expected.existingTraderClaimConsumedUsdc,
+            "Close claim consumption should match"
         );
         assertEq(
-            actual.existingDeferredRemainingUsdc,
-            expected.existingDeferredRemainingUsdc,
-            "Close deferred remainder should match"
+            actual.existingTraderClaimRemainingUsdc,
+            expected.existingTraderClaimRemainingUsdc,
+            "Close claim remainder should match"
         );
         assertEq(actual.immediatePayoutUsdc, expected.immediatePayoutUsdc, "Close immediate payout should match");
         assertEq(
-            actual.deferredTraderCreditUsdc, expected.deferredTraderCreditUsdc, "Close deferred payout should match"
+            actual.traderClaimBalanceUsdc, expected.traderClaimBalanceUsdc, "Close trader claim balance should match"
         );
         assertEq(actual.seizedCollateralUsdc, expected.seizedCollateralUsdc, "Close seized collateral should match");
         assertEq(actual.badDebtUsdc, expected.badDebtUsdc, "Close bad debt should match");

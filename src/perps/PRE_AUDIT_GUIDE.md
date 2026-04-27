@@ -17,7 +17,7 @@ If reviewing quickly, focus on these questions in order:
 1. Does a path use the canonical planner output rather than recomputing different economics at execution time?
 2. Does the path move value only across the intended custody domains?
 3. Does the path use the correct oracle regime and failure policy for the current market state?
-4. Does the path preserve bounded queue behavior and deferred-liability seniority?
+4. Does the path preserve bounded queue behavior and claim-liability seniority?
 
 ## Test Taxonomy
 
@@ -109,7 +109,7 @@ Any new helper/module contract that can reach these sets should be treated as se
 | Bounty type | Source of funds | Custody while pending | Success path | Illiquid path | Terminal failure path |
 |-------------|-----------------|-----------------------|--------------|---------------|-----------------------|
 | Order execution bounty | Trader free settlement, then bounded close fallback from active position margin | `OrderRouter` escrow | clearinghouse credit for the clearer | n/a | clearer payment or trader refund via clearinghouse credit depending on failure category/policy |
-| Liquidation bounty | Capped from canonical liquidation value derived from reachable collateral and carry-adjusted equity | planned and serviced by the engine through the liquidation settlement path | immediate keeper clearinghouse credit if cash is available after the settlement path | deferred keeper credit senior claim | n/a |
+| Liquidation bounty | Capped from canonical liquidation value derived from reachable collateral and carry-adjusted equity | planned and serviced by the engine through the liquidation settlement path | immediate keeper clearinghouse credit if cash is available after the settlement path | keeper claim balance senior claim | n/a |
 
 ### Oracle regime table
 
@@ -130,8 +130,8 @@ Any new helper/module contract that can reach these sets should be treated as se
 | Other locked margin | Trader, but reserved to queued intents until an explicit terminal path unlocks it | clearinghouse reservations | router commit/release/consume | no for ordinary close reachability; only available where terminal settlement explicitly unlocks/consumes it | indirectly and only through explicit terminal settlement plans | no | no |
 | Committed order margin | Trader but reserved to one order | clearinghouse reservation keyed by `orderId` | router commit/execute/fail | no | no | no | no |
 | Router execution bounty escrow | Trader-funded keeper escrow | `OrderRouter` balance + order record | router commit/distribute/refund/forfeit | no | no | no | no |
-| Deferred trader credit | Trader senior claim on vault liquidity | `CfdEngine.deferredTraderCreditUsdc` | engine create/service | no | yes, as senior liability | yes | yes |
-| Deferred keeper credit | Keeper senior claim on vault liquidity | `CfdEngine.deferredKeeperCreditUsdc` | engine create/service | no | yes, as senior liability | yes | yes |
+| trader claim balance | Trader senior claim on vault liquidity | `MarginClearinghouse` non-spendable trader claim balance | engine create/service through clearinghouse claim APIs | no | yes, as senior liability | yes | yes |
+| keeper claim balance | Keeper senior claim on vault liquidity | `MarginClearinghouse` non-spendable keeper claim balance | engine create/service through clearinghouse claim APIs | no | yes, as senior liability | yes | yes |
 | Unsettled carry | Protocol-recorded carry debt on an account | `CfdEngine.unsettledCarryUsdc[account]` | engine carry-checkpoint paths | no | yes, as carry drag on account equity | no | no |
 | Accumulated protocol fees | Protocol/treasury | `CfdEngine.accumulatedFeesUsdc` + canonical pool cash | engine accrual, owner withdraw | no | reduces net physical assets | yes | yes |
 | Accumulated bad debt | Protocol loss / LP impairment | `CfdEngine.accumulatedBadDebtUsdc` | engine realization, bad debt clear path | n/a | yes, as realized deficit | yes | yes |
@@ -152,19 +152,19 @@ Reachability note:
 - New risk: execution may rely on older marks than the live regime would permit.
 - Protecting invariant: frozen execution has its own tighter stale window and remains close-only.
 
-### Deferred trader credit servicing
+### Trader Claim Servicing
 
 - Liveness problem: profitable closes and liquidation payouts should not revert only because the vault is temporarily illiquid.
-- Chosen tradeoff: record senior deferred trader/keeper credit claims instead of reverting the state transition.
+- Chosen tradeoff: record senior trader and keeper claim balances instead of reverting the state transition.
 - New risk: payout servicing becomes asynchronous and must respect seniority.
-- Protecting invariant: deferred liabilities remain senior in withdrawal, solvency, and reconciliation accounting.
+- Protecting invariant: non-spendable claim liabilities remain senior in withdrawal, solvency, and reconciliation accounting.
 
 ### Fail-soft liquidation bounty servicing
 
 - Liveness problem: liquidation should not fail solely because immediate vault cash is unavailable.
-- Chosen tradeoff: keeper bounty may become deferred keeper credit.
+- Chosen tradeoff: keeper bounty may become keeper claim balance.
 - New risk: keeper payment timing becomes state-dependent.
-- Protecting invariant: liquidation still completes, and the keeper credit claim remains senior until paid.
+- Protecting invariant: liquidation still completes, and the keeper claim balance remains senior until paid.
 
 ### Bounded queue cleanup
 
@@ -216,17 +216,17 @@ Reachability note:
 2. Planner computes carry-adjusted liquidation equity using only physically reachable collateral.
 3. Keeper bounty is capped by physically reachable collateral, not by the positive-equity sign boundary.
 4. Terminal residual plan seizes reachable collateral, pays the bounty, and computes any fresh trader payout or explicit subsidy shortfall.
-5. Existing deferred trader credit is not treated as reachable collateral; it remains only as a senior claim unless negative residual netting consumes it.
-6. If cash is available, fresh payout is immediate; otherwise it becomes deferred.
+5. Existing trader claim balance is not treated as reachable collateral; it remains only as a senior claim unless negative residual netting consumes it.
+6. If cash is available, fresh payout is immediate; otherwise it becomes a claim.
 7. Position is removed and queue cleanup runs on the liquidated account's local pending-order queue only.
 
-### Liquidation with bad debt and deferred netting
+### Liquidation with bad debt and claim netting
 
 1. Keeper calls liquidation on an account whose reachable collateral cannot cover losses.
 2. Planner computes carry-adjusted negative equity.
 3. Keeper bounty is capped by reachable collateral.
 4. Terminal residual plan consumes all physically reachable collateral.
-5. Existing same-account deferred trader credit is netted exactly once against remaining terminal shortfall.
+5. Existing same-account trader claim balance is netted exactly once against remaining terminal shortfall.
 6. Any leftover deficit becomes realized bad debt.
 7. `degradedMode` may latch if post-op solvency falls below the required boundary.
 
@@ -241,7 +241,7 @@ Reachability note:
 
 1. Preview/live parity: canonical close and liquidation planner outputs should match live settlement semantics.
 2. Physical-first solvency: physical cash and mathematical claims are distinct objects.
-3. Deferred-liability seniority: deferred trader and keeper credit claims remain senior until serviced.
+3. claim-liability seniority: trader and keeper claim balances remain senior until serviced.
 4. Carry-aware risk: pending carry reduces relevant equity before realization on guard and risk checks.
 5. Bounded queue behavior: cleanup and close-intent projection are account-local.
 6. Escrow conservation: router-held USDC execution bounty escrow and admin-held ETH refund claims are each distributed, refunded, forfeited, or left claimable exactly once.
@@ -254,10 +254,10 @@ Use the suites below as the highest-signal audit companions.
 | Theme | Primary suites |
 |-------|----------------|
 | Carry | `test/perps/CfdEngine.t.sol`, `test/perps/CfdEnginePlanRegression.t.sol`, `test/perps/MarginClearinghouse.t.sol` |
-| Deferred claim modes | `test/perps/DeferredClaimsMatrix.t.sol`, `test/perps/CfdEngine.t.sol` |
-| Liquidation | `test/perps/CfdEngine.t.sol`, `test/perps/OrderRouter.t.sol`, `test/perps/invariant/PerpDeferredCreditInvariant.t.sol` |
+| claim modes | `test/perps/ClaimsMatrix.t.sol`, `test/perps/CfdEngine.t.sol` |
+| Liquidation | `test/perps/CfdEngine.t.sol`, `test/perps/OrderRouter.t.sol`, `test/perps/invariant/PerpClaimInvariant.t.sol` |
 | Payout modes | `test/perps/PayoutModesMatrix.t.sol`, `test/perps/CfdEngine.t.sol` |
-| Deferred liabilities | `test/perps/CfdEngine.t.sol`, `test/perps/invariant/PerpDeferredCreditInvariant.t.sol` |
+| non-spendable claim liabilities | `test/perps/CfdEngine.t.sol`, `test/perps/invariant/PerpClaimInvariant.t.sol` |
 | Economic conservation | `test/perps/invariant/PerpEconomicConservationInvariant.t.sol`, `test/perps/invariant/PerpAccountingInvariant.t.sol` |
 | Multi-account isolation | `test/perps/invariant/PerpMultiAccountInvariant.t.sol` |
 | FIFO / expiry / queue | `test/perps/OrderRouter.t.sol` |

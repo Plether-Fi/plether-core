@@ -62,9 +62,9 @@ library CfdEnginePlanTypes {
         uint256 accumulatedFeesUsdc;
         uint256 accumulatedBadDebtUsdc;
         uint256 unsettledCarryUsdc;
-        uint256 totalDeferredTraderCreditUsdc;
-        uint256 totalDeferredKeeperCreditUsdc;
-        uint256 deferredTraderCreditForAccount;
+        uint256 totalTraderClaimBalanceUsdc;
+        uint256 totalKeeperClaimBalanceUsdc;
+        uint256 traderClaimBalanceForAccount;
         bool degradedMode;
 
         uint256 capPrice;
@@ -172,10 +172,10 @@ library CfdEnginePlanTypes {
 
         uint256 freshTraderPayoutUsdc;
         bool freshPayoutIsImmediate;
-        bool freshPayoutIsDeferred;
-        uint256 existingDeferredConsumedUsdc;
-        uint256 existingDeferredRemainingUsdc;
-        uint256 deferredFeeRecoveryUsdc;
+        bool freshPayoutCreatesClaim;
+        uint256 existingTraderClaimConsumedUsdc;
+        uint256 existingTraderClaimRemainingUsdc;
+        uint256 traderClaimFeeRecoveryUsdc;
 
         CfdEngineSettlementLib.CloseSettlementResult lossResult;
         MarginClearinghouseAccountingLib.SettlementConsumption lossConsumption;
@@ -226,9 +226,9 @@ library CfdEnginePlanTypes {
         uint256 settlementRetainedUsdc;
         uint256 freshTraderPayoutUsdc;
         bool freshPayoutIsImmediate;
-        bool freshPayoutIsDeferred;
-        uint256 existingDeferredConsumedUsdc;
-        uint256 existingDeferredRemainingUsdc;
+        bool freshPayoutCreatesClaim;
+        uint256 existingTraderClaimConsumedUsdc;
+        uint256 existingTraderClaimRemainingUsdc;
 
         uint256 syncMarginQueueAmount;
 

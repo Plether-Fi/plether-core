@@ -5,6 +5,7 @@ import {CfdEnginePlanTypes} from "../CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../CfdTypes.sol";
 import {EngineStatusViewTypes} from "./EngineStatusViewTypes.sol";
 import {ICfdEngineTypes} from "./ICfdEngineTypes.sol";
+import {IMarginClearinghouse} from "./IMarginClearinghouse.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /// @notice Stateful CFD trading engine: processes orders and liquidates positions.
@@ -69,12 +70,12 @@ interface ICfdEngine is ICfdEngineTypes {
         uint64 publishTime
     ) external;
 
-    /// @notice Liquidates an undercollateralized position and services or defers the keeper bounty.
+    /// @notice Liquidates an undercollateralized position and services the keeper bounty or records a keeper claim.
     /// @param account          Account holding the position to liquidate
     /// @param currentOraclePrice Mark price from the oracle (8 decimals)
     /// @param vaultDepthUsdc     Available vault liquidity (6 decimals)
     /// @param publishTime        Oracle publish timestamp
-    /// @param keeper             Keeper receiving the liquidation bounty or deferred credit
+    /// @param keeper             Keeper receiving the liquidation bounty or claim credit
     /// @return keeperBountyUsdc  Bounty owed to the liquidation keeper (6 decimals)
     function liquidatePosition(
         address account,
@@ -107,11 +108,11 @@ interface ICfdEngine is ICfdEngineTypes {
     /// @notice Accumulated execution fees awaiting withdrawal (6 decimals)
     function accumulatedFeesUsdc() external view returns (uint256);
 
-    /// @notice Deferred trader credit still owed to beneficiaries.
-    function totalDeferredTraderCreditUsdc() external view returns (uint256);
-
-    /// @notice Deferred keeper credit still owed after failed immediate settlement.
-    function totalDeferredKeeperCreditUsdc() external view returns (uint256);
+    /// @notice Services a non-spendable clearinghouse claim into spendable settlement balance when vault cash allows it.
+    function claimBalance(
+        IMarginClearinghouse.ClaimKind kind,
+        address account
+    ) external;
 
     /// @notice Timestamp of the last mark price update
     function lastMarkTime() external view returns (uint64);

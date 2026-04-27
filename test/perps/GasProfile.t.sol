@@ -14,6 +14,7 @@ import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
+import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "forge-std/Test.sol";
 
@@ -341,32 +342,32 @@ contract GasProfileTest is Test {
         emit log_named_uint("09_addMargin", gas);
     }
 
-    // --- 10. claimDeferredTraderCredit ---
-    function test_gas_10_claimDeferredTraderCredit() public {
+    // --- 10. claimTraderClaim ---
+    function test_gas_10_claimTraderClaim() public {
         _depositToClearinghouse(alice, 11_000e6);
         _openPosition(alice, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
 
         address aliceAccount = _account(alice);
 
-        // Drain pool to force deferred payout
+        // Drain pool to force trader claim balance
         uint256 poolAssets = IERC20(usdc).balanceOf(address(pool));
         vm.prank(address(pool));
         IERC20(usdc).transfer(address(0xDEAD), poolAssets - 9000e6);
 
-        // Close at profit — payout gets deferred (use external call for clean timestamp reads)
+        // Close at profit — payout becomes a claim (use external call for clean timestamp reads)
         this._closeAtPrice(alice, CfdTypes.Side.BULL, 100_000e18, int64(80_000_000));
 
-        uint256 deferred = engine.deferredTraderCreditUsdc(aliceAccount);
-        require(deferred > 0, "Setup failed: no deferred trader credit");
+        uint256 claim = clearinghouse.traderClaimBalanceUsdc(aliceAccount);
+        require(claim > 0, "Setup failed: no trader claim balance");
 
         // Replenish pool so claim can succeed
-        _mintUsdc(address(pool), deferred);
+        _mintUsdc(address(pool), claim);
 
         vm.prank(alice);
         uint256 g0 = gasleft();
-        engine.claimDeferredTraderCredit(aliceAccount);
+        engine.claimBalance(IMarginClearinghouse.ClaimKind.Trader, aliceAccount);
         uint256 gas = g0 - gasleft();
-        emit log_named_uint("10_claimDeferredTraderCredit", gas);
+        emit log_named_uint("10_claimTraderClaim", gas);
     }
 
     // --- 11. clearinghouse.deposit ---

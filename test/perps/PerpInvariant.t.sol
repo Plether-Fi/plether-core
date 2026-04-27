@@ -600,27 +600,27 @@ contract PerpInvariantTest is BasePerpTest {
             protocolView.accumulatedFeesUsdc, engine.accumulatedFeesUsdc(), "Protocol view fees must match accessor"
         );
         assertEq(
-            protocolView.totalDeferredTraderCreditUsdc,
-            engine.totalDeferredTraderCreditUsdc(),
-            "Protocol view trader deferred payouts must match storage"
+            protocolView.totalTraderClaimBalanceUsdc,
+            clearinghouse.totalTraderClaimBalanceUsdc(),
+            "Protocol view trader trader claim balances must match storage"
         );
         assertEq(
-            protocolView.totalDeferredKeeperCreditUsdc,
-            engine.totalDeferredKeeperCreditUsdc(),
-            "Protocol view deferred keeper credit must match storage"
+            protocolView.totalKeeperClaimBalanceUsdc,
+            clearinghouse.totalKeeperClaimBalanceUsdc(),
+            "Protocol view keeper claim balance must match storage"
         );
     }
 
-    function invariant_WithdrawalReserveIncludesDeferredLiabilities() public view {
+    function invariant_WithdrawalReserveIncludesClaimLiabilities() public view {
         uint256 expectedReserved = _maxLiability() + engine.accumulatedFeesUsdc()
-            + engine.totalDeferredTraderCreditUsdc() + engine.totalDeferredKeeperCreditUsdc();
+            + clearinghouse.totalTraderClaimBalanceUsdc() + clearinghouse.totalKeeperClaimBalanceUsdc();
 
         expectedReserved += uint256(0);
 
         assertEq(
             _withdrawalReservedUsdc(),
             expectedReserved,
-            "Withdrawal reserve must include liabilities, fees, and deferred obligations"
+            "Withdrawal reserve must include liabilities, fees, and claim obligations"
         );
     }
 
@@ -678,7 +678,7 @@ contract AdversarialPerpHandler is Test {
     uint256 public ghost_batchAttempts;
     uint256 public ghost_batchAdvances;
     uint256 public ghost_starvationEvents;
-    uint256 public ghost_expectedDeferredKeeperCredit;
+    uint256 public ghost_expectedKeeperClaim;
     uint256 public ghost_failSoftLiquidations;
     uint256 public ghost_lastRetryableSlippageBatch;
     uint64 public ghost_lastRetryableSlippageOrderId;
@@ -943,14 +943,14 @@ contract AdversarialPerpHandler is Test {
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(oraclePrice);
 
-        uint256 beforeDeferred = engine.deferredKeeperCreditUsdc(address(this));
+        uint256 beforeKeeperClaim = clearinghouse.keeperClaimBalanceUsdc(address(this));
         vm.mockCallRevert(address(pool), abi.encodeWithSelector(pool.payOut.selector), bytes("vault illiquid"));
         vm.roll(block.number + 1);
 
         try router.executeLiquidation(account, priceData) {
-            uint256 afterDeferred = engine.deferredKeeperCreditUsdc(address(this));
-            if (afterDeferred == beforeDeferred + preview.keeperBountyUsdc) {
-                ghost_expectedDeferredKeeperCredit += preview.keeperBountyUsdc;
+            uint256 afterKeeperClaim = clearinghouse.keeperClaimBalanceUsdc(address(this));
+            if (afterKeeperClaim == beforeKeeperClaim + preview.keeperBountyUsdc) {
+                ghost_expectedKeeperClaim += preview.keeperBountyUsdc;
                 ghost_failSoftLiquidations++;
             }
         } catch {}
@@ -1113,19 +1113,19 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         }
     }
 
-    function invariant_AdversarialLiquidationPayoutFailureOnlyDefersBounty() public view {
+    function invariant_AdversarialLiquidationPayoutFailureOnlyRecordsKeeperClaim() public view {
         assertEq(
-            engine.deferredKeeperCreditUsdc(address(handler)),
-            handler.ghost_expectedDeferredKeeperCredit(),
-            "Liquidation payout failures must only create deferred bounty claims"
+            clearinghouse.keeperClaimBalanceUsdc(address(handler)),
+            handler.ghost_expectedKeeperClaim(),
+            "Liquidation payout failures must only create keeper claim balances"
         );
     }
 
-    function invariant_DeferredKeeperCreditTotalsConserveClaims() public view {
+    function invariant_KeeperClaimTotalsConserveClaims() public view {
         assertEq(
-            engine.totalDeferredKeeperCreditUsdc(),
-            engine.deferredKeeperCreditUsdc(address(handler)),
-            "Deferred keeper credit total must equal tracked keeper claims in invariant harness"
+            clearinghouse.totalKeeperClaimBalanceUsdc(),
+            clearinghouse.keeperClaimBalanceUsdc(address(handler)),
+            "keeper claim balance total must equal tracked keeper claims in invariant harness"
         );
     }
 

@@ -35,7 +35,7 @@ If you want the accounting model first, read [`ACCOUNTING_SPEC.md`](ACCOUNTING_S
 - Orders are binding once committed. Users cannot cancel queued orders.
 - Queue execution is FIFO from the global head.
 - LP-capital carry is used instead of side-to-side funding.
-- If the HousePool is short on cash, trader profits and liquidation bounties can become deferred balance claims instead of reverting the state transition.
+- If the HousePool is short on cash, trader profits and liquidation bounties can become non-spendable claim balances instead of reverting the state transition.
 
 ### Units and accounts
 
@@ -120,24 +120,24 @@ Important details:
 - Close orders can still execute during genuine frozen-oracle windows using the last valid mark subject to the relaxed frozen-market rules.
 - Close-intent queue validation is account-local and bounded by the per-account pending-order queue.
 
-### Deferred trader credit
+### Trader claims
 
-Profitable closes and some liquidation residuals can create deferred trader credit if the HousePool cannot immediately fund them.
+Profitable closes and some liquidation residuals can create non-spendable trader claims if the HousePool cannot immediately fund them.
 
-- Deferred trader credit is tracked by beneficiary balance: `deferredTraderCreditUsdc[account]`.
-- There is no FIFO deferred-claim queue.
-- `claimDeferredTraderCredit(account)` is beneficiary-only and requires the caller to own `account`.
-- Claims can be partial if current HousePool cash is insufficient.
-- Claimed amounts are credited into `MarginClearinghouse`, not sent directly to the wallet.
+- Trader claims are tracked in `MarginClearinghouse`.
+- There is no FIFO claim queue.
+- `claimBalance(ClaimKind.Trader, account)` is beneficiary-only and requires the caller to own `account`.
+- Claim servicing stays blocked while aggregate claim liabilities are underfunded.
+- Claimed amounts move from clearinghouse claim balance into spendable clearinghouse settlement balance, not directly to the wallet.
 
-### Deferred keeper credit
+### Keeper claims
 
 Liquidation bounties are fail-soft when the HousePool is illiquid.
 
 - The liquidation still completes.
-- Any unpaid keeper value is recorded in `deferredKeeperCreditUsdc[keeper]`.
-- `claimDeferredKeeperCredit()` is beneficiary-only and settles to clearinghouse credit rather than direct wallet transfer.
-- Deferred trader credit and deferred keeper credit are included in reserve and solvency accounting.
+- Any unpaid keeper value is recorded as a non-spendable keeper claim in `MarginClearinghouse`.
+- `claimBalance(ClaimKind.Keeper, keeper)` is beneficiary-only and settles to clearinghouse credit rather than direct wallet transfer.
+- Trader claims and keeper claims are included in reserve and solvency accounting.
 
 ## LP Lifecycle
 
@@ -239,14 +239,14 @@ Close and liquidation use the planner's canonical carry-adjusted settlement/equi
 
 Open-risk projection credits skew-reducing trade rebates into reachable collateral before the initial-margin check, so preview and execution do not conservatively reject rebate-backed but valid opens.
 
-### Deferred liabilities
+### Non-spendable Claim Liabilities
 
 The system can complete terminal transitions even when immediate vault cash is insufficient.
 
-- Trader gains can become deferred trader credit.
-- Liquidation bounties can become deferred keeper credit.
+- Trader gains can become trader claim balance.
+- Liquidation bounties can become keeper claim balance.
 - Both are included in reserve and solvency accounting.
-- Deferred balances are beneficiary-based, not queue-based.
+- Claim balances are beneficiary-based, not queue-based.
 
 ### Conservative LP accounting
 
@@ -353,7 +353,7 @@ This is a containment latch, not a pause. The protocol still allows transitions 
 - The keeper bounty is proportional with a floor.
 - Liquidation does not compute a fresh VPI delta, but any negative accrued VPI rebate debt is clawed back before residual/bad-debt planning.
 - Residual trader value is preserved when positive.
-- Same-account deferred trader credit is not treated as liquidation-reachable collateral; it is only netted once as terminal settlement bookkeeping.
+- Same-account trader claim balance is not treated as liquidation-reachable collateral; it is only netted once as terminal settlement bookkeeping.
 - Bad debt is socialized to LP capital if losses exceed reachable collateral.
 - Voluntary closes on underwater positions seize what is reachable and let the vault absorb the shortfall rather than trapping the user in an impossible state.
 

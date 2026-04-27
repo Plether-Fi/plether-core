@@ -98,7 +98,7 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
     }
 
     /// @notice Applies the live close/decrease settlement plan produced by the planner.
-    /// @dev Can record deferred trader credit, bad debt, and realized carry depending on the close result.
+    /// @dev Can record trader claim balance, bad debt, and realized carry depending on the close result.
     function executeClose(
         ICfdEngineSettlementHost host,
         CfdEnginePlanTypes.CloseDelta calldata delta,
@@ -120,7 +120,7 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
 
         if (delta.settlementType == CfdEnginePlanTypes.SettlementType.GAIN) {
             if (delta.freshTraderPayoutUsdc > 0) {
-                host.settlementRecordDeferredTraderPayout(delta.account, delta.freshTraderPayoutUsdc);
+                host.settlementRecordTraderPayout(delta.account, delta.freshTraderPayoutUsdc);
             }
             if (delta.pendingCarryUsdc > 0) {
                 ICfdVault(host.vault())
@@ -142,8 +142,8 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
                     delta.deletePosition,
                     host.vault()
                 );
-            uint256 cashCollectedExecutionFeeUsdc = delta.executionFeeUsdc > delta.deferredFeeRecoveryUsdc
-                ? delta.executionFeeUsdc - delta.deferredFeeRecoveryUsdc
+            uint256 cashCollectedExecutionFeeUsdc = delta.executionFeeUsdc > delta.traderClaimFeeRecoveryUsdc
+                ? delta.executionFeeUsdc - delta.traderClaimFeeRecoveryUsdc
                 : 0;
             uint256 protocolFeeInflowUsdc =
                 seizedUsdc > cashCollectedExecutionFeeUsdc ? cashCollectedExecutionFeeUsdc : seizedUsdc;
@@ -163,8 +163,8 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
             if (delta.syncMarginQueueAmount > 0) {
                 IOrderRouterAccounting(host.orderRouter()).syncMarginQueue(delta.account);
             }
-            if (delta.existingDeferredConsumedUsdc > 0) {
-                host.settlementConsumeDeferredTraderPayout(delta.account, delta.existingDeferredConsumedUsdc);
+            if (delta.existingTraderClaimConsumedUsdc > 0) {
+                host.settlementConsumeTraderClaim(delta.account, delta.existingTraderClaimConsumedUsdc);
             }
             if (delta.badDebtUsdc > 0) {
                 host.settlementAccumulateBadDebt(delta.badDebtUsdc);
@@ -248,11 +248,11 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
         if (delta.syncMarginQueueAmount > 0) {
             IOrderRouterAccounting(host.orderRouter()).syncMarginQueue(delta.account);
         }
-        if (delta.existingDeferredConsumedUsdc > 0) {
-            host.settlementConsumeDeferredTraderPayout(delta.account, delta.existingDeferredConsumedUsdc);
+        if (delta.existingTraderClaimConsumedUsdc > 0) {
+            host.settlementConsumeTraderClaim(delta.account, delta.existingTraderClaimConsumedUsdc);
         }
         if (delta.freshTraderPayoutUsdc > 0) {
-            host.settlementRecordDeferredTraderPayout(delta.account, delta.freshTraderPayoutUsdc);
+            host.settlementRecordTraderPayout(delta.account, delta.freshTraderPayoutUsdc);
             if (delta.pendingCarryUsdc > 0) {
                 ICfdVault(host.vault())
                     .recordClaimantInflow(

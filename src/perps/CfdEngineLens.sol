@@ -157,11 +157,11 @@ contract CfdEngineLens is ICfdEngineLens {
         }
 
         preview.freshTraderPayoutUsdc = delta.freshTraderPayoutUsdc;
-        preview.existingDeferredConsumedUsdc = delta.existingDeferredConsumedUsdc;
-        preview.existingDeferredRemainingUsdc = delta.existingDeferredRemainingUsdc;
+        preview.existingTraderClaimConsumedUsdc = delta.existingTraderClaimConsumedUsdc;
+        preview.existingTraderClaimRemainingUsdc = delta.existingTraderClaimRemainingUsdc;
         preview.immediatePayoutUsdc = delta.freshPayoutIsImmediate ? delta.freshTraderPayoutUsdc : 0;
-        preview.deferredTraderCreditUsdc =
-            delta.existingDeferredRemainingUsdc + (delta.freshPayoutIsDeferred ? delta.freshTraderPayoutUsdc : 0);
+        preview.traderClaimBalanceUsdc =
+            delta.existingTraderClaimRemainingUsdc + (delta.freshPayoutCreatesClaim ? delta.freshTraderPayoutUsdc : 0);
         if (delta.settlementType == CfdEnginePlanTypes.SettlementType.LOSS) {
             preview.seizedCollateralUsdc = delta.lossResult.seizedUsdc;
             preview.badDebtUsdc = delta.badDebtUsdc;
@@ -203,12 +203,12 @@ contract CfdEngineLens is ICfdEngineLens {
         preview.seizedCollateralUsdc = delta.residualPlan.settlementSeizedUsdc;
         preview.settlementRetainedUsdc = delta.settlementRetainedUsdc;
         preview.freshTraderPayoutUsdc = delta.freshTraderPayoutUsdc;
-        preview.existingDeferredConsumedUsdc = delta.existingDeferredConsumedUsdc;
-        preview.existingDeferredRemainingUsdc = delta.existingDeferredRemainingUsdc;
+        preview.existingTraderClaimConsumedUsdc = delta.existingTraderClaimConsumedUsdc;
+        preview.existingTraderClaimRemainingUsdc = delta.existingTraderClaimRemainingUsdc;
         preview.immediatePayoutUsdc = delta.freshPayoutIsImmediate ? delta.freshTraderPayoutUsdc : 0;
-        preview.deferredTraderCreditUsdc = delta.existingDeferredRemainingUsdc;
-        if (delta.freshPayoutIsDeferred) {
-            preview.deferredTraderCreditUsdc += delta.freshTraderPayoutUsdc;
+        preview.traderClaimBalanceUsdc = delta.existingTraderClaimRemainingUsdc;
+        if (delta.freshPayoutCreatesClaim) {
+            preview.traderClaimBalanceUsdc += delta.freshTraderPayoutUsdc;
         }
         preview.badDebtUsdc = delta.badDebtUsdc;
         preview.triggersDegradedMode = delta.solvency.triggersDegradedMode;
@@ -254,9 +254,9 @@ contract CfdEngineLens is ICfdEngineLens {
         snap.accumulatedFeesUsdc = engineContract.accumulatedFeesUsdc();
         snap.accumulatedBadDebtUsdc = engineContract.accumulatedBadDebtUsdc();
         snap.unsettledCarryUsdc = engineContract.unsettledCarryUsdc(account);
-        snap.totalDeferredTraderCreditUsdc = engineContract.totalDeferredTraderCreditUsdc();
-        snap.totalDeferredKeeperCreditUsdc = engineContract.totalDeferredKeeperCreditUsdc();
-        snap.deferredTraderCreditForAccount = engineContract.deferredTraderCreditUsdc(account);
+        snap.totalTraderClaimBalanceUsdc = engineContract.clearinghouse().totalTraderClaimBalanceUsdc();
+        snap.totalKeeperClaimBalanceUsdc = engineContract.clearinghouse().totalKeeperClaimBalanceUsdc();
+        snap.traderClaimBalanceForAccount = engineContract.clearinghouse().traderClaimBalanceUsdc(account);
         snap.degradedMode = engineContract.degradedMode();
         snap.capPrice = engineContract.CAP_PRICE();
         snap.riskParams = _riskParams();

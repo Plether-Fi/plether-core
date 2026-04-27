@@ -13,6 +13,7 @@ import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "../../src/perps/OrderRouterAdmin.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "forge-std/Test.sol";
@@ -669,7 +670,7 @@ contract PerpsForkTest is Test {
         assertEq(aliceUsdcAfter - aliceUsdcBefore, aliceBalance, "Real USDC withdrawal should match");
     }
 
-    function test_DeferredTraderCreditClaimFlow_RealUsdc() public {
+    function test_TraderClaimClaimFlow_RealUsdc() public {
         _depositToClearinghouse(alice, 11_000e6);
 
         this._commitAndExecute(alice, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8, int64(100_000_000), false);
@@ -691,10 +692,10 @@ contract PerpsForkTest is Test {
         vm.prank(keeper);
         router.executeOrder(2, _pythUpdateData());
 
-        uint256 deferred = engine.deferredTraderCreditUsdc(aliceAccount);
-        assertGt(deferred, 0, "Illiquid profitable close should record a deferred payout");
+        uint256 claim = clearinghouse.traderClaimBalanceUsdc(aliceAccount);
+        assertGt(claim, 0, "Illiquid profitable close should record a trader claim balance");
         (uint256 size,,,,,,) = engine.positions(aliceAccount);
-        assertEq(size, 0, "Position should be closed even when payout is deferred");
+        assertEq(size, 0, "Position should be closed even when payout is claim");
         uint256 chAfterClose = clearinghouse.balanceUsdc(aliceAccount);
         assertLt(
             chAfterClose,
@@ -707,22 +708,22 @@ contract PerpsForkTest is Test {
             "Only the close bounty and realized carry should move before claim"
         );
 
-        deal(USDC, address(pool), IERC20(USDC).balanceOf(address(pool)) + deferred);
+        deal(USDC, address(pool), IERC20(USDC).balanceOf(address(pool)) + claim);
         vm.prank(address(router));
-        pool.recordProtocolInflow(deferred);
+        pool.recordProtocolInflow(claim);
 
         vm.prank(alice);
-        engine.claimDeferredTraderCredit(aliceAccount);
+        engine.claimBalance(IMarginClearinghouse.ClaimKind.Trader, aliceAccount);
 
-        assertEq(engine.deferredTraderCreditUsdc(aliceAccount), 0, "Claim should clear deferred payout state");
+        assertEq(clearinghouse.traderClaimBalanceUsdc(aliceAccount), 0, "Claim should clear trader claim balance state");
         assertEq(
             clearinghouse.balanceUsdc(aliceAccount),
-            chAfterClose + deferred,
-            "Claim should credit deferred USDC on top of the post-close settlement balance"
+            chAfterClose + claim,
+            "Claim should credit claim-serviced USDC on top of the post-close settlement balance"
         );
     }
 
-    function test_DeferredTraderCreditBatchDoesNotBlockTailOrder_RealUsdc() public {
+    function test_TraderClaimBatchDoesNotBlockTailOrder_RealUsdc() public {
         _depositToClearinghouse(alice, 20_000e6);
 
         this._commitAndExecute(alice, CfdTypes.Side.BULL, 100_000e18, 8000e6, 1e8, int64(100_000_000), false);
@@ -749,15 +750,19 @@ contract PerpsForkTest is Test {
         assertEq(
             router.nextExecuteId(),
             0,
-            "Batch execution should continue past a deferred-payout close and clear the queue when exhausted"
+            "Batch execution should continue past a claim-payout close and clear the queue when exhausted"
         );
-        assertGt(engine.deferredTraderCreditUsdc(aliceAccount), 0, "Deferred payout should remain recorded after the batch");
+        assertGt(
+            clearinghouse.traderClaimBalanceUsdc(aliceAccount),
+            0,
+            "trader claim balance should remain recorded after the batch"
+        );
 
         (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(aliceAccount);
         assertEq(
             size,
             0,
-            "Tail open should be consumed even if deferred payout leaves the protocol unable to re-open immediately"
+            "Tail open should be consumed even if trader claim balance leaves the protocol unable to re-open immediately"
         );
         assertEq(
             uint256(side),

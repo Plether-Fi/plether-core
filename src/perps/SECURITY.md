@@ -17,7 +17,7 @@ The perps system is built around a few core security choices:
 - delayed-order execution through a keeper-run FIFO router,
 - strict separation between trader custody, router escrow, engine accounting, and LP capital,
 - conservative LP accounting that refuses to count unrealized trader losses as present assets,
-- fail-soft terminal settlement through deferred trader and clearer balances,
+- fail-soft terminal settlement through non-spendable trader and keeper claim balances,
 - degraded-mode containment if a terminal transition reveals insolvency.
 
 The protocol is intentionally non-upgradeable. Admins can tune risk parameters and pause certain entrypoints, but they cannot swap logic or rewrite deployed code.
@@ -103,8 +103,8 @@ These are the highest-value properties an auditor should expect to hold.
 | Bounded entry solvency | Risk-increasing opens require `vault.totalAssets() >= max(globalBullMaxProfit, globalBearMaxProfit)` using canonical physical backing rather than raw token balance |
 | Degraded containment | If a close or liquidation reveals post-op insolvency, `degradedMode` latches and blocks further risk expansion while still permitting protective transitions |
 | Bounded payout | No trader payout can exceed the capped market payoff implied by `CAP_PRICE` |
-| Withdrawal firewall | LP withdrawals are limited to conservative free cash after accounting for bounded liability, deferred liabilities, and protocol-owned balances |
-| Deferred liabilities are senior | Deferred trader credit and deferred keeper credit remain senior claims on vault liquidity until serviced |
+| Withdrawal firewall | LP withdrawals are limited to conservative free cash after accounting for bounded liability, non-spendable claim liabilities, and protocol-owned balances |
+| Non-spendable claim liabilities are senior | Trader claim balances and keeper claim balances remain senior claims on vault liquidity until serviced |
 
 ### Position and engine accounting
 
@@ -144,7 +144,7 @@ The tables above describe the intended safety properties. The suites below are t
 | Bounded entry solvency / margin sufficiency | `test/perps/OrderRouter.t.sol`, `test/perps/CfdEnginePlanRegression.t.sol`, `test/perps/invariant/PerpPreviewInvariant.t.sol` |
 | Degraded containment / post-op degraded-mode parity | `test/perps/PerpInvariant.t.sol`, `test/perps/invariant/PerpPreviewInvariant.t.sol`, `test/perps/PreviewExecutionDifferential.t.sol` |
 | Bounded payout / preview-live settlement parity | `test/perps/CfdEngine.t.sol`, `test/perps/invariant/PerpPreviewInvariant.t.sol`, `test/perps/invariant/PerpClosePreviewParityInvariant.t.sol` |
-| Withdrawal firewall / deferred-liability seniority | `test/perps/PerpInvariant.t.sol`, `test/perps/invariant/PerpEconomicConservationInvariant.t.sol`, `test/perps/invariant/PerpDeferredCreditInvariant.t.sol`, `test/perps/HousePool.t.sol` |
+| Withdrawal firewall / claim-liability seniority | `test/perps/PerpInvariant.t.sol`, `test/perps/invariant/PerpEconomicConservationInvariant.t.sol`, `test/perps/invariant/PerpClaimInvariant.t.sol`, `test/perps/HousePool.t.sol` |
 | Single direction / side symmetry / total-margin conservation | `test/perps/PerpInvariant.t.sol`, `test/perps/invariant/PerpMultiAccountInvariant.t.sol` |
 | Global FIFO / binding intents / bounded cleanup | `test/perps/OrderRouter.t.sol`, `test/perps/invariant/PerpAccountingInvariant.t.sol` |
 | Bounty conservation / reservation source of truth | `test/perps/OrderRouter.t.sol`, `test/perps/invariant/PerpAccountingInvariant.t.sol`, `test/perps/invariant/PerpEconomicConservationInvariant.t.sol` |
@@ -295,12 +295,12 @@ Close and liquidation security depends on using the planner's canonical carry-ad
 
 Security implication: oracle freshness still gates execution and LP accounting freshness, but not carry accrual.
 
-### Deferred liabilities
+### Non-Spendable Claim Liabilities
 
 Terminal transitions are fail-soft when the vault lacks immediate cash.
 
-- profitable closes can create deferred trader credit,
-- liquidation bounties can create deferred keeper credit,
+- profitable closes can create trader claim balance,
+- liquidation bounties can create keeper claim balance,
 - both are beneficiary-balance based rather than FIFO queue based,
 - both remain part of reserve and solvency accounting until paid.
 
@@ -308,10 +308,10 @@ This preserves risk reduction and liquidation liveness under temporary cash shor
 
 ### Explicit netting boundary
 
-Same-account deferred trader credit is not generic collateral.
+Same-account trader claim balance is not generic collateral.
 
 - generic account-health and withdraw checks use physically reachable clearinghouse collateral,
-- terminal settlement paths may still explicitly net same-account deferred trader credit,
+- terminal settlement paths may still explicitly net same-account trader claim balance,
 - this avoids accidentally reusing a vault IOU as immediately spendable account cash.
 
 ## HousePool And LP-Specific Risks
@@ -370,7 +370,7 @@ Trade-off:
 - liquidation accounting is constrained by actually reachable collateral,
 - keeper bounty is proportional with a floor, capped by reachable value, and may explicitly subsidize low-equity liquidations,
 - residual trader value is preserved when positive,
-- same-account deferred trader credit does not support liquidation reachability and is only netted once against terminal shortfall,
+- same-account trader claim balance does not support liquidation reachability and is only netted once against terminal shortfall,
 - remaining deficit becomes bad debt socialized to LP capital.
 
 ### Queue interaction during liquidation

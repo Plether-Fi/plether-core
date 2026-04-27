@@ -17,11 +17,11 @@ contract PayoutModesMatrixTest is BasePerpTest {
         _open(account, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
 
         CfdEngine.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 80_000_000);
-        assertEq(preview.deferredTraderCreditUsdc, 0, "Immediate close payout should not defer trader funds");
+        assertEq(preview.traderClaimBalanceUsdc, 0, "Immediate close payout should not create a trader claim");
         assertGt(preview.immediatePayoutUsdc, 0, "Immediate close payout should credit settlement immediately");
     }
 
-    function test_CloseDeferredTraderCreditMode() public {
+    function test_CloseTraderClaimMode() public {
         address trader = address(0xA002);
         address account = trader;
         _fundTrader(trader, 11_000e6);
@@ -30,7 +30,7 @@ contract PayoutModesMatrixTest is BasePerpTest {
 
         CfdEngine.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 80_000_000);
         assertEq(preview.immediatePayoutUsdc, 0, "Illiquid close payout should not credit settlement immediately");
-        assertGt(preview.deferredTraderCreditUsdc, 0, "Illiquid close payout should become deferred");
+        assertGt(preview.traderClaimBalanceUsdc, 0, "Illiquid close payout should become a claim");
     }
 
     function test_LiquidationImmediateKeeperCreditMode() public {
@@ -55,7 +55,7 @@ contract PayoutModesMatrixTest is BasePerpTest {
             0,
             "Liquid mode should credit keeper bounty immediately"
         );
-        assertEq(engine.deferredKeeperCreditUsdc(keeper), 0, "Liquid mode should not defer keeper bounty");
+        assertEq(clearinghouse.keeperClaimBalanceUsdc(keeper), 0, "Liquid mode should not create a keeper claim");
     }
 
     function test_LiquidationBadDebtMode() public {

@@ -1409,6 +1409,19 @@ contract OrderRouterPythTest is BasePerpTest {
         updateData[0] = "";
     }
 
+    function _drainPositionMarginTo(
+        address account,
+        uint256 targetMarginUsdc
+    ) internal {
+        uint256 currentMarginUsdc = clearinghouse.getLockedMarginBuckets(account).positionMarginUsdc;
+        if (currentMarginUsdc <= targetMarginUsdc) {
+            return;
+        }
+
+        vm.prank(address(engine));
+        clearinghouse.seizePositionMarginUsdc(account, currentMarginUsdc - targetMarginUsdc, address(0xDEAD));
+    }
+
     function test_PublishTimeBeforeCommit_Reverts() public {
         vm.warp(1000);
 
@@ -1820,7 +1833,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 1e8, false);
 
-        vm.store(address(clearinghouse), keccak256(abi.encode(aliceAccount, uint256(3))), bytes32(uint256(1e6)));
+        _drainPositionMarginTo(aliceAccount, 1e6);
 
         uint256 keeperBefore = _settlementBalance(address(this));
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 7);
@@ -1847,7 +1860,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 1e8, false);
 
-        vm.store(address(clearinghouse), keccak256(abi.encode(aliceAccount, uint256(3))), bytes32(uint256(1e6)));
+        _drainPositionMarginTo(aliceAccount, 1e6);
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
         uint64 freshPublishTime = uint64(block.timestamp);
@@ -1875,7 +1888,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 1e8, false);
 
-        vm.store(address(clearinghouse), keccak256(abi.encode(aliceAccount, uint256(3))), bytes32(uint256(1e6)));
+        _drainPositionMarginTo(aliceAccount, 1e6);
 
         uint256 keeperBefore = _settlementBalance(address(this));
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 7);
@@ -1904,7 +1917,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 1e8, false);
 
-        vm.store(address(clearinghouse), keccak256(abi.encode(aliceAccount, uint256(3))), bytes32(uint256(1e6)));
+        _drainPositionMarginTo(aliceAccount, 1e6);
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
         uint64 freshPublishTime = uint64(block.timestamp);
@@ -2184,7 +2197,7 @@ contract OrderRouterPythTest is BasePerpTest {
         );
     }
 
-    function test_DeferredTraderCredit_CloseBehindPendingOpenIsRejected() public {
+    function test_TraderClaim_CloseBehindPendingOpenIsRejected() public {
         address account = alice;
 
         vm.startPrank(alice);
@@ -2197,6 +2210,7 @@ contract OrderRouterPythTest is BasePerpTest {
         bytes[] memory priceData = _pythUpdateData();
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), block.timestamp + 6);
         vm.roll(block.number + 1);
+        vm.warp(block.timestamp + 6);
         router.executeOrder(1, priceData);
 
         uint256 keeperUsdcBefore = _settlementBalance(address(this));
@@ -2216,7 +2230,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(account);
         assertEq(
-            escrow.pendingOrderCount, 0, "Queued orders should be fully consumed even when one close defers payout"
+            escrow.pendingOrderCount, 0, "Queued orders should be fully consumed even when one close records a claim"
         );
     }
 
@@ -3068,7 +3082,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         );
     }
 
-    function test_ExecuteLiquidation_DefersKeeperCreditPerPreviewWhenVaultPayoutFails() public {
+    function test_ExecuteLiquidation_RecordsKeeperClaimPerPreviewWhenVaultPayoutFails() public {
         address account = trader;
         _fundTrader(trader, 900e6);
 
@@ -3092,9 +3106,9 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         _assertLiquidationPreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
         assertEq(observed.keeperSettlementUsdc, 0, "Failed immediate keeper credit should not reach settlement");
         assertEq(
-            observed.deferredKeeperCreditUsdc,
+            observed.keeperClaimBalanceUsdc,
             preview.keeperBountyUsdc,
-            "Failed immediate keeper credit should defer the previewed keeper bounty into deferred keeper credit liability"
+            "Failed immediate keeper credit should record the previewed keeper bounty as a keeper claim liability"
         );
     }
 
@@ -5137,7 +5151,7 @@ contract KeeperFeeRefundTest is Test {
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1.5e8, false);
 
         uint256 keeperBefore = keeper.balance;
-        uint256 deferredKeeperCreditBefore = engine.totalDeferredKeeperCreditUsdc();
+        uint256 keeperClaimBalanceBefore = clearinghouse.totalKeeperClaimBalanceUsdc();
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(1e8));
         vm.prank(keeper);
@@ -5152,9 +5166,9 @@ contract KeeperFeeRefundTest is Test {
         assertEq(keeper.balance - keeperBefore, 0, "Keeper should not receive fee on slippage failure");
         assertEq(alice.balance, 1 ether, "Open slippage failure should not route any ETH refund to the trader");
         assertEq(
-            engine.totalDeferredKeeperCreditUsdc(),
-            deferredKeeperCreditBefore,
-            "Slippage failure should not leak failed-order bounty into deferred keeper credit liabilities"
+            clearinghouse.totalKeeperClaimBalanceUsdc(),
+            keeperClaimBalanceBefore,
+            "Slippage failure should not leak failed-order bounty into keeper claim balance liabilities"
         );
     }
 

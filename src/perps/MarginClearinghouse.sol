@@ -23,7 +23,15 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
 
     bytes4 internal constant MARK_PRICE_STALE_SELECTOR = bytes4(keccak256("CfdEngine__MarkPriceStale()"));
 
+    struct AccountClaimBalances {
+        uint256 traderClaimBalanceUsdc;
+        uint256 keeperClaimBalanceUsdc;
+    }
+
     mapping(address => uint256) internal settlementBalances;
+    mapping(address => AccountClaimBalances) internal claimBalances;
+    uint256 internal totalTraderClaimBalance;
+    uint256 internal totalKeeperClaimBalance;
 
     mapping(address => uint256) internal positionMarginUsdc;
     mapping(address => uint256) internal committedOrderMarginUsdc;
@@ -52,11 +60,17 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     error MarginClearinghouse__ZeroAddress();
     error MarginClearinghouse__InsufficientBucketMargin();
     error MarginClearinghouse__AmountOverflow();
+    error MarginClearinghouse__InsufficientClaimBalance();
 
     event Deposit(address indexed account, address indexed asset, uint256 amount);
     event Withdraw(address indexed account, address indexed asset, uint256 amount);
     event MarginLocked(address indexed account, IMarginClearinghouse.MarginBucket indexed bucket, uint256 amountUsdc);
     event MarginUnlocked(address indexed account, IMarginClearinghouse.MarginBucket indexed bucket, uint256 amountUsdc);
+    event ClaimCredited(address indexed account, IMarginClearinghouse.ClaimKind indexed kind, uint256 amountUsdc);
+    event ClaimReleasedToSettlement(
+        address indexed account, IMarginClearinghouse.ClaimKind indexed kind, uint256 amountUsdc
+    );
+    event ClaimConsumed(address indexed account, IMarginClearinghouse.ClaimKind indexed kind, uint256 amountUsdc);
     event ReservationCreated(
         uint64 indexed orderId,
         address indexed account,
@@ -505,7 +519,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         _unlockMargin(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, amountUsdc);
     }
 
-    /// @notice Adjusts settlement USDC for realized PnL, deferred servicing, and rebates.
+    /// @notice Adjusts settlement USDC for realized PnL, claim servicing, and rebates.
     ///         Positive amounts credit the account; negative amounts debit it.
     /// @param account Account to settle
     /// @param amount Signed USDC delta: positive credits, negative debits (6 decimals)
@@ -518,6 +532,36 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         } else if (amount < 0) {
             _debitSettlementUsdc(account, uint256(-amount));
         }
+    }
+
+    /// @notice Records a non-spendable claim owed to an account.
+    function creditClaim(
+        address account,
+        IMarginClearinghouse.ClaimKind kind,
+        uint256 amountUsdc
+    ) external onlyEngine {
+        _creditClaim(account, kind, amountUsdc);
+    }
+
+    /// @notice Moves a serviced non-spendable claim into spendable settlement balance.
+    function releaseClaimToSettlement(
+        address account,
+        IMarginClearinghouse.ClaimKind kind,
+        uint256 amountUsdc
+    ) external onlyEngine {
+        _consumeClaim(account, kind, amountUsdc);
+        _creditSettlementUsdc(account, amountUsdc);
+        emit ClaimReleasedToSettlement(account, kind, amountUsdc);
+    }
+
+    /// @notice Consumes a non-spendable claim without crediting settlement.
+    function consumeClaim(
+        address account,
+        IMarginClearinghouse.ClaimKind kind,
+        uint256 amountUsdc
+    ) external onlyEngine {
+        _consumeClaim(account, kind, amountUsdc);
+        emit ClaimConsumed(account, kind, amountUsdc);
     }
 
     /// @notice Credits settlement USDC and locks the same amount as active margin.
@@ -718,6 +762,27 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         settlementBalances[account] += amountUsdc;
     }
 
+    function _creditClaim(
+        address account,
+        IMarginClearinghouse.ClaimKind kind,
+        uint256 amountUsdc
+    ) internal {
+        if (amountUsdc == 0) {
+            return;
+        }
+
+        AccountClaimBalances storage balances = claimBalances[account];
+        if (kind == IMarginClearinghouse.ClaimKind.Trader) {
+            balances.traderClaimBalanceUsdc += amountUsdc;
+            totalTraderClaimBalance += amountUsdc;
+        } else {
+            balances.keeperClaimBalanceUsdc += amountUsdc;
+            totalKeeperClaimBalance += amountUsdc;
+        }
+
+        emit ClaimCredited(account, kind, amountUsdc);
+    }
+
     function _checkpointCarryBeforeMarginChange(
         address account
     ) internal {
@@ -780,6 +845,31 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
             revert MarginClearinghouse__InsufficientUsdcForSettlement();
         }
         settlementBalances[account] -= amountUsdc;
+    }
+
+    function _consumeClaim(
+        address account,
+        IMarginClearinghouse.ClaimKind kind,
+        uint256 amountUsdc
+    ) internal {
+        if (amountUsdc == 0) {
+            return;
+        }
+
+        AccountClaimBalances storage balances = claimBalances[account];
+        if (kind == IMarginClearinghouse.ClaimKind.Trader) {
+            if (balances.traderClaimBalanceUsdc < amountUsdc) {
+                revert MarginClearinghouse__InsufficientClaimBalance();
+            }
+            balances.traderClaimBalanceUsdc -= amountUsdc;
+            totalTraderClaimBalance -= amountUsdc;
+        } else {
+            if (balances.keeperClaimBalanceUsdc < amountUsdc) {
+                revert MarginClearinghouse__InsufficientClaimBalance();
+            }
+            balances.keeperClaimBalanceUsdc -= amountUsdc;
+            totalKeeperClaimBalance -= amountUsdc;
+        }
     }
 
     function _lockMargin(
@@ -1068,6 +1158,46 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         address account
     ) external view returns (uint256) {
         return settlementBalances[account];
+    }
+
+    function claimBalanceUsdc(
+        address account
+    ) external view returns (uint256) {
+        AccountClaimBalances storage balances = claimBalances[account];
+        return balances.traderClaimBalanceUsdc + balances.keeperClaimBalanceUsdc;
+    }
+
+    function traderClaimBalanceUsdc(
+        address account
+    ) external view returns (uint256) {
+        return claimBalances[account].traderClaimBalanceUsdc;
+    }
+
+    function keeperClaimBalanceUsdc(
+        address account
+    ) external view returns (uint256) {
+        return claimBalances[account].keeperClaimBalanceUsdc;
+    }
+
+    function totalClaimBalanceUsdc() external view returns (uint256) {
+        return totalTraderClaimBalance + totalKeeperClaimBalance;
+    }
+
+    function totalTraderClaimBalanceUsdc() external view returns (uint256) {
+        return totalTraderClaimBalance;
+    }
+
+    function totalKeeperClaimBalanceUsdc() external view returns (uint256) {
+        return totalKeeperClaimBalance;
+    }
+
+    function getClaimBalances(
+        address account
+    ) external view returns (IMarginClearinghouse.ClaimBalances memory balances) {
+        AccountClaimBalances storage accountBalances = claimBalances[account];
+        balances.traderClaimBalanceUsdc = accountBalances.traderClaimBalanceUsdc;
+        balances.keeperClaimBalanceUsdc = accountBalances.keeperClaimBalanceUsdc;
+        balances.totalClaimBalanceUsdc = accountBalances.traderClaimBalanceUsdc + accountBalances.keeperClaimBalanceUsdc;
     }
 
     function lockedMarginUsdc(
