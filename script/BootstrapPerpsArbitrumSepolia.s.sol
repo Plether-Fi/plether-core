@@ -8,8 +8,14 @@ import "forge-std/Script.sol";
 
 interface IMintableERC20 {
 
-    function approve(address spender, uint256 amount) external returns (bool);
-    function mint(address to, uint256 amount) external;
+    function approve(
+        address spender,
+        uint256 amount
+    ) external returns (bool);
+    function mint(
+        address to,
+        uint256 amount
+    ) external;
 
 }
 
@@ -51,7 +57,9 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         vm.startBroadcast(privateKey);
 
         _configurePauser(housePool, routerAdmin, pauser);
-        _seedLifecycle(housePool, IMintableERC20(usdc), seniorSeedUsdc, juniorSeedUsdc, seniorSeedReceiver, juniorSeedReceiver);
+        _seedLifecycle(
+            housePool, IMintableERC20(usdc), seniorSeedUsdc, juniorSeedUsdc, seniorSeedReceiver, juniorSeedReceiver
+        );
         _fundTestUsers(IMintableERC20(usdc), testUsers, testUserAmounts);
         _activateTrading(housePool, activateTrading);
 
@@ -66,7 +74,11 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         console.log("Note: this script funds users with mock USDC only; ETH still needs a faucet.");
     }
 
-    function _configurePauser(HousePool housePool, OrderRouterAdmin routerAdmin, address pauser) internal {
+    function _configurePauser(
+        HousePool housePool,
+        OrderRouterAdmin routerAdmin,
+        address pauser
+    ) internal {
         if (pauser == address(0)) {
             return;
         }
@@ -117,7 +129,11 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         }
     }
 
-    function _fundTestUsers(IMintableERC20 usdc, address[] memory testUsers, uint256[] memory testUserAmounts) internal {
+    function _fundTestUsers(
+        IMintableERC20 usdc,
+        address[] memory testUsers,
+        uint256[] memory testUserAmounts
+    ) internal {
         for (uint256 i; i < testUsers.length; ++i) {
             if (testUsers[i] == address(0) || testUserAmounts[i] == 0) {
                 continue;
@@ -128,7 +144,10 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         }
     }
 
-    function _activateTrading(HousePool housePool, bool activateTrading) internal {
+    function _activateTrading(
+        HousePool housePool,
+        bool activateTrading
+    ) internal {
         if (!activateTrading || housePool.isTradingActive()) {
             return;
         }
