@@ -285,7 +285,7 @@ contract AuditFollowupFindingsFailing_LegacySpreadReserve is BasePerpTest {
         assertGt(bearLegacySpread, 0, "Setup must make the bear side owed legacy spread");
 
         uint256 bal = usdc.balanceOf(address(pool));
-        uint256 maxLiability = _sideMaxProfit(CfdTypes.Side.BULL);
+        uint256 maxLiability = _maxLiability();
         uint256 pendingFees = engine.accumulatedFeesUsdc();
         uint256 expectedFree = bal > maxLiability + pendingFees + uint256(bearLegacySpread)
             ? bal - maxLiability - pendingFees - uint256(bearLegacySpread)

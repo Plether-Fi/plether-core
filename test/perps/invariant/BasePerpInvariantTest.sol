@@ -161,9 +161,9 @@ abstract contract BasePerpInvariantTest is Test {
     }
 
     function _maxLiability() internal view returns (uint256) {
-        (uint256 bullMaxProfit,,,) = engine.sides(uint8(CfdTypes.Side.BULL));
-        (uint256 bearMaxProfit,,,) = engine.sides(uint8(CfdTypes.Side.BEAR));
-        return bullMaxProfit > bearMaxProfit ? bullMaxProfit : bearMaxProfit;
+        uint256 bullLpBackedRisk = engine.sideLpBackedRiskUsdc(uint8(CfdTypes.Side.BULL));
+        uint256 bearLpBackedRisk = engine.sideLpBackedRiskUsdc(uint8(CfdTypes.Side.BEAR));
+        return bullLpBackedRisk > bearLpBackedRisk ? bullLpBackedRisk : bearLpBackedRisk;
     }
 
     function _withdrawalReservedUsdc() internal view returns (uint256) {

@@ -722,9 +722,22 @@ abstract contract BasePerpTest is Test {
     }
 
     function _maxLiability() internal view returns (uint256) {
-        ICfdEngine.SideState memory bull = _sideState(CfdTypes.Side.BULL);
-        ICfdEngine.SideState memory bear = _sideState(CfdTypes.Side.BEAR);
-        return bull.maxProfitUsdc > bear.maxProfitUsdc ? bull.maxProfitUsdc : bear.maxProfitUsdc;
+        uint256 bullRisk = _sideLpBackedRisk(CfdTypes.Side.BULL);
+        uint256 bearRisk = _sideLpBackedRisk(CfdTypes.Side.BEAR);
+        return bullRisk > bearRisk ? bullRisk : bearRisk;
+    }
+
+    function _positionLpBackedRisk(
+        uint256 maxProfitUsdc,
+        uint256 marginUsdc
+    ) internal pure returns (uint256) {
+        return maxProfitUsdc > marginUsdc ? maxProfitUsdc - marginUsdc : 0;
+    }
+
+    function _sideLpBackedRisk(
+        CfdTypes.Side side
+    ) internal view returns (uint256) {
+        return engine.sideLpBackedRiskUsdc(uint8(side));
     }
 
     function _withdrawalReservedUsdc() internal view returns (uint256) {

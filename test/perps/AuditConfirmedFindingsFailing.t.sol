@@ -497,7 +497,7 @@ contract AuditConfirmedFindingsFailing_LegacySpreadReserve is BasePerpTest {
         assertGt(cappedLegacySpread, 0, "Positive legacy-spread liabilities should be fully reserved");
 
         uint256 bal = usdc.balanceOf(address(pool));
-        uint256 maxLiability = _sideMaxProfit(CfdTypes.Side.BULL);
+        uint256 maxLiability = _maxLiability();
         uint256 pendingFees = engine.accumulatedFeesUsdc();
         uint256 expectedReserved = maxLiability + pendingFees + uint256(cappedLegacySpread);
         uint256 expectedFree = bal > expectedReserved ? bal - expectedReserved : 0;

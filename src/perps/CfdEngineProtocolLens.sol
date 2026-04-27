@@ -44,15 +44,13 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         snapshot.protocolFeesUsdc = engineContract.accumulatedFeesUsdc();
         snapshot.netPhysicalAssetsUsdc =
             vaultAssetsUsdc > snapshot.protocolFeesUsdc ? vaultAssetsUsdc - snapshot.protocolFeesUsdc : 0;
-        snapshot.maxLiabilityUsdc = SolvencyAccountingLib.getMaxLiability(
-            _sideState(CfdTypes.Side.BULL).maxProfitUsdc, _sideState(CfdTypes.Side.BEAR).maxProfitUsdc
-        );
+        ICfdEngine.SideState memory bullState = _sideState(CfdTypes.Side.BULL);
+        ICfdEngine.SideState memory bearState = _sideState(CfdTypes.Side.BEAR);
+        snapshot.maxLiabilityUsdc = _maxLiabilityFromSides(bullState, bearState);
         snapshot.supplementalReservedUsdc = 0;
         snapshot.unrealizedMtmLiabilityUsdc = _getVaultMtmLiability();
         snapshot.deferredTraderCreditUsdc = engineContract.totalDeferredTraderCreditUsdc();
         snapshot.deferredKeeperCreditUsdc = engineContract.totalDeferredKeeperCreditUsdc();
-        ICfdEngine.SideState memory bullState = _sideState(CfdTypes.Side.BULL);
-        ICfdEngine.SideState memory bearState = _sideState(CfdTypes.Side.BEAR);
         snapshot.markFreshnessRequired = bullState.maxProfitUsdc + bearState.maxProfitUsdc > 0;
         if (snapshot.markFreshnessRequired) {
             snapshot.maxMarkStaleness =
@@ -100,9 +98,9 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         returns (ProtocolLensViewTypes.ProtocolAccountingSnapshot memory snapshot)
     {
         uint256 vaultAssetsUsdc = engineContract.vault().totalAssets();
-        uint256 maxLiabilityUsdc = SolvencyAccountingLib.getMaxLiability(
-            _sideState(CfdTypes.Side.BULL).maxProfitUsdc, _sideState(CfdTypes.Side.BEAR).maxProfitUsdc
-        );
+        ICfdEngine.SideState memory bullState = _sideState(CfdTypes.Side.BULL);
+        ICfdEngine.SideState memory bearState = _sideState(CfdTypes.Side.BEAR);
+        uint256 maxLiabilityUsdc = _maxLiabilityFromSides(bullState, bearState);
         SolvencyAccountingLib.SolvencyState memory solvencyState = _buildAdjustedSolvencyState();
         snapshot.vaultAssetsUsdc = vaultAssetsUsdc;
         snapshot.netPhysicalAssetsUsdc = solvencyState.netPhysicalAssetsUsdc;
@@ -115,20 +113,30 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         snapshot.totalDeferredTraderCreditUsdc = engineContract.totalDeferredTraderCreditUsdc();
         snapshot.totalDeferredKeeperCreditUsdc = engineContract.totalDeferredKeeperCreditUsdc();
         snapshot.degradedMode = engineContract.degradedMode();
-        ICfdEngine.SideState memory bullState = _sideState(CfdTypes.Side.BULL);
-        ICfdEngine.SideState memory bearState = _sideState(CfdTypes.Side.BEAR);
         snapshot.hasLiveLiability = bullState.maxProfitUsdc + bearState.maxProfitUsdc > 0;
     }
 
     function _buildAdjustedSolvencyState() internal view returns (SolvencyAccountingLib.SolvencyState memory) {
+        ICfdEngine.SideState memory bullState = _sideState(CfdTypes.Side.BULL);
+        ICfdEngine.SideState memory bearState = _sideState(CfdTypes.Side.BEAR);
         return SolvencyAccountingLib.buildSolvencyState(
             engineContract.vault().totalAssets(),
             engineContract.accumulatedFeesUsdc(),
-            SolvencyAccountingLib.getMaxLiability(
-                _sideState(CfdTypes.Side.BULL).maxProfitUsdc, _sideState(CfdTypes.Side.BEAR).maxProfitUsdc
-            ),
+            _maxLiabilityFromSides(bullState, bearState),
             engineContract.totalDeferredTraderCreditUsdc(),
             engineContract.totalDeferredKeeperCreditUsdc()
+        );
+    }
+
+    function _maxLiabilityFromSides(
+        ICfdEngine.SideState memory bullState,
+        ICfdEngine.SideState memory bearState
+    ) internal view returns (uint256) {
+        bullState;
+        bearState;
+        return SolvencyAccountingLib.getMaxLiability(
+            engineContract.sideLpBackedRiskUsdc(uint8(CfdTypes.Side.BULL)),
+            engineContract.sideLpBackedRiskUsdc(uint8(CfdTypes.Side.BEAR))
         );
     }
 

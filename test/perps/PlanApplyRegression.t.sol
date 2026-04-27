@@ -103,10 +103,11 @@ contract PlanApplyRegressionTest is BasePerpTest {
             return;
         }
 
-        (,,, uint256 posMaxProfit,,,) = engine.positions(bullAccount);
-        uint256 bullMaxAfter = _sideMaxProfit(CfdTypes.Side.BULL) - posMaxProfit;
-        uint256 bearMax = _sideMaxProfit(CfdTypes.Side.BEAR);
-        uint256 expectedMaxLiability = bullMaxAfter > bearMax ? bullMaxAfter : bearMax;
+        (, uint256 posMargin,, uint256 posMaxProfit,,,) = engine.positions(bullAccount);
+        uint256 removedRisk = _positionLpBackedRisk(posMaxProfit, posMargin);
+        uint256 bullRiskAfter = _sideLpBackedRisk(CfdTypes.Side.BULL) - removedRisk;
+        uint256 bearRisk = _sideLpBackedRisk(CfdTypes.Side.BEAR);
+        uint256 expectedMaxLiability = bullRiskAfter > bearRisk ? bullRiskAfter : bearRisk;
 
         assertEq(
             preview.maxLiabilityAfterUsdc,
@@ -148,9 +149,7 @@ contract PlanApplyRegressionTest is BasePerpTest {
 
         this.doClose(bullAccount, CfdTypes.Side.BULL, 100_000e18, closePrice);
 
-        uint256 postMaxLiability = _sideMaxProfit(CfdTypes.Side.BULL) > _sideMaxProfit(CfdTypes.Side.BEAR)
-            ? _sideMaxProfit(CfdTypes.Side.BULL)
-            : _sideMaxProfit(CfdTypes.Side.BEAR);
+        uint256 postMaxLiability = _maxLiability();
 
         assertEq(preview.maxLiabilityAfterUsdc, postMaxLiability, "Preview max liability must match post-close storage");
 
@@ -188,9 +187,7 @@ contract PlanApplyRegressionTest is BasePerpTest {
         vm.prank(address(router));
         engine.liquidatePosition(bullAccount, liquidationPrice, vaultDepth, uint64(block.timestamp));
 
-        uint256 postMaxLiability = _sideMaxProfit(CfdTypes.Side.BULL) > _sideMaxProfit(CfdTypes.Side.BEAR)
-            ? _sideMaxProfit(CfdTypes.Side.BULL)
-            : _sideMaxProfit(CfdTypes.Side.BEAR);
+        uint256 postMaxLiability = _maxLiability();
 
         assertEq(
             preview.maxLiabilityAfterUsdc, postMaxLiability, "Preview max liability must match post-liquidation storage"

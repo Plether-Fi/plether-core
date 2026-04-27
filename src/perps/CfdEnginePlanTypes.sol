@@ -38,6 +38,7 @@ library CfdEnginePlanTypes {
         uint256 openInterest;
         uint256 entryNotional;
         uint256 totalMargin;
+        uint256 lpBackedRiskUsdc;
     }
 
     struct RawSnapshot {
