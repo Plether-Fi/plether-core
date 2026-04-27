@@ -612,6 +612,13 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, IOrderRouterAdminHost
         maxPruneOrdersPerCall = config.maxPruneOrdersPerCall;
     }
 
+    function applyOracleConfig(
+        IOrderRouterAdminHost.OracleConfig calldata config
+    ) external {
+        _onlyAdmin();
+        _setOracleConfig(config.pyth, config.feedIds, config.quantities, config.basePrices, config.inversions);
+    }
+
     function _nextCommitId() internal view override returns (uint64) {
         return nextCommitId;
     }

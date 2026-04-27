@@ -146,6 +146,7 @@ Rules:
 - value with no valid claimant path must sit in explicit `unassignedAssets`.
 - during `oracleFrozen`, tranche entry/exit pricing remains live by applying fixed tranche-local LP surcharges instead of requiring a fresh live mark.
 - during `oracleFrozen`, bootstrap admin flows (`initializeSeedPosition`, `assignUnassignedAssets`) are blocked rather than inheriting LP frozen-fee pricing.
+- during `oracleFrozen`, ERC4626 `maxMint` reports the finite share cap implied by the active frozen-entry fee.
 
 Required consequences:
 
@@ -467,7 +468,7 @@ Freshness policy is action-specific.
 
 - in live markets, require fresh oracle data under the close execution rule,
 - stale data is a keeper/oracle failure rather than a user failure,
-- frozen-oracle windows use the dedicated frozen-market policy.
+- frozen-oracle windows use the dedicated frozen-market policy, including relaxed cross-feed publish-time divergence up to the frozen staleness window.
 
 ### Liquidations
 

@@ -356,6 +356,27 @@ contract TimelockPauseTest is BasePerpTest {
         routerAdmin.proposeRouterConfig(config);
     }
 
+    function test_OrderRouter_InvalidMaxOrderAge_Reverts() public {
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.maxOrderAge = 0;
+
+        vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__InvalidMaxOrderAge.selector);
+        routerAdmin.proposeRouterConfig(config);
+
+        config = _routerConfig();
+        config.maxOrderAge = 1 hours + 1;
+
+        vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__InvalidMaxOrderAge.selector);
+        routerAdmin.proposeRouterConfig(config);
+    }
+
+    function test_OrderRouter_InvalidOracleConfig_Reverts() public {
+        IOrderRouterAdminHost.OracleConfig memory config;
+
+        vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__InvalidOracleConfig.selector);
+        routerAdmin.proposeOracleConfig(config);
+    }
+
     function test_OrderRouter_InvalidCloseOrderExecutionBounty_Reverts() public {
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         config.closeOrderExecutionBountyUsdc = 1_000_001;

@@ -215,7 +215,13 @@ contract OrderRouterTest is BasePerpTest {
         router.executeOrder(1, empty);
     }
 
-    function test_ExecuteOrder_SkipsFailedHeadEvenWhenExpirationDisabled() public {
+    function test_ExecuteOrder_SkipsFailedHeadBeforeExpiration() public {
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.maxOrderAge = 300;
+        routerAdmin.proposeRouterConfig(config);
+        vm.warp(block.timestamp + 48 hours);
+        routerAdmin.finalizeRouterConfig();
+
         address other = address(0x333);
         bytes32 otherId = bytes32(uint256(uint160(other)));
 
@@ -231,14 +237,6 @@ contract OrderRouterTest is BasePerpTest {
 
         vm.prank(other);
         clearinghouse.withdraw(otherId, 70e6);
-
-        vm.prank(address(this));
-        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
-        config.maxOrderAge = 0;
-        routerAdmin.proposeRouterConfig(config);
-        vm.warp(block.timestamp + 48 hours);
-        vm.prank(address(this));
-        routerAdmin.finalizeRouterConfig();
 
         bytes[] memory pythPrice = new bytes[](1);
         pythPrice[0] = abi.encode(uint256(150_000_000));
@@ -1967,6 +1965,65 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(router.nextExecuteId(), 0, "Successful batch execution should clear the queue head");
     }
 
+    function test_FrozenCloseExecution_AllowsFeedPublishDivergenceWithinFadStaleness() public {
+        uint256 saturdayNoon = 605_016_000;
+        uint256 minPublishTime = saturdayNoon - 2 hours;
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+
+        vm.warp(minPublishTime - 1);
+        _open(aliceId, CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8);
+
+        mockPyth.setPrice(feedIds[0], int64(100_000_000), int32(-8), minPublishTime);
+        mockPyth.setPrice(feedIds[1], int64(100_000_000), int32(-8), minPublishTime + 2 hours);
+
+        vm.warp(saturdayNoon);
+        uint64 orderId = router.nextCommitId();
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 0, true);
+
+        vm.roll(block.number + 1);
+        router.executeOrder(orderId, _pythUpdateData());
+
+        (uint256 sizeAfter,,,,,,) = engine.positions(aliceId);
+        assertEq(sizeAfter, 0, "Frozen close execution should accept feed divergence within FAD staleness");
+    }
+
+    function test_OracleConfigTimelock_RotatesPythBasket() public {
+        MockPyth newPyth = new MockPyth();
+        bytes32[] memory newFeedIds = new bytes32[](2);
+        uint256[] memory newWeights = new uint256[](2);
+        uint256[] memory newBases = new uint256[](2);
+        bool[] memory newInversions = new bool[](2);
+
+        newFeedIds[0] = bytes32(uint256(101));
+        newFeedIds[1] = bytes32(uint256(202));
+        newWeights[0] = 0.7e18;
+        newWeights[1] = 0.3e18;
+        newBases[0] = 1e8;
+        newBases[1] = 1e8;
+
+        IOrderRouterAdminHost.OracleConfig memory config = IOrderRouterAdminHost.OracleConfig({
+            pyth: address(newPyth),
+            feedIds: newFeedIds,
+            quantities: newWeights,
+            basePrices: newBases,
+            inversions: newInversions
+        });
+
+        routerAdmin.proposeOracleConfig(config);
+        vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__TimelockNotReady.selector);
+        routerAdmin.finalizeOracleConfig();
+
+        vm.warp(block.timestamp + 48 hours + 1);
+        routerAdmin.finalizeOracleConfig();
+
+        assertEq(address(router.pyth()), address(newPyth), "Pyth endpoint should rotate after timelock");
+        assertEq(router.pythFeedIds(0), newFeedIds[0], "First feed id should rotate");
+        assertEq(router.pythFeedIds(1), newFeedIds[1], "Second feed id should rotate");
+        assertEq(router.quantities(0), newWeights[0], "First weight should rotate");
+        assertEq(router.quantities(1), newWeights[1], "Second weight should rotate");
+    }
+
     function test_BatchPostCommitSkewInvalidationPaysClearerBounty() public {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8, false);
@@ -2211,6 +2268,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         bytes[] memory priceData = _pythUpdateData();
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), block.timestamp + 6);
+        vm.warp(block.timestamp + 6);
         vm.roll(block.number + 1);
         router.executeOrder(1, priceData);
 
@@ -2272,6 +2330,7 @@ contract OrderRouterPythTest is BasePerpTest {
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 3006);
 
         bytes[] memory empty = _pythUpdateData();
+        vm.warp(3006);
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
@@ -2287,6 +2346,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         bytes[] memory empty = _pythUpdateData();
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), uint64(block.timestamp + 6));
+        vm.warp(block.timestamp + 6);
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
@@ -2613,6 +2673,7 @@ contract OrderRouterPythTest is BasePerpTest {
         mockPyth.setPrice(FEED_A, int64(120_000_000), int32(-8), 1001);
         mockPyth.setPrice(FEED_B, int64(80_000_000), int32(-8), 1001);
 
+        vm.warp(1001);
         (uint256 price, uint256 minPt) = harness.computeBasketPrice(60, 60);
         assertEq(price, 108_000_000, "70/30 basket should compute $1.08");
         assertEq(minPt, 1001, "minPublishTime should be weakest link");
@@ -4097,6 +4158,7 @@ contract InversionTest is Test {
 
     function setUp() public {
         mockPyth = new MockPyth();
+        vm.warp(1001);
     }
 
     function test_H03_InvertedFeedUsesCorrectPrice() public {

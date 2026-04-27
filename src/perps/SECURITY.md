@@ -28,7 +28,8 @@ All perps contracts are non-upgradeable.
 
 - No proxy patterns.
 - Runtime logic is fixed at deployment.
-- Core constructor parameters such as `CAP_PRICE`, oracle feed configuration, basket weights, and base prices are immutable.
+- Core constructor parameters such as `CAP_PRICE` are immutable.
+- `OrderRouter` oracle feed configuration, basket weights, base prices, and Pyth endpoint can be rotated only through `OrderRouterAdmin`'s 48-hour timelocked oracle config flow.
 
 ### Timelocked admin state
 
@@ -45,6 +46,7 @@ Engine risk controls live in `CfdEngineAdmin`, and router risk controls live in 
 | `seniorRateBps` | `HousePool` | `onlyOwner`, 48-hour timelock |
 | `markStalenessLimit` | `HousePool` | `onlyOwner`, 48-hour timelock |
 | `RouterConfig` (`maxOrderAge`, `orderExecutionStalenessLimit`, `liquidationStalenessLimit`, `pythMaxConfidenceRatioBps`) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
+| `OracleConfig` (`pyth`, feed ids, quantities, base prices, inversions) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
 
 ### One-time wiring
 
@@ -162,6 +164,7 @@ Mitigations:
 - delayed-order execution with publish-time ordering and future-publication rejection while the oracle is live,
 - distinct staleness thresholds for order execution, liquidation, engine-side guards, and HousePool freshness,
 - shared normalized basket-price construction across execution paths,
+- timelocked Pyth endpoint and basket-feed rotation if an upstream feed is deprecated or replaced,
 - frozen-oracle regime for close liveness during genuine market closure.
 
 Risks:

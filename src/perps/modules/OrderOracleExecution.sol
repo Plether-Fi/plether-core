@@ -65,34 +65,7 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
         }
         vault = ICfdVault(_vault);
         engineLens = ICfdEngineLens(_engineLens);
-        pyth = IPyth(_pyth);
-
-        if (_pyth != address(0)) {
-            if (_feedIds.length == 0) {
-                _revertEmptyFeeds();
-            }
-            if (
-                _feedIds.length != _quantities.length || _feedIds.length != _basePrices.length
-                    || _feedIds.length != _inversions.length
-            ) {
-                _revertLengthMismatch();
-            }
-            uint256 totalWeight;
-            for (uint256 i = 0; i < _basePrices.length; i++) {
-                if (_basePrices[i] == 0) {
-                    _revertInvalidBasePrice();
-                }
-                totalWeight += _quantities[i];
-            }
-            if (totalWeight != 1e18) {
-                _revertInvalidWeights();
-            }
-        }
-
-        pythFeedIds = _feedIds;
-        quantities = _quantities;
-        basePrices = _basePrices;
-        inversions = _inversions;
+        _setOracleConfig(_pyth, _feedIds, _quantities, _basePrices, _inversions);
     }
 
     function _currentRouterExecutionContext() internal view returns (RouterExecutionContext memory context) {
@@ -112,7 +85,7 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
         }
 
         (update.executionPrice, update.oraclePublishTime, update.pythFee) =
-            _resolveOraclePrice(pythUpdateData, mockFallbackPrice, maxStaleness, orderExecutionStalenessLimit);
+            _resolveOraclePrice(pythUpdateData, mockFallbackPrice, maxStaleness, maxStaleness);
 
         if (address(pyth) != address(0)) {
             if (OracleFreshnessPolicyLib.isStale(
@@ -154,7 +127,7 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
         }
 
         (update.executionPrice, update.oraclePublishTime, update.pythFee) =
-            _resolveOraclePrice(pythUpdateData, 1e8, maxStaleness, orderExecutionStalenessLimit);
+            _resolveOraclePrice(pythUpdateData, 1e8, maxStaleness, maxStaleness);
 
         if (address(pyth) != address(0)) {
             OracleFreshnessPolicyLib.Policy memory policy = OracleFreshnessPolicyLib.getPolicy(
@@ -195,7 +168,7 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
         }
 
         (update.executionPrice, update.oraclePublishTime, update.pythFee) =
-            _resolveOraclePrice(pythUpdateData, 1e8, maxStaleness, liquidationStalenessLimit);
+            _resolveOraclePrice(pythUpdateData, 1e8, maxStaleness, maxStaleness);
 
         if (address(pyth) != address(0)) {
             OracleFreshnessPolicyLib.Policy memory policy = OracleFreshnessPolicyLib.getPolicy(
@@ -259,6 +232,52 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
                 price = mockFallbackPrice;
             }
             publishTime = uint64(block.timestamp);
+        }
+    }
+
+    function _setOracleConfig(
+        address newPyth,
+        bytes32[] memory newFeedIds,
+        uint256[] memory newQuantities,
+        uint256[] memory newBasePrices,
+        bool[] memory newInversions
+    ) internal {
+        _validateOracleConfig(newPyth, newFeedIds, newQuantities, newBasePrices, newInversions);
+        pyth = IPyth(newPyth);
+        pythFeedIds = newFeedIds;
+        quantities = newQuantities;
+        basePrices = newBasePrices;
+        inversions = newInversions;
+    }
+
+    function _validateOracleConfig(
+        address newPyth,
+        bytes32[] memory newFeedIds,
+        uint256[] memory newQuantities,
+        uint256[] memory newBasePrices,
+        bool[] memory newInversions
+    ) internal pure {
+        if (newPyth == address(0)) {
+            return;
+        }
+        if (newFeedIds.length == 0) {
+            _revertEmptyFeeds();
+        }
+        if (
+            newFeedIds.length != newQuantities.length || newFeedIds.length != newBasePrices.length
+                || newFeedIds.length != newInversions.length
+        ) {
+            _revertLengthMismatch();
+        }
+        uint256 totalWeight;
+        for (uint256 i = 0; i < newBasePrices.length; i++) {
+            if (newBasePrices[i] == 0) {
+                _revertInvalidBasePrice();
+            }
+            totalWeight += newQuantities[i];
+        }
+        if (totalWeight != 1e18) {
+            _revertInvalidWeights();
         }
     }
 

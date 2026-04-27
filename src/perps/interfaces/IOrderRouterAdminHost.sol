@@ -18,8 +18,20 @@ interface IOrderRouterAdminHost {
         uint256 maxPruneOrdersPerCall;
     }
 
+    struct OracleConfig {
+        address pyth;
+        bytes32[] feedIds;
+        uint256[] quantities;
+        uint256[] basePrices;
+        bool[] inversions;
+    }
+
     function applyRouterConfig(
         RouterConfig calldata config
+    ) external;
+
+    function applyOracleConfig(
+        OracleConfig calldata config
     ) external;
 
 }

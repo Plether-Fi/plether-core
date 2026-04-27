@@ -155,6 +155,10 @@ contract TrancheVault is ERC4626 {
         if (!_canDepositNow()) {
             return 0;
         }
+        uint256 feeBps = _frozenLpFeeBps();
+        if (feeBps > 0) {
+            return _maxFrozenMintShares(feeBps);
+        }
         return super.maxMint(receiver);
     }
 
@@ -418,10 +422,24 @@ contract TrancheVault is ERC4626 {
         uint256 shares,
         uint256 feeBps
     ) internal view returns (uint256) {
+        if (shares > _maxFrozenMintShares(feeBps)) {
+            return type(uint256).max;
+        }
         uint256 adjustedShares = totalSupply() + 10 ** _decimalsOffset();
         uint256 adjustedAssets = totalAssets() + 1;
         uint256 denominator = ((10_000 - feeBps) * adjustedShares) - (feeBps * shares);
         return Math.mulDiv(10_000 * shares, adjustedAssets, denominator, Math.Rounding.Ceil);
+    }
+
+    function _maxFrozenMintShares(
+        uint256 feeBps
+    ) internal view returns (uint256) {
+        uint256 adjustedShares = totalSupply() + 10 ** _decimalsOffset();
+        uint256 quotient = Math.mulDiv(adjustedShares, 10_000 - feeBps, feeBps, Math.Rounding.Floor);
+        if (mulmod(adjustedShares, 10_000 - feeBps, feeBps) == 0) {
+            return quotient == 0 ? 0 : quotient - 1;
+        }
+        return quotient;
     }
 
 }
