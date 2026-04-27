@@ -104,11 +104,10 @@ contract PlanApplyRegressionTest is BasePerpTest {
         }
 
         (, uint256 posMargin,, uint256 posMaxProfit,,,) = engine.positions(bullAccount);
-        uint256 bullMaxAfter = _sideMaxProfit(CfdTypes.Side.BULL) - posMaxProfit;
-        uint256 bullMarginAfter = _sideTotalMargin(CfdTypes.Side.BULL) - posMargin;
-        uint256 bearMax = _sideMaxProfit(CfdTypes.Side.BEAR);
-        uint256 expectedMaxLiability =
-            _lpBackedMaxLiability(bullMaxAfter, bullMarginAfter, bearMax, _sideTotalMargin(CfdTypes.Side.BEAR));
+        uint256 removedRisk = _positionLpBackedRisk(posMaxProfit, posMargin);
+        uint256 bullRiskAfter = _sideLpBackedRisk(CfdTypes.Side.BULL) - removedRisk;
+        uint256 bearRisk = _sideLpBackedRisk(CfdTypes.Side.BEAR);
+        uint256 expectedMaxLiability = bullRiskAfter > bearRisk ? bullRiskAfter : bearRisk;
 
         assertEq(
             preview.maxLiabilityAfterUsdc,

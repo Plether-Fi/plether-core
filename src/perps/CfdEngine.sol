@@ -143,6 +143,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         uint64 lastUpdateTime;
         uint64 lastCarryTimestamp;
         int256 vpiAccrued;
+        uint256 lpBackedRiskUsdc;
     }
 
     uint256 public immutable CAP_PRICE;
@@ -159,6 +160,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     // ==========================================
 
     SideState[2] public sides;
+    uint256[2] public sideLpBackedRiskUsdc;
     uint256 public lastMarkPrice;
     uint64 public lastMarkTime;
 
@@ -530,6 +532,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         uint256 marginBefore = _positionMarginBucketUsdc(account);
         clearinghouse.lockPositionMargin(account, amount);
         _syncTotalSideMargin(pos.side, marginBefore, _positionMarginBucketUsdc(account));
+        _syncPositionLpBackedRisk(account, pos);
         pos.lastUpdateTime = uint64(block.timestamp);
         pos.lastCarryTimestamp = uint64(block.timestamp);
 
@@ -734,6 +737,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         } else {
             clearinghouse.reserveStaleCloseExecutionBountyFromPositionMargin(account, marginBackedBountyUsdc, recipient);
         }
+        _syncPositionLpBackedRiskToMargin(pos, positionMarginUsdc - marginBackedBountyUsdc);
     }
 
     /// @notice Reduces accumulated bad debt after governance-confirmed recapitalization
@@ -933,6 +937,45 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         }
     }
 
+    function _positionLpBackedRisk(
+        uint256 maxProfitUsdc,
+        uint256 marginUsdc
+    ) internal pure returns (uint256) {
+        return SolvencyAccountingLib.getPositionLpBackedRisk(maxProfitUsdc, marginUsdc);
+    }
+
+    function _applySideLpBackedRiskDelta(
+        CfdTypes.Side side,
+        uint256 oldRiskUsdc,
+        uint256 newRiskUsdc
+    ) internal {
+        uint256 index = _sideIndex(side);
+        if (newRiskUsdc > oldRiskUsdc) {
+            sideLpBackedRiskUsdc[index] += newRiskUsdc - oldRiskUsdc;
+        } else if (oldRiskUsdc > newRiskUsdc) {
+            sideLpBackedRiskUsdc[index] -= oldRiskUsdc - newRiskUsdc;
+        }
+    }
+
+    function _syncPositionLpBackedRisk(
+        address account,
+        StoredPosition storage pos
+    ) internal {
+        _syncPositionLpBackedRiskToMargin(pos, _positionMarginBucketUsdc(account));
+    }
+
+    function _syncPositionLpBackedRiskToMargin(
+        StoredPosition storage pos,
+        uint256 marginUsdc
+    ) internal {
+        if (pos.size == 0) {
+            return;
+        }
+        uint256 newRiskUsdc = _positionLpBackedRisk(pos.maxProfitUsdc, marginUsdc);
+        _applySideLpBackedRiskDelta(pos.side, pos.lpBackedRiskUsdc, newRiskUsdc);
+        pos.lpBackedRiskUsdc = newRiskUsdc;
+    }
+
     function _syncMarginQueue(
         address account,
         uint256 consumedCommittedReservationUsdc
@@ -1085,9 +1128,8 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     }
 
     function _maxLiability() internal view returns (uint256) {
-        (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
         return SolvencyAccountingLib.getMaxLiability(
-            bullState.maxProfitUsdc, bullState.totalMargin, bearState.maxProfitUsdc, bearState.totalMargin
+            sideLpBackedRiskUsdc[_sideIndex(CfdTypes.Side.BULL)], sideLpBackedRiskUsdc[_sideIndex(CfdTypes.Side.BEAR)]
         );
     }
 
@@ -1136,8 +1178,8 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         snap.lastMarkTime = lastMarkTime;
 
         (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
-        snap.bullSide = _copySideSnapshot(bullState);
-        snap.bearSide = _copySideSnapshot(bearState);
+        snap.bullSide = _copySideSnapshot(CfdTypes.Side.BULL, bullState);
+        snap.bearSide = _copySideSnapshot(CfdTypes.Side.BEAR, bearState);
 
         snap.vaultAssetsUsdc = vaultDepthUsdc;
         snap.vaultCashUsdc = vaultDepthUsdc;
@@ -1161,12 +1203,14 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     }
 
     function _copySideSnapshot(
+        CfdTypes.Side side,
         SideState storage state
     ) internal view returns (CfdEnginePlanTypes.SideSnapshot memory snap) {
         snap.maxProfitUsdc = state.maxProfitUsdc;
         snap.openInterest = state.openInterest;
         snap.entryNotional = state.entryNotional;
         snap.totalMargin = state.totalMargin;
+        snap.lpBackedRiskUsdc = sideLpBackedRiskUsdc[_sideIndex(side)];
     }
 
     function _tryGetFreshLiveMarkPrice() internal view returns (bool fresh, uint256 price) {
@@ -1289,6 +1333,10 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         CfdEngineSettlementTypes.PositionState calldata position
     ) external onlySettlementModule {
         StoredPosition storage pos = _positions[account];
+        if (pos.size > 0 || pos.lpBackedRiskUsdc > 0) {
+            _applySideLpBackedRiskDelta(pos.side, pos.lpBackedRiskUsdc, 0);
+        }
+        uint256 newRiskUsdc = _positionLpBackedRisk(position.maxProfitUsdc, _positionMarginBucketUsdc(account));
         pos.size = position.size;
         pos.entryPrice = position.entryPrice;
         pos.maxProfitUsdc = position.maxProfitUsdc;
@@ -1296,11 +1344,17 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         pos.lastUpdateTime = position.lastUpdateTime;
         pos.lastCarryTimestamp = position.lastCarryTimestamp;
         pos.vpiAccrued = position.vpiAccrued;
+        pos.lpBackedRiskUsdc = newRiskUsdc;
+        _applySideLpBackedRiskDelta(position.side, 0, newRiskUsdc);
     }
 
     function settlementDeletePosition(
         address account
     ) external onlySettlementModule {
+        StoredPosition storage pos = _positions[account];
+        if (pos.size > 0 || pos.lpBackedRiskUsdc > 0) {
+            _applySideLpBackedRiskDelta(pos.side, pos.lpBackedRiskUsdc, 0);
+        }
         delete _positions[account];
     }
 
@@ -1479,6 +1533,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
 
         if (marginConsumedUsdc > 0) {
             _syncTotalSideMargin(pos.side, marginBefore, marginBefore - marginConsumedUsdc);
+            _syncPositionLpBackedRiskToMargin(pos, marginBefore - marginConsumedUsdc);
         }
 
         if (realizedCarryUsdc > 0) {

@@ -31,15 +31,18 @@ library SolvencyAccountingLib {
         uint256 effectiveAssetsUsdc;
     }
 
-    function getMaxLiability(
-        uint256 bullMaxProfitUsdc,
-        uint256 bullTotalMarginUsdc,
-        uint256 bearMaxProfitUsdc,
-        uint256 bearTotalMarginUsdc
+    function getPositionLpBackedRisk(
+        uint256 maxProfitUsdc,
+        uint256 marginUsdc
     ) internal pure returns (uint256) {
-        uint256 bullLpBackedUsdc = bullMaxProfitUsdc > bullTotalMarginUsdc ? bullMaxProfitUsdc - bullTotalMarginUsdc : 0;
-        uint256 bearLpBackedUsdc = bearMaxProfitUsdc > bearTotalMarginUsdc ? bearMaxProfitUsdc - bearTotalMarginUsdc : 0;
-        return bullLpBackedUsdc > bearLpBackedUsdc ? bullLpBackedUsdc : bearLpBackedUsdc;
+        return maxProfitUsdc > marginUsdc ? maxProfitUsdc - marginUsdc : 0;
+    }
+
+    function getMaxLiability(
+        uint256 bullLpBackedRiskUsdc,
+        uint256 bearLpBackedRiskUsdc
+    ) internal pure returns (uint256) {
+        return bullLpBackedRiskUsdc > bearLpBackedRiskUsdc ? bullLpBackedRiskUsdc : bearLpBackedRiskUsdc;
     }
 
     function buildSolvencyState(

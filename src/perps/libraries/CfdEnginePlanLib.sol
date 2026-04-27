@@ -154,9 +154,30 @@ library CfdEnginePlanLib {
         CfdEnginePlanTypes.SideSnapshot memory bull,
         CfdEnginePlanTypes.SideSnapshot memory bear
     ) private pure returns (uint256) {
-        return SolvencyAccountingLib.getMaxLiability(
-            bull.maxProfitUsdc, bull.totalMargin, bear.maxProfitUsdc, bear.totalMargin
-        );
+        return SolvencyAccountingLib.getMaxLiability(bull.lpBackedRiskUsdc, bear.lpBackedRiskUsdc);
+    }
+
+    function _positionLpBackedRisk(
+        uint256 maxProfitUsdc,
+        uint256 marginUsdc
+    ) private pure returns (uint256) {
+        return SolvencyAccountingLib.getPositionLpBackedRisk(maxProfitUsdc, marginUsdc);
+    }
+
+    function _applyPositionRiskChange(
+        CfdEnginePlanTypes.SideSnapshot memory side,
+        uint256 oldMaxProfitUsdc,
+        uint256 oldMarginUsdc,
+        uint256 newMaxProfitUsdc,
+        uint256 newMarginUsdc
+    ) private pure {
+        uint256 oldRiskUsdc = _positionLpBackedRisk(oldMaxProfitUsdc, oldMarginUsdc);
+        uint256 newRiskUsdc = _positionLpBackedRisk(newMaxProfitUsdc, newMarginUsdc);
+        if (newRiskUsdc > oldRiskUsdc) {
+            side.lpBackedRiskUsdc += newRiskUsdc - oldRiskUsdc;
+        } else if (oldRiskUsdc > newRiskUsdc) {
+            side.lpBackedRiskUsdc -= oldRiskUsdc - newRiskUsdc;
+        }
     }
 
     function _planDeferredTraderCreditConsumption(
@@ -354,6 +375,7 @@ library CfdEnginePlanLib {
         }
 
         uint256 settlementBalanceUsdc = snap.accountBuckets.settlementBalanceUsdc - consumption.totalConsumedUsdc;
+        uint256 oldPositionMarginUsdc = snap.position.margin;
         snap.lockedBuckets.positionMarginUsdc -= consumption.activeMarginConsumedUsdc;
         snap.position.margin -= consumption.activeMarginConsumedUsdc;
         snap.vaultAssetsUsdc += pendingCarryUsdc;
@@ -368,8 +390,22 @@ library CfdEnginePlanLib {
 
         if (snap.position.side == CfdTypes.Side.BULL) {
             snap.bullSide.totalMargin -= consumption.activeMarginConsumedUsdc;
+            _applyPositionRiskChange(
+                snap.bullSide,
+                snap.position.maxProfitUsdc,
+                oldPositionMarginUsdc,
+                snap.position.maxProfitUsdc,
+                snap.position.margin
+            );
         } else {
             snap.bearSide.totalMargin -= consumption.activeMarginConsumedUsdc;
+            _applyPositionRiskChange(
+                snap.bearSide,
+                snap.position.maxProfitUsdc,
+                oldPositionMarginUsdc,
+                snap.position.maxProfitUsdc,
+                snap.position.margin
+            );
         }
 
         return false;
@@ -416,10 +452,24 @@ library CfdEnginePlanLib {
             bull.openInterest += delta.sideOiIncrease;
             bull.maxProfitUsdc += delta.sideMaxProfitIncrease;
             bull.totalMargin = delta.sideTotalMarginAfterOpen;
+            _applyPositionRiskChange(
+                bull,
+                snap.position.maxProfitUsdc,
+                snap.position.margin,
+                snap.position.maxProfitUsdc + delta.posMaxProfitIncrease,
+                delta.positionMarginAfterOpen
+            );
         } else {
             bear.openInterest += delta.sideOiIncrease;
             bear.maxProfitUsdc += delta.sideMaxProfitIncrease;
             bear.totalMargin = delta.sideTotalMarginAfterOpen;
+            _applyPositionRiskChange(
+                bear,
+                snap.position.maxProfitUsdc,
+                snap.position.margin,
+                snap.position.maxProfitUsdc + delta.posMaxProfitIncrease,
+                delta.positionMarginAfterOpen
+            );
         }
 
         uint256 postMaxLiability = _maxLiability(bull, bear);
@@ -604,10 +654,24 @@ library CfdEnginePlanLib {
             bull.openInterest -= delta.sideOiDecrease;
             bull.totalMargin = delta.totalMarginAfterClose;
             bull.maxProfitUsdc -= delta.posMaxProfitReduction;
+            _applyPositionRiskChange(
+                bull,
+                snap.position.maxProfitUsdc,
+                snap.position.margin,
+                delta.deletePosition ? 0 : snap.position.maxProfitUsdc - delta.posMaxProfitReduction,
+                delta.deletePosition ? 0 : delta.posMarginAfter
+            );
         } else {
             bear.openInterest -= delta.sideOiDecrease;
             bear.totalMargin = delta.totalMarginAfterClose;
             bear.maxProfitUsdc -= delta.posMaxProfitReduction;
+            _applyPositionRiskChange(
+                bear,
+                snap.position.maxProfitUsdc,
+                snap.position.margin,
+                delta.deletePosition ? 0 : snap.position.maxProfitUsdc - delta.posMaxProfitReduction,
+                delta.deletePosition ? 0 : delta.posMarginAfter
+            );
         }
 
         uint256 postMaxLiability = _maxLiability(bull, bear);
@@ -767,10 +831,12 @@ library CfdEnginePlanLib {
             bull.openInterest -= pos.size;
             bull.totalMargin -= pos.margin;
             bull.maxProfitUsdc -= pos.maxProfitUsdc;
+            _applyPositionRiskChange(bull, pos.maxProfitUsdc, pos.margin, 0, 0);
         } else {
             bear.openInterest -= pos.size;
             bear.totalMargin -= pos.margin;
             bear.maxProfitUsdc -= pos.maxProfitUsdc;
+            _applyPositionRiskChange(bear, pos.maxProfitUsdc, pos.margin, 0, 0);
         }
 
         uint256 postMaxLiability = _maxLiability(bull, bear);

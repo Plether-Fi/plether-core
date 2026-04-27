@@ -99,13 +99,13 @@ These are the highest-value properties an auditor should expect to hold.
 
 | Invariant | Description |
 |-----------|-------------|
-| Bounded entry solvency | Risk-increasing opens require `vault.totalAssets() >= max(max(globalBullMaxProfit - globalBullTotalMargin, 0), max(globalBearMaxProfit - globalBearTotalMargin, 0))` using canonical physical backing rather than raw token balance |
+| Bounded entry solvency | Risk-increasing opens require `vault.totalAssets() >= max(sum(BULL position LP-backed risk), sum(BEAR position LP-backed risk))` using canonical physical backing rather than raw token balance |
 | Degraded containment | If a close or liquidation reveals post-op insolvency, `degradedMode` latches and blocks further risk expansion while still permitting protective transitions |
 | Bounded payout | No trader payout can exceed the capped market payoff implied by `CAP_PRICE` |
 | Withdrawal firewall | LP withdrawals are limited to conservative free cash after accounting for bounded liability, deferred liabilities, and protocol-owned balances |
 | Deferred liabilities are senior | Deferred trader credit and deferred keeper credit remain senior claims on vault liquidity until serviced |
 
-This branch uses LP-backed capacity as the reserve basis. It deliberately relaxes the earlier gross max-profit invariant by treating side-local trader margin as self-funded risk.
+This branch uses position-local LP-backed capacity as the reserve basis. It deliberately relaxes the earlier gross max-profit invariant by treating each position's own margin as self-funded risk without pooling excess margin across same-side traders.
 
 ### Position and engine accounting
 

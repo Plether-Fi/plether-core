@@ -209,13 +209,15 @@ This is why the LP docs distinguish freshness-gated repricing from already-funde
 Before increasing risk, the engine checks that the vault can cover the worst-case side payout after the trade.
 
 ```text
+positionLpBackedRisk = max(positionMaxProfit - positionMargin, 0)
+
 vault total assets >= max(
-  max(globalBullMaxProfit - globalBullTotalMargin, 0),
-  max(globalBearMaxProfit - globalBearTotalMargin, 0)
+  sum(BULL positionLpBackedRisk),
+  sum(BEAR positionLpBackedRisk)
 )
 ```
 
-This treats side-local trader margin as self-funded risk. Only the portion of worst-case side payout not already covered by that side's margin consumes LP capacity. It does not mean LPs can never take loss; it means the system capacity model reserves for LP-backed risk rather than raw gross notional.
+This treats each position's own margin as self-funded risk. Only the portion of worst-case position payout not already covered by that position's margin consumes LP capacity. Same-side excess margin is not pooled across traders. It does not mean LPs can never take loss; it means the system capacity model reserves for LP-backed risk rather than raw gross notional.
 
 ### Carry instead of funding
 

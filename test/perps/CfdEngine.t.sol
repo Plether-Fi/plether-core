@@ -231,10 +231,12 @@ contract CfdEnginePlanLibHarness {
             maxProfitUsdc: 100_000e6,
             openInterest: currentSize,
             entryNotional: currentSize * currentEntryPrice,
-            totalMargin: positionMarginUsdc
+            totalMargin: positionMarginUsdc,
+            lpBackedRiskUsdc: 100_000e6 > positionMarginUsdc ? 100_000e6 - positionMarginUsdc : 0
         });
-        snap.bearSide =
-            CfdEnginePlanTypes.SideSnapshot({maxProfitUsdc: 0, openInterest: 0, entryNotional: 0, totalMargin: 0});
+        snap.bearSide = CfdEnginePlanTypes.SideSnapshot({
+            maxProfitUsdc: 0, openInterest: 0, entryNotional: 0, totalMargin: 0, lpBackedRiskUsdc: 0
+        });
         snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
             settlementBalanceUsdc: settlementBalanceUsdc,
             totalLockedMarginUsdc: positionMarginUsdc,
@@ -311,18 +313,15 @@ contract CfdEngineTest is BasePerpTest {
         uint256 maxProfitReductionUsdc,
         uint256 marginReductionUsdc
     ) internal view returns (uint256) {
-        uint256 bullMaxProfit = _sideMaxProfit(CfdTypes.Side.BULL);
-        uint256 bullMargin = _sideTotalMargin(CfdTypes.Side.BULL);
-        uint256 bearMaxProfit = _sideMaxProfit(CfdTypes.Side.BEAR);
-        uint256 bearMargin = _sideTotalMargin(CfdTypes.Side.BEAR);
+        uint256 bullRisk = _sideLpBackedRisk(CfdTypes.Side.BULL);
+        uint256 bearRisk = _sideLpBackedRisk(CfdTypes.Side.BEAR);
+        uint256 removedRisk = _positionLpBackedRisk(maxProfitReductionUsdc, marginReductionUsdc);
         if (side == CfdTypes.Side.BULL) {
-            bullMaxProfit -= maxProfitReductionUsdc;
-            bullMargin -= marginReductionUsdc;
+            bullRisk = bullRisk > removedRisk ? bullRisk - removedRisk : 0;
         } else {
-            bearMaxProfit -= maxProfitReductionUsdc;
-            bearMargin -= marginReductionUsdc;
+            bearRisk = bearRisk > removedRisk ? bearRisk - removedRisk : 0;
         }
-        return _lpBackedMaxLiability(bullMaxProfit, bullMargin, bearMaxProfit, bearMargin);
+        return bullRisk > bearRisk ? bullRisk : bearRisk;
     }
 
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {

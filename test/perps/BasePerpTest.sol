@@ -722,20 +722,22 @@ abstract contract BasePerpTest is Test {
     }
 
     function _maxLiability() internal view returns (uint256) {
-        ICfdEngine.SideState memory bull = _sideState(CfdTypes.Side.BULL);
-        ICfdEngine.SideState memory bear = _sideState(CfdTypes.Side.BEAR);
-        return _lpBackedMaxLiability(bull.maxProfitUsdc, bull.totalMargin, bear.maxProfitUsdc, bear.totalMargin);
+        uint256 bullRisk = _sideLpBackedRisk(CfdTypes.Side.BULL);
+        uint256 bearRisk = _sideLpBackedRisk(CfdTypes.Side.BEAR);
+        return bullRisk > bearRisk ? bullRisk : bearRisk;
     }
 
-    function _lpBackedMaxLiability(
-        uint256 bullMaxProfitUsdc,
-        uint256 bullTotalMarginUsdc,
-        uint256 bearMaxProfitUsdc,
-        uint256 bearTotalMarginUsdc
+    function _positionLpBackedRisk(
+        uint256 maxProfitUsdc,
+        uint256 marginUsdc
     ) internal pure returns (uint256) {
-        uint256 bullLpBackedUsdc = bullMaxProfitUsdc > bullTotalMarginUsdc ? bullMaxProfitUsdc - bullTotalMarginUsdc : 0;
-        uint256 bearLpBackedUsdc = bearMaxProfitUsdc > bearTotalMarginUsdc ? bearMaxProfitUsdc - bearTotalMarginUsdc : 0;
-        return bullLpBackedUsdc > bearLpBackedUsdc ? bullLpBackedUsdc : bearLpBackedUsdc;
+        return maxProfitUsdc > marginUsdc ? maxProfitUsdc - marginUsdc : 0;
+    }
+
+    function _sideLpBackedRisk(
+        CfdTypes.Side side
+    ) internal view returns (uint256) {
+        return engine.sideLpBackedRiskUsdc(uint8(side));
     }
 
     function _withdrawalReservedUsdc() internal view returns (uint256) {

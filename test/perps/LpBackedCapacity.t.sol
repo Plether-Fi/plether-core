@@ -38,10 +38,46 @@ contract LpBackedCapacityTest is BasePerpTest {
         assertEq(
             snapshot.maxLiabilityUsdc,
             grossBearMaxProfit - selfFundedMargin,
-            "capacity should reserve only LP-backed side risk"
+            "single-position capacity should reserve only LP-backed risk"
         );
         assertLt(
             snapshot.maxLiabilityUsdc, pool.totalAssets(), "LP-backed risk should fit inside reduced pool capacity"
+        );
+    }
+
+    function test_PositionLocalCapacityDoesNotCrossSubsidizeSameSideRisk() public {
+        address overcollateralizedTrader = address(0xA11CE);
+        address thinTrader = address(0xB0B);
+        _fundTrader(overcollateralizedTrader, 120_000e6);
+        _fundTrader(thinTrader, 30_000e6);
+
+        _open(overcollateralizedTrader, CfdTypes.Side.BEAR, 10_000e18, 100_000e6, 0.5e8);
+        assertEq(_sideLpBackedRisk(CfdTypes.Side.BEAR), 0, "excess margin should zero this position's LP risk");
+
+        _shrinkPoolTo(100_000e6);
+
+        uint256 sideLevelPostRisk = (15_000e6 + 150_000e6) - (_sideTotalMargin(CfdTypes.Side.BEAR) + 9980e6);
+        assertLt(sideLevelPostRisk, pool.totalAssets(), "side-level pooled margin would admit this trade");
+
+        uint256 depth = pool.totalAssets();
+        vm.expectRevert();
+        _open(thinTrader, CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 0.5e8, depth);
+    }
+
+    function test_AddMarginReducesPositionLocalLpBackedRisk() public {
+        _fundTrader(trader, 300_000e6);
+        _open(trader, CfdTypes.Side.BEAR, 200_000e18, 100_000e6, 0.5e8);
+
+        uint256 riskBefore = _sideLpBackedRisk(CfdTypes.Side.BEAR);
+        assertEq(riskBefore, 200_040e6, "setup should leave LP-backed risk after execution fee");
+
+        vm.prank(trader);
+        engine.addMargin(trader, 50_000e6);
+
+        assertEq(
+            _sideLpBackedRisk(CfdTypes.Side.BEAR),
+            riskBefore - 50_000e6,
+            "added margin should reduce only this position's LP-backed risk"
         );
     }
 
