@@ -1086,7 +1086,9 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
 
     function _maxLiability() internal view returns (uint256) {
         (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
-        return SolvencyAccountingLib.getMaxLiability(bullState.maxProfitUsdc, bearState.maxProfitUsdc);
+        return SolvencyAccountingLib.getMaxLiability(
+            bullState.maxProfitUsdc, bullState.totalMargin, bearState.maxProfitUsdc, bearState.totalMargin
+        );
     }
 
     function _getWithdrawalReservedUsdc() internal view returns (uint256 reservedUsdc) {

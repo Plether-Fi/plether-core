@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdTypes} from "../CfdTypes.sol";
-
 library SolvencyAccountingLib {
 
     struct PreviewDelta {
@@ -35,23 +33,13 @@ library SolvencyAccountingLib {
 
     function getMaxLiability(
         uint256 bullMaxProfitUsdc,
-        uint256 bearMaxProfitUsdc
-    ) internal pure returns (uint256) {
-        return bullMaxProfitUsdc > bearMaxProfitUsdc ? bullMaxProfitUsdc : bearMaxProfitUsdc;
-    }
-
-    function getMaxLiabilityAfterClose(
-        uint256 bullMaxProfitUsdc,
+        uint256 bullTotalMarginUsdc,
         uint256 bearMaxProfitUsdc,
-        CfdTypes.Side side,
-        uint256 maxProfitReductionUsdc
+        uint256 bearTotalMarginUsdc
     ) internal pure returns (uint256) {
-        if (side == CfdTypes.Side.BULL) {
-            bullMaxProfitUsdc -= maxProfitReductionUsdc;
-        } else {
-            bearMaxProfitUsdc -= maxProfitReductionUsdc;
-        }
-        return getMaxLiability(bullMaxProfitUsdc, bearMaxProfitUsdc);
+        uint256 bullLpBackedUsdc = bullMaxProfitUsdc > bullTotalMarginUsdc ? bullMaxProfitUsdc - bullTotalMarginUsdc : 0;
+        uint256 bearLpBackedUsdc = bearMaxProfitUsdc > bearTotalMarginUsdc ? bearMaxProfitUsdc - bearTotalMarginUsdc : 0;
+        return bullLpBackedUsdc > bearLpBackedUsdc ? bullLpBackedUsdc : bearLpBackedUsdc;
     }
 
     function buildSolvencyState(

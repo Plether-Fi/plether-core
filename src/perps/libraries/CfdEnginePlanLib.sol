@@ -150,6 +150,15 @@ library CfdEnginePlanLib {
         return postBullUsdc > postBearUsdc ? postBullUsdc - postBearUsdc : postBearUsdc - postBullUsdc;
     }
 
+    function _maxLiability(
+        CfdEnginePlanTypes.SideSnapshot memory bull,
+        CfdEnginePlanTypes.SideSnapshot memory bear
+    ) private pure returns (uint256) {
+        return SolvencyAccountingLib.getMaxLiability(
+            bull.maxProfitUsdc, bull.totalMargin, bear.maxProfitUsdc, bear.totalMargin
+        );
+    }
+
     function _planDeferredTraderCreditConsumption(
         uint256 deferredTraderCreditUsdc,
         uint256 shortfallUsdc,
@@ -413,14 +422,14 @@ library CfdEnginePlanLib {
             bear.totalMargin = delta.sideTotalMarginAfterOpen;
         }
 
-        uint256 postMaxLiability = SolvencyAccountingLib.getMaxLiability(bull.maxProfitUsdc, bear.maxProfitUsdc);
+        uint256 postMaxLiability = _maxLiability(bull, bear);
 
         int256 physicalAssetsDeltaUsdc = delta.tradeCostUsdc;
 
         SolvencyAccountingLib.SolvencyState memory currentState = SolvencyAccountingLib.buildSolvencyState(
             snap.vaultCashUsdc,
             snap.accumulatedFeesUsdc,
-            SolvencyAccountingLib.getMaxLiability(snap.bullSide.maxProfitUsdc, snap.bearSide.maxProfitUsdc),
+            _maxLiability(snap.bullSide, snap.bearSide),
             snap.totalDeferredTraderCreditUsdc,
             snap.totalDeferredKeeperCreditUsdc
         );
@@ -594,14 +603,14 @@ library CfdEnginePlanLib {
         if (delta.side == CfdTypes.Side.BULL) {
             bull.openInterest -= delta.sideOiDecrease;
             bull.totalMargin = delta.totalMarginAfterClose;
+            bull.maxProfitUsdc -= delta.posMaxProfitReduction;
         } else {
             bear.openInterest -= delta.sideOiDecrease;
             bear.totalMargin = delta.totalMarginAfterClose;
+            bear.maxProfitUsdc -= delta.posMaxProfitReduction;
         }
 
-        uint256 postMaxLiability = SolvencyAccountingLib.getMaxLiabilityAfterClose(
-            snap.bullSide.maxProfitUsdc, snap.bearSide.maxProfitUsdc, delta.side, delta.posMaxProfitReduction
-        );
+        uint256 postMaxLiability = _maxLiability(bull, bear);
 
         int256 physicalAssetsDelta = int256(delta.lossResult.seizedUsdc)
             - int256(delta.freshPayoutIsImmediate ? delta.freshTraderPayoutUsdc : 0);
@@ -611,7 +620,7 @@ library CfdEnginePlanLib {
         SolvencyAccountingLib.SolvencyState memory currentState = SolvencyAccountingLib.buildSolvencyState(
             snap.vaultAssetsUsdc,
             snap.accumulatedFeesUsdc,
-            SolvencyAccountingLib.getMaxLiability(snap.bullSide.maxProfitUsdc, snap.bearSide.maxProfitUsdc),
+            _maxLiability(snap.bullSide, snap.bearSide),
             snap.totalDeferredTraderCreditUsdc,
             snap.totalDeferredKeeperCreditUsdc
         );
@@ -757,19 +766,19 @@ library CfdEnginePlanLib {
         if (pos.side == CfdTypes.Side.BULL) {
             bull.openInterest -= pos.size;
             bull.totalMargin -= pos.margin;
+            bull.maxProfitUsdc -= pos.maxProfitUsdc;
         } else {
             bear.openInterest -= pos.size;
             bear.totalMargin -= pos.margin;
+            bear.maxProfitUsdc -= pos.maxProfitUsdc;
         }
 
-        uint256 postMaxLiability = SolvencyAccountingLib.getMaxLiabilityAfterClose(
-            bull.maxProfitUsdc, bear.maxProfitUsdc, pos.side, pos.maxProfitUsdc
-        );
+        uint256 postMaxLiability = _maxLiability(bull, bear);
 
         SolvencyAccountingLib.SolvencyState memory currentState = SolvencyAccountingLib.buildSolvencyState(
             snap.vaultAssetsUsdc,
             snap.accumulatedFeesUsdc,
-            SolvencyAccountingLib.getMaxLiability(snap.bullSide.maxProfitUsdc, snap.bearSide.maxProfitUsdc),
+            _maxLiability(snap.bullSide, snap.bearSide),
             snap.totalDeferredTraderCreditUsdc,
             snap.totalDeferredKeeperCreditUsdc
         );

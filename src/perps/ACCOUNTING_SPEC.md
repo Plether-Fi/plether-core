@@ -56,7 +56,7 @@ Operational rules:
 
 - `bullMaxProfit`: worst-case payout to all live BULL positions at one price extreme
 - `bearMaxProfit`: worst-case payout to all live BEAR positions at the opposite price extreme
-- `maxLiability = max(bullMaxProfit, bearMaxProfit)`
+- `maxLiability = max(max(bullMaxProfit - bullTotalMargin, 0), max(bearMaxProfit - bearTotalMargin, 0))`
 - `badDebt`: realized shortfall that could not be covered by reachable account value or available settlement paths
 
 ### Conservative unrealized MtM
@@ -90,12 +90,13 @@ Definition:
 Rule:
 
 - a risk-increasing action is allowed only if post-op effective solvency assets remain at least as large as post-op bounded liability.
+- the bounded-liability input is reduced by side-local trader margin, so only LP-backed side risk consumes capacity.
 
 Notes:
 
 - this view does not rely on speculative receivables,
 - it must not count unrealized trader losses as spendable assets,
-- it is less conservative than LP withdrawal accounting, but still bounded and physical-first.
+- it is less conservative than raw gross max-profit accounting because active trader margin is treated as self-funded capacity.
 
 ### 2. LP withdrawal view
 

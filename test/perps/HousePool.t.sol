@@ -210,7 +210,7 @@ contract HousePoolTest is BasePerpTest {
         bytes[] memory empty;
         router.executeOrder(1, empty);
 
-        // Max liability = 800k (BULL at $1, cap $2 → max profit = entry*size = $800k)
+        // LP-backed max liability nets the side's trader margin from max profit.
         // Free USDC = totalAssets - maxLiability
         uint256 freeUsdc = pool.getFreeUSDC();
         uint256 seniorMax = pool.getMaxSeniorWithdraw();
@@ -1266,7 +1266,7 @@ contract HousePoolTest is BasePerpTest {
 
         uint256 freeUSDC = pool.getFreeUSDC();
         uint256 vaultBal = pool.totalAssets();
-        uint256 expectedReserved = 100_000 * 1e6 + fees;
+        uint256 expectedReserved = _maxLiability() + fees;
 
         assertEq(
             freeUSDC,
@@ -2900,8 +2900,8 @@ contract HousePoolAuditTest is BasePerpTest {
         uint256 fees = engine.accumulatedFeesUsdc();
         assertGt(fees, 0, "Fees should have accumulated");
 
-        uint256 maxLiability = _sideMaxProfit(CfdTypes.Side.BULL);
-        assertEq(maxLiability, 500_100e6, "Both positions should be open");
+        uint256 bullSideMaxProfit = _sideMaxProfit(CfdTypes.Side.BULL);
+        assertEq(bullSideMaxProfit, 500_100e6, "Both positions should be open");
 
         address feeRecipient = address(0xFEE);
         engine.withdrawFees(feeRecipient);
