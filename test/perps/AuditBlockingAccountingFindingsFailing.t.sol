@@ -271,7 +271,7 @@ contract AuditBlockingAccountingFindingsFailing_PartialCloseWithCommittedMargin 
 
 }
 
-contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
+contract AuditBlockingAccountingFindingsFailing_ClaimBounty is BasePerpTest {
 
     address trader = address(0xC200);
     address counterparty = address(0xBEA3);
@@ -436,7 +436,7 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
         );
 
         OrderRouter.OrderRecord memory record = _orderRecord(1);
-        assertEq(record.executionBountyUsdc, 0, "Deferred bounty should be cleared on liquidation");
+        assertEq(record.executionBountyUsdc, 0, "keeper claim should be cleared on liquidation");
     }
 
     function test_H2_OpenOrderStillRevertsWhenFullyUtilized() public {

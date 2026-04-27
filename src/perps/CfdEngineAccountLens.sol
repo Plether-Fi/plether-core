@@ -41,7 +41,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         viewData.terminalReachableUsdc = MarginClearinghouseAccountingLib.getTerminalReachableUsdc(buckets);
         viewData.accountEquityUsdc = engineContract.clearinghouse().getAccountEquityUsdc(account);
         viewData.freeBuyingPowerUsdc = engineContract.clearinghouse().getFreeBuyingPowerUsdc(account);
-        viewData.deferredTraderCreditUsdc = engineContract.deferredTraderCreditUsdc(account);
+        viewData.traderClaimBalanceUsdc = engineContract.clearinghouse().traderClaimBalanceUsdc(account);
     }
 
     /// @notice Returns the current withdrawable USDC for an account under engine-side guards.
@@ -124,7 +124,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         return imrHeadroomUsdc < withdrawableUsdc ? imrHeadroomUsdc : withdrawableUsdc;
     }
 
-    /// @notice Returns a compact accounting split for account custody, escrow, and deferred balances.
+    /// @notice Returns a compact accounting split for account custody, escrow, and claim balances.
     function getAccountLedgerView(
         address account
     ) external view returns (AccountLensViewTypes.AccountLedgerView memory viewData) {
@@ -135,7 +135,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         viewData.otherLockedMarginUsdc = snapshot.otherLockedMarginUsdc;
         viewData.executionEscrowUsdc = snapshot.executionEscrowUsdc;
         viewData.committedMarginUsdc = snapshot.committedMarginUsdc;
-        viewData.deferredTraderCreditUsdc = snapshot.deferredTraderCreditUsdc;
+        viewData.traderClaimBalanceUsdc = snapshot.traderClaimBalanceUsdc;
         viewData.pendingOrderCount = snapshot.pendingOrderCount;
     }
 
@@ -165,7 +165,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         snapshot.reservedSettlementBucketUsdc = lockedBuckets.reservedSettlementUsdc;
         snapshot.executionEscrowUsdc = escrow.executionBountyUsdc;
         snapshot.committedMarginUsdc = escrow.committedMarginUsdc;
-        snapshot.deferredTraderCreditUsdc = engineContract.deferredTraderCreditUsdc(account);
+        snapshot.traderClaimBalanceUsdc = engineContract.clearinghouse().traderClaimBalanceUsdc(account);
         snapshot.pendingOrderCount = escrow.pendingOrderCount;
         snapshot.closeReachableUsdc = buckets.freeSettlementUsdc;
         snapshot.terminalReachableUsdc = MarginClearinghouseAccountingLib.getTerminalReachableUsdc(buckets);

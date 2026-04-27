@@ -11,9 +11,8 @@ interface ICfdEngineTypes {
     error CfdEngine__RouterAlreadySet();
     error CfdEngine__DependenciesAlreadySet();
     error CfdEngine__NoFeesToWithdraw();
-    error CfdEngine__NoDeferredTraderCredit();
+    error CfdEngine__NoClaimBalance();
     error CfdEngine__InsufficientVaultLiquidity();
-    error CfdEngine__NoDeferredKeeperCredit();
     error CfdEngine__MustCloseOpposingPosition();
     error CfdEngine__CarryExceedsMargin();
     error CfdEngine__VaultSolvencyExceeded();
@@ -55,7 +54,7 @@ interface ICfdEngineTypes {
         uint256 terminalReachableUsdc;
         uint256 accountEquityUsdc;
         uint256 freeBuyingPowerUsdc;
-        uint256 deferredTraderCreditUsdc;
+        uint256 traderClaimBalanceUsdc;
     }
 
     struct PositionView {
@@ -66,7 +65,7 @@ interface ICfdEngineTypes {
         uint256 entryPrice;
         uint256 entryNotionalUsdc;
         uint256 physicalReachableCollateralUsdc;
-        uint256 nettableDeferredTraderCreditUsdc;
+        uint256 nettableTraderClaimUsdc;
         int256 unrealizedPnlUsdc;
         int256 netEquityUsdc;
         uint256 maxProfitUsdc;
@@ -79,8 +78,8 @@ interface ICfdEngineTypes {
         uint256 withdrawalReservedUsdc;
         uint256 freeUsdc;
         uint256 accumulatedFeesUsdc;
-        uint256 totalDeferredTraderCreditUsdc;
-        uint256 totalDeferredKeeperCreditUsdc;
+        uint256 totalTraderClaimBalanceUsdc;
+        uint256 totalKeeperClaimBalanceUsdc;
         bool degradedMode;
         bool hasLiveLiability;
     }
@@ -95,10 +94,10 @@ interface ICfdEngineTypes {
         uint256 vpiUsdc;
         uint256 executionFeeUsdc;
         uint256 freshTraderPayoutUsdc;
-        uint256 existingDeferredConsumedUsdc;
-        uint256 existingDeferredRemainingUsdc;
+        uint256 existingTraderClaimConsumedUsdc;
+        uint256 existingTraderClaimRemainingUsdc;
         uint256 immediatePayoutUsdc;
-        uint256 deferredTraderCreditUsdc;
+        uint256 traderClaimBalanceUsdc;
         uint256 seizedCollateralUsdc;
         uint256 badDebtUsdc;
         uint256 remainingSize;
@@ -119,10 +118,10 @@ interface ICfdEngineTypes {
         uint256 seizedCollateralUsdc;
         uint256 settlementRetainedUsdc;
         uint256 freshTraderPayoutUsdc;
-        uint256 existingDeferredConsumedUsdc;
-        uint256 existingDeferredRemainingUsdc;
+        uint256 existingTraderClaimConsumedUsdc;
+        uint256 existingTraderClaimRemainingUsdc;
         uint256 immediatePayoutUsdc;
-        uint256 deferredTraderCreditUsdc;
+        uint256 traderClaimBalanceUsdc;
         uint256 badDebtUsdc;
         bool triggersDegradedMode;
         bool postOpDegradedMode;
@@ -130,11 +129,11 @@ interface ICfdEngineTypes {
         uint256 maxLiabilityAfterUsdc;
     }
 
-    struct DeferredCreditStatus {
-        uint256 deferredTraderCreditUsdc;
-        bool traderPayoutClaimableNow;
-        uint256 deferredKeeperCreditUsdc;
-        bool keeperCreditClaimableNow;
+    struct ClaimStatus {
+        uint256 traderClaimBalanceUsdc;
+        bool traderClaimServiceableNow;
+        uint256 keeperClaimBalanceUsdc;
+        bool keeperClaimServiceableNow;
     }
 
     struct SideState {

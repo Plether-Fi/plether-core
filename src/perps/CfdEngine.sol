@@ -46,7 +46,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         uint256 terminalReachableUsdc;
         uint256 accountEquityUsdc;
         uint256 freeBuyingPowerUsdc;
-        uint256 deferredTraderCreditUsdc;
+        uint256 traderClaimBalanceUsdc;
     }
 
     struct PositionView {
@@ -57,7 +57,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         uint256 entryPrice;
         uint256 entryNotionalUsdc;
         uint256 physicalReachableCollateralUsdc;
-        uint256 nettableDeferredTraderCreditUsdc;
+        uint256 nettableTraderClaimUsdc;
         int256 unrealizedPnlUsdc;
         int256 netEquityUsdc;
         uint256 maxProfitUsdc;
@@ -70,8 +70,8 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         uint256 withdrawalReservedUsdc;
         uint256 freeUsdc;
         uint256 accumulatedFeesUsdc;
-        uint256 totalDeferredTraderCreditUsdc;
-        uint256 totalDeferredKeeperCreditUsdc;
+        uint256 totalTraderClaimBalanceUsdc;
+        uint256 totalKeeperClaimBalanceUsdc;
         bool degradedMode;
         bool hasLiveLiability;
     }
@@ -86,10 +86,10 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         uint256 vpiUsdc;
         uint256 executionFeeUsdc;
         uint256 freshTraderPayoutUsdc;
-        uint256 existingDeferredConsumedUsdc;
-        uint256 existingDeferredRemainingUsdc;
+        uint256 existingTraderClaimConsumedUsdc;
+        uint256 existingTraderClaimRemainingUsdc;
         uint256 immediatePayoutUsdc;
-        uint256 deferredTraderCreditUsdc;
+        uint256 traderClaimBalanceUsdc;
         uint256 seizedCollateralUsdc;
         uint256 badDebtUsdc;
         uint256 remainingSize;
@@ -110,10 +110,10 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         uint256 seizedCollateralUsdc;
         uint256 settlementRetainedUsdc;
         uint256 freshTraderPayoutUsdc;
-        uint256 existingDeferredConsumedUsdc;
-        uint256 existingDeferredRemainingUsdc;
+        uint256 existingTraderClaimConsumedUsdc;
+        uint256 existingTraderClaimRemainingUsdc;
         uint256 immediatePayoutUsdc;
-        uint256 deferredTraderCreditUsdc;
+        uint256 traderClaimBalanceUsdc;
         uint256 badDebtUsdc;
         bool triggersDegradedMode;
         bool postOpDegradedMode;
@@ -121,11 +121,11 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         uint256 maxLiabilityAfterUsdc;
     }
 
-    struct DeferredCreditStatus {
-        uint256 deferredTraderCreditUsdc;
-        bool traderPayoutClaimableNow;
-        uint256 deferredKeeperCreditUsdc;
-        bool keeperCreditClaimableNow;
+    struct ClaimStatus {
+        uint256 traderClaimBalanceUsdc;
+        bool traderClaimServiceableNow;
+        uint256 keeperClaimBalanceUsdc;
+        bool keeperClaimServiceableNow;
     }
 
     struct SideState {
@@ -169,10 +169,6 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
 
     CfdTypes.RiskParams public riskParams;
     mapping(address => StoredPosition) internal _positions;
-    mapping(address => uint256) public deferredTraderCreditUsdc;
-    uint256 public totalDeferredTraderCreditUsdc;
-    mapping(address => uint256) public deferredKeeperCreditUsdc;
-    uint256 public totalDeferredKeeperCreditUsdc;
     address public orderRouter;
 
     mapping(uint256 => bool) public fadDayOverrides;
@@ -186,9 +182,8 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     error CfdEngine__RouterAlreadySet();
     error CfdEngine__DependenciesAlreadySet();
     error CfdEngine__NoFeesToWithdraw();
-    error CfdEngine__NoDeferredTraderCredit();
+    error CfdEngine__NoClaimBalance();
     error CfdEngine__InsufficientVaultLiquidity();
-    error CfdEngine__NoDeferredKeeperCredit();
     error CfdEngine__MustCloseOpposingPosition();
     error CfdEngine__CarryExceedsMargin();
     error CfdEngine__VaultSolvencyExceeded();
@@ -236,10 +231,6 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     event BadDebtCleared(uint256 amount, uint256 remaining);
     event DegradedModeEntered(uint256 effectiveAssets, uint256 maxLiability, address indexed triggeringAccount);
     event DegradedModeCleared();
-    event DeferredTraderCreditRecorded(address indexed account, uint256 amountUsdc);
-    event DeferredTraderCreditClaimed(address indexed account, uint256 amountUsdc);
-    event DeferredKeeperCreditRecorded(address indexed keeper, uint256 amountUsdc);
-    event DeferredKeeperCreditClaimed(address indexed keeper, uint256 amountUsdc);
     event CarryCheckpointed(address indexed account, uint256 addedUnsettledCarryUsdc, uint256 totalUnsettledCarryUsdc);
     event CarryRealized(
         address indexed account,
@@ -280,7 +271,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         bearState = _sideState(CfdTypes.Side.BEAR);
     }
 
-    function _checkpointDeferredClaimCarryIfPossible(
+    function _checkpointClaimCarryIfPossible(
         address account,
         StoredPosition storage pos
     ) internal {
@@ -302,15 +293,16 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         _checkpointCarryBeforeBasisChange(account, pos, price, _genericReachableCollateralUsdc(account));
     }
 
-    function _claimDeferredBalance(
+    function _serviceClaimBalance(
         uint256 amount,
-        address account
+        address account,
+        IMarginClearinghouse.ClaimKind kind
     ) internal returns (uint256 claimAmountUsdc) {
-        claimAmountUsdc = CashPriorityLib.availableCashForDeferredBeneficiaryClaim(
+        claimAmountUsdc = CashPriorityLib.availableCashForClaimService(
             vault.totalAssets(),
             accumulatedFeesUsdc,
-            totalDeferredTraderCreditUsdc,
-            totalDeferredKeeperCreditUsdc,
+            clearinghouse.totalTraderClaimBalanceUsdc(),
+            clearinghouse.totalKeeperClaimBalanceUsdc(),
             amount
         );
         if (claimAmountUsdc == 0) {
@@ -318,25 +310,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         }
 
         vault.payOut(address(clearinghouse), claimAmountUsdc);
-        clearinghouse.settleUsdc(account, int256(claimAmountUsdc));
-    }
-
-    function _increaseDeferredLiability(
-        uint256 currentAmountUsdc,
-        uint256 currentTotalUsdc,
-        uint256 amountUsdc
-    ) internal pure returns (uint256 updatedAmountUsdc, uint256 updatedTotalUsdc) {
-        updatedAmountUsdc = currentAmountUsdc + amountUsdc;
-        updatedTotalUsdc = currentTotalUsdc + amountUsdc;
-    }
-
-    function _decreaseDeferredLiability(
-        uint256 currentAmountUsdc,
-        uint256 currentTotalUsdc,
-        uint256 amountUsdc
-    ) internal pure returns (uint256 updatedAmountUsdc, uint256 updatedTotalUsdc) {
-        updatedAmountUsdc = currentAmountUsdc - amountUsdc;
-        updatedTotalUsdc = currentTotalUsdc - amountUsdc;
+        clearinghouse.releaseClaimToSettlement(account, kind, claimAmountUsdc);
     }
 
     modifier onlyRouter() {
@@ -591,52 +565,29 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         _checkpointCarryBeforeBasisChange(account, pos, price, reachableCollateralBasisUsdc);
     }
 
-    /// @notice Claims deferred trader credit balance into the clearinghouse.
-    /// @dev The claim can be partial if current vault cash is insufficient. Funds are credited to the
-    ///      clearinghouse first, so beneficiaries access them through the normal account-balance path.
-    ///      Carry is checkpointed before the settlement-basis change using a fresh mark when available,
-    ///      otherwise the cached stored mark is used.
-    function claimDeferredTraderCredit(
+    /// @notice Services a non-spendable clearinghouse claim into spendable settlement balance when vault cash allows it.
+    /// @dev Trader claims are beneficiary-account claims. Keeper claims are keyed by the keeper's address-derived account.
+    ///      The claim can be partial if current vault cash is insufficient. Funds are credited to the clearinghouse first,
+    ///      so beneficiaries access them through the normal account-balance path. Carry is checkpointed before the
+    ///      settlement-basis change using a fresh mark when available, otherwise the cached stored mark is used.
+    function claimBalance(
+        IMarginClearinghouse.ClaimKind kind,
         address account
     ) external nonReentrant {
         if (msg.sender != account) {
             revert CfdEngine__NotAccountOwner();
         }
         StoredPosition storage pos = _positions[account];
-        _checkpointDeferredClaimCarryIfPossible(account, pos);
+        _checkpointClaimCarryIfPossible(account, pos);
 
-        uint256 amount = deferredTraderCreditUsdc[account];
+        uint256 amount = kind == IMarginClearinghouse.ClaimKind.Trader
+            ? clearinghouse.traderClaimBalanceUsdc(account)
+            : clearinghouse.keeperClaimBalanceUsdc(account);
         if (amount == 0) {
-            revert CfdEngine__NoDeferredTraderCredit();
-        }
-        uint256 claimAmountUsdc = _claimDeferredBalance(amount, account);
-
-        deferredTraderCreditUsdc[account] -= claimAmountUsdc;
-        totalDeferredTraderCreditUsdc -= claimAmountUsdc;
-
-        emit DeferredTraderCreditClaimed(account, claimAmountUsdc);
-    }
-
-    /// @notice Claims previously deferred keeper credit when the vault has replenished cash.
-    /// @dev Deferred keeper value always settles to clearinghouse credit for the recorded keeper address-derived account.
-    function claimDeferredKeeperCredit() external nonReentrant {
-        address beneficiary = msg.sender;
-        address account = beneficiary;
-        StoredPosition storage pos = _positions[account];
-        _checkpointDeferredClaimCarryIfPossible(account, pos);
-
-        uint256 amount = deferredKeeperCreditUsdc[beneficiary];
-        if (amount == 0) {
-            revert CfdEngine__NoDeferredKeeperCredit();
+            revert CfdEngine__NoClaimBalance();
         }
 
-        uint256 claimAmountUsdc = _claimDeferredBalance(amount, account);
-
-        (deferredKeeperCreditUsdc[beneficiary], totalDeferredKeeperCreditUsdc) = _decreaseDeferredLiability(
-            deferredKeeperCreditUsdc[beneficiary], totalDeferredKeeperCreditUsdc, claimAmountUsdc
-        );
-
-        emit DeferredKeeperCreditClaimed(beneficiary, claimAmountUsdc);
+        _serviceClaimBalance(amount, account, kind);
     }
 
     function reserveCloseOrderExecutionBounty(
@@ -940,7 +891,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         IOrderRouterAccounting(orderRouter).syncMarginQueue(account);
     }
 
-    function _payOrRecordDeferredTraderPayout(
+    function _payOrRecordTraderClaim(
         address account,
         uint256 amountUsdc
     ) internal {
@@ -952,25 +903,22 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
             vault.payOut(address(clearinghouse), amountUsdc);
             clearinghouse.settleUsdc(account, int256(amountUsdc));
         } else {
-            _enqueueOrAccrueDeferredTraderPayout(account, amountUsdc);
-            emit DeferredTraderCreditRecorded(account, amountUsdc);
+            _creditTraderClaim(account, amountUsdc);
         }
     }
 
-    function _enqueueOrAccrueDeferredTraderPayout(
+    function _creditTraderClaim(
         address account,
         uint256 amountUsdc
     ) internal {
-        (deferredTraderCreditUsdc[account], totalDeferredTraderCreditUsdc) =
-            _increaseDeferredLiability(deferredTraderCreditUsdc[account], totalDeferredTraderCreditUsdc, amountUsdc);
+        clearinghouse.creditClaim(account, IMarginClearinghouse.ClaimKind.Trader, amountUsdc);
     }
 
-    function _enqueueOrAccrueDeferredKeeperCredit(
+    function _creditKeeperClaim(
         address keeper,
         uint256 amountUsdc
     ) internal {
-        (deferredKeeperCreditUsdc[keeper], totalDeferredKeeperCreditUsdc) =
-            _increaseDeferredLiability(deferredKeeperCreditUsdc[keeper], totalDeferredKeeperCreditUsdc, amountUsdc);
+        clearinghouse.creditClaim(keeper, IMarginClearinghouse.ClaimKind.Keeper, amountUsdc);
     }
 
     function _canPayFreshVaultPayout(
@@ -991,7 +939,10 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
 
     function _freshVaultReservation() internal view returns (CashPriorityLib.SeniorCashReservation memory reservation) {
         return CashPriorityLib.reserveFreshPayouts(
-            vault.totalAssets(), accumulatedFeesUsdc, totalDeferredTraderCreditUsdc, totalDeferredKeeperCreditUsdc
+            vault.totalAssets(),
+            accumulatedFeesUsdc,
+            clearinghouse.totalTraderClaimBalanceUsdc(),
+            clearinghouse.totalKeeperClaimBalanceUsdc()
         );
     }
 
@@ -1040,14 +991,14 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         return _positions[account].lastCarryTimestamp;
     }
 
-    /// @notice Liquidates an undercollateralized position and services or defers the keeper bounty.
+    /// @notice Liquidates an undercollateralized position and services the keeper bounty or records a keeper claim.
     ///         Surplus equity (after bounty) is returned to the user.
     ///         In bad-debt cases (equity < bounty), all remaining margin is seized by the vault.
     /// @param account Clearinghouse account that owns the position
     /// @param currentOraclePrice Pyth oracle price (8 decimals), clamped to CAP_PRICE
     /// @param vaultDepthUsdc HousePool total assets used for post-op solvency checks and payout affordability
     /// @param publishTime Pyth publish timestamp, stored as lastMarkTime
-    /// @param keeper Account receiving immediate liquidation-bounty credit or deferred keeper credit
+    /// @param keeper Account receiving immediate liquidation-bounty credit or keeper claim balance
     /// @return keeperBountyUsdc Bounty owed to the liquidation keeper (USDC, 6 decimals)
     function liquidatePosition(
         address account,
@@ -1100,8 +1051,8 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
             vault.totalAssets(),
             accumulatedFeesUsdc,
             _maxLiability(),
-            totalDeferredTraderCreditUsdc,
-            totalDeferredKeeperCreditUsdc
+            clearinghouse.totalTraderClaimBalanceUsdc(),
+            clearinghouse.totalKeeperClaimBalanceUsdc()
         );
     }
 
@@ -1149,9 +1100,9 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         snap.accumulatedFeesUsdc = accumulatedFeesUsdc;
         snap.accumulatedBadDebtUsdc = accumulatedBadDebtUsdc;
         snap.unsettledCarryUsdc = unsettledCarryUsdc[account];
-        snap.totalDeferredTraderCreditUsdc = totalDeferredTraderCreditUsdc;
-        snap.totalDeferredKeeperCreditUsdc = totalDeferredKeeperCreditUsdc;
-        snap.deferredTraderCreditForAccount = deferredTraderCreditUsdc[account];
+        snap.totalTraderClaimBalanceUsdc = clearinghouse.totalTraderClaimBalanceUsdc();
+        snap.totalKeeperClaimBalanceUsdc = clearinghouse.totalKeeperClaimBalanceUsdc();
+        snap.traderClaimBalanceForAccount = clearinghouse.traderClaimBalanceUsdc(account);
         snap.degradedMode = degradedMode;
 
         snap.capPrice = CAP_PRICE;
@@ -1258,18 +1209,18 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         }
     }
 
-    function settlementConsumeDeferredTraderPayout(
+    function settlementConsumeTraderClaim(
         address account,
         uint256 amountUsdc
     ) external onlySettlementModule {
-        _consumeDeferredTraderPayout(account, amountUsdc);
+        _consumeTraderClaim(account, amountUsdc);
     }
 
-    function settlementRecordDeferredTraderPayout(
+    function settlementRecordTraderPayout(
         address account,
         uint256 amountUsdc
     ) external onlySettlementModule {
-        _payOrRecordDeferredTraderPayout(account, amountUsdc);
+        _payOrRecordTraderClaim(account, amountUsdc);
     }
 
     function settlementAccumulateFees(
@@ -1368,8 +1319,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
             } catch {}
         }
 
-        _enqueueOrAccrueDeferredKeeperCredit(keeper, amountUsdc);
-        emit DeferredKeeperCreditRecorded(keeper, amountUsdc);
+        _creditKeeperClaim(keeper, amountUsdc);
     }
 
     function _enterDegradedModeIfInsolvent(
@@ -1531,7 +1481,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         .maxStaleness;
     }
 
-    function _consumeDeferredTraderPayout(
+    function _consumeTraderClaim(
         address account,
         uint256 amountUsdc
     ) internal {
@@ -1539,8 +1489,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
             return;
         }
 
-        deferredTraderCreditUsdc[account] -= amountUsdc;
-        totalDeferredTraderCreditUsdc -= amountUsdc;
+        clearinghouse.consumeClaim(account, IMarginClearinghouse.ClaimKind.Trader, amountUsdc);
     }
 
     function _validateRiskParams(

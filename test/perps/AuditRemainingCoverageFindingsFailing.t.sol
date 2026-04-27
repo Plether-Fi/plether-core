@@ -211,7 +211,7 @@ contract AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees is BasePerp
         router.executeOrder(1, priceData);
 
         (uint256 size,,,,,,) = engine.positions(account);
-        assertEq(size, 0, "A profitable close should complete even when profit payout must be deferred");
+        assertEq(size, 0, "A profitable close should complete even when profit payout must become a claim");
     }
 
     function test_M2_CloseCommitRequiresPrefundedKeeperBounty() public {
@@ -229,7 +229,7 @@ contract AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees is BasePerp
         assertEq(_executionBountyReserve(1), 200_000, "Close commits should escrow the configured flat clearer bounty");
     }
 
-    function test_H5_CloseKeeperRewardMustDeferInsteadOfRevertingOnCashShortage() public {
+    function test_H5_CloseKeeperRewardMustRecordClaimInsteadOfRevertingOnCashShortage() public {
         address account = trader;
         address keeperAccount = keeper;
         _fundTrader(trader, 11_000e6);
@@ -254,9 +254,9 @@ contract AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees is BasePerp
         (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Close should still succeed even when execution bounty cash is unavailable");
         assertEq(
-            engine.deferredKeeperCreditUsdc(keeper),
+            clearinghouse.keeperClaimBalanceUsdc(keeper),
             0,
-            "Illiquid close execution should not touch deferred vault-funded clearer claims"
+            "Illiquid close execution should not touch vault-funded clearer claims"
         );
         assertEq(
             clearinghouse.balanceUsdc(keeperAccount) - keeperSettlementBefore,
@@ -273,7 +273,7 @@ contract AuditRemainingCoverageFindingsFailing_TerminalLiveness is BasePerpTest 
     address spammer = address(0x7101);
     address keeper = address(0x7102);
 
-    function test_H6_LiquidationKeeperRewardMustDeferInsteadOfRevertingOnCashShortage() public {
+    function test_H6_LiquidationKeeperRewardMustRecordClaimInsteadOfRevertingOnCashShortage() public {
         address account = trader;
         _fundTrader(trader, 11_000e6);
 
@@ -290,7 +290,11 @@ contract AuditRemainingCoverageFindingsFailing_TerminalLiveness is BasePerpTest 
 
         (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Liquidation should still succeed even when bounty cash is unavailable");
-        assertGt(engine.deferredKeeperCreditUsdc(keeper), 0, "Liquidation bounty should defer instead of reverting");
+        assertGt(
+            clearinghouse.keeperClaimBalanceUsdc(keeper),
+            0,
+            "Liquidation bounty should create a claim instead of reverting"
+        );
     }
 
     function test_M3_TerminalCloseMustRemainExecutableUnderBoundedForeignQueue() public {

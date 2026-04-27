@@ -40,7 +40,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
         selectors[3] = handler.commitCloseOrder.selector;
         selectors[4] = handler.executeNextOrderBatch.selector;
         selectors[5] = handler.liquidate.selector;
-        selectors[6] = handler.claimDeferredKeeperCredit.selector;
+        selectors[6] = handler.claimKeeperClaim.selector;
         selectors[7] = handler.setRouterPayoutFailureMode.selector;
         selectors[8] = handler.warpForward.selector;
         selectors[9] = handler.syncMarkNow.selector;
@@ -55,14 +55,14 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
 
         assertEq(accountingView.degradedMode, engine.degradedMode(), "Protocol accounting view degraded flag mismatch");
         assertEq(
-            accountingView.totalDeferredTraderCreditUsdc,
-            engine.totalDeferredTraderCreditUsdc(),
-            "Protocol accounting view deferred trader credit mismatch"
+            accountingView.totalTraderClaimBalanceUsdc,
+            clearinghouse.totalTraderClaimBalanceUsdc(),
+            "Protocol accounting view trader claim balance mismatch"
         );
         assertEq(
-            accountingView.totalDeferredKeeperCreditUsdc,
-            engine.totalDeferredKeeperCreditUsdc(),
-            "Protocol accounting view deferred keeper credit mismatch"
+            accountingView.totalKeeperClaimBalanceUsdc,
+            clearinghouse.totalKeeperClaimBalanceUsdc(),
+            "Protocol accounting view keeper claim balance mismatch"
         );
         assertEq(
             accountingView.accumulatedFeesUsdc,
@@ -300,17 +300,17 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
         assertEq(actual.settlementRetainedUsdc, expected.settlementRetainedUsdc, "Settlement retained should match");
         assertEq(actual.freshTraderPayoutUsdc, expected.freshTraderPayoutUsdc, "Fresh trader payout should match");
         assertEq(
-            actual.existingDeferredConsumedUsdc,
-            expected.existingDeferredConsumedUsdc,
-            "Deferred consumption should match"
+            actual.existingTraderClaimConsumedUsdc,
+            expected.existingTraderClaimConsumedUsdc,
+            "claim consumption should match"
         );
         assertEq(
-            actual.existingDeferredRemainingUsdc,
-            expected.existingDeferredRemainingUsdc,
-            "Deferred remainder should match"
+            actual.existingTraderClaimRemainingUsdc,
+            expected.existingTraderClaimRemainingUsdc,
+            "claim remainder should match"
         );
         assertEq(actual.immediatePayoutUsdc, expected.immediatePayoutUsdc, "Immediate payout should match");
-        assertEq(actual.deferredTraderCreditUsdc, expected.deferredTraderCreditUsdc, "Deferred payout should match");
+        assertEq(actual.traderClaimBalanceUsdc, expected.traderClaimBalanceUsdc, "trader claim balance should match");
         assertEq(actual.badDebtUsdc, expected.badDebtUsdc, "Bad debt should match");
         assertEq(actual.triggersDegradedMode, expected.triggersDegradedMode, "Degraded trigger should match");
         assertEq(actual.postOpDegradedMode, expected.postOpDegradedMode, "Post-op degraded mode should match");

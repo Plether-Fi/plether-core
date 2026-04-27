@@ -7,7 +7,7 @@ It is the source of truth for:
 - solvency,
 - LP withdrawal limits,
 - close and liquidation settlement,
-- deferred liabilities,
+- non-spendable claim liabilities,
 - router escrow treatment,
 - LP-capital carry.
 
@@ -28,7 +28,7 @@ The key rules are:
 2. Unrealized trader losses are not LP assets until they are physically realized.
 3. LP withdrawals are stricter than protocol solvency.
 4. Pending-order reservations are not free trader collateral.
-5. Realized shortfall must become either immediate seizure, deferred liability, or bad debt.
+5. Realized shortfall must become either immediate seizure, non-spendable claim liability, or bad debt.
 6. A valid risk-reducing transition must not revert just to preserve pre-close solvency; the protocol contains the outcome with `degradedMode` instead.
 
 ## Canonical Quantities
@@ -112,8 +112,8 @@ freeUsdc = netPhysicalAssets - withdrawalReservedUsdc
 Where `withdrawalReservedUsdc` is built from the canonical reserve model, including at least:
 
 - bounded trader liability,
-- deferred trader credit,
-- deferred keeper credit,
+- trader claim balance,
+- keeper claim balance,
 - protocol-owned inventory.
 
 Rule:
@@ -135,7 +135,7 @@ Question answered:
 Definition:
 
 - start from `netPhysicalAssets`,
-- subtract deferred liabilities and protocol-owned balances,
+- subtract non-spendable claim liabilities and protocol-owned balances,
 - apply conservative unrealized MtM liability only,
 - do not book unrealized trader losses as assets.
 
@@ -162,7 +162,7 @@ Question answered:
 Rules:
 
 - use physically reachable clearinghouse collateral for generic views and withdraw checks,
-- same-account deferred trader credit is a separate explicit netting bucket rather than generic collateral,
+- same-account trader claim balance is a separate explicit netting bucket rather than generic collateral,
 - liquidation and close settlement must cap seizure and payout logic by actually reachable value,
 - pending-order reservations and router escrow must be handled explicitly rather than assumed to be free cash.
 
@@ -182,8 +182,8 @@ Key fields:
 - `maxLiabilityUsdc`
 - `supplementalReservedUsdc`: reserved extension slot for LP-withdrawal accounting; currently zero in the carry model
 - `unrealizedMtmLiabilityUsdc`
-- `deferredTraderCreditUsdc`
-- `deferredKeeperCreditUsdc`
+- trader claim balance
+- keeper claim balance
 - `protocolFeesUsdc`
 - `markFreshnessRequired`
 - `maxMarkStaleness`
@@ -293,37 +293,37 @@ Rules:
 - carry does not pause when the oracle is stale or frozen,
 - both sides pay when they consume LP-backed capital,
 - pending carry reduces equity for guard and risk checks before realization,
-- basis-changing settlement credits must checkpoint carry even when physical collection is deferred,
+- basis-changing settlement credits must checkpoint carry before physical collection is possible,
 - carry is computed on clearinghouse deposit/withdraw using the pre-mutation reachable basis,
 - on deposit, realized carry may be collected from post-deposit settlement in the same transaction,
 - on withdraw, carry is realized before settlement balance is reduced,
 - liquidation does not have its own separate carry-realization path,
 - realized carry is booked as LP trading revenue.
 
-## Deferred Liabilities
+## Non-Spendable Claims
 
 The protocol supports fail-soft terminal settlement.
 
-### Deferred trader credit
+### Trader claims
 
-- profitable closes and some liquidation residuals may create `deferredTraderCreditUsdc[account]`,
-- only the beneficiary account owner may call `claimDeferredTraderCredit(account)`,
-- claims may be partial,
-- settlement is credited into `MarginClearinghouse`.
+- profitable closes and some liquidation residuals may create a non-spendable clearinghouse trader claim,
+- only the beneficiary account owner may call `claimBalance(ClaimKind.Trader, account)`,
+- claim servicing is all-or-nothing for the requested beneficiary balance while aggregate claim liabilities are underfunded,
+- serviced claims move into spendable `MarginClearinghouse` settlement balance.
 
-### Deferred keeper credit
+### Keeper claims
 
-- illiquid liquidation bounties may create `deferredKeeperCreditUsdc[beneficiary]`,
-- only the recorded beneficiary may call `claimDeferredKeeperCredit()`,
-- settlement is credited into `MarginClearinghouse`.
+- illiquid liquidation bounties may create a non-spendable clearinghouse keeper claim,
+- only the recorded beneficiary may call `claimBalance(ClaimKind.Keeper, keeper)`,
+- serviced claims move into spendable `MarginClearinghouse` settlement balance.
 
 Rules:
 
-- deferred liabilities are beneficiary-balance based, not FIFO queue based,
+- non-spendable claim liabilities are beneficiary-balance based, not FIFO queue based,
 - they are senior claims on vault cash,
-- deferred claim servicing outranks protocol fee withdrawals when cash is insufficient to satisfy both,
-- deferred claim servicing is frozen entirely while physical vault cash is below aggregate deferred liabilities,
-- fee withdrawal, fresh payout funding, fresh liquidation bounty payment, and deferred servicing must all agree on what cash is actually free.
+- claim servicing outranks protocol fee withdrawals when cash is insufficient to satisfy both,
+- claim servicing is frozen entirely while physical vault cash is below aggregate non-spendable claim liabilities,
+- fee withdrawal, fresh payout funding, fresh liquidation bounty payment, and claim servicing must all agree on what cash is actually free.
 
 ## Pending-Order Escrow Model
 
@@ -342,7 +342,7 @@ Rules:
 - escrowed value is not free buying power,
 - releasing or consuming escrow must happen exactly once,
 - clearinghouse reservation records are the source of truth for committed trader margin,
-- router escrow is not LP cash and should not become a deferred vault liability bucket.
+- router escrow is not LP cash and should not become a vault-backed claim liability bucket.
 
 ### Close-order bounty policy
 
@@ -389,14 +389,14 @@ Required properties:
 
 - protocol fee withdrawal may be partial,
 - withdrawing a safe subset of `accumulatedFeesUsdc` must not require the entire fee balance to be currently withdrawable,
-- post-withdraw solvency and deferred-liability reservations must still hold.
+- post-withdraw solvency and claim-liability reservations must still hold.
 
 ### Liquidation settlement
 
 Liquidation must:
 
 1. seize reachable account value,
-2. pay or defer the keeper bounty according to available vault cash,
+2. service the keeper bounty immediately or record a keeper claim according to available vault cash,
 3. preserve residual trader value when positive,
 4. realize remaining shortfall as bad debt,
 5. delete the position,
@@ -420,7 +420,7 @@ Required property:
 Liquidation residuals must be modeled explicitly as:
 
 - settlement retained on-ledger in the clearinghouse,
-- existing deferred trader credit consumed / remaining,
+- existing trader claim balance consumed / remaining,
 - fresh trader payout created by the liquidation itself.
 
 This prevents overloading one residual bucket with multiple meanings.
@@ -531,7 +531,7 @@ The accounting system should preserve the following:
 
 ## Architecture Goal
 
-The system uses multiple conservative accounting kernels because different paths answer different questions: solvency, withdrawal availability, close settlement, liquidation planning, deferred liabilities, and router escrow all need different boundaries.
+The system uses multiple conservative accounting kernels because different paths answer different questions: solvency, withdrawal availability, close settlement, liquidation planning, non-spendable claim liabilities, and router escrow all need different boundaries.
 
 Design rules:
 

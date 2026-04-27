@@ -112,7 +112,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
 
     /// @notice Keeper-triggered liquidation using the canonical live-market staleness policy.
     ///         Forfeits any queued-order execution escrow to the HousePool instead of crediting it back to trader settlement,
-    ///         then asks the engine to service or defer the liquidation keeper bounty.
+    ///         then asks the engine to service the liquidation keeper bounty or record a keeper claim.
     /// @param account The account to liquidate
     /// @param pythUpdateData Pyth price update blobs; attach ETH to cover the Pyth fee
     function executeLiquidation(
