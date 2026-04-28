@@ -14,8 +14,8 @@ import {OracleFreshnessPolicyLib} from "./libraries/OracleFreshnessPolicyLib.sol
 /// @dev Owns Pyth updates, basket math, confidence checks, freshness policy, and cap clamping.
 ///      State-changing callers should use `updateAndGetPrice` and pass its snapshot through execution.
 ///      `getPrice` is view-only and should not be paired with a separate update inside execution flows.
-///      When `pyth == address(0)`, Anvil-only mock mode decodes an optional uint256 price override from
-///      `pythUpdateData[0]`; if absent, it falls back to the stored mark or 1e8 for local testing.
+///      Tests and local deployments should use an IPyth-compatible mock contract instead of branching
+///      production oracle behavior.
 contract PletherOracle is IPletherOracle {
 
     ICfdEngineCore public immutable engine;
@@ -41,34 +41,36 @@ contract PletherOracle is IPletherOracle {
         uint256[] memory basePrices_,
         bool[] memory inversions_
     ) {
+        if (pyth_ == address(0)) {
+            revert PletherOracle__ZeroPyth();
+        }
+
         engine = ICfdEngineCore(engine_);
         housePool = ICfdVault(housePool_);
         pyth = IPyth(pyth_);
         owner = msg.sender;
 
-        if (pyth_ != address(0)) {
-            if (feedIds_.length == 0) {
-                revert PletherOracle__NoFeeds();
-            }
-            if (
-                feedIds_.length != quantities_.length || feedIds_.length != basePrices_.length
-                    || feedIds_.length != inversions_.length
-            ) {
-                revert PletherOracle__ArrayLengthMismatch(
-                    feedIds_.length, quantities_.length, basePrices_.length, inversions_.length
-                );
-            }
+        if (feedIds_.length == 0) {
+            revert PletherOracle__NoFeeds();
+        }
+        if (
+            feedIds_.length != quantities_.length || feedIds_.length != basePrices_.length
+                || feedIds_.length != inversions_.length
+        ) {
+            revert PletherOracle__ArrayLengthMismatch(
+                feedIds_.length, quantities_.length, basePrices_.length, inversions_.length
+            );
+        }
 
-            uint256 totalWeight;
-            for (uint256 i = 0; i < basePrices_.length; i++) {
-                if (basePrices_[i] == 0) {
-                    revert PletherOracle__ZeroBasePrice(i);
-                }
-                totalWeight += quantities_[i];
+        uint256 totalWeight;
+        for (uint256 i = 0; i < basePrices_.length; i++) {
+            if (basePrices_[i] == 0) {
+                revert PletherOracle__ZeroBasePrice(i);
             }
-            if (totalWeight != 1e18) {
-                revert PletherOracle__InvalidTotalWeight(totalWeight);
-            }
+            totalWeight += quantities_[i];
+        }
+        if (totalWeight != 1e18) {
+            revert PletherOracle__InvalidTotalWeight(totalWeight);
         }
 
         pythFeedIds = feedIds_;
@@ -82,18 +84,14 @@ contract PletherOracle is IPletherOracle {
         PriceMode mode
     ) external payable override returns (PriceSnapshot memory snapshot) {
         uint256 pythFee = _updatePrice(pythUpdateData);
-        snapshot = _getPrice(mode, _mockModePrice(pythUpdateData));
+        snapshot = _getPrice(mode);
         snapshot.updateFee = pythFee;
     }
 
     function getPrice(
         PriceMode mode
     ) external view override returns (PriceSnapshot memory snapshot) {
-        uint256 fallbackPrice = engine.lastMarkPrice();
-        if (fallbackPrice == 0) {
-            fallbackPrice = 1e8;
-        }
-        return _getPrice(mode, fallbackPrice);
+        return _getPrice(mode);
     }
 
     function getOrderExecutionPolicy(
@@ -116,9 +114,6 @@ contract PletherOracle is IPletherOracle {
     function getUpdateFee(
         bytes[] calldata pythUpdateData
     ) public view override returns (uint256 pythFee) {
-        if (address(pyth) == address(0)) {
-            return 0;
-        }
         if (pythUpdateData.length == 0) {
             revert PletherOracle__MissingUpdateData();
         }
@@ -130,23 +125,13 @@ contract PletherOracle is IPletherOracle {
     }
 
     function _getPrice(
-        PriceMode mode,
-        uint256 mockModePrice
+        PriceMode mode
     ) internal view returns (PriceSnapshot memory snapshot) {
         PolicySnapshot memory policy = _policyForMode(mode);
         snapshot.maxStaleness = policy.maxStaleness;
         snapshot.closeOnly = policy.closeOnly;
         snapshot.oracleFrozen = policy.oracleFrozen;
         snapshot.isFadWindow = policy.isFadWindow;
-
-        if (address(pyth) == address(0)) {
-            if (block.chainid != 31_337) {
-                revert PletherOracle__MockModeForbidden(block.chainid);
-            }
-            snapshot.price = _clampToCap(mockModePrice);
-            snapshot.publishTime = uint64(block.timestamp);
-            return snapshot;
-        }
 
         uint256 minPublishTime;
         (snapshot.price, minPublishTime) =
@@ -162,43 +147,12 @@ contract PletherOracle is IPletherOracle {
     function _updatePrice(
         bytes[] calldata pythUpdateData
     ) internal returns (uint256 pythFee) {
-        if (address(pyth) == address(0)) {
-            if (block.chainid != 31_337) {
-                revert PletherOracle__MockModeForbidden(block.chainid);
-            }
-            _refundExcess(0);
-            return 0;
-        }
-
         pythFee = getUpdateFee(pythUpdateData);
         if (msg.value < pythFee) {
             revert PletherOracle__InsufficientFee(msg.value, pythFee);
         }
         pyth.updatePriceFeeds{value: pythFee}(pythUpdateData);
         _refundExcess(pythFee);
-    }
-
-    function _mockModePrice(
-        bytes[] calldata pythUpdateData
-    ) internal view returns (uint256 price) {
-        if (address(pyth) != address(0)) {
-            return 0;
-        }
-        if (pythUpdateData.length > 0) {
-            price = abi.decode(pythUpdateData[0], (uint256));
-        } else {
-            price = _storedMarkFallbackPrice();
-        }
-        if (price == 0) {
-            revert PletherOracle__InvalidMockPrice(price);
-        }
-    }
-
-    function _storedMarkFallbackPrice() internal view returns (uint256 price) {
-        price = engine.lastMarkPrice();
-        if (price == 0) {
-            price = 1e8;
-        }
     }
 
     function _policyForOrder(
@@ -340,5 +294,4 @@ contract PletherOracle is IPletherOracle {
             revert PletherOracle__RefundFailed(msg.sender, refund);
         }
     }
-
 }

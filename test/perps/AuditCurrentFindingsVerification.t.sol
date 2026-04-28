@@ -280,7 +280,7 @@ contract AuditCurrentFindingsVerifiedInvalid_RebateIlliquidity is BasePerpTest {
         address keeperAccount = address(this);
         uint256 keeperBefore = clearinghouse.balanceUsdc(keeperAccount);
         uint256 bobSettlementBefore = clearinghouse.balanceUsdc(bobAccount);
-        bytes[] memory empty;
+        bytes[] memory empty = _mockPythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 

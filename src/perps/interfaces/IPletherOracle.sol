@@ -45,8 +45,7 @@ interface IPletherOracle {
     );
     error PletherOracle__ZeroBasePrice(uint256 index);
     error PletherOracle__InvalidTotalWeight(uint256 totalWeight);
-    error PletherOracle__MockModeForbidden(uint256 chainId);
-    error PletherOracle__InvalidMockPrice(uint256 price);
+    error PletherOracle__ZeroPyth();
     error PletherOracle__MissingUpdateData();
     error PletherOracle__InsufficientFee(uint256 provided, uint256 required);
     error PletherOracle__PriceOutOfOrder(uint64 publishTime, uint64 lastMarkTime);

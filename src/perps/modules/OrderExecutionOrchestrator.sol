@@ -132,14 +132,14 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
             return OrderExecutionStepResult.Break;
         }
 
-        if (address(pyth()) != address(0) && !executionContext.oracleFrozen && block.number == order.commitBlock) {
+        if (!executionContext.oracleFrozen && block.number == order.commitBlock) {
             if (revertOnBlockedExecution) {
                 revert IOrderRouterErrors.OrderRouter__SameBlockExecution(order.commitBlock, block.number);
             }
             return OrderExecutionStepResult.Break;
         }
 
-        if (address(pyth()) != address(0) && !executionContext.oracleFrozen && oraclePublishTime <= order.commitTime) {
+        if (!executionContext.oracleFrozen && oraclePublishTime <= order.commitTime) {
             if (revertOnBlockedExecution) {
                 revert IOrderRouterErrors.OrderRouter__OraclePublishTimeNotAfterCommit(
                     oraclePublishTime, order.commitTime

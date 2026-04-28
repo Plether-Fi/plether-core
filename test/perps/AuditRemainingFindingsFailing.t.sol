@@ -144,7 +144,7 @@ contract AuditRemainingFindingsFailing_MevDrift is BasePerpTest {
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 1001);
 
         vm.warp(1001);
-        bytes[] memory empty;
+        bytes[] memory empty = _mockPythUpdateData();
 
         vm.expectRevert();
         router.executeOrder(1, empty);
@@ -216,7 +216,7 @@ contract AuditRemainingFindingsFailing_StaleOracleExecution is BasePerpTest {
         vm.warp(1050);
         vm.roll(block.number + 1);
 
-        bytes[] memory empty;
+        bytes[] memory empty = _mockPythUpdateData();
         vm.expectRevert();
         router.executeOrder(1, empty);
     }

@@ -137,6 +137,11 @@ contract PletherOracleTest is Test {
         new PletherOracle(address(engine), address(vault), address(pyth), ids, w, bases, inv);
     }
 
+    function test_Constructor_RevertsOnZeroPyth() public {
+        vm.expectRevert(IPletherOracle.PletherOracle__ZeroPyth.selector);
+        _deployOracle(address(0));
+    }
+
     function test_Constructor_RevertsOnArrayLengthMismatch() public {
         bool[] memory inv = new bool[](1);
 
@@ -211,53 +216,6 @@ contract PletherOracleTest is Test {
         oracle.updateAndGetPrice(_pythUpdateData(), IPletherOracle.PriceMode.MarkRefresh);
     }
 
-    function test_MockMode_DecodesAnvilPriceOverride() public {
-        vm.chainId(31_337);
-        vm.warp(1234);
-        vm.deal(address(this), 1 ether);
-        PletherOracle mockOracle = _deployOracle(address(0));
-
-        uint256 balanceBefore = address(this).balance;
-        IPletherOracle.PriceSnapshot memory snapshot = mockOracle.updateAndGetPrice{value: 0.2 ether}(
-            _mockPriceData(123_000_000), IPletherOracle.PriceMode.OrderExecution
-        );
-
-        assertEq(snapshot.price, 123_000_000, "mock override price");
-        assertEq(snapshot.publishTime, 1234, "mock publish time");
-        assertEq(snapshot.updateFee, 0, "mock fee");
-        assertEq(address(this).balance, balanceBefore, "mock mode refunds all ETH");
-    }
-
-    function test_MockMode_EmptyPayloadFallsBackToStoredMark() public {
-        vm.chainId(31_337);
-        vm.warp(1234);
-        engine.setLastMark(111_000_000, 1200);
-        PletherOracle mockOracle = _deployOracle(address(0));
-
-        bytes[] memory empty;
-        IPletherOracle.PriceSnapshot memory snapshot =
-            mockOracle.updateAndGetPrice(empty, IPletherOracle.PriceMode.MarkRefresh);
-
-        assertEq(snapshot.price, 111_000_000, "stored mark fallback");
-        assertEq(snapshot.publishTime, 1234, "mock publish time is current block time");
-    }
-
-    function test_MockMode_RevertsOnZeroOverride() public {
-        vm.chainId(31_337);
-        PletherOracle mockOracle = _deployOracle(address(0));
-
-        vm.expectPartialRevert(IPletherOracle.PletherOracle__InvalidMockPrice.selector);
-        mockOracle.updateAndGetPrice(_mockPriceData(0), IPletherOracle.PriceMode.OrderExecution);
-    }
-
-    function test_MockMode_RevertsOffAnvil() public {
-        vm.chainId(1);
-        PletherOracle mockOracle = _deployOracle(address(0));
-
-        vm.expectPartialRevert(IPletherOracle.PletherOracle__MockModeForbidden.selector);
-        mockOracle.updateAndGetPrice(_mockPriceData(1e8), IPletherOracle.PriceMode.OrderExecution);
-    }
-
     function test_ApplyConfig_OnlyOwnerOrRouter() public {
         vm.prank(address(0xBEEF));
         vm.expectRevert(IPletherOracle.PletherOracle__Unauthorized.selector);
@@ -296,13 +254,6 @@ contract PletherOracleTest is Test {
     function _pythUpdateData() internal pure returns (bytes[] memory updateData) {
         updateData = new bytes[](1);
         updateData[0] = hex"01";
-    }
-
-    function _mockPriceData(
-        uint256 price
-    ) internal pure returns (bytes[] memory updateData) {
-        updateData = new bytes[](1);
-        updateData[0] = abi.encode(price);
     }
 
 }

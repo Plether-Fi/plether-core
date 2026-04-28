@@ -27,7 +27,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
 
     /// @param _engine CfdEngine that processes trades and liquidations
     /// @param _housePool HousePool used for depth queries and liquidation bounty payouts
-    /// @param _pyth Pyth oracle contract (address(0) enables mock mode on Anvil)
+    /// @param _pyth Pyth oracle contract
     /// @param _feedIds Pyth price feed IDs for each basket component
     /// @param _quantities Weight of each component (must sum to 1e18)
     /// @param _basePrices Base price per component for normalization (8 decimals)

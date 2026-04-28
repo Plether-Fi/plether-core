@@ -308,7 +308,7 @@ contract AuditRemainingCoverageFindingsFailing_TerminalLiveness is BasePerpTest 
             router.commitOrder(CfdTypes.Side.BEAR, 10_000e18, 1000e6, 2e8, false);
         }
 
-        bytes[] memory empty = new bytes[](0);
+        bytes[] memory empty = _mockPythUpdateData();
         vm.roll(block.number + 1);
         uint64 closeOrderId = router.nextExecuteId();
         router.executeOrder(closeOrderId, empty);
