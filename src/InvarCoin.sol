@@ -514,6 +514,29 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         _stakeLpToGauge(lpMinted);
     }
 
+    function _depositToCurve(
+        uint256 usdcAmount,
+        uint256 bearAmount,
+        uint256 oraclePrice
+    ) private returns (uint256 lpMinted) {
+        if (usdcAmount > 0) {
+            USDC.safeTransferFrom(msg.sender, address(this), usdcAmount);
+        }
+        if (bearAmount > 0) {
+            BEAR.safeTransferFrom(msg.sender, address(this), bearAmount);
+        }
+
+        uint256[2] memory amounts = [usdcAmount, bearAmount];
+        uint256 expectedLp = CURVE_POOL.calc_token_amount(amounts, true);
+        uint256 totalUsdcValue = usdcAmount + (bearAmount * oraclePrice) / 1e20;
+        uint256 emaExpectedLp = (totalUsdcValue * 1e30) / CURVE_POOL.lp_price();
+        if (_outsideSpotDeviationBounds(expectedLp, emaExpectedLp)) {
+            revert InvarCoin__SpotDeviationTooHigh();
+        }
+
+        lpMinted = CURVE_POOL.add_liquidity(amounts, expectedLp > 0 ? expectedLp - 1 : 0);
+    }
+
     function _stakeLpToGauge(
         uint256 amount
     ) private {
@@ -778,21 +801,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         uint256 assets = _totalAssetsOptimistic(oraclePrice);
         uint256 supply = totalSupply();
 
-        if (usdcAmount > 0) {
-            USDC.safeTransferFrom(msg.sender, address(this), usdcAmount);
-        }
-        if (bearAmount > 0) {
-            BEAR.safeTransferFrom(msg.sender, address(this), bearAmount);
-        }
-
-        uint256[2] memory amounts = [usdcAmount, bearAmount];
-        uint256 expectedLp = CURVE_POOL.calc_token_amount(amounts, true);
-        uint256 totalUsdcValue = usdcAmount + (bearAmount * oraclePrice) / 1e20;
-        uint256 emaExpectedLp = (totalUsdcValue * 1e30) / CURVE_POOL.lp_price();
-        if (_outsideSpotDeviationBounds(expectedLp, emaExpectedLp)) {
-            revert InvarCoin__SpotDeviationTooHigh();
-        }
-        uint256 lpMinted = CURVE_POOL.add_liquidity(amounts, expectedLp > 0 ? expectedLp - 1 : 0);
+        uint256 lpMinted = _depositToCurve(usdcAmount, bearAmount, oraclePrice);
         uint256 lpValue = (lpMinted * _pessimisticLpPrice(oraclePrice)) / 1e30;
         _recordLpDeployment(lpMinted);
 

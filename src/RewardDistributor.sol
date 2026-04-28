@@ -197,9 +197,22 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
         uint256 absBasketPrice = uint256(rawPrice);
 
         (uint256 bearPct, uint256 bullPct) = _calculateSplit(absBasketPrice);
+        (uint256 bearUsdc, uint256 bullUsdc) = _allocateRewards(distributableUsdc, bearPct, bullPct);
+        (uint256 stakedBearUsdc, uint256 invarUsdcAmount) = _prepareBearAllocation(bearUsdc, absBasketPrice);
+        (uint256 bearAmount, uint256 bullAmount) = _acquireTokens(stakedBearUsdc, bullUsdc, absBasketPrice);
+        _distributeAcquiredTokens(bearAmount, bullAmount);
 
-        uint256 bearUsdc;
-        uint256 bullUsdc;
+        lastDistributionTime = block.timestamp;
+        USDC.safeTransfer(msg.sender, callerReward);
+
+        emit RewardsDistributed(bearAmount, bullAmount, invarUsdcAmount, bearPct, bullPct);
+    }
+
+    function _allocateRewards(
+        uint256 distributableUsdc,
+        uint256 bearPct,
+        uint256 bullPct
+    ) internal pure returns (uint256 bearUsdc, uint256 bullUsdc) {
         if (bearPct >= bullPct) {
             bullUsdc = (distributableUsdc * bullPct) / 10_000;
             bearUsdc = distributableUsdc - bullUsdc;
@@ -207,30 +220,35 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
             bearUsdc = (distributableUsdc * bearPct) / 10_000;
             bullUsdc = distributableUsdc - bearUsdc;
         }
+    }
 
-        uint256 invarUsdcAmount;
-        (uint256 stakedBearUsdc, uint256 invarUsdc) = _splitBearAllocation(bearUsdc, absBasketPrice);
-        if (invarUsdc > 0) {
-            try INVAR_COIN.donateUsdc(invarUsdc) {
-                invarUsdcAmount = invarUsdc;
-            } catch {
-                stakedBearUsdc += invarUsdc;
-            }
+    function _prepareBearAllocation(
+        uint256 bearUsdc,
+        uint256 absBasketPrice
+    ) internal returns (uint256 stakedBearUsdc, uint256 invarUsdcAmount) {
+        uint256 invarUsdc;
+        (stakedBearUsdc, invarUsdc) = _splitBearAllocation(bearUsdc, absBasketPrice);
+        if (invarUsdc == 0) {
+            return (stakedBearUsdc, 0);
         }
 
-        (uint256 bearAmount, uint256 bullAmount) = _acquireTokens(stakedBearUsdc, bullUsdc, absBasketPrice);
+        try INVAR_COIN.donateUsdc(invarUsdc) {
+            invarUsdcAmount = invarUsdc;
+        } catch {
+            stakedBearUsdc += invarUsdc;
+        }
+    }
 
+    function _distributeAcquiredTokens(
+        uint256 bearAmount,
+        uint256 bullAmount
+    ) internal {
         if (bearAmount > 0) {
             STAKED_BEAR.donateYield(bearAmount);
         }
         if (bullAmount > 0) {
             STAKED_BULL.donateYield(bullAmount);
         }
-
-        lastDistributionTime = block.timestamp;
-        USDC.safeTransfer(msg.sender, callerReward);
-
-        emit RewardsDistributed(bearAmount, bullAmount, invarUsdcAmount, bearPct, bullPct);
     }
 
     /// @notice Distributes rewards after updating the Pyth oracle price.
