@@ -446,11 +446,14 @@ LP tokens are valued using both Curve's `lp_price()` (EMA) and an oracle-derived
 |-----------|-------|---------|
 | `BUFFER_TARGET_BPS` | 200 (2%) | Target USDC held locally for gas-efficient withdrawals |
 | `DEPLOY_THRESHOLD` | $1,000 | Minimum excess before `deployToCurve` activates |
+| `MAX_DEPLOY_POOL_BPS` | 100 (1%) | Maximum single-sided USDC deployment as a share of Curve's USDC balance |
 | `MAX_SPOT_DEVIATION_BPS` | 50 (0.5%) | Circuit breaker for pool manipulation |
 
 The spot deviation guard compares spot execution against EMA-derived fair value. It blocks `deployToCurve`, `replenishBuffer`, `lpDeposit`, and `redeployToCurve` when the pool is being manipulated in either direction beyond the configured tolerance.
 
 For permissionless maintenance actions (`deployToCurve` and `replenishBuffer`), Curve min-out parameters are derived from the EMA fair-value bound rather than the current spot quote. This prevents callers from using a manipulated spot quote as the vault's slippage floor.
+
+`deployToCurve` also chunks excess buffer deployment to at most 1% of Curve's current USDC balance per call. Large deposits can therefore take multiple calls to fully deploy, limiting single-sided price impact and reducing sandwichable value.
 
 #### Gauge Integration
 

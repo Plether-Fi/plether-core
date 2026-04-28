@@ -119,7 +119,7 @@ InvarCoin is a passive savings token that maintains exposure to a basket of glob
 - After claiming rewards, route protected balances only through `sweepGaugeRewards(token)`
 
 **Keeper operations:**
-- `deployToCurve()` — pushes excess USDC buffer (>2% target) into single-sided Curve LP
+- `deployToCurve()` — pushes excess USDC buffer (>2% target) into single-sided Curve LP, capped to 1% of Curve's USDC side per call
 - `replenishBuffer()` — burns Curve LP to restore the 2% USDC buffer
 - `harvest()` — captures LP fee yield and streams to sINVAR stakers
 

@@ -64,6 +64,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
     uint256 public constant BUFFER_TARGET_BPS = 200; // 2% target buffer
     uint256 public constant DEPLOY_THRESHOLD = 1000e6; // Min $1000 to deploy
+    uint256 public constant MAX_DEPLOY_POOL_BPS = 100; // Max 1% of Curve USDC side per deploy
     uint256 public constant MAX_SPOT_DEVIATION_BPS = 50; // 0.5% max spot-vs-EMA deviation
 
     uint256 public constant ORACLE_TIMEOUT = 24 hours;
@@ -951,7 +952,8 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     }
 
     /// @notice Permissionless keeper function: deploys excess USDC buffer into Curve as single-sided liquidity.
-    /// @dev Maintains a 2% USDC buffer (BUFFER_TARGET_BPS). Only deploys if excess exceeds DEPLOY_THRESHOLD ($1000).
+    /// @dev Maintains a 2% USDC buffer (BUFFER_TARGET_BPS). Only deploys if excess exceeds DEPLOY_THRESHOLD ($1000),
+    ///      and chunks deployments to at most MAX_DEPLOY_POOL_BPS of Curve's current USDC balance.
     ///      Symmetric spot-vs-EMA deviation check (MAX_SPOT_DEVIATION_BPS = 0.5%) blocks deployment during
     ///      pool manipulation, and the min-LP bound is derived from EMA fair value rather than spot.
     /// @param maxUsdc Cap on USDC to deploy (0 = no cap, deploy entire excess).
@@ -972,6 +974,14 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         uint256 usdcToDeploy = localUsdc - bufferTarget;
         if (maxUsdc > 0 && maxUsdc < usdcToDeploy) {
             usdcToDeploy = maxUsdc;
+        }
+
+        uint256 maxDeployByDepth = (USDC.balanceOf(address(CURVE_POOL)) * MAX_DEPLOY_POOL_BPS) / BPS;
+        if (usdcToDeploy > maxDeployByDepth) {
+            usdcToDeploy = maxDeployByDepth;
+        }
+        if (usdcToDeploy == 0) {
+            revert InvarCoin__NothingToDeploy();
         }
 
         uint256[2] memory amounts = [usdcToDeploy, uint256(0)];

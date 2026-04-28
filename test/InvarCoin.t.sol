@@ -374,6 +374,8 @@ contract InvarCoinTest is Test {
 
         curve.setPriceMultiplier(1.2e18);
 
+        usdc.mint(address(curve), 10_000_000e6);
+
         ic = new InvarCoin(
             address(usdc), address(bearToken), address(curveLp), address(curve), address(oracle), address(0), address(0)
         );
@@ -774,6 +776,20 @@ contract InvarCoinTest is Test {
         curve.setSpotDiscountBps(30);
 
         ic.deployToCurve(0);
+    }
+
+    function test_DeployToCurve_CapsDeployToOnePercentOfPoolUsdc() public {
+        vm.prank(alice);
+        ic.deposit(200_000e6, alice, 0);
+
+        uint256 poolUsdcBefore = usdc.balanceOf(address(curve));
+        uint256 expectedDeploy = (poolUsdcBefore * ic.MAX_DEPLOY_POOL_BPS()) / 10_000;
+
+        uint256 lpMinted = ic.deployToCurve(0);
+
+        assertGt(lpMinted, 0);
+        assertEq(usdc.balanceOf(address(curve)) - poolUsdcBefore, expectedDeploy, "deploy should be capped");
+        assertEq(usdc.balanceOf(address(ic)), 200_000e6 - expectedDeploy, "excess remains for later chunks");
     }
 
     function test_DeployToCurve_SlippageGuardUsesEmaBound() public {
@@ -2986,6 +3002,7 @@ contract InvarCoinGaugeTest is Test {
         curveLp = new MockCurveLpToken();
         curve = new MockCurvePool(address(usdc), address(bearToken), address(curveLp));
         curve.setPriceMultiplier(1.2e18);
+        usdc.mint(address(curve), 10_000_000e6);
 
         ic = new InvarCoin(
             address(usdc), address(bearToken), address(curveLp), address(curve), address(oracle), address(0), address(0)
@@ -4023,6 +4040,7 @@ contract HarvestBypassTest is Test {
         curveLp = new MockCurveLpToken();
         curve = new MockCurvePool(address(usdc), address(bearToken), address(curveLp));
         curve.setPriceMultiplier(1.2e18);
+        usdc.mint(address(curve), 10_000_000e6);
 
         ic = new InvarCoin(
             address(usdc), address(bearToken), address(curveLp), address(curve), address(oracle), address(0), address(0)
