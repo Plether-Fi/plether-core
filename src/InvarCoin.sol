@@ -954,8 +954,8 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     /// @notice Permissionless keeper function: deploys excess USDC buffer into Curve as single-sided liquidity.
     /// @dev Maintains a 2% USDC buffer (BUFFER_TARGET_BPS). Only deploys if excess exceeds DEPLOY_THRESHOLD ($1000),
     ///      and chunks deployments to at most MAX_DEPLOY_POOL_BPS of Curve's current USDC balance.
-    ///      Symmetric spot-vs-EMA deviation check (MAX_SPOT_DEVIATION_BPS = 0.5%) blocks deployment during
-    ///      pool manipulation, and the min-LP bound is derived from EMA fair value rather than spot.
+    ///      Requires Curve to quote at least EMA fair value so deployments only execute when single-sided
+    ///      USDC liquidity is fair or favorable to the vault.
     /// @param maxUsdc Cap on USDC to deploy (0 = no cap, deploy entire excess).
     /// @return lpMinted Amount of Curve LP tokens minted.
     function deployToCurve(
@@ -987,10 +987,10 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         uint256[2] memory amounts = [usdcToDeploy, uint256(0)];
         uint256 calcLp = CURVE_POOL.calc_token_amount(amounts, true);
         uint256 emaExpectedLp = (usdcToDeploy * 1e30) / CURVE_POOL.lp_price();
-        if (_outsideSpotDeviationBounds(calcLp, emaExpectedLp)) {
+        if (calcLp < emaExpectedLp) {
             revert InvarCoin__SpotDeviationTooHigh();
         }
-        lpMinted = CURVE_POOL.add_liquidity(amounts, _fairValueMinOut(emaExpectedLp));
+        lpMinted = CURVE_POOL.add_liquidity(amounts, emaExpectedLp);
         _recordLpDeployment(lpMinted);
 
         emit DeployedToCurve(msg.sender, usdcToDeploy, 0, lpMinted);

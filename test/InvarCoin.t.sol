@@ -759,22 +759,22 @@ contract InvarCoinTest is Test {
         ic.deployToCurve(0);
     }
 
-    function test_DeployToCurve_RevertsOnSpotPremiumManipulation() public {
+    function test_DeployToCurve_AllowsFavorableSpotPremium() public {
         vm.prank(alice);
         ic.deposit(20_000e6, alice, 0);
 
         curve.setSpotPremiumBps(600);
 
-        vm.expectRevert(InvarCoin.InvarCoin__SpotDeviationTooHigh.selector);
         ic.deployToCurve(0);
     }
 
-    function test_DeployToCurve_AllowsNormalSpotDrift() public {
+    function test_DeployToCurve_RevertsOnUnfavorableSpotDrift() public {
         vm.prank(alice);
         ic.deposit(20_000e6, alice, 0);
 
         curve.setSpotDiscountBps(30);
 
+        vm.expectRevert(InvarCoin.InvarCoin__SpotDeviationTooHigh.selector);
         ic.deployToCurve(0);
     }
 
@@ -801,9 +801,9 @@ contract InvarCoinTest is Test {
 
         uint256 deploy = 17_640e6;
         uint256 emaExpectedLp = (deploy * 1e30) / curve.lp_price();
-        uint256 minLpOut = emaExpectedLp * 9950 / 10_000;
+        uint256 minLpOut = emaExpectedLp;
 
-        curve.setSpotDiscountBps(30);
+        curve.setSpotPremiumBps(30);
 
         vm.expectCall(address(curve), abi.encodeCall(curve.add_liquidity, ([deploy, uint256(0)], minLpOut)));
         ic.deployToCurve(0);
@@ -2722,7 +2722,7 @@ contract InvarCoinTest is Test {
 
         uint256 deploy = 17_640e6;
         uint256 emaExpectedLp = (deploy * 1e30) / curve.lp_price();
-        uint256 minLpOut = emaExpectedLp * 9950 / 10_000;
+        uint256 minLpOut = emaExpectedLp;
 
         vm.expectCall(address(curve), abi.encodeCall(curve.add_liquidity, ([deploy, uint256(0)], minLpOut)));
         ic.deployToCurve(0);
