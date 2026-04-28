@@ -28,7 +28,8 @@ All perps contracts are non-upgradeable.
 
 - No proxy patterns.
 - Runtime logic is fixed at deployment.
-- Core constructor parameters such as `CAP_PRICE`, oracle feed configuration, basket weights, and base prices are immutable.
+- Core constructor parameters such as `CAP_PRICE` are immutable.
+- `OrderRouter` oracle feed configuration, basket weights, base prices, and Pyth endpoint can be rotated only through `OrderRouterAdmin`'s 48-hour timelocked oracle config flow.
 
 ### Timelocked admin state
 
@@ -45,6 +46,7 @@ Engine risk controls live in `CfdEngineAdmin`, and router risk controls live in 
 | `seniorRateBps` | `HousePool` | `onlyOwner`, 48-hour timelock |
 | `markStalenessLimit` | `HousePool` | `onlyOwner`, 48-hour timelock |
 | `RouterConfig` (`maxOrderAge`, `orderExecutionStalenessLimit`, `liquidationStalenessLimit`, `pythMaxConfidenceRatioBps`) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
+| `OracleConfig` (`pyth`, feed ids, quantities, base prices, inversions) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
 
 ### One-time wiring
 
@@ -159,9 +161,10 @@ The protocol assumes Pyth provides timely and correct FX feed data for the baske
 
 Mitigations:
 
-- delayed-order execution with publish-time ordering while the oracle is live,
+- delayed-order execution with publish-time ordering and future-publication rejection while the oracle is live,
 - distinct staleness thresholds for order execution, liquidation, engine-side guards, and HousePool freshness,
 - shared normalized basket-price construction across execution paths,
+- timelocked Pyth endpoint and basket-feed rotation if an upstream feed is deprecated or replaced,
 - frozen-oracle regime for close liveness during genuine market closure.
 
 Risks:
@@ -235,7 +238,7 @@ The router uses delayed commit/execute semantics rather than same-tx market exec
 Security properties:
 
 - trader intent is committed before keeper execution,
-- live-market execution requires `publishTime > commitTime`, which defends against oracle latency arbitrage,
+- live-market execution requires `commitTime < publishTime <= block.timestamp`, which defends against oracle latency arbitrage and future-dated feed drift,
 - FIFO execution prevents later orders from bypassing earlier ones,
 - binding order semantics prevent traders from turning queued intents into free options.
 
@@ -274,6 +277,7 @@ That means:
 
 - LP share pricing may temporarily undercount value,
 - junior principal can dip before later realized recovery arrives,
+- same-side loser debt cannot net down live winner liability before settlement,
 - but the protocol avoids phantom-profit withdrawal bugs.
 
 This is an explicit design choice, not an accounting accident.
@@ -366,7 +370,7 @@ Trade-off:
 ### Reachability and bounty bounds
 
 - liquidation accounting is constrained by actually reachable collateral,
-- keeper bounty is proportional with a floor but capped by reachable value,
+- keeper bounty is proportional with a floor, capped by reachable value, and may explicitly subsidize low-equity liquidations,
 - residual trader value is preserved when positive,
 - same-account deferred trader credit does not support liquidation reachability and is only netted once against terminal shortfall,
 - remaining deficit becomes bad debt socialized to LP capital.

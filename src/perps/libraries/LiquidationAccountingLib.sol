@@ -33,9 +33,7 @@ library LiquidationAccountingLib {
             bounty = minBountyUsdc;
         }
 
-        if (state.equityUsdc > 0 && bounty > uint256(state.equityUsdc)) {
-            bounty = uint256(state.equityUsdc);
-        } else if (state.equityUsdc <= 0 && bounty > reachableCollateralUsdc) {
+        if (bounty > reachableCollateralUsdc) {
             bounty = reachableCollateralUsdc;
         }
 

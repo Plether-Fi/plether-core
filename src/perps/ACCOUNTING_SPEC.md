@@ -65,11 +65,12 @@ For LP accounting, unrealized trader profits may be recognized as liabilities, b
 
 Definition:
 
-- compute unrealized PnL per side,
-- clamp each side at zero,
-- sum the remaining positive values.
+- compute a side-local upper bound from cached max-profit exposure,
+- for BULL, scale side max profit by `(CAP_PRICE - markPrice) / CAP_PRICE`,
+- for BEAR, scale side max profit by `markPrice / CAP_PRICE`,
+- sum the two conservative side liabilities.
 
-This quantity is appropriate for conservative LP equity and tranche reconciliation, not for pretending the vault has already collected losing traders' money.
+This quantity is appropriate for conservative LP equity and tranche reconciliation, not for pretending the vault has already collected losing traders' money. It can temporarily over-reserve LP value when entry prices are dispersed inside a side, but it avoids netting winners against uncollected same-side loser debt.
 
 ## The Four Core Accounting Views
 
@@ -145,6 +146,7 @@ Rules:
 - value with no valid claimant path must sit in explicit `unassignedAssets`.
 - during `oracleFrozen`, tranche entry/exit pricing remains live by applying fixed tranche-local LP surcharges instead of requiring a fresh live mark.
 - during `oracleFrozen`, bootstrap admin flows (`initializeSeedPosition`, `assignUnassignedAssets`) are blocked rather than inheriting LP frozen-fee pricing.
+- during `oracleFrozen`, ERC4626 `maxMint` reports the finite share cap implied by the active frozen-entry fee.
 
 Required consequences:
 
@@ -403,14 +405,15 @@ Liquidation must:
 
 Keeper bounty rule:
 
-- cap by positive equity when available,
-- otherwise cap by physically reachable liquidation collateral,
-- never by stale notions of notional or margin alone.
+- cap by physically reachable liquidation collateral,
+- allow the bounty to exceed positive equity as an explicit liquidation subsidy,
+- never cap by stale notions of notional or margin alone.
 
 Required property:
 
 - liquidation eligibility, bounty caps, and residual planning must use carry-adjusted equity,
 - negative accrued VPI must reduce liquidation equity before keeper-bounty and residual planning,
+- any bounty paid above positive equity must flow through the normal residual shortfall and bad-debt accounting,
 - preview and live liquidation should share the same liquidation-accounting kernel.
 
 ### Three-bucket liquidation residual accounting
@@ -465,7 +468,7 @@ Freshness policy is action-specific.
 
 - in live markets, require fresh oracle data under the close execution rule,
 - stale data is a keeper/oracle failure rather than a user failure,
-- frozen-oracle windows use the dedicated frozen-market policy.
+- frozen-oracle windows use the dedicated frozen-market policy, including relaxed cross-feed publish-time divergence up to the frozen staleness window.
 
 ### Liquidations
 
@@ -507,7 +510,7 @@ Required transition rules:
 - expiry resolves through the configured bounty and reservation policy,
 - stale or missing oracle data does not destroy a valid pending order,
 - slippage-invalid orders fail terminally and must not pin the FIFO head,
-- live-market execution requires `oraclePublishTime > order.commitTime`; only genuine frozen-oracle close-only windows may relax that ordering.
+- live-market execution requires `order.commitTime < oraclePublishTime <= block.timestamp`; only genuine frozen-oracle close-only windows may relax commit-time ordering.
 
 ![Order state machine](../../assets/diagrams/perps-order-lifecycle.svg)
 

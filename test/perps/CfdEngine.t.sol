@@ -4584,7 +4584,7 @@ contract CfdEngineTest is BasePerpTest {
         engine.liquidatePosition(accountId, 1e8, 1_000_000 * 1e6, uint64(block.timestamp));
     }
 
-    function test_LiquidationBounty_CappedByPositiveEquity() public {
+    function test_LiquidationBounty_UsesReachableCollateralSubsidyCap() public {
         uint256 vaultDepth = 1_000_000 * 1e6;
         bytes32 accountId = bytes32(uint256(1234));
         address trader = address(uint160(uint256(accountId)));
@@ -4625,8 +4625,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         uint256 bounty = engine.liquidatePosition(accountId, 100_500_000, vaultDepth, uint64(block.timestamp));
 
-        assertLe(bounty, posMargin, "Keeper bounty should not exceed remaining positive equity");
-        assertEq(bounty, 600_000, "Keeper bounty should cap at the trader's remaining positive equity");
+        assertEq(bounty, posMargin, "Keeper bounty subsidy should be bounded by physically reachable collateral");
     }
 
     function test_ClearBadDebt_ReducesOutstandingDebt() public {
@@ -5181,8 +5180,8 @@ contract CfdEngineCarryRegressionTest is BasePerpTest {
         uint256 mtm = _vaultMtmAdjustment();
         assertEq(
             mtm,
-            5000e6,
-            "Only the profitable bull side should count toward vault MtM; losing bear exposure must clamp to zero"
+            71_000e6,
+            "MtM should use a conservative max-profit envelope instead of netting side-level paper losses"
         );
     }
 
@@ -5401,6 +5400,7 @@ contract CfdEngineAuditTest is BasePerpTest {
             orderExecutionStalenessLimit: router.orderExecutionStalenessLimit(),
             liquidationStalenessLimit: router.liquidationStalenessLimit(),
             pythMaxConfidenceRatioBps: router.pythMaxConfidenceRatioBps(),
+            minOpenNotionalUsdc: router.minOpenNotionalUsdc(),
             openOrderExecutionBountyBps: router.openOrderExecutionBountyBps(),
             minOpenOrderExecutionBountyUsdc: router.minOpenOrderExecutionBountyUsdc(),
             maxOpenOrderExecutionBountyUsdc: router.maxOpenOrderExecutionBountyUsdc(),

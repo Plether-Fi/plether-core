@@ -65,7 +65,7 @@ contract AuditC1SequencerDriftFailing is BasePerpTest {
         vm.deal(alice, 10 ether);
     }
 
-    function test_C1_SequencerDriftStillLetsKnownPriceBypassMevShield() public {
+    function test_C1_FuturePublishTimeRejectedBeforeDelayBypass() public {
         mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 110);
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 110);
 
@@ -73,12 +73,15 @@ contract AuditC1SequencerDriftFailing is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
 
-        vm.warp(110);
+        vm.roll(block.number + 1);
+        vm.warp(105);
         bytes[] memory updateData = new bytes[](1);
         updateData[0] = "";
 
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 13));
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
         router.executeOrder(1, updateData);
+
+        assertEq(router.nextExecuteId(), 1, "Future publish time must leave the order pending");
     }
 
 }

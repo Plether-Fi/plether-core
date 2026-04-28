@@ -206,6 +206,25 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         assertEq(seniorVault.balanceOf(lp), targetShares, "Frozen mint should deliver the requested net shares");
     }
 
+    function test_FrozenMint_MaxMintCapsFiniteFeeAsymptote() public {
+        address lp = address(0xAAA7);
+
+        _fundSenior(address(0xAAA8), 500_000e6);
+        _fundJunior(address(0xAAA9), 500_000e6);
+        _enterFrozenWindow();
+
+        uint256 maxShares = seniorVault.maxMint(lp);
+
+        assertGt(maxShares, 0, "Frozen maxMint should allow bounded minting");
+        assertLt(maxShares, type(uint256).max, "Frozen maxMint should expose the finite fee asymptote");
+        assertLt(seniorVault.previewMint(maxShares), type(uint256).max, "maxMint amount should remain previewable");
+        assertEq(
+            seniorVault.previewMint(maxShares + 1),
+            type(uint256).max,
+            "Preview past maxMint should not underflow the frozen-fee denominator"
+        );
+    }
+
     function test_FrozenDepositAndMint_MatchEquivalentNetOwnership() public {
         address depositLp = address(0xAAB4);
         address mintLp = address(0xAAB5);

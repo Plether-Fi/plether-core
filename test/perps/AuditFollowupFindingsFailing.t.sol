@@ -189,7 +189,7 @@ contract AuditFollowupFindingsFailing_LiquidationBounty is BasePerpTest {
         });
     }
 
-    function test_H1_PositiveEquityLiquidationCapsAtRemainingEquity() public {
+    function test_H1_PositiveEquityLiquidationUsesExplicitSubsidy() public {
         address trader = address(0xA201);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
 
@@ -206,9 +206,7 @@ contract AuditFollowupFindingsFailing_LiquidationBounty is BasePerpTest {
         vm.stopPrank();
 
         assertGt(bounty, 0, "Keeper bounty should stay positive for a still-positive-equity liquidation");
-        assertLt(
-            bounty, 5e6, "Keeper bounty should remain capped below the trader's remaining positive equity in this setup"
-        );
+        assertGe(bounty, 5e6, "Keeper bounty subsidy should avoid a near-zero positive-equity cliff");
     }
 
 }

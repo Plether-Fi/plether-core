@@ -72,20 +72,24 @@ contract DeployPerpsArbitrumSepolia is Script {
 
         deployed.usdc = new MockUSDC();
         deployed.clearinghouse = new MarginClearinghouse(address(deployed.usdc));
-        deployed.engine = new CfdEngine(address(deployed.usdc), address(deployed.clearinghouse), CAP_PRICE, _riskParams());
+        deployed.engine =
+            new CfdEngine(address(deployed.usdc), address(deployed.clearinghouse), CAP_PRICE, _riskParams());
 
         deployed.planner = new CfdEnginePlanner();
         deployed.settlementModule = new CfdEngineSettlementModule(address(deployed.engine));
         deployed.engineAdmin = new CfdEngineAdmin(address(deployed.engine), deployer);
-        deployed.engine.setDependencies(
-            address(deployed.planner), address(deployed.settlementModule), address(deployed.engineAdmin)
-        );
+        deployed.engine
+            .setDependencies(
+                address(deployed.planner), address(deployed.settlementModule), address(deployed.engineAdmin)
+            );
 
         deployed.housePool = new HousePool(address(deployed.usdc), address(deployed.engine));
-        deployed.seniorVault =
-            new TrancheVault(IERC20(address(deployed.usdc)), address(deployed.housePool), true, "Plether Senior LP", "psLP");
-        deployed.juniorVault =
-            new TrancheVault(IERC20(address(deployed.usdc)), address(deployed.housePool), false, "Plether Junior LP", "pjLP");
+        deployed.seniorVault = new TrancheVault(
+            IERC20(address(deployed.usdc)), address(deployed.housePool), true, "Plether Senior LP", "psLP"
+        );
+        deployed.juniorVault = new TrancheVault(
+            IERC20(address(deployed.usdc)), address(deployed.housePool), false, "Plether Junior LP", "pjLP"
+        );
 
         deployed.housePool.setSeniorVault(address(deployed.seniorVault));
         deployed.housePool.setJuniorVault(address(deployed.juniorVault));
@@ -110,13 +114,18 @@ contract DeployPerpsArbitrumSepolia is Script {
         deployed.clearinghouse.setEngine(address(deployed.engine));
 
         deployed.publicLens = new PerpsPublicLens(
-            address(deployed.accountLens), address(deployed.engine), address(deployed.router), address(deployed.housePool)
+            address(deployed.accountLens),
+            address(deployed.engine),
+            address(deployed.router),
+            address(deployed.housePool)
         );
 
         vm.stopBroadcast();
 
         _logDeployment(deployed);
-        console.log("Trading remains inactive until seed positions are initialized and HousePool.activateTrading() is called.");
+        console.log(
+            "Trading remains inactive until seed positions are initialized and HousePool.activateTrading() is called."
+        );
     }
 
     function _riskParams() internal pure returns (CfdTypes.RiskParams memory) {
@@ -201,7 +210,10 @@ contract MockUSDC is ERC20 {
         return 6;
     }
 
-    function mint(address to, uint256 amount) external {
+    function mint(
+        address to,
+        uint256 amount
+    ) external {
         _mint(to, amount);
     }
 

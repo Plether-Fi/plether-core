@@ -82,27 +82,16 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
     }
 
     function _getVaultMtmLiability() internal view returns (uint256) {
-        uint256 price = engineContract.lastMarkPrice();
+        if (engineContract.lastMarkTime() == 0) {
+            return 0;
+        }
 
-        int256 bullPnl;
-        int256 bearPnl;
+        uint256 price = engineContract.lastMarkPrice();
         ICfdEngine.SideState memory bullState = _sideState(CfdTypes.Side.BULL);
         ICfdEngine.SideState memory bearState = _sideState(CfdTypes.Side.BEAR);
-        if (price > 0) {
-            bullPnl = (int256(bullState.entryNotional) - int256(bullState.openInterest * price))
-                / int256(CfdMath.USDC_TO_TOKEN_SCALE);
-            bearPnl = (int256(bearState.openInterest * price) - int256(bearState.entryNotional))
-                / int256(CfdMath.USDC_TO_TOKEN_SCALE);
-        }
-        int256 bullTotal = bullPnl;
-        int256 bearTotal = bearPnl;
-        if (bullTotal < 0) {
-            bullTotal = 0;
-        }
-        if (bearTotal < 0) {
-            bearTotal = 0;
-        }
-        return uint256(bullTotal) + uint256(bearTotal);
+        uint256 capPrice = engineContract.CAP_PRICE();
+        return CfdMath.conservativeMtmLiability(bullState.maxProfitUsdc, CfdTypes.Side.BULL, price, capPrice)
+            + CfdMath.conservativeMtmLiability(bearState.maxProfitUsdc, CfdTypes.Side.BEAR, price, capPrice);
     }
 
     function _buildProtocolAccountingSnapshot()

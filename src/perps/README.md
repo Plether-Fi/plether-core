@@ -108,7 +108,7 @@ The main runtime and read surfaces are:
 2. Submit an open or close intent through `OrderRouter.commitOrder(...)`.
 3. The router records a FIFO order, reserves committed margin, and escrows a keeper execution bounty.
 4. A keeper later calls `executeOrder(...)` or `executeOrderBatch(...)` with Pyth update data.
-5. `OrderRouter` validates oracle freshness, live-market `publishTime > commitTime` ordering, slippage, and queue eligibility, then calls `CfdEngine.processOrderTyped(...)`.
+5. `OrderRouter` validates oracle freshness, live-market `commitTime < publishTime <= block.timestamp` ordering, slippage, and queue eligibility, then calls `CfdEngine.processOrderTyped(...)`.
 6. `CfdEngine` updates the position, realizes fees and carry, and settles through `MarginClearinghouse` and `HousePool`.
 
 Important details:
@@ -189,6 +189,7 @@ Operationally:
 - Trading does not become live until both tranche seed positions exist and the owner activates trading.
 - Risk-increasing order commits and ordinary tranche deposits stay blocked during the seed lifecycle.
 - `TrancheVault.maxDeposit()` / `maxMint()` return zero while lifecycle, stale-mark, deposit-pause, senior-impairment, or pending-bootstrap-assignment gates block deposits.
+- During `oracleFrozen`, `TrancheVault.maxMint()` returns the finite share cap implied by the active frozen-entry fee rather than the default unbounded ERC4626 value.
 - `TrancheVault.maxWithdraw()` / `maxRedeem()` enforce cooldown plus pool-level withdrawal availability.
 
 ### Reconcile / freshness nuance
@@ -254,6 +255,7 @@ LP accounting intentionally refuses to count unrealized trader losses as present
 
 - Unrealized profitable trader PnL is treated as a liability.
 - Unrealized trader losses are not booked as instantly withdrawable LP assets.
+- Side MtM uses a conservative max-profit envelope so same-side loser debt cannot net down live winner liability before settlement.
 - Realized losses increase physical pool cash only when settlement actually happens.
 
 This keeps LP share pricing and withdrawal limits conservative.
@@ -304,7 +306,9 @@ The router is configured with parallel arrays of Pyth feed ids, quantities, and 
 - `_computeBasketPrice()` normalizes each feed to 8 decimals.
 - The router computes the weighted basket price in the same shape as the spot basket oracle.
 - The minimum `publishTime` across feeds drives MEV checks, staleness validation, and `engine.lastMarkTime()` ordering.
-- Live order execution requires `publishTime > order.commitTime`; frozen-oracle close-only windows are the only regime that relaxes that ordering rule.
+- Live order execution requires `order.commitTime < publishTime <= block.timestamp`; frozen-oracle close-only windows are the only regime that relaxes commit-time ordering.
+- During `oracleFrozen`, cross-feed publish-time divergence is allowed up to the same relaxed frozen-market staleness window so risk-reducing execution is not blocked by naturally staggered stale feeds.
+- The Pyth endpoint and basket arrays are recoverable through `OrderRouterAdmin`'s timelocked oracle-config flow.
 - The execution price is clamped to `CAP_PRICE` before the slippage check so the user sees the same price the engine executes.
 
 ### Frozen oracle behavior
@@ -389,6 +393,7 @@ Timelocked surfaces include:
 - `HousePool.seniorRateBps`
 - `HousePool.markStalenessLimit`
 - `OrderRouterAdmin` -> `OrderRouter.RouterConfig`
+- `OrderRouterAdmin` -> `OrderRouter.OracleConfig`
 
 Instant controls remain for one-time wiring and fee withdrawal. `OrderRouter` pause/unpause is now owner-gated on `OrderRouterAdmin` rather than the router itself.
 
@@ -422,6 +427,7 @@ Instant controls remain for one-time wiring and fee withdrawal. `OrderRouter` pa
 | `DEPOSIT_COOLDOWN` | 1 hour | LP anti-flash cooldown |
 
 OrderRouter also exposes timelocked admin control over `maxPendingOrders`, `minEngineGas`, and `maxPruneOrdersPerCall`.
+`maxOrderAge` must stay nonzero and cannot exceed one hour, so close-only windows cannot be indefinitely pinned by an old FIFO head.
 
 ## Further Reading
 

@@ -34,6 +34,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, IOrderRouterAdminHost
 
     uint256 public maxOrderAge;
     uint256 internal constant DEFAULT_MAX_ORDER_AGE = 60;
+    uint256 public minOpenNotionalUsdc;
     uint256 public openOrderExecutionBountyBps;
     uint256 public minOpenOrderExecutionBountyUsdc;
     uint256 public maxOpenOrderExecutionBountyUsdc;
@@ -81,8 +82,9 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, IOrderRouterAdminHost
     ) OrderOracleExecution(_engine, _engineLens, _vault, _pyth, _feedIds, _quantities, _basePrices, _inversions) {
         admin = address(new OrderRouterAdmin(address(this), msg.sender));
         maxOrderAge = DEFAULT_MAX_ORDER_AGE;
+        minOpenNotionalUsdc = 100_000_000;
         openOrderExecutionBountyBps = 1;
-        minOpenOrderExecutionBountyUsdc = 10_000;
+        minOpenOrderExecutionBountyUsdc = 100_000;
         maxOpenOrderExecutionBountyUsdc = 200_000;
         closeOrderExecutionBountyUsdc = 200_000;
         maxPendingOrders = 5;
@@ -224,6 +226,10 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, IOrderRouterAdminHost
             executionBountyUsdc = closeOrderExecutionBountyUsdc;
         } else {
             uint256 commitPrice = _commitReferencePrice();
+            uint256 notionalUsdc = (sizeDelta * commitPrice) / DecimalConstants.USDC_TO_TOKEN_SCALE;
+            if (notionalUsdc < minOpenNotionalUsdc) {
+                _revertCommitValidation(11);
+            }
             if (_canUseCommitMarkForOpenPrefilter()) {
                 uint64 commitMarkTime = engine.lastMarkTime();
                 CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory =
@@ -596,6 +602,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, IOrderRouterAdminHost
         orderExecutionStalenessLimit = config.orderExecutionStalenessLimit;
         liquidationStalenessLimit = config.liquidationStalenessLimit;
         pythMaxConfidenceRatioBps = config.pythMaxConfidenceRatioBps;
+        minOpenNotionalUsdc = config.minOpenNotionalUsdc;
         openOrderExecutionBountyBps = config.openOrderExecutionBountyBps;
         minOpenOrderExecutionBountyUsdc = config.minOpenOrderExecutionBountyUsdc;
         maxOpenOrderExecutionBountyUsdc = config.maxOpenOrderExecutionBountyUsdc;
@@ -603,6 +610,13 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, IOrderRouterAdminHost
         maxPendingOrders = config.maxPendingOrders;
         minEngineGas = config.minEngineGas;
         maxPruneOrdersPerCall = config.maxPruneOrdersPerCall;
+    }
+
+    function applyOracleConfig(
+        IOrderRouterAdminHost.OracleConfig calldata config
+    ) external {
+        _onlyAdmin();
+        _setOracleConfig(config.pyth, config.feedIds, config.quantities, config.basePrices, config.inversions);
     }
 
     function _nextCommitId() internal view override returns (uint64) {

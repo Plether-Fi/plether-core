@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {CfdTypes} from "./CfdTypes.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /// @title CfdMath
 /// @notice Pure stateless math library for PnL and price impact
@@ -74,6 +75,26 @@ library CfdMath {
             maxPriceDiff = capPrice > entryPrice ? capPrice - entryPrice : 0;
         }
         maxProfitUsdc = (size * maxPriceDiff) / USDC_TO_TOKEN_SCALE;
+    }
+
+    /// @notice Conservative upper bound for a side's current gross winning-trader MtM liability.
+    /// @dev Uses each position's max-profit envelope so same-side losing positions cannot net down
+    ///      winning positions before their losses are physically realized.
+    function conservativeMtmLiability(
+        uint256 maxProfitUsdc,
+        CfdTypes.Side side,
+        uint256 price,
+        uint256 capPrice
+    ) internal pure returns (uint256) {
+        if (maxProfitUsdc == 0 || capPrice == 0) {
+            return 0;
+        }
+
+        uint256 clampedPrice = price > capPrice ? capPrice : price;
+        if (side == CfdTypes.Side.BULL) {
+            return Math.mulDiv(maxProfitUsdc, capPrice - clampedPrice, capPrice, Math.Rounding.Ceil);
+        }
+        return Math.mulDiv(maxProfitUsdc, clampedPrice, capPrice, Math.Rounding.Ceil);
     }
 
     // ==========================================

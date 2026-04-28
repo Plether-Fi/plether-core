@@ -37,12 +37,14 @@ library OrderOraclePolicyLib {
     }
 
     function isStale(
-        uint64 oraclePublishTime,
+        uint256 oraclePublishTime,
         uint256 maxStaleness,
         uint256 currentTimestamp
     ) internal pure returns (bool) {
-        uint256 age = currentTimestamp > oraclePublishTime ? currentTimestamp - oraclePublishTime : 0;
-        return age > maxStaleness;
+        if (oraclePublishTime > currentTimestamp) {
+            return true;
+        }
+        return currentTimestamp - oraclePublishTime > maxStaleness;
     }
 
 }
