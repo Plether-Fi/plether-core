@@ -805,15 +805,53 @@ contract InvarCoinTest is Test {
         ic.harvest();
     }
 
-    function test_Harvest_RevertsWhenNoStakers() public {
+    function test_Harvest_SkipsWhenNoStakersAndPreservesYield() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice, 0);
+
+        ic.deployToCurve(0);
+        uint256 costBefore = ic.curveLpCostVp();
+        curve.setVirtualPrice(1.05e18);
+
+        vm.expectRevert(InvarCoin.InvarCoin__NoYield.selector);
+        ic.harvest();
+
+        assertEq(ic.curveLpCostVp(), costBefore, "yield accounting should not advance without stakers");
+
+        uint256 stakeAmount = ic.balanceOf(alice);
+        vm.startPrank(alice);
+        ic.approve(address(sInvar), stakeAmount);
+        sInvar.deposit(stakeAmount, alice);
+        vm.stopPrank();
+
+        uint256 donated = ic.harvest();
+        assertGt(donated, 0, "pending yield should remain harvestable once stakers exist");
+    }
+
+    function test_Deposit_SkipsPendingHarvestWhenNoStakers() public {
         vm.prank(alice);
         ic.deposit(20_000e6, alice, 0);
 
         ic.deployToCurve(0);
         curve.setVirtualPrice(1.05e18);
 
-        vm.expectRevert(InvarCoin.InvarCoin__NoStakers.selector);
-        ic.harvest();
+        vm.prank(bob);
+        uint256 shares = ic.deposit(1000e6, bob, 0);
+
+        assertGt(shares, 0);
+    }
+
+    function test_LpWithdraw_SkipsPendingHarvestWhenNoStakers() public {
+        vm.prank(alice);
+        uint256 shares = ic.deposit(20_000e6, alice, 0);
+
+        ic.deployToCurve(0);
+        curve.setVirtualPrice(1.05e18);
+
+        vm.prank(alice);
+        (uint256 usdcReturned, uint256 bearReturned) = ic.lpWithdraw(shares, 0, 0, alice);
+
+        assertTrue(usdcReturned > 0 || bearReturned > 0);
     }
 
     function test_Harvest_CurveYield() public {

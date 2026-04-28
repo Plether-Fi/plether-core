@@ -823,7 +823,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     /// @dev Measures fee yield as virtual price growth above the cost basis (curveLpCostVp).
     ///      Mints INVAR proportional to the USDC value of yield and donates it to sINVAR stakers.
     ///      Only tracks VP growth on vault-deployed LP (trackedLpBalance), not donated LP.
-    ///      Reverts if no yield is available — use as a heartbeat signal for keepers.
+    ///      Reverts if no yield is donated — use as a heartbeat signal for keepers.
     /// @return donated Amount of INVAR minted and donated to sINVAR.
     function harvest() external nonReentrant whenNotPaused returns (uint256 donated) {
         donated = _harvest();
@@ -833,7 +833,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     }
 
     /// @dev Harvest yield before withdrawals. Best-effort: skips when no yield is pending, Curve is
-    ///      down, or oracle is unavailable. Withdrawals must never be blocked by oracle outages.
+    ///      down, oracle is unavailable, or no sINVAR stakers exist. Withdrawals must never be blocked.
     function _harvestSafe() internal {
         if (address(stakedInvarCoin) == address(0)) {
             return;
@@ -884,14 +884,15 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
     function _mintAndDonate(
         uint256 amount
-    ) private {
-        if (stakedInvarCoin.totalSupply() == 0) {
-            revert InvarCoin__NoStakers();
+    ) private returns (bool donated) {
+        if (amount == 0 || stakedInvarCoin.totalSupply() == 0) {
+            return false;
         }
 
         _mint(address(this), amount);
         IERC20(this).approve(address(stakedInvarCoin), amount);
         stakedInvarCoin.donateYield(amount);
+        donated = true;
     }
 
     function _harvestWithPrice(
@@ -906,15 +907,19 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         if (totalYieldUsdc == 0) {
             return 0;
         }
-        curveLpCostVp = currentVpValue;
-
         uint256 supply = totalSupply();
         uint256 currentAssets = _totalAssetsWithPrice(_lpBalance(), oraclePrice);
         uint256 assetsBeforeYield = currentAssets > totalYieldUsdc ? currentAssets - totalYieldUsdc : 0;
 
-        donated = Math.mulDiv(totalYieldUsdc, supply + VIRTUAL_SHARES, assetsBeforeYield + VIRTUAL_ASSETS);
+        uint256 amountToDonate =
+            Math.mulDiv(totalYieldUsdc, supply + VIRTUAL_SHARES, assetsBeforeYield + VIRTUAL_ASSETS);
 
-        _mintAndDonate(donated);
+        if (!_mintAndDonate(amountToDonate)) {
+            return 0;
+        }
+
+        curveLpCostVp = currentVpValue;
+        donated = amountToDonate;
 
         emit YieldHarvested(donated, 0, donated);
     }
@@ -932,6 +937,10 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         }
 
         _harvest();
+
+        if (stakedInvarCoin.totalSupply() == 0) {
+            revert InvarCoin__NoStakers();
+        }
 
         uint256 oraclePrice = _validatedOraclePrice();
 

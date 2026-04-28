@@ -12,3 +12,4 @@
 - When the contracts are undeployed, do not preserve misleading or redundant APIs for backward compatibility; prefer renaming/removing the wrong surface and updating callers in the same pass.
 - When the user explicitly says compatibility does not matter, remove legacy fields outright instead of documenting them as compatibility placeholders; stale zero-valued fields are audit bait.
 - When reducing EIP-170 bytecode size, do not count internal helper extraction as a real size lever; inherited/internal refactors mostly inline, so start with actual external call boundaries or dispatch-surface removal.
+- When reviewing best-effort/liveness paths, check every internal callee for newly introduced reverts and ensure skipped work does not advance accounting checkpoints or discard pending value.
