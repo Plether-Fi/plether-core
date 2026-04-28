@@ -113,7 +113,9 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
     event Deposited(address indexed user, address indexed receiver, uint256 usdcIn, uint256 glUsdOut);
     event Withdrawn(address indexed user, address indexed receiver, uint256 glUsdIn, uint256 usdcOut);
-    event LpWithdrawn(address indexed user, uint256 sharesBurned, uint256 usdcReturned, uint256 bearReturned);
+    event LpWithdrawn(
+        address indexed user, address indexed receiver, uint256 sharesBurned, uint256 usdcReturned, uint256 bearReturned
+    );
     event LpDeposited(address indexed user, address indexed receiver, uint256 usdcIn, uint256 bearIn, uint256 glUsdOut);
     event DeployedToCurve(address indexed caller, uint256 usdcDeployed, uint256 bearDeployed, uint256 lpMinted);
     event BufferReplenished(uint256 lpBurned, uint256 usdcRecovered);
@@ -770,7 +772,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             BEAR.safeTransfer(receiver, bearReturned);
         }
 
-        emit LpWithdrawn(msg.sender, glUsdAmount, usdcReturned, bearReturned);
+        emit LpWithdrawn(msg.sender, receiver, glUsdAmount, usdcReturned, bearReturned);
     }
 
     /// @notice Direct LP deposit: provide USDC and/or plDXY-BEAR, deploy to Curve, mint INVAR.
