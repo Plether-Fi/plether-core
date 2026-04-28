@@ -7,6 +7,7 @@ import {CfdEnginePlanTypes} from "../../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../../../src/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "../../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../../src/perps/OrderRouter.sol";
+import {MockPyth} from "../../mocks/MockPyth.sol";
 import {MockUSDC} from "../../mocks/MockUSDC.sol";
 import {PerpAccountingHandler} from "./handlers/PerpAccountingHandler.sol";
 import {CfdEngineHarness} from "./mocks/CfdEngineHarness.sol";
@@ -21,6 +22,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
     CfdEngineLens internal engineLens;
     MarginClearinghouse internal clearinghouse;
     MockInvariantVault internal vault;
+    MockPyth internal mockPyth;
     OrderRouter internal router;
     PerpAccountingHandler internal handler;
 
@@ -36,15 +38,23 @@ contract PerpClosePreviewParityInvariantTest is Test {
         engineLens = new CfdEngineLens(address(engine));
 
         vault = new MockInvariantVault(address(usdc), address(engine));
+        mockPyth = new MockPyth();
+        mockPyth.setPrice(bytes32(uint256(1)), int64(100_000_000), int32(-8), uint64(SETUP_TIMESTAMP));
+        bytes32[] memory feedIds = new bytes32[](1);
+        feedIds[0] = bytes32(uint256(1));
+        uint256[] memory weights = new uint256[](1);
+        weights[0] = 1e18;
+        uint256[] memory basePrices = new uint256[](1);
+        basePrices[0] = 1e8;
         router = new OrderRouter(
             address(engine),
             address(engineLens),
             address(vault),
-            address(0),
-            new bytes32[](0),
-            new uint256[](0),
-            new uint256[](0),
-            new bool[](0)
+            address(mockPyth),
+            feedIds,
+            weights,
+            basePrices,
+            new bool[](1)
         );
 
         clearinghouse.setEngine(address(engine));

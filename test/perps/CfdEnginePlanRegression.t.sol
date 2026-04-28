@@ -19,6 +19,7 @@ import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearingho
 import {CfdEnginePlanLib} from "../../src/perps/libraries/CfdEnginePlanLib.sol";
 import {MarginClearinghouseAccountingLib} from "../../src/perps/libraries/MarginClearinghouseAccountingLib.sol";
 import {PositionRiskAccountingLib} from "../../src/perps/libraries/PositionRiskAccountingLib.sol";
+import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -67,6 +68,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
     address bearTrader = address(0xBEA2);
     address freshBullTrader = address(0xB013);
     CfdEnginePlanner planner;
+    MockPyth mockPyth;
 
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
         return CfdTypes.RiskParams({
@@ -106,15 +108,24 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         pool.setJuniorVault(address(juniorVault));
         engine.setVault(address(pool));
 
+        mockPyth = new MockPyth();
+        mockPyth.setPrice(bytes32(uint256(1)), int64(100_000_000), int32(-8), uint64(block.timestamp));
+        bytes32[] memory feedIds = new bytes32[](1);
+        feedIds[0] = bytes32(uint256(1));
+        uint256[] memory weights = new uint256[](1);
+        weights[0] = 1e18;
+        uint256[] memory basePrices = new uint256[](1);
+        basePrices[0] = 1e8;
+
         router = new OrderRouter(
             address(engine),
             address(engineLens),
             address(pool),
-            address(0),
-            new bytes32[](0),
-            new uint256[](0),
-            new uint256[](0),
-            new bool[](0)
+            address(mockPyth),
+            feedIds,
+            weights,
+            basePrices,
+            new bool[](1)
         );
         _syncRouterAdmin();
         engine.setOrderRouter(address(router));

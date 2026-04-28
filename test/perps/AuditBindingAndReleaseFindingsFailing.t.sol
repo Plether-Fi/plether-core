@@ -33,7 +33,7 @@ contract AuditBindingAndReleaseFindingsFailing is BasePerpTest {
 
         uint256 lockedBeforeExecution = clearinghouse.lockedMarginUsdc(aliceAccount);
 
-        bytes[] memory empty;
+        bytes[] memory empty = _mockPythUpdateData();
         vm.roll(block.number + 1);
         vm.prank(address(this));
         router.executeOrder(1, empty);
@@ -51,7 +51,7 @@ contract AuditBindingAndReleaseFindingsFailing is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
 
-        bytes[] memory empty;
+        bytes[] memory empty = _mockPythUpdateData();
         uint256 keeperBefore = usdc.balanceOf(address(this));
 
         vm.warp(block.timestamp + router.maxOrderAge() + 1);
