@@ -7,7 +7,6 @@ import {ICfdEngineCore} from "../interfaces/ICfdEngineCore.sol";
 import {IOrderRouterAccounting} from "../interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterErrors} from "../interfaces/IOrderRouterErrors.sol";
 import {CashPriorityLib} from "../libraries/CashPriorityLib.sol";
-import {OracleFreshnessPolicyLib} from "../libraries/OracleFreshnessPolicyLib.sol";
 import {OrderValidationLib} from "../libraries/OrderValidationLib.sol";
 import {OrderOracleExecution} from "./OrderOracleExecution.sol";
 import {OrderQueueBook} from "./OrderQueueBook.sol";
@@ -102,7 +101,7 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
         } catch (bytes memory revertData) {
             bytes4 selector = revertData.length >= 4 ? bytes4(revertData) : bytes4(0);
             if (selector == MARK_PRICE_OUT_OF_ORDER_SELECTOR) {
-                revert IOrderRouterErrors.OrderRouter__OracleValidation(9);
+                revert IOrderRouterErrors.OrderRouter__MarkPriceOutOfOrder();
             }
             failureReason = selector == PANIC_SELECTOR ? OrderFailReason.EnginePanic : OrderFailReason.EngineRevert;
             failureOutcome = _failedOutcomeFromEngineRevert(order, revertData);
@@ -118,8 +117,6 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
         RouterExecutionContext memory executionContext,
         bool revertOnBlockedExecution
     ) internal returns (OrderExecutionStepResult result) {
-        OracleFreshnessPolicyLib.Policy memory orderPolicy =
-            _executionPolicyForOrder(order.isClose, executionContext.oracleFrozen, executionContext.isFadWindow);
         if (_maxOrderAge() > 0 && block.timestamp - order.commitTime > _maxOrderAge()) {
             emit OrderFailed(orderId, OrderFailReason.Expired);
             _finalizeOrCleanupOrder(
@@ -128,23 +125,25 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
             return revertOnBlockedExecution ? OrderExecutionStepResult.Return : OrderExecutionStepResult.Continue;
         }
 
-        if (orderPolicy.closeOnly) {
+        if (!order.isClose && executionContext.openExecutionCloseOnly) {
             if (revertOnBlockedExecution) {
                 revert IOrderRouterErrors.OrderRouter__CommitValidation(10);
             }
             return OrderExecutionStepResult.Break;
         }
 
-        if (address(pyth) != address(0) && !executionContext.oracleFrozen && block.number == order.commitBlock) {
+        if (address(pyth()) != address(0) && !executionContext.oracleFrozen && block.number == order.commitBlock) {
             if (revertOnBlockedExecution) {
-                revert IOrderRouterErrors.OrderRouter__OracleValidation(13);
+                revert IOrderRouterErrors.OrderRouter__SameBlockExecution(order.commitBlock, block.number);
             }
             return OrderExecutionStepResult.Break;
         }
 
-        if (address(pyth) != address(0) && !executionContext.oracleFrozen && oraclePublishTime <= order.commitTime) {
+        if (address(pyth()) != address(0) && !executionContext.oracleFrozen && oraclePublishTime <= order.commitTime) {
             if (revertOnBlockedExecution) {
-                revert IOrderRouterErrors.OrderRouter__OracleValidation(13);
+                revert IOrderRouterErrors.OrderRouter__OraclePublishTimeNotAfterCommit(
+                    oraclePublishTime, order.commitTime
+                );
             }
             return OrderExecutionStepResult.Break;
         }

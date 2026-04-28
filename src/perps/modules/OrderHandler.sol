@@ -5,6 +5,7 @@ import {CfdTypes} from "../CfdTypes.sol";
 import {IOrderRouterAccounting} from "../interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterAdminHost} from "../interfaces/IOrderRouterAdminHost.sol";
 import {IOrderRouterErrors} from "../interfaces/IOrderRouterErrors.sol";
+import {IPletherOracle} from "../interfaces/IPletherOracle.sol";
 import {OrderValidation} from "./OrderValidation.sol";
 
 /// @notice Internal action handler for the delayed-order router.
@@ -90,11 +91,8 @@ abstract contract OrderHandler is OrderValidation {
         if (nextExecuteId == 0) {
             revert IOrderRouterErrors.OrderRouter__QueueState(0);
         }
-        uint64 initialHeadOrderId = nextExecuteId;
-        (, CfdTypes.Order memory initialHeadOrder) = _pendingOrder(initialHeadOrderId);
-
         (OracleUpdateResult memory update, RouterExecutionContext memory executionContext) =
-            _prepareOrderExecutionOracle(pythUpdateData, initialHeadOrder.targetPrice);
+            _prepareOrderExecutionOracle(pythUpdateData);
 
         _skipStaleOrders(orderId, update.executionPrice, update.oraclePublishTime);
         if (nextExecuteId == 0) {
@@ -119,7 +117,7 @@ abstract contract OrderHandler is OrderValidation {
         _validateBatchBounds(maxOrderId);
 
         (OracleUpdateResult memory update, RouterExecutionContext memory executionContext) =
-            _prepareOrderExecutionOracle(pythUpdateData, 1e8);
+            _prepareOrderExecutionOracle(pythUpdateData);
         uint256 expiredPrunes;
 
         while (nextExecuteId != 0 && nextExecuteId <= maxOrderId) {
@@ -160,9 +158,13 @@ abstract contract OrderHandler is OrderValidation {
     ) internal {
         _onlyAdmin();
         maxOrderAge = config.maxOrderAge;
-        orderExecutionStalenessLimit = config.orderExecutionStalenessLimit;
-        liquidationStalenessLimit = config.liquidationStalenessLimit;
-        pythMaxConfidenceRatioBps = config.pythMaxConfidenceRatioBps;
+        pletherOracle.applyConfig(
+            IPletherOracle.OracleConfig({
+                orderExecutionStalenessLimit: config.orderExecutionStalenessLimit,
+                liquidationStalenessLimit: config.liquidationStalenessLimit,
+                pythMaxConfidenceRatioBps: config.pythMaxConfidenceRatioBps
+            })
+        );
         openOrderExecutionBountyBps = config.openOrderExecutionBountyBps;
         minOpenOrderExecutionBountyUsdc = config.minOpenOrderExecutionBountyUsdc;
         maxOpenOrderExecutionBountyUsdc = config.maxOpenOrderExecutionBountyUsdc;

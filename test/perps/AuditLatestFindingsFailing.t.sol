@@ -256,7 +256,7 @@ contract AuditLatestFindingsFailing_MevDrift is BasePerpTest {
         bytes[] memory updateData = new bytes[](1);
         updateData[0] = "";
 
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 13));
+        vm.expectPartialRevert(OrderRouter.OrderRouter__SameBlockExecution.selector);
         router.executeOrder(1, updateData);
     }
 

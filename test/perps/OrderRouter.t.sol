@@ -22,6 +22,7 @@ import {ICfdEngineAdminHost} from "../../src/perps/interfaces/ICfdEngineAdminHos
 import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
+import {IPletherOracle} from "../../src/perps/interfaces/IPletherOracle.sol";
 import {PositionRiskAccountingLib} from "../../src/perps/libraries/PositionRiskAccountingLib.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
@@ -1420,7 +1421,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 13));
+        vm.expectPartialRevert(OrderRouter.OrderRouter__OraclePublishTimeNotAfterCommit.selector);
         router.executeOrder(1, empty);
 
         assertEq(
@@ -1439,7 +1440,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(block.number + 1);
 
         bytes[] memory empty = _pythUpdateData();
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         router.executeOrder(1, empty);
 
         assertEq(router.nextExecuteId(), 1, "Future oracle publication must not consume the FIFO head");
@@ -1456,7 +1457,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(1050);
 
         bytes[] memory empty = _pythUpdateData();
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 13));
+        vm.expectPartialRevert(OrderRouter.OrderRouter__SameBlockExecution.selector);
         router.executeOrder(1, empty);
 
         assertEq(router.nextExecuteId(), 1, "Order stays in queue when executed in same block");
@@ -1477,7 +1478,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(1200);
         vm.roll(block.number + 1);
 
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         router.executeOrder(1, _pythUpdateData());
 
         IOrderRouterAdminHost.RouterConfig memory routerConfig = _routerConfig();
@@ -1543,7 +1544,7 @@ contract OrderRouterPythTest is BasePerpTest {
         mockPyth.setAllPrices(feedIds, int64(100_000_000), uint64(2_000_000), int32(-8), uint64(block.timestamp - 10));
 
         vm.roll(block.number + 1);
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 11));
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__ConfidenceTooWide.selector);
         router.executeOrder(1, _pythUpdateData());
     }
 
@@ -2137,7 +2138,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(1000);
         bytes[] memory empty = _pythUpdateData();
 
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         router.executeOrder(1, empty);
 
         IOrderRouterAccounting.AccountEscrowView memory afterRevertEscrow = router.getAccountEscrow(account);
@@ -2196,6 +2197,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         bytes[] memory priceData = _pythUpdateData();
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), block.timestamp + 6);
+        vm.warp(block.timestamp + 6);
         vm.roll(block.number + 1);
         router.executeOrder(1, priceData);
 
@@ -2233,7 +2235,7 @@ contract OrderRouterPythTest is BasePerpTest {
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 2000 - age);
 
         bytes[] memory empty = _pythUpdateData();
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         router.executeOrder(1, empty);
 
         IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(account);
@@ -2255,6 +2257,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         address account = alice;
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 3006);
+        vm.warp(3006);
 
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
@@ -2272,6 +2275,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         bytes[] memory empty = _pythUpdateData();
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), uint64(block.timestamp + 6));
+        vm.warp(block.timestamp + 6);
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
@@ -2324,7 +2328,7 @@ contract OrderRouterPythTest is BasePerpTest {
         data[0] = hex"00";
 
         vm.warp(1050);
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 6));
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__InsufficientFee.selector);
         vm.roll(block.number + 1);
         router.executeOrder(1, data);
     }
@@ -2356,7 +2360,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         vm.warp(2056);
         vm.roll(block.number + 1);
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         router.executeLiquidation(account, empty);
     }
 
@@ -2383,7 +2387,7 @@ contract OrderRouterPythTest is BasePerpTest {
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 2000);
 
         vm.warp(2061);
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         router.executeLiquidation(account, empty);
 
         IOrderRouterAdminHost.RouterConfig memory routerConfig = _routerConfig();
@@ -2527,7 +2531,7 @@ contract OrderRouterPythTest is BasePerpTest {
         bytes[] memory empty = _pythUpdateData();
         vm.prank(keeper);
         vm.roll(block.number + 1);
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 13));
+        vm.expectPartialRevert(OrderRouter.OrderRouter__OraclePublishTimeNotAfterCommit.selector);
         router.executeOrder(1, empty);
 
         assertEq(router.nextExecuteId(), 1, "Live execution should reject publish times that predate commit");
@@ -2558,7 +2562,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         vm.warp(1000);
         bytes[] memory empty = _pythUpdateData();
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         vm.roll(block.number + 1);
         router.executeOrderBatch(1, empty);
     }
@@ -2598,6 +2602,7 @@ contract OrderRouterPythTest is BasePerpTest {
         mockPyth.setPrice(FEED_A, int64(120_000_000), int32(-8), 1001);
         mockPyth.setPrice(FEED_B, int64(80_000_000), int32(-8), 1001);
 
+        vm.warp(1001);
         (uint256 price, uint256 minPt) = harness.computeBasketPrice(60, 60);
         assertEq(price, 108_000_000, "70/30 basket should compute $1.08");
         assertEq(minPt, 1001, "minPublishTime should be weakest link");
@@ -2615,7 +2620,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(1050);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 13));
+        vm.expectPartialRevert(OrderRouter.OrderRouter__OraclePublishTimeNotAfterCommit.selector);
         router.executeOrder(1, empty);
 
         assertEq(router.nextExecuteId(), 1, "Weakest-link publish time should still trigger MEV protection");
@@ -2632,7 +2637,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         vm.warp(1001);
         bytes[] memory empty = _pythUpdateData();
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         vm.roll(block.number + 1);
         router.executeOrderBatch(1, empty);
     }
@@ -2644,7 +2649,7 @@ contract OrderRouterPythTest is BasePerpTest {
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 930);
 
         BasketPriceHarness harness = new BasketPriceHarness(address(mockPyth), feedIds, weights, bases, new bool[](2));
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__PublishTimeDivergence.selector);
         harness.computeBasketPrice(3 days, 60);
     }
 
@@ -2821,7 +2826,9 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
         );
         assertEq(router.nextExecuteId(), orderId, "Blocked close-only execution should leave the FIFO head pending");
         assertEq(
-            router.pendingOrderCounts(aliceAccount), 1, "Blocked close-only execution should preserve pending order count"
+            router.pendingOrderCounts(aliceAccount),
+            1,
+            "Blocked close-only execution should preserve pending order count"
         );
         assertEq(
             uint256(_orderRecord(orderId).status),
@@ -2870,7 +2877,9 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
             _executionBountyReserve(orderId), reservedBounty, "Blocked batch execution should preserve bounty escrow"
         );
         assertEq(router.nextExecuteId(), orderId, "Blocked batch execution should stop at the pending FIFO head");
-        assertEq(router.pendingOrderCounts(aliceAccount), 1, "Blocked batch execution should preserve pending order count");
+        assertEq(
+            router.pendingOrderCounts(aliceAccount), 1, "Blocked batch execution should preserve pending order count"
+        );
         assertEq(
             uint256(_orderRecord(orderId).status),
             uint256(IOrderRouterAccounting.OrderStatus.Pending),
@@ -2882,13 +2891,25 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
 
 contract BasketPriceHarness is OrderRouter {
 
+    IPyth internal localPyth;
+    bytes32[] internal localPythFeedIds;
+    uint256[] internal localQuantities;
+    uint256[] internal localBasePrices;
+    bool[] internal localInversions;
+
     constructor(
         address _pyth,
         bytes32[] memory _feedIds,
         uint256[] memory _quantities,
         uint256[] memory _basePrices,
         bool[] memory _inversions
-    ) OrderRouter(address(1), address(1), address(1), _pyth, _feedIds, _quantities, _basePrices, _inversions) {}
+    ) OrderRouter(address(1), address(1), address(1), _pyth, _feedIds, _quantities, _basePrices, _inversions) {
+        localPyth = IPyth(_pyth);
+        localPythFeedIds = _feedIds;
+        localQuantities = _quantities;
+        localBasePrices = _basePrices;
+        localInversions = _inversions;
+    }
 
     function computeBasketPrice(
         uint256 maxStaleness,
@@ -2898,15 +2919,22 @@ contract BasketPriceHarness is OrderRouter {
         uint256 maxPublishTime;
         uint256 basketPrice;
 
-        for (uint256 i = 0; i < pythFeedIds.length; i++) {
-            PythStructs.Price memory p = IPyth(address(pyth)).getPriceUnsafe(pythFeedIds[i]);
+        for (uint256 i = 0; i < localPythFeedIds.length; i++) {
+            PythStructs.Price memory p = localPyth.getPriceUnsafe(localPythFeedIds[i]);
             if (p.publishTime > block.timestamp || block.timestamp - p.publishTime > maxStaleness) {
-                revert OrderRouter.OrderRouter__OracleValidation(10);
+                revert IPletherOracle.PletherOracle__StalePrice(
+                    IPletherOracle.PriceMode.OrderExecution,
+                    localPythFeedIds[i],
+                    p.publishTime,
+                    maxStaleness,
+                    block.timestamp
+                );
             }
 
             uint256 norm =
-                inversions[i] ? _localInvertPythPrice(p.price, p.expo) : _localNormalizePythPrice(p.price, p.expo);
-            basketPrice += (norm * quantities[i]) / (basePrices[i] * DecimalConstants.CHAINLINK_TO_TOKEN_SCALE);
+                localInversions[i] ? _localInvertPythPrice(p.price, p.expo) : _localNormalizePythPrice(p.price, p.expo);
+            basketPrice += (norm * localQuantities[i])
+                / (localBasePrices[i] * DecimalConstants.CHAINLINK_TO_TOKEN_SCALE);
 
             if (p.publishTime < minPublishTime) {
                 minPublishTime = p.publishTime;
@@ -2917,10 +2945,12 @@ contract BasketPriceHarness is OrderRouter {
         }
 
         if (maxPublishTime > minPublishTime + maxPublishTimeDivergence) {
-            revert OrderRouter.OrderRouter__OracleValidation(10);
+            revert IPletherOracle.PletherOracle__PublishTimeDivergence(
+                IPletherOracle.PriceMode.OrderExecution, minPublishTime, maxPublishTime, maxPublishTimeDivergence
+            );
         }
         if (basketPrice == 0) {
-            revert OrderRouter.OrderRouter__OracleValidation(8);
+            revert IPletherOracle.PletherOracle__ZeroBasketPrice();
         }
 
         return (basketPrice, minPublishTime);
@@ -2931,7 +2961,7 @@ contract BasketPriceHarness is OrderRouter {
         int32 expo
     ) internal pure returns (uint256 normalizedPrice) {
         if (price <= 0) {
-            revert OrderRouter.OrderRouter__OracleValidation(8);
+            revert IPletherOracle.PletherOracle__InvalidPrice(bytes32(0), price);
         }
         uint256 positivePrice = uint256(uint64(price));
         uint256 scaledPrecision = 10 ** uint256(uint32(26 - expo));
@@ -2944,7 +2974,7 @@ contract BasketPriceHarness is OrderRouter {
         int32 expo
     ) internal pure returns (uint256 normalizedPrice) {
         if (price <= 0) {
-            revert OrderRouter.OrderRouter__OracleValidation(8);
+            revert IPletherOracle.PletherOracle__InvalidPrice(bytes32(0), price);
         }
 
         uint256 rawPrice = uint256(uint64(price));
@@ -2979,7 +3009,7 @@ contract NormalizePythHarness is OrderRouter {
         int32 expo
     ) external pure returns (uint256) {
         if (price <= 0) {
-            revert OrderRouter.OrderRouter__OracleValidation(8);
+            revert IPletherOracle.PletherOracle__InvalidPrice(bytes32(0), price);
         }
 
         uint256 rawPrice = uint256(uint64(price));
@@ -3301,13 +3331,17 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         vm.stopPrank();
 
         assertEq(router.pendingOrderCounts(traderAccount), 2, "Liquidated account should start with two queued orders");
-        assertEq(router.pendingOrderCounts(otherAccount), 2, "Unrelated account should start with its own queued orders");
+        assertEq(
+            router.pendingOrderCounts(otherAccount), 2, "Unrelated account should start with its own queued orders"
+        );
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(150_000_000));
         router.executeLiquidation(traderAccount, priceData);
 
-        assertEq(router.pendingOrderCounts(traderAccount), 0, "Liquidation should clear only the liquidated account queue");
+        assertEq(
+            router.pendingOrderCounts(traderAccount), 0, "Liquidation should clear only the liquidated account queue"
+        );
         assertEq(router.pendingOrderCounts(otherAccount), 2, "Unrelated account queue should remain intact");
 
         IOrderRouterAccounting.PendingOrderView[] memory otherPending = _pendingOrders(otherAccount);
@@ -3563,7 +3597,9 @@ contract FadStalenessTest is BasePerpTest {
         );
         assertEq(router.nextExecuteId(), orderId, "Blocked close-only execution should leave the FIFO head pending");
         assertEq(
-            router.pendingOrderCounts(aliceAccount), 1, "Blocked close-only execution should preserve pending order count"
+            router.pendingOrderCounts(aliceAccount),
+            1,
+            "Blocked close-only execution should preserve pending order count"
         );
         assertEq(
             uint256(_orderRecord(orderId).status),
@@ -3611,7 +3647,9 @@ contract FadStalenessTest is BasePerpTest {
             _executionBountyReserve(orderId), reservedBounty, "Blocked batch execution should preserve bounty escrow"
         );
         assertEq(router.nextExecuteId(), orderId, "Blocked batch execution should stop at the pending FIFO head");
-        assertEq(router.pendingOrderCounts(aliceAccount), 1, "Blocked batch execution should preserve pending order count");
+        assertEq(
+            router.pendingOrderCounts(aliceAccount), 1, "Blocked batch execution should preserve pending order count"
+        );
         assertEq(
             uint256(_orderRecord(orderId).status),
             uint256(IOrderRouterAccounting.OrderStatus.Pending),
@@ -3648,7 +3686,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(SATURDAY_NOON + 50);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         router.executeOrder(2, empty);
     }
 
@@ -3692,7 +3730,7 @@ contract FadStalenessTest is BasePerpTest {
         bytes[] memory empty = _pythUpdateData();
         address aliceAccount = alice;
 
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         router.executeLiquidation(aliceAccount, empty);
     }
 
@@ -3724,7 +3762,7 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.warp(SATURDAY_NOON + 50);
         bytes[] memory empty = _pythUpdateData();
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         vm.roll(block.number + 1);
         router.executeOrderBatch(2, empty);
     }
@@ -3739,7 +3777,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(WEDNESDAY_NOON + 67);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         router.executeOrder(2, empty);
 
         address aliceAccount = alice;
@@ -3851,7 +3889,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(FRIDAY_20UTC + 30);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         router.executeOrder(2, empty);
     }
 
@@ -3898,7 +3936,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(FRIDAY_20UTC + 63);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         router.executeOrder(2, empty);
 
         address aliceAccount = alice;
@@ -3914,7 +3952,7 @@ contract FadStalenessTest is BasePerpTest {
         bytes[] memory empty = _pythUpdateData();
         address aliceAccount = alice;
 
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 12));
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         router.executeLiquidation(aliceAccount, empty);
     }
 
@@ -3948,7 +3986,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(SUNDAY_21UTC + 30);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         router.executeOrder(2, empty);
     }
 
@@ -3971,7 +4009,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(SUNDAY_21UTC + 50);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         router.executeOrder(2, empty);
     }
 
@@ -4040,7 +4078,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(runwayTime + 30);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         router.executeOrder(2, empty);
     }
 
@@ -4097,6 +4135,7 @@ contract InversionTest is Test {
         BasketPriceHarness harness = new BasketPriceHarness(address(mockPyth), ids, w, b, inv);
 
         mockPyth.setPrice(FEED_JPY, int64(156_700), int32(-3), 1001);
+        vm.warp(1001);
         (uint256 price,) = harness.computeBasketPrice(60, 60);
 
         uint256 expectedNorm = (uint256(1e29) + (156_700 / 2)) / 156_700 / 1e18;
@@ -4116,7 +4155,7 @@ contract InversionTest is Test {
         b[1] = 1e8;
         bool[] memory inv = new bool[](1);
 
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 1));
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__ArrayLengthMismatch.selector);
         new BasketPriceHarness(address(mockPyth), ids, w, b, inv);
     }
 
@@ -4139,6 +4178,7 @@ contract InversionTest is Test {
         mockPyth.setPrice(FEED_EUR, int64(108_000_000), int32(-8), 1001);
         mockPyth.setPrice(FEED_JPY, int64(156_700), int32(-3), 1001);
 
+        vm.warp(1001);
         (uint256 price,) = harness.computeBasketPrice(60, 60);
 
         assertApproxEqAbs(price, 100_000_000, 100, "Mixed basket at base prices should be ~$1.00");
@@ -4190,6 +4230,7 @@ contract InversionTest is Test {
         mockPyth.setPrice(pythIds[2], int64(126_000_000), int32(-8), 1001);
         mockPyth.setPrice(pythIds[3], int64(8800), int32(-4), 1001);
 
+        vm.warp(1001);
         (uint256 pythPrice,) = harness.computeBasketPrice(60, 60);
 
         assertApproxEqAbs(
@@ -4257,7 +4298,7 @@ contract OrderRouterAuditTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
         bytes[] memory empty;
 
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 4));
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__MockModeForbidden.selector);
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
     }
@@ -4655,7 +4696,7 @@ contract MarkPriceStalenessTest is BasePerpTest {
         bytes[] memory updateData = new bytes[](1);
         updateData[0] = "";
 
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         router.updateMarkPrice(updateData);
     }
 
@@ -4665,7 +4706,7 @@ contract MarkPriceStalenessTest is BasePerpTest {
         bytes[] memory updateData = new bytes[](1);
         updateData[0] = "";
 
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         router.updateMarkPrice(updateData);
 
         assertEq(engine.lastMarkTime(), 0, "Future oracle publication must not update the cached mark");
@@ -4682,7 +4723,7 @@ contract MarkPriceStalenessTest is BasePerpTest {
     }
 
     function test_Constructor_ZeroEngineLensReverts() public {
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 7));
+        vm.expectRevert(OrderRouter.OrderRouter__ZeroEngineLens.selector);
         new OrderRouter(
             address(engine), address(0), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
         );
@@ -4782,7 +4823,7 @@ contract StalenessGriefTest is BasePerpTest {
         bytes[] memory empty = _pythUpdateData();
         vm.prank(attacker);
         vm.roll(block.number + 1);
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         router.executeOrder(1, empty);
 
         address aliceAccount = alice;
