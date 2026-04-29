@@ -62,17 +62,17 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     /// @notice Curve Minter for CRV emissions on L1 (address(0) on L2 where claim_rewards handles CRV).
     ICurveMinter public immutable CRV_MINTER;
 
-    uint256 public constant BUFFER_TARGET_BPS = 200; // 2% target buffer
-    uint256 public constant DEPLOY_THRESHOLD = 1000e6; // Min $1000 to deploy
-    uint256 public constant MAX_DEPLOY_POOL_BPS = 100; // Max 1% of Curve USDC side per deploy
-    uint256 public constant MAX_SPOT_DEVIATION_BPS = 50; // 0.5% max spot-vs-EMA deviation
+    uint256 private constant BUFFER_TARGET_BPS = 200; // 2% target buffer
+    uint256 private constant DEPLOY_THRESHOLD = 1000e6; // Min $1000 to deploy
+    uint256 private constant MAX_DEPLOY_POOL_BPS = 100; // Max 1% of Curve USDC side per deploy
+    uint256 private constant MAX_SPOT_DEVIATION_BPS = 50; // 0.5% max spot-vs-EMA deviation
 
-    uint256 public constant ORACLE_TIMEOUT = 24 hours;
-    uint256 public constant SEQUENCER_GRACE_PERIOD = 1 hours;
+    uint256 private constant ORACLE_TIMEOUT = 24 hours;
+    uint256 private constant SEQUENCER_GRACE_PERIOD = 1 hours;
 
     // Inflation attack protection (Virtual Shares)
-    uint256 public constant VIRTUAL_SHARES = 1e18;
-    uint256 public constant VIRTUAL_ASSETS = 1e6;
+    uint256 private constant VIRTUAL_SHARES = 1e18;
+    uint256 private constant VIRTUAL_ASSETS = 1e6;
 
     uint256 private constant USDC_INDEX = 0;
     uint256 private constant BPS = 10_000;

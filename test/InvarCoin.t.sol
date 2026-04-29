@@ -362,6 +362,9 @@ contract InvarCoinTest is Test {
     address public rewardDist = makeAddr("rewardDist");
 
     uint256 constant ORACLE_PRICE = 120_000_000;
+    uint256 constant MAX_DEPLOY_POOL_BPS = 100;
+    uint256 constant VIRTUAL_SHARES = 1e18;
+    uint256 constant VIRTUAL_ASSETS = 1e6;
 
     function setUp() public {
         vm.warp(100_000);
@@ -786,7 +789,7 @@ contract InvarCoinTest is Test {
         ic.deposit(200_000e6, alice, 0);
 
         uint256 poolUsdcBefore = usdc.balanceOf(address(curve));
-        uint256 expectedDeploy = (poolUsdcBefore * ic.MAX_DEPLOY_POOL_BPS()) / 10_000;
+        uint256 expectedDeploy = (poolUsdcBefore * MAX_DEPLOY_POOL_BPS) / 10_000;
 
         uint256 lpMinted = ic.deployToCurve(0);
 
@@ -979,14 +982,12 @@ contract InvarCoinTest is Test {
         uint256 optimisticAssetsBeforeYield = localUsdc + optimisticLpValue - optimisticYield;
         uint256 mixedAssetsBeforeYield = localUsdc + optimisticLpValue - pessimisticYield;
 
-        uint256 pessimisticShares = Math.mulDiv(
-            pessimisticYield, supply + ic.VIRTUAL_SHARES(), pessimisticAssetsBeforeYield + ic.VIRTUAL_ASSETS()
-        );
-        uint256 optimisticShares = Math.mulDiv(
-            optimisticYield, supply + ic.VIRTUAL_SHARES(), optimisticAssetsBeforeYield + ic.VIRTUAL_ASSETS()
-        );
+        uint256 pessimisticShares =
+            Math.mulDiv(pessimisticYield, supply + VIRTUAL_SHARES, pessimisticAssetsBeforeYield + VIRTUAL_ASSETS);
+        uint256 optimisticShares =
+            Math.mulDiv(optimisticYield, supply + VIRTUAL_SHARES, optimisticAssetsBeforeYield + VIRTUAL_ASSETS);
         uint256 mixedShares =
-            Math.mulDiv(pessimisticYield, supply + ic.VIRTUAL_SHARES(), mixedAssetsBeforeYield + ic.VIRTUAL_ASSETS());
+            Math.mulDiv(pessimisticYield, supply + VIRTUAL_SHARES, mixedAssetsBeforeYield + VIRTUAL_ASSETS);
 
         assertApproxEqRel(
             pessimisticShares, optimisticShares, 0.003e18, "Consistent harvest pricing should be nearly basis-invariant"
