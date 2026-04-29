@@ -362,6 +362,9 @@ contract InvarCoinTest is Test {
     address public rewardDist = makeAddr("rewardDist");
 
     uint256 constant ORACLE_PRICE = 120_000_000;
+    uint256 constant MAX_DEPLOY_POOL_BPS = 100;
+    uint256 constant VIRTUAL_SHARES = 1e18;
+    uint256 constant VIRTUAL_ASSETS = 1e6;
 
     function setUp() public {
         vm.warp(100_000);
@@ -373,6 +376,8 @@ contract InvarCoinTest is Test {
         curve = new MockCurvePool(address(usdc), address(bearToken), address(curveLp));
 
         curve.setPriceMultiplier(1.2e18);
+
+        usdc.mint(address(curve), 10_000_000e6);
 
         ic = new InvarCoin(
             address(usdc), address(bearToken), address(curveLp), address(curve), address(oracle), address(0), address(0)
@@ -688,6 +693,9 @@ contract InvarCoinTest is Test {
         uint256 bobUsdcBefore = usdc.balanceOf(bob);
         uint256 bobBearBefore = bearToken.balanceOf(bob);
 
+        vm.expectEmit(true, true, false, false);
+        emit InvarCoin.LpWithdrawn(alice, bob, bal, 0, 0);
+
         vm.prank(alice);
         (uint256 usdcReturned, uint256 bearReturned) = ic.lpWithdraw(bal, 0, 0, bob);
 
@@ -757,23 +765,37 @@ contract InvarCoinTest is Test {
         ic.deployToCurve(0);
     }
 
-    function test_DeployToCurve_RevertsOnSpotPremiumManipulation() public {
+    function test_DeployToCurve_AllowsFavorableSpotPremium() public {
         vm.prank(alice);
         ic.deposit(20_000e6, alice, 0);
 
         curve.setSpotPremiumBps(600);
 
-        vm.expectRevert(InvarCoin.InvarCoin__SpotDeviationTooHigh.selector);
         ic.deployToCurve(0);
     }
 
-    function test_DeployToCurve_AllowsNormalSpotDrift() public {
+    function test_DeployToCurve_RevertsOnUnfavorableSpotDrift() public {
         vm.prank(alice);
         ic.deposit(20_000e6, alice, 0);
 
         curve.setSpotDiscountBps(30);
 
+        vm.expectRevert(InvarCoin.InvarCoin__SpotDeviationTooHigh.selector);
         ic.deployToCurve(0);
+    }
+
+    function test_DeployToCurve_CapsDeployToOnePercentOfPoolUsdc() public {
+        vm.prank(alice);
+        ic.deposit(200_000e6, alice, 0);
+
+        uint256 poolUsdcBefore = usdc.balanceOf(address(curve));
+        uint256 expectedDeploy = (poolUsdcBefore * MAX_DEPLOY_POOL_BPS) / 10_000;
+
+        uint256 lpMinted = ic.deployToCurve(0);
+
+        assertGt(lpMinted, 0);
+        assertEq(usdc.balanceOf(address(curve)) - poolUsdcBefore, expectedDeploy, "deploy should be capped");
+        assertEq(usdc.balanceOf(address(ic)), 200_000e6 - expectedDeploy, "excess remains for later chunks");
     }
 
     function test_DeployToCurve_SlippageGuardUsesEmaBound() public {
@@ -785,9 +807,9 @@ contract InvarCoinTest is Test {
 
         uint256 deploy = 17_640e6;
         uint256 emaExpectedLp = (deploy * 1e30) / curve.lp_price();
-        uint256 minLpOut = emaExpectedLp * 9950 / 10_000;
+        uint256 minLpOut = emaExpectedLp;
 
-        curve.setSpotDiscountBps(30);
+        curve.setSpotPremiumBps(30);
 
         vm.expectCall(address(curve), abi.encodeCall(curve.add_liquidity, ([deploy, uint256(0)], minLpOut)));
         ic.deployToCurve(0);
@@ -805,15 +827,53 @@ contract InvarCoinTest is Test {
         ic.harvest();
     }
 
-    function test_Harvest_RevertsWhenNoStakers() public {
+    function test_Harvest_SkipsWhenNoStakersAndPreservesYield() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice, 0);
+
+        ic.deployToCurve(0);
+        uint256 costBefore = ic.curveLpCostVp();
+        curve.setVirtualPrice(1.05e18);
+
+        vm.expectRevert(InvarCoin.InvarCoin__NoYield.selector);
+        ic.harvest();
+
+        assertEq(ic.curveLpCostVp(), costBefore, "yield accounting should not advance without stakers");
+
+        uint256 stakeAmount = ic.balanceOf(alice);
+        vm.startPrank(alice);
+        ic.approve(address(sInvar), stakeAmount);
+        sInvar.deposit(stakeAmount, alice);
+        vm.stopPrank();
+
+        uint256 donated = ic.harvest();
+        assertGt(donated, 0, "pending yield should remain harvestable once stakers exist");
+    }
+
+    function test_Deposit_SkipsPendingHarvestWhenNoStakers() public {
         vm.prank(alice);
         ic.deposit(20_000e6, alice, 0);
 
         ic.deployToCurve(0);
         curve.setVirtualPrice(1.05e18);
 
-        vm.expectRevert(InvarCoin.InvarCoin__NoStakers.selector);
-        ic.harvest();
+        vm.prank(bob);
+        uint256 shares = ic.deposit(1000e6, bob, 0);
+
+        assertGt(shares, 0);
+    }
+
+    function test_LpWithdraw_SkipsPendingHarvestWhenNoStakers() public {
+        vm.prank(alice);
+        uint256 shares = ic.deposit(20_000e6, alice, 0);
+
+        ic.deployToCurve(0);
+        curve.setVirtualPrice(1.05e18);
+
+        vm.prank(alice);
+        (uint256 usdcReturned, uint256 bearReturned) = ic.lpWithdraw(shares, 0, 0, alice);
+
+        assertTrue(usdcReturned > 0 || bearReturned > 0);
     }
 
     function test_Harvest_CurveYield() public {
@@ -922,14 +982,12 @@ contract InvarCoinTest is Test {
         uint256 optimisticAssetsBeforeYield = localUsdc + optimisticLpValue - optimisticYield;
         uint256 mixedAssetsBeforeYield = localUsdc + optimisticLpValue - pessimisticYield;
 
-        uint256 pessimisticShares = Math.mulDiv(
-            pessimisticYield, supply + ic.VIRTUAL_SHARES(), pessimisticAssetsBeforeYield + ic.VIRTUAL_ASSETS()
-        );
-        uint256 optimisticShares = Math.mulDiv(
-            optimisticYield, supply + ic.VIRTUAL_SHARES(), optimisticAssetsBeforeYield + ic.VIRTUAL_ASSETS()
-        );
+        uint256 pessimisticShares =
+            Math.mulDiv(pessimisticYield, supply + VIRTUAL_SHARES, pessimisticAssetsBeforeYield + VIRTUAL_ASSETS);
+        uint256 optimisticShares =
+            Math.mulDiv(optimisticYield, supply + VIRTUAL_SHARES, optimisticAssetsBeforeYield + VIRTUAL_ASSETS);
         uint256 mixedShares =
-            Math.mulDiv(pessimisticYield, supply + ic.VIRTUAL_SHARES(), mixedAssetsBeforeYield + ic.VIRTUAL_ASSETS());
+            Math.mulDiv(pessimisticYield, supply + VIRTUAL_SHARES, mixedAssetsBeforeYield + VIRTUAL_ASSETS);
 
         assertApproxEqRel(
             pessimisticShares, optimisticShares, 0.003e18, "Consistent harvest pricing should be nearly basis-invariant"
@@ -2706,7 +2764,7 @@ contract InvarCoinTest is Test {
 
         uint256 deploy = 17_640e6;
         uint256 emaExpectedLp = (deploy * 1e30) / curve.lp_price();
-        uint256 minLpOut = emaExpectedLp * 9950 / 10_000;
+        uint256 minLpOut = emaExpectedLp;
 
         vm.expectCall(address(curve), abi.encodeCall(curve.add_liquidity, ([deploy, uint256(0)], minLpOut)));
         ic.deployToCurve(0);
@@ -2986,6 +3044,7 @@ contract InvarCoinGaugeTest is Test {
         curveLp = new MockCurveLpToken();
         curve = new MockCurvePool(address(usdc), address(bearToken), address(curveLp));
         curve.setPriceMultiplier(1.2e18);
+        usdc.mint(address(curve), 10_000_000e6);
 
         ic = new InvarCoin(
             address(usdc), address(bearToken), address(curveLp), address(curve), address(oracle), address(0), address(0)
@@ -4023,6 +4082,7 @@ contract HarvestBypassTest is Test {
         curveLp = new MockCurveLpToken();
         curve = new MockCurvePool(address(usdc), address(bearToken), address(curveLp));
         curve.setPriceMultiplier(1.2e18);
+        usdc.mint(address(curve), 10_000_000e6);
 
         ic = new InvarCoin(
             address(usdc), address(bearToken), address(curveLp), address(curve), address(oracle), address(0), address(0)

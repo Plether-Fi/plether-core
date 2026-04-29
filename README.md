@@ -119,13 +119,13 @@ InvarCoin is a passive savings token that maintains exposure to a basket of glob
 - After claiming rewards, route protected balances only through `sweepGaugeRewards(token)`
 
 **Keeper operations:**
-- `deployToCurve()` — pushes excess USDC buffer (>2% target) into single-sided Curve LP
+- `deployToCurve()` — pushes excess USDC buffer (>2% target) into single-sided Curve LP when execution is at least EMA fair value, capped to 1% of Curve's USDC side per call
 - `replenishBuffer()` — burns Curve LP to restore the 2% USDC buffer
 - `harvest()` — captures LP fee yield and streams to sINVAR stakers
 
 **Safety:**
 - Dual LP pricing: pessimistic (min of EMA, oracle) for withdrawals, optimistic (max) for deposits
-- Spot-vs-EMA deviation guard (0.5%) blocks deposits/deployments during pool manipulation
+- Spot-vs-EMA guards block unfavorable Curve execution during deposits/deployments
 - Virtual shares (1e18/1e6) prevent first-depositor inflation attacks
 - `totalAssets()` is a best-effort NAV view for UX/monitoring; use `totalAssetsValidated()` for strict oracle-validated accounting reads
 - `_harvestSafe()` gracefully skips when Curve VP reads fail; if yield is pending, strict oracle validation is still enforced

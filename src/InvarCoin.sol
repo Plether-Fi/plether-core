@@ -62,16 +62,17 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     /// @notice Curve Minter for CRV emissions on L1 (address(0) on L2 where claim_rewards handles CRV).
     ICurveMinter public immutable CRV_MINTER;
 
-    uint256 public constant BUFFER_TARGET_BPS = 200; // 2% target buffer
-    uint256 public constant DEPLOY_THRESHOLD = 1000e6; // Min $1000 to deploy
-    uint256 public constant MAX_SPOT_DEVIATION_BPS = 50; // 0.5% max spot-vs-EMA deviation
+    uint256 private constant BUFFER_TARGET_BPS = 200; // 2% target buffer
+    uint256 private constant DEPLOY_THRESHOLD = 1000e6; // Min $1000 to deploy
+    uint256 private constant MAX_DEPLOY_POOL_BPS = 100; // Max 1% of Curve USDC side per deploy
+    uint256 private constant MAX_SPOT_DEVIATION_BPS = 50; // 0.5% max spot-vs-EMA deviation
 
-    uint256 public constant ORACLE_TIMEOUT = 24 hours;
-    uint256 public constant SEQUENCER_GRACE_PERIOD = 1 hours;
+    uint256 private constant ORACLE_TIMEOUT = 24 hours;
+    uint256 private constant SEQUENCER_GRACE_PERIOD = 1 hours;
 
     // Inflation attack protection (Virtual Shares)
-    uint256 public constant VIRTUAL_SHARES = 1e18;
-    uint256 public constant VIRTUAL_ASSETS = 1e6;
+    uint256 private constant VIRTUAL_SHARES = 1e18;
+    uint256 private constant VIRTUAL_ASSETS = 1e6;
 
     uint256 private constant USDC_INDEX = 0;
     uint256 private constant BPS = 10_000;
@@ -113,7 +114,9 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
     event Deposited(address indexed user, address indexed receiver, uint256 usdcIn, uint256 glUsdOut);
     event Withdrawn(address indexed user, address indexed receiver, uint256 glUsdIn, uint256 usdcOut);
-    event LpWithdrawn(address indexed user, uint256 sharesBurned, uint256 usdcReturned, uint256 bearReturned);
+    event LpWithdrawn(
+        address indexed user, address indexed receiver, uint256 sharesBurned, uint256 usdcReturned, uint256 bearReturned
+    );
     event LpDeposited(address indexed user, address indexed receiver, uint256 usdcIn, uint256 bearIn, uint256 glUsdOut);
     event DeployedToCurve(address indexed caller, uint256 usdcDeployed, uint256 bearDeployed, uint256 lpMinted);
     event BufferReplenished(uint256 lpBurned, uint256 usdcRecovered);
@@ -770,7 +773,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             BEAR.safeTransfer(receiver, bearReturned);
         }
 
-        emit LpWithdrawn(msg.sender, glUsdAmount, usdcReturned, bearReturned);
+        emit LpWithdrawn(msg.sender, receiver, glUsdAmount, usdcReturned, bearReturned);
     }
 
     /// @notice Direct LP deposit: provide USDC and/or plDXY-BEAR, deploy to Curve, mint INVAR.
@@ -823,7 +826,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     /// @dev Measures fee yield as virtual price growth above the cost basis (curveLpCostVp).
     ///      Mints INVAR proportional to the USDC value of yield and donates it to sINVAR stakers.
     ///      Only tracks VP growth on vault-deployed LP (trackedLpBalance), not donated LP.
-    ///      Reverts if no yield is available — use as a heartbeat signal for keepers.
+    ///      Reverts if no yield is donated — use as a heartbeat signal for keepers.
     /// @return donated Amount of INVAR minted and donated to sINVAR.
     function harvest() external nonReentrant whenNotPaused returns (uint256 donated) {
         donated = _harvest();
@@ -833,7 +836,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     }
 
     /// @dev Harvest yield before withdrawals. Best-effort: skips when no yield is pending, Curve is
-    ///      down, or oracle is unavailable. Withdrawals must never be blocked by oracle outages.
+    ///      down, oracle is unavailable, or no sINVAR stakers exist. Withdrawals must never be blocked.
     function _harvestSafe() internal {
         if (address(stakedInvarCoin) == address(0)) {
             return;
@@ -884,14 +887,15 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
     function _mintAndDonate(
         uint256 amount
-    ) private {
-        if (stakedInvarCoin.totalSupply() == 0) {
-            revert InvarCoin__NoStakers();
+    ) private returns (bool donated) {
+        if (amount == 0 || stakedInvarCoin.totalSupply() == 0) {
+            return false;
         }
 
         _mint(address(this), amount);
         IERC20(this).approve(address(stakedInvarCoin), amount);
         stakedInvarCoin.donateYield(amount);
+        donated = true;
     }
 
     function _harvestWithPrice(
@@ -906,15 +910,19 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         if (totalYieldUsdc == 0) {
             return 0;
         }
-        curveLpCostVp = currentVpValue;
-
         uint256 supply = totalSupply();
         uint256 currentAssets = _totalAssetsWithPrice(_lpBalance(), oraclePrice);
         uint256 assetsBeforeYield = currentAssets > totalYieldUsdc ? currentAssets - totalYieldUsdc : 0;
 
-        donated = Math.mulDiv(totalYieldUsdc, supply + VIRTUAL_SHARES, assetsBeforeYield + VIRTUAL_ASSETS);
+        uint256 amountToDonate =
+            Math.mulDiv(totalYieldUsdc, supply + VIRTUAL_SHARES, assetsBeforeYield + VIRTUAL_ASSETS);
 
-        _mintAndDonate(donated);
+        if (!_mintAndDonate(amountToDonate)) {
+            return 0;
+        }
+
+        curveLpCostVp = currentVpValue;
+        donated = amountToDonate;
 
         emit YieldHarvested(donated, 0, donated);
     }
@@ -932,6 +940,10 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         }
 
         _harvest();
+
+        if (stakedInvarCoin.totalSupply() == 0) {
+            revert InvarCoin__NoStakers();
+        }
 
         uint256 oraclePrice = _validatedOraclePrice();
 
@@ -951,9 +963,10 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     }
 
     /// @notice Permissionless keeper function: deploys excess USDC buffer into Curve as single-sided liquidity.
-    /// @dev Maintains a 2% USDC buffer (BUFFER_TARGET_BPS). Only deploys if excess exceeds DEPLOY_THRESHOLD ($1000).
-    ///      Symmetric spot-vs-EMA deviation check (MAX_SPOT_DEVIATION_BPS = 0.5%) blocks deployment during
-    ///      pool manipulation, and the min-LP bound is derived from EMA fair value rather than spot.
+    /// @dev Maintains a 2% USDC buffer (BUFFER_TARGET_BPS). Only deploys if excess exceeds DEPLOY_THRESHOLD ($1000),
+    ///      and chunks deployments to at most MAX_DEPLOY_POOL_BPS of Curve's current USDC balance.
+    ///      Requires Curve to quote at least EMA fair value so deployments only execute when single-sided
+    ///      USDC liquidity is fair or favorable to the vault.
     /// @param maxUsdc Cap on USDC to deploy (0 = no cap, deploy entire excess).
     /// @return lpMinted Amount of Curve LP tokens minted.
     function deployToCurve(
@@ -974,13 +987,21 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             usdcToDeploy = maxUsdc;
         }
 
+        uint256 maxDeployByDepth = (USDC.balanceOf(address(CURVE_POOL)) * MAX_DEPLOY_POOL_BPS) / BPS;
+        if (usdcToDeploy > maxDeployByDepth) {
+            usdcToDeploy = maxDeployByDepth;
+        }
+        if (usdcToDeploy == 0) {
+            revert InvarCoin__NothingToDeploy();
+        }
+
         uint256[2] memory amounts = [usdcToDeploy, uint256(0)];
         uint256 calcLp = CURVE_POOL.calc_token_amount(amounts, true);
         uint256 emaExpectedLp = (usdcToDeploy * 1e30) / CURVE_POOL.lp_price();
-        if (_outsideSpotDeviationBounds(calcLp, emaExpectedLp)) {
+        if (calcLp < emaExpectedLp) {
             revert InvarCoin__SpotDeviationTooHigh();
         }
-        lpMinted = CURVE_POOL.add_liquidity(amounts, _fairValueMinOut(emaExpectedLp));
+        lpMinted = CURVE_POOL.add_liquidity(amounts, emaExpectedLp);
         _recordLpDeployment(lpMinted);
 
         emit DeployedToCurve(msg.sender, usdcToDeploy, 0, lpMinted);
