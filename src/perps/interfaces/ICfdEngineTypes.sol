@@ -152,6 +152,7 @@ interface ICfdEngineTypes {
         uint64 lastUpdateTime;
         uint64 lastCarryTimestamp;
         int256 vpiAccrued;
+        uint256 lpBackedRiskUsdc;
     }
 
 }

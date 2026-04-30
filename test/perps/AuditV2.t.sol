@@ -34,6 +34,9 @@ contract AuditV2_C01_WithdrawGuardTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 5e6,
             bountyBps: 10
         });
@@ -96,6 +99,9 @@ contract AuditV2_C02_ReconcileTimeConsumptionTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 5e6,
             bountyBps: 10
         });
@@ -177,6 +183,9 @@ contract AuditV2_C03_OracleFrozenCloseTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 5e6,
             bountyBps: 10
         });
@@ -390,6 +399,9 @@ contract AuditV2_M01_VPIRebateIMRTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 5e6,
             bountyBps: 10
         });

@@ -24,6 +24,9 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 1e6,
             bountyBps: 9
         });
@@ -356,6 +359,37 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
                 "Account ledger snapshot committed margin must match typed committed bucket"
             );
         }
+    }
+
+    function invariant_SideLpBackedRiskMatchesActivePositions() public view {
+        uint256 sumBullLpBackedRisk;
+        uint256 sumBearLpBackedRisk;
+
+        for (uint256 i = 0; i < handler.actorCount(); i++) {
+            address account = _account(handler.actorAt(i));
+            (uint256 size, uint256 margin,, uint256 maxProfitUsdc, CfdTypes.Side side,,) = engine.positions(account);
+            if (size == 0) {
+                continue;
+            }
+
+            uint256 lpBackedRisk = maxProfitUsdc > margin ? maxProfitUsdc - margin : 0;
+            if (side == CfdTypes.Side.BULL) {
+                sumBullLpBackedRisk += lpBackedRisk;
+            } else {
+                sumBearLpBackedRisk += lpBackedRisk;
+            }
+        }
+
+        assertEq(
+            engine.sideLpBackedRiskUsdc(uint8(CfdTypes.Side.BULL)),
+            sumBullLpBackedRisk,
+            "Bull LP-backed risk mirror must equal active bull position risk"
+        );
+        assertEq(
+            engine.sideLpBackedRiskUsdc(uint8(CfdTypes.Side.BEAR)),
+            sumBearLpBackedRisk,
+            "Bear LP-backed risk mirror must equal active bear position risk"
+        );
     }
 
     function invariant_FifoPointersStayWithinCommittedRange() public view {

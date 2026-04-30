@@ -54,6 +54,9 @@ contract TimelockPauseTest is BasePerpTest {
             initMarginBps: ((200) * 15) / 10,
             fadMarginBps: 500,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 10 * 1e6,
             bountyBps: 20
         });
@@ -73,6 +76,9 @@ contract TimelockPauseTest is BasePerpTest {
             initMarginBps: ((200) * 15) / 10,
             fadMarginBps: 500,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 10 * 1e6,
             bountyBps: 20
         });
@@ -94,6 +100,9 @@ contract TimelockPauseTest is BasePerpTest {
             initMarginBps: ((200) * 15) / 10,
             fadMarginBps: 500,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 10 * 1e6,
             bountyBps: 20
         });
@@ -105,7 +114,7 @@ contract TimelockPauseTest is BasePerpTest {
         _warpForward(48 hours + 1);
         engineAdmin.finalizeRiskConfig();
 
-        (,, uint256 maintMarginBps,,,,,) = engine.riskParams();
+        (,, uint256 maintMarginBps,,,,,,,,) = engine.riskParams();
         assertEq(maintMarginBps, 200);
         assertEq(engine.executionFeeBps(), 7);
         assertEq(engineAdmin.riskConfigActivationTime(), 0);
@@ -124,6 +133,9 @@ contract TimelockPauseTest is BasePerpTest {
             initMarginBps: ((200) * 15) / 10,
             fadMarginBps: 500,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 10 * 1e6,
             bountyBps: 20
         });
@@ -149,6 +161,9 @@ contract TimelockPauseTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 10
         });
@@ -169,6 +184,9 @@ contract TimelockPauseTest is BasePerpTest {
             initMarginBps: ((200) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 10
         });
@@ -188,6 +206,9 @@ contract TimelockPauseTest is BasePerpTest {
             initMarginBps: ((300) * 15) / 10,
             fadMarginBps: 500,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 10
         });

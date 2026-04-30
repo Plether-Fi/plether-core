@@ -437,6 +437,9 @@ contract AuditConfirmedFindingsFailing_LegacySpreadReserve is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 5e6,
             bountyBps: 10
         });
@@ -497,7 +500,7 @@ contract AuditConfirmedFindingsFailing_LegacySpreadReserve is BasePerpTest {
         assertGt(cappedLegacySpread, 0, "Positive legacy-spread liabilities should be fully reserved");
 
         uint256 bal = usdc.balanceOf(address(pool));
-        uint256 maxLiability = _sideMaxProfit(CfdTypes.Side.BULL);
+        uint256 maxLiability = _maxLiability();
         uint256 pendingFees = engine.accumulatedFeesUsdc();
         uint256 expectedReserved = maxLiability + pendingFees + uint256(cappedLegacySpread);
         uint256 expectedFree = bal > expectedReserved ? bal - expectedReserved : 0;
@@ -521,6 +524,9 @@ contract AuditConfirmedFindingsFailing_EntryNotionalRounding is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 1,
             bountyBps: 10
         });
@@ -581,6 +587,9 @@ contract AuditConfirmedFindingsFailing_OpenSkewCap is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 5e6,
             bountyBps: 10
         });

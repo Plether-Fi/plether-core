@@ -96,6 +96,9 @@ contract CfdEnginePlanLibHarness {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 1e6,
             bountyBps: 10
         });
@@ -146,6 +149,9 @@ contract CfdEnginePlanLibHarness {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 1e6,
             bountyBps: 10
         });
@@ -195,6 +201,9 @@ contract CfdEnginePlanLibHarness {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 1e6,
             bountyBps: 10
         });
@@ -231,10 +240,12 @@ contract CfdEnginePlanLibHarness {
             maxProfitUsdc: 100_000e6,
             openInterest: currentSize,
             entryNotional: currentSize * currentEntryPrice,
-            totalMargin: positionMarginUsdc
+            totalMargin: positionMarginUsdc,
+            lpBackedRiskUsdc: 100_000e6 > positionMarginUsdc ? 100_000e6 - positionMarginUsdc : 0
         });
-        snap.bearSide =
-            CfdEnginePlanTypes.SideSnapshot({maxProfitUsdc: 0, openInterest: 0, entryNotional: 0, totalMargin: 0});
+        snap.bearSide = CfdEnginePlanTypes.SideSnapshot({
+            maxProfitUsdc: 0, openInterest: 0, entryNotional: 0, totalMargin: 0, lpBackedRiskUsdc: 0
+        });
         snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
             settlementBalanceUsdc: settlementBalanceUsdc,
             totalLockedMarginUsdc: positionMarginUsdc,
@@ -252,6 +263,9 @@ contract CfdEnginePlanLibHarness {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 1e6,
             bountyBps: 10
         });
@@ -308,16 +322,18 @@ contract CfdEngineTest is BasePerpTest {
 
     function _maxLiabilityAfterClose(
         CfdTypes.Side side,
-        uint256 maxProfitReductionUsdc
+        uint256 maxProfitReductionUsdc,
+        uint256 marginReductionUsdc
     ) internal view returns (uint256) {
-        uint256 bullMaxProfit = _sideMaxProfit(CfdTypes.Side.BULL);
-        uint256 bearMaxProfit = _sideMaxProfit(CfdTypes.Side.BEAR);
+        uint256 bullRisk = _sideLpBackedRisk(CfdTypes.Side.BULL);
+        uint256 bearRisk = _sideLpBackedRisk(CfdTypes.Side.BEAR);
+        uint256 removedRisk = _positionLpBackedRisk(maxProfitReductionUsdc, marginReductionUsdc);
         if (side == CfdTypes.Side.BULL) {
-            bullMaxProfit -= maxProfitReductionUsdc;
+            bullRisk = bullRisk > removedRisk ? bullRisk - removedRisk : 0;
         } else {
-            bearMaxProfit -= maxProfitReductionUsdc;
+            bearRisk = bearRisk > removedRisk ? bearRisk - removedRisk : 0;
         }
-        return bullMaxProfit > bearMaxProfit ? bullMaxProfit : bearMaxProfit;
+        return bullRisk > bearRisk ? bullRisk : bearRisk;
     }
 
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
@@ -328,6 +344,9 @@ contract CfdEngineTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 1 * 1e6,
             bountyBps: 10
         });
@@ -409,7 +428,7 @@ contract CfdEngineTest is BasePerpTest {
         params.initMarginBps = 400;
         _setRiskParams(params);
 
-        (,,, uint256 initMarginBps,,,,) = engine.riskParams();
+        (,,, uint256 initMarginBps,,,,,,,) = engine.riskParams();
         assertEq(initMarginBps, 400, "Setup must finalize the explicit init margin config");
 
         vm.prank(address(router));
@@ -752,7 +771,9 @@ contract CfdEngineTest is BasePerpTest {
         (uint256 size,,,,,,) = engine.positions(bearAccount);
         assertEq(size, 0, "Illiquid profitable close close should still destroy the position");
         assertEq(
-            engine.deferredTraderCreditUsdc(bearAccount), preview.deferredTraderCreditUsdc, "Live close should match preview"
+            engine.deferredTraderCreditUsdc(bearAccount),
+            preview.deferredTraderCreditUsdc,
+            "Live close should match preview"
         );
     }
 
@@ -1399,9 +1420,7 @@ contract CfdEngineTest is BasePerpTest {
         );
         assertEq(pool.totalAssets(), 20e6, "Trader claim should move the vault into the exact 20/20/20 residual state");
         assertEq(engine.accumulatedFeesUsdc(), 20e6, "Servicing deferred claims must not burn fee accounting");
-        assertEq(
-            engine.deferredTraderCreditUsdc(traderAccount), 0, "Trader deferred balance should be fully consumed"
-        );
+        assertEq(engine.deferredTraderCreditUsdc(traderAccount), 0, "Trader deferred balance should be fully consumed");
         assertEq(engine.deferredKeeperCreditUsdc(keeper), 20e6, "Keeper deferred balance should remain queued");
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
@@ -2393,7 +2412,7 @@ contract CfdEngineTest is BasePerpTest {
         assertTrue(preDrainPreview.valid, "Setup close preview should remain valid");
 
         uint256 grossTargetAssets =
-            _maxLiabilityAfterClose(CfdTypes.Side.BULL, bullMaxProfit) + engine.accumulatedFeesUsdc();
+            _maxLiabilityAfterClose(CfdTypes.Side.BULL, bullMaxProfit, bullMargin) + engine.accumulatedFeesUsdc();
         assertGt(
             grossTargetAssets,
             preDrainPreview.seizedCollateralUsdc + 1,
@@ -3402,7 +3421,9 @@ contract CfdEngineTest is BasePerpTest {
 
         _closeAt(bearAccount, CfdTypes.Side.BEAR, 5000e18, 120_000_000, vaultDepth, refreshTime);
         uint256 bearDeferredBefore = engine.deferredTraderCreditUsdc(bearAccount);
-        assertGt(bearDeferredBefore, 0, "Initial deferred payout should create tracked deferred balance for bearAccount");
+        assertGt(
+            bearDeferredBefore, 0, "Initial deferred payout should create tracked deferred balance for bearAccount"
+        );
 
         _closeAt(laterAccount, CfdTypes.Side.BEAR, 5000e18, 120_000_000, vaultDepth, refreshTime);
         uint256 laterDeferred = engine.deferredTraderCreditUsdc(laterAccount);
@@ -3440,7 +3461,8 @@ contract CfdEngineTest is BasePerpTest {
             deferredBefore, 1e6, "Setup must create legacy deferred payout large enough to cover the fee shortfall"
         );
 
-        stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(bearAccount).checked_write(uint256(0));
+        stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(bearAccount)
+            .checked_write(uint256(0));
         bytes32 positionMarginSlot = keccak256(abi.encode(bearAccount, uint256(3)));
         vm.store(address(clearinghouse), positionMarginSlot, bytes32(uint256(0)));
 
@@ -4031,6 +4053,9 @@ contract CfdEngineTest is BasePerpTest {
                 initMarginBps: ((300) * 15) / 10,
                 fadMarginBps: 500,
                 baseCarryBps: 500,
+                carryKinkUtilizationBps: 7000,
+                carrySlope1Bps: 0,
+                carrySlope2Bps: 0,
                 minBountyUsdc: 1 * 1e6,
                 bountyBps: 10
             })
@@ -4247,6 +4272,9 @@ contract CfdEngineTest is BasePerpTest {
                 initMarginBps: ((100) * 15) / 10,
                 fadMarginBps: 300,
                 baseCarryBps: 500,
+                carryKinkUtilizationBps: 7000,
+                carrySlope1Bps: 0,
+                carrySlope2Bps: 0,
                 minBountyUsdc: 1 * 1e6,
                 bountyBps: 10
             })
@@ -4442,9 +4470,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(engine));
         pool.payOut(address(0xDEAD), 60_000 * 1e6);
 
-        uint256 maxLiab = _sideMaxProfit(CfdTypes.Side.BULL) > _sideMaxProfit(CfdTypes.Side.BEAR)
-            ? _sideMaxProfit(CfdTypes.Side.BULL)
-            : _sideMaxProfit(CfdTypes.Side.BEAR);
+        uint256 maxLiab = _maxLiability();
         assertTrue(usdc.balanceOf(address(pool)) < maxLiab, "Vault should be insolvent");
 
         CfdTypes.Order memory aliceClose = CfdTypes.Order({
@@ -4548,13 +4574,11 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         engine.processOrderTyped(bobOpen, 1e8, vaultDepth, uint64(block.timestamp));
 
-        // Drain vault to simulate insolvency (pool has ~$1M + fees, maxLiab = $200k)
+        // Drain vault to simulate insolvency.
         vm.prank(address(engine));
         pool.payOut(address(0xDEAD), 810_000 * 1e6);
 
-        uint256 maxLiab = _sideMaxProfit(CfdTypes.Side.BULL) > _sideMaxProfit(CfdTypes.Side.BEAR)
-            ? _sideMaxProfit(CfdTypes.Side.BULL)
-            : _sideMaxProfit(CfdTypes.Side.BEAR);
+        uint256 maxLiab = _maxLiability();
         assertTrue(usdc.balanceOf(address(pool)) < maxLiab, "Vault should be insolvent");
 
         // Price rises to $1.10 — BULL loses $20k, deeply underwater
@@ -4586,6 +4610,9 @@ contract CfdEngineTest is BasePerpTest {
                 initMarginBps: ((10) * 15) / 10,
                 fadMarginBps: 10,
                 baseCarryBps: 500,
+                carryKinkUtilizationBps: 7000,
+                carrySlope1Bps: 0,
+                carrySlope2Bps: 0,
                 minBountyUsdc: 1 * 1e6,
                 bountyBps: 100
             })
@@ -4855,7 +4882,7 @@ contract CfdEngineTest is BasePerpTest {
         params.initMarginBps = 300;
         _setRiskParams(params);
 
-        (,,, uint256 initMarginBps,,,,) = engine.riskParams();
+        (,,, uint256 initMarginBps,,,,,,,) = engine.riskParams();
         assertEq(initMarginBps, 300, "Setup must finalize the explicit init margin config");
 
         vm.prank(address(router));
@@ -5104,6 +5131,9 @@ contract CfdEngineCarryRegressionTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 1 * 1e6,
             bountyBps: 10
         });
@@ -5220,6 +5250,9 @@ contract CfdEngineAuditTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 1 * 1e6,
             bountyBps: 10
         });
@@ -5483,6 +5516,9 @@ contract CfdEngineAuditTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 1 * 1e6,
             bountyBps: 10
         });
@@ -5584,6 +5620,9 @@ contract MarginCappedMtmTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 1 * 1e6,
             bountyBps: 10
         });
@@ -5766,6 +5805,9 @@ contract PhantomExecFeeTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 1 * 1e6,
             bountyBps: 10
         });
@@ -5831,6 +5873,9 @@ contract CarryModelFreeUsdcTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 1 * 1e6,
             bountyBps: 10
         });
@@ -5889,7 +5934,7 @@ contract CarryModelFreeUsdcTest is BasePerpTest {
         uint256 freeUsdcNow = pool.getFreeUSDC();
 
         uint256 bal = usdc.balanceOf(address(pool));
-        uint256 maxLiability = _sideMaxProfit(CfdTypes.Side.BULL);
+        uint256 maxLiability = _maxLiability();
         uint256 pendingFees = engine.accumulatedFeesUsdc();
         uint256 reservedWithoutLegacySpread = maxLiability + pendingFees;
         uint256 freeWithoutLegacySpread = bal > reservedWithoutLegacySpread ? bal - reservedWithoutLegacySpread : 0;
@@ -5916,6 +5961,9 @@ contract DegradedModeLifecycleTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 1e6,
             bountyBps: 10
         });
@@ -6031,6 +6079,9 @@ contract ProtocolPhaseTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 1e6,
             bountyBps: 10
         });
@@ -6130,6 +6181,9 @@ contract VpiDepthTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 1 * 1e6,
             bountyBps: 10
         });
@@ -6325,6 +6379,9 @@ contract VpiChunkingTest is Test {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 1 * 1e6,
             bountyBps: 10
         });
@@ -6510,6 +6567,9 @@ contract SolvencySnapshotRegressionTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 1e6,
             bountyBps: 10
         });

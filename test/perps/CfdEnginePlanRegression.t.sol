@@ -76,6 +76,9 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 5e6,
             bountyBps: 10
         });
@@ -370,10 +373,18 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         snap.lastMarkPrice = 1e8;
         snap.lastMarkTime = uint64(block.timestamp);
         snap.bullSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: 100_000e6, openInterest: 100_000e18, entryNotional: 100_000e6, totalMargin: 2500e6
+            maxProfitUsdc: 100_000e6,
+            openInterest: 100_000e18,
+            entryNotional: 100_000e6,
+            totalMargin: 2500e6,
+            lpBackedRiskUsdc: 97_500e6
         });
         snap.bearSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: 100_000e6, openInterest: 100_000e18, entryNotional: 100_000e6, totalMargin: 2500e6
+            maxProfitUsdc: 100_000e6,
+            openInterest: 100_000e18,
+            entryNotional: 100_000e6,
+            totalMargin: 2500e6,
+            lpBackedRiskUsdc: 97_500e6
         });
         snap.vaultAssetsUsdc = 2_000_000e6;
         snap.vaultCashUsdc = 2_000_000e6;
@@ -435,10 +446,15 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             vpiAccrued: 0
         });
         snap.bullSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: 0, openInterest: 300_000e18, entryNotional: 300_000e6, totalMargin: 50_000e6
+            maxProfitUsdc: 0,
+            openInterest: 300_000e18,
+            entryNotional: 300_000e6,
+            totalMargin: 50_000e6,
+            lpBackedRiskUsdc: 0
         });
-        snap.bearSide =
-            CfdEnginePlanTypes.SideSnapshot({maxProfitUsdc: 0, openInterest: 0, entryNotional: 0, totalMargin: 0});
+        snap.bearSide = CfdEnginePlanTypes.SideSnapshot({
+            maxProfitUsdc: 0, openInterest: 0, entryNotional: 0, totalMargin: 0, lpBackedRiskUsdc: 0
+        });
         snap.vaultAssetsUsdc = 2_000_000e6;
         snap.vaultCashUsdc = 2_000_000e6;
         snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
@@ -489,10 +505,18 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         snap.lastMarkPrice = 1e8;
         snap.lastMarkTime = uint64(block.timestamp);
         snap.bullSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: 100_000e6, openInterest: 10_000e18, entryNotional: 10_000e18 * 1e8, totalMargin: 100e6
+            maxProfitUsdc: 100_000e6,
+            openInterest: 10_000e18,
+            entryNotional: 10_000e18 * 1e8,
+            totalMargin: 100e6,
+            lpBackedRiskUsdc: 99_900e6
         });
         snap.bearSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: 100_000e6, openInterest: 10_000e18, entryNotional: 10_000e18 * 1e8, totalMargin: 100e6
+            maxProfitUsdc: 100_000e6,
+            openInterest: 10_000e18,
+            entryNotional: 10_000e18 * 1e8,
+            totalMargin: 100e6,
+            lpBackedRiskUsdc: 99_900e6
         });
         snap.vaultAssetsUsdc = 50_000_000e6;
         snap.vaultCashUsdc = 50_000_000e6;
@@ -620,10 +644,15 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             maxProfitUsdc: 100_000e6,
             openInterest: 1_000_000e18,
             entryNotional: 1_000_000e18 * 1e8,
-            totalMargin: 50_000e6
+            totalMargin: 50_000e6,
+            lpBackedRiskUsdc: 50_000e6
         });
         snap.bearSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: 10_000e6, openInterest: 100_000e18, entryNotional: 100_000e18 * 1e8, totalMargin: 1e6
+            maxProfitUsdc: 10_000e6,
+            openInterest: 100_000e18,
+            entryNotional: 100_000e18 * 1e8,
+            totalMargin: 1e6,
+            lpBackedRiskUsdc: 9999e6
         });
         snap.vaultAssetsUsdc = 50_000_000e6;
         snap.vaultCashUsdc = 0;
@@ -675,10 +704,18 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         snap.lastMarkPrice = 1e8;
         snap.lastMarkTime = uint64(block.timestamp);
         snap.bullSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: 100_000e6, openInterest: 100_000e18, entryNotional: 100_000e18 * 1e8, totalMargin: 2000e6
+            maxProfitUsdc: 100_000e6,
+            openInterest: 100_000e18,
+            entryNotional: 100_000e18 * 1e8,
+            totalMargin: 2000e6,
+            lpBackedRiskUsdc: 98_000e6
         });
         snap.bearSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: 100_000e6, openInterest: 100_000e18, entryNotional: 100_000e18 * 1e8, totalMargin: 2000e6
+            maxProfitUsdc: 100_000e6,
+            openInterest: 100_000e18,
+            entryNotional: 100_000e18 * 1e8,
+            totalMargin: 2000e6,
+            lpBackedRiskUsdc: 98_000e6
         });
         snap.vaultAssetsUsdc = 50_000_000e6;
         snap.vaultCashUsdc = 50_000_000e6;

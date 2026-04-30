@@ -47,6 +47,9 @@ contract AuditV3_C01_FIFODeadlockTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 5e6,
             bountyBps: 10
         });
@@ -210,6 +213,9 @@ contract AuditV3_C03_AsymmetricStalenessTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 5e6,
             bountyBps: 10
         });
@@ -432,6 +438,9 @@ contract AuditV3_H02_JuniorWipeoutDilutionTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 5e6,
             bountyBps: 10
         });

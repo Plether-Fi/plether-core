@@ -180,6 +180,9 @@ contract PerpInvariantTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 5e6,
             bountyBps: 10
         });
@@ -493,8 +496,39 @@ contract PerpInvariantTest is BasePerpTest {
         );
     }
 
+    function invariant_SideLpBackedRiskMatchesPositions() public view {
+        uint256 sumBullLpBackedRisk;
+        uint256 sumBearLpBackedRisk;
+
+        for (uint256 i = 0; i < 3; i++) {
+            address account = handler.traders(i);
+            (uint256 size, uint256 margin,, uint256 maxProfitUsdc, CfdTypes.Side side,,) = engine.positions(account);
+            if (size == 0) {
+                continue;
+            }
+
+            uint256 lpBackedRisk = maxProfitUsdc > margin ? maxProfitUsdc - margin : 0;
+            if (side == CfdTypes.Side.BULL) {
+                sumBullLpBackedRisk += lpBackedRisk;
+            } else {
+                sumBearLpBackedRisk += lpBackedRisk;
+            }
+        }
+
+        assertEq(
+            engine.sideLpBackedRiskUsdc(uint8(CfdTypes.Side.BULL)),
+            sumBullLpBackedRisk,
+            "Bull LP-backed risk mirror must equal live bull position risk"
+        );
+        assertEq(
+            engine.sideLpBackedRiskUsdc(uint8(CfdTypes.Side.BEAR)),
+            sumBearLpBackedRisk,
+            "Bear LP-backed risk mirror must equal live bear position risk"
+        );
+    }
+
     function invariant_LivePositionsRemainLargeEnoughForLiquidationEconomics() public view {
-        (,,,,,, uint256 minBountyUsdc, uint256 bountyBps) = engine.riskParams();
+        (,,,,,,,,, uint256 minBountyUsdc, uint256 bountyBps) = engine.riskParams();
         uint256 oraclePrice = engine.lastMarkPrice();
         if (oraclePrice == 0) {
             oraclePrice = 1e8;
@@ -972,6 +1006,9 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 5e6,
             bountyBps: 10
         });

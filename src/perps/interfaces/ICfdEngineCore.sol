@@ -34,6 +34,9 @@ interface ICfdEngineCore {
             uint256 initMarginBps,
             uint256 fadMarginBps,
             uint256 baseCarryBps,
+            uint256 carryKinkUtilizationBps,
+            uint256 carrySlope1Bps,
+            uint256 carrySlope2Bps,
             uint256 minBountyUsdc,
             uint256 bountyBps
         );

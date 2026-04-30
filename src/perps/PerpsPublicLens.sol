@@ -146,7 +146,7 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
             uint256 maxSkewRatio,
             uint256 maintMarginBps,
             uint256 initMarginBps,
-            uint256 fadMarginBps,,,
+            uint256 fadMarginBps,,,,,,
         ) = ENGINE.riskParams();
         vpiFactor;
         maxSkewRatio;

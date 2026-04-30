@@ -56,7 +56,8 @@ Operational rules:
 
 - `bullMaxProfit`: worst-case payout to all live BULL positions at one price extreme
 - `bearMaxProfit`: worst-case payout to all live BEAR positions at the opposite price extreme
-- `maxLiability = max(bullMaxProfit, bearMaxProfit)`
+- `positionLpBackedRisk = max(positionMaxProfit - positionMargin, 0)`
+- `maxLiability = max(sum(BULL positionLpBackedRisk), sum(BEAR positionLpBackedRisk))`
 - `badDebt`: realized shortfall that could not be covered by reachable account value or available settlement paths
 
 ### Conservative unrealized MtM
@@ -90,12 +91,14 @@ Definition:
 Rule:
 
 - a risk-increasing action is allowed only if post-op effective solvency assets remain at least as large as post-op bounded liability.
+- the bounded-liability input is gross side max-profit: `max(bull.maxProfitUsdc, bear.maxProfitUsdc)`.
+- position-local LP-backed risk is a pricing signal, not a solvency or LP-withdrawal reserve input.
 
 Notes:
 
 - this view does not rely on speculative receivables,
 - it must not count unrealized trader losses as spendable assets,
-- it is less conservative than LP withdrawal accounting, but still bounded and physical-first.
+- it reserves for the settlement liability exactly as profitable close/claim semantics pay it.
 
 ### 2. LP withdrawal view
 
@@ -284,7 +287,9 @@ Definitions:
 
 - `positionNotionalUsdc = size * markPrice / scale`
 - `lpBackedNotionalUsdc = max(positionNotionalUsdc - reachableCollateralUsdc, 0)`
-- `pendingCarryUsdc = lpBackedNotionalUsdc * baseCarryBps * elapsedSeconds / (10_000 * 365 days)`
+- `sideLpBackedUtilizationBps = min(sideLpBackedRiskUsdc * 10_000 / vaultAssetsUsdc, 10_000)`
+- `carryRateBps = baseCarryBps + kinked utilization surcharge`
+- `pendingCarryUsdc = lpBackedNotionalUsdc * carryRateBps * elapsedSeconds / (10_000 * 365 days)`
 - `unsettledCarryUsdc[account]`: carry that has been checkpointed at a basis change but not yet physically collected
 
 Rules:
@@ -292,6 +297,7 @@ Rules:
 - carry accrues continuously by wall-clock time,
 - carry does not pause when the oracle is stale or frozen,
 - both sides pay when they consume LP-backed capital,
+- the carry rate increases with same-side position-local LP-backed utilization through `carryKinkUtilizationBps`, `carrySlope1Bps`, and `carrySlope2Bps`,
 - pending carry reduces equity for guard and risk checks before realization,
 - basis-changing settlement credits must checkpoint carry even when physical collection is deferred,
 - carry is computed on clearinghouse deposit/withdraw using the pre-mutation reachable basis,

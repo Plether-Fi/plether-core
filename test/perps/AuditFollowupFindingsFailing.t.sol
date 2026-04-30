@@ -44,6 +44,9 @@ contract AuditFollowupFindingsFailing_CloseSolvency is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 5e6,
             bountyBps: 10
         });
@@ -184,6 +187,9 @@ contract AuditFollowupFindingsFailing_LiquidationBounty is BasePerpTest {
             initMarginBps: ((10) * 15) / 10,
             fadMarginBps: 1000,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 1e6,
             bountyBps: 1000
         });
@@ -225,6 +231,9 @@ contract AuditFollowupFindingsFailing_LegacySpreadReserve is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 5e6,
             bountyBps: 10
         });
@@ -285,7 +294,7 @@ contract AuditFollowupFindingsFailing_LegacySpreadReserve is BasePerpTest {
         assertGt(bearLegacySpread, 0, "Setup must make the bear side owed legacy spread");
 
         uint256 bal = usdc.balanceOf(address(pool));
-        uint256 maxLiability = _sideMaxProfit(CfdTypes.Side.BULL);
+        uint256 maxLiability = _maxLiability();
         uint256 pendingFees = engine.accumulatedFeesUsdc();
         uint256 expectedFree = bal > maxLiability + pendingFees + uint256(bearLegacySpread)
             ? bal - maxLiability - pendingFees - uint256(bearLegacySpread)
