@@ -99,13 +99,13 @@ These are the highest-value properties an auditor should expect to hold.
 
 | Invariant | Description |
 |-----------|-------------|
-| Bounded entry solvency | Risk-increasing opens require `vault.totalAssets() >= max(sum(BULL position LP-backed risk), sum(BEAR position LP-backed risk))` using canonical physical backing rather than raw token balance |
+| Bounded entry solvency | Risk-increasing opens require effective assets to cover `max(bull.maxProfitUsdc, bear.maxProfitUsdc)` using canonical physical backing rather than raw token balance |
 | Degraded containment | If a close or liquidation reveals post-op insolvency, `degradedMode` latches and blocks further risk expansion while still permitting protective transitions |
 | Bounded payout | No trader payout can exceed the capped market payoff implied by `CAP_PRICE` |
 | Withdrawal firewall | LP withdrawals are limited to conservative free cash after accounting for bounded liability, deferred liabilities, and protocol-owned balances |
 | Deferred liabilities are senior | Deferred trader credit and deferred keeper credit remain senior claims on vault liquidity until serviced |
 
-This branch uses position-local LP-backed capacity as the reserve basis. It deliberately relaxes the earlier gross max-profit invariant by treating each position's own margin as self-funded risk without pooling excess margin across same-side traders.
+This branch keeps gross max-profit as the reserve basis. Position-local LP-backed risk is retained as a pricing signal for carry, without letting trader margin reduce the hard settlement reserve.
 
 ### Position and engine accounting
 
@@ -286,6 +286,7 @@ This is an explicit design choice, not an accounting accident.
 The perps system uses LP-capital carry instead of side-to-side funding.
 
 - carry base: `max(positionNotionalUsdc - reachableCollateralUsdc, 0)`
+- carry rate: `baseCarryBps` plus a kinked surcharge from same-side position-local LP-backed utilization
 - accrual clock: wall-clock time
 - stale/frozen behavior: carry does not pause during stale or frozen oracle windows
 - basis-change fallback: if physical collection is unsafe, elapsed carry is checkpointed into `unsettledCarryUsdc`

@@ -257,7 +257,9 @@ contract MarginClearinghouseTest is Test {
         vm.prank(engine);
         clearinghouse.lockPositionMargin(aliceAccount, 4200 * 1e6);
 
-        assertEq(clearinghouse.getFreeBuyingPowerUsdc(aliceAccount), 800 * 1e6, "free buying power should remain exposed");
+        assertEq(
+            clearinghouse.getFreeBuyingPowerUsdc(aliceAccount), 800 * 1e6, "free buying power should remain exposed"
+        );
     }
 
     function test_GetAccountUsdcBuckets_SplitsTypedLockedMarginBuckets() public {
@@ -330,7 +332,9 @@ contract MarginClearinghouseTest is Test {
             checkpointCallsBeforeUnlock + 1,
             "Committed-margin unlock should checkpoint carry before funds become reachable again"
         );
-        assertEq(mockEngine.lastCarryAccountId(), aliceAccount, "Unlock should checkpoint carry for the unlocked account");
+        assertEq(
+            mockEngine.lastCarryAccountId(), aliceAccount, "Unlock should checkpoint carry for the unlocked account"
+        );
     }
 
     function test_LockCommittedOrderMargin_RevertsWhenReservationLedgerIsActive() public {
@@ -458,7 +462,9 @@ contract MarginClearinghouseTest is Test {
             checkpointCallsBeforeRelease + 1,
             "Reservation release should checkpoint carry before committed margin becomes reachable again"
         );
-        assertEq(mockEngine.lastCarryAccountId(), aliceAccount, "Release should checkpoint carry for the released account");
+        assertEq(
+            mockEngine.lastCarryAccountId(), aliceAccount, "Release should checkpoint carry for the released account"
+        );
     }
 
     function test_ReleaseOrderReservationIfActive_UsesStoredMarkFallbackWhenFreshCarryIsStale() public {
@@ -477,7 +483,9 @@ contract MarginClearinghouseTest is Test {
             mockEngine.storedMarkCheckpointCalls(), 1, "Stale reservation release should checkpoint using stored mark"
         );
         assertEq(
-            mockEngine.lastCarryAccountId(), aliceAccount, "Fallback release checkpoint should use the reservation account"
+            mockEngine.lastCarryAccountId(),
+            aliceAccount,
+            "Fallback release checkpoint should use the reservation account"
         );
     }
 
@@ -957,8 +965,10 @@ contract MarginClearinghouseTest is Test {
             vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientFreeEquity.selector);
             clearinghouse.applyOpenCost(aliceAccount, marginDeltaUsdc, tradeCostUsdc, engine);
         } else {
-            int256 netMarginChangeUsdc = clearinghouse.applyOpenCost(aliceAccount, marginDeltaUsdc, tradeCostUsdc, engine);
-            IMarginClearinghouse.AccountUsdcBuckets memory bucketsAfter = clearinghouse.getAccountUsdcBuckets(aliceAccount);
+            int256 netMarginChangeUsdc =
+                clearinghouse.applyOpenCost(aliceAccount, marginDeltaUsdc, tradeCostUsdc, engine);
+            IMarginClearinghouse.AccountUsdcBuckets memory bucketsAfter =
+                clearinghouse.getAccountUsdcBuckets(aliceAccount);
             assertEq(
                 netMarginChangeUsdc, plan.netMarginChangeUsdc, "Live open-cost net margin change should match plan"
             );
@@ -1088,6 +1098,9 @@ contract MarginClearinghouseAuditTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 10
         });
@@ -1222,6 +1235,9 @@ contract NonUsdcCollateralTest is Test {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 10
         });

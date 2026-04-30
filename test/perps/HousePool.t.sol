@@ -55,6 +55,9 @@ contract HousePoolTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 10
         });
@@ -1495,6 +1498,9 @@ contract HousePoolTest is BasePerpTest {
                 initMarginBps: ((100) * 15) / 10,
                 fadMarginBps: 300,
                 baseCarryBps: 500,
+                carryKinkUtilizationBps: 7000,
+                carrySlope1Bps: 0,
+                carrySlope2Bps: 0,
                 minBountyUsdc: 5 * 1e6,
                 bountyBps: 10
             })
@@ -1534,6 +1540,9 @@ contract HousePoolTest is BasePerpTest {
                 initMarginBps: ((100) * 15) / 10,
                 fadMarginBps: 300,
                 baseCarryBps: 500,
+                carryKinkUtilizationBps: 7000,
+                carrySlope1Bps: 0,
+                carrySlope2Bps: 0,
                 minBountyUsdc: 5 * 1e6,
                 bountyBps: 10
             })
@@ -1579,6 +1588,9 @@ contract HousePoolTest is BasePerpTest {
                 initMarginBps: ((100) * 15) / 10,
                 fadMarginBps: 300,
                 baseCarryBps: 500,
+                carryKinkUtilizationBps: 7000,
+                carrySlope1Bps: 0,
+                carrySlope2Bps: 0,
                 minBountyUsdc: 5 * 1e6,
                 bountyBps: 10
             })
@@ -1859,6 +1871,9 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 10
         });
@@ -2515,6 +2530,9 @@ contract HousePoolAuditTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 10
         });

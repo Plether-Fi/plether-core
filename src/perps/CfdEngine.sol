@@ -1128,9 +1128,8 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     }
 
     function _maxLiability() internal view returns (uint256) {
-        return SolvencyAccountingLib.getMaxLiability(
-            sideLpBackedRiskUsdc[_sideIndex(CfdTypes.Side.BULL)], sideLpBackedRiskUsdc[_sideIndex(CfdTypes.Side.BEAR)]
-        );
+        (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
+        return SolvencyAccountingLib.getMaxLiability(bullState.maxProfitUsdc, bearState.maxProfitUsdc);
     }
 
     function _getWithdrawalReservedUsdc() internal view returns (uint256 reservedUsdc) {
@@ -1461,8 +1460,11 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         }
         uint256 lpBackedNotionalUsdc =
             PositionRiskAccountingLib.computeLpBackedNotionalUsdc(pos.size, price, reachableCollateralUsdc);
+        uint256 utilizationBps = PositionRiskAccountingLib.computeLpBackedUtilizationBps(
+            sideLpBackedRiskUsdc[_sideIndex(pos.side)], address(vault) == address(0) ? 0 : vault.totalAssets()
+        );
         return PositionRiskAccountingLib.computePendingCarryUsdc(
-            lpBackedNotionalUsdc, riskParams.baseCarryBps, timestampNow - pos.lastCarryTimestamp
+            lpBackedNotionalUsdc, riskParams, utilizationBps, timestampNow - pos.lastCarryTimestamp
         );
     }
 
@@ -1587,6 +1589,9 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
             revert CfdEngine__InvalidRiskParams();
         }
         if (_riskParams.minBountyUsdc == 0 || _riskParams.bountyBps == 0) {
+            revert CfdEngine__InvalidRiskParams();
+        }
+        if (_riskParams.carryKinkUtilizationBps > 10_000) {
             revert CfdEngine__InvalidRiskParams();
         }
         if (_riskParams.maxSkewRatio > CfdMath.WAD) {

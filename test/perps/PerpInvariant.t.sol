@@ -180,6 +180,9 @@ contract PerpInvariantTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 5e6,
             bountyBps: 10
         });
@@ -525,7 +528,7 @@ contract PerpInvariantTest is BasePerpTest {
     }
 
     function invariant_LivePositionsRemainLargeEnoughForLiquidationEconomics() public view {
-        (,,,,,, uint256 minBountyUsdc, uint256 bountyBps) = engine.riskParams();
+        (,,,,,,,,, uint256 minBountyUsdc, uint256 bountyBps) = engine.riskParams();
         uint256 oraclePrice = engine.lastMarkPrice();
         if (oraclePrice == 0) {
             oraclePrice = 1e8;
@@ -1003,6 +1006,9 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 5e6,
             bountyBps: 10
         });

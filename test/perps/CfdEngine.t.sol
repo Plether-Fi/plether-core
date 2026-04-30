@@ -96,6 +96,9 @@ contract CfdEnginePlanLibHarness {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 1e6,
             bountyBps: 10
         });
@@ -146,6 +149,9 @@ contract CfdEnginePlanLibHarness {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 1e6,
             bountyBps: 10
         });
@@ -195,6 +201,9 @@ contract CfdEnginePlanLibHarness {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 1e6,
             bountyBps: 10
         });
@@ -254,6 +263,9 @@ contract CfdEnginePlanLibHarness {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 1e6,
             bountyBps: 10
         });
@@ -332,6 +344,9 @@ contract CfdEngineTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 1 * 1e6,
             bountyBps: 10
         });
@@ -413,7 +428,7 @@ contract CfdEngineTest is BasePerpTest {
         params.initMarginBps = 400;
         _setRiskParams(params);
 
-        (,,, uint256 initMarginBps,,,,) = engine.riskParams();
+        (,,, uint256 initMarginBps,,,,,,,) = engine.riskParams();
         assertEq(initMarginBps, 400, "Setup must finalize the explicit init margin config");
 
         vm.prank(address(router));
@@ -4038,6 +4053,9 @@ contract CfdEngineTest is BasePerpTest {
                 initMarginBps: ((300) * 15) / 10,
                 fadMarginBps: 500,
                 baseCarryBps: 500,
+                carryKinkUtilizationBps: 7000,
+                carrySlope1Bps: 0,
+                carrySlope2Bps: 0,
                 minBountyUsdc: 1 * 1e6,
                 bountyBps: 10
             })
@@ -4254,6 +4272,9 @@ contract CfdEngineTest is BasePerpTest {
                 initMarginBps: ((100) * 15) / 10,
                 fadMarginBps: 300,
                 baseCarryBps: 500,
+                carryKinkUtilizationBps: 7000,
+                carrySlope1Bps: 0,
+                carrySlope2Bps: 0,
                 minBountyUsdc: 1 * 1e6,
                 bountyBps: 10
             })
@@ -4589,6 +4610,9 @@ contract CfdEngineTest is BasePerpTest {
                 initMarginBps: ((10) * 15) / 10,
                 fadMarginBps: 10,
                 baseCarryBps: 500,
+                carryKinkUtilizationBps: 7000,
+                carrySlope1Bps: 0,
+                carrySlope2Bps: 0,
                 minBountyUsdc: 1 * 1e6,
                 bountyBps: 100
             })
@@ -4858,7 +4882,7 @@ contract CfdEngineTest is BasePerpTest {
         params.initMarginBps = 300;
         _setRiskParams(params);
 
-        (,,, uint256 initMarginBps,,,,) = engine.riskParams();
+        (,,, uint256 initMarginBps,,,,,,,) = engine.riskParams();
         assertEq(initMarginBps, 300, "Setup must finalize the explicit init margin config");
 
         vm.prank(address(router));
@@ -5107,6 +5131,9 @@ contract CfdEngineCarryRegressionTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 1 * 1e6,
             bountyBps: 10
         });
@@ -5223,6 +5250,9 @@ contract CfdEngineAuditTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 1 * 1e6,
             bountyBps: 10
         });
@@ -5486,6 +5516,9 @@ contract CfdEngineAuditTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 1 * 1e6,
             bountyBps: 10
         });
@@ -5587,6 +5620,9 @@ contract MarginCappedMtmTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 1 * 1e6,
             bountyBps: 10
         });
@@ -5769,6 +5805,9 @@ contract PhantomExecFeeTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 1 * 1e6,
             bountyBps: 10
         });
@@ -5834,6 +5873,9 @@ contract CarryModelFreeUsdcTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 1 * 1e6,
             bountyBps: 10
         });
@@ -5919,6 +5961,9 @@ contract DegradedModeLifecycleTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 1e6,
             bountyBps: 10
         });
@@ -6034,6 +6079,9 @@ contract ProtocolPhaseTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 1e6,
             bountyBps: 10
         });
@@ -6133,6 +6181,9 @@ contract VpiDepthTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 1 * 1e6,
             bountyBps: 10
         });
@@ -6328,6 +6379,9 @@ contract VpiChunkingTest is Test {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 1 * 1e6,
             bountyBps: 10
         });
@@ -6513,6 +6567,9 @@ contract SolvencySnapshotRegressionTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 1e6,
             bountyBps: 10
         });

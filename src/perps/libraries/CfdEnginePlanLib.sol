@@ -154,7 +154,34 @@ library CfdEnginePlanLib {
         CfdEnginePlanTypes.SideSnapshot memory bull,
         CfdEnginePlanTypes.SideSnapshot memory bear
     ) private pure returns (uint256) {
-        return SolvencyAccountingLib.getMaxLiability(bull.lpBackedRiskUsdc, bear.lpBackedRiskUsdc);
+        return SolvencyAccountingLib.getMaxLiability(bull.maxProfitUsdc, bear.maxProfitUsdc);
+    }
+
+    function _sideLpBackedRiskUsdc(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        CfdTypes.Side side
+    ) private pure returns (uint256) {
+        return side == CfdTypes.Side.BULL ? snap.bullSide.lpBackedRiskUsdc : snap.bearSide.lpBackedRiskUsdc;
+    }
+
+    function _sideLpBackedUtilizationBps(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        CfdTypes.Side side
+    ) private pure returns (uint256) {
+        return PositionRiskAccountingLib.computeLpBackedUtilizationBps(
+            _sideLpBackedRiskUsdc(snap, side), snap.vaultAssetsUsdc
+        );
+    }
+
+    function _pendingCarryUsdc(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        CfdTypes.Side side,
+        uint256 carryBaseUsdc,
+        uint256 carryTimeDelta
+    ) private pure returns (uint256) {
+        return PositionRiskAccountingLib.computePendingCarryUsdc(
+            carryBaseUsdc, snap.riskParams, _sideLpBackedUtilizationBps(snap, side), carryTimeDelta
+        );
     }
 
     function _positionLpBackedRisk(
@@ -248,9 +275,7 @@ library CfdEnginePlanLib {
             effectiveSnap.position.size, price, genericReachableUsdc
         );
         delta.pendingCarryUsdc = effectiveSnap.unsettledCarryUsdc
-            + PositionRiskAccountingLib.computePendingCarryUsdc(
-                carryBaseUsdc, effectiveSnap.riskParams.baseCarryBps, carryTimeDelta
-            );
+            + _pendingCarryUsdc(effectiveSnap, effectiveSnap.position.side, carryBaseUsdc, carryTimeDelta);
 
         if (_applyPendingCarryRealizationToOpenSnapshot(effectiveSnap, delta.pendingCarryUsdc)) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES;
@@ -519,10 +544,8 @@ library CfdEnginePlanLib {
         uint256 genericReachableUsdc = MarginClearinghouseAccountingLib.getGenericReachableUsdc(snap.accountBuckets);
         uint256 carryBaseUsdc =
             PositionRiskAccountingLib.computeLpBackedNotionalUsdc(snap.position.size, price, genericReachableUsdc);
-        delta.pendingCarryUsdc = snap.unsettledCarryUsdc
-            + PositionRiskAccountingLib.computePendingCarryUsdc(
-                carryBaseUsdc, snap.riskParams.baseCarryBps, carryTimeDelta
-            );
+        delta.pendingCarryUsdc =
+            snap.unsettledCarryUsdc + _pendingCarryUsdc(snap, snap.position.side, carryBaseUsdc, carryTimeDelta);
 
         CfdTypes.Position memory pos = snap.position;
         delta.side = pos.side;
@@ -770,10 +793,8 @@ library CfdEnginePlanLib {
             : 0;
         uint256 carryBaseUsdc =
             PositionRiskAccountingLib.computeLpBackedNotionalUsdc(snap.position.size, price, settlementReachableUsdc);
-        delta.pendingCarryUsdc = snap.unsettledCarryUsdc
-            + PositionRiskAccountingLib.computePendingCarryUsdc(
-                carryBaseUsdc, snap.riskParams.baseCarryBps, carryTimeDelta
-            );
+        delta.pendingCarryUsdc =
+            snap.unsettledCarryUsdc + _pendingCarryUsdc(snap, snap.position.side, carryBaseUsdc, carryTimeDelta);
 
         delta.riskState = PositionRiskAccountingLib.buildPositionRiskStateWithCarry(
             pos, price, snap.capPrice, delta.pendingCarryUsdc, settlementReachableUsdc, maintMarginBps

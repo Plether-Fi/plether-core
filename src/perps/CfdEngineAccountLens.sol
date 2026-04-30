@@ -86,11 +86,15 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
 
         uint256 reachableUsdc = MarginClearinghouseAccountingLib.getGenericReachableUsdc(buckets);
         uint256 pendingCarryUsdc = engineContract.unsettledCarryUsdc(account);
+        CfdTypes.RiskParams memory params = _riskParams();
         if (pos.size > 0 && pos.lastCarryTimestamp > 0 && block.timestamp > pos.lastCarryTimestamp) {
             uint256 lpBackedNotionalUsdc =
                 PositionRiskAccountingLib.computeLpBackedNotionalUsdc(pos.size, price, reachableUsdc);
             pendingCarryUsdc += PositionRiskAccountingLib.computePendingCarryUsdc(
-                lpBackedNotionalUsdc, _riskParams().baseCarryBps, block.timestamp - pos.lastCarryTimestamp
+                lpBackedNotionalUsdc,
+                params,
+                _sideLpBackedUtilizationBps(pos.side),
+                block.timestamp - pos.lastCarryTimestamp
             );
         }
         if (pendingCarryUsdc > 0) {
@@ -107,7 +111,6 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
 
         withdrawableUsdc = buckets.freeSettlementUsdc;
         reachableUsdc = MarginClearinghouseAccountingLib.getGenericReachableUsdc(buckets);
-        CfdTypes.RiskParams memory params = _riskParams();
         uint256 currentMarginBps = engineContract.isFadWindow() ? params.fadMarginBps : params.maintMarginBps;
         uint256 effectiveMarginBps = params.initMarginBps > currentMarginBps ? params.initMarginBps : currentMarginBps;
         PositionRiskAccountingLib.PositionRiskState memory riskState =
@@ -183,7 +186,10 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
             uint256 lpBackedNotionalUsdc =
                 PositionRiskAccountingLib.computeLpBackedNotionalUsdc(pos.size, price, snapshot.terminalReachableUsdc);
             pendingCarryUsdc = PositionRiskAccountingLib.computePendingCarryUsdc(
-                lpBackedNotionalUsdc, params.baseCarryBps, block.timestamp - pos.lastCarryTimestamp
+                lpBackedNotionalUsdc,
+                params,
+                _sideLpBackedUtilizationBps(pos.side),
+                block.timestamp - pos.lastCarryTimestamp
             );
         }
         pendingCarryUsdc += engineContract.unsettledCarryUsdc(account);
@@ -223,9 +229,22 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
             params.initMarginBps,
             params.fadMarginBps,
             params.baseCarryBps,
+            params.carryKinkUtilizationBps,
+            params.carrySlope1Bps,
+            params.carrySlope2Bps,
             params.minBountyUsdc,
             params.bountyBps
         ) = engineContract.riskParams();
+    }
+
+    function _sideLpBackedUtilizationBps(
+        CfdTypes.Side side
+    ) internal view returns (uint256) {
+        ICfdVault engineVault = engineContract.vault();
+        return PositionRiskAccountingLib.computeLpBackedUtilizationBps(
+            engineContract.sideLpBackedRiskUsdc(uint8(side)),
+            address(engineVault) == address(0) ? 0 : engineVault.totalAssets()
+        );
     }
 
 }

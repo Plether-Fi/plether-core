@@ -6,6 +6,8 @@ import {CfdTypes} from "../CfdTypes.sol";
 
 library PositionRiskAccountingLib {
 
+    uint256 internal constant UTILIZATION_BPS = 10_000;
+
     struct PositionRiskState {
         int256 unrealizedPnlUsdc;
         int256 equityUsdc;
@@ -38,6 +40,71 @@ library PositionRiskAccountingLib {
             return 0;
         }
         carryUsdc = (baseCarryBps * lpBackedNotionalUsdc * timeDelta) / (CfdMath.SECONDS_PER_YEAR * 10_000);
+    }
+
+    function computeLpBackedUtilizationBps(
+        uint256 lpBackedRiskUsdc,
+        uint256 vaultAssetsUsdc
+    ) internal pure returns (uint256 utilizationBps) {
+        if (lpBackedRiskUsdc == 0) {
+            return 0;
+        }
+        if (vaultAssetsUsdc == 0) {
+            return UTILIZATION_BPS;
+        }
+        utilizationBps = (lpBackedRiskUsdc * UTILIZATION_BPS) / vaultAssetsUsdc;
+        if (utilizationBps > UTILIZATION_BPS) {
+            utilizationBps = UTILIZATION_BPS;
+        }
+    }
+
+    function computeVariableCarryRateBps(
+        uint256 baseCarryBps,
+        uint256 utilizationBps,
+        uint256 kinkUtilizationBps,
+        uint256 carrySlope1Bps,
+        uint256 carrySlope2Bps
+    ) internal pure returns (uint256 carryRateBps) {
+        if (utilizationBps > UTILIZATION_BPS) {
+            utilizationBps = UTILIZATION_BPS;
+        }
+        carryRateBps = baseCarryBps;
+        if (utilizationBps == 0) {
+            return carryRateBps;
+        }
+        if (kinkUtilizationBps == 0) {
+            return carryRateBps + carrySlope1Bps + (carrySlope2Bps * utilizationBps) / UTILIZATION_BPS;
+        }
+        if (utilizationBps <= kinkUtilizationBps) {
+            return carryRateBps + (carrySlope1Bps * utilizationBps) / kinkUtilizationBps;
+        }
+        if (kinkUtilizationBps >= UTILIZATION_BPS) {
+            return carryRateBps + (carrySlope1Bps * utilizationBps) / UTILIZATION_BPS;
+        }
+        return carryRateBps + carrySlope1Bps + (carrySlope2Bps * (utilizationBps - kinkUtilizationBps))
+            / (UTILIZATION_BPS - kinkUtilizationBps);
+    }
+
+    function computePendingCarryUsdc(
+        uint256 lpBackedNotionalUsdc,
+        CfdTypes.RiskParams memory riskParams,
+        uint256 lpBackedUtilizationBps,
+        uint256 timeDelta
+    ) internal pure returns (uint256 carryUsdc) {
+        if (timeDelta == 0 || lpBackedNotionalUsdc == 0) {
+            return 0;
+        }
+        uint256 carryRateBps = computeVariableCarryRateBps(
+            riskParams.baseCarryBps,
+            lpBackedUtilizationBps,
+            riskParams.carryKinkUtilizationBps,
+            riskParams.carrySlope1Bps,
+            riskParams.carrySlope2Bps
+        );
+        if (carryRateBps == 0) {
+            return 0;
+        }
+        carryUsdc = (carryRateBps * lpBackedNotionalUsdc * timeDelta) / (CfdMath.SECONDS_PER_YEAR * 10_000);
     }
 
     function buildPositionRiskState(

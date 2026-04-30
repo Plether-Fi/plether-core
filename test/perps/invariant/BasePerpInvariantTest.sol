@@ -82,6 +82,9 @@ abstract contract BasePerpInvariantTest is Test {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 1e6,
             bountyBps: 9
         });
@@ -188,7 +191,7 @@ abstract contract BasePerpInvariantTest is Test {
         uint256 size,
         uint256 price
     ) internal view returns (uint256) {
-        (,, uint256 maintMarginBps,, uint256 fadMarginBps,,,) = engine.riskParams();
+        (,, uint256 maintMarginBps,, uint256 fadMarginBps,,,,,,) = engine.riskParams();
         uint256 requiredBps = engine.isFadWindow() ? fadMarginBps : maintMarginBps;
         uint256 notionalUsdc = (size * price) / 1e20;
         return (notionalUsdc * requiredBps) / 10_000;

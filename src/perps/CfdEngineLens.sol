@@ -312,6 +312,9 @@ contract CfdEngineLens is ICfdEngineLens {
             params.initMarginBps,
             params.fadMarginBps,
             params.baseCarryBps,
+            params.carryKinkUtilizationBps,
+            params.carrySlope1Bps,
+            params.carrySlope2Bps,
             params.minBountyUsdc,
             params.bountyBps
         ) = engineContract.riskParams();

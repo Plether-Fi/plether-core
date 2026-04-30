@@ -39,10 +39,10 @@ library SolvencyAccountingLib {
     }
 
     function getMaxLiability(
-        uint256 bullLpBackedRiskUsdc,
-        uint256 bearLpBackedRiskUsdc
+        uint256 bullMaxProfitUsdc,
+        uint256 bearMaxProfitUsdc
     ) internal pure returns (uint256) {
-        return bullLpBackedRiskUsdc > bearLpBackedRiskUsdc ? bullLpBackedRiskUsdc : bearLpBackedRiskUsdc;
+        return bullMaxProfitUsdc > bearMaxProfitUsdc ? bullMaxProfitUsdc : bearMaxProfitUsdc;
     }
 
     function buildSolvencyState(

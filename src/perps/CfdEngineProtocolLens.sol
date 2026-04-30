@@ -131,13 +131,8 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
     function _maxLiabilityFromSides(
         ICfdEngine.SideState memory bullState,
         ICfdEngine.SideState memory bearState
-    ) internal view returns (uint256) {
-        bullState;
-        bearState;
-        return SolvencyAccountingLib.getMaxLiability(
-            engineContract.sideLpBackedRiskUsdc(uint8(CfdTypes.Side.BULL)),
-            engineContract.sideLpBackedRiskUsdc(uint8(CfdTypes.Side.BEAR))
-        );
+    ) internal pure returns (uint256) {
+        return SolvencyAccountingLib.getMaxLiability(bullState.maxProfitUsdc, bearState.maxProfitUsdc);
     }
 
     function _sideState(
@@ -155,6 +150,9 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
             params.initMarginBps,
             params.fadMarginBps,
             params.baseCarryBps,
+            params.carryKinkUtilizationBps,
+            params.carrySlope1Bps,
+            params.carrySlope2Bps,
             params.minBountyUsdc,
             params.bountyBps
         ) = engineContract.riskParams();

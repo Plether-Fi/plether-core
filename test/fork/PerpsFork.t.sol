@@ -107,6 +107,9 @@ contract PerpsForkTest is Test {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
+            carryKinkUtilizationBps: 7000,
+            carrySlope1Bps: 0,
+            carrySlope2Bps: 0,
             minBountyUsdc: 1e6,
             bountyBps: 10
         });
@@ -271,6 +274,9 @@ contract PerpsForkTest is Test {
             uint256 initMarginBps,
             uint256 fadMarginBps,
             uint256 baseCarryBps,
+            uint256 carryKinkUtilizationBps,
+            uint256 carrySlope1Bps,
+            uint256 carrySlope2Bps,
             uint256 minBountyUsdc,
             uint256 bountyBps
         ) = engine.riskParams();
@@ -281,6 +287,9 @@ contract PerpsForkTest is Test {
             initMarginBps: initMarginBps,
             fadMarginBps: fadMarginBps,
             baseCarryBps: baseCarryBps,
+            carryKinkUtilizationBps: carryKinkUtilizationBps,
+            carrySlope1Bps: carrySlope1Bps,
+            carrySlope2Bps: carrySlope2Bps,
             minBountyUsdc: minBountyUsdc,
             bountyBps: bountyBps
         });
@@ -751,7 +760,9 @@ contract PerpsForkTest is Test {
             0,
             "Batch execution should continue past a deferred-payout close and clear the queue when exhausted"
         );
-        assertGt(engine.deferredTraderCreditUsdc(aliceAccount), 0, "Deferred payout should remain recorded after the batch");
+        assertGt(
+            engine.deferredTraderCreditUsdc(aliceAccount), 0, "Deferred payout should remain recorded after the batch"
+        );
 
         (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(aliceAccount);
         assertEq(
