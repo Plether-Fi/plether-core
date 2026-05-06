@@ -233,7 +233,7 @@ contract PerpsPublicLensTest is BasePerpTest {
         engine.updateMarkPrice(1e8, uint64(SATURDAY_NOON - 4 days));
 
         PerpsViewTypes.LpStatusView memory viewData = publicLens.getLpStatus();
-        assertFalse(pool.getVaultLiquidityView().markFresh, "setup should make the frozen mark stale");
+        assertFalse(pool.getPoolLiquidityView().markFresh, "setup should make the frozen mark stale");
         assertFalse(viewData.oracleFresh, "LP status should mirror the actual house-pool freshness policy");
     }
 

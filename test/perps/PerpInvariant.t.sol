@@ -271,10 +271,10 @@ contract PerpInvariantTest is BasePerpTest {
         assertLe(claimed, effectivePool, "Claimed equity cannot exceed MtM-adjusted pool value");
     }
 
-    function invariant_FeesWithinVault() public view {
+    function invariant_FeesWithinPool() public view {
         uint256 fees = engine.accumulatedFeesUsdc();
         uint256 poolBalance = pool.totalAssets();
-        assertLe(fees, poolBalance, "Accumulated fees must not exceed vault balance");
+        assertLe(fees, poolBalance, "Accumulated fees must not exceed pool balance");
     }
 
     function invariant_WithdrawalAccountingMatchesEngineReserve() public view {
@@ -589,7 +589,7 @@ contract PerpInvariantTest is BasePerpTest {
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory protocolView =
             engineProtocolLens.getProtocolAccountingSnapshot();
 
-        assertEq(protocolView.vaultAssetsUsdc, pool.totalAssets(), "Protocol view vault assets must match pool assets");
+        assertEq(protocolView.poolAssetsUsdc, pool.totalAssets(), "Protocol view pool assets must match pool assets");
         assertEq(protocolView.maxLiabilityUsdc, _maxLiability(), "Protocol view liability must match accessor");
         assertEq(
             protocolView.withdrawalReservedUsdc,
@@ -625,17 +625,17 @@ contract PerpInvariantTest is BasePerpTest {
     }
 
     function invariant_PoolLiquidityViewMatchesProtocolAccounting() public view {
-        HousePool.VaultLiquidityView memory vaultView = pool.getVaultLiquidityView();
+        HousePool.PoolLiquidityView memory poolView = pool.getPoolLiquidityView();
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory protocolView =
             engineProtocolLens.getProtocolAccountingSnapshot();
 
-        assertEq(vaultView.totalAssetsUsdc, protocolView.vaultAssetsUsdc, "Pool and engine must agree on vault assets");
+        assertEq(poolView.totalAssetsUsdc, protocolView.poolAssetsUsdc, "Pool and engine must agree on pool assets");
         assertEq(
-            vaultView.withdrawalReservedUsdc,
+            poolView.withdrawalReservedUsdc,
             protocolView.withdrawalReservedUsdc,
             "Pool and engine must agree on withdrawal reserves"
         );
-        assertEq(vaultView.freeUsdc, protocolView.freeUsdc, "Pool free USDC must match engine accounting view");
+        assertEq(poolView.freeUsdc, protocolView.freeUsdc, "Pool free USDC must match engine accounting view");
     }
 
     function invariant_LiquidationPreviewMatchesPositionView() public view {
@@ -644,7 +644,7 @@ contract PerpInvariantTest is BasePerpTest {
             return;
         }
 
-        uint256 vaultDepth = pool.totalAssets();
+        uint256 poolDepth = pool.totalAssets();
         for (uint256 i = 0; i < 3; i++) {
             address account = handler.traders(i);
             PerpsViewTypes.PositionView memory positionView = _publicPosition(account);
@@ -934,7 +934,7 @@ contract AdversarialPerpHandler is Test {
         }
 
         uint256 oraclePrice = bound(priceFuzz, 80_000_000, 125_000_000);
-        uint256 vaultDepth = pool.totalAssets();
+        uint256 poolDepth = pool.totalAssets();
         CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, oraclePrice);
         if (!preview.liquidatable || preview.keeperBountyUsdc == 0) {
             return;
@@ -944,7 +944,7 @@ contract AdversarialPerpHandler is Test {
         priceData[0] = abi.encode(oraclePrice);
 
         uint256 beforeDeferred = engine.deferredKeeperCreditUsdc(address(this));
-        vm.mockCallRevert(address(pool), abi.encodeWithSelector(pool.payOut.selector), bytes("vault illiquid"));
+        vm.mockCallRevert(address(pool), abi.encodeWithSelector(pool.payOut.selector), bytes("pool illiquid"));
         vm.roll(block.number + 1);
 
         try router.executeLiquidation(account, priceData) {
@@ -1020,12 +1020,12 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
     function invariant_AdversarialViewsStayConsistent() public view {
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory protocolView =
             engineProtocolLens.getProtocolAccountingSnapshot();
-        HousePool.VaultLiquidityView memory vaultView = pool.getVaultLiquidityView();
+        HousePool.PoolLiquidityView memory poolView = pool.getPoolLiquidityView();
 
-        assertEq(vaultView.totalAssetsUsdc, protocolView.vaultAssetsUsdc, "Pool and engine must agree on assets");
-        assertEq(vaultView.freeUsdc, protocolView.freeUsdc, "Pool and engine must agree on free liquidity");
+        assertEq(poolView.totalAssetsUsdc, protocolView.poolAssetsUsdc, "Pool and engine must agree on assets");
+        assertEq(poolView.freeUsdc, protocolView.freeUsdc, "Pool and engine must agree on free liquidity");
         assertEq(
-            vaultView.withdrawalReservedUsdc,
+            poolView.withdrawalReservedUsdc,
             protocolView.withdrawalReservedUsdc,
             "Pool and engine must agree on reserved liquidity"
         );

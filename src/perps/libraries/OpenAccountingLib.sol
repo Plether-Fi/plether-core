@@ -15,7 +15,7 @@ library OpenAccountingLib {
         uint256 capPrice;
         uint256 preSkewUsdc;
         uint256 postSkewUsdc;
-        uint256 vaultDepthUsdc;
+        uint256 poolDepthUsdc;
         uint256 executionFeeBps;
         CfdTypes.RiskParams riskParams;
     }
@@ -54,7 +54,7 @@ library OpenAccountingLib {
         state.postSkewUsdc = inputs.postSkewUsdc;
 
         state.vpiUsdc = CfdMath.calculateVPI(
-            inputs.preSkewUsdc, inputs.postSkewUsdc, inputs.vaultDepthUsdc, inputs.riskParams.vpiFactor
+            inputs.preSkewUsdc, inputs.postSkewUsdc, inputs.poolDepthUsdc, inputs.riskParams.vpiFactor
         );
         state.notionalUsdc = (inputs.sizeDelta * inputs.price) / CfdMath.USDC_TO_TOKEN_SCALE;
         state.executionFeeUsdc = (state.notionalUsdc * inputs.executionFeeBps) / 10_000;

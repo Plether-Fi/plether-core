@@ -10,7 +10,7 @@ import {OrderRouter} from "../../../src/perps/OrderRouter.sol";
 import {MockUSDC} from "../../mocks/MockUSDC.sol";
 import {PerpAccountingHandler} from "./handlers/PerpAccountingHandler.sol";
 import {CfdEngineHarness} from "./mocks/CfdEngineHarness.sol";
-import {MockInvariantVault} from "./mocks/MockInvariantVault.sol";
+import {MockInvariantHousePool} from "./mocks/MockInvariantHousePool.sol";
 import {Test} from "forge-std/Test.sol";
 
 contract PerpClosePreviewParityInvariantTest is Test {
@@ -20,7 +20,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
     CfdEngine internal engine;
     CfdEngineLens internal engineLens;
     MarginClearinghouse internal clearinghouse;
-    MockInvariantVault internal vault;
+    MockInvariantHousePool internal housePool;
     OrderRouter internal router;
     PerpAccountingHandler internal handler;
 
@@ -35,11 +35,11 @@ contract PerpClosePreviewParityInvariantTest is Test {
         engine = harness;
         engineLens = new CfdEngineLens(address(engine));
 
-        vault = new MockInvariantVault(address(usdc), address(engine));
+        housePool = new MockInvariantHousePool(address(usdc), address(engine));
         router = new OrderRouter(
             address(engine),
             address(engineLens),
-            address(vault),
+            address(housePool),
             address(0),
             new bytes32[](0),
             new uint256[](0),
@@ -50,12 +50,12 @@ contract PerpClosePreviewParityInvariantTest is Test {
         clearinghouse.setEngine(address(engine));
         vm.warp(SETUP_TIMESTAMP);
 
-        engine.setVault(address(vault));
+        engine.setPool(address(housePool));
         engine.setOrderRouter(address(router));
-        vault.setOrderRouter(address(router));
-        vault.seedAssets(100_000e6);
+        housePool.setOrderRouter(address(router));
+        housePool.seedAssets(100_000e6);
 
-        handler = new PerpAccountingHandler(usdc, engine, clearinghouse, router, vault);
+        handler = new PerpAccountingHandler(usdc, engine, clearinghouse, router, housePool);
         handler.seedActors(50_000e6, 50_000e6);
 
         bytes4[] memory selectors = new bytes4[](11);
@@ -67,9 +67,9 @@ contract PerpClosePreviewParityInvariantTest is Test {
         selectors[5] = handler.liquidate.selector;
         selectors[6] = handler.claimDeferredKeeperCredit.selector;
         selectors[7] = handler.setRouterPayoutFailureMode.selector;
-        selectors[8] = handler.setVaultAssets.selector;
-        selectors[9] = handler.fundVault.selector;
-        selectors[10] = handler.drainVault.selector;
+        selectors[8] = handler.setPoolAssets.selector;
+        selectors[9] = handler.fundHousePool.selector;
+        selectors[10] = handler.drainHousePool.selector;
 
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
         targetContract(address(handler));
@@ -117,7 +117,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
 
     function invariant_PreviewClose_EqualsSimulateCloseAtCanonicalDepth() public view {
         uint256 oraclePrice = _previewOraclePrice();
-        uint256 canonicalDepth = vault.totalAssets();
+        uint256 canonicalDepth = housePool.totalAssets();
         (,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
@@ -150,7 +150,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
         }
     }
 
-    function invariant_ValidPartialCloseWithCarryAccrualImpliesVaultCanPay() public view {
+    function invariant_ValidPartialCloseWithCarryAccrualImpliesHousePoolCanPay() public view {
         uint256 oraclePrice = _previewOraclePrice();
         (,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
 
@@ -209,7 +209,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
 
     function invariant_ImmediateDeferredSplitMatchesAdjustedCash() public view {
         uint256 oraclePrice = _previewOraclePrice();
-        uint256 vaultDepthUsdc = vault.totalAssets();
+        uint256 poolDepthUsdc = housePool.totalAssets();
         (,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
@@ -219,7 +219,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
                 continue;
             }
 
-            _checkPayoutSplit(account, size, oraclePrice, vaultDepthUsdc, true);
+            _checkPayoutSplit(account, size, oraclePrice, poolDepthUsdc, true);
 
             if (size < 2) {
                 continue;
@@ -230,7 +230,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
                 if (fractions[f] == 0 || fractions[f] >= size) {
                     continue;
                 }
-                _checkPayoutSplit(account, fractions[f], oraclePrice, vaultDepthUsdc, false);
+                _checkPayoutSplit(account, fractions[f], oraclePrice, poolDepthUsdc, false);
             }
         }
     }
@@ -239,7 +239,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
         address account,
         uint256 sizeDelta,
         uint256 oraclePrice,
-        uint256 vaultDepthUsdc,
+        uint256 poolDepthUsdc,
         bool isFullClose
     ) internal view {
         CfdEngine.ClosePreview memory preview = engineLens.previewClose(account, sizeDelta, oraclePrice);
@@ -248,11 +248,11 @@ contract PerpClosePreviewParityInvariantTest is Test {
             return;
         }
 
-        uint256 adjustedCash = vault.totalAssets();
+        uint256 adjustedCash = housePool.totalAssets();
         uint256 totalOwed = preview.immediatePayoutUsdc + preview.deferredTraderCreditUsdc;
 
         if (preview.immediatePayoutUsdc > 0) {
-            assertGe(adjustedCash, preview.immediatePayoutUsdc, "Post-carry vault cash must cover immediate payout");
+            assertGe(adjustedCash, preview.immediatePayoutUsdc, "Post-carry HousePool cash must cover immediate payout");
             assertEq(preview.deferredTraderCreditUsdc, 0, "Immediate payout excludes deferred payout");
         }
 

@@ -118,7 +118,7 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
 
         PerpsViewTypes.ProtocolStatusView memory status = _getProtocolStatusView();
         viewData.lastMarkTime = status.lastMarkTime;
-        viewData.oracleFresh = HOUSE_POOL.getVaultLiquidityView().markFresh;
+        viewData.oracleFresh = HOUSE_POOL.getPoolLiquidityView().markFresh;
     }
 
     /// @notice Returns high-level protocol runtime status flags.

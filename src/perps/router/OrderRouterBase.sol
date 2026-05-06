@@ -54,7 +54,7 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
     }
 
     function _onlyEngine() internal view {
-        if (msg.sender != address(engine) && msg.sender != address(engine.settlementModule())) {
+        if (msg.sender != address(engine) && msg.sender != address(engine.settlementSidecar())) {
             revert OrderRouter__Unauthorized();
         }
     }

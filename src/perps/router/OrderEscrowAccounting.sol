@@ -52,7 +52,7 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting, IOrderRouterE
     function getAccountEscrow(
         address account
     ) public view override returns (IOrderRouterAccounting.AccountEscrowView memory escrow) {
-        // Clearinghouse remains the canonical owner of committed-order margin value; this module only composes the view.
+        // Clearinghouse remains the canonical owner of committed-order margin value; this router component composes the view.
         escrow.committedMarginUsdc = clearinghouse.getAccountReservationSummary(account).activeCommittedOrderMarginUsdc;
         (escrow.pendingOrderCount, escrow.executionBountyUsdc,,) = _summarizePendingOrders(account);
     }

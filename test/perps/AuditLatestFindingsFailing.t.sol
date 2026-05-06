@@ -57,7 +57,7 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
 
         assertGt(engine.accumulatedBadDebtUsdc(), 0, "Setup must realize bad debt");
 
-        assertEq(_vaultMtmAdjustment(), 75_000e6, "MtM should use the conservative post-liquidation envelope");
+        assertEq(_poolMtmAdjustment(), 75_000e6, "MtM should use the conservative post-liquidation envelope");
     }
 
     function test_H1_MarginOnlyUpdateViaRouterReverts() public {
@@ -214,7 +214,7 @@ contract AuditLatestFindingsFailing_MevDrift is BasePerpTest {
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         feedIds.push(FEED_A);
         feedIds.push(FEED_B);

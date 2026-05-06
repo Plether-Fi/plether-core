@@ -5,7 +5,7 @@ import {IPyth, PythStructs} from "../../interfaces/IPyth.sol";
 import {DecimalConstants} from "../../libraries/DecimalConstants.sol";
 import {CfdTypes} from "../CfdTypes.sol";
 import {ICfdEngineLens} from "../interfaces/ICfdEngineLens.sol";
-import {ICfdVault} from "../interfaces/ICfdVault.sol";
+import {IHousePool} from "../interfaces/IHousePool.sol";
 import {MarketCalendarLib} from "../libraries/MarketCalendarLib.sol";
 import {OracleFreshnessPolicyLib} from "../libraries/OracleFreshnessPolicyLib.sol";
 import {OrderEscrowAccounting} from "./OrderEscrowAccounting.sol";
@@ -24,7 +24,7 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
         uint256 pythFee;
     }
 
-    ICfdVault internal immutable housePool;
+    IHousePool internal immutable housePool;
     ICfdEngineLens internal immutable engineLens;
     IPyth public pyth;
     bytes32[] public pythFeedIds;
@@ -49,7 +49,7 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
         if (_engineLens == address(0)) {
             revert OrderRouter__InvalidEngineLens();
         }
-        housePool = ICfdVault(_housePool);
+        housePool = IHousePool(_housePool);
         engineLens = ICfdEngineLens(_engineLens);
         pyth = IPyth(_pyth);
 

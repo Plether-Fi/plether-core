@@ -60,11 +60,11 @@ contract AuditRemainingFindingsFailing is BasePerpTest {
         address account = alice;
         _fundTrader(alice, 1000e6);
         _open(account, CfdTypes.Side.BULL, 20_000e18, 312e6, 1e8);
-        uint256 vaultDepth = pool.totalAssets();
+        uint256 poolDepth = pool.totalAssets();
 
         vm.prank(address(router));
         vm.expectRevert(CfdEngine.CfdEngine__PositionIsSolvent.selector);
-        engine.liquidatePosition(account, 99_500_000, vaultDepth, uint64(block.timestamp));
+        engine.liquidatePosition(account, 99_500_000, poolDepth, uint64(block.timestamp));
     }
 
     function test_H3_OperatorCannotSeizeToArbitraryRecipient() public {
@@ -105,7 +105,7 @@ contract AuditRemainingFindingsFailing_MevDrift is BasePerpTest {
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         feedIds.push(FEED_A);
         feedIds.push(FEED_B);
@@ -175,7 +175,7 @@ contract AuditRemainingFindingsFailing_StaleOracleExecution is BasePerpTest {
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         feedIds.push(FEED_A);
         feedIds.push(FEED_B);

@@ -231,7 +231,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         vm.warp(block.timestamp + 180 days);
 
         CfdEngine.ClosePreview memory preview = engineLens.previewClose(bearAccount, 50_000e18, 1e8);
-        assertTrue(preview.valid, "Positive-funding partial close preview should remain valid");
+        assertTrue(preview.valid, "Positive-carry partial close preview should remain valid");
 
         uint256 deferredBefore = engine.deferredTraderCreditUsdc(bearAccount);
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();

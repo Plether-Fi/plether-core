@@ -249,7 +249,7 @@ contract PerpOraclePathInvariantTest is BasePerpTest {
 
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         mockPyth = new MockPyth();
         feedIds.push(FEED_A);

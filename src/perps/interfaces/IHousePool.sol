@@ -5,6 +5,54 @@ pragma solidity 0.8.33;
 ///         Senior tranche earns fixed yield; junior absorbs first-loss and excess profit.
 interface IHousePool {
 
+    enum ClaimantInflowKind {
+        Revenue,
+        Recapitalization
+    }
+
+    enum ClaimantInflowCashMode {
+        CashArrived,
+        AlreadyRetained
+    }
+
+    /// @notice Canonical economic USDC backing recognized by the pool (6 decimals).
+    ///         Ignores unsolicited positive token transfers until explicitly accounted, but
+    ///         still reflects raw-balance shortfalls if assets leave the pool unexpectedly.
+    function totalAssets() external view returns (uint256);
+
+    /// @notice Transfers USDC from the pool to a recipient.
+    /// @param recipient Address to receive USDC
+    /// @param amount USDC amount to transfer (6 decimals)
+    function payOut(
+        address recipient,
+        uint256 amount
+    ) external;
+
+    /// @notice Increases canonical pool assets to recognize a legitimate protocol-owned inflow.
+    /// @dev This is the controlled accounting path for endogenous protocol gains that should
+    ///      increase economic pool depth. It does not require raw excess to be present and may
+    ///      also be used to restore canonical accounting after a raw-balance shortfall has already
+    ///      reduced `totalAssets()` via the `min(rawBalance, accountedAssets)` boundary.
+    ///      Reverts if the caller is unauthorized.
+    function recordProtocolInflow(
+        uint256 amount
+    ) external;
+
+    /// @notice Records claimant-owned value that should ultimately flow through the tranche waterfall.
+    /// @dev `CashArrived` increments canonical accounted assets because raw USDC arrived in this flow.
+    ///      `AlreadyRetained` only routes ownership for value already retained physically by the pool.
+    function recordClaimantInflow(
+        uint256 amount,
+        ClaimantInflowKind kind,
+        ClaimantInflowCashMode cashMode
+    ) external;
+
+    /// @notice Maximum age for mark price freshness checks outside FAD mode (seconds)
+    function markStalenessLimit() external view returns (uint256);
+
+    /// @notice Returns true once both tranche seed positions exist.
+    function isSeedLifecycleComplete() external view returns (bool);
+
     /// @notice Total USDC attributed to the senior tranche (6 decimals)
     function seniorPrincipal() external view returns (uint256);
     /// @notice Total USDC attributed to the junior tranche (6 decimals)

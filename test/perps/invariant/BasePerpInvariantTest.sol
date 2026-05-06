@@ -7,7 +7,7 @@ import {CfdEngineAdmin} from "../../../src/perps/CfdEngineAdmin.sol";
 import {CfdEngineLens} from "../../../src/perps/CfdEngineLens.sol";
 import {CfdEnginePlanner} from "../../../src/perps/CfdEnginePlanner.sol";
 import {CfdEngineProtocolLens} from "../../../src/perps/CfdEngineProtocolLens.sol";
-import {CfdEngineSettlementModule} from "../../../src/perps/CfdEngineSettlementModule.sol";
+import {CfdEngineSettlementSidecar} from "../../../src/perps/CfdEngineSettlementSidecar.sol";
 import {CfdTypes} from "../../../src/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "../../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../../src/perps/OrderRouter.sol";
@@ -18,7 +18,7 @@ import {IOrderRouterAccounting} from "../../../src/perps/interfaces/IOrderRouter
 import {PerpsViewTypes} from "../../../src/perps/interfaces/PerpsViewTypes.sol";
 import {MockUSDC} from "../../mocks/MockUSDC.sol";
 import {OrderRouterDebugLens} from "../../utils/OrderRouterDebugLens.sol";
-import {MockInvariantVault} from "./mocks/MockInvariantVault.sol";
+import {MockInvariantHousePool} from "./mocks/MockInvariantHousePool.sol";
 import {Test} from "forge-std/Test.sol";
 
 abstract contract BasePerpInvariantTest is Test {
@@ -30,7 +30,7 @@ abstract contract BasePerpInvariantTest is Test {
     CfdEngineLens internal engineLens;
     CfdEngineProtocolLens internal engineProtocolLens;
     MarginClearinghouse internal clearinghouse;
-    MockInvariantVault internal vault;
+    MockInvariantHousePool internal housePool;
     OrderRouter internal router;
     OrderRouterAdmin internal routerAdmin;
     PerpsPublicLens internal publicLens;
@@ -47,11 +47,11 @@ abstract contract BasePerpInvariantTest is Test {
         engineAccountLens = new CfdEngineAccountLens(address(engine));
         engineLens = new CfdEngineLens(address(engine));
         engineProtocolLens = new CfdEngineProtocolLens(address(engine));
-        vault = new MockInvariantVault(address(usdc), address(engine));
+        housePool = new MockInvariantHousePool(address(usdc), address(engine));
         router = new OrderRouter(
             address(engine),
             address(engineLens),
-            address(vault),
+            address(housePool),
             address(0),
             new bytes32[](0),
             new uint256[](0),
@@ -63,14 +63,14 @@ abstract contract BasePerpInvariantTest is Test {
         clearinghouse.setEngine(address(engine));
         vm.warp(SETUP_TIMESTAMP);
 
-        engine.setVault(address(vault));
+        engine.setPool(address(housePool));
         engine.setOrderRouter(address(router));
-        vault.setOrderRouter(address(router));
+        housePool.setOrderRouter(address(router));
         publicLens = new PerpsPublicLens(address(engineAccountLens), address(engine), address(router), address(0));
 
-        uint256 initialVaultAssets = _initialVaultAssets();
-        if (initialVaultAssets > 0) {
-            vault.seedAssets(initialVaultAssets);
+        uint256 initialHousePoolAssets = _initialHousePoolAssets();
+        if (initialHousePoolAssets > 0) {
+            housePool.seedAssets(initialHousePoolAssets);
         }
     }
 
@@ -87,7 +87,7 @@ abstract contract BasePerpInvariantTest is Test {
         });
     }
 
-    function _initialVaultAssets() internal pure virtual returns (uint256) {
+    function _initialHousePoolAssets() internal pure virtual returns (uint256) {
         return 1_000_000_000e6;
     }
 
@@ -100,9 +100,9 @@ abstract contract BasePerpInvariantTest is Test {
     ) internal returns (CfdEngine deployedEngine) {
         deployedEngine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, riskParams_);
         CfdEnginePlanner planner = new CfdEnginePlanner();
-        CfdEngineSettlementModule settlement = new CfdEngineSettlementModule(address(deployedEngine));
-        CfdEngineAdmin adminModule = new CfdEngineAdmin(address(deployedEngine), address(this));
-        deployedEngine.setDependencies(address(planner), address(settlement), address(adminModule));
+        CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(deployedEngine));
+        CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(deployedEngine), address(this));
+        deployedEngine.setDependencies(address(planner), address(settlement), address(engineAdmin));
     }
 
     function _syncRouterAdmin() internal {
@@ -200,7 +200,7 @@ abstract contract BasePerpInvariantTest is Test {
     ) internal view returns (DeferredEngineViewTypes.DeferredCreditStatus memory status) {
         uint256 deferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(account);
         uint256 deferredKeeperCreditUsdc = engine.deferredKeeperCreditUsdc(keeper);
-        bool anyLiquidity = vault.totalAssets() > 0;
+        bool anyLiquidity = housePool.totalAssets() > 0;
 
         status.deferredTraderCreditUsdc = deferredTraderCreditUsdc;
         status.traderPayoutClaimableNow = deferredTraderCreditUsdc > 0 && anyLiquidity;

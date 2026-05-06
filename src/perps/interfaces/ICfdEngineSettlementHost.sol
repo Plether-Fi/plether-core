@@ -7,7 +7,7 @@ import {CfdEngineSettlementTypes} from "./CfdEngineSettlementTypes.sol";
 interface ICfdEngineSettlementHost {
 
     function clearinghouse() external view returns (address);
-    function vault() external view returns (address);
+    function pool() external view returns (address);
     function orderRouter() external view returns (address);
 
     function settlementApplyCarryAndMark(

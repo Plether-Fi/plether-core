@@ -69,7 +69,7 @@ contract AuditV3_C01_FIFODeadlockTest is BasePerpTest {
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior", "jUSDC");
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         feedIds.push(FEED_A);
         feedIds.push(FEED_B);
@@ -526,7 +526,7 @@ contract AuditV3_M01_MissingGasFloorTest is BasePerpTest {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// M-02: historical legacy-funding desync note kept obsolete for context.
+// M-02: historical legacy-spread desync note kept obsolete for context.
 //       The live carry model does not use side indices.
 //       This obsolete test remains only as audit-history context.
 // ═══════════════════════════════════════════════════════════════════

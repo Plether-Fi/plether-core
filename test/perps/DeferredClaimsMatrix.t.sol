@@ -10,7 +10,7 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
 
     using stdStorage for StdStorage;
 
-    function test_TraderDeferredClaim_RevertsWhileAggregateDeferredClaimsExceedVaultCash() public {
+    function test_TraderDeferredClaim_RevertsWhileAggregateDeferredClaimsExceedPoolCash() public {
         address trader = address(0xDC00);
         address otherKeeper = address(0xDC04);
         address account = trader;
@@ -19,14 +19,14 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
         usdc.mint(address(pool), 40e6);
 
         stdstore.target(address(engine)).sig("accumulatedFeesUsdc()").checked_write(uint256(20e6));
-        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(bytes32)").with_key(account)
+        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(address)").with_key(account)
             .checked_write(uint256(30e6));
         stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(uint256(30e6));
 
         vm.prank(address(router));
         engine.recordDeferredKeeperCredit(otherKeeper, 20e6);
 
-        vm.expectRevert(CfdEngine.CfdEngine__InsufficientVaultLiquidity.selector);
+        vm.expectRevert(CfdEngine.CfdEngine__InsufficientPoolLiquidity.selector);
         vm.prank(trader);
         engine.claimDeferredTraderCredit(account);
 
@@ -39,17 +39,17 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
         assertEq(engine.accumulatedFeesUsdc(), 20e6, "Protocol fees should remain preserved");
     }
 
-    function test_TraderDeferredClaim_RevertsWhenSingleClaimExceedsAvailableVaultCash() public {
+    function test_TraderDeferredClaim_RevertsWhenSingleClaimExceedsAvailablePoolCash() public {
         address trader = address(0xDC01);
         address account = trader;
         usdc.burn(address(pool), pool.totalAssets());
         usdc.mint(address(pool), 20e6);
 
-        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(bytes32)").with_key(account)
+        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(address)").with_key(account)
             .checked_write(uint256(50e6));
         stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(uint256(50e6));
 
-        vm.expectRevert(CfdEngine.CfdEngine__InsufficientVaultLiquidity.selector);
+        vm.expectRevert(CfdEngine.CfdEngine__InsufficientPoolLiquidity.selector);
         vm.prank(trader);
         engine.claimDeferredTraderCredit(account);
 
@@ -69,14 +69,14 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
         usdc.mint(address(pool), 45e6);
 
         stdstore.target(address(engine)).sig("accumulatedFeesUsdc()").checked_write(uint256(20e6));
-        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(bytes32)").with_key(account)
+        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(address)").with_key(account)
             .checked_write(uint256(30e6));
         stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(uint256(30e6));
 
         vm.prank(address(router));
         engine.recordDeferredKeeperCredit(otherKeeper, 20e6);
 
-        vm.expectRevert(CfdEngine.CfdEngine__InsufficientVaultLiquidity.selector);
+        vm.expectRevert(CfdEngine.CfdEngine__InsufficientPoolLiquidity.selector);
         vm.prank(trader);
         engine.claimDeferredTraderCredit(account);
 
@@ -85,7 +85,7 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
         assertEq(engine.accumulatedFeesUsdc(), 20e6, "Protocol fees should remain preserved");
     }
 
-    function test_ClearerDeferredClaim_RevertsWhenVaultCashFallsBelowKeeperLiability() public {
+    function test_ClearerDeferredClaim_RevertsWhenPoolCashFallsBelowKeeperLiability() public {
         address keeper = address(0xDC03);
         vm.prank(address(router));
         engine.recordDeferredKeeperCredit(keeper, 5000e6);
@@ -93,7 +93,7 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
         usdc.mint(address(pool), 2000e6);
 
         address keeperAccount = keeper;
-        vm.expectRevert(CfdEngine.CfdEngine__InsufficientVaultLiquidity.selector);
+        vm.expectRevert(CfdEngine.CfdEngine__InsufficientPoolLiquidity.selector);
         vm.prank(keeper);
         engine.claimDeferredKeeperCredit();
 
@@ -113,14 +113,14 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
         usdc.mint(address(pool), 45e6);
 
         stdstore.target(address(engine)).sig("accumulatedFeesUsdc()").checked_write(uint256(20e6));
-        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(bytes32)").with_key(traderAccount)
+        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(address)").with_key(traderAccount)
             .checked_write(uint256(20e6));
         stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(uint256(20e6));
 
         vm.prank(address(router));
         engine.recordDeferredKeeperCredit(keeper, 30e6);
 
-        vm.expectRevert(CfdEngine.CfdEngine__InsufficientVaultLiquidity.selector);
+        vm.expectRevert(CfdEngine.CfdEngine__InsufficientPoolLiquidity.selector);
         vm.prank(keeper);
         engine.claimDeferredKeeperCredit();
 

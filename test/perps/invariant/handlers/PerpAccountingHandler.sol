@@ -16,7 +16,7 @@ import {IOrderRouterAccounting} from "../../../../src/perps/interfaces/IOrderRou
 import {MockUSDC} from "../../../mocks/MockUSDC.sol";
 import {OrderRouterDebugLens} from "../../../utils/OrderRouterDebugLens.sol";
 import {PerpGhostLedger} from "../ghost/PerpGhostLedger.sol";
-import {MockInvariantVault} from "../mocks/MockInvariantVault.sol";
+import {MockInvariantHousePool} from "../mocks/MockInvariantHousePool.sol";
 import {Test} from "forge-std/Test.sol";
 
 contract PerpAccountingHandler is Test {
@@ -81,13 +81,13 @@ contract PerpAccountingHandler is Test {
     MarginClearinghouse public immutable clearinghouse;
     OrderRouter public immutable router;
     OrderRouterAdmin public immutable routerAdmin;
-    MockInvariantVault public immutable vault;
+    MockInvariantHousePool public immutable housePool;
     PerpGhostLedger public immutable ghost;
 
     address[4] internal actors;
 
     uint256 public ghostTotalTraderMinted;
-    uint256 public ghostTotalVaultMinted;
+    uint256 public ghostTotalHousePoolMinted;
     uint256 public ghostSuccessfulLiquidations;
 
     mapping(uint64 => address) internal ghostOrderOwner;
@@ -114,7 +114,7 @@ contract PerpAccountingHandler is Test {
         CfdEngine _engine,
         MarginClearinghouse _clearinghouse,
         OrderRouter _router,
-        MockInvariantVault _vault
+        MockInvariantHousePool _housePool
     ) {
         usdc = _usdc;
         engine = _engine;
@@ -123,7 +123,7 @@ contract PerpAccountingHandler is Test {
         clearinghouse = _clearinghouse;
         router = _router;
         routerAdmin = OrderRouterAdmin(_router.admin());
-        vault = _vault;
+        housePool = _housePool;
 
         actors[0] = address(0x5101);
         actors[1] = address(0x5102);
@@ -145,14 +145,14 @@ contract PerpAccountingHandler is Test {
 
     function seedActors(
         uint256 traderDepositUsdc,
-        uint256 vaultSeedUsdc
+        uint256 housePoolSeedUsdc
     ) external {
         for (uint256 i = 0; i < actors.length; i++) {
             _mintAndDepositTrader(actors[i], traderDepositUsdc);
         }
 
-        vault.seedAssets(vaultSeedUsdc);
-        ghostTotalVaultMinted += vaultSeedUsdc;
+        housePool.seedAssets(housePoolSeedUsdc);
+        ghostTotalHousePoolMinted += housePoolSeedUsdc;
     }
 
     function depositCollateral(
@@ -244,7 +244,7 @@ contract PerpAccountingHandler is Test {
             active: true,
             account: account,
             routerOpenAllowed: !routerAdmin.paused() && !engine.degradedMode() && !engine.isOracleFrozen()
-                && !engine.isFadWindow() && vault.canIncreaseRisk() && router.pendingOrderCounts(account) < 5,
+                && !engine.isFadWindow() && housePool.canIncreaseRisk() && router.pendingOrderCounts(account) < 5,
             prefilterActive: _canUseCommitMarkForOpenPrefilter(),
             failureCategory: engineLens.previewOpenFailurePolicyCategory(
                 account, side, sizeDelta, marginDelta, _commitReferencePrice(), engine.lastMarkTime()
@@ -413,7 +413,7 @@ contract PerpAccountingHandler is Test {
         priceData[0] = abi.encode(price);
         CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, price);
         uint256 keeperBountyUsdc = preview.keeperBountyUsdc;
-        bool shouldDefer = vault.failRouterPayouts() && keeperBountyUsdc > 0;
+        bool shouldDefer = housePool.failRouterPayouts() && keeperBountyUsdc > 0;
         uint256 deferredTraderCreditUsdc = preview.deferredTraderCreditUsdc;
         uint256 allowedDeferredAfterUsdc = preview.deferredTraderCreditUsdc > preview.existingDeferredRemainingUsdc
             ? preview.deferredTraderCreditUsdc - preview.existingDeferredRemainingUsdc
@@ -497,7 +497,7 @@ contract PerpAccountingHandler is Test {
             }
         }
 
-        vault.setAssets(0);
+        housePool.setAssets(0);
         uint256 closeOraclePrice = side == CfdTypes.Side.BULL ? uint256(15e7) : uint256(5e7);
 
         CfdEngine.ClosePreview memory closePreview = engineLens.previewClose(account, size, closeOraclePrice);
@@ -545,14 +545,14 @@ contract PerpAccountingHandler is Test {
         } catch {}
     }
 
-    function fundVault(
+    function fundHousePool(
         uint256 amountFuzz
     ) external {
         _clearLastBadDebtDeferredEvent();
         _clearTerminalReservationSet();
         uint256 amount = bound(amountFuzz, 1000e6, 250_000e6);
-        vault.seedAssets(amount);
-        ghostTotalVaultMinted += amount;
+        housePool.seedAssets(amount);
+        ghostTotalHousePoolMinted += amount;
     }
 
     function setRouterPayoutFailureMode(
@@ -560,23 +560,23 @@ contract PerpAccountingHandler is Test {
     ) external {
         _clearLastBadDebtDeferredEvent();
         _clearTerminalReservationSet();
-        vault.setFailRouterPayouts(modeFuzz % 2 == 1);
+        housePool.setFailRouterPayouts(modeFuzz % 2 == 1);
     }
 
-    function setVaultAssets(
+    function setPoolAssets(
         uint256 amountFuzz
     ) external {
         _clearLastBadDebtDeferredEvent();
         _clearTerminalReservationSet();
-        vault.setAssets(bound(amountFuzz, 0, 1_000_000_000e6));
+        housePool.setAssets(bound(amountFuzz, 0, 1_000_000_000e6));
     }
 
-    function drainVault(
+    function drainHousePool(
         uint256 floorFuzz
     ) external {
         _clearLastBadDebtDeferredEvent();
         _clearTerminalReservationSet();
-        vault.setAssets(bound(floorFuzz, 0, 100e6));
+        housePool.setAssets(bound(floorFuzz, 0, 100e6));
     }
 
     function lastBadDebtDeferredEventSnapshot() external view returns (BadDebtDeferredEvent memory) {
@@ -1163,8 +1163,8 @@ contract PerpAccountingHandler is Test {
         revert("unknown actor");
     }
 
-    function vaultAssetDepth() public view returns (uint256) {
-        return vault.totalAssets();
+    function housePoolAssetDepth() public view returns (uint256) {
+        return housePool.totalAssets();
     }
 
     function _freeSettlementUsdc(

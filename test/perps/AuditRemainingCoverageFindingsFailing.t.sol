@@ -189,7 +189,7 @@ contract AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees is BasePerp
     address trader = address(0xC105);
     address keeper = address(0xBEEF);
 
-    function test_H4_ProfitableCloseMustNotBeDroppedWhenVaultLacksImmediateCash() public {
+    function test_H4_ProfitableCloseMustNotBeDroppedWhenPoolLacksImmediateCash() public {
         address account = trader;
         _fundTrader(trader, 11_000e6);
 
@@ -255,7 +255,7 @@ contract AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees is BasePerp
         assertEq(
             engine.deferredKeeperCreditUsdc(keeper),
             0,
-            "Illiquid close execution should not touch deferred vault-funded clearer claims"
+            "Illiquid close execution should not touch deferred pool-funded clearer claims"
         );
         assertEq(
             clearinghouse.balanceUsdc(keeperAccount) - keeperSettlementBefore,
@@ -281,7 +281,7 @@ contract AuditRemainingCoverageFindingsFailing_TerminalLiveness is BasePerpTest 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(125_000_000));
 
-        vm.mockCallRevert(address(pool), abi.encodeWithSelector(pool.payOut.selector), bytes("vault illiquid"));
+        vm.mockCallRevert(address(pool), abi.encodeWithSelector(pool.payOut.selector), bytes("pool illiquid"));
 
         vm.roll(block.number + 1);
         vm.prank(keeper);

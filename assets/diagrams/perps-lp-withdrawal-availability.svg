@@ -78,7 +78,7 @@
 <text x="333.77500000000003" y="1011.95" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#991b1b">Blocked: stale mark</text>
 <text x="547.075" y="1011.95" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#0c4a6e">Build withdrawal snapshot</text>
 <text x="547.075" y="1087.95" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#0c4a6e">Reserved USDC</text>
-<text x="547.075" y="1163.95" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#0c4a6e">max liability + funding reserve + deferred liabilities + protocol fees</text>
+<text x="547.075" y="1163.95" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#0c4a6e">max liability + carry reserve + deferred liabilities + protocol fees</text>
 <text x="547.075" y="1239.95" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#0c4a6e">Free USDC</text>
 <text x="547.075" y="1315.95" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#0c4a6e">net physical assets minus reserved USDC</text>
 <text x="547.075" y="1391.95" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#0c4a6e">Cap by tranche priority</text>

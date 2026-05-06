@@ -45,8 +45,8 @@ contract PerpFeeFlowInvariantTest is BasePerpInvariantTest {
         );
     }
 
-    function invariant_FeeBucketRemainsVaultCustodied() public view {
-        assertLe(engine.accumulatedFeesUsdc(), vault.totalAssets(), "Tracked fees must remain custodied by the vault");
+    function invariant_FeeBucketRemainsHousePoolCustodied() public view {
+        assertLe(engine.accumulatedFeesUsdc(), housePool.totalAssets(), "Tracked fees must remain custodied by the HousePool");
     }
 
 }

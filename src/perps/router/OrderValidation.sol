@@ -6,11 +6,11 @@ import {CfdTypes} from "../CfdTypes.sol";
 import {OrderRouterAdmin} from "../OrderRouterAdmin.sol";
 import {OrderFailurePolicyLib} from "../libraries/OrderFailurePolicyLib.sol";
 import {OrderValidationLib} from "../libraries/OrderValidationLib.sol";
-import {OrderUtils} from "./OrderUtils.sol";
+import {OrderBountyAccounting} from "./OrderBountyAccounting.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 
 /// @notice Validation and preflight checks for delayed-order commits and execution bounds.
-abstract contract OrderValidation is OrderUtils {
+abstract contract OrderValidation is OrderBountyAccounting {
 
     uint64 public nextCommitId = 1;
 

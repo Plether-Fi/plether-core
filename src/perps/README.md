@@ -34,7 +34,7 @@ If you want the accounting model first, read [`ACCOUNTING_SPEC.md`](ACCOUNTING_S
 - One live position per account address at a time. Side flips must pass through a close.
 - Orders are binding once committed. Users cannot cancel queued orders.
 - Queue execution is FIFO from the global head.
-- LP-capital carry is used instead of side-to-side funding.
+- LP-capital carry is used instead of a side-to-side rate mechanism.
 - If the HousePool is short on cash, trader profits and liquidation bounties can become deferred balance claims instead of reverting the state transition.
 
 ### Units and accounts
@@ -84,7 +84,7 @@ The main runtime and read surfaces are:
 - `MarginClearinghouse`: trader custody and typed margin buckets.
 - `OrderRouter`: thin external shell for delayed-order commits, keeper execution, Pyth validation, and keeper bounty escrow.
 - `CfdEngine`: canonical execution ledger and solvency boundary.
-- `CfdEngineSettlementModule`: externalized close/liquidation settlement orchestration used by the engine.
+- `CfdEngineSettlementSidecar`: externalized close/liquidation settlement orchestration used by the engine.
 - `CfdEnginePlanner`: externalized open/close/liquidation plan builder wired into the engine after deployment.
 - `HousePool`: LP capital, liabilities, reserves, and tranche waterfall.
 - `TrancheVault`: ERC-4626 LP vault wrappers for senior and junior capital.
@@ -94,11 +94,11 @@ The main runtime and read surfaces are:
 ### Intended boundaries
 
 - `CfdEngine` and `ICfdEngineCore` are the canonical runtime truth for execution, liquidation, and protocol status.
-- `CfdEngineSettlementModule` executes close and liquidation choreography, while `CfdEngine` remains the storage owner.
-- `CfdEngine`, `CfdEnginePlanner`, `CfdEngineSettlementModule`, and `CfdEngineAdmin` are now deployed separately and wired once through `CfdEngine.setDependencies(...)` to keep engine initcode under EIP-3860.
+- `CfdEngineSettlementSidecar` executes close and liquidation choreography, while `CfdEngine` remains the storage owner.
+- `CfdEngine`, `CfdEnginePlanner`, `CfdEngineSettlementSidecar`, and `CfdEngineAdmin` are now deployed separately and wired once through `CfdEngine.setDependencies(...)` to keep engine initcode under EIP-3860.
 - `MarginClearinghouse` owns trader settlement balances and locked-margin custody buckets.
-- `OrderRouter` owns queued order records and router-custodied execution bounty escrow; its implementation is split into base storage/hooks, handler, validation, and utility modules.
-- `HousePool` owns LP capital and pays protocol obligations that must leave the vault.
+- `OrderRouter` owns queued order records and router-custodied execution bounty escrow; its implementation is split into base storage/hooks, commit, execution, execution-settlement, liquidation, validation, and bounty-accounting components.
+- `HousePool` owns LP capital and pays protocol obligations that must leave the pool.
 - `PerpsPublicLens` is the default read surface for product consumers.
 - The account and protocol lenses are for deeper diagnostics, tests, audits, and operator tooling.
 
@@ -206,17 +206,17 @@ This is why the LP docs distinguish freshness-gated repricing from already-funde
 
 ### Bounded solvency at entry
 
-Before increasing risk, the engine checks that the vault can cover the worst-case side payout after the trade.
+Before increasing risk, the engine checks that the HousePool can cover the worst-case side payout after the trade.
 
 ```text
-vault total assets >= max(globalBullMaxProfit, globalBearMaxProfit)
+pool total assets >= max(globalBullMaxProfit, globalBearMaxProfit)
 ```
 
 This does not mean LPs can never take loss. It means trader upside is bounded and the system can reason about the worst case without iterating positions.
 
-### Carry instead of funding
+### LP-capital carry
 
-Plether Perps uses a fixed global carry rate on LP-backed exposure rather than side-to-side funding.
+Plether Perps uses a fixed global carry rate on LP-backed exposure rather than a side-to-side rate mechanism.
 
 ```text
 lpBackedNotionalUsdc = max(positionNotionalUsdc - reachableCollateralUsdc, 0)
@@ -241,7 +241,7 @@ Open-risk projection credits skew-reducing trade rebates into reachable collater
 
 ### Deferred liabilities
 
-The system can complete terminal transitions even when immediate vault cash is insufficient.
+The system can complete terminal transitions even when immediate pool cash is insufficient.
 
 - Trader gains can become deferred trader credit.
 - Liquidation bounties can become deferred keeper credit.
@@ -250,7 +250,7 @@ The system can complete terminal transitions even when immediate vault cash is i
 
 ### Conservative LP accounting
 
-LP accounting intentionally refuses to count unrealized trader losses as present vault assets.
+LP accounting intentionally refuses to count unrealized trader losses as present pool assets.
 
 - Unrealized profitable trader PnL is treated as a liability.
 - Unrealized trader losses are not booked as instantly withdrawable LP assets.
@@ -265,9 +265,9 @@ The perps system intentionally splits accounting into separate kernels:
 
 - `CloseAccountingLib`: realized PnL, execution fee, trader settlement, and bad-debt handling for voluntary decreases.
 - `LiquidationAccountingLib`: reachable collateral, keeper bounty, residual payout, and bad debt for forced close.
-- `SolvencyAccountingLib`: effective assets, bounded max liability, withdrawal reserves, and free vault cash.
+- `SolvencyAccountingLib`: effective assets, bounded max liability, withdrawal reserves, and free pool cash.
 - `OrderEscrowAccounting`: router-held execution bounty reserves and margin-queue bookkeeping.
-- `OrderRouterBase` / `OrderHandler` / `OrderValidation` / `OrderUtils`: shared router state, delayed-order lifecycle handling, preflight validation, and bounty/liquidation helper math.
+- `OrderRouterBase` / `OrderCommitHandler` / `OrderExecutionHandler` / `OrderExecutionSettlement` / `OrderLiquidationHandler` / `OrderBountyAccounting` / `OrderValidation`: shared router state, delayed-order lifecycle handling, terminal execution settlement, liquidation flow, bounty accounting, and preflight validation.
 - `HousePool.recordClaimantInflow(amount, kind, cashMode)`: claimant-owned value routing for both revenue and recapitalization, with explicit cash-arrival vs retained-value modes.
 
 These domains answer different questions. They should not silently share assumptions just because the inputs look similar.
@@ -290,7 +290,7 @@ These domains answer different questions. They should not silently share assumpt
 - Close intents reserve a flat governance-configured bounty capped at `1 USDC` (default `0.20 USDC`).
 - Open bounties come from free settlement.
 - Close bounties use free settlement first when carry can be checkpointed from a fresh live mark; otherwise they fall back to bounded active position margin so stale-mark closes remain committable.
-- Failed-order rewards stay independent from vault liquidity because they are paid from router escrow rather than LP cash.
+- Failed-order rewards stay independent from pool liquidity because they are paid from router escrow rather than LP cash.
 
 ### Execute rules
 
@@ -355,7 +355,7 @@ This is a containment latch, not a pause. The protocol still allows transitions 
 - Residual trader value is preserved when positive.
 - Same-account deferred trader credit is not treated as liquidation-reachable collateral; it is only netted once as terminal settlement bookkeeping.
 - Bad debt is socialized to LP capital if losses exceed reachable collateral.
-- Voluntary closes on underwater positions seize what is reachable and let the vault absorb the shortfall rather than trapping the user in an impossible state.
+- Voluntary closes on underwater positions seize what is reachable and let the HousePool absorb the shortfall rather than trapping the user in an impossible state.
 
 ### Friday Auto-Deleverage (FAD)
 
@@ -381,7 +381,7 @@ The important runtime invariants are:
 ## Governance and Admin Controls
 
 Most risk-sensitive parameter changes are timelocked for 48 hours.
-Engine risk controls live on `CfdEngineAdmin`, and router risk controls plus pause state now live on `OrderRouterAdmin`, with both admin modules finalizing changes onto their host contracts.
+Engine risk controls live on `CfdEngineAdmin`, and router risk controls plus pause state now live on `OrderRouterAdmin`, with both deployed admin contracts finalizing changes onto their host contracts.
 
 Timelocked surfaces include:
 

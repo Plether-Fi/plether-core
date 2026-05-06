@@ -6,8 +6,8 @@ import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterAdminHost} from "./interfaces/IOrderRouterAdminHost.sol";
 import {IPerpsKeeper} from "./interfaces/IPerpsKeeper.sol";
 import {IPerpsTraderActions} from "./interfaces/IPerpsTraderActions.sol";
-import {OrderHandler} from "./modules/OrderHandler.sol";
-import {OrderRouterBase} from "./modules/OrderRouterBase.sol";
+import {OrderHandler} from "./router/OrderHandler.sol";
+import {OrderRouterBase} from "./router/OrderRouterBase.sol";
 
 /// @title OrderRouter (The MEV Shield)
 /// @notice Manages Commit-Reveal, MEV protection, and the un-brickable FIFO queue.

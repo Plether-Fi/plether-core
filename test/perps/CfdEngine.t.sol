@@ -5,7 +5,7 @@ import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdEngineAdmin} from "../../src/perps/CfdEngineAdmin.sol";
 import {CfdEnginePlanTypes} from "../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdEnginePlanner} from "../../src/perps/CfdEnginePlanner.sol";
-import {CfdEngineSettlementModule} from "../../src/perps/CfdEngineSettlementModule.sol";
+import {CfdEngineSettlementSidecar} from "../../src/perps/CfdEngineSettlementSidecar.sol";
 import {CfdMath} from "../../src/perps/CfdMath.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
@@ -77,8 +77,8 @@ contract CfdEnginePlanLibHarness {
         snap.lastMarkPrice = oraclePrice;
         snap.lastMarkTime = 1;
         snap.bearSide.openInterest = size;
-        snap.vaultAssetsUsdc = 1_000_000e6;
-        snap.vaultCashUsdc = 1;
+        snap.poolAssetsUsdc = 1_000_000e6;
+        snap.poolCashUsdc = 1;
         snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
             settlementBalanceUsdc: settlementReachableUsdc,
             totalLockedMarginUsdc: 0,
@@ -127,8 +127,8 @@ contract CfdEnginePlanLibHarness {
         snap.lastMarkPrice = oraclePrice;
         snap.lastMarkTime = currentTimestamp;
         snap.bearSide.openInterest = size;
-        snap.vaultAssetsUsdc = 1_000_000e6;
-        snap.vaultCashUsdc = 1;
+        snap.poolAssetsUsdc = 1_000_000e6;
+        snap.poolCashUsdc = 1;
         snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
             settlementBalanceUsdc: settlementReachableUsdc,
             totalLockedMarginUsdc: 0,
@@ -176,8 +176,8 @@ contract CfdEnginePlanLibHarness {
         snap.lastMarkPrice = oraclePrice;
         snap.lastMarkTime = 1;
         snap.bearSide.openInterest = size;
-        snap.vaultAssetsUsdc = 1_000_000e6;
-        snap.vaultCashUsdc = 1;
+        snap.poolAssetsUsdc = 1_000_000e6;
+        snap.poolCashUsdc = 1;
         snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
             settlementBalanceUsdc: settlementReachableUsdc,
             totalLockedMarginUsdc: 0,
@@ -256,8 +256,8 @@ contract CfdEnginePlanLibHarness {
             bountyBps: 10
         });
         snap.executionFeeBps = 4;
-        snap.vaultAssetsUsdc = 1_000_000e6;
-        snap.vaultCashUsdc = 1_000_000e6;
+        snap.poolAssetsUsdc = 1_000_000e6;
+        snap.poolCashUsdc = 1_000_000e6;
 
         return CfdEnginePlanLib.planOpen(
             snap,
@@ -292,18 +292,18 @@ contract CfdEngineTest is BasePerpTest {
     }
 
     function _legacyCappedSpreadAfter(
-        int256 bullFunding,
-        int256 bearFunding,
+        int256 bullLegacySpread,
+        int256 bearLegacySpread,
         uint256 bullMargin,
         uint256 bearMargin
     ) internal pure returns (int256) {
-        if (bullFunding < -int256(bullMargin)) {
-            bullFunding = -int256(bullMargin);
+        if (bullLegacySpread < -int256(bullMargin)) {
+            bullLegacySpread = -int256(bullMargin);
         }
-        if (bearFunding < -int256(bearMargin)) {
-            bearFunding = -int256(bearMargin);
+        if (bearLegacySpread < -int256(bearMargin)) {
+            bearLegacySpread = -int256(bearMargin);
         }
-        return bullFunding + bearFunding;
+        return bullLegacySpread + bearLegacySpread;
     }
 
     function _maxLiabilityAfterClose(
@@ -355,7 +355,7 @@ contract CfdEngineTest is BasePerpTest {
         address account = address(uint160(1));
         _fundTrader(account, 20_000 * 1e6);
 
-        // maxProfit = 1.2M tokens * $1 entry = $1.2M > vault's $1M balance
+        // maxProfit = 1.2M tokens * $1 entry = $1.2M > pool's $1M balance
         CfdTypes.Order memory tooLarge = CfdTypes.Order({
             account: account,
             sizeDelta: 1_200_000 * 1e18,
@@ -384,7 +384,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
 
-        // Withdraw LP to reduce vault to $50k — solvency check should fail
+        // Withdraw LP to reduce pool to $50k — solvency check should fail
         vm.warp(block.timestamp + 1 hours); // past deposit cooldown
         juniorVault.withdraw(950_000 * 1e6, address(this), address(this));
         vm.expectRevert(abi.encodeWithSelector(ICfdEngine.CfdEngine__TypedOrderFailure.selector, 2, 7, false));
@@ -480,7 +480,7 @@ contract CfdEngineTest is BasePerpTest {
     }
 
     function helper_NoCarryBaselineAccumulation() public {
-        uint256 vaultDepth = 1_000_000 * 1e6;
+        uint256 poolDepth = 1_000_000 * 1e6;
 
         address account1 = address(0x1);
         address account2 = address(0x2);
@@ -499,7 +499,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrderTyped(retailLong, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(retailLong, 1e8, poolDepth, uint64(block.timestamp));
 
         uint64 refreshTime = uint64(block.timestamp + 30 days);
         vm.warp(refreshTime);
@@ -522,7 +522,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrderTyped(mmShort, 1e8, vaultDepth, accrualTime);
+        engine.processOrderTyped(mmShort, 1e8, poolDepth, accrualTime);
 
         assertEq(_legacySideIndexZero(CfdTypes.Side.BULL), 0);
         assertEq(_legacySideIndexZero(CfdTypes.Side.BEAR), 0);
@@ -552,7 +552,7 @@ contract CfdEngineTest is BasePerpTest {
         _open(traderAccount, CfdTypes.Side.BULL, 200_000e18, 20_000e6, 1e8);
 
         uint256 feesBefore = engine.accumulatedFeesUsdc();
-        uint256 vaultAssetsBefore = pool.totalAssets();
+        uint256 poolAssetsBefore = pool.totalAssets();
         vm.warp(block.timestamp + 1 days);
 
         vm.prank(address(router));
@@ -573,8 +573,8 @@ contract CfdEngineTest is BasePerpTest {
         );
         assertEq(
             pool.totalAssets(),
-            vaultAssetsBefore + 25e6,
-            "Absorbed cancellation fee should raise canonical vault assets"
+            poolAssetsBefore + 25e6,
+            "Absorbed cancellation fee should raise canonical pool assets"
         );
         assertEq(pool.excessAssets(), 0, "Absorbed cancellation fee should not strand canonical assets as excess");
     }
@@ -588,13 +588,13 @@ contract CfdEngineTest is BasePerpTest {
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
 
-        // no-op in no-side-funding baseline
+        // no-op in carry-only baseline
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
         vm.warp(block.timestamp + 1);
 
-        // no-op in no-side-funding baseline
+        // no-op in carry-only baseline
     }
 
     function test_ProtocolAccounting_DoesNotProjectCarryFromStaleLiveMark() public {
@@ -643,7 +643,7 @@ contract CfdEngineTest is BasePerpTest {
 
         vm.warp(block.timestamp + engine.fadMaxStaleness() + 1);
 
-        // no-op in no-side-funding baseline
+        // no-op in carry-only baseline
     }
 
     function test_ProtocolAccounting_DoesNotProjectCarryFromFrozenMarkPastFadMaxStaleness() public {
@@ -683,7 +683,7 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
-    function test_OpenTradeCost_AccountsVaultInflowCanonically() public {
+    function test_OpenTradeCost_AccountsPoolInflowCanonically() public {
         address firstBullAccount = address(0xABC2);
         address secondBullAccount = address(0xABC3);
         _fundTrader(firstBullAccount, 100_000e6);
@@ -691,14 +691,14 @@ contract CfdEngineTest is BasePerpTest {
 
         _open(firstBullAccount, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
 
-        uint256 vaultAssetsBefore = pool.totalAssets();
+        uint256 poolAssetsBefore = pool.totalAssets();
         _open(secondBullAccount, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
 
-        assertGt(pool.totalAssets(), vaultAssetsBefore, "Positive trade cost should increase canonical vault assets");
+        assertGt(pool.totalAssets(), poolAssetsBefore, "Positive trade cost should increase canonical pool assets");
         assertEq(pool.excessAssets(), 0, "Trade-cost inflows should not remain quarantined as excess");
     }
 
-    function test_ProfitableClose_RecordsDeferredTraderCreditWhenVaultIlliquid() public {
+    function test_ProfitableClose_RecordsDeferredTraderCreditWhenPoolIlliquid() public {
         address account = address(0xD301);
         _fundTrader(address(0xD301), 11_000e6);
 
@@ -722,15 +722,15 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
-    function test_FullClose_AfterFreshMark_DoesNotRevertWhenVaultIlliquid() public {
-        uint256 vaultDepth = 1_000_000 * 1e6;
+    function test_FullClose_AfterFreshMark_DoesNotRevertWhenPoolIlliquid() public {
+        uint256 poolDepth = 1_000_000 * 1e6;
         address bullAccount = address(uint160(1));
         address bearAccount = address(uint160(2));
         _fundTrader(bullAccount, 5000 * 1e6);
         _fundTrader(bearAccount, 5000 * 1e6);
 
-        _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, vaultDepth);
-        _open(bearAccount, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, vaultDepth);
+        _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, poolDepth);
+        _open(bearAccount, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, poolDepth);
 
         uint64 refreshTime = uint64(block.timestamp + 30 days);
         vm.warp(refreshTime);
@@ -747,7 +747,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 1);
 
-        _closeAt(bearAccount, CfdTypes.Side.BEAR, 10_000e18, 1e8, vaultDepth, accrualTime);
+        _closeAt(bearAccount, CfdTypes.Side.BEAR, 10_000e18, 1e8, poolDepth, accrualTime);
 
         (uint256 size,,,,,,) = engine.positions(bearAccount);
         assertEq(size, 0, "Illiquid profitable close close should still destroy the position");
@@ -756,7 +756,7 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
-    function test_PreviewClose_UsesCanonicalVaultDepthWhileSimulateCloseAllowsWhatIfDepth() public {
+    function test_PreviewClose_UsesCanonicalPoolDepthWhileSimulateCloseAllowsWhatIfDepth() public {
         address bullAccount = address(uint160(0xC10));
         address bearAccount = address(uint160(0xC11));
         _fundTrader(bullAccount, 5000e6);
@@ -882,7 +882,7 @@ contract CfdEngineTest is BasePerpTest {
         _fundTrader(trader, 20_000e6);
 
         _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
-        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(bytes32)").with_key(account)
+        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(address)").with_key(account)
             .checked_write(uint256(5000e6));
         stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(uint256(5000e6));
 
@@ -927,7 +927,7 @@ contract CfdEngineTest is BasePerpTest {
         _fundTrader(trader, 20_000e6);
 
         _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
-        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(bytes32)").with_key(account)
+        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(address)").with_key(account)
             .checked_write(uint256(5000e6));
         stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(uint256(5000e6));
 
@@ -974,7 +974,7 @@ contract CfdEngineTest is BasePerpTest {
         _fundTrader(trader, 20_000e6);
         _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
-        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(bytes32)").with_key(account)
+        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(address)").with_key(account)
             .checked_write(deferredTraderCredit);
         stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(deferredTraderCredit);
 
@@ -1097,7 +1097,7 @@ contract CfdEngineTest is BasePerpTest {
         uint256 partialLiquidity = deferred / 2;
         usdc.mint(address(pool), partialLiquidity);
 
-        vm.expectRevert(CfdEngine.CfdEngine__InsufficientVaultLiquidity.selector);
+        vm.expectRevert(CfdEngine.CfdEngine__InsufficientPoolLiquidity.selector);
         vm.prank(trader);
         engine.claimDeferredTraderCredit(account);
 
@@ -1135,7 +1135,7 @@ contract CfdEngineTest is BasePerpTest {
         uint256 partialLiquidity = deferred / 2;
         usdc.mint(address(pool), partialLiquidity);
 
-        vm.expectRevert(CfdEngine.CfdEngine__InsufficientVaultLiquidity.selector);
+        vm.expectRevert(CfdEngine.CfdEngine__InsufficientPoolLiquidity.selector);
         vm.prank(trader);
         engine.claimDeferredTraderCredit(account);
 
@@ -1165,7 +1165,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.stopPrank();
 
         vm.prank(trader);
-        vm.expectRevert(CfdEngine.CfdEngine__InsufficientVaultLiquidity.selector);
+        vm.expectRevert(CfdEngine.CfdEngine__InsufficientPoolLiquidity.selector);
         engine.claimDeferredTraderCredit(account);
     }
 
@@ -1192,14 +1192,14 @@ contract CfdEngineTest is BasePerpTest {
         usdc.mint(address(pool), deferred);
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeper);
-        vm.expectRevert(CfdEngine.CfdEngine__InsufficientVaultLiquidity.selector);
+        vm.expectRevert(CfdEngine.CfdEngine__InsufficientPoolLiquidity.selector);
         vm.prank(keeper);
         engine.claimDeferredKeeperCredit();
         assertEq(clearinghouse.balanceUsdc(keeper), keeperSettlementBefore);
     }
 
     function test_NoSideCarryRealization_KeepsClearinghouseMarginInSync() public {
-        uint256 vaultDepth = 1_000_000 * 1e6;
+        uint256 poolDepth = 1_000_000 * 1e6;
         address account = address(uint160(1));
         _fundTrader(account, 20_000 * 1e6);
 
@@ -1216,7 +1216,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrderTyped(openOrder, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(openOrder, 1e8, poolDepth, uint64(block.timestamp));
 
         (, uint256 marginAfterOpen,,,,,) = engine.positions(account);
         IMarginClearinghouse.LockedMarginBuckets memory lockedAfterOpen = clearinghouse.getLockedMarginBuckets(account);
@@ -1248,7 +1248,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrderTyped(addOrder, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(addOrder, 1e8, poolDepth, uint64(block.timestamp));
 
         (, uint256 marginAfterAdd,,,,,) = engine.positions(account);
         IMarginClearinghouse.LockedMarginBuckets memory lockedAfterAdd = clearinghouse.getLockedMarginBuckets(account);
@@ -1349,7 +1349,7 @@ contract CfdEngineTest is BasePerpTest {
 
         usdc.mint(address(pool), fees);
 
-        vm.expectRevert(CfdEngine.CfdEngine__InsufficientVaultLiquidity.selector);
+        vm.expectRevert(CfdEngine.CfdEngine__InsufficientPoolLiquidity.selector);
         engine.withdrawFees(treasury);
 
         usdc.mint(address(pool), deferredBounty + solvencyBuffer);
@@ -1375,7 +1375,7 @@ contract CfdEngineTest is BasePerpTest {
         usdc.mint(address(pool), 100e6);
 
         stdstore.target(address(engine)).sig("accumulatedFeesUsdc()").checked_write(uint256(60e6));
-        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(bytes32)").with_key(traderAccount)
+        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(address)").with_key(traderAccount)
             .checked_write(uint256(40e6));
         stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(uint256(40e6));
 
@@ -1385,7 +1385,7 @@ contract CfdEngineTest is BasePerpTest {
         engine.withdrawFees(treasury, 40e6);
 
         assertEq(usdc.balanceOf(treasury), 40e6, "Treasury should receive the withdrawable fee slice");
-        assertEq(pool.totalAssets(), 60e6, "Fee withdrawal should leave the expected residual vault cash");
+        assertEq(pool.totalAssets(), 60e6, "Fee withdrawal should leave the expected residual pool cash");
         assertEq(engine.accumulatedFeesUsdc(), 20e6, "Fee accounting should retain the unwithdrawn remainder");
 
         uint256 traderSettlementBefore = clearinghouse.balanceUsdc(traderAccount);
@@ -1397,7 +1397,7 @@ contract CfdEngineTest is BasePerpTest {
             40e6,
             "Trader should receive the first deferred claim ahead of remaining protocol fees"
         );
-        assertEq(pool.totalAssets(), 20e6, "Trader claim should move the vault into the exact 20/20/20 residual state");
+        assertEq(pool.totalAssets(), 20e6, "Trader claim should move the pool into the exact 20/20/20 residual state");
         assertEq(engine.accumulatedFeesUsdc(), 20e6, "Servicing deferred claims must not burn fee accounting");
         assertEq(
             engine.deferredTraderCreditUsdc(traderAccount), 0, "Trader deferred balance should be fully consumed"
@@ -1413,7 +1413,7 @@ contract CfdEngineTest is BasePerpTest {
             20e6,
             "Keeper should be able to drain the last 20e6 instead of deadlocking behind fee accounting"
         );
-        assertEq(pool.totalAssets(), 0, "Final deferred claim should consume the last residual vault cash");
+        assertEq(pool.totalAssets(), 0, "Final deferred claim should consume the last residual pool cash");
         assertEq(
             engine.deferredKeeperCreditUsdc(keeper), 0, "Keeper deferred balance should clear after the final claim"
         );
@@ -1684,7 +1684,7 @@ contract CfdEngineTest is BasePerpTest {
             settlementBefore + depositAmount - expectedCarry,
             "Deposit hook should realize carry before adding fresh settlement"
         );
-        assertEq(pool.rawAssets(), poolRawBefore + expectedCarry, "Carry realization should physically fund the vault");
+        assertEq(pool.rawAssets(), poolRawBefore + expectedCarry, "Carry realization should physically fund the pool");
         assertEq(
             pool.accountedAssets(),
             poolAccountedBefore + expectedCarry,
@@ -1961,13 +1961,13 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
-    function test_SettlementModule_RevertsWhenCalledDirectly() public {
-        CfdEngineSettlementModule module = CfdEngineSettlementModule(address(engine.settlementModule()));
+    function test_SettlementSidecar_RevertsWhenCalledDirectly() public {
+        CfdEngineSettlementSidecar sidecar = CfdEngineSettlementSidecar(address(engine.settlementSidecar()));
         CfdEnginePlanTypes.CloseDelta memory delta;
         CfdTypes.Position memory position;
 
-        vm.expectRevert(CfdEngineSettlementModule.CfdEngineSettlementModule__Unauthorized.selector);
-        module.executeClose(ICfdEngineSettlementHost(address(engine)), delta, position, uint64(block.timestamp));
+        vm.expectRevert(CfdEngineSettlementSidecar.CfdEngineSettlementSidecar__Unauthorized.selector);
+        sidecar.executeClose(ICfdEngineSettlementHost(address(engine)), delta, position, uint64(block.timestamp));
     }
 
     function test_GetAccountCollateralView_ReturnsCurrentBuckets() public {
@@ -2049,7 +2049,7 @@ contract CfdEngineTest is BasePerpTest {
 
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory viewData =
             engineProtocolLens.getProtocolAccountingSnapshot();
-        assertEq(viewData.vaultAssetsUsdc, pool.totalAssets());
+        assertEq(viewData.poolAssetsUsdc, pool.totalAssets());
         assertEq(viewData.withdrawalReservedUsdc, _withdrawalReservedUsdc());
         assertEq(viewData.accumulatedFeesUsdc, engine.accumulatedFeesUsdc());
         assertEq(viewData.totalDeferredTraderCreditUsdc, engine.totalDeferredTraderCreditUsdc());
@@ -2077,11 +2077,11 @@ contract CfdEngineTest is BasePerpTest {
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory housePoolSnapshot =
             engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
 
-        assertEq(snapshot.vaultAssetsUsdc, pool.totalAssets());
+        assertEq(snapshot.poolAssetsUsdc, pool.totalAssets());
         assertEq(
             snapshot.netPhysicalAssetsUsdc,
-            snapshot.vaultAssetsUsdc > snapshot.accumulatedFeesUsdc
-                ? snapshot.vaultAssetsUsdc - snapshot.accumulatedFeesUsdc
+            snapshot.poolAssetsUsdc > snapshot.accumulatedFeesUsdc
+                ? snapshot.poolAssetsUsdc - snapshot.accumulatedFeesUsdc
                 : 0
         );
         assertEq(snapshot.maxLiabilityUsdc, _maxLiability());
@@ -2092,8 +2092,8 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(snapshot.totalDeferredKeeperCreditUsdc, engine.totalDeferredKeeperCreditUsdc());
         assertEq(snapshot.degradedMode, engine.degradedMode());
         assertEq(snapshot.hasLiveLiability, (_maxLiability() > 0));
-        assertEq(snapshot.vaultAssetsUsdc, viewData.vaultAssetsUsdc);
-        assertEq(housePoolSnapshot.physicalAssetsUsdc, snapshot.vaultAssetsUsdc);
+        assertEq(snapshot.poolAssetsUsdc, viewData.poolAssetsUsdc);
+        assertEq(housePoolSnapshot.physicalAssetsUsdc, snapshot.poolAssetsUsdc);
         assertEq(snapshot.maxLiabilityUsdc, viewData.maxLiabilityUsdc);
         assertEq(snapshot.withdrawalReservedUsdc, viewData.withdrawalReservedUsdc);
         assertEq(snapshot.freeUsdc, viewData.freeUsdc);
@@ -2124,7 +2124,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(
             pool.totalAssets(), accountedBefore, "Canonical pool assets should ignore the donation until accounted"
         );
-        assertEq(beforeAccount.vaultAssetsUsdc, accountedBefore, "Protocol snapshot should follow canonical assets");
+        assertEq(beforeAccount.poolAssetsUsdc, accountedBefore, "Protocol snapshot should follow canonical assets");
         assertEq(
             houseBefore.netPhysicalAssetsUsdc, accountedBefore, "HousePool snapshot should ignore unaccounted donations"
         );
@@ -2140,7 +2140,7 @@ contract CfdEngineTest is BasePerpTest {
             pool.totalAssets(), accountedBefore + 100_000e6, "Explicit accounting should raise canonical pool assets"
         );
         assertEq(
-            afterAccount.vaultAssetsUsdc,
+            afterAccount.poolAssetsUsdc,
             accountedBefore + 100_000e6,
             "Protocol snapshot should reflect explicit accounting"
         );
@@ -2235,7 +2235,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(snapshot.maxLiabilityUsdc, _maxLiability(), "Snapshot liability must match accessor");
         assertEq(snapshot.supplementalReservedUsdc, uint256(0), "Snapshot supplemental reserve must match accessor");
         assertEq(
-            snapshot.unrealizedMtmLiabilityUsdc, _vaultMtmAdjustment(), "Snapshot MtM liability must match accessor"
+            snapshot.unrealizedMtmLiabilityUsdc, _poolMtmAdjustment(), "Snapshot MtM liability must match accessor"
         );
         assertEq(
             snapshot.deferredTraderCreditUsdc,
@@ -2323,7 +2323,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(illiquidPreview.remainingSize, 0);
     }
 
-    function test_SimulateClose_UsesHypotheticalVaultCashForPayoutBreakdown() public {
+    function test_SimulateClose_UsesHypotheticalPoolCashForPayoutBreakdown() public {
         address trader = address(0xAB1301);
         address account = trader;
         _fundTrader(trader, 11_000e6);
@@ -2334,12 +2334,12 @@ contract CfdEngineTest is BasePerpTest {
         CfdEngine.ClosePreview memory hypotheticalPreview = engineLens.simulateClose(account, 100_000e18, 80_000_000, 1);
 
         assertTrue(canonicalPreview.valid);
-        assertGt(canonicalPreview.immediatePayoutUsdc, 0, "Live preview should reflect currently available vault cash");
+        assertGt(canonicalPreview.immediatePayoutUsdc, 0, "Live preview should reflect currently available pool cash");
         assertEq(canonicalPreview.deferredTraderCreditUsdc, 0, "Live preview should not defer when cash is available");
         assertEq(canonicalDepth, pool.totalAssets(), "Setup should keep canonical depth unchanged");
 
         assertTrue(hypotheticalPreview.valid);
-        assertEq(hypotheticalPreview.immediatePayoutUsdc, 0, "Hypothetical close should use caller-supplied vault cash");
+        assertEq(hypotheticalPreview.immediatePayoutUsdc, 0, "Hypothetical close should use caller-supplied pool cash");
         assertGt(hypotheticalPreview.deferredTraderCreditUsdc, 0, "Low hypothetical cash should defer the payout");
     }
 
@@ -2401,7 +2401,7 @@ contract CfdEngineTest is BasePerpTest {
         );
         uint256 targetAssets = grossTargetAssets;
         uint256 currentAssets = pool.totalAssets();
-        assertGt(currentAssets, targetAssets, "Test setup must be able to drain the vault into the funding-clip gap");
+        assertGt(currentAssets, targetAssets, "Test setup must be able to drain the pool into the carry-clip gap");
 
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), currentAssets - targetAssets);
@@ -2638,7 +2638,7 @@ contract CfdEngineTest is BasePerpTest {
 
         stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(account).checked_write(uint256(0));
 
-        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(bytes32)").with_key(account)
+        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(address)").with_key(account)
             .checked_write(uint256(10e6));
         stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(uint256(10e6));
 
@@ -2679,10 +2679,10 @@ contract CfdEngineTest is BasePerpTest {
         bytes[] memory empty;
         router.executeLiquidation(account, empty);
 
-        uint256 vaultAssets = pool.totalAssets() + preview.keeperBountyUsdc;
+        uint256 postPayoutPoolAssets = pool.totalAssets() + preview.keeperBountyUsdc;
         uint256 fees = engine.accumulatedFeesUsdc();
         int256 legacySpread = int256(0);
-        uint256 netPhysical = vaultAssets > fees ? vaultAssets - fees : 0;
+        uint256 netPhysical = postPayoutPoolAssets > fees ? postPayoutPoolAssets - fees : 0;
         uint256 liveEffective = legacySpread > 0
             ? (netPhysical > uint256(legacySpread) ? netPhysical - uint256(legacySpread) : 0)
             : netPhysical + uint256(-legacySpread);
@@ -2930,7 +2930,7 @@ contract CfdEngineTest is BasePerpTest {
     function test_LiquidationPreviewAndPositionView_UseCurrentNotionalThreshold() public {
         address trader = address(0xAB1401);
         address account = trader;
-        uint256 vaultDepth = pool.totalAssets();
+        uint256 poolDepth = pool.totalAssets();
         _fundTrader(trader, 2000e6);
         _open(account, CfdTypes.Side.BULL, 10_000e18, 1105e6, 1e8);
 
@@ -2948,13 +2948,13 @@ contract CfdEngineTest is BasePerpTest {
         assertTrue(preview.liquidatable, "Liquidation preview should use current notional for maintenance threshold");
 
         vm.prank(address(router));
-        engine.liquidatePosition(account, 110_000_000, vaultDepth, uint64(block.timestamp));
+        engine.liquidatePosition(account, 110_000_000, poolDepth, uint64(block.timestamp));
 
         (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Live liquidation should agree with preview and position view");
     }
 
-    function helper_PreviewLiquidation_UsesCanonicalVaultDepthWhileSimulateLiquidationAllowsWhatIfDepth() public {
+    function helper_PreviewLiquidation_UsesCanonicalPoolDepthWhileSimulateLiquidationAllowsWhatIfDepth() public {
         address trader = address(0xAB14015);
         address account = trader;
         _fundTrader(trader, 2000e6);
@@ -3187,7 +3187,7 @@ contract CfdEngineTest is BasePerpTest {
         uint256 canonicalDepth = pool.totalAssets();
         uint256 forfeitedEscrow = router.getAccountEscrow(account).executionBountyUsdc;
         assertGt(forfeitedEscrow, 0, "Setup must build forfeitable execution escrow");
-        assertGt(canonicalDepth, forfeitedEscrow, "Setup needs canonical vault depth to exceed escrow");
+        assertGt(canonicalDepth, forfeitedEscrow, "Setup needs canonical pool depth to exceed escrow");
 
         CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 101_000_000);
         CfdEngine.LiquidationPreview memory oldModelEquivalent =
@@ -3201,15 +3201,15 @@ contract CfdEngineTest is BasePerpTest {
     }
 
     function test_Liquidation_ConsumesDeferredTraderCreditBeforeRecordingBadDebt() public {
-        uint256 vaultDepth = 1_000_000 * 1e6;
+        uint256 poolDepth = 1_000_000 * 1e6;
         address bullAccount = address(uint160(0xD221));
         address bearAccount = address(uint160(0xD222));
         address keeper = address(0xD223);
         _fundTrader(bullAccount, 5000e6);
         _fundTrader(bearAccount, 5000e6);
 
-        _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, vaultDepth);
-        _open(bearAccount, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, vaultDepth);
+        _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, poolDepth);
+        _open(bearAccount, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, poolDepth);
 
         uint64 refreshTime = uint64(block.timestamp + 1 days);
         vm.warp(refreshTime);
@@ -3221,7 +3221,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 1);
 
-        _closeAt(bearAccount, CfdTypes.Side.BEAR, 5000e18, 120_000_000, vaultDepth, refreshTime);
+        _closeAt(bearAccount, CfdTypes.Side.BEAR, 5000e18, 120_000_000, poolDepth, refreshTime);
         uint256 deferredBefore = engine.deferredTraderCreditUsdc(bearAccount);
         assertGt(deferredBefore, 0, "Setup must create deferred payout while keeping the position open");
 
@@ -3270,14 +3270,14 @@ contract CfdEngineTest is BasePerpTest {
     }
 
     function test_Close_ConsumesDeferredTraderCreditBeforeRecordingBadDebt() public {
-        uint256 vaultDepth = 1_000_000 * 1e6;
+        uint256 poolDepth = 1_000_000 * 1e6;
         address bullAccount = address(uint160(0xD231));
         address bearAccount = address(uint160(0xD232));
         _fundTrader(bullAccount, 5000e6);
         _fundTrader(bearAccount, 5000e6);
 
-        _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, vaultDepth);
-        _open(bearAccount, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, vaultDepth);
+        _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, poolDepth);
+        _open(bearAccount, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, poolDepth);
 
         uint64 refreshTime = uint64(block.timestamp + 1 days);
         vm.warp(refreshTime);
@@ -3289,7 +3289,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 1);
 
-        _closeAt(bearAccount, CfdTypes.Side.BEAR, 5000e18, 120_000_000, vaultDepth, refreshTime);
+        _closeAt(bearAccount, CfdTypes.Side.BEAR, 5000e18, 120_000_000, poolDepth, refreshTime);
         uint256 deferredBefore = engine.deferredTraderCreditUsdc(bearAccount);
         assertGt(deferredBefore, 0, "Setup must create deferred payout while keeping the position open");
 
@@ -3297,7 +3297,7 @@ contract CfdEngineTest is BasePerpTest {
         stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(bearAccount)
             .checked_write(reducedSettlement);
 
-        CfdEngine.ClosePreview memory preview = engineLens.simulateClose(bearAccount, 5000e18, 80_000_000, vaultDepth);
+        CfdEngine.ClosePreview memory preview = engineLens.simulateClose(bearAccount, 5000e18, 80_000_000, poolDepth);
         assertGt(
             preview.existingDeferredConsumedUsdc,
             0,
@@ -3310,7 +3310,7 @@ contract CfdEngineTest is BasePerpTest {
         );
 
         CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(bearAccount);
-        _closeAt(bearAccount, CfdTypes.Side.BEAR, 5000e18, 80_000_000, vaultDepth, refreshTime);
+        _closeAt(bearAccount, CfdTypes.Side.BEAR, 5000e18, 80_000_000, poolDepth, refreshTime);
 
         CloseParityObserved memory observed = _observeCloseParity(bearAccount, beforeSnapshot);
 
@@ -3332,15 +3332,15 @@ contract CfdEngineTest is BasePerpTest {
     }
 
     function test_Close_ConsumesDeferredTraderCreditBalancesWithoutQueueOrdering() public {
-        uint256 vaultDepth = 1_000_000 * 1e6;
+        uint256 poolDepth = 1_000_000 * 1e6;
         address bullAccount = address(uint160(0xD241));
         address bearAccount = address(uint160(0xD242));
         address keeper = address(0xD243);
         _fundTrader(bullAccount, 5000e6);
         _fundTrader(bearAccount, 5000e6);
 
-        _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, vaultDepth);
-        _open(bearAccount, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, vaultDepth);
+        _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, poolDepth);
+        _open(bearAccount, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, poolDepth);
 
         uint64 refreshTime = uint64(block.timestamp + 1 days);
         vm.warp(refreshTime);
@@ -3355,11 +3355,11 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 1);
 
-        _closeAt(bearAccount, CfdTypes.Side.BEAR, 5000e18, 120_000_000, vaultDepth, refreshTime);
+        _closeAt(bearAccount, CfdTypes.Side.BEAR, 5000e18, 120_000_000, poolDepth, refreshTime);
         uint256 deferredBefore = engine.deferredTraderCreditUsdc(bearAccount);
         assertGt(deferredBefore, 0, "Bear account should accrue deferred trader credit balance");
 
-        _closeAt(bearAccount, CfdTypes.Side.BEAR, 2500e18, 120_000_000, vaultDepth, refreshTime);
+        _closeAt(bearAccount, CfdTypes.Side.BEAR, 2500e18, 120_000_000, poolDepth, refreshTime);
         uint256 deferredAfterAccrual = engine.deferredTraderCreditUsdc(bearAccount);
         assertGe(
             deferredAfterAccrual, deferredBefore, "Additional deferred payout should coalesce into the same balance"
@@ -3369,7 +3369,7 @@ contract CfdEngineTest is BasePerpTest {
         stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(bearAccount)
             .checked_write(reducedSettlement);
 
-        _closeAt(bearAccount, CfdTypes.Side.BEAR, 2500e18, 80_000_000, vaultDepth, refreshTime);
+        _closeAt(bearAccount, CfdTypes.Side.BEAR, 2500e18, 80_000_000, poolDepth, refreshTime);
         assertLe(
             engine.deferredTraderCreditUsdc(bearAccount),
             deferredAfterAccrual,
@@ -3378,7 +3378,7 @@ contract CfdEngineTest is BasePerpTest {
     }
 
     function test_DeferredTraderCredit_CoalescesPerAccountWithoutQueuePosition() public {
-        uint256 vaultDepth = 1_000_000 * 1e6;
+        uint256 poolDepth = 1_000_000 * 1e6;
         address bullAccount = address(uint160(0xD261));
         address bearAccount = address(uint160(0xD262));
         address laterAccount = address(uint160(0xD263));
@@ -3386,9 +3386,9 @@ contract CfdEngineTest is BasePerpTest {
         _fundTrader(bearAccount, 5000e6);
         _fundTrader(laterAccount, 5000e6);
 
-        _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, vaultDepth);
-        _open(bearAccount, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, vaultDepth);
-        _open(laterAccount, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, vaultDepth);
+        _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, poolDepth);
+        _open(bearAccount, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, poolDepth);
+        _open(laterAccount, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, poolDepth);
 
         uint64 refreshTime = uint64(block.timestamp + 1 days);
         vm.warp(refreshTime);
@@ -3400,29 +3400,29 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 1);
 
-        _closeAt(bearAccount, CfdTypes.Side.BEAR, 5000e18, 120_000_000, vaultDepth, refreshTime);
+        _closeAt(bearAccount, CfdTypes.Side.BEAR, 5000e18, 120_000_000, poolDepth, refreshTime);
         uint256 bearDeferredBefore = engine.deferredTraderCreditUsdc(bearAccount);
         assertGt(bearDeferredBefore, 0, "Initial deferred payout should create tracked deferred balance for bearAccount");
 
-        _closeAt(laterAccount, CfdTypes.Side.BEAR, 5000e18, 120_000_000, vaultDepth, refreshTime);
+        _closeAt(laterAccount, CfdTypes.Side.BEAR, 5000e18, 120_000_000, poolDepth, refreshTime);
         uint256 laterDeferred = engine.deferredTraderCreditUsdc(laterAccount);
         assertGt(laterDeferred, 0, "Later claimant should also accrue deferred balance");
 
-        _closeAt(bearAccount, CfdTypes.Side.BEAR, 2500e18, 120_000_000, vaultDepth, refreshTime);
+        _closeAt(bearAccount, CfdTypes.Side.BEAR, 2500e18, 120_000_000, poolDepth, refreshTime);
         uint256 bearDeferredAfter = engine.deferredTraderCreditUsdc(bearAccount);
 
         assertGe(bearDeferredAfter, bearDeferredBefore, "Coalescing should not move the account behind later claimants");
     }
 
     function test_Close_RecoversExecutionFeeShortfallFromExistingDeferredTraderCredit() public {
-        uint256 vaultDepth = 1_000_000 * 1e6;
+        uint256 poolDepth = 1_000_000 * 1e6;
         address bullAccount = address(uint160(0xD251));
         address bearAccount = address(uint160(0xD252));
         _fundTrader(bullAccount, 5000e6);
         _fundTrader(bearAccount, 5000e6);
 
-        _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, vaultDepth);
-        _open(bearAccount, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, vaultDepth);
+        _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, poolDepth);
+        _open(bearAccount, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, poolDepth);
 
         uint64 refreshTime = uint64(block.timestamp + 1 days);
         vm.warp(refreshTime);
@@ -3434,7 +3434,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 1);
 
-        _closeAt(bearAccount, CfdTypes.Side.BEAR, 5000e18, 120_000_000, vaultDepth, refreshTime);
+        _closeAt(bearAccount, CfdTypes.Side.BEAR, 5000e18, 120_000_000, poolDepth, refreshTime);
         uint256 deferredBefore = engine.deferredTraderCreditUsdc(bearAccount);
         assertGt(
             deferredBefore, 1e6, "Setup must create legacy deferred payout large enough to cover the fee shortfall"
@@ -3447,7 +3447,7 @@ contract CfdEngineTest is BasePerpTest {
         IMarginClearinghouse.LockedMarginBuckets memory locked = clearinghouse.getLockedMarginBuckets(bearAccount);
         assertEq(locked.positionMarginUsdc, 0, "Test must reduce reachable collateral below the terminal close fee");
 
-        CfdEngine.ClosePreview memory preview = engineLens.simulateClose(bearAccount, 5000e18, 1e8, vaultDepth);
+        CfdEngine.ClosePreview memory preview = engineLens.simulateClose(bearAccount, 5000e18, 1e8, poolDepth);
         uint256 nominalExecutionFeeUsdc = (((5000e18 * uint256(1e8)) / CfdMath.USDC_TO_TOKEN_SCALE) * 4) / 10_000;
 
         assertEq(
@@ -3467,7 +3467,7 @@ contract CfdEngineTest is BasePerpTest {
         );
 
         uint256 feesBefore = engine.accumulatedFeesUsdc();
-        _closeAt(bearAccount, CfdTypes.Side.BEAR, 5000e18, 1e8, vaultDepth, refreshTime);
+        _closeAt(bearAccount, CfdTypes.Side.BEAR, 5000e18, 1e8, poolDepth, refreshTime);
 
         assertEq(
             engine.accumulatedFeesUsdc() - feesBefore,
@@ -3573,7 +3573,7 @@ contract CfdEngineTest is BasePerpTest {
         uint256 targetAssets = bearMaxProfit + engine.accumulatedFeesUsdc() + preDrainPreview.keeperBountyUsdc
             - preDrainPreview.seizedCollateralUsdc - 1;
         uint256 currentAssets = pool.totalAssets();
-        assertGt(currentAssets, targetAssets, "Test setup must be able to drain the vault into the degraded-mode gap");
+        assertGt(currentAssets, targetAssets, "Test setup must be able to drain the pool into the degraded-mode gap");
 
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), currentAssets - targetAssets);
@@ -3664,7 +3664,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(statusBefore.deferredKeeperCreditUsdc, deferredBounty);
         assertFalse(
             statusBefore.keeperCreditClaimableNow,
-            "Deferred keeper credit should be unclaimable while vault is illiquid"
+            "Deferred keeper credit should be unclaimable while pool is illiquid"
         );
 
         usdc.mint(address(pool), deferredBounty);
@@ -3672,7 +3672,7 @@ contract CfdEngineTest is BasePerpTest {
         DeferredEngineViewTypes.DeferredCreditStatus memory statusAfterCarry = _deferredCreditStatus(address(0), keeper);
         assertTrue(
             statusAfterCarry.keeperCreditClaimableNow,
-            "Deferred keeper credit should become claimable once vault liquidity returns"
+            "Deferred keeper credit should become claimable once pool liquidity returns"
         );
 
         address keeperAccount = keeper;
@@ -3704,7 +3704,7 @@ contract CfdEngineTest is BasePerpTest {
         usdc.mint(address(pool), 10e6);
 
         uint256 settlementBefore = clearinghouse.balanceUsdc(keeperAccount);
-        vm.expectRevert(CfdEngine.CfdEngine__InsufficientVaultLiquidity.selector);
+        vm.expectRevert(CfdEngine.CfdEngine__InsufficientPoolLiquidity.selector);
         vm.prank(keeper);
         engine.claimDeferredKeeperCredit();
 
@@ -3867,7 +3867,7 @@ contract CfdEngineTest is BasePerpTest {
     }
 
     function test_CarryRealization_DoesNotBackfillAfterFreshCheckpoint() public {
-        uint256 vaultDepth = 1_000_000 * 1e6;
+        uint256 poolDepth = 1_000_000 * 1e6;
         address account = address(uint160(1));
         _fundTrader(account, 20_000 * 1e6);
 
@@ -3883,7 +3883,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrderTyped(openOrder, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(openOrder, 1e8, poolDepth, uint64(block.timestamp));
 
         uint64 refreshTime = uint64(block.timestamp + 365 days);
         vm.warp(refreshTime);
@@ -3906,14 +3906,14 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrderTyped(addOrder, 1e8, vaultDepth, accrualTime);
+        engine.processOrderTyped(addOrder, 1e8, poolDepth, accrualTime);
 
         (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 110_000 * 1e18, "Fresh mark checkpoint should not retroactively create a carry-driven revert");
     }
 
     function test_EntryPriceAveraging() public {
-        uint256 vaultDepth = 1_000_000 * 1e6;
+        uint256 poolDepth = 1_000_000 * 1e6;
         address account = address(uint160(1));
         _fundTrader(account, 10_000 * 1e6);
 
@@ -3930,7 +3930,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrderTyped(first, 0.8e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(first, 0.8e8, poolDepth, uint64(block.timestamp));
 
         (,, uint256 entryAfterFirst,,,,) = engine.positions(account);
         assertEq(entryAfterFirst, 0.8e8, "Entry should be $0.80");
@@ -3948,7 +3948,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrderTyped(second, 1.2e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(second, 1.2e8, poolDepth, uint64(block.timestamp));
 
         (uint256 totalSize,, uint256 avgEntry,,,,) = engine.positions(account);
         assertEq(totalSize, 40_000 * 1e18, "Total size should be 40k");
@@ -3956,7 +3956,7 @@ contract CfdEngineTest is BasePerpTest {
     }
 
     function test_CarryRealization_OnClose() public {
-        uint256 vaultDepth = 1_000_000 * 1e6;
+        uint256 poolDepth = 1_000_000 * 1e6;
         address account = address(uint160(1));
         _fundTrader(account, 5000 * 1e6);
 
@@ -3972,7 +3972,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrderTyped(openOrder, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(openOrder, 1e8, poolDepth, uint64(block.timestamp));
 
         uint256 chBefore = clearinghouse.balanceUsdc(account);
 
@@ -3990,14 +3990,14 @@ contract CfdEngineTest is BasePerpTest {
             isClose: true
         });
         vm.prank(address(router));
-        engine.processOrderTyped(closeOrder, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(closeOrder, 1e8, poolDepth, uint64(block.timestamp));
 
         uint256 chAfter = clearinghouse.balanceUsdc(account);
         assertLt(chAfter, chBefore, "Carry drain should reduce clearinghouse balance on close");
     }
 
     function test_SetRiskParams_MakesPositionLiquidatable() public {
-        uint256 vaultDepth = 1_000_000 * 1e6;
+        uint256 poolDepth = 1_000_000 * 1e6;
         address account = address(uint160(1));
         address trader = account;
         _fundTrader(trader, 5000 * 1e6);
@@ -4014,14 +4014,14 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrderTyped(order, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(order, 1e8, poolDepth, uint64(block.timestamp));
 
         vm.prank(trader);
         clearinghouse.withdraw(account, 2500 * 1e6);
 
         vm.expectRevert(CfdEngine.CfdEngine__PositionIsSolvent.selector);
         vm.prank(address(router));
-        engine.liquidatePosition(account, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.liquidatePosition(account, 1e8, poolDepth, uint64(block.timestamp));
 
         _setRiskParams(
             CfdTypes.RiskParams({
@@ -4037,7 +4037,7 @@ contract CfdEngineTest is BasePerpTest {
         );
 
         vm.prank(address(router));
-        uint256 bounty = engine.liquidatePosition(account, 1e8, vaultDepth, uint64(block.timestamp));
+        uint256 bounty = engine.liquidatePosition(account, 1e8, poolDepth, uint64(block.timestamp));
         assertTrue(bounty > 0, "Position should be liquidatable after raising maintMarginBps");
 
         (uint256 size,,,,,,) = engine.positions(account);
@@ -4138,7 +4138,7 @@ contract CfdEngineTest is BasePerpTest {
     }
 
     function test_CloseSize_ExceedsPosition_Reverts() public {
-        uint256 vaultDepth = 1_000_000 * 1e6;
+        uint256 poolDepth = 1_000_000 * 1e6;
         address account = address(uint160(1));
         _fundTrader(account, 5000 * 1e6);
 
@@ -4154,7 +4154,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrderTyped(openOrder, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(openOrder, 1e8, poolDepth, uint64(block.timestamp));
 
         CfdTypes.Order memory closeOrder = CfdTypes.Order({
             account: account,
@@ -4169,11 +4169,11 @@ contract CfdEngineTest is BasePerpTest {
         });
         vm.expectRevert(abi.encodeWithSelector(ICfdEngine.CfdEngine__TypedOrderFailure.selector, 1, 1, true));
         vm.prank(address(router));
-        engine.processOrderTyped(closeOrder, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(closeOrder, 1e8, poolDepth, uint64(block.timestamp));
     }
 
     function test_MarginDrained_ByFees_Reverts() public {
-        uint256 vaultDepth = 1_000_000 * 1e6;
+        uint256 poolDepth = 1_000_000 * 1e6;
         address account = address(uint160(1));
         _fundTrader(account, 1000 * 1e6);
 
@@ -4190,7 +4190,7 @@ contract CfdEngineTest is BasePerpTest {
         });
         vm.expectRevert(abi.encodeWithSelector(ICfdEngine.CfdEngine__TypedOrderFailure.selector, 1, 6, false));
         vm.prank(address(router));
-        engine.processOrderTyped(order, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(order, 1e8, poolDepth, uint64(block.timestamp));
     }
 
     function test_PreviewOpen_ClassifiesCarryDrainedReleasedFreeSettlementAsUserInvalid() public {
@@ -4235,7 +4235,7 @@ contract CfdEngineTest is BasePerpTest {
     }
 
     function test_OpenOrder_IMRPrecedesSkewWhenBothFail() public {
-        uint256 vaultDepth = 1_000_000 * 1e6;
+        uint256 poolDepth = 1_000_000 * 1e6;
         address account = address(uint160(11));
         _fundTrader(account, 5000 * 1e6);
 
@@ -4266,11 +4266,11 @@ contract CfdEngineTest is BasePerpTest {
 
         vm.expectRevert(abi.encodeWithSelector(ICfdEngine.CfdEngine__TypedOrderFailure.selector, 1, 6, false));
         vm.prank(address(router));
-        engine.processOrderTyped(order, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(order, 1e8, poolDepth, uint64(block.timestamp));
     }
 
     function test_C5_CloseSucceeds_WhenCarryExceedsMargin_ButPositionProfitable() public {
-        uint256 vaultDepth = 1_000_000 * 1e6;
+        uint256 poolDepth = 1_000_000 * 1e6;
         address account = address(uint160(1));
         _fundTrader(account, 10_000 * 1e6);
 
@@ -4287,7 +4287,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrderTyped(openOrder, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(openOrder, 1e8, poolDepth, uint64(block.timestamp));
 
         // Warp 365 days — carry will far exceed margin
         vm.warp(block.timestamp + 365 days);
@@ -4310,7 +4310,7 @@ contract CfdEngineTest is BasePerpTest {
 
         // This should NOT revert — the position is profitable despite carry > margin
         vm.prank(address(router));
-        engine.processOrderTyped(closeOrder, 0.5e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(closeOrder, 0.5e8, poolDepth, uint64(block.timestamp));
 
         (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Position should be fully closed");
@@ -4320,7 +4320,7 @@ contract CfdEngineTest is BasePerpTest {
     }
 
     function test_C2_InsufficientInitialMargin_Reverts() public {
-        uint256 vaultDepth = 1_000_000 * 1e6;
+        uint256 poolDepth = 1_000_000 * 1e6;
         address account = address(uint160(1));
         _fundTrader(account, 1000 * 1e6);
 
@@ -4342,11 +4342,11 @@ contract CfdEngineTest is BasePerpTest {
 
         vm.expectRevert(abi.encodeWithSelector(ICfdEngine.CfdEngine__TypedOrderFailure.selector, 1, 6, false));
         vm.prank(address(router));
-        engine.processOrderTyped(order, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(order, 1e8, poolDepth, uint64(block.timestamp));
     }
 
     function test_H8_CloseAfterBlendedEntry_DoesNotUnderflow() public {
-        uint256 vaultDepth = 1_000_000 * 1e6;
+        uint256 poolDepth = 1_000_000 * 1e6;
         address account = address(uint160(1));
         _fundTrader(account, 10_000 * 1e6);
 
@@ -4363,7 +4363,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrderTyped(first, 100_000_001, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(first, 100_000_001, poolDepth, uint64(block.timestamp));
 
         // Open BEAR 200k tokens at price $1.00 — blends entry to 100_000_000 (truncated from .33)
         // Sum of individual maxProfits < maxProfit(blended) due to integer truncation
@@ -4379,7 +4379,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrderTyped(second, 100_000_000, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(second, 100_000_000, poolDepth, uint64(block.timestamp));
 
         // Close entire position — must not underflow in _reduceGlobalLiability
         CfdTypes.Order memory close = CfdTypes.Order({
@@ -4394,7 +4394,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: true
         });
         vm.prank(address(router));
-        engine.processOrderTyped(close, 100_000_000, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(close, 100_000_000, poolDepth, uint64(block.timestamp));
 
         (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Position should be fully closed");
@@ -4405,7 +4405,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.warp(block.timestamp + 1 hours);
         juniorVault.withdraw(800_000 * 1e6, address(this), address(this));
 
-        uint256 vaultDepth = 200_000 * 1e6;
+        uint256 poolDepth = 200_000 * 1e6;
         address aliceAccount = address(uint160(1));
         address bobAccount = address(uint160(2));
         _fundTrader(aliceAccount, 50_000 * 1e6);
@@ -4423,7 +4423,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrderTyped(aliceOpen, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(aliceOpen, 1e8, poolDepth, uint64(block.timestamp));
 
         CfdTypes.Order memory bobOpen = CfdTypes.Order({
             account: bobAccount,
@@ -4437,7 +4437,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrderTyped(bobOpen, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(bobOpen, 1e8, poolDepth, uint64(block.timestamp));
 
         vm.prank(address(engine));
         pool.payOut(address(0xDEAD), 60_000 * 1e6);
@@ -4445,7 +4445,7 @@ contract CfdEngineTest is BasePerpTest {
         uint256 maxLiab = _sideMaxProfit(CfdTypes.Side.BULL) > _sideMaxProfit(CfdTypes.Side.BEAR)
             ? _sideMaxProfit(CfdTypes.Side.BULL)
             : _sideMaxProfit(CfdTypes.Side.BEAR);
-        assertTrue(usdc.balanceOf(address(pool)) < maxLiab, "Vault should be insolvent");
+        assertTrue(usdc.balanceOf(address(pool)) < maxLiab, "Pool should be insolvent");
 
         CfdTypes.Order memory aliceClose = CfdTypes.Order({
             account: aliceAccount,
@@ -4459,14 +4459,14 @@ contract CfdEngineTest is BasePerpTest {
             isClose: true
         });
         vm.prank(address(router));
-        engine.processOrderTyped(aliceClose, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(aliceClose, 1e8, poolDepth, uint64(block.timestamp));
 
         (uint256 aliceSize,,,,,,) = engine.positions(aliceAccount);
         assertEq(aliceSize, 0, "Close should succeed during insolvency");
     }
 
     function test_M11_LiquidationSeizesFreeEquity() public {
-        uint256 vaultDepth = 1_000_000 * 1e6;
+        uint256 poolDepth = 1_000_000 * 1e6;
         address account = address(uint160(1));
         address trader = account;
         _fundTrader(trader, 50_000 * 1e6);
@@ -4483,7 +4483,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrderTyped(openOrder, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(openOrder, 1e8, poolDepth, uint64(block.timestamp));
 
         vm.prank(trader);
         clearinghouse.withdraw(account, 46_000 * 1e6);
@@ -4491,11 +4491,11 @@ contract CfdEngineTest is BasePerpTest {
         uint256 freeEquityBefore = clearinghouse.getFreeBuyingPowerUsdc(account);
         assertTrue(freeEquityBefore > 0, "User should have free equity beyond locked margin");
 
-        uint256 vaultBefore = usdc.balanceOf(address(pool));
+        uint256 poolBalanceBefore = usdc.balanceOf(address(pool));
 
         // Price rises to $1.10 — BULL loses $10k, equity = margin (~$1537) - $10k = negative
         vm.prank(address(router));
-        engine.liquidatePosition(account, 1.1e8, vaultDepth, uint64(block.timestamp));
+        engine.liquidatePosition(account, 1.1e8, poolDepth, uint64(block.timestamp));
 
         (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Position should be liquidated");
@@ -4503,14 +4503,14 @@ contract CfdEngineTest is BasePerpTest {
         uint256 freeEquityAfter = clearinghouse.getFreeBuyingPowerUsdc(account);
         assertTrue(freeEquityAfter < freeEquityBefore, "Free equity should be reduced to cover bad debt");
 
-        uint256 vaultAfter = usdc.balanceOf(address(pool));
-        uint256 totalRecovered = vaultAfter - vaultBefore;
+        uint256 poolBalanceAfter = usdc.balanceOf(address(pool));
+        uint256 totalRecovered = poolBalanceAfter - poolBalanceBefore;
         (, uint256 posMarginStored,,,,,) = engine.positions(account);
-        assertTrue(totalRecovered > 0, "Vault should recover more than zero from bad debt liquidation");
+        assertTrue(totalRecovered > 0, "Pool should recover more than zero from bad debt liquidation");
     }
 
-    function test_LiquidationWorksWhenVaultInsolvent() public {
-        uint256 vaultDepth = 1_000_000 * 1e6;
+    function test_LiquidationWorksWhenPoolInsolvent() public {
+        uint256 poolDepth = 1_000_000 * 1e6;
         address aliceAccount = address(uint160(1));
         address bobAccount = address(uint160(2));
         address aliceTrader = aliceAccount;
@@ -4529,7 +4529,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrderTyped(aliceOpen, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(aliceOpen, 1e8, poolDepth, uint64(block.timestamp));
 
         vm.prank(aliceTrader);
         clearinghouse.withdraw(aliceAccount, 28_000 * 1e6);
@@ -4546,20 +4546,20 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrderTyped(bobOpen, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(bobOpen, 1e8, poolDepth, uint64(block.timestamp));
 
-        // Drain vault to simulate insolvency (pool has ~$1M + fees, maxLiab = $200k)
+        // Drain pool to simulate insolvency (pool has ~$1M + fees, maxLiab = $200k)
         vm.prank(address(engine));
         pool.payOut(address(0xDEAD), 810_000 * 1e6);
 
         uint256 maxLiab = _sideMaxProfit(CfdTypes.Side.BULL) > _sideMaxProfit(CfdTypes.Side.BEAR)
             ? _sideMaxProfit(CfdTypes.Side.BULL)
             : _sideMaxProfit(CfdTypes.Side.BEAR);
-        assertTrue(usdc.balanceOf(address(pool)) < maxLiab, "Vault should be insolvent");
+        assertTrue(usdc.balanceOf(address(pool)) < maxLiab, "Pool should be insolvent");
 
         // Price rises to $1.10 — BULL loses $20k, deeply underwater
         vm.prank(address(router));
-        engine.liquidatePosition(aliceAccount, 1.1e8, vaultDepth, uint64(block.timestamp));
+        engine.liquidatePosition(aliceAccount, 1.1e8, poolDepth, uint64(block.timestamp));
 
         (uint256 aliceSize,,,,,,) = engine.positions(aliceAccount);
         assertEq(aliceSize, 0, "Liquidation must succeed during insolvency");
@@ -4573,7 +4573,7 @@ contract CfdEngineTest is BasePerpTest {
     }
 
     function test_LiquidationBounty_UsesReachableCollateralSubsidyCap() public {
-        uint256 vaultDepth = 1_000_000 * 1e6;
+        uint256 poolDepth = 1_000_000 * 1e6;
         address account = address(uint160(1234));
         address trader = account;
         _fundTrader(trader, 200 * 1e6);
@@ -4603,7 +4603,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrderTyped(openOrder, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(openOrder, 1e8, poolDepth, uint64(block.timestamp));
 
         (, uint256 posMargin,,,,,) = engine.positions(account);
 
@@ -4611,7 +4611,7 @@ contract CfdEngineTest is BasePerpTest {
         clearinghouse.withdraw(account, 194 * 1e6);
 
         vm.prank(address(router));
-        uint256 bounty = engine.liquidatePosition(account, 100_500_000, vaultDepth, uint64(block.timestamp));
+        uint256 bounty = engine.liquidatePosition(account, 100_500_000, poolDepth, uint64(block.timestamp));
 
         assertEq(bounty, posMargin, "Keeper bounty subsidy should be bounded by physically reachable collateral");
     }
@@ -4630,15 +4630,15 @@ contract CfdEngineTest is BasePerpTest {
         assertGt(badDebt, 0, "Expected liquidation shortfall to create bad debt");
 
         uint256 clearAmount = badDebt / 2;
-        uint256 vaultAssetsBefore = pool.totalAssets();
+        uint256 poolAssetsBefore = pool.totalAssets();
         usdc.mint(address(this), clearAmount);
         usdc.approve(address(engine), clearAmount);
         engine.clearBadDebt(clearAmount);
         assertEq(engine.accumulatedBadDebtUsdc(), badDebt - clearAmount, "Bad debt should decrease after clearing");
         assertEq(
             pool.totalAssets(),
-            vaultAssetsBefore + clearAmount,
-            "Bad-debt recapitalization should raise canonical vault assets"
+            poolAssetsBefore + clearAmount,
+            "Bad-debt recapitalization should raise canonical pool assets"
         );
         assertEq(pool.excessAssets(), 0, "Bad-debt recapitalization should not strand excess assets");
 
@@ -5165,7 +5165,7 @@ contract CfdEngineCarryRegressionTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1.1e8, uint64(block.timestamp));
 
-        uint256 mtm = _vaultMtmAdjustment();
+        uint256 mtm = _poolMtmAdjustment();
         assertEq(
             mtm,
             71_000e6,
@@ -5293,7 +5293,7 @@ contract CfdEngineAuditTest is BasePerpTest {
             side: CfdTypes.Side.BULL,
             isClose: false
         });
-        uint256 vaultDepth = pool.totalAssets();
+        uint256 poolDepth = pool.totalAssets();
 
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -5304,7 +5304,7 @@ contract CfdEngineAuditTest is BasePerpTest {
             )
         );
         vm.prank(address(router));
-        engine.processOrderTyped(order, 101_800_000, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(order, 101_800_000, poolDepth, uint64(block.timestamp));
     }
 
     function test_ProcessOrderTyped_RevertsWhenAccountAlreadyLiquidatableBeforeIncrease() public {
@@ -5349,7 +5349,7 @@ contract CfdEngineAuditTest is BasePerpTest {
             side: CfdTypes.Side.BULL,
             isClose: false
         });
-        uint256 vaultDepth = pool.totalAssets();
+        uint256 poolDepth = pool.totalAssets();
 
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -5360,7 +5360,7 @@ contract CfdEngineAuditTest is BasePerpTest {
             )
         );
         vm.prank(address(router));
-        engine.processOrderTyped(order, 102_000_000, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(order, 102_000_000, poolDepth, uint64(block.timestamp));
     }
 
     // Regression: Finding-4
@@ -5685,7 +5685,7 @@ contract MarginCappedMtmTest is BasePerpTest {
         router.executeOrder(2, priceData);
 
         int256 uncappedPnl = _unrealizedTraderPnl();
-        uint256 cappedMtm = _vaultMtmAdjustment();
+        uint256 cappedMtm = _poolMtmAdjustment();
 
         assertLt(uncappedPnl, -int256(_sideTotalMargin(CfdTypes.Side.BEAR)), "Uncapped loss exceeds deposited margin");
         assertGt(int256(cappedMtm), uncappedPnl, "Capped MtM is less aggressive than uncapped");
@@ -5738,13 +5738,13 @@ contract MarginCappedMtmTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 10_000e6, 1.2e8, false);
         router.executeOrder(2, priceData);
 
-        uint256 mtm = _vaultMtmAdjustment();
-        assertGt(mtm, 0, "Positive MtM = vault liability when traders are winning (no cap needed)");
+        uint256 mtm = _poolMtmAdjustment();
+        assertGt(mtm, 0, "Positive MtM = pool liability when traders are winning (no cap needed)");
     }
 
     function test_MtmAdjustment_ZeroWithNoPositions() public {
         _fundJunior(bob, 500_000e6);
-        assertEq(_vaultMtmAdjustment(), 0, "MtM should be zero with no positions");
+        assertEq(_poolMtmAdjustment(), 0, "MtM should be zero with no positions");
     }
 
 }
@@ -6076,7 +6076,7 @@ contract ProtocolPhaseTest is BasePerpTest {
         assertEq(
             unconfigured.getProtocolStatus().phase,
             uint8(ICfdEngine.ProtocolPhase.Configuring),
-            "Engine without vault/router should be Configuring"
+            "Engine without pool/router should be Configuring"
         );
     }
 
@@ -6238,7 +6238,7 @@ contract VpiDepthTest is BasePerpTest {
         vm.stopPrank();
 
         uint256 smallDepth = pool.totalAssets();
-        assertLt(smallDepth, largeDepth, "LP withdrawal should shrink live vault depth");
+        assertLt(smallDepth, largeDepth, "LP withdrawal should shrink live pool depth");
 
         uint256 rebateSettlementBeforeOpen = clearinghouse.balanceUsdc(rebateAccount);
         uint64 rebatePublishTime = engine.lastMarkTime();
@@ -6332,16 +6332,16 @@ contract VpiChunkingTest is Test {
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
         CfdEnginePlanner planner = new CfdEnginePlanner();
-        CfdEngineSettlementModule settlement = new CfdEngineSettlementModule(address(engine));
-        CfdEngineAdmin adminModule = new CfdEngineAdmin(address(engine), address(this));
-        engine.setDependencies(address(planner), address(settlement), address(adminModule));
+        CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(engine));
+        CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
+        engine.setDependencies(address(planner), address(settlement), address(engineAdmin));
         pool = new HousePool(address(usdc), address(engine));
         TrancheVault seniorVault =
             new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior LP", "seniorUSDC");
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "juniorUSDC");
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
         engine.setOrderRouter(address(this));
         pool.setOrderRouter(address(this));
 
@@ -6517,7 +6517,7 @@ contract SolvencySnapshotRegressionTest is BasePerpTest {
 
     /// @dev Regression: planLiquidation must use post-liquidation side snapshots (OI and totalMargin).
     ///      for solvency computation. Now also uses previewPostOpSolvency with physicalAssetsDelta
-    ///      to account for seized collateral flowing into the vault.
+    ///      to account for seized collateral flowing into the pool.
     function test_PreviewLiquidation_SolvencyUsesPostLiquidationCarryState() public {
         address bullTrader = address(0xDD01);
         address bearTrader = address(0xDD02);

@@ -54,7 +54,7 @@ contract AuditC01_HwmInflation is BasePerpTest {
 
         // Open a BEAR position. BEAR profits when oracle price rises.
         // 100k tokens at $1.00, max profit = 100k * ($2 - $1) = $100k
-        // Vault has $150k, so solvency check passes.
+        // Pool has $150k, so solvency check passes.
         _fundTrader(address(0xAAA), 5000 * 1e6);
         address traderAccount = address(0xAAA);
         _open(traderAccount, CfdTypes.Side.BEAR, 100_000 * 1e18, 5000 * 1e6, 1e8);

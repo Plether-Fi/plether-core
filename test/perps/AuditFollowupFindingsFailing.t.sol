@@ -269,16 +269,16 @@ contract AuditFollowupFindingsFailing_LegacySpreadReserve is BasePerpTest {
             bearPos = CfdTypes.Position(size, margin, entryPrice, 0, side, 0, 0, 0);
         }
 
-        int256 bullFundingA = 0;
-        int256 bullFundingB = 0;
+        int256 bullLegacySpreadA = 0;
+        int256 bullLegacySpreadB = 0;
         int256 bearLegacySpread = 0;
         assertLt(
-            bullFundingA,
+            bullLegacySpreadA,
             -int256(bullPosA.margin),
             "Large undercollateralized bull should owe more legacy spread than its own margin in the obsolete model"
         );
         assertGt(
-            bullFundingA + bullFundingB,
+            bullLegacySpreadA + bullLegacySpreadB,
             -int256(bullPosA.margin + bullPosB.margin),
             "Global bull margin should mask the single-account deficit"
         );

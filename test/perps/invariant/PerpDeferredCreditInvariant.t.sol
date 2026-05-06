@@ -15,7 +15,7 @@ contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
     function setUp() public override {
         super.setUp();
 
-        handler = new PerpAccountingHandler(usdc, engine, clearinghouse, router, vault);
+        handler = new PerpAccountingHandler(usdc, engine, clearinghouse, router, housePool);
         handler.seedActors(50_000e6, 100_000e6);
 
         bytes4[] memory selectors = new bytes4[](8);
@@ -24,17 +24,17 @@ contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
         selectors[2] = handler.commitOpenOrder.selector;
         selectors[3] = handler.createDeferredTraderCredit.selector;
         selectors[4] = handler.claimDeferredTraderCredit.selector;
-        selectors[5] = handler.setVaultAssets.selector;
-        selectors[6] = handler.fundVault.selector;
+        selectors[5] = handler.setPoolAssets.selector;
+        selectors[6] = handler.fundHousePool.selector;
         selectors[7] = handler.liquidate.selector;
 
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
         targetContract(address(handler));
     }
 
-    function invariant_DeferredCreditStatusMatchesEngineAndVaultLiquidity() public view {
+    function invariant_DeferredCreditStatusMatchesEngineAndHousePoolLiquidity() public view {
         uint256 totalDeferredTraderCreditUsdc;
-        uint256 vaultAssets = vault.totalAssets();
+        uint256 poolAssets = housePool.totalAssets();
         uint256 protocolFeesUsdc = engine.accumulatedFeesUsdc();
         uint256 totalDeferredTraderCreditUsdc_ = engine.totalDeferredTraderCreditUsdc();
         uint256 totalDeferredKeeperCreditUsdc = engine.totalDeferredKeeperCreditUsdc();
@@ -50,14 +50,14 @@ contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
                 ? totalDeferredTraderCreditUsdc_ - deferredTraderCreditUsdc
                 : 0;
             uint256 expectedTraderClaimableNow = CashPriorityLib.availableCashForDeferredBeneficiaryClaim(
-                vaultAssets,
+                poolAssets,
                 protocolFeesUsdc,
                 totalDeferredTraderCreditUsdc_,
                 totalDeferredKeeperCreditUsdc,
                 deferredTraderCreditUsdc
             );
             uint256 expectedKeeperClaimableNow = CashPriorityLib.availableCashForDeferredBeneficiaryClaim(
-                vaultAssets,
+                poolAssets,
                 protocolFeesUsdc,
                 otherDeferredTraderCreditUsdc,
                 deferredKeeperCreditUsdc,
@@ -114,7 +114,7 @@ contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
         );
     }
 
-    function invariant_FullClosePreviewUsesAllOrNothingVaultLiquidityGating() public view {
+    function invariant_FullClosePreviewUsesAllOrNothingHousePoolLiquidityGating() public view {
         uint256 oraclePrice = _previewOraclePrice();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
@@ -141,21 +141,21 @@ contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
             );
             uint256 freeCashForFreshPayouts =
                 CashPriorityLib.reserveFreshPayouts(
-                vault.totalAssets(),
+                housePool.totalAssets(),
                 engine.accumulatedFeesUsdc(),
                 engine.totalDeferredTraderCreditUsdc(),
                 engine.totalDeferredKeeperCreditUsdc()
             )
             .freeCashUsdc;
             if (freeCashForFreshPayouts >= totalPayoutUsdc) {
-                assertEq(preview.deferredTraderCreditUsdc, 0, "Close preview must not defer when vault is liquid");
+                assertEq(preview.deferredTraderCreditUsdc, 0, "Close preview must not defer when HousePool is liquid");
             } else {
-                assertEq(preview.immediatePayoutUsdc, 0, "Close preview must fully defer when vault is illiquid");
+                assertEq(preview.immediatePayoutUsdc, 0, "Close preview must fully defer when HousePool is illiquid");
             }
         }
     }
 
-    function invariant_LiquidationPreviewUsesAllOrNothingVaultLiquidityGating() public view {
+    function invariant_LiquidationPreviewUsesAllOrNothingHousePoolLiquidityGating() public view {
         uint256 oraclePrice = _previewOraclePrice();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
@@ -176,17 +176,17 @@ contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
                 freshDeferredTraderCreditUsdc > 0,
                 "Fresh liquidation payout must choose immediate or deferred settlement"
             );
-            if (vault.totalAssets() >= totalFreshPayoutUsdc) {
+            if (housePool.totalAssets() >= totalFreshPayoutUsdc) {
                 assertEq(
                     freshDeferredTraderCreditUsdc,
                     0,
-                    "Liquidation preview must not defer the fresh payout when vault liquidity is sufficient"
+                    "Liquidation preview must not defer the fresh payout when HousePool liquidity is sufficient"
                 );
             } else {
                 assertEq(
                     preview.immediatePayoutUsdc,
                     0,
-                    "Liquidation preview must fully defer the fresh payout when vault is illiquid"
+                    "Liquidation preview must fully defer the fresh payout when HousePool is illiquid"
                 );
             }
         }

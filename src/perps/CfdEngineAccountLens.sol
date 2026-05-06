@@ -5,7 +5,7 @@ import {CfdEngine} from "./CfdEngine.sol";
 import {CfdTypes} from "./CfdTypes.sol";
 import {AccountLensViewTypes} from "./interfaces/AccountLensViewTypes.sol";
 import {ICfdEngineAccountLens} from "./interfaces/ICfdEngineAccountLens.sol";
-import {ICfdVault} from "./interfaces/ICfdVault.sol";
+import {IHousePool} from "./interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "./interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
 import {MarginClearinghouseAccountingLib} from "./libraries/MarginClearinghouseAccountingLib.sol";
@@ -67,14 +67,14 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         if (price == 0) {
             return 0;
         }
-        ICfdVault vault = engineContract.vault();
+        IHousePool pool = engineContract.pool();
         uint256 maxStaleness =
             OracleFreshnessPolicyLib.getPolicy(
             OracleFreshnessPolicyLib.Mode.PoolReconcile,
             engineContract.isOracleFrozen(),
             engineContract.isFadWindow(),
             engineContract.engineMarkStalenessLimit(),
-            address(vault) == address(0) ? 0 : vault.markStalenessLimit(),
+            address(pool) == address(0) ? 0 : pool.markStalenessLimit(),
             0,
             0,
             engineContract.fadMaxStaleness()

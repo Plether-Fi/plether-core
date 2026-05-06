@@ -5,7 +5,7 @@ import {CfdEnginePlanTypes} from "../CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../CfdTypes.sol";
 import {ICfdEngineSettlementHost} from "./ICfdEngineSettlementHost.sol";
 
-interface ICfdEngineSettlementModule {
+interface ICfdEngineSettlementSidecar {
 
     function executeOpen(
         ICfdEngineSettlementHost host,

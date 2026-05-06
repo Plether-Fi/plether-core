@@ -37,7 +37,7 @@ interface ICfdEngineLens {
         address account,
         uint256 sizeDelta,
         uint256 oraclePrice,
-        uint256 vaultDepthUsdc
+        uint256 poolDepthUsdc
     ) external view returns (CfdEngine.ClosePreview memory preview);
 
     function previewLiquidation(
@@ -48,7 +48,7 @@ interface ICfdEngineLens {
     function simulateLiquidation(
         address account,
         uint256 oraclePrice,
-        uint256 vaultDepthUsdc
+        uint256 poolDepthUsdc
     ) external view returns (CfdEngine.LiquidationPreview memory preview);
 
 }
