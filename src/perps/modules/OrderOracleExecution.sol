@@ -6,7 +6,6 @@ import {DecimalConstants} from "../../libraries/DecimalConstants.sol";
 import {CfdTypes} from "../CfdTypes.sol";
 import {ICfdEngineLens} from "../interfaces/ICfdEngineLens.sol";
 import {ICfdVault} from "../interfaces/ICfdVault.sol";
-import {IOrderRouterErrors} from "../interfaces/IOrderRouterErrors.sol";
 import {MarketCalendarLib} from "../libraries/MarketCalendarLib.sol";
 import {OracleFreshnessPolicyLib} from "../libraries/OracleFreshnessPolicyLib.sol";
 import {OrderEscrowAccounting} from "./OrderEscrowAccounting.sol";
@@ -48,7 +47,7 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
         bool[] memory _inversions
     ) OrderEscrowAccounting(_engine) {
         if (_engineLens == address(0)) {
-            revert IOrderRouterErrors.OrderRouter__OracleValidation(7);
+            revert OrderRouter__InvalidEngineLens();
         }
         housePool = ICfdVault(_housePool);
         engineLens = ICfdEngineLens(_engineLens);
@@ -56,23 +55,23 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
 
         if (_pyth != address(0)) {
             if (_feedIds.length == 0) {
-                revert IOrderRouterErrors.OrderRouter__OracleValidation(0);
+                revert OrderRouter__EmptyFeeds();
             }
             if (
                 _feedIds.length != _quantities.length || _feedIds.length != _basePrices.length
                     || _feedIds.length != _inversions.length
             ) {
-                revert IOrderRouterErrors.OrderRouter__OracleValidation(1);
+                revert OrderRouter__LengthMismatch();
             }
             uint256 totalWeight;
             for (uint256 i = 0; i < _basePrices.length; i++) {
                 if (_basePrices[i] == 0) {
-                    revert IOrderRouterErrors.OrderRouter__OracleValidation(2);
+                    revert OrderRouter__InvalidBasePrice();
                 }
                 totalWeight += _quantities[i];
             }
             if (totalWeight != 1e18) {
-                revert IOrderRouterErrors.OrderRouter__OracleValidation(3);
+                revert OrderRouter__InvalidWeights();
             }
         }
 
@@ -105,12 +104,12 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
             if (OracleFreshnessPolicyLib.isStale(
                     update.oraclePublishTime, executionContext.policy.maxStaleness, block.timestamp
                 )) {
-                revert IOrderRouterErrors.OrderRouter__OracleValidation(10);
+                revert OrderRouter__OraclePriceTooStale();
             }
         }
 
         if (update.oraclePublishTime < engine.lastMarkTime()) {
-            revert IOrderRouterErrors.OrderRouter__OracleValidation(9);
+            revert OrderRouter__MarkPriceOutOfOrder();
         }
 
         uint256 capPrice = engine.CAP_PRICE();
@@ -155,7 +154,7 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
                 engine.fadMaxStaleness()
             );
             if (OracleFreshnessPolicyLib.isStale(update.oraclePublishTime, policy.maxStaleness, block.timestamp)) {
-                revert IOrderRouterErrors.OrderRouter__OracleValidation(10);
+                revert OrderRouter__OraclePriceTooStale();
             }
         }
 
@@ -196,7 +195,7 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
                 engine.fadMaxStaleness()
             );
             if (OracleFreshnessPolicyLib.isStale(update.oraclePublishTime, policy.maxStaleness, block.timestamp)) {
-                revert IOrderRouterErrors.OrderRouter__OracleValidation(12);
+                revert OrderRouter__LiquidationOraclePriceTooStale();
             }
         }
     }
@@ -226,11 +225,11 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
     ) internal returns (uint256 price, uint64 publishTime, uint256 pythFee) {
         if (address(pyth) != address(0)) {
             if (pythUpdateData.length == 0) {
-                revert IOrderRouterErrors.OrderRouter__OracleValidation(5);
+                revert OrderRouter__EmptyPythUpdateData();
             }
             pythFee = pyth.getUpdateFee(pythUpdateData);
             if (msg.value < pythFee) {
-                revert IOrderRouterErrors.OrderRouter__OracleValidation(6);
+                revert OrderRouter__InsufficientPythFee();
             }
             pyth.updatePriceFeeds{value: pythFee}(pythUpdateData);
             uint256 minPublishTime;
@@ -238,7 +237,7 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
             publishTime = uint64(minPublishTime);
         } else {
             if (block.chainid != 31_337) {
-                revert IOrderRouterErrors.OrderRouter__OracleValidation(4);
+                revert OrderRouter__MockOracleUnavailable();
             }
             if (pythUpdateData.length > 0) {
                 price = abi.decode(pythUpdateData[0], (uint256));
@@ -260,13 +259,13 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
         for (uint256 i = 0; i < len; i++) {
             PythStructs.Price memory p = pyth.getPriceUnsafe(pythFeedIds[i]);
             if (OracleFreshnessPolicyLib.isStale(p.publishTime, maxStaleness, block.timestamp)) {
-                revert IOrderRouterErrors.OrderRouter__OracleValidation(10);
+                revert OrderRouter__OraclePriceTooStale();
             }
             if (p.price <= 0) {
-                revert IOrderRouterErrors.OrderRouter__OracleValidation(8);
+                revert OrderRouter__InvalidOraclePrice();
             }
             if (uint256(uint64(p.conf)) * 10_000 > uint256(uint64(p.price)) * pythMaxConfidenceRatioBps) {
-                revert IOrderRouterErrors.OrderRouter__OracleValidation(11);
+                revert OrderRouter__OracleConfidenceTooWide();
             }
             uint256 norm = inversions[i] ? _invertPythPrice(p.price, p.expo) : _normalizePythPrice(p.price, p.expo);
 
@@ -281,11 +280,11 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
         }
 
         if (maxPublishTime > minPublishTime + maxPublishTimeDivergence) {
-            revert IOrderRouterErrors.OrderRouter__OracleValidation(10);
+            revert OrderRouter__OraclePublishTimesDiverged();
         }
 
         if (basketPrice == 0) {
-            revert IOrderRouterErrors.OrderRouter__OracleValidation(8);
+            revert OrderRouter__InvalidOraclePrice();
         }
     }
 
@@ -323,7 +322,7 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
         int32 expo
     ) internal pure returns (uint256) {
         if (price <= 0) {
-            revert IOrderRouterErrors.OrderRouter__OracleValidation(8);
+            revert OrderRouter__InvalidOraclePrice();
         }
         uint256 positivePrice = uint256(uint64(price));
         uint256 scaledPrecision = 10 ** uint256(uint32(26 - expo));
@@ -336,7 +335,7 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
         int32 expo
     ) internal pure returns (uint256) {
         if (price <= 0) {
-            revert IOrderRouterErrors.OrderRouter__OracleValidation(8);
+            revert OrderRouter__InvalidOraclePrice();
         }
         uint256 rawPrice = uint256(uint64(price));
 

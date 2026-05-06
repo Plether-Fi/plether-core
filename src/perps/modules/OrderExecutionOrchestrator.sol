@@ -5,7 +5,6 @@ import {CfdEnginePlanTypes} from "../CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../CfdTypes.sol";
 import {ICfdEngineCore} from "../interfaces/ICfdEngineCore.sol";
 import {IOrderRouterAccounting} from "../interfaces/IOrderRouterAccounting.sol";
-import {IOrderRouterErrors} from "../interfaces/IOrderRouterErrors.sol";
 import {CashPriorityLib} from "../libraries/CashPriorityLib.sol";
 import {OracleFreshnessPolicyLib} from "../libraries/OracleFreshnessPolicyLib.sol";
 import {OrderValidationLib} from "../libraries/OrderValidationLib.sol";
@@ -36,17 +35,13 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
     event OrderExecuted(uint64 indexed orderId, uint256 executionPrice);
     event OrderFailed(uint64 indexed orderId, OrderFailReason reason);
 
+    uint256 internal constant DEFAULT_MAX_ORDER_AGE = 60;
+    uint256 public maxOrderAge = DEFAULT_MAX_ORDER_AGE;
     uint256 public minEngineGas;
     uint256 public maxPruneOrdersPerCall;
     bytes4 internal constant PANIC_SELECTOR = 0x4e487b71;
     bytes4 internal constant TYPED_ORDER_FAILURE_SELECTOR = ICfdEngineCore.CfdEngine__TypedOrderFailure.selector;
     bytes4 internal constant MARK_PRICE_OUT_OF_ORDER_SELECTOR = ICfdEngineCore.CfdEngine__MarkPriceOutOfOrder.selector;
-
-    function _maxOrderAge() internal view virtual returns (uint256);
-    function _queueHeadOrderId() internal view virtual override returns (uint64);
-    function _setQueueHeadOrderId(
-        uint64 orderId
-    ) internal virtual override;
 
     function _releaseCommittedMarginForExecution(
         uint64 orderId
@@ -70,12 +65,12 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
         uint256 executionPrice,
         uint64 oraclePublishTime
     ) internal returns (uint256 pruned) {
-        uint256 age = _maxOrderAge();
-        while (_queueHeadOrderId() != 0 && _queueHeadOrderId() <= upToId && pruned < maxPrunes) {
-            uint64 headId = _queueHeadOrderId();
+        uint256 age = maxOrderAge;
+        while (nextExecuteId != 0 && nextExecuteId <= upToId && pruned < maxPrunes) {
+            uint64 headId = nextExecuteId;
             OrderRecord storage record = _orderRecord(headId);
             if (record.status != IOrderRouterAccounting.OrderStatus.Pending) {
-                _setQueueHeadOrderId(record.nextGlobalOrderId);
+                nextExecuteId = record.nextGlobalOrderId;
                 continue;
             }
             if (headId == upToId || age == 0) {
@@ -102,7 +97,7 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
         } catch (bytes memory revertData) {
             bytes4 selector = revertData.length >= 4 ? bytes4(revertData) : bytes4(0);
             if (selector == MARK_PRICE_OUT_OF_ORDER_SELECTOR) {
-                revert IOrderRouterErrors.OrderRouter__OracleValidation(9);
+                revert OrderRouter__MarkPriceOutOfOrder();
             }
             failureReason = selector == PANIC_SELECTOR ? OrderFailReason.EnginePanic : OrderFailReason.EngineRevert;
             failureOutcome = _failedOutcomeFromEngineRevert(order, revertData);
@@ -120,7 +115,7 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
     ) internal returns (OrderExecutionStepResult result) {
         OracleFreshnessPolicyLib.Policy memory orderPolicy =
             _executionPolicyForOrder(order.isClose, executionContext.oracleFrozen, executionContext.isFadWindow);
-        if (_maxOrderAge() > 0 && block.timestamp - order.commitTime > _maxOrderAge()) {
+        if (maxOrderAge > 0 && block.timestamp - order.commitTime > maxOrderAge) {
             emit OrderFailed(orderId, OrderFailReason.Expired);
             _finalizeOrCleanupOrder(
                 orderId, false, _failedOutcomeForTerminalFailure(order), executionPrice, oraclePublishTime
@@ -130,21 +125,21 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
 
         if (orderPolicy.closeOnly) {
             if (revertOnBlockedExecution) {
-                revert IOrderRouterErrors.OrderRouter__CommitValidation(10);
+                revert OrderRouter__CloseOnlyWindow();
             }
             return OrderExecutionStepResult.Break;
         }
 
         if (address(pyth) != address(0) && !executionContext.oracleFrozen && block.number == order.commitBlock) {
             if (revertOnBlockedExecution) {
-                revert IOrderRouterErrors.OrderRouter__OracleValidation(13);
+                revert OrderRouter__MevDetected();
             }
             return OrderExecutionStepResult.Break;
         }
 
         if (address(pyth) != address(0) && !executionContext.oracleFrozen && oraclePublishTime <= order.commitTime) {
             if (revertOnBlockedExecution) {
-                revert IOrderRouterErrors.OrderRouter__OracleValidation(13);
+                revert OrderRouter__MevDetected();
             }
             return OrderExecutionStepResult.Break;
         }
@@ -160,7 +155,7 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
         uint256 forwardedGas = gasleft() - (gasleft() / 64);
         if (forwardedGas < minEngineGas) {
             if (revertOnBlockedExecution) {
-                revert IOrderRouterErrors.OrderRouter__InsufficientGas();
+                revert OrderRouter__InsufficientGas();
             }
             return OrderExecutionStepResult.Break;
         }

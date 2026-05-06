@@ -9,6 +9,7 @@ import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "../../src/perps/OrderRouterAdmin.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {IOrderRouterErrors} from "../../src/perps/interfaces/IOrderRouterErrors.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
@@ -155,7 +156,7 @@ contract AuditExecutionPathFindingsFailing_CommitPrefilterFeeParity is BasePerpT
         vm.prank(trader);
         vm.expectRevert(
             abi.encodeWithSelector(
-                OrderRouter.OrderRouter__PredictableOpenInvalid.selector,
+                IOrderRouterErrors.OrderRouter__PredictableOpenInvalid.selector,
                 uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN)
             )
         );

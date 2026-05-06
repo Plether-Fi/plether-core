@@ -13,8 +13,8 @@ import {OrderRouterAdmin} from "../../../src/perps/OrderRouterAdmin.sol";
 import {PerpsPublicLens} from "../../../src/perps/PerpsPublicLens.sol";
 import {TrancheVault} from "../../../src/perps/TrancheVault.sol";
 import {IOrderRouterAdminHost} from "../../../src/perps/interfaces/IOrderRouterAdminHost.sol";
+import {IOrderRouterErrors} from "../../../src/perps/interfaces/IOrderRouterErrors.sol";
 import {MockPyth} from "../../mocks/MockPyth.sol";
-import {MockUSDC} from "../../mocks/MockUSDC.sol";
 import {MockUSDC} from "../../mocks/MockUSDC.sol";
 import {BasePerpTest} from "../BasePerpTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -168,7 +168,10 @@ contract PerpOraclePathHandler is Test {
         } catch (bytes memory err) {
             bytes4 selector = _revertSelector(err);
             if (expectStale) {
-                if (selector != OrderRouter.OrderRouter__OracleValidation.selector) {
+                if (
+                    selector != IOrderRouterErrors.OrderRouter__OraclePriceTooStale.selector
+                        && selector != IOrderRouterErrors.OrderRouter__OraclePublishTimesDiverged.selector
+                ) {
                     revert PerpOraclePathHandler__UnexpectedRevert(selector);
                 }
                 return;

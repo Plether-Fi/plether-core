@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {CfdTypes} from "../CfdTypes.sol";
+import {IOrderRouterErrors} from "../interfaces/IOrderRouterErrors.sol";
 
 /// @notice Pure validation helpers for delayed-order router checks.
 library OrderValidationLib {
@@ -10,14 +11,13 @@ library OrderValidationLib {
         uint256 sizeDelta,
         uint256 marginDelta,
         bool isClose
-    ) internal pure returns (bool zeroSize, uint8 validationCode) {
+    ) internal pure {
         if (sizeDelta == 0) {
-            return (true, 0);
+            revert IOrderRouterErrors.OrderRouter__ZeroSize();
         }
         if (isClose && marginDelta > 0) {
-            return (false, 2);
+            revert IOrderRouterErrors.OrderRouter__CloseWithPositiveMargin();
         }
-        return (false, 0);
     }
 
     function validateCloseCommit(
@@ -26,34 +26,32 @@ library OrderValidationLib {
         CfdTypes.Side queuedSide,
         CfdTypes.Side requestedSide,
         uint256 sizeDelta
-    ) internal pure returns (uint8 validationCode) {
+    ) internal pure {
         if (!positionExists || queuedSize == 0) {
-            return 3;
+            revert IOrderRouterErrors.OrderRouter__NoQueuedPosition();
         }
         if (queuedSide != requestedSide) {
-            return 4;
+            revert IOrderRouterErrors.OrderRouter__SideMismatch();
         }
         if (sizeDelta > queuedSize) {
-            return 5;
+            revert IOrderRouterErrors.OrderRouter__SizeExceedsQueued();
         }
-        return 0;
     }
 
     function validateBatchBounds(
         uint64 maxOrderId,
         uint64 nextExecuteId,
         uint64 nextCommitId
-    ) internal pure returns (uint8 validationCode) {
+    ) internal pure {
         if (nextExecuteId == 0) {
-            return 0;
+            revert IOrderRouterErrors.OrderRouter__NoOrdersToExecute();
         }
         if (maxOrderId < nextExecuteId) {
-            return 2;
+            revert IOrderRouterErrors.OrderRouter__BatchBeforeQueueHead();
         }
         if (maxOrderId >= nextCommitId) {
-            return 3;
+            revert IOrderRouterErrors.OrderRouter__BatchOrderNotCommitted();
         }
-        return 0;
     }
 
     function checkSlippage(

@@ -9,7 +9,7 @@ import {IOrderRouterErrors} from "../interfaces/IOrderRouterErrors.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
+abstract contract OrderEscrowAccounting is IOrderRouterAccounting, IOrderRouterErrors {
 
     using SafeERC20 for IERC20;
 
@@ -83,8 +83,6 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
         }
     }
 
-    function _nextCommitId() internal view virtual returns (uint64);
-
     function getMarginReservationIds(
         address account
     ) public view override returns (uint64[] memory orderIds) {
@@ -119,7 +117,7 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
             _reserveCloseExecutionBounty(account, sizeDelta, executionBountyUsdc);
         } else {
             if (clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc < executionBountyUsdc) {
-                revert IOrderRouterErrors.OrderRouter__CommitValidation(6);
+                revert OrderRouter__InsufficientFreeEquity();
             }
             clearinghouse.seizeUsdc(account, executionBountyUsdc, address(this));
         }
@@ -238,7 +236,7 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
         } else if (prevOrderId != 0) {
             orderRecords[prevOrderId].nextAccountOrderId = nextOrderId;
         } else if (tailOrderId != orderId) {
-            revert IOrderRouterErrors.OrderRouter__QueueState(6);
+            revert OrderRouter__AccountQueueCorrupt();
         }
 
         if (tailOrderId == orderId) {
@@ -246,7 +244,7 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
         } else if (nextOrderId != 0) {
             orderRecords[nextOrderId].prevAccountOrderId = prevOrderId;
         } else if (headOrderId != orderId) {
-            revert IOrderRouterErrors.OrderRouter__QueueState(6);
+            revert OrderRouter__AccountQueueCorrupt();
         }
 
         record.nextAccountOrderId = 0;
@@ -273,7 +271,7 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
         } else if (prevOrderId != 0) {
             orderRecords[prevOrderId].nextMarginOrderId = nextOrderId;
         } else if (tailOrderId != orderId) {
-            revert IOrderRouterErrors.OrderRouter__QueueState(5);
+            revert OrderRouter__MarginQueueCorrupt();
         }
 
         if (tailOrderId == orderId) {
@@ -281,7 +279,7 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
         } else if (nextOrderId != 0) {
             orderRecords[nextOrderId].prevMarginOrderId = prevOrderId;
         } else if (headOrderId != orderId) {
-            revert IOrderRouterErrors.OrderRouter__QueueState(5);
+            revert OrderRouter__MarginQueueCorrupt();
         }
 
         record.nextMarginOrderId = 0;

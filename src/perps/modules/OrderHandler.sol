@@ -4,11 +4,12 @@ pragma solidity 0.8.33;
 import {CfdTypes} from "../CfdTypes.sol";
 import {IOrderRouterAccounting} from "../interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterAdminHost} from "../interfaces/IOrderRouterAdminHost.sol";
-import {IOrderRouterErrors} from "../interfaces/IOrderRouterErrors.sol";
 import {OrderValidation} from "./OrderValidation.sol";
 
 /// @notice Internal action handler for the delayed-order router.
 abstract contract OrderHandler is OrderValidation {
+
+    uint256 public maxPendingOrders = 5;
 
     function _commitOrder(
         CfdTypes.Side side,
@@ -51,7 +52,7 @@ abstract contract OrderHandler is OrderValidation {
         _linkGlobalOrder(orderId);
         _linkAccountOrder(account, orderId);
         if (++pendingOrderCounts[account] > maxPendingOrders) {
-            revert IOrderRouterErrors.OrderRouter__CommitValidation(7);
+            revert OrderRouter__TooManyPendingOrders();
         }
         emit OrderCommitted(orderId, account, side);
     }
@@ -88,7 +89,7 @@ abstract contract OrderHandler is OrderValidation {
         bytes[] calldata pythUpdateData
     ) internal {
         if (nextExecuteId == 0) {
-            revert IOrderRouterErrors.OrderRouter__QueueState(0);
+            revert OrderRouter__NoOrdersToExecute();
         }
         uint64 initialHeadOrderId = nextExecuteId;
         (, CfdTypes.Order memory initialHeadOrder) = _pendingOrder(initialHeadOrderId);
@@ -98,13 +99,13 @@ abstract contract OrderHandler is OrderValidation {
 
         _skipStaleOrders(orderId, update.executionPrice, update.oraclePublishTime);
         if (nextExecuteId == 0) {
-            revert IOrderRouterErrors.OrderRouter__QueueState(0);
+            revert OrderRouter__NoOrdersToExecute();
         }
         if (orderId < nextExecuteId) {
             orderId = nextExecuteId;
         }
         if (orderId != nextExecuteId) {
-            revert IOrderRouterErrors.OrderRouter__QueueState(1);
+            revert OrderRouter__OrderNotQueueHead();
         }
         (, CfdTypes.Order memory order) = _pendingOrder(orderId);
 

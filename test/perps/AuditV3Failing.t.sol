@@ -7,6 +7,7 @@ import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {IOrderRouterErrors} from "../../src/perps/interfaces/IOrderRouterErrors.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
@@ -254,7 +255,7 @@ contract AuditV3Failing_CloseSlippageInversion is BasePerpTest {
         _open(account, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
 
         vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__CommitValidation.selector, 4));
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__SideMismatch.selector);
         router.commitOrder(CfdTypes.Side.BEAR, 20_000e18, 0, 0, true);
     }
 
