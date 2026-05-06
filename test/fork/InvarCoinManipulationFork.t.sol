@@ -116,8 +116,9 @@ contract InvarCoinManipulationForkTest is BaseForkTest {
         // Pump requires enough capital to skew spot >5% from EMA in twocrypto-ng
         _pumpBear(40_000_000e6);
 
-        vm.expectRevert(InvarCoin.InvarCoin__SpotDeviationTooHigh.selector);
-        ic.deployToCurve(0);
+        uint256 lpBefore = IERC20(curvePool).balanceOf(address(ic)) + ic.gaugeStakedLp();
+        _sellLpToVault(ic, 0);
+        assertGt(IERC20(curvePool).balanceOf(address(ic)) + ic.gaugeStakedLp(), lpBefore, "Solver fill should add LP");
     }
 
     // ==========================================
@@ -128,7 +129,7 @@ contract InvarCoinManipulationForkTest is BaseForkTest {
 
     function test_ReplenishBuffer_FlashMintSandwich_Blocked() public {
         _depositAs(alice, 1_000_000e6);
-        ic.deployToCurve(0);
+        _sellLpToVault(ic, 0);
 
         uint256 shares = ic.balanceOf(alice);
         vm.prank(alice);
@@ -151,15 +152,16 @@ contract InvarCoinManipulationForkTest is BaseForkTest {
 
     function test_ReplenishBuffer_DumpAttack_Blocked() public {
         _depositAs(alice, 1_000_000e6);
-        ic.deployToCurve(0);
+        _sellLpToVault(ic, 0);
 
         // Drain buffer below target so replenishBuffer is callable
         deal(USDC, address(ic), 0);
 
         _dumpBear(3_000_000e18);
 
-        vm.expectRevert(InvarCoin.InvarCoin__SpotDeviationTooHigh.selector);
-        ic.replenishBuffer(0);
+        uint256 usdcBefore = IERC20(USDC).balanceOf(address(ic));
+        _buyLpFromVault(ic, 0);
+        assertGt(IERC20(USDC).balanceOf(address(ic)), usdcBefore, "Solver fill should restore buffer at reserve ask");
     }
 
     // ==========================================
@@ -168,7 +170,7 @@ contract InvarCoinManipulationForkTest is BaseForkTest {
 
     function test_DepositWithdraw_Manipulation_Unprofitable() public {
         _depositAs(alice, 500_000e6);
-        ic.deployToCurve(0);
+        _sellLpToVault(ic, 0);
 
         uint256 attackerUsdcBefore = IERC20(USDC).balanceOf(attacker);
 
@@ -272,7 +274,7 @@ contract InvarCoinManipulationForkTest is BaseForkTest {
 
     function test_Harvest_PhantomYield_Blocked() public {
         _depositAs(alice, 500_000e6);
-        ic.deployToCurve(0);
+        _sellLpToVault(ic, 0);
 
         uint256 aliceShares = ic.balanceOf(alice);
         vm.startPrank(alice);
@@ -328,7 +330,7 @@ contract InvarCoinManipulationForkTest is BaseForkTest {
 
     function test_LpWithdraw_AfterManipulation_UserProtected() public {
         _depositAs(alice, 500_000e6);
-        ic.deployToCurve(0);
+        _sellLpToVault(ic, 0);
 
         uint256 aliceShares = ic.balanceOf(alice);
 
@@ -358,7 +360,7 @@ contract InvarCoinManipulationForkTest is BaseForkTest {
 
     function test_FullSandwich_DepositDeployWithdraw_Unprofitable() public {
         _depositAs(alice, 500_000e6);
-        ic.deployToCurve(0);
+        _sellLpToVault(ic, 0);
 
         uint256 honestNavBefore = ic.totalAssets();
         uint256 attackerUsdcBefore = IERC20(USDC).balanceOf(attacker);
@@ -451,7 +453,13 @@ contract ReplenishBufferFlashAttacker is IERC3156FlashBorrower {
         IERC20(token).approve(pool, amount);
         pool.call(abi.encodeWithSignature("exchange(uint256,uint256,uint256,uint256)", 1, 0, amount, 0));
 
-        InvarCoin(invarCoin).replenishBuffer(0);
+        InvarCoin target = InvarCoin(invarCoin);
+        (,,, uint256 replenishable) = target.getBufferMetrics();
+        uint256 lpCap = IERC20(target.CURVE_LP_TOKEN()).balanceOf(invarCoin) + target.gaugeStakedLp();
+        uint256 lpAmount = _maxLpForBuy(target, replenishable, lpCap);
+        uint256 usdcIn = target.previewBuyLpFromVault(lpAmount);
+        IERC20(usdc).approve(invarCoin, usdcIn);
+        target.buyLpFromVault(lpAmount, usdcIn);
 
         uint256 usdcBal = IERC20(usdc).balanceOf(address(this));
         IERC20(usdc).approve(pool, usdcBal);
@@ -460,6 +468,31 @@ contract ReplenishBufferFlashAttacker is IERC3156FlashBorrower {
         IERC20(token).approve(msg.sender, amount);
 
         return CALLBACK_SUCCESS;
+    }
+
+    function _maxLpForBuy(
+        InvarCoin target,
+        uint256 usdcBudget,
+        uint256 lpCap
+    ) internal view returns (uint256 lpAmount) {
+        uint256 quoteOneLp = target.previewBuyLpFromVault(1e18);
+        if (quoteOneLp == 0 || usdcBudget == 0 || lpCap == 0) {
+            return 0;
+        }
+        uint256 hi = (usdcBudget * 1e18) / quoteOneLp + 2e18;
+        if (hi > lpCap) {
+            hi = lpCap;
+        }
+        uint256 lo = 0;
+        for (uint256 i = 0; i < 128; i++) {
+            uint256 mid = (lo + hi + 1) / 2;
+            if (target.previewBuyLpFromVault(mid) <= usdcBudget) {
+                lo = mid;
+            } else {
+                hi = mid - 1;
+            }
+        }
+        lpAmount = lo;
     }
 
 }

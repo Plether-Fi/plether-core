@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {BullLeverageRouter} from "../../src/BullLeverageRouter.sol";
+import {InvarCoin} from "../../src/InvarCoin.sol";
 import {LeverageRouter} from "../../src/LeverageRouter.sol";
 import {StakedToken} from "../../src/StakedToken.sol";
 import {SyntheticSplitter} from "../../src/SyntheticSplitter.sol";
@@ -9,6 +10,7 @@ import {VaultAdapter} from "../../src/VaultAdapter.sol";
 import {ZapRouter} from "../../src/ZapRouter.sol";
 import {LeverageRouterBase} from "../../src/base/LeverageRouterBase.sol";
 import {AggregatorV3Interface} from "../../src/interfaces/AggregatorV3Interface.sol";
+import {ICurveTwocrypto} from "../../src/interfaces/ICurveTwocrypto.sol";
 import {IMorpho, MarketParams} from "../../src/interfaces/IMorpho.sol";
 import {BasketOracle} from "../../src/oracles/BasketOracle.sol";
 import {MorphoOracle} from "../../src/oracles/MorphoOracle.sol";
@@ -218,6 +220,118 @@ abstract contract BaseForkTest is Test {
         (uint256 usdcRequired,,) = splitter.previewMint(amount);
         IERC20(USDC).approve(address(splitter), usdcRequired);
         splitter.mint(amount);
+    }
+
+    function _maxLpForSell(
+        InvarCoin target,
+        uint256 usdcBudget
+    ) internal view returns (uint256 lpAmount) {
+        uint256 quoteOneLp = target.previewSellLpToVault(1e18);
+        if (quoteOneLp == 0 || usdcBudget == 0) {
+            return 0;
+        }
+        uint256 hi = (usdcBudget * 1e18) / quoteOneLp + 2e18;
+        while (target.previewSellLpToVault(hi) <= usdcBudget) {
+            hi *= 2;
+        }
+        uint256 lo = 0;
+        for (uint256 i = 0; i < 128; i++) {
+            uint256 mid = (lo + hi + 1) / 2;
+            if (target.previewSellLpToVault(mid) <= usdcBudget) {
+                lo = mid;
+            } else {
+                hi = mid - 1;
+            }
+        }
+        lpAmount = lo;
+    }
+
+    function _maxLpForBuy(
+        InvarCoin target,
+        uint256 usdcBudget,
+        uint256 lpCap
+    ) internal view returns (uint256 lpAmount) {
+        uint256 quoteOneLp = target.previewBuyLpFromVault(1e18);
+        if (quoteOneLp == 0 || usdcBudget == 0 || lpCap == 0) {
+            return 0;
+        }
+        uint256 hi = (usdcBudget * 1e18) / quoteOneLp + 2e18;
+        if (hi > lpCap) {
+            hi = lpCap;
+        }
+        uint256 lo = 0;
+        for (uint256 i = 0; i < 128; i++) {
+            uint256 mid = (lo + hi + 1) / 2;
+            if (target.previewBuyLpFromVault(mid) <= usdcBudget) {
+                lo = mid;
+            } else {
+                hi = mid - 1;
+            }
+        }
+        lpAmount = lo;
+    }
+
+    function _acquireCurveLp(
+        uint256 lpAmount
+    ) internal {
+        if (lpAmount == 0) {
+            return;
+        }
+        uint256 usdcAmount = (lpAmount * ICurveTwocrypto(curvePool).lp_price()) / 1e30;
+        if (usdcAmount == 0) {
+            usdcAmount = 1;
+        }
+        uint256 lpBefore = IERC20(curvePool).balanceOf(address(this));
+        for (uint256 i = 0; i < 8 && IERC20(curvePool).balanceOf(address(this)) - lpBefore < lpAmount; i++) {
+            deal(USDC, address(this), IERC20(USDC).balanceOf(address(this)) + usdcAmount);
+            IERC20(USDC).approve(curvePool, usdcAmount);
+            ICurveTwocrypto(curvePool).add_liquidity([usdcAmount, uint256(0)], 0);
+            usdcAmount *= 2;
+        }
+        require(IERC20(curvePool).balanceOf(address(this)) - lpBefore >= lpAmount, "solver LP acquisition failed");
+    }
+
+    function _sellLpToVault(
+        InvarCoin target,
+        uint256 maxUsdc
+    ) internal returns (uint256 lpAmount) {
+        (,, uint256 deployable,) = target.getBufferMetrics();
+        if (maxUsdc > 0 && maxUsdc < deployable) {
+            deployable = maxUsdc;
+        }
+        if (deployable == 0) {
+            target.sellLpToVault(1, 0);
+            return 0;
+        }
+        lpAmount = _maxLpForSell(target, deployable);
+        _acquireCurveLp(lpAmount);
+        lpAmount = _maxLpForSell(target, deployable);
+        uint256 solverLp = IERC20(curvePool).balanceOf(address(this));
+        if (solverLp < lpAmount) {
+            _acquireCurveLp(lpAmount - solverLp);
+        }
+        IERC20(curvePool).approve(address(target), lpAmount);
+        target.sellLpToVault(lpAmount, 0);
+    }
+
+    function _buyLpFromVault(
+        InvarCoin target,
+        uint256 maxLp
+    ) internal returns (uint256 usdcIn) {
+        (,,, uint256 replenishable) = target.getBufferMetrics();
+        uint256 lpCap = IERC20(target.CURVE_LP_TOKEN()).balanceOf(address(target)) + target.gaugeStakedLp();
+        if (maxLp > 0 && maxLp < lpCap) {
+            lpCap = maxLp;
+        }
+        if (replenishable == 0 || lpCap == 0) {
+            target.buyLpFromVault(1, type(uint256).max);
+            return 0;
+        }
+        uint256 lpAmount = _maxLpForBuy(target, replenishable, lpCap);
+        usdcIn = target.previewBuyLpFromVault(lpAmount);
+        deal(USDC, address(this), IERC20(USDC).balanceOf(address(this)) + usdcIn);
+        IERC20(USDC).approve(address(target), usdcIn);
+        target.buyLpFromVault(lpAmount, usdcIn);
     }
 
     /// @notice Create a Morpho market and supply liquidity

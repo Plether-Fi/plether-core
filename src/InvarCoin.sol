@@ -36,7 +36,7 @@ import {OracleLib} from "./libraries/OracleLib.sol";
 ///      The oracle-derived LP price mirrors the twocrypto-ng formula: 2 * virtualPrice * sqrt(bearPrice).
 ///
 ///      A 2% USDC buffer (BUFFER_TARGET_BPS) is maintained locally for gas-efficient withdrawals.
-///      Excess USDC is deployed to Curve via permissionless keeper calls (deployToCurve).
+///      Permissionless solvers can rebalance USDC/Curve LP inventory against conservative reserve prices.
 ///
 ///      Virtual shares (1e18 INVAR / 1e6 USDC) protect against inflation attacks on the first deposit.
 contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuard {
@@ -65,6 +65,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     uint256 public constant BUFFER_TARGET_BPS = 200; // 2% target buffer
     uint256 public constant DEPLOY_THRESHOLD = 1000e6; // Min $1000 to deploy
     uint256 public constant MAX_SPOT_DEVIATION_BPS = 50; // 0.5% max spot-vs-EMA deviation
+    uint256 private constant SOLVER_PRICE_SPREAD_BPS = 10; // 0.1% solver reserve bid/ask spread
 
     uint256 public constant ORACLE_TIMEOUT = 24 hours;
     uint256 public constant SEQUENCER_GRACE_PERIOD = 1 hours;
@@ -116,7 +117,8 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     event LpWithdrawn(address indexed user, uint256 sharesBurned, uint256 usdcReturned, uint256 bearReturned);
     event LpDeposited(address indexed user, address indexed receiver, uint256 usdcIn, uint256 bearIn, uint256 glUsdOut);
     event DeployedToCurve(address indexed caller, uint256 usdcDeployed, uint256 bearDeployed, uint256 lpMinted);
-    event BufferReplenished(uint256 lpBurned, uint256 usdcRecovered);
+    event SolverLpPurchased(address indexed solver, uint256 lpIn, uint256 usdcOut);
+    event SolverLpSold(address indexed solver, uint256 lpOut, uint256 usdcIn);
     event YieldHarvested(uint256 glUsdMinted, uint256 callerReward, uint256 donated);
     event TokenRescued(address indexed token, address indexed to, uint256 amount);
     event EmergencyWithdrawCurve(uint256 lpBurned, uint256 usdcReceived, uint256 bearReceived);
@@ -490,12 +492,6 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     ) private pure returns (bool) {
         return spotValue * BPS < emaValue * (BPS - MAX_SPOT_DEVIATION_BPS)
             || spotValue * BPS > emaValue * (BPS + MAX_SPOT_DEVIATION_BPS);
-    }
-
-    function _fairValueMinOut(
-        uint256 emaValue
-    ) private pure returns (uint256) {
-        return Math.mulDiv(emaValue, BPS - MAX_SPOT_DEVIATION_BPS, BPS);
     }
 
     function _reduceLpAccounting(
@@ -950,90 +946,93 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         emit UsdcDonated(msg.sender, usdcAmount, invarMinted);
     }
 
-    /// @notice Permissionless keeper function: deploys excess USDC buffer into Curve as single-sided liquidity.
-    /// @dev Maintains a 2% USDC buffer (BUFFER_TARGET_BPS). Only deploys if excess exceeds DEPLOY_THRESHOLD ($1000).
-    ///      Symmetric spot-vs-EMA deviation check (MAX_SPOT_DEVIATION_BPS = 0.5%) blocks deployment during
-    ///      pool manipulation, and the min-LP bound is derived from EMA fair value rather than spot.
-    /// @param maxUsdc Cap on USDC to deploy (0 = no cap, deploy entire excess).
-    /// @return lpMinted Amount of Curve LP tokens minted.
-    function deployToCurve(
-        uint256 maxUsdc
-    ) external nonReentrant whenNotPaused returns (uint256 lpMinted) {
+    /// @notice Preview USDC paid when a solver sells Curve LP to the vault.
+    /// @dev Uses the pessimistic fair LP price less SOLVER_PRICE_SPREAD_BPS as the vault bid.
+    function previewSellLpToVault(
+        uint256 lpAmount
+    ) external view returns (uint256 usdcOut) {
         uint256 oraclePrice = _validatedOraclePrice();
+        uint256 bidPrice = Math.mulDiv(_pessimisticLpPrice(oraclePrice), BPS - SOLVER_PRICE_SPREAD_BPS, BPS);
+        usdcOut = Math.mulDiv(lpAmount, bidPrice, 1e30);
+    }
+
+    /// @notice Preview USDC required when a solver buys Curve LP from the vault.
+    /// @dev Uses the optimistic fair LP price plus SOLVER_PRICE_SPREAD_BPS as the vault ask.
+    function previewBuyLpFromVault(
+        uint256 lpAmount
+    ) external view returns (uint256 usdcIn) {
+        uint256 oraclePrice = _validatedOraclePrice();
+        uint256 askPrice = Math.mulDiv(_optimisticLpPrice(oraclePrice), BPS + SOLVER_PRICE_SPREAD_BPS, BPS);
+        usdcIn = Math.mulDiv(lpAmount, askPrice, 1e30, Math.Rounding.Ceil);
+    }
+
+    /// @notice Permissionless solver fill: solver sells Curve LP to the vault for excess USDC buffer.
+    /// @dev The vault never trades on Curve; the solver owns sourcing/slippage risk.
+    /// @param lpAmount Amount of Curve LP transferred from the solver.
+    /// @param minUsdcOut Minimum USDC the solver is willing to receive.
+    /// @return usdcOut USDC paid to the solver.
+    function sellLpToVault(
+        uint256 lpAmount,
+        uint256 minUsdcOut
+    ) external nonReentrant whenNotPaused returns (uint256 usdcOut) {
+        if (lpAmount == 0) {
+            revert InvarCoin__ZeroAmount();
+        }
+        uint256 oraclePrice = _validatedOraclePrice();
+        uint256 localUsdc = USDC.balanceOf(address(this));
         uint256 assets = _totalAssetsWithPrice(_lpBalance(), oraclePrice);
         uint256 bufferTarget = (assets * BUFFER_TARGET_BPS) / BPS;
-
-        uint256 localUsdc = USDC.balanceOf(address(this));
-
         if (localUsdc <= bufferTarget || localUsdc - bufferTarget < DEPLOY_THRESHOLD) {
             revert InvarCoin__NothingToDeploy();
         }
 
-        uint256 usdcToDeploy = localUsdc - bufferTarget;
-        if (maxUsdc > 0 && maxUsdc < usdcToDeploy) {
-            usdcToDeploy = maxUsdc;
+        uint256 bidPrice = Math.mulDiv(_pessimisticLpPrice(oraclePrice), BPS - SOLVER_PRICE_SPREAD_BPS, BPS);
+        usdcOut = Math.mulDiv(lpAmount, bidPrice, 1e30);
+        if (usdcOut == 0 || usdcOut < minUsdcOut || usdcOut > localUsdc - bufferTarget) {
+            revert InvarCoin__SlippageExceeded();
         }
 
-        uint256[2] memory amounts = [usdcToDeploy, uint256(0)];
-        uint256 calcLp = CURVE_POOL.calc_token_amount(amounts, true);
-        uint256 emaExpectedLp = (usdcToDeploy * 1e30) / CURVE_POOL.lp_price();
-        if (_outsideSpotDeviationBounds(calcLp, emaExpectedLp)) {
-            revert InvarCoin__SpotDeviationTooHigh();
-        }
-        lpMinted = CURVE_POOL.add_liquidity(amounts, _fairValueMinOut(emaExpectedLp));
-        _recordLpDeployment(lpMinted);
+        CURVE_LP_TOKEN.safeTransferFrom(msg.sender, address(this), lpAmount);
+        _recordLpDeployment(lpAmount);
+        USDC.safeTransfer(msg.sender, usdcOut);
 
-        emit DeployedToCurve(msg.sender, usdcToDeploy, 0, lpMinted);
+        emit SolverLpPurchased(msg.sender, lpAmount, usdcOut);
     }
 
-    /// @notice Permissionless keeper function: restores USDC buffer by burning Curve LP (single-sided to USDC).
-    /// @dev Inverse of deployToCurve. Uses same symmetric spot-vs-EMA deviation check for sandwich protection,
-    ///      with the min-USDC bound derived from EMA fair value rather than spot.
-    ///      The maxLpToBurn parameter allows chunked replenishment when the full withdrawal would
-    ///      exceed the 0.5% spot deviation limit due to price impact.
-    /// @param maxLpToBurn Cap on LP tokens to burn (0 = no cap, burn entire deficit).
-    function replenishBuffer(
-        uint256 maxLpToBurn
-    ) external nonReentrant whenNotPaused returns (uint256 usdcRecovered) {
+    /// @notice Permissionless solver fill: solver buys Curve LP from the vault and restores USDC buffer.
+    /// @dev The vault never trades on Curve; the solver owns exit/slippage risk.
+    /// @param lpAmount Amount of Curve LP bought from the vault.
+    /// @param maxUsdcIn Maximum USDC the solver is willing to pay.
+    /// @return usdcIn USDC paid by the solver.
+    function buyLpFromVault(
+        uint256 lpAmount,
+        uint256 maxUsdcIn
+    ) external nonReentrant whenNotPaused returns (uint256 usdcIn) {
+        if (lpAmount == 0) {
+            revert InvarCoin__ZeroAmount();
+        }
         _harvestSafe();
         uint256 oraclePrice = _validatedOraclePrice();
-        uint256 lpBalBefore = _lpBalance();
-        uint256 assets = _totalAssetsWithPrice(lpBalBefore, oraclePrice);
+        uint256 lpBal = _lpBalance();
+        uint256 assets = _totalAssetsWithPrice(lpBal, oraclePrice);
         uint256 bufferTarget = (assets * BUFFER_TARGET_BPS) / BPS;
-
-        uint256 currentBuffer = USDC.balanceOf(address(this));
-
-        if (currentBuffer >= bufferTarget) {
+        uint256 localUsdc = USDC.balanceOf(address(this));
+        if (localUsdc >= bufferTarget || lpAmount > lpBal) {
             revert InvarCoin__NothingToDeploy();
         }
 
-        if (lpBalBefore == 0) {
-            revert InvarCoin__NothingToDeploy();
-        }
-        uint256 usdcBefore = currentBuffer;
-
-        uint256 maxReplenish = bufferTarget - currentBuffer;
-        uint256 lpPrice = CURVE_POOL.lp_price();
-        uint256 lpToBurn = (maxReplenish * 1e30) / lpPrice;
-        if (lpToBurn > lpBalBefore) {
-            lpToBurn = lpBalBefore;
-        }
-        if (maxLpToBurn > 0 && maxLpToBurn < lpToBurn) {
-            lpToBurn = maxLpToBurn;
+        uint256 askPrice = Math.mulDiv(_optimisticLpPrice(oraclePrice), BPS + SOLVER_PRICE_SPREAD_BPS, BPS);
+        usdcIn = Math.mulDiv(lpAmount, askPrice, 1e30, Math.Rounding.Ceil);
+        if (usdcIn > maxUsdcIn || usdcIn > bufferTarget - localUsdc) {
+            revert InvarCoin__SlippageExceeded();
         }
 
-        uint256 calcOut = CURVE_POOL.calc_withdraw_one_coin(lpToBurn, USDC_INDEX);
-        uint256 emaExpectedUsdc = (lpToBurn * lpPrice) / 1e30;
-        if (_outsideSpotDeviationBounds(calcOut, emaExpectedUsdc)) {
-            revert InvarCoin__SpotDeviationTooHigh();
-        }
-        _ensureUnstakedLp(lpToBurn);
-        CURVE_POOL.remove_liquidity_one_coin(lpToBurn, USDC_INDEX, _fairValueMinOut(emaExpectedUsdc));
-        _reduceLpAccounting(lpToBurn, lpBalBefore);
+        USDC.safeTransferFrom(msg.sender, address(this), usdcIn);
+        _ensureUnstakedLp(lpAmount);
+        _reduceLpAccounting(lpAmount, lpBal);
+        CURVE_LP_TOKEN.safeTransfer(msg.sender, lpAmount);
 
-        usdcRecovered = USDC.balanceOf(address(this)) - usdcBefore;
-
-        emit BufferReplenished(lpToBurn, usdcRecovered);
+        emit SolverLpSold(msg.sender, lpAmount, usdcIn);
     }
 
     // ==========================================
