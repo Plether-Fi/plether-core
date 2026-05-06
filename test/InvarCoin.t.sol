@@ -805,7 +805,7 @@ contract InvarCoinTest is Test {
         ic.harvest();
     }
 
-    function test_Harvest_SkipsWhenNoStakersAndPreservesYield() public {
+    function test_Harvest_CheckpointsYieldWhenNoStakers() public {
         vm.prank(alice);
         ic.deposit(20_000e6, alice, 0);
 
@@ -813,10 +813,10 @@ contract InvarCoinTest is Test {
         uint256 costBefore = ic.curveLpCostVp();
         curve.setVirtualPrice(1.05e18);
 
-        vm.expectRevert(InvarCoin.InvarCoin__NoYield.selector);
-        ic.harvest();
+        uint256 donatedWithoutStakers = ic.harvest();
 
-        assertEq(ic.curveLpCostVp(), costBefore, "yield accounting should not advance without stakers");
+        assertEq(donatedWithoutStakers, 0, "no INVAR should be donated without stakers");
+        assertGt(ic.curveLpCostVp(), costBefore, "yield accounting should advance without stakers");
 
         uint256 stakeAmount = ic.balanceOf(alice);
         vm.startPrank(alice);
@@ -824,8 +824,8 @@ contract InvarCoinTest is Test {
         sInvar.deposit(stakeAmount, alice);
         vm.stopPrank();
 
-        uint256 donated = ic.harvest();
-        assertGt(donated, 0, "pending yield should remain harvestable once stakers exist");
+        vm.expectRevert(InvarCoin.InvarCoin__NoYield.selector);
+        ic.harvest();
     }
 
     function test_Deposit_SkipsPendingHarvestWhenNoStakers() public {
@@ -834,11 +834,13 @@ contract InvarCoinTest is Test {
 
         ic.deployToCurve(0);
         curve.setVirtualPrice(1.05e18);
+        uint256 expectedCost = (ic.trackedLpBalance() * curve.virtualPrice()) / 1e18;
 
         vm.prank(bob);
         uint256 shares = ic.deposit(1000e6, bob, 0);
 
         assertGt(shares, 0);
+        assertEq(ic.curveLpCostVp(), expectedCost, "deposit should checkpoint no-staker VP growth");
     }
 
     function test_LpWithdraw_SkipsPendingHarvestWhenNoStakers() public {
@@ -2135,6 +2137,13 @@ contract InvarCoinTest is Test {
     function test_MicroHarvestPreservesCostBasis() public {
         vm.prank(alice);
         ic.deposit(100_000e6, alice, 0);
+
+        uint256 stakeAmount = ic.balanceOf(alice);
+        vm.startPrank(alice);
+        ic.approve(address(sInvar), stakeAmount);
+        sInvar.deposit(stakeAmount, alice);
+        vm.stopPrank();
+
         ic.deployToCurve(0);
 
         uint256 costVpBefore = ic.curveLpCostVp();
@@ -2217,6 +2226,11 @@ contract InvarCoinTest is Test {
     function test_WithdrawReverts_CurveLpPriceRevertsWithPendingYield() public {
         vm.prank(alice);
         uint256 shares = ic.deposit(100_000e6, alice, 0);
+        uint256 stakeAmount = shares / 2;
+        vm.startPrank(alice);
+        ic.approve(address(sInvar), stakeAmount);
+        sInvar.deposit(stakeAmount, alice);
+        vm.stopPrank();
         ic.deployToCurve(0);
 
         curve.setVirtualPrice(curve.virtualPrice() * 105 / 100);
@@ -2225,7 +2239,7 @@ contract InvarCoinTest is Test {
 
         vm.prank(alice);
         vm.expectRevert();
-        ic.withdraw(shares, alice, 0);
+        ic.withdraw(shares - stakeAmount, alice, 0);
     }
 
     function test_SetEmergencyMode_BrickedCurve_WithdrawViaLpWithdraw() public {
@@ -2679,6 +2693,34 @@ contract InvarCoinTest is Test {
         uint256 shares = freshIc.deposit(10_000e6, bob, 0);
 
         assertGt(shares, 0);
+        assertEq(
+            freshIc.curveLpCostVp(),
+            (freshIc.trackedLpBalance() * curve.virtualPrice()) / 1e18,
+            "deposit should checkpoint VP growth before staking is configured"
+        );
+    }
+
+    function test_LpWithdraw_CheckpointsYieldWithoutStakedInvarCoin() public {
+        InvarCoin freshIc = new InvarCoin(
+            address(usdc), address(bearToken), address(curveLp), address(curve), address(oracle), address(0), address(0)
+        );
+
+        vm.prank(alice);
+        usdc.approve(address(freshIc), type(uint256).max);
+        vm.prank(alice);
+        freshIc.deposit(20_000e6, alice, 0);
+        freshIc.deployToCurve(0);
+
+        uint256 costBefore = freshIc.curveLpCostVp();
+        curve.setVirtualPrice(1.05e18);
+
+        uint256 sharesToWithdraw = freshIc.balanceOf(alice) / 1000;
+        vm.prank(alice);
+        freshIc.lpWithdraw(sharesToWithdraw, 0, 0, alice);
+
+        assertGt(
+            freshIc.curveLpCostVp(), costBefore, "lpWithdraw should checkpoint VP growth before staking is configured"
+        );
     }
 
     function test_Harvest_ExactDonatedAmount() public {
@@ -2962,6 +3004,13 @@ contract InvarCoinTest is Test {
     function test_GetHarvestableYield_WithYield() public {
         vm.prank(alice);
         ic.deposit(20_000e6, alice, 0);
+
+        uint256 stakeAmount = ic.balanceOf(alice);
+        vm.startPrank(alice);
+        ic.approve(address(sInvar), stakeAmount);
+        sInvar.deposit(stakeAmount, alice);
+        vm.stopPrank();
+
         ic.deployToCurve(0);
 
         curve.setVirtualPrice(1.05e18);
@@ -4077,9 +4126,21 @@ contract HarvestBypassTest is Test {
         usdc.approve(address(ic), type(uint256).max);
     }
 
-    function test_WithdrawSucceedsWhenYieldPendingAndOracleStale() public {
+    function _depositAndStakeHalf() private returns (uint256 liquidShares) {
         vm.prank(alice);
-        ic.deposit(100_000e6, alice, 0);
+        uint256 shares = ic.deposit(100_000e6, alice, 0);
+
+        uint256 stakeAmount = shares / 2;
+        vm.startPrank(alice);
+        ic.approve(address(sInvar), stakeAmount);
+        sInvar.deposit(stakeAmount, alice);
+        vm.stopPrank();
+
+        liquidShares = shares - stakeAmount;
+    }
+
+    function test_WithdrawSucceedsWhenYieldPendingAndOracleStale() public {
+        uint256 shares = _depositAndStakeHalf();
 
         ic.deployToCurve(0);
 
@@ -4087,7 +4148,6 @@ contract HarvestBypassTest is Test {
 
         assertGt(ic.getHarvestableYield(), 0, "yield should be pending");
 
-        uint256 shares = ic.balanceOf(alice);
         oracle.setUpdatedAt(block.timestamp - 25 hours);
 
         vm.prank(alice);
@@ -4096,8 +4156,7 @@ contract HarvestBypassTest is Test {
     }
 
     function test_LpWithdrawSucceedsWhenYieldPendingAndOracleStale() public {
-        vm.prank(alice);
-        ic.deposit(100_000e6, alice, 0);
+        uint256 shares = _depositAndStakeHalf();
 
         ic.deployToCurve(0);
 
@@ -4105,7 +4164,6 @@ contract HarvestBypassTest is Test {
 
         assertGt(ic.getHarvestableYield(), 0, "yield should be pending");
 
-        uint256 shares = ic.balanceOf(alice);
         oracle.setUpdatedAt(block.timestamp - 25 hours);
 
         vm.prank(alice);
@@ -4114,8 +4172,7 @@ contract HarvestBypassTest is Test {
     }
 
     function test_LpWithdrawSucceedsWhenYieldPendingAndOracleReverts() public {
-        vm.prank(alice);
-        ic.deposit(100_000e6, alice, 0);
+        uint256 shares = _depositAndStakeHalf();
 
         ic.deployToCurve(0);
 
@@ -4124,8 +4181,6 @@ contract HarvestBypassTest is Test {
         assertGt(ic.getHarvestableYield(), 0, "yield should be pending");
 
         vm.mockCallRevert(address(oracle), abi.encodeWithSignature("latestRoundData()"), "oracle deviation");
-
-        uint256 shares = ic.balanceOf(alice);
 
         vm.prank(alice);
         (uint256 usdcOut, uint256 bearOut) = ic.lpWithdraw(shares / 2, 0, 0, alice);
