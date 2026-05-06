@@ -265,9 +265,4 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
         _deleteOrder(orderId, IOrderRouterAccounting.OrderStatus.Executed);
     }
 
-    function _sendEth(
-        address to,
-        uint256 amount
-    ) internal virtual;
-
 }

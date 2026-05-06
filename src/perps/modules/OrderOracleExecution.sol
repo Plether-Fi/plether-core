@@ -21,7 +21,6 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
     struct OracleUpdateResult {
         uint256 executionPrice;
         uint64 oraclePublishTime;
-        uint256 pythFee;
     }
 
     ICfdVault internal immutable housePool;
@@ -97,11 +96,7 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
         bytes[] calldata pythUpdateData,
         IPletherOracle.PriceMode mode
     ) internal returns (IPletherOracle.PriceSnapshot memory snapshot) {
-        uint256 pythFee = pletherOracle.getUpdateFee(pythUpdateData);
-        if (msg.value < pythFee) {
-            revert IPletherOracle.PletherOracle__InsufficientFee(msg.value, pythFee);
-        }
-        return pletherOracle.updateAndGetPrice{value: pythFee}(pythUpdateData, mode);
+        return pletherOracle.updatePrice{value: msg.value}(msg.sender, pythUpdateData, mode);
     }
 
     function _toOracleUpdateResult(
@@ -109,7 +104,6 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
     ) internal pure returns (OracleUpdateResult memory update) {
         update.executionPrice = snapshot.price;
         update.oraclePublishTime = snapshot.publishTime;
-        update.pythFee = snapshot.updateFee;
     }
 
     function _commitReferencePrice() internal view returns (uint256 price) {

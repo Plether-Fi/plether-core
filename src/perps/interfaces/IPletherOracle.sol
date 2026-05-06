@@ -38,7 +38,8 @@ interface IPletherOracle {
     }
 
     error PletherOracle__Unauthorized();
-    error PletherOracle__RefundFailed(address recipient, uint256 amount);
+    error PletherOracle__NothingToClaim();
+    error PletherOracle__EthTransferFailed();
     error PletherOracle__NoFeeds();
     error PletherOracle__ArrayLengthMismatch(
         uint256 feedIdsLength, uint256 quantitiesLength, uint256 basePricesLength, uint256 inversionsLength
@@ -59,21 +60,40 @@ interface IPletherOracle {
     );
     error PletherOracle__ZeroBasketPrice();
 
+    event EthRefundDeferred(address indexed recipient, uint256 amount);
+    event EthRefundClaimed(address indexed recipient, uint256 amount);
+
     /// @notice Atomically applies oracle update data and returns the validated price snapshot for `mode`.
     /// @dev This is the only state-changing oracle read path. Execution callers must use this function
     ///      and pass the returned `PriceSnapshot` through downstream logic; do not split update/read
-    ///      semantics by updating first and later calling `getPrice`.
-    function updateAndGetPrice(
+    ///      semantics by updating first and later calling `getLatestPrice`.
+    function updatePrice(
+        address refundRecipient,
         bytes[] calldata pythUpdateData,
         PriceMode mode
     ) external payable returns (PriceSnapshot memory snapshot);
 
-    /// @notice Returns the current validated oracle price without applying a Pyth update.
+    /// @notice Applies oracle update data and returns the latest order-execution basket price.
+    function updatePrice(
+        address refundRecipient,
+        bytes[] calldata pythUpdateData
+    ) external payable returns (uint256 latestPrice);
+
+    /// @notice Returns the current validated oracle snapshot without applying a Pyth update.
     /// @dev View-only path for diagnostics, simulation, and UI reads. State-changing execution paths
-    ///      should use `updateAndGetPrice` so the update and read remain one atomic operation.
-    function getPrice(
+    ///      should use `updatePrice` so the update and read remain one atomic operation.
+    function getLatestPrice(
         PriceMode mode
     ) external view returns (PriceSnapshot memory snapshot);
+
+    /// @notice Returns the latest validated order-execution basket price without applying a Pyth update.
+    function getLatestPrice() external view returns (uint256 latestPrice);
+
+    function claimEthRefund() external;
+
+    function claimableEth(
+        address account
+    ) external view returns (uint256 amount);
 
     function getOrderExecutionPolicy(
         bool isClose

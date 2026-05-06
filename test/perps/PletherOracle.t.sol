@@ -99,15 +99,16 @@ contract PletherOracleTest is Test {
         oracle = _deployOracle(address(pyth));
     }
 
-    function test_UpdateAndGetPrice_ReturnsSingleSnapshotAndRefundsExcess() public {
+    function test_UpdatePrice_ReturnsSingleSnapshotAndRefundsExcess() public {
         vm.warp(1000);
         vm.deal(address(this), 1 ether);
         pyth.setFee(0.1 ether);
         _setBothPrices(100_000_000, 990);
 
         uint256 balanceBefore = address(this).balance;
-        IPletherOracle.PriceSnapshot memory snapshot =
-            oracle.updateAndGetPrice{value: 0.25 ether}(_pythUpdateData(), IPletherOracle.PriceMode.OrderExecution);
+        IPletherOracle.PriceSnapshot memory snapshot = oracle.updatePrice{value: 0.25 ether}(
+            address(this), _pythUpdateData(), IPletherOracle.PriceMode.OrderExecution
+        );
 
         assertEq(snapshot.price, 1e8, "basket price");
         assertEq(snapshot.publishTime, 990, "weakest publish time");
@@ -116,15 +117,26 @@ contract PletherOracleTest is Test {
         assertEq(balanceBefore - address(this).balance, 0.1 ether, "only Pyth fee retained");
     }
 
-    function test_GetPrice_IsViewOnlyAndUsesCurrentStoredPythPrice() public {
+    function test_GetLatestPrice_IsViewOnlyAndUsesCurrentStoredPythPrice() public {
         vm.warp(1000);
         _setBothPrices(100_000_000, 995);
 
-        IPletherOracle.PriceSnapshot memory snapshot = oracle.getPrice(IPletherOracle.PriceMode.MarkRefresh);
+        IPletherOracle.PriceSnapshot memory snapshot = oracle.getLatestPrice(IPletherOracle.PriceMode.MarkRefresh);
 
         assertEq(snapshot.price, 1e8, "view price");
         assertEq(snapshot.publishTime, 995, "view publish time");
         assertEq(snapshot.updateFee, 0, "view has no update fee");
+    }
+
+    function test_ReportInterface_ReturnsLatestPriceOnly() public {
+        vm.warp(1000);
+        _setBothPrices(100_000_000, 995);
+
+        uint256 latestPrice = oracle.getLatestPrice();
+        assertEq(latestPrice, 1e8, "latest price view");
+
+        latestPrice = oracle.updatePrice(address(this), _pythUpdateData());
+        assertEq(latestPrice, 1e8, "latest price update");
     }
 
     function test_Constructor_RevertsOnMissingFeeds() public {
@@ -163,15 +175,15 @@ contract PletherOracleTest is Test {
         new PletherOracle(address(engine), address(vault), address(pyth), feedIds, weights, basePrices, inversions);
     }
 
-    function test_UpdateAndGetPrice_RevertsOnStalePrice() public {
+    function test_UpdatePrice_RevertsOnStalePrice() public {
         vm.warp(1000);
         _setBothPrices(100_000_000, 939);
 
         vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
-        oracle.updateAndGetPrice(_pythUpdateData(), IPletherOracle.PriceMode.OrderExecution);
+        oracle.updatePrice(address(this), _pythUpdateData(), IPletherOracle.PriceMode.OrderExecution);
     }
 
-    function test_UpdateAndGetPrice_RevertsOnConfidenceTooWide() public {
+    function test_UpdatePrice_RevertsOnConfidenceTooWide() public {
         vm.warp(1000);
         pyth.setPrice(FEED_A, int64(100_000_000), uint64(2_000_000), int32(-8), 990);
         pyth.setPrice(FEED_B, int64(100_000_000), uint64(2_000_000), int32(-8), 990);
@@ -182,7 +194,7 @@ contract PletherOracleTest is Test {
         );
 
         vm.expectPartialRevert(IPletherOracle.PletherOracle__ConfidenceTooWide.selector);
-        oracle.updateAndGetPrice(_pythUpdateData(), IPletherOracle.PriceMode.OrderExecution);
+        oracle.updatePrice(address(this), _pythUpdateData(), IPletherOracle.PriceMode.OrderExecution);
     }
 
     function test_LiquidationMode_UsesStricterStalenessThanOrderExecution() public {
@@ -190,11 +202,11 @@ contract PletherOracleTest is Test {
         _setBothPrices(100_000_000, 984);
 
         IPletherOracle.PriceSnapshot memory orderSnapshot =
-            oracle.updateAndGetPrice(_pythUpdateData(), IPletherOracle.PriceMode.OrderExecution);
+            oracle.updatePrice(address(this), _pythUpdateData(), IPletherOracle.PriceMode.OrderExecution);
         assertEq(orderSnapshot.price, 1e8, "order mode accepts 16 second old price");
 
         vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
-        oracle.updateAndGetPrice(_pythUpdateData(), IPletherOracle.PriceMode.Liquidation);
+        oracle.updatePrice(address(this), _pythUpdateData(), IPletherOracle.PriceMode.Liquidation);
     }
 
     function test_FrozenWindow_RevertsWhenFeedPublishTimesDivergeTooFar() public {
@@ -204,16 +216,16 @@ contract PletherOracleTest is Test {
         pyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 900);
 
         vm.expectPartialRevert(IPletherOracle.PletherOracle__PublishTimeDivergence.selector);
-        oracle.updateAndGetPrice(_pythUpdateData(), IPletherOracle.PriceMode.OrderExecution);
+        oracle.updatePrice(address(this), _pythUpdateData(), IPletherOracle.PriceMode.OrderExecution);
     }
 
-    function test_UpdateAndGetPrice_RevertsWhenPublishTimePredatesStoredMark() public {
+    function test_UpdatePrice_RevertsWhenPublishTimePredatesStoredMark() public {
         vm.warp(1000);
         engine.setLastMark(1e8, 995);
         _setBothPrices(100_000_000, 990);
 
         vm.expectPartialRevert(IPletherOracle.PletherOracle__PriceOutOfOrder.selector);
-        oracle.updateAndGetPrice(_pythUpdateData(), IPletherOracle.PriceMode.MarkRefresh);
+        oracle.updatePrice(address(this), _pythUpdateData(), IPletherOracle.PriceMode.MarkRefresh);
     }
 
     function test_ApplyConfig_OnlyOwnerOrRouter() public {

@@ -8,15 +8,16 @@ import {ICfdVault} from "./interfaces/ICfdVault.sol";
 import {IPletherOracle} from "./interfaces/IPletherOracle.sol";
 import {MarketCalendarLib} from "./libraries/MarketCalendarLib.sol";
 import {OracleFreshnessPolicyLib} from "./libraries/OracleFreshnessPolicyLib.sol";
+import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 
 /// @title PletherOracle
 /// @notice Mode-aware Pyth basket oracle for the perps router.
 /// @dev Owns Pyth updates, basket math, confidence checks, freshness policy, and cap clamping.
-///      State-changing callers should use `updateAndGetPrice` and pass its snapshot through execution.
-///      `getPrice` is view-only and should not be paired with a separate update inside execution flows.
+///      State-changing callers should use `updatePrice` and pass its snapshot through execution.
+///      `getLatestPrice` is view-only and should not be paired with a separate update inside execution flows.
 ///      Tests and local deployments should use an IPyth-compatible mock contract instead of branching
 ///      production oracle behavior.
-contract PletherOracle is IPletherOracle {
+contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
 
     ICfdEngineCore public immutable engine;
     ICfdVault public immutable housePool;
@@ -31,6 +32,7 @@ contract PletherOracle is IPletherOracle {
     uint256 public override orderExecutionStalenessLimit = 60;
     uint256 public override liquidationStalenessLimit = 15;
     uint256 public override pythMaxConfidenceRatioBps = 10_000;
+    mapping(address => uint256) public override claimableEth;
 
     constructor(
         address engine_,
@@ -79,19 +81,43 @@ contract PletherOracle is IPletherOracle {
         inversions = inversions_;
     }
 
-    function updateAndGetPrice(
+    function updatePrice(
+        address refundRecipient,
         bytes[] calldata pythUpdateData,
         PriceMode mode
-    ) external payable override returns (PriceSnapshot memory snapshot) {
-        uint256 pythFee = _updatePrice(pythUpdateData);
-        snapshot = _getPrice(mode);
-        snapshot.updateFee = pythFee;
+    ) external payable override nonReentrant returns (PriceSnapshot memory snapshot) {
+        return _updateAndGetSnapshot(refundRecipient, pythUpdateData, mode);
     }
 
-    function getPrice(
+    function updatePrice(
+        address refundRecipient,
+        bytes[] calldata pythUpdateData
+    ) external payable override nonReentrant returns (uint256 latestPrice) {
+        return _updateAndGetSnapshot(refundRecipient, pythUpdateData, PriceMode.OrderExecution).price;
+    }
+
+    function getLatestPrice(
         PriceMode mode
     ) external view override returns (PriceSnapshot memory snapshot) {
-        return _getPrice(mode);
+        return _getLatestPriceSnapshot(mode);
+    }
+
+    function getLatestPrice() external view override returns (uint256 latestPrice) {
+        return _getLatestPriceSnapshot(PriceMode.OrderExecution).price;
+    }
+
+    function claimEthRefund() external override nonReentrant {
+        uint256 amount = claimableEth[msg.sender];
+        if (amount == 0) {
+            revert PletherOracle__NothingToClaim();
+        }
+        claimableEth[msg.sender] = 0;
+        (bool ok,) = payable(msg.sender).call{value: amount}("");
+        if (!ok) {
+            claimableEth[msg.sender] = amount;
+            revert PletherOracle__EthTransferFailed();
+        }
+        emit EthRefundClaimed(msg.sender, amount);
     }
 
     function getOrderExecutionPolicy(
@@ -124,7 +150,18 @@ contract PletherOracle is IPletherOracle {
         return MarketCalendarLib.isOracleFrozen(block.timestamp, engine.fadDayOverrides(block.timestamp / 86_400));
     }
 
-    function _getPrice(
+    function _updateAndGetSnapshot(
+        address refundRecipient,
+        bytes[] calldata pythUpdateData,
+        PriceMode mode
+    ) internal returns (PriceSnapshot memory snapshot) {
+        uint256 pythFee = _updatePythPrice(pythUpdateData);
+        snapshot = _getLatestPriceSnapshot(mode);
+        snapshot.updateFee = pythFee;
+        _refundExcess(refundRecipient, pythFee);
+    }
+
+    function _getLatestPriceSnapshot(
         PriceMode mode
     ) internal view returns (PriceSnapshot memory snapshot) {
         PolicySnapshot memory policy = _policyForMode(mode);
@@ -144,7 +181,7 @@ contract PletherOracle is IPletherOracle {
         }
     }
 
-    function _updatePrice(
+    function _updatePythPrice(
         bytes[] calldata pythUpdateData
     ) internal returns (uint256 pythFee) {
         pythFee = getUpdateFee(pythUpdateData);
@@ -152,7 +189,6 @@ contract PletherOracle is IPletherOracle {
             revert PletherOracle__InsufficientFee(msg.value, pythFee);
         }
         pyth.updatePriceFeeds{value: pythFee}(pythUpdateData);
-        _refundExcess(pythFee);
     }
 
     function _policyForOrder(
@@ -283,15 +319,19 @@ contract PletherOracle is IPletherOracle {
     }
 
     function _refundExcess(
+        address refundRecipient,
         uint256 pythFee
     ) internal {
         uint256 refund = msg.value - pythFee;
         if (refund == 0) {
             return;
         }
-        (bool ok,) = payable(msg.sender).call{value: refund}("");
-        if (!ok) {
-            revert PletherOracle__RefundFailed(msg.sender, refund);
+        (bool ok,) = payable(refundRecipient).call{value: refund}("");
+        if (ok) {
+            return;
         }
+        claimableEth[refundRecipient] += refund;
+        emit EthRefundDeferred(refundRecipient, refund);
     }
-}
+
+    }

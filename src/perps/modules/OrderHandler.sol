@@ -107,7 +107,6 @@ abstract contract OrderHandler is OrderValidation {
         (, CfdTypes.Order memory order) = _pendingOrder(orderId);
 
         _executePendingOrder(orderId, order, update.executionPrice, update.oraclePublishTime, executionContext, true);
-        _sendEth(msg.sender, msg.value - update.pythFee);
     }
 
     function _executeOrderBatch(
@@ -149,8 +148,6 @@ abstract contract OrderHandler is OrderValidation {
                 break;
             }
         }
-
-        _sendEth(msg.sender, msg.value - update.pythFee);
     }
 
     function _applyRouterConfig(
@@ -177,8 +174,7 @@ abstract contract OrderHandler is OrderValidation {
     function _updateMarkPrice(
         bytes[] calldata pythUpdateData
     ) internal {
-        OracleUpdateResult memory update = _prepareMarkRefreshOracle(pythUpdateData);
-        _sendEth(msg.sender, msg.value - update.pythFee);
+        _prepareMarkRefreshOracle(pythUpdateData);
     }
 
     function _executeLiquidation(
@@ -194,8 +190,6 @@ abstract contract OrderHandler is OrderValidation {
 
         _clearLiquidatedAccountOrders(account);
         _creditOrDeferLiquidationBounty(keeperBountyUsdc, update.executionPrice, update.oraclePublishTime);
-
-        _sendEth(msg.sender, msg.value - update.pythFee);
     }
 
     function _clearLiquidatedAccountOrders(

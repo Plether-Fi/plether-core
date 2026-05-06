@@ -140,16 +140,4 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
         }
     }
 
-    function _sendEth(
-        address to,
-        uint256 amount
-    ) internal override {
-        if (amount > 0) {
-            (bool ok,) = payable(to).call{value: amount}("");
-            if (!ok) {
-                OrderRouterAdmin(admin).creditClaimableEth{value: amount}(to, amount);
-            }
-        }
-    }
-
 }
