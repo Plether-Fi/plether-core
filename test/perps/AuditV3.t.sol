@@ -410,7 +410,7 @@ contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
 
 // ═══════════════════════════════════════════════════════════════════
 // H-02: Junior tranche ERC4626 wipeout hyper-dilution.
-//       When _absorbLoss wipes juniorPrincipal to 0, shares survive.
+//       When reconciliation wipes juniorPrincipal to 0, shares survive.
 //       A $1 deposit captures >99% ownership of the tranche.
 // ═══════════════════════════════════════════════════════════════════
 
