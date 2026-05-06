@@ -10,8 +10,8 @@ import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
 import {ICfdEngineAdminHost} from "./interfaces/ICfdEngineAdminHost.sol";
 import {ICfdEnginePlanner} from "./interfaces/ICfdEnginePlanner.sol";
 import {ICfdEngineSettlementHost} from "./interfaces/ICfdEngineSettlementHost.sol";
-import {ICfdEngineSettlementModule} from "./interfaces/ICfdEngineSettlementModule.sol";
-import {ICfdVault} from "./interfaces/ICfdVault.sol";
+import {ICfdEngineSettlementSidecar} from "./interfaces/ICfdEngineSettlementSidecar.sol";
+import {IHousePool} from "./interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "./interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
 import {IWithdrawGuard} from "./interfaces/IWithdrawGuard.sol";
@@ -65,7 +65,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     }
 
     struct ProtocolAccountingView {
-        uint256 vaultAssetsUsdc;
+        uint256 poolAssetsUsdc;
         uint256 maxLiabilityUsdc;
         uint256 withdrawalReservedUsdc;
         uint256 freeUsdc;
@@ -149,9 +149,9 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
 
     IERC20 public immutable USDC;
     IMarginClearinghouse public immutable clearinghouse;
-    ICfdVault public vault;
+    IHousePool public pool;
     ICfdEnginePlanner public planner;
-    ICfdEngineSettlementModule public settlementModule;
+    ICfdEngineSettlementSidecar public settlementSidecar;
     address public admin;
 
     // ==========================================
@@ -182,16 +182,16 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     uint256 public engineMarkStalenessLimit = 60;
     uint256 public executionFeeBps = 4;
     error CfdEngine__Unauthorized();
-    error CfdEngine__VaultAlreadySet();
+    error CfdEngine__PoolAlreadySet();
     error CfdEngine__RouterAlreadySet();
     error CfdEngine__DependenciesAlreadySet();
     error CfdEngine__NoFeesToWithdraw();
     error CfdEngine__NoDeferredTraderCredit();
-    error CfdEngine__InsufficientVaultLiquidity();
+    error CfdEngine__InsufficientPoolLiquidity();
     error CfdEngine__NoDeferredKeeperCredit();
     error CfdEngine__MustCloseOpposingPosition();
     error CfdEngine__CarryExceedsMargin();
-    error CfdEngine__VaultSolvencyExceeded();
+    error CfdEngine__PoolSolvencyExceeded();
     error CfdEngine__MarginDrainedByFees();
     error CfdEngine__CloseSizeExceedsPosition();
     error CfdEngine__NoPositionToLiquidate();
@@ -307,17 +307,17 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         address account
     ) internal returns (uint256 claimAmountUsdc) {
         claimAmountUsdc = CashPriorityLib.availableCashForDeferredBeneficiaryClaim(
-            vault.totalAssets(),
+            pool.totalAssets(),
             accumulatedFeesUsdc,
             totalDeferredTraderCreditUsdc,
             totalDeferredKeeperCreditUsdc,
             amount
         );
         if (claimAmountUsdc == 0) {
-            revert CfdEngine__InsufficientVaultLiquidity();
+            revert CfdEngine__InsufficientPoolLiquidity();
         }
 
-        vault.payOut(address(clearinghouse), claimAmountUsdc);
+        pool.payOut(address(clearinghouse), claimAmountUsdc);
         clearinghouse.settleUsdc(account, int256(claimAmountUsdc));
     }
 
@@ -346,8 +346,8 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         _;
     }
 
-    modifier onlySettlementModule() {
-        if (msg.sender != address(settlementModule)) {
+    modifier onlySettlementSidecar() {
+        if (msg.sender != address(settlementSidecar)) {
             revert CfdEngine__Unauthorized();
         }
         _;
@@ -377,34 +377,34 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         riskParams = _riskParams;
     }
 
-    /// @notice One-time setter for planner, settlement module, and admin sidecars.
+    /// @notice One-time setter for planner, settlement sidecar, and admin sidecars.
     function setDependencies(
         address planner_,
-        address settlementModule_,
+        address settlementSidecar_,
         address admin_
     ) external onlyOwner {
-        if (planner_ == address(0) || settlementModule_ == address(0) || admin_ == address(0)) {
+        if (planner_ == address(0) || settlementSidecar_ == address(0) || admin_ == address(0)) {
             revert CfdEngine__ZeroAddress();
         }
-        if (address(planner) != address(0) || address(settlementModule) != address(0) || admin != address(0)) {
+        if (address(planner) != address(0) || address(settlementSidecar) != address(0) || admin != address(0)) {
             revert CfdEngine__DependenciesAlreadySet();
         }
         planner = ICfdEnginePlanner(planner_);
-        settlementModule = ICfdEngineSettlementModule(settlementModule_);
+        settlementSidecar = ICfdEngineSettlementSidecar(settlementSidecar_);
         admin = admin_;
     }
 
-    /// @notice One-time setter for the HousePool vault backing all positions
-    function setVault(
-        address _vault
+    /// @notice One-time setter for the HousePool backing all positions
+    function setPool(
+        address _pool
     ) external onlyOwner {
-        if (_vault == address(0)) {
+        if (_pool == address(0)) {
             revert CfdEngine__ZeroAddress();
         }
-        if (address(vault) != address(0)) {
-            revert CfdEngine__VaultAlreadySet();
+        if (address(pool) != address(0)) {
+            revert CfdEngine__PoolAlreadySet();
         }
-        vault = ICfdVault(_vault);
+        pool = IHousePool(_pool);
     }
 
     /// @notice One-time setter for the authorized OrderRouter
@@ -420,14 +420,14 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         orderRouter = _router;
     }
 
-    /// @notice Withdraws accumulated execution fees from the vault to a recipient.
+    /// @notice Withdraws accumulated execution fees from the pool to a recipient.
     function withdrawFees(
         address recipient
     ) external onlyOwner {
         withdrawFees(recipient, accumulatedFeesUsdc);
     }
 
-    /// @notice Withdraws up to `amountUsdc` of accumulated execution fees from the vault to a recipient.
+    /// @notice Withdraws up to `amountUsdc` of accumulated execution fees from the pool to a recipient.
     function withdrawFees(
         address recipient,
         uint256 amountUsdc
@@ -441,14 +441,14 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         }
         uint256 withdrawalUsdc = amountUsdc < fees ? amountUsdc : fees;
         if (!_canWithdrawProtocolFees(withdrawalUsdc)) {
-            revert CfdEngine__InsufficientVaultLiquidity();
+            revert CfdEngine__InsufficientPoolLiquidity();
         }
         accumulatedFeesUsdc = fees - withdrawalUsdc;
-        vault.payOut(recipient, withdrawalUsdc);
+        pool.payOut(recipient, withdrawalUsdc);
         _assertPostSolvency();
     }
 
-    /// @notice Pulls router-custodied cancellation fees into the vault and books them as protocol revenue.
+    /// @notice Pulls router-custodied cancellation fees into the pool and books them as protocol revenue.
     function absorbRouterCancellationFee(
         uint256 amountUsdc
     ) external onlyRouter {
@@ -456,12 +456,12 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
             return;
         }
 
-        USDC.safeTransferFrom(msg.sender, address(vault), amountUsdc);
-        vault.recordProtocolInflow(amountUsdc);
+        USDC.safeTransferFrom(msg.sender, address(pool), amountUsdc);
+        pool.recordProtocolInflow(amountUsdc);
         accumulatedFeesUsdc += amountUsdc;
     }
 
-    /// @notice Books router-delivered protocol-owned inflow as protocol fees after the router has already funded the vault.
+    /// @notice Books router-delivered protocol-owned inflow as protocol fees after the router has already funded the pool.
     function recordRouterProtocolFee(
         uint256 amountUsdc
     ) external onlyRouter {
@@ -583,7 +583,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     }
 
     /// @notice Claims deferred trader credit balance into the clearinghouse.
-    /// @dev The claim can be partial if current vault cash is insufficient. Funds are credited to the
+    /// @dev The claim can be partial if current pool cash is insufficient. Funds are credited to the
     ///      clearinghouse first, so beneficiaries access them through the normal account-balance path.
     ///      Carry is checkpointed before the settlement-basis change using a fresh mark when available,
     ///      otherwise the cached stored mark is used.
@@ -608,7 +608,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         emit DeferredTraderCreditClaimed(account, claimAmountUsdc);
     }
 
-    /// @notice Claims previously deferred keeper credit when the vault has replenished cash.
+    /// @notice Claims previously deferred keeper credit when the pool has replenished cash.
     /// @dev Deferred keeper value always settles to clearinghouse credit for the recorded keeper address-derived account.
     function claimDeferredKeeperCredit() external nonReentrant {
         address beneficiary = msg.sender;
@@ -630,7 +630,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         emit DeferredKeeperCreditClaimed(beneficiary, claimAmountUsdc);
     }
 
-    /// @notice Records keeper credit that could not be serviced immediately because vault cash was unavailable.
+    /// @notice Records keeper credit that could not be serviced immediately because pool cash was unavailable.
     function recordDeferredKeeperCredit(
         address keeper,
         uint256 amountUsdc
@@ -672,7 +672,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
             isOracleFrozen(),
             isFadWindow(),
             engineMarkStalenessLimit,
-            address(vault) == address(0) ? 0 : vault.markStalenessLimit(),
+            address(pool) == address(0) ? 0 : pool.markStalenessLimit(),
             0,
             0,
             fadMaxStaleness
@@ -748,9 +748,9 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         if (amount > badDebt) {
             revert CfdEngine__BadDebtTooLarge();
         }
-        USDC.safeTransferFrom(msg.sender, address(vault), amount);
-        vault.recordClaimantInflow(
-            amount, ICfdVault.ClaimantInflowKind.Recapitalization, ICfdVault.ClaimantInflowCashMode.CashArrived
+        USDC.safeTransferFrom(msg.sender, address(pool), amount);
+        pool.recordClaimantInflow(
+            amount, IHousePool.ClaimantInflowKind.Recapitalization, IHousePool.ClaimantInflowCashMode.CashArrived
         );
         accumulatedBadDebtUsdc = badDebt - amount;
         emit BadDebtCleared(amount, accumulatedBadDebtUsdc);
@@ -884,16 +884,16 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     function processOrderTyped(
         CfdTypes.Order memory order,
         uint256 currentOraclePrice,
-        uint256 vaultDepthUsdc,
+        uint256 poolDepthUsdc,
         uint64 publishTime
     ) external onlyRouter nonReentrant {
-        _processOrder(order, currentOraclePrice, vaultDepthUsdc, publishTime);
+        _processOrder(order, currentOraclePrice, poolDepthUsdc, publishTime);
     }
 
     function _processOrder(
         CfdTypes.Order memory order,
         uint256 currentOraclePrice,
-        uint256 vaultDepthUsdc,
+        uint256 poolDepthUsdc,
         uint64 publishTime
     ) internal {
         if (publishTime < lastMarkTime) {
@@ -901,8 +901,8 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         }
 
         CfdEnginePlanTypes.RawSnapshot memory snap =
-            _buildRawSnapshot(order.account, currentOraclePrice, vaultDepthUsdc, publishTime);
-        snap.vaultCashUsdc = vault.totalAssets();
+            _buildRawSnapshot(order.account, currentOraclePrice, poolDepthUsdc, publishTime);
+        snap.poolCashUsdc = pool.totalAssets();
 
         if (order.isClose) {
             CfdEnginePlanTypes.CloseDelta memory delta = planner.planClose(snap, order, currentOraclePrice, publishTime);
@@ -951,8 +951,8 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
             return;
         }
 
-        if (_canPayFreshVaultPayout(amountUsdc)) {
-            vault.payOut(address(clearinghouse), amountUsdc);
+        if (_canPayFreshPoolPayout(amountUsdc)) {
+            pool.payOut(address(clearinghouse), amountUsdc);
             clearinghouse.settleUsdc(account, int256(amountUsdc));
         } else {
             _enqueueOrAccrueDeferredTraderPayout(account, amountUsdc);
@@ -976,25 +976,25 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
             _increaseDeferredLiability(deferredKeeperCreditUsdc[keeper], totalDeferredKeeperCreditUsdc, amountUsdc);
     }
 
-    function _canPayFreshVaultPayout(
+    function _canPayFreshPoolPayout(
         uint256 amountUsdc
     ) internal view returns (bool) {
-        return amountUsdc <= _freshVaultReservation().freeCashUsdc;
+        return amountUsdc <= _freshPoolReservation().freeCashUsdc;
     }
 
     function _canWithdrawProtocolFees(
         uint256 amountUsdc
     ) internal view returns (bool) {
-        return amountUsdc <= _freshVaultReservation().protocolFeeWithdrawalUsdc;
+        return amountUsdc <= _freshPoolReservation().protocolFeeWithdrawalUsdc;
     }
 
-    function _availableCashForFreshVaultPayouts() internal view returns (uint256) {
-        return _freshVaultReservation().freeCashUsdc;
+    function _availableCashForFreshPoolPayouts() internal view returns (uint256) {
+        return _freshPoolReservation().freeCashUsdc;
     }
 
-    function _freshVaultReservation() internal view returns (CashPriorityLib.SeniorCashReservation memory reservation) {
+    function _freshPoolReservation() internal view returns (CashPriorityLib.SeniorCashReservation memory reservation) {
         return CashPriorityLib.reserveFreshPayouts(
-            vault.totalAssets(), accumulatedFeesUsdc, totalDeferredTraderCreditUsdc, totalDeferredKeeperCreditUsdc
+            pool.totalAssets(), accumulatedFeesUsdc, totalDeferredTraderCreditUsdc, totalDeferredKeeperCreditUsdc
         );
     }
 
@@ -1045,16 +1045,16 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
 
     /// @notice Liquidates an undercollateralized position.
     ///         Surplus equity (after bounty) is returned to the user.
-    ///         In bad-debt cases (equity < bounty), all remaining margin is seized by the vault.
+    ///         In bad-debt cases (equity < bounty), all remaining margin is seized by the pool.
     /// @param account Clearinghouse account that owns the position
     /// @param currentOraclePrice Pyth oracle price (8 decimals), clamped to CAP_PRICE
-    /// @param vaultDepthUsdc HousePool total assets used for post-op solvency checks and payout affordability
+    /// @param poolDepthUsdc HousePool total assets used for post-op solvency checks and payout affordability
     /// @param publishTime Pyth publish timestamp, stored as lastMarkTime
     /// @return keeperBountyUsdc Bounty paid to the liquidation keeper (USDC, 6 decimals)
     function liquidatePosition(
         address account,
         uint256 currentOraclePrice,
-        uint256 vaultDepthUsdc,
+        uint256 poolDepthUsdc,
         uint64 publishTime
     ) external onlyRouter nonReentrant returns (uint256 keeperBountyUsdc) {
         if (publishTime < lastMarkTime) {
@@ -1065,8 +1065,8 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         }
 
         CfdEnginePlanTypes.RawSnapshot memory snap =
-            _buildRawSnapshot(account, currentOraclePrice, vaultDepthUsdc, publishTime);
-        snap.vaultCashUsdc = vault.totalAssets();
+            _buildRawSnapshot(account, currentOraclePrice, poolDepthUsdc, publishTime);
+        snap.poolCashUsdc = pool.totalAssets();
         CfdEnginePlanTypes.LiquidationDelta memory delta =
             planner.planLiquidation(snap, currentOraclePrice, publishTime);
 
@@ -1095,7 +1095,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
 
     function _buildAdjustedSolvencyState() internal view returns (SolvencyAccountingLib.SolvencyState memory) {
         return SolvencyAccountingLib.buildSolvencyState(
-            vault.totalAssets(),
+            pool.totalAssets(),
             accumulatedFeesUsdc,
             _maxLiability(),
             totalDeferredTraderCreditUsdc,
@@ -1123,7 +1123,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     function _buildRawSnapshot(
         address account,
         uint256,
-        uint256 vaultDepthUsdc,
+        uint256 poolDepthUsdc,
         uint64
     ) internal view returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
         snap.account = account;
@@ -1137,8 +1137,8 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         snap.bullSide = _copySideSnapshot(bullState);
         snap.bearSide = _copySideSnapshot(bearState);
 
-        snap.vaultAssetsUsdc = vaultDepthUsdc;
-        snap.vaultCashUsdc = vaultDepthUsdc;
+        snap.poolAssetsUsdc = poolDepthUsdc;
+        snap.poolCashUsdc = poolDepthUsdc;
 
         snap.accountBuckets = clearinghouse.getAccountUsdcBuckets(account);
         snap.lockedBuckets = clearinghouse.getLockedMarginBuckets(account);
@@ -1220,7 +1220,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     function settlementApplyCarryAndMark(
         uint256 newMarkPrice,
         uint64 newMarkTime
-    ) external onlySettlementModule {
+    ) external onlySettlementSidecar {
         _applyCarryAndMark(newMarkPrice, newMarkTime);
     }
 
@@ -1228,7 +1228,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         CfdTypes.Side side,
         uint256 marginBefore,
         uint256 marginAfter
-    ) external onlySettlementModule {
+    ) external onlySettlementSidecar {
         _syncTotalSideMargin(side, marginBefore, marginAfter);
     }
 
@@ -1237,7 +1237,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         int256 maxProfitDelta,
         int256 openInterestDelta,
         int256 entryNotionalDelta
-    ) external onlySettlementModule {
+    ) external onlySettlementSidecar {
         SideState storage sideState = _sideState(side);
         if (maxProfitDelta >= 0) {
             sideState.maxProfitUsdc += uint256(maxProfitDelta);
@@ -1259,33 +1259,33 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     function settlementConsumeDeferredTraderPayout(
         address account,
         uint256 amountUsdc
-    ) external onlySettlementModule {
+    ) external onlySettlementSidecar {
         _consumeDeferredTraderPayout(account, amountUsdc);
     }
 
     function settlementRecordDeferredTraderPayout(
         address account,
         uint256 amountUsdc
-    ) external onlySettlementModule {
+    ) external onlySettlementSidecar {
         _payOrRecordDeferredTraderPayout(account, amountUsdc);
     }
 
     function settlementAccumulateFees(
         uint256 amountUsdc
-    ) external onlySettlementModule {
+    ) external onlySettlementSidecar {
         accumulatedFeesUsdc += amountUsdc;
     }
 
     function settlementAccumulateBadDebt(
         uint256 amountUsdc
-    ) external onlySettlementModule {
+    ) external onlySettlementSidecar {
         accumulatedBadDebtUsdc += amountUsdc;
     }
 
     function settlementWritePosition(
         address account,
         CfdEngineSettlementTypes.PositionState calldata position
-    ) external onlySettlementModule {
+    ) external onlySettlementSidecar {
         StoredPosition storage pos = _positions[account];
         pos.size = position.size;
         pos.entryPrice = position.entryPrice;
@@ -1298,7 +1298,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
 
     function settlementDeletePosition(
         address account
-    ) external onlySettlementModule {
+    ) external onlySettlementSidecar {
         delete _positions[account];
     }
 
@@ -1312,7 +1312,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
             _realizeCarryFromSettlement(delta.account, pos, delta.price, _genericReachableCollateralUsdc(delta.account));
             currentPosition = _loadPosition(delta.account);
         }
-        settlementModule.executeOpen(ICfdEngineSettlementHost(address(this)), delta, currentPosition, publishTime);
+        settlementSidecar.executeOpen(ICfdEngineSettlementHost(address(this)), delta, currentPosition, publishTime);
         _assertPostSolvency();
 
         emit PositionOpened(delta.account, delta.posSide, delta.sizeDelta, delta.price, delta.marginDeltaUsdc);
@@ -1325,7 +1325,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         StoredPosition storage pos = _positions[delta.account];
         CfdTypes.Side marginSide = pos.side;
         CfdTypes.Position memory currentPosition = _loadPosition(delta.account);
-        settlementModule.executeClose(ICfdEngineSettlementHost(address(this)), delta, currentPosition, publishTime);
+        settlementSidecar.executeClose(ICfdEngineSettlementHost(address(this)), delta, currentPosition, publishTime);
         emit PositionClosed(delta.account, marginSide, delta.sizeDelta, delta.price, delta.realizedPnlUsdc);
 
         unsettledCarryUsdc[delta.account] = 0;
@@ -1338,7 +1338,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         uint64 publishTime
     ) internal returns (uint256 keeperBountyUsdc) {
         keeperBountyUsdc =
-            settlementModule.executeLiquidation(ICfdEngineSettlementHost(address(this)), delta, publishTime);
+            settlementSidecar.executeLiquidation(ICfdEngineSettlementHost(address(this)), delta, publishTime);
         emit PositionLiquidated(delta.account, delta.side, delta.posSize, delta.price, keeperBountyUsdc);
 
         unsettledCarryUsdc[delta.account] = 0;
@@ -1348,14 +1348,14 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
 
     function _enterDegradedModeIfInsolvent(
         address account,
-        uint256 pendingVaultPayoutUsdc
+        uint256 pendingPoolPayoutUsdc
     ) internal {
         if (degradedMode) {
             return;
         }
         SolvencyAccountingLib.SolvencyState memory state = _buildAdjustedSolvencyState();
         uint256 effectiveAssetsAfter =
-            SolvencyAccountingLib.effectiveAssetsAfterPendingPayout(state, pendingVaultPayoutUsdc);
+            SolvencyAccountingLib.effectiveAssetsAfterPendingPayout(state, pendingPoolPayoutUsdc);
         if (effectiveAssetsAfter < state.maxLiabilityUsdc) {
             degradedMode = true;
             emit DegradedModeEntered(effectiveAssetsAfter, state.maxLiabilityUsdc, account);
@@ -1480,9 +1480,9 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         }
 
         if (realizedCarryUsdc > 0) {
-            USDC.safeTransfer(address(vault), realizedCarryUsdc);
-            vault.recordClaimantInflow(
-                realizedCarryUsdc, ICfdVault.ClaimantInflowKind.Revenue, ICfdVault.ClaimantInflowCashMode.CashArrived
+            USDC.safeTransfer(address(pool), realizedCarryUsdc);
+            pool.recordClaimantInflow(
+                realizedCarryUsdc, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.CashArrived
             );
         }
         emit CarryRealized(
@@ -1497,7 +1497,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
             isOracleFrozen(),
             isFadWindow(),
             engineMarkStalenessLimit,
-            address(vault) == address(0) ? 0 : vault.markStalenessLimit(),
+            address(pool) == address(0) ? 0 : pool.markStalenessLimit(),
             0,
             0,
             fadMaxStaleness
@@ -1569,13 +1569,13 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     }
 
     function _getProtocolPhase() internal view returns (ICfdEngine.ProtocolPhase) {
-        if (address(vault) == address(0) || orderRouter == address(0)) {
+        if (address(pool) == address(0) || orderRouter == address(0)) {
             return ICfdEngine.ProtocolPhase.Configuring;
         }
         if (degradedMode) {
             return ICfdEngine.ProtocolPhase.Degraded;
         }
-        if (!vault.canIncreaseRisk()) {
+        if (!pool.canIncreaseRisk()) {
             return ICfdEngine.ProtocolPhase.Configuring;
         }
         return ICfdEngine.ProtocolPhase.Active;

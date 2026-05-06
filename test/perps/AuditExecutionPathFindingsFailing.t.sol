@@ -59,7 +59,7 @@ contract AuditExecutionPathFindingsFailing_EthRefundFallback is BasePerpTest {
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         mockPyth = new MockPyth();
 

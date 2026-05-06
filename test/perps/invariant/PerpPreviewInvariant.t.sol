@@ -30,7 +30,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
     function setUp() public override {
         super.setUp();
 
-        handler = new PerpAccountingHandler(usdc, engine, clearinghouse, router, vault);
+        handler = new PerpAccountingHandler(usdc, engine, clearinghouse, router, housePool);
         handler.seedActors(50_000e6, 100_000e6);
 
         bytes4[] memory selectors = new bytes4[](10);
@@ -147,7 +147,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
 
     function invariant_PreviewLiquidation_EqualsSimulateLiquidationAtCanonicalDepth() public view {
         uint256 oraclePrice = _previewOraclePrice();
-        uint256 canonicalDepth = vault.totalAssets();
+        uint256 canonicalDepth = housePool.totalAssets();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
@@ -262,7 +262,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
         if (attempt.withdrawPasses) {
             assertTrue(
                 attempt.checkWithdrawPasses,
-                "Successful withdraws must only happen when checkWithdraw also passes under randomized funding/time evolution"
+                "Successful withdraws must only happen when checkWithdraw also passes under randomized carry/time evolution"
             );
         }
         if (!attempt.checkWithdrawPasses) {

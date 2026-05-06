@@ -39,13 +39,13 @@ contract AuditValidFindingsFailing is BasePerpTest {
 
         // Move mark to 1e8 — both positions still open (no liquidation).
         // A is winning $50K, B is losing $50K but has only $1K margin.
-        // The vault has a live winner on the same side as an undercollateralized loser.
+        // The pool has a live winner on the same side as an undercollateralized loser.
         // The conservative O(1) MtM bound must not let that loser's uncollected debt net
         // the winner down to zero before liquidation realizes any collectible value.
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
-        uint256 mtm = _vaultMtmAdjustment();
+        uint256 mtm = _poolMtmAdjustment();
         assertEq(mtm, 100_000e6, "MtM should over-reserve rather than net uncollectible same-side losses");
     }
 

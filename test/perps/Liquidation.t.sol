@@ -149,7 +149,7 @@ contract LiquidationTest is BasePerpTest {
 
         // BULL loses when price rises. At $1.06:
         // PnL = 6000 * $0.06 = -$360. equity = posMargin - $360 < 0 → liquidatable.
-        // Bounty capped at posMargin (vault never pays more than it recovers).
+        // Bounty capped at posMargin (pool never pays more than it recovers).
         bytes[] memory pythData = new bytes[](1);
         pythData[0] = abi.encode(1.06e8);
 
@@ -161,8 +161,8 @@ contract LiquidationTest is BasePerpTest {
 
         // Proportional bounty (0.10% of ~$6360 = ~$6.36) stays below posMargin, so the cap does not bind.
         assertGt(bounty, 0, "Keeper still incentivized on negative-equity liquidation");
-        assertLe(bounty, posMargin, "Bounty never exceeds margin vault can seize");
-        assertGe(usdc.balanceOf(address(pool)), poolBefore, "Vault never pays more than it seizes");
+        assertLe(bounty, posMargin, "Bounty never exceeds margin pool can seize");
+        assertGe(usdc.balanceOf(address(pool)), poolBefore, "Pool never pays more than it seizes");
     }
 
     function obsolete_LiquidationEquity_IncludesLegacySpread() public {
@@ -235,7 +235,7 @@ contract LiquidationTest is BasePerpTest {
 
         uint256 userSeized = chBefore - chAfter;
         assertEq(
-            poolAfter, poolBefore + userSeized - bounty, "Vault intermediates: receives seized margin, pays bounty"
+            poolAfter, poolBefore + userSeized - bounty, "Pool intermediates: receives seized margin, pays bounty"
         );
     }
 

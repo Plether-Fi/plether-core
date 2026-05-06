@@ -1,6 +1,6 @@
 # Perps Pre-Audit Guide
 
-This document is the shortest path for an auditor to reconstruct intended behavior without inferring policy from multiple modules.
+This document is the shortest path for an auditor to reconstruct intended behavior without inferring policy from multiple components.
 
 Read this with:
 
@@ -51,13 +51,13 @@ Before trusting a test as a source of truth, ask:
 
 | Contract | Privileged caller set | Notes |
 |----------|------------------------|-------|
-| `CfdEngine` settlement host hooks | `settlementModule` only | settlement module itself is engine-gated |
+| `CfdEngine` settlement host hooks | `settlementSidecar` only | settlement sidecar itself is engine-gated |
 | `CfdEngine.processOrderTyped` / `liquidatePosition` / fee bookkeeping | `orderRouter` only | router is the external execution boundary |
-| `MarginClearinghouse` operator paths | `engine`, `orderRouter`, `settlementModule` | router for queue escrow, engine/module for settlement |
-| `HousePool.payOut` / `recordProtocolInflow` | `engine`, `orderRouter`, `settlementModule` | payout/inflow authority is intentionally narrow |
-| `HousePool.recordClaimantInflow` | `engine`, `settlementModule` | claimant-owned revenue/recap routing only |
+| `MarginClearinghouse` operator paths | `engine`, `orderRouter`, `settlementSidecar` | router for queue escrow, engine/sidecar for settlement |
+| `HousePool.payOut` / `recordProtocolInflow` | `engine`, `orderRouter`, `settlementSidecar` | payout/inflow authority is intentionally narrow |
+| `HousePool.recordClaimantInflow` | `engine`, `settlementSidecar` | claimant-owned revenue/recap routing only |
 
-Any new helper/module contract that can reach these sets should be treated as security-critical and explicitly access-controlled.
+Any new helper/sidecar contract that can reach these sets should be treated as security-critical and explicitly access-controlled.
 
 ### Order lifecycle state machine
 
@@ -129,8 +129,8 @@ Any new helper/module contract that can reach these sets should be treated as se
 | Other locked margin | Trader, but reserved to queued intents until an explicit terminal path unlocks it | clearinghouse reservations | router commit/release/consume | no for ordinary close reachability; only available where terminal settlement explicitly unlocks/consumes it | indirectly and only through explicit terminal settlement plans | no | no |
 | Committed order margin | Trader but reserved to one order | clearinghouse reservation keyed by `orderId` | router commit/execute/fail | no | no | no | no |
 | Router execution bounty escrow | Trader-funded keeper escrow | `OrderRouter` balance + order record | router commit/distribute/refund/forfeit | no | no | no | no |
-| Deferred trader credit | Trader senior claim on vault liquidity | `CfdEngine.deferredTraderCreditUsdc` | engine create/service | no | yes, as senior liability | yes | yes |
-| Deferred keeper credit | Keeper senior claim on vault liquidity | `CfdEngine.deferredKeeperCreditUsdc` | engine create/service | no | yes, as senior liability | yes | yes |
+| Deferred trader credit | Trader senior claim on pool liquidity | `CfdEngine.deferredTraderCreditUsdc` | engine create/service | no | yes, as senior liability | yes | yes |
+| Deferred keeper credit | Keeper senior claim on pool liquidity | `CfdEngine.deferredKeeperCreditUsdc` | engine create/service | no | yes, as senior liability | yes | yes |
 | Unsettled carry | Protocol-recorded carry debt on an account | `CfdEngine.unsettledCarryUsdc[account]` | engine carry-checkpoint paths | no | yes, as carry drag on account equity | no | no |
 | Accumulated protocol fees | Protocol/treasury | `CfdEngine.accumulatedFeesUsdc` + canonical pool cash | engine accrual, owner withdraw | no | reduces net physical assets | yes | yes |
 | Accumulated bad debt | Protocol loss / LP impairment | `CfdEngine.accumulatedBadDebtUsdc` | engine realization, bad debt clear path | n/a | yes, as realized deficit | yes | yes |
@@ -153,14 +153,14 @@ Reachability note:
 
 ### Deferred trader credit servicing
 
-- Liveness problem: profitable closes and liquidation payouts should not revert only because the vault is temporarily illiquid.
+- Liveness problem: profitable closes and liquidation payouts should not revert only because the HousePool is temporarily illiquid.
 - Chosen tradeoff: record senior deferred trader/keeper credit claims instead of reverting the state transition.
 - New risk: payout servicing becomes asynchronous and must respect seniority.
 - Protecting invariant: deferred liabilities remain senior in withdrawal, solvency, and reconciliation accounting.
 
 ### Fail-soft liquidation bounty servicing
 
-- Liveness problem: liquidation should not fail solely because immediate vault cash is unavailable.
+- Liveness problem: liquidation should not fail solely because immediate pool cash is unavailable.
 - Chosen tradeoff: keeper bounty may become deferred keeper credit.
 - New risk: keeper payment timing becomes state-dependent.
 - Protecting invariant: liquidation still completes, and the keeper credit claim remains senior until paid.
@@ -196,7 +196,7 @@ Reachability note:
 4. Planner computes canonical close settlement, including fees and pending carry.
 5. Engine realizes carry and applies the close using the planner's exact loss/gain result.
 6. Clearinghouse unlocks/consumes the relevant trader buckets.
-7. If vault cash is available, the trader receives immediate settlement.
+7. If pool cash is available, the trader receives immediate settlement.
 8. Router bounty escrow is distributed and the order becomes terminal.
 
 ### Losing partial close
@@ -271,4 +271,4 @@ Use the suites below as the highest-signal audit companions.
 | Stale-mark / reconcile behavior | `test/perps/HousePool.t.sol`, `test/perps/CfdEngine.t.sol`, `test/perps/AuditV2.t.sol`, `test/perps/AuditV3.t.sol` |
 | Audit-history regressions | `test/perps/AuditCurrentFindingsVerification.t.sol`, `test/perps/AuditFindings.t.sol`, `test/perps/AuditV2.t.sol`, `test/perps/AuditV3.t.sol` |
 
-Historical or obsolete regression names that still mention legacy spread/funding are audit-history artifacts, not live accounting concepts. When those names appear, trust the surrounding comments and the current accounting docs rather than the historical label.
+Historical or obsolete regression names that still mention legacy spread labels are audit-history artifacts, not live accounting concepts. When those names appear, trust the surrounding comments and the current accounting docs rather than the historical label.

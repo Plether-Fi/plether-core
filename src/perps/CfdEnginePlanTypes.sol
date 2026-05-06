@@ -51,8 +51,8 @@ library CfdEnginePlanTypes {
         SideSnapshot bullSide;
         SideSnapshot bearSide;
 
-        uint256 vaultAssetsUsdc;
-        uint256 vaultCashUsdc;
+        uint256 poolAssetsUsdc;
+        uint256 poolCashUsdc;
 
         IMarginClearinghouse.AccountUsdcBuckets accountBuckets;
         IMarginClearinghouse.LockedMarginBuckets lockedBuckets;
@@ -116,7 +116,7 @@ library CfdEnginePlanTypes {
         int256 tradeCostUsdc;
         uint256 marginDeltaUsdc;
         int256 netMarginChange;
-        uint256 vaultRebatePayoutUsdc;
+        uint256 poolRebatePayoutUsdc;
 
         uint256 executionFeeUsdc;
         uint256 pendingCarryUsdc;

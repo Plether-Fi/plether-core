@@ -37,7 +37,7 @@ interface ICfdEngine is ICfdEngineTypes {
     function processOrderTyped(
         CfdTypes.Order memory order,
         uint256 currentOraclePrice,
-        uint256 vaultDepthUsdc,
+        uint256 poolDepthUsdc,
         uint64 publishTime
     ) external;
 
@@ -61,7 +61,7 @@ interface ICfdEngine is ICfdEngineTypes {
         uint256 amountUsdc
     ) external;
 
-    /// @notice Books router-delivered protocol-owned inflow as accumulated fees after the router has already paid the vault.
+    /// @notice Books router-delivered protocol-owned inflow as accumulated fees after the router has already paid the pool.
     function recordRouterProtocolFee(
         uint256 amountUsdc
     ) external;
@@ -79,13 +79,13 @@ interface ICfdEngine is ICfdEngineTypes {
     /// @notice Liquidates an undercollateralized position, returns keeper bounty in USDC
     /// @param account          Account holding the position to liquidate
     /// @param currentOraclePrice Mark price from the oracle (8 decimals)
-    /// @param vaultDepthUsdc     Available vault liquidity (6 decimals)
+    /// @param poolDepthUsdc     Available pool liquidity (6 decimals)
     /// @param publishTime        Oracle publish timestamp
     /// @return keeperBountyUsdc  Bounty paid to the liquidation keeper (6 decimals)
     function liquidatePosition(
         address account,
         uint256 currentOraclePrice,
-        uint256 vaultDepthUsdc,
+        uint256 poolDepthUsdc,
         uint64 publishTime
     ) external returns (uint256 keeperBountyUsdc);
 
@@ -96,17 +96,17 @@ interface ICfdEngine is ICfdEngineTypes {
         uint256 reachableCollateralBasisUsdc
     ) external;
 
-    /// @notice Canonical liquidation preview using the vault's current accounted depth.
+    /// @notice Canonical liquidation preview using the pool's current accounted depth.
     function previewLiquidation(
         address account,
         uint256 oraclePrice
     ) external view returns (LiquidationPreview memory preview);
 
-    /// @notice Hypothetical liquidation simulation at a caller-supplied vault depth.
+    /// @notice Hypothetical liquidation simulation at a caller-supplied pool depth.
     function simulateLiquidation(
         address account,
         uint256 oraclePrice,
-        uint256 vaultDepthUsdc
+        uint256 poolDepthUsdc
     ) external view returns (LiquidationPreview memory preview);
 
     /// @notice Accumulated execution fees awaiting withdrawal (6 decimals)
@@ -172,7 +172,7 @@ interface ICfdEngine is ICfdEngineTypes {
     ) external view returns (bool);
 
     /// @notice High-level protocol lifecycle used by external status consumers.
-    ///         `Active` means the engine is wired and the vault has enabled live risk-taking.
+    ///         `Active` means the engine is wired and the HousePool has enabled live risk-taking.
     enum ProtocolPhase {
         Configuring,
         Active,

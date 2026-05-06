@@ -5,7 +5,6 @@ import {CfdEngineProtocolLens} from "./CfdEngineProtocolLens.sol";
 import {HousePoolEngineViewTypes} from "./interfaces/HousePoolEngineViewTypes.sol";
 import {ICfdEngineCore} from "./interfaces/ICfdEngineCore.sol";
 import {ICfdEngineProtocolLens} from "./interfaces/ICfdEngineProtocolLens.sol";
-import {ICfdVault} from "./interfaces/ICfdVault.sol";
 import {IHousePool} from "./interfaces/IHousePool.sol";
 import {IPerpsLPActions} from "./interfaces/IPerpsLPActions.sol";
 import {ITrancheVaultBootstrap} from "./interfaces/ITrancheVaultBootstrap.sol";
@@ -28,11 +27,11 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 /// @notice Tranched house pool. Senior tranche gets fixed-rate yield with last-loss protection.
 ///         Junior tranche absorbs first loss but captures surplus revenue.
 /// @custom:security-contact contact@plether.com
-contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
+contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
 
     using SafeERC20 for IERC20;
 
-    struct VaultLiquidityView {
+    struct PoolLiquidityView {
         uint256 totalAssetsUsdc;
         uint256 freeUsdc;
         uint256 withdrawalReservedUsdc;
@@ -89,7 +88,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
     uint256 public lastSeniorYieldCheckpointTime;
     PoolConfig internal poolConfig;
     uint256 public constant MAX_FROZEN_LP_FEE_BPS = 1000;
-    bool public override(ICfdVault, IHousePool) isTradingActive;
+    bool public override isTradingActive;
     bool public seniorSeedInitialized;
     bool public juniorSeedInitialized;
 
@@ -141,8 +140,8 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
     event ProtocolInflowAccounted(address indexed caller, uint256 amountUsdc, uint256 accountedAssetsUsdc);
     event ClaimantInflowAccounted(
         address indexed caller,
-        ICfdVault.ClaimantInflowKind kind,
-        ICfdVault.ClaimantInflowCashMode cashMode,
+        IHousePool.ClaimantInflowKind kind,
+        IHousePool.ClaimantInflowCashMode cashMode,
         uint256 amountUsdc
     );
     event UnassignedAssetsAssigned(
@@ -303,7 +302,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
     }
 
     // ==========================================
-    // ICfdVault INTERFACE
+    // IHousePool INTERFACE
     // ==========================================
 
     /// @notice Canonical economic USDC backing recognized by the pool.
@@ -318,11 +317,11 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         return HousePoolSeedLifecycleLib.isSeedLifecycleComplete(seniorSeedInitialized, juniorSeedInitialized);
     }
 
-    function hasSeedLifecycleStarted() public view override(ICfdVault, IHousePool) returns (bool) {
+    function hasSeedLifecycleStarted() public view override returns (bool) {
         return HousePoolSeedLifecycleLib.hasSeedLifecycleStarted(seniorSeedInitialized, juniorSeedInitialized);
     }
 
-    function canAcceptOrdinaryDeposits() public view override(ICfdVault, IHousePool) returns (bool) {
+    function canAcceptOrdinaryDeposits() public view override returns (bool) {
         return HousePoolSeedLifecycleLib.canAcceptOrdinaryDeposits(
             seniorSeedInitialized, juniorSeedInitialized, isTradingActive
         );
@@ -348,7 +347,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         );
     }
 
-    function canIncreaseRisk() public view override(ICfdVault, IHousePool) returns (bool) {
+    function canIncreaseRisk() public view override returns (bool) {
         return HousePoolSeedLifecycleLib.canIncreaseRisk(seniorSeedInitialized, juniorSeedInitialized, isTradingActive);
     }
 
@@ -404,14 +403,14 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         address recipient,
         uint256 amount
     ) external {
-        if (msg.sender != address(ENGINE) && msg.sender != orderRouter && msg.sender != ENGINE.settlementModule()) {
+        if (msg.sender != address(ENGINE) && msg.sender != orderRouter && msg.sender != ENGINE.settlementSidecar()) {
             revert HousePool__Unauthorized();
         }
         accountedAssets -= amount;
         USDC.safeTransfer(recipient, amount);
     }
 
-    /// @notice Accounts a legitimate protocol-owned inflow into canonical vault assets.
+    /// @notice Accounts a legitimate protocol-owned inflow into canonical pool assets.
     /// @dev Only the engine or order router may use this path. Unlike `accountExcess()`, this does
     ///      not require raw excess to exist: it is the explicit accounting hook for endogenous
     ///      protocol gains and may also be used to restore canonical accounting after a raw-balance
@@ -419,7 +418,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
     function recordProtocolInflow(
         uint256 amount
     ) external {
-        if (msg.sender != address(ENGINE) && msg.sender != orderRouter && msg.sender != ENGINE.settlementModule()) {
+        if (msg.sender != address(ENGINE) && msg.sender != orderRouter && msg.sender != ENGINE.settlementSidecar()) {
             revert HousePool__Unauthorized();
         }
         if (amount == 0) {
@@ -433,25 +432,25 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
     /// @dev Revenue and recapitalization remain distinct economic buckets, but share one API.
     function recordClaimantInflow(
         uint256 amount,
-        ICfdVault.ClaimantInflowKind kind,
-        ICfdVault.ClaimantInflowCashMode cashMode
+        IHousePool.ClaimantInflowKind kind,
+        IHousePool.ClaimantInflowCashMode cashMode
     ) external {
-        if (msg.sender != address(ENGINE) && msg.sender != ENGINE.settlementModule()) {
+        if (msg.sender != address(ENGINE) && msg.sender != ENGINE.settlementSidecar()) {
             revert HousePool__Unauthorized();
         }
         if (amount == 0) {
             return;
         }
 
-        if (kind == ICfdVault.ClaimantInflowKind.Recapitalization && msg.sender != address(ENGINE)) {
+        if (kind == IHousePool.ClaimantInflowKind.Recapitalization && msg.sender != address(ENGINE)) {
             revert HousePool__Unauthorized();
         }
 
-        if (cashMode == ICfdVault.ClaimantInflowCashMode.CashArrived) {
+        if (cashMode == IHousePool.ClaimantInflowCashMode.CashArrived) {
             accountedAssets += amount;
         }
 
-        if (kind == ICfdVault.ClaimantInflowKind.Recapitalization) {
+        if (kind == IHousePool.ClaimantInflowKind.Recapitalization) {
             _recordPendingClaimantInflow(kind, amount);
         } else if (seniorPrincipal + juniorPrincipal == 0) {
             _recordPendingClaimantInflow(kind, amount);
@@ -743,7 +742,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
 
     /// @notice Snapshot of pool liquidity, tranche principals, and oracle health for frontend consumption
     /// @return viewData Struct containing balances, reserves, and status flags
-    function getVaultLiquidityView() external view returns (VaultLiquidityView memory viewData) {
+    function getPoolLiquidityView() external view returns (PoolLiquidityView memory viewData) {
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot = _getHousePoolInputSnapshot();
         HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot = _getHousePoolStatusSnapshot();
         HousePoolAccountingLib.WithdrawalSnapshot memory withdrawalSnapshot =
@@ -1080,10 +1079,10 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
     }
 
     function _recordPendingClaimantInflow(
-        ICfdVault.ClaimantInflowKind kind,
+        IHousePool.ClaimantInflowKind kind,
         uint256 amount
     ) internal {
-        if (kind == ICfdVault.ClaimantInflowKind.Recapitalization) {
+        if (kind == IHousePool.ClaimantInflowKind.Recapitalization) {
             pendingRecapitalizationUsdc += amount;
         } else {
             pendingTradingRevenueUsdc += amount;

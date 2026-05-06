@@ -254,7 +254,7 @@ library CfdEnginePlanLib {
                 capPrice: effectiveSnap.capPrice,
                 preSkewUsdc: preSkewUsdc,
                 postSkewUsdc: postSkewUsdc,
-                vaultDepthUsdc: effectiveSnap.vaultAssetsUsdc,
+                poolDepthUsdc: effectiveSnap.poolAssetsUsdc,
                 executionFeeBps: effectiveSnap.executionFeeBps,
                 riskParams: effectiveSnap.riskParams
             })
@@ -272,7 +272,7 @@ library CfdEnginePlanLib {
         delta.tradeCostUsdc = openState.tradeCostUsdc;
         delta.marginDeltaUsdc = order.marginDelta;
         delta.netMarginChange = int256(order.marginDelta) - openState.tradeCostUsdc;
-        delta.vaultRebatePayoutUsdc = openState.tradeCostUsdc < 0 ? uint256(-openState.tradeCostUsdc) : 0;
+        delta.poolRebatePayoutUsdc = openState.tradeCostUsdc < 0 ? uint256(-openState.tradeCostUsdc) : 0;
 
         MarginClearinghouseAccountingLib.OpenCostPlan memory openCostPlan =
             MarginClearinghouseAccountingLib.planOpenCostApplication(
@@ -319,8 +319,8 @@ library CfdEnginePlanLib {
         }
 
         if (
-            effectiveSnap.vaultAssetsUsdc > 0
-                && ((postSkewUsdc * CfdMath.WAD) / effectiveSnap.vaultAssetsUsdc)
+            effectiveSnap.poolAssetsUsdc > 0
+                && ((postSkewUsdc * CfdMath.WAD) / effectiveSnap.poolAssetsUsdc)
                     > effectiveSnap.riskParams.maxSkewRatio
         ) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH;
@@ -347,8 +347,8 @@ library CfdEnginePlanLib {
         uint256 settlementBalanceUsdc = snap.accountBuckets.settlementBalanceUsdc - consumption.totalConsumedUsdc;
         snap.lockedBuckets.positionMarginUsdc -= consumption.activeMarginConsumedUsdc;
         snap.position.margin -= consumption.activeMarginConsumedUsdc;
-        snap.vaultAssetsUsdc += pendingCarryUsdc;
-        snap.vaultCashUsdc += pendingCarryUsdc;
+        snap.poolAssetsUsdc += pendingCarryUsdc;
+        snap.poolCashUsdc += pendingCarryUsdc;
 
         snap.accountBuckets = MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(
             settlementBalanceUsdc,
@@ -418,7 +418,7 @@ library CfdEnginePlanLib {
         int256 physicalAssetsDeltaUsdc = delta.tradeCostUsdc;
 
         SolvencyAccountingLib.SolvencyState memory currentState = SolvencyAccountingLib.buildSolvencyState(
-            snap.vaultCashUsdc,
+            snap.poolCashUsdc,
             snap.accumulatedFeesUsdc,
             SolvencyAccountingLib.getMaxLiability(snap.bullSide.maxProfitUsdc, snap.bearSide.maxProfitUsdc),
             snap.totalDeferredTraderCreditUsdc,
@@ -432,7 +432,7 @@ library CfdEnginePlanLib {
                 maxLiabilityAfterUsdc: postMaxLiability,
                 deferredTraderPayoutDeltaUsdc: 0,
                 deferredKeeperCreditDeltaUsdc: 0,
-                pendingVaultPayoutUsdc: 0
+                pendingPoolPayoutUsdc: 0
             }),
             snap.degradedMode
         );
@@ -504,7 +504,7 @@ library CfdEnginePlanLib {
             snap.capPrice,
             preSkewUsdc,
             postSkewUsdc,
-            snap.vaultAssetsUsdc,
+            snap.poolAssetsUsdc,
             snap.riskParams.vpiFactor,
             snap.executionFeeBps
         );
@@ -528,14 +528,14 @@ library CfdEnginePlanLib {
             return delta;
         }
 
-        uint256 effectiveVaultCash = snap.vaultCashUsdc;
+        uint256 effectivePoolCash = snap.poolCashUsdc;
 
         delta.executionFeeUsdc = cs.executionFeeUsdc;
         delta.realizedPnlUsdc = cs.realizedPnlUsdc;
 
         uint256 availableCashForFreshPayouts =
             CashPriorityLib.reserveFreshPayouts(
-            effectiveVaultCash,
+            effectivePoolCash,
             snap.accumulatedFeesUsdc,
             snap.totalDeferredTraderCreditUsdc,
             snap.totalDeferredKeeperCreditUsdc
@@ -609,7 +609,7 @@ library CfdEnginePlanLib {
         uint256 deferredTraderPayoutIncrease = delta.freshPayoutIsDeferred ? delta.freshTraderPayoutUsdc : 0;
 
         SolvencyAccountingLib.SolvencyState memory currentState = SolvencyAccountingLib.buildSolvencyState(
-            snap.vaultAssetsUsdc,
+            snap.poolAssetsUsdc,
             snap.accumulatedFeesUsdc,
             SolvencyAccountingLib.getMaxLiability(snap.bullSide.maxProfitUsdc, snap.bearSide.maxProfitUsdc),
             snap.totalDeferredTraderCreditUsdc,
@@ -625,7 +625,7 @@ library CfdEnginePlanLib {
                 deferredTraderPayoutDeltaUsdc: int256(deferredTraderPayoutIncrease)
                     - int256(delta.existingDeferredConsumedUsdc),
                 deferredKeeperCreditDeltaUsdc: 0,
-                pendingVaultPayoutUsdc: 0
+                pendingPoolPayoutUsdc: 0
             }),
             snap.degradedMode
         );
@@ -745,7 +745,7 @@ library CfdEnginePlanLib {
             uint256 deferredTraderPayoutAfterConsumption =
                 snap.totalDeferredTraderCreditUsdc - delta.existingDeferredConsumedUsdc;
             delta.freshPayoutIsImmediate = CashPriorityLib.reserveFreshPayouts(
-                    snap.vaultCashUsdc,
+                    snap.poolCashUsdc,
                     snap.accumulatedFeesUsdc,
                     deferredTraderPayoutAfterConsumption,
                     snap.totalDeferredKeeperCreditUsdc
@@ -767,7 +767,7 @@ library CfdEnginePlanLib {
         );
 
         SolvencyAccountingLib.SolvencyState memory currentState = SolvencyAccountingLib.buildSolvencyState(
-            snap.vaultAssetsUsdc,
+            snap.poolAssetsUsdc,
             snap.accumulatedFeesUsdc,
             SolvencyAccountingLib.getMaxLiability(snap.bullSide.maxProfitUsdc, snap.bearSide.maxProfitUsdc),
             snap.totalDeferredTraderCreditUsdc,
@@ -786,7 +786,7 @@ library CfdEnginePlanLib {
                 deferredTraderPayoutDeltaUsdc: int256(delta.freshPayoutIsDeferred ? delta.freshTraderPayoutUsdc : 0)
                     - int256(delta.existingDeferredConsumedUsdc),
                 deferredKeeperCreditDeltaUsdc: 0,
-                pendingVaultPayoutUsdc: delta.keeperBountyUsdc
+                pendingPoolPayoutUsdc: delta.keeperBountyUsdc
             }),
             snap.degradedMode
         );

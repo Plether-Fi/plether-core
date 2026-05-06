@@ -3,7 +3,7 @@ pragma solidity 0.8.33;
 
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePoolEngineViewTypes} from "../../src/perps/interfaces/HousePoolEngineViewTypes.sol";
-import {ICfdVault} from "../../src/perps/interfaces/ICfdVault.sol";
+import {IHousePool} from "../../src/perps/interfaces/IHousePool.sol";
 import {ProtocolLensViewTypes} from "../../src/perps/interfaces/ProtocolLensViewTypes.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 
@@ -17,8 +17,8 @@ contract HousePoolSnapshotParityTest is BasePerpTest {
 
         assertEq(
             inputSnapshot.physicalAssetsUsdc,
-            protocolSnapshot.vaultAssetsUsdc,
-            "HousePool input physical assets should match protocol vault assets"
+            protocolSnapshot.poolAssetsUsdc,
+            "HousePool input physical assets should match protocol pool assets"
         );
         assertEq(
             inputSnapshot.netPhysicalAssetsUsdc,
@@ -96,7 +96,7 @@ contract HousePoolSnapshotParityTest is BasePerpTest {
         usdc.mint(address(pool), 35_000e6);
         vm.prank(address(engine));
         pool.recordClaimantInflow(
-            35_000e6, ICfdVault.ClaimantInflowKind.Revenue, ICfdVault.ClaimantInflowCashMode.CashArrived
+            35_000e6, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.CashArrived
         );
 
         (uint256 pendingSenior, uint256 pendingJunior, uint256 pendingSeniorWithdraw, uint256 pendingJuniorWithdraw) =

@@ -7,16 +7,16 @@ import {CfdTypes} from "../CfdTypes.sol";
 interface ICfdEngineTypes {
 
     error CfdEngine__Unauthorized();
-    error CfdEngine__VaultAlreadySet();
+    error CfdEngine__PoolAlreadySet();
     error CfdEngine__RouterAlreadySet();
     error CfdEngine__DependenciesAlreadySet();
     error CfdEngine__NoFeesToWithdraw();
     error CfdEngine__NoDeferredTraderCredit();
-    error CfdEngine__InsufficientVaultLiquidity();
+    error CfdEngine__InsufficientPoolLiquidity();
     error CfdEngine__NoDeferredKeeperCredit();
     error CfdEngine__MustCloseOpposingPosition();
     error CfdEngine__CarryExceedsMargin();
-    error CfdEngine__VaultSolvencyExceeded();
+    error CfdEngine__PoolSolvencyExceeded();
     error CfdEngine__MarginDrainedByFees();
     error CfdEngine__CloseSizeExceedsPosition();
     error CfdEngine__NoPositionToLiquidate();
@@ -74,7 +74,7 @@ interface ICfdEngineTypes {
     }
 
     struct ProtocolAccountingView {
-        uint256 vaultAssetsUsdc;
+        uint256 poolAssetsUsdc;
         uint256 maxLiabilityUsdc;
         uint256 withdrawalReservedUsdc;
         uint256 freeUsdc;

@@ -156,7 +156,7 @@ contract PerpsReadParityTest is BasePerpTest {
             engineProtocolLens.getProtocolAccountingSnapshot();
 
         assertEq(
-            protocolSnapshot.vaultAssetsUsdc, pool.totalAssets(), "Protocol lens vault assets should match pool assets"
+            protocolSnapshot.poolAssetsUsdc, pool.totalAssets(), "Protocol lens pool assets should match pool assets"
         );
         assertEq(
             protocolSnapshot.withdrawalReservedUsdc,

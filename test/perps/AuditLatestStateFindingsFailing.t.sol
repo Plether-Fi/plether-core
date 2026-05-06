@@ -6,7 +6,7 @@ import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
-import {ICfdVault} from "../../src/perps/interfaces/ICfdVault.sol";
+import {IHousePool} from "../../src/perps/interfaces/IHousePool.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 
@@ -160,7 +160,7 @@ contract AuditLatestStateFindingsFailing_StaleSeniorMutationYield is BasePerpTes
         usdc.mint(address(pool), 50_000e6);
         vm.prank(address(engine));
         pool.recordClaimantInflow(
-            50_000e6, ICfdVault.ClaimantInflowKind.Recapitalization, ICfdVault.ClaimantInflowCashMode.CashArrived
+            50_000e6, IHousePool.ClaimantInflowKind.Recapitalization, IHousePool.ClaimantInflowCashMode.CashArrived
         );
 
         vm.prank(address(juniorVault));

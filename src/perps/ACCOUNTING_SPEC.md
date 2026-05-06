@@ -70,7 +70,7 @@ Definition:
 - for BEAR, scale side max profit by `markPrice / CAP_PRICE`,
 - sum the two conservative side liabilities.
 
-This quantity is appropriate for conservative LP equity and tranche reconciliation, not for pretending the vault has already collected losing traders' money. It can temporarily over-reserve LP value when entry prices are dispersed inside a side, but it avoids netting winners against uncollected same-side loser debt.
+This quantity is appropriate for conservative LP equity and tranche reconciliation, not for pretending the pool has already collected losing traders' money. It can temporarily over-reserve LP value when entry prices are dispersed inside a side, but it avoids netting winners against uncollected same-side loser debt.
 
 ## The Four Core Accounting Views
 
@@ -123,7 +123,7 @@ Rule:
 Notes:
 
 - this view is intentionally stricter than solvency,
-- it ignores uncollected trader debts as a funding source for withdrawal.
+- it ignores uncollected trader debts as a cash source for withdrawal.
 - during `oracleFrozen`, ERC4626 LP exits remain live but the user-facing withdraw/redeem output is reduced by the tranche's frozen-window surcharge rather than hard-blocking immediately.
 
 ### 3. LP reconciliation view
@@ -264,8 +264,8 @@ Keep these categories separate:
 
 - `recordProtocolInflow`: protocol-owned value such as fees
 - `recordClaimantInflow(amount, Recapitalization, CashArrived)`: recapitalization intended to restore waterfall claimants
-- `recordClaimantInflow(amount, Revenue, CashArrived)`: claimant-owned value where fresh cash entered the vault in this flow
-- `recordClaimantInflow(amount, Revenue, AlreadyRetained)`: claimant-owned value already retained physically by the vault and only needing ownership routing
+- `recordClaimantInflow(amount, Revenue, CashArrived)`: claimant-owned value where fresh cash entered the pool in this flow
+- `recordClaimantInflow(amount, Revenue, AlreadyRetained)`: claimant-owned value already retained physically by the pool and only needing ownership routing
 
 Rules:
 
@@ -278,7 +278,7 @@ Rules:
 
 ## LP-Capital Carry
 
-The protocol uses LP-capital carry instead of side-to-side funding.
+The protocol uses LP-capital carry instead of a side-to-side rate mechanism.
 
 Definitions:
 
@@ -320,10 +320,10 @@ The protocol supports fail-soft terminal settlement.
 Rules:
 
 - deferred liabilities are beneficiary-balance based, not FIFO queue based,
-- they are senior claims on vault cash,
+- they are senior claims on pool cash,
 - deferred claim servicing outranks protocol fee withdrawals when cash is insufficient to satisfy both,
-- deferred claim servicing is frozen entirely while physical vault cash is below aggregate deferred liabilities,
-- fee withdrawal, fresh payout funding, fresh liquidation bounty payment, and deferred servicing must all agree on what cash is actually free.
+- deferred claim servicing is frozen entirely while physical pool cash is below aggregate deferred liabilities,
+- fee withdrawal, fresh payout cash, fresh liquidation bounty payment, and deferred servicing must all agree on what cash is actually free.
 
 ## Pending-Order Escrow Model
 
@@ -342,7 +342,7 @@ Rules:
 - escrowed value is not free buying power,
 - releasing or consuming escrow must happen exactly once,
 - clearinghouse reservation records are the source of truth for committed trader margin,
-- router escrow is not LP cash and should not become a deferred vault liability bucket.
+- router escrow is not LP cash and should not become a deferred pool liability bucket.
 
 ### Close-order bounty policy
 
@@ -396,7 +396,7 @@ Required properties:
 Liquidation must:
 
 1. seize reachable account value,
-2. pay or defer the keeper bounty according to available vault cash,
+2. pay or defer the keeper bounty according to available pool cash,
 3. preserve residual trader value when positive,
 4. realize remaining shortfall as bad debt,
 5. delete the position,

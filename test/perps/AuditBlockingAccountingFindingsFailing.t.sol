@@ -8,7 +8,7 @@ import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
 import {CfdEnginePlanTypes} from "../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdEnginePlanner} from "../../src/perps/CfdEnginePlanner.sol";
 import {CfdEngineProtocolLens} from "../../src/perps/CfdEngineProtocolLens.sol";
-import {CfdEngineSettlementModule} from "../../src/perps/CfdEngineSettlementModule.sol";
+import {CfdEngineSettlementSidecar} from "../../src/perps/CfdEngineSettlementSidecar.sol";
 import {CfdMath} from "../../src/perps/CfdMath.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
@@ -114,10 +114,10 @@ contract AuditBlockingAccountingFindingsFailing_SolvencyTiming is BasePerpTest {
         clearinghouse = new MarginClearinghouse(address(usdc));
 
         engine = new CfdEngineSolvencyTimingHarness(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
-        CfdEnginePlanner plannerModule = new CfdEnginePlanner();
-        CfdEngineSettlementModule settlementModule = new CfdEngineSettlementModule(address(engine));
-        CfdEngineAdmin adminModule = new CfdEngineAdmin(address(engine), address(this));
-        engine.setDependencies(address(plannerModule), address(settlementModule), address(adminModule));
+        CfdEnginePlanner planner = new CfdEnginePlanner();
+        CfdEngineSettlementSidecar settlementSidecar = new CfdEngineSettlementSidecar(address(engine));
+        CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
+        engine.setDependencies(address(planner), address(settlementSidecar), address(engineAdmin));
         _syncEngineAdmin();
         engineAccountLens = new CfdEngineAccountLens(address(engine));
         engineLens = new CfdEngineLens(address(engine));
@@ -128,7 +128,7 @@ contract AuditBlockingAccountingFindingsFailing_SolvencyTiming is BasePerpTest {
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         router = new OrderRouter(
             address(engine),

@@ -30,7 +30,7 @@ contract CfdEngineLens is ICfdEngineLens {
         uint256 sizeDelta,
         uint256 oraclePrice
     ) external view returns (CfdEngine.ClosePreview memory preview) {
-        preview = _previewClose(account, sizeDelta, oraclePrice, engineContract.vault().totalAssets());
+        preview = _previewClose(account, sizeDelta, oraclePrice, engineContract.pool().totalAssets());
     }
 
     function previewOpenRevertCode(
@@ -42,7 +42,7 @@ contract CfdEngineLens is ICfdEngineLens {
         uint64 publishTime
     ) external view returns (uint8 code) {
         CfdEnginePlanTypes.RawSnapshot memory snap =
-            _buildRawSnapshot(account, oraclePrice, engineContract.vault().totalAssets(), publishTime);
+            _buildRawSnapshot(account, oraclePrice, engineContract.pool().totalAssets(), publishTime);
         CfdTypes.Order memory order = CfdTypes.Order({
             account: account,
             sizeDelta: sizeDelta,
@@ -66,7 +66,7 @@ contract CfdEngineLens is ICfdEngineLens {
         uint64 publishTime
     ) external view returns (CfdEnginePlanTypes.OpenFailurePolicyCategory category) {
         CfdEnginePlanTypes.RawSnapshot memory snap =
-            _buildRawSnapshot(account, oraclePrice, engineContract.vault().totalAssets(), publishTime);
+            _buildRawSnapshot(account, oraclePrice, engineContract.pool().totalAssets(), publishTime);
         CfdTypes.Order memory order = CfdTypes.Order({
             account: account,
             sizeDelta: sizeDelta,
@@ -87,31 +87,31 @@ contract CfdEngineLens is ICfdEngineLens {
         address account,
         uint256 sizeDelta,
         uint256 oraclePrice,
-        uint256 vaultDepthUsdc
+        uint256 poolDepthUsdc
     ) external view returns (CfdEngine.ClosePreview memory preview) {
-        preview = _previewClose(account, sizeDelta, oraclePrice, vaultDepthUsdc);
+        preview = _previewClose(account, sizeDelta, oraclePrice, poolDepthUsdc);
     }
 
     function previewLiquidation(
         address account,
         uint256 oraclePrice
     ) external view returns (CfdEngine.LiquidationPreview memory preview) {
-        preview = _previewLiquidation(account, oraclePrice, engineContract.vault().totalAssets());
+        preview = _previewLiquidation(account, oraclePrice, engineContract.pool().totalAssets());
     }
 
     function simulateLiquidation(
         address account,
         uint256 oraclePrice,
-        uint256 vaultDepthUsdc
+        uint256 poolDepthUsdc
     ) external view returns (CfdEngine.LiquidationPreview memory preview) {
-        preview = _previewLiquidation(account, oraclePrice, vaultDepthUsdc);
+        preview = _previewLiquidation(account, oraclePrice, poolDepthUsdc);
     }
 
     function _previewClose(
         address account,
         uint256 sizeDelta,
         uint256 oraclePrice,
-        uint256 vaultDepthUsdc
+        uint256 poolDepthUsdc
     ) internal view returns (CfdEngine.ClosePreview memory preview) {
         uint256 price = oraclePrice > engineContract.CAP_PRICE() ? engineContract.CAP_PRICE() : oraclePrice;
         preview.executionPrice = price;
@@ -128,7 +128,7 @@ contract CfdEngineLens is ICfdEngineLens {
             return preview;
         }
 
-        CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(account, oraclePrice, vaultDepthUsdc, 0);
+        CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(account, oraclePrice, poolDepthUsdc, 0);
         CfdTypes.Order memory order = CfdTypes.Order({
             account: account,
             sizeDelta: sizeDelta,
@@ -182,7 +182,7 @@ contract CfdEngineLens is ICfdEngineLens {
     function _previewLiquidation(
         address account,
         uint256 oraclePrice,
-        uint256 vaultDepthUsdc
+        uint256 poolDepthUsdc
     ) internal view returns (CfdEngine.LiquidationPreview memory preview) {
         uint256 price = oraclePrice > engineContract.CAP_PRICE() ? engineContract.CAP_PRICE() : oraclePrice;
         preview.oraclePrice = price;
@@ -191,7 +191,7 @@ contract CfdEngineLens is ICfdEngineLens {
             return preview;
         }
 
-        CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(account, oraclePrice, vaultDepthUsdc, 0);
+        CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(account, oraclePrice, poolDepthUsdc, 0);
         _applyLiquidationPreviewForfeiture(account, snap);
         CfdEnginePlanTypes.LiquidationDelta memory delta = planner.planLiquidation(snap, oraclePrice, 0);
 
@@ -220,7 +220,7 @@ contract CfdEngineLens is ICfdEngineLens {
     function _buildRawSnapshot(
         address account,
         uint256 oraclePrice,
-        uint256 vaultDepthUsdc,
+        uint256 poolDepthUsdc,
         uint64 publishTime
     ) internal view returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
         ICfdEngine.SideState memory bull;
@@ -246,8 +246,8 @@ contract CfdEngineLens is ICfdEngineLens {
         snap.lastMarkTime = publishTime == 0 ? lastMarkTime : publishTime;
         snap.bullSide = _sideSnapshot(bull);
         snap.bearSide = _sideSnapshot(bear);
-        snap.vaultAssetsUsdc = vaultDepthUsdc;
-        snap.vaultCashUsdc = vaultDepthUsdc;
+        snap.poolAssetsUsdc = poolDepthUsdc;
+        snap.poolCashUsdc = poolDepthUsdc;
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(engineContract.clearinghouse());
         snap.accountBuckets = clearinghouse.getAccountUsdcBuckets(account);
         snap.lockedBuckets = clearinghouse.getLockedMarginBuckets(account);
@@ -278,8 +278,8 @@ contract CfdEngineLens is ICfdEngineLens {
         if (forfeitedUsdc == 0) {
             return;
         }
-        snap.vaultAssetsUsdc += forfeitedUsdc;
-        snap.vaultCashUsdc += forfeitedUsdc;
+        snap.poolAssetsUsdc += forfeitedUsdc;
+        snap.poolCashUsdc += forfeitedUsdc;
         snap.accumulatedFeesUsdc += forfeitedUsdc;
     }
 

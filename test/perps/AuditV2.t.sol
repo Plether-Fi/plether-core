@@ -199,7 +199,7 @@ contract AuditV2_C03_OracleFrozenCloseTest is BasePerpTest {
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         feedIds.push(FEED_A);
         feedIds.push(FEED_B);
@@ -410,7 +410,7 @@ contract AuditV2_M01_VPIRebateIMRTest is BasePerpTest {
         _fundTrader(bob, 1e6);
         address bobAccount = bob;
 
-        uint256 vaultDepth = pool.totalAssets();
+        uint256 poolDepth = pool.totalAssets();
         vm.prank(address(router));
         vm.expectRevert();
         engine.processOrderTyped(
@@ -426,7 +426,7 @@ contract AuditV2_M01_VPIRebateIMRTest is BasePerpTest {
                 isClose: false
             }),
             1e8,
-            vaultDepth,
+            poolDepth,
             uint64(block.timestamp)
         );
     }

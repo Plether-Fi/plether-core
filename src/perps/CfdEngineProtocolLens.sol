@@ -39,11 +39,11 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
     function getHousePoolInputSnapshot(
         uint256 markStalenessLimit
     ) external view returns (HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot) {
-        uint256 vaultAssetsUsdc = engineContract.vault().totalAssets();
-        snapshot.physicalAssetsUsdc = vaultAssetsUsdc;
+        uint256 poolAssetsUsdc = engineContract.pool().totalAssets();
+        snapshot.physicalAssetsUsdc = poolAssetsUsdc;
         snapshot.protocolFeesUsdc = engineContract.accumulatedFeesUsdc();
         snapshot.netPhysicalAssetsUsdc =
-            vaultAssetsUsdc > snapshot.protocolFeesUsdc ? vaultAssetsUsdc - snapshot.protocolFeesUsdc : 0;
+            poolAssetsUsdc > snapshot.protocolFeesUsdc ? poolAssetsUsdc - snapshot.protocolFeesUsdc : 0;
         snapshot.maxLiabilityUsdc = SolvencyAccountingLib.getMaxLiability(
             _sideState(CfdTypes.Side.BULL).maxProfitUsdc, _sideState(CfdTypes.Side.BEAR).maxProfitUsdc
         );
@@ -99,12 +99,12 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         view
         returns (ProtocolLensViewTypes.ProtocolAccountingSnapshot memory snapshot)
     {
-        uint256 vaultAssetsUsdc = engineContract.vault().totalAssets();
+        uint256 poolAssetsUsdc = engineContract.pool().totalAssets();
         uint256 maxLiabilityUsdc = SolvencyAccountingLib.getMaxLiability(
             _sideState(CfdTypes.Side.BULL).maxProfitUsdc, _sideState(CfdTypes.Side.BEAR).maxProfitUsdc
         );
         SolvencyAccountingLib.SolvencyState memory solvencyState = _buildAdjustedSolvencyState();
-        snapshot.vaultAssetsUsdc = vaultAssetsUsdc;
+        snapshot.poolAssetsUsdc = poolAssetsUsdc;
         snapshot.netPhysicalAssetsUsdc = solvencyState.netPhysicalAssetsUsdc;
         snapshot.maxLiabilityUsdc = maxLiabilityUsdc;
         snapshot.effectiveSolvencyAssetsUsdc = solvencyState.effectiveAssetsUsdc;
@@ -122,7 +122,7 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
 
     function _buildAdjustedSolvencyState() internal view returns (SolvencyAccountingLib.SolvencyState memory) {
         return SolvencyAccountingLib.buildSolvencyState(
-            engineContract.vault().totalAssets(),
+            engineContract.pool().totalAssets(),
             engineContract.accumulatedFeesUsdc(),
             SolvencyAccountingLib.getMaxLiability(
                 _sideState(CfdTypes.Side.BULL).maxProfitUsdc, _sideState(CfdTypes.Side.BEAR).maxProfitUsdc

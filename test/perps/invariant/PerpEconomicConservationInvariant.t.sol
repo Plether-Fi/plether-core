@@ -21,7 +21,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
     function setUp() public override {
         super.setUp();
 
-        handler = new PerpAccountingHandler(usdc, engine, clearinghouse, router, vault);
+        handler = new PerpAccountingHandler(usdc, engine, clearinghouse, router, housePool);
         handler.seedActors(50_000e6, 100_000e6);
 
         bytes4[] memory selectors = new bytes4[](12);
@@ -34,9 +34,9 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         selectors[6] = handler.claimDeferredKeeperCredit.selector;
         selectors[7] = handler.createDeferredTraderCredit.selector;
         selectors[8] = handler.claimDeferredTraderCredit.selector;
-        selectors[9] = handler.fundVault.selector;
+        selectors[9] = handler.fundHousePool.selector;
         selectors[10] = handler.setRouterPayoutFailureMode.selector;
-        selectors[11] = handler.setVaultAssets.selector;
+        selectors[11] = handler.setPoolAssets.selector;
 
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
         targetContract(address(handler));
@@ -450,10 +450,10 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
             engineProtocolLens.getHousePoolInputSnapshot(60 seconds);
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory protocolSnapshot =
             engineProtocolLens.getProtocolAccountingSnapshot();
-        uint256 vaultAssetsUsdc = vault.totalAssets();
+        uint256 poolAssetsUsdc = housePool.totalAssets();
         uint256 feesUsdc = engine.accumulatedFeesUsdc();
 
-        assertEq(protocolSnapshot.vaultAssetsUsdc, vaultAssetsUsdc, "Protocol snapshot vault assets mismatch");
+        assertEq(protocolSnapshot.poolAssetsUsdc, poolAssetsUsdc, "Protocol snapshot HousePool assets mismatch");
         assertEq(protocolSnapshot.accumulatedFeesUsdc, feesUsdc, "Protocol snapshot fees mismatch");
         assertEq(
             protocolSnapshot.accumulatedBadDebtUsdc,
@@ -487,16 +487,16 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         );
         assertEq(
             snapshot.physicalAssetsUsdc,
-            vaultAssetsUsdc,
-            "House-pool snapshot physical assets must match canonical vault assets"
+            poolAssetsUsdc,
+            "House-pool snapshot physical assets must match canonical HousePool assets"
         );
         assertEq(
             snapshot.netPhysicalAssetsUsdc,
-            vaultAssetsUsdc > feesUsdc ? vaultAssetsUsdc - feesUsdc : 0,
-            "House-pool snapshot net physical assets must match vault assets net of fees"
+            poolAssetsUsdc > feesUsdc ? poolAssetsUsdc - feesUsdc : 0,
+            "House-pool snapshot net physical assets must match HousePool assets net of fees"
         );
         assertEq(
-            snapshot.physicalAssetsUsdc, vaultAssetsUsdc, "House-pool snapshot physical asset decomposition mismatch"
+            snapshot.physicalAssetsUsdc, poolAssetsUsdc, "House-pool snapshot physical asset decomposition mismatch"
         );
         assertEq(
             protocolSnapshot.netPhysicalAssetsUsdc,
@@ -585,7 +585,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         totalBalances += usdc.balanceOf(address(engine));
         totalBalances += usdc.balanceOf(address(clearinghouse));
         totalBalances += usdc.balanceOf(address(router));
-        totalBalances += usdc.balanceOf(address(vault));
+        totalBalances += usdc.balanceOf(address(housePool));
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             totalBalances += usdc.balanceOf(handler.actorAt(i));

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {ICfdVault} from "../../../../src/perps/interfaces/ICfdVault.sol";
+import {IHousePool} from "../../../../src/perps/interfaces/IHousePool.sol";
 import {MockUSDC} from "../../../mocks/MockUSDC.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-contract MockInvariantVault is ICfdVault {
+contract MockInvariantHousePool is IHousePool {
 
     using SafeERC20 for MockUSDC;
 
@@ -14,8 +14,8 @@ contract MockInvariantVault is ICfdVault {
     address public orderRouter;
     bool public failRouterPayouts;
 
-    error MockInvariantVault__RouterAlreadySet();
-    error MockInvariantVault__ForcedRouterPayoutFailure();
+    error MockInvariantHousePool__RouterAlreadySet();
+    error MockInvariantHousePool__ForcedRouterPayoutFailure();
 
     constructor(
         address _usdc,
@@ -29,7 +29,7 @@ contract MockInvariantVault is ICfdVault {
         address _orderRouter
     ) external {
         if (orderRouter != address(0)) {
-            revert MockInvariantVault__RouterAlreadySet();
+            revert MockInvariantHousePool__RouterAlreadySet();
         }
         orderRouter = _orderRouter;
     }
@@ -69,7 +69,7 @@ contract MockInvariantVault is ICfdVault {
             revert("unauthorized");
         }
         if (msg.sender == orderRouter && failRouterPayouts) {
-            revert MockInvariantVault__ForcedRouterPayoutFailure();
+            revert MockInvariantHousePool__ForcedRouterPayoutFailure();
         }
         usdc.safeTransfer(recipient, amount);
     }
@@ -84,8 +84,8 @@ contract MockInvariantVault is ICfdVault {
 
     function recordClaimantInflow(
         uint256,
-        ICfdVault.ClaimantInflowKind,
-        ICfdVault.ClaimantInflowCashMode
+        IHousePool.ClaimantInflowKind,
+        IHousePool.ClaimantInflowCashMode
     ) external view {
         if (msg.sender != engine) {
             revert("unauthorized");
@@ -114,6 +114,94 @@ contract MockInvariantVault is ICfdVault {
 
     function isTradingActive() external pure returns (bool) {
         return true;
+    }
+
+    function seniorPrincipal() external pure returns (uint256) {
+        return 0;
+    }
+
+    function juniorPrincipal() external pure returns (uint256) {
+        return 0;
+    }
+
+    function seniorHighWaterMark() external pure returns (uint256) {
+        return 0;
+    }
+
+    function unassignedAssets() external pure returns (uint256) {
+        return 0;
+    }
+
+    function depositSenior(
+        uint256
+    ) external pure {}
+
+    function withdrawSenior(
+        uint256,
+        address
+    ) external pure {}
+
+    function depositJunior(
+        uint256
+    ) external pure {}
+
+    function withdrawJunior(
+        uint256,
+        address
+    ) external pure {}
+
+    function assignUnassignedAssets(
+        bool,
+        address
+    ) external pure {}
+
+    function initializeSeedPosition(
+        bool,
+        uint256,
+        address
+    ) external pure {}
+
+    function getMaxSeniorWithdraw() external pure returns (uint256) {
+        return 0;
+    }
+
+    function getMaxJuniorWithdraw() external pure returns (uint256) {
+        return 0;
+    }
+
+    function getPendingTrancheState()
+        external
+        pure
+        returns (
+            uint256 seniorPrincipalUsdc,
+            uint256 juniorPrincipalUsdc,
+            uint256 maxSeniorWithdrawUsdc,
+            uint256 maxJuniorWithdrawUsdc
+        )
+    {
+        return (0, 0, 0, 0);
+    }
+
+    function reconcile() external pure {}
+
+    function isWithdrawalLive() external pure returns (bool) {
+        return true;
+    }
+
+    function canAcceptTrancheDeposits(
+        bool
+    ) external pure returns (bool) {
+        return true;
+    }
+
+    function isOracleFrozen() external pure returns (bool) {
+        return false;
+    }
+
+    function frozenLpFeeBps(
+        bool
+    ) external pure returns (uint256) {
+        return 0;
     }
 
 }

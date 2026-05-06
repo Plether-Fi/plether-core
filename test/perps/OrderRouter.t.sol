@@ -9,7 +9,7 @@ import {CfdEngineAdmin} from "../../src/perps/CfdEngineAdmin.sol";
 import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
 import {CfdEnginePlanTypes} from "../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdEnginePlanner} from "../../src/perps/CfdEnginePlanner.sol";
-import {CfdEngineSettlementModule} from "../../src/perps/CfdEngineSettlementModule.sol";
+import {CfdEngineSettlementSidecar} from "../../src/perps/CfdEngineSettlementSidecar.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
@@ -1356,7 +1356,7 @@ contract OrderRouterPythTest is BasePerpTest {
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         feedIds.push(FEED_A);
         feedIds.push(FEED_B);
@@ -2722,7 +2722,7 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         feedIds.push(FEED_A);
         feedIds.push(FEED_B);
@@ -3064,7 +3064,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         );
     }
 
-    function test_ExecuteLiquidation_DefersKeeperCreditPerPreviewWhenVaultPayoutFails() public {
+    function test_ExecuteLiquidation_DefersKeeperCreditPerPreviewWhenPoolPayoutFails() public {
         address account = trader;
         _fundTrader(trader, 900e6);
 
@@ -3076,7 +3076,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         vm.mockCallRevert(
             address(pool),
             abi.encodeWithSelector(pool.payOut.selector, address(clearinghouse), preview.keeperBountyUsdc),
-            abi.encodeWithSignature("Error(string)", "vault illiquid")
+            abi.encodeWithSignature("Error(string)", "pool illiquid")
         );
 
         bytes[] memory priceData = new bytes[](1);
@@ -3153,7 +3153,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         );
     }
 
-    function test_ExecuteLiquidation_ForfeitedEscrowFeedsPostForfeitureVaultDepth() public {
+    function test_ExecuteLiquidation_ForfeitedEscrowFeedsPostForfeiturePoolDepth() public {
         address account = trader;
         _fundTrader(trader, 900e6);
 
@@ -3192,12 +3192,12 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         assertEq(
             clearinghouse.balanceUsdc(address(this)) - keeperBefore,
             expectedPreview.keeperBountyUsdc,
-            "Liquidation bounty should use the post-forfeiture vault depth for funding"
+            "Liquidation bounty should use the post-forfeiture pool depth for carry"
         );
         assertEq(
             engine.accumulatedBadDebtUsdc(),
             expectedPreview.badDebtUsdc,
-            "Liquidation bad debt should use the post-forfeiture vault depth for funding"
+            "Liquidation bad debt should use the post-forfeiture pool depth for carry"
         );
     }
 
@@ -3217,7 +3217,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
 
         AccountLensViewTypes.AccountLedgerSnapshot memory snapshotBefore =
             engineAccountLens.getAccountLedgerSnapshot(account);
-        uint256 vaultAssetsBefore = pool.totalAssets();
+        uint256 poolAssetsBefore = pool.totalAssets();
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(102_500_000));
@@ -3238,8 +3238,8 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         assertEq(pool.excessAssets(), 0, "Forfeited close-order bounty escrow should not remain quarantined as excess");
         assertGe(
             pool.totalAssets(),
-            vaultAssetsBefore + 400_000,
-            "Forfeited close-order bounty escrow should contribute to canonical vault assets"
+            poolAssetsBefore + 400_000,
+            "Forfeited close-order bounty escrow should contribute to canonical pool assets"
         );
     }
 
@@ -3389,7 +3389,7 @@ contract FadStalenessTest is BasePerpTest {
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         feedIds.push(FEED_A);
         feedIds.push(FEED_B);
@@ -4621,7 +4621,7 @@ contract MarkPriceStalenessTest is BasePerpTest {
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior LP", "sUSDC");
         pool.setJuniorVault(address(juniorVault));
         pool.setSeniorVault(address(seniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         mockPyth = new MockPyth();
         feedIds.push(FEED_A);
@@ -4734,7 +4734,7 @@ contract StalenessGriefTest is BasePerpTest {
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior LP", "sUSDC");
         pool.setJuniorVault(address(juniorVault));
         pool.setSeniorVault(address(seniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         mockPyth = new MockPyth();
         feedIds.push(FEED_A);
@@ -4847,15 +4847,15 @@ contract VpiImrBypassTest is Test {
 
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
         CfdEnginePlanner planner = new CfdEnginePlanner();
-        CfdEngineSettlementModule settlement = new CfdEngineSettlementModule(address(engine));
-        CfdEngineAdmin adminModule = new CfdEngineAdmin(address(engine), address(this));
-        engine.setDependencies(address(planner), address(settlement), address(adminModule));
+        CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(engine));
+        CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
+        engine.setDependencies(address(planner), address(settlement), address(engineAdmin));
         pool = new HousePool(address(usdc), address(engine));
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior LP", "sUSDC");
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC");
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
         router = new OrderRouter(
             address(engine),
             address(new CfdEngineLens(address(engine))),
@@ -5031,15 +5031,15 @@ contract KeeperFeeRefundTest is Test {
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
         CfdEnginePlanner planner = new CfdEnginePlanner();
-        CfdEngineSettlementModule settlement = new CfdEngineSettlementModule(address(engine));
-        CfdEngineAdmin adminModule = new CfdEngineAdmin(address(engine), address(this));
-        engine.setDependencies(address(planner), address(settlement), address(adminModule));
+        CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(engine));
+        CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
+        engine.setDependencies(address(planner), address(settlement), address(engineAdmin));
         pool = new HousePool(address(usdc), address(engine));
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior LP", "sUSDC");
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC");
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
         router = new OrderRouter(
             address(engine),
             address(new CfdEngineLens(address(engine))),
@@ -5339,15 +5339,15 @@ contract WeekendArbitrageTest is Test {
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
         CfdEnginePlanner planner = new CfdEnginePlanner();
-        CfdEngineSettlementModule settlement = new CfdEngineSettlementModule(address(engine));
-        CfdEngineAdmin adminModule = new CfdEngineAdmin(address(engine), address(this));
-        engine.setDependencies(address(planner), address(settlement), address(adminModule));
+        CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(engine));
+        CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
+        engine.setDependencies(address(planner), address(settlement), address(engineAdmin));
         pool = new HousePool(address(usdc), address(engine));
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior LP", "sUSDC");
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC");
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         feedIds.push(FEED_A);
         feedIds.push(FEED_B);

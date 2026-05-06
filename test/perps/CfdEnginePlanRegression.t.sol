@@ -8,7 +8,7 @@ import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
 import {CfdEnginePlanTypes} from "../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdEnginePlanner} from "../../src/perps/CfdEnginePlanner.sol";
 import {CfdEngineProtocolLens} from "../../src/perps/CfdEngineProtocolLens.sol";
-import {CfdEngineSettlementModule} from "../../src/perps/CfdEngineSettlementModule.sol";
+import {CfdEngineSettlementSidecar} from "../../src/perps/CfdEngineSettlementSidecar.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
@@ -35,20 +35,20 @@ contract CfdEnginePlanHarness is CfdEngine {
     function previewOpenPlan(
         CfdTypes.Order memory order,
         uint256 executionPrice,
-        uint256 vaultDepthUsdc
+        uint256 poolDepthUsdc
     ) external view returns (CfdEnginePlanTypes.OpenDelta memory delta) {
-        CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(order.account, executionPrice, vaultDepthUsdc, 0);
-        snap.vaultCashUsdc = vault.totalAssets();
+        CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(order.account, executionPrice, poolDepthUsdc, 0);
+        snap.poolCashUsdc = pool.totalAssets();
         return CfdEnginePlanLib.planOpen(snap, order, executionPrice, 0);
     }
 
     function buildRawSnapshotForPlanner(
         address account,
         uint256 executionPrice,
-        uint256 vaultDepthUsdc
+        uint256 poolDepthUsdc
     ) external view returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
-        snap = _buildRawSnapshot(account, executionPrice, vaultDepthUsdc, 0);
-        snap.vaultCashUsdc = vault.totalAssets();
+        snap = _buildRawSnapshot(account, executionPrice, poolDepthUsdc, 0);
+        snap.poolCashUsdc = pool.totalAssets();
     }
 
     function computeOpenMarginAfter(
@@ -90,10 +90,10 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         clearinghouse = new MarginClearinghouse(address(usdc));
 
         engine = new CfdEnginePlanHarness(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
-        CfdEnginePlanner plannerModule = new CfdEnginePlanner();
-        CfdEngineSettlementModule settlementModule = new CfdEngineSettlementModule(address(engine));
-        CfdEngineAdmin adminModule = new CfdEngineAdmin(address(engine), address(this));
-        engine.setDependencies(address(plannerModule), address(settlementModule), address(adminModule));
+        planner = new CfdEnginePlanner();
+        CfdEngineSettlementSidecar settlementSidecar = new CfdEngineSettlementSidecar(address(engine));
+        CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
+        engine.setDependencies(address(planner), address(settlementSidecar), address(engineAdmin));
         _syncEngineAdmin();
         engineAccountLens = new CfdEngineAccountLens(address(engine));
         engineLens = new CfdEngineLens(address(engine));
@@ -104,7 +104,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         router = new OrderRouter(
             address(engine),
@@ -124,7 +124,6 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         _bypassAllTimelocks();
         _bootstrapSeededLifecycle();
         _fundJunior(address(this), 1_000_000e6);
-        planner = new CfdEnginePlanner();
     }
 
     function _position(
@@ -375,8 +374,8 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         snap.bearSide = CfdEnginePlanTypes.SideSnapshot({
             maxProfitUsdc: 100_000e6, openInterest: 100_000e18, entryNotional: 100_000e6, totalMargin: 2500e6
         });
-        snap.vaultAssetsUsdc = 2_000_000e6;
-        snap.vaultCashUsdc = 2_000_000e6;
+        snap.poolAssetsUsdc = 2_000_000e6;
+        snap.poolCashUsdc = 2_000_000e6;
         snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
             settlementBalanceUsdc: 2500e6,
             totalLockedMarginUsdc: 2500e6,
@@ -439,8 +438,8 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         });
         snap.bearSide =
             CfdEnginePlanTypes.SideSnapshot({maxProfitUsdc: 0, openInterest: 0, entryNotional: 0, totalMargin: 0});
-        snap.vaultAssetsUsdc = 2_000_000e6;
-        snap.vaultCashUsdc = 2_000_000e6;
+        snap.poolAssetsUsdc = 2_000_000e6;
+        snap.poolCashUsdc = 2_000_000e6;
         snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
             settlementBalanceUsdc: 4000e6,
             totalLockedMarginUsdc: 0,
@@ -494,8 +493,8 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         snap.bearSide = CfdEnginePlanTypes.SideSnapshot({
             maxProfitUsdc: 100_000e6, openInterest: 10_000e18, entryNotional: 10_000e18 * 1e8, totalMargin: 100e6
         });
-        snap.vaultAssetsUsdc = 50_000_000e6;
-        snap.vaultCashUsdc = 50_000_000e6;
+        snap.poolAssetsUsdc = 50_000_000e6;
+        snap.poolCashUsdc = 50_000_000e6;
         snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
             settlementBalanceUsdc: 200e6,
             totalLockedMarginUsdc: 100e6,
@@ -625,8 +624,8 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         snap.bearSide = CfdEnginePlanTypes.SideSnapshot({
             maxProfitUsdc: 10_000e6, openInterest: 100_000e18, entryNotional: 100_000e18 * 1e8, totalMargin: 1e6
         });
-        snap.vaultAssetsUsdc = 50_000_000e6;
-        snap.vaultCashUsdc = 0;
+        snap.poolAssetsUsdc = 50_000_000e6;
+        snap.poolCashUsdc = 0;
         snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
             settlementBalanceUsdc: 0,
             totalLockedMarginUsdc: 1e6,
@@ -653,7 +652,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         assertEq(
             uint8(delta.revertCode),
             uint8(CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES),
-            "Planner should reject opens whose physical margin cannot cover the trade charges under the no-side-funding model"
+            "Planner should reject opens whose physical margin cannot cover the trade charges under the carry-only model"
         );
     }
 
@@ -680,8 +679,8 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         snap.bearSide = CfdEnginePlanTypes.SideSnapshot({
             maxProfitUsdc: 100_000e6, openInterest: 100_000e18, entryNotional: 100_000e18 * 1e8, totalMargin: 2000e6
         });
-        snap.vaultAssetsUsdc = 50_000_000e6;
-        snap.vaultCashUsdc = 50_000_000e6;
+        snap.poolAssetsUsdc = 50_000_000e6;
+        snap.poolCashUsdc = 50_000_000e6;
         snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
             settlementBalanceUsdc: 5000e6,
             totalLockedMarginUsdc: 4000e6,

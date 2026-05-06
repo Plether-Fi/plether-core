@@ -121,7 +121,7 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         );
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeper);
-        vm.expectRevert(CfdEngine.CfdEngine__InsufficientVaultLiquidity.selector);
+        vm.expectRevert(CfdEngine.CfdEngine__InsufficientPoolLiquidity.selector);
         vm.prank(keeper);
         engine.claimDeferredKeeperCredit();
         assertEq(clearinghouse.balanceUsdc(keeper), keeperSettlementBefore);
@@ -150,7 +150,7 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
 
         usdc.mint(address(pool), aliceDeferred / 2);
 
-        vm.expectRevert(CfdEngine.CfdEngine__InsufficientVaultLiquidity.selector);
+        vm.expectRevert(CfdEngine.CfdEngine__InsufficientPoolLiquidity.selector);
         vm.prank(alice);
         engine.claimDeferredTraderCredit(aliceAccount);
 
@@ -158,7 +158,7 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         assertEq(engine.deferredTraderCreditUsdc(bobAccount), bobDeferred, "Unclaimed later balance should remain unchanged");
 
         usdc.mint(address(pool), bobDeferred / 2);
-        vm.expectRevert(CfdEngine.CfdEngine__InsufficientVaultLiquidity.selector);
+        vm.expectRevert(CfdEngine.CfdEngine__InsufficientPoolLiquidity.selector);
         vm.prank(bob);
         engine.claimDeferredTraderCredit(bobAccount);
 

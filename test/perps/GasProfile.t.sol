@@ -7,7 +7,7 @@ import {CfdEngineAccountLens} from "../../src/perps/CfdEngineAccountLens.sol";
 import {CfdEngineAdmin} from "../../src/perps/CfdEngineAdmin.sol";
 import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
 import {CfdEnginePlanner} from "../../src/perps/CfdEnginePlanner.sol";
-import {CfdEngineSettlementModule} from "../../src/perps/CfdEngineSettlementModule.sol";
+import {CfdEngineSettlementSidecar} from "../../src/perps/CfdEngineSettlementSidecar.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
@@ -116,9 +116,9 @@ contract GasProfileTest is Test {
         clearinghouse = new MarginClearinghouse(usdc);
         engine = new CfdEngine(usdc, address(clearinghouse), CAP_PRICE, params);
         CfdEnginePlanner planner = new CfdEnginePlanner();
-        CfdEngineSettlementModule settlement = new CfdEngineSettlementModule(address(engine));
-        CfdEngineAdmin adminModule = new CfdEngineAdmin(address(engine), address(this));
-        engine.setDependencies(address(planner), address(settlement), address(adminModule));
+        CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(engine));
+        CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
+        engine.setDependencies(address(planner), address(settlement), address(engineAdmin));
         engineAccountLens = new CfdEngineAccountLens(address(engine));
         engineLens = new CfdEngineLens(address(engine));
         pool = new HousePool(usdc, address(engine));
@@ -127,7 +127,7 @@ contract GasProfileTest is Test {
         juniorVault = new TrancheVault(IERC20(usdc), address(pool), false, "Junior LP", "junUSDC");
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         pyth = new ControllablePythGas();
         feedIds.push(EUR_USD_FEED_ID);
@@ -487,8 +487,8 @@ contract GasProfileTest is Test {
         emit log_named_uint("19_getAccountLedgerSnapshot", gas);
     }
 
-    // --- 20. getVaultLiquidityView ---
-    function test_gas_20_getVaultLiquidityView() public {
+    // --- 20. getPoolLiquidityView ---
+    function test_gas_20_getPoolLiquidityView() public {
         // Add some state: positions + both tranches
         _mintUsdc(lp2, 500_000e6);
         vm.startPrank(lp2);
@@ -500,9 +500,9 @@ contract GasProfileTest is Test {
         _openPosition(alice, CfdTypes.Side.BULL, 50_000e18, 5000e6, 1e8);
 
         uint256 g0 = gasleft();
-        pool.getVaultLiquidityView();
+        pool.getPoolLiquidityView();
         uint256 gas = g0 - gasleft();
-        emit log_named_uint("20_getVaultLiquidityView", gas);
+        emit log_named_uint("20_getPoolLiquidityView", gas);
     }
 
     // --- Batch scaling ---

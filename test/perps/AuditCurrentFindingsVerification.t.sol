@@ -39,7 +39,7 @@ contract AuditCurrentFindingsFailing is BasePerpTest {
         vm.prank(address(router));
         engine.liquidatePosition(loserAccount, 1e8, depth, uint64(block.timestamp));
 
-        assertEq(_vaultMtmAdjustment(), 75_000e6, "MtM should use the conservative post-liquidation envelope");
+        assertEq(_poolMtmAdjustment(), 75_000e6, "MtM should use the conservative post-liquidation envelope");
     }
 
     function test_H1_UpdateMarkPriceMustRejectOlderPublishTime() public {
@@ -165,7 +165,7 @@ contract AuditCurrentFindingsVerifiedInvalid_Mev is BasePerpTest {
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         feedIds.push(FEED_A);
         feedIds.push(FEED_B);
@@ -285,7 +285,7 @@ contract AuditCurrentFindingsVerifiedInvalid_RebateIlliquidity is BasePerpTest {
         router.executeOrder(1, empty);
 
         (uint256 size,,,,,,) = engine.positions(bobAccount);
-        assertEq(size, 0, "rebate-bearing open should not execute once vault cash is insufficient");
+        assertEq(size, 0, "rebate-bearing open should not execute once pool cash is insufficient");
         assertEq(
             clearinghouse.balanceUsdc(keeperAccount) - keeperBefore,
             pending.executionBountyUsdc,

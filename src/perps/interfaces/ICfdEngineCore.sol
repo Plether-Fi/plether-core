@@ -18,7 +18,7 @@ interface ICfdEngineCore {
 
     function orderRouter() external view returns (address);
 
-    function settlementModule() external view returns (address);
+    function settlementSidecar() external view returns (address);
 
     function USDC() external view returns (IERC20);
 
@@ -41,7 +41,7 @@ interface ICfdEngineCore {
     function processOrderTyped(
         CfdTypes.Order memory order,
         uint256 currentOraclePrice,
-        uint256 vaultDepthUsdc,
+        uint256 poolDepthUsdc,
         uint64 publishTime
     ) external;
 
@@ -81,7 +81,7 @@ interface ICfdEngineCore {
     function liquidatePosition(
         address account,
         uint256 currentOraclePrice,
-        uint256 vaultDepthUsdc,
+        uint256 poolDepthUsdc,
         uint64 publishTime
     ) external returns (uint256 keeperBountyUsdc);
 

@@ -13,7 +13,7 @@ import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
 import {ICfdEngineAdminHost} from "../../src/perps/interfaces/ICfdEngineAdminHost.sol";
-import {ICfdVault} from "../../src/perps/interfaces/ICfdVault.sol";
+import {IHousePool} from "../../src/perps/interfaces/IHousePool.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
@@ -44,7 +44,7 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         feedIds.push(FEED_A);
         feedIds.push(FEED_B);
@@ -216,7 +216,7 @@ contract AuditConfirmedFindingsFailing_OutOfOrderMarkCancellation is BasePerpTes
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         feedIds.push(FEED_A);
         feedIds.push(FEED_B);
@@ -358,7 +358,7 @@ contract AuditConfirmedFindingsFailing_HwmRouteConsistency is BasePerpTest {
         usdc.mint(address(recapPool), recapAmount);
         vm.prank(address(engine));
         recapPool.recordClaimantInflow(
-            recapAmount, ICfdVault.ClaimantInflowKind.Recapitalization, ICfdVault.ClaimantInflowCashMode.CashArrived
+            recapAmount, IHousePool.ClaimantInflowKind.Recapitalization, IHousePool.ClaimantInflowCashMode.CashArrived
         );
         vm.prank(address(recapJuniorVault));
         recapPool.reconcile();
@@ -620,10 +620,10 @@ contract AuditConfirmedFindingsFailing_KeeperReserveLiquidation is BasePerpTest 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 0, true);
 
-        uint256 vaultDepth = pool.totalAssets();
+        uint256 poolDepth = pool.totalAssets();
         vm.prank(address(router));
         vm.expectRevert(CfdEngine.CfdEngine__PositionIsSolvent.selector);
-        engine.liquidatePosition(account, 100_530_000, vaultDepth, uint64(block.timestamp));
+        engine.liquidatePosition(account, 100_530_000, poolDepth, uint64(block.timestamp));
     }
 
 }
