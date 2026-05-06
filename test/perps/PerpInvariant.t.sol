@@ -10,6 +10,8 @@ import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {AccountLensViewTypes} from "../../src/perps/interfaces/AccountLensViewTypes.sol";
+import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
+import {IHousePool} from "../../src/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {PerpsViewTypes} from "../../src/perps/interfaces/PerpsViewTypes.sol";
@@ -625,7 +627,7 @@ contract PerpInvariantTest is BasePerpTest {
     }
 
     function invariant_PoolLiquidityViewMatchesProtocolAccounting() public view {
-        HousePool.PoolLiquidityView memory poolView = pool.getPoolLiquidityView();
+        IHousePool.PoolLiquidityView memory poolView = pool.getPoolLiquidityView();
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory protocolView =
             engineProtocolLens.getProtocolAccountingSnapshot();
 
@@ -652,7 +654,7 @@ contract PerpInvariantTest is BasePerpTest {
                 continue;
             }
 
-            CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, oraclePrice);
+            ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, oraclePrice);
             assertEq(
                 preview.liquidatable, positionView.liquidatable, "Liquidation preview must match live position view"
             );
@@ -935,7 +937,7 @@ contract AdversarialPerpHandler is Test {
 
         uint256 oraclePrice = bound(priceFuzz, 80_000_000, 125_000_000);
         uint256 poolDepth = pool.totalAssets();
-        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, oraclePrice);
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, oraclePrice);
         if (!preview.liquidatable || preview.keeperBountyUsdc == 0) {
             return;
         }
@@ -1020,7 +1022,7 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
     function invariant_AdversarialViewsStayConsistent() public view {
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory protocolView =
             engineProtocolLens.getProtocolAccountingSnapshot();
-        HousePool.PoolLiquidityView memory poolView = pool.getPoolLiquidityView();
+        IHousePool.PoolLiquidityView memory poolView = pool.getPoolLiquidityView();
 
         assertEq(poolView.totalAssetsUsdc, protocolView.poolAssetsUsdc, "Pool and engine must agree on assets");
         assertEq(poolView.freeUsdc, protocolView.freeUsdc, "Pool and engine must agree on free liquidity");

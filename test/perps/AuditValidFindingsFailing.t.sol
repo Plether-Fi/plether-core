@@ -2,7 +2,6 @@
 pragma solidity 0.8.33;
 
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
-import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 

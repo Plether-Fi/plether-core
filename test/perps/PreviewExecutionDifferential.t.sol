@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdEnginePlanTypes} from "../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {AccountLensViewTypes} from "../../src/perps/interfaces/AccountLensViewTypes.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
+import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 
@@ -68,7 +68,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             vm.stopPrank();
             assertEq(
                 _revertSelector(revertData),
-                ICfdEngine.CfdEngine__TypedOrderFailure.selector,
+                ICfdEngineTypes.CfdEngine__TypedOrderFailure.selector,
                 "Valid preview open unexpectedly hit an untyped revert"
             );
             fail("Valid preview open unexpectedly reverted on the live open path");
@@ -85,7 +85,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         _fundTrader(trader, 11_000e6);
         _open(account, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
 
-        CfdEngine.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, closePrice);
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, closePrice);
         vm.assume(preview.valid);
 
         vm.prank(trader);
@@ -156,7 +156,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 1);
 
-        CfdEngine.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, closePrice);
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, closePrice);
         vm.assume(preview.valid);
 
         vm.prank(trader);
@@ -230,7 +230,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
 
         vm.warp(block.timestamp + 180 days);
 
-        CfdEngine.ClosePreview memory preview = engineLens.previewClose(bearAccount, 50_000e18, 1e8);
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(bearAccount, 50_000e18, 1e8);
         assertTrue(preview.valid, "Positive-carry partial close preview should remain valid");
 
         uint256 deferredBefore = engine.deferredTraderCreditUsdc(bearAccount);
@@ -273,7 +273,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         _fundTrader(trader, 8000e6);
         _open(account, CfdTypes.Side.BULL, 100_000e18, 4000e6, 1e8);
 
-        CfdEngine.ClosePreview memory preview = engineLens.previewClose(account, 50_000e18, 110_000_000);
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 50_000e18, 110_000_000);
         assertTrue(preview.valid, "Partial close preview should remain valid without queued margin support");
 
         vm.prank(trader);
@@ -310,7 +310,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         vm.prank(trader);
         clearinghouse.withdraw(account, 100e6);
 
-        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, liquidationPrice);
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, liquidationPrice);
         vm.assume(preview.liquidatable);
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(KEEPER);
@@ -385,7 +385,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 1);
 
-        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, liquidationPrice);
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, liquidationPrice);
         vm.assume(preview.liquidatable);
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(KEEPER);
@@ -462,7 +462,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 0, true);
 
-        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, liquidationPrice);
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, liquidationPrice);
         AccountLensViewTypes.AccountLedgerSnapshot memory snapshotBefore =
             engineAccountLens.getAccountLedgerSnapshot(account);
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(KEEPER);

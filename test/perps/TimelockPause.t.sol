@@ -9,6 +9,7 @@ import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "../../src/perps/OrderRouterAdmin.sol";
 import {ICfdEngineAdminHost} from "../../src/perps/interfaces/ICfdEngineAdminHost.sol";
+import {IHousePool} from "../../src/perps/interfaces/IHousePool.sol";
 import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
@@ -206,12 +207,12 @@ contract TimelockPauseTest is BasePerpTest {
     // ==========================================
 
     function test_ProposePoolConfig_TimelockFlow() public {
-        HousePool.PoolConfig memory config = _currentPoolConfig();
+        IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 1200;
         pool.proposePoolConfig(config);
         assertGt(pool.poolConfigActivationTime(), 0);
 
-        vm.expectRevert(HousePool.HousePool__TimelockNotReady.selector);
+        vm.expectRevert(IHousePool.HousePool__TimelockNotReady.selector);
         pool.finalizePoolConfig();
 
         _warpForward(48 hours + 1);
@@ -224,12 +225,12 @@ contract TimelockPauseTest is BasePerpTest {
     }
 
     function test_ProposePoolConfig_TimelockFlow_ForMarkStalenessLimit() public {
-        HousePool.PoolConfig memory config = _currentPoolConfig();
+        IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.markStalenessLimit = 60;
         pool.proposePoolConfig(config);
         assertGt(pool.poolConfigActivationTime(), 0);
 
-        vm.expectRevert(HousePool.HousePool__TimelockNotReady.selector);
+        vm.expectRevert(IHousePool.HousePool__TimelockNotReady.selector);
         pool.finalizePoolConfig();
 
         _warpForward(48 hours + 1);
@@ -240,12 +241,12 @@ contract TimelockPauseTest is BasePerpTest {
     }
 
     function test_FinalizePoolConfig_NoProposal_Reverts() public {
-        vm.expectRevert(HousePool.HousePool__NoProposal.selector);
+        vm.expectRevert(IHousePool.HousePool__NoProposal.selector);
         pool.finalizePoolConfig();
     }
 
     function test_CancelPoolConfig_ClearsPending() public {
-        HousePool.PoolConfig memory config = _currentPoolConfig();
+        IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 1500;
         pool.proposePoolConfig(config);
         pool.cancelPoolConfigProposal();
@@ -253,13 +254,13 @@ contract TimelockPauseTest is BasePerpTest {
     }
 
     function test_ProposePoolConfig_TimelockFlow_ForFrozenLpFees() public {
-        HousePool.PoolConfig memory config = _currentPoolConfig();
+        IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorFrozenLpFeeBps = 40;
         config.juniorFrozenLpFeeBps = 90;
         pool.proposePoolConfig(config);
         assertGt(pool.poolConfigActivationTime(), 0);
 
-        vm.expectRevert(HousePool.HousePool__TimelockNotReady.selector);
+        vm.expectRevert(IHousePool.HousePool__TimelockNotReady.selector);
         pool.finalizePoolConfig();
 
         _warpForward(48 hours + 1);
@@ -271,7 +272,7 @@ contract TimelockPauseTest is BasePerpTest {
     }
 
     function test_CancelPoolConfig_ZeroesPendingStruct() public {
-        HousePool.PoolConfig memory config = _currentPoolConfig();
+        IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorFrozenLpFeeBps = 40;
         config.juniorFrozenLpFeeBps = 90;
         pool.proposePoolConfig(config);
@@ -290,14 +291,14 @@ contract TimelockPauseTest is BasePerpTest {
     }
 
     function test_ProposePoolConfig_RevertsForInvalidFrozenLpFees() public {
-        HousePool.PoolConfig memory config = _currentPoolConfig();
+        IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorFrozenLpFeeBps = 1001;
-        vm.expectRevert(HousePool.HousePool__InvalidFrozenLpFee.selector);
+        vm.expectRevert(IHousePool.HousePool__InvalidFrozenLpFee.selector);
         pool.proposePoolConfig(config);
 
         config = _currentPoolConfig();
         config.juniorFrozenLpFeeBps = 1001;
-        vm.expectRevert(HousePool.HousePool__InvalidFrozenLpFee.selector);
+        vm.expectRevert(IHousePool.HousePool__InvalidFrozenLpFee.selector);
         pool.proposePoolConfig(config);
     }
 
@@ -551,7 +552,7 @@ contract TimelockPauseTest is BasePerpTest {
 
     function test_HousePool_Pause_OnlyOwner() public {
         vm.prank(nonOwner);
-        vm.expectRevert(HousePool.HousePool__UnauthorizedPauser.selector);
+        vm.expectRevert(IHousePool.HousePool__UnauthorizedPauser.selector);
         pool.pause();
     }
 

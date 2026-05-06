@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {IHousePool} from "../../src/perps/interfaces/IHousePool.sol";
 import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
@@ -219,7 +219,7 @@ contract AuditV3_C03_AsymmetricStalenessTest is BasePerpTest {
         _fundSenior(address(this), 500_000e6);
         _fundJunior(address(this), 500_000e6);
 
-        HousePool.PoolConfig memory config = _currentPoolConfig();
+        IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 1000; // 10% APY
         pool.proposePoolConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
@@ -262,7 +262,7 @@ contract AuditV3_C03_AsymmetricStalenessTest is BasePerpTest {
         _fundSenior(address(this), 500_000e6);
         _fundJunior(address(this), 500_000e6);
 
-        HousePool.PoolConfig memory config = _currentPoolConfig();
+        IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 1000; // 10% APY
         pool.proposePoolConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);

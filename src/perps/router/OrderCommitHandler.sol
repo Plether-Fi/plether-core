@@ -2,8 +2,8 @@
 pragma solidity 0.8.33;
 
 import {CfdTypes} from "../CfdTypes.sol";
+import {IOrderRouter} from "../interfaces/IOrderRouter.sol";
 import {IOrderRouterAccounting} from "../interfaces/IOrderRouterAccounting.sol";
-import {IOrderRouterErrors} from "../interfaces/IOrderRouterErrors.sol";
 import {OrderValidation} from "./OrderValidation.sol";
 
 /// @notice Commit-time delayed-order handling and pending-order read helpers.
@@ -50,7 +50,7 @@ abstract contract OrderCommitHandler is OrderValidation {
         _linkGlobalOrder(orderId);
         _linkAccountOrder(account, orderId);
         if (++pendingOrderCounts[account] > maxPendingOrders) {
-            revert IOrderRouterErrors.OrderRouter__CommitValidation(7);
+            revert IOrderRouter.OrderRouter__CommitValidation(7);
         }
         emit OrderCommitted(orderId, account, side);
     }

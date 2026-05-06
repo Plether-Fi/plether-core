@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
+import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 
@@ -16,7 +16,7 @@ contract PayoutModesMatrixTest is BasePerpTest {
         _fundTrader(trader, 11_000e6);
         _open(account, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
 
-        CfdEngine.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 80_000_000);
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 80_000_000);
         assertEq(preview.deferredTraderCreditUsdc, 0, "Immediate close payout should not defer trader funds");
         assertGt(preview.immediatePayoutUsdc, 0, "Immediate close payout should credit settlement immediately");
     }
@@ -28,7 +28,7 @@ contract PayoutModesMatrixTest is BasePerpTest {
         _open(account, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
         usdc.burn(address(pool), pool.totalAssets());
 
-        CfdEngine.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 80_000_000);
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 80_000_000);
         assertEq(preview.immediatePayoutUsdc, 0, "Illiquid close payout should not credit settlement immediately");
         assertGt(preview.deferredTraderCreditUsdc, 0, "Illiquid close payout should become deferred");
     }
@@ -65,7 +65,7 @@ contract PayoutModesMatrixTest is BasePerpTest {
         _open(account, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
         stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(account).checked_write(uint256(0));
 
-        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 180_000_000);
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 180_000_000);
         assertGt(preview.badDebtUsdc, 0, "Deeply underwater liquidation should surface bad debt");
     }
 

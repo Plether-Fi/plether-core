@@ -2,8 +2,8 @@
 pragma solidity 0.8.33;
 
 import {CfdTypes} from "../CfdTypes.sol";
+import {IOrderRouter} from "../interfaces/IOrderRouter.sol";
 import {IOrderRouterAccounting} from "../interfaces/IOrderRouterAccounting.sol";
-import {IOrderRouterErrors} from "../interfaces/IOrderRouterErrors.sol";
 import {OrderValidation} from "./OrderValidation.sol";
 
 /// @notice External-order execution entry handling for single and batch keeper execution.
@@ -14,7 +14,7 @@ abstract contract OrderExecutionHandler is OrderValidation {
         bytes[] calldata pythUpdateData
     ) internal {
         if (nextExecuteId == 0) {
-            revert IOrderRouterErrors.OrderRouter__QueueState(0);
+            revert IOrderRouter.OrderRouter__QueueState(0);
         }
         uint64 initialHeadOrderId = nextExecuteId;
         (, CfdTypes.Order memory initialHeadOrder) = _pendingOrder(initialHeadOrderId);
@@ -24,13 +24,13 @@ abstract contract OrderExecutionHandler is OrderValidation {
 
         _skipStaleOrders(orderId, update.executionPrice, update.oraclePublishTime);
         if (nextExecuteId == 0) {
-            revert IOrderRouterErrors.OrderRouter__QueueState(0);
+            revert IOrderRouter.OrderRouter__QueueState(0);
         }
         if (orderId < nextExecuteId) {
             orderId = nextExecuteId;
         }
         if (orderId != nextExecuteId) {
-            revert IOrderRouterErrors.OrderRouter__QueueState(1);
+            revert IOrderRouter.OrderRouter__QueueState(1);
         }
         (, CfdTypes.Order memory order) = _pendingOrder(orderId);
 

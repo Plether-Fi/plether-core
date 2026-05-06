@@ -4,12 +4,11 @@ pragma solidity 0.8.33;
 import {CfdEngine} from "./CfdEngine.sol";
 import {CfdEnginePlanTypes} from "./CfdEnginePlanTypes.sol";
 import {CfdTypes} from "./CfdTypes.sol";
-import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
 import {ICfdEngineLens} from "./interfaces/ICfdEngineLens.sol";
 import {ICfdEnginePlanner} from "./interfaces/ICfdEnginePlanner.sol";
+import {ICfdEngineTypes} from "./interfaces/ICfdEngineTypes.sol";
 import {IMarginClearinghouse} from "./interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
-import {CfdEnginePlanLib} from "./libraries/CfdEnginePlanLib.sol";
 
 contract CfdEngineLens is ICfdEngineLens {
 
@@ -29,7 +28,7 @@ contract CfdEngineLens is ICfdEngineLens {
         address account,
         uint256 sizeDelta,
         uint256 oraclePrice
-    ) external view returns (CfdEngine.ClosePreview memory preview) {
+    ) external view returns (ICfdEngineTypes.ClosePreview memory preview) {
         preview = _previewClose(account, sizeDelta, oraclePrice, engineContract.pool().totalAssets());
     }
 
@@ -88,14 +87,14 @@ contract CfdEngineLens is ICfdEngineLens {
         uint256 sizeDelta,
         uint256 oraclePrice,
         uint256 poolDepthUsdc
-    ) external view returns (CfdEngine.ClosePreview memory preview) {
+    ) external view returns (ICfdEngineTypes.ClosePreview memory preview) {
         preview = _previewClose(account, sizeDelta, oraclePrice, poolDepthUsdc);
     }
 
     function previewLiquidation(
         address account,
         uint256 oraclePrice
-    ) external view returns (CfdEngine.LiquidationPreview memory preview) {
+    ) external view returns (ICfdEngineTypes.LiquidationPreview memory preview) {
         preview = _previewLiquidation(account, oraclePrice, engineContract.pool().totalAssets());
     }
 
@@ -103,7 +102,7 @@ contract CfdEngineLens is ICfdEngineLens {
         address account,
         uint256 oraclePrice,
         uint256 poolDepthUsdc
-    ) external view returns (CfdEngine.LiquidationPreview memory preview) {
+    ) external view returns (ICfdEngineTypes.LiquidationPreview memory preview) {
         preview = _previewLiquidation(account, oraclePrice, poolDepthUsdc);
     }
 
@@ -112,7 +111,7 @@ contract CfdEngineLens is ICfdEngineLens {
         uint256 sizeDelta,
         uint256 oraclePrice,
         uint256 poolDepthUsdc
-    ) internal view returns (CfdEngine.ClosePreview memory preview) {
+    ) internal view returns (ICfdEngineTypes.ClosePreview memory preview) {
         uint256 price = oraclePrice > engineContract.CAP_PRICE() ? engineContract.CAP_PRICE() : oraclePrice;
         preview.executionPrice = price;
         preview.sizeDelta = sizeDelta;
@@ -183,7 +182,7 @@ contract CfdEngineLens is ICfdEngineLens {
         address account,
         uint256 oraclePrice,
         uint256 poolDepthUsdc
-    ) internal view returns (CfdEngine.LiquidationPreview memory preview) {
+    ) internal view returns (ICfdEngineTypes.LiquidationPreview memory preview) {
         uint256 price = oraclePrice > engineContract.CAP_PRICE() ? engineContract.CAP_PRICE() : oraclePrice;
         preview.oraclePrice = price;
         ICfdEnginePlanner planner = engineContract.planner();
@@ -223,8 +222,8 @@ contract CfdEngineLens is ICfdEngineLens {
         uint256 poolDepthUsdc,
         uint64 publishTime
     ) internal view returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
-        ICfdEngine.SideState memory bull;
-        ICfdEngine.SideState memory bear;
+        ICfdEngineTypes.SideState memory bull;
+        ICfdEngineTypes.SideState memory bear;
         (bull.maxProfitUsdc, bull.openInterest, bull.entryNotional, bull.totalMargin) =
             engineContract.sides(uint8(CfdTypes.Side.BULL));
         (bear.maxProfitUsdc, bear.openInterest, bear.entryNotional, bear.totalMargin) =
@@ -292,7 +291,7 @@ contract CfdEngineLens is ICfdEngineLens {
     }
 
     function _sideSnapshot(
-        ICfdEngine.SideState memory side
+        ICfdEngineTypes.SideState memory side
     ) internal pure returns (CfdEnginePlanTypes.SideSnapshot memory snap) {
         snap = CfdEnginePlanTypes.SideSnapshot({
             maxProfitUsdc: side.maxProfitUsdc,

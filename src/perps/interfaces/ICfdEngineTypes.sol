@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
+import {CfdEnginePlanTypes} from "../CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../CfdTypes.sol";
 
 /// @notice Shared CfdEngine structs and custom errors.
@@ -44,6 +45,40 @@ interface ICfdEngineTypes {
     error CfdEngine__StillInsolvent();
     error CfdEngine__ZeroAddress();
     error CfdEngine__InsufficientCloseOrderBountyBacking();
+    error CfdEngine__TypedOrderFailure(
+        CfdEnginePlanTypes.ExecutionFailurePolicyCategory failureCategory, uint8 failureCode, bool isClose
+    );
+
+    event CarryUpdated(int256 bullIndex, int256 bearIndex, uint256 absSkewUsdc);
+    event PositionOpened(
+        address indexed account, CfdTypes.Side side, uint256 sizeDelta, uint256 price, uint256 marginDelta
+    );
+    event PositionClosed(address indexed account, CfdTypes.Side side, uint256 sizeDelta, uint256 price, int256 pnl);
+    event PositionLiquidated(
+        address indexed account, CfdTypes.Side side, uint256 size, uint256 price, uint256 keeperBounty
+    );
+    event MarginAdded(address indexed account, uint256 amount);
+    event FadDaysAdded(uint256[] timestamps);
+    event FadDaysRemoved(uint256[] timestamps);
+    event FadMaxStalenessUpdated(uint256 newStaleness);
+    event FadRunwayUpdated(uint256 newRunway);
+    event EngineMarkStalenessLimitUpdated(uint256 newStaleness);
+    event BadDebtCleared(uint256 amount, uint256 remaining);
+    event DegradedModeEntered(uint256 effectiveAssets, uint256 maxLiability, address indexed triggeringAccount);
+    event DegradedModeCleared();
+    event DeferredTraderCreditRecorded(address indexed account, uint256 amountUsdc);
+    event DeferredTraderCreditClaimed(address indexed account, uint256 amountUsdc);
+    event DeferredKeeperCreditRecorded(address indexed keeper, uint256 amountUsdc);
+    event DeferredKeeperCreditClaimed(address indexed keeper, uint256 amountUsdc);
+    event CarryCheckpointed(address indexed account, uint256 addedUnsettledCarryUsdc, uint256 totalUnsettledCarryUsdc);
+    event CarryRealized(
+        address indexed account,
+        uint256 realizedCarryUsdc,
+        uint256 freeSettlementConsumedUsdc,
+        uint256 marginConsumedUsdc,
+        uint256 remainingUnsettledCarryUsdc
+    );
+    event TokenSwept(address indexed token, address indexed to, uint256 amount);
 
     struct AccountCollateralView {
         uint256 settlementBalanceUsdc;
@@ -142,16 +177,6 @@ interface ICfdEngineTypes {
         uint256 openInterest;
         uint256 entryNotional;
         uint256 totalMargin;
-    }
-
-    struct StoredPosition {
-        uint256 size;
-        uint256 entryPrice;
-        uint256 maxProfitUsdc;
-        CfdTypes.Side side;
-        uint64 lastUpdateTime;
-        uint64 lastCarryTimestamp;
-        int256 vpiAccrued;
     }
 
 }

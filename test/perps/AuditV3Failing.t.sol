@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
-import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
+import {IOrderRouter} from "../../src/perps/interfaces/IOrderRouter.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
@@ -67,7 +67,7 @@ contract AuditV3Failing_FadStaleness is BasePerpTest {
         vm.warp(fridayEvening + 2 hours - 1);
 
         vm.prank(alice);
-        vm.expectRevert(CfdEngine.CfdEngine__MarkPriceStale.selector);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__MarkPriceStale.selector);
         clearinghouse.withdraw(account, 100e6);
     }
 
@@ -254,7 +254,7 @@ contract AuditV3Failing_CloseSlippageInversion is BasePerpTest {
         _open(account, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
 
         vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__CommitValidation.selector, 4));
+        vm.expectRevert(abi.encodeWithSelector(IOrderRouter.OrderRouter__CommitValidation.selector, 4));
         router.commitOrder(CfdTypes.Side.BEAR, 20_000e18, 0, 0, true);
     }
 

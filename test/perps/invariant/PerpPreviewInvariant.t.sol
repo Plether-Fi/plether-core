@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEngine} from "../../../src/perps/CfdEngine.sol";
 import {CfdEnginePlanTypes} from "../../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../../../src/perps/CfdTypes.sol";
 import {AccountLensViewTypes} from "../../../src/perps/interfaces/AccountLensViewTypes.sol";
 import {ICfdEngine} from "../../../src/perps/interfaces/ICfdEngine.sol";
+import {ICfdEngineTypes} from "../../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {ProtocolLensViewTypes} from "../../../src/perps/interfaces/ProtocolLensViewTypes.sol";
 import {BasePerpInvariantTest} from "./BasePerpInvariantTest.sol";
 import {PerpAccountingHandler} from "./handlers/PerpAccountingHandler.sol";
@@ -81,14 +81,15 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
                 continue;
             }
 
-            CfdEngine.LiquidationPreview memory liquidationPreview = engineLens.previewLiquidation(account, oraclePrice);
+            ICfdEngineTypes.LiquidationPreview memory liquidationPreview =
+                engineLens.previewLiquidation(account, oraclePrice);
             assertFalse(liquidationPreview.liquidatable, "Empty positions must not preview as liquidatable");
             assertEq(
                 liquidationPreview.reachableCollateralUsdc, 0, "Empty positions must not expose reachable collateral"
             );
             assertFalse(liquidationPreview.triggersDegradedMode, "Empty positions must not trigger degraded mode");
 
-            CfdEngine.ClosePreview memory closePreview = engineLens.previewClose(account, 1, oraclePrice);
+            ICfdEngineTypes.ClosePreview memory closePreview = engineLens.previewClose(account, 1, oraclePrice);
             assertFalse(closePreview.valid, "Empty positions must not preview as valid closes");
             assertEq(
                 uint8(closePreview.invalidReason),
@@ -111,7 +112,8 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
                 continue;
             }
 
-            CfdEngine.LiquidationPreview memory liquidationPreview = engineLens.previewLiquidation(account, oraclePrice);
+            ICfdEngineTypes.LiquidationPreview memory liquidationPreview =
+                engineLens.previewLiquidation(account, oraclePrice);
             assertEq(
                 liquidationPreview.reachableCollateralUsdc,
                 _terminalReachableUsdc(account),
@@ -131,7 +133,8 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
                 continue;
             }
 
-            CfdEngine.LiquidationPreview memory liquidationPreview = engineLens.previewLiquidation(account, oraclePrice);
+            ICfdEngineTypes.LiquidationPreview memory liquidationPreview =
+                engineLens.previewLiquidation(account, oraclePrice);
             assertEq(
                 liquidationPreview.reachableCollateralUsdc,
                 snapshot.terminalReachableUsdc,
@@ -151,8 +154,8 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
-            CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, oraclePrice);
-            CfdEngine.LiquidationPreview memory simulation =
+            ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, oraclePrice);
+            ICfdEngineTypes.LiquidationPreview memory simulation =
                 engineLens.simulateLiquidation(account, oraclePrice, canonicalDepth);
 
             _assertLiquidationPreviewEquals(preview, simulation);
@@ -170,7 +173,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
                 continue;
             }
 
-            CfdEngine.ClosePreview memory closePreview = engineLens.previewClose(account, size, oraclePrice);
+            ICfdEngineTypes.ClosePreview memory closePreview = engineLens.previewClose(account, size, oraclePrice);
             assertTrue(closePreview.valid, "Full close preview should stay valid for open positions");
 
             if (alreadyDegraded) {
@@ -185,7 +188,8 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
-            CfdEngine.LiquidationPreview memory liquidationPreview = engineLens.previewLiquidation(account, oraclePrice);
+            ICfdEngineTypes.LiquidationPreview memory liquidationPreview =
+                engineLens.previewLiquidation(account, oraclePrice);
             if (liquidationPreview.triggersDegradedMode) {
                 assertFalse(alreadyDegraded, "Liquidation preview trigger flag must be transition-only");
             }
@@ -195,7 +199,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
                 continue;
             }
 
-            CfdEngine.ClosePreview memory closePreview = engineLens.previewClose(account, size, oraclePrice);
+            ICfdEngineTypes.ClosePreview memory closePreview = engineLens.previewClose(account, size, oraclePrice);
             if (closePreview.triggersDegradedMode) {
                 assertFalse(alreadyDegraded, "Close preview trigger flag must be transition-only");
             }
@@ -207,7 +211,8 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
-            CfdEngine.LiquidationPreview memory liquidationPreview = engineLens.previewLiquidation(account, oraclePrice);
+            ICfdEngineTypes.LiquidationPreview memory liquidationPreview =
+                engineLens.previewLiquidation(account, oraclePrice);
             assertEq(
                 liquidationPreview.postOpDegradedMode,
                 liquidationPreview.effectiveAssetsAfterUsdc < liquidationPreview.maxLiabilityAfterUsdc,
@@ -219,7 +224,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
                 continue;
             }
 
-            CfdEngine.ClosePreview memory closePreview = engineLens.previewClose(account, size, oraclePrice);
+            ICfdEngineTypes.ClosePreview memory closePreview = engineLens.previewClose(account, size, oraclePrice);
             assertEq(
                 closePreview.postOpDegradedMode,
                 closePreview.effectiveAssetsAfterUsdc < closePreview.maxLiabilityAfterUsdc,
@@ -287,8 +292,8 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
     }
 
     function _assertLiquidationPreviewEquals(
-        CfdEngine.LiquidationPreview memory actual,
-        CfdEngine.LiquidationPreview memory expected
+        ICfdEngineTypes.LiquidationPreview memory actual,
+        ICfdEngineTypes.LiquidationPreview memory expected
     ) internal pure {
         assertEq(actual.liquidatable, expected.liquidatable, "Liquidatable flag should match canonical simulation");
         assertEq(actual.oraclePrice, expected.oraclePrice, "Liquidation oracle price should match");

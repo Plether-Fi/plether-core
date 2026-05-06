@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {HousePool} from "../../src/perps/HousePool.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {IHousePool} from "../../src/perps/interfaces/IHousePool.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 
 contract FrozenLpFeePolicyTest is BasePerpTest {
@@ -367,7 +367,7 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         uint256 assets = 100_000e6;
 
         _fundSenior(address(0xA11CE), 500_000e6);
-        HousePool.PoolConfig memory config = _currentPoolConfig();
+        IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorFrozenLpFeeBps = 40;
         config.juniorFrozenLpFeeBps = 90;
         pool.proposePoolConfig(config);
@@ -432,7 +432,7 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         _fundJunior(address(0xAAA8), 500_000e6);
         _enterFrozenWindow();
 
-        HousePool.PoolConfig memory config = _currentPoolConfig();
+        IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorFrozenLpFeeBps = 25;
         config.juniorFrozenLpFeeBps = 75;
         pool.proposePoolConfig(config);

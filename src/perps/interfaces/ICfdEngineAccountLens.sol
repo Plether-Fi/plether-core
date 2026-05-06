@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEngine} from "../CfdEngine.sol";
 import {AccountLensViewTypes} from "./AccountLensViewTypes.sol";
+import {ICfdEngineTypes} from "./ICfdEngineTypes.sol";
 
 interface ICfdEngineAccountLens {
 
@@ -10,7 +10,7 @@ interface ICfdEngineAccountLens {
     ///      Product-facing consumers should prefer `IPerpsTraderViews` via `PerpsPublicLens`.
     function getAccountCollateralView(
         address account
-    ) external view returns (CfdEngine.AccountCollateralView memory viewData);
+    ) external view returns (ICfdEngineTypes.AccountCollateralView memory viewData);
 
     function getWithdrawableUsdc(
         address account

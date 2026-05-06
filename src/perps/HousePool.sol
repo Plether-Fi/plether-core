@@ -31,21 +31,6 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
 
     using SafeERC20 for IERC20;
 
-    struct PoolLiquidityView {
-        uint256 totalAssetsUsdc;
-        uint256 freeUsdc;
-        uint256 withdrawalReservedUsdc;
-        uint256 pendingRecapitalizationUsdc;
-        uint256 pendingTradingRevenueUsdc;
-        uint256 seniorPrincipalUsdc;
-        uint256 juniorPrincipalUsdc;
-        uint256 unpaidSeniorYieldUsdc;
-        uint256 seniorHighWaterMarkUsdc;
-        bool markFresh;
-        bool oracleFrozen;
-        bool degradedMode;
-    }
-
     struct PendingAccountingState {
         HousePoolWaterfallAccountingLib.WaterfallState waterfall;
         uint256 unassignedAssets;
@@ -57,13 +42,6 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
         HousePoolEngineViewTypes.HousePoolInputSnapshot accountingSnapshot;
         HousePoolEngineViewTypes.HousePoolStatusSnapshot statusSnapshot;
         PendingAccountingState pendingState;
-    }
-
-    struct PoolConfig {
-        uint256 seniorRateBps;
-        uint256 markStalenessLimit;
-        uint256 seniorFrozenLpFeeBps;
-        uint256 juniorFrozenLpFeeBps;
     }
 
     IERC20 public immutable USDC;
@@ -96,62 +74,6 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
 
     PoolConfig public pendingPoolConfig;
     uint256 public poolConfigActivationTime;
-
-    error HousePool__NotAVault();
-    error HousePool__RouterAlreadySet();
-    error HousePool__SeniorVaultAlreadySet();
-    error HousePool__JuniorVaultAlreadySet();
-    error HousePool__Unauthorized();
-    error HousePool__ExceedsMaxSeniorWithdraw();
-    error HousePool__ExceedsMaxJuniorWithdraw();
-    error HousePool__MarkPriceStale();
-    error HousePool__TimelockNotReady();
-    error HousePool__NoProposal();
-    error HousePool__SeniorImpaired();
-    error HousePool__DegradedMode();
-    error HousePool__ZeroAddress();
-    error HousePool__ZeroStaleness();
-    error HousePool__InvalidSeniorRate();
-    error HousePool__InvalidFrozenLpFee();
-    error HousePool__NoExcessAssets();
-    error HousePool__ExcessAmountTooHigh();
-    error HousePool__PendingBootstrap();
-    error HousePool__NoUnassignedAssets();
-    error HousePool__BootstrapSharesZero();
-    error HousePool__SeedAlreadyInitialized();
-    error HousePool__TradingActivationNotReady();
-    error HousePool__UnauthorizedPauser();
-    error HousePool__OracleFrozen();
-
-    event Reconciled(uint256 seniorPrincipal, uint256 juniorPrincipal, int256 delta);
-    event SeniorRateUpdated(uint256 newRateBps);
-    event MarkStalenessLimitUpdated(uint256 newLimit);
-    event PoolConfigProposed(
-        uint256 seniorRateBps,
-        uint256 markStalenessLimit,
-        uint256 seniorFrozenLpFeeBps,
-        uint256 juniorFrozenLpFeeBps,
-        uint256 activationTime
-    );
-    event PoolConfigFinalized();
-    event FrozenLpFeesUpdated(uint256 seniorFeeBps, uint256 juniorFeeBps);
-    event ExcessAccounted(uint256 amountUsdc, uint256 accountedAssetsUsdc);
-    event ExcessSwept(address indexed recipient, uint256 amountUsdc);
-    event ProtocolInflowAccounted(address indexed caller, uint256 amountUsdc, uint256 accountedAssetsUsdc);
-    event ClaimantInflowAccounted(
-        address indexed caller,
-        IHousePool.ClaimantInflowKind kind,
-        IHousePool.ClaimantInflowCashMode cashMode,
-        uint256 amountUsdc
-    );
-    event UnassignedAssetsAssigned(
-        bool indexed toSenior, address indexed receiver, uint256 amountUsdc, uint256 sharesMinted
-    );
-    event SeedPositionInitialized(
-        bool indexed toSenior, address indexed receiver, uint256 amountUsdc, uint256 sharesMinted
-    );
-    event TradingActivated();
-    event PauserUpdated(address indexed previousPauser, address indexed newPauser);
 
     modifier onlyPauserOrOwner() {
         if (msg.sender != owner() && msg.sender != pauser) {

@@ -10,6 +10,7 @@ import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {MarginClearinghouseAccountingLib} from "../../src/perps/libraries/MarginClearinghouseAccountingLib.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
@@ -257,7 +258,9 @@ contract MarginClearinghouseTest is Test {
         vm.prank(engine);
         clearinghouse.lockPositionMargin(aliceAccount, 4200 * 1e6);
 
-        assertEq(clearinghouse.getFreeBuyingPowerUsdc(aliceAccount), 800 * 1e6, "free buying power should remain exposed");
+        assertEq(
+            clearinghouse.getFreeBuyingPowerUsdc(aliceAccount), 800 * 1e6, "free buying power should remain exposed"
+        );
     }
 
     function test_GetAccountUsdcBuckets_SplitsTypedLockedMarginBuckets() public {
@@ -330,7 +333,9 @@ contract MarginClearinghouseTest is Test {
             checkpointCallsBeforeUnlock + 1,
             "Committed-margin unlock should checkpoint carry before funds become reachable again"
         );
-        assertEq(mockEngine.lastCarryAccountId(), aliceAccount, "Unlock should checkpoint carry for the unlocked account");
+        assertEq(
+            mockEngine.lastCarryAccountId(), aliceAccount, "Unlock should checkpoint carry for the unlocked account"
+        );
     }
 
     function test_LockCommittedOrderMargin_RevertsWhenReservationLedgerIsActive() public {
@@ -458,7 +463,9 @@ contract MarginClearinghouseTest is Test {
             checkpointCallsBeforeRelease + 1,
             "Reservation release should checkpoint carry before committed margin becomes reachable again"
         );
-        assertEq(mockEngine.lastCarryAccountId(), aliceAccount, "Release should checkpoint carry for the released account");
+        assertEq(
+            mockEngine.lastCarryAccountId(), aliceAccount, "Release should checkpoint carry for the released account"
+        );
     }
 
     function test_ReleaseOrderReservationIfActive_UsesStoredMarkFallbackWhenFreshCarryIsStale() public {
@@ -477,7 +484,9 @@ contract MarginClearinghouseTest is Test {
             mockEngine.storedMarkCheckpointCalls(), 1, "Stale reservation release should checkpoint using stored mark"
         );
         assertEq(
-            mockEngine.lastCarryAccountId(), aliceAccount, "Fallback release checkpoint should use the reservation account"
+            mockEngine.lastCarryAccountId(),
+            aliceAccount,
+            "Fallback release checkpoint should use the reservation account"
         );
     }
 
@@ -957,8 +966,10 @@ contract MarginClearinghouseTest is Test {
             vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientFreeEquity.selector);
             clearinghouse.applyOpenCost(aliceAccount, marginDeltaUsdc, tradeCostUsdc, engine);
         } else {
-            int256 netMarginChangeUsdc = clearinghouse.applyOpenCost(aliceAccount, marginDeltaUsdc, tradeCostUsdc, engine);
-            IMarginClearinghouse.AccountUsdcBuckets memory bucketsAfter = clearinghouse.getAccountUsdcBuckets(aliceAccount);
+            int256 netMarginChangeUsdc =
+                clearinghouse.applyOpenCost(aliceAccount, marginDeltaUsdc, tradeCostUsdc, engine);
+            IMarginClearinghouse.AccountUsdcBuckets memory bucketsAfter =
+                clearinghouse.getAccountUsdcBuckets(aliceAccount);
             assertEq(
                 netMarginChangeUsdc, plan.netMarginChangeUsdc, "Live open-cost net margin change should match plan"
             );
@@ -1158,7 +1169,7 @@ contract MarginClearinghouseAuditTest is BasePerpTest {
         router.executeOrder(1, empty);
 
         WithdrawParityState memory state = _observeWithdrawParity(account, alice, 5000e6);
-        _assertWithdrawParity(state, CfdEngine.CfdEngine__WithdrawBlockedByOpenPosition.selector);
+        _assertWithdrawParity(state, ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition.selector);
     }
 
     function test_Withdraw_FailsConsistentlyWhenGuardWouldFailOnStaleMark() public {
@@ -1174,7 +1185,7 @@ contract MarginClearinghouseAuditTest is BasePerpTest {
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
 
         WithdrawParityState memory state = _observeWithdrawParity(account, alice, 100e6);
-        _assertWithdrawParity(state, CfdEngine.CfdEngine__MarkPriceStale.selector);
+        _assertWithdrawParity(state, ICfdEngineTypes.CfdEngine__MarkPriceStale.selector);
     }
 
     function test_Withdraw_UsesCarryAwareGuardParityForOpenPositions() public {
@@ -1196,7 +1207,7 @@ contract MarginClearinghouseAuditTest is BasePerpTest {
         vm.warp(block.timestamp + 30);
 
         WithdrawParityState memory state = _observeWithdrawParity(account, alice, 80e6);
-        _assertWithdrawParity(state, CfdEngine.CfdEngine__WithdrawBlockedByOpenPosition.selector);
+        _assertWithdrawParity(state, ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition.selector);
     }
 
 }

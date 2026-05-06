@@ -5,8 +5,8 @@ import {CfdEngine} from "./CfdEngine.sol";
 import {CfdMath} from "./CfdMath.sol";
 import {CfdTypes} from "./CfdTypes.sol";
 import {HousePoolEngineViewTypes} from "./interfaces/HousePoolEngineViewTypes.sol";
-import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
 import {ICfdEngineProtocolLens} from "./interfaces/ICfdEngineProtocolLens.sol";
+import {ICfdEngineTypes} from "./interfaces/ICfdEngineTypes.sol";
 import {ProtocolLensViewTypes} from "./interfaces/ProtocolLensViewTypes.sol";
 import {OracleFreshnessPolicyLib} from "./libraries/OracleFreshnessPolicyLib.sol";
 import {SolvencyAccountingLib} from "./libraries/SolvencyAccountingLib.sol";
@@ -51,8 +51,8 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         snapshot.unrealizedMtmLiabilityUsdc = _getVaultMtmLiability();
         snapshot.deferredTraderCreditUsdc = engineContract.totalDeferredTraderCreditUsdc();
         snapshot.deferredKeeperCreditUsdc = engineContract.totalDeferredKeeperCreditUsdc();
-        ICfdEngine.SideState memory bullState = _sideState(CfdTypes.Side.BULL);
-        ICfdEngine.SideState memory bearState = _sideState(CfdTypes.Side.BEAR);
+        ICfdEngineTypes.SideState memory bullState = _sideState(CfdTypes.Side.BULL);
+        ICfdEngineTypes.SideState memory bearState = _sideState(CfdTypes.Side.BEAR);
         snapshot.markFreshnessRequired = bullState.maxProfitUsdc + bearState.maxProfitUsdc > 0;
         if (snapshot.markFreshnessRequired) {
             snapshot.maxMarkStaleness =
@@ -87,8 +87,8 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         }
 
         uint256 price = engineContract.lastMarkPrice();
-        ICfdEngine.SideState memory bullState = _sideState(CfdTypes.Side.BULL);
-        ICfdEngine.SideState memory bearState = _sideState(CfdTypes.Side.BEAR);
+        ICfdEngineTypes.SideState memory bullState = _sideState(CfdTypes.Side.BULL);
+        ICfdEngineTypes.SideState memory bearState = _sideState(CfdTypes.Side.BEAR);
         uint256 capPrice = engineContract.CAP_PRICE();
         return CfdMath.conservativeMtmLiability(bullState.maxProfitUsdc, CfdTypes.Side.BULL, price, capPrice)
             + CfdMath.conservativeMtmLiability(bearState.maxProfitUsdc, CfdTypes.Side.BEAR, price, capPrice);
@@ -115,8 +115,8 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         snapshot.totalDeferredTraderCreditUsdc = engineContract.totalDeferredTraderCreditUsdc();
         snapshot.totalDeferredKeeperCreditUsdc = engineContract.totalDeferredKeeperCreditUsdc();
         snapshot.degradedMode = engineContract.degradedMode();
-        ICfdEngine.SideState memory bullState = _sideState(CfdTypes.Side.BULL);
-        ICfdEngine.SideState memory bearState = _sideState(CfdTypes.Side.BEAR);
+        ICfdEngineTypes.SideState memory bullState = _sideState(CfdTypes.Side.BULL);
+        ICfdEngineTypes.SideState memory bearState = _sideState(CfdTypes.Side.BEAR);
         snapshot.hasLiveLiability = bullState.maxProfitUsdc + bearState.maxProfitUsdc > 0;
     }
 
@@ -134,7 +134,7 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
 
     function _sideState(
         CfdTypes.Side side
-    ) internal view returns (ICfdEngine.SideState memory state) {
+    ) internal view returns (ICfdEngineTypes.SideState memory state) {
         (state.maxProfitUsdc, state.openInterest, state.entryNotional, state.totalMargin) =
             engineContract.sides(uint8(side));
     }

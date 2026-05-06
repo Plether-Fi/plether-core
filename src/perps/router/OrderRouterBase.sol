@@ -1,18 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdTypes} from "../CfdTypes.sol";
 import {OrderRouterAdmin} from "../OrderRouterAdmin.sol";
+import {IOrderRouter} from "../interfaces/IOrderRouter.sol";
 import {IOrderRouterAccounting} from "../interfaces/IOrderRouterAccounting.sol";
-import {IOrderRouterAdminHost} from "../interfaces/IOrderRouterAdminHost.sol";
-import {IOrderRouterErrors} from "../interfaces/IOrderRouterErrors.sol";
 import {OrderExecutionOrchestrator} from "./OrderExecutionOrchestrator.sol";
 import {OrderOracleExecution} from "./OrderOracleExecution.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /// @notice Shared storage and abstract-hook implementations for the delayed-order router stack.
-abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrchestrator {
+abstract contract OrderRouterBase is IOrderRouter, OrderExecutionOrchestrator {
 
     using SafeERC20 for IERC20;
 
@@ -29,8 +27,6 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
     uint256 public maxPendingOrders;
 
     uint64 public globalTailOrderId;
-
-    event OrderCommitted(uint64 indexed orderId, address indexed account, CfdTypes.Side side);
 
     /// @param _engine CfdEngine that processes trades and liquidations
     /// @param _housePool HousePool used for depth queries and liquidation bounty payouts
@@ -65,13 +61,13 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
 
     function _onlyEngine() internal view {
         if (msg.sender != address(engine) && msg.sender != address(engine.settlementSidecar())) {
-            revert IOrderRouterErrors.OrderRouter__CommitValidation(8);
+            revert IOrderRouter.OrderRouter__CommitValidation(8);
         }
     }
 
     function _onlyAdmin() internal view {
         if (msg.sender != admin) {
-            revert IOrderRouterErrors.OrderRouter__CommitValidation(8);
+            revert IOrderRouter.OrderRouter__CommitValidation(8);
         }
     }
 
@@ -116,7 +112,7 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
     ) internal override {
         try engine.reserveCloseOrderExecutionBounty(account, sizeDelta, executionBountyUsdc, address(this)) {}
         catch {
-            revert IOrderRouterErrors.OrderRouter__CommitValidation(6);
+            revert IOrderRouter.OrderRouter__CommitValidation(6);
         }
     }
 

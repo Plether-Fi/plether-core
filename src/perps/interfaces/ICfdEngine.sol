@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEnginePlanTypes} from "../CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../CfdTypes.sol";
 import {EngineStatusViewTypes} from "./EngineStatusViewTypes.sol";
 import {ICfdEngineTypes} from "./ICfdEngineTypes.sol";
@@ -14,10 +13,6 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 ///      `IPerpsKeeper`, `IProtocolViews`, and `IMarginAccount`.
 ///      Live protocol contracts should prefer smaller role-specific interfaces like `ICfdEngineCore`.
 interface ICfdEngine is ICfdEngineTypes {
-
-    error CfdEngine__TypedOrderFailure(
-        CfdEnginePlanTypes.ExecutionFailurePolicyCategory failureCategory, uint8 failureCode, bool isClose
-    );
 
     /// @notice Margin clearinghouse address used for account margin locking/unlocking
     function clearinghouse() external view returns (address);

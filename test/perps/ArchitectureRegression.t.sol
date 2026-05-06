@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {DeferredEngineViewTypes} from "../../src/perps/interfaces/DeferredEngineViewTypes.sol";
+import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 
 contract ArchitectureRegression_EscrowShielding is BasePerpTest {
@@ -41,7 +41,7 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         vm.prank(address(router));
         engine.recordDeferredKeeperCredit(keeper, 950_001e6);
 
-        vm.expectRevert(CfdEngine.CfdEngine__PostOpSolvencyBreach.selector);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__PostOpSolvencyBreach.selector);
         engine.withdrawFees(address(this));
     }
 
@@ -84,7 +84,9 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         _close(bobAccount, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
 
         assertGt(
-            engine.deferredTraderCreditUsdc(bobAccount), 0, "new payout must defer while older deferred claims reserve cash"
+            engine.deferredTraderCreditUsdc(bobAccount),
+            0,
+            "new payout must defer while older deferred claims reserve cash"
         );
         assertEq(
             clearinghouse.balanceUsdc(bobAccount),
@@ -121,7 +123,7 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         );
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeper);
-        vm.expectRevert(CfdEngine.CfdEngine__InsufficientPoolLiquidity.selector);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InsufficientPoolLiquidity.selector);
         vm.prank(keeper);
         engine.claimDeferredKeeperCredit();
         assertEq(clearinghouse.balanceUsdc(keeper), keeperSettlementBefore);
@@ -150,15 +152,19 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
 
         usdc.mint(address(pool), aliceDeferred / 2);
 
-        vm.expectRevert(CfdEngine.CfdEngine__InsufficientPoolLiquidity.selector);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InsufficientPoolLiquidity.selector);
         vm.prank(alice);
         engine.claimDeferredTraderCredit(aliceAccount);
 
-        assertEq(engine.deferredTraderCreditUsdc(aliceAccount), aliceDeferred, "Oldest deferred claim should remain frozen");
-        assertEq(engine.deferredTraderCreditUsdc(bobAccount), bobDeferred, "Unclaimed later balance should remain unchanged");
+        assertEq(
+            engine.deferredTraderCreditUsdc(aliceAccount), aliceDeferred, "Oldest deferred claim should remain frozen"
+        );
+        assertEq(
+            engine.deferredTraderCreditUsdc(bobAccount), bobDeferred, "Unclaimed later balance should remain unchanged"
+        );
 
         usdc.mint(address(pool), bobDeferred / 2);
-        vm.expectRevert(CfdEngine.CfdEngine__InsufficientPoolLiquidity.selector);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InsufficientPoolLiquidity.selector);
         vm.prank(bob);
         engine.claimDeferredTraderCredit(bobAccount);
 

@@ -18,8 +18,9 @@ import {PerpsPublicLens} from "../../src/perps/PerpsPublicLens.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {DeferredEngineViewTypes} from "../../src/perps/interfaces/DeferredEngineViewTypes.sol";
 import {HousePoolEngineViewTypes} from "../../src/perps/interfaces/HousePoolEngineViewTypes.sol";
-import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
 import {ICfdEngineAdminHost} from "../../src/perps/interfaces/ICfdEngineAdminHost.sol";
+import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
+import {IHousePool} from "../../src/perps/interfaces/IHousePool.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
 import {PerpsViewTypes} from "../../src/perps/interfaces/PerpsViewTypes.sol";
@@ -263,8 +264,8 @@ abstract contract BasePerpTest is Test {
         vm.stopPrank();
     }
 
-    function _currentPoolConfig() internal view returns (HousePool.PoolConfig memory config) {
-        config = HousePool.PoolConfig({
+    function _currentPoolConfig() internal view returns (IHousePool.PoolConfig memory config) {
+        config = IHousePool.PoolConfig({
             seniorRateBps: pool.seniorRateBps(),
             markStalenessLimit: pool.markStalenessLimit(),
             seniorFrozenLpFeeBps: pool.seniorFrozenLpFeeBps(),
@@ -383,7 +384,7 @@ abstract contract BasePerpTest is Test {
     }
 
     function _assertClosePreviewMatchesObserved(
-        CfdEngine.ClosePreview memory preview,
+        ICfdEngineTypes.ClosePreview memory preview,
         CloseParityObserved memory observed,
         bool degradedModeBefore
     ) internal {
@@ -420,8 +421,8 @@ abstract contract BasePerpTest is Test {
     }
 
     function _assertClosePreviewEquals(
-        CfdEngine.ClosePreview memory actual,
-        CfdEngine.ClosePreview memory expected
+        ICfdEngineTypes.ClosePreview memory actual,
+        ICfdEngineTypes.ClosePreview memory expected
     ) internal pure {
         assertEq(actual.valid, expected.valid, "Close preview validity should match");
         assertEq(uint8(actual.invalidReason), uint8(expected.invalidReason), "Close invalid reason should match");
@@ -496,7 +497,7 @@ abstract contract BasePerpTest is Test {
     }
 
     function _assertLiquidationPreviewMatchesObserved(
-        CfdEngine.LiquidationPreview memory preview,
+        ICfdEngineTypes.LiquidationPreview memory preview,
         LiquidationParityObserved memory observed,
         bool degradedModeBefore
     ) internal pure {
@@ -535,8 +536,8 @@ abstract contract BasePerpTest is Test {
     }
 
     function _assertLiquidationPreviewEquals(
-        CfdEngine.LiquidationPreview memory actual,
-        CfdEngine.LiquidationPreview memory expected
+        ICfdEngineTypes.LiquidationPreview memory actual,
+        ICfdEngineTypes.LiquidationPreview memory expected
     ) internal pure {
         assertEq(
             actual.liquidatable, expected.liquidatable, "Liquidatable flag should match canonical simulateLiquidation"
@@ -717,13 +718,13 @@ abstract contract BasePerpTest is Test {
 
     function _sideState(
         CfdTypes.Side side
-    ) internal view returns (ICfdEngine.SideState memory state) {
+    ) internal view returns (ICfdEngineTypes.SideState memory state) {
         (state.maxProfitUsdc, state.openInterest, state.entryNotional, state.totalMargin) = engine.sides(uint8(side));
     }
 
     function _maxLiability() internal view returns (uint256) {
-        ICfdEngine.SideState memory bull = _sideState(CfdTypes.Side.BULL);
-        ICfdEngine.SideState memory bear = _sideState(CfdTypes.Side.BEAR);
+        ICfdEngineTypes.SideState memory bull = _sideState(CfdTypes.Side.BULL);
+        ICfdEngineTypes.SideState memory bear = _sideState(CfdTypes.Side.BEAR);
         return bull.maxProfitUsdc > bear.maxProfitUsdc ? bull.maxProfitUsdc : bear.maxProfitUsdc;
     }
 
@@ -736,8 +737,8 @@ abstract contract BasePerpTest is Test {
         if (price == 0) {
             return 0;
         }
-        ICfdEngine.SideState memory bull = _sideState(CfdTypes.Side.BULL);
-        ICfdEngine.SideState memory bear = _sideState(CfdTypes.Side.BEAR);
+        ICfdEngineTypes.SideState memory bull = _sideState(CfdTypes.Side.BULL);
+        ICfdEngineTypes.SideState memory bear = _sideState(CfdTypes.Side.BEAR);
         int256 bullPnl = (int256(bull.entryNotional) - int256(bull.openInterest * price)) / int256(1e20);
         int256 bearPnl = (int256(bear.openInterest * price) - int256(bear.entryNotional)) / int256(1e20);
         return bullPnl + bearPnl;

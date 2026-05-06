@@ -2,10 +2,9 @@
 pragma solidity 0.8.33;
 
 import {CfdTypes} from "./CfdTypes.sol";
+import {IOrderRouter} from "./interfaces/IOrderRouter.sol";
 import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterAdminHost} from "./interfaces/IOrderRouterAdminHost.sol";
-import {IPerpsKeeper} from "./interfaces/IPerpsKeeper.sol";
-import {IPerpsTraderActions} from "./interfaces/IPerpsTraderActions.sol";
 import {OrderHandler} from "./router/OrderHandler.sol";
 import {OrderRouterBase} from "./router/OrderRouterBase.sol";
 
@@ -13,14 +12,7 @@ import {OrderRouterBase} from "./router/OrderRouterBase.sol";
 /// @notice Manages Commit-Reveal, MEV protection, and the un-brickable FIFO queue.
 /// @dev Holds only non-trader-owned keeper execution reserves. Trader collateral remains in MarginClearinghouse.
 /// @custom:security-contact contact@plether.com
-contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
-
-    error OrderRouter__ZeroSize();
-    error OrderRouter__OracleValidation(uint8 code);
-    error OrderRouter__QueueState(uint8 code);
-    error OrderRouter__CommitValidation(uint8 code);
-    error OrderRouter__InsufficientGas();
-    error OrderRouter__PredictableOpenInvalid(uint8 code);
+contract OrderRouter is IOrderRouter, OrderHandler {
 
     /// @param _engine CfdEngine that processes trades and liquidations
     /// @param _housePool HousePool used for depth queries and liquidation bounty payouts

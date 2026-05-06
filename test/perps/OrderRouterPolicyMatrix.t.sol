@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdEnginePlanTypes} from "../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {ICfdEngineCore} from "../../src/perps/interfaces/ICfdEngineCore.sol";
+import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {PositionRiskAccountingLib} from "../../src/perps/libraries/PositionRiskAccountingLib.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
@@ -372,7 +372,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
             isClose: false
         });
         bytes memory revertData = abi.encodeWithSelector(
-            ICfdEngineCore.CfdEngine__TypedOrderFailure.selector,
+            ICfdEngineTypes.CfdEngine__TypedOrderFailure.selector,
             CfdEnginePlanTypes.ExecutionFailurePolicyCategory.ProtocolStateInvalidated,
             uint8(CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES),
             false

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEngine} from "../CfdEngine.sol";
 import {CfdEnginePlanTypes} from "../CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../CfdTypes.sol";
+import {ICfdEngineTypes} from "./ICfdEngineTypes.sol";
 
 interface ICfdEngineLens {
 
@@ -13,7 +13,7 @@ interface ICfdEngineLens {
         address account,
         uint256 sizeDelta,
         uint256 oraclePrice
-    ) external view returns (CfdEngine.ClosePreview memory preview);
+    ) external view returns (ICfdEngineTypes.ClosePreview memory preview);
 
     function previewOpenRevertCode(
         address account,
@@ -38,17 +38,17 @@ interface ICfdEngineLens {
         uint256 sizeDelta,
         uint256 oraclePrice,
         uint256 poolDepthUsdc
-    ) external view returns (CfdEngine.ClosePreview memory preview);
+    ) external view returns (ICfdEngineTypes.ClosePreview memory preview);
 
     function previewLiquidation(
         address account,
         uint256 oraclePrice
-    ) external view returns (CfdEngine.LiquidationPreview memory preview);
+    ) external view returns (ICfdEngineTypes.LiquidationPreview memory preview);
 
     function simulateLiquidation(
         address account,
         uint256 oraclePrice,
         uint256 poolDepthUsdc
-    ) external view returns (CfdEngine.LiquidationPreview memory preview);
+    ) external view returns (ICfdEngineTypes.LiquidationPreview memory preview);
 
 }

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
+import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 
@@ -26,7 +26,7 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
         vm.prank(address(router));
         engine.recordDeferredKeeperCredit(otherKeeper, 20e6);
 
-        vm.expectRevert(CfdEngine.CfdEngine__InsufficientPoolLiquidity.selector);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InsufficientPoolLiquidity.selector);
         vm.prank(trader);
         engine.claimDeferredTraderCredit(account);
 
@@ -49,7 +49,7 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
             .checked_write(uint256(50e6));
         stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(uint256(50e6));
 
-        vm.expectRevert(CfdEngine.CfdEngine__InsufficientPoolLiquidity.selector);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InsufficientPoolLiquidity.selector);
         vm.prank(trader);
         engine.claimDeferredTraderCredit(account);
 
@@ -76,7 +76,7 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
         vm.prank(address(router));
         engine.recordDeferredKeeperCredit(otherKeeper, 20e6);
 
-        vm.expectRevert(CfdEngine.CfdEngine__InsufficientPoolLiquidity.selector);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InsufficientPoolLiquidity.selector);
         vm.prank(trader);
         engine.claimDeferredTraderCredit(account);
 
@@ -93,7 +93,7 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
         usdc.mint(address(pool), 2000e6);
 
         address keeperAccount = keeper;
-        vm.expectRevert(CfdEngine.CfdEngine__InsufficientPoolLiquidity.selector);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InsufficientPoolLiquidity.selector);
         vm.prank(keeper);
         engine.claimDeferredKeeperCredit();
 
@@ -120,7 +120,7 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
         vm.prank(address(router));
         engine.recordDeferredKeeperCredit(keeper, 30e6);
 
-        vm.expectRevert(CfdEngine.CfdEngine__InsufficientPoolLiquidity.selector);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InsufficientPoolLiquidity.selector);
         vm.prank(keeper);
         engine.claimDeferredKeeperCredit();
 
@@ -128,9 +128,7 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
         assertEq(
             engine.deferredKeeperCreditUsdc(keeper), 30e6, "Keeper residual deferred balance should stay fully queued"
         );
-        assertEq(
-            engine.deferredTraderCreditUsdc(traderAccount), 20e6, "Trader deferred queue should remain preserved"
-        );
+        assertEq(engine.deferredTraderCreditUsdc(traderAccount), 20e6, "Trader deferred queue should remain preserved");
         assertEq(engine.accumulatedFeesUsdc(), 20e6, "Protocol fees should remain preserved");
     }
 

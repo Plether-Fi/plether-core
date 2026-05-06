@@ -12,6 +12,8 @@ import {OrderRouter} from "../../../src/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "../../../src/perps/OrderRouterAdmin.sol";
 import {PerpsPublicLens} from "../../../src/perps/PerpsPublicLens.sol";
 import {TrancheVault} from "../../../src/perps/TrancheVault.sol";
+import {ICfdEngineTypes} from "../../../src/perps/interfaces/ICfdEngineTypes.sol";
+import {IOrderRouter} from "../../../src/perps/interfaces/IOrderRouter.sol";
 import {IOrderRouterAdminHost} from "../../../src/perps/interfaces/IOrderRouterAdminHost.sol";
 import {MockPyth} from "../../mocks/MockPyth.sol";
 import {MockUSDC} from "../../mocks/MockUSDC.sol";
@@ -168,13 +170,13 @@ contract PerpOraclePathHandler is Test {
         } catch (bytes memory err) {
             bytes4 selector = _revertSelector(err);
             if (expectStale) {
-                if (selector != OrderRouter.OrderRouter__OracleValidation.selector) {
+                if (selector != IOrderRouter.OrderRouter__OracleValidation.selector) {
                     revert PerpOraclePathHandler__UnexpectedRevert(selector);
                 }
                 return;
             }
             if (expectOutOfOrder) {
-                if (selector != CfdEngine.CfdEngine__MarkPriceOutOfOrder.selector) {
+                if (selector != ICfdEngineTypes.CfdEngine__MarkPriceOutOfOrder.selector) {
                     revert PerpOraclePathHandler__UnexpectedRevert(selector);
                 }
                 return;

@@ -2,8 +2,8 @@
 pragma solidity 0.8.33;
 
 import {CfdTypes} from "../CfdTypes.sol";
+import {IOrderRouter} from "../interfaces/IOrderRouter.sol";
 import {IOrderRouterAccounting} from "../interfaces/IOrderRouterAccounting.sol";
-import {IOrderRouterErrors} from "../interfaces/IOrderRouterErrors.sol";
 import {OracleFreshnessPolicyLib} from "../libraries/OracleFreshnessPolicyLib.sol";
 import {OrderValidationLib} from "../libraries/OrderValidationLib.sol";
 import {OrderExecutionSettlement} from "./OrderExecutionSettlement.sol";
@@ -84,21 +84,21 @@ abstract contract OrderExecutionOrchestrator is OrderExecutionSettlement {
 
         if (orderPolicy.closeOnly) {
             if (revertOnBlockedExecution) {
-                revert IOrderRouterErrors.OrderRouter__CommitValidation(10);
+                revert IOrderRouter.OrderRouter__CommitValidation(10);
             }
             return OrderExecutionStepResult.Break;
         }
 
         if (address(pyth) != address(0) && !executionContext.oracleFrozen && block.number == order.commitBlock) {
             if (revertOnBlockedExecution) {
-                revert IOrderRouterErrors.OrderRouter__OracleValidation(13);
+                revert IOrderRouter.OrderRouter__OracleValidation(13);
             }
             return OrderExecutionStepResult.Break;
         }
 
         if (address(pyth) != address(0) && !executionContext.oracleFrozen && oraclePublishTime <= order.commitTime) {
             if (revertOnBlockedExecution) {
-                revert IOrderRouterErrors.OrderRouter__OracleValidation(13);
+                revert IOrderRouter.OrderRouter__OracleValidation(13);
             }
             return OrderExecutionStepResult.Break;
         }
@@ -114,7 +114,7 @@ abstract contract OrderExecutionOrchestrator is OrderExecutionSettlement {
         uint256 forwardedGas = gasleft() - (gasleft() / 64);
         if (forwardedGas < minEngineGas) {
             if (revertOnBlockedExecution) {
-                revert IOrderRouterErrors.OrderRouter__InsufficientGas();
+                revert IOrderRouter.OrderRouter__InsufficientGas();
             }
             return OrderExecutionStepResult.Break;
         }

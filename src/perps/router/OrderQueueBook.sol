@@ -2,8 +2,8 @@
 pragma solidity 0.8.33;
 
 import {CfdTypes} from "../CfdTypes.sol";
+import {IOrderRouter} from "../interfaces/IOrderRouter.sol";
 import {IOrderRouterAccounting} from "../interfaces/IOrderRouterAccounting.sol";
-import {IOrderRouterErrors} from "../interfaces/IOrderRouterErrors.sol";
 import {OrderEscrowAccounting} from "./OrderEscrowAccounting.sol";
 
 abstract contract OrderQueueBook is OrderEscrowAccounting {
@@ -55,7 +55,7 @@ abstract contract OrderQueueBook is OrderEscrowAccounting {
         } else if (prevOrderId != 0) {
             orderRecords[prevOrderId].nextGlobalOrderId = nextOrderId;
         } else if (tailOrderId != orderId) {
-            revert IOrderRouterErrors.OrderRouter__QueueState(6);
+            revert IOrderRouter.OrderRouter__QueueState(6);
         }
 
         if (tailOrderId == orderId) {
@@ -63,7 +63,7 @@ abstract contract OrderQueueBook is OrderEscrowAccounting {
         } else if (nextOrderId != 0) {
             orderRecords[nextOrderId].prevGlobalOrderId = prevOrderId;
         } else if (headOrderId != orderId) {
-            revert IOrderRouterErrors.OrderRouter__QueueState(6);
+            revert IOrderRouter.OrderRouter__QueueState(6);
         }
 
         record.nextGlobalOrderId = 0;
@@ -75,7 +75,7 @@ abstract contract OrderQueueBook is OrderEscrowAccounting {
     ) internal view returns (OrderRecord storage record, CfdTypes.Order memory order) {
         record = _orderRecord(orderId);
         if (record.status != IOrderRouterAccounting.OrderStatus.Pending) {
-            revert IOrderRouterErrors.OrderRouter__QueueState(4);
+            revert IOrderRouter.OrderRouter__QueueState(4);
         }
         order = record.core;
     }

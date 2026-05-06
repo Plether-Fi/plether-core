@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {IOrderRouter} from "../../src/perps/interfaces/IOrderRouter.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
@@ -78,7 +78,7 @@ contract AuditC1SequencerDriftFailing is BasePerpTest {
         bytes[] memory updateData = new bytes[](1);
         updateData[0] = "";
 
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
+        vm.expectRevert(abi.encodeWithSelector(IOrderRouter.OrderRouter__OracleValidation.selector, 10));
         router.executeOrder(1, updateData);
 
         assertEq(router.nextExecuteId(), 1, "Future publish time must leave the order pending");

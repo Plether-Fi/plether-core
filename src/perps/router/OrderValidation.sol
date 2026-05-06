@@ -4,7 +4,7 @@ pragma solidity 0.8.33;
 import {CfdEnginePlanTypes} from "../CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../CfdTypes.sol";
 import {OrderRouterAdmin} from "../OrderRouterAdmin.sol";
-import {IOrderRouterErrors} from "../interfaces/IOrderRouterErrors.sol";
+import {IOrderRouter} from "../interfaces/IOrderRouter.sol";
 import {OrderFailurePolicyLib} from "../libraries/OrderFailurePolicyLib.sol";
 import {OrderValidationLib} from "../libraries/OrderValidationLib.sol";
 import {OrderBountyAccounting} from "./OrderBountyAccounting.sol";
@@ -18,16 +18,16 @@ abstract contract OrderValidation is OrderBountyAccounting {
             revert Pausable.EnforcedPause();
         }
         if (engine.degradedMode()) {
-            revert IOrderRouterErrors.OrderRouter__CommitValidation(9);
+            revert IOrderRouter.OrderRouter__CommitValidation(9);
         }
         if (_isCloseOnlyWindow()) {
-            revert IOrderRouterErrors.OrderRouter__CommitValidation(10);
+            revert IOrderRouter.OrderRouter__CommitValidation(10);
         }
         if (!housePool.canIncreaseRisk()) {
             if (!housePool.isSeedLifecycleComplete()) {
-                revert IOrderRouterErrors.OrderRouter__CommitValidation(0);
+                revert IOrderRouter.OrderRouter__CommitValidation(0);
             }
-            revert IOrderRouterErrors.OrderRouter__CommitValidation(1);
+            revert IOrderRouter.OrderRouter__CommitValidation(1);
         }
     }
 
@@ -38,10 +38,10 @@ abstract contract OrderValidation is OrderBountyAccounting {
     ) internal pure {
         (bool zeroSize, uint8 validationCode) = OrderValidationLib.validateBaseCommit(sizeDelta, marginDelta, isClose);
         if (zeroSize) {
-            revert IOrderRouterErrors.OrderRouter__ZeroSize();
+            revert IOrderRouter.OrderRouter__ZeroSize();
         }
         if (validationCode != 0) {
-            revert IOrderRouterErrors.OrderRouter__CommitValidation(validationCode);
+            revert IOrderRouter.OrderRouter__CommitValidation(validationCode);
         }
     }
 
@@ -55,7 +55,7 @@ abstract contract OrderValidation is OrderBountyAccounting {
             queuedPosition.exists, queuedPosition.size, queuedPosition.side, side, sizeDelta
         );
         if (validationCode != 0) {
-            revert IOrderRouterErrors.OrderRouter__CommitValidation(validationCode);
+            revert IOrderRouter.OrderRouter__CommitValidation(validationCode);
         }
         return closeOrderExecutionBountyUsdc;
     }
@@ -75,7 +75,7 @@ abstract contract OrderValidation is OrderBountyAccounting {
             uint8 revertCode =
                 engineLens.previewOpenRevertCode(account, side, sizeDelta, marginDelta, commitPrice, commitMarkTime);
             if (OrderFailurePolicyLib.isPredictablyInvalidOpen(failureCategory)) {
-                revert IOrderRouterErrors.OrderRouter__PredictableOpenInvalid(revertCode);
+                revert IOrderRouter.OrderRouter__PredictableOpenInvalid(revertCode);
             }
         }
         return _quoteOpenOrderExecutionBountyUsdc(sizeDelta, commitPrice);
@@ -85,11 +85,11 @@ abstract contract OrderValidation is OrderBountyAccounting {
         uint64 maxOrderId
     ) internal view {
         if (nextExecuteId == 0) {
-            revert IOrderRouterErrors.OrderRouter__QueueState(0);
+            revert IOrderRouter.OrderRouter__QueueState(0);
         }
         uint8 validationCode = OrderValidationLib.validateBatchBounds(maxOrderId, nextExecuteId, nextCommitId);
         if (validationCode != 0) {
-            revert IOrderRouterErrors.OrderRouter__QueueState(validationCode);
+            revert IOrderRouter.OrderRouter__QueueState(validationCode);
         }
     }
 

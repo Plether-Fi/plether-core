@@ -5,6 +5,7 @@ import {CfdEngine} from "./CfdEngine.sol";
 import {CfdTypes} from "./CfdTypes.sol";
 import {AccountLensViewTypes} from "./interfaces/AccountLensViewTypes.sol";
 import {ICfdEngineAccountLens} from "./interfaces/ICfdEngineAccountLens.sol";
+import {ICfdEngineTypes} from "./interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "./interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "./interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
@@ -29,7 +30,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
     /// @notice Returns detailed clearinghouse bucket and reachability state for an account.
     function getAccountCollateralView(
         address account
-    ) external view returns (CfdEngine.AccountCollateralView memory viewData) {
+    ) external view returns (ICfdEngineTypes.AccountCollateralView memory viewData) {
         IMarginClearinghouse.AccountUsdcBuckets memory buckets =
             engineContract.clearinghouse().getAccountUsdcBuckets(account);
         viewData.settlementBalanceUsdc = buckets.settlementBalanceUsdc;

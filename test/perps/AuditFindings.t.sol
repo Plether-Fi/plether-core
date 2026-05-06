@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
-import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
+import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
+import {IHousePool} from "../../src/perps/interfaces/IHousePool.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -139,7 +139,7 @@ contract AuditC03_MarginCheck is BasePerpTest {
         // execFee = 4bps * $200k = $80 → pos.margin = $2990 < $3000
         // C-03 FIX: IMR check now uses pos.margin, so this correctly reverts
         uint256 depth = pool.totalAssets();
-        vm.expectRevert(abi.encodeWithSelector(ICfdEngine.CfdEngine__TypedOrderFailure.selector, 1, 6, false));
+        vm.expectRevert(abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__TypedOrderFailure.selector, 1, 6, false));
         vm.prank(address(router));
         engine.processOrderTyped(
             CfdTypes.Order({
@@ -213,7 +213,7 @@ contract AuditC04_StaleOracleMtmBypass is BasePerpTest {
         _fundSenior(alice, 500_000 * 1e6);
         _fundJunior(bob, 500_000 * 1e6);
 
-        HousePool.PoolConfig memory config = _currentPoolConfig();
+        IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 800; // 8% APY
         pool.proposePoolConfig(config);
         _warpForward(48 hours + 1);
@@ -332,7 +332,7 @@ contract AuditH01_MarkTimeLookback is BasePerpTest {
         // H-01 FIX: engine.updateMarkPrice now uses publishTime, not block.timestamp
         uint64 vaaTime = uint64(block.timestamp) - 30;
         vm.prank(address(router));
-        vm.expectRevert(CfdEngine.CfdEngine__MarkPriceOutOfOrder.selector);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__MarkPriceOutOfOrder.selector);
         engine.updateMarkPrice(0.8e8, vaaTime);
     }
 
@@ -479,7 +479,7 @@ contract AuditH04_UnpaidYieldNotScaled is BasePerpTest {
         _fundSenior(bob, 500_000 * 1e6);
         _fundJunior(address(this), 2_000_000 * 1e6);
 
-        HousePool.PoolConfig memory config = _currentPoolConfig();
+        IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 800; // 8% APY
         pool.proposePoolConfig(config);
         _warpForward(48 hours + 1);

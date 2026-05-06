@@ -13,6 +13,8 @@ import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "../../src/perps/OrderRouterAdmin.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
+import {IOrderRouter} from "../../src/perps/interfaces/IOrderRouter.sol";
 import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "forge-std/Test.sol";
@@ -350,7 +352,7 @@ contract PerpsForkTest is Test {
             new bool[](1)
         );
 
-        vm.expectRevert(CfdEngine.CfdEngine__RouterAlreadySet.selector);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__RouterAlreadySet.selector);
         engine.setOrderRouter(address(realPythRouter));
 
         assertEq(
@@ -374,7 +376,7 @@ contract PerpsForkTest is Test {
         vm.roll(commitBlock + 2);
 
         vm.prank(keeper);
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 13));
+        vm.expectRevert(abi.encodeWithSelector(IOrderRouter.OrderRouter__OracleValidation.selector, 13));
         router.executeOrder(orderId, _pythUpdateData());
 
         vm.warp(commitTime + 1001);
@@ -404,7 +406,7 @@ contract PerpsForkTest is Test {
         vm.roll(commitBlock + 2);
 
         vm.prank(keeper);
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
+        vm.expectRevert(abi.encodeWithSelector(IOrderRouter.OrderRouter__OracleValidation.selector, 10));
         router.executeOrder(orderId, _pythUpdateData());
 
         address aliceAccount = _account(alice);
@@ -445,7 +447,7 @@ contract PerpsForkTest is Test {
         vm.warp(liqPublishTime + 16);
 
         vm.prank(keeper);
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 12));
+        vm.expectRevert(abi.encodeWithSelector(IOrderRouter.OrderRouter__OracleValidation.selector, 12));
         router.executeLiquidation(aliceAccount, _pythUpdateData());
     }
 
@@ -751,7 +753,9 @@ contract PerpsForkTest is Test {
             0,
             "Batch execution should continue past a deferred-payout close and clear the queue when exhausted"
         );
-        assertGt(engine.deferredTraderCreditUsdc(aliceAccount), 0, "Deferred payout should remain recorded after the batch");
+        assertGt(
+            engine.deferredTraderCreditUsdc(aliceAccount), 0, "Deferred payout should remain recorded after the batch"
+        );
 
         (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(aliceAccount);
         assertEq(
