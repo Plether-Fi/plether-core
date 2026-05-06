@@ -7,8 +7,8 @@ import {OrderRouterBase} from "./OrderRouterBase.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-/// @notice Shared router math and escrow settlement helpers.
-abstract contract OrderUtils is OrderRouterBase {
+/// @notice Keeper bounty, liquidation bounty, and forfeited-order bounty accounting for the router stack.
+abstract contract OrderBountyAccounting is OrderRouterBase {
 
     using SafeERC20 for IERC20;
 
