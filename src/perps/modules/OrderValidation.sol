@@ -7,11 +7,11 @@ import {OrderRouterAdmin} from "../OrderRouterAdmin.sol";
 import {IOrderRouterErrors} from "../interfaces/IOrderRouterErrors.sol";
 import {OrderFailurePolicyLib} from "../libraries/OrderFailurePolicyLib.sol";
 import {OrderValidationLib} from "../libraries/OrderValidationLib.sol";
-import {OrderUtils} from "./OrderUtils.sol";
+import {OrderBountyAccounting} from "./OrderBountyAccounting.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 
 /// @notice Validation and preflight checks for delayed-order commits and execution bounds.
-abstract contract OrderValidation is OrderUtils {
+abstract contract OrderValidation is OrderBountyAccounting {
 
     function _validateOpenCommitAllowed() internal view {
         if (OrderRouterAdmin(admin).paused()) {
