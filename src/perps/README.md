@@ -146,7 +146,7 @@ LPs provide USDC to the `HousePool`, which is split into senior and junior ERC-4
 - Senior gets a target coupon funded from junior NAV, plus last-loss protection.
 - Junior absorbs first loss and receives residual upside.
 - LP withdrawals are gated by solvency, reserved liabilities, lifecycle state, mark freshness policy, and holder cooldown rules.
-- Ordinary tranche deposits must be at least `1 USDC`, preventing dust deposits from forcing coupon checkpoint churn.
+- Ordinary tranche deposits and partial withdrawals must be at least `1 USDC`, preventing dust flows from forcing coupon checkpoint churn while still allowing full dust exits.
 - During `oracleFrozen`, tranche deposits and withdrawals remain live under stale-priced ERC4626 math with a fixed tranche-local surcharge: entry charges the fee by minting fewer net shares, exit charges the fee by paying fewer net assets, and the retained value stays in that same tranche (senior `25 bps`, junior `75 bps`).
 - During `oracleFrozen`, bootstrap admin flows stay blocked: `initializeSeedPosition(...)` and `assignUnassignedAssets(...)` must wait for the oracle to become live again instead of inheriting the stale-window LP fee path.
 

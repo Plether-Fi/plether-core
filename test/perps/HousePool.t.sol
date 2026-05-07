@@ -1363,6 +1363,60 @@ contract HousePoolTest is BasePerpTest {
         );
     }
 
+    function test_MinWithdrawal_BlocksDustBeforeCouponCheckpoint() public {
+        _fundSenior(alice, 100_000e6);
+        _fundJunior(bob, 100_000e6);
+        uint256 checkpointBefore = pool.lastSeniorCouponCheckpointTime();
+
+        vm.warp(block.timestamp + 1 days);
+
+        vm.startPrank(alice);
+        vm.expectRevert(TrancheVault.TrancheVault__WithdrawalTooSmall.selector);
+        seniorVault.withdraw(0, alice, alice);
+        vm.expectRevert(TrancheVault.TrancheVault__WithdrawalTooSmall.selector);
+        seniorVault.withdraw(1, alice, alice);
+        vm.expectRevert(TrancheVault.TrancheVault__WithdrawalTooSmall.selector);
+        seniorVault.redeem(0, alice, alice);
+        vm.expectRevert(TrancheVault.TrancheVault__WithdrawalTooSmall.selector);
+        seniorVault.redeem(1, alice, alice);
+        vm.stopPrank();
+
+        assertEq(
+            pool.lastSeniorCouponCheckpointTime(),
+            checkpointBefore,
+            "Dust withdrawals must fail before forcing coupon checkpointing"
+        );
+    }
+
+    function test_MinWithdrawal_AllowsFullDustExit() public {
+        uint256 minimum = pool.minTrancheDepositUsdc();
+        _fundJunior(alice, minimum);
+        _fundJunior(bob, minimum);
+
+        vm.prank(address(engine));
+        pool.payOut(address(0xBEEF), minimum + 2);
+
+        vm.warp(block.timestamp + 1 hours);
+
+        uint256 aliceWithdrawable = juniorVault.maxWithdraw(alice);
+        assertGt(aliceWithdrawable, 0, "Setup should leave Alice withdrawable dust");
+        assertLt(aliceWithdrawable, minimum, "Setup should leave Alice below the ordinary flow minimum");
+        vm.prank(alice);
+        uint256 aliceSharesBurned = juniorVault.withdraw(aliceWithdrawable, alice, alice);
+        assertEq(juniorVault.previewRedeem(juniorVault.balanceOf(alice)), 0, "Full dust withdraw should clear value");
+        assertEq(usdc.balanceOf(alice), aliceWithdrawable, "Alice should receive the full dust value");
+        assertGt(aliceSharesBurned, 0, "Withdraw should burn shares");
+
+        uint256 bobShares = juniorVault.balanceOf(bob);
+        uint256 bobAssets = juniorVault.previewRedeem(bobShares);
+        assertGt(bobAssets, 0, "Setup should leave Bob redeemable dust");
+        assertLt(bobAssets, minimum, "Setup should leave Bob below the ordinary flow minimum");
+        vm.prank(bob);
+        uint256 redeemedAssets = juniorVault.redeem(bobShares, bob, bob);
+        assertEq(juniorVault.balanceOf(bob), 0, "Full dust redeem should let Bob exit");
+        assertEq(redeemedAssets, bobAssets, "Redeem should pay the previewed dust value");
+    }
+
     function test_MeaningfulThirdPartyTopUpToExistingHolderReverts() public {
         _fundJunior(alice, 100_000 * 1e6);
 

@@ -35,6 +35,7 @@ contract TrancheVault is ERC4626 {
     error TrancheVault__TerminallyWiped();
     error TrancheVault__TradingNotActive();
     error TrancheVault__DepositTooSmall();
+    error TrancheVault__WithdrawalTooSmall();
 
     /// @param _usdc         Underlying USDC token used as the vault asset
     /// @param _pool         HousePool that holds USDC and manages the tranche waterfall
@@ -169,6 +170,7 @@ contract TrancheVault is ERC4626 {
         address receiver,
         address _owner
     ) public override returns (uint256) {
+        _requireWithdrawPreflight(assets, _owner);
         POOL.reconcile();
         uint256 feeBps = _frozenLpFeeBps();
         if (feeBps > 0) {
@@ -185,6 +187,7 @@ contract TrancheVault is ERC4626 {
         address receiver,
         address _owner
     ) public override returns (uint256) {
+        _requireRedeemPreflight(shares, _owner);
         POOL.reconcile();
         uint256 feeBps = _frozenLpFeeBps();
         if (feeBps > 0) {
@@ -361,6 +364,46 @@ contract TrancheVault is ERC4626 {
     ) internal view {
         if (assets < POOL.minTrancheDepositUsdc()) {
             revert TrancheVault__DepositTooSmall();
+        }
+    }
+
+    function _requireWithdrawPreflight(
+        uint256 assets,
+        address _owner
+    ) internal view {
+        if (assets == 0) {
+            revert TrancheVault__WithdrawalTooSmall();
+        }
+        uint256 maxAssets = maxWithdraw(_owner);
+        if (assets > maxAssets) {
+            revert ERC4626ExceededMaxWithdraw(_owner, assets, maxAssets);
+        }
+        if (assets >= POOL.minTrancheDepositUsdc()) {
+            return;
+        }
+        uint256 ownerShares = _unlockedOwnerShares(_owner);
+        uint256 ownerAssets = previewRedeem(ownerShares);
+        if (assets < ownerAssets && previewWithdraw(assets) < ownerShares) {
+            revert TrancheVault__WithdrawalTooSmall();
+        }
+    }
+
+    function _requireRedeemPreflight(
+        uint256 shares,
+        address _owner
+    ) internal view {
+        if (shares == 0) {
+            revert TrancheVault__WithdrawalTooSmall();
+        }
+        uint256 maxShares = maxRedeem(_owner);
+        if (shares > maxShares) {
+            revert ERC4626ExceededMaxRedeem(_owner, shares, maxShares);
+        }
+        if (previewRedeem(shares) >= POOL.minTrancheDepositUsdc()) {
+            return;
+        }
+        if (shares < _unlockedOwnerShares(_owner)) {
+            revert TrancheVault__WithdrawalTooSmall();
         }
     }
 
