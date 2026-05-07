@@ -87,6 +87,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
     uint256 public lastSeniorCouponCheckpointTime;
     PoolConfig internal poolConfig;
     uint256 public constant MAX_FROZEN_LP_FEE_BPS = 1000;
+    uint256 public constant MIN_TRANCHE_DEPOSIT_USDC = 1e6;
     bool public override(ICfdVault, IHousePool) isTradingActive;
     bool public seniorSeedInitialized;
     bool public juniorSeedInitialized;
@@ -121,6 +122,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
     error HousePool__TradingActivationNotReady();
     error HousePool__UnauthorizedPauser();
     error HousePool__OracleFrozen();
+    error HousePool__DepositTooSmall();
 
     event Reconciled(uint256 seniorPrincipal, uint256 juniorPrincipal, int256 delta);
     event SeniorRateUpdated(uint256 newRateBps);
@@ -327,7 +329,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
     }
 
     function canAcceptTrancheDeposits(
-        bool isSenior
+        bool
     ) public view override returns (bool) {
         (
             HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
@@ -340,7 +342,6 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
             unassignedAssets,
             _markIsFreshForReconcile(accountingSnapshot, statusSnapshot),
             ctx.pendingState.unassignedAssets,
-            isSenior,
             ctx.pendingState.waterfall.seniorPrincipal,
             ctx.pendingState.waterfall.seniorHighWaterMark
         );
@@ -541,6 +542,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
             seniorHighWaterMark += amount;
             seniorSeedInitialized = true;
         } else {
+            _checkpointSeniorCouponBeforePrincipalMutation();
             juniorPrincipal += amount;
             juniorSeedInitialized = true;
         }
@@ -558,6 +560,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
     function depositSenior(
         uint256 amount
     ) external override(IHousePool, IPerpsLPActions) onlyVault whenNotPaused {
+        _requireMinimumTrancheDeposit(amount);
         (
             HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
             HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
@@ -565,7 +568,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         _reconcile(accountingSnapshot);
         _requireFreshMark(accountingSnapshot, statusSnapshot);
         _requireNoPendingBootstrap();
-        if (seniorPrincipal < seniorHighWaterMark && seniorPrincipal > 0) {
+        if (seniorPrincipal < seniorHighWaterMark) {
             revert HousePool__SeniorImpaired();
         }
         USDC.safeTransferFrom(msg.sender, address(this), amount);
@@ -614,6 +617,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
     function depositJunior(
         uint256 amount
     ) external override(IHousePool, IPerpsLPActions) onlyVault whenNotPaused {
+        _requireMinimumTrancheDeposit(amount);
         (
             HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
             HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
@@ -621,6 +625,9 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         _reconcile(accountingSnapshot);
         _requireFreshMark(accountingSnapshot, statusSnapshot);
         _requireNoPendingBootstrap();
+        if (seniorPrincipal < seniorHighWaterMark) {
+            revert HousePool__SeniorImpaired();
+        }
         USDC.safeTransferFrom(msg.sender, address(this), amount);
         accountedAssets += amount;
         juniorPrincipal += amount;
@@ -739,6 +746,10 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         return isSenior ? poolConfig.seniorFrozenLpFeeBps : poolConfig.juniorFrozenLpFeeBps;
     }
 
+    function minTrancheDepositUsdc() external pure override returns (uint256) {
+        return MIN_TRANCHE_DEPOSIT_USDC;
+    }
+
     /// @notice Snapshot of pool liquidity, tranche principals, and oracle health for frontend consumption
     /// @return viewData Struct containing balances, reserves, and status flags
     function getVaultLiquidityView() external view returns (VaultLiquidityView memory viewData) {
@@ -793,6 +804,14 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
     ) internal pure {
         if (statusSnapshot.oracleFrozen) {
             revert HousePool__OracleFrozen();
+        }
+    }
+
+    function _requireMinimumTrancheDeposit(
+        uint256 amount
+    ) internal pure {
+        if (amount < MIN_TRANCHE_DEPOSIT_USDC) {
+            revert HousePool__DepositTooSmall();
         }
     }
 

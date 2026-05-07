@@ -326,11 +326,12 @@ contract AuditFollowupFindingsFailing_TrancheCooldownBypass is BasePerpTest {
         TrancheCooldownBypassReceiver receiver = new TrancheCooldownBypassReceiver();
         address receiverAddr = address(receiver);
 
-        usdc.mint(receiverAddr, 1);
+        uint256 minimumDeposit = pool.minTrancheDepositUsdc();
+        usdc.mint(receiverAddr, minimumDeposit);
         vm.prank(receiverAddr);
-        receiver.approveAsset(juniorVault, 1);
+        receiver.approveAsset(juniorVault, minimumDeposit);
         vm.prank(receiverAddr);
-        juniorVault.deposit(1, receiverAddr);
+        juniorVault.deposit(minimumDeposit, receiverAddr);
 
         vm.warp(block.timestamp + 1 hours + 1);
 

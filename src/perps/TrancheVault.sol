@@ -34,6 +34,7 @@ contract TrancheVault is ERC4626 {
     error TrancheVault__InvalidSeedPosition();
     error TrancheVault__TerminallyWiped();
     error TrancheVault__TradingNotActive();
+    error TrancheVault__DepositTooSmall();
 
     /// @param _usdc         Underlying USDC token used as the vault asset
     /// @param _pool         HousePool that holds USDC and manages the tranche waterfall
@@ -89,6 +90,8 @@ contract TrancheVault is ERC4626 {
         uint256 assets,
         address receiver
     ) public override returns (uint256) {
+        _requireActiveTranche();
+        _requireMinimumDeposit(assets);
         POOL.reconcile();
         _requireLifecycleActiveForOrdinaryDeposit();
         _requireActiveTranche();
@@ -106,6 +109,8 @@ contract TrancheVault is ERC4626 {
         uint256 shares,
         address receiver
     ) public override returns (uint256) {
+        _requireActiveTranche();
+        _requireMinimumDeposit(previewMint(shares));
         POOL.reconcile();
         _requireLifecycleActiveForOrdinaryDeposit();
         _requireActiveTranche();
@@ -348,6 +353,14 @@ contract TrancheVault is ERC4626 {
     function _requireLifecycleActiveForOrdinaryDeposit() internal view {
         if (!_ordinaryDepositsAllowed()) {
             revert TrancheVault__TradingNotActive();
+        }
+    }
+
+    function _requireMinimumDeposit(
+        uint256 assets
+    ) internal view {
+        if (assets < POOL.minTrancheDepositUsdc()) {
+            revert TrancheVault__DepositTooSmall();
         }
     }
 

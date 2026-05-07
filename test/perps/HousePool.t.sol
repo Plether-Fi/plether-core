@@ -1323,11 +1323,12 @@ contract HousePoolTest is BasePerpTest {
 
         // Third-party deposits into an existing holder should be rejected outright.
         address attacker = address(0xBAD);
-        usdc.mint(attacker, 1);
+        uint256 minimumDeposit = pool.minTrancheDepositUsdc();
+        usdc.mint(attacker, minimumDeposit);
         vm.startPrank(attacker);
-        usdc.approve(address(juniorVault), 1);
+        usdc.approve(address(juniorVault), minimumDeposit);
         vm.expectRevert(TrancheVault.TrancheVault__ThirdPartyDepositForExistingHolder.selector);
-        juniorVault.deposit(1, alice);
+        juniorVault.deposit(minimumDeposit, alice);
         vm.stopPrank();
 
         vm.warp(block.timestamp + 11 minutes);
@@ -1336,6 +1337,30 @@ contract HousePoolTest is BasePerpTest {
         juniorVault.withdraw(withdrawable, alice, alice);
 
         assertEq(usdc.balanceOf(alice), withdrawable, "Victim withdraw should succeed after original cooldown");
+    }
+
+    function test_MinDeposit_BlocksDustBeforeCouponCheckpoint() public {
+        _fundSenior(alice, 100_000e6);
+        _fundJunior(bob, 100_000e6);
+        uint256 checkpointBefore = pool.lastSeniorCouponCheckpointTime();
+
+        vm.warp(block.timestamp + 1 days);
+
+        address dave = address(0x444);
+        usdc.mint(dave, pool.minTrancheDepositUsdc());
+        vm.startPrank(dave);
+        usdc.approve(address(seniorVault), pool.minTrancheDepositUsdc());
+        vm.expectRevert(TrancheVault.TrancheVault__DepositTooSmall.selector);
+        seniorVault.deposit(1, dave);
+        vm.expectRevert(TrancheVault.TrancheVault__DepositTooSmall.selector);
+        seniorVault.mint(1, dave);
+        vm.stopPrank();
+
+        assertEq(
+            pool.lastSeniorCouponCheckpointTime(),
+            checkpointBefore,
+            "Dust deposits must fail before forcing coupon checkpointing"
+        );
     }
 
     function test_MeaningfulThirdPartyTopUpToExistingHolderReverts() public {
@@ -1630,6 +1655,36 @@ contract HousePoolSeedLifecycleGateTest is BasePerpTest {
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
+    }
+
+    function test_InitializeJuniorSeed_CheckpointsPreExistingSeniorCouponWithoutChargingSeed() public {
+        uint256 seniorSeed = 100_000e6;
+        uint256 juniorSeed = 50_000e6;
+        usdc.mint(address(this), seniorSeed);
+        usdc.approve(address(pool), seniorSeed);
+        pool.initializeSeedPosition(true, seniorSeed, address(this));
+
+        vm.warp(block.timestamp + 30 days);
+        uint256 juniorSeedTime = block.timestamp;
+        usdc.mint(address(this), juniorSeed);
+        usdc.approve(address(pool), juniorSeed);
+        pool.initializeSeedPosition(false, juniorSeed, address(this));
+
+        assertEq(pool.seniorPrincipal(), seniorSeed, "Junior seed should not pay pre-existing senior coupon time");
+        assertEq(pool.juniorPrincipal(), juniorSeed, "Junior seed should enter at face value");
+        assertEq(
+            pool.lastSeniorCouponCheckpointTime(),
+            juniorSeedTime,
+            "Junior seed should become the new senior coupon checkpoint"
+        );
+
+        vm.warp(juniorSeedTime + 1 days);
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        uint256 expectedCoupon = (seniorSeed * 800 * uint256(1 days)) / (10_000 * uint256(365 days));
+        assertEq(pool.seniorPrincipal(), seniorSeed + expectedCoupon, "Only post-junior-seed coupon should be paid");
+        assertEq(pool.juniorPrincipal(), juniorSeed - expectedCoupon, "Junior should only fund post-entry coupon time");
     }
 
     function test_OrdinaryDeposit_RevertsWhenSeedLifecycleStartedButTradingInactive() public {
@@ -2408,6 +2463,10 @@ contract HousePoolSeededBaseSetupTest is BasePerpTest {
         assertGt(pool.seniorHighWaterMark() - pool.seniorPrincipal(), 0, "Senior deficit exists");
         assertEq(seniorVault.maxDeposit(dave), 0, "ERC4626 maxDeposit should be zero while senior is impaired");
         assertEq(seniorVault.maxMint(dave), 0, "ERC4626 maxMint should be zero while senior is impaired");
+        assertEq(juniorVault.maxDeposit(dave), 0, "Junior maxDeposit should be zero while senior is impaired");
+        assertEq(juniorVault.maxMint(dave), 0, "Junior maxMint should be zero while senior is impaired");
+        assertFalse(pool.canAcceptTrancheDeposits(true), "Pool should block ordinary senior deposits while impaired");
+        assertFalse(pool.canAcceptTrancheDeposits(false), "Pool should block ordinary junior deposits while impaired");
     }
 
     function test_MaxDepositAndMaxMint_ReopenForPendingSeniorRecapAfterWipeout() public {

@@ -87,4 +87,7 @@ interface IHousePool {
         bool isSenior
     ) external view returns (uint256);
 
+    /// @notice Minimum assets accepted by ordinary ERC4626 tranche deposit/mint flows (6 decimals).
+    function minTrancheDepositUsdc() external view returns (uint256);
+
 }
