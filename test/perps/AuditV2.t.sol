@@ -68,7 +68,7 @@ contract AuditV2_C01_WithdrawGuardTest is BasePerpTest {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// C-02: _reconcile early return permanently destroys senior yield
+// C-02: _reconcile early return permanently destroys senior coupon checkpointing
 // ═══════════════════════════════════════════════════════════════════
 
 contract AuditV2_C02_ReconcileTimeConsumptionTest is BasePerpTest {
@@ -101,7 +101,7 @@ contract AuditV2_C02_ReconcileTimeConsumptionTest is BasePerpTest {
         });
     }
 
-    function test_C02_FrozenWindowReconcile_DoesNotDestroySeniorYieldEntitlement() public {
+    function test_C02_FrozenWindowReconcile_DoesNotDestroySeniorCouponCheckpointing() public {
         HousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 1000;
         pool.proposePoolConfig(config);
@@ -114,7 +114,7 @@ contract AuditV2_C02_ReconcileTimeConsumptionTest is BasePerpTest {
         address aliceAccount = alice;
         _open(aliceAccount, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
 
-        uint256 yieldBefore = pool.unpaidSeniorYield();
+        uint256 seniorBefore = pool.seniorPrincipal();
 
         // Capture base timestamp before any warps (block.timestamp is cached per frame)
         uint256 baseTs = SETUP_TIMESTAMP + 48 hours + 1;
@@ -140,8 +140,8 @@ contract AuditV2_C02_ReconcileTimeConsumptionTest is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        uint256 yieldAfter = pool.unpaidSeniorYield();
-        assertGe(yieldAfter, yieldBefore, "Frozen-window reconcile should not destroy accrued senior yield entitlement");
+        uint256 seniorAfter = pool.seniorPrincipal();
+        assertGe(seniorAfter, seniorBefore, "Frozen-window reconcile should not destroy senior coupon value");
     }
 
 }

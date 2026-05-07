@@ -143,7 +143,7 @@ Liquidation bounties are fail-soft when the HousePool is illiquid.
 
 LPs provide USDC to the `HousePool`, which is split into senior and junior ERC-4626 tranche vaults.
 
-- Senior gets fixed-rate yield and last-loss protection.
+- Senior gets a target coupon funded from junior NAV, plus last-loss protection.
 - Junior absorbs first loss and receives residual upside.
 - LP withdrawals are gated by solvency, reserved liabilities, lifecycle state, mark freshness policy, and holder cooldown rules.
 - During `oracleFrozen`, tranche deposits and withdrawals remain live under stale-priced ERC4626 math with a fixed tranche-local surcharge: entry charges the fee by minting fewer net shares, exit charges the fee by paying fewer net assets, and the retained value stays in that same tranche (senior `25 bps`, junior `75 bps`).
@@ -174,7 +174,7 @@ Operationally:
 
 - Senior principal is restored before junior receives surplus if senior has been impaired.
 - `seniorHighWaterMark` is a compounded protected senior claim watermark, not a principal-only watermark.
-- When fresh revenue pays accrued senior yield into `seniorPrincipal`, that paid yield also ratchets `seniorHighWaterMark` upward and remains senior-protected after later losses.
+- When the junior-funded coupon increases `seniorPrincipal`, the paid coupon also ratchets `seniorHighWaterMark` upward and remains senior-protected after later losses.
 - The mark increases additively on deposits, scales proportionally on withdrawals, and resets cleanly after wipeout plus recapitalization.
 - Deposits remain blocked while senior is partially impaired.
 
@@ -195,8 +195,8 @@ Operationally:
 
 `HousePool` separates mark-dependent reconcile math from already-funded pending buckets.
 
-- If mark freshness is required and stale, it skips mark-dependent yield and waterfall math.
-- That stale path does not back-accrue senior yield across the stale interval.
+- If mark freshness is required and stale, it skips mark-dependent revenue/loss waterfall math.
+- The senior coupon still checkpoints against existing junior NAV, so future junior entrants are not charged for prior time.
 - `finalizePoolConfig()` cannot change `seniorRateBps` while the mark is stale; governance must refresh the mark first.
 - Already-funded pending recapitalization or trading-revenue buckets may still apply through the same settlement entrypoint.
 
@@ -420,7 +420,7 @@ Instant controls remain for one-time wiring and fee withdrawal. `OrderRouter` pa
 | FAD override days | empty | Admin-set calendar override set |
 | `fadMaxStaleness` | 3 days | Frozen-market max staleness |
 | `fadRunwaySeconds` | 3 hours | Admin FAD pre-close runway |
-| `seniorRateBps` | 800 (8% APY) | Senior fixed-rate target |
+| `seniorRateBps` | 800 (8% APY) | Senior target coupon rate funded from junior NAV |
 | `DEPOSIT_COOLDOWN` | 1 hour | LP anti-flash cooldown |
 
 OrderRouter also exposes timelocked admin control over `maxPendingOrders`, `minEngineGas`, and `maxPruneOrdersPerCall`.

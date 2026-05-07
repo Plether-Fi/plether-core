@@ -88,7 +88,7 @@ contract AuditTightenedFindingsFailing is BasePerpTest {
         assertEq(juniorVault.lastDepositTime(alice), redepositTime, "New deposit should reset cooldown timestamp");
     }
 
-    function test_L1_StaleIntervalsMustNotAccrueSeniorYield() public {
+    function test_L1_StaleIntervalsCheckpointSeniorCoupon() public {
         _fundSenior(alice, 200_000 * 1e6);
         _fundJunior(bob, 200_000 * 1e6);
 
@@ -108,7 +108,7 @@ contract AuditTightenedFindingsFailing is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        assertEq(pool.seniorPrincipal(), seniorBefore, "Stale-mark downtime should not later mint senior yield");
+        assertGt(pool.seniorPrincipal(), seniorBefore, "Stale-mark downtime should checkpoint senior coupon value");
     }
 
 }

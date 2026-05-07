@@ -90,7 +90,7 @@ contract AuditLatestStateFindingsFailing_LiquidationBounty is BasePerpTest {
 
 }
 
-contract AuditLatestStateFindingsFailing_SeniorYieldCheckpoint is BasePerpTest {
+contract AuditLatestStateFindingsFailing_SeniorCouponCheckpoint is BasePerpTest {
 
     address seniorLp = address(0x1111);
     address juniorLp = address(0x2222);
@@ -100,7 +100,7 @@ contract AuditLatestStateFindingsFailing_SeniorYieldCheckpoint is BasePerpTest {
         return 0;
     }
 
-    function test_M2_FinalizeSeniorRateMustNotEraseYieldDuringStaleMarkPeriod() public {
+    function test_M2_FinalizeSeniorRateMustNotEraseCouponCheckpointDuringStaleMarkPeriod() public {
         _fundSenior(seniorLp, 200_000e6);
         _fundJunior(juniorLp, 200_000e6);
         _fundTrader(trader, 50_000e6);
@@ -124,7 +124,7 @@ contract AuditLatestStateFindingsFailing_SeniorYieldCheckpoint is BasePerpTest {
 
 }
 
-contract AuditLatestStateFindingsFailing_StaleSeniorMutationYield is BasePerpTest {
+contract AuditLatestStateFindingsFailing_StaleSeniorMutationCoupon is BasePerpTest {
 
     address seniorLp = address(0x44441);
     address juniorLp = address(0x55551);
@@ -138,7 +138,7 @@ contract AuditLatestStateFindingsFailing_StaleSeniorMutationYield is BasePerpTes
         return 0;
     }
 
-    function test_H1_StaleSeniorMutationMustNotDestroyAccruedYield() public {
+    function test_H1_StaleSeniorMutationMustPreserveCouponValue() public {
         _fundSenior(seniorLp, 100_000e6);
         _fundJunior(juniorLp, 100_000e6);
 
@@ -173,12 +173,7 @@ contract AuditLatestStateFindingsFailing_StaleSeniorMutationYield is BasePerpTes
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        uint256 minimumPreservedYield = (52_000e6 * 800 * uint256(30 days)) / (10_000 * uint256(365 days));
-        assertGe(
-            pool.unpaidSeniorYield(),
-            minimumPreservedYield,
-            "Stale senior recapitalization should preserve the pre-mutation senior yield interval"
-        );
+        assertGt(pool.seniorPrincipal(), 52_000e6, "Stale senior recapitalization should preserve senior coupon value");
     }
 
 }

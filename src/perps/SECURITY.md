@@ -347,11 +347,11 @@ When marks are stale and freshness is required:
 
 Exception: once the protocol enters `oracle frozen`, tranche deposits and withdrawals remain live under fixed stale-price surcharges instead of hard-blocking immediately.
 
-### Senior yield model
+### Senior coupon model
 
-Senior yield is a preferred return from surplus revenue, not a hard coupon paid by draining junior capital during inactivity.
+Senior coupon is funded from existing junior NAV and capped by available junior principal.
 
-This avoids weakening the junior loss buffer during flat or low-volume periods.
+This removes unpaid senior-coupon debt queues while making the cost of the fixed senior product explicit for junior LPs.
 
 ## Liquidation Security
 
@@ -397,7 +397,7 @@ This preserves terminal liveness without requiring an unbounded global queue sca
 
 - conservative MtM can temporarily understate junior value,
 - `oracleFrozen` keeps LP deposits and withdrawals live under fixed tranche-local frozen fees rather than a separate stale-action gate,
-- senior yield is not guaranteed during flat periods,
+- senior coupon payments are capped by available junior principal,
 - deposit cooldown can be griefed only by economically irrational donation-style top-ups.
 
 ### VPI limitations

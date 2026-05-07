@@ -449,12 +449,12 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
 
 }
 
-contract AuditBlockingAccountingFindingsFailing_StaleSeniorYield is BasePerpTest {
+contract AuditBlockingAccountingFindingsFailing_StaleSeniorCoupon is BasePerpTest {
 
     address seniorLp = address(0xA11CE);
     address juniorLp = address(0xB0B);
 
-    function test_L1_FinalizeSeniorRate_StaleMarkMustNotAccrueYield() public {
+    function test_L1_FinalizeSeniorRate_StaleMarkMustNotApplyRateChange() public {
         address trader = address(0x3333);
         address traderAccount = trader;
 
@@ -463,8 +463,6 @@ contract AuditBlockingAccountingFindingsFailing_StaleSeniorYield is BasePerpTest
         _fundTrader(trader, 50_000e6);
         _open(traderAccount, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
-        uint256 unpaidBefore = pool.unpaidSeniorYield();
-
         HousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 1600;
         pool.proposePoolConfig(config);
@@ -472,7 +470,7 @@ contract AuditBlockingAccountingFindingsFailing_StaleSeniorYield is BasePerpTest
         vm.expectRevert(HousePool.HousePool__MarkPriceStale.selector);
         pool.finalizePoolConfig();
 
-        assertEq(pool.unpaidSeniorYield(), unpaidBefore, "Rejected stale finalization should not accrue senior yield");
+        assertEq(pool.seniorRateBps(), 800, "Rejected stale finalization should leave the prior coupon rate in place");
     }
 
 }

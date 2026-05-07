@@ -9,7 +9,6 @@ library HousePoolReconcilePlanLib {
 
     struct ReconcilePlan {
         HousePoolPendingPreviewLib.PendingAccountingState state;
-        uint256 yieldAccrued;
         bool markFresh;
         bool juniorSupplyZero;
         bool claimedEquityZero;
@@ -23,13 +22,17 @@ library HousePoolReconcilePlanLib {
         HousePoolAccountingLib.ReconcileSnapshot memory snapshot,
         uint256 pendingBucketAssets,
         uint256 seniorRateBps,
-        uint256 yieldElapsed,
+        uint256 couponElapsed,
         bool markFresh
     ) internal pure returns (ReconcilePlan memory plan) {
         plan.state = state;
         plan.markFresh = markFresh;
-        plan.juniorSupplyZero = state.juniorSupply == 0;
-        plan.claimedEquityZero = state.waterfall.seniorPrincipal + state.waterfall.juniorPrincipal == 0;
+        if (couponElapsed > 0 && state.juniorSupply > 0) {
+            (plan.state.waterfall,) =
+                HousePoolWaterfallAccountingLib.paySeniorCoupon(plan.state.waterfall, seniorRateBps, couponElapsed);
+        }
+        plan.juniorSupplyZero = plan.state.juniorSupply == 0;
+        plan.claimedEquityZero = plan.state.waterfall.seniorPrincipal + plan.state.waterfall.juniorPrincipal == 0;
 
         if (!markFresh) {
             return plan;
@@ -56,32 +59,23 @@ library HousePoolReconcilePlanLib {
             : 0;
         HousePoolWaterfallAccountingLib.ReconcilePlan memory waterfallPlan =
             HousePoolWaterfallAccountingLib.planReconcile(
-                state.waterfall.seniorPrincipal,
-                state.waterfall.juniorPrincipal,
-                distributableToClaims,
-                seniorRateBps,
-                yieldElapsed
+                plan.state.waterfall.seniorPrincipal, plan.state.waterfall.juniorPrincipal, distributableToClaims
             );
 
-        plan.yieldAccrued = waterfallPlan.yieldAccrued;
         plan.revenue = waterfallPlan.isRevenue;
         plan.deltaUsdc = waterfallPlan.deltaUsdc;
 
         if (plan.revenue) {
             plan.juniorPrincipalBeforeRevenue = plan.state.waterfall.juniorPrincipal;
-            plan.state.waterfall.unpaidSeniorYield += plan.yieldAccrued;
             plan.state.waterfall =
                 HousePoolWaterfallAccountingLib.distributeRevenue(plan.state.waterfall, plan.deltaUsdc);
             return plan;
         }
 
         if (plan.deltaUsdc > 0) {
-            plan.state.waterfall.unpaidSeniorYield += plan.yieldAccrued;
             plan.state.waterfall = HousePoolWaterfallAccountingLib.absorbLoss(plan.state.waterfall, plan.deltaUsdc);
             return plan;
         }
-
-        plan.state.waterfall.unpaidSeniorYield += plan.yieldAccrued;
     }
 
     function juniorRevenueWithoutOwners(
