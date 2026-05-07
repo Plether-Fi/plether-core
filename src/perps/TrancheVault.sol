@@ -34,6 +34,8 @@ contract TrancheVault is ERC4626 {
     error TrancheVault__InvalidSeedPosition();
     error TrancheVault__TerminallyWiped();
     error TrancheVault__TradingNotActive();
+    error TrancheVault__ZeroAssets();
+    error TrancheVault__ZeroShares();
 
     /// @param _usdc         Underlying USDC token used as the vault asset
     /// @param _pool         HousePool that holds USDC and manages the tranche waterfall
@@ -164,6 +166,9 @@ contract TrancheVault is ERC4626 {
         address receiver,
         address _owner
     ) public override returns (uint256) {
+        if (assets == 0) {
+            revert TrancheVault__ZeroAssets();
+        }
         POOL.reconcile();
         uint256 feeBps = _frozenLpFeeBps();
         if (feeBps > 0) {
@@ -180,6 +185,9 @@ contract TrancheVault is ERC4626 {
         address receiver,
         address _owner
     ) public override returns (uint256) {
+        if (shares == 0) {
+            revert TrancheVault__ZeroShares();
+        }
         POOL.reconcile();
         uint256 feeBps = _frozenLpFeeBps();
         if (feeBps > 0) {
