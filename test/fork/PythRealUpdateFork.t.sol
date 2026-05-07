@@ -99,8 +99,7 @@ contract PythRealUpdateForkTest is Test {
         vm.prank(keeper);
         router.executeOrder{value: fee}(orderId, updateData);
 
-        bytes32 aliceId = _accountId(alice);
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(alice);
         assertEq(size, 100_000e18, "position opened with real Pyth update bytes");
         assertEq(engine.lastMarkTime(), publishTime, "engine mark time uses commit-bound Pyth tick");
     }
@@ -185,19 +184,13 @@ contract PythRealUpdateForkTest is Test {
         deal(USDC, trader, amount);
         vm.startPrank(trader);
         IERC20(USDC).approve(address(clearinghouse), amount);
-        clearinghouse.deposit(_accountId(trader), amount);
+        clearinghouse.deposit(trader, amount);
         vm.stopPrank();
     }
 
     function _singleFeedIds() internal pure returns (bytes32[] memory feedIds) {
         feedIds = new bytes32[](1);
         feedIds[0] = EUR_USD_FEED_ID;
-    }
-
-    function _accountId(
-        address trader
-    ) internal pure returns (bytes32) {
-        return bytes32(uint256(uint160(trader)));
     }
 
     function _isUtcWeekend(

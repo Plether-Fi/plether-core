@@ -2562,6 +2562,68 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(router.nextExecuteId(), 0, "Fresh post-commit publish should execute normally");
     }
 
+    function test_OrderExecution_UsesCommitBoundHistoricalPrice_NotLiveRevealPrice() public {
+        vm.warp(1000);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 0, false);
+
+        mockPyth.setAllUniquePrices(feedIds, int64(100_000_000), 0, int32(-8), 1006, 999);
+        mockPyth.setAllPrices(feedIds, int64(120_000_000), int32(-8), 1050);
+
+        vm.warp(1050);
+        vm.roll(block.number + 1);
+        router.executeOrder(1, _pythUpdateData());
+
+        (uint256 size,, uint256 entryPrice,,,,) = engine.positions(alice);
+        assertEq(size, 10_000 * 1e18, "Historical settlement should execute the open");
+        assertEq(entryPrice, 100_000_000, "Entry price must bind to the first post-commit tick");
+    }
+
+    function test_OrderExecution_RejectsSkippedHistoricalTick() public {
+        vm.warp(1000);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 0, false);
+
+        mockPyth.setAllUniquePrices(feedIds, int64(120_000_000), 0, int32(-8), 1012, 1006);
+
+        vm.warp(1050);
+        vm.roll(block.number + 1);
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
+        router.executeOrder(1, _pythUpdateData());
+
+        assertEq(router.nextExecuteId(), 1, "A skipped historical tick must leave the order pending");
+    }
+
+    function test_BatchExecution_ReusesHistoricalTickForClusteredOrders() public {
+        vm.warp(1000);
+        mockPyth.setFee(1 ether);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 300 * 1e6, 1e8, false);
+
+        mockPyth.setAllUniquePrices(feedIds, int64(100_000_000), 0, int32(-8), 1006, 999);
+
+        vm.deal(address(this), 1 ether);
+        vm.warp(1050);
+        vm.roll(block.number + 1);
+        uint256 callsBefore = mockPyth.parseUniqueCallCount();
+        router.executeOrderBatch{value: 1 ether}(2, _pythUpdateData());
+
+        assertEq(
+            mockPyth.parseUniqueCallCount() - callsBefore,
+            1,
+            "Batch should parse once when later commit times are covered by the same unique tick"
+        );
+        assertEq(router.nextExecuteId(), 0, "Clustered batch should drain the queue");
+
+        (uint256 size,,,,,,) = engine.positions(alice);
+        assertEq(size, 15_000 * 1e18, "Both clustered orders should execute");
+    }
+
     function test_BatchExecution_StalePrice_Reverts() public {
         vm.warp(1000);
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 900);
