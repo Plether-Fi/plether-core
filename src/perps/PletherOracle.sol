@@ -167,7 +167,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         uint256 pythFee = _updatePythPrice(pythUpdateData);
         PolicySnapshot memory policy = _policyForMode(PriceMode.Liquidation);
         BasketPrice memory basket = _computeLiveBasketPrice(
-            PriceMode.Liquidation, policy.maxStaleness, _maxPublishTimeDivergence(PriceMode.Liquidation)
+            PriceMode.Liquidation, policy.maxStaleness, _policyPublishTimeDivergence(PriceMode.Liquidation, policy)
         );
         snapshot = _snapshotFromBasket(PriceMode.Liquidation, basket, policy, true);
         snapshot.price = _clampToCap(_adverseLiquidationPrice(account, snapshot.price, basket.confidence));
@@ -271,7 +271,8 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         PriceMode mode
     ) internal view returns (PriceSnapshot memory snapshot) {
         PolicySnapshot memory policy = _policyForMode(mode);
-        BasketPrice memory basket = _computeLiveBasketPrice(mode, policy.maxStaleness, _maxPublishTimeDivergence(mode));
+        BasketPrice memory basket =
+            _computeLiveBasketPrice(mode, policy.maxStaleness, _policyPublishTimeDivergence(mode, policy));
         snapshot = _snapshotFromBasket(mode, basket, policy, true);
     }
 
@@ -301,6 +302,16 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         );
         basket.pythFee = pythFee;
         ok = true;
+    }
+
+    function _policyPublishTimeDivergence(
+        PriceMode mode,
+        PolicySnapshot memory policy
+    ) internal view returns (uint256) {
+        if (mode == PriceMode.Liquidation && policy.oracleFrozen) {
+            return policy.maxStaleness;
+        }
+        return _maxPublishTimeDivergence(mode);
     }
 
     function _resolveHistoricalOrderBasket(
