@@ -752,7 +752,9 @@ contract CfdEngineTest is BasePerpTest {
         (uint256 size,,,,,,) = engine.positions(bearAccount);
         assertEq(size, 0, "Illiquid profitable close close should still destroy the position");
         assertEq(
-            engine.deferredTraderCreditUsdc(bearAccount), preview.deferredTraderCreditUsdc, "Live close should match preview"
+            engine.deferredTraderCreditUsdc(bearAccount),
+            preview.deferredTraderCreditUsdc,
+            "Live close should match preview"
         );
     }
 
@@ -1399,9 +1401,7 @@ contract CfdEngineTest is BasePerpTest {
         );
         assertEq(pool.totalAssets(), 20e6, "Trader claim should move the vault into the exact 20/20/20 residual state");
         assertEq(engine.accumulatedFeesUsdc(), 20e6, "Servicing deferred claims must not burn fee accounting");
-        assertEq(
-            engine.deferredTraderCreditUsdc(traderAccount), 0, "Trader deferred balance should be fully consumed"
-        );
+        assertEq(engine.deferredTraderCreditUsdc(traderAccount), 0, "Trader deferred balance should be fully consumed");
         assertEq(engine.deferredKeeperCreditUsdc(keeper), 20e6, "Keeper deferred balance should remain queued");
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
@@ -3402,7 +3402,9 @@ contract CfdEngineTest is BasePerpTest {
 
         _closeAt(bearAccount, CfdTypes.Side.BEAR, 5000e18, 120_000_000, vaultDepth, refreshTime);
         uint256 bearDeferredBefore = engine.deferredTraderCreditUsdc(bearAccount);
-        assertGt(bearDeferredBefore, 0, "Initial deferred payout should create tracked deferred balance for bearAccount");
+        assertGt(
+            bearDeferredBefore, 0, "Initial deferred payout should create tracked deferred balance for bearAccount"
+        );
 
         _closeAt(laterAccount, CfdTypes.Side.BEAR, 5000e18, 120_000_000, vaultDepth, refreshTime);
         uint256 laterDeferred = engine.deferredTraderCreditUsdc(laterAccount);
@@ -3440,7 +3442,8 @@ contract CfdEngineTest is BasePerpTest {
             deferredBefore, 1e6, "Setup must create legacy deferred payout large enough to cover the fee shortfall"
         );
 
-        stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(bearAccount).checked_write(uint256(0));
+        stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(bearAccount)
+            .checked_write(uint256(0));
         bytes32 positionMarginSlot = keccak256(abi.encode(bearAccount, uint256(3)));
         vm.store(address(clearinghouse), positionMarginSlot, bytes32(uint256(0)));
 
@@ -5388,6 +5391,9 @@ contract CfdEngineAuditTest is BasePerpTest {
             orderExecutionStalenessLimit: router.orderExecutionStalenessLimit(),
             liquidationStalenessLimit: router.liquidationStalenessLimit(),
             pythMaxConfidenceRatioBps: router.pythMaxConfidenceRatioBps(),
+            orderSettlementWindow: router.orderSettlementWindow(),
+            maxComponentPublishTimeDivergence: router.maxComponentPublishTimeDivergence(),
+            adverseConfidenceMultiplierBps: router.adverseConfidenceMultiplierBps(),
             openOrderExecutionBountyBps: router.openOrderExecutionBountyBps(),
             minOpenOrderExecutionBountyUsdc: router.minOpenOrderExecutionBountyUsdc(),
             maxOpenOrderExecutionBountyUsdc: router.maxOpenOrderExecutionBountyUsdc(),

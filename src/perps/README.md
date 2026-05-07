@@ -108,7 +108,7 @@ The main runtime and read surfaces are:
 2. Submit an open or close intent through `OrderRouter.commitOrder(...)`.
 3. The router records a FIFO order, reserves committed margin, and escrows a keeper execution bounty.
 4. A keeper later calls `executeOrder(...)` or `executeOrderBatch(...)` with Pyth update data.
-5. `OrderRouter` validates oracle freshness, live-market `commitTime < publishTime <= block.timestamp` ordering, slippage, and queue eligibility, then calls `CfdEngine.processOrderTyped(...)`.
+5. `OrderRouter` resolves the first valid Pyth tick at or after the order's `commitTime`, applies conservative confidence-adjusted pricing, validates slippage and queue eligibility, then calls `CfdEngine.processOrderTyped(...)`.
 6. `CfdEngine` updates the position, realizes fees and carry, and settles through `MarginClearinghouse` and `HousePool`.
 
 Important details:
@@ -296,7 +296,9 @@ These domains answer different questions. They should not silently share assumpt
 
 - Keepers execute from the global queue head.
 - Pyth update data is required for live-market execution and the caller must attach ETH for the Pyth fee.
-- Publish-time ordering and staleness rules enforce MEV resistance when the oracle is live.
+- Live order settlement uses Pyth's unique historical parse over `[commitTime, commitTime + orderSettlementWindow]`, capped at `block.timestamp`, rather than the latest reveal-time price.
+- `executeOrderBatch` caches a successfully parsed historical basket and reuses it for later FIFO orders whose `commitTime` is still covered by the same unique tick, avoiding repeated Pyth parsing for clustered commits.
+- A keeper cannot skip an unfavorable post-commit tick by submitting a later tick: the unique parse requires the previous publish time to be before the order's `commitTime`.
 - Slippage, expiry, and typed engine failures finalize the order; close-only ineligibility for queued opens blocks execution without consuming the FIFO head.
 
 ### Basket oracle and publish-time checks
@@ -305,8 +307,12 @@ The router is configured with parallel arrays of Pyth feed ids, quantities, and 
 
 - `_computeBasketPrice()` normalizes each feed to 8 decimals.
 - The router computes the weighted basket price in the same shape as the spot basket oracle.
-- The minimum `publishTime` across feeds drives MEV checks, staleness validation, and `engine.lastMarkTime()` ordering.
-- Live order execution requires `order.commitTime < publishTime <= block.timestamp`; frozen-oracle close-only windows are the only regime that relaxes commit-time ordering.
+- Basket confidence is propagated conservatively by summing weighted component relative confidence, then multiplying by the basket price.
+- Opening and closing orders use the adverse side of the confidence interval for the trader's side: `BULL` opens are priced lower, `BEAR` opens are priced higher, `BULL` closes are priced higher, and `BEAR` closes are priced lower.
+- Liquidation checks also use the side-adverse confidence-adjusted mark for the liquidated account.
+- Component publish times must stay within `maxComponentPublishTimeDivergence`; if one basket leg is too far from the others, live opens are blocked rather than mixing fresh and stale components.
+- The minimum `publishTime` across feeds remains the basket publish time passed to the engine; historical order fills can use an older commit-bound price without rewinding a newer cached engine mark.
+- Frozen-oracle close-only windows are the only regime that relaxes historical live-market settlement.
 - The execution price is clamped to `CAP_PRICE` before the slippage check so the user sees the same price the engine executes.
 
 ### Frozen oracle behavior
@@ -414,6 +420,9 @@ Instant controls remain for one-time wiring and fee withdrawal. `OrderRouter` pa
 | Open execution bounty | 0.01 to 0.20 USDC | Timelocked router reserve bounds |
 | Close execution bounty | 0.20 USDC | Timelocked router reserve amount |
 | Normal execution staleness | 60s | Normal order execution freshness |
+| Order settlement window | 15s | Historical Pyth search window after order commit |
+| Component publish divergence | 5s | Max basket-leg publish-time skew for live settlement |
+| Adverse confidence multiplier | 10,000 (1x) | Confidence interval multiplier applied to execution and liquidation marks |
 | Liquidation staleness | 15s | Live-market liquidation freshness |
 | `engineMarkStalenessLimit` | 60s | Engine-side mark freshness |
 | `markStalenessLimit` | 60s | HousePool mark freshness |

@@ -704,6 +704,9 @@ abstract contract BasePerpTest is Test {
         config.orderExecutionStalenessLimit = router.orderExecutionStalenessLimit();
         config.liquidationStalenessLimit = router.liquidationStalenessLimit();
         config.pythMaxConfidenceRatioBps = router.pythMaxConfidenceRatioBps();
+        config.orderSettlementWindow = router.orderSettlementWindow();
+        config.maxComponentPublishTimeDivergence = router.maxComponentPublishTimeDivergence();
+        config.adverseConfidenceMultiplierBps = router.adverseConfidenceMultiplierBps();
         config.openOrderExecutionBountyBps = router.openOrderExecutionBountyBps();
         config.minOpenOrderExecutionBountyUsdc = router.minOpenOrderExecutionBountyUsdc();
         config.maxOpenOrderExecutionBountyUsdc = router.maxOpenOrderExecutionBountyUsdc();

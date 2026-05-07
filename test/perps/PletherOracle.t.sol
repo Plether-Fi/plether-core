@@ -189,7 +189,12 @@ contract PletherOracleTest is Test {
         pyth.setPrice(FEED_B, int64(100_000_000), uint64(2_000_000), int32(-8), 990);
         oracle.applyConfig(
             IPletherOracle.OracleConfig({
-                orderExecutionStalenessLimit: 60, liquidationStalenessLimit: 15, pythMaxConfidenceRatioBps: 100
+                orderExecutionStalenessLimit: 60,
+                liquidationStalenessLimit: 15,
+                pythMaxConfidenceRatioBps: 100,
+                orderSettlementWindow: oracle.orderSettlementWindow(),
+                maxComponentPublishTimeDivergence: oracle.maxComponentPublishTimeDivergence(),
+                adverseConfidenceMultiplierBps: oracle.adverseConfidenceMultiplierBps()
             })
         );
 
@@ -233,14 +238,24 @@ contract PletherOracleTest is Test {
         vm.expectRevert(IPletherOracle.PletherOracle__Unauthorized.selector);
         oracle.applyConfig(
             IPletherOracle.OracleConfig({
-                orderExecutionStalenessLimit: 120, liquidationStalenessLimit: 30, pythMaxConfidenceRatioBps: 500
+                orderExecutionStalenessLimit: 120,
+                liquidationStalenessLimit: 30,
+                pythMaxConfidenceRatioBps: 500,
+                orderSettlementWindow: oracle.orderSettlementWindow(),
+                maxComponentPublishTimeDivergence: oracle.maxComponentPublishTimeDivergence(),
+                adverseConfidenceMultiplierBps: oracle.adverseConfidenceMultiplierBps()
             })
         );
 
         vm.prank(engine.orderRouter());
         oracle.applyConfig(
             IPletherOracle.OracleConfig({
-                orderExecutionStalenessLimit: 120, liquidationStalenessLimit: 30, pythMaxConfidenceRatioBps: 500
+                orderExecutionStalenessLimit: 120,
+                liquidationStalenessLimit: 30,
+                pythMaxConfidenceRatioBps: 500,
+                orderSettlementWindow: oracle.orderSettlementWindow(),
+                maxComponentPublishTimeDivergence: oracle.maxComponentPublishTimeDivergence(),
+                adverseConfidenceMultiplierBps: oracle.adverseConfidenceMultiplierBps()
             })
         );
 

@@ -11,6 +11,12 @@ library PythStructs {
         uint256 publishTime;
     }
 
+    struct PriceFeed {
+        bytes32 id;
+        Price price;
+        Price emaPrice;
+    }
+
 }
 
 /// @title Pyth Network Interface (minimal)
@@ -38,6 +44,16 @@ interface IPyth {
     function updatePriceFeeds(
         bytes[] calldata updateData
     ) external payable;
+
+    /// @notice Parses the first price update for each feed in a publish-time range.
+    /// @dev Pyth guarantees the returned update is unique in the requested range:
+    ///      prevPublishTime < minPublishTime <= publishTime <= maxPublishTime.
+    function parsePriceFeedUpdatesUnique(
+        bytes[] calldata updateData,
+        bytes32[] calldata priceIds,
+        uint64 minPublishTime,
+        uint64 maxPublishTime
+    ) external payable returns (PythStructs.PriceFeed[] memory priceFeeds);
 
     /// @notice Returns the fee required to update price feeds.
     /// @param updateData Array of price update data.

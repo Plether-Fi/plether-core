@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {CfdTypes} from "../CfdTypes.sol";
+import {OrderRouterAdmin} from "../OrderRouterAdmin.sol";
 import {IOrderRouterAccounting} from "../interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterAdminHost} from "../interfaces/IOrderRouterAdminHost.sol";
 import {IOrderRouterErrors} from "../interfaces/IOrderRouterErrors.sol";
@@ -91,8 +92,11 @@ abstract contract OrderHandler is OrderValidation {
         if (nextExecuteId == 0) {
             revert IOrderRouterErrors.OrderRouter__QueueState(0);
         }
+        uint64 initialHeadOrderId = nextExecuteId;
+        (, CfdTypes.Order memory initialHeadOrder) = _pendingOrder(initialHeadOrderId);
         (OracleUpdateResult memory update, RouterExecutionContext memory executionContext) =
-            _prepareOrderExecutionOracle(pythUpdateData);
+            _prepareOrderExecutionOracle(pythUpdateData, initialHeadOrder, 0);
+        uint256 pythFeeTotal = update.pythFee;
 
         _skipStaleOrders(orderId, update.executionPrice, update.oraclePublishTime);
         if (nextExecuteId == 0) {
@@ -105,8 +109,13 @@ abstract contract OrderHandler is OrderValidation {
             revert IOrderRouterErrors.OrderRouter__QueueState(1);
         }
         (, CfdTypes.Order memory order) = _pendingOrder(orderId);
+        if (orderId != initialHeadOrderId) {
+            (update, executionContext) = _prepareOrderExecutionOracle(pythUpdateData, order, pythFeeTotal);
+            pythFeeTotal += update.pythFee;
+        }
 
         _executePendingOrder(orderId, order, update.executionPrice, update.oraclePublishTime, executionContext, true);
+        _sendEth(msg.sender, msg.value - pythFeeTotal);
     }
 
     function _executeOrderBatch(
@@ -115,9 +124,12 @@ abstract contract OrderHandler is OrderValidation {
     ) internal {
         _validateBatchBounds(maxOrderId);
 
-        (OracleUpdateResult memory update, RouterExecutionContext memory executionContext) =
-            _prepareOrderExecutionOracle(pythUpdateData);
+        OracleUpdateResult memory update;
+        RouterExecutionContext memory executionContext;
+        IPletherOracle.BatchOrderPriceCache memory oracleCache;
+        uint256 pythFeeTotal;
         uint256 expiredPrunes;
+        bool madeProgress;
 
         while (nextExecuteId != 0 && nextExecuteId <= maxOrderId) {
             uint64 orderId = nextExecuteId;
@@ -129,6 +141,18 @@ abstract contract OrderHandler is OrderValidation {
                 continue;
             }
 
+            bool oracleResolved;
+            (oracleResolved, update, executionContext, oracleCache) =
+                _tryPrepareBatchOrderExecutionOracle(pythUpdateData, order, pythFeeTotal, oracleCache);
+            if (!oracleResolved) {
+                pythFeeTotal += update.pythFee;
+                if (!madeProgress) {
+                    _revertOrderExecutionStale();
+                }
+                break;
+            }
+            pythFeeTotal += update.pythFee;
+
             if (maxOrderAge > 0 && block.timestamp - order.commitTime > maxOrderAge) {
                 if (expiredPrunes >= maxPruneOrdersPerCall) {
                     break;
@@ -138,6 +162,7 @@ abstract contract OrderHandler is OrderValidation {
                     orderId, _failedOutcomeForTerminalFailure(order), update.executionPrice, update.oraclePublishTime
                 );
                 expiredPrunes++;
+                madeProgress = true;
                 continue;
             }
 
@@ -147,7 +172,10 @@ abstract contract OrderHandler is OrderValidation {
             if (result == OrderExecutionStepResult.Break) {
                 break;
             }
+            madeProgress = true;
         }
+
+        _sendEth(msg.sender, msg.value - pythFeeTotal);
     }
 
     function _applyRouterConfig(
@@ -159,7 +187,10 @@ abstract contract OrderHandler is OrderValidation {
             IPletherOracle.OracleConfig({
                 orderExecutionStalenessLimit: config.orderExecutionStalenessLimit,
                 liquidationStalenessLimit: config.liquidationStalenessLimit,
-                pythMaxConfidenceRatioBps: config.pythMaxConfidenceRatioBps
+                pythMaxConfidenceRatioBps: config.pythMaxConfidenceRatioBps,
+                orderSettlementWindow: config.orderSettlementWindow,
+                maxComponentPublishTimeDivergence: config.maxComponentPublishTimeDivergence,
+                adverseConfidenceMultiplierBps: config.adverseConfidenceMultiplierBps
             })
         );
         openOrderExecutionBountyBps = config.openOrderExecutionBountyBps;
@@ -181,7 +212,7 @@ abstract contract OrderHandler is OrderValidation {
         address account,
         bytes[] calldata pythUpdateData
     ) internal {
-        OracleUpdateResult memory update = _prepareLiquidationOracle(pythUpdateData);
+        OracleUpdateResult memory update = _prepareLiquidationOracle(account, pythUpdateData);
 
         _forfeitEscrowedOrderBountiesOnLiquidation(account);
         uint256 housePoolDepth = housePool.totalAssets();
@@ -190,6 +221,19 @@ abstract contract OrderHandler is OrderValidation {
 
         _clearLiquidatedAccountOrders(account);
         _creditOrDeferLiquidationBounty(keeperBountyUsdc, update.executionPrice, update.oraclePublishTime);
+    }
+
+    function _sendEth(
+        address to,
+        uint256 amount
+    ) internal {
+        if (amount == 0) {
+            return;
+        }
+        (bool ok,) = payable(to).call{value: amount}("");
+        if (!ok) {
+            OrderRouterAdmin(admin).creditClaimableEth{value: amount}(to, amount);
+        }
     }
 
     function _clearLiquidatedAccountOrders(

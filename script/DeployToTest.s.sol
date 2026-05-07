@@ -149,6 +149,20 @@ contract MockPyth is IPyth {
         bytes[] calldata
     ) external payable {}
 
+    function parsePriceFeedUpdatesUnique(
+        bytes[] calldata,
+        bytes32[] calldata priceIds,
+        uint64 minPublishTime,
+        uint64 maxPublishTime
+    ) external payable returns (PythStructs.PriceFeed[] memory priceFeeds) {
+        priceFeeds = new PythStructs.PriceFeed[](priceIds.length);
+        for (uint256 i = 0; i < priceIds.length; i++) {
+            PythStructs.Price memory price = prices[priceIds[i]];
+            require(price.publishTime >= minPublishTime && price.publishTime <= maxPublishTime, "outside range");
+            priceFeeds[i] = PythStructs.PriceFeed({id: priceIds[i], price: price, emaPrice: price});
+        }
+    }
+
     function getUpdateFee(
         bytes[] calldata
     ) external pure returns (uint256) {

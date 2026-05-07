@@ -44,7 +44,7 @@ Engine risk controls live in `CfdEngineAdmin`, and router risk controls live in 
 | `EngineFreshnessConfig` (`fadMaxStaleness`, `engineMarkStalenessLimit`) | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 48-hour timelock |
 | `seniorRateBps` | `HousePool` | `onlyOwner`, 48-hour timelock |
 | `markStalenessLimit` | `HousePool` | `onlyOwner`, 48-hour timelock |
-| `RouterConfig` (`maxOrderAge`, `orderExecutionStalenessLimit`, `liquidationStalenessLimit`, `pythMaxConfidenceRatioBps`) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
+| `RouterConfig` (`maxOrderAge`, staleness limits, Pyth confidence ratio, historical settlement window, component publish-time skew, adverse confidence multiplier) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
 
 ### One-time wiring
 
@@ -159,14 +159,17 @@ The protocol assumes Pyth provides timely and correct FX feed data for the baske
 
 Mitigations:
 
-- delayed-order execution with publish-time ordering and future-publication rejection while the oracle is live,
+- delayed-order execution that settles against the first unique Pyth tick at or after commit while the oracle is live,
 - distinct staleness thresholds for order execution, liquidation, engine-side guards, and HousePool freshness,
 - shared normalized basket-price construction across execution paths,
+- conservative basket confidence propagation and side-adverse pricing for execution, equity checks, and liquidation,
+- component publish-time skew limits so a basket cannot mix fresh and stale legs,
 - frozen-oracle regime for close liveness during genuine market closure.
 
 Risks:
 
 - compromised or stale feeds distort the basket price,
+- unavailable historical update data can delay live order execution until a keeper supplies the commit-window tick or the order expires,
 - frozen-market execution is intentionally liveness-first for risk reduction,
 - exponent normalization truncates on scale-down,
 - all live execution still depends on external oracle availability.
@@ -235,7 +238,10 @@ The router uses delayed commit/execute semantics rather than same-tx market exec
 Security properties:
 
 - trader intent is committed before keeper execution,
-- live-market execution requires `commitTime < publishTime <= block.timestamp`, which defends against oracle latency arbitrage and future-dated feed drift,
+- live-market execution uses Pyth's unique historical parse over `[commitTime, commitTime + orderSettlementWindow]`, capped at `block.timestamp`, so settlement is bound to the first post-commit tick rather than the keeper's reveal-time tick,
+- the unique historical parse rejects skipped ticks because the parsed update must prove its previous publish time is before the order's `commitTime`,
+- batch execution may reuse a parsed historical basket only for later FIFO orders whose `commitTime` falls within the cached tick's proven coverage,
+- basket confidence is included in execution and liquidation prices instead of being treated only as metadata,
 - FIFO execution prevents later orders from bypassing earlier ones,
 - binding order semantics prevent traders from turning queued intents into free options.
 

@@ -3,6 +3,7 @@ pragma solidity 0.8.33;
 
 import {IPyth, PythStructs} from "../interfaces/IPyth.sol";
 import {DecimalConstants} from "../libraries/DecimalConstants.sol";
+import {CfdTypes} from "./CfdTypes.sol";
 import {ICfdEngineCore} from "./interfaces/ICfdEngineCore.sol";
 import {ICfdVault} from "./interfaces/ICfdVault.sol";
 import {IPletherOracle} from "./interfaces/IPletherOracle.sol";
@@ -19,6 +20,13 @@ import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/Reentrancy
 ///      production oracle behavior.
 contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
 
+    struct BasketPrice {
+        uint256 price;
+        uint256 confidence;
+        uint64 publishTime;
+        uint256 pythFee;
+    }
+
     ICfdEngineCore public immutable engine;
     ICfdVault public immutable housePool;
     IPyth public immutable override pyth;
@@ -32,6 +40,9 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
     uint256 public override orderExecutionStalenessLimit = 60;
     uint256 public override liquidationStalenessLimit = 15;
     uint256 public override pythMaxConfidenceRatioBps = 10_000;
+    uint256 public override orderSettlementWindow = 15;
+    uint256 public override maxComponentPublishTimeDivergence = 5;
+    uint256 public override adverseConfidenceMultiplierBps = 10_000;
     mapping(address => uint256) public override claimableEth;
 
     constructor(
@@ -96,6 +107,74 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         return _updateAndGetSnapshot(refundRecipient, pythUpdateData, PriceMode.OrderExecution).price;
     }
 
+    function updateOrderExecutionPrice(
+        address refundRecipient,
+        bytes[] calldata pythUpdateData,
+        OrderExecutionRequest calldata request
+    ) external payable override nonReentrant returns (bool ok, PriceSnapshot memory snapshot) {
+        return _updateOrderExecutionPrice(refundRecipient, pythUpdateData, request);
+    }
+
+    function updateBatchOrderExecutionPrice(
+        address refundRecipient,
+        bytes[] calldata pythUpdateData,
+        OrderExecutionRequest calldata request,
+        BatchOrderPriceCache calldata cache
+    )
+        external
+        payable
+        override
+        nonReentrant
+        returns (bool ok, PriceSnapshot memory snapshot, BatchOrderPriceCache memory nextCache)
+    {
+        nextCache = cache;
+        PolicySnapshot memory policy = _policyForMode(PriceMode.OrderExecution);
+
+        BasketPrice memory basket;
+        bool reusedBasket;
+        if (!policy.oracleFrozen && _canReuseHistoricalBatchBasket(request.commitTime, cache)) {
+            basket = BasketPrice({
+                price: cache.price, confidence: cache.confidence, publishTime: cache.publishTime, pythFee: 0
+            });
+            reusedBasket = true;
+        } else {
+            (basket, ok) = _resolveOrderExecutionBasket(refundRecipient, pythUpdateData, request, policy);
+            if (!ok) {
+                snapshot.updateFee = basket.pythFee;
+                return (false, snapshot, nextCache);
+            }
+        }
+
+        snapshot = _snapshotFromBasket(PriceMode.OrderExecution, basket, policy, false);
+        snapshot.price = _clampToCap(_adverseOrderPrice(request, snapshot.price, basket.confidence));
+        if (!policy.oracleFrozen && !reusedBasket) {
+            nextCache = BatchOrderPriceCache({
+                hasHistoricalBasket: true,
+                minReusableCommitTime: request.commitTime,
+                price: basket.price,
+                confidence: basket.confidence,
+                publishTime: basket.publishTime
+            });
+        }
+        ok = true;
+    }
+
+    function updateLiquidationPrice(
+        address refundRecipient,
+        bytes[] calldata pythUpdateData,
+        address account
+    ) external payable override nonReentrant returns (PriceSnapshot memory snapshot) {
+        uint256 pythFee = _updatePythPrice(pythUpdateData);
+        PolicySnapshot memory policy = _policyForMode(PriceMode.Liquidation);
+        BasketPrice memory basket = _computeLiveBasketPrice(
+            PriceMode.Liquidation, policy.maxStaleness, _maxPublishTimeDivergence(PriceMode.Liquidation)
+        );
+        snapshot = _snapshotFromBasket(PriceMode.Liquidation, basket, policy, true);
+        snapshot.price = _clampToCap(_adverseLiquidationPrice(account, snapshot.price, basket.confidence));
+        snapshot.updateFee = pythFee;
+        _refundExcess(refundRecipient, pythFee);
+    }
+
     function getLatestPrice(
         PriceMode mode
     ) external view override returns (PriceSnapshot memory snapshot) {
@@ -132,9 +211,19 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         if (msg.sender != owner && msg.sender != engine.orderRouter()) {
             revert PletherOracle__Unauthorized();
         }
+        if (
+            config.orderExecutionStalenessLimit == 0 || config.liquidationStalenessLimit == 0
+                || config.orderSettlementWindow == 0 || config.maxComponentPublishTimeDivergence == 0
+                || config.maxComponentPublishTimeDivergence > config.orderSettlementWindow
+        ) {
+            revert PletherOracle__InvalidSettlementConfig();
+        }
         orderExecutionStalenessLimit = config.orderExecutionStalenessLimit;
         liquidationStalenessLimit = config.liquidationStalenessLimit;
         pythMaxConfidenceRatioBps = config.pythMaxConfidenceRatioBps;
+        orderSettlementWindow = config.orderSettlementWindow;
+        maxComponentPublishTimeDivergence = config.maxComponentPublishTimeDivergence;
+        adverseConfidenceMultiplierBps = config.adverseConfidenceMultiplierBps;
     }
 
     function getUpdateFee(
@@ -161,24 +250,29 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         _refundExcess(refundRecipient, pythFee);
     }
 
+    function _updateOrderExecutionPrice(
+        address refundRecipient,
+        bytes[] calldata pythUpdateData,
+        OrderExecutionRequest calldata request
+    ) internal returns (bool ok, PriceSnapshot memory snapshot) {
+        PolicySnapshot memory policy = _policyForMode(PriceMode.OrderExecution);
+        BasketPrice memory basket;
+        (basket, ok) = _resolveOrderExecutionBasket(refundRecipient, pythUpdateData, request, policy);
+        if (!ok) {
+            snapshot.updateFee = basket.pythFee;
+            return (false, snapshot);
+        }
+        snapshot = _snapshotFromBasket(PriceMode.OrderExecution, basket, policy, false);
+        snapshot.price = _clampToCap(_adverseOrderPrice(request, snapshot.price, basket.confidence));
+        ok = true;
+    }
+
     function _getLatestPriceSnapshot(
         PriceMode mode
     ) internal view returns (PriceSnapshot memory snapshot) {
         PolicySnapshot memory policy = _policyForMode(mode);
-        snapshot.maxStaleness = policy.maxStaleness;
-        snapshot.closeOnly = policy.closeOnly;
-        snapshot.oracleFrozen = policy.oracleFrozen;
-        snapshot.isFadWindow = policy.isFadWindow;
-
-        uint256 minPublishTime;
-        (snapshot.price, minPublishTime) =
-            _computeBasketPrice(mode, policy.maxStaleness, _maxPublishTimeDivergence(mode));
-        snapshot.price = _clampToCap(snapshot.price);
-        snapshot.publishTime = uint64(minPublishTime);
-
-        if (snapshot.publishTime < engine.lastMarkTime()) {
-            revert PletherOracle__PriceOutOfOrder(snapshot.publishTime, engine.lastMarkTime());
-        }
+        BasketPrice memory basket = _computeLiveBasketPrice(mode, policy.maxStaleness, _maxPublishTimeDivergence(mode));
+        snapshot = _snapshotFromBasket(mode, basket, policy, true);
     }
 
     function _updatePythPrice(
@@ -189,6 +283,58 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
             revert PletherOracle__InsufficientFee(msg.value, pythFee);
         }
         pyth.updatePriceFeeds{value: pythFee}(pythUpdateData);
+    }
+
+    function _resolveOrderExecutionBasket(
+        address refundRecipient,
+        bytes[] calldata pythUpdateData,
+        OrderExecutionRequest calldata request,
+        PolicySnapshot memory policy
+    ) internal returns (BasketPrice memory basket, bool ok) {
+        if (!policy.oracleFrozen) {
+            return _resolveHistoricalOrderBasket(refundRecipient, pythUpdateData, request);
+        }
+
+        uint256 pythFee = _updatePythPrice(pythUpdateData);
+        basket = _computeLiveBasketPrice(
+            PriceMode.OrderExecution, policy.maxStaleness, _maxPublishTimeDivergence(PriceMode.OrderExecution)
+        );
+        basket.pythFee = pythFee;
+        ok = true;
+    }
+
+    function _resolveHistoricalOrderBasket(
+        address refundRecipient,
+        bytes[] calldata pythUpdateData,
+        OrderExecutionRequest calldata request
+    ) internal returns (BasketPrice memory basket, bool ok) {
+        uint256 pythFee = getUpdateFee(pythUpdateData);
+        if (msg.value < pythFee) {
+            revert PletherOracle__InsufficientFee(msg.value, pythFee);
+        }
+
+        uint64 minPublishTime = request.commitTime;
+        uint256 settlementDeadline = uint256(request.commitTime) + orderSettlementWindow;
+        uint64 maxPublishTime = uint64(settlementDeadline < block.timestamp ? settlementDeadline : block.timestamp);
+        try pyth.parsePriceFeedUpdatesUnique{value: pythFee}(
+            pythUpdateData, pythFeedIds, minPublishTime, maxPublishTime
+        ) returns (
+            PythStructs.PriceFeed[] memory parsedFeeds
+        ) {
+            basket = _computeBasketPriceFromFeeds(
+                PriceMode.OrderExecution, parsedFeeds, maxComponentPublishTimeDivergence
+            );
+            basket.pythFee = pythFee;
+            ok = true;
+        } catch {
+            if (request.revertOnHistoricalUnavailable) {
+                revert PletherOracle__StalePrice(
+                    PriceMode.OrderExecution, bytes32(0), maxPublishTime, orderExecutionStalenessLimit, block.timestamp
+                );
+            }
+            basket.pythFee = pythFee;
+            _refundValue(payable(refundRecipient), pythFee);
+        }
     }
 
     function _policyForOrder(
@@ -232,13 +378,12 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         policy.isFadWindow = isFad;
     }
 
-    function _computeBasketPrice(
+    function _computeLiveBasketPrice(
         PriceMode mode,
         uint256 maxStaleness,
         uint256 maxPublishTimeDivergence
-    ) internal view returns (uint256 basketPrice, uint256 minPublishTime) {
-        minPublishTime = type(uint256).max;
-        uint256 maxPublishTime;
+    ) internal view returns (BasketPrice memory basket) {
+        PythStructs.PriceFeed[] memory priceFeeds = new PythStructs.PriceFeed[](pythFeedIds.length);
         uint256 len = pythFeedIds.length;
 
         for (uint256 i = 0; i < len; i++) {
@@ -247,6 +392,34 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
             if (OracleFreshnessPolicyLib.isStale(p.publishTime, maxStaleness, block.timestamp)) {
                 revert PletherOracle__StalePrice(mode, feedId, p.publishTime, maxStaleness, block.timestamp);
             }
+            priceFeeds[i] = PythStructs.PriceFeed({id: feedId, price: p, emaPrice: p});
+        }
+
+        basket = _computeBasketPriceFromFeeds(mode, priceFeeds, maxPublishTimeDivergence);
+    }
+
+    function _computeBasketPriceFromFeeds(
+        PriceMode mode,
+        PythStructs.PriceFeed[] memory priceFeeds,
+        uint256 maxPublishTimeDivergence
+    ) internal view returns (BasketPrice memory basket) {
+        if (priceFeeds.length != pythFeedIds.length) {
+            revert PletherOracle__ArrayLengthMismatch(
+                priceFeeds.length, quantities.length, basePrices.length, inversions.length
+            );
+        }
+        uint256 minPublishTime = type(uint256).max;
+        uint256 maxPublishTime;
+        uint256 len = pythFeedIds.length;
+
+        for (uint256 i = 0; i < len; i++) {
+            bytes32 feedId = pythFeedIds[i];
+            if (priceFeeds[i].id != feedId) {
+                revert PletherOracle__ArrayLengthMismatch(
+                    priceFeeds.length, quantities.length, basePrices.length, inversions.length
+                );
+            }
+            PythStructs.Price memory p = priceFeeds[i].price;
             if (p.price <= 0) {
                 revert PletherOracle__InvalidPrice(feedId, p.price);
             }
@@ -255,7 +428,9 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
             }
 
             uint256 norm = inversions[i] ? _invertPythPrice(p.price, p.expo) : _normalizePythPrice(p.price, p.expo);
-            basketPrice += (norm * quantities[i]) / (basePrices[i] * DecimalConstants.CHAINLINK_TO_TOKEN_SCALE);
+            uint256 weightedPrice = (norm * quantities[i]) / (basePrices[i] * DecimalConstants.CHAINLINK_TO_TOKEN_SCALE);
+            basket.price += weightedPrice;
+            basket.confidence += (weightedPrice * uint256(uint64(p.conf))) / uint256(uint64(p.price));
 
             if (p.publishTime < minPublishTime) {
                 minPublishTime = p.publishTime;
@@ -269,9 +444,77 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
             revert PletherOracle__PublishTimeDivergence(mode, minPublishTime, maxPublishTime, maxPublishTimeDivergence);
         }
 
-        if (basketPrice == 0) {
+        if (basket.price == 0) {
             revert PletherOracle__ZeroBasketPrice();
         }
+        basket.publishTime = uint64(minPublishTime);
+    }
+
+    function _snapshotFromBasket(
+        PriceMode mode,
+        BasketPrice memory basket,
+        PolicySnapshot memory policy,
+        bool enforcePublishOrder
+    ) internal view returns (PriceSnapshot memory snapshot) {
+        snapshot.maxStaleness = policy.maxStaleness;
+        snapshot.closeOnly = policy.closeOnly;
+        snapshot.oracleFrozen = policy.oracleFrozen;
+        snapshot.isFadWindow = policy.isFadWindow;
+        snapshot.price = _clampToCap(basket.price);
+        snapshot.publishTime = basket.publishTime;
+        snapshot.updateFee = basket.pythFee;
+
+        if (enforcePublishOrder && snapshot.publishTime < engine.lastMarkTime()) {
+            revert PletherOracle__PriceOutOfOrder(snapshot.publishTime, engine.lastMarkTime());
+        }
+        mode;
+    }
+
+    function _adverseOrderPrice(
+        OrderExecutionRequest calldata request,
+        uint256 price,
+        uint256 confidence
+    ) internal view returns (uint256) {
+        uint256 shift = (confidence * adverseConfidenceMultiplierBps) / 10_000;
+        if (shift == 0) {
+            return price;
+        }
+
+        bool adverseUp = request.side == CfdTypes.Side.BEAR ? !request.isClose : request.isClose;
+        return adverseUp ? price + shift : price > shift ? price - shift : 0;
+    }
+
+    function _adverseLiquidationPrice(
+        address account,
+        uint256 price,
+        uint256 confidence
+    ) internal view returns (uint256) {
+        uint256 shift = (confidence * adverseConfidenceMultiplierBps) / 10_000;
+        if (shift == 0) {
+            return price;
+        }
+
+        (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(account);
+        if (size == 0) {
+            return price;
+        }
+        return side == CfdTypes.Side.BULL ? price + shift : price > shift ? price - shift : 0;
+    }
+
+    function _canReuseHistoricalBatchBasket(
+        uint64 commitTime,
+        BatchOrderPriceCache calldata cache
+    ) internal view returns (bool) {
+        if (!cache.hasHistoricalBasket) {
+            return false;
+        }
+        if (commitTime < cache.minReusableCommitTime || commitTime > cache.publishTime) {
+            return false;
+        }
+        if (cache.publishTime > block.timestamp) {
+            return false;
+        }
+        return uint256(cache.publishTime) <= uint256(commitTime) + orderSettlementWindow;
     }
 
     function _maxPublishTimeDivergence(
@@ -332,6 +575,21 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         }
         claimableEth[refundRecipient] += refund;
         emit EthRefundDeferred(refundRecipient, refund);
+    }
+
+    function _refundValue(
+        address payable refundRecipient,
+        uint256 amount
+    ) internal {
+        if (amount == 0) {
+            return;
+        }
+        (bool ok,) = refundRecipient.call{value: amount}("");
+        if (ok) {
+            return;
+        }
+        claimableEth[refundRecipient] += amount;
+        emit EthRefundDeferred(refundRecipient, amount);
     }
 
     }

@@ -487,13 +487,11 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
             return;
         }
 
-        if (publishTime < lastMarkTime) {
-            revert CfdEngine__MarkPriceOutOfOrder();
-        }
-
         uint256 clampedPrice = price > CAP_PRICE ? CAP_PRICE : price;
-        lastMarkPrice = clampedPrice;
-        lastMarkTime = publishTime;
+        if (publishTime >= lastMarkTime) {
+            lastMarkPrice = clampedPrice;
+            lastMarkTime = publishTime;
+        }
 
         address account = beneficiary;
         StoredPosition storage pos = _positions[account];
@@ -896,10 +894,6 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         uint256 vaultDepthUsdc,
         uint64 publishTime
     ) internal {
-        if (publishTime < lastMarkTime) {
-            revert CfdEngine__MarkPriceOutOfOrder();
-        }
-
         CfdEnginePlanTypes.RawSnapshot memory snap =
             _buildRawSnapshot(order.account, currentOraclePrice, vaultDepthUsdc, publishTime);
         snap.vaultCashUsdc = vault.totalAssets();
@@ -1213,6 +1207,9 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         uint256 newMarkPrice,
         uint64 newMarkTime
     ) internal {
+        if (newMarkTime < lastMarkTime) {
+            return;
+        }
         lastMarkPrice = newMarkPrice;
         lastMarkTime = newMarkTime;
     }
