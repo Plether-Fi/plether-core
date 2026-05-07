@@ -172,7 +172,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
 
         uint256 minPublishTime;
         (snapshot.price, minPublishTime) =
-            _computeBasketPrice(mode, policy.maxStaleness, _maxPublishTimeDivergence(mode));
+            _computeBasketPrice(mode, policy.maxStaleness, _policyPublishTimeDivergence(mode, policy));
         snapshot.price = _clampToCap(snapshot.price);
         snapshot.publishTime = uint64(minPublishTime);
 
@@ -189,6 +189,16 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
             revert PletherOracle__InsufficientFee(msg.value, pythFee);
         }
         pyth.updatePriceFeeds{value: pythFee}(pythUpdateData);
+    }
+
+    function _policyPublishTimeDivergence(
+        PriceMode mode,
+        PolicySnapshot memory policy
+    ) internal view returns (uint256) {
+        if (mode == PriceMode.Liquidation && policy.oracleFrozen) {
+            return policy.maxStaleness;
+        }
+        return _maxPublishTimeDivergence(mode);
     }
 
     function _policyForOrder(

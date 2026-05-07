@@ -219,6 +219,21 @@ contract PletherOracleTest is Test {
         oracle.updatePrice(address(this), _pythUpdateData(), IPletherOracle.PriceMode.OrderExecution);
     }
 
+    function test_FrozenLiquidation_AllowsFeedDivergenceWithinFadMaxStaleness() public {
+        vm.warp(1000);
+        engine.setFadDayOverride(block.timestamp / 86_400, true);
+        pyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1000);
+        pyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 984);
+
+        IPletherOracle.PriceSnapshot memory snapshot =
+            oracle.updatePrice(address(this), _pythUpdateData(), IPletherOracle.PriceMode.Liquidation);
+
+        assertTrue(snapshot.oracleFrozen, "setup should use frozen oracle policy");
+        assertEq(snapshot.maxStaleness, engine.fadMaxStaleness(), "liquidation should use frozen staleness");
+        assertEq(snapshot.publishTime, 984, "basket should retain weakest publish time");
+        assertEq(snapshot.price, 1e8, "basket price");
+    }
+
     function test_UpdatePrice_RevertsWhenPublishTimePredatesStoredMark() public {
         vm.warp(1000);
         engine.setLastMark(1e8, 995);
@@ -229,20 +244,16 @@ contract PletherOracleTest is Test {
     }
 
     function test_ApplyConfig_OnlyOwnerOrRouter() public {
-        vm.prank(address(0xBEEF));
+        IPletherOracle.OracleConfig memory config = IPletherOracle.OracleConfig({
+            orderExecutionStalenessLimit: 120, liquidationStalenessLimit: 30, pythMaxConfidenceRatioBps: 500
+        });
+
         vm.expectRevert(IPletherOracle.PletherOracle__Unauthorized.selector);
-        oracle.applyConfig(
-            IPletherOracle.OracleConfig({
-                orderExecutionStalenessLimit: 120, liquidationStalenessLimit: 30, pythMaxConfidenceRatioBps: 500
-            })
-        );
+        vm.prank(address(0xBEEF));
+        oracle.applyConfig(config);
 
         vm.prank(engine.orderRouter());
-        oracle.applyConfig(
-            IPletherOracle.OracleConfig({
-                orderExecutionStalenessLimit: 120, liquidationStalenessLimit: 30, pythMaxConfidenceRatioBps: 500
-            })
-        );
+        oracle.applyConfig(config);
 
         assertEq(oracle.orderExecutionStalenessLimit(), 120, "router can apply config");
         assertEq(oracle.liquidationStalenessLimit(), 30, "liquidation limit");
