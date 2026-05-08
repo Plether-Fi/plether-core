@@ -339,6 +339,18 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         updatedTotalUsdc = currentTotalUsdc - amountUsdc;
     }
 
+    function _recordProtocolFee(
+        uint256 amountUsdc,
+        uint256 vaultCashInflowUsdc
+    ) internal {
+        if (vaultCashInflowUsdc > 0) {
+            vault.recordProtocolInflow(vaultCashInflowUsdc);
+        }
+        if (amountUsdc > 0) {
+            accumulatedFeesUsdc += amountUsdc;
+        }
+    }
+
     modifier onlyRouter() {
         if (msg.sender != orderRouter) {
             revert CfdEngine__Unauthorized();
@@ -457,11 +469,10 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         }
 
         USDC.safeTransferFrom(msg.sender, address(vault), amountUsdc);
-        vault.recordProtocolInflow(amountUsdc);
-        accumulatedFeesUsdc += amountUsdc;
+        _recordProtocolFee(amountUsdc, amountUsdc);
     }
 
-    /// @notice Books router-delivered protocol-owned inflow as protocol fees after the router has already funded the vault.
+    /// @notice Books router-delivered protocol-owned inflow as protocol fees after the router has funded the vault.
     function recordRouterProtocolFee(
         uint256 amountUsdc
     ) external onlyRouter {
@@ -469,7 +480,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
             return;
         }
 
-        accumulatedFeesUsdc += amountUsdc;
+        _recordProtocolFee(amountUsdc, amountUsdc);
     }
 
     /// @notice Credits a router-collected execution bounty into the beneficiary's clearinghouse account.
@@ -1270,10 +1281,11 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         _payOrRecordDeferredTraderPayout(account, amountUsdc);
     }
 
-    function settlementAccumulateFees(
-        uint256 amountUsdc
+    function settlementRecordProtocolFee(
+        uint256 amountUsdc,
+        uint256 vaultCashInflowUsdc
     ) external onlySettlementModule {
-        accumulatedFeesUsdc += amountUsdc;
+        _recordProtocolFee(amountUsdc, vaultCashInflowUsdc);
     }
 
     function settlementAccumulateBadDebt(

@@ -53,13 +53,11 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
 
         int256 netMarginChange = IMarginClearinghouse(host.clearinghouse())
             .applyOpenCost(delta.account, delta.marginDeltaUsdc, delta.tradeCostUsdc, host.vault());
+        uint256 protocolFeeInflowUsdc;
         if (delta.tradeCostUsdc > 0) {
-            uint256 protocolFeeInflowUsdc = uint256(delta.tradeCostUsdc) > delta.executionFeeUsdc
+            protocolFeeInflowUsdc = uint256(delta.tradeCostUsdc) > delta.executionFeeUsdc
                 ? delta.executionFeeUsdc
                 : uint256(delta.tradeCostUsdc);
-            if (protocolFeeInflowUsdc > 0) {
-                ICfdVault(host.vault()).recordProtocolInflow(protocolFeeInflowUsdc);
-            }
             if (uint256(delta.tradeCostUsdc) > protocolFeeInflowUsdc) {
                 ICfdVault(host.vault())
                     .recordClaimantInflow(
@@ -79,8 +77,8 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
             int256(delta.sideOiIncrease),
             delta.sideEntryNotionalDelta
         );
-        if (delta.executionFeeUsdc > 0) {
-            host.settlementAccumulateFees(delta.executionFeeUsdc);
+        if (delta.executionFeeUsdc > 0 || protocolFeeInflowUsdc > 0) {
+            host.settlementRecordProtocolFee(delta.executionFeeUsdc, protocolFeeInflowUsdc);
         }
         host.settlementWritePosition(
             delta.account,
@@ -118,6 +116,7 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
 
         IMarginClearinghouse(host.clearinghouse()).unlockPositionMargin(delta.account, delta.unlockMarginUsdc);
 
+        uint256 protocolFeeInflowUsdc;
         if (delta.settlementType == CfdEnginePlanTypes.SettlementType.GAIN) {
             if (delta.freshTraderPayoutUsdc > 0) {
                 host.settlementRecordDeferredTraderPayout(delta.account, delta.freshTraderPayoutUsdc);
@@ -145,12 +144,9 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
             uint256 cashCollectedExecutionFeeUsdc = delta.executionFeeUsdc > delta.deferredFeeRecoveryUsdc
                 ? delta.executionFeeUsdc - delta.deferredFeeRecoveryUsdc
                 : 0;
-            uint256 protocolFeeInflowUsdc =
+            protocolFeeInflowUsdc =
                 seizedUsdc > cashCollectedExecutionFeeUsdc ? cashCollectedExecutionFeeUsdc : seizedUsdc;
             if (seizedUsdc > 0) {
-                if (protocolFeeInflowUsdc > 0) {
-                    ICfdVault(host.vault()).recordProtocolInflow(protocolFeeInflowUsdc);
-                }
                 if (seizedUsdc > protocolFeeInflowUsdc) {
                     ICfdVault(host.vault())
                         .recordClaimantInflow(
@@ -178,8 +174,8 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
                 );
         }
 
-        if (delta.executionFeeUsdc > 0) {
-            host.settlementAccumulateFees(delta.executionFeeUsdc);
+        if (delta.executionFeeUsdc > 0 || protocolFeeInflowUsdc > 0) {
+            host.settlementRecordProtocolFee(delta.executionFeeUsdc, protocolFeeInflowUsdc);
         }
 
         if (delta.deletePosition) {

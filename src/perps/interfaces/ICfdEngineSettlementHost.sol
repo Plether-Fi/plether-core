@@ -33,8 +33,10 @@ interface ICfdEngineSettlementHost {
         address account,
         uint256 amountUsdc
     ) external;
-    function settlementAccumulateFees(
-        uint256 amountUsdc
+    /// @notice Records protocol fee ownership and any fresh vault cash backing that fee.
+    function settlementRecordProtocolFee(
+        uint256 amountUsdc,
+        uint256 vaultCashInflowUsdc
     ) external;
     function settlementAccumulateBadDebt(
         uint256 amountUsdc

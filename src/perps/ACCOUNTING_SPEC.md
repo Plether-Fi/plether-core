@@ -262,7 +262,7 @@ Not every inflow into `HousePool` is LP equity.
 
 Keep these categories separate:
 
-- `recordProtocolInflow`: protocol-owned value such as fees
+- `recordProtocolInflow`: non-LP protocol-recognized backing, including protocol fees routed through `CfdEngine` and settlement-module keeper-liability backing; `OrderRouter` does not call this hook directly
 - `recordClaimantInflow(amount, Recapitalization, CashArrived)`: recapitalization intended to restore waterfall claimants
 - `recordClaimantInflow(amount, Revenue, CashArrived)`: claimant-owned value where fresh cash entered the vault in this flow
 - `recordClaimantInflow(amount, Revenue, AlreadyRetained)`: claimant-owned value already retained physically by the vault and only needing ownership routing

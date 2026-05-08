@@ -752,7 +752,9 @@ contract CfdEngineTest is BasePerpTest {
         (uint256 size,,,,,,) = engine.positions(bearAccount);
         assertEq(size, 0, "Illiquid profitable close close should still destroy the position");
         assertEq(
-            engine.deferredTraderCreditUsdc(bearAccount), preview.deferredTraderCreditUsdc, "Live close should match preview"
+            engine.deferredTraderCreditUsdc(bearAccount),
+            preview.deferredTraderCreditUsdc,
+            "Live close should match preview"
         );
     }
 
@@ -882,7 +884,7 @@ contract CfdEngineTest is BasePerpTest {
         _fundTrader(trader, 20_000e6);
 
         _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
-        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(bytes32)").with_key(account)
+        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(address)").with_key(account)
             .checked_write(uint256(5000e6));
         stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(uint256(5000e6));
 
@@ -927,7 +929,7 @@ contract CfdEngineTest is BasePerpTest {
         _fundTrader(trader, 20_000e6);
 
         _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
-        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(bytes32)").with_key(account)
+        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(address)").with_key(account)
             .checked_write(uint256(5000e6));
         stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(uint256(5000e6));
 
@@ -974,7 +976,7 @@ contract CfdEngineTest is BasePerpTest {
         _fundTrader(trader, 20_000e6);
         _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
-        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(bytes32)").with_key(account)
+        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(address)").with_key(account)
             .checked_write(deferredTraderCredit);
         stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(deferredTraderCredit);
 
@@ -1375,7 +1377,7 @@ contract CfdEngineTest is BasePerpTest {
         usdc.mint(address(pool), 100e6);
 
         stdstore.target(address(engine)).sig("accumulatedFeesUsdc()").checked_write(uint256(60e6));
-        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(bytes32)").with_key(traderAccount)
+        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(address)").with_key(traderAccount)
             .checked_write(uint256(40e6));
         stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(uint256(40e6));
 
@@ -1399,9 +1401,7 @@ contract CfdEngineTest is BasePerpTest {
         );
         assertEq(pool.totalAssets(), 20e6, "Trader claim should move the vault into the exact 20/20/20 residual state");
         assertEq(engine.accumulatedFeesUsdc(), 20e6, "Servicing deferred claims must not burn fee accounting");
-        assertEq(
-            engine.deferredTraderCreditUsdc(traderAccount), 0, "Trader deferred balance should be fully consumed"
-        );
+        assertEq(engine.deferredTraderCreditUsdc(traderAccount), 0, "Trader deferred balance should be fully consumed");
         assertEq(engine.deferredKeeperCreditUsdc(keeper), 20e6, "Keeper deferred balance should remain queued");
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
@@ -2636,9 +2636,9 @@ contract CfdEngineTest is BasePerpTest {
         _fundTrader(trader, 200e6);
         _open(account, CfdTypes.Side.BEAR, 10_000e18, 200e6, 99_700_000);
 
-        stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(account).checked_write(uint256(0));
+        stdstore.target(address(clearinghouse)).sig("balanceUsdc(address)").with_key(account).checked_write(uint256(0));
 
-        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(bytes32)").with_key(account)
+        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(address)").with_key(account)
             .checked_write(uint256(10e6));
         stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(uint256(10e6));
 
@@ -3226,7 +3226,7 @@ contract CfdEngineTest is BasePerpTest {
         assertGt(deferredBefore, 0, "Setup must create deferred payout while keeping the position open");
 
         uint256 reducedSettlement = clearinghouse.balanceUsdc(bearAccount) - 4700e6;
-        stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(bearAccount)
+        stdstore.target(address(clearinghouse)).sig("balanceUsdc(address)").with_key(bearAccount)
             .checked_write(reducedSettlement);
 
         uint256 settlementReachableBefore = _terminalReachableUsdc(bearAccount);
@@ -3294,7 +3294,7 @@ contract CfdEngineTest is BasePerpTest {
         assertGt(deferredBefore, 0, "Setup must create deferred payout while keeping the position open");
 
         uint256 reducedSettlement = clearinghouse.balanceUsdc(bearAccount) - 4700e6;
-        stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(bearAccount)
+        stdstore.target(address(clearinghouse)).sig("balanceUsdc(address)").with_key(bearAccount)
             .checked_write(reducedSettlement);
 
         CfdEngine.ClosePreview memory preview = engineLens.simulateClose(bearAccount, 5000e18, 80_000_000, vaultDepth);
@@ -3366,7 +3366,7 @@ contract CfdEngineTest is BasePerpTest {
         );
 
         uint256 reducedSettlement = clearinghouse.balanceUsdc(bearAccount) - 4700e6;
-        stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(bearAccount)
+        stdstore.target(address(clearinghouse)).sig("balanceUsdc(address)").with_key(bearAccount)
             .checked_write(reducedSettlement);
 
         _closeAt(bearAccount, CfdTypes.Side.BEAR, 2500e18, 80_000_000, vaultDepth, refreshTime);
@@ -3402,7 +3402,9 @@ contract CfdEngineTest is BasePerpTest {
 
         _closeAt(bearAccount, CfdTypes.Side.BEAR, 5000e18, 120_000_000, vaultDepth, refreshTime);
         uint256 bearDeferredBefore = engine.deferredTraderCreditUsdc(bearAccount);
-        assertGt(bearDeferredBefore, 0, "Initial deferred payout should create tracked deferred balance for bearAccount");
+        assertGt(
+            bearDeferredBefore, 0, "Initial deferred payout should create tracked deferred balance for bearAccount"
+        );
 
         _closeAt(laterAccount, CfdTypes.Side.BEAR, 5000e18, 120_000_000, vaultDepth, refreshTime);
         uint256 laterDeferred = engine.deferredTraderCreditUsdc(laterAccount);
@@ -3440,7 +3442,8 @@ contract CfdEngineTest is BasePerpTest {
             deferredBefore, 1e6, "Setup must create legacy deferred payout large enough to cover the fee shortfall"
         );
 
-        stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(bearAccount).checked_write(uint256(0));
+        stdstore.target(address(clearinghouse)).sig("balanceUsdc(address)").with_key(bearAccount)
+            .checked_write(uint256(0));
         bytes32 positionMarginSlot = keccak256(abi.encode(bearAccount, uint256(3)));
         vm.store(address(clearinghouse), positionMarginSlot, bytes32(uint256(0)));
 
@@ -5796,6 +5799,7 @@ contract PhantomExecFeeTest is BasePerpTest {
         vm.stopPrank();
 
         vm.warp(block.timestamp + 1);
+        vm.roll(block.number + 1);
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(1e8));
         router.executeOrder(1, priceData);

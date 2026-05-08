@@ -709,7 +709,7 @@ contract PerpsForkTest is Test {
         );
 
         deal(USDC, address(pool), IERC20(USDC).balanceOf(address(pool)) + deferred);
-        vm.prank(address(router));
+        vm.prank(address(engine));
         pool.recordProtocolInflow(deferred);
 
         vm.prank(alice);

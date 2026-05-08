@@ -411,15 +411,16 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         USDC.safeTransfer(recipient, amount);
     }
 
-    /// @notice Accounts a legitimate protocol-owned inflow into canonical vault assets.
-    /// @dev Only the engine or order router may use this path. Unlike `accountExcess()`, this does
+    /// @notice Accounts legitimate non-LP protocol-recognized backing into canonical vault assets.
+    /// @dev Only the engine or settlement module may use this path. Router-sourced protocol fees
+    ///      must route through the engine fee-record path. Unlike `accountExcess()`, this does
     ///      not require raw excess to exist: it is the explicit accounting hook for endogenous
     ///      protocol gains and may also be used to restore canonical accounting after a raw-balance
     ///      shortfall has already reduced effective assets through `totalAssets() = min(raw, accounted)`.
     function recordProtocolInflow(
         uint256 amount
     ) external {
-        if (msg.sender != address(ENGINE) && msg.sender != orderRouter && msg.sender != ENGINE.settlementModule()) {
+        if (msg.sender != address(ENGINE) && msg.sender != ENGINE.settlementModule()) {
             revert HousePool__Unauthorized();
         }
         if (amount == 0) {

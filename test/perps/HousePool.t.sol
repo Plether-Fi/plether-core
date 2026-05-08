@@ -1145,7 +1145,7 @@ contract HousePoolTest is BasePerpTest {
         assertEq(usdc.balanceOf(treasury), 25_000e6, "Sweep recipient should receive only the quarantined donation");
     }
 
-    function test_RecordProtocolInflow_OnlyEngineCanAccountRawExcess() public {
+    function test_RecordProtocolInflow_EngineCanAccountRawExcess() public {
         _fundJunior(bob, 500_000e6);
         usdc.mint(address(pool), 25_000e6);
 
@@ -1164,19 +1164,33 @@ contract HousePoolTest is BasePerpTest {
         assertEq(pool.excessAssets(), 0, "Engine-accounted inflow should not remain quarantined as excess");
     }
 
-    function test_RecordProtocolInflow_OrderRouterCanAccountRawExcess() public {
+    function test_RecordProtocolInflow_SettlementModuleCanAccountRawExcess() public {
         _fundJunior(bob, 500_000e6);
         usdc.mint(address(pool), 25_000e6);
 
-        vm.prank(address(router));
+        vm.prank(address(engine.settlementModule()));
         pool.recordProtocolInflow(25_000e6);
 
         assertEq(
             pool.totalAssets(),
             SEEDED_SENIOR + SEEDED_JUNIOR + 525_000e6,
-            "Router-accounted inflow should become canonical immediately"
+            "Settlement-module-accounted inflow should become canonical immediately"
         );
-        assertEq(pool.excessAssets(), 0, "Router-accounted inflow should not remain quarantined as excess");
+        assertEq(pool.excessAssets(), 0, "Settlement-module-accounted inflow should not remain quarantined as excess");
+    }
+
+    function test_RecordProtocolInflow_OrderRouterCannotAccountRawExcess() public {
+        _fundJunior(bob, 500_000e6);
+        usdc.mint(address(pool), 25_000e6);
+
+        uint256 accountedBefore = pool.totalAssets();
+
+        vm.prank(address(router));
+        vm.expectRevert(HousePool.HousePool__Unauthorized.selector);
+        pool.recordProtocolInflow(25_000e6);
+
+        assertEq(pool.totalAssets(), accountedBefore, "Router must not mutate canonical pool assets directly");
+        assertEq(pool.excessAssets(), 25_000e6, "Router-rejected inflow should remain quarantined as raw excess");
     }
 
     function test_RecordProtocolInflow_RestoresCanonicalAssetsAfterRawShortfall() public {

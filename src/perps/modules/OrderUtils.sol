@@ -78,7 +78,6 @@ abstract contract OrderUtils is OrderRouterBase {
         }
 
         USDC.safeTransfer(address(housePool), forfeitedUsdc);
-        housePool.recordProtocolInflow(forfeitedUsdc);
         engine.recordRouterProtocolFee(forfeitedUsdc);
     }
 

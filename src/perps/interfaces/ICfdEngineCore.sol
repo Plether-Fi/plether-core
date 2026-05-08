@@ -61,6 +61,7 @@ interface ICfdEngineCore {
         uint256 amountUsdc
     ) external;
 
+    /// @notice Books router-delivered protocol-owned inflow as accumulated fees after the router has funded the vault.
     function recordRouterProtocolFee(
         uint256 amountUsdc
     ) external;
