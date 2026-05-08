@@ -45,16 +45,10 @@ interface ICfdEngineCore {
         uint64 publishTime
     ) external;
 
-    function recordDeferredKeeperCredit(
-        address keeper,
-        uint256 amountUsdc
-    ) external;
-
     function reserveCloseOrderExecutionBounty(
         address account,
         uint256 sizeDelta,
-        uint256 amountUsdc,
-        address recipient
+        uint256 amountUsdc
     ) external;
 
     function absorbReservedExecutionBounty(
@@ -73,8 +67,6 @@ interface ICfdEngineCore {
     function accumulatedFeesUsdc() external view returns (uint256);
 
     function totalDeferredTraderCreditUsdc() external view returns (uint256);
-
-    function totalDeferredKeeperCreditUsdc() external view returns (uint256);
 
     function liquidatePosition(
         address account,

@@ -13,7 +13,6 @@ library ProtocolLensViewTypes {
         uint256 accumulatedFeesUsdc;
         uint256 accumulatedBadDebtUsdc;
         uint256 totalDeferredTraderCreditUsdc;
-        uint256 totalDeferredKeeperCreditUsdc;
         bool degradedMode;
         bool hasLiveLiability;
     }

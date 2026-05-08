@@ -40,11 +40,6 @@ contract HousePoolSnapshotParityTest is BasePerpTest {
             protocolSnapshot.totalDeferredTraderCreditUsdc,
             "HousePool input deferred trader credit should match protocol snapshot"
         );
-        assertEq(
-            inputSnapshot.deferredKeeperCreditUsdc,
-            protocolSnapshot.totalDeferredKeeperCreditUsdc,
-            "HousePool input deferred keeper credit should match protocol snapshot"
-        );
     }
 
     function test_PendingTrancheStateMatchesReconcileOutcome() public {

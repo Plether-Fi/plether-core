@@ -1164,19 +1164,15 @@ contract HousePoolTest is BasePerpTest {
         assertEq(pool.excessAssets(), 0, "Engine-accounted inflow should not remain quarantined as excess");
     }
 
-    function test_RecordProtocolInflow_OrderRouterCanAccountRawExcess() public {
+    function test_RecordProtocolInflow_OrderRouterCannotAccountRawExcess() public {
         _fundJunior(bob, 500_000e6);
         usdc.mint(address(pool), 25_000e6);
 
         vm.prank(address(router));
+        vm.expectRevert(HousePool.HousePool__Unauthorized.selector);
         pool.recordProtocolInflow(25_000e6);
 
-        assertEq(
-            pool.totalAssets(),
-            SEEDED_SENIOR + SEEDED_JUNIOR + 525_000e6,
-            "Router-accounted inflow should become canonical immediately"
-        );
-        assertEq(pool.excessAssets(), 0, "Router-accounted inflow should not remain quarantined as excess");
+        assertEq(pool.excessAssets(), 25_000e6, "Router-originated raw excess should remain quarantined");
     }
 
     function test_RecordProtocolInflow_RestoresCanonicalAssetsAfterRawShortfall() public {
@@ -1194,11 +1190,6 @@ contract HousePoolTest is BasePerpTest {
             "Engine-accounted inflow should restore canonical assets even after a raw shortfall"
         );
         assertEq(pool.excessAssets(), 0, "Shortfall recovery inflow should not remain quarantined as excess");
-    }
-
-    function test_SetOrderRouter_Twice_Reverts() public {
-        vm.expectRevert(HousePool.HousePool__RouterAlreadySet.selector);
-        pool.setOrderRouter(address(0x999));
     }
 
     function test_SetSeniorVault_Twice_Reverts() public {

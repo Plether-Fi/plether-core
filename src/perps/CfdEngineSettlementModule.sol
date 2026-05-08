@@ -235,9 +235,10 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
                 delta.account, reservationOrderIds, settlementPlan, host.vault(), keeper, delta.keeperBountyUsdc
             );
         if (seizedUsdc > 0) {
-            ICfdVault(host.vault()).recordClaimantInflow(
-                seizedUsdc, ICfdVault.ClaimantInflowKind.Revenue, ICfdVault.ClaimantInflowCashMode.CashArrived
-            );
+            ICfdVault(host.vault())
+                .recordClaimantInflow(
+                    seizedUsdc, ICfdVault.ClaimantInflowKind.Revenue, ICfdVault.ClaimantInflowCashMode.CashArrived
+                );
         }
         if (delta.syncMarginQueueAmount > 0) {
             IOrderRouterAccounting(host.orderRouter()).syncMarginQueue(delta.account);

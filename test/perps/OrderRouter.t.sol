@@ -583,7 +583,7 @@ contract OrderRouterTest is BasePerpTest {
 
         vm.prank(address(router));
         vm.expectRevert(CfdEngine.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
-        engine.reserveCloseOrderExecutionBounty(account, 25_000e18, 1e6, address(router));
+        engine.reserveCloseOrderExecutionBounty(account, 25_000e18, 1e6);
     }
 
     function test_InvalidClose_MarginBackedBountyPaysKeeper() public {
@@ -1399,7 +1399,6 @@ contract OrderRouterPythTest is BasePerpTest {
         );
         _syncRouterAdmin();
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
 
@@ -2263,11 +2262,7 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(router.nextExecuteId(), 1, "Stale revert should keep queue head pending");
         assertEq(escrow.pendingOrderCount, 1, "Stale revert should preserve escrowed order state");
         assertEq(usdc.balanceOf(address(router)), 0, "Router should not custody the keeper reserve");
-        assertEq(
-            escrow.executionBountyUsdc,
-            200_000,
-            "Escrow view should continue tracking the pending keeper reserve"
-        );
+        assertEq(escrow.executionBountyUsdc, 200_000, "Escrow view should continue tracking the pending keeper reserve");
         assertEq(
             clearinghouse.getLockedMarginBuckets(account).reservedSettlementUsdc,
             200_000,
@@ -2776,7 +2771,6 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
             new bool[](2)
         );
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
 
@@ -3169,11 +3163,6 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
             preview.keeperBountyUsdc,
             "Keeper bounty should settle directly inside the clearinghouse"
         );
-        assertEq(
-            observed.deferredKeeperCreditUsdc,
-            0,
-            "Keeper bounty should not enter the deferred-credit path"
-        );
     }
 
     function test_ExecuteLiquidation_ForfeitsEscrowedOpenBountiesWithoutCreditingTraderSettlement() public {
@@ -3501,7 +3490,6 @@ contract FadStalenessTest is BasePerpTest {
             new bool[](2)
         );
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
         _bootstrapSeededLifecycle();
@@ -4746,7 +4734,6 @@ contract MarkPriceStalenessTest is BasePerpTest {
             new bool[](2)
         );
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
 
         clearinghouse.setEngine(address(engine));
         vm.warp(SETUP_TIMESTAMP);
@@ -4859,7 +4846,6 @@ contract StalenessGriefTest is BasePerpTest {
             new bool[](2)
         );
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
 
         clearinghouse.setEngine(address(engine));
         vm.warp(SETUP_TIMESTAMP);
@@ -4989,7 +4975,6 @@ contract VpiImrBypassTest is Test {
         );
         routerAdmin = OrderRouterAdmin(router.admin());
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
 
         _warpPastTimelock();
         clearinghouse.setEngine(address(engine));
@@ -5205,7 +5190,6 @@ contract KeeperFeeRefundTest is Test {
         );
         routerAdmin = OrderRouterAdmin(router.admin());
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
 
         _warpPastTimelock();
         IOrderRouterAdminHost.RouterConfig memory config = IOrderRouterAdminHost.RouterConfig({
@@ -5278,7 +5262,6 @@ contract KeeperFeeRefundTest is Test {
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1.5e8, false);
 
         uint256 keeperBefore = keeper.balance;
-        uint256 deferredKeeperCreditBefore = engine.totalDeferredKeeperCreditUsdc();
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(1e8));
         vm.warp(block.timestamp + 1);
@@ -5293,11 +5276,6 @@ contract KeeperFeeRefundTest is Test {
         );
         assertEq(keeper.balance - keeperBefore, 0, "Keeper should not receive fee on slippage failure");
         assertEq(alice.balance, 1 ether, "Open slippage failure should not route any ETH refund to the trader");
-        assertEq(
-            engine.totalDeferredKeeperCreditUsdc(),
-            deferredKeeperCreditBefore,
-            "Slippage failure should not leak failed-order bounty into deferred keeper credit liabilities"
-        );
     }
 
     function test_FIFOCleanupImpossibleHeadOrderHasEconomicCleanupIncentive() public {
@@ -5524,7 +5502,6 @@ contract WeekendArbitrageTest is Test {
             new bool[](2)
         );
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
 
         _warpPastTimelock();
         clearinghouse.setEngine(address(engine));

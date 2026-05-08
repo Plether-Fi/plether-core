@@ -54,7 +54,6 @@ abstract contract BasePerpTest is Test {
         uint256 settlementUsdc;
         uint256 deferredTraderCreditUsdc;
         uint256 keeperSettlementUsdc;
-        uint256 deferredKeeperCreditUsdc;
     }
 
     struct LiquidationParityObserved {
@@ -62,7 +61,6 @@ abstract contract BasePerpTest is Test {
         uint256 deferredTraderCreditUsdc;
         uint256 badDebtUsdc;
         uint256 keeperSettlementUsdc;
-        uint256 deferredKeeperCreditUsdc;
         uint256 remainingSize;
         bool degradedMode;
         uint256 effectiveAssetsAfterUsdc;
@@ -132,7 +130,6 @@ abstract contract BasePerpTest is Test {
         );
         _syncRouterAdmin();
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
         publicLens = new PerpsPublicLens(address(engineAccountLens), address(engine), address(router), address(pool));
 
         _bypassAllTimelocks();
@@ -502,7 +499,6 @@ abstract contract BasePerpTest is Test {
         snapshot.settlementUsdc = clearinghouse.balanceUsdc(account);
         snapshot.deferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(account);
         snapshot.keeperSettlementUsdc = clearinghouse.balanceUsdc(keeper);
-        snapshot.deferredKeeperCreditUsdc = engine.deferredKeeperCreditUsdc(keeper);
     }
 
     function _observeLiquidationParity(
@@ -521,10 +517,6 @@ abstract contract BasePerpTest is Test {
         uint256 keeperSettlementAfter = clearinghouse.balanceUsdc(keeper);
         observed.keeperSettlementUsdc = keeperSettlementAfter > beforeSnapshot.keeperSettlementUsdc
             ? keeperSettlementAfter - beforeSnapshot.keeperSettlementUsdc
-            : 0;
-        uint256 deferredKeeperCreditAfter = engine.deferredKeeperCreditUsdc(keeper);
-        observed.deferredKeeperCreditUsdc = deferredKeeperCreditAfter > beforeSnapshot.deferredKeeperCreditUsdc
-            ? deferredKeeperCreditAfter - beforeSnapshot.deferredKeeperCreditUsdc
             : 0;
         observed.degradedMode = engine.degradedMode();
         observed.effectiveAssetsAfterUsdc = afterSnapshot.effectiveSolvencyAssetsUsdc;
@@ -548,7 +540,7 @@ abstract contract BasePerpTest is Test {
         );
         assertEq(observed.badDebtUsdc, preview.badDebtUsdc, "Bad debt should match liquidation preview");
         assertEq(
-            observed.keeperSettlementUsdc + observed.deferredKeeperCreditUsdc,
+            observed.keeperSettlementUsdc,
             preview.keeperBountyUsdc,
             "Keeper bounty settlement should match liquidation preview"
         );
@@ -923,13 +915,11 @@ abstract contract BasePerpTest is Test {
         address keeper
     ) internal view returns (DeferredEngineViewTypes.DeferredCreditStatus memory status) {
         uint256 deferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(account);
-        uint256 deferredKeeperCreditUsdc = engine.deferredKeeperCreditUsdc(keeper);
         bool anyLiquidity = pool.totalAssets() > 0;
 
         status.deferredTraderCreditUsdc = deferredTraderCreditUsdc;
         status.traderPayoutClaimableNow = deferredTraderCreditUsdc > 0 && anyLiquidity;
-        status.deferredKeeperCreditUsdc = deferredKeeperCreditUsdc;
-        status.keeperCreditClaimableNow = deferredKeeperCreditUsdc > 0 && anyLiquidity;
+        keeper;
     }
 
     function _vaultMtmAdjustment() internal view returns (uint256) {

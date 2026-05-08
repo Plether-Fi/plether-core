@@ -17,7 +17,7 @@ The perps system is built around a few core security choices:
 - delayed-order execution through a keeper-run FIFO router,
 - strict separation between trader custody, router escrow, engine accounting, and LP capital,
 - conservative LP accounting that refuses to count unrealized trader losses as present assets,
-- fail-soft terminal settlement through deferred trader and clearer balances,
+- fail-soft terminal settlement through deferred trader balances and direct clearinghouse keeper credits,
 - degraded-mode containment if a terminal transition reveals insolvency.
 
 The protocol is intentionally non-upgradeable. Admins can tune risk parameters and pause certain entrypoints, but they cannot swap logic or rewrite deployed code.
@@ -57,7 +57,6 @@ These are one-time configuration setters rather than mutable governance knobs:
 | `setEngine(address)` | `MarginClearinghouse` |
 | `setSeniorVault(address)` | `HousePool` |
 | `setJuniorVault(address)` | `HousePool` |
-| `setOrderRouter(address)` | `HousePool` |
 
 ### Instant owner controls
 
@@ -81,11 +80,11 @@ The owner cannot:
 
 Several perps contracts intentionally expose narrow but high-authority capability surfaces.
 
-- `OrderRouter` is the external execution boundary and can reach engine settlement paths plus `HousePool.payOut(...)` / `recordProtocolInflow(...)` through the approved caller set.
+- `OrderRouter` is the external execution boundary and can reach engine settlement paths, but it does not hold vault payout or protocol-inflow authority.
 - `CfdEngineSettlementModule` is engine-gated, but any external function added there is automatically security-critical because it can reach engine-owned settlement hooks.
 - `MarginClearinghouse` operator paths trust `engine`, `orderRouter`, and `settlementModule` to move trader custody across settlement, escrow, and seizure buckets.
 - `MarginClearinghouse.reserveStaleCloseExecutionBountyFromSettlement(...)` and `reserveStaleCloseExecutionBountyFromPositionMargin(...)` are intentionally narrow stale close-commit escape hatches; they must remain reserved for risk-reducing stale fallback flows that have already been bounded by router/engine policy.
-- `HousePool.payOut(...)` and `HousePool.recordProtocolInflow(...)` trust `engine`, `orderRouter`, and `settlementModule` as capability-bearing callers.
+- `HousePool.payOut(...)` and `HousePool.recordProtocolInflow(...)` trust only `engine` and `settlementModule` as capability-bearing callers.
 
 Practical rule:
 

@@ -14,10 +14,8 @@ contract PerpGhostLedger {
     mapping(address => LiquidationSnapshot) internal liquidationSnapshots;
     mapping(address => uint256) internal committedMarginUsdc;
     mapping(address => uint256) internal deferredTraderCreditUsdc;
-    mapping(address => uint256) internal deferredKeeperCreditUsdc;
     uint256 internal totalTrackedCommittedMarginUsdc;
     uint256 internal totalTrackedDeferredTraderCreditUsdc;
-    uint256 internal totalTrackedDeferredKeeperCreditUsdc;
 
     error PerpGhostLedger__Unauthorized();
 
@@ -64,30 +62,6 @@ contract PerpGhostLedger {
         totalTrackedCommittedMarginUsdc -= amountUsdc;
     }
 
-    function increaseDeferredKeeperCredit(
-        address clearer,
-        uint256 amountUsdc
-    ) external {
-        if (msg.sender != handler) {
-            revert PerpGhostLedger__Unauthorized();
-        }
-
-        deferredKeeperCreditUsdc[clearer] += amountUsdc;
-        totalTrackedDeferredKeeperCreditUsdc += amountUsdc;
-    }
-
-    function decreaseDeferredKeeperCredit(
-        address clearer,
-        uint256 amountUsdc
-    ) external {
-        if (msg.sender != handler) {
-            revert PerpGhostLedger__Unauthorized();
-        }
-
-        deferredKeeperCreditUsdc[clearer] -= amountUsdc;
-        totalTrackedDeferredKeeperCreditUsdc -= amountUsdc;
-    }
-
     function increaseDeferredTraderCredit(
         address account,
         uint256 amountUsdc
@@ -124,12 +98,6 @@ contract PerpGhostLedger {
         return committedMarginUsdc[account];
     }
 
-    function deferredKeeperCreditSnapshot(
-        address clearer
-    ) external view returns (uint256) {
-        return deferredKeeperCreditUsdc[clearer];
-    }
-
     function deferredTraderCreditSnapshot(
         address account
     ) external view returns (uint256) {
@@ -142,10 +110,6 @@ contract PerpGhostLedger {
 
     function totalDeferredTraderCreditSnapshot() external view returns (uint256) {
         return totalTrackedDeferredTraderCreditUsdc;
-    }
-
-    function totalDeferredKeeperCreditSnapshot() external view returns (uint256) {
-        return totalTrackedDeferredKeeperCreditUsdc;
     }
 
 }

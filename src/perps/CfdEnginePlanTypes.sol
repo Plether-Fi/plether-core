@@ -63,7 +63,6 @@ library CfdEnginePlanTypes {
         uint256 accumulatedBadDebtUsdc;
         uint256 unsettledCarryUsdc;
         uint256 totalDeferredTraderCreditUsdc;
-        uint256 totalDeferredKeeperCreditUsdc;
         uint256 deferredTraderCreditForAccount;
         bool degradedMode;
 

@@ -186,7 +186,7 @@ contract PlanApplyRegressionTest is BasePerpTest {
         }
 
         vm.prank(address(router));
-        engine.liquidatePosition(bullAccount, liquidationPrice, vaultDepth, uint64(block.timestamp));
+        engine.liquidatePosition(bullAccount, liquidationPrice, vaultDepth, uint64(block.timestamp), address(this));
 
         uint256 postMaxLiability = _sideMaxProfit(CfdTypes.Side.BULL) > _sideMaxProfit(CfdTypes.Side.BEAR)
             ? _sideMaxProfit(CfdTypes.Side.BULL)

@@ -330,7 +330,6 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         vm.assume(preview.liquidatable);
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(KEEPER);
-        uint256 deferredKeeperCreditBefore = engine.deferredKeeperCreditUsdc(KEEPER);
         uint256 deferredBefore = engine.deferredTraderCreditUsdc(account);
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
         IMarginClearinghouse.AccountUsdcBuckets memory bucketsBefore = clearinghouse.getAccountUsdcBuckets(account);
@@ -352,10 +351,9 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         assertEq(bucketsAfter.activePositionMarginUsdc, 0, "Liquidation should clear the live position-margin bucket");
         assertEq(bucketsAfter.totalLockedMarginUsdc, 0, "Liquidation should clear all locked margin in the simple path");
         assertEq(
-            (clearinghouse.balanceUsdc(KEEPER) - keeperSettlementBefore)
-                + (engine.deferredKeeperCreditUsdc(KEEPER) - deferredKeeperCreditBefore),
+            clearinghouse.balanceUsdc(KEEPER) - keeperSettlementBefore,
             preview.keeperBountyUsdc,
-            "Liquidation preview keeper bounty should match live execution or deferred bounty"
+            "Liquidation preview keeper bounty should match live clearinghouse credit"
         );
         assertEq(
             engine.deferredTraderCreditUsdc(account) - deferredBefore,
@@ -407,7 +405,6 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         vm.assume(preview.liquidatable);
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(KEEPER);
-        uint256 deferredKeeperCreditBefore = engine.deferredKeeperCreditUsdc(KEEPER);
         uint256 deferredBefore = engine.deferredTraderCreditUsdc(account);
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
         IMarginClearinghouse.AccountUsdcBuckets memory bucketsBefore = clearinghouse.getAccountUsdcBuckets(account);
@@ -433,10 +430,9 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             "Illiquid liquidation should clear all locked margin in the simple path"
         );
         assertEq(
-            (clearinghouse.balanceUsdc(KEEPER) - keeperSettlementBefore)
-                + (engine.deferredKeeperCreditUsdc(KEEPER) - deferredKeeperCreditBefore),
+            clearinghouse.balanceUsdc(KEEPER) - keeperSettlementBefore,
             preview.keeperBountyUsdc,
-            "Illiquid liquidation preview keeper bounty should match live execution or deferred bounty"
+            "Illiquid liquidation preview keeper bounty should match live clearinghouse credit"
         );
         assertEq(
             engine.deferredTraderCreditUsdc(account) - deferredBefore,
@@ -485,7 +481,6 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         AccountLensViewTypes.AccountLedgerSnapshot memory snapshotBefore =
             engineAccountLens.getAccountLedgerSnapshot(account);
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(KEEPER);
-        uint256 deferredKeeperCreditBefore = engine.deferredKeeperCreditUsdc(KEEPER);
         uint256 deferredBefore = engine.deferredTraderCreditUsdc(account);
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
         bytes[] memory priceData = new bytes[](1);
@@ -500,8 +495,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             "Liquidation preview must exclude router execution escrow from reachable collateral"
         );
         assertEq(
-            (clearinghouse.balanceUsdc(KEEPER) - keeperSettlementBefore)
-                + (engine.deferredKeeperCreditUsdc(KEEPER) - deferredKeeperCreditBefore),
+            clearinghouse.balanceUsdc(KEEPER) - keeperSettlementBefore,
             preview.keeperBountyUsdc,
             "Queued-escrow liquidation preview keeper bounty should match live outcome"
         );

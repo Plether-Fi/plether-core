@@ -11,11 +11,6 @@ contract MockInvariantVault is ICfdVault {
 
     MockUSDC public immutable usdc;
     address public immutable engine;
-    address public orderRouter;
-    bool public failRouterPayouts;
-
-    error MockInvariantVault__RouterAlreadySet();
-    error MockInvariantVault__ForcedRouterPayoutFailure();
 
     constructor(
         address _usdc,
@@ -23,21 +18,6 @@ contract MockInvariantVault is ICfdVault {
     ) {
         usdc = MockUSDC(_usdc);
         engine = _engine;
-    }
-
-    function setOrderRouter(
-        address _orderRouter
-    ) external {
-        if (orderRouter != address(0)) {
-            revert MockInvariantVault__RouterAlreadySet();
-        }
-        orderRouter = _orderRouter;
-    }
-
-    function setFailRouterPayouts(
-        bool shouldFail
-    ) external {
-        failRouterPayouts = shouldFail;
     }
 
     function seedAssets(
@@ -65,11 +45,8 @@ contract MockInvariantVault is ICfdVault {
         address recipient,
         uint256 amount
     ) external {
-        if (msg.sender != engine && msg.sender != orderRouter) {
+        if (msg.sender != engine) {
             revert("unauthorized");
-        }
-        if (msg.sender == orderRouter && failRouterPayouts) {
-            revert MockInvariantVault__ForcedRouterPayoutFailure();
         }
         usdc.safeTransfer(recipient, amount);
     }

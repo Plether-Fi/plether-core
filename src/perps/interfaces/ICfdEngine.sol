@@ -41,18 +41,11 @@ interface ICfdEngine is ICfdEngineTypes {
         uint64 publishTime
     ) external;
 
-    /// @notice Deprecated: keeper bounties are now direct clearinghouse transfers and never deferred.
-    function recordDeferredKeeperCredit(
-        address keeper,
-        uint256 amountUsdc
-    ) external;
-
     /// @notice Reserves close-order execution bounty from free settlement first, then active position margin.
     function reserveCloseOrderExecutionBounty(
         address account,
         uint256 sizeDelta,
-        uint256 amountUsdc,
-        address recipient
+        uint256 amountUsdc
     ) external;
 
     /// @notice Moves reserved execution-bounty escrow into protocol-owned vault fees.
@@ -111,9 +104,6 @@ interface ICfdEngine is ICfdEngineTypes {
 
     /// @notice Deferred trader credit still owed to beneficiaries.
     function totalDeferredTraderCreditUsdc() external view returns (uint256);
-
-    /// @notice Deferred keeper credit still owed after failed immediate settlement.
-    function totalDeferredKeeperCreditUsdc() external view returns (uint256);
 
     /// @notice Timestamp of the last mark price update
     function lastMarkTime() external view returns (uint64);

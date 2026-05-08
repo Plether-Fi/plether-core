@@ -326,8 +326,7 @@ contract PerpInvariantTest is BasePerpTest {
             pendingKeeperReserves += record.executionBountyUsdc;
         }
         for (uint256 i = 0; i < 3; i++) {
-            reservedSettlementUsdc +=
-                clearinghouse.getLockedMarginBuckets(handler.traders(i)).reservedSettlementUsdc;
+            reservedSettlementUsdc += clearinghouse.getLockedMarginBuckets(handler.traders(i)).reservedSettlementUsdc;
         }
 
         assertEq(usdc.balanceOf(address(router)), 0, "Router must not custody queued keeper reserves");
@@ -610,16 +609,11 @@ contract PerpInvariantTest is BasePerpTest {
             engine.totalDeferredTraderCreditUsdc(),
             "Protocol view trader deferred payouts must match storage"
         );
-        assertEq(
-            protocolView.totalDeferredKeeperCreditUsdc,
-            engine.totalDeferredKeeperCreditUsdc(),
-            "Protocol view deferred keeper credit must match storage"
-        );
     }
 
     function invariant_WithdrawalReserveIncludesDeferredLiabilities() public view {
-        uint256 expectedReserved = _maxLiability() + engine.accumulatedFeesUsdc()
-            + engine.totalDeferredTraderCreditUsdc() + engine.totalDeferredKeeperCreditUsdc();
+        uint256 expectedReserved =
+            _maxLiability() + engine.accumulatedFeesUsdc() + engine.totalDeferredTraderCreditUsdc();
 
         expectedReserved += uint256(0);
 
@@ -684,7 +678,6 @@ contract AdversarialPerpHandler is Test {
     uint256 public ghost_batchAttempts;
     uint256 public ghost_batchAdvances;
     uint256 public ghost_starvationEvents;
-    uint256 public ghost_expectedDeferredKeeperCredit;
     uint256 public ghost_failSoftLiquidations;
     uint256 public ghost_lastRetryableSlippageBatch;
     uint64 public ghost_lastRetryableSlippageOrderId;
@@ -953,9 +946,7 @@ contract AdversarialPerpHandler is Test {
         vm.roll(block.number + 1);
 
         try router.executeLiquidation(account, priceData) {
-            if (engine.deferredKeeperCreditUsdc(address(this)) == 0) {
-                ghost_failSoftLiquidations++;
-            }
+            ghost_failSoftLiquidations++;
         } catch {}
 
         vm.clearMockedCalls();
@@ -1008,8 +999,7 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
             pendingKeeperReserves += record.executionBountyUsdc;
         }
         for (uint256 i = 0; i < 4; i++) {
-            reservedSettlementUsdc +=
-                clearinghouse.getLockedMarginBuckets(handler.actors(i)).reservedSettlementUsdc;
+            reservedSettlementUsdc += clearinghouse.getLockedMarginBuckets(handler.actors(i)).reservedSettlementUsdc;
         }
 
         assertEq(usdc.balanceOf(address(router)), 0, "Router must not custody adversarial keeper reserves");
@@ -1108,8 +1098,7 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
             pendingKeeperReserves += record.executionBountyUsdc;
         }
         for (uint256 i = 0; i < 4; i++) {
-            reservedSettlementUsdc +=
-                clearinghouse.getLockedMarginBuckets(handler.actors(i)).reservedSettlementUsdc;
+            reservedSettlementUsdc += clearinghouse.getLockedMarginBuckets(handler.actors(i)).reservedSettlementUsdc;
         }
 
         assertEq(usdc.balanceOf(address(router)), 0, "Router must not custody pending keeper reserves");
@@ -1126,22 +1115,6 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
             IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(account);
             assertEq(buckets.freeSettlementUsdc + buckets.totalLockedMarginUsdc, buckets.settlementBalanceUsdc);
         }
-    }
-
-    function invariant_AdversarialLiquidationPayoutFailureDoesNotDeferBounty() public view {
-        assertEq(
-            engine.deferredKeeperCreditUsdc(address(handler)),
-            handler.ghost_expectedDeferredKeeperCredit(),
-            "Liquidation payout failures must not create deferred bounty claims"
-        );
-    }
-
-    function invariant_DeferredKeeperCreditTotalsConserveClaims() public view {
-        assertEq(
-            engine.totalDeferredKeeperCreditUsdc(),
-            engine.deferredKeeperCreditUsdc(address(handler)),
-            "Deferred keeper credit total must equal tracked keeper claims in invariant harness"
-        );
     }
 
 }

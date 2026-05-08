@@ -146,7 +146,6 @@ contract AuditBlockingAccountingFindingsFailing_SolvencyTiming is BasePerpTest {
         );
         _syncRouterAdmin();
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
         publicLens = new PerpsPublicLens(address(engineAccountLens), address(engine), address(router), address(pool));
 
         _bypassAllTimelocks();

@@ -54,7 +54,7 @@ Before trusting a test as a source of truth, ask:
 | `CfdEngine` settlement host hooks | `settlementModule` only | settlement module itself is engine-gated |
 | `CfdEngine.processOrderTyped` / `liquidatePosition` / fee bookkeeping | `orderRouter` only | router is the external execution boundary |
 | `MarginClearinghouse` operator paths | `engine`, `orderRouter`, `settlementModule` | router for queue escrow, engine/module for settlement |
-| `HousePool.payOut` / `recordProtocolInflow` | `engine`, `orderRouter`, `settlementModule` | payout/inflow authority is intentionally narrow |
+| `HousePool.payOut` / `recordProtocolInflow` | `engine`, `settlementModule` | payout/inflow authority is intentionally narrow |
 | `HousePool.recordClaimantInflow` | `engine`, `settlementModule` | claimant-owned revenue/recap routing only |
 
 Any new helper/module contract that can reach these sets should be treated as security-critical and explicitly access-controlled.
@@ -154,7 +154,7 @@ Reachability note:
 ### Deferred trader credit servicing
 
 - Liveness problem: profitable closes and liquidation payouts should not revert only because the vault is temporarily illiquid.
-- Chosen tradeoff: record senior deferred trader/keeper credit claims instead of reverting the state transition.
+- Chosen tradeoff: record senior deferred trader credit claims instead of reverting the state transition.
 - New risk: payout servicing becomes asynchronous and must respect seniority.
 - Protecting invariant: deferred liabilities remain senior in withdrawal, solvency, and reconciliation accounting.
 
@@ -240,7 +240,7 @@ Reachability note:
 
 1. Preview/live parity: canonical close and liquidation planner outputs should match live settlement semantics.
 2. Physical-first solvency: physical cash and mathematical claims are distinct objects.
-3. Deferred-liability seniority: deferred trader and keeper credit claims remain senior until serviced.
+3. Deferred-liability seniority: deferred trader credit claims remain senior until serviced.
 4. Carry-aware risk: pending carry reduces relevant equity before realization on guard and risk checks.
 5. Bounded queue behavior: cleanup and close-intent projection are account-local.
 6. Escrow conservation: router-held USDC execution bounty escrow and admin-held ETH refund claims are each distributed, refunded, forfeited, or left claimable exactly once.

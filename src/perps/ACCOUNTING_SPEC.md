@@ -182,7 +182,6 @@ Key fields:
 - `supplementalReservedUsdc`: reserved extension slot for LP-withdrawal accounting; currently zero in the carry model
 - `unrealizedMtmLiabilityUsdc`
 - `deferredTraderCreditUsdc`
-- `deferredKeeperCreditUsdc` is retained as a legacy zero-valued view; keeper bounties are now direct clearinghouse credits.
 - `protocolFeesUsdc`
 - `markFreshnessRequired`
 - `maxMarkStaleness`
@@ -314,8 +313,7 @@ The protocol supports fail-soft terminal settlement.
 
 - order execution bounties are reserved from trader margin at commit time,
 - liquidation bounties are capped by liquidation-reachable collateral,
-- successful bounty settlement credits the keeper directly in `MarginClearinghouse`,
-- deferred keeper-credit entry points are deprecated and revert without creating liability.
+- successful bounty settlement credits the keeper directly in `MarginClearinghouse`.
 
 Rules:
 
@@ -396,7 +394,7 @@ Required properties:
 Liquidation must:
 
 1. seize reachable account value,
-2. pay or defer the keeper bounty according to available vault cash,
+2. credit the keeper bounty directly from the liquidated account's reachable margin,
 3. preserve residual trader value when positive,
 4. realize remaining shortfall as bad debt,
 5. delete the position,

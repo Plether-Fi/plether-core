@@ -137,7 +137,6 @@ Order and liquidation bounties are margin transfers inside `MarginClearinghouse`
 - Open and close order bounties are reserved from trader margin at commit time.
 - Successful execution credits the keeper's clearinghouse settlement balance from the reservation.
 - Liquidation bounties are capped by liquidation-reachable collateral and credited directly to the keeper.
-- The deprecated deferred keeper-credit functions revert and do not create vault liabilities.
 
 ## LP Lifecycle
 

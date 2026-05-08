@@ -145,7 +145,6 @@ contract PerpsForkTest is Test {
         );
         routerAdmin = OrderRouterAdmin(router.admin());
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
 
         uint256 t0 = block.timestamp;
         clearinghouse.setEngine(address(engine));

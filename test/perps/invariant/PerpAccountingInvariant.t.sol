@@ -35,15 +35,13 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         handler = new PerpAccountingHandler(usdc, engine, clearinghouse, router, vault);
         handler.seedActors(50_000e6, 100_000e6);
 
-        bytes4[] memory selectors = new bytes4[](8);
+        bytes4[] memory selectors = new bytes4[](6);
         selectors[0] = handler.depositCollateral.selector;
         selectors[1] = handler.withdrawCollateral.selector;
         selectors[2] = handler.commitOpenOrder.selector;
         selectors[3] = handler.commitCloseOrder.selector;
         selectors[4] = handler.executeNextOrderBatch.selector;
         selectors[5] = handler.liquidate.selector;
-        selectors[6] = handler.claimDeferredKeeperCredit.selector;
-        selectors[7] = handler.setRouterPayoutFailureMode.selector;
 
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
         targetContract(address(handler));
@@ -165,18 +163,6 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
                 "Pending close size mapping must match pending-order scan"
             );
         }
-    }
-
-    function invariant_GhostDeferredKeeperCreditMatchesEngine() public view {
-        uint256 ghostDeferredBounty = handler.deferredKeeperCreditSnapshot();
-        uint256 liveDeferredBounty = engine.deferredKeeperCreditUsdc(address(handler));
-
-        assertEq(ghostDeferredBounty, liveDeferredBounty, "Ghost deferred keeper credit must match engine storage");
-        assertEq(
-            handler.totalDeferredKeeperCreditSnapshot(),
-            ghostDeferredBounty,
-            "Ghost deferred keeper credit total must match tracked clearer balance"
-        );
     }
 
     function invariant_GhostOrderCommittedMarginStateMachineMatchesRouter() public view {
@@ -440,11 +426,11 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
     }
 
     function _sumReservedSettlementBuckets() internal view returns (uint256 totalReservedSettlement) {
-        totalReservedSettlement +=
-            clearinghouse.getLockedMarginBuckets(_account(address(handler))).reservedSettlementUsdc;
+        totalReservedSettlement += clearinghouse.getLockedMarginBuckets(_account(address(handler)))
+        .reservedSettlementUsdc;
         for (uint256 i = 0; i < handler.actorCount(); i++) {
-            totalReservedSettlement +=
-                clearinghouse.getLockedMarginBuckets(_account(handler.actorAt(i))).reservedSettlementUsdc;
+            totalReservedSettlement += clearinghouse.getLockedMarginBuckets(_account(handler.actorAt(i)))
+            .reservedSettlementUsdc;
         }
     }
 

@@ -57,11 +57,11 @@ contract CfdEnginePublishTimeRegression is BasePerpTest {
         uint256 depth = pool.totalAssets();
 
         vm.prank(address(router));
-        engine.liquidatePosition(aliceAccount, 1.2e8, depth, fridayPublishTime);
+        engine.liquidatePosition(aliceAccount, 1.2e8, depth, fridayPublishTime, address(this));
         assertEq(engine.lastMarkTime(), fridayPublishTime, "liquidation should store oracle publish time");
 
         vm.prank(address(router));
-        engine.liquidatePosition(bobAccount, 1.2e8, depth, fridayPublishTime);
+        engine.liquidatePosition(bobAccount, 1.2e8, depth, fridayPublishTime, address(this));
         assertEq(
             engine.lastMarkTime(), fridayPublishTime, "repeated frozen liquidation should keep the same publish time"
         );

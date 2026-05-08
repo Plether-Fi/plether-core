@@ -71,7 +71,6 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         uint256 freeUsdc;
         uint256 accumulatedFeesUsdc;
         uint256 totalDeferredTraderCreditUsdc;
-        uint256 totalDeferredKeeperCreditUsdc;
         bool degradedMode;
         bool hasLiveLiability;
     }
@@ -124,8 +123,6 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     struct DeferredCreditStatus {
         uint256 deferredTraderCreditUsdc;
         bool traderPayoutClaimableNow;
-        uint256 deferredKeeperCreditUsdc;
-        bool keeperCreditClaimableNow;
     }
 
     struct SideState {
@@ -171,8 +168,6 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     mapping(address => StoredPosition) internal _positions;
     mapping(address => uint256) public deferredTraderCreditUsdc;
     uint256 public totalDeferredTraderCreditUsdc;
-    mapping(address => uint256) public deferredKeeperCreditUsdc;
-    uint256 public totalDeferredKeeperCreditUsdc;
     address public orderRouter;
 
     mapping(uint256 => bool) public fadDayOverrides;
@@ -188,7 +183,6 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     error CfdEngine__NoFeesToWithdraw();
     error CfdEngine__NoDeferredTraderCredit();
     error CfdEngine__InsufficientVaultLiquidity();
-    error CfdEngine__NoDeferredKeeperCredit();
     error CfdEngine__MustCloseOpposingPosition();
     error CfdEngine__CarryExceedsMargin();
     error CfdEngine__VaultSolvencyExceeded();
@@ -238,8 +232,6 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     event DegradedModeCleared();
     event DeferredTraderCreditRecorded(address indexed account, uint256 amountUsdc);
     event DeferredTraderCreditClaimed(address indexed account, uint256 amountUsdc);
-    event DeferredKeeperCreditRecorded(address indexed keeper, uint256 amountUsdc);
-    event DeferredKeeperCreditClaimed(address indexed keeper, uint256 amountUsdc);
     event BountyCredited(address indexed sourceAccount, address indexed beneficiary, uint256 amountUsdc);
     event CarryCheckpointed(address indexed account, uint256 addedUnsettledCarryUsdc, uint256 totalUnsettledCarryUsdc);
     event CarryRealized(
@@ -327,11 +319,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         address account
     ) internal returns (uint256 claimAmountUsdc) {
         claimAmountUsdc = CashPriorityLib.availableCashForDeferredBeneficiaryClaim(
-            vault.totalAssets(),
-            accumulatedFeesUsdc,
-            totalDeferredTraderCreditUsdc,
-            0,
-            amount
+            vault.totalAssets(), accumulatedFeesUsdc, totalDeferredTraderCreditUsdc, amount
         );
         if (claimAmountUsdc == 0) {
             revert CfdEngine__InsufficientVaultLiquidity();
@@ -606,26 +594,10 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         emit DeferredTraderCreditClaimed(account, claimAmountUsdc);
     }
 
-    /// @notice Deprecated: keeper bounties are now direct clearinghouse transfers and never deferred.
-    function claimDeferredKeeperCredit() external nonReentrant {
-        revert CfdEngine__NoDeferredKeeperCredit();
-    }
-
-    /// @notice Deprecated: keeper bounties are now direct clearinghouse transfers and never deferred.
-    function recordDeferredKeeperCredit(
-        address keeper,
-        uint256 amountUsdc
-    ) external view onlyRouter {
-        keeper;
-        amountUsdc;
-        revert CfdEngine__NoDeferredKeeperCredit();
-    }
-
     function reserveCloseOrderExecutionBounty(
         address account,
         uint256 sizeDelta,
-        uint256 amountUsdc,
-        address recipient
+        uint256 amountUsdc
     ) external onlyRouter {
         if (amountUsdc == 0) {
             return;
@@ -700,18 +672,18 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         _syncTotalSideMargin(pos.side, positionMarginUsdc, positionMarginUsdc - marginBackedBountyUsdc);
         if (freeBackedBountyUsdc > 0) {
             if (priceFresh) {
-                clearinghouse.reserveCloseExecutionBountyFromSettlement(account, freeBackedBountyUsdc, recipient);
+                clearinghouse.reserveCloseExecutionBountyFromSettlement(account, freeBackedBountyUsdc);
             } else {
-                clearinghouse.reserveStaleCloseExecutionBountyFromSettlement(account, freeBackedBountyUsdc, recipient);
+                clearinghouse.reserveStaleCloseExecutionBountyFromSettlement(account, freeBackedBountyUsdc);
             }
         }
         if (marginBackedBountyUsdc == 0) {
             return;
         }
         if (priceFresh) {
-            clearinghouse.reserveCloseExecutionBountyFromPositionMargin(account, marginBackedBountyUsdc, recipient);
+            clearinghouse.reserveCloseExecutionBountyFromPositionMargin(account, marginBackedBountyUsdc);
         } else {
-            clearinghouse.reserveStaleCloseExecutionBountyFromPositionMargin(account, marginBackedBountyUsdc, recipient);
+            clearinghouse.reserveStaleCloseExecutionBountyFromPositionMargin(account, marginBackedBountyUsdc);
         }
     }
 
@@ -964,9 +936,8 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     }
 
     function _freshVaultReservation() internal view returns (CashPriorityLib.SeniorCashReservation memory reservation) {
-        return CashPriorityLib.reserveFreshPayouts(
-            vault.totalAssets(), accumulatedFeesUsdc, totalDeferredTraderCreditUsdc, 0
-        );
+        return
+            CashPriorityLib.reserveFreshPayouts(vault.totalAssets(), accumulatedFeesUsdc, totalDeferredTraderCreditUsdc);
     }
 
     // ==========================================
@@ -1012,23 +983,6 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         address account
     ) external view returns (uint64) {
         return _positions[account].lastCarryTimestamp;
-    }
-
-    /// @notice Liquidates an undercollateralized position.
-    ///         Surplus equity (after bounty) is returned to the user.
-    ///         In bad-debt cases (equity < bounty), all remaining margin is seized by the vault.
-    /// @param account Clearinghouse account that owns the position
-    /// @param currentOraclePrice Pyth oracle price (8 decimals), clamped to CAP_PRICE
-    /// @param vaultDepthUsdc HousePool total assets used for post-op solvency checks and payout affordability
-    /// @param publishTime Pyth publish timestamp, stored as lastMarkTime
-    /// @return keeperBountyUsdc Bounty paid to the liquidation keeper (USDC, 6 decimals)
-    function liquidatePosition(
-        address account,
-        uint256 currentOraclePrice,
-        uint256 vaultDepthUsdc,
-        uint64 publishTime
-    ) external onlyRouter nonReentrant returns (uint256 keeperBountyUsdc) {
-        return _liquidatePosition(account, currentOraclePrice, vaultDepthUsdc, publishTime, msg.sender);
     }
 
     function liquidatePosition(
@@ -1086,11 +1040,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
 
     function _buildAdjustedSolvencyState() internal view returns (SolvencyAccountingLib.SolvencyState memory) {
         return SolvencyAccountingLib.buildSolvencyState(
-            vault.totalAssets(),
-            accumulatedFeesUsdc,
-            _maxLiability(),
-            totalDeferredTraderCreditUsdc,
-            0
+            vault.totalAssets(), accumulatedFeesUsdc, _maxLiability(), totalDeferredTraderCreditUsdc
         );
     }
 
@@ -1139,7 +1089,6 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         snap.accumulatedBadDebtUsdc = accumulatedBadDebtUsdc;
         snap.unsettledCarryUsdc = unsettledCarryUsdc[account];
         snap.totalDeferredTraderCreditUsdc = totalDeferredTraderCreditUsdc;
-        snap.totalDeferredKeeperCreditUsdc = 0;
         snap.deferredTraderCreditForAccount = deferredTraderCreditUsdc[account];
         snap.degradedMode = degradedMode;
 

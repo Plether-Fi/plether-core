@@ -635,16 +635,10 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
             settlementBalances[account] > reservedUsdc ? settlementBalances[account] - reservedUsdc : 0;
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = includeOtherLockedMargin
             ? MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(
-                settlementAvailableUsdc,
-                positionMarginUsdc[account],
-                committedOrderMarginUsdc[account],
-                0
+                settlementAvailableUsdc, positionMarginUsdc[account], committedOrderMarginUsdc[account], 0
             )
             : MarginClearinghouseAccountingLib.buildPartialCloseUsdcBuckets(
-                settlementAvailableUsdc,
-                positionMarginUsdc[account],
-                committedOrderMarginUsdc[account],
-                0
+                settlementAvailableUsdc, positionMarginUsdc[account], committedOrderMarginUsdc[account], 0
             );
         MarginClearinghouseAccountingLib.SettlementConsumption memory consumption =
             MarginClearinghouseAccountingLib.planTerminalLossConsumption(buckets, protectedLockedMarginUsdc, lossUsdc);
@@ -671,17 +665,6 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         settlementBalances[account] -= mutation.settlementDebitUsdc;
         IERC20(settlementAsset).safeTransfer(recipient, mutation.settlementDebitUsdc);
         emit AssetSeized(account, settlementAsset, mutation.settlementDebitUsdc, recipient);
-    }
-
-    /// @notice Applies a pre-planned liquidation settlement mutation.
-    /// @dev Releases the active position margin bucket and covered committed margin exactly as planned.
-    function applyLiquidationSettlementPlan(
-        address account,
-        uint64[] calldata reservationOrderIds,
-        IMarginClearinghouse.LiquidationSettlementPlan calldata plan,
-        address recipient
-    ) external onlyOperator returns (uint256 seizedUsdc) {
-        return _applyLiquidationSettlementPlan(account, reservationOrderIds, plan, recipient, address(0), 0);
     }
 
     /// @notice Applies a pre-planned liquidation settlement mutation and credits the keeper bounty internally.
@@ -1029,12 +1012,8 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     /// @notice Reserves free settlement for the engine's fresh close-bounty path with carry checkpointing.
     function reserveCloseExecutionBountyFromSettlement(
         address account,
-        uint256 amount,
-        address recipient
+        uint256 amount
     ) external onlyEngine {
-        if (recipient == address(0)) {
-            revert MarginClearinghouse__ZeroAddress();
-        }
         _checkpointCarryBeforeMarginChange(account);
         _lockMargin(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, amount);
     }
@@ -1042,12 +1021,8 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     /// @notice Reserves free settlement for the engine's stale close-bounty path without checkpointing carry.
     function reserveStaleCloseExecutionBountyFromSettlement(
         address account,
-        uint256 amount,
-        address recipient
+        uint256 amount
     ) external onlyEngine {
-        if (recipient == address(0)) {
-            revert MarginClearinghouse__ZeroAddress();
-        }
         _lockMargin(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, amount);
     }
 
@@ -1122,12 +1097,8 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
 
     function reserveCloseExecutionBountyFromPositionMargin(
         address account,
-        uint256 amount,
-        address recipient
+        uint256 amount
     ) external onlyEngine {
-        if (recipient == address(0)) {
-            revert MarginClearinghouse__ZeroAddress();
-        }
         if (amount == 0) {
             return;
         }
@@ -1138,12 +1109,8 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     /// @notice Reserves active position margin for the engine's stale close-bounty path without checkpointing carry.
     function reserveStaleCloseExecutionBountyFromPositionMargin(
         address account,
-        uint256 amount,
-        address recipient
+        uint256 amount
     ) external onlyEngine {
-        if (recipient == address(0)) {
-            revert MarginClearinghouse__ZeroAddress();
-        }
         if (amount == 0) {
             return;
         }

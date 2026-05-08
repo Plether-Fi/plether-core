@@ -717,7 +717,9 @@ contract CfdEngineTest is BasePerpTest {
         (uint256 size,,,,,,) = engine.positions(bearAccount);
         assertEq(size, 0, "Illiquid profitable close close should still destroy the position");
         assertEq(
-            engine.deferredTraderCreditUsdc(bearAccount), preview.deferredTraderCreditUsdc, "Live close should match preview"
+            engine.deferredTraderCreditUsdc(bearAccount),
+            preview.deferredTraderCreditUsdc,
+            "Live close should match preview"
         );
     }
 
@@ -959,11 +961,6 @@ contract CfdEngineTest is BasePerpTest {
             "Trader deferred claim must not consume protocol fee reserve"
         );
         assertEq(
-            afterSnapshot.totalDeferredKeeperCreditUsdc,
-            beforeSnapshot.totalDeferredKeeperCreditUsdc,
-            "Trader deferred claim should leave the removed keeper reserve at zero"
-        );
-        assertEq(
             afterSnapshot.totalDeferredTraderCreditUsdc, 0, "Claim should extinguish the trader deferred liability"
         );
         assertEq(
@@ -1096,7 +1093,6 @@ contract CfdEngineTest is BasePerpTest {
         engine.claimDeferredTraderCredit(account);
 
         assertEq(engine.deferredTraderCreditUsdc(account), deferred, "Head deferred payout should remain fully queued");
-        assertEq(engine.totalDeferredKeeperCreditUsdc(), 0, "Removed keeper path should leave no later bounty queued");
     }
 
     function test_ClaimDeferredTraderCredit_RevertsWithoutLiquidityOrPayout() public {
@@ -1123,13 +1119,6 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(trader);
         vm.expectRevert(CfdEngine.CfdEngine__InsufficientVaultLiquidity.selector);
         engine.claimDeferredTraderCredit(account);
-    }
-
-    function test_ClaimDeferredKeeperCredit_RevertsWhenTraderClaimIsAheadInQueue() public {
-        address keeper = address(0xD305);
-        vm.expectRevert(CfdEngine.CfdEngine__NoDeferredKeeperCredit.selector);
-        vm.prank(keeper);
-        engine.claimDeferredKeeperCredit();
     }
 
     function test_NoSideCarryRealization_KeepsClearinghouseMarginInSync() public {
@@ -1263,13 +1252,22 @@ contract CfdEngineTest is BasePerpTest {
     }
 
     function test_WithdrawFees_RespectsSeniorCashReservation() public {
-        address keeper = address(0xFEE2);
+        address trader = address(0xFEE2);
+        address treasury = address(0xFEE3);
 
-        vm.prank(address(router));
-        vm.expectRevert(CfdEngine.CfdEngine__NoDeferredKeeperCredit.selector);
-        engine.recordDeferredKeeperCredit(keeper, 25e6);
+        usdc.burn(address(pool), pool.totalAssets());
+        usdc.mint(address(pool), 100e6);
+        stdstore.target(address(engine)).sig("accumulatedFeesUsdc()").checked_write(uint256(100e6));
+        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(address)").with_key(trader)
+            .checked_write(uint256(25e6));
+        stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(uint256(25e6));
 
-        assertEq(engine.totalDeferredKeeperCreditUsdc(), 0, "Removed keeper path must not reserve senior cash");
+        vm.expectRevert(CfdEngine.CfdEngine__InsufficientVaultLiquidity.selector);
+        engine.withdrawFees(treasury, 76e6);
+
+        engine.withdrawFees(treasury, 75e6);
+
+        assertEq(usdc.balanceOf(treasury), 75e6, "Fee withdrawal should respect deferred trader cash reservation");
     }
 
     function test_WithdrawFees_ThenDeferredClaims_DrainsResidualCashWithoutDeadlock() public {
@@ -1302,10 +1300,7 @@ contract CfdEngineTest is BasePerpTest {
         );
         assertEq(pool.totalAssets(), 20e6, "Trader claim should move the vault into the exact 20/20/20 residual state");
         assertEq(engine.accumulatedFeesUsdc(), 20e6, "Servicing deferred claims must not burn fee accounting");
-        assertEq(
-            engine.deferredTraderCreditUsdc(traderAccount), 0, "Trader deferred balance should be fully consumed"
-        );
-        assertEq(engine.totalDeferredKeeperCreditUsdc(), 0, "Removed keeper path should leave no queued balance");
+        assertEq(engine.deferredTraderCreditUsdc(traderAccount), 0, "Trader deferred balance should be fully consumed");
         assertEq(pool.totalAssets(), 20e6, "Residual vault cash should remain available for recorded protocol fees");
         assertEq(
             engine.accumulatedFeesUsdc(),
@@ -1345,33 +1340,6 @@ contract CfdEngineTest is BasePerpTest {
             feesBefore - partialAmount,
             "Partial fee withdrawal should leave the remainder booked"
         );
-    }
-
-    function test_ClaimDeferredKeeperCredit_UsesFeeOnlyLiquidityWhenAtQueueHead() public {
-        address keeper = address(0xFEE5);
-        DeferredEngineViewTypes.DeferredCreditStatus memory status = _deferredCreditStatus(address(0), keeper);
-        assertEq(status.deferredKeeperCreditUsdc, 0, "Removed keeper path should expose no deferred balance");
-        assertFalse(status.keeperCreditClaimableNow, "Removed keeper path should never become claimable");
-
-        vm.expectRevert(CfdEngine.CfdEngine__NoDeferredKeeperCredit.selector);
-        vm.prank(keeper);
-        engine.claimDeferredKeeperCredit();
-    }
-
-    function test_ClaimDeferredKeeperCredit_RealizesCarryBeforeCreditingSettlement() public {
-        address keeper = address(0xFEE6);
-        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeper);
-        vm.prank(address(router));
-        vm.expectRevert(CfdEngine.CfdEngine__NoDeferredKeeperCredit.selector);
-        engine.recordDeferredKeeperCredit(keeper, 5000e6);
-        assertEq(clearinghouse.balanceUsdc(keeper), keeperSettlementBefore);
-    }
-
-    function test_ClaimDeferredKeeperCredit_UsesStoredMarkCarryCheckpointWhenMarkIsStale() public {
-        address keeper = address(0xFEE7);
-        vm.expectRevert(CfdEngine.CfdEngine__NoDeferredKeeperCredit.selector);
-        vm.prank(keeper);
-        engine.claimDeferredKeeperCredit();
     }
 
     function test_AddMargin_UpdatesPositionAndSideTotals() public {
@@ -1852,7 +1820,6 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(viewData.withdrawalReservedUsdc, _withdrawalReservedUsdc());
         assertEq(viewData.accumulatedFeesUsdc, engine.accumulatedFeesUsdc());
         assertEq(viewData.totalDeferredTraderCreditUsdc, engine.totalDeferredTraderCreditUsdc());
-        assertEq(viewData.totalDeferredKeeperCreditUsdc, engine.totalDeferredKeeperCreditUsdc());
         assertEq(viewData.degradedMode, engine.degradedMode());
         assertEq(viewData.hasLiveLiability, (_maxLiability() > 0));
     }
@@ -1888,7 +1855,6 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(snapshot.accumulatedFeesUsdc, engine.accumulatedFeesUsdc());
         assertEq(snapshot.accumulatedBadDebtUsdc, engine.accumulatedBadDebtUsdc());
         assertEq(snapshot.totalDeferredTraderCreditUsdc, engine.totalDeferredTraderCreditUsdc());
-        assertEq(snapshot.totalDeferredKeeperCreditUsdc, engine.totalDeferredKeeperCreditUsdc());
         assertEq(snapshot.degradedMode, engine.degradedMode());
         assertEq(snapshot.hasLiveLiability, (_maxLiability() > 0));
         assertEq(snapshot.vaultAssetsUsdc, viewData.vaultAssetsUsdc);
@@ -1898,13 +1864,11 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(snapshot.freeUsdc, viewData.freeUsdc);
         assertEq(snapshot.accumulatedFeesUsdc, viewData.accumulatedFeesUsdc);
         assertEq(snapshot.totalDeferredTraderCreditUsdc, viewData.totalDeferredTraderCreditUsdc);
-        assertEq(snapshot.totalDeferredKeeperCreditUsdc, viewData.totalDeferredKeeperCreditUsdc);
         assertEq(snapshot.degradedMode, viewData.degradedMode);
         assertEq(snapshot.hasLiveLiability, viewData.hasLiveLiability);
         assertEq(snapshot.netPhysicalAssetsUsdc, housePoolSnapshot.netPhysicalAssetsUsdc);
         assertEq(snapshot.maxLiabilityUsdc, housePoolSnapshot.maxLiabilityUsdc);
         assertEq(snapshot.totalDeferredTraderCreditUsdc, housePoolSnapshot.deferredTraderCreditUsdc);
-        assertEq(snapshot.totalDeferredKeeperCreditUsdc, housePoolSnapshot.deferredKeeperCreditUsdc);
         assertEq(snapshot.accumulatedFeesUsdc, housePoolSnapshot.protocolFeesUsdc);
     }
 
@@ -2040,11 +2004,6 @@ contract CfdEngineTest is BasePerpTest {
             snapshot.deferredTraderCreditUsdc,
             engine.totalDeferredTraderCreditUsdc(),
             "Snapshot payout must match storage"
-        );
-        assertEq(
-            snapshot.deferredKeeperCreditUsdc,
-            engine.totalDeferredKeeperCreditUsdc(),
-            "Snapshot bounty must match storage"
         );
         assertEq(snapshot.protocolFeesUsdc, fees, "Snapshot fees must match storage");
         assertTrue(snapshot.markFreshnessRequired, "Open directional liability should require fresh marks");
@@ -2385,13 +2344,9 @@ contract CfdEngineTest is BasePerpTest {
 
         assertTrue(delta.liquidatable, "Setup must remain liquidatable");
         assertEq(
-            delta.keeperBountyUsdc,
-            0,
-            "Zero reachable settlement should cap the direct margin-funded bounty at zero"
+            delta.keeperBountyUsdc, 0, "Zero reachable settlement should cap the direct margin-funded bounty at zero"
         );
-        assertEq(
-            delta.residualUsdc, 8e6, "Residual should keep all positive PnL when no bounty is reachable"
-        );
+        assertEq(delta.residualUsdc, 8e6, "Residual should keep all positive PnL when no bounty is reachable");
         assertEq(delta.settlementRetainedUsdc, 0, "No settlement should remain when none is reachable");
         assertEq(
             delta.existingDeferredConsumedUsdc,
@@ -2488,7 +2443,7 @@ contract CfdEngineTest is BasePerpTest {
         uint256 liveEffective = legacySpread > 0
             ? (netPhysical > uint256(legacySpread) ? netPhysical - uint256(legacySpread) : 0)
             : netPhysical + uint256(-legacySpread);
-        uint256 deferred = engine.totalDeferredTraderCreditUsdc() + engine.totalDeferredKeeperCreditUsdc();
+        uint256 deferred = engine.totalDeferredTraderCreditUsdc();
         liveEffective = liveEffective > deferred ? liveEffective - deferred : 0;
 
         assertEq(
@@ -2750,7 +2705,7 @@ contract CfdEngineTest is BasePerpTest {
         assertTrue(preview.liquidatable, "Liquidation preview should use current notional for maintenance threshold");
 
         vm.prank(address(router));
-        engine.liquidatePosition(account, 110_000_000, vaultDepth, uint64(block.timestamp));
+        engine.liquidatePosition(account, 110_000_000, vaultDepth, uint64(block.timestamp), address(this));
 
         (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Live liquidation should agree with preview and position view");
@@ -3200,7 +3155,9 @@ contract CfdEngineTest is BasePerpTest {
 
         _closeAt(bearAccount, CfdTypes.Side.BEAR, 5000e18, 120_000_000, vaultDepth, refreshTime);
         uint256 bearDeferredBefore = engine.deferredTraderCreditUsdc(bearAccount);
-        assertGt(bearDeferredBefore, 0, "Initial deferred payout should create tracked deferred balance for bearAccount");
+        assertGt(
+            bearDeferredBefore, 0, "Initial deferred payout should create tracked deferred balance for bearAccount"
+        );
 
         _closeAt(laterAccount, CfdTypes.Side.BEAR, 5000e18, 120_000_000, vaultDepth, refreshTime);
         uint256 laterDeferred = engine.deferredTraderCreditUsdc(laterAccount);
@@ -3238,7 +3195,8 @@ contract CfdEngineTest is BasePerpTest {
             deferredBefore, 1e6, "Setup must create legacy deferred payout large enough to cover the fee shortfall"
         );
 
-        stdstore.target(address(clearinghouse)).sig("balanceUsdc(address)").with_key(bearAccount).checked_write(uint256(0));
+        stdstore.target(address(clearinghouse)).sig("balanceUsdc(address)").with_key(bearAccount)
+            .checked_write(uint256(0));
         bytes32 positionMarginSlot = keccak256(abi.encode(bearAccount, uint256(3)));
         vm.store(address(clearinghouse), positionMarginSlot, bytes32(uint256(0)));
 
@@ -3434,40 +3392,6 @@ contract CfdEngineTest is BasePerpTest {
 
         DeferredEngineViewTypes.DeferredCreditStatus memory status = _deferredCreditStatus(account, address(0xAB17));
         assertTrue(status.traderPayoutClaimableNow, "Deferred trader claim should be claimable under partial liquidity");
-        assertFalse(status.keeperCreditClaimableNow, "Removed keeper path should not report claimability");
-    }
-
-    function test_DeferredKeeperCredit_Lifecycle() public {
-        address keeper = address(0xAB1601);
-
-        vm.prank(address(router));
-        vm.expectRevert(CfdEngine.CfdEngine__NoDeferredKeeperCredit.selector);
-        engine.recordDeferredKeeperCredit(keeper, 25e6);
-
-        ProtocolLensViewTypes.ProtocolAccountingSnapshot memory protocolView =
-            engineProtocolLens.getProtocolAccountingSnapshot();
-        DeferredEngineViewTypes.DeferredCreditStatus memory status = _deferredCreditStatus(address(0), keeper);
-        assertEq(protocolView.totalDeferredKeeperCreditUsdc, 0);
-        assertEq(status.deferredKeeperCreditUsdc, 0);
-        assertFalse(status.keeperCreditClaimableNow, "Removed keeper credit should remain unclaimable");
-    }
-
-    function test_DeferredKeeperCredit_CoalescesPerKeeperButFreezesUnderAggregateShortfall() public {
-        address keeper = address(0xAB1605);
-
-        vm.prank(address(router));
-        vm.expectRevert(CfdEngine.CfdEngine__NoDeferredKeeperCredit.selector);
-        engine.recordDeferredKeeperCredit(keeper, 25e6);
-
-        assertEq(engine.deferredKeeperCreditUsdc(keeper), 0, "Removed keeper path should not aggregate events");
-    }
-
-    function test_ClaimDeferredKeeperCredit_IgnoresKeeperWalletTransferBlacklist() public {
-        address keeper = address(0xAB1603);
-
-        vm.expectRevert(CfdEngine.CfdEngine__NoDeferredKeeperCredit.selector);
-        vm.prank(keeper);
-        engine.claimDeferredKeeperCredit();
     }
 
     function test_CloseLoss_ConsumesQueuedCommittedMarginBeforeBadDebt() public {
@@ -3733,7 +3657,7 @@ contract CfdEngineTest is BasePerpTest {
 
         vm.expectRevert(CfdEngine.CfdEngine__PositionIsSolvent.selector);
         vm.prank(address(router));
-        engine.liquidatePosition(account, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.liquidatePosition(account, 1e8, vaultDepth, uint64(block.timestamp), address(this));
 
         _setRiskParams(
             CfdTypes.RiskParams({
@@ -3749,7 +3673,7 @@ contract CfdEngineTest is BasePerpTest {
         );
 
         vm.prank(address(router));
-        uint256 bounty = engine.liquidatePosition(account, 1e8, vaultDepth, uint64(block.timestamp));
+        uint256 bounty = engine.liquidatePosition(account, 1e8, vaultDepth, uint64(block.timestamp), address(this));
         assertTrue(bounty > 0, "Position should be liquidatable after raising maintMarginBps");
 
         (uint256 size,,,,,,) = engine.positions(account);
@@ -3776,7 +3700,7 @@ contract CfdEngineTest is BasePerpTest {
 
         vm.prank(address(0xDEAD));
         vm.expectRevert(CfdEngine.CfdEngine__Unauthorized.selector);
-        engine.liquidatePosition(account, 1e8, 1_000_000 * 1e6, uint64(block.timestamp));
+        engine.liquidatePosition(account, 1e8, 1_000_000 * 1e6, uint64(block.timestamp), address(this));
     }
 
     function test_ProposeRiskParams_RevertsOnZeroMaintMargin() public {
@@ -4207,7 +4131,7 @@ contract CfdEngineTest is BasePerpTest {
 
         // Price rises to $1.10 — BULL loses $10k, equity = margin (~$1537) - $10k = negative
         vm.prank(address(router));
-        engine.liquidatePosition(account, 1.1e8, vaultDepth, uint64(block.timestamp));
+        engine.liquidatePosition(account, 1.1e8, vaultDepth, uint64(block.timestamp), address(this));
 
         (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Position should be liquidated");
@@ -4271,7 +4195,7 @@ contract CfdEngineTest is BasePerpTest {
 
         // Price rises to $1.10 — BULL loses $20k, deeply underwater
         vm.prank(address(router));
-        engine.liquidatePosition(aliceAccount, 1.1e8, vaultDepth, uint64(block.timestamp));
+        engine.liquidatePosition(aliceAccount, 1.1e8, vaultDepth, uint64(block.timestamp), address(this));
 
         (uint256 aliceSize,,,,,,) = engine.positions(aliceAccount);
         assertEq(aliceSize, 0, "Liquidation must succeed during insolvency");
@@ -4281,7 +4205,7 @@ contract CfdEngineTest is BasePerpTest {
         address account = address(uint160(1));
         vm.expectRevert(CfdEngine.CfdEngine__NoPositionToLiquidate.selector);
         vm.prank(address(router));
-        engine.liquidatePosition(account, 1e8, 1_000_000 * 1e6, uint64(block.timestamp));
+        engine.liquidatePosition(account, 1e8, 1_000_000 * 1e6, uint64(block.timestamp), address(this));
     }
 
     function test_LiquidationBounty_UsesReachableCollateralSubsidyCap() public {
@@ -4323,7 +4247,8 @@ contract CfdEngineTest is BasePerpTest {
         clearinghouse.withdraw(account, 194 * 1e6);
 
         vm.prank(address(router));
-        uint256 bounty = engine.liquidatePosition(account, 100_500_000, vaultDepth, uint64(block.timestamp));
+        uint256 bounty =
+            engine.liquidatePosition(account, 100_500_000, vaultDepth, uint64(block.timestamp), address(this));
 
         assertEq(bounty, posMargin, "Keeper bounty subsidy should be bounded by physically reachable collateral");
     }
@@ -4336,7 +4261,7 @@ contract CfdEngineTest is BasePerpTest {
 
         uint256 depth = pool.totalAssets();
         vm.prank(address(router));
-        engine.liquidatePosition(account, 1.2e8, depth, uint64(block.timestamp));
+        engine.liquidatePosition(account, 1.2e8, depth, uint64(block.timestamp), address(this));
 
         uint256 badDebt = engine.accumulatedBadDebtUsdc();
         assertGt(badDebt, 0, "Expected liquidation shortfall to create bad debt");
@@ -4426,11 +4351,11 @@ contract CfdEngineTest is BasePerpTest {
 
         vm.warp(block.timestamp + 31);
         vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(account, 10_000e18, 1e6, address(router));
+        engine.reserveCloseOrderExecutionBounty(account, 10_000e18, 1e6);
 
         vm.warp(block.timestamp + 30 days);
         vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(account, 10_000e18, 1e6, address(router));
+        engine.reserveCloseOrderExecutionBounty(account, 10_000e18, 1e6);
     }
 
     function test_ReserveCloseOrderExecutionBounty_RevertsWhenNoStoredMarkExists() public {
@@ -4448,7 +4373,7 @@ contract CfdEngineTest is BasePerpTest {
         engine.updateMarkPrice(0, uint64(block.timestamp));
         vm.prank(address(router));
         vm.expectRevert(CfdEngine.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
-        engine.reserveCloseOrderExecutionBounty(account, 10_000e18, 1e6, address(router));
+        engine.reserveCloseOrderExecutionBounty(account, 10_000e18, 1e6);
     }
 
     function test_ReserveCloseOrderExecutionBounty_ExcludesQueuedReservationsFromGenericReachability() public {
@@ -4479,7 +4404,7 @@ contract CfdEngineTest is BasePerpTest {
 
         vm.prank(address(router));
         vm.expectRevert(CfdEngine.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
-        engine.reserveCloseOrderExecutionBounty(account, 10_000e18, 6000e6, address(router));
+        engine.reserveCloseOrderExecutionBounty(account, 10_000e18, 6000e6);
     }
 
     function test_CheckWithdraw_RevertsWhenOpenPositionHasZeroMarkPrice() public {
@@ -4625,7 +4550,7 @@ contract CfdEngineTest is BasePerpTest {
 
         vm.prank(address(router));
         vm.expectRevert(CfdEngine.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
-        engine.reserveCloseOrderExecutionBounty(account, 50_000e18, 1400e6, address(router));
+        engine.reserveCloseOrderExecutionBounty(account, 50_000e18, 1400e6);
     }
 
     function test_ReserveCloseOrderExecutionBounty_RecomputesCarryAfterReservationReachabilityDrop() public {
@@ -4675,7 +4600,7 @@ contract CfdEngineTest is BasePerpTest {
 
         vm.prank(address(router));
         vm.expectRevert(CfdEngine.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
-        engine.reserveCloseOrderExecutionBounty(account, size / 2, bountyUsdc, address(router));
+        engine.reserveCloseOrderExecutionBounty(account, size / 2, bountyUsdc);
     }
 
     function test_ReserveCloseOrderExecutionBounty_AllowsFullCloseNearMaintenance() public {
@@ -4696,7 +4621,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(_freeSettlementUsdc(account), 0, "setup must fully consume free settlement");
 
         vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(account, size, 1e6, address(router));
+        engine.reserveCloseOrderExecutionBounty(account, size, 1e6);
     }
 
     function test_ReserveCloseOrderExecutionBounty_PartialCloseStillRevertsNearMaintenance() public {
@@ -4716,15 +4641,7 @@ contract CfdEngineTest is BasePerpTest {
 
         vm.prank(address(router));
         vm.expectRevert(CfdEngine.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
-        engine.reserveCloseOrderExecutionBounty(account, size / 2, 1e6, address(router));
-    }
-
-    function test_ClaimDeferredKeeperCredit_DoesNotRequireFreshMarkForKeeperPosition() public {
-        address keeper = address(0x51597);
-
-        vm.expectRevert(CfdEngine.CfdEngine__NoDeferredKeeperCredit.selector);
-        vm.prank(keeper);
-        engine.claimDeferredKeeperCredit();
+        engine.reserveCloseOrderExecutionBounty(account, size / 2, 1e6);
     }
 
     function test_VpiDepthManipulation_NeutralizedByStatefulBound() public {
@@ -6060,7 +5977,6 @@ contract VpiChunkingTest is Test {
         pool.setJuniorVault(address(juniorVault));
         engine.setVault(address(pool));
         engine.setOrderRouter(address(this));
-        pool.setOrderRouter(address(this));
 
         clearinghouse.setEngine(address(engine));
         vm.warp(1_709_532_000);

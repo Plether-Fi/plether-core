@@ -7,8 +7,6 @@ library DeferredEngineViewTypes {
     struct DeferredCreditStatus {
         uint256 deferredTraderCreditUsdc;
         bool traderPayoutClaimableNow;
-        uint256 deferredKeeperCreditUsdc;
-        bool keeperCreditClaimableNow;
     }
 
 }

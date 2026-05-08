@@ -62,24 +62,21 @@ contract PerpClosePreviewParityInvariantTest is Test {
 
         engine.setVault(address(vault));
         engine.setOrderRouter(address(router));
-        vault.setOrderRouter(address(router));
         vault.seedAssets(100_000e6);
 
         handler = new PerpAccountingHandler(usdc, engine, clearinghouse, router, vault);
         handler.seedActors(50_000e6, 50_000e6);
 
-        bytes4[] memory selectors = new bytes4[](11);
+        bytes4[] memory selectors = new bytes4[](9);
         selectors[0] = handler.depositCollateral.selector;
         selectors[1] = handler.withdrawCollateral.selector;
         selectors[2] = handler.commitOpenOrder.selector;
         selectors[3] = handler.commitCloseOrder.selector;
         selectors[4] = handler.executeNextOrderBatch.selector;
         selectors[5] = handler.liquidate.selector;
-        selectors[6] = handler.claimDeferredKeeperCredit.selector;
-        selectors[7] = handler.setRouterPayoutFailureMode.selector;
-        selectors[8] = handler.setVaultAssets.selector;
-        selectors[9] = handler.fundVault.selector;
-        selectors[10] = handler.drainVault.selector;
+        selectors[6] = handler.setVaultAssets.selector;
+        selectors[7] = handler.fundVault.selector;
+        selectors[8] = handler.drainVault.selector;
 
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
         targetContract(address(handler));

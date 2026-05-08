@@ -9,22 +9,6 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
 
     using stdStorage for StdStorage;
 
-    function test_RecordDeferredKeeperCredit_RevertsAndDoesNotCreateLiability() public {
-        address keeper = address(0xDC00);
-
-        vm.expectRevert(CfdEngine.CfdEngine__NoDeferredKeeperCredit.selector);
-        vm.prank(address(router));
-        engine.recordDeferredKeeperCredit(keeper, 20e6);
-
-        assertEq(engine.deferredKeeperCreditUsdc(keeper), 0, "Removed keeper path must not queue credit");
-        assertEq(engine.totalDeferredKeeperCreditUsdc(), 0, "Removed keeper path must not create aggregate liability");
-    }
-
-    function test_ClaimDeferredKeeperCredit_RevertsWhenPathRemoved() public {
-        vm.expectRevert(CfdEngine.CfdEngine__NoDeferredKeeperCredit.selector);
-        engine.claimDeferredKeeperCredit();
-    }
-
     function test_TraderDeferredClaim_RevertsWhenSingleClaimExceedsAvailableVaultCash() public {
         address trader = address(0xDC01);
         address account = trader;

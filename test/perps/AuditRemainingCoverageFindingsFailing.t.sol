@@ -52,7 +52,7 @@ contract AuditRemainingCoverageFindingsFailing_EscrowShielding is BasePerpTest {
 
         uint256 depth = pool.totalAssets();
         vm.startPrank(address(router));
-        engine.liquidatePosition(account, 110_000_000, depth, uint64(block.timestamp));
+        engine.liquidatePosition(account, 110_000_000, depth, uint64(block.timestamp), address(this));
         vm.stopPrank();
 
         (uint256 size,,,,,,) = engine.positions(account);
@@ -99,7 +99,8 @@ contract AuditRemainingCoverageFindingsFailing_LiquidationBounty is BasePerpTest
 
         vm.startPrank(address(router));
         vm.warp(1_709_971_200);
-        uint256 bounty = engine.liquidatePosition(account, 101_000_000, pool.totalAssets(), uint64(block.timestamp));
+        uint256 bounty =
+            engine.liquidatePosition(account, 101_000_000, pool.totalAssets(), uint64(block.timestamp), address(this));
         vm.stopPrank();
 
         assertGt(bounty, 0, "Keeper bounty should stay positive for a still-positive-equity liquidation");
@@ -229,7 +230,7 @@ contract AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees is BasePerp
         assertEq(_executionBountyReserve(1), 200_000, "Close commits should escrow the configured flat clearer bounty");
     }
 
-    function test_H5_CloseKeeperRewardMustDeferInsteadOfRevertingOnCashShortage() public {
+    function test_H5_CloseKeeperRewardMustCreditFromReservedMarginDespiteVaultCashShortage() public {
         address account = trader;
         address keeperAccount = keeper;
         _fundTrader(trader, 11_000e6);
@@ -255,11 +256,6 @@ contract AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees is BasePerp
         (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Close should still succeed even when execution bounty cash is unavailable");
         assertEq(
-            engine.deferredKeeperCreditUsdc(keeper),
-            0,
-            "Illiquid close execution should not touch deferred vault-funded clearer claims"
-        );
-        assertEq(
             clearinghouse.balanceUsdc(keeperAccount) - keeperSettlementBefore,
             200_000,
             "Illiquid close execution should still pay the keeper from router escrow via clearinghouse settlement"
@@ -274,7 +270,7 @@ contract AuditRemainingCoverageFindingsFailing_TerminalLiveness is BasePerpTest 
     address spammer = address(0x7101);
     address keeper = address(0x7102);
 
-    function test_H6_LiquidationKeeperRewardMustDeferInsteadOfRevertingOnCashShortage() public {
+    function test_H6_LiquidationKeeperRewardMustCreditFromTraderMarginDespiteVaultCashShortage() public {
         address account = trader;
         _fundTrader(trader, 11_000e6);
 
@@ -297,7 +293,6 @@ contract AuditRemainingCoverageFindingsFailing_TerminalLiveness is BasePerpTest 
             0,
             "Liquidation bounty should credit keeper settlement instead of reverting"
         );
-        assertEq(engine.deferredKeeperCreditUsdc(keeper), 0, "Liquidation bounty should not create deferred keeper debt");
     }
 
     function test_M3_TerminalCloseMustRemainExecutableUnderBoundedForeignQueue() public {
