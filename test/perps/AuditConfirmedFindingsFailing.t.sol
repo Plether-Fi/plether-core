@@ -11,7 +11,6 @@ import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
-import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
 import {ICfdEngineAdminHost} from "../../src/perps/interfaces/ICfdEngineAdminHost.sol";
 import {ICfdVault} from "../../src/perps/interfaces/ICfdVault.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
@@ -527,7 +526,7 @@ contract AuditConfirmedFindingsFailing_EntryNotionalRounding is BasePerpTest {
         });
     }
 
-    function test_H2_ScalingLargePositionWithDustIncreaseUsesTypedFailure() public {
+    function test_H2_ScalingLargePositionWithDustIncreaseUsesResultingNotionalFloor() public {
         address account = address(uint160(1));
         _fundTrader(account, 10_000e6);
 
@@ -549,8 +548,6 @@ contract AuditConfirmedFindingsFailing_EntryNotionalRounding is BasePerpTest {
             uint64(block.timestamp)
         );
 
-        uint256 depth = pool.totalAssets();
-        vm.expectRevert(abi.encodeWithSelector(ICfdEngine.CfdEngine__TypedOrderFailure.selector, 1, 3, false));
         engine.processOrderTyped(
             CfdTypes.Order({
                 account: account,
@@ -564,10 +561,18 @@ contract AuditConfirmedFindingsFailing_EntryNotionalRounding is BasePerpTest {
                 isClose: false
             }),
             150_000_000,
-            depth,
+            pool.totalAssets(),
             uint64(block.timestamp)
         );
         vm.stopPrank();
+
+        (uint256 size,, uint256 entryPrice,,,,) = engine.positions(account);
+        assertEq(size, 1000e18 + 1, "Same-side dust increase should grow an already-valid live position");
+        assertEq(
+            _sideEntryNotional(CfdTypes.Side.BULL),
+            size * entryPrice,
+            "Side entry notional must stay aligned with the resulting live position"
+        );
     }
 
 }
