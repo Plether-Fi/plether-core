@@ -9,6 +9,7 @@ import {ICfdEngineSettlementModule} from "./interfaces/ICfdEngineSettlementModul
 import {ICfdVault} from "./interfaces/ICfdVault.sol";
 import {IMarginClearinghouse} from "./interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
+import {CashPriorityLib} from "./libraries/CashPriorityLib.sol";
 
 /// @title CfdEngineSettlementModule
 /// @notice Externalized settlement executor for `CfdEngine` close and liquidation flows.
@@ -19,7 +20,6 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
     address public immutable ENGINE;
 
     error CfdEngineSettlementModule__Unauthorized();
-    error CfdEngineSettlementModule__InsufficientVaultLiquidity();
 
     constructor(
         address engine_
@@ -279,11 +279,15 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
         }
 
         ICfdVault vault = ICfdVault(host.vault());
-        if (vault.totalAssets() < vaultFundedUsdc) {
-            revert CfdEngineSettlementModule__InsufficientVaultLiquidity();
+        CashPriorityLib.SeniorCashReservation memory reservation = CashPriorityLib.reserveFreshPayouts(
+            vault.totalAssets(), host.totalDeferredTraderCreditUsdc(), host.totalDeferredKeeperCreditUsdc()
+        );
+        uint256 topUpUsdc = vaultFundedUsdc < reservation.freeCashUsdc ? vaultFundedUsdc : reservation.freeCashUsdc;
+        if (topUpUsdc == 0) {
+            return;
         }
-        vault.payOut(host.clearinghouse(), vaultFundedUsdc);
-        IMarginClearinghouse(host.clearinghouse()).settleUsdc(host.protocolTreasury(), int256(vaultFundedUsdc));
+        vault.payOut(host.clearinghouse(), topUpUsdc);
+        IMarginClearinghouse(host.clearinghouse()).settleUsdc(host.protocolTreasury(), int256(topUpUsdc));
     }
 
 }

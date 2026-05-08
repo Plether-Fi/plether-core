@@ -689,6 +689,46 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
+    function test_ProtocolFeeTopUp_DoesNotLeapfrogDeferredClaims() public {
+        address account = address(0xD30F);
+        _fundTrader(account, 11_000e6);
+
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+
+        uint256 closePrice = 80_000_000;
+        uint256 executionFeeUsdc = _engineExecutionFeeUsdc(100_000e18, closePrice);
+        uint256 poolAssets = pool.totalAssets();
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolAssets - executionFeeUsdc);
+
+        CfdEngine.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, closePrice);
+        assertTrue(preview.valid, "Setup close preview should be valid");
+        assertEq(preview.immediatePayoutUsdc, 0, "Setup must defer the trader payout");
+        assertGt(preview.deferredTraderCreditUsdc, 0, "Setup must create a deferred senior claim");
+        assertEq(pool.totalAssets(), executionFeeUsdc, "Setup leaves only the fee amount physically available");
+
+        uint256 feesBefore = engine.protocolTreasuryBalanceUsdc();
+        CfdTypes.Order memory closeOrder = CfdTypes.Order({
+            account: account,
+            sizeDelta: 100_000e18,
+            marginDelta: 0,
+            targetPrice: 0,
+            commitTime: uint64(block.timestamp),
+            commitBlock: uint64(block.number),
+            orderId: 0,
+            side: CfdTypes.Side.BULL,
+            isClose: true
+        });
+        uint256 closeDepth = pool.totalAssets();
+        vm.prank(address(router));
+        engine.processOrderTyped(closeOrder, closePrice, closeDepth, uint64(block.timestamp));
+
+        (uint256 size,,,,,,) = engine.positions(account);
+        assertEq(size, 0, "Close should still destroy the position");
+        assertGt(engine.deferredTraderCreditUsdc(account), 0, "Deferred senior claim should be recorded");
+        assertEq(engine.protocolTreasuryBalanceUsdc(), feesBefore, "Fee top-up must not leapfrog deferred claims");
+    }
+
     function test_FullClose_AfterFreshMark_DoesNotRevertWhenVaultIlliquid() public {
         uint256 vaultDepth = 1_000_000 * 1e6;
         address bullAccount = address(uint160(1));
@@ -1267,6 +1307,31 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(treasury);
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientBalance.selector);
         clearinghouse.withdraw(treasury, fees);
+    }
+
+    function test_SetProtocolTreasury_RevertsWhenCurrentTreasuryHasBalance() public {
+        address oldTreasury = engine.protocolTreasury();
+        address newTreasury = address(0xFEE99);
+
+        _fundProtocolTreasury(1e6);
+
+        vm.expectRevert(CfdEngine.CfdEngine__ProtocolTreasuryBalanceNotEmpty.selector);
+        engine.setProtocolTreasury(newTreasury);
+
+        assertEq(engine.protocolTreasury(), oldTreasury, "Treasury should not rotate while old balance remains");
+        assertEq(engine.protocolTreasuryBalanceUsdc(), 1e6, "Existing treasury balance should remain reported");
+    }
+
+    function test_SetProtocolTreasury_AllowsRotationAfterCurrentTreasuryBalanceIsWithdrawn() public {
+        address newTreasury = address(0xFEE98);
+
+        _fundProtocolTreasury(1e6);
+        _withdrawProtocolTreasury(1e6);
+
+        engine.setProtocolTreasury(newTreasury);
+
+        assertEq(engine.protocolTreasury(), newTreasury, "Treasury should rotate after the old account is drained");
+        assertEq(engine.protocolTreasuryBalanceUsdc(), 0, "New treasury starts with no reported balance");
     }
 
     function test_CloseProtocolFeeInflow_IsBoundedByPhysicalCashReceived() public {
@@ -3454,16 +3519,17 @@ contract CfdEngineTest is BasePerpTest {
             isClose: true
         });
         vm.prank(address(router));
-        vm.expectRevert(CfdEngineSettlementModule.CfdEngineSettlementModule__InsufficientVaultLiquidity.selector);
         engine.processOrderTyped(underfundedFeeClose, 1e8, vaultDepth, refreshTime);
 
         assertEq(
-            engine.protocolTreasuryBalanceUsdc(), feesBefore, "Treasury fees should not change when fee funding reverts"
+            engine.protocolTreasuryBalanceUsdc(),
+            feesBefore,
+            "Treasury fees should not consume cash reserved for remaining deferred claims"
         );
         assertEq(
             engine.deferredTraderCreditUsdc(bearAccount),
-            deferredBefore,
-            "Deferred payout should remain queued when treasury fee funding cannot be physically settled"
+            preview.existingDeferredRemainingUsdc,
+            "Deferred payout should be consumed without routing reserved cash to treasury"
         );
     }
 

@@ -185,6 +185,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     error CfdEngine__VaultAlreadySet();
     error CfdEngine__RouterAlreadySet();
     error CfdEngine__DependenciesAlreadySet();
+    error CfdEngine__ProtocolTreasuryBalanceNotEmpty();
     error CfdEngine__NoDeferredTraderCredit();
     error CfdEngine__InsufficientVaultLiquidity();
     error CfdEngine__NoDeferredKeeperCredit();
@@ -423,6 +424,13 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     ) external onlyOwner {
         if (treasury == address(0)) {
             revert CfdEngine__ZeroAddress();
+        }
+        address currentTreasury = protocolTreasury;
+        if (treasury == currentTreasury) {
+            return;
+        }
+        if (clearinghouse.balanceUsdc(currentTreasury) != 0) {
+            revert CfdEngine__ProtocolTreasuryBalanceNotEmpty();
         }
         protocolTreasury = treasury;
         emit ProtocolTreasuryUpdated(treasury);

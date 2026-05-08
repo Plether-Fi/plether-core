@@ -10,6 +10,7 @@ interface ICfdEngineTypes {
     error CfdEngine__VaultAlreadySet();
     error CfdEngine__RouterAlreadySet();
     error CfdEngine__DependenciesAlreadySet();
+    error CfdEngine__ProtocolTreasuryBalanceNotEmpty();
     error CfdEngine__NoDeferredTraderCredit();
     error CfdEngine__InsufficientVaultLiquidity();
     error CfdEngine__NoDeferredKeeperCredit();
