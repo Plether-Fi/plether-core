@@ -36,6 +36,12 @@ contract HousePoolTest is BasePerpTest {
         pool.accountExcess();
     }
 
+    function _setTotalDeferredTraderCredit(
+        uint256 amount
+    ) internal {
+        stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(amount);
+    }
+
     function _enterFrozenWindow() internal {
         uint256 saturdayFrozen = 1_710_021_600;
         vm.warp(saturdayFrozen - 12 hours);
@@ -696,6 +702,87 @@ contract HousePoolTest is BasePerpTest {
         (uint256 pendingSenior,, uint256 maxSeniorWithdraw,) = pool.getPendingTrancheState();
         assertEq(pendingSenior, 10_000e6, "Projected recapitalization should credit senior principal");
         assertEq(maxSeniorWithdraw, 10_000e6, "Projected credited senior assets must remain withdrawable in preview");
+    }
+
+    function test_PendingRecapitalization_CapsAgainstDeferredLiabilitiesAndCarriesResidual() public {
+        usdc.burn(address(pool), pool.totalAssets());
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        uint256 pendingAmount = 100_000e6;
+        uint256 deferredLiability = 50_040e6;
+        uint256 settleableAmount = pendingAmount - deferredLiability;
+
+        usdc.mint(address(pool), pendingAmount);
+        vm.prank(address(engine));
+        pool.recordClaimantInflow(
+            pendingAmount, ICfdVault.ClaimantInflowKind.Recapitalization, ICfdVault.ClaimantInflowCashMode.CashArrived
+        );
+        _setTotalDeferredTraderCredit(deferredLiability);
+
+        (uint256 pendingSenior,, uint256 maxSeniorWithdraw,) = pool.getPendingTrancheState();
+        assertEq(pendingSenior, settleableAmount, "Preview should only credit liability-adjusted recap assets");
+        assertEq(maxSeniorWithdraw, 0, "Residual pending recapitalization should stay reserved from withdrawals");
+
+        vm.prank(address(seniorVault));
+        pool.reconcile();
+
+        assertEq(pool.seniorPrincipal(), settleableAmount, "Live reconcile should apply only the settleable recap");
+        assertEq(pool.seniorHighWaterMark(), pendingAmount, "Residual recap should preserve senior's recovery target");
+        assertEq(pool.pendingRecapitalizationUsdc(), deferredLiability, "Unsettled recap must remain pending");
+        assertEq(pool.pendingTradingRevenueUsdc(), 0);
+
+        HousePool.VaultLiquidityView memory viewData = pool.getVaultLiquidityView();
+        assertEq(viewData.seniorPrincipalUsdc, settleableAmount, "Liquidity view should not overstate senior NAV");
+        assertEq(viewData.pendingRecapitalizationUsdc, deferredLiability, "Liquidity view should expose residual recap");
+        assertEq(viewData.freeUsdc, 0, "Residual pending recap should reserve remaining free liquidity");
+        assertEq(pool.getMaxSeniorWithdraw(), 0, "Residual pending recap should reserve senior withdrawals");
+
+        _setTotalDeferredTraderCredit(0);
+        vm.prank(address(seniorVault));
+        pool.reconcile();
+
+        assertEq(pool.seniorPrincipal(), pendingAmount, "Residual recap should settle once backing becomes available");
+        assertEq(pool.pendingRecapitalizationUsdc(), 0, "Fully settled recap should clear the pending bucket");
+        assertEq(pool.unassignedAssets(), 0, "Settled recap should keep senior restoration out of unassigned assets");
+    }
+
+    function test_PendingRevenue_CapsAgainstDeferredLiabilitiesAndCarriesResidual() public {
+        usdc.burn(address(pool), pool.totalAssets());
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        uint256 pendingAmount = 100_000e6;
+        uint256 deferredLiability = 50_040e6;
+        uint256 settleableAmount = pendingAmount - deferredLiability;
+
+        usdc.mint(address(pool), pendingAmount);
+        vm.prank(address(engine));
+        pool.recordClaimantInflow(
+            pendingAmount, ICfdVault.ClaimantInflowKind.Revenue, ICfdVault.ClaimantInflowCashMode.CashArrived
+        );
+        _setTotalDeferredTraderCredit(deferredLiability);
+
+        (uint256 pendingSenior, uint256 pendingJunior,, uint256 maxJuniorWithdraw) = pool.getPendingTrancheState();
+        assertEq(pendingSenior, SEEDED_SENIOR, "Preview should restore seeded senior first");
+        assertEq(pendingJunior, settleableAmount - SEEDED_SENIOR, "Preview should credit only settleable revenue");
+        assertEq(maxJuniorWithdraw, 0, "Residual pending revenue should stay reserved from withdrawals");
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        assertEq(pool.seniorPrincipal(), SEEDED_SENIOR, "Live reconcile should restore seeded senior first");
+        assertEq(pool.juniorPrincipal(), settleableAmount - SEEDED_SENIOR, "Live reconcile should cap revenue credit");
+        assertEq(pool.pendingTradingRevenueUsdc(), deferredLiability, "Unsettled revenue must remain pending");
+        assertFalse(pool.canAcceptTrancheDeposits(false), "Residual pending revenue should keep deposits shut");
+
+        _setTotalDeferredTraderCredit(0);
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        assertEq(pool.seniorPrincipal(), SEEDED_SENIOR, "Senior should stay restored after residual revenue settles");
+        assertEq(pool.juniorPrincipal(), pendingAmount - SEEDED_SENIOR, "Residual revenue should settle to junior");
+        assertEq(pool.pendingTradingRevenueUsdc(), 0, "Fully settled revenue should clear the pending bucket");
     }
 
     function helper_RecordRecapitalizationInflow_NoClaimantPathFallsBackToUnassignedAssets() public {
