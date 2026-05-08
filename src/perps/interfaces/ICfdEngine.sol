@@ -25,6 +25,9 @@ interface ICfdEngine is ICfdEngineTypes {
     /// @notice Current order router allowed to execute orders through the engine.
     function orderRouter() external view returns (address);
 
+    /// @notice Clearinghouse account that receives protocol fee credits.
+    function protocolTreasury() external view returns (address);
+
     /// @notice Settlement token used for fees, margin, and payouts
     function USDC() external view returns (IERC20);
 
@@ -54,16 +57,6 @@ interface ICfdEngine is ICfdEngineTypes {
         uint256 sizeDelta,
         uint256 amountUsdc,
         address recipient
-    ) external;
-
-    /// @notice Pulls router-custodied cancellation fees into protocol revenue.
-    function absorbRouterCancellationFee(
-        uint256 amountUsdc
-    ) external;
-
-    /// @notice Books router-delivered protocol-owned inflow as accumulated fees after the router has funded the vault.
-    function recordRouterProtocolFee(
-        uint256 amountUsdc
     ) external;
 
     /// @notice Credits a keeper execution bounty into the beneficiary's clearinghouse account.
@@ -109,8 +102,8 @@ interface ICfdEngine is ICfdEngineTypes {
         uint256 vaultDepthUsdc
     ) external view returns (LiquidationPreview memory preview);
 
-    /// @notice Accumulated execution fees awaiting withdrawal (6 decimals)
-    function accumulatedFeesUsdc() external view returns (uint256);
+    /// @notice Protocol fees custodied by the treasury clearinghouse account (6 decimals).
+    function protocolTreasuryBalanceUsdc() external view returns (uint256);
 
     /// @notice Deferred trader credit still owed to beneficiaries.
     function totalDeferredTraderCreditUsdc() external view returns (uint256);

@@ -164,8 +164,8 @@ contract PerpsReadParityTest is BasePerpTest {
             "Protocol lens reserved cash should match live reservation state"
         );
         assertEq(
-            protocolSnapshot.accumulatedFeesUsdc,
-            engine.accumulatedFeesUsdc(),
+            protocolSnapshot.protocolTreasuryBalanceUsdc,
+            engine.protocolTreasuryBalanceUsdc(),
             "Protocol lens fees should match engine state"
         );
         assertEq(

@@ -27,12 +27,12 @@ interface ICfdVault {
     ) external;
 
     /// @notice Increases canonical vault assets to recognize legitimate non-LP protocol backing.
-    /// @dev This is the controlled accounting path for endogenous protocol fees and keeper-liability
-    ///      backing that should increase economic vault depth. It does not require raw excess to be
+    /// @dev This is the controlled accounting path for non-fee protocol backing that should increase
+    ///      economic vault depth. It does not require raw excess to be
     ///      present and may also be used to restore canonical accounting after a raw-balance shortfall
     ///      has already reduced `totalAssets()` via the `min(rawBalance, accountedAssets)` boundary.
     ///      Reverts if the caller is unauthorized.
-    function recordProtocolInflow(
+    function recordProtocolBackingInflow(
         uint256 amount
     ) external;
 

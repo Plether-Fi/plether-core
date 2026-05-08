@@ -59,7 +59,6 @@ library CfdEnginePlanTypes {
 
         uint64[] marginReservationIds;
 
-        uint256 accumulatedFeesUsdc;
         uint256 accumulatedBadDebtUsdc;
         uint256 unsettledCarryUsdc;
         uint256 totalDeferredTraderCreditUsdc;

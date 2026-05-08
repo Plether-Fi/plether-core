@@ -210,8 +210,6 @@ contract PerpInvariantTest is BasePerpTest {
 
     function invariant_GlobalSolvency() public view {
         uint256 effectiveAssets = pool.totalAssets();
-        uint256 fees = engine.accumulatedFeesUsdc();
-        effectiveAssets = effectiveAssets > fees ? effectiveAssets - fees : 0;
 
         int256 cappedLegacySpread = int256(0);
         if (cappedLegacySpread < 0) {
@@ -271,10 +269,14 @@ contract PerpInvariantTest is BasePerpTest {
         assertLe(claimed, effectivePool, "Claimed equity cannot exceed MtM-adjusted pool value");
     }
 
-    function invariant_FeesWithinVault() public view {
-        uint256 fees = engine.accumulatedFeesUsdc();
-        uint256 poolBalance = pool.totalAssets();
-        assertLe(fees, poolBalance, "Accumulated fees must not exceed vault balance");
+    function invariant_FeesWithinClearinghouseTreasury() public view {
+        uint256 fees = engine.protocolTreasuryBalanceUsdc();
+        assertEq(
+            clearinghouse.balanceUsdc(engine.protocolTreasury()),
+            fees,
+            "Accumulated fees must equal the treasury clearinghouse balance"
+        );
+        assertLe(fees, usdc.balanceOf(address(clearinghouse)), "Treasury fees must be clearinghouse-custodied");
     }
 
     function invariant_WithdrawalAccountingMatchesEngineReserve() public view {
@@ -597,7 +599,9 @@ contract PerpInvariantTest is BasePerpTest {
             "Protocol view withdrawal reserve must match accessor"
         );
         assertEq(
-            protocolView.accumulatedFeesUsdc, engine.accumulatedFeesUsdc(), "Protocol view fees must match accessor"
+            protocolView.protocolTreasuryBalanceUsdc,
+            engine.protocolTreasuryBalanceUsdc(),
+            "Protocol view fees must match accessor"
         );
         assertEq(
             protocolView.totalDeferredTraderCreditUsdc,
@@ -612,15 +616,15 @@ contract PerpInvariantTest is BasePerpTest {
     }
 
     function invariant_WithdrawalReserveIncludesDeferredLiabilities() public view {
-        uint256 expectedReserved = _maxLiability() + engine.accumulatedFeesUsdc()
-            + engine.totalDeferredTraderCreditUsdc() + engine.totalDeferredKeeperCreditUsdc();
+        uint256 expectedReserved =
+            _maxLiability() + engine.totalDeferredTraderCreditUsdc() + engine.totalDeferredKeeperCreditUsdc();
 
         expectedReserved += uint256(0);
 
         assertEq(
             _withdrawalReservedUsdc(),
             expectedReserved,
-            "Withdrawal reserve must include liabilities, fees, and deferred obligations"
+            "Withdrawal reserve must include liabilities and deferred obligations"
         );
     }
 

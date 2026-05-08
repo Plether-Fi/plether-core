@@ -19,6 +19,7 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
     address public immutable ENGINE;
 
     error CfdEngineSettlementModule__Unauthorized();
+    error CfdEngineSettlementModule__InsufficientVaultLiquidity();
 
     constructor(
         address engine_
@@ -51,17 +52,21 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
             ICfdVault(host.vault()).payOut(host.clearinghouse(), delta.vaultRebatePayoutUsdc);
         }
 
-        int256 netMarginChange = IMarginClearinghouse(host.clearinghouse())
-            .applyOpenCost(delta.account, delta.marginDeltaUsdc, delta.tradeCostUsdc, host.vault());
-        uint256 protocolFeeInflowUsdc;
+        (int256 netMarginChange, uint256 protocolFeeCreditedUsdc) = IMarginClearinghouse(host.clearinghouse())
+            .applyOpenCost(
+                delta.account,
+                delta.marginDeltaUsdc,
+                delta.tradeCostUsdc,
+                host.vault(),
+                host.protocolTreasury(),
+                delta.executionFeeUsdc
+            );
         if (delta.tradeCostUsdc > 0) {
-            protocolFeeInflowUsdc = uint256(delta.tradeCostUsdc) > delta.executionFeeUsdc
-                ? delta.executionFeeUsdc
-                : uint256(delta.tradeCostUsdc);
-            if (uint256(delta.tradeCostUsdc) > protocolFeeInflowUsdc) {
+            uint256 vaultCashInflowUsdc = uint256(delta.tradeCostUsdc) - protocolFeeCreditedUsdc;
+            if (vaultCashInflowUsdc > 0) {
                 ICfdVault(host.vault())
                     .recordClaimantInflow(
-                        uint256(delta.tradeCostUsdc) - protocolFeeInflowUsdc,
+                        vaultCashInflowUsdc,
                         ICfdVault.ClaimantInflowKind.Revenue,
                         ICfdVault.ClaimantInflowCashMode.CashArrived
                     );
@@ -77,9 +82,7 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
             int256(delta.sideOiIncrease),
             delta.sideEntryNotionalDelta
         );
-        if (delta.executionFeeUsdc > 0 || protocolFeeInflowUsdc > 0) {
-            host.settlementRecordProtocolFee(delta.executionFeeUsdc, protocolFeeInflowUsdc);
-        }
+        _settleProtocolFeeTopUp(host, delta.executionFeeUsdc, protocolFeeCreditedUsdc);
         host.settlementWritePosition(
             delta.account,
             CfdEngineSettlementTypes.PositionState({
@@ -116,7 +119,7 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
 
         IMarginClearinghouse(host.clearinghouse()).unlockPositionMargin(delta.account, delta.unlockMarginUsdc);
 
-        uint256 protocolFeeInflowUsdc;
+        uint256 protocolFeeCreditedUsdc;
         if (delta.settlementType == CfdEnginePlanTypes.SettlementType.GAIN) {
             if (delta.freshTraderPayoutUsdc > 0) {
                 host.settlementRecordDeferredTraderPayout(delta.account, delta.freshTraderPayoutUsdc);
@@ -132,25 +135,25 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
         } else if (delta.settlementType == CfdEnginePlanTypes.SettlementType.LOSS) {
             uint64[] memory reservationOrderIds =
                 IOrderRouterAccounting(host.orderRouter()).getMarginReservationIds(delta.account);
-            (uint256 seizedUsdc,) = IMarginClearinghouse(host.clearinghouse())
+            (uint256 seizedUsdc,, uint256 cashCreditedProtocolFeeUsdc) = IMarginClearinghouse(host.clearinghouse())
                 .consumeCloseLoss(
                     delta.account,
                     reservationOrderIds,
                     delta.lossUsdc,
                     delta.posMarginAfter,
                     delta.deletePosition,
-                    host.vault()
+                    host.vault(),
+                    host.protocolTreasury(),
+                    delta.executionFeeUsdc > delta.deferredFeeRecoveryUsdc
+                        ? delta.executionFeeUsdc - delta.deferredFeeRecoveryUsdc
+                        : 0
                 );
-            uint256 cashCollectedExecutionFeeUsdc = delta.executionFeeUsdc > delta.deferredFeeRecoveryUsdc
-                ? delta.executionFeeUsdc - delta.deferredFeeRecoveryUsdc
-                : 0;
-            protocolFeeInflowUsdc =
-                seizedUsdc > cashCollectedExecutionFeeUsdc ? cashCollectedExecutionFeeUsdc : seizedUsdc;
+            protocolFeeCreditedUsdc = cashCreditedProtocolFeeUsdc;
             if (seizedUsdc > 0) {
-                if (seizedUsdc > protocolFeeInflowUsdc) {
+                if (seizedUsdc > protocolFeeCreditedUsdc) {
                     ICfdVault(host.vault())
                         .recordClaimantInflow(
-                            seizedUsdc - protocolFeeInflowUsdc,
+                            seizedUsdc - protocolFeeCreditedUsdc,
                             ICfdVault.ClaimantInflowKind.Revenue,
                             ICfdVault.ClaimantInflowCashMode.CashArrived
                         );
@@ -174,9 +177,7 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
                 );
         }
 
-        if (delta.executionFeeUsdc > 0 || protocolFeeInflowUsdc > 0) {
-            host.settlementRecordProtocolFee(delta.executionFeeUsdc, protocolFeeInflowUsdc);
-        }
+        _settleProtocolFeeTopUp(host, delta.executionFeeUsdc, protocolFeeCreditedUsdc);
 
         if (delta.deletePosition) {
             host.settlementDeletePosition(delta.account);
@@ -230,7 +231,7 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
         uint256 keeperBountyInflowUsdc = seizedUsdc > delta.keeperBountyUsdc ? delta.keeperBountyUsdc : seizedUsdc;
         if (seizedUsdc > 0) {
             if (keeperBountyInflowUsdc > 0) {
-                ICfdVault(host.vault()).recordProtocolInflow(keeperBountyInflowUsdc);
+                ICfdVault(host.vault()).recordProtocolBackingInflow(keeperBountyInflowUsdc);
             }
             if (seizedUsdc > keeperBountyInflowUsdc) {
                 ICfdVault(host.vault())
@@ -262,6 +263,27 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
             host.settlementAccumulateBadDebt(delta.badDebtUsdc);
         }
         host.settlementDeletePosition(delta.account);
+    }
+
+    function _settleProtocolFeeTopUp(
+        ICfdEngineSettlementHost host,
+        uint256 amountUsdc,
+        uint256 clearinghouseCreditedUsdc
+    ) private {
+        if (clearinghouseCreditedUsdc > amountUsdc) {
+            clearinghouseCreditedUsdc = amountUsdc;
+        }
+        uint256 vaultFundedUsdc = amountUsdc - clearinghouseCreditedUsdc;
+        if (vaultFundedUsdc == 0) {
+            return;
+        }
+
+        ICfdVault vault = ICfdVault(host.vault());
+        if (vault.totalAssets() < vaultFundedUsdc) {
+            revert CfdEngineSettlementModule__InsufficientVaultLiquidity();
+        }
+        vault.payOut(host.clearinghouse(), vaultFundedUsdc);
+        IMarginClearinghouse(host.clearinghouse()).settleUsdc(host.protocolTreasury(), int256(vaultFundedUsdc));
     }
 
 }

@@ -35,7 +35,6 @@ contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
     function invariant_DeferredCreditStatusMatchesEngineAndVaultLiquidity() public view {
         uint256 totalDeferredTraderCreditUsdc;
         uint256 vaultAssets = vault.totalAssets();
-        uint256 protocolFeesUsdc = engine.accumulatedFeesUsdc();
         uint256 totalDeferredTraderCreditUsdc_ = engine.totalDeferredTraderCreditUsdc();
         uint256 totalDeferredKeeperCreditUsdc = engine.totalDeferredKeeperCreditUsdc();
         uint256 handlerKeeperCreditUsdc = engine.deferredKeeperCreditUsdc(address(handler));
@@ -50,18 +49,10 @@ contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
                 ? totalDeferredTraderCreditUsdc_ - deferredTraderCreditUsdc
                 : 0;
             uint256 expectedTraderClaimableNow = CashPriorityLib.availableCashForDeferredBeneficiaryClaim(
-                vaultAssets,
-                protocolFeesUsdc,
-                totalDeferredTraderCreditUsdc_,
-                totalDeferredKeeperCreditUsdc,
-                deferredTraderCreditUsdc
+                vaultAssets, totalDeferredTraderCreditUsdc_, totalDeferredKeeperCreditUsdc, deferredTraderCreditUsdc
             );
             uint256 expectedKeeperClaimableNow = CashPriorityLib.availableCashForDeferredBeneficiaryClaim(
-                vaultAssets,
-                protocolFeesUsdc,
-                otherDeferredTraderCreditUsdc,
-                deferredKeeperCreditUsdc,
-                deferredKeeperCreditUsdc
+                vaultAssets, otherDeferredTraderCreditUsdc, deferredKeeperCreditUsdc, deferredKeeperCreditUsdc
             );
 
             assertEq(
@@ -141,10 +132,7 @@ contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
             );
             uint256 freeCashForFreshPayouts =
                 CashPriorityLib.reserveFreshPayouts(
-                vault.totalAssets(),
-                engine.accumulatedFeesUsdc(),
-                engine.totalDeferredTraderCreditUsdc(),
-                engine.totalDeferredKeeperCreditUsdc()
+                vault.totalAssets(), engine.totalDeferredTraderCreditUsdc(), engine.totalDeferredKeeperCreditUsdc()
             )
             .freeCashUsdc;
             if (freeCashForFreshPayouts >= totalPayoutUsdc) {

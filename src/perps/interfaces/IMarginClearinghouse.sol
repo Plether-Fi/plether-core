@@ -169,13 +169,15 @@ interface IMarginClearinghouse {
         address account,
         uint256 amountUsdc
     ) external;
-    /// @notice Applies an open/increase trade cost by debiting or crediting settlement and updating locked margin.
+    /// @notice Applies an open/increase trade cost and routes any cash-collected protocol fee to a treasury account.
     function applyOpenCost(
         address account,
         uint256 marginDeltaUsdc,
         int256 tradeCostUsdc,
-        address recipient
-    ) external returns (int256 netMarginChangeUsdc);
+        address recipient,
+        address protocolFeeAccount,
+        uint256 protocolFeeUsdc
+    ) external returns (int256 netMarginChangeUsdc, uint256 protocolFeeCreditedUsdc);
     /// @notice Consumes a realized settlement loss from free settlement plus the active position margin bucket.
     function consumeSettlementLoss(
         address account,
@@ -183,15 +185,17 @@ interface IMarginClearinghouse {
         uint256 lossUsdc,
         address recipient
     ) external returns (uint256 marginConsumedUsdc, uint256 freeSettlementConsumedUsdc, uint256 uncoveredUsdc);
-    /// @notice Consumes close-path losses from settlement buckets while preserving the remaining live position margin and reserved escrow.
+    /// @notice Consumes close-path losses and routes any cash-collected protocol fee to a treasury account.
     function consumeCloseLoss(
         address account,
         uint64[] calldata reservationOrderIds,
         uint256 lossUsdc,
         uint256 protectedLockedMarginUsdc,
         bool includeOtherLockedMargin,
-        address recipient
-    ) external returns (uint256 seizedUsdc, uint256 shortfallUsdc);
+        address recipient,
+        address protocolFeeAccount,
+        uint256 protocolFeeUsdc
+    ) external returns (uint256 seizedUsdc, uint256 shortfallUsdc, uint256 protocolFeeCreditedUsdc);
     /// @notice Applies a pre-planned liquidation settlement mutation while preserving reserved escrow.
     function applyLiquidationSettlementPlan(
         address account,

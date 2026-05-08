@@ -5,7 +5,6 @@ library CfdEngineSnapshotsLib {
 
     struct SolvencySnapshot {
         uint256 physicalAssets;
-        uint256 protocolFees;
         uint256 netPhysicalAssets;
         uint256 maxLiability;
         uint256 effectiveSolvencyAssets;

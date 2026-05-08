@@ -9,6 +9,7 @@ interface ICfdEngineSettlementHost {
     function clearinghouse() external view returns (address);
     function vault() external view returns (address);
     function orderRouter() external view returns (address);
+    function protocolTreasury() external view returns (address);
 
     function settlementApplyCarryAndMark(
         uint256 newMarkPrice,
@@ -32,11 +33,6 @@ interface ICfdEngineSettlementHost {
     function settlementRecordDeferredTraderPayout(
         address account,
         uint256 amountUsdc
-    ) external;
-    /// @notice Records protocol fee ownership and any fresh vault cash backing that fee.
-    function settlementRecordProtocolFee(
-        uint256 amountUsdc,
-        uint256 vaultCashInflowUsdc
     ) external;
     function settlementAccumulateBadDebt(
         uint256 amountUsdc

@@ -439,7 +439,7 @@ contract CfdEngineTest is BasePerpTest {
             "Preview should accept the healthy open"
         );
 
-        uint256 feesBefore = engine.accumulatedFeesUsdc();
+        uint256 feesBefore = engine.protocolTreasuryBalanceUsdc();
         _open(account, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
 
         (uint256 size, uint256 margin,,,,,) = engine.positions(account);
@@ -447,7 +447,9 @@ contract CfdEngineTest is BasePerpTest {
         assertGt(margin, 0, "Live open should leave positive position margin");
         assertLt(margin, 5000e6, "Live open margin should reflect execution costs after the successful preview");
         assertGt(
-            engine.accumulatedFeesUsdc() - feesBefore, 0, "Live open should collect protocol revenue after success"
+            engine.protocolTreasuryBalanceUsdc() - feesBefore,
+            0,
+            "Live open should collect protocol revenue after success"
         );
     }
 
@@ -542,41 +544,6 @@ contract CfdEngineTest is BasePerpTest {
 
         int256 legacySideSpread = 0;
         assertEq(legacySideSpread, 0, "Carry model should not accrue any side-to-side legacy-spread state");
-    }
-
-    function helper_AbsorbRouterCancellationFee_NoSyncCheckpointRequired() public {
-        address trader = address(0xABC1);
-        address traderAccount = trader;
-
-        _fundTrader(trader, 50_000e6);
-        _open(traderAccount, CfdTypes.Side.BULL, 200_000e18, 20_000e6, 1e8);
-
-        uint256 feesBefore = engine.accumulatedFeesUsdc();
-        uint256 vaultAssetsBefore = pool.totalAssets();
-        vm.warp(block.timestamp + 1 days);
-
-        vm.prank(address(router));
-        engine.updateMarkPrice(1e8, uint64(block.timestamp));
-        vm.warp(block.timestamp + 1);
-
-        usdc.mint(address(router), 25e6);
-        vm.prank(address(router));
-        usdc.approve(address(engine), 25e6);
-
-        vm.prank(address(router));
-        engine.absorbRouterCancellationFee(25e6);
-
-        assertEq(
-            engine.accumulatedFeesUsdc() - feesBefore,
-            25e6,
-            "Absorbed cancellation fee should be booked as incremental protocol revenue"
-        );
-        assertEq(
-            pool.totalAssets(),
-            vaultAssetsBefore + 25e6,
-            "Absorbed cancellation fee should raise canonical vault assets"
-        );
-        assertEq(pool.excessAssets(), 0, "Absorbed cancellation fee should not strand canonical assets as excess");
     }
 
     function helper_SyncState_IsNoopInCarryModel() public {
@@ -996,9 +963,9 @@ contract CfdEngineTest is BasePerpTest {
             engineProtocolLens.getProtocolAccountingSnapshot();
 
         assertEq(
-            afterSnapshot.accumulatedFeesUsdc,
-            beforeSnapshot.accumulatedFeesUsdc,
-            "Trader deferred claim must not consume protocol fee reserve"
+            afterSnapshot.protocolTreasuryBalanceUsdc,
+            beforeSnapshot.protocolTreasuryBalanceUsdc,
+            "Trader deferred claim must not consume treasury fee balance"
         );
         assertEq(
             afterSnapshot.totalDeferredKeeperCreditUsdc,
@@ -1265,7 +1232,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(lockedAfterAdd.reservedSettlementUsdc, 0, "Carry realization should not strand reserved settlement");
     }
 
-    function test_WithdrawFees() public {
+    function test_ProtocolFees_CreditTreasuryMargin() public {
         address account = address(uint160(1));
         _fundTrader(account, 5000 * 1e6);
 
@@ -1284,24 +1251,22 @@ contract CfdEngineTest is BasePerpTest {
         engine.processOrderTyped(order, 1e8, 1_000_000 * 1e6, uint64(block.timestamp));
 
         // 100k BULL at $1.00: execFee = notional * 4bps = $100k * 0.0004 = $40
-        uint256 fees = engine.accumulatedFeesUsdc();
+        uint256 fees = engine.protocolTreasuryBalanceUsdc();
         assertEq(fees, 40_000_000, "Exec fee should be 4bps of $100k notional");
 
-        address treasury = address(0xBEEF);
+        address treasury = engine.protocolTreasury();
+        uint256 treasuryBalanceBefore = usdc.balanceOf(treasury);
         uint256 assetsBeforeWithdrawal = pool.totalAssets();
-        engine.withdrawFees(treasury);
+        _withdrawProtocolTreasury(fees);
 
-        assertEq(engine.accumulatedFeesUsdc(), 0, "Fees should reset to zero");
-        assertEq(usdc.balanceOf(treasury), fees, "Treasury receives exact fee amount");
-        assertEq(
-            pool.totalAssets(),
-            assetsBeforeWithdrawal - fees,
-            "Fee withdrawal should reduce canonical assets only by the already-accounted fee amount"
-        );
-        assertEq(pool.excessAssets(), 0, "Fee inflows should not remain stranded as excess before or after withdrawal");
+        assertEq(engine.protocolTreasuryBalanceUsdc(), 0, "Fees should reset to zero");
+        assertEq(usdc.balanceOf(treasury) - treasuryBalanceBefore, fees, "Treasury receives exact fee amount");
+        assertEq(pool.totalAssets(), assetsBeforeWithdrawal, "Treasury withdrawal should not touch vault assets");
+        assertEq(pool.excessAssets(), 0, "Fee inflows should not remain stranded as vault excess");
 
-        vm.expectRevert(CfdEngine.CfdEngine__NoFeesToWithdraw.selector);
-        engine.withdrawFees(treasury);
+        vm.prank(treasury);
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientBalance.selector);
+        clearinghouse.withdraw(treasury, fees);
     }
 
     function test_CloseProtocolFeeInflow_IsBoundedByPhysicalCashReceived() public {
@@ -1330,15 +1295,14 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
-    function test_WithdrawFees_RespectsSeniorCashReservation() public {
+    function test_ProtocolTreasuryWithdrawal_DoesNotUseSeniorCashReservation() public {
         address account = address(uint160(0xFEE1));
         address keeper = address(0xFEE2);
-        address treasury = address(0xFEE3);
         _fundTrader(account, 5000e6);
 
         _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
 
-        uint256 fees = engine.accumulatedFeesUsdc();
+        uint256 fees = engine.protocolTreasuryBalanceUsdc();
         uint256 deferredBounty = 25e6;
         uint256 solvencyBuffer = pool.totalAssets();
 
@@ -1349,34 +1313,35 @@ contract CfdEngineTest is BasePerpTest {
         usdc.transfer(address(0xDEAD), pool.totalAssets());
         vm.stopPrank();
 
-        usdc.mint(address(pool), fees);
-
-        vm.expectRevert(CfdEngine.CfdEngine__InsufficientVaultLiquidity.selector);
-        engine.withdrawFees(treasury);
+        address treasury = engine.protocolTreasury();
+        uint256 treasuryBalanceBefore = usdc.balanceOf(treasury);
+        _withdrawProtocolTreasury(fees);
 
         usdc.mint(address(pool), deferredBounty + solvencyBuffer);
-        engine.withdrawFees(treasury);
 
-        assertEq(usdc.balanceOf(treasury), fees, "Fee withdrawal should succeed once senior deferred cash is funded");
-        assertEq(engine.accumulatedFeesUsdc(), 0, "Fee withdrawal should still clear accumulated fees");
+        assertEq(
+            usdc.balanceOf(treasury) - treasuryBalanceBefore,
+            fees,
+            "Treasury withdrawal should use clearinghouse custody"
+        );
+        assertEq(engine.protocolTreasuryBalanceUsdc(), 0, "Treasury balance should be withdrawn");
         assertEq(
             engine.deferredKeeperCreditUsdc(keeper),
             deferredBounty,
-            "Withdrawing fees must not consume deferred senior claims"
+            "Withdrawing treasury margin must not consume deferred senior claims"
         );
     }
 
-    function test_WithdrawFees_ThenDeferredClaims_DrainsResidualCashWithoutDeadlock() public {
+    function test_TreasuryWithdrawal_ThenDeferredClaims_DrainsResidualCashWithoutDeadlock() public {
         address trader = address(0xFEA1);
         address keeper = address(0xFEA2);
-        address treasury = address(0xFEA3);
         address traderAccount = trader;
         address keeperAccount = keeper;
 
         usdc.burn(address(pool), pool.totalAssets());
         usdc.mint(address(pool), 100e6);
 
-        stdstore.target(address(engine)).sig("accumulatedFeesUsdc()").checked_write(uint256(60e6));
+        _fundProtocolTreasury(60e6);
         stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(address)").with_key(traderAccount)
             .checked_write(uint256(40e6));
         stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(uint256(40e6));
@@ -1384,11 +1349,13 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         engine.recordDeferredKeeperCredit(keeper, 20e6);
 
-        engine.withdrawFees(treasury, 40e6);
+        address treasury = engine.protocolTreasury();
+        uint256 treasuryBalanceBefore = usdc.balanceOf(treasury);
+        _withdrawProtocolTreasury(60e6);
 
-        assertEq(usdc.balanceOf(treasury), 40e6, "Treasury should receive the withdrawable fee slice");
-        assertEq(pool.totalAssets(), 60e6, "Fee withdrawal should leave the expected residual vault cash");
-        assertEq(engine.accumulatedFeesUsdc(), 20e6, "Fee accounting should retain the unwithdrawn remainder");
+        assertEq(usdc.balanceOf(treasury) - treasuryBalanceBefore, 60e6, "Treasury should receive its margin balance");
+        assertEq(pool.totalAssets(), 100e6, "Treasury withdrawal should leave vault cash untouched");
+        assertEq(engine.protocolTreasuryBalanceUsdc(), 0, "Treasury balance should be fully withdrawn");
 
         uint256 traderSettlementBefore = clearinghouse.balanceUsdc(traderAccount);
         vm.prank(trader);
@@ -1399,8 +1366,10 @@ contract CfdEngineTest is BasePerpTest {
             40e6,
             "Trader should receive the first deferred claim ahead of remaining protocol fees"
         );
-        assertEq(pool.totalAssets(), 20e6, "Trader claim should move the vault into the exact 20/20/20 residual state");
-        assertEq(engine.accumulatedFeesUsdc(), 20e6, "Servicing deferred claims must not burn fee accounting");
+        assertEq(pool.totalAssets(), 60e6, "Trader claim should consume only its deferred vault cash");
+        assertEq(
+            engine.protocolTreasuryBalanceUsdc(), 0, "Servicing deferred claims must not affect treasury accounting"
+        );
         assertEq(engine.deferredTraderCreditUsdc(traderAccount), 0, "Trader deferred balance should be fully consumed");
         assertEq(engine.deferredKeeperCreditUsdc(keeper), 20e6, "Keeper deferred balance should remain queued");
 
@@ -1413,21 +1382,16 @@ contract CfdEngineTest is BasePerpTest {
             20e6,
             "Keeper should be able to drain the last 20e6 instead of deadlocking behind fee accounting"
         );
-        assertEq(pool.totalAssets(), 0, "Final deferred claim should consume the last residual vault cash");
+        assertEq(pool.totalAssets(), 40e6, "Final deferred claim should leave non-deferred vault cash available");
         assertEq(
             engine.deferredKeeperCreditUsdc(keeper), 0, "Keeper deferred balance should clear after the final claim"
         );
-        assertEq(
-            engine.accumulatedFeesUsdc(),
-            20e6,
-            "Fee accounting should remain recorded even after deferred claims drain cash"
-        );
+        assertEq(engine.protocolTreasuryBalanceUsdc(), 0, "Treasury accounting should stay outside deferred claims");
     }
 
-    function test_WithdrawFees_AllowsPartialWithdrawal() public {
+    function test_ProtocolTreasury_AllowsPartialWithdrawal() public {
         address trader = address(0xFEE4A);
         address account = trader;
-        address treasury = address(0xFEE5);
         _fundTrader(trader, 10_000e6);
 
         CfdTypes.Order memory order = CfdTypes.Order({
@@ -1444,14 +1408,20 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         engine.processOrderTyped(order, 1e8, 1_000_000e6, uint64(block.timestamp));
 
-        uint256 feesBefore = engine.accumulatedFeesUsdc();
+        uint256 feesBefore = engine.protocolTreasuryBalanceUsdc();
         uint256 partialAmount = feesBefore / 2;
 
-        engine.withdrawFees(treasury, partialAmount);
+        address treasury = engine.protocolTreasury();
+        uint256 treasuryBalanceBefore = usdc.balanceOf(treasury);
+        _withdrawProtocolTreasury(partialAmount);
 
-        assertEq(usdc.balanceOf(treasury), partialAmount, "Treasury should receive the requested partial fee amount");
         assertEq(
-            engine.accumulatedFeesUsdc(),
+            usdc.balanceOf(treasury) - treasuryBalanceBefore,
+            partialAmount,
+            "Treasury should receive the requested partial fee amount"
+        );
+        assertEq(
+            engine.protocolTreasuryBalanceUsdc(),
             feesBefore - partialAmount,
             "Partial fee withdrawal should leave the remainder booked"
         );
@@ -1464,7 +1434,7 @@ contract CfdEngineTest is BasePerpTest {
 
         _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
 
-        uint256 fees = engine.accumulatedFeesUsdc();
+        uint256 fees = engine.protocolTreasuryBalanceUsdc();
         vm.prank(address(router));
         engine.recordDeferredKeeperCredit(keeper, 1e6);
 
@@ -1477,7 +1447,7 @@ contract CfdEngineTest is BasePerpTest {
         DeferredEngineViewTypes.DeferredCreditStatus memory status = _deferredCreditStatus(address(0), keeper);
         assertTrue(status.keeperCreditClaimableNow, "Queue-head deferred bounty should be claimable ahead of fees");
 
-        uint256 feesBefore = engine.accumulatedFeesUsdc();
+        uint256 feesBefore = engine.protocolTreasuryBalanceUsdc();
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeper);
         vm.prank(keeper);
         engine.claimDeferredKeeperCredit();
@@ -1487,7 +1457,9 @@ contract CfdEngineTest is BasePerpTest {
             1e6,
             "Keeper should receive the queue-head deferred bounty as clearinghouse credit"
         );
-        assertEq(engine.accumulatedFeesUsdc(), feesBefore, "Servicing deferred claims must not burn fee accounting");
+        assertEq(
+            engine.protocolTreasuryBalanceUsdc(), feesBefore, "Servicing deferred claims must not burn fee accounting"
+        );
     }
 
     function test_ClaimDeferredKeeperCredit_RealizesCarryBeforeCreditingSettlement() public {
@@ -2018,9 +1990,10 @@ contract CfdEngineTest is BasePerpTest {
         _fundTrader(trader, 5000e6);
         _open(account, CfdTypes.Side.BEAR, 10_000e18, 5000e6, 1e8);
 
+        uint256 closeExecutionFeeUsdc = _engineExecutionFeeUsdc(5000e18, 120_000_000);
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 1);
+        usdc.transfer(address(0xDEAD), poolAssets - closeExecutionFeeUsdc - 1);
 
         _close(account, CfdTypes.Side.BEAR, 5000e18, 120_000_000);
         assertGt(engine.deferredTraderCreditUsdc(account), 0, "Setup must create deferred trader credit");
@@ -2051,7 +2024,7 @@ contract CfdEngineTest is BasePerpTest {
             engineProtocolLens.getProtocolAccountingSnapshot();
         assertEq(viewData.vaultAssetsUsdc, pool.totalAssets());
         assertEq(viewData.withdrawalReservedUsdc, _withdrawalReservedUsdc());
-        assertEq(viewData.accumulatedFeesUsdc, engine.accumulatedFeesUsdc());
+        assertEq(viewData.protocolTreasuryBalanceUsdc, engine.protocolTreasuryBalanceUsdc());
         assertEq(viewData.totalDeferredTraderCreditUsdc, engine.totalDeferredTraderCreditUsdc());
         assertEq(viewData.totalDeferredKeeperCreditUsdc, engine.totalDeferredKeeperCreditUsdc());
         assertEq(viewData.degradedMode, engine.degradedMode());
@@ -2078,15 +2051,10 @@ contract CfdEngineTest is BasePerpTest {
             engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
 
         assertEq(snapshot.vaultAssetsUsdc, pool.totalAssets());
-        assertEq(
-            snapshot.netPhysicalAssetsUsdc,
-            snapshot.vaultAssetsUsdc > snapshot.accumulatedFeesUsdc
-                ? snapshot.vaultAssetsUsdc - snapshot.accumulatedFeesUsdc
-                : 0
-        );
+        assertEq(snapshot.netPhysicalAssetsUsdc, snapshot.vaultAssetsUsdc);
         assertEq(snapshot.maxLiabilityUsdc, _maxLiability());
         assertEq(snapshot.withdrawalReservedUsdc, _withdrawalReservedUsdc());
-        assertEq(snapshot.accumulatedFeesUsdc, engine.accumulatedFeesUsdc());
+        assertEq(snapshot.protocolTreasuryBalanceUsdc, engine.protocolTreasuryBalanceUsdc());
         assertEq(snapshot.accumulatedBadDebtUsdc, engine.accumulatedBadDebtUsdc());
         assertEq(snapshot.totalDeferredTraderCreditUsdc, engine.totalDeferredTraderCreditUsdc());
         assertEq(snapshot.totalDeferredKeeperCreditUsdc, engine.totalDeferredKeeperCreditUsdc());
@@ -2097,7 +2065,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(snapshot.maxLiabilityUsdc, viewData.maxLiabilityUsdc);
         assertEq(snapshot.withdrawalReservedUsdc, viewData.withdrawalReservedUsdc);
         assertEq(snapshot.freeUsdc, viewData.freeUsdc);
-        assertEq(snapshot.accumulatedFeesUsdc, viewData.accumulatedFeesUsdc);
+        assertEq(snapshot.protocolTreasuryBalanceUsdc, viewData.protocolTreasuryBalanceUsdc);
         assertEq(snapshot.totalDeferredTraderCreditUsdc, viewData.totalDeferredTraderCreditUsdc);
         assertEq(snapshot.totalDeferredKeeperCreditUsdc, viewData.totalDeferredKeeperCreditUsdc);
         assertEq(snapshot.degradedMode, viewData.degradedMode);
@@ -2106,7 +2074,6 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(snapshot.maxLiabilityUsdc, housePoolSnapshot.maxLiabilityUsdc);
         assertEq(snapshot.totalDeferredTraderCreditUsdc, housePoolSnapshot.deferredTraderCreditUsdc);
         assertEq(snapshot.totalDeferredKeeperCreditUsdc, housePoolSnapshot.deferredKeeperCreditUsdc);
-        assertEq(snapshot.accumulatedFeesUsdc, housePoolSnapshot.protocolFeesUsdc);
     }
 
     function test_ProtocolAccountingSnapshot_IgnoresUnaccountedPoolDonationUntilAccounted() public {
@@ -2224,13 +2191,14 @@ contract CfdEngineTest is BasePerpTest {
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot =
             engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
         HousePoolEngineViewTypes.HousePoolStatusSnapshot memory status = engineProtocolLens.getHousePoolStatusSnapshot();
-        uint256 fees = engine.accumulatedFeesUsdc();
 
         assertEq(
             snapshot.physicalAssetsUsdc, pool.totalAssets(), "Snapshot physical assets must match canonical pool assets"
         );
         assertEq(
-            snapshot.netPhysicalAssetsUsdc, pool.totalAssets() - fees, "Snapshot net assets must exclude protocol fees"
+            snapshot.netPhysicalAssetsUsdc,
+            pool.totalAssets(),
+            "Treasury clearinghouse fees must not reduce vault net assets"
         );
         assertEq(snapshot.maxLiabilityUsdc, _maxLiability(), "Snapshot liability must match accessor");
         assertEq(snapshot.supplementalReservedUsdc, uint256(0), "Snapshot supplemental reserve must match accessor");
@@ -2247,7 +2215,6 @@ contract CfdEngineTest is BasePerpTest {
             engine.totalDeferredKeeperCreditUsdc(),
             "Snapshot bounty must match storage"
         );
-        assertEq(snapshot.protocolFeesUsdc, fees, "Snapshot fees must match storage");
         assertTrue(snapshot.markFreshnessRequired, "Open directional liability should require fresh marks");
         assertEq(
             snapshot.maxMarkStaleness,
@@ -2393,7 +2360,7 @@ contract CfdEngineTest is BasePerpTest {
         assertTrue(preDrainPreview.valid, "Setup close preview should remain valid");
 
         uint256 grossTargetAssets =
-            _maxLiabilityAfterClose(CfdTypes.Side.BULL, bullMaxProfit) + engine.accumulatedFeesUsdc();
+            _maxLiabilityAfterClose(CfdTypes.Side.BULL, bullMaxProfit) + engine.protocolTreasuryBalanceUsdc();
         assertGt(
             grossTargetAssets,
             preDrainPreview.seizedCollateralUsdc + 1,
@@ -2584,13 +2551,9 @@ contract CfdEngineTest is BasePerpTest {
 
         assertTrue(delta.liquidatable, "Setup must remain liquidatable");
         assertEq(
-            delta.keeperBountyUsdc,
-            2e6,
-            "Positive physical equity should still support the current lower bounty in this setup"
+            delta.keeperBountyUsdc, 0, "No reachable settlement collateral should cap the liquidation bounty at zero"
         );
-        assertEq(
-            delta.residualUsdc, 6e6, "Residual should reflect the current physically reachable collateral computation"
-        );
+        assertEq(delta.residualUsdc, 8e6, "Residual should reflect equity when no bounty is payable");
         assertEq(delta.settlementRetainedUsdc, 0, "No settlement should remain when none is reachable");
         assertEq(
             delta.existingDeferredConsumedUsdc,
@@ -2602,9 +2565,9 @@ contract CfdEngineTest is BasePerpTest {
             10e6,
             "Legacy deferred payout should remain intact on positive residual"
         );
-        assertEq(delta.freshTraderPayoutUsdc, 6e6, "Only physical residual should become a fresh trader payout");
+        assertEq(delta.freshTraderPayoutUsdc, 8e6, "Only physical residual should become a fresh trader payout");
         assertEq(
-            delta.residualPlan.freshTraderPayoutUsdc, 6e6, "Residual plan should expose only the physical fresh payout"
+            delta.residualPlan.freshTraderPayoutUsdc, 8e6, "Residual plan should expose only the physical fresh payout"
         );
         assertEq(delta.badDebtUsdc, 0, "Positive residual should not create bad debt");
     }
@@ -2649,10 +2612,10 @@ contract CfdEngineTest is BasePerpTest {
         CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 100_000_000);
 
         assertTrue(preview.liquidatable, "Preview should not revert for positive physical residual");
-        assertEq(preview.keeperBountyUsdc, 10e6, "Setup should use the current percentage bounty");
+        assertEq(preview.keeperBountyUsdc, 0, "No reachable settlement collateral should cap the bounty at zero");
         assertEq(preview.settlementRetainedUsdc, 0, "No settlement should remain when no settlement is reachable");
         assertEq(
-            preview.freshTraderPayoutUsdc, 20e6, "Preview should surface the current physical fresh liquidation payout"
+            preview.freshTraderPayoutUsdc, 30e6, "Preview should surface the current physical fresh liquidation payout"
         );
         assertEq(
             preview.existingDeferredConsumedUsdc,
@@ -2669,18 +2632,19 @@ contract CfdEngineTest is BasePerpTest {
         );
         assertEq(
             preview.deferredTraderCreditUsdc,
-            30e6,
+            40e6,
             "Deferred payout should reflect the untouched legacy claim plus the fresh deferred amount in the current preview model"
         );
         assertEq(preview.badDebtUsdc, 0, "Positive residual should not report bad debt");
 
         uint256 settlementBefore = clearinghouse.balanceUsdc(account);
         vm.prank(keeper);
-        bytes[] memory empty;
-        router.executeLiquidation(account, empty);
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(100_000_000));
+        router.executeLiquidation(account, priceData);
 
         uint256 vaultAssets = pool.totalAssets() + preview.keeperBountyUsdc;
-        uint256 fees = engine.accumulatedFeesUsdc();
+        uint256 fees = engine.protocolTreasuryBalanceUsdc();
         int256 legacySpread = int256(0);
         uint256 netPhysical = vaultAssets > fees ? vaultAssets - fees : 0;
         uint256 liveEffective = legacySpread > 0
@@ -2697,7 +2661,7 @@ contract CfdEngineTest is BasePerpTest {
         );
         assertEq(
             engine.deferredTraderCreditUsdc(account),
-            30e6,
+            40e6,
             "Live liquidation should preserve the old deferred claim plus the fresh deferred amount"
         );
         assertEq(
@@ -3154,7 +3118,7 @@ contract CfdEngineTest is BasePerpTest {
             "Preview bad debt should match live liquidation after staged forfeiture"
         );
         assertEq(
-            afterSnapshot.accumulatedFeesUsdc - beforeSnapshot.protocol.accumulatedFeesUsdc,
+            afterSnapshot.protocolTreasuryBalanceUsdc - beforeSnapshot.protocol.protocolTreasuryBalanceUsdc,
             escrowBefore.executionBountyUsdc,
             "Live liquidation should book the same forfeited escrow preview assumes as protocol fees"
         );
@@ -3217,9 +3181,10 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, refreshTime);
 
+        uint256 firstCloseExecutionFeeUsdc = _engineExecutionFeeUsdc(5000e18, 120_000_000);
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 1);
+        usdc.transfer(address(0xDEAD), poolAssets - firstCloseExecutionFeeUsdc - 1);
 
         _closeAt(bearAccount, CfdTypes.Side.BEAR, 5000e18, 120_000_000, vaultDepth, refreshTime);
         uint256 deferredBefore = engine.deferredTraderCreditUsdc(bearAccount);
@@ -3285,9 +3250,11 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, refreshTime);
 
+        uint256 setupCloseFeesUsdc =
+            _engineExecutionFeeUsdc(5000e18, 120_000_000) + _engineExecutionFeeUsdc(2500e18, 120_000_000);
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 1);
+        usdc.transfer(address(0xDEAD), poolAssets - setupCloseFeesUsdc - 1);
 
         _closeAt(bearAccount, CfdTypes.Side.BEAR, 5000e18, 120_000_000, vaultDepth, refreshTime);
         uint256 deferredBefore = engine.deferredTraderCreditUsdc(bearAccount);
@@ -3351,9 +3318,11 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         engine.recordDeferredKeeperCredit(keeper, 1e6);
 
+        uint256 setupCloseFeesUsdc =
+            (_engineExecutionFeeUsdc(5000e18, 120_000_000) * 2) + _engineExecutionFeeUsdc(2500e18, 120_000_000);
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 1);
+        usdc.transfer(address(0xDEAD), poolAssets - setupCloseFeesUsdc - 1);
 
         _closeAt(bearAccount, CfdTypes.Side.BEAR, 5000e18, 120_000_000, vaultDepth, refreshTime);
         uint256 deferredBefore = engine.deferredTraderCreditUsdc(bearAccount);
@@ -3396,9 +3365,11 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, refreshTime);
 
+        uint256 setupCloseFeesUsdc =
+            (_engineExecutionFeeUsdc(5000e18, 120_000_000) * 2) + _engineExecutionFeeUsdc(2500e18, 120_000_000);
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 1);
+        usdc.transfer(address(0xDEAD), poolAssets - setupCloseFeesUsdc - 1);
 
         _closeAt(bearAccount, CfdTypes.Side.BEAR, 5000e18, 120_000_000, vaultDepth, refreshTime);
         uint256 bearDeferredBefore = engine.deferredTraderCreditUsdc(bearAccount);
@@ -3432,9 +3403,10 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, refreshTime);
 
+        uint256 firstCloseExecutionFeeUsdc = _engineExecutionFeeUsdc(5000e18, 120_000_000);
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 1);
+        usdc.transfer(address(0xDEAD), poolAssets - firstCloseExecutionFeeUsdc - 1);
 
         _closeAt(bearAccount, CfdTypes.Side.BEAR, 5000e18, 120_000_000, vaultDepth, refreshTime);
         uint256 deferredBefore = engine.deferredTraderCreditUsdc(bearAccount);
@@ -3451,7 +3423,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(locked.positionMarginUsdc, 0, "Test must reduce reachable collateral below the terminal close fee");
 
         CfdEngine.ClosePreview memory preview = engineLens.simulateClose(bearAccount, 5000e18, 1e8, vaultDepth);
-        uint256 nominalExecutionFeeUsdc = (((5000e18 * uint256(1e8)) / CfdMath.USDC_TO_TOKEN_SCALE) * 4) / 10_000;
+        uint256 nominalExecutionFeeUsdc = _engineExecutionFeeUsdc(5000e18, 1e8);
 
         assertEq(
             preview.badDebtUsdc,
@@ -3469,18 +3441,29 @@ contract CfdEngineTest is BasePerpTest {
             "Deferred payout should still contribute to covering the close shortfall"
         );
 
-        uint256 feesBefore = engine.accumulatedFeesUsdc();
-        _closeAt(bearAccount, CfdTypes.Side.BEAR, 5000e18, 1e8, vaultDepth, refreshTime);
+        uint256 feesBefore = engine.protocolTreasuryBalanceUsdc();
+        CfdTypes.Order memory underfundedFeeClose = CfdTypes.Order({
+            account: bearAccount,
+            sizeDelta: 5000e18,
+            marginDelta: 0,
+            targetPrice: 0,
+            commitTime: refreshTime,
+            commitBlock: uint64(block.number),
+            orderId: 0,
+            side: CfdTypes.Side.BEAR,
+            isClose: true
+        });
+        vm.prank(address(router));
+        vm.expectRevert(CfdEngineSettlementModule.CfdEngineSettlementModule__InsufficientVaultLiquidity.selector);
+        engine.processOrderTyped(underfundedFeeClose, 1e8, vaultDepth, refreshTime);
 
         assertEq(
-            engine.accumulatedFeesUsdc() - feesBefore,
-            nominalExecutionFeeUsdc,
-            "Protocol should book the full close execution fee under the current accounting model"
+            engine.protocolTreasuryBalanceUsdc(), feesBefore, "Treasury fees should not change when fee funding reverts"
         );
         assertEq(
-            deferredBefore - engine.deferredTraderCreditUsdc(bearAccount),
-            2_243_750,
-            "Live close should extinguish the deferred payout slice consumed alongside direct fee collection"
+            engine.deferredTraderCreditUsdc(bearAccount),
+            deferredBefore,
+            "Deferred payout should remain queued when treasury fee funding cannot be physically settled"
         );
     }
 
@@ -3573,7 +3556,7 @@ contract CfdEngineTest is BasePerpTest {
         assertTrue(preDrainPreview.liquidatable, "Setup must produce a liquidatable position");
 
         uint256 bearMaxProfit = _sideMaxProfit(CfdTypes.Side.BEAR);
-        uint256 targetAssets = bearMaxProfit + engine.accumulatedFeesUsdc() + preDrainPreview.keeperBountyUsdc
+        uint256 targetAssets = bearMaxProfit + engine.protocolTreasuryBalanceUsdc() + preDrainPreview.keeperBountyUsdc
             - preDrainPreview.seizedCollateralUsdc - 1;
         uint256 currentAssets = pool.totalAssets();
         assertGt(currentAssets, targetAssets, "Test setup must be able to drain the vault into the degraded-mode gap");
@@ -4788,9 +4771,10 @@ contract CfdEngineTest is BasePerpTest {
         _fundTrader(trader, 5000e6);
         _open(account, CfdTypes.Side.BEAR, 10_000e18, 5000e6, 1e8);
 
+        uint256 closeExecutionFeeUsdc = _engineExecutionFeeUsdc(5000e18, 120_000_000);
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 1);
+        usdc.transfer(address(0xDEAD), poolAssets - closeExecutionFeeUsdc - 1);
 
         _close(account, CfdTypes.Side.BEAR, 5000e18, 120_000_000);
         assertGt(engine.deferredTraderCreditUsdc(account), 0, "Setup must create deferred trader credit");
@@ -5804,7 +5788,7 @@ contract PhantomExecFeeTest is BasePerpTest {
         priceData[0] = abi.encode(uint256(1e8));
         router.executeOrder(1, priceData);
 
-        uint256 openFee = engine.accumulatedFeesUsdc();
+        uint256 openFee = engine.protocolTreasuryBalanceUsdc();
 
         vm.warp(block.timestamp + 1);
         vm.prank(alice);
@@ -5812,7 +5796,9 @@ contract PhantomExecFeeTest is BasePerpTest {
 
         assertEq(router.nextCommitId(), 3, "Close intents should reserve a flat keeper bounty from free settlement");
         assertEq(
-            engine.accumulatedFeesUsdc(), openFee, "Committing the close should not accrue additional protocol fees"
+            engine.protocolTreasuryBalanceUsdc(),
+            openFee,
+            "Committing the close should not accrue additional protocol fees"
         );
     }
 
@@ -5894,7 +5880,7 @@ contract CarryModelFreeUsdcTest is BasePerpTest {
 
         uint256 bal = usdc.balanceOf(address(pool));
         uint256 maxLiability = _sideMaxProfit(CfdTypes.Side.BULL);
-        uint256 pendingFees = engine.accumulatedFeesUsdc();
+        uint256 pendingFees = engine.protocolTreasuryBalanceUsdc();
         uint256 reservedWithoutLegacySpread = maxLiability + pendingFees;
         uint256 freeWithoutLegacySpread = bal > reservedWithoutLegacySpread ? bal - reservedWithoutLegacySpread : 0;
 

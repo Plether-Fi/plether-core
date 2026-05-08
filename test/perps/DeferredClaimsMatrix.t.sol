@@ -18,7 +18,7 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
         usdc.burn(address(pool), pool.totalAssets());
         usdc.mint(address(pool), 40e6);
 
-        stdstore.target(address(engine)).sig("accumulatedFeesUsdc()").checked_write(uint256(20e6));
+        _fundProtocolTreasury(20e6);
         stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(address)").with_key(account)
             .checked_write(uint256(30e6));
         stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(uint256(30e6));
@@ -36,7 +36,7 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
             "Trader deferred claim should remain fully queued during freeze"
         );
         assertEq(engine.deferredKeeperCreditUsdc(otherKeeper), 20e6, "Other deferred claims should remain preserved");
-        assertEq(engine.accumulatedFeesUsdc(), 20e6, "Protocol fees should remain preserved");
+        assertEq(engine.protocolTreasuryBalanceUsdc(), 20e6, "Protocol fees should remain preserved");
     }
 
     function test_TraderDeferredClaim_RevertsWhenSingleClaimExceedsAvailableVaultCash() public {
@@ -68,7 +68,7 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
         usdc.burn(address(pool), pool.totalAssets());
         usdc.mint(address(pool), 45e6);
 
-        stdstore.target(address(engine)).sig("accumulatedFeesUsdc()").checked_write(uint256(20e6));
+        _fundProtocolTreasury(20e6);
         stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(address)").with_key(account)
             .checked_write(uint256(30e6));
         stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(uint256(30e6));
@@ -82,7 +82,7 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
 
         assertEq(engine.deferredTraderCreditUsdc(account), 30e6, "Trader deferred balance should stay fully queued");
         assertEq(engine.deferredKeeperCreditUsdc(otherKeeper), 20e6, "Keeper deferred queue should remain preserved");
-        assertEq(engine.accumulatedFeesUsdc(), 20e6, "Protocol fees should remain preserved");
+        assertEq(engine.protocolTreasuryBalanceUsdc(), 20e6, "Protocol fees should remain preserved");
     }
 
     function test_ClearerDeferredClaim_RevertsWhenVaultCashFallsBelowKeeperLiability() public {
@@ -112,7 +112,7 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
         usdc.burn(address(pool), pool.totalAssets());
         usdc.mint(address(pool), 45e6);
 
-        stdstore.target(address(engine)).sig("accumulatedFeesUsdc()").checked_write(uint256(20e6));
+        _fundProtocolTreasury(20e6);
         stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(address)").with_key(traderAccount)
             .checked_write(uint256(20e6));
         stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(uint256(20e6));
@@ -129,7 +129,7 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
             engine.deferredKeeperCreditUsdc(keeper), 30e6, "Keeper residual deferred balance should stay fully queued"
         );
         assertEq(engine.deferredTraderCreditUsdc(traderAccount), 20e6, "Trader deferred queue should remain preserved");
-        assertEq(engine.accumulatedFeesUsdc(), 20e6, "Protocol fees should remain preserved");
+        assertEq(engine.protocolTreasuryBalanceUsdc(), 20e6, "Protocol fees should remain preserved");
     }
 
 }

@@ -41,8 +41,8 @@ This directory contains stateful Foundry invariant suites for the perps system.
 - `PerpFeeFlowInvariant.t.sol`
   - Catches fee accrual, custody, and withdrawal drift
   - Verifies a handler-side fee model tracks accumulated and withdrawn fees
-  - Verifies the canonical protocol accounting snapshot includes the same live fee bucket
-  - Verifies the live fee bucket remains vault-custodied
+  - Verifies the canonical protocol accounting snapshot includes the same live treasury fee balance
+  - Verifies the live fee balance remains clearinghouse-custodied
 
 - `PerpEconomicConservationInvariant.t.sol`
   - Catches protocol-wide ledger drift and conservation bugs

@@ -65,8 +65,8 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
             "Protocol accounting view deferred keeper credit mismatch"
         );
         assertEq(
-            accountingView.accumulatedFeesUsdc,
-            engine.accumulatedFeesUsdc(),
+            accountingView.protocolTreasuryBalanceUsdc,
+            engine.protocolTreasuryBalanceUsdc(),
             "Protocol accounting view accumulated fees mismatch"
         );
     }

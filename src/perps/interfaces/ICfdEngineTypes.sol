@@ -10,7 +10,6 @@ interface ICfdEngineTypes {
     error CfdEngine__VaultAlreadySet();
     error CfdEngine__RouterAlreadySet();
     error CfdEngine__DependenciesAlreadySet();
-    error CfdEngine__NoFeesToWithdraw();
     error CfdEngine__NoDeferredTraderCredit();
     error CfdEngine__InsufficientVaultLiquidity();
     error CfdEngine__NoDeferredKeeperCredit();
@@ -78,7 +77,7 @@ interface ICfdEngineTypes {
         uint256 maxLiabilityUsdc;
         uint256 withdrawalReservedUsdc;
         uint256 freeUsdc;
-        uint256 accumulatedFeesUsdc;
+        uint256 protocolTreasuryBalanceUsdc;
         uint256 totalDeferredTraderCreditUsdc;
         uint256 totalDeferredKeeperCreditUsdc;
         bool degradedMode;

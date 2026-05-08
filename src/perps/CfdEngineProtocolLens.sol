@@ -41,9 +41,7 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
     ) external view returns (HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot) {
         uint256 vaultAssetsUsdc = engineContract.vault().totalAssets();
         snapshot.physicalAssetsUsdc = vaultAssetsUsdc;
-        snapshot.protocolFeesUsdc = engineContract.accumulatedFeesUsdc();
-        snapshot.netPhysicalAssetsUsdc =
-            vaultAssetsUsdc > snapshot.protocolFeesUsdc ? vaultAssetsUsdc - snapshot.protocolFeesUsdc : 0;
+        snapshot.netPhysicalAssetsUsdc = vaultAssetsUsdc;
         snapshot.maxLiabilityUsdc = SolvencyAccountingLib.getMaxLiability(
             _sideState(CfdTypes.Side.BULL).maxProfitUsdc, _sideState(CfdTypes.Side.BEAR).maxProfitUsdc
         );
@@ -110,7 +108,7 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         snapshot.effectiveSolvencyAssetsUsdc = solvencyState.effectiveAssetsUsdc;
         snapshot.withdrawalReservedUsdc = solvencyState.withdrawalReservedUsdc;
         snapshot.freeUsdc = solvencyState.freeWithdrawableUsdc;
-        snapshot.accumulatedFeesUsdc = engineContract.accumulatedFeesUsdc();
+        snapshot.protocolTreasuryBalanceUsdc = engineContract.protocolTreasuryBalanceUsdc();
         snapshot.accumulatedBadDebtUsdc = engineContract.accumulatedBadDebtUsdc();
         snapshot.totalDeferredTraderCreditUsdc = engineContract.totalDeferredTraderCreditUsdc();
         snapshot.totalDeferredKeeperCreditUsdc = engineContract.totalDeferredKeeperCreditUsdc();
@@ -123,7 +121,6 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
     function _buildAdjustedSolvencyState() internal view returns (SolvencyAccountingLib.SolvencyState memory) {
         return SolvencyAccountingLib.buildSolvencyState(
             engineContract.vault().totalAssets(),
-            engineContract.accumulatedFeesUsdc(),
             SolvencyAccountingLib.getMaxLiability(
                 _sideState(CfdTypes.Side.BULL).maxProfitUsdc, _sideState(CfdTypes.Side.BEAR).maxProfitUsdc
             ),

@@ -64,15 +64,15 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
     }
 
     function invariant_WithdrawalReserveIncludesKnownDeferredLiabilities() public view {
-        uint256 expectedReserved = _maxLiability() + engine.accumulatedFeesUsdc()
-            + engine.totalDeferredTraderCreditUsdc() + engine.totalDeferredKeeperCreditUsdc();
+        uint256 expectedReserved =
+            _maxLiability() + engine.totalDeferredTraderCreditUsdc() + engine.totalDeferredKeeperCreditUsdc();
 
         expectedReserved += uint256(0);
 
         assertEq(
             _withdrawalReservedUsdc(),
             expectedReserved,
-            "Withdrawal reserve must include liabilities, fees, and deferred obligations"
+            "Withdrawal reserve must include liabilities and deferred obligations"
         );
     }
 
@@ -451,10 +451,13 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory protocolSnapshot =
             engineProtocolLens.getProtocolAccountingSnapshot();
         uint256 vaultAssetsUsdc = vault.totalAssets();
-        uint256 feesUsdc = engine.accumulatedFeesUsdc();
 
         assertEq(protocolSnapshot.vaultAssetsUsdc, vaultAssetsUsdc, "Protocol snapshot vault assets mismatch");
-        assertEq(protocolSnapshot.accumulatedFeesUsdc, feesUsdc, "Protocol snapshot fees mismatch");
+        assertEq(
+            protocolSnapshot.protocolTreasuryBalanceUsdc,
+            engine.protocolTreasuryBalanceUsdc(),
+            "Protocol snapshot fees mismatch"
+        );
         assertEq(
             protocolSnapshot.accumulatedBadDebtUsdc,
             engine.accumulatedBadDebtUsdc(),
@@ -470,7 +473,6 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
             engineProtocolLens.getProtocolAccountingSnapshot().freeUsdc,
             "Protocol snapshot free USDC mismatch"
         );
-        assertEq(snapshot.protocolFeesUsdc, feesUsdc, "House-pool snapshot fees must match engine fees");
         assertEq(
             snapshot.deferredTraderCreditUsdc,
             engine.totalDeferredTraderCreditUsdc(),
@@ -492,8 +494,8 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         );
         assertEq(
             snapshot.netPhysicalAssetsUsdc,
-            vaultAssetsUsdc > feesUsdc ? vaultAssetsUsdc - feesUsdc : 0,
-            "House-pool snapshot net physical assets must match vault assets net of fees"
+            vaultAssetsUsdc,
+            "House-pool snapshot net physical assets must not reserve treasury clearinghouse fees"
         );
         assertEq(
             snapshot.physicalAssetsUsdc, vaultAssetsUsdc, "House-pool snapshot physical asset decomposition mismatch"

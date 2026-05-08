@@ -282,7 +282,7 @@ contract HousePoolTest is BasePerpTest {
         bytes[] memory empty;
         router.executeOrder(1, empty);
 
-        uint256 fees = engine.accumulatedFeesUsdc();
+        uint256 fees = engine.protocolTreasuryBalanceUsdc();
         assertTrue(fees > 0, "Fees should exist after trade");
 
         // Pool balance includes the seized margin (exec fee goes to pool as part of seize)
@@ -501,7 +501,7 @@ contract HousePoolTest is BasePerpTest {
     function helper_AssignUnassignedAssets_MintsMatchingSharesToReceiver() public {
         usdc.mint(address(pool), 100_000e6);
         vm.prank(address(engine));
-        pool.recordProtocolInflow(100_000e6);
+        pool.recordProtocolBackingInflow(100_000e6);
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -825,7 +825,7 @@ contract HousePoolTest is BasePerpTest {
 
         usdc.mint(address(pool), 1500e6);
         vm.prank(address(engine));
-        pool.recordProtocolInflow(1500e6);
+        pool.recordProtocolBackingInflow(1500e6);
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -838,7 +838,7 @@ contract HousePoolTest is BasePerpTest {
     function helper_UnassignedAssets_AreReservedFromWithdrawalLiquidity() public {
         usdc.mint(address(pool), 100_000e6);
         vm.prank(address(engine));
-        pool.recordProtocolInflow(100_000e6);
+        pool.recordProtocolBackingInflow(100_000e6);
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -1065,7 +1065,7 @@ contract HousePoolTest is BasePerpTest {
 
         usdc.mint(address(pool), 10_000e6);
         vm.prank(address(engine));
-        pool.recordProtocolInflow(10_000e6);
+        pool.recordProtocolBackingInflow(10_000e6);
         vm.prank(address(juniorVault));
         pool.reconcile();
 
@@ -1145,16 +1145,16 @@ contract HousePoolTest is BasePerpTest {
         assertEq(usdc.balanceOf(treasury), 25_000e6, "Sweep recipient should receive only the quarantined donation");
     }
 
-    function test_RecordProtocolInflow_EngineCanAccountRawExcess() public {
+    function test_RecordProtocolBackingInflow_EngineCanAccountRawExcess() public {
         _fundJunior(bob, 500_000e6);
         usdc.mint(address(pool), 25_000e6);
 
         vm.prank(alice);
         vm.expectRevert(HousePool.HousePool__Unauthorized.selector);
-        pool.recordProtocolInflow(25_000e6);
+        pool.recordProtocolBackingInflow(25_000e6);
 
         vm.prank(address(engine));
-        pool.recordProtocolInflow(25_000e6);
+        pool.recordProtocolBackingInflow(25_000e6);
 
         assertEq(
             pool.totalAssets(),
@@ -1164,12 +1164,12 @@ contract HousePoolTest is BasePerpTest {
         assertEq(pool.excessAssets(), 0, "Engine-accounted inflow should not remain quarantined as excess");
     }
 
-    function test_RecordProtocolInflow_SettlementModuleCanAccountRawExcess() public {
+    function test_RecordProtocolBackingInflow_SettlementModuleCanAccountRawExcess() public {
         _fundJunior(bob, 500_000e6);
         usdc.mint(address(pool), 25_000e6);
 
         vm.prank(address(engine.settlementModule()));
-        pool.recordProtocolInflow(25_000e6);
+        pool.recordProtocolBackingInflow(25_000e6);
 
         assertEq(
             pool.totalAssets(),
@@ -1179,7 +1179,7 @@ contract HousePoolTest is BasePerpTest {
         assertEq(pool.excessAssets(), 0, "Settlement-module-accounted inflow should not remain quarantined as excess");
     }
 
-    function test_RecordProtocolInflow_OrderRouterCannotAccountRawExcess() public {
+    function test_RecordProtocolBackingInflow_OrderRouterCannotAccountRawExcess() public {
         _fundJunior(bob, 500_000e6);
         usdc.mint(address(pool), 25_000e6);
 
@@ -1187,20 +1187,20 @@ contract HousePoolTest is BasePerpTest {
 
         vm.prank(address(router));
         vm.expectRevert(HousePool.HousePool__Unauthorized.selector);
-        pool.recordProtocolInflow(25_000e6);
+        pool.recordProtocolBackingInflow(25_000e6);
 
         assertEq(pool.totalAssets(), accountedBefore, "Router must not mutate canonical pool assets directly");
         assertEq(pool.excessAssets(), 25_000e6, "Router-rejected inflow should remain quarantined as raw excess");
     }
 
-    function test_RecordProtocolInflow_RestoresCanonicalAssetsAfterRawShortfall() public {
+    function test_RecordProtocolBackingInflow_RestoresCanonicalAssetsAfterRawShortfall() public {
         _fundJunior(bob, 500_000e6);
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), 100_000e6);
         usdc.mint(address(pool), 10_000e6);
 
         vm.prank(address(engine));
-        pool.recordProtocolInflow(10_000e6);
+        pool.recordProtocolBackingInflow(10_000e6);
 
         assertEq(
             pool.totalAssets(),
@@ -1275,7 +1275,7 @@ contract HousePoolTest is BasePerpTest {
         router.executeOrder(1, empty);
 
         // 100k BULL at $1.00: protocol accrues the full $40 execution fee.
-        uint256 fees = engine.accumulatedFeesUsdc();
+        uint256 fees = engine.protocolTreasuryBalanceUsdc();
         assertEq(fees, 40_000_000, "Protocol fees should remain separate from reserved execution bounty escrow");
 
         uint256 freeUSDC = pool.getFreeUSDC();
@@ -1626,7 +1626,7 @@ contract HousePoolTest is BasePerpTest {
         // Pool cash must cover LP claims + fees + conservative unrealized liabilities
         uint256 poolBalance = usdc.balanceOf(address(pool));
         uint256 juniorAfter = pool.juniorPrincipal();
-        uint256 fees = engine.accumulatedFeesUsdc();
+        uint256 fees = engine.protocolTreasuryBalanceUsdc();
         uint256 reserved = fees;
         assertGe(poolBalance, juniorAfter + reserved, "Pool cash must cover LP claims + reserved obligations");
     }
@@ -2238,7 +2238,7 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         _fundTrader(trader, 50_000e6);
 
         uint256 assetsBefore = pool.totalAssets();
-        uint256 feesBefore = engine.accumulatedFeesUsdc();
+        uint256 feesBefore = engine.protocolTreasuryBalanceUsdc();
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8, false);
@@ -2246,7 +2246,7 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         router.executeOrder(1, empty);
 
         uint256 assetsDelta = pool.totalAssets() - assetsBefore;
-        uint256 feesDelta = engine.accumulatedFeesUsdc() - feesBefore;
+        uint256 feesDelta = engine.protocolTreasuryBalanceUsdc() - feesBefore;
         (, uint256 pendingJunior,,) = pool.getPendingTrancheState();
         uint256 expectedLpTradingRevenue = assetsDelta > feesDelta ? assetsDelta - feesDelta : 0;
 
@@ -2259,8 +2259,14 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         );
 
         uint256 juniorBeforeFeeWithdrawal = pool.juniorPrincipal();
-        address feeRecipient = address(0xAB1718);
-        engine.withdrawFees(feeRecipient);
+        address feeRecipient = engine.protocolTreasury();
+        uint256 recipientBalanceBefore = usdc.balanceOf(feeRecipient);
+        _withdrawProtocolTreasury(feesDelta);
+        assertEq(
+            usdc.balanceOf(feeRecipient) - recipientBalanceBefore,
+            feesDelta,
+            "Treasury should withdraw protocol fee margin"
+        );
         assertEq(
             pool.juniorPrincipal(), juniorBeforeFeeWithdrawal, "Fee withdrawal should not drain seeded LP principal"
         );
@@ -2340,7 +2346,7 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
     function helper_UnassignedAssets_AreReservedFromWithdrawalLiquidity() public {
         usdc.mint(address(pool), 100_000e6);
         vm.prank(address(engine));
-        pool.recordProtocolInflow(100_000e6);
+        pool.recordProtocolBackingInflow(100_000e6);
         vm.prank(address(juniorVault));
         pool.reconcile();
         (,, uint256 maxSeniorWithdraw, uint256 maxJuniorWithdraw) = pool.getPendingTrancheState();
@@ -2417,7 +2423,7 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         assertGt(pool.seniorHighWaterMark(), 0);
         usdc.mint(address(pool), 10_000e6);
         vm.prank(address(engine));
-        pool.recordProtocolInflow(10_000e6);
+        pool.recordProtocolBackingInflow(10_000e6);
         vm.prank(address(juniorVault));
         pool.reconcile();
         pool.assignUnassignedAssets(true, alice);
@@ -2848,7 +2854,7 @@ contract HousePoolAuditTest is BasePerpTest {
 
         uint256 poolBalance = usdc.balanceOf(address(pool));
         uint256 totalClaimed = pool.seniorPrincipal() + pool.juniorPrincipal();
-        uint256 pendingFees = engine.accumulatedFeesUsdc();
+        uint256 pendingFees = engine.protocolTreasuryBalanceUsdc();
 
         assertGe(totalClaimed + pendingFees, poolBalance, "All pool cash must be accounted for with zero open interest");
     }
@@ -2911,16 +2917,17 @@ contract HousePoolAuditTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 250_100e18, 25_000e6, 1e8, false);
         router.executeOrder(id2, priceData);
 
-        uint256 fees = engine.accumulatedFeesUsdc();
+        uint256 fees = engine.protocolTreasuryBalanceUsdc();
         assertGt(fees, 0, "Fees should have accumulated");
 
         uint256 maxLiability = _sideMaxProfit(CfdTypes.Side.BULL);
         assertEq(maxLiability, 500_100e6, "Both positions should be open");
 
-        address feeRecipient = address(0xFEE);
-        engine.withdrawFees(feeRecipient);
+        address feeRecipient = engine.protocolTreasury();
+        uint256 recipientBalanceBefore = usdc.balanceOf(feeRecipient);
+        _withdrawProtocolTreasury(fees);
 
-        assertEq(usdc.balanceOf(feeRecipient), fees, "Fee recipient should receive fees");
+        assertEq(usdc.balanceOf(feeRecipient) - recipientBalanceBefore, fees, "Fee recipient should receive fees");
     }
 
     // Regression: C-03 — senior HWM preserved for restoration after wipeout

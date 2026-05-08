@@ -138,7 +138,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
     event FrozenLpFeesUpdated(uint256 seniorFeeBps, uint256 juniorFeeBps);
     event ExcessAccounted(uint256 amountUsdc, uint256 accountedAssetsUsdc);
     event ExcessSwept(address indexed recipient, uint256 amountUsdc);
-    event ProtocolInflowAccounted(address indexed caller, uint256 amountUsdc, uint256 accountedAssetsUsdc);
+    event ProtocolBackingInflowAccounted(address indexed caller, uint256 amountUsdc, uint256 accountedAssetsUsdc);
     event ClaimantInflowAccounted(
         address indexed caller,
         ICfdVault.ClaimantInflowKind kind,
@@ -413,11 +413,12 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
 
     /// @notice Accounts legitimate non-LP protocol-recognized backing into canonical vault assets.
     /// @dev Only the engine or settlement module may use this path. Router-sourced protocol fees
-    ///      must route through the engine fee-record path. Unlike `accountExcess()`, this does
-    ///      not require raw excess to exist: it is the explicit accounting hook for endogenous
-    ///      protocol gains and may also be used to restore canonical accounting after a raw-balance
-    ///      shortfall has already reduced effective assets through `totalAssets() = min(raw, accounted)`.
-    function recordProtocolInflow(
+    ///      must route to the treasury clearinghouse account instead. Unlike `accountExcess()`,
+    ///      this does not require raw excess to exist: it is the explicit accounting hook for
+    ///      non-fee protocol backing and may also be used to restore canonical accounting after a
+    ///      raw-balance shortfall has already reduced effective assets through
+    ///      `totalAssets() = min(raw, accounted)`.
+    function recordProtocolBackingInflow(
         uint256 amount
     ) external {
         if (msg.sender != address(ENGINE) && msg.sender != ENGINE.settlementModule()) {
@@ -427,7 +428,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
             return;
         }
         accountedAssets += amount;
-        emit ProtocolInflowAccounted(msg.sender, amount, accountedAssets);
+        emit ProtocolBackingInflowAccounted(msg.sender, amount, accountedAssets);
     }
 
     /// @notice Records claimant-owned value into the tranche claimant path.

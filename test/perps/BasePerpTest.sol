@@ -96,6 +96,7 @@ abstract contract BasePerpTest is Test {
     uint256 constant CAP_PRICE = 2e8;
     bytes32 internal constant BASE_PYTH_FEED_A = bytes32(uint256(1));
     bytes32 internal constant BASE_PYTH_FEED_B = bytes32(uint256(2));
+    address internal constant PROTOCOL_TREASURY_ACCOUNT = address(0xFEE50001);
 
     receive() external payable {}
 
@@ -733,6 +734,7 @@ abstract contract BasePerpTest is Test {
         CfdEngineSettlementModule settlement = new CfdEngineSettlementModule(address(deployedEngine));
         CfdEngineAdmin adminModule = new CfdEngineAdmin(address(deployedEngine), address(this));
         deployedEngine.setDependencies(address(planner), address(settlement), address(adminModule));
+        deployedEngine.setProtocolTreasury(PROTOCOL_TREASURY_ACCOUNT);
     }
 
     function _syncRouterAdmin() internal {
@@ -803,6 +805,14 @@ abstract contract BasePerpTest is Test {
         }
         uint256 maxExecutionBountyUsdc = router.maxOpenOrderExecutionBountyUsdc();
         return executionBountyUsdc > maxExecutionBountyUsdc ? maxExecutionBountyUsdc : executionBountyUsdc;
+    }
+
+    function _engineExecutionFeeUsdc(
+        uint256 sizeDelta,
+        uint256 price
+    ) internal view returns (uint256) {
+        uint256 notionalUsdc = (sizeDelta * price) / DecimalConstants.USDC_TO_TOKEN_SCALE;
+        return (notionalUsdc * engine.executionFeeBps()) / 10_000;
     }
 
     function _sideOpenInterest(
@@ -898,6 +908,23 @@ abstract contract BasePerpTest is Test {
         address account
     ) internal view returns (uint256) {
         return clearinghouse.balanceUsdc(_accountOf(account));
+    }
+
+    function _fundProtocolTreasury(
+        uint256 amountUsdc
+    ) internal {
+        address treasury = engine.protocolTreasury();
+        usdc.mint(address(clearinghouse), amountUsdc);
+        vm.prank(address(engine));
+        clearinghouse.settleUsdc(treasury, int256(amountUsdc));
+    }
+
+    function _withdrawProtocolTreasury(
+        uint256 amountUsdc
+    ) internal {
+        address treasury = engine.protocolTreasury();
+        vm.prank(treasury);
+        clearinghouse.withdraw(treasury, amountUsdc);
     }
 
     function _terminalReachableUsdc(

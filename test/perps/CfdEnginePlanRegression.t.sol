@@ -301,7 +301,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             uint8(delta.revertCode), uint8(CfdEnginePlanTypes.OpenRevertCode.OK), "Setup should not predict failure"
         );
 
-        uint256 feesBefore = engine.accumulatedFeesUsdc();
+        uint256 feesBefore = engine.protocolTreasuryBalanceUsdc();
         _open(account, CfdTypes.Side.BULL, order.sizeDelta, order.marginDelta, 1e8);
 
         (uint256 size, uint256 margin, uint256 entryPrice,,,,) = engine.positions(account);
@@ -309,7 +309,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         assertEq(margin, delta.positionMarginAfterOpen, "Live open margin should match planner delta");
         assertEq(entryPrice, delta.newPosEntryPrice, "Live open entry price should match planner delta");
         assertEq(
-            engine.accumulatedFeesUsdc() - feesBefore,
+            engine.protocolTreasuryBalanceUsdc() - feesBefore,
             delta.executionFeeUsdc,
             "Live open fee collection should match planner execution fee"
         );

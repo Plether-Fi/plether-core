@@ -66,7 +66,7 @@ The owner can act immediately to:
 - pause and unpause `OrderRouter` through `OrderRouterAdmin`,
 - pause and unpause `HousePool`,
 - assign the dedicated `pauser` role on `OrderRouter` and `HousePool`,
-- withdraw protocol fees,
+- set the protocol treasury account,
 - transfer ownership.
 
 The owner cannot:
@@ -81,11 +81,11 @@ The owner cannot:
 
 Several perps contracts intentionally expose narrow but high-authority capability surfaces.
 
-- `OrderRouter` is the external execution boundary and can reach engine settlement paths plus `HousePool.payOut(...)` through the approved caller set. Router-sourced protocol inflows must route through the engine fee-record path rather than calling `recordProtocolInflow(...)` directly.
+- `OrderRouter` is the external execution boundary and can reach engine settlement paths plus `HousePool.payOut(...)` through the approved caller set. Router-sourced protocol inflows must physically fund the clearinghouse and credit the treasury account directly rather than calling `recordProtocolBackingInflow(...)`.
 - `CfdEngineSettlementModule` is engine-gated, but any external function added there is automatically security-critical because it can reach engine-owned settlement hooks.
 - `MarginClearinghouse` operator paths trust `engine`, `orderRouter`, and `settlementModule` to move trader custody across settlement, escrow, and seizure buckets.
 - `MarginClearinghouse.reserveStaleCloseExecutionBountyFromSettlement(...)` and `reserveStaleCloseExecutionBountyFromPositionMargin(...)` are intentionally narrow stale close-commit escape hatches; they must remain reserved for risk-reducing stale fallback flows that have already been bounded by router/engine policy.
-- `HousePool.payOut(...)` trusts `engine`, `orderRouter`, and `settlementModule` as capability-bearing callers; `HousePool.recordProtocolInflow(...)` is narrower and trusts only `engine` and `settlementModule`.
+- `HousePool.payOut(...)` trusts `engine`, `orderRouter`, and `settlementModule` as capability-bearing callers; `HousePool.recordProtocolBackingInflow(...)` is narrower, trusts only `engine` and `settlementModule`, and is not used for protocol-fee custody in the treasury-margin model.
 
 Practical rule:
 

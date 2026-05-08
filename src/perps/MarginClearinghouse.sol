@@ -533,13 +533,26 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         _lockMargin(account, IMarginClearinghouse.MarginBucket.Position, amountUsdc);
     }
 
-    /// @notice Applies an open/increase trade cost by debiting or crediting settlement and updating locked margin.
+    /// @notice Applies an open/increase trade cost and routes any cash-collected protocol fee to a treasury account.
     function applyOpenCost(
         address account,
         uint256 marginDeltaUsdc,
         int256 tradeCostUsdc,
-        address recipient
-    ) external onlyOperator returns (int256 netMarginChangeUsdc) {
+        address recipient,
+        address protocolFeeAccount,
+        uint256 protocolFeeUsdc
+    ) external onlyOperator returns (int256 netMarginChangeUsdc, uint256 protocolFeeCreditedUsdc) {
+        return _applyOpenCost(account, marginDeltaUsdc, tradeCostUsdc, recipient, protocolFeeAccount, protocolFeeUsdc);
+    }
+
+    function _applyOpenCost(
+        address account,
+        uint256 marginDeltaUsdc,
+        int256 tradeCostUsdc,
+        address recipient,
+        address protocolFeeAccount,
+        uint256 protocolFeeUsdc
+    ) internal returns (int256 netMarginChangeUsdc, uint256 protocolFeeCreditedUsdc) {
         MarginClearinghouseAccountingLib.OpenCostPlan memory plan =
             MarginClearinghouseAccountingLib.planOpenCostApplication(
                 _buildAccountUsdcBuckets(account), marginDeltaUsdc, tradeCostUsdc
@@ -561,17 +574,14 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
             _unlockMargin(account, IMarginClearinghouse.MarginBucket.Position, plan.positionMarginUnlockedUsdc);
         }
 
-        if (plan.settlementDebitUsdc > 0) {
-            settlementBalances[account] -= plan.settlementDebitUsdc;
-        }
-
         if (plan.positionMarginLockedUsdc > 0) {
             _lockMargin(account, IMarginClearinghouse.MarginBucket.Position, plan.positionMarginLockedUsdc);
         }
 
         if (plan.settlementDebitUsdc > 0) {
-            IERC20(settlementAsset).safeTransfer(recipient, plan.settlementDebitUsdc);
-            emit AssetSeized(account, settlementAsset, plan.settlementDebitUsdc, recipient);
+            protocolFeeCreditedUsdc = _routeSettlementDebit(
+                account, plan.settlementDebitUsdc, recipient, protocolFeeAccount, protocolFeeUsdc
+            );
         }
     }
 
@@ -616,17 +626,41 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         emit AssetSeized(account, settlementAsset, totalConsumedUsdc, recipient);
     }
 
-    /// @notice Consumes close-path losses from settlement buckets while preserving any explicitly protected remaining position margin.
+    /// @notice Consumes close-path losses and routes any cash-collected protocol fee to a treasury account.
     function consumeCloseLoss(
         address account,
         uint64[] calldata reservationOrderIds,
         uint256 lossUsdc,
         uint256 protectedLockedMarginUsdc,
         bool includeOtherLockedMargin,
-        address recipient
-    ) external onlyOperator returns (uint256 seizedUsdc, uint256 shortfallUsdc) {
+        address recipient,
+        address protocolFeeAccount,
+        uint256 protocolFeeUsdc
+    ) external onlyOperator returns (uint256 seizedUsdc, uint256 shortfallUsdc, uint256 protocolFeeCreditedUsdc) {
+        return _consumeCloseLoss(
+            account,
+            reservationOrderIds,
+            lossUsdc,
+            protectedLockedMarginUsdc,
+            includeOtherLockedMargin,
+            recipient,
+            protocolFeeAccount,
+            protocolFeeUsdc
+        );
+    }
+
+    function _consumeCloseLoss(
+        address account,
+        uint64[] calldata reservationOrderIds,
+        uint256 lossUsdc,
+        uint256 protectedLockedMarginUsdc,
+        bool includeOtherLockedMargin,
+        address recipient,
+        address protocolFeeAccount,
+        uint256 protocolFeeUsdc
+    ) internal returns (uint256 seizedUsdc, uint256 shortfallUsdc, uint256 protocolFeeCreditedUsdc) {
         if (lossUsdc == 0) {
-            return (0, 0);
+            return (0, 0, 0);
         }
 
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = includeOtherLockedMargin
@@ -650,7 +684,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         shortfallUsdc = consumption.uncoveredUsdc;
 
         if (seizedUsdc == 0) {
-            return (0, shortfallUsdc);
+            return (0, shortfallUsdc, 0);
         }
 
         if (mutation.positionMarginUnlockedUsdc > 0) {
@@ -664,9 +698,9 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
             );
         }
 
-        settlementBalances[account] -= mutation.settlementDebitUsdc;
-        IERC20(settlementAsset).safeTransfer(recipient, mutation.settlementDebitUsdc);
-        emit AssetSeized(account, settlementAsset, mutation.settlementDebitUsdc, recipient);
+        protocolFeeCreditedUsdc = _routeSettlementDebit(
+            account, mutation.settlementDebitUsdc, recipient, protocolFeeAccount, protocolFeeUsdc
+        );
     }
 
     /// @notice Applies a pre-planned liquidation settlement mutation.
@@ -709,6 +743,28 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         uint256 lossUsdc
     ) internal view returns (MarginClearinghouseAccountingLib.SettlementConsumption memory consumption) {
         return MarginClearinghouseAccountingLib.planCarryLossConsumption(_buildAccountUsdcBuckets(account), lossUsdc);
+    }
+
+    function _routeSettlementDebit(
+        address account,
+        uint256 amountUsdc,
+        address recipient,
+        address protocolFeeAccount,
+        uint256 protocolFeeUsdc
+    ) internal returns (uint256 protocolFeeCreditedUsdc) {
+        settlementBalances[account] -= amountUsdc;
+
+        if (protocolFeeAccount != address(0) && protocolFeeUsdc > 0) {
+            protocolFeeCreditedUsdc = protocolFeeUsdc < amountUsdc ? protocolFeeUsdc : amountUsdc;
+            settlementBalances[protocolFeeAccount] += protocolFeeCreditedUsdc;
+            emit AssetSeized(account, settlementAsset, protocolFeeCreditedUsdc, protocolFeeAccount);
+        }
+
+        uint256 recipientTransferUsdc = amountUsdc - protocolFeeCreditedUsdc;
+        if (recipientTransferUsdc > 0) {
+            IERC20(settlementAsset).safeTransfer(recipient, recipientTransferUsdc);
+            emit AssetSeized(account, settlementAsset, recipientTransferUsdc, recipient);
+        }
     }
 
     function _creditSettlementUsdc(

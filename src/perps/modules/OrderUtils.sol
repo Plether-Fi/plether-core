@@ -40,10 +40,7 @@ abstract contract OrderUtils is OrderRouterBase {
         }
 
         CashPriorityLib.SeniorCashReservation memory reservation = CashPriorityLib.reserveFreshPayouts(
-            housePool.totalAssets(),
-            engine.accumulatedFeesUsdc(),
-            engine.totalDeferredTraderCreditUsdc(),
-            engine.totalDeferredKeeperCreditUsdc()
+            housePool.totalAssets(), engine.totalDeferredTraderCreditUsdc(), engine.totalDeferredKeeperCreditUsdc()
         );
         if (liquidationBountyUsdc > reservation.freeCashUsdc) {
             engine.recordDeferredKeeperCredit(msg.sender, liquidationBountyUsdc);
@@ -77,8 +74,8 @@ abstract contract OrderUtils is OrderRouterBase {
             return;
         }
 
-        USDC.safeTransfer(address(housePool), forfeitedUsdc);
-        engine.recordRouterProtocolFee(forfeitedUsdc);
+        USDC.safeTransfer(address(clearinghouse), forfeitedUsdc);
+        clearinghouse.settleUsdc(engine.protocolTreasury(), int256(forfeitedUsdc));
     }
 
 }

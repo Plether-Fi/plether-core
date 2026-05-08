@@ -8,7 +8,6 @@ import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
 import {ICfdEngineLens} from "./interfaces/ICfdEngineLens.sol";
 import {ICfdEnginePlanner} from "./interfaces/ICfdEnginePlanner.sol";
 import {IMarginClearinghouse} from "./interfaces/IMarginClearinghouse.sol";
-import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
 import {CfdEnginePlanLib} from "./libraries/CfdEnginePlanLib.sol";
 
 contract CfdEngineLens is ICfdEngineLens {
@@ -251,7 +250,6 @@ contract CfdEngineLens is ICfdEngineLens {
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(engineContract.clearinghouse());
         snap.accountBuckets = clearinghouse.getAccountUsdcBuckets(account);
         snap.lockedBuckets = clearinghouse.getLockedMarginBuckets(account);
-        snap.accumulatedFeesUsdc = engineContract.accumulatedFeesUsdc();
         snap.accumulatedBadDebtUsdc = engineContract.accumulatedBadDebtUsdc();
         snap.unsettledCarryUsdc = engineContract.unsettledCarryUsdc(account);
         snap.totalDeferredTraderCreditUsdc = engineContract.totalDeferredTraderCreditUsdc();
@@ -269,18 +267,9 @@ contract CfdEngineLens is ICfdEngineLens {
     function _applyLiquidationPreviewForfeiture(
         address account,
         CfdEnginePlanTypes.RawSnapshot memory snap
-    ) internal view {
-        address orderRouter = engineContract.orderRouter();
-        if (orderRouter == address(0)) {
-            return;
-        }
-        uint256 forfeitedUsdc = IOrderRouterAccounting(orderRouter).getAccountEscrow(account).executionBountyUsdc;
-        if (forfeitedUsdc == 0) {
-            return;
-        }
-        snap.vaultAssetsUsdc += forfeitedUsdc;
-        snap.vaultCashUsdc += forfeitedUsdc;
-        snap.accumulatedFeesUsdc += forfeitedUsdc;
+    ) internal pure {
+        account;
+        snap;
     }
 
     function _position(

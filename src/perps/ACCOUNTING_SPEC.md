@@ -43,8 +43,8 @@ Use these terms consistently:
 - `accountedAssets`: canonical protocol-owned USDC recognized by pool accounting
 - `excessAssets = max(rawAssets - accountedAssets, 0)`: unsolicited or otherwise unaccounted positive balance
 - `physicalAssets = totalAssets() = min(rawAssets, accountedAssets)`: conservative economic pool backing
-- `protocolFees = accumulatedFeesUsdc`: protocol-owned inventory, not LP equity
-- `netPhysicalAssets = physicalAssets - protocolFees`
+- `treasuryFees = protocolTreasuryBalanceUsdc()`: protocol-owned inventory held as treasury margin in `MarginClearinghouse`, not LP equity
+- `netPhysicalAssets = physicalAssets`
 
 Operational rules:
 
@@ -184,7 +184,6 @@ Key fields:
 - `unrealizedMtmLiabilityUsdc`
 - `deferredTraderCreditUsdc`
 - `deferredKeeperCreditUsdc`
-- `protocolFeesUsdc`
 - `markFreshnessRequired`
 - `maxMarkStaleness`
 
@@ -227,7 +226,7 @@ Accounting rules:
 - `deposit` and `mint` move gross USDC into the tranche while charging the frozen fee by minting fewer net shares (or grossing up the requested share target for `mint`),
 - `withdraw` and `redeem` burn shares against the gross tranche claim while paying only net user assets after the frozen fee,
 - the fee does not become protocol revenue,
-- the fee does not increase `accumulatedFeesUsdc`,
+- the fee does not increase `protocolTreasuryBalanceUsdc`,
 - the fee remains inside the same tranche and therefore benefits incumbent LPs of that tranche only.
 
 Consequences:
@@ -262,7 +261,7 @@ Not every inflow into `HousePool` is LP equity.
 
 Keep these categories separate:
 
-- `recordProtocolInflow`: non-LP protocol-recognized backing, including protocol fees routed through `CfdEngine` and settlement-module keeper-liability backing; `OrderRouter` does not call this hook directly
+- `recordProtocolBackingInflow`: non-LP protocol-recognized pool backing such as settlement-module keeper-liability backing; protocol fees route to the treasury clearinghouse account instead of this hook
 - `recordClaimantInflow(amount, Recapitalization, CashArrived)`: recapitalization intended to restore waterfall claimants
 - `recordClaimantInflow(amount, Revenue, CashArrived)`: claimant-owned value where fresh cash entered the vault in this flow
 - `recordClaimantInflow(amount, Revenue, AlreadyRetained)`: claimant-owned value already retained physically by the vault and only needing ownership routing
@@ -385,11 +384,11 @@ Required properties:
 - skew-reducing rebates must count as reachable collateral for projected IMR checks,
 - open preview and execution should not reject a trade solely because the planner omitted a rebate that the live settlement would credit.
 
-### Fee withdrawals
+### Treasury fee withdrawals
 
-- protocol fee withdrawal may be partial,
-- withdrawing a safe subset of `accumulatedFeesUsdc` must not require the entire fee balance to be currently withdrawable,
-- post-withdraw solvency and deferred-liability reservations must still hold.
+- protocol fee withdrawal is a standard `MarginClearinghouse` withdrawal from the configured treasury account,
+- `CfdEngine.protocolTreasuryBalanceUsdc()` reports the configured treasury account balance,
+- withdrawing treasury margin must not consume `HousePool` cash, deferred claims, or LP withdrawal reserves.
 
 ### Liquidation settlement
 

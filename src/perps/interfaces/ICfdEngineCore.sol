@@ -18,6 +18,8 @@ interface ICfdEngineCore {
 
     function orderRouter() external view returns (address);
 
+    function protocolTreasury() external view returns (address);
+
     function settlementModule() external view returns (address);
 
     function USDC() external view returns (IERC20);
@@ -57,15 +59,6 @@ interface ICfdEngineCore {
         address recipient
     ) external;
 
-    function absorbRouterCancellationFee(
-        uint256 amountUsdc
-    ) external;
-
-    /// @notice Books router-delivered protocol-owned inflow as accumulated fees after the router has funded the vault.
-    function recordRouterProtocolFee(
-        uint256 amountUsdc
-    ) external;
-
     function creditKeeperExecutionBounty(
         address beneficiary,
         uint256 amountUsdc,
@@ -73,7 +66,7 @@ interface ICfdEngineCore {
         uint64 publishTime
     ) external;
 
-    function accumulatedFeesUsdc() external view returns (uint256);
+    function protocolTreasuryBalanceUsdc() external view returns (uint256);
 
     function totalDeferredTraderCreditUsdc() external view returns (uint256);
 

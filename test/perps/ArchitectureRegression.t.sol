@@ -33,7 +33,7 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
     address internal bob = address(0xB0B);
     address internal keeper = address(0xBEEF);
 
-    function test_WithdrawFees_MustHonorDeferredKeeperLiabilities() public {
+    function test_ProtocolFees_AreCustodiedInTreasuryMargin() public {
         address account = alice;
         _fundTrader(alice, 20_000e6);
         _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
@@ -41,8 +41,13 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         vm.prank(address(router));
         engine.recordDeferredKeeperCredit(keeper, 950_001e6);
 
-        vm.expectRevert(CfdEngine.CfdEngine__PostOpSolvencyBreach.selector);
-        engine.withdrawFees(address(this));
+        uint256 fees = engine.protocolTreasuryBalanceUsdc();
+        assertGt(fees, 0, "Setup should accrue protocol fees");
+        assertEq(
+            clearinghouse.balanceUsdc(engine.protocolTreasury()),
+            fees,
+            "Protocol fees should live in the treasury clearinghouse account"
+        );
     }
 
     function test_Reconcile_MustSubtractDeferredLiquidationBounties() public {
@@ -84,7 +89,9 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         _close(bobAccount, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
 
         assertGt(
-            engine.deferredTraderCreditUsdc(bobAccount), 0, "new payout must defer while older deferred claims reserve cash"
+            engine.deferredTraderCreditUsdc(bobAccount),
+            0,
+            "new payout must defer while older deferred claims reserve cash"
         );
         assertEq(
             clearinghouse.balanceUsdc(bobAccount),
@@ -154,8 +161,12 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         vm.prank(alice);
         engine.claimDeferredTraderCredit(aliceAccount);
 
-        assertEq(engine.deferredTraderCreditUsdc(aliceAccount), aliceDeferred, "Oldest deferred claim should remain frozen");
-        assertEq(engine.deferredTraderCreditUsdc(bobAccount), bobDeferred, "Unclaimed later balance should remain unchanged");
+        assertEq(
+            engine.deferredTraderCreditUsdc(aliceAccount), aliceDeferred, "Oldest deferred claim should remain frozen"
+        );
+        assertEq(
+            engine.deferredTraderCreditUsdc(bobAccount), bobDeferred, "Unclaimed later balance should remain unchanged"
+        );
 
         usdc.mint(address(pool), bobDeferred / 2);
         vm.expectRevert(CfdEngine.CfdEngine__InsufficientVaultLiquidity.selector);

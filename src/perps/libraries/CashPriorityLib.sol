@@ -5,37 +5,30 @@ library CashPriorityLib {
 
     struct SeniorCashReservation {
         uint256 physicalAssetsUsdc;
-        uint256 protocolFeesUsdc;
         uint256 deferredTraderCreditUsdc;
         uint256 deferredKeeperCreditUsdc;
         uint256 totalSeniorClaimsUsdc;
         uint256 reservedSeniorCashUsdc;
-        uint256 protocolFeeWithdrawalUsdc;
         uint256 freeCashUsdc;
         uint256 deferredClaimServiceableUsdc;
     }
 
     function reserveFreshPayouts(
         uint256 physicalAssetsUsdc,
-        uint256 protocolFeesUsdc,
         uint256 deferredTraderCreditUsdc,
         uint256 deferredKeeperCreditUsdc
     ) internal pure returns (SeniorCashReservation memory reservation) {
-        return _buildSeniorCashReservation(
-            physicalAssetsUsdc, protocolFeesUsdc, deferredTraderCreditUsdc, deferredKeeperCreditUsdc
-        );
+        return _buildSeniorCashReservation(physicalAssetsUsdc, deferredTraderCreditUsdc, deferredKeeperCreditUsdc);
     }
 
     function reserveDeferredClaim(
         uint256 physicalAssetsUsdc,
-        uint256 protocolFeesUsdc,
         uint256 deferredTraderCreditUsdc,
         uint256 deferredKeeperCreditUsdc,
         uint256 deferredClaimAmountUsdc
     ) internal pure returns (SeniorCashReservation memory reservation) {
-        reservation = _buildSeniorCashReservation(
-            physicalAssetsUsdc, protocolFeesUsdc, deferredTraderCreditUsdc, deferredKeeperCreditUsdc
-        );
+        reservation =
+            _buildSeniorCashReservation(physicalAssetsUsdc, deferredTraderCreditUsdc, deferredKeeperCreditUsdc);
 
         if (physicalAssetsUsdc < reservation.totalSeniorClaimsUsdc) {
             return reservation;
@@ -59,58 +52,37 @@ library CashPriorityLib {
 
     function availableCashForFreshPayouts(
         uint256 physicalAssetsUsdc,
-        uint256 protocolFeesUsdc,
         uint256 deferredTraderCreditUsdc,
         uint256 deferredKeeperCreditUsdc
     ) internal pure returns (uint256) {
-        return reserveFreshPayouts(
-            physicalAssetsUsdc, protocolFeesUsdc, deferredTraderCreditUsdc, deferredKeeperCreditUsdc
-        )
-        .freeCashUsdc;
+        return reserveFreshPayouts(physicalAssetsUsdc, deferredTraderCreditUsdc, deferredKeeperCreditUsdc).freeCashUsdc;
     }
 
     function availableCashForDeferredBeneficiaryClaim(
         uint256 physicalAssetsUsdc,
-        uint256 protocolFeesUsdc,
         uint256 deferredTraderCreditUsdc,
         uint256 deferredKeeperCreditUsdc,
         uint256 claimAmountUsdc
     ) internal pure returns (uint256) {
         return reserveDeferredClaim(
-            physicalAssetsUsdc, protocolFeesUsdc, deferredTraderCreditUsdc, deferredKeeperCreditUsdc, claimAmountUsdc
+            physicalAssetsUsdc, deferredTraderCreditUsdc, deferredKeeperCreditUsdc, claimAmountUsdc
         )
         .deferredClaimServiceableUsdc;
     }
 
-    function availableCashForProtocolFeeWithdrawal(
-        uint256 physicalAssetsUsdc,
-        uint256 protocolFeesUsdc,
-        uint256 deferredTraderCreditUsdc,
-        uint256 deferredKeeperCreditUsdc
-    ) internal pure returns (uint256) {
-        return reserveFreshPayouts(
-            physicalAssetsUsdc, protocolFeesUsdc, deferredTraderCreditUsdc, deferredKeeperCreditUsdc
-        )
-        .protocolFeeWithdrawalUsdc;
-    }
-
     function canPayFreshPayout(
         uint256 physicalAssetsUsdc,
-        uint256 protocolFeesUsdc,
         uint256 deferredTraderCreditUsdc,
         uint256 deferredKeeperCreditUsdc,
         uint256 amountUsdc
     ) internal pure returns (bool) {
         return amountUsdc > 0
             && amountUsdc
-                <= availableCashForFreshPayouts(
-                physicalAssetsUsdc, protocolFeesUsdc, deferredTraderCreditUsdc, deferredKeeperCreditUsdc
-            );
+                <= availableCashForFreshPayouts(physicalAssetsUsdc, deferredTraderCreditUsdc, deferredKeeperCreditUsdc);
     }
 
     function canPayDeferredBeneficiaryClaim(
         uint256 physicalAssetsUsdc,
-        uint256 protocolFeesUsdc,
         uint256 deferredTraderCreditUsdc,
         uint256 deferredKeeperCreditUsdc,
         uint256 claimAmountUsdc
@@ -118,25 +90,7 @@ library CashPriorityLib {
         return claimAmountUsdc > 0
             && claimAmountUsdc
                 <= availableCashForDeferredBeneficiaryClaim(
-                physicalAssetsUsdc,
-                protocolFeesUsdc,
-                deferredTraderCreditUsdc,
-                deferredKeeperCreditUsdc,
-                claimAmountUsdc
-            );
-    }
-
-    function canWithdrawProtocolFees(
-        uint256 physicalAssetsUsdc,
-        uint256 protocolFeesUsdc,
-        uint256 deferredTraderCreditUsdc,
-        uint256 deferredKeeperCreditUsdc,
-        uint256 amountUsdc
-    ) internal pure returns (bool) {
-        return amountUsdc > 0
-            && amountUsdc
-                <= availableCashForProtocolFeeWithdrawal(
-                physicalAssetsUsdc, protocolFeesUsdc, deferredTraderCreditUsdc, deferredKeeperCreditUsdc
+                physicalAssetsUsdc, deferredTraderCreditUsdc, deferredKeeperCreditUsdc, claimAmountUsdc
             );
     }
 
@@ -149,22 +103,15 @@ library CashPriorityLib {
 
     function _buildSeniorCashReservation(
         uint256 physicalAssetsUsdc,
-        uint256 protocolFeesUsdc,
         uint256 deferredTraderCreditUsdc,
         uint256 deferredKeeperCreditUsdc
     ) private pure returns (SeniorCashReservation memory reservation) {
         reservation.physicalAssetsUsdc = physicalAssetsUsdc;
-        reservation.protocolFeesUsdc = protocolFeesUsdc;
         reservation.deferredTraderCreditUsdc = deferredTraderCreditUsdc;
         reservation.deferredKeeperCreditUsdc = deferredKeeperCreditUsdc;
         reservation.totalSeniorClaimsUsdc = reservedSeniorCashUsdc(deferredTraderCreditUsdc, deferredKeeperCreditUsdc);
         reservation.reservedSeniorCashUsdc = reservation.totalSeniorClaimsUsdc;
-        reservation.protocolFeeWithdrawalUsdc = protocolFeesUsdc
-            < _saturatingSub(physicalAssetsUsdc, reservation.reservedSeniorCashUsdc)
-            ? protocolFeesUsdc
-            : _saturatingSub(physicalAssetsUsdc, reservation.reservedSeniorCashUsdc);
-        reservation.freeCashUsdc =
-            _saturatingSub(_saturatingSub(physicalAssetsUsdc, reservation.reservedSeniorCashUsdc), protocolFeesUsdc);
+        reservation.freeCashUsdc = _saturatingSub(physicalAssetsUsdc, reservation.reservedSeniorCashUsdc);
     }
 
 }
