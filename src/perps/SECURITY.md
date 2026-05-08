@@ -238,9 +238,9 @@ The router uses delayed commit/execute semantics rather than same-tx market exec
 Security properties:
 
 - trader intent is committed before keeper execution,
-- live-market execution uses Pyth's unique historical parse over `[commitTime, commitTime + orderSettlementWindow]`, capped at `block.timestamp`, so settlement is bound to the first post-commit tick rather than the keeper's reveal-time tick,
-- the unique historical parse rejects skipped ticks because the parsed update must prove its previous publish time is before the order's `commitTime`,
-- batch execution may reuse a parsed historical basket only for later FIFO orders whose `commitTime` falls within the cached tick's proven coverage,
+- live-market execution uses Pyth's unique historical parse over `(commitTime, commitTime + orderSettlementWindow]`, capped at `block.timestamp`, so settlement is bound to the first post-commit tick rather than the keeper's reveal-time tick,
+- the unique historical parse rejects skipped ticks because the parsed update must prove its previous publish time is no later than the order's `commitTime`,
+- batch execution may reuse a parsed historical basket only for later FIFO orders whose `commitTime` is strictly before the cached tick and falls within its proven coverage,
 - basket confidence is included in execution and liquidation prices instead of being treated only as metadata,
 - FIFO execution prevents later orders from bypassing earlier ones,
 - binding order semantics prevent traders from turning queued intents into free options.

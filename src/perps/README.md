@@ -108,7 +108,7 @@ The main runtime and read surfaces are:
 2. Submit an open or close intent through `OrderRouter.commitOrder(...)`.
 3. The router records a FIFO order, reserves committed margin, and escrows a keeper execution bounty.
 4. A keeper later calls `executeOrder(...)` or `executeOrderBatch(...)` with Pyth update data.
-5. `OrderRouter` resolves the first valid Pyth tick at or after the order's `commitTime`, applies conservative confidence-adjusted pricing, validates slippage and queue eligibility, then calls `CfdEngine.processOrderTyped(...)`.
+5. `OrderRouter` resolves the first valid Pyth tick strictly after the order's `commitTime`, applies conservative confidence-adjusted pricing, validates slippage and queue eligibility, then calls `CfdEngine.processOrderTyped(...)`.
 6. `CfdEngine` updates the position, realizes fees and carry, and settles through `MarginClearinghouse` and `HousePool`.
 
 Important details:
@@ -296,9 +296,9 @@ These domains answer different questions. They should not silently share assumpt
 
 - Keepers execute from the global queue head.
 - Pyth update data is required for live-market execution and the caller must attach ETH for the Pyth fee.
-- Live order settlement uses Pyth's unique historical parse over `[commitTime, commitTime + orderSettlementWindow]`, capped at `block.timestamp`, rather than the latest reveal-time price.
-- `executeOrderBatch` caches a successfully parsed historical basket and reuses it for later FIFO orders whose `commitTime` is still covered by the same unique tick, avoiding repeated Pyth parsing for clustered commits.
-- A keeper cannot skip an unfavorable post-commit tick by submitting a later tick: the unique parse requires the previous publish time to be before the order's `commitTime`.
+- Live order settlement uses Pyth's unique historical parse over `(commitTime, commitTime + orderSettlementWindow]`, capped at `block.timestamp`, rather than the latest reveal-time price.
+- `executeOrderBatch` caches a successfully parsed historical basket and reuses it for later FIFO orders whose `commitTime` is still strictly before the cached tick and covered by the same unique range, avoiding repeated Pyth parsing for clustered commits.
+- A keeper cannot skip an unfavorable post-commit tick by submitting a later tick: the unique parse requires the previous publish time to be no later than the order's `commitTime`.
 - Slippage, expiry, and typed engine failures finalize the order; close-only ineligibility for queued opens blocks execution without consuming the FIFO head.
 
 ### Basket oracle and publish-time checks
@@ -311,7 +311,7 @@ The router is configured with parallel arrays of Pyth feed ids, quantities, and 
 - Opening and closing orders use the adverse side of the confidence interval for the trader's side: `BULL` opens are priced lower, `BEAR` opens are priced higher, `BULL` closes are priced higher, and `BEAR` closes are priced lower.
 - Liquidation checks also use the side-adverse confidence-adjusted mark for the liquidated account.
 - Component publish times must stay within `maxComponentPublishTimeDivergence`; if one basket leg is too far from the others, live opens are blocked rather than mixing fresh and stale components.
-- The minimum `publishTime` across feeds remains the basket publish time passed to the engine; historical order fills can use an older commit-bound price without rewinding a newer cached engine mark.
+- The minimum `publishTime` across feeds remains the basket publish time passed to the engine; historical order fills can use an older post-commit price without rewinding a newer cached engine mark.
 - Frozen-oracle close-only windows are the only regime that relaxes historical live-market settlement.
 - The execution price is clamped to `CAP_PRICE` before the slippage check so the user sees the same price the engine executes.
 

@@ -378,9 +378,10 @@ contract PerpsForkTest is Test {
         vm.roll(commitBlock + 2);
 
         vm.prank(keeper);
-        vm.expectPartialRevert(OrderRouter.OrderRouter__OraclePublishTimeNotAfterCommit.selector);
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         router.executeOrder(orderId, _pythUpdateData());
 
+        pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), commitTime + 1);
         vm.warp(commitTime + 1001);
         vm.roll(commitBlock + 3);
         vm.prank(keeper);

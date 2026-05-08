@@ -1198,6 +1198,10 @@ contract OrderRouterTest is BasePerpTest {
             router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
             vm.warp(block.timestamp + router.maxOrderAge() + 1);
+            uint256 historicalPublishTime = block.timestamp - router.maxOrderAge();
+            baseMockPyth.setAllUniquePrices(
+                _basePythFeedIds(), int64(100_000_000), 0, int32(-8), historicalPublishTime, historicalPublishTime - 1
+            );
             vm.roll(block.number + 1);
             router.executeOrder(uint64(i + 1), empty);
 
@@ -1216,6 +1220,9 @@ contract OrderRouterTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 500 * 1e6, 1e8, false);
 
         vm.warp(block.timestamp + 1);
+        baseMockPyth.setAllUniquePrices(
+            _basePythFeedIds(), int64(100_000_000), 0, int32(-8), block.timestamp, block.timestamp - 1
+        );
         vm.roll(block.number + 10);
         uint256 gasBefore = gasleft();
         router.executeOrderBatch(26, empty);
@@ -1430,7 +1437,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
-        vm.expectPartialRevert(OrderRouter.OrderRouter__OraclePublishTimeNotAfterCommit.selector);
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         router.executeOrder(1, empty);
 
         assertEq(
@@ -1940,6 +1947,12 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_BatchExecution_UsesOrderExecutionPublishTimeDivergenceLimit() public {
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.orderSettlementWindow = 60;
+        config.maxComponentPublishTimeDivergence = 60;
+        _setRouterConfig(config);
+        vm.warp(1000);
+
         uint256 basePublishTime = block.timestamp + 6;
 
         vm.prank(alice);
@@ -2540,10 +2553,10 @@ contract OrderRouterPythTest is BasePerpTest {
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         vm.prank(keeper);
-        vm.expectPartialRevert(OrderRouter.OrderRouter__OraclePublishTimeNotAfterCommit.selector);
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         router.executeOrder(1, empty);
 
-        assertEq(router.nextExecuteId(), 1, "Live execution should reject publish times that predate commit");
+        assertEq(router.nextExecuteId(), 1, "Live execution should reject publish times that are not post-commit");
     }
 
     function test_FreshPublishAfterCommit_Executes() public {
@@ -2562,7 +2575,23 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(router.nextExecuteId(), 0, "Fresh post-commit publish should execute normally");
     }
 
-    function test_OrderExecution_UsesCommitBoundHistoricalPrice_NotLiveRevealPrice() public {
+    function test_PublishTimeEqualToCommit_Reverts() public {
+        vm.warp(1000);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+
+        mockPyth.setAllUniquePrices(feedIds, int64(100_000_000), 0, int32(-8), 1000, 999);
+
+        vm.warp(1050);
+        vm.roll(block.number + 1);
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
+        router.executeOrder(1, _pythUpdateData());
+
+        assertEq(router.nextExecuteId(), 1, "Live execution must require a strictly post-commit tick");
+    }
+
+    function test_OrderExecution_UsesPostCommitHistoricalPrice_NotLiveRevealPrice() public {
         vm.warp(1000);
 
         vm.prank(alice);
@@ -2622,6 +2651,28 @@ contract OrderRouterPythTest is BasePerpTest {
 
         (uint256 size,,,,,,) = engine.positions(alice);
         assertEq(size, 15_000 * 1e18, "Both clustered orders should execute");
+    }
+
+    function test_BatchExecution_DoesNotReuseTickAtCommitTimestamp() public {
+        vm.warp(1000);
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+
+        vm.warp(1006);
+        vm.roll(block.number + 1);
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 300 * 1e6, 1e8, false);
+
+        mockPyth.setAllUniquePrices(feedIds, int64(100_000_000), 0, int32(-8), 1006, 999);
+
+        vm.warp(1050);
+        vm.roll(block.number + 1);
+        router.executeOrderBatch(2, _pythUpdateData());
+
+        assertEq(router.nextExecuteId(), 2, "Order committed at the cached tick must remain pending");
+
+        (uint256 size,,,,,,) = engine.positions(alice);
+        assertEq(size, 10_000 * 1e18, "Only the strictly post-commit order should execute");
     }
 
     function test_BatchExecution_StalePrice_Reverts() public {
@@ -2691,10 +2742,10 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(1050);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
-        vm.expectPartialRevert(OrderRouter.OrderRouter__OraclePublishTimeNotAfterCommit.selector);
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         router.executeOrder(1, empty);
 
-        assertEq(router.nextExecuteId(), 1, "Weakest-link publish time should still trigger MEV protection");
+        assertEq(router.nextExecuteId(), 1, "Weakest-link publish time should still enforce post-commit settlement");
     }
 
     function test_WeakestLink_Staleness() public {
@@ -5055,8 +5106,26 @@ contract VpiImrBypassTest is Test {
     function _mockPythUpdateData() internal returns (bytes[] memory updateData) {
         vm.roll(block.number + 1);
         vm.warp(block.timestamp + 1);
+        uint256 publishTime = _mockHistoricalPublishTime();
+        mockPyth.setAllUniquePrices(
+            feedIds, int64(100_000_000), 0, int32(-8), publishTime, publishTime == 0 ? 0 : publishTime - 1
+        );
         updateData = new bytes[](1);
         updateData[0] = abi.encode(uint256(1e8));
+    }
+
+    function _mockHistoricalPublishTime() internal view returns (uint256 publishTime) {
+        publishTime = block.timestamp;
+        uint64 nextOrderId = router.nextExecuteId();
+        if (nextOrderId == 0) {
+            return publishTime;
+        }
+
+        (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(nextOrderId);
+        uint256 candidate = uint256(pending.commitTime) + 1;
+        if (pending.orderId != 0 && candidate <= block.timestamp) {
+            publishTime = candidate;
+        }
     }
 
     // Rebate-aware open validation should allow commits when a skew-reducing rebate
@@ -5164,8 +5233,26 @@ contract KeeperFeeRefundTest is Test {
     function _mockPythUpdateData() internal returns (bytes[] memory updateData) {
         vm.roll(block.number + 1);
         vm.warp(block.timestamp + 1);
+        uint256 publishTime = _mockHistoricalPublishTime();
+        mockPyth.setAllUniquePrices(
+            feedIds, int64(100_000_000), 0, int32(-8), publishTime, publishTime == 0 ? 0 : publishTime - 1
+        );
         updateData = new bytes[](1);
         updateData[0] = abi.encode(uint256(1e8));
+    }
+
+    function _mockHistoricalPublishTime() internal view returns (uint256 publishTime) {
+        publishTime = block.timestamp;
+        uint64 nextOrderId = router.nextExecuteId();
+        if (nextOrderId == 0) {
+            return publishTime;
+        }
+
+        (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(nextOrderId);
+        uint256 candidate = uint256(pending.commitTime) + 1;
+        if (pending.orderId != 0 && candidate <= block.timestamp) {
+            publishTime = candidate;
+        }
     }
 
     function _warpPastTimelock() internal {

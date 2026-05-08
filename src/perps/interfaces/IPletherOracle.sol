@@ -94,7 +94,7 @@ interface IPletherOracle {
         PriceMode mode
     ) external payable returns (PriceSnapshot memory snapshot);
 
-    /// @notice Applies order-execution update data and returns a commit-bound historical execution price.
+    /// @notice Applies order-execution update data and returns a strictly post-commit historical execution price.
     /// @dev The caller supplies only the Pyth fee for this parse; refunds for unavailable historical
     ///      parses are returned to the caller so the router can keep aggregate fee accounting correct.
     function updateOrderExecutionPrice(

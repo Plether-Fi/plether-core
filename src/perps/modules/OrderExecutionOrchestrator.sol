@@ -139,7 +139,7 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
             return OrderExecutionStepResult.Break;
         }
 
-        if (!executionContext.oracleFrozen && oraclePublishTime < order.commitTime) {
+        if (!executionContext.oracleFrozen && oraclePublishTime <= order.commitTime) {
             if (revertOnBlockedExecution) {
                 revert IOrderRouterErrors.OrderRouter__OraclePublishTimeNotAfterCommit(
                     oraclePublishTime, order.commitTime

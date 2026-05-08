@@ -314,7 +314,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
             revert PletherOracle__InsufficientFee(msg.value, pythFee);
         }
 
-        uint64 minPublishTime = request.commitTime;
+        uint64 minPublishTime = request.commitTime + 1;
         uint256 settlementDeadline = uint256(request.commitTime) + orderSettlementWindow;
         uint64 maxPublishTime = uint64(settlementDeadline < block.timestamp ? settlementDeadline : block.timestamp);
         try pyth.parsePriceFeedUpdatesUnique{value: pythFee}(
@@ -519,7 +519,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         if (!cache.hasHistoricalBasket) {
             return false;
         }
-        if (commitTime < cache.minReusableCommitTime || commitTime > cache.publishTime) {
+        if (commitTime < cache.minReusableCommitTime || commitTime >= cache.publishTime) {
             return false;
         }
         if (cache.publishTime > block.timestamp) {

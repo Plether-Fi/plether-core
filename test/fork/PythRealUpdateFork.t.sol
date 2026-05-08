@@ -40,7 +40,7 @@ contract PythRealUpdateForkTest is Test {
         vm.createSelectFork(vm.envString("MAINNET_RPC_URL"));
     }
 
-    function test_PythUniqueHistoricalParse_RealHermesBytes_ReturnsCommitBoundTick() public {
+    function test_PythUniqueHistoricalParse_RealHermesBytes_ReturnsRangeBoundTick() public {
         (bytes[] memory updateData, uint64 prevPublishTime, uint64 publishTime) = _realHermesFixture();
         assertLt(prevPublishTime, publishTime, "fixture must cover at least one commit timestamp");
 
@@ -51,7 +51,7 @@ contract PythRealUpdateForkTest is Test {
 
         assertEq(feeds.length, 1, "one feed returned");
         assertEq(feeds[0].id, EUR_USD_FEED_ID, "feed id");
-        assertEq(feeds[0].price.publishTime, publishTime, "commit-bound publish time");
+        assertEq(feeds[0].price.publishTime, publishTime, "range-bound publish time");
         assertGt(feeds[0].price.price, int64(0), "positive price");
         assertGt(feeds[0].price.conf, uint64(0), "confidence returned");
     }
@@ -67,7 +67,7 @@ contract PythRealUpdateForkTest is Test {
         IPyth(REAL_PYTH).parsePriceFeedUpdatesUnique{value: fee}(updateData, priceIds, prevPublishTime, publishTime);
     }
 
-    function test_OrderRouter_ExecutesCommitBoundOrder_WithRealHermesBytes() public {
+    function test_OrderRouter_ExecutesPostCommitOrder_WithRealHermesBytes() public {
         (bytes[] memory updateData, uint64 prevPublishTime, uint64 publishTime) = _realHermesFixture();
         assertLt(prevPublishTime, publishTime, "fixture must cover at least one commit timestamp");
 
@@ -81,7 +81,9 @@ contract PythRealUpdateForkTest is Test {
         _deployPerpsWithRealPyth(publishTime);
         _depositToClearinghouse(alice, 10_000e6);
 
-        vm.warp(publishTime);
+        uint64 commitTime = publishTime - 1;
+
+        vm.warp(commitTime);
         vm.roll(1_000_000);
         uint64 orderId = router.nextCommitId();
 
@@ -93,7 +95,7 @@ contract PythRealUpdateForkTest is Test {
         vm.warp(publishTime + 1);
         vm.roll(1_000_001);
         (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(orderId);
-        assertEq(pending.commitTime, publishTime, "fixture publish time should be the order commit time");
+        assertEq(pending.commitTime, commitTime, "fixture publish time should be strictly after the order commit time");
         assertGt(block.number, pending.commitBlock, "execution must happen after the commit block");
 
         vm.prank(keeper);
@@ -101,7 +103,7 @@ contract PythRealUpdateForkTest is Test {
 
         (uint256 size,,,,,,) = engine.positions(alice);
         assertEq(size, 100_000e18, "position opened with real Pyth update bytes");
-        assertEq(engine.lastMarkTime(), publishTime, "engine mark time uses commit-bound Pyth tick");
+        assertEq(engine.lastMarkTime(), publishTime, "engine mark time uses the post-commit Pyth tick");
     }
 
     function _realHermesFixture()

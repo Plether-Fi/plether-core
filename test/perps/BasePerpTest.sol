@@ -259,8 +259,26 @@ abstract contract BasePerpTest is Test {
     function _mockPythUpdateData() internal returns (bytes[] memory updateData) {
         vm.roll(block.number + 1);
         vm.warp(block.timestamp + 1);
+        uint256 publishTime = _mockHistoricalPublishTime();
+        baseMockPyth.setAllUniquePrices(
+            _basePythFeedIds(), int64(100_000_000), 0, int32(-8), publishTime, publishTime == 0 ? 0 : publishTime - 1
+        );
         updateData = new bytes[](1);
         updateData[0] = abi.encode(uint256(1e8));
+    }
+
+    function _mockHistoricalPublishTime() internal view returns (uint256 publishTime) {
+        publishTime = block.timestamp;
+        uint64 nextOrderId = router.nextExecuteId();
+        if (nextOrderId == 0) {
+            return publishTime;
+        }
+
+        (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(nextOrderId);
+        uint256 candidate = uint256(pending.commitTime) + 1;
+        if (pending.orderId != 0 && candidate <= block.timestamp) {
+            publishTime = candidate;
+        }
     }
 
     // --- Legacy side-index placeholder helpers ---
