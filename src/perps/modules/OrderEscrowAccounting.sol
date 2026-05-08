@@ -6,12 +6,8 @@ import {ICfdEngineCore} from "../interfaces/ICfdEngineCore.sol";
 import {IMarginClearinghouse} from "../interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "../interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterErrors} from "../interfaces/IOrderRouterErrors.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
-
-    using SafeERC20 for IERC20;
 
     struct OrderRecord {
         CfdTypes.Order core;
@@ -29,7 +25,6 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
 
     ICfdEngineCore public immutable engine;
     IMarginClearinghouse internal immutable clearinghouse;
-    IERC20 internal immutable USDC;
 
     mapping(uint64 => OrderRecord) internal orderRecords;
     mapping(address => uint256) public pendingOrderCounts;
@@ -46,7 +41,6 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
         clearinghouse = _engine.code.length == 0
             ? IMarginClearinghouse(address(0))
             : IMarginClearinghouse(ICfdEngineCore(_engine).clearinghouse());
-        USDC = _engine.code.length == 0 ? IERC20(address(0)) : ICfdEngineCore(_engine).USDC();
     }
 
     function getAccountEscrow(
@@ -121,7 +115,7 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
             if (clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc < executionBountyUsdc) {
                 revert IOrderRouterErrors.OrderRouter__CommitValidation(6);
             }
-            clearinghouse.seizeUsdc(account, executionBountyUsdc, address(this));
+            clearinghouse.lockReservedSettlement(account, executionBountyUsdc);
         }
         orderRecords[orderId].executionBountyUsdc = executionBountyUsdc;
     }
@@ -164,8 +158,7 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
             return 0;
         }
         record.executionBountyUsdc = 0;
-        USDC.safeTransfer(address(clearinghouse), executionBountyUsdc);
-        engine.creditKeeperExecutionBounty(msg.sender, executionBountyUsdc, executionPrice, oraclePublishTime);
+        engine.creditBounty(record.core.account, msg.sender, executionBountyUsdc, executionPrice, oraclePublishTime);
         return executionBountyUsdc;
     }
 

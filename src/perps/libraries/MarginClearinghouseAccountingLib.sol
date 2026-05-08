@@ -33,6 +33,7 @@ library MarginClearinghouseAccountingLib {
     }
 
     struct LiquidationResidualPlan {
+        uint256 keeperBountyUsdc;
         uint256 settlementRetainedUsdc;
         uint256 settlementSeizedUsdc;
         uint256 freshTraderPayoutUsdc;
@@ -204,25 +205,37 @@ library MarginClearinghouseAccountingLib {
         IMarginClearinghouse.AccountUsdcBuckets memory buckets,
         int256 residualUsdc
     ) internal pure returns (LiquidationResidualPlan memory plan) {
+        return planLiquidationResidual(buckets, residualUsdc, 0);
+    }
+
+    function planLiquidationResidual(
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets,
+        int256 residualUsdc,
+        uint256 keeperBountyUsdc
+    ) internal pure returns (LiquidationResidualPlan memory plan) {
         uint256 reachableUsdc = getTerminalReachableUsdc(buckets);
+        plan.keeperBountyUsdc = keeperBountyUsdc;
+        uint256 reachableAfterBountyUsdc =
+            reachableUsdc > keeperBountyUsdc ? reachableUsdc - keeperBountyUsdc : 0;
 
         if (residualUsdc >= 0) {
-            plan.settlementRetainedUsdc = reachableUsdc > uint256(residualUsdc) ? uint256(residualUsdc) : reachableUsdc;
-            plan.settlementSeizedUsdc = reachableUsdc - plan.settlementRetainedUsdc;
+            plan.settlementRetainedUsdc =
+                reachableAfterBountyUsdc > uint256(residualUsdc) ? uint256(residualUsdc) : reachableAfterBountyUsdc;
+            plan.settlementSeizedUsdc = reachableAfterBountyUsdc - plan.settlementRetainedUsdc;
             plan.freshTraderPayoutUsdc = uint256(residualUsdc) - plan.settlementRetainedUsdc;
         } else {
             plan.settlementRetainedUsdc = 0;
-            plan.settlementSeizedUsdc = reachableUsdc;
+            plan.settlementSeizedUsdc = reachableAfterBountyUsdc;
             plan.badDebtUsdc = uint256(-residualUsdc);
         }
 
-        plan.mutation.settlementDebitUsdc = plan.settlementSeizedUsdc;
+        plan.mutation.settlementDebitUsdc = plan.settlementSeizedUsdc + keeperBountyUsdc;
         uint256 freeSettlementUsdc = buckets.freeSettlementUsdc;
         uint256 positionMarginUsdc = buckets.activePositionMarginUsdc;
         plan.mutation.positionMarginUnlockedUsdc = positionMarginUsdc;
-        plan.mutation.otherLockedMarginUnlockedUsdc = plan.settlementSeizedUsdc
+        plan.mutation.otherLockedMarginUnlockedUsdc = plan.mutation.settlementDebitUsdc
             > freeSettlementUsdc + positionMarginUsdc
-            ? plan.settlementSeizedUsdc - freeSettlementUsdc - positionMarginUsdc
+            ? plan.mutation.settlementDebitUsdc - freeSettlementUsdc - positionMarginUsdc
             : 0;
     }
 

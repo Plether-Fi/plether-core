@@ -903,7 +903,9 @@ abstract contract BasePerpTest is Test {
     function _terminalReachableUsdc(
         address account
     ) internal view returns (uint256) {
-        return clearinghouse.getAccountUsdcBuckets(account).settlementBalanceUsdc;
+        uint256 settlementBalance = clearinghouse.getAccountUsdcBuckets(account).settlementBalanceUsdc;
+        uint256 executionEscrow = router.getAccountEscrow(account).executionBountyUsdc;
+        return settlementBalance > executionEscrow ? settlementBalance - executionEscrow : 0;
     }
 
     function _publicPosition(

@@ -49,11 +49,12 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         targetContract(address(handler));
     }
 
-    function invariant_RouterCustodyMatchesLiveExecutionBounties() public view {
+    function invariant_ClearinghouseReservationsMatchLiveExecutionBounties() public view {
+        assertEq(usdc.balanceOf(address(router)), 0, "Router must not custody execution bounty reserves");
         assertEq(
-            usdc.balanceOf(address(router)),
+            _sumReservedSettlementBuckets(),
             _sumPendingExecutionBounties(),
-            "Router custody must equal live pending execution bounty reserves"
+            "Clearinghouse reserved settlement must equal live pending execution bounty reserves"
         );
     }
 
@@ -435,6 +436,15 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
                 continue;
             }
             totalBounties += record.executionBountyUsdc;
+        }
+    }
+
+    function _sumReservedSettlementBuckets() internal view returns (uint256 totalReservedSettlement) {
+        totalReservedSettlement +=
+            clearinghouse.getLockedMarginBuckets(_account(address(handler))).reservedSettlementUsdc;
+        for (uint256 i = 0; i < handler.actorCount(); i++) {
+            totalReservedSettlement +=
+                clearinghouse.getLockedMarginBuckets(_account(handler.actorAt(i))).reservedSettlementUsdc;
         }
     }
 

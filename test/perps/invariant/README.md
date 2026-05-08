@@ -16,7 +16,7 @@ This directory contains stateful Foundry invariant suites for the perps system.
   - Catches view-layer drift between previews and core engine/accounting state
   - Verifies empty positions preview as inactive
   - Verifies liquidation reachable collateral previews match clearinghouse accounting
-  - Verifies liquidation previews exclude router-custodied execution escrow from reachable collateral
+  - Verifies liquidation previews exclude clearinghouse-reserved execution escrow from reachable collateral
   - Verifies generic position views expose physical reachable collateral separately from deferred payout netting
   - Verifies degraded-mode trigger flags behave as transition flags rather than persistent state flags
 

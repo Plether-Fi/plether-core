@@ -33,31 +33,29 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
     address internal bob = address(0xB0B);
     address internal keeper = address(0xBEEF);
 
-    function test_WithdrawFees_MustHonorDeferredKeeperLiabilities() public {
-        address account = alice;
-        _fundTrader(alice, 20_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
-
+    function test_RecordDeferredKeeperCredit_MustRevertAndLeaveNoLiability() public {
         vm.prank(address(router));
+        vm.expectRevert(CfdEngine.CfdEngine__NoDeferredKeeperCredit.selector);
         engine.recordDeferredKeeperCredit(keeper, 950_001e6);
 
-        vm.expectRevert(CfdEngine.CfdEngine__PostOpSolvencyBreach.selector);
-        engine.withdrawFees(address(this));
+        assertEq(engine.deferredKeeperCreditUsdc(keeper), 0, "Removed keeper path must not queue credit");
+        assertEq(engine.totalDeferredKeeperCreditUsdc(), 0, "Removed keeper path must not create aggregate liability");
     }
 
-    function test_Reconcile_MustSubtractDeferredLiquidationBounties() public {
+    function test_Reconcile_NoLongerSubtractsDeferredLiquidationBounties() public {
         uint256 juniorPrincipalBefore = pool.juniorPrincipal();
 
         vm.prank(address(router));
+        vm.expectRevert(CfdEngine.CfdEngine__NoDeferredKeeperCredit.selector);
         engine.recordDeferredKeeperCredit(keeper, 100_000e6);
 
         vm.prank(address(juniorVault));
         pool.reconcile();
 
         assertEq(
-            juniorPrincipalBefore - pool.juniorPrincipal(),
-            100_000e6,
-            "Deferred liquidation bounties must reduce junior distributable equity by the reserved keeper amount"
+            pool.juniorPrincipal(),
+            juniorPrincipalBefore,
+            "Removed deferred keeper path should not reduce junior distributable equity"
         );
     }
 
@@ -93,7 +91,7 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         );
     }
 
-    function test_DeferredClaimability_ViewCanOverstateKeeperClaimabilityDuringShortfall() public {
+    function test_DeferredClaimability_ViewReportsRemovedKeeperPathUnclaimable() public {
         address aliceAccount = alice;
         _fundTrader(alice, 11_000e6);
         _open(aliceAccount, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
@@ -106,9 +104,6 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         uint256 deferredTraderCredit = engine.deferredTraderCreditUsdc(aliceAccount);
         assertGt(deferredTraderCredit, 0, "setup must create a deferred payout");
 
-        vm.prank(address(router));
-        engine.recordDeferredKeeperCredit(keeper, deferredTraderCredit);
-
         usdc.mint(address(pool), deferredTraderCredit);
 
         DeferredEngineViewTypes.DeferredCreditStatus memory status = _deferredCreditStatus(aliceAccount, keeper);
@@ -116,12 +111,10 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
             status.traderPayoutClaimableNow,
             "Trader claim should remain claimable when cash fully covers the trader credit"
         );
-        assertTrue(
-            status.keeperCreditClaimableNow, "Keeper view currently reports claimability whenever any cash remains"
-        );
+        assertFalse(status.keeperCreditClaimableNow, "Removed keeper path should not report claimability");
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeper);
-        vm.expectRevert(CfdEngine.CfdEngine__InsufficientVaultLiquidity.selector);
+        vm.expectRevert(CfdEngine.CfdEngine__NoDeferredKeeperCredit.selector);
         vm.prank(keeper);
         engine.claimDeferredKeeperCredit();
         assertEq(clearinghouse.balanceUsdc(keeper), keeperSettlementBefore);

@@ -255,7 +255,7 @@ contract CfdEngineLens is ICfdEngineLens {
         snap.accumulatedBadDebtUsdc = engineContract.accumulatedBadDebtUsdc();
         snap.unsettledCarryUsdc = engineContract.unsettledCarryUsdc(account);
         snap.totalDeferredTraderCreditUsdc = engineContract.totalDeferredTraderCreditUsdc();
-        snap.totalDeferredKeeperCreditUsdc = engineContract.totalDeferredKeeperCreditUsdc();
+        snap.totalDeferredKeeperCreditUsdc = 0;
         snap.deferredTraderCreditForAccount = engineContract.deferredTraderCreditUsdc(account);
         snap.degradedMode = engineContract.degradedMode();
         snap.capPrice = engineContract.CAP_PRICE();
@@ -281,6 +281,24 @@ contract CfdEngineLens is ICfdEngineLens {
         snap.vaultAssetsUsdc += forfeitedUsdc;
         snap.vaultCashUsdc += forfeitedUsdc;
         snap.accumulatedFeesUsdc += forfeitedUsdc;
+
+        uint256 lockedReductionUsdc =
+            forfeitedUsdc > snap.lockedBuckets.reservedSettlementUsdc
+                ? snap.lockedBuckets.reservedSettlementUsdc
+                : forfeitedUsdc;
+        snap.lockedBuckets.reservedSettlementUsdc -= lockedReductionUsdc;
+        snap.lockedBuckets.totalLockedMarginUsdc -= lockedReductionUsdc;
+
+        snap.accountBuckets.settlementBalanceUsdc =
+            snap.accountBuckets.settlementBalanceUsdc > forfeitedUsdc
+                ? snap.accountBuckets.settlementBalanceUsdc - forfeitedUsdc
+                : 0;
+        snap.accountBuckets.otherLockedMarginUsdc -= lockedReductionUsdc;
+        snap.accountBuckets.totalLockedMarginUsdc -= lockedReductionUsdc;
+        snap.accountBuckets.freeSettlementUsdc = snap.accountBuckets.settlementBalanceUsdc
+            > snap.accountBuckets.totalLockedMarginUsdc
+            ? snap.accountBuckets.settlementBalanceUsdc - snap.accountBuckets.totalLockedMarginUsdc
+            : 0;
     }
 
     function _position(

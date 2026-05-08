@@ -206,7 +206,8 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
     function executeLiquidation(
         ICfdEngineSettlementHost host,
         CfdEnginePlanTypes.LiquidationDelta calldata delta,
-        uint64 publishTime
+        uint64 publishTime,
+        address keeper
     ) external onlyEngine returns (uint256 keeperBountyUsdc) {
         host.settlementApplyCarryAndMark(delta.price, publishTime);
         host.settlementApplySideDelta(
@@ -230,20 +231,13 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
                 otherLockedMarginUnlockedUsdc: delta.residualPlan.mutation.otherLockedMarginUnlockedUsdc
             });
         uint256 seizedUsdc = IMarginClearinghouse(host.clearinghouse())
-            .applyLiquidationSettlementPlan(delta.account, reservationOrderIds, settlementPlan, host.vault());
-        uint256 keeperBountyInflowUsdc = seizedUsdc > delta.keeperBountyUsdc ? delta.keeperBountyUsdc : seizedUsdc;
+            .applyLiquidationSettlementPlan(
+                delta.account, reservationOrderIds, settlementPlan, host.vault(), keeper, delta.keeperBountyUsdc
+            );
         if (seizedUsdc > 0) {
-            if (keeperBountyInflowUsdc > 0) {
-                ICfdVault(host.vault()).recordProtocolInflow(keeperBountyInflowUsdc);
-            }
-            if (seizedUsdc > keeperBountyInflowUsdc) {
-                ICfdVault(host.vault())
-                    .recordClaimantInflow(
-                        seizedUsdc - keeperBountyInflowUsdc,
-                        ICfdVault.ClaimantInflowKind.Revenue,
-                        ICfdVault.ClaimantInflowCashMode.CashArrived
-                    );
-            }
+            ICfdVault(host.vault()).recordClaimantInflow(
+                seizedUsdc, ICfdVault.ClaimantInflowKind.Revenue, ICfdVault.ClaimantInflowCashMode.CashArrived
+            );
         }
         if (delta.syncMarginQueueAmount > 0) {
             IOrderRouterAccounting(host.orderRouter()).syncMarginQueue(delta.account);

@@ -68,6 +68,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     );
     event ReservationReleased(uint64 indexed orderId, address indexed account, uint256 amountUsdc);
     event AssetSeized(address indexed account, address indexed asset, uint256 amount, address recipient);
+    event ReservedSettlementTransferred(address indexed account, address indexed recipient, uint256 amountUsdc);
 
     modifier onlyOperator() {
         address engine_ = engine;
@@ -629,18 +630,21 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
             return (0, 0);
         }
 
+        uint256 reservedUsdc = reservedSettlementUsdc[account];
+        uint256 settlementAvailableUsdc =
+            settlementBalances[account] > reservedUsdc ? settlementBalances[account] - reservedUsdc : 0;
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = includeOtherLockedMargin
             ? MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(
-                settlementBalances[account],
+                settlementAvailableUsdc,
                 positionMarginUsdc[account],
                 committedOrderMarginUsdc[account],
-                reservedSettlementUsdc[account]
+                0
             )
             : MarginClearinghouseAccountingLib.buildPartialCloseUsdcBuckets(
-                settlementBalances[account],
+                settlementAvailableUsdc,
                 positionMarginUsdc[account],
                 committedOrderMarginUsdc[account],
-                reservedSettlementUsdc[account]
+                0
             );
         MarginClearinghouseAccountingLib.SettlementConsumption memory consumption =
             MarginClearinghouseAccountingLib.planTerminalLossConsumption(buckets, protectedLockedMarginUsdc, lossUsdc);
@@ -677,6 +681,30 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         IMarginClearinghouse.LiquidationSettlementPlan calldata plan,
         address recipient
     ) external onlyOperator returns (uint256 seizedUsdc) {
+        return _applyLiquidationSettlementPlan(account, reservationOrderIds, plan, recipient, address(0), 0);
+    }
+
+    /// @notice Applies a pre-planned liquidation settlement mutation and credits the keeper bounty internally.
+    /// @dev Releases the active position margin bucket and covered committed margin exactly as planned.
+    function applyLiquidationSettlementPlan(
+        address account,
+        uint64[] calldata reservationOrderIds,
+        IMarginClearinghouse.LiquidationSettlementPlan calldata plan,
+        address recipient,
+        address keeper,
+        uint256 keeperBountyUsdc
+    ) external onlyOperator returns (uint256 seizedUsdc) {
+        return _applyLiquidationSettlementPlan(account, reservationOrderIds, plan, recipient, keeper, keeperBountyUsdc);
+    }
+
+    function _applyLiquidationSettlementPlan(
+        address account,
+        uint64[] calldata reservationOrderIds,
+        IMarginClearinghouse.LiquidationSettlementPlan calldata plan,
+        address recipient,
+        address keeper,
+        uint256 keeperBountyUsdc
+    ) internal returns (uint256 seizedUsdc) {
         seizedUsdc = plan.settlementSeizedUsdc;
 
         if (plan.positionMarginUnlockedUsdc > 0) {
@@ -686,10 +714,26 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
             _consumeOtherLockedMarginViaReservations(account, reservationOrderIds, plan.otherLockedMarginUnlockedUsdc);
         }
 
+        uint256 settlementDebitUsdc = seizedUsdc + keeperBountyUsdc;
+        if (settlementDebitUsdc > 0) {
+            if (settlementBalances[account] < settlementDebitUsdc) {
+                revert MarginClearinghouse__InsufficientAssetToSeize();
+            }
+            settlementBalances[account] -= settlementDebitUsdc;
+        }
         if (seizedUsdc > 0) {
-            settlementBalances[account] -= plan.settlementSeizedUsdc;
+            if (recipient == address(0)) {
+                revert MarginClearinghouse__ZeroAddress();
+            }
             IERC20(settlementAsset).safeTransfer(recipient, plan.settlementSeizedUsdc);
             emit AssetSeized(account, settlementAsset, plan.settlementSeizedUsdc, recipient);
+        }
+        if (keeperBountyUsdc > 0) {
+            if (keeper == address(0)) {
+                revert MarginClearinghouse__ZeroAddress();
+            }
+            settlementBalances[keeper] += keeperBountyUsdc;
+            emit ReservedSettlementTransferred(account, keeper, keeperBountyUsdc);
         }
     }
 
@@ -907,6 +951,15 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         emit MarginUnlocked(account, bucket, amountUsdc);
     }
 
+    function _reservePositionMarginAsSettlement(
+        address account,
+        uint256 amountUsdc
+    ) internal {
+        _consumeLockedMargin(account, IMarginClearinghouse.MarginBucket.Position, amountUsdc);
+        reservedSettlementUsdc[account] += amountUsdc;
+        emit MarginLocked(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, amountUsdc);
+    }
+
     function _bucketStorage(
         IMarginClearinghouse.MarginBucket bucket,
         address account
@@ -983,17 +1036,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
             revert MarginClearinghouse__ZeroAddress();
         }
         _checkpointCarryBeforeMarginChange(account);
-        if (settlementBalances[account] < amount) {
-            revert MarginClearinghouse__InsufficientAssetToSeize();
-        }
-        if (amount > _buildAccountUsdcBuckets(account).freeSettlementUsdc) {
-            revert MarginClearinghouse__InsufficientAssetToSeize();
-        }
-
-        settlementBalances[account] -= amount;
-        IERC20(settlementAsset).safeTransfer(recipient, amount);
-
-        emit AssetSeized(account, settlementAsset, amount, recipient);
+        _lockMargin(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, amount);
     }
 
     /// @notice Reserves free settlement for the engine's stale close-bounty path without checkpointing carry.
@@ -1005,16 +1048,52 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         if (recipient == address(0)) {
             revert MarginClearinghouse__ZeroAddress();
         }
-        if (settlementBalances[account] < amount) {
-            revert MarginClearinghouse__InsufficientAssetToSeize();
+        _lockMargin(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, amount);
+    }
+
+    function transferReservedSettlement(
+        address account,
+        address recipient,
+        uint256 amount
+    ) external onlyEngine {
+        if (recipient == address(0)) {
+            revert MarginClearinghouse__ZeroAddress();
         }
-        if (amount > _buildAccountUsdcBuckets(account).freeSettlementUsdc) {
+        if (amount == 0) {
+            return;
+        }
+        if (reservedSettlementUsdc[account] < amount || settlementBalances[account] < amount) {
             revert MarginClearinghouse__InsufficientAssetToSeize();
         }
 
+        reservedSettlementUsdc[account] -= amount;
+        settlementBalances[account] -= amount;
+        settlementBalances[recipient] += amount;
+
+        emit MarginUnlocked(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, amount);
+        emit ReservedSettlementTransferred(account, recipient, amount);
+    }
+
+    function seizeReservedSettlement(
+        address account,
+        uint256 amount,
+        address recipient
+    ) external onlyEngine {
+        if (recipient == address(0)) {
+            revert MarginClearinghouse__ZeroAddress();
+        }
+        if (amount == 0) {
+            return;
+        }
+        if (reservedSettlementUsdc[account] < amount || settlementBalances[account] < amount) {
+            revert MarginClearinghouse__InsufficientAssetToSeize();
+        }
+
+        reservedSettlementUsdc[account] -= amount;
         settlementBalances[account] -= amount;
         IERC20(settlementAsset).safeTransfer(recipient, amount);
 
+        emit MarginUnlocked(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, amount);
         emit AssetSeized(account, settlementAsset, amount, recipient);
     }
 
@@ -1041,6 +1120,21 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         emit AssetSeized(account, settlementAsset, amount, recipient);
     }
 
+    function reserveCloseExecutionBountyFromPositionMargin(
+        address account,
+        uint256 amount,
+        address recipient
+    ) external onlyEngine {
+        if (recipient == address(0)) {
+            revert MarginClearinghouse__ZeroAddress();
+        }
+        if (amount == 0) {
+            return;
+        }
+        _checkpointCarryBeforeMarginChange(account);
+        _reservePositionMarginAsSettlement(account, amount);
+    }
+
     /// @notice Reserves active position margin for the engine's stale close-bounty path without checkpointing carry.
     function reserveStaleCloseExecutionBountyFromPositionMargin(
         address account,
@@ -1057,11 +1151,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
             revert MarginClearinghouse__InsufficientAssetToSeize();
         }
 
-        _consumeLockedMargin(account, IMarginClearinghouse.MarginBucket.Position, amount);
-        settlementBalances[account] -= amount;
-        IERC20(settlementAsset).safeTransfer(recipient, amount);
-
-        emit AssetSeized(account, settlementAsset, amount, recipient);
+        _reservePositionMarginAsSettlement(account, amount);
     }
 
     function balanceUsdc(

@@ -240,6 +240,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     event DeferredTraderCreditClaimed(address indexed account, uint256 amountUsdc);
     event DeferredKeeperCreditRecorded(address indexed keeper, uint256 amountUsdc);
     event DeferredKeeperCreditClaimed(address indexed keeper, uint256 amountUsdc);
+    event BountyCredited(address indexed sourceAccount, address indexed beneficiary, uint256 amountUsdc);
     event CarryCheckpointed(address indexed account, uint256 addedUnsettledCarryUsdc, uint256 totalUnsettledCarryUsdc);
     event CarryRealized(
         address indexed account,
@@ -302,6 +303,25 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         _checkpointCarryBeforeBasisChange(account, pos, price, _genericReachableCollateralUsdc(account));
     }
 
+    function _checkpointBountyRecipient(
+        address account,
+        uint256 price,
+        uint64 publishTime
+    ) internal {
+        if (publishTime < lastMarkTime) {
+            revert CfdEngine__MarkPriceOutOfOrder();
+        }
+
+        uint256 clampedPrice = price > CAP_PRICE ? CAP_PRICE : price;
+        lastMarkPrice = clampedPrice;
+        lastMarkTime = publishTime;
+
+        StoredPosition storage pos = _positions[account];
+        if (pos.size > 0) {
+            _checkpointCarryBeforeBasisChange(account, pos, clampedPrice, _genericReachableCollateralUsdc(account));
+        }
+    }
+
     function _claimDeferredBalance(
         uint256 amount,
         address account
@@ -310,7 +330,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
             vault.totalAssets(),
             accumulatedFeesUsdc,
             totalDeferredTraderCreditUsdc,
-            totalDeferredKeeperCreditUsdc,
+            0,
             amount
         );
         if (claimAmountUsdc == 0) {
@@ -448,36 +468,26 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         _assertPostSolvency();
     }
 
-    /// @notice Pulls router-custodied cancellation fees into the vault and books them as protocol revenue.
-    function absorbRouterCancellationFee(
+    /// @notice Moves reserved execution-bounty escrow into protocol-owned vault fees.
+    function absorbReservedExecutionBounty(
+        address sourceAccount,
         uint256 amountUsdc
     ) external onlyRouter {
         if (amountUsdc == 0) {
             return;
         }
 
-        USDC.safeTransferFrom(msg.sender, address(vault), amountUsdc);
+        clearinghouse.seizeReservedSettlement(sourceAccount, amountUsdc, address(vault));
         vault.recordProtocolInflow(amountUsdc);
         accumulatedFeesUsdc += amountUsdc;
+        emit BountyCredited(sourceAccount, address(vault), amountUsdc);
     }
 
-    /// @notice Books router-delivered protocol-owned inflow as protocol fees after the router has already funded the vault.
-    function recordRouterProtocolFee(
-        uint256 amountUsdc
-    ) external onlyRouter {
-        if (amountUsdc == 0) {
-            return;
-        }
-
-        accumulatedFeesUsdc += amountUsdc;
-    }
-
-    /// @notice Credits a router-collected execution bounty into the beneficiary's clearinghouse account.
+    /// @notice Transfers reserved bounty value from a source account into a beneficiary clearinghouse account.
     /// @dev Realizes carry first when the beneficiary currently has an open position because the
-    ///      clearinghouse settlement credit changes the carry basis. Router execution already validates
-    ///      the oracle publish time, so this helper only enforces monotonic publish ordering before
-    ///      checkpointing against the validated cached mark.
-    function creditKeeperExecutionBounty(
+    ///      clearinghouse settlement credit changes the carry basis.
+    function creditBounty(
+        address sourceAccount,
         address beneficiary,
         uint256 amountUsdc,
         uint256 price,
@@ -487,21 +497,9 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
             return;
         }
 
-        if (publishTime < lastMarkTime) {
-            revert CfdEngine__MarkPriceOutOfOrder();
-        }
-
-        uint256 clampedPrice = price > CAP_PRICE ? CAP_PRICE : price;
-        lastMarkPrice = clampedPrice;
-        lastMarkTime = publishTime;
-
-        address account = beneficiary;
-        StoredPosition storage pos = _positions[account];
-        if (pos.size > 0) {
-            _checkpointCarryBeforeBasisChange(account, pos, clampedPrice, _genericReachableCollateralUsdc(account));
-        }
-
-        clearinghouse.settleUsdc(account, int256(amountUsdc));
+        _checkpointBountyRecipient(beneficiary, price, publishTime);
+        clearinghouse.transferReservedSettlement(sourceAccount, beneficiary, amountUsdc);
+        emit BountyCredited(sourceAccount, beneficiary, amountUsdc);
     }
 
     /// @notice Adds isolated margin to an existing open position without changing size.
@@ -608,38 +606,19 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         emit DeferredTraderCreditClaimed(account, claimAmountUsdc);
     }
 
-    /// @notice Claims previously deferred keeper credit when the vault has replenished cash.
-    /// @dev Deferred keeper value always settles to clearinghouse credit for the recorded keeper address-derived account.
+    /// @notice Deprecated: keeper bounties are now direct clearinghouse transfers and never deferred.
     function claimDeferredKeeperCredit() external nonReentrant {
-        address beneficiary = msg.sender;
-        address account = beneficiary;
-        StoredPosition storage pos = _positions[account];
-        _checkpointDeferredClaimCarryIfPossible(account, pos);
-
-        uint256 amount = deferredKeeperCreditUsdc[beneficiary];
-        if (amount == 0) {
-            revert CfdEngine__NoDeferredKeeperCredit();
-        }
-
-        uint256 claimAmountUsdc = _claimDeferredBalance(amount, account);
-
-        (deferredKeeperCreditUsdc[beneficiary], totalDeferredKeeperCreditUsdc) = _decreaseDeferredLiability(
-            deferredKeeperCreditUsdc[beneficiary], totalDeferredKeeperCreditUsdc, claimAmountUsdc
-        );
-
-        emit DeferredKeeperCreditClaimed(beneficiary, claimAmountUsdc);
+        revert CfdEngine__NoDeferredKeeperCredit();
     }
 
-    /// @notice Records keeper credit that could not be serviced immediately because vault cash was unavailable.
+    /// @notice Deprecated: keeper bounties are now direct clearinghouse transfers and never deferred.
     function recordDeferredKeeperCredit(
         address keeper,
         uint256 amountUsdc
-    ) external onlyRouter {
-        if (amountUsdc == 0) {
-            return;
-        }
-        _enqueueOrAccrueDeferredKeeperCredit(keeper, amountUsdc);
-        emit DeferredKeeperCreditRecorded(keeper, amountUsdc);
+    ) external view onlyRouter {
+        keeper;
+        amountUsdc;
+        revert CfdEngine__NoDeferredKeeperCredit();
     }
 
     function reserveCloseOrderExecutionBounty(
@@ -730,7 +709,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
             return;
         }
         if (priceFresh) {
-            clearinghouse.seizePositionMarginUsdc(account, marginBackedBountyUsdc, recipient);
+            clearinghouse.reserveCloseExecutionBountyFromPositionMargin(account, marginBackedBountyUsdc, recipient);
         } else {
             clearinghouse.reserveStaleCloseExecutionBountyFromPositionMargin(account, marginBackedBountyUsdc, recipient);
         }
@@ -968,14 +947,6 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
             _increaseDeferredLiability(deferredTraderCreditUsdc[account], totalDeferredTraderCreditUsdc, amountUsdc);
     }
 
-    function _enqueueOrAccrueDeferredKeeperCredit(
-        address keeper,
-        uint256 amountUsdc
-    ) internal {
-        (deferredKeeperCreditUsdc[keeper], totalDeferredKeeperCreditUsdc) =
-            _increaseDeferredLiability(deferredKeeperCreditUsdc[keeper], totalDeferredKeeperCreditUsdc, amountUsdc);
-    }
-
     function _canPayFreshVaultPayout(
         uint256 amountUsdc
     ) internal view returns (bool) {
@@ -994,7 +965,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
 
     function _freshVaultReservation() internal view returns (CashPriorityLib.SeniorCashReservation memory reservation) {
         return CashPriorityLib.reserveFreshPayouts(
-            vault.totalAssets(), accumulatedFeesUsdc, totalDeferredTraderCreditUsdc, totalDeferredKeeperCreditUsdc
+            vault.totalAssets(), accumulatedFeesUsdc, totalDeferredTraderCreditUsdc, 0
         );
     }
 
@@ -1057,6 +1028,26 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         uint256 vaultDepthUsdc,
         uint64 publishTime
     ) external onlyRouter nonReentrant returns (uint256 keeperBountyUsdc) {
+        return _liquidatePosition(account, currentOraclePrice, vaultDepthUsdc, publishTime, msg.sender);
+    }
+
+    function liquidatePosition(
+        address account,
+        uint256 currentOraclePrice,
+        uint256 vaultDepthUsdc,
+        uint64 publishTime,
+        address keeper
+    ) external onlyRouter nonReentrant returns (uint256 keeperBountyUsdc) {
+        return _liquidatePosition(account, currentOraclePrice, vaultDepthUsdc, publishTime, keeper);
+    }
+
+    function _liquidatePosition(
+        address account,
+        uint256 currentOraclePrice,
+        uint256 vaultDepthUsdc,
+        uint64 publishTime,
+        address keeper
+    ) internal returns (uint256 keeperBountyUsdc) {
         if (publishTime < lastMarkTime) {
             revert CfdEngine__MarkPriceOutOfOrder();
         }
@@ -1074,7 +1065,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
             revert CfdEngine__PositionIsSolvent();
         }
 
-        return _applyLiquidation(delta, publishTime);
+        return _applyLiquidation(delta, publishTime, keeper);
     }
 
     function _assertPostSolvency() internal view {
@@ -1099,7 +1090,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
             accumulatedFeesUsdc,
             _maxLiability(),
             totalDeferredTraderCreditUsdc,
-            totalDeferredKeeperCreditUsdc
+            0
         );
     }
 
@@ -1148,7 +1139,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         snap.accumulatedBadDebtUsdc = accumulatedBadDebtUsdc;
         snap.unsettledCarryUsdc = unsettledCarryUsdc[account];
         snap.totalDeferredTraderCreditUsdc = totalDeferredTraderCreditUsdc;
-        snap.totalDeferredKeeperCreditUsdc = totalDeferredKeeperCreditUsdc;
+        snap.totalDeferredKeeperCreditUsdc = 0;
         snap.deferredTraderCreditForAccount = deferredTraderCreditUsdc[account];
         snap.degradedMode = degradedMode;
 
@@ -1335,15 +1326,19 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
 
     function _applyLiquidation(
         CfdEnginePlanTypes.LiquidationDelta memory delta,
-        uint64 publishTime
+        uint64 publishTime,
+        address keeper
     ) internal returns (uint256 keeperBountyUsdc) {
+        if (delta.keeperBountyUsdc > 0 && keeper != delta.account) {
+            _checkpointBountyRecipient(keeper, delta.price, publishTime);
+        }
         keeperBountyUsdc =
-            settlementModule.executeLiquidation(ICfdEngineSettlementHost(address(this)), delta, publishTime);
+            settlementModule.executeLiquidation(ICfdEngineSettlementHost(address(this)), delta, publishTime, keeper);
         emit PositionLiquidated(delta.account, delta.side, delta.posSize, delta.price, keeperBountyUsdc);
 
         unsettledCarryUsdc[delta.account] = 0;
 
-        _enterDegradedModeIfInsolvent(delta.account, keeperBountyUsdc);
+        _enterDegradedModeIfInsolvent(delta.account, 0);
     }
 
     function _enterDegradedModeIfInsolvent(

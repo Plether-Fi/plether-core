@@ -412,8 +412,6 @@ contract PerpAccountingHandler is Test {
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(price);
         CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, price);
-        uint256 keeperBountyUsdc = preview.keeperBountyUsdc;
-        bool shouldDefer = vault.failRouterPayouts() && keeperBountyUsdc > 0;
         uint256 deferredTraderCreditUsdc = preview.deferredTraderCreditUsdc;
         uint256 allowedDeferredAfterUsdc = preview.deferredTraderCreditUsdc > preview.existingDeferredRemainingUsdc
             ? preview.deferredTraderCreditUsdc - preview.existingDeferredRemainingUsdc
@@ -433,9 +431,7 @@ contract PerpAccountingHandler is Test {
                 ghost.increaseDeferredTraderCredit(account, deferredTraderCreditUsdc);
             }
             _syncGhostDeferredTraderCredit(account);
-            if (shouldDefer) {
-                ghost.increaseDeferredKeeperCredit(address(this), keeperBountyUsdc);
-            }
+            _syncGhostDeferredKeeperCredit(address(this));
             uint256 badDebtAfter = engine.accumulatedBadDebtUsdc();
             if (badDebtAfter > badDebtBefore) {
                 _recordBadDebtDeferredEvent(account, badDebtAfter, allowedDeferredAfterUsdc);

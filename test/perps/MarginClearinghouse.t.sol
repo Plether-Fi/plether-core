@@ -62,7 +62,7 @@ contract MockClearinghouseEngine {
     }
 
     function checkWithdraw(
-        bytes32
+        address
     ) external pure {}
 
     function setCarryRealizationStale(
@@ -1107,8 +1107,7 @@ contract MarginClearinghouseAuditTest is BasePerpTest {
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
 
         (uint256 size,,,,,,) = engine.positions(account);
         assertGt(size, 0, "Position should be open");
@@ -1131,12 +1130,11 @@ contract MarginClearinghouseAuditTest is BasePerpTest {
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 0, 1e8, true);
-        router.executeOrder(2, empty);
+        router.executeOrder(2, _mockPythUpdateData());
 
         (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Position should be closed");
@@ -1154,8 +1152,7 @@ contract MarginClearinghouseAuditTest is BasePerpTest {
         address account = alice;
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, false);
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
 
         WithdrawParityState memory state = _observeWithdrawParity(account, alice, 5000e6);
         _assertWithdrawParity(state, CfdEngine.CfdEngine__WithdrawBlockedByOpenPosition.selector);
@@ -1168,8 +1165,7 @@ contract MarginClearinghouseAuditTest is BasePerpTest {
         address account = alice;
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, false);
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
 
@@ -1188,8 +1184,7 @@ contract MarginClearinghouseAuditTest is BasePerpTest {
         address account = alice;
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 1600e6, 1e8, false);
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));

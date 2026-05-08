@@ -57,15 +57,13 @@ interface ICfdEngineCore {
         address recipient
     ) external;
 
-    function absorbRouterCancellationFee(
+    function absorbReservedExecutionBounty(
+        address sourceAccount,
         uint256 amountUsdc
     ) external;
 
-    function recordRouterProtocolFee(
-        uint256 amountUsdc
-    ) external;
-
-    function creditKeeperExecutionBounty(
+    function creditBounty(
+        address sourceAccount,
         address beneficiary,
         uint256 amountUsdc,
         uint256 price,
@@ -82,7 +80,8 @@ interface ICfdEngineCore {
         address account,
         uint256 currentOraclePrice,
         uint256 vaultDepthUsdc,
-        uint64 publishTime
+        uint64 publishTime,
+        address keeper
     ) external returns (uint256 keeperBountyUsdc);
 
     function lastMarkTime() external view returns (uint64);

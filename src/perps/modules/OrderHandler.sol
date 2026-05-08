@@ -186,10 +186,10 @@ abstract contract OrderHandler is OrderValidation {
         _forfeitEscrowedOrderBountiesOnLiquidation(account);
         uint256 housePoolDepth = housePool.totalAssets();
         uint256 keeperBountyUsdc =
-            engine.liquidatePosition(account, update.executionPrice, housePoolDepth, update.oraclePublishTime);
+            engine.liquidatePosition(account, update.executionPrice, housePoolDepth, update.oraclePublishTime, msg.sender);
 
         _clearLiquidatedAccountOrders(account);
-        _creditOrDeferLiquidationBounty(keeperBountyUsdc, update.executionPrice, update.oraclePublishTime);
+        keeperBountyUsdc;
     }
 
     function _clearLiquidatedAccountOrders(

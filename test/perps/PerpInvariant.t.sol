@@ -313,8 +313,9 @@ contract PerpInvariantTest is BasePerpTest {
         assertEq(hasLiveLiability, hasDirectionalLiability, "Live-liability flag must match nonzero bounded liability");
     }
 
-    function invariant_PendingKeeperReservesBackedByRouterUsdc() public view {
+    function invariant_PendingKeeperReservesBackedByClearinghouseReservations() public view {
         uint256 pendingKeeperReserves;
+        uint256 reservedSettlementUsdc;
         uint64 nextCommitId = router.nextCommitId();
 
         for (uint64 orderId = 1; orderId < nextCommitId; orderId++) {
@@ -324,11 +325,16 @@ contract PerpInvariantTest is BasePerpTest {
             }
             pendingKeeperReserves += record.executionBountyUsdc;
         }
+        for (uint256 i = 0; i < 3; i++) {
+            reservedSettlementUsdc +=
+                clearinghouse.getLockedMarginBuckets(handler.traders(i)).reservedSettlementUsdc;
+        }
 
+        assertEq(usdc.balanceOf(address(router)), 0, "Router must not custody queued keeper reserves");
         assertEq(
-            usdc.balanceOf(address(router)),
+            reservedSettlementUsdc,
             pendingKeeperReserves,
-            "Queued keeper reserves must stay backed in router custody"
+            "Queued keeper reserves must stay backed by clearinghouse reserved settlement"
         );
     }
 
@@ -943,14 +949,11 @@ contract AdversarialPerpHandler is Test {
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(oraclePrice);
 
-        uint256 beforeDeferred = engine.deferredKeeperCreditUsdc(address(this));
         vm.mockCallRevert(address(pool), abi.encodeWithSelector(pool.payOut.selector), bytes("vault illiquid"));
         vm.roll(block.number + 1);
 
         try router.executeLiquidation(account, priceData) {
-            uint256 afterDeferred = engine.deferredKeeperCreditUsdc(address(this));
-            if (afterDeferred == beforeDeferred + preview.keeperBountyUsdc) {
-                ghost_expectedDeferredKeeperCredit += preview.keeperBountyUsdc;
+            if (engine.deferredKeeperCreditUsdc(address(this)) == 0) {
                 ghost_failSoftLiquidations++;
             }
         } catch {}
@@ -996,6 +999,7 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
 
     function invariant_AdversarialEscrowStaysBacked() public view {
         uint256 pendingKeeperReserves;
+        uint256 reservedSettlementUsdc;
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
             OrderRouter.OrderRecord memory record = _orderRecord(orderId);
             if (record.core.account == address(0) || record.core.sizeDelta == 0) {
@@ -1003,11 +1007,16 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
             }
             pendingKeeperReserves += record.executionBountyUsdc;
         }
+        for (uint256 i = 0; i < 4; i++) {
+            reservedSettlementUsdc +=
+                clearinghouse.getLockedMarginBuckets(handler.actors(i)).reservedSettlementUsdc;
+        }
 
+        assertEq(usdc.balanceOf(address(router)), 0, "Router must not custody adversarial keeper reserves");
         assertEq(
-            usdc.balanceOf(address(router)),
+            reservedSettlementUsdc,
             pendingKeeperReserves,
-            "Adversarial queue keeper reserves must remain fully backed"
+            "Adversarial queue keeper reserves must remain fully backed by clearinghouse reservations"
         );
     }
 
@@ -1088,8 +1097,9 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         assertEq(traversed, pendingCount, "Global queue traversal must cover every pending order exactly once");
     }
 
-    function invariant_AdversarialRouterCustodiesOnlyPendingKeeperReserves() public view {
+    function invariant_AdversarialClearinghouseReservesOnlyPendingKeeperReserves() public view {
         uint256 pendingKeeperReserves;
+        uint256 reservedSettlementUsdc;
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
             OrderRouter.OrderRecord memory record = _orderRecord(orderId);
             if (record.core.account == address(0) || record.core.sizeDelta == 0) {
@@ -1097,11 +1107,16 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
             }
             pendingKeeperReserves += record.executionBountyUsdc;
         }
+        for (uint256 i = 0; i < 4; i++) {
+            reservedSettlementUsdc +=
+                clearinghouse.getLockedMarginBuckets(handler.actors(i)).reservedSettlementUsdc;
+        }
 
+        assertEq(usdc.balanceOf(address(router)), 0, "Router must not custody pending keeper reserves");
         assertEq(
-            usdc.balanceOf(address(router)),
+            reservedSettlementUsdc,
             pendingKeeperReserves,
-            "Router custody must equal pending keeper reserves during adversarial flows"
+            "Clearinghouse reservations must equal pending keeper reserves during adversarial flows"
         );
     }
 
@@ -1113,11 +1128,11 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         }
     }
 
-    function invariant_AdversarialLiquidationPayoutFailureOnlyDefersBounty() public view {
+    function invariant_AdversarialLiquidationPayoutFailureDoesNotDeferBounty() public view {
         assertEq(
             engine.deferredKeeperCreditUsdc(address(handler)),
             handler.ghost_expectedDeferredKeeperCredit(),
-            "Liquidation payout failures must only create deferred bounty claims"
+            "Liquidation payout failures must not create deferred bounty claims"
         );
     }
 

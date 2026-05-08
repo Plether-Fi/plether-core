@@ -41,8 +41,7 @@ interface ICfdEngine is ICfdEngineTypes {
         uint64 publishTime
     ) external;
 
-    /// @notice Records deferred keeper credit when immediate clearinghouse settlement is unavailable.
-    /// @dev Deferred keeper value is always later claimed as clearinghouse credit.
+    /// @notice Deprecated: keeper bounties are now direct clearinghouse transfers and never deferred.
     function recordDeferredKeeperCredit(
         address keeper,
         uint256 amountUsdc
@@ -56,20 +55,17 @@ interface ICfdEngine is ICfdEngineTypes {
         address recipient
     ) external;
 
-    /// @notice Pulls router-custodied cancellation fees into protocol revenue.
-    function absorbRouterCancellationFee(
+    /// @notice Moves reserved execution-bounty escrow into protocol-owned vault fees.
+    function absorbReservedExecutionBounty(
+        address sourceAccount,
         uint256 amountUsdc
     ) external;
 
-    /// @notice Books router-delivered protocol-owned inflow as accumulated fees after the router has already paid the vault.
-    function recordRouterProtocolFee(
-        uint256 amountUsdc
-    ) external;
-
-    /// @notice Credits a keeper execution bounty into the beneficiary's clearinghouse account.
+    /// @notice Credits a reserved execution bounty into the beneficiary's clearinghouse account.
     /// @dev Realizes carry first when the beneficiary account currently has an open position so the
     ///      settlement-balance credit cannot retroactively dilute carry owed over the elapsed interval.
-    function creditKeeperExecutionBounty(
+    function creditBounty(
+        address sourceAccount,
         address beneficiary,
         uint256 amountUsdc,
         uint256 price,
@@ -86,7 +82,8 @@ interface ICfdEngine is ICfdEngineTypes {
         address account,
         uint256 currentOraclePrice,
         uint256 vaultDepthUsdc,
-        uint64 publishTime
+        uint64 publishTime,
+        address keeper
     ) external returns (uint256 keeperBountyUsdc);
 
     /// @notice Realizes accrued carry against the current reachable collateral before a user-level

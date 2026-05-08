@@ -102,8 +102,8 @@ These are the highest-value properties an auditor should expect to hold.
 | Bounded entry solvency | Risk-increasing opens require `vault.totalAssets() >= max(globalBullMaxProfit, globalBearMaxProfit)` using canonical physical backing rather than raw token balance |
 | Degraded containment | If a close or liquidation reveals post-op insolvency, `degradedMode` latches and blocks further risk expansion while still permitting protective transitions |
 | Bounded payout | No trader payout can exceed the capped market payoff implied by `CAP_PRICE` |
-| Withdrawal firewall | LP withdrawals are limited to conservative free cash after accounting for bounded liability, deferred liabilities, and protocol-owned balances |
-| Deferred liabilities are senior | Deferred trader credit and deferred keeper credit remain senior claims on vault liquidity until serviced |
+| Withdrawal firewall | LP withdrawals are limited to conservative free cash after accounting for bounded liability, deferred trader liabilities, and protocol-owned balances |
+| Deferred trader liabilities are senior | Deferred trader credit remains a senior claim on vault liquidity until serviced; keeper bounties are not vault liabilities |
 
 ### Position and engine accounting
 
@@ -206,7 +206,7 @@ Keepers are permissionless executors.
 
 - They execute queued orders with oracle data.
 - They trigger liquidations.
-- They receive router-custodied execution bounties or liquidation bounties depending on the path.
+- They receive clearinghouse execution-bounty credits or liquidation bounty credits depending on the path.
 - They are not trusted with user intent beyond what the delayed-order model reveals.
 
 ### Engine and router vs clearinghouse
@@ -218,7 +218,7 @@ Those actors can:
 - lock and unlock margin,
 - settle USDC balances,
 - seize settlement into protocol-authorized flows,
-- move execution bounty reserves into router custody.
+- move execution bounty reserves inside clearinghouse custody.
 
 Those actors cannot:
 
@@ -299,9 +299,9 @@ Security implication: oracle freshness still gates execution and LP accounting f
 Terminal transitions are fail-soft when the vault lacks immediate cash.
 
 - profitable closes can create deferred trader credit,
-- liquidation bounties can create deferred keeper credit,
-- both are beneficiary-balance based rather than FIFO queue based,
-- both remain part of reserve and solvency accounting until paid.
+- keeper bounties are direct clearinghouse credits funded from trader margin,
+- deferred trader credits are beneficiary-balance based rather than FIFO queue based,
+- deferred trader credits remain part of reserve and solvency accounting until paid.
 
 This preserves risk reduction and liquidation liveness under temporary cash shortfall.
 
