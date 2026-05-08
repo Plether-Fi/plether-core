@@ -234,7 +234,7 @@ contract AuditRemainingFindingsFailing_StaleOracleExecution is BasePerpTest {
 
         vm.warp(commitTime);
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 1e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.BULL, 1000e18, 0, 0, true);
 
         mockPyth.setPrice(FEED_A, int64(150_000_000), int32(-8), freshPublishTime);
         mockPyth.setPrice(FEED_B, int64(150_000_000), int32(-8), freshPublishTime);

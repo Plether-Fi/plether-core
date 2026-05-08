@@ -57,6 +57,10 @@ abstract contract OrderValidation is OrderUtils {
         if (validationCode != 0) {
             revert IOrderRouterErrors.OrderRouter__CommitValidation(validationCode);
         }
+        uint256 minCloseSizeDelta = _minSizeDeltaForEngineBountyFloor(_commitReferencePrice());
+        if (sizeDelta < queuedPosition.size && sizeDelta < minCloseSizeDelta) {
+            revert IOrderRouterErrors.OrderRouter__CommitValidation(11);
+        }
         return closeOrderExecutionBountyUsdc;
     }
 

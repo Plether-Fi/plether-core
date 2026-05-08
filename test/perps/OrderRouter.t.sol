@@ -197,6 +197,37 @@ contract OrderRouterTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 0, 500 * 1e6, 1e8, false);
     }
 
+    function test_DustPartialCloseCommit_Reverts() public {
+        _fundTrader(alice, 2000e6);
+        _open(alice, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__CommitValidation.selector, 11));
+        router.commitOrder(CfdTypes.Side.BULL, 1, 0, 0, true);
+
+        assertEq(router.pendingOrderCounts(alice), 0, "Rejected dust close should not enter the FIFO queue");
+        assertEq(router.nextCommitId(), 1, "Rejected dust close should not consume an order id");
+    }
+
+    function test_DustFullResidualCloseCommit_Allowed() public {
+        uint256 minCloseSize = 1000e18;
+
+        _fundTrader(alice, 2000e6);
+        _open(alice, CfdTypes.Side.BULL, minCloseSize + 1, 1000e6, 1e8);
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+
+        vm.startPrank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, minCloseSize, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.BULL, 1, 0, 0, true);
+        vm.stopPrank();
+
+        assertEq(router.pendingOrderCounts(alice), 2, "Both meaningful partial and full-residual closes should queue");
+        assertEq(router.pendingCloseSize(alice), minCloseSize + 1, "Queued closes should consume the full residual");
+        assertEq(router.nextCommitId(), 3, "Both close orders should receive ids");
+    }
+
     function test_ExecuteNonPendingOrder_Reverts() public {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);

@@ -123,6 +123,7 @@ These are the highest-value properties an auditor should expect to hold.
 | Binding intents | Users cannot cancel queued orders once committed |
 | Bounty conservation | Router-custodied USDC execution bounty escrow is conserved across order lifecycle transitions until distributed or absorbed |
 | Reservation source of truth | Clearinghouse reservation records remain the source of truth for committed order margin |
+| Economic close granularity | Partial close intents must meet the engine notional floor; only full residual closes may be smaller |
 | Bounded cleanup | Queue cleanup, liquidation cleanup, and close-intent position projection are account-local and intentionally bounded |
 
 ### HousePool and LP accounting
@@ -237,6 +238,7 @@ Security properties:
 - trader intent is committed before keeper execution,
 - live-market execution requires `commitTime < publishTime <= block.timestamp`, which defends against oracle latency arbitrage and future-dated feed drift,
 - FIFO execution prevents later orders from bypassing earlier ones,
+- partial-close size floors prevent flat-bounty dust closes from occupying global FIFO slots,
 - binding order semantics prevent traders from turning queued intents into free options.
 
 ### Queue failure handling

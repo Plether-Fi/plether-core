@@ -6,6 +6,7 @@ import {CashPriorityLib} from "../libraries/CashPriorityLib.sol";
 import {OrderRouterBase} from "./OrderRouterBase.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /// @notice Shared router math and escrow settlement helpers.
 abstract contract OrderUtils is OrderRouterBase {
@@ -25,6 +26,14 @@ abstract contract OrderUtils is OrderRouterBase {
             executionBountyUsdc > maxOpenOrderExecutionBountyUsdc
                 ? maxOpenOrderExecutionBountyUsdc
                 : executionBountyUsdc;
+    }
+
+    function _minSizeDeltaForEngineBountyFloor(
+        uint256 price
+    ) internal view returns (uint256) {
+        (,,,,,, uint256 minBountyUsdc, uint256 bountyBps) = engine.riskParams();
+        uint256 minNotionalUsdc = Math.mulDiv(minBountyUsdc, 10_000, bountyBps, Math.Rounding.Ceil);
+        return Math.mulDiv(minNotionalUsdc, DecimalConstants.USDC_TO_TOKEN_SCALE, price, Math.Rounding.Ceil);
     }
 
     /// @dev Liquidation keeper value follows the same default custody path as other keeper flows:

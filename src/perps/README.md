@@ -280,6 +280,7 @@ These domains answer different questions. They should not silently share assumpt
 
 - Opens are blocked while paused, degraded, or close-only.
 - The router may reject predictably invalid opens at commit time using engine-lens prechecks.
+- Partial closes must meet the same notional floor used for new positions; only full closes may clear a smaller residual.
 - Each account may have at most `5` pending orders.
 - The router escrows the execution bounty at commit time.
 
@@ -288,6 +289,7 @@ These domains answer different questions. They should not silently share assumpt
 - Execution always starts from the global queue head.
 - Risk-increasing orders reserve an execution bounty quoted from the engine mark and bounded to `[0.01 USDC, 0.20 USDC]`.
 - Close intents reserve a flat governance-configured bounty capped at `1 USDC` (default `0.20 USDC`).
+- Partial close size is floored by the engine `minBountyUsdc / bountyBps` notional threshold at the commit reference price, preventing dust closes from occupying the FIFO queue for a flat bounty.
 - Open bounties come from free settlement.
 - Close bounties use free settlement first when carry can be checkpointed from a fresh live mark; otherwise they fall back to bounded active position margin so stale-mark closes remain committable.
 - Failed-order rewards stay independent from vault liquidity because they are paid from router escrow rather than LP cash.
