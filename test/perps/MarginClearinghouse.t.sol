@@ -649,6 +649,28 @@ contract MarginClearinghouseTest is Test {
         clearinghouse.seizeUsdc(aliceAccount, 100 * 1e6, address(0xBEEF));
     }
 
+    function test_RouterPermissionSurface_IsLimitedToReservationAccounting() public {
+        vm.prank(alice);
+        clearinghouse.deposit(aliceAccount, 1000 * 1e6);
+
+        vm.startPrank(address(mockRouter));
+        clearinghouse.lockReservedSettlement(aliceAccount, 100 * 1e6);
+        clearinghouse.reserveCommittedOrderMargin(aliceAccount, 99, 200 * 1e6);
+        uint256 releasedUsdc = clearinghouse.releaseOrderReservationIfActive(99);
+        vm.stopPrank();
+
+        assertEq(releasedUsdc, 200 * 1e6, "router should release its own active reservation");
+        assertEq(
+            clearinghouse.getLockedMarginBuckets(aliceAccount).reservedSettlementUsdc,
+            100 * 1e6,
+            "router should still be able to reserve execution-bounty settlement"
+        );
+
+        vm.prank(address(mockRouter));
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__NotOperator.selector);
+        clearinghouse.settleUsdc(aliceAccount, int256(1e6));
+    }
+
     function test_C01_WithdrawUsdcBelowLockedMargin_ShouldRevert() public {
         vm.prank(alice);
         clearinghouse.deposit(aliceAccount, 1000 * 1e6);

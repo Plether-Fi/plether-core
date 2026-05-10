@@ -1620,8 +1620,8 @@ contract CfdEngineTest is BasePerpTest {
             carryElapsed
         );
 
-        vm.prank(address(router));
-        clearinghouse.seizeUsdc(account, seizedAmount, address(router));
+        vm.prank(address(engine));
+        clearinghouse.seizeUsdc(account, seizedAmount, address(engine));
 
         assertEq(
             clearinghouse.balanceUsdc(account),
@@ -1671,7 +1671,7 @@ contract CfdEngineTest is BasePerpTest {
             carryElapsed
         );
 
-        vm.prank(address(router));
+        vm.prank(address(engine));
         clearinghouse.unlockReservedSettlement(account, reservedAmount);
 
         assertEq(
@@ -1703,9 +1703,9 @@ contract CfdEngineTest is BasePerpTest {
         );
         assertGt(expectedCarry, 0, "Setup must accrue carry before seizure");
 
-        vm.prank(address(router));
+        vm.prank(address(engine));
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientAssetToSeize.selector);
-        clearinghouse.seizeUsdc(account, freeSettlementBefore, address(router));
+        clearinghouse.seizeUsdc(account, freeSettlementBefore, address(engine));
     }
 
     function test_ProfitableClose_DoesNotDoubleBookCarryIntoAccountedAssets() public {

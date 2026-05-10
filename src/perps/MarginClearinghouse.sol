@@ -75,18 +75,15 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         if (engine_ == address(0)) {
             revert MarginClearinghouse__NotOperator();
         }
-        if (
-            msg.sender != engine_ && msg.sender != ICfdEngineCore(engine_).orderRouter()
-                && msg.sender != ICfdEngineCore(engine_).settlementModule()
-        ) {
+        if (msg.sender != engine_ && !_isSettlementModule(engine_, msg.sender)) {
             revert MarginClearinghouse__NotOperator();
         }
         _;
     }
 
-    modifier onlyOrderRouter() {
+    modifier onlyEngineOrOrderRouter() {
         address engine_ = engine;
-        if (engine_ == address(0) || msg.sender != ICfdEngineCore(engine_).orderRouter()) {
+        if (engine_ == address(0) || (msg.sender != engine_ && !_isOrderRouter(engine_, msg.sender))) {
             revert MarginClearinghouse__NotOperator();
         }
         _;
@@ -296,7 +293,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         address account,
         uint64 orderId,
         uint256 amountUsdc
-    ) external onlyOperator {
+    ) external onlyEngineOrOrderRouter {
         if (orderReservations[orderId].status != IMarginClearinghouse.ReservationStatus.None) {
             revert MarginClearinghouse__ReservationAlreadyExists();
         }
@@ -343,7 +340,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
 
     function releaseOrderReservationIfActive(
         uint64 orderId
-    ) external onlyOperator returns (uint256 releasedUsdc) {
+    ) external onlyEngineOrOrderRouter returns (uint256 releasedUsdc) {
         IMarginClearinghouse.OrderReservation storage reservation = orderReservations[orderId];
         if (reservation.status != IMarginClearinghouse.ReservationStatus.Active) {
             return 0;
@@ -493,7 +490,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     function lockReservedSettlement(
         address account,
         uint256 amountUsdc
-    ) external onlyOperator {
+    ) external onlyEngineOrOrderRouter {
         _checkpointCarryBeforeMarginChange(account);
         _lockMargin(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, amountUsdc);
     }
@@ -796,6 +793,28 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
             }
 
             ICfdEngineCore(engine_).checkpointCarryUsingStoredMark(account, reachableCollateralBasisUsdc);
+        }
+    }
+
+    function _isOrderRouter(
+        address engine_,
+        address caller
+    ) internal view returns (bool) {
+        try ICfdEngineCore(engine_).orderRouter() returns (address router_) {
+            return router_ != address(0) && caller == router_;
+        } catch {
+            return false;
+        }
+    }
+
+    function _isSettlementModule(
+        address engine_,
+        address caller
+    ) internal view returns (bool) {
+        try ICfdEngineCore(engine_).settlementModule() returns (address settlementModule_) {
+            return settlementModule_ != address(0) && caller == settlementModule_;
+        } catch {
+            return false;
         }
     }
 

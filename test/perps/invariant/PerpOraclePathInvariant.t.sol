@@ -16,7 +16,6 @@ import {IOrderRouterAdminHost} from "../../../src/perps/interfaces/IOrderRouterA
 import {IPletherOracle} from "../../../src/perps/interfaces/IPletherOracle.sol";
 import {MockPyth} from "../../mocks/MockPyth.sol";
 import {MockUSDC} from "../../mocks/MockUSDC.sol";
-import {MockUSDC} from "../../mocks/MockUSDC.sol";
 import {BasePerpTest} from "../BasePerpTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Test} from "forge-std/Test.sol";
@@ -26,6 +25,7 @@ contract PerpOraclePathHandler is Test {
     MockPyth public immutable mockPyth;
     OrderRouter public immutable router;
     OrderRouterAdmin public immutable routerAdmin;
+    IPletherOracle public immutable pletherOracle;
     CfdEngine public immutable engine;
     address public immutable owner;
     bytes32[] internal feedIds;
@@ -51,6 +51,7 @@ contract PerpOraclePathHandler is Test {
         mockPyth = _mockPyth;
         router = _router;
         routerAdmin = OrderRouterAdmin(_router.admin());
+        pletherOracle = _router.pletherOracle();
         engine = _engine;
         owner = _owner;
         feedIds = _feedIds;
@@ -195,7 +196,7 @@ contract PerpOraclePathHandler is Test {
         acceptEthRefunds = true;
         uint256 pending = ghostPendingRefundEth;
         uint256 beforeBalance = address(this).balance;
-        routerAdmin.claimBalance(true);
+        pletherOracle.claimEthRefund();
         uint256 claimed = address(this).balance - beforeBalance;
         assertEq(claimed, pending, "claim must transfer the full stranded ETH amount");
         ghostPendingRefundEth = 0;
@@ -301,12 +302,13 @@ contract PerpOraclePathInvariantTest is BasePerpTest {
         assertEq(engine.lastMarkTime(), handler.ghostExpectedMarkTime(), "engine mark time drifted from last success");
     }
 
-    function invariant_RouterAdminCustodiesOnlyTrackedStrandedRefundEth() public view {
+    function invariant_OracleTracksOnlyClaimableFailedRefundEth() public view {
         assertEq(
-            address(routerAdmin).balance,
+            router.pletherOracle().claimableEth(address(handler)),
             handler.ghostPendingRefundEth(),
-            "router admin ETH balance must equal stranded refunds"
+            "oracle claimable ETH must equal failed refund total"
         );
+        assertEq(address(routerAdmin).balance, 0, "router admin must not custody oracle refunds");
     }
 
     function invariant_OracleStalenessLimitsRemainPositive() public view {

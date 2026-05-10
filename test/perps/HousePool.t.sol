@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
@@ -152,16 +151,12 @@ contract HousePoolTest is BasePerpTest {
 
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BULL, 200_000 * 1e18, 20_000 * 1e6, 1e8, false);
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
 
         // Price drops to $0.50 → BULL profits $100k
-        bytes[] memory pythData = new bytes[](1);
-        pythData[0] = abi.encode(0.5e8);
-
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BULL, 200_000 * 1e18, 0, 0, true);
-        router.executeOrder{value: 0}(2, pythData);
+        router.executeOrder(2, _mockPythUpdateData(0.5e8));
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -178,16 +173,12 @@ contract HousePoolTest is BasePerpTest {
 
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BULL, 200_000 * 1e18, 20_000 * 1e6, 1e8, false);
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
 
         // Price drops to $0.50 → BULL profits $100k, exceeding junior's $50k
-        bytes[] memory pythData = new bytes[](1);
-        pythData[0] = abi.encode(0.5e8);
-
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BULL, 200_000 * 1e18, 0, 0, true);
-        router.executeOrder{value: 0}(2, pythData);
+        router.executeOrder(2, _mockPythUpdateData(0.5e8));
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -207,8 +198,7 @@ contract HousePoolTest is BasePerpTest {
         _fundTrader(carol, 50_000 * 1e6);
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BULL, 800_000 * 1e18, 40_000 * 1e6, 1e8, false);
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
 
         // Max liability = 800k (BULL at $1, cap $2 → max profit = entry*size = $800k)
         // Free USDC = totalAssets - maxLiability
@@ -233,8 +223,7 @@ contract HousePoolTest is BasePerpTest {
         _fundTrader(carol, 50_000 * 1e6);
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BULL, 250_000 * 1e18, 25_000 * 1e6, 1e8, false);
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
 
         // freeUSDC ≈ 400k - 250k + exec_fees. Senior principal = 200k.
         // Senior max = min(200k, freeUSDC) < 200k
@@ -279,8 +268,7 @@ contract HousePoolTest is BasePerpTest {
         _fundTrader(carol, 50_000 * 1e6);
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
 
         uint256 fees = engine.accumulatedFeesUsdc();
         assertTrue(fees > 0, "Fees should exist after trade");
@@ -291,10 +279,11 @@ contract HousePoolTest is BasePerpTest {
         pool.reconcile();
 
         uint256 totalBalance = pool.totalAssets();
+        uint256 unrealizedMtmLiability = _vaultMtmAdjustment();
         assertEq(
             pool.juniorPrincipal(),
-            totalBalance - fees - SEEDED_SENIOR,
-            "Reconcile should exclude protocol fees exactly"
+            totalBalance - fees - unrealizedMtmLiability - SEEDED_SENIOR,
+            "Reconcile should exclude protocol fees and live MTM liability exactly"
         );
     }
 
@@ -311,16 +300,12 @@ contract HousePoolTest is BasePerpTest {
         // Trader opens BULL $100k at $1.00
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
 
         // Price drops to $0.80 → BULL profits $20k (paid from pool)
-        bytes[] memory pythData = new bytes[](1);
-        pythData[0] = abi.encode(0.8e8);
-
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 0, 0, true);
-        router.executeOrder{value: 0}(2, pythData);
+        router.executeOrder(2, _mockPythUpdateData(0.8e8));
 
         uint256 staleTime = block.timestamp + 30 days;
         vm.warp(staleTime);
@@ -1116,21 +1101,6 @@ contract HousePoolTest is BasePerpTest {
         pool.assignUnassignedAssets(false, alice);
     }
 
-    function test_InitializeSeedPosition_RevertsWhenOracleFrozen() public {
-        uint256 seedAssets = 50_000e6;
-        bytes32 seedFlagsSlot = vm.load(address(pool), bytes32(uint256(20)));
-        bytes32 seniorSeedCleared = (seedFlagsSlot & ~bytes32(uint256(0xff << 8)));
-        vm.store(address(pool), bytes32(uint256(20)), seniorSeedCleared);
-
-        usdc.mint(address(this), seedAssets);
-        usdc.approve(address(pool), seedAssets);
-
-        _enterFrozenWindow();
-
-        vm.expectRevert(HousePool.HousePool__OracleFrozen.selector);
-        pool.initializeSeedPosition(true, seedAssets, address(this));
-    }
-
     function test_SweepExcess_RemovesDonationWithoutChangingAccountedAssets() public {
         _fundJunior(bob, 500_000e6);
 
@@ -1248,8 +1218,7 @@ contract HousePoolTest is BasePerpTest {
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 5000 * 1e6, 1e8, false);
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
 
         // 100k BULL at $1.00: protocol accrues the full $40 execution fee.
         uint256 fees = engine.accumulatedFeesUsdc();
@@ -1496,8 +1465,7 @@ contract HousePoolTest is BasePerpTest {
         _fundTrader(carol, 100_000 * 1e6);
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BULL, 500_000 * 1e18, 50_000 * 1e6, 1e8, false);
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
 
         assertEq(int256(0), 0, "Starts at zero");
 
@@ -1536,14 +1504,13 @@ contract HousePoolTest is BasePerpTest {
         _fundTrader(trader1, 100_000 * 1e6);
         vm.prank(trader1);
         router.commitOrder(CfdTypes.Side.BULL, 400_000 * 1e18, 40_000 * 1e6, 1e8, false);
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
 
         address trader2 = address(0x555);
         _fundTrader(trader2, 100_000 * 1e6);
         vm.prank(trader2);
         router.commitOrder(CfdTypes.Side.BEAR, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
-        router.executeOrder(2, empty);
+        router.executeOrder(2, _mockPythUpdateData());
 
         vm.warp(block.timestamp + 20 days);
         vm.prank(address(router));
@@ -1580,14 +1547,13 @@ contract HousePoolTest is BasePerpTest {
         _fundTrader(trader1, 100_000 * 1e6);
         vm.prank(trader1);
         router.commitOrder(CfdTypes.Side.BULL, 400_000 * 1e18, 40_000 * 1e6, 1e8, false);
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
 
         address trader2 = address(0x555);
         _fundTrader(trader2, 100_000 * 1e6);
         vm.prank(trader2);
         router.commitOrder(CfdTypes.Side.BEAR, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
-        router.executeOrder(2, empty);
+        router.executeOrder(2, _mockPythUpdateData());
 
         vm.warp(block.timestamp + 20 days);
         vm.prank(address(router));
@@ -1842,6 +1808,28 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         pool.accountExcess();
     }
 
+    function _enterFrozenWindow() internal {
+        uint256 saturdayFrozen = 1_710_021_600;
+        vm.warp(saturdayFrozen - 12 hours);
+        assertTrue(engine.isOracleFrozen(), "setup should enter a frozen-oracle window");
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(saturdayFrozen - 12 hours));
+
+        vm.warp(saturdayFrozen);
+    }
+
+    function test_InitializeSeedPosition_RevertsWhenOracleFrozen() public {
+        uint256 seedAssets = 50_000e6;
+        usdc.mint(address(this), seedAssets);
+        usdc.approve(address(pool), seedAssets);
+
+        _enterFrozenWindow();
+
+        vm.expectRevert(HousePool.HousePool__OracleFrozen.selector);
+        pool.initializeSeedPosition(true, seedAssets, address(this));
+    }
+
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
@@ -1928,8 +1916,6 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         _fundTrader(trader, 900e6);
         _open(account, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
 
-        uint256 assetsBefore = pool.totalAssets();
-        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 150_000_000);
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(150_000_000));
         router.executeLiquidation(account, priceData);
@@ -2219,18 +2205,18 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8, false);
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
 
         uint256 assetsDelta = pool.totalAssets() - assetsBefore;
         uint256 feesDelta = engine.accumulatedFeesUsdc() - feesBefore;
         (, uint256 pendingJunior,,) = pool.getPendingTrancheState();
         uint256 expectedLpTradingRevenue = assetsDelta > feesDelta ? assetsDelta - feesDelta : 0;
+        uint256 pendingJuniorIncrease = pendingJunior > pendingJuniorBefore ? pendingJunior - pendingJuniorBefore : 0;
 
         assertEq(feesDelta, 40_000_000, "Open should still accrue the full execution fee as protocol revenue");
         assertEq(pool.excessAssets(), 0, "Execution fee inflow should be canonically accounted, not stranded as excess");
         assertEq(
-            pendingJunior - pendingJuniorBefore,
+            pendingJuniorIncrease,
             expectedLpTradingRevenue,
             "Seeded pending LP revenue should exclude the execution fee portion"
         );
@@ -2547,16 +2533,13 @@ contract HousePoolAuditTest is BasePerpTest {
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 200_000e18, 10_000e6, 1e8, false);
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
 
         uint256 juniorBefore = pool.juniorPrincipal();
 
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(1.2e8));
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 10_000e6, 1.2e8, false);
-        router.executeOrder(2, priceData);
+        router.executeOrder(2, _mockPythUpdateData(1.2e8));
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -2575,16 +2558,13 @@ contract HousePoolAuditTest is BasePerpTest {
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 200_000e18, 10_000e6, 1e8, false);
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
 
         uint256 juniorBefore = pool.juniorPrincipal();
 
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(0.8e8));
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 10_000e6, 0.8e8, false);
-        router.executeOrder(2, priceData);
+        router.executeOrder(2, _mockPythUpdateData(0.8e8));
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -2604,12 +2584,11 @@ contract HousePoolAuditTest is BasePerpTest {
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 5000e6, 1e8, false);
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 0, 1e8, true);
-        router.executeOrder(2, empty);
+        router.executeOrder(2, _mockPythUpdateData());
 
         (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0);
@@ -2628,8 +2607,7 @@ contract HousePoolAuditTest is BasePerpTest {
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 400_000e18, 20_000e6, 1e8, false);
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
 
         vm.warp(block.timestamp + 121);
 
@@ -2664,8 +2642,7 @@ contract HousePoolAuditTest is BasePerpTest {
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8, false);
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
 
         vm.warp(saturdayFrozen);
         assertTrue(engine.isOracleFrozen(), "Test setup should advance into a frozen oracle window");
@@ -2688,14 +2665,13 @@ contract HousePoolAuditTest is BasePerpTest {
         _fundTrader(bullTrader, 100_000e6);
         vm.prank(bullTrader);
         router.commitOrder(CfdTypes.Side.BULL, 400_000e18, 40_000e6, 1e8, false);
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
 
         address bearTrader = address(0x555);
         _fundTrader(bearTrader, 100_000e6);
         vm.prank(bearTrader);
         router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8, false);
-        router.executeOrder(2, empty);
+        router.executeOrder(2, _mockPythUpdateData());
 
         vm.warp(saturdayFrozen - 12 hours);
         assertTrue(engine.isOracleFrozen(), "setup should enter a frozen-oracle window");
@@ -2726,14 +2702,13 @@ contract HousePoolAuditTest is BasePerpTest {
         _fundTrader(bullTrader, 100_000e6);
         vm.prank(bullTrader);
         router.commitOrder(CfdTypes.Side.BULL, 400_000e18, 40_000e6, 1e8, false);
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
 
         address bearTrader = address(0x555);
         _fundTrader(bearTrader, 100_000e6);
         vm.prank(bearTrader);
         router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8, false);
-        router.executeOrder(2, empty);
+        router.executeOrder(2, _mockPythUpdateData());
 
         vm.warp(saturdayFrozen - 12 hours);
         assertTrue(engine.isOracleFrozen(), "setup should enter a frozen-oracle window");
@@ -2766,25 +2741,21 @@ contract HousePoolAuditTest is BasePerpTest {
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 300_000e18, 30_000e6, 1e8, false);
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
 
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
-        router.executeOrder(2, empty);
+        router.executeOrder(2, _mockPythUpdateData());
 
         vm.warp(block.timestamp + 90 days);
 
-        bytes[] memory closePrice = new bytes[](1);
-        closePrice[0] = abi.encode(uint256(1e8));
-
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
-        router.executeOrder(3, closePrice);
+        router.executeOrder(3, _mockPythUpdateData());
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 300_000e18, 0, 0, true);
-        router.executeOrder(4, closePrice);
+        router.executeOrder(4, _mockPythUpdateData());
 
         assertEq(_sideOpenInterest(CfdTypes.Side.BULL), 0, "All bull positions closed");
         assertEq(_sideOpenInterest(CfdTypes.Side.BEAR), 0, "All bear positions closed");
@@ -2800,25 +2771,21 @@ contract HousePoolAuditTest is BasePerpTest {
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 300_000e18, 30_000e6, 1e8, false);
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
 
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
-        router.executeOrder(2, empty);
+        router.executeOrder(2, _mockPythUpdateData());
 
         vm.warp(block.timestamp + 90 days);
 
-        bytes[] memory closePrice = new bytes[](1);
-        closePrice[0] = abi.encode(uint256(1e8));
-
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
-        router.executeOrder(3, closePrice);
+        router.executeOrder(3, _mockPythUpdateData());
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 300_000e18, 0, 0, true);
-        router.executeOrder(4, closePrice);
+        router.executeOrder(4, _mockPythUpdateData());
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -2841,22 +2808,19 @@ contract HousePoolAuditTest is BasePerpTest {
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 300_000e18, 30_000e6, 1e8, false);
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
 
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
-        router.executeOrder(2, empty);
+        router.executeOrder(2, _mockPythUpdateData());
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
         vm.warp(block.timestamp + 30);
 
-        bytes[] memory price = new bytes[](1);
-        price[0] = abi.encode(uint256(1e8));
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
-        router.executeOrder(3, price);
+        router.executeOrder(3, _mockPythUpdateData());
 
         int256 unrealizedLegacySpread = int256(0);
         assertEq(unrealizedLegacySpread, 0, "Carry model should not report legacy side spread state");
@@ -2875,18 +2839,15 @@ contract HousePoolAuditTest is BasePerpTest {
         _fundTrader(alice, 50_000e6);
         _fundTrader(carol, 50_000e6);
 
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(1e8));
-
         uint64 id1 = router.nextCommitId();
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 250_000e18, 25_000e6, 1e8, false);
-        router.executeOrder(id1, priceData);
+        router.executeOrder(id1, _mockPythUpdateData());
 
         uint64 id2 = router.nextCommitId();
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BULL, 250_100e18, 25_000e6, 1e8, false);
-        router.executeOrder(id2, priceData);
+        router.executeOrder(id2, _mockPythUpdateData());
 
         uint256 fees = engine.accumulatedFeesUsdc();
         assertGt(fees, 0, "Fees should have accumulated");
@@ -2908,8 +2869,7 @@ contract HousePoolAuditTest is BasePerpTest {
         _fundTrader(carol, 50_000e6);
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BEAR, 200_000e18, 20_000e6, 1e8, false);
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
 
         uint256 closeDepth = pool.totalAssets();
         vm.prank(address(router));
@@ -2954,8 +2914,7 @@ contract HousePoolAuditTest is BasePerpTest {
         _fundTrader(carol, 50_000e6);
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 20_000e6, 1e8, false);
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
 
         uint256 closeDepth = pool.totalAssets();
         vm.prank(address(router));

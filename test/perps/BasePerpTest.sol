@@ -254,10 +254,16 @@ abstract contract BasePerpTest is Test {
     }
 
     function _mockPythUpdateData() internal returns (bytes[] memory updateData) {
+        return _mockPythUpdateData(1e8);
+    }
+
+    function _mockPythUpdateData(
+        uint256 price
+    ) internal returns (bytes[] memory updateData) {
         vm.roll(block.number + 1);
         vm.warp(block.timestamp + 1);
         updateData = new bytes[](1);
-        updateData[0] = abi.encode(uint256(1e8));
+        updateData[0] = abi.encode(price);
     }
 
     // --- Legacy side-index placeholder helpers ---
@@ -419,7 +425,7 @@ abstract contract BasePerpTest is Test {
         CfdEngine.ClosePreview memory preview,
         CloseParityObserved memory observed,
         bool degradedModeBefore
-    ) internal {
+    ) internal pure {
         assertApproxEqAbs(
             observed.immediatePayoutUsdc,
             preview.immediatePayoutUsdc,
@@ -819,7 +825,7 @@ abstract contract BasePerpTest is Test {
     // The live system does not maintain a legacy side-index state; this helper is intentionally zero.
     function _legacySideIndexZero(
         CfdTypes.Side side
-    ) internal view returns (int256) {
+    ) internal pure returns (int256) {
         side;
         return 0;
     }
@@ -828,7 +834,7 @@ abstract contract BasePerpTest is Test {
     // The live carry model does not use a legacy side-entry index; this helper is intentionally zero.
     function _legacySideEntryIndexZero(
         CfdTypes.Side side
-    ) internal view returns (int256) {
+    ) internal pure returns (int256) {
         side;
         return 0;
     }
