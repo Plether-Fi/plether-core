@@ -55,7 +55,6 @@ contract PayoutModesMatrixTest is BasePerpTest {
             0,
             "Liquid mode should credit keeper bounty immediately"
         );
-        assertEq(engine.deferredKeeperCreditUsdc(keeper), 0, "Liquid mode should not defer keeper bounty");
     }
 
     function test_LiquidationBadDebtMode() public {

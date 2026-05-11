@@ -6,7 +6,6 @@ library CashPriorityLib {
     struct SeniorCashReservation {
         uint256 physicalAssetsUsdc;
         uint256 deferredTraderCreditUsdc;
-        uint256 deferredKeeperCreditUsdc;
         uint256 totalSeniorClaimsUsdc;
         uint256 reservedSeniorCashUsdc;
         uint256 freeCashUsdc;
@@ -15,20 +14,17 @@ library CashPriorityLib {
 
     function reserveFreshPayouts(
         uint256 physicalAssetsUsdc,
-        uint256 deferredTraderCreditUsdc,
-        uint256 deferredKeeperCreditUsdc
+        uint256 deferredTraderCreditUsdc
     ) internal pure returns (SeniorCashReservation memory reservation) {
-        return _buildSeniorCashReservation(physicalAssetsUsdc, deferredTraderCreditUsdc, deferredKeeperCreditUsdc);
+        return _buildSeniorCashReservation(physicalAssetsUsdc, deferredTraderCreditUsdc);
     }
 
     function reserveDeferredClaim(
         uint256 physicalAssetsUsdc,
         uint256 deferredTraderCreditUsdc,
-        uint256 deferredKeeperCreditUsdc,
         uint256 deferredClaimAmountUsdc
     ) internal pure returns (SeniorCashReservation memory reservation) {
-        reservation =
-            _buildSeniorCashReservation(physicalAssetsUsdc, deferredTraderCreditUsdc, deferredKeeperCreditUsdc);
+        reservation = _buildSeniorCashReservation(physicalAssetsUsdc, deferredTraderCreditUsdc);
 
         if (physicalAssetsUsdc < reservation.totalSeniorClaimsUsdc) {
             return reservation;
@@ -44,53 +40,45 @@ library CashPriorityLib {
     }
 
     function reservedSeniorCashUsdc(
-        uint256 deferredTraderCreditUsdc,
-        uint256 deferredKeeperCreditUsdc
+        uint256 deferredTraderCreditUsdc
     ) internal pure returns (uint256) {
-        return deferredTraderCreditUsdc + deferredKeeperCreditUsdc;
+        return deferredTraderCreditUsdc;
     }
 
     function availableCashForFreshPayouts(
         uint256 physicalAssetsUsdc,
-        uint256 deferredTraderCreditUsdc,
-        uint256 deferredKeeperCreditUsdc
+        uint256 deferredTraderCreditUsdc
     ) internal pure returns (uint256) {
-        return reserveFreshPayouts(physicalAssetsUsdc, deferredTraderCreditUsdc, deferredKeeperCreditUsdc).freeCashUsdc;
+        return reserveFreshPayouts(physicalAssetsUsdc, deferredTraderCreditUsdc).freeCashUsdc;
     }
 
     function availableCashForDeferredBeneficiaryClaim(
         uint256 physicalAssetsUsdc,
         uint256 deferredTraderCreditUsdc,
-        uint256 deferredKeeperCreditUsdc,
         uint256 claimAmountUsdc
     ) internal pure returns (uint256) {
-        return reserveDeferredClaim(
-            physicalAssetsUsdc, deferredTraderCreditUsdc, deferredKeeperCreditUsdc, claimAmountUsdc
-        )
+        return reserveDeferredClaim(physicalAssetsUsdc, deferredTraderCreditUsdc, claimAmountUsdc)
         .deferredClaimServiceableUsdc;
     }
 
     function canPayFreshPayout(
         uint256 physicalAssetsUsdc,
         uint256 deferredTraderCreditUsdc,
-        uint256 deferredKeeperCreditUsdc,
         uint256 amountUsdc
     ) internal pure returns (bool) {
-        return amountUsdc > 0
-            && amountUsdc
-                <= availableCashForFreshPayouts(physicalAssetsUsdc, deferredTraderCreditUsdc, deferredKeeperCreditUsdc);
+        return
+            amountUsdc > 0 && amountUsdc <= availableCashForFreshPayouts(physicalAssetsUsdc, deferredTraderCreditUsdc);
     }
 
     function canPayDeferredBeneficiaryClaim(
         uint256 physicalAssetsUsdc,
         uint256 deferredTraderCreditUsdc,
-        uint256 deferredKeeperCreditUsdc,
         uint256 claimAmountUsdc
     ) internal pure returns (bool) {
         return claimAmountUsdc > 0
             && claimAmountUsdc
                 <= availableCashForDeferredBeneficiaryClaim(
-                physicalAssetsUsdc, deferredTraderCreditUsdc, deferredKeeperCreditUsdc, claimAmountUsdc
+                physicalAssetsUsdc, deferredTraderCreditUsdc, claimAmountUsdc
             );
     }
 
@@ -103,13 +91,11 @@ library CashPriorityLib {
 
     function _buildSeniorCashReservation(
         uint256 physicalAssetsUsdc,
-        uint256 deferredTraderCreditUsdc,
-        uint256 deferredKeeperCreditUsdc
+        uint256 deferredTraderCreditUsdc
     ) private pure returns (SeniorCashReservation memory reservation) {
         reservation.physicalAssetsUsdc = physicalAssetsUsdc;
         reservation.deferredTraderCreditUsdc = deferredTraderCreditUsdc;
-        reservation.deferredKeeperCreditUsdc = deferredKeeperCreditUsdc;
-        reservation.totalSeniorClaimsUsdc = reservedSeniorCashUsdc(deferredTraderCreditUsdc, deferredKeeperCreditUsdc);
+        reservation.totalSeniorClaimsUsdc = reservedSeniorCashUsdc(deferredTraderCreditUsdc);
         reservation.reservedSeniorCashUsdc = reservation.totalSeniorClaimsUsdc;
         reservation.freeCashUsdc = _saturatingSub(physicalAssetsUsdc, reservation.reservedSeniorCashUsdc);
     }

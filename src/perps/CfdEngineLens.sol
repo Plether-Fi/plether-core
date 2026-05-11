@@ -8,6 +8,7 @@ import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
 import {ICfdEngineLens} from "./interfaces/ICfdEngineLens.sol";
 import {ICfdEnginePlanner} from "./interfaces/ICfdEnginePlanner.sol";
 import {IMarginClearinghouse} from "./interfaces/IMarginClearinghouse.sol";
+import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
 import {CfdEnginePlanLib} from "./libraries/CfdEnginePlanLib.sol";
 
 contract CfdEngineLens is ICfdEngineLens {
@@ -253,7 +254,6 @@ contract CfdEngineLens is ICfdEngineLens {
         snap.accumulatedBadDebtUsdc = engineContract.accumulatedBadDebtUsdc();
         snap.unsettledCarryUsdc = engineContract.unsettledCarryUsdc(account);
         snap.totalDeferredTraderCreditUsdc = engineContract.totalDeferredTraderCreditUsdc();
-        snap.totalDeferredKeeperCreditUsdc = engineContract.totalDeferredKeeperCreditUsdc();
         snap.deferredTraderCreditForAccount = engineContract.deferredTraderCreditUsdc(account);
         snap.degradedMode = engineContract.degradedMode();
         snap.capPrice = engineContract.CAP_PRICE();
@@ -267,9 +267,38 @@ contract CfdEngineLens is ICfdEngineLens {
     function _applyLiquidationPreviewForfeiture(
         address account,
         CfdEnginePlanTypes.RawSnapshot memory snap
-    ) internal pure {
-        account;
-        snap;
+    ) internal view {
+        address orderRouter = engineContract.orderRouter();
+        if (orderRouter == address(0)) {
+            return;
+        }
+
+        uint256 forfeitedUsdc = IOrderRouterAccounting(orderRouter).getAccountEscrow(account).executionBountyUsdc;
+        if (forfeitedUsdc == 0) {
+            return;
+        }
+
+        if (forfeitedUsdc > snap.accountBuckets.settlementBalanceUsdc) {
+            forfeitedUsdc = snap.accountBuckets.settlementBalanceUsdc;
+        }
+        snap.accountBuckets.settlementBalanceUsdc -= forfeitedUsdc;
+
+        uint256 releasedReserveUsdc = forfeitedUsdc;
+        if (releasedReserveUsdc > snap.lockedBuckets.reservedSettlementUsdc) {
+            releasedReserveUsdc = snap.lockedBuckets.reservedSettlementUsdc;
+        }
+        snap.lockedBuckets.reservedSettlementUsdc -= releasedReserveUsdc;
+        snap.lockedBuckets.totalLockedMarginUsdc -= releasedReserveUsdc;
+        uint256 accountReserveReleaseUsdc = releasedReserveUsdc;
+        if (accountReserveReleaseUsdc > snap.accountBuckets.otherLockedMarginUsdc) {
+            accountReserveReleaseUsdc = snap.accountBuckets.otherLockedMarginUsdc;
+        }
+        snap.accountBuckets.otherLockedMarginUsdc -= accountReserveReleaseUsdc;
+        snap.accountBuckets.totalLockedMarginUsdc -= accountReserveReleaseUsdc;
+        snap.accountBuckets.freeSettlementUsdc = snap.accountBuckets.settlementBalanceUsdc
+            > snap.accountBuckets.totalLockedMarginUsdc
+            ? snap.accountBuckets.settlementBalanceUsdc - snap.accountBuckets.totalLockedMarginUsdc
+            : 0;
     }
 
     function _position(

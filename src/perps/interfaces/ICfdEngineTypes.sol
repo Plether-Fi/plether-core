@@ -13,7 +13,6 @@ interface ICfdEngineTypes {
     error CfdEngine__ProtocolTreasuryBalanceNotEmpty();
     error CfdEngine__NoDeferredTraderCredit();
     error CfdEngine__InsufficientVaultLiquidity();
-    error CfdEngine__NoDeferredKeeperCredit();
     error CfdEngine__MustCloseOpposingPosition();
     error CfdEngine__CarryExceedsMargin();
     error CfdEngine__VaultSolvencyExceeded();
@@ -80,7 +79,6 @@ interface ICfdEngineTypes {
         uint256 freeUsdc;
         uint256 protocolTreasuryBalanceUsdc;
         uint256 totalDeferredTraderCreditUsdc;
-        uint256 totalDeferredKeeperCreditUsdc;
         bool degradedMode;
         bool hasLiveLiability;
     }
@@ -133,8 +131,6 @@ interface ICfdEngineTypes {
     struct DeferredCreditStatus {
         uint256 deferredTraderCreditUsdc;
         bool traderPayoutClaimableNow;
-        uint256 deferredKeeperCreditUsdc;
-        bool keeperCreditClaimableNow;
     }
 
     struct SideState {

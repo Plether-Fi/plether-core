@@ -2,15 +2,10 @@
 pragma solidity 0.8.33;
 
 import {DecimalConstants} from "../../libraries/DecimalConstants.sol";
-import {CashPriorityLib} from "../libraries/CashPriorityLib.sol";
 import {OrderRouterBase} from "./OrderRouterBase.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-/// @notice Shared router math and escrow settlement helpers.
+/// @notice Shared router math and reservation settlement helpers.
 abstract contract OrderUtils is OrderRouterBase {
-
-    using SafeERC20 for IERC20;
 
     function _quoteOpenOrderExecutionBountyUsdc(
         uint256 sizeDelta,
@@ -25,33 +20,6 @@ abstract contract OrderUtils is OrderRouterBase {
             executionBountyUsdc > maxOpenOrderExecutionBountyUsdc
                 ? maxOpenOrderExecutionBountyUsdc
                 : executionBountyUsdc;
-    }
-
-    /// @dev Liquidation keeper value follows the same default custody path as other keeper flows:
-    ///      credit the beneficiary's clearinghouse account when cash is available, otherwise defer the
-    ///      claim for later clearinghouse settlement.
-    function _creditOrDeferLiquidationBounty(
-        uint256 liquidationBountyUsdc,
-        uint256 executionPrice,
-        uint64 oraclePublishTime
-    ) internal {
-        if (liquidationBountyUsdc == 0) {
-            return;
-        }
-
-        CashPriorityLib.SeniorCashReservation memory reservation = CashPriorityLib.reserveFreshPayouts(
-            housePool.totalAssets(), engine.totalDeferredTraderCreditUsdc(), engine.totalDeferredKeeperCreditUsdc()
-        );
-        if (liquidationBountyUsdc > reservation.freeCashUsdc) {
-            engine.recordDeferredKeeperCredit(msg.sender, liquidationBountyUsdc);
-            return;
-        }
-
-        try housePool.payOut(address(clearinghouse), liquidationBountyUsdc) {
-            engine.creditKeeperExecutionBounty(msg.sender, liquidationBountyUsdc, executionPrice, oraclePublishTime);
-        } catch {
-            engine.recordDeferredKeeperCredit(msg.sender, liquidationBountyUsdc);
-        }
     }
 
     function _forfeitEscrowedOrderBountiesOnLiquidation(
@@ -74,8 +42,7 @@ abstract contract OrderUtils is OrderRouterBase {
             return;
         }
 
-        USDC.safeTransfer(address(clearinghouse), forfeitedUsdc);
-        clearinghouse.settleUsdc(engine.protocolTreasury(), int256(forfeitedUsdc));
+        engine.absorbReservedExecutionBounty(account, forfeitedUsdc);
     }
 
 }

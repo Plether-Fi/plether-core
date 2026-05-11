@@ -71,7 +71,6 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
     ICfdEngineCore public immutable ENGINE;
     ICfdEngineProtocolLens public immutable ENGINE_PROTOCOL_LENS;
 
-    address public orderRouter;
     address public seniorVault;
     address public juniorVault;
     address public pauser;
@@ -99,7 +98,6 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
     uint256 public poolConfigActivationTime;
 
     error HousePool__NotAVault();
-    error HousePool__RouterAlreadySet();
     error HousePool__SeniorVaultAlreadySet();
     error HousePool__JuniorVaultAlreadySet();
     error HousePool__Unauthorized();
@@ -187,19 +185,6 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
     // ==========================================
     // ADMIN (set-once pattern)
     // ==========================================
-
-    /// @notice Set the OrderRouter address (one-time, immutable after set)
-    function setOrderRouter(
-        address _router
-    ) external onlyOwner {
-        if (_router == address(0)) {
-            revert HousePool__ZeroAddress();
-        }
-        if (orderRouter != address(0)) {
-            revert HousePool__RouterAlreadySet();
-        }
-        orderRouter = _router;
-    }
 
     /// @notice Set the senior tranche vault address (one-time, immutable after set)
     function setSeniorVault(
@@ -404,7 +389,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         address recipient,
         uint256 amount
     ) external {
-        if (msg.sender != address(ENGINE) && msg.sender != orderRouter && msg.sender != ENGINE.settlementModule()) {
+        if (msg.sender != address(ENGINE) && msg.sender != ENGINE.settlementModule()) {
             revert HousePool__Unauthorized();
         }
         accountedAssets -= amount;

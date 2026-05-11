@@ -53,8 +53,9 @@ Before trusting a test as a source of truth, ask:
 |----------|------------------------|-------|
 | `CfdEngine` settlement host hooks | `settlementModule` only | settlement module itself is engine-gated |
 | `CfdEngine.processOrderTyped` / `liquidatePosition` / fee bookkeeping | `orderRouter` only | router is the external execution boundary |
-| `MarginClearinghouse` operator paths | `engine`, `orderRouter`, `settlementModule` | router for queue escrow, engine/module for settlement |
-| `HousePool.payOut` | `engine`, `orderRouter`, `settlementModule` | payout authority covers engine settlement and router-managed bounty flows |
+| `MarginClearinghouse` operator paths | `engine`, `settlementModule` | broad settlement mutations only |
+| `MarginClearinghouse` reservation paths | `engine`, `orderRouter` | router can reserve/release queued margin and execution-bounty buckets, but cannot perform broad settlement |
+| `HousePool.payOut` | `engine`, `settlementModule` | payout authority covers engine-owned settlement only |
 | `HousePool.recordProtocolBackingInflow` | `engine`, `settlementModule` | non-fee pool backing only; protocol-fee inflows route to the treasury clearinghouse account |
 | `HousePool.recordClaimantInflow` | `engine`, `settlementModule` | claimant-owned revenue/recap routing only |
 
@@ -66,7 +67,7 @@ Any new helper/module contract that can reach these sets should be treated as se
 
 - keeper executes a valid FIFO head
 - margin reservations are consumed/released
-- router bounty escrow is distributed
+- clearinghouse-reserved bounty value is distributed
 
 `Pending -> Failed`
 
@@ -108,8 +109,8 @@ Any new helper/module contract that can reach these sets should be treated as se
 
 | Bounty type | Source of funds | Custody while pending | Success path | Illiquid path | Terminal failure path |
 |-------------|-----------------|-----------------------|--------------|---------------|-----------------------|
-| Order execution bounty | Trader free settlement, then bounded close fallback from active position margin | `OrderRouter` escrow | clearinghouse credit for the clearer | n/a | clearer payment or trader refund via clearinghouse credit depending on failure category/policy |
-| Liquidation bounty | Capped from canonical liquidation value derived from reachable collateral and carry-adjusted equity | planned in engine, then serviced through the liquidation settlement path | immediate keeper clearinghouse credit if cash is available after the settlement path | deferred keeper credit senior claim | n/a |
+| Order execution bounty | Trader free settlement, then bounded close fallback from active position margin | `MarginClearinghouse` reserved settlement bucket plus router order record | clearinghouse credit for the clearer | n/a | clearer payment or trader refund via clearinghouse credit depending on failure category/policy |
+| Liquidation bounty | Liquidated account reachable collateral, capped by canonical liquidation value and carry-adjusted equity | planned in engine, then transferred by the liquidation settlement path | direct keeper clearinghouse credit | n/a | n/a |
 
 ### Oracle regime table
 
@@ -129,9 +130,8 @@ Any new helper/module contract that can reach these sets should be treated as se
 | Active position margin | Trader until terminal settlement outcome | clearinghouse locked bucket + engine position mirror | engine open/close/liquidation, bounded router close-bounty sourcing | yes for terminal paths, no for ordinary withdraw | yes, via risk/equity view | no | no |
 | Other locked margin | Trader, but reserved to queued intents until an explicit terminal path unlocks it | clearinghouse reservations | router commit/release/consume | no for ordinary close reachability; only available where terminal settlement explicitly unlocks/consumes it | indirectly and only through explicit terminal settlement plans | no | no |
 | Committed order margin | Trader but reserved to one order | clearinghouse reservation keyed by `orderId` | router commit/execute/fail | no | no | no | no |
-| Router execution bounty escrow | Trader-funded keeper escrow | `OrderRouter` balance + order record | router commit/distribute/refund/forfeit | no | no | no | no |
+| Execution bounty reserve | Trader-funded keeper reserve | `MarginClearinghouse` reserved settlement bucket + router order record | router commit/distribute/refund/forfeit through engine/clearinghouse | no | no | no | no |
 | Deferred trader credit | Trader senior claim on vault liquidity | `CfdEngine.deferredTraderCreditUsdc` | engine create/service | no | yes, as senior liability | yes | yes |
-| Deferred keeper credit | Keeper senior claim on vault liquidity | `CfdEngine.deferredKeeperCreditUsdc` | engine create/service | no | yes, as senior liability | yes | yes |
 | Unsettled carry | Protocol-recorded carry debt on an account | `CfdEngine.unsettledCarryUsdc[account]` | engine carry-checkpoint paths | no | yes, as carry drag on account equity | no | no |
 | Treasury protocol fees | Protocol/treasury | Treasury account in `MarginClearinghouse`; `CfdEngine.protocolTreasuryBalanceUsdc()` reports that balance | cash-collected settlement fee routing, settlement top-ups, treasury clearinghouse withdraw | no | yes, as clearinghouse-custodied protocol margin | no | no |
 | Accumulated bad debt | Protocol loss / LP impairment | `CfdEngine.accumulatedBadDebtUsdc` | engine realization, bad debt clear path | n/a | yes, as realized deficit | yes | yes |
@@ -155,16 +155,16 @@ Reachability note:
 ### Deferred trader credit servicing
 
 - Liveness problem: profitable closes and liquidation payouts should not revert only because the vault is temporarily illiquid.
-- Chosen tradeoff: record senior deferred trader/keeper credit claims instead of reverting the state transition.
+- Chosen tradeoff: record senior deferred trader credit claims instead of reverting the state transition.
 - New risk: payout servicing becomes asynchronous and must respect seniority.
 - Protecting invariant: deferred liabilities remain senior in withdrawal, solvency, and reconciliation accounting.
 
-### Fail-soft liquidation bounty servicing
+### Clearinghouse liquidation bounty servicing
 
 - Liveness problem: liquidation should not fail solely because immediate vault cash is unavailable.
-- Chosen tradeoff: keeper bounty may become deferred keeper credit.
-- New risk: keeper payment timing becomes state-dependent.
-- Protecting invariant: liquidation still completes, and the keeper credit claim remains senior until paid.
+- Chosen tradeoff: keeper bounties settle from liquidated account margin through the clearinghouse.
+- New risk: liquidation rewardability depends on the liquidated account's reachable collateral.
+- Protecting invariant: liquidation bounty payments are capped by reachable collateral and do not touch vault cash.
 
 ### Bounded queue cleanup
 
@@ -192,18 +192,18 @@ Reachability note:
 ### Profitable close with immediate payout
 
 1. Trader has a live position and commits a close.
-2. Router escrows the close execution bounty, using free settlement first when a fresh carry-checkpoint mark exists and otherwise using the bounded active-margin fallback.
+2. Router reserves the close execution bounty in the clearinghouse, using free settlement first when a fresh carry-checkpoint mark exists and otherwise using the bounded active-margin fallback.
 3. Keeper executes the FIFO head under the current oracle regime.
 4. Planner computes canonical close settlement, including fees and pending carry.
 5. Engine realizes carry and applies the close using the planner's exact loss/gain result.
 6. Clearinghouse unlocks/consumes the relevant trader buckets.
 7. If vault cash is available, the trader receives immediate settlement.
-8. Router bounty escrow is distributed and the order becomes terminal.
+8. Clearinghouse-reserved bounty value is distributed and the order becomes terminal.
 
 ### Losing partial close
 
 1. Trader commits a reduce-only close.
-2. Router escrows the execution bounty and preserves the residual position path.
+2. Router reserves the execution bounty and preserves the residual position path.
 3. Keeper executes.
 4. Planner computes canonical carry-adjusted loss and partial-close remaining margin.
 5. Engine consumes close loss from free settlement, then allowed unlocked margin buckets, then shortfall if needed.
@@ -241,10 +241,10 @@ Reachability note:
 
 1. Preview/live parity: canonical close and liquidation planner outputs should match live settlement semantics.
 2. Physical-first solvency: physical cash and mathematical claims are distinct objects.
-3. Deferred-liability seniority: deferred trader and keeper credit claims remain senior until serviced.
+3. Deferred-liability seniority: deferred trader credit claims remain senior until serviced.
 4. Carry-aware risk: pending carry reduces relevant equity before realization on guard and risk checks.
 5. Bounded queue behavior: cleanup and close-intent projection are account-local.
-6. Escrow conservation: router-held USDC execution bounty escrow and admin-held ETH refund claims are each distributed, refunded, forfeited, or left claimable exactly once.
+6. Escrow conservation: clearinghouse-reserved execution bounty value and admin-held ETH refund claims are each distributed, refunded, forfeited, or left claimable exactly once.
 7. No speculative LP asset inflation: unrealized trader losses are not counted as spendable LP assets.
 
 ## Test Map

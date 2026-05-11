@@ -64,9 +64,9 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
             "Expired open should pay the clearer from reserved bounty settlement"
         );
         assertEq(
-            clearinghouse.balanceUsdc(traderAccount) - traderSettlementBefore,
-            0,
-            "Expired open cleanup should not refund the trader after the bounty was already escrowed"
+            traderSettlementBefore - clearinghouse.balanceUsdc(traderAccount),
+            pending.executionBountyUsdc,
+            "Expired open cleanup should debit only the already-reserved bounty"
         );
     }
 
@@ -103,6 +103,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         vm.prank(ALICE);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1.5e8, false);
 
+        (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(1);
         uint256 traderSettlementBefore = clearinghouse.balanceUsdc(traderAccount);
         uint256 keeperEthBefore = KEEPER.balance;
 
@@ -116,9 +117,9 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
 
         assertEq(KEEPER.balance - keeperEthBefore, 0, "Open slippage miss should not pay the clearer");
         assertEq(
-            clearinghouse.balanceUsdc(traderAccount) - traderSettlementBefore,
-            0,
-            "Open slippage miss should not further change trader settlement after the bounty was escrowed"
+            traderSettlementBefore - clearinghouse.balanceUsdc(traderAccount),
+            pending.executionBountyUsdc,
+            "Open slippage cleanup should debit only the already-reserved bounty"
         );
     }
 
@@ -161,8 +162,11 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
 
         uint256 traderSettlementBefore = clearinghouse.balanceUsdc(traderAccount);
         uint64 carryTimestampBefore = engine.getPositionLastCarryTimestamp(traderAccount);
+        _fundTrader(BOB, 1e6);
         vm.prank(address(router));
-        engine.creditKeeperExecutionBounty(ALICE, 1e6, 110_000_000, uint64(block.timestamp));
+        clearinghouse.lockReservedSettlement(BOB, 1e6);
+        vm.prank(address(router));
+        engine.creditBounty(BOB, ALICE, 1e6, 110_000_000, uint64(block.timestamp));
 
         assertEq(
             engine.getPositionLastCarryTimestamp(traderAccount),
@@ -236,9 +240,11 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
             30 days
         );
 
-        usdc.mint(address(clearinghouse), 1e6);
+        _fundTrader(BOB, 1e6);
         vm.prank(address(router));
-        engine.creditKeeperExecutionBounty(KEEPER, 1e6, 1e8, uint64(warpedTime));
+        clearinghouse.lockReservedSettlement(BOB, 1e6);
+        vm.prank(address(router));
+        engine.creditBounty(BOB, KEEPER, 1e6, 1e8, uint64(warpedTime));
 
         assertEq(
             clearinghouse.balanceUsdc(keeperAccount),
@@ -315,9 +321,9 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
             "Protocol invalidation should pay the clearer so queue-head cleanup remains incentive compatible"
         );
         assertEq(
-            clearinghouse.balanceUsdc(traderAccount) - traderSettlementBefore,
-            0,
-            "Protocol invalidation should not refund the trader once the reserved bounty funds the clearer cleanup"
+            traderSettlementBefore - clearinghouse.balanceUsdc(traderAccount),
+            pending.executionBountyUsdc,
+            "Protocol invalidation should debit only the already-reserved bounty"
         );
     }
 

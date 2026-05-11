@@ -44,25 +44,24 @@ interface ICfdEngine is ICfdEngineTypes {
         uint64 publishTime
     ) external;
 
-    /// @notice Records deferred keeper credit when immediate clearinghouse settlement is unavailable.
-    /// @dev Deferred keeper value is always later claimed as clearinghouse credit.
-    function recordDeferredKeeperCredit(
-        address keeper,
-        uint256 amountUsdc
-    ) external;
-
     /// @notice Reserves close-order execution bounty from free settlement first, then active position margin.
     function reserveCloseOrderExecutionBounty(
         address account,
         uint256 sizeDelta,
-        uint256 amountUsdc,
-        address recipient
+        uint256 amountUsdc
     ) external;
 
-    /// @notice Credits a keeper execution bounty into the beneficiary's clearinghouse account.
+    /// @notice Moves forfeited reserved execution-bounty escrow into the protocol treasury account.
+    function absorbReservedExecutionBounty(
+        address sourceAccount,
+        uint256 amountUsdc
+    ) external;
+
+    /// @notice Credits a reserved execution bounty into the beneficiary's clearinghouse account.
     /// @dev Realizes carry first when the beneficiary account currently has an open position so the
     ///      settlement-balance credit cannot retroactively dilute carry owed over the elapsed interval.
-    function creditKeeperExecutionBounty(
+    function creditBounty(
+        address sourceAccount,
         address beneficiary,
         uint256 amountUsdc,
         uint256 price,
@@ -79,7 +78,8 @@ interface ICfdEngine is ICfdEngineTypes {
         address account,
         uint256 currentOraclePrice,
         uint256 vaultDepthUsdc,
-        uint64 publishTime
+        uint64 publishTime,
+        address keeper
     ) external returns (uint256 keeperBountyUsdc);
 
     /// @notice Realizes accrued carry against the current reachable collateral before a user-level
@@ -107,9 +107,6 @@ interface ICfdEngine is ICfdEngineTypes {
 
     /// @notice Deferred trader credit still owed to beneficiaries.
     function totalDeferredTraderCreditUsdc() external view returns (uint256);
-
-    /// @notice Deferred keeper credit still owed after failed immediate settlement.
-    function totalDeferredKeeperCreditUsdc() external view returns (uint256);
 
     /// @notice Timestamp of the last mark price update
     function lastMarkTime() external view returns (uint64);

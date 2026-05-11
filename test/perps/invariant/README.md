@@ -6,9 +6,9 @@ This directory contains stateful Foundry invariant suites for the perps system.
 
 - `PerpAccountingInvariant.t.sol`
   - Catches hidden-collateral and split-accounting bugs
-  - Verifies router-held execution bounty escrow reconciles with live orders
+  - Verifies clearinghouse-reserved execution bounty value reconciles with live orders
   - Verifies liquidated accounts cannot keep pending orders, live reserves, or recover value later
-  - Verifies ghost-tracked committed margin and deferred clearer bounty stay aligned with protocol state
+  - Verifies ghost-tracked committed margin and reserved execution bounty stay aligned with protocol state
   - Verifies a stricter per-order committed-margin state machine across commit, execution, cancellation, failure, and liquidation
   - Verifies pending-order and margin-order FIFO queues keep consistent head/tail pointers, links, counts, and ordering
 
@@ -16,7 +16,7 @@ This directory contains stateful Foundry invariant suites for the perps system.
   - Catches view-layer drift between previews and core engine/accounting state
   - Verifies empty positions preview as inactive
   - Verifies liquidation reachable collateral previews match clearinghouse accounting
-  - Verifies liquidation previews exclude router-custodied execution escrow from reachable collateral
+  - Verifies liquidation previews exclude clearinghouse-reserved execution escrow from reachable collateral
   - Verifies generic position views expose physical reachable collateral separately from deferred payout netting
   - Verifies degraded-mode trigger flags behave as transition flags rather than persistent state flags
 
@@ -48,7 +48,7 @@ This directory contains stateful Foundry invariant suites for the perps system.
   - Catches protocol-wide ledger drift and conservation bugs
   - Verifies known actor and protocol balances conserve total USDC supply
   - Verifies clearinghouse custody matches tracked account balances
-  - Verifies the compact per-account ledger view stays aligned with clearinghouse buckets, router escrow, deferred payouts, and pending order counts
+  - Verifies the compact per-account ledger view stays aligned with clearinghouse buckets, router order reserves, deferred payouts, and pending order counts
   - Verifies the expanded per-account ledger snapshot stays aligned with typed locked-margin buckets, collateral, position-health, and settlement-reachability views
   - Verifies tracked per-account settlement, escrow, and deferred payouts aggregate cleanly into protocol custody and obligation buckets
   - Verifies deposit/withdraw transitions preserve monotonic reachability expectations

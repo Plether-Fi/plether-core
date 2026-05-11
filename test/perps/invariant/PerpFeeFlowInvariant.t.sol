@@ -25,7 +25,7 @@ contract PerpFeeFlowInvariantTest is BasePerpInvariantTest {
         targetContract(address(handler));
     }
 
-    function invariant_FeeModelTracksAccumulatedFeesAndWithdrawals() public view {
+    function invariant_FeeModelTracksTreasuryBalanceAndWithdrawals() public view {
         assertEq(
             handler.ghostTrackedFeesUsdc(),
             engine.protocolTreasuryBalanceUsdc(),

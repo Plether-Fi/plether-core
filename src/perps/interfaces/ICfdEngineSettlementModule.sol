@@ -24,7 +24,8 @@ interface ICfdEngineSettlementModule {
     function executeLiquidation(
         ICfdEngineSettlementHost host,
         CfdEnginePlanTypes.LiquidationDelta calldata delta,
-        uint64 publishTime
+        uint64 publishTime,
+        address keeper
     ) external returns (uint256 keeperBountyUsdc);
 
 }

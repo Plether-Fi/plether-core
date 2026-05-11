@@ -11,7 +11,6 @@ interface ICfdEngineSettlementHost {
     function orderRouter() external view returns (address);
     function protocolTreasury() external view returns (address);
     function totalDeferredTraderCreditUsdc() external view returns (uint256);
-    function totalDeferredKeeperCreditUsdc() external view returns (uint256);
 
     function settlementApplyCarryAndMark(
         uint256 newMarkPrice,

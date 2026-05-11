@@ -24,19 +24,17 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         handler = new PerpAccountingHandler(usdc, engine, clearinghouse, router, vault);
         handler.seedActors(50_000e6, 100_000e6);
 
-        bytes4[] memory selectors = new bytes4[](12);
+        bytes4[] memory selectors = new bytes4[](10);
         selectors[0] = handler.depositCollateral.selector;
         selectors[1] = handler.withdrawCollateral.selector;
         selectors[2] = handler.commitOpenOrder.selector;
         selectors[3] = handler.commitCloseOrder.selector;
         selectors[4] = handler.executeNextOrderModelled.selector;
         selectors[5] = handler.liquidate.selector;
-        selectors[6] = handler.claimDeferredKeeperCredit.selector;
-        selectors[7] = handler.createDeferredTraderCredit.selector;
-        selectors[8] = handler.claimDeferredTraderCredit.selector;
-        selectors[9] = handler.fundVault.selector;
-        selectors[10] = handler.setRouterPayoutFailureMode.selector;
-        selectors[11] = handler.setVaultAssets.selector;
+        selectors[6] = handler.createDeferredTraderCredit.selector;
+        selectors[7] = handler.claimDeferredTraderCredit.selector;
+        selectors[8] = handler.fundVault.selector;
+        selectors[9] = handler.setVaultAssets.selector;
 
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
         targetContract(address(handler));
@@ -64,8 +62,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
     }
 
     function invariant_WithdrawalReserveIncludesKnownDeferredLiabilities() public view {
-        uint256 expectedReserved =
-            _maxLiability() + engine.totalDeferredTraderCreditUsdc() + engine.totalDeferredKeeperCreditUsdc();
+        uint256 expectedReserved = _maxLiability() + engine.totalDeferredTraderCreditUsdc();
 
         expectedReserved += uint256(0);
 
@@ -167,15 +164,18 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
     function invariant_TrackedAccountLedgerTotalsMatchProtocolCustodyAndObligations() public view {
         uint256 totalSettlementUsdc =
             engineAccountLens.getAccountLedgerView(_account(address(handler))).settlementBalanceUsdc;
+        uint256 totalReservedSettlementUsdc =
+            clearinghouse.getLockedMarginBuckets(_account(address(handler))).reservedSettlementUsdc;
         uint256 totalExecutionEscrowUsdc;
         uint256 totalDeferredTraderCreditUsdc;
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
-            AccountLensViewTypes.AccountLedgerView memory ledgerView =
-                engineAccountLens.getAccountLedgerView(_account(handler.actorAt(i)));
+            address account = _account(handler.actorAt(i));
+            AccountLensViewTypes.AccountLedgerView memory ledgerView = engineAccountLens.getAccountLedgerView(account);
             totalSettlementUsdc += ledgerView.settlementBalanceUsdc;
             totalExecutionEscrowUsdc += ledgerView.executionEscrowUsdc;
             totalDeferredTraderCreditUsdc += ledgerView.deferredTraderCreditUsdc;
+            totalReservedSettlementUsdc += clearinghouse.getLockedMarginBuckets(account).reservedSettlementUsdc;
         }
 
         assertEq(
@@ -185,9 +185,10 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         );
         assertEq(
             totalExecutionEscrowUsdc,
-            usdc.balanceOf(address(router)),
-            "Tracked execution escrow totals must match router custody"
+            totalReservedSettlementUsdc,
+            "Tracked execution escrow totals must match clearinghouse reserved settlement"
         );
+        assertEq(usdc.balanceOf(address(router)), 0, "Router must not custody execution bounty escrow");
         assertEq(
             totalDeferredTraderCreditUsdc,
             engine.totalDeferredTraderCreditUsdc(),
@@ -478,11 +479,6 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
             engine.totalDeferredTraderCreditUsdc(),
             "House-pool snapshot deferred trader credit mismatch"
         );
-        assertEq(
-            snapshot.deferredKeeperCreditUsdc,
-            engine.totalDeferredKeeperCreditUsdc(),
-            "House-pool snapshot deferred keeper credit mismatch"
-        );
         assertEq(snapshot.maxLiabilityUsdc, _maxLiability(), "House-pool snapshot max liability mismatch");
         assertEq(
             snapshot.supplementalReservedUsdc, uint256(0), "House-pool snapshot supplemental reserved amount mismatch"
@@ -513,11 +509,6 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
             snapshot.deferredTraderCreditUsdc,
             "Protocol snapshot deferred trader credit mismatch"
         );
-        assertEq(
-            protocolSnapshot.totalDeferredKeeperCreditUsdc,
-            snapshot.deferredKeeperCreditUsdc,
-            "Protocol snapshot deferred keeper credit mismatch"
-        );
     }
 
     function invariant_HousePoolStatusSnapshotMatchesEngineState() public view {
@@ -542,7 +533,11 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
                 continue;
             }
 
-            assertEq(handler.accountRouterEscrow(account), 0, "Bad debt cannot coexist with tracked router escrow");
+            assertEq(
+                handler.accountExecutionBountyReserve(account),
+                0,
+                "Bad debt cannot coexist with tracked execution bounty reserves"
+            );
             assertEq(
                 clearinghouse.balanceUsdc(account), 0, "Bad debt cannot coexist with tracked clearinghouse balance"
             );

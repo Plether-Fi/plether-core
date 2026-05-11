@@ -35,7 +35,7 @@ If you want the accounting model first, read [`ACCOUNTING_SPEC.md`](ACCOUNTING_S
 - Orders are binding once committed. Users cannot cancel queued orders.
 - Queue execution is FIFO from the global head.
 - LP-capital carry is used instead of side-to-side funding.
-- If the HousePool is short on cash, trader profits and liquidation bounties can become deferred balance claims instead of reverting the state transition.
+- If the HousePool is short on cash, trader profits can become deferred balance claims instead of reverting the state transition; keeper bounties are funded from reserved trader margin inside the clearinghouse.
 
 ### Units and accounts
 
@@ -82,7 +82,7 @@ The wider engine, clearinghouse, router, and house-pool interfaces still exist f
 The main runtime and read surfaces are:
 
 - `MarginClearinghouse`: trader custody and typed margin buckets.
-- `OrderRouter`: thin external shell for delayed-order commits, keeper execution, Pyth validation, and keeper bounty escrow.
+- `OrderRouter`: thin external shell for delayed-order commits, keeper execution, Pyth validation, and clearinghouse-reserved keeper bounties.
 - `CfdEngine`: canonical execution ledger and solvency boundary.
 - `CfdEngineSettlementModule`: externalized close/liquidation settlement orchestration used by the engine.
 - `CfdEnginePlanner`: externalized open/close/liquidation plan builder wired into the engine after deployment.
@@ -97,8 +97,8 @@ The main runtime and read surfaces are:
 - `CfdEngineSettlementModule` executes close and liquidation choreography, while `CfdEngine` remains the storage owner.
 - `CfdEngine`, `CfdEnginePlanner`, `CfdEngineSettlementModule`, and `CfdEngineAdmin` are now deployed separately and wired once through `CfdEngine.setDependencies(...)` to keep engine initcode under EIP-3860.
 - `MarginClearinghouse` owns trader settlement balances and locked-margin custody buckets.
-- `OrderRouter` owns queued order records and router-custodied execution bounty escrow; its implementation is split into base storage/hooks, handler, validation, and utility modules.
-- `HousePool` owns LP capital and pays protocol obligations that must leave the vault.
+- `OrderRouter` owns queued order records while execution-bounty value remains reserved in `MarginClearinghouse`; its implementation is split into base storage/hooks, handler, validation, and utility modules.
+- `HousePool` owns LP capital and pays engine-authorized obligations that must leave the vault.
 - `PerpsPublicLens` is the default read surface for product consumers.
 - The account and protocol lenses are for deeper diagnostics, tests, audits, and operator tooling.
 
@@ -106,7 +106,7 @@ The main runtime and read surfaces are:
 
 1. Deposit USDC into `MarginClearinghouse`.
 2. Submit an open or close intent through `OrderRouter.commitOrder(...)`.
-3. The router records a FIFO order, reserves committed margin, and escrows a keeper execution bounty.
+3. The router records a FIFO order, reserves committed margin, and reserves a keeper execution bounty in `MarginClearinghouse`.
 4. A keeper later calls `executeOrder(...)` or `executeOrderBatch(...)` with Pyth update data.
 5. `OrderRouter` validates oracle freshness, live-market `commitTime < publishTime <= block.timestamp` ordering, slippage, and queue eligibility, then calls `CfdEngine.processOrderTyped(...)`.
 6. `CfdEngine` updates the position, realizes fees and carry, and settles through `MarginClearinghouse` and `HousePool`.
@@ -115,7 +115,7 @@ Important details:
 
 - `acceptablePrice == 0` behaves like a delayed market-style order.
 - Open orders are rejected during degraded mode and close-only windows.
-- Failed orders are finalized from router-custodied bounty escrow; blocked FIFO heads remain pending.
+- Failed orders are finalized from reserved clearinghouse bounty escrow; blocked FIFO heads remain pending.
 - Execution-time user-invalid opens, protocol-state invalidations, and terminal-invalid closes pay the clearer from escrow so FIFO cleanup remains incentive compatible.
 - Close orders can still execute during genuine frozen-oracle windows using the last valid mark subject to the relaxed frozen-market rules.
 - Close-intent queue validation is account-local and bounded by the per-account pending-order queue.
@@ -130,14 +130,13 @@ Profitable closes and some liquidation residuals can create deferred trader cred
 - Claims can be partial if current HousePool cash is insufficient.
 - Claimed amounts are credited into `MarginClearinghouse`, not sent directly to the wallet.
 
-### Deferred keeper credit
+### Keeper bounty credit
 
-Liquidation bounties are fail-soft when the HousePool is illiquid.
+Order and liquidation bounties are margin transfers inside `MarginClearinghouse`.
 
-- The liquidation still completes.
-- Any unpaid keeper value is recorded in `deferredKeeperCreditUsdc[keeper]`.
-- `claimDeferredKeeperCredit()` is beneficiary-only and settles to clearinghouse credit rather than direct wallet transfer.
-- Deferred trader credit and deferred keeper credit are included in reserve and solvency accounting.
+- Open and close order bounties are reserved from trader margin at commit time.
+- Successful execution credits the keeper's clearinghouse settlement balance from the reservation.
+- Liquidation bounties are capped by liquidation-reachable collateral and credited directly to the keeper.
 
 Protocol fees settle into the treasury clearinghouse account only when they are cash-collected from trader settlement or when remaining free `HousePool` cash can fund a top-up after senior deferred claims and immediate trader payouts. The simplified custody model does not create deferred protocol-fee liabilities; uncredited fee portions stay in pool backing rather than becoming withdrawable treasury margin.
 
@@ -246,8 +245,8 @@ Open-risk projection credits skew-reducing trade rebates into reachable collater
 The system can complete terminal transitions even when immediate vault cash is insufficient.
 
 - Trader gains can become deferred trader credit.
-- Liquidation bounties can become deferred keeper credit.
-- Both are included in reserve and solvency accounting.
+- Keeper bounties are direct clearinghouse credits funded from trader margin and do not become vault liabilities.
+- Deferred trader credit is included in reserve and solvency accounting.
 - Deferred balances are beneficiary-based, not queue-based.
 
 ### Conservative LP accounting
@@ -268,7 +267,7 @@ The perps system intentionally splits accounting into separate kernels:
 - `CloseAccountingLib`: realized PnL, execution fee, trader settlement, and bad-debt handling for voluntary decreases.
 - `LiquidationAccountingLib`: reachable collateral, keeper bounty, residual payout, and bad debt for forced close.
 - `SolvencyAccountingLib`: effective assets, bounded max liability, withdrawal reserves, and free vault cash.
-- `OrderEscrowAccounting`: router-held execution bounty reserves and margin-queue bookkeeping.
+- `OrderEscrowAccounting`: clearinghouse-reserved execution bounty accounting and margin-queue bookkeeping.
 - `OrderRouterBase` / `OrderHandler` / `OrderValidation` / `OrderUtils`: shared router state, delayed-order lifecycle handling, preflight validation, and bounty/liquidation helper math.
 - `HousePool.recordClaimantInflow(amount, kind, cashMode)`: claimant-owned value routing for both revenue and recapitalization, with explicit cash-arrival vs retained-value modes.
 
@@ -283,7 +282,7 @@ These domains answer different questions. They should not silently share assumpt
 - Opens are blocked while paused, degraded, or close-only.
 - The router may reject predictably invalid opens at commit time using engine-lens prechecks.
 - Each account may have at most `5` pending orders.
-- The router escrows the execution bounty at commit time.
+- The router reserves the execution bounty in `MarginClearinghouse` at commit time.
 
 ### Queue and bounty economics
 
@@ -292,7 +291,7 @@ These domains answer different questions. They should not silently share assumpt
 - Close intents reserve a flat governance-configured bounty capped at `1 USDC` (default `0.20 USDC`).
 - Open bounties come from free settlement.
 - Close bounties use free settlement first when carry can be checkpointed from a fresh live mark; otherwise they fall back to bounded active position margin so stale-mark closes remain committable.
-- Failed-order rewards stay independent from vault liquidity because they are paid from router escrow rather than LP cash.
+- Failed-order rewards stay independent from vault liquidity because they are paid from clearinghouse-reserved trader value rather than LP cash.
 
 ### Execute rules
 
@@ -378,7 +377,7 @@ The important runtime invariants are:
 - side-local cached accounting stays consistent with the live position set and never overstates bounded payoff or margin state,
 - `sides[BULL].totalMargin + sides[BEAR].totalMargin == sum(pos.margin)` across live positions,
 - commit-time open preview must not admit orders the router can already classify as commit-time rejectable, and close/liquidation preview math must match live accounting semantics,
-- router-custodied USDC execution bounty escrow and admin-custodied ETH refund claims are each conserved across their respective lifecycle transitions.
+- clearinghouse USDC execution-bounty reservations and admin-custodied ETH refund claims are each conserved across their respective lifecycle transitions.
 
 ## Governance and Admin Controls
 

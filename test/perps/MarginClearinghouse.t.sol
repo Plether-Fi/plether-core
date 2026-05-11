@@ -62,7 +62,7 @@ contract MockClearinghouseEngine {
     }
 
     function checkWithdraw(
-        bytes32
+        address
     ) external pure {}
 
     function setCarryRealizationStale(
@@ -649,6 +649,28 @@ contract MarginClearinghouseTest is Test {
         clearinghouse.seizeUsdc(aliceAccount, 100 * 1e6, address(0xBEEF));
     }
 
+    function test_RouterPermissionSurface_IsLimitedToReservationAccounting() public {
+        vm.prank(alice);
+        clearinghouse.deposit(aliceAccount, 1000 * 1e6);
+
+        vm.startPrank(address(mockRouter));
+        clearinghouse.lockReservedSettlement(aliceAccount, 100 * 1e6);
+        clearinghouse.reserveCommittedOrderMargin(aliceAccount, 99, 200 * 1e6);
+        uint256 releasedUsdc = clearinghouse.releaseOrderReservationIfActive(99);
+        vm.stopPrank();
+
+        assertEq(releasedUsdc, 200 * 1e6, "router should release its own active reservation");
+        assertEq(
+            clearinghouse.getLockedMarginBuckets(aliceAccount).reservedSettlementUsdc,
+            100 * 1e6,
+            "router should still be able to reserve execution-bounty settlement"
+        );
+
+        vm.prank(address(mockRouter));
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__NotOperator.selector);
+        clearinghouse.settleUsdc(aliceAccount, int256(1e6));
+    }
+
     function test_C01_WithdrawUsdcBelowLockedMargin_ShouldRevert() public {
         vm.prank(alice);
         clearinghouse.deposit(aliceAccount, 1000 * 1e6);
@@ -725,7 +747,8 @@ contract MarginClearinghouseTest is Test {
             positionMarginUnlockedUsdc: 600 * 1e6,
             otherLockedMarginUnlockedUsdc: 100 * 1e6
         });
-        uint256 seizedUsdc = clearinghouse.applyLiquidationSettlementPlan(aliceAccount, reservationIds, plan, engine);
+        uint256 seizedUsdc =
+            clearinghouse.applyLiquidationSettlementPlan(aliceAccount, reservationIds, plan, engine, address(0), 0);
         vm.stopPrank();
 
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceAccount);
@@ -848,7 +871,7 @@ contract MarginClearinghouseTest is Test {
             otherLockedMarginUnlockedUsdc: 100 * 1e6
         });
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__IncompleteReservationCoverage.selector);
-        clearinghouse.applyLiquidationSettlementPlan(aliceAccount, reservationIds, plan, engine);
+        clearinghouse.applyLiquidationSettlementPlan(aliceAccount, reservationIds, plan, engine, address(0), 0);
         vm.stopPrank();
     }
 
@@ -1067,8 +1090,9 @@ contract MarginClearinghouseTest is Test {
             });
 
         vm.prank(engine);
-        uint256 seizedUsdc =
-            clearinghouse.applyLiquidationSettlementPlan(aliceAccount, reservationIds, settlementPlan, engine);
+        uint256 seizedUsdc = clearinghouse.applyLiquidationSettlementPlan(
+            aliceAccount, reservationIds, settlementPlan, engine, address(0), 0
+        );
 
         IMarginClearinghouse.AccountUsdcBuckets memory bucketsAfter = clearinghouse.getAccountUsdcBuckets(aliceAccount);
         IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(41);
@@ -1126,8 +1150,7 @@ contract MarginClearinghouseAuditTest is BasePerpTest {
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
 
         (uint256 size,,,,,,) = engine.positions(account);
         assertGt(size, 0, "Position should be open");
@@ -1150,12 +1173,11 @@ contract MarginClearinghouseAuditTest is BasePerpTest {
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 0, 1e8, true);
-        router.executeOrder(2, empty);
+        router.executeOrder(2, _mockPythUpdateData());
 
         (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Position should be closed");
@@ -1173,8 +1195,7 @@ contract MarginClearinghouseAuditTest is BasePerpTest {
         address account = alice;
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, false);
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
 
         WithdrawParityState memory state = _observeWithdrawParity(account, alice, 5000e6);
         _assertWithdrawParity(state, CfdEngine.CfdEngine__WithdrawBlockedByOpenPosition.selector);
@@ -1187,8 +1208,7 @@ contract MarginClearinghouseAuditTest is BasePerpTest {
         address account = alice;
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, false);
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
 
@@ -1207,8 +1227,7 @@ contract MarginClearinghouseAuditTest is BasePerpTest {
         address account = alice;
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 1600e6, 1e8, false);
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));

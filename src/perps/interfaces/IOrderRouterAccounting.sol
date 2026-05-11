@@ -16,9 +16,9 @@ interface IOrderRouterAccounting {
         Failed
     }
 
-    /// @notice Router/accounting view of queued order escrow attributed to an account.
+    /// @notice Router/accounting view of queued order reservations attributed to an account.
     /// @dev `committedMarginUsdc` is derived from canonical MarginClearinghouse reservation state.
-    ///      `executionBountyUsdc` is router-custodied bounty escrow reserved for queued orders.
+    ///      `executionBountyUsdc` is clearinghouse-reserved bounty escrow for queued orders.
     struct AccountEscrowView {
         uint256 committedMarginUsdc;
         uint256 executionBountyUsdc;

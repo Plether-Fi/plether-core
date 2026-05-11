@@ -54,7 +54,6 @@ abstract contract BasePerpTest is Test {
         uint256 settlementUsdc;
         uint256 deferredTraderCreditUsdc;
         uint256 keeperSettlementUsdc;
-        uint256 deferredKeeperCreditUsdc;
     }
 
     struct LiquidationParityObserved {
@@ -62,7 +61,6 @@ abstract contract BasePerpTest is Test {
         uint256 deferredTraderCreditUsdc;
         uint256 badDebtUsdc;
         uint256 keeperSettlementUsdc;
-        uint256 deferredKeeperCreditUsdc;
         uint256 remainingSize;
         bool degradedMode;
         uint256 effectiveAssetsAfterUsdc;
@@ -133,7 +131,6 @@ abstract contract BasePerpTest is Test {
         );
         _syncRouterAdmin();
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
         publicLens = new PerpsPublicLens(address(engineAccountLens), address(engine), address(router), address(pool));
 
         _bypassAllTimelocks();
@@ -258,10 +255,16 @@ abstract contract BasePerpTest is Test {
     }
 
     function _mockPythUpdateData() internal returns (bytes[] memory updateData) {
+        return _mockPythUpdateData(1e8);
+    }
+
+    function _mockPythUpdateData(
+        uint256 price
+    ) internal returns (bytes[] memory updateData) {
         vm.roll(block.number + 1);
         vm.warp(block.timestamp + 1);
         updateData = new bytes[](1);
-        updateData[0] = abi.encode(uint256(1e8));
+        updateData[0] = abi.encode(price);
     }
 
     // --- Legacy side-index placeholder helpers ---
@@ -423,7 +426,7 @@ abstract contract BasePerpTest is Test {
         CfdEngine.ClosePreview memory preview,
         CloseParityObserved memory observed,
         bool degradedModeBefore
-    ) internal {
+    ) internal pure {
         assertApproxEqAbs(
             observed.immediatePayoutUsdc,
             preview.immediatePayoutUsdc,
@@ -503,7 +506,6 @@ abstract contract BasePerpTest is Test {
         snapshot.settlementUsdc = clearinghouse.balanceUsdc(account);
         snapshot.deferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(account);
         snapshot.keeperSettlementUsdc = clearinghouse.balanceUsdc(keeper);
-        snapshot.deferredKeeperCreditUsdc = engine.deferredKeeperCreditUsdc(keeper);
     }
 
     function _observeLiquidationParity(
@@ -522,10 +524,6 @@ abstract contract BasePerpTest is Test {
         uint256 keeperSettlementAfter = clearinghouse.balanceUsdc(keeper);
         observed.keeperSettlementUsdc = keeperSettlementAfter > beforeSnapshot.keeperSettlementUsdc
             ? keeperSettlementAfter - beforeSnapshot.keeperSettlementUsdc
-            : 0;
-        uint256 deferredKeeperCreditAfter = engine.deferredKeeperCreditUsdc(keeper);
-        observed.deferredKeeperCreditUsdc = deferredKeeperCreditAfter > beforeSnapshot.deferredKeeperCreditUsdc
-            ? deferredKeeperCreditAfter - beforeSnapshot.deferredKeeperCreditUsdc
             : 0;
         observed.degradedMode = engine.degradedMode();
         observed.effectiveAssetsAfterUsdc = afterSnapshot.effectiveSolvencyAssetsUsdc;
@@ -549,7 +547,7 @@ abstract contract BasePerpTest is Test {
         );
         assertEq(observed.badDebtUsdc, preview.badDebtUsdc, "Bad debt should match liquidation preview");
         assertEq(
-            observed.keeperSettlementUsdc + observed.deferredKeeperCreditUsdc,
+            observed.keeperSettlementUsdc,
             preview.keeperBountyUsdc,
             "Keeper bounty settlement should match liquidation preview"
         );
@@ -837,7 +835,7 @@ abstract contract BasePerpTest is Test {
     // The live system does not maintain a legacy side-index state; this helper is intentionally zero.
     function _legacySideIndexZero(
         CfdTypes.Side side
-    ) internal view returns (int256) {
+    ) internal pure returns (int256) {
         side;
         return 0;
     }
@@ -846,7 +844,7 @@ abstract contract BasePerpTest is Test {
     // The live carry model does not use a legacy side-entry index; this helper is intentionally zero.
     function _legacySideEntryIndexZero(
         CfdTypes.Side side
-    ) internal view returns (int256) {
+    ) internal pure returns (int256) {
         side;
         return 0;
     }
@@ -930,7 +928,9 @@ abstract contract BasePerpTest is Test {
     function _terminalReachableUsdc(
         address account
     ) internal view returns (uint256) {
-        return clearinghouse.getAccountUsdcBuckets(account).settlementBalanceUsdc;
+        uint256 settlementBalance = clearinghouse.getAccountUsdcBuckets(account).settlementBalanceUsdc;
+        uint256 executionEscrow = router.getAccountEscrow(account).executionBountyUsdc;
+        return settlementBalance > executionEscrow ? settlementBalance - executionEscrow : 0;
     }
 
     function _publicPosition(
@@ -948,13 +948,11 @@ abstract contract BasePerpTest is Test {
         address keeper
     ) internal view returns (DeferredEngineViewTypes.DeferredCreditStatus memory status) {
         uint256 deferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(account);
-        uint256 deferredKeeperCreditUsdc = engine.deferredKeeperCreditUsdc(keeper);
         bool anyLiquidity = pool.totalAssets() > 0;
 
         status.deferredTraderCreditUsdc = deferredTraderCreditUsdc;
         status.traderPayoutClaimableNow = deferredTraderCreditUsdc > 0 && anyLiquidity;
-        status.deferredKeeperCreditUsdc = deferredKeeperCreditUsdc;
-        status.keeperCreditClaimableNow = deferredKeeperCreditUsdc > 0 && anyLiquidity;
+        keeper;
     }
 
     function _vaultMtmAdjustment() internal view returns (uint256) {

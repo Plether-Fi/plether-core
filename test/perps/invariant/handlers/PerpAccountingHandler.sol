@@ -412,8 +412,6 @@ contract PerpAccountingHandler is Test {
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(price);
         CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, price);
-        uint256 keeperBountyUsdc = preview.keeperBountyUsdc;
-        bool shouldDefer = vault.failRouterPayouts() && keeperBountyUsdc > 0;
         uint256 deferredTraderCreditUsdc = preview.deferredTraderCreditUsdc;
         uint256 allowedDeferredAfterUsdc = preview.deferredTraderCreditUsdc > preview.existingDeferredRemainingUsdc
             ? preview.deferredTraderCreditUsdc - preview.existingDeferredRemainingUsdc
@@ -433,9 +431,6 @@ contract PerpAccountingHandler is Test {
                 ghost.increaseDeferredTraderCredit(account, deferredTraderCreditUsdc);
             }
             _syncGhostDeferredTraderCredit(account);
-            if (shouldDefer) {
-                ghost.increaseDeferredKeeperCredit(address(this), keeperBountyUsdc);
-            }
             uint256 badDebtAfter = engine.accumulatedBadDebtUsdc();
             if (badDebtAfter > badDebtBefore) {
                 _recordBadDebtDeferredEvent(account, badDebtAfter, allowedDeferredAfterUsdc);
@@ -443,14 +438,6 @@ contract PerpAccountingHandler is Test {
             _recordTerminalResidualEvent(
                 account, badDebtBefore, preview.badDebtUsdc, expectedFinalResidualUsdc, traderWalletBeforeUsdc, true
             );
-        } catch {}
-    }
-
-    function claimDeferredKeeperCredit() external {
-        _clearLastBadDebtDeferredEvent();
-        _clearTerminalReservationSet();
-        try engine.claimDeferredKeeperCredit() {
-            _syncGhostDeferredKeeperCredit(address(this));
         } catch {}
     }
 
@@ -555,14 +542,6 @@ contract PerpAccountingHandler is Test {
         ghostTotalVaultMinted += amount;
     }
 
-    function setRouterPayoutFailureMode(
-        uint256 modeFuzz
-    ) external {
-        _clearLastBadDebtDeferredEvent();
-        _clearTerminalReservationSet();
-        vault.setFailRouterPayouts(modeFuzz % 2 == 1);
-    }
-
     function setVaultAssets(
         uint256 amountFuzz
     ) external {
@@ -595,7 +574,7 @@ contract PerpAccountingHandler is Test {
         return lastWithdrawParityAttempt;
     }
 
-    function accountRouterEscrow(
+    function accountExecutionBountyReserve(
         address account
     ) public view returns (uint256 totalEscrowUsdc) {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
@@ -635,10 +614,6 @@ contract PerpAccountingHandler is Test {
 
     function totalCommittedMarginSnapshot() external view returns (uint256) {
         return ghost.totalCommittedMarginSnapshot();
-    }
-
-    function deferredKeeperCreditSnapshot() external view returns (uint256) {
-        return ghost.deferredKeeperCreditSnapshot(address(this));
     }
 
     function deferredTraderCreditSnapshot(
@@ -729,18 +704,6 @@ contract PerpAccountingHandler is Test {
             ghost.increaseDeferredTraderCredit(account, liveDeferredTraderCredit - ghostDeferredTraderCredit);
         } else if (ghostDeferredTraderCredit > liveDeferredTraderCredit) {
             ghost.decreaseDeferredTraderCredit(account, ghostDeferredTraderCredit - liveDeferredTraderCredit);
-        }
-    }
-
-    function _syncGhostDeferredKeeperCredit(
-        address keeper
-    ) internal {
-        uint256 ghostDeferredBounty = ghost.deferredKeeperCreditSnapshot(keeper);
-        uint256 liveDeferredBounty = engine.deferredKeeperCreditUsdc(keeper);
-        if (liveDeferredBounty > ghostDeferredBounty) {
-            ghost.increaseDeferredKeeperCredit(keeper, liveDeferredBounty - ghostDeferredBounty);
-        } else if (ghostDeferredBounty > liveDeferredBounty) {
-            ghost.decreaseDeferredKeeperCredit(keeper, ghostDeferredBounty - liveDeferredBounty);
         }
     }
 
@@ -927,10 +890,6 @@ contract PerpAccountingHandler is Test {
                 count++;
             }
         }
-    }
-
-    function totalDeferredKeeperCreditSnapshot() external view returns (uint256) {
-        return ghost.totalDeferredKeeperCreditSnapshot();
     }
 
     function _ensureFreeSettlement(

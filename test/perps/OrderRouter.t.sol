@@ -285,7 +285,11 @@ contract OrderRouterTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 500 * 1e6, 2e8, false);
         vm.stopPrank();
 
-        assertEq(clearinghouse.lockedMarginUsdc(account), 1500 * 1e6, "Both committed margins should be locked");
+        assertEq(
+            clearinghouse.lockedMarginUsdc(account),
+            1500 * 1e6 + 400_000,
+            "Both committed margins and execution bounties should be locked"
+        );
 
         bytes[] memory empty = _mockPythUpdateData();
         vm.roll(block.number + 1);
@@ -294,7 +298,7 @@ contract OrderRouterTest is BasePerpTest {
         (, uint256 posMargin,,,,,) = engine.positions(account);
         assertEq(
             clearinghouse.lockedMarginUsdc(account),
-            posMargin + 500 * 1e6,
+            posMargin + 500 * 1e6 + 200_000,
             "Lock should preserve pending committed margin for order 2"
         );
         assertEq(_remainingCommittedMargin(1), 0, "Order 1 committed margin must be cleared on success");
@@ -418,7 +422,12 @@ contract OrderRouterTest is BasePerpTest {
         (, uint256 marginAfter,,,,,) = engine.positions(account);
         assertEq(_executionBountyReserve(1), 200_000, "Close orders should still escrow full bounty");
         assertEq(marginAfter, marginBefore - 200_000, "Close bounty should fall back to active margin");
-        assertEq(usdc.balanceOf(address(router)), 200_000, "Router should custody the close bounty after fallback");
+        assertEq(usdc.balanceOf(address(router)), 0, "Router should not custody close-order bounty escrow");
+        assertEq(
+            clearinghouse.getLockedMarginBuckets(account).reservedSettlementUsdc,
+            200_000,
+            "Clearinghouse should reserve the close bounty after margin fallback"
+        );
     }
 
     function test_CloseCommit_CanReserveKeeperBountyFromPositionMarginWithStaleStoredMark() public {
@@ -446,8 +455,11 @@ contract OrderRouterTest is BasePerpTest {
             _executionBountyReserve(1), 200_000, "Stale-mark close commits should still escrow the flat router bounty"
         );
         assertEq(marginAfter, marginBefore - 200_000, "Stale-mark close bounty should still fall back to active margin");
+        assertEq(usdc.balanceOf(address(router)), 0, "Router should not custody stale-mark close bounty escrow");
         assertEq(
-            usdc.balanceOf(address(router)), 200_000, "Router should custody the stale-mark close bounty after fallback"
+            clearinghouse.getLockedMarginBuckets(account).reservedSettlementUsdc,
+            200_000,
+            "Clearinghouse should reserve the stale-mark close bounty after margin fallback"
         );
     }
 
@@ -523,7 +535,7 @@ contract OrderRouterTest is BasePerpTest {
             _riskParams().baseCarryBps,
             carryElapsed
         );
-        uint256 routerBalanceBefore = usdc.balanceOf(address(router));
+        uint256 reservedSettlementBefore = clearinghouse.getLockedMarginBuckets(account).reservedSettlementUsdc;
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 0, true);
@@ -532,9 +544,9 @@ contract OrderRouterTest is BasePerpTest {
         uint256 marginConsumed = marginBefore - marginAfter;
         assertEq(_executionBountyReserve(2), 200_000, "Fresh carry checkpoint should still escrow the full bounty");
         assertEq(
-            usdc.balanceOf(address(router)) - routerBalanceBefore,
+            clearinghouse.getLockedMarginBuckets(account).reservedSettlementUsdc - reservedSettlementBefore,
             200_000,
-            "Close commit should escrow exactly 0.20 USDC of bounty value"
+            "Close commit should reserve exactly 0.20 USDC of bounty value"
         );
         assertEq(
             clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc,
@@ -571,7 +583,7 @@ contract OrderRouterTest is BasePerpTest {
 
         vm.prank(address(router));
         vm.expectRevert(CfdEngine.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
-        engine.reserveCloseOrderExecutionBounty(account, 25_000e18, 1e6, address(router));
+        engine.reserveCloseOrderExecutionBounty(account, 25_000e18, 1e6);
     }
 
     function test_InvalidClose_MarginBackedBountyPaysKeeper() public {
@@ -618,7 +630,7 @@ contract OrderRouterTest is BasePerpTest {
             200_000,
             "keeper should receive the escrowed margin-backed bounty as clearinghouse credit"
         );
-        assertEq(_executionBountyReserve(1), 0, "failed close should clear router bounty escrow");
+        assertEq(_executionBountyReserve(1), 0, "failed close should clear reserved execution bounty");
         assertEq(
             uint256(_orderRecord(1).status),
             uint256(IOrderRouterAccounting.OrderStatus.Failed),
@@ -1387,7 +1399,6 @@ contract OrderRouterPythTest is BasePerpTest {
         );
         _syncRouterAdmin();
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
 
@@ -1532,9 +1543,9 @@ contract OrderRouterPythTest is BasePerpTest {
             "Router-validated refund path should not revert during settlement credit finalization"
         );
         assertEq(
-            clearinghouse.balanceUsdc(aliceAccount) - settlementBefore,
-            0,
-            "Trader refund path should no-op from the post-commit settlement baseline even when engine helper freshness would otherwise be stricter"
+            settlementBefore - clearinghouse.balanceUsdc(aliceAccount),
+            200_000,
+            "Trader refund path should consume the reserved bounty from the post-commit settlement baseline"
         );
     }
 
@@ -1639,9 +1650,9 @@ contract OrderRouterPythTest is BasePerpTest {
             "Keeper should receive bounty on protocol-state failure under current policy"
         );
         assertEq(
-            clearinghouse.balanceUsdc(aliceAccount) - aliceSettlementBefore,
-            0,
-            "Trader should not be refunded under current policy"
+            aliceSettlementBefore - clearinghouse.balanceUsdc(aliceAccount),
+            200_000,
+            "Trader should pay the reserved bounty under current policy"
         );
     }
 
@@ -1672,9 +1683,9 @@ contract OrderRouterPythTest is BasePerpTest {
             "Current policy should still pay the clearer while preserving FIFO progress"
         );
         assertEq(
-            clearinghouse.balanceUsdc(aliceAccount),
-            aliceSettlementBefore,
-            "Trader settlement should remain unchanged by the failure payout"
+            aliceSettlementBefore - clearinghouse.balanceUsdc(aliceAccount),
+            200_000,
+            "Trader settlement should pay the reserved bounty while preserving FIFO progress"
         );
     }
 
@@ -1780,9 +1791,9 @@ contract OrderRouterPythTest is BasePerpTest {
             "Keeper should receive bounty on skew invalidation under current policy"
         );
         assertEq(
-            clearinghouse.balanceUsdc(aliceAccount) - traderSettlementBefore,
-            0,
-            "Trader should not be refunded on skew invalidation"
+            traderSettlementBefore - clearinghouse.balanceUsdc(aliceAccount),
+            200_000,
+            "Trader should pay the reserved bounty on skew invalidation"
         );
     }
 
@@ -1817,9 +1828,9 @@ contract OrderRouterPythTest is BasePerpTest {
             "Keeper should receive bounty on solvency invalidation under current policy"
         );
         assertEq(
-            clearinghouse.balanceUsdc(aliceAccount) - traderSettlementBefore,
-            0,
-            "Trader should not be refunded on solvency invalidation"
+            traderSettlementBefore - clearinghouse.balanceUsdc(aliceAccount),
+            200_000,
+            "Trader should pay the reserved bounty on solvency invalidation"
         );
     }
 
@@ -1986,9 +1997,9 @@ contract OrderRouterPythTest is BasePerpTest {
             "Batch execution should pay the clearer on skew invalidation under current policy"
         );
         assertEq(
-            clearinghouse.balanceUsdc(aliceAccount) - traderSettlementBefore,
-            0,
-            "Batch invalidation should not refund the trader"
+            traderSettlementBefore - clearinghouse.balanceUsdc(aliceAccount),
+            200_000,
+            "Batch invalidation should debit the reserved trader bounty"
         );
     }
 
@@ -2252,8 +2263,12 @@ contract OrderRouterPythTest is BasePerpTest {
         IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(account);
         assertEq(router.nextExecuteId(), 1, "Stale revert should keep queue head pending");
         assertEq(escrow.pendingOrderCount, 1, "Stale revert should preserve escrowed order state");
+        assertEq(usdc.balanceOf(address(router)), 0, "Router should not custody the keeper reserve");
+        assertEq(escrow.executionBountyUsdc, 200_000, "Escrow view should continue tracking the pending keeper reserve");
         assertEq(
-            usdc.balanceOf(address(router)), 200_000, "Router custody should continue escrowing the keeper reserve"
+            clearinghouse.getLockedMarginBuckets(account).reservedSettlementUsdc,
+            200_000,
+            "Clearinghouse should continue reserving the pending keeper reserve"
         );
     }
 
@@ -2758,7 +2773,6 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
             new bool[](2)
         );
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
 
@@ -3124,7 +3138,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         );
     }
 
-    function test_ExecuteLiquidation_DefersKeeperCreditPerPreviewWhenVaultPayoutFails() public {
+    function test_ExecuteLiquidation_CreditsKeeperBountyEvenWhenVaultPayoutFails() public {
         address account = trader;
         _fundTrader(trader, 900e6);
 
@@ -3146,11 +3160,10 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
 
         LiquidationParityObserved memory observed = _observeLiquidationParity(account, address(this), beforeSnapshot);
         _assertLiquidationPreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
-        assertEq(observed.keeperSettlementUsdc, 0, "Failed immediate keeper credit should not reach settlement");
         assertEq(
-            observed.deferredKeeperCreditUsdc,
+            observed.keeperSettlementUsdc,
             preview.keeperBountyUsdc,
-            "Failed immediate keeper credit should defer the previewed keeper bounty into deferred keeper credit liability"
+            "Keeper bounty should settle directly inside the clearinghouse"
         );
     }
 
@@ -3168,10 +3181,11 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         clearinghouse.withdraw(account, 70e6);
         vm.stopPrank();
 
+        assertEq(usdc.balanceOf(address(router)), 0, "Router should not custody open-order bounty escrow");
         assertEq(
-            usdc.balanceOf(address(router)),
+            clearinghouse.getLockedMarginBuckets(account).reservedSettlementUsdc,
             _executionBountyReserve(1) * queuedOrderCount,
-            "Router should custody the shielded open-order bounty escrow"
+            "Clearinghouse should reserve the shielded open-order bounty escrow"
         );
         assertEq(
             router.pendingOrderCounts(account),
@@ -3195,7 +3209,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
             preview.badDebtUsdc,
             "Liquidation should not improve previewed bad debt by restoring execution escrow"
         );
-        assertEq(router.getAccountEscrow(account).executionBountyUsdc, _executionBountyReserve(1) * queuedOrderCount);
+        assertEq(router.getAccountEscrow(account).executionBountyUsdc, 0);
         assertEq(
             preview.reachableCollateralUsdc,
             snapshotBefore.terminalReachableUsdc,
@@ -3213,7 +3227,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         );
     }
 
-    function test_ExecuteLiquidation_ForfeitedEscrowFeedsPostForfeitureVaultDepth() public {
+    function test_ExecuteLiquidation_ForfeitedEscrowFeedsTreasuryMarginWithoutChangingVaultDepth() public {
         address account = trader;
         _fundTrader(trader, 900e6);
 
@@ -3252,12 +3266,12 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         assertEq(
             clearinghouse.balanceUsdc(address(this)) - keeperBefore,
             expectedPreview.keeperBountyUsdc,
-            "Liquidation bounty should use the post-forfeiture vault depth for funding"
+            "Liquidation bounty should use post-forfeiture clearinghouse reachability"
         );
         assertEq(
             engine.accumulatedBadDebtUsdc(),
             expectedPreview.badDebtUsdc,
-            "Liquidation bad debt should use the post-forfeiture vault depth for funding"
+            "Liquidation bad debt should use post-forfeiture clearinghouse reachability"
         );
     }
 
@@ -3273,7 +3287,12 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         clearinghouse.withdraw(account, 68e6);
         vm.stopPrank();
 
-        assertEq(usdc.balanceOf(address(router)), 400_000, "Router should custody prefunded close-order bounty escrow");
+        assertEq(usdc.balanceOf(address(router)), 0, "Router should not custody prefunded close-order bounty escrow");
+        assertEq(
+            clearinghouse.getLockedMarginBuckets(account).reservedSettlementUsdc,
+            400_000,
+            "Clearinghouse should reserve prefunded close-order bounty escrow"
+        );
 
         AccountLensViewTypes.AccountLedgerSnapshot memory snapshotBefore =
             engineAccountLens.getAccountLedgerSnapshot(account);
@@ -3473,7 +3492,6 @@ contract FadStalenessTest is BasePerpTest {
             new bool[](2)
         );
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
         _bootstrapSeededLifecycle();
@@ -4616,9 +4634,9 @@ contract StaleOrderExpiryTest is BasePerpTest {
             "Expired open order should pay the clearer from the reserved bounty"
         );
         assertEq(
-            _settlementBalance(spammer) - traderSettlementBefore,
-            0,
-            "Expired open order should not refund the trader bounty once the clearer prunes it"
+            traderSettlementBefore - _settlementBalance(spammer),
+            pending.executionBountyUsdc,
+            "Expired open order should debit the reserved trader bounty once the clearer prunes it"
         );
     }
 
@@ -4641,13 +4659,18 @@ contract StaleOrderExpiryTest is BasePerpTest {
         vm.prank(localKeeper);
         router.executeOrder(1, empty);
 
-        uint256 traderRefund = _settlementBalance(spammer) - traderSettlementBefore;
+        uint256 traderDebit = traderSettlementBefore - _settlementBalance(spammer);
         uint256 keeperReward = _settlementBalance(localKeeper) - keeperSettlementBefore;
         uint256 protocolRetained = engine.protocolTreasuryBalanceUsdc() - feesBefore;
 
+        assertEq(
+            traderDebit,
+            pending.executionBountyUsdc,
+            "Clearing an expired head order must consume the reserved bounty from trader settlement"
+        );
         assertTrue(
-            keeperReward > 0 || protocolRetained > 0 || traderRefund < pending.executionBountyUsdc,
-            "Clearing an expired head order must either pay the clearer or burn part of the reserved bounty"
+            keeperReward > 0 || protocolRetained > 0,
+            "Clearing an expired head order must either pay the clearer or retain the reserved bounty"
         );
     }
 
@@ -4713,7 +4736,6 @@ contract MarkPriceStalenessTest is BasePerpTest {
             new bool[](2)
         );
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
 
         clearinghouse.setEngine(address(engine));
         vm.warp(SETUP_TIMESTAMP);
@@ -4826,7 +4848,6 @@ contract StalenessGriefTest is BasePerpTest {
             new bool[](2)
         );
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
 
         clearinghouse.setEngine(address(engine));
         vm.warp(SETUP_TIMESTAMP);
@@ -4956,7 +4977,6 @@ contract VpiImrBypassTest is Test {
         );
         routerAdmin = OrderRouterAdmin(router.admin());
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
 
         _warpPastTimelock();
         clearinghouse.setEngine(address(engine));
@@ -5172,7 +5192,6 @@ contract KeeperFeeRefundTest is Test {
         );
         routerAdmin = OrderRouterAdmin(router.admin());
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
 
         _warpPastTimelock();
         IOrderRouterAdminHost.RouterConfig memory config = IOrderRouterAdminHost.RouterConfig({
@@ -5245,7 +5264,6 @@ contract KeeperFeeRefundTest is Test {
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1.5e8, false);
 
         uint256 keeperBefore = keeper.balance;
-        uint256 deferredKeeperCreditBefore = engine.totalDeferredKeeperCreditUsdc();
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(1e8));
         vm.warp(block.timestamp + 1);
@@ -5260,11 +5278,6 @@ contract KeeperFeeRefundTest is Test {
         );
         assertEq(keeper.balance - keeperBefore, 0, "Keeper should not receive fee on slippage failure");
         assertEq(alice.balance, 1 ether, "Open slippage failure should not route any ETH refund to the trader");
-        assertEq(
-            engine.totalDeferredKeeperCreditUsdc(),
-            deferredKeeperCreditBefore,
-            "Slippage failure should not leak failed-order bounty into deferred keeper credit liabilities"
-        );
     }
 
     function test_FIFOCleanupImpossibleHeadOrderHasEconomicCleanupIncentive() public {
@@ -5491,7 +5504,6 @@ contract WeekendArbitrageTest is Test {
             new bool[](2)
         );
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
 
         _warpPastTimelock();
         clearinghouse.setEngine(address(engine));

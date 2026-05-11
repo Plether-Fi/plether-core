@@ -28,7 +28,7 @@ contract AuditRemainingCoverageFindingsFailing_EscrowShielding is BasePerpTest {
             7900e6,
             "Full close should consume queued committed margin before socializing shortfall"
         );
-        assertEq(_executionBountyReserve(1), 200_000, "Queued execution bounty should remain in router custody");
+        assertEq(_executionBountyReserve(1), 200_000, "Queued execution bounty should remain reserved");
         assertEq(
             engine.accumulatedBadDebtUsdc(),
             0,
@@ -52,12 +52,12 @@ contract AuditRemainingCoverageFindingsFailing_EscrowShielding is BasePerpTest {
 
         uint256 depth = pool.totalAssets();
         vm.startPrank(address(router));
-        engine.liquidatePosition(account, 110_000_000, depth, uint64(block.timestamp));
+        engine.liquidatePosition(account, 110_000_000, depth, uint64(block.timestamp), address(this));
         vm.stopPrank();
 
         (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Liquidation should still clear the live insolvent position");
-        assertEq(_executionBountyReserve(1), 200_000, "Queued execution bounty should remain in router custody");
+        assertEq(_executionBountyReserve(1), 200_000, "Queued execution bounty should remain reserved");
         assertLt(
             clearinghouse.lockedMarginUsdc(account),
             7900e6,
@@ -99,7 +99,8 @@ contract AuditRemainingCoverageFindingsFailing_LiquidationBounty is BasePerpTest
 
         vm.startPrank(address(router));
         vm.warp(1_709_971_200);
-        uint256 bounty = engine.liquidatePosition(account, 101_000_000, pool.totalAssets(), uint64(block.timestamp));
+        uint256 bounty =
+            engine.liquidatePosition(account, 101_000_000, pool.totalAssets(), uint64(block.timestamp), address(this));
         vm.stopPrank();
 
         assertGt(bounty, 0, "Keeper bounty should stay positive for a still-positive-equity liquidation");
@@ -205,6 +206,7 @@ contract AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees is BasePerp
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(80_000_000));
 
+        vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
         vm.prank(keeper);
         router.executeOrder(1, priceData);
@@ -228,7 +230,7 @@ contract AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees is BasePerp
         assertEq(_executionBountyReserve(1), 200_000, "Close commits should escrow the configured flat clearer bounty");
     }
 
-    function test_H5_CloseKeeperRewardMustDeferInsteadOfRevertingOnCashShortage() public {
+    function test_H5_CloseKeeperRewardMustCreditFromReservedMarginDespiteVaultCashShortage() public {
         address account = trader;
         address keeperAccount = keeper;
         _fundTrader(trader, 11_000e6);
@@ -246,6 +248,7 @@ contract AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees is BasePerp
         priceData[0] = abi.encode(uint256(80_000_000));
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
+        vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
         vm.prank(keeper);
         router.executeOrder(1, priceData);
@@ -253,14 +256,9 @@ contract AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees is BasePerp
         (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Close should still succeed even when execution bounty cash is unavailable");
         assertEq(
-            engine.deferredKeeperCreditUsdc(keeper),
-            0,
-            "Illiquid close execution should not touch deferred vault-funded clearer claims"
-        );
-        assertEq(
             clearinghouse.balanceUsdc(keeperAccount) - keeperSettlementBefore,
             200_000,
-            "Illiquid close execution should still pay the keeper from router escrow via clearinghouse settlement"
+            "Illiquid close execution should still pay the keeper from clearinghouse-reserved bounty value"
         );
     }
 
@@ -272,7 +270,7 @@ contract AuditRemainingCoverageFindingsFailing_TerminalLiveness is BasePerpTest 
     address spammer = address(0x7101);
     address keeper = address(0x7102);
 
-    function test_H6_LiquidationKeeperRewardMustDeferInsteadOfRevertingOnCashShortage() public {
+    function test_H6_LiquidationKeeperRewardMustCreditFromTraderMarginDespiteVaultCashShortage() public {
         address account = trader;
         _fundTrader(trader, 11_000e6);
 
@@ -283,13 +281,18 @@ contract AuditRemainingCoverageFindingsFailing_TerminalLiveness is BasePerpTest 
 
         vm.mockCallRevert(address(pool), abi.encodeWithSelector(pool.payOut.selector), bytes("vault illiquid"));
 
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeper);
         vm.roll(block.number + 1);
         vm.prank(keeper);
         router.executeLiquidation(account, priceData);
 
         (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Liquidation should still succeed even when bounty cash is unavailable");
-        assertGt(engine.deferredKeeperCreditUsdc(keeper), 0, "Liquidation bounty should defer instead of reverting");
+        assertGt(
+            clearinghouse.balanceUsdc(keeper) - keeperSettlementBefore,
+            0,
+            "Liquidation bounty should credit keeper settlement instead of reverting"
+        );
     }
 
     function test_M3_TerminalCloseMustRemainExecutableUnderBoundedForeignQueue() public {

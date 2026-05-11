@@ -8,7 +8,7 @@ It is the source of truth for:
 - LP withdrawal limits,
 - close and liquidation settlement,
 - deferred liabilities,
-- router escrow treatment,
+- clearinghouse reservation treatment,
 - LP-capital carry.
 
 Use it together with:
@@ -113,8 +113,7 @@ Where `withdrawalReservedUsdc` is built from the canonical reserve model, includ
 
 - bounded trader liability,
 - deferred trader credit,
-- deferred keeper credit,
-- protocol-owned inventory.
+- clearinghouse-backed protocol treasury margin.
 
 Rule:
 
@@ -164,7 +163,7 @@ Rules:
 - use physically reachable clearinghouse collateral for generic views and withdraw checks,
 - same-account deferred trader credit is a separate explicit netting bucket rather than generic collateral,
 - liquidation and close settlement must cap seizure and payout logic by actually reachable value,
-- pending-order reservations and router escrow must be handled explicitly rather than assumed to be free cash.
+- pending-order reservations and execution bounty reserves must be handled explicitly rather than assumed to be free cash.
 
 ## Snapshot Boundaries
 
@@ -183,7 +182,6 @@ Key fields:
 - `supplementalReservedUsdc`: reserved extension slot for LP-withdrawal accounting; currently zero in the carry model
 - `unrealizedMtmLiabilityUsdc`
 - `deferredTraderCreditUsdc`
-- `deferredKeeperCreditUsdc`
 - `markFreshnessRequired`
 - `maxMarkStaleness`
 
@@ -261,7 +259,7 @@ Not every inflow into `HousePool` is LP equity.
 
 Keep these categories separate:
 
-- `recordProtocolBackingInflow`: non-LP protocol-recognized pool backing such as settlement-module keeper-liability backing; protocol fees route to the treasury clearinghouse account instead of this hook
+- `recordProtocolBackingInflow`: non-LP protocol-recognized pool backing; protocol fees route to the treasury clearinghouse account instead of this hook
 - `recordClaimantInflow(amount, Recapitalization, CashArrived)`: recapitalization intended to restore waterfall claimants
 - `recordClaimantInflow(amount, Revenue, CashArrived)`: claimant-owned value where fresh cash entered the vault in this flow
 - `recordClaimantInflow(amount, Revenue, AlreadyRetained)`: claimant-owned value already retained physically by the vault and only needing ownership routing
@@ -310,19 +308,12 @@ The protocol supports fail-soft terminal settlement.
 - claims may be partial,
 - settlement is credited into `MarginClearinghouse`.
 
-### Deferred keeper credit
-
-- illiquid liquidation bounties may create `deferredKeeperCreditUsdc[beneficiary]`,
-- only the recorded beneficiary may call `claimDeferredKeeperCredit()`,
-- settlement is credited into `MarginClearinghouse`.
-
 Rules:
 
 - deferred liabilities are beneficiary-balance based, not FIFO queue based,
 - they are senior claims on vault cash,
-- deferred claim servicing outranks protocol fee withdrawals when cash is insufficient to satisfy both,
 - deferred claim servicing is frozen entirely while physical vault cash is below aggregate deferred liabilities,
-- fee withdrawal, fresh payout funding, fresh liquidation bounty payment, and deferred servicing must all agree on what cash is actually free,
+- fresh payout funding, protocol fee top-ups, and deferred servicing must all agree on what vault cash is actually free,
 - protocol fee top-ups are subordinate to deferred claims and immediate trader payouts; any fee amount that cannot be cash-credited under this priority is not recorded as a deferred protocol liability.
 
 ## Pending-Order Escrow Model
@@ -334,7 +325,7 @@ Question answered:
 Escrow / reservation buckets include:
 
 - committed order margin,
-- router-custodied execution bounty reserve.
+- clearinghouse-reserved execution bounty value.
 
 Rules:
 
@@ -342,11 +333,11 @@ Rules:
 - escrowed value is not free buying power,
 - releasing or consuming escrow must happen exactly once,
 - clearinghouse reservation records are the source of truth for committed trader margin,
-- router escrow is not LP cash and should not become a deferred vault liability bucket.
+- execution bounty reserves are not LP cash and should not become a deferred vault liability bucket.
 
 ### Close-order bounty policy
 
-- close intents may source their flat router-custodied bounty from active position margin when free settlement is exhausted,
+- close intents may source their flat clearinghouse-reserved bounty from active position margin when free settlement is exhausted,
 - this is an explicit bounded liveness tradeoff,
 - `closeOrderExecutionBountyUsdc` is governance-configured but hard-capped at `1 USDC`,
 - the amount parked in escrow is bounded by `MAX_PENDING_ORDERS * 1 USDC` per account,
@@ -356,8 +347,8 @@ Rules:
 ### Open-order failure policy
 
 - deterministic live-state open failures may be rejected at commit time,
-- execution-time user-invalid opens pay the clearer from router escrow,
-- genuine post-commit protocol-state invalidations pay the clearer from router escrow so FIFO head cleanup remains incentive compatible,
+- execution-time user-invalid opens pay the clearer from clearinghouse-reserved bounty value,
+- genuine post-commit protocol-state invalidations pay the clearer from clearinghouse-reserved bounty value so FIFO head cleanup remains incentive compatible,
 - typed engine policy categories, not raw revert selectors, should drive the split.
 
 ## Settlement Rules
@@ -533,7 +524,7 @@ The accounting system should preserve the following:
 
 ## Architecture Goal
 
-The system uses multiple conservative accounting kernels because different paths answer different questions: solvency, withdrawal availability, close settlement, liquidation planning, deferred liabilities, and router escrow all need different boundaries.
+The system uses multiple conservative accounting kernels because different paths answer different questions: solvency, withdrawal availability, close settlement, liquidation planning, deferred liabilities, and clearinghouse reservations all need different boundaries.
 
 Design rules:
 

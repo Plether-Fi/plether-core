@@ -146,7 +146,6 @@ contract GasProfileTest is Test {
             new bool[](1)
         );
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
 
         uint256 t0 = block.timestamp;
         clearinghouse.setEngine(address(engine));

@@ -36,23 +36,14 @@ contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
         uint256 totalDeferredTraderCreditUsdc;
         uint256 vaultAssets = vault.totalAssets();
         uint256 totalDeferredTraderCreditUsdc_ = engine.totalDeferredTraderCreditUsdc();
-        uint256 totalDeferredKeeperCreditUsdc = engine.totalDeferredKeeperCreditUsdc();
-        uint256 handlerKeeperCreditUsdc = engine.deferredKeeperCreditUsdc(address(handler));
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
             DeferredEngineViewTypes.DeferredCreditStatus memory status =
                 _deferredCreditStatus(account, address(handler));
             uint256 deferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(account);
-            uint256 deferredKeeperCreditUsdc = handlerKeeperCreditUsdc;
-            uint256 otherDeferredTraderCreditUsdc = totalDeferredTraderCreditUsdc_ > deferredTraderCreditUsdc
-                ? totalDeferredTraderCreditUsdc_ - deferredTraderCreditUsdc
-                : 0;
             uint256 expectedTraderClaimableNow = CashPriorityLib.availableCashForDeferredBeneficiaryClaim(
-                vaultAssets, totalDeferredTraderCreditUsdc_, totalDeferredKeeperCreditUsdc, deferredTraderCreditUsdc
-            );
-            uint256 expectedKeeperClaimableNow = CashPriorityLib.availableCashForDeferredBeneficiaryClaim(
-                vaultAssets, otherDeferredTraderCreditUsdc, deferredKeeperCreditUsdc, deferredKeeperCreditUsdc
+                vaultAssets, totalDeferredTraderCreditUsdc_, deferredTraderCreditUsdc
             );
 
             assertEq(
@@ -62,11 +53,6 @@ contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
                 status.traderPayoutClaimableNow,
                 deferredTraderCreditUsdc > 0 && expectedTraderClaimableNow > 0,
                 "Deferred payout claimability mismatch"
-            );
-            assertEq(
-                status.keeperCreditClaimableNow,
-                deferredKeeperCreditUsdc > 0 && expectedKeeperClaimableNow > 0,
-                "Deferred keeper credit claimability mismatch"
             );
 
             totalDeferredTraderCreditUsdc += deferredTraderCreditUsdc;
@@ -131,9 +117,7 @@ contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
                 "Close preview must choose immediate or deferred payout"
             );
             uint256 freeCashForFreshPayouts =
-                CashPriorityLib.reserveFreshPayouts(
-                vault.totalAssets(), engine.totalDeferredTraderCreditUsdc(), engine.totalDeferredKeeperCreditUsdc()
-            )
+                CashPriorityLib.reserveFreshPayouts(vault.totalAssets(), engine.totalDeferredTraderCreditUsdc())
             .freeCashUsdc;
             if (freeCashForFreshPayouts >= totalPayoutUsdc) {
                 assertEq(preview.deferredTraderCreditUsdc, 0, "Close preview must not defer when vault is liquid");

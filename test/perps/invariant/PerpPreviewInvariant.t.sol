@@ -33,17 +33,15 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
         handler = new PerpAccountingHandler(usdc, engine, clearinghouse, router, vault);
         handler.seedActors(50_000e6, 100_000e6);
 
-        bytes4[] memory selectors = new bytes4[](10);
+        bytes4[] memory selectors = new bytes4[](8);
         selectors[0] = handler.depositCollateral.selector;
         selectors[1] = handler.withdrawCollateral.selector;
         selectors[2] = handler.commitOpenOrder.selector;
         selectors[3] = handler.commitCloseOrder.selector;
         selectors[4] = handler.executeNextOrderBatch.selector;
         selectors[5] = handler.liquidate.selector;
-        selectors[6] = handler.claimDeferredKeeperCredit.selector;
-        selectors[7] = handler.setRouterPayoutFailureMode.selector;
-        selectors[8] = handler.warpForward.selector;
-        selectors[9] = handler.syncMarkNow.selector;
+        selectors[6] = handler.warpForward.selector;
+        selectors[7] = handler.syncMarkNow.selector;
 
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
         targetContract(address(handler));
@@ -60,14 +58,9 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
             "Protocol accounting view deferred trader credit mismatch"
         );
         assertEq(
-            accountingView.totalDeferredKeeperCreditUsdc,
-            engine.totalDeferredKeeperCreditUsdc(),
-            "Protocol accounting view deferred keeper credit mismatch"
-        );
-        assertEq(
             accountingView.protocolTreasuryBalanceUsdc,
             engine.protocolTreasuryBalanceUsdc(),
-            "Protocol accounting view accumulated fees mismatch"
+            "Protocol accounting view treasury balance mismatch"
         );
     }
 
@@ -120,7 +113,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function invariant_LiquidationPreviewExcludesRouterExecutionEscrow() public view {
+    function invariant_LiquidationPreviewExcludesReservedExecutionBounty() public view {
         uint256 oraclePrice = _previewOraclePrice();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
@@ -140,7 +133,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
             assertLt(
                 liquidationPreview.reachableCollateralUsdc,
                 snapshot.settlementBalanceUsdc + snapshot.executionEscrowUsdc,
-                "Liquidation preview must exclude router execution escrow from reachable collateral"
+                "Liquidation preview must exclude reserved execution bounty from reachable collateral"
             );
         }
     }
