@@ -804,6 +804,9 @@ contract InvarCoinTest is InvarCoinSolverTestHelpers {
         uint256 bobUsdcBefore = usdc.balanceOf(bob);
         uint256 bobBearBefore = bearToken.balanceOf(bob);
 
+        vm.expectEmit(true, true, false, false);
+        emit InvarCoin.LpWithdrawn(alice, bob, bal, 0, 0);
+
         vm.prank(alice);
         (uint256 usdcReturned, uint256 bearReturned) = ic.lpWithdraw(bal, 0, 0, bob);
 
@@ -926,15 +929,55 @@ contract InvarCoinTest is InvarCoinSolverTestHelpers {
         ic.harvest();
     }
 
-    function test_Harvest_RevertsWhenNoStakers() public {
+    function test_Harvest_CheckpointsYieldWhenNoStakers() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice, 0);
+
+        _deployToCurve(ic, curveLp, 0);
+        uint256 costBefore = ic.curveLpCostVp();
+        curve.setVirtualPrice(1.05e18);
+
+        uint256 donatedWithoutStakers = ic.harvest();
+
+        assertEq(donatedWithoutStakers, 0, "no INVAR should be donated without stakers");
+        assertGt(ic.curveLpCostVp(), costBefore, "yield accounting should advance without stakers");
+
+        uint256 stakeAmount = ic.balanceOf(alice);
+        vm.startPrank(alice);
+        ic.approve(address(sInvar), stakeAmount);
+        sInvar.deposit(stakeAmount, alice);
+        vm.stopPrank();
+
+        vm.expectRevert(InvarCoin.InvarCoin__NoYield.selector);
+        ic.harvest();
+    }
+
+    function test_Deposit_SkipsPendingHarvestWhenNoStakers() public {
         vm.prank(alice);
         ic.deposit(20_000e6, alice, 0);
 
         _deployToCurve(ic, curveLp, 0);
         curve.setVirtualPrice(1.05e18);
+        uint256 expectedCost = (ic.trackedLpBalance() * curve.virtualPrice()) / 1e18;
 
-        vm.expectRevert(InvarCoin.InvarCoin__NoStakers.selector);
-        ic.harvest();
+        vm.prank(bob);
+        uint256 shares = ic.deposit(1000e6, bob, 0);
+
+        assertGt(shares, 0);
+        assertEq(ic.curveLpCostVp(), expectedCost, "deposit should checkpoint no-staker VP growth");
+    }
+
+    function test_LpWithdraw_SkipsPendingHarvestWhenNoStakers() public {
+        vm.prank(alice);
+        uint256 shares = ic.deposit(20_000e6, alice, 0);
+
+        _deployToCurve(ic, curveLp, 0);
+        curve.setVirtualPrice(1.05e18);
+
+        vm.prank(alice);
+        (uint256 usdcReturned, uint256 bearReturned) = ic.lpWithdraw(shares, 0, 0, alice);
+
+        assertTrue(usdcReturned > 0 || bearReturned > 0);
     }
 
     function test_Harvest_CurveYield() public {
@@ -2219,6 +2262,13 @@ contract InvarCoinTest is InvarCoinSolverTestHelpers {
     function test_MicroHarvestPreservesCostBasis() public {
         vm.prank(alice);
         ic.deposit(100_000e6, alice, 0);
+
+        uint256 stakeAmount = ic.balanceOf(alice);
+        vm.startPrank(alice);
+        ic.approve(address(sInvar), stakeAmount);
+        sInvar.deposit(stakeAmount, alice);
+        vm.stopPrank();
+
         _deployToCurve(ic, curveLp, 0);
 
         uint256 costVpBefore = ic.curveLpCostVp();
@@ -2301,6 +2351,11 @@ contract InvarCoinTest is InvarCoinSolverTestHelpers {
     function test_WithdrawReverts_CurveLpPriceRevertsWithPendingYield() public {
         vm.prank(alice);
         uint256 shares = ic.deposit(100_000e6, alice, 0);
+        uint256 stakeAmount = shares / 2;
+        vm.startPrank(alice);
+        ic.approve(address(sInvar), stakeAmount);
+        sInvar.deposit(stakeAmount, alice);
+        vm.stopPrank();
         _deployToCurve(ic, curveLp, 0);
 
         curve.setVirtualPrice(curve.virtualPrice() * 105 / 100);
@@ -2309,7 +2364,7 @@ contract InvarCoinTest is InvarCoinSolverTestHelpers {
 
         vm.prank(alice);
         vm.expectRevert();
-        ic.withdraw(shares, alice, 0);
+        ic.withdraw(shares - stakeAmount, alice, 0);
     }
 
     function test_SetEmergencyMode_BrickedCurve_WithdrawViaLpWithdraw() public {
@@ -2763,6 +2818,34 @@ contract InvarCoinTest is InvarCoinSolverTestHelpers {
         uint256 shares = freshIc.deposit(10_000e6, bob, 0);
 
         assertGt(shares, 0);
+        assertEq(
+            freshIc.curveLpCostVp(),
+            (freshIc.trackedLpBalance() * curve.virtualPrice()) / 1e18,
+            "deposit should checkpoint VP growth before staking is configured"
+        );
+    }
+
+    function test_LpWithdraw_CheckpointsYieldWithoutStakedInvarCoin() public {
+        InvarCoin freshIc = new InvarCoin(
+            address(usdc), address(bearToken), address(curveLp), address(curve), address(oracle), address(0), address(0)
+        );
+
+        vm.prank(alice);
+        usdc.approve(address(freshIc), type(uint256).max);
+        vm.prank(alice);
+        freshIc.deposit(20_000e6, alice, 0);
+        _deployToCurve(freshIc, curveLp, 0);
+
+        uint256 costBefore = freshIc.curveLpCostVp();
+        curve.setVirtualPrice(1.05e18);
+
+        uint256 sharesToWithdraw = freshIc.balanceOf(alice) / 1000;
+        vm.prank(alice);
+        freshIc.lpWithdraw(sharesToWithdraw, 0, 0, alice);
+
+        assertGt(
+            freshIc.curveLpCostVp(), costBefore, "lpWithdraw should checkpoint VP growth before staking is configured"
+        );
     }
 
     function test_Harvest_ExactDonatedAmount() public {
@@ -3061,6 +3144,13 @@ contract InvarCoinTest is InvarCoinSolverTestHelpers {
     function test_GetHarvestableYield_WithYield() public {
         vm.prank(alice);
         ic.deposit(20_000e6, alice, 0);
+
+        uint256 stakeAmount = ic.balanceOf(alice);
+        vm.startPrank(alice);
+        ic.approve(address(sInvar), stakeAmount);
+        sInvar.deposit(stakeAmount, alice);
+        vm.stopPrank();
+
         _deployToCurve(ic, curveLp, 0);
 
         curve.setVirtualPrice(1.05e18);
@@ -4182,9 +4272,21 @@ contract HarvestBypassTest is InvarCoinSolverTestHelpers {
         usdc.approve(address(ic), type(uint256).max);
     }
 
-    function test_WithdrawSucceedsWhenYieldPendingAndOracleStale() public {
+    function _depositAndStakeHalf() private returns (uint256 liquidShares) {
         vm.prank(alice);
-        ic.deposit(100_000e6, alice, 0);
+        uint256 shares = ic.deposit(100_000e6, alice, 0);
+
+        uint256 stakeAmount = shares / 2;
+        vm.startPrank(alice);
+        ic.approve(address(sInvar), stakeAmount);
+        sInvar.deposit(stakeAmount, alice);
+        vm.stopPrank();
+
+        liquidShares = shares - stakeAmount;
+    }
+
+    function test_WithdrawSucceedsWhenYieldPendingAndOracleStale() public {
+        uint256 shares = _depositAndStakeHalf();
 
         _deployToCurve(ic, curveLp, 0);
 
@@ -4192,7 +4294,6 @@ contract HarvestBypassTest is InvarCoinSolverTestHelpers {
 
         assertGt(ic.getHarvestableYield(), 0, "yield should be pending");
 
-        uint256 shares = ic.balanceOf(alice);
         oracle.setUpdatedAt(block.timestamp - 25 hours);
 
         vm.prank(alice);
@@ -4201,8 +4302,7 @@ contract HarvestBypassTest is InvarCoinSolverTestHelpers {
     }
 
     function test_LpWithdrawSucceedsWhenYieldPendingAndOracleStale() public {
-        vm.prank(alice);
-        ic.deposit(100_000e6, alice, 0);
+        uint256 shares = _depositAndStakeHalf();
 
         _deployToCurve(ic, curveLp, 0);
 
@@ -4210,7 +4310,6 @@ contract HarvestBypassTest is InvarCoinSolverTestHelpers {
 
         assertGt(ic.getHarvestableYield(), 0, "yield should be pending");
 
-        uint256 shares = ic.balanceOf(alice);
         oracle.setUpdatedAt(block.timestamp - 25 hours);
 
         vm.prank(alice);
@@ -4219,8 +4318,7 @@ contract HarvestBypassTest is InvarCoinSolverTestHelpers {
     }
 
     function test_LpWithdrawSucceedsWhenYieldPendingAndOracleReverts() public {
-        vm.prank(alice);
-        ic.deposit(100_000e6, alice, 0);
+        uint256 shares = _depositAndStakeHalf();
 
         _deployToCurve(ic, curveLp, 0);
 
@@ -4229,8 +4327,6 @@ contract HarvestBypassTest is InvarCoinSolverTestHelpers {
         assertGt(ic.getHarvestableYield(), 0, "yield should be pending");
 
         vm.mockCallRevert(address(oracle), abi.encodeWithSignature("latestRoundData()"), "oracle deviation");
-
-        uint256 shares = ic.balanceOf(alice);
 
         vm.prank(alice);
         (uint256 usdcOut, uint256 bearOut) = ic.lpWithdraw(shares / 2, 0, 0, alice);
