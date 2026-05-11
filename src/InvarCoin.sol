@@ -377,10 +377,10 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
     /// @notice Estimated harvestable Curve fee yield (USDC, 6 decimals).
     /// @dev Read-only estimator mirroring _harvest math. Uses permissive oracle reads and returns 0 if no staking
-    ///      contract or no VP growth.
+    ///      contract, no sINVAR stakers, or no VP growth.
     function getHarvestableYield() external view returns (uint256 yieldUsdc) {
         uint256 lpBal = trackedLpBalance;
-        if (lpBal == 0 || address(stakedInvarCoin) == address(0)) {
+        if (lpBal == 0 || !_hasStakedInvarSupply()) {
             return 0;
         }
 
@@ -462,6 +462,20 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
     function _validatedOraclePrice() private view returns (uint256) {
         return OracleLib.getValidatedPrice(BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
+    }
+
+    function _hasStakedInvarSupply() private view returns (bool) {
+        StakedToken staking = stakedInvarCoin;
+        return address(staking) != address(0) && staking.totalSupply() > 0;
+    }
+
+    function _checkpointIfNoStakers(
+        uint256 currentVpValue
+    ) private returns (bool checkpointed) {
+        if (!_hasStakedInvarSupply()) {
+            curveLpCostVp = currentVpValue;
+            checkpointed = true;
+        }
     }
 
     /// @dev Total LP held: local + gauge-staked (internally tracked to avoid external call dependency).
@@ -823,21 +837,20 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     /// @dev Measures fee yield as virtual price growth above the cost basis (curveLpCostVp).
     ///      Mints INVAR proportional to the USDC value of yield and donates it to sINVAR stakers.
     ///      Only tracks VP growth on vault-deployed LP (trackedLpBalance), not donated LP.
-    ///      Reverts if no yield is available — use as a heartbeat signal for keepers.
+    ///      Reverts if no yield is available to donate or checkpoint — use as a heartbeat signal for keepers.
     /// @return donated Amount of INVAR minted and donated to sINVAR.
     function harvest() external nonReentrant whenNotPaused returns (uint256 donated) {
-        donated = _harvest();
-        if (donated == 0) {
+        bool accounted;
+        (donated, accounted) = _harvest();
+        if (!accounted) {
             revert InvarCoin__NoYield();
         }
     }
 
     /// @dev Harvest yield before withdrawals. Best-effort: skips when no yield is pending, Curve is
-    ///      down, or oracle is unavailable. Withdrawals must never be blocked by oracle outages.
+    ///      down, or oracle is unavailable. If no sINVAR recipients exist, checkpoints VP growth as INVAR NAV.
+    ///      Withdrawals must never be blocked.
     function _harvestSafe() internal {
-        if (address(stakedInvarCoin) == address(0)) {
-            return;
-        }
         uint256 lpBal = trackedLpBalance;
         if (lpBal == 0) {
             return;
@@ -855,6 +868,10 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             return;
         }
 
+        if (_checkpointIfNoStakers(currentVpValue)) {
+            return;
+        }
+
         (bool ok, uint256 oraclePrice) =
             OracleLib.tryGetValidatedPrice(BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
         if (!ok) {
@@ -867,17 +884,17 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     /// @dev Uses trackedLpBalance (not _lpBalance()) so donated LP cannot inflate harvestable yield.
     ///      Divergence from actual LP is prevented by internal gaugeStakedLp tracking and
     ///      forceRemoveGauge() which writes off stuck LP from both trackedLpBalance and curveLpCostVp.
-    function _harvest() internal returns (uint256 donated) {
-        if (address(stakedInvarCoin) == address(0)) {
-            return 0;
-        }
-
+    function _harvest() internal returns (uint256 donated, bool accounted) {
         uint256 lpBal = trackedLpBalance;
         if (lpBal > 0) {
             uint256 currentVpValue = (lpBal * CURVE_POOL.get_virtual_price()) / 1e18;
             if (currentVpValue > curveLpCostVp) {
+                if (_checkpointIfNoStakers(currentVpValue)) {
+                    return (0, true);
+                }
+
                 uint256 oraclePrice = _validatedOraclePrice();
-                donated = _harvestWithPrice(lpBal, currentVpValue, oraclePrice);
+                (donated, accounted) = _harvestWithPrice(lpBal, currentVpValue, oraclePrice);
             }
         }
     }
@@ -898,23 +915,29 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         uint256 lpBal,
         uint256 currentVpValue,
         uint256 oraclePrice
-    ) private returns (uint256 donated) {
+    ) private returns (uint256 donated, bool accounted) {
         uint256 vpGrowth = currentVpValue - curveLpCostVp;
         uint256 currentLpUsdc = (lpBal * _pessimisticLpPrice(oraclePrice)) / 1e30;
         uint256 totalYieldUsdc = Math.mulDiv(currentLpUsdc, vpGrowth, currentVpValue);
 
         if (totalYieldUsdc == 0) {
-            return 0;
+            return (0, false);
         }
-        curveLpCostVp = currentVpValue;
-
         uint256 supply = totalSupply();
         uint256 currentAssets = _totalAssetsWithPrice(_lpBalance(), oraclePrice);
         uint256 assetsBeforeYield = currentAssets > totalYieldUsdc ? currentAssets - totalYieldUsdc : 0;
 
-        donated = Math.mulDiv(totalYieldUsdc, supply + VIRTUAL_SHARES, assetsBeforeYield + VIRTUAL_ASSETS);
+        uint256 amountToDonate =
+            Math.mulDiv(totalYieldUsdc, supply + VIRTUAL_SHARES, assetsBeforeYield + VIRTUAL_ASSETS);
 
-        _mintAndDonate(donated);
+        if (amountToDonate == 0) {
+            return (0, false);
+        }
+
+        _mintAndDonate(amountToDonate);
+        curveLpCostVp = currentVpValue;
+        donated = amountToDonate;
+        accounted = true;
 
         emit YieldHarvested(donated, 0, donated);
     }
@@ -932,6 +955,10 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         }
 
         _harvest();
+
+        if (stakedInvarCoin.totalSupply() == 0) {
+            revert InvarCoin__NoStakers();
+        }
 
         uint256 oraclePrice = _validatedOraclePrice();
 
