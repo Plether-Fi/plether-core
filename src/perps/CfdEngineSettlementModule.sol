@@ -177,7 +177,7 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
                 );
         }
 
-        _settleProtocolFeeTopUp(host, delta.executionFeeUsdc, protocolFeeCreditedUsdc);
+        _settleProtocolFeeTopUp(host, protocolFeeCreditedUsdc + delta.protocolFeeTopUpUsdc, protocolFeeCreditedUsdc);
 
         if (delta.deletePosition) {
             host.settlementDeletePosition(delta.account);

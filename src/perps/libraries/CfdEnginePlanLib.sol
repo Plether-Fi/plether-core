@@ -542,9 +542,13 @@ library CfdEnginePlanLib {
         if (carryAdjustedSettlementUsdc > 0) {
             delta.settlementType = CfdEnginePlanTypes.SettlementType.GAIN;
             delta.freshTraderPayoutUsdc = uint256(carryAdjustedSettlementUsdc);
-            delta.freshPayoutIsImmediate =
-                availableCashForFreshPayouts >= delta.freshTraderPayoutUsdc + delta.executionFeeUsdc;
+            delta.freshPayoutIsImmediate = availableCashForFreshPayouts >= delta.freshTraderPayoutUsdc;
             delta.freshPayoutIsDeferred = !delta.freshPayoutIsImmediate;
+            if (delta.freshPayoutIsImmediate) {
+                uint256 cashAfterTraderPayout = availableCashForFreshPayouts - delta.freshTraderPayoutUsdc;
+                delta.protocolFeeTopUpUsdc =
+                    delta.executionFeeUsdc < cashAfterTraderPayout ? delta.executionFeeUsdc : cashAfterTraderPayout;
+            }
         } else if (carryAdjustedSettlementUsdc < 0) {
             delta.settlementType = CfdEnginePlanTypes.SettlementType.LOSS;
             delta.lossUsdc = uint256(-carryAdjustedSettlementUsdc);
@@ -566,6 +570,7 @@ library CfdEnginePlanLib {
                 delta.badDebtUsdc
             ) = _planCloseDeferredTraderCreditConsumption(snap.deferredTraderCreditForAccount, delta.lossResult);
             delta.executionFeeUsdc = delta.lossResult.collectedExecFeeUsdc + delta.deferredFeeRecoveryUsdc;
+            delta.protocolFeeTopUpUsdc = _closeLossProtocolFeeTopUpUsdc(snap, delta);
 
             if (delta.lossResult.shortfallUsdc > 0 && cs.remainingMarginUsdc > 0) {
                 delta.revertCode = CfdEnginePlanTypes.CloseRevertCode.PARTIAL_CLOSE_UNDERWATER;
@@ -618,10 +623,32 @@ library CfdEnginePlanLib {
         sp.postOpDegradedMode = result.postOpDegradedMode;
     }
 
+    function _closeLossProtocolFeeTopUpUsdc(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        CfdEnginePlanTypes.CloseDelta memory delta
+    ) private pure returns (uint256 topUpUsdc) {
+        uint256 uncreditedFeeUsdc = delta.executionFeeUsdc - delta.lossResult.collectedExecFeeUsdc;
+        if (uncreditedFeeUsdc == 0) {
+            return 0;
+        }
+
+        uint256 vaultCashAfterSeizure =
+            snap.vaultCashUsdc + delta.lossResult.seizedUsdc - delta.lossResult.collectedExecFeeUsdc;
+        uint256 deferredTraderCreditAfterConsumption =
+            snap.totalDeferredTraderCreditUsdc - delta.existingDeferredConsumedUsdc;
+        uint256 freeCashUsdc =
+            CashPriorityLib.reserveFreshPayouts(
+            vaultCashAfterSeizure, deferredTraderCreditAfterConsumption, snap.totalDeferredKeeperCreditUsdc
+        )
+        .freeCashUsdc;
+        return uncreditedFeeUsdc < freeCashUsdc ? uncreditedFeeUsdc : freeCashUsdc;
+    }
+
     function _closeVaultPhysicalAssetsDelta(
         CfdEnginePlanTypes.CloseDelta memory delta
     ) private pure returns (int256) {
-        return int256(delta.lossResult.seizedUsdc) - int256(delta.executionFeeUsdc)
+        return int256(delta.lossResult.seizedUsdc) - int256(delta.lossResult.collectedExecFeeUsdc)
+            - int256(delta.protocolFeeTopUpUsdc)
             - int256(delta.freshPayoutIsImmediate ? delta.freshTraderPayoutUsdc : 0);
     }
 

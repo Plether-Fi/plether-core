@@ -181,6 +181,7 @@ library CfdEnginePlanTypes {
         uint256 syncMarginQueueAmount;
 
         uint256 executionFeeUsdc;
+        uint256 protocolFeeTopUpUsdc;
         uint256 badDebtUsdc;
         uint256 pendingCarryUsdc;
 

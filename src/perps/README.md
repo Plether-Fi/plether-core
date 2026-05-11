@@ -139,6 +139,8 @@ Liquidation bounties are fail-soft when the HousePool is illiquid.
 - `claimDeferredKeeperCredit()` is beneficiary-only and settles to clearinghouse credit rather than direct wallet transfer.
 - Deferred trader credit and deferred keeper credit are included in reserve and solvency accounting.
 
+Protocol fees settle into the treasury clearinghouse account only when they are cash-collected from trader settlement or when remaining free `HousePool` cash can fund a top-up after senior deferred claims and immediate trader payouts. The simplified custody model does not create deferred protocol-fee liabilities; uncredited fee portions stay in pool backing rather than becoming withdrawable treasury margin.
+
 ## LP Lifecycle
 
 LPs provide USDC to the `HousePool`, which is split into senior and junior ERC-4626 tranche vaults.

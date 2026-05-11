@@ -43,7 +43,7 @@ Use these terms consistently:
 - `accountedAssets`: canonical protocol-owned USDC recognized by pool accounting
 - `excessAssets = max(rawAssets - accountedAssets, 0)`: unsolicited or otherwise unaccounted positive balance
 - `physicalAssets = totalAssets() = min(rawAssets, accountedAssets)`: conservative economic pool backing
-- `treasuryFees = protocolTreasuryBalanceUsdc()`: protocol-owned inventory held as treasury margin in `MarginClearinghouse`, not LP equity
+- `treasuryFees = protocolTreasuryBalanceUsdc()`: cash-realized protocol-owned inventory held as treasury margin in `MarginClearinghouse`, not LP equity
 - `netPhysicalAssets = physicalAssets`
 
 Operational rules:
@@ -322,7 +322,8 @@ Rules:
 - they are senior claims on vault cash,
 - deferred claim servicing outranks protocol fee withdrawals when cash is insufficient to satisfy both,
 - deferred claim servicing is frozen entirely while physical vault cash is below aggregate deferred liabilities,
-- fee withdrawal, fresh payout funding, fresh liquidation bounty payment, and deferred servicing must all agree on what cash is actually free.
+- fee withdrawal, fresh payout funding, fresh liquidation bounty payment, and deferred servicing must all agree on what cash is actually free,
+- protocol fee top-ups are subordinate to deferred claims and immediate trader payouts; any fee amount that cannot be cash-credited under this priority is not recorded as a deferred protocol liability.
 
 ## Pending-Order Escrow Model
 
@@ -388,6 +389,8 @@ Required properties:
 
 - protocol fee withdrawal is a standard `MarginClearinghouse` withdrawal from the configured treasury account,
 - `CfdEngine.protocolTreasuryBalanceUsdc()` reports the configured treasury account balance,
+- only cash-collected fees and free-cash-funded top-ups become treasury margin,
+- uncredited fee amounts are not withdrawable protocol inventory in the simplified treasury-margin model,
 - withdrawing treasury margin must not consume `HousePool` cash, deferred claims, or LP withdrawal reserves.
 
 ### Liquidation settlement

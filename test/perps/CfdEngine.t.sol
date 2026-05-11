@@ -729,6 +729,46 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(engine.protocolTreasuryBalanceUsdc(), feesBefore, "Fee top-up must not leapfrog deferred claims");
     }
 
+    function test_ProtocolFeeTopUp_PreviewPaysTraderWhenOnlyPayoutCashIsFree() public {
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.vpiFactor = 0;
+        _setRiskParams(params);
+
+        address account = address(0xD310);
+        _fundTrader(account, 11_000e6);
+
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+
+        uint256 closePrice = 80_000_000;
+        CfdEngine.ClosePreview memory liquidPreview = engineLens.previewClose(account, 100_000e18, closePrice);
+        assertGt(liquidPreview.freshTraderPayoutUsdc, 0, "Setup must create a trader payout");
+        assertGt(liquidPreview.executionFeeUsdc, 0, "Setup must create a protocol fee");
+
+        uint256 poolAssets = pool.totalAssets();
+        uint256 drainAmount = poolAssets - liquidPreview.freshTraderPayoutUsdc;
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), drainAmount);
+
+        CfdEngine.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, closePrice);
+        assertTrue(preview.valid, "Setup close preview should be valid");
+        assertEq(pool.totalAssets(), preview.freshTraderPayoutUsdc, "Setup leaves exactly trader payout cash");
+        assertLt(
+            pool.totalAssets(),
+            preview.freshTraderPayoutUsdc + preview.executionFeeUsdc,
+            "Setup cannot also fund the protocol fee top-up"
+        );
+        assertEq(preview.immediatePayoutUsdc, preview.freshTraderPayoutUsdc, "Preview should follow trader payout cash");
+        assertEq(preview.deferredTraderCreditUsdc, 0, "Preview should not defer when payout cash is free");
+
+        uint256 feesBefore = engine.protocolTreasuryBalanceUsdc();
+        CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(account);
+        _close(account, CfdTypes.Side.BULL, 100_000e18, closePrice);
+
+        CloseParityObserved memory observed = _observeCloseParity(account, beforeSnapshot);
+        _assertClosePreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
+        assertEq(engine.protocolTreasuryBalanceUsdc(), feesBefore, "Unfunded fee top-up should not accrue");
+    }
+
     function test_FullClose_AfterFreshMark_DoesNotRevertWhenVaultIlliquid() public {
         uint256 vaultDepth = 1_000_000 * 1e6;
         address bullAccount = address(uint160(1));
