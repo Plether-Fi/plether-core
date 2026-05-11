@@ -4,13 +4,13 @@ pragma solidity ^0.8.30;
 import {InvarCoin} from "../src/InvarCoin.sol";
 import {StakedToken} from "../src/StakedToken.sol";
 import {OracleLib} from "../src/libraries/OracleLib.sol";
-import {MockBEAR, MockCurveLpToken, MockCurvePool, MockUSDC6} from "./InvarCoin.t.sol";
+import {InvarCoinSolverTestHelpers, MockBEAR, MockCurveLpToken, MockCurvePool, MockUSDC6} from "./InvarCoin.t.sol";
 import {MockOracle} from "./utils/MockOracle.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {StdInvariant} from "forge-std/StdInvariant.sol";
 import {Test, console} from "forge-std/Test.sol";
 
-contract InvarCoinHandler is Test {
+contract InvarCoinHandler is InvarCoinSolverTestHelpers {
 
     InvarCoin public ic;
     StakedToken public sInvar;
@@ -184,12 +184,18 @@ contract InvarCoinHandler is Test {
         }
 
         uint256 supplyBefore = ic.totalSupply();
-        try ic.deployToCurve(0) {
+        (,, uint256 deployable,) = ic.getBufferMetrics();
+        uint256 lpAmount = deployable == 0 ? 1 : _maxLpForSell(ic, deployable);
+        if (lpAmount > 0) {
+            curveLp.mint(address(this), lpAmount);
+            curveLp.approve(address(ic), lpAmount);
+        }
+        try ic.sellLpToVault(lpAmount, 0) {
             ghost_totalInvarMinted += ic.totalSupply() - supplyBefore;
             deployToCurveCalls++;
         } catch (bytes memory reason) {
             bytes4 sel = bytes4(reason);
-            if (sel != ERR_NOTHING_TO_DEPLOY && sel != ERR_SPOT_DEVIATION) {
+            if (sel != ERR_NOTHING_TO_DEPLOY && sel != ERR_SLIPPAGE && sel != ERR_ZERO_AMOUNT) {
                 assembly { revert(add(reason, 32), mload(reason)) }
             }
         }
@@ -201,12 +207,21 @@ contract InvarCoinHandler is Test {
         }
 
         uint256 supplyBefore = ic.totalSupply();
-        try ic.replenishBuffer(0) {
+        (,,, uint256 replenishable) = ic.getBufferMetrics();
+        uint256 lpCap = curveLp.balanceOf(address(ic)) + ic.gaugeStakedLp();
+        uint256 lpAmount = replenishable == 0 || lpCap == 0 ? 1 : _maxLpForBuy(ic, replenishable, lpCap);
+        uint256 usdcIn = lpAmount == 0 ? 0 : ic.previewBuyLpFromVault(lpAmount);
+        if (usdcIn > 0) {
+            usdc.mint(address(this), usdcIn);
+            usdc.approve(address(ic), usdcIn);
+        }
+        try ic.buyLpFromVault(lpAmount, usdcIn) {
             ghost_totalInvarMinted += ic.totalSupply() - supplyBefore;
             replenishBufferCalls++;
         } catch (bytes memory reason) {
             bytes4 sel = bytes4(reason);
-            if (sel != ERR_NOTHING_TO_DEPLOY && sel != ERR_SPOT_DEVIATION) {
+            if (sel != ERR_NOTHING_TO_DEPLOY && sel != ERR_SLIPPAGE && sel != ERR_ZERO_AMOUNT && sel != ERR_STALE_PRICE)
+            {
                 assembly { revert(add(reason, 32), mload(reason)) }
             }
         }

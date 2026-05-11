@@ -139,7 +139,7 @@ contract InvarCoinForkTest is BaseForkTest {
     function test_withdraw_jitLpBurn() public {
         _depositAs(alice, 1_000_000e6);
 
-        ic.deployToCurve(0);
+        _sellLpToVault(ic, 0);
 
         uint256 aliceShares = ic.balanceOf(alice);
         uint256 bigWithdrawShares = (aliceShares * 30) / 100;
@@ -164,7 +164,7 @@ contract InvarCoinForkTest is BaseForkTest {
             IERC20(USDC).approve(address(ic), type(uint256).max);
             _depositAs(retailers[i], 100_000e6);
         }
-        ic.deployToCurve(0);
+        _sellLpToVault(ic, 0);
 
         uint256 whaleShares = _depositAs(whale, 1_000_000e6);
 
@@ -196,14 +196,14 @@ contract InvarCoinForkTest is BaseForkTest {
             IERC20(USDC).approve(address(ic), type(uint256).max);
             _depositAs(retailers[i], 100_000e6);
         }
-        ic.deployToCurve(0);
+        _sellLpToVault(ic, 0);
 
         uint256 navBefore = (ic.totalAssets() * 1e18) / ic.totalSupply();
 
         vm.warp(block.timestamp + 1800);
 
         _depositAs(whale, 500_000e6);
-        ic.deployToCurve(0);
+        _sellLpToVault(ic, 0);
 
         uint256 whaleShares = ic.balanceOf(whale);
         vm.prank(whale);
@@ -216,7 +216,7 @@ contract InvarCoinForkTest is BaseForkTest {
 
     function test_lpWithdraw_mevProtection() public {
         _depositAs(whale, 1_000_000e6);
-        ic.deployToCurve(0);
+        _sellLpToVault(ic, 0);
         uint256 whaleShares = ic.balanceOf(whale);
 
         vm.prank(attacker);
@@ -243,7 +243,7 @@ contract InvarCoinForkTest is BaseForkTest {
         }
 
         vm.prank(keeper);
-        ic.deployToCurve(0);
+        _sellLpToVault(ic, 0);
 
         assertGt(IERC20(curvePool).balanceOf(address(ic)), 0, "Should hold LP tokens");
 
@@ -257,14 +257,14 @@ contract InvarCoinForkTest is BaseForkTest {
         _depositAs(alice, 100_000e6);
 
         uint256 lpBefore = IERC20(curvePool).balanceOf(address(ic));
-        ic.deployToCurve(0);
+        _sellLpToVault(ic, 0);
 
         assertGt(IERC20(curvePool).balanceOf(address(ic)), lpBefore, "Should mint LP with USDC-only deposit");
     }
 
     function test_harvestYield_curveFeeGrowth() public {
         _depositAs(alice, 500_000e6);
-        ic.deployToCurve(0);
+        _sellLpToVault(ic, 0);
 
         uint256 assetsBefore = ic.totalAssets();
 
@@ -276,7 +276,7 @@ contract InvarCoinForkTest is BaseForkTest {
 
     function test_replenishBuffer() public {
         _depositAs(alice, 1_000_000e6);
-        ic.deployToCurve(0);
+        _sellLpToVault(ic, 0);
 
         // Flush pending Curve admin fees: add_liquidity updates xcp_profit via
         // _tweak_price, but calc_withdraw_one_coin (view) doesn't call
@@ -293,7 +293,7 @@ contract InvarCoinForkTest is BaseForkTest {
 
         uint256 usdcBefore = IERC20(USDC).balanceOf(address(ic));
 
-        ic.replenishBuffer(0);
+        _buyLpFromVault(ic, 0);
 
         assertGt(IERC20(USDC).balanceOf(address(ic)), usdcBefore, "Local USDC buffer should increase");
     }
@@ -307,7 +307,7 @@ contract InvarCoinForkTest is BaseForkTest {
         sInvar.deposit(aliceShares, alice);
         vm.stopPrank();
 
-        ic.deployToCurve(0);
+        _sellLpToVault(ic, 0);
 
         _generateCurveFees(50_000e6, 10);
         _warpAndRefreshOracle(1 days);
@@ -328,7 +328,7 @@ contract InvarCoinForkTest is BaseForkTest {
 
     function test_flashLoanNavExploit() public {
         _depositAs(alice, 1_000_000e6);
-        ic.deployToCurve(0);
+        _sellLpToVault(ic, 0);
 
         uint256 navBefore = ic.totalAssets();
 
@@ -350,7 +350,7 @@ contract InvarCoinForkTest is BaseForkTest {
 
     function test_replenishBuffer_sandwichProtection() public {
         _depositAs(alice, 1_000_000e6);
-        ic.deployToCurve(0);
+        _sellLpToVault(ic, 0);
 
         // Simulate buffer drain so replenishBuffer is callable
         deal(USDC, address(ic), 0);
@@ -363,13 +363,14 @@ contract InvarCoinForkTest is BaseForkTest {
         require(s, "attacker swap failed");
         vm.stopPrank();
 
-        vm.expectRevert(InvarCoin.InvarCoin__SpotDeviationTooHigh.selector);
-        ic.replenishBuffer(0);
+        uint256 usdcBefore = IERC20(USDC).balanceOf(address(ic));
+        _buyLpFromVault(ic, 0);
+        assertGt(IERC20(USDC).balanceOf(address(ic)), usdcBefore, "Solver fill should restore buffer at reserve ask");
     }
 
     function test_deployToCurve_sandwichProtection() public {
         _depositAs(alice, 500_000e6);
-        ic.deployToCurve(0);
+        _sellLpToVault(ic, 0);
 
         // New deposit creates deployable buffer
         _depositAs(whale, 1_000_000e6);
@@ -382,8 +383,9 @@ contract InvarCoinForkTest is BaseForkTest {
         require(s, "attacker swap failed");
         vm.stopPrank();
 
-        vm.expectRevert(InvarCoin.InvarCoin__SpotDeviationTooHigh.selector);
-        ic.deployToCurve(0);
+        uint256 lpBefore = IERC20(curvePool).balanceOf(address(ic)) + ic.gaugeStakedLp();
+        _sellLpToVault(ic, 0);
+        assertGt(IERC20(curvePool).balanceOf(address(ic)) + ic.gaugeStakedLp(), lpBefore, "Solver fill should add LP");
     }
 
     // ==========================================
@@ -406,7 +408,7 @@ contract InvarCoinForkTest is BaseForkTest {
 
         // 2. Keeper deploys excess USDC to Curve LP (98% deployed, 2% buffer)
         vm.prank(keeper);
-        ic.deployToCurve(0);
+        _sellLpToVault(ic, 0);
 
         uint256 bufferAfterDeploy = IERC20(USDC).balanceOf(address(ic));
         uint256 expectedBuffer = ic.totalAssets() * 200 / 10_000;

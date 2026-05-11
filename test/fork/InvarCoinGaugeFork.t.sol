@@ -109,7 +109,7 @@ contract InvarCoinGaugeForkTest is BaseForkTest {
         uint256 depositAmount
     ) internal returns (uint256 shares) {
         shares = _depositAs(alice, depositAmount);
-        ic.deployToCurve(0);
+        _sellLpToVault(ic, 0);
         _proposeAndFinalizeGauge();
     }
 
@@ -136,7 +136,7 @@ contract InvarCoinGaugeForkTest is BaseForkTest {
 
     function test_stakeToGauge_realGauge() public {
         _depositAs(alice, 1_000_000e6);
-        ic.deployToCurve(0);
+        _sellLpToVault(ic, 0);
         _proposeAndFinalizeGauge();
 
         uint256 gaugeBal = gauge.balanceOf(address(ic));
@@ -153,7 +153,7 @@ contract InvarCoinGaugeForkTest is BaseForkTest {
 
     function test_unstakeFromGauge_realGauge() public {
         _depositAs(alice, 1_000_000e6);
-        ic.deployToCurve(0);
+        _sellLpToVault(ic, 0);
         _proposeAndFinalizeGauge();
 
         uint256 gaugeBal = gauge.balanceOf(address(ic));
@@ -167,7 +167,7 @@ contract InvarCoinGaugeForkTest is BaseForkTest {
 
     function test_stakeAll_unstakeAll() public {
         _depositAs(alice, 1_000_000e6);
-        ic.deployToCurve(0);
+        _sellLpToVault(ic, 0);
         _proposeAndFinalizeGauge();
 
         uint256 gaugeBal = gauge.balanceOf(address(ic));
@@ -231,7 +231,7 @@ contract InvarCoinGaugeForkTest is BaseForkTest {
         uint256 usdcBefore = IERC20(USDC).balanceOf(address(ic));
         assertEq(IERC20(curvePool).balanceOf(address(ic)), 0, "All LP in gauge before replenish");
 
-        ic.replenishBuffer(0);
+        _buyLpFromVault(ic, 0);
 
         assertGt(IERC20(USDC).balanceOf(address(ic)), usdcBefore, "Buffer should increase");
     }
@@ -260,7 +260,7 @@ contract InvarCoinGaugeForkTest is BaseForkTest {
 
     function test_totalAssets_includesStakedLp() public {
         _depositAs(alice, 1_000_000e6);
-        ic.deployToCurve(0);
+        _sellLpToVault(ic, 0);
 
         uint256 assetsBefore = ic.totalAssets();
 
@@ -279,7 +279,7 @@ contract InvarCoinGaugeForkTest is BaseForkTest {
         sInvar.deposit(aliceShares, alice);
         vm.stopPrank();
 
-        ic.deployToCurve(0);
+        _sellLpToVault(ic, 0);
 
         _proposeAndFinalizeGauge();
 
@@ -297,14 +297,14 @@ contract InvarCoinGaugeForkTest is BaseForkTest {
 
     function test_depositAndDeploy_afterGaugeSet() public {
         _depositAs(alice, 500_000e6);
-        ic.deployToCurve(0);
+        _sellLpToVault(ic, 0);
 
         _proposeAndFinalizeGauge();
 
         uint256 gaugeBalBefore = gauge.balanceOf(address(ic));
 
         _depositAs(bob, 100_000e6);
-        ic.deployToCurve(0);
+        _sellLpToVault(ic, 0);
 
         assertEq(IERC20(curvePool).balanceOf(address(ic)), 0, "LP should be auto-staked, not local");
         assertGt(gauge.balanceOf(address(ic)), gaugeBalBefore, "New LP auto-staked to gauge");
