@@ -26,8 +26,10 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
         ENGINE = engine_;
     }
 
-    modifier onlyEngine() {
-        if (msg.sender != ENGINE) {
+    modifier onlyEngineHost(
+        ICfdEngineSettlementHost host
+    ) {
+        if (msg.sender != ENGINE || address(host) != ENGINE) {
             revert CfdEngineSettlementModule__Unauthorized();
         }
         _;
@@ -41,7 +43,7 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
         CfdEnginePlanTypes.OpenDelta calldata delta,
         CfdTypes.Position calldata currentPosition,
         uint64 publishTime
-    ) external onlyEngine {
+    ) external onlyEngineHost(host) {
         host.settlementApplyCarryAndMark(delta.price, publishTime);
         CfdTypes.Side marginSide = currentPosition.size > 0 ? currentPosition.side : delta.posSide;
         uint256 marginBefore =
@@ -104,7 +106,7 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
         CfdEnginePlanTypes.CloseDelta calldata delta,
         CfdTypes.Position calldata currentPosition,
         uint64 publishTime
-    ) external onlyEngine {
+    ) external onlyEngineHost(host) {
         host.settlementApplyCarryAndMark(delta.price, publishTime);
         uint256 marginBefore =
             IMarginClearinghouse(host.clearinghouse()).getLockedMarginBuckets(delta.account).positionMarginUsdc;
@@ -207,7 +209,7 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
         ICfdEngineSettlementHost host,
         CfdEnginePlanTypes.LiquidationDelta calldata delta,
         uint64 publishTime
-    ) external onlyEngine returns (uint256 keeperBountyUsdc) {
+    ) external onlyEngineHost(host) returns (uint256 keeperBountyUsdc) {
         host.settlementApplyCarryAndMark(delta.price, publishTime);
         host.settlementApplySideDelta(
             delta.side,

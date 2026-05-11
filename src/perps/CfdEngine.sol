@@ -185,6 +185,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     error CfdEngine__VaultAlreadySet();
     error CfdEngine__RouterAlreadySet();
     error CfdEngine__DependenciesAlreadySet();
+    error CfdEngine__InvalidSettlementModule();
     error CfdEngine__NoFeesToWithdraw();
     error CfdEngine__NoDeferredTraderCredit();
     error CfdEngine__InsufficientVaultLiquidity();
@@ -388,6 +389,16 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         }
         if (address(planner) != address(0) || address(settlementModule) != address(0) || admin != address(0)) {
             revert CfdEngine__DependenciesAlreadySet();
+        }
+        if (settlementModule_.code.length == 0) {
+            revert CfdEngine__InvalidSettlementModule();
+        }
+        try ICfdEngineSettlementModule(settlementModule_).ENGINE() returns (address settlementEngine) {
+            if (settlementEngine != address(this)) {
+                revert CfdEngine__InvalidSettlementModule();
+            }
+        } catch {
+            revert CfdEngine__InvalidSettlementModule();
         }
         planner = ICfdEnginePlanner(planner_);
         settlementModule = ICfdEngineSettlementModule(settlementModule_);
