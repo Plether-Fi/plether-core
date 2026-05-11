@@ -51,14 +51,6 @@ contract MockInvariantVault is ICfdVault {
         usdc.safeTransfer(recipient, amount);
     }
 
-    function recordProtocolBackingInflow(
-        uint256
-    ) external view {
-        if (msg.sender != engine) {
-            revert("unauthorized");
-        }
-    }
-
     function recordClaimantInflow(
         uint256,
         ICfdVault.ClaimantInflowKind,

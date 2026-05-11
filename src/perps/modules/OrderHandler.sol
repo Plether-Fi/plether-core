@@ -183,7 +183,7 @@ abstract contract OrderHandler is OrderValidation {
     ) internal {
         OracleUpdateResult memory update = _prepareLiquidationOracle(pythUpdateData);
 
-        _forfeitEscrowedOrderBountiesOnLiquidation(account);
+        _forfeitReservedOrderBountiesOnLiquidation(account);
         uint256 housePoolDepth = housePool.totalAssets();
         uint256 keeperBountyUsdc = engine.liquidatePosition(
             account, update.executionPrice, housePoolDepth, update.oraclePublishTime, msg.sender

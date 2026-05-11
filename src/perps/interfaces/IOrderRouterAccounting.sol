@@ -18,8 +18,8 @@ interface IOrderRouterAccounting {
 
     /// @notice Router/accounting view of queued order reservations attributed to an account.
     /// @dev `committedMarginUsdc` is derived from canonical MarginClearinghouse reservation state.
-    ///      `executionBountyUsdc` is clearinghouse-reserved bounty escrow for queued orders.
-    struct AccountEscrowView {
+    ///      `executionBountyUsdc` is clearinghouse-reserved bounty reservation for queued orders.
+    struct AccountReservationView {
         uint256 committedMarginUsdc;
         uint256 executionBountyUsdc;
         uint256 pendingOrderCount;
@@ -43,10 +43,10 @@ interface IOrderRouterAccounting {
         address account
     ) external;
 
-    /// @notice Returns aggregate queued escrow attributed to an account across all pending orders.
-    function getAccountEscrow(
+    /// @notice Returns aggregate queued reservation attributed to an account across all pending orders.
+    function getAccountReservations(
         address account
-    ) external view returns (AccountEscrowView memory escrow);
+    ) external view returns (AccountReservationView memory reservation);
 
     /// @notice Returns the current account-queue head id for pending-order traversal.
     function accountHeadOrderId(

@@ -273,7 +273,7 @@ contract CfdEngineLens is ICfdEngineLens {
             return;
         }
 
-        uint256 forfeitedUsdc = IOrderRouterAccounting(orderRouter).getAccountEscrow(account).executionBountyUsdc;
+        uint256 forfeitedUsdc = IOrderRouterAccounting(orderRouter).getAccountReservations(account).executionBountyUsdc;
         if (forfeitedUsdc == 0) {
             return;
         }

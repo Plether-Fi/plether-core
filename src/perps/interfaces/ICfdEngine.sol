@@ -51,7 +51,7 @@ interface ICfdEngine is ICfdEngineTypes {
         uint256 amountUsdc
     ) external;
 
-    /// @notice Moves forfeited reserved execution-bounty escrow into the protocol treasury account.
+    /// @notice Moves forfeited reserved execution-bounty reservation into the protocol treasury account.
     function absorbReservedExecutionBounty(
         address sourceAccount,
         uint256 amountUsdc

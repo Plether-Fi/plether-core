@@ -482,9 +482,7 @@ contract HousePoolTest is BasePerpTest {
     }
 
     function helper_AssignUnassignedAssets_MintsMatchingSharesToReceiver() public {
-        usdc.mint(address(pool), 100_000e6);
-        vm.prank(address(engine));
-        pool.recordProtocolBackingInflow(100_000e6);
+        _mintAndAccountPoolExcess(100_000e6);
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -808,7 +806,9 @@ contract HousePoolTest is BasePerpTest {
 
         usdc.mint(address(pool), 1500e6);
         vm.prank(address(engine));
-        pool.recordProtocolBackingInflow(1500e6);
+        pool.recordClaimantInflow(
+            1500e6, ICfdVault.ClaimantInflowKind.Revenue, ICfdVault.ClaimantInflowCashMode.CashArrived
+        );
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -819,9 +819,7 @@ contract HousePoolTest is BasePerpTest {
     }
 
     function helper_UnassignedAssets_AreReservedFromWithdrawalLiquidity() public {
-        usdc.mint(address(pool), 100_000e6);
-        vm.prank(address(engine));
-        pool.recordProtocolBackingInflow(100_000e6);
+        _mintAndAccountPoolExcess(100_000e6);
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -1032,7 +1030,7 @@ contract HousePoolTest is BasePerpTest {
         assertEq(pool.unassignedAssets(), 0, "Assignment should still consume the normalized unassigned bucket");
     }
 
-    function helper_AssignUnassignedAssets_ResetsSeniorHwmAfterTerminalWipeout() public {
+    function helper_ReconcileRecapitalization_ResetsSeniorHwmAfterTerminalWipeout() public {
         uint256 seedAssets = 50_000e6;
 
         usdc.mint(address(this), seedAssets);
@@ -1048,16 +1046,16 @@ contract HousePoolTest is BasePerpTest {
 
         usdc.mint(address(pool), 10_000e6);
         vm.prank(address(engine));
-        pool.recordProtocolBackingInflow(10_000e6);
+        pool.recordClaimantInflow(
+            10_000e6, ICfdVault.ClaimantInflowKind.Recapitalization, ICfdVault.ClaimantInflowCashMode.CashArrived
+        );
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        pool.assignUnassignedAssets(true, alice);
-
+        assertEq(pool.seniorPrincipal(), 10_000e6, "Recapitalization should restore senior principal after wipeout");
         assertEq(
-            pool.seniorPrincipal(), 10_000e6, "Bootstrapping should restore senior principal from unassigned assets"
+            pool.seniorHighWaterMark(), 10_000e6, "Recapitalization after wipeout must reset the senior HWM baseline"
         );
-        assertEq(pool.seniorHighWaterMark(), 10_000e6, "Bootstrapping after wipeout must reset the senior HWM baseline");
     }
 
     function test_AssignUnassignedAssets_ResetsSeniorHwmWhenSeniorIsEmptyButJuniorStillExists() public {
@@ -1111,71 +1109,6 @@ contract HousePoolTest is BasePerpTest {
         assertEq(pool.totalAssets(), accountedBefore, "Sweeping raw excess must not change canonical assets");
         assertEq(pool.excessAssets(), 0, "Swept donation should no longer remain as excess");
         assertEq(usdc.balanceOf(treasury), 25_000e6, "Sweep recipient should receive only the quarantined donation");
-    }
-
-    function test_RecordProtocolBackingInflow_EngineCanAccountRawExcess() public {
-        _fundJunior(bob, 500_000e6);
-        usdc.mint(address(pool), 25_000e6);
-
-        vm.prank(alice);
-        vm.expectRevert(HousePool.HousePool__Unauthorized.selector);
-        pool.recordProtocolBackingInflow(25_000e6);
-
-        vm.prank(address(engine));
-        pool.recordProtocolBackingInflow(25_000e6);
-
-        assertEq(
-            pool.totalAssets(),
-            SEEDED_SENIOR + SEEDED_JUNIOR + 525_000e6,
-            "Engine-accounted inflow should become canonical immediately"
-        );
-        assertEq(pool.excessAssets(), 0, "Engine-accounted inflow should not remain quarantined as excess");
-    }
-
-    function test_RecordProtocolBackingInflow_SettlementModuleCanAccountRawExcess() public {
-        _fundJunior(bob, 500_000e6);
-        usdc.mint(address(pool), 25_000e6);
-
-        vm.prank(address(engine.settlementModule()));
-        pool.recordProtocolBackingInflow(25_000e6);
-
-        assertEq(
-            pool.totalAssets(),
-            SEEDED_SENIOR + SEEDED_JUNIOR + 525_000e6,
-            "Settlement-module-accounted inflow should become canonical immediately"
-        );
-        assertEq(pool.excessAssets(), 0, "Settlement-module-accounted inflow should not remain quarantined as excess");
-    }
-
-    function test_RecordProtocolBackingInflow_OrderRouterCannotAccountRawExcess() public {
-        _fundJunior(bob, 500_000e6);
-        usdc.mint(address(pool), 25_000e6);
-
-        uint256 accountedBefore = pool.totalAssets();
-
-        vm.prank(address(router));
-        vm.expectRevert(HousePool.HousePool__Unauthorized.selector);
-        pool.recordProtocolBackingInflow(25_000e6);
-
-        assertEq(pool.totalAssets(), accountedBefore, "Router must not mutate canonical pool assets directly");
-        assertEq(pool.excessAssets(), 25_000e6, "Router-rejected inflow should remain quarantined as raw excess");
-    }
-
-    function test_RecordProtocolBackingInflow_RestoresCanonicalAssetsAfterRawShortfall() public {
-        _fundJunior(bob, 500_000e6);
-        vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), 100_000e6);
-        usdc.mint(address(pool), 10_000e6);
-
-        vm.prank(address(engine));
-        pool.recordProtocolBackingInflow(10_000e6);
-
-        assertEq(
-            pool.totalAssets(),
-            SEEDED_SENIOR + SEEDED_JUNIOR + 410_000e6,
-            "Engine-accounted inflow should restore canonical assets even after a raw shortfall"
-        );
-        assertEq(pool.excessAssets(), 0, "Shortfall recovery inflow should not remain quarantined as excess");
     }
 
     function test_SetSeniorVault_Twice_Reverts() public {
@@ -1238,7 +1171,7 @@ contract HousePoolTest is BasePerpTest {
 
         // 100k BULL at $1.00: protocol accrues the full $40 execution fee.
         uint256 fees = engine.protocolTreasuryBalanceUsdc();
-        assertEq(fees, 40_000_000, "Protocol fees should remain separate from reserved execution bounty escrow");
+        assertEq(fees, 40_000_000, "Protocol fees should remain separate from reserved execution bounty reservation");
 
         uint256 freeUSDC = pool.getFreeUSDC();
         uint256 vaultBal = pool.totalAssets();
@@ -1971,8 +1904,8 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         helper_AssignUnassignedAssets_ReconcilesBeforeBootstrappingAndAvoidsPhantomAssets();
     }
 
-    function obsolete_test_AssignUnassignedAssets_ResetsSeniorHwmAfterTerminalWipeout() public {
-        helper_AssignUnassignedAssets_ResetsSeniorHwmAfterTerminalWipeout();
+    function obsolete_test_ReconcileRecapitalization_ResetsSeniorHwmAfterTerminalWipeout() public {
+        helper_ReconcileRecapitalization_ResetsSeniorHwmAfterTerminalWipeout();
     }
 
     function helper_AssignUnassignedAssets_MintsMatchingSharesToReceiver() public {
@@ -2323,9 +2256,7 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
     }
 
     function helper_UnassignedAssets_AreReservedFromWithdrawalLiquidity() public {
-        usdc.mint(address(pool), 100_000e6);
-        vm.prank(address(engine));
-        pool.recordProtocolBackingInflow(100_000e6);
+        _mintAndAccountPoolExcess(100_000e6);
         vm.prank(address(juniorVault));
         pool.reconcile();
         (,, uint256 maxSeniorWithdraw, uint256 maxJuniorWithdraw) = pool.getPendingTrancheState();
@@ -2390,7 +2321,7 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         assertEq(pool.unassignedAssets(), 0);
     }
 
-    function helper_AssignUnassignedAssets_ResetsSeniorHwmAfterTerminalWipeout() public {
+    function helper_ReconcileRecapitalization_ResetsSeniorHwmAfterTerminalWipeout() public {
         uint256 seedAssets = 50_000e6;
         usdc.mint(address(this), seedAssets);
         usdc.approve(address(pool), seedAssets);
@@ -2402,10 +2333,11 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         assertGt(pool.seniorHighWaterMark(), 0);
         usdc.mint(address(pool), 10_000e6);
         vm.prank(address(engine));
-        pool.recordProtocolBackingInflow(10_000e6);
+        pool.recordClaimantInflow(
+            10_000e6, ICfdVault.ClaimantInflowKind.Recapitalization, ICfdVault.ClaimantInflowCashMode.CashArrived
+        );
         vm.prank(address(juniorVault));
         pool.reconcile();
-        pool.assignUnassignedAssets(true, alice);
         assertEq(pool.seniorPrincipal(), 10_000e6);
         assertEq(pool.seniorHighWaterMark(), 10_000e6);
     }

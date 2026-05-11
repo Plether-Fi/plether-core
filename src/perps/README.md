@@ -115,8 +115,8 @@ Important details:
 
 - `acceptablePrice == 0` behaves like a delayed market-style order.
 - Open orders are rejected during degraded mode and close-only windows.
-- Failed orders are finalized from reserved clearinghouse bounty escrow; blocked FIFO heads remain pending.
-- Execution-time user-invalid opens, protocol-state invalidations, and terminal-invalid closes pay the clearer from escrow so FIFO cleanup remains incentive compatible.
+- Failed orders are finalized from reserved clearinghouse bounty reservation; blocked FIFO heads remain pending.
+- Execution-time user-invalid opens, protocol-state invalidations, and terminal-invalid closes pay the clearer from reservation so FIFO cleanup remains incentive compatible.
 - Close orders can still execute during genuine frozen-oracle windows using the last valid mark subject to the relaxed frozen-market rules.
 - Close-intent queue validation is account-local and bounded by the per-account pending-order queue.
 
@@ -267,7 +267,7 @@ The perps system intentionally splits accounting into separate kernels:
 - `CloseAccountingLib`: realized PnL, execution fee, trader settlement, and bad-debt handling for voluntary decreases.
 - `LiquidationAccountingLib`: reachable collateral, keeper bounty, residual payout, and bad debt for forced close.
 - `SolvencyAccountingLib`: effective assets, bounded max liability, withdrawal reserves, and free vault cash.
-- `OrderEscrowAccounting`: clearinghouse-reserved execution bounty accounting and margin-queue bookkeeping.
+- `OrderReservationAccounting`: clearinghouse-reserved execution bounty accounting and margin-queue bookkeeping.
 - `OrderRouterBase` / `OrderHandler` / `OrderValidation` / `OrderUtils`: shared router state, delayed-order lifecycle handling, preflight validation, and bounty/liquidation helper math.
 - `HousePool.recordClaimantInflow(amount, kind, cashMode)`: claimant-owned value routing for both revenue and recapitalization, with explicit cash-arrival vs retained-value modes.
 

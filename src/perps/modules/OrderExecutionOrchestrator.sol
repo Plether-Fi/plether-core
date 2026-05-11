@@ -252,7 +252,7 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
         uint256 executionPrice,
         uint64 oraclePublishTime
     ) internal returns (uint256 executionBountyUsdc) {
-        executionBountyUsdc = _consumeOrderEscrow(orderId, false, executionPrice, oraclePublishTime);
+        executionBountyUsdc = _consumeOrderReservation(orderId, false, executionPrice, oraclePublishTime);
         _deleteOrder(orderId, IOrderRouterAccounting.OrderStatus.Failed);
     }
 
@@ -261,7 +261,7 @@ abstract contract OrderExecutionOrchestrator is OrderOracleExecution, OrderQueue
         uint256 executionPrice,
         uint64 oraclePublishTime
     ) internal {
-        _consumeOrderEscrow(orderId, true, executionPrice, oraclePublishTime);
+        _consumeOrderReservation(orderId, true, executionPrice, oraclePublishTime);
         _deleteOrder(orderId, IOrderRouterAccounting.OrderStatus.Executed);
     }
 

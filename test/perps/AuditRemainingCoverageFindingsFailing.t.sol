@@ -8,7 +8,7 @@ import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 
-contract AuditRemainingCoverageFindingsFailing_EscrowShielding is BasePerpTest {
+contract AuditRemainingCoverageFindingsFailing_ReservationShielding is BasePerpTest {
 
     address trader = address(0xC10A);
 
@@ -150,16 +150,18 @@ contract AuditRemainingCoverageFindingsFailing_DustQueueEconomics is BasePerpTes
 
     address trader = address(0xD057);
 
-    function test_H3_DustOrdersMustEscrowMinimumKeeperReserve() public {
+    function test_H3_DustOrdersMustReserveMinimumKeeperReserve() public {
         _fundTrader(trader, 1e6);
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 1, 0, 0, false);
 
         address account = trader;
-        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(account);
+        IOrderRouterAccounting.AccountReservationView memory reservation = router.getAccountReservations(account);
         assertEq(
-            escrow.executionBountyUsdc, 10_000, "Dust orders should escrow the configured minimum execution bounty"
+            reservation.executionBountyUsdc,
+            10_000,
+            "Dust orders should reservation the configured minimum execution bounty"
         );
     }
 
@@ -227,7 +229,9 @@ contract AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees is BasePerp
         assertEq(
             router.nextCommitId(), 2, "Close commits should still succeed when the trader prefunds the keeper bounty"
         );
-        assertEq(_executionBountyReserve(1), 200_000, "Close commits should escrow the configured flat clearer bounty");
+        assertEq(
+            _executionBountyReserve(1), 200_000, "Close commits should reservation the configured flat clearer bounty"
+        );
     }
 
     function test_H5_CloseKeeperRewardMustCreditFromReservedMarginDespiteVaultCashShortage() public {

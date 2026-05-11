@@ -42,7 +42,6 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     error MarginClearinghouse__InsufficientFreeEquity();
     error MarginClearinghouse__InsufficientUsdcForSettlement();
     error MarginClearinghouse__InsufficientAssetToSeize();
-    error MarginClearinghouse__InvalidSeizeRecipient();
     error MarginClearinghouse__InvalidMarginBucket();
     error MarginClearinghouse__ReservationAlreadyExists();
     error MarginClearinghouse__ReservationNotActive();
@@ -1056,34 +1055,6 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         return positionMarginUsdc[account] + committedOrderMarginUsdc[account] + reservedSettlementUsdc[account];
     }
 
-    /// @notice Transfers settlement USDC from an account to the calling operator.
-    /// @dev The recipient must equal msg.sender, so operators can only pull seized funds
-    ///      into their own contract/account and must forward them explicitly afterward.
-    /// @param account Account to seize from
-    /// @param amount USDC amount to seize
-    /// @param recipient Recipient of seized tokens (must equal msg.sender)
-    function seizeUsdc(
-        address account,
-        uint256 amount,
-        address recipient
-    ) external onlyOperator {
-        if (recipient != msg.sender) {
-            revert MarginClearinghouse__InvalidSeizeRecipient();
-        }
-        _checkpointCarryBeforeMarginChange(account);
-        if (settlementBalances[account] < amount) {
-            revert MarginClearinghouse__InsufficientAssetToSeize();
-        }
-        if (amount > _buildAccountUsdcBuckets(account).freeSettlementUsdc) {
-            revert MarginClearinghouse__InsufficientAssetToSeize();
-        }
-
-        settlementBalances[account] -= amount;
-        IERC20(settlementAsset).safeTransfer(recipient, amount);
-
-        emit AssetSeized(account, settlementAsset, amount, recipient);
-    }
-
     /// @notice Reserves free settlement for the engine's fresh close-bounty path with carry checkpointing.
     function reserveCloseExecutionBountyFromSettlement(
         address account,
@@ -1122,52 +1093,6 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
 
         emit MarginUnlocked(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, amount);
         emit ReservedSettlementTransferred(account, recipient, amount);
-    }
-
-    function seizeReservedSettlement(
-        address account,
-        uint256 amount,
-        address recipient
-    ) external onlyEngine {
-        if (recipient == address(0)) {
-            revert MarginClearinghouse__ZeroAddress();
-        }
-        if (amount == 0) {
-            return;
-        }
-        if (reservedSettlementUsdc[account] < amount || settlementBalances[account] < amount) {
-            revert MarginClearinghouse__InsufficientAssetToSeize();
-        }
-
-        reservedSettlementUsdc[account] -= amount;
-        settlementBalances[account] -= amount;
-        IERC20(settlementAsset).safeTransfer(recipient, amount);
-
-        emit MarginUnlocked(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, amount);
-        emit AssetSeized(account, settlementAsset, amount, recipient);
-    }
-
-    function seizePositionMarginUsdc(
-        address account,
-        uint256 amount,
-        address recipient
-    ) external onlyOperator {
-        if (recipient == address(0)) {
-            revert MarginClearinghouse__ZeroAddress();
-        }
-        if (amount == 0) {
-            return;
-        }
-        if (settlementBalances[account] < amount) {
-            revert MarginClearinghouse__InsufficientAssetToSeize();
-        }
-
-        _checkpointCarryBeforeMarginChange(account);
-        _consumeLockedMargin(account, IMarginClearinghouse.MarginBucket.Position, amount);
-        settlementBalances[account] -= amount;
-        IERC20(settlementAsset).safeTransfer(recipient, amount);
-
-        emit AssetSeized(account, settlementAsset, amount, recipient);
     }
 
     function reserveCloseExecutionBountyFromPositionMargin(

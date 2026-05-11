@@ -327,7 +327,7 @@ contract OrderRouterTest is BasePerpTest {
         vm.stopPrank();
     }
 
-    function test_AccountEscrowView_TracksPendingOrders() public {
+    function test_AccountReservationView_TracksPendingOrders() public {
         address account = alice;
 
         vm.startPrank(alice);
@@ -335,10 +335,16 @@ contract OrderRouterTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 500 * 1e6, 1e8, false);
         vm.stopPrank();
 
-        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(account);
-        assertEq(escrow.committedMarginUsdc, 1500 * 1e6, "Escrow view should sum committed margin across pending opens");
-        assertEq(escrow.executionBountyUsdc, 400_000, "Open and close orders should both escrow execution bounties");
-        assertEq(escrow.pendingOrderCount, 2, "Escrow view should count queued orders");
+        IOrderRouterAccounting.AccountReservationView memory reservation = router.getAccountReservations(account);
+        assertEq(
+            reservation.committedMarginUsdc,
+            1500 * 1e6,
+            "Reservation view should sum committed margin across pending opens"
+        );
+        assertEq(
+            reservation.executionBountyUsdc, 400_000, "Open and close orders should both reservation execution bounties"
+        );
+        assertEq(reservation.pendingOrderCount, 2, "Reservation view should count queued orders");
     }
 
     function test_OrderRecord_UnifiesPendingState() public {
@@ -367,12 +373,12 @@ contract OrderRouterTest is BasePerpTest {
         OrderRouter.OrderRecord memory record = _orderRecord(1);
         assertEq(uint256(record.status), uint256(IOrderRouterAccounting.OrderStatus.Executed));
         assertEq(record.core.orderId, 1, "Terminal record should keep immutable order metadata");
-        assertEq(_remainingCommittedMargin(1), 0, "Executed order should clear committed margin escrow");
-        assertEq(record.executionBountyUsdc, 0, "Executed order should clear execution bounty escrow");
+        assertEq(_remainingCommittedMargin(1), 0, "Executed order should clear committed margin reservation");
+        assertEq(record.executionBountyUsdc, 0, "Executed order should clear execution bounty reservation");
         assertFalse(record.inMarginQueue, "Executed order should not remain linked in the margin queue");
     }
 
-    function test_GetPendingOrdersAndEscrow_ReturnAggregateOrderState() public {
+    function test_GetPendingOrdersAndReservation_ReturnAggregateOrderState() public {
         address account = alice;
 
         vm.startPrank(alice);
@@ -380,11 +386,11 @@ contract OrderRouterTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 500 * 1e6, 1e8, false);
         vm.stopPrank();
 
-        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(account);
+        IOrderRouterAccounting.AccountReservationView memory reservation = router.getAccountReservations(account);
         IOrderRouterAccounting.PendingOrderView[] memory pending = _pendingOrders(account);
-        assertEq(escrow.pendingOrderCount, 2);
-        assertEq(escrow.committedMarginUsdc, 1500 * 1e6);
-        assertEq(escrow.executionBountyUsdc, 400_000);
+        assertEq(reservation.pendingOrderCount, 2);
+        assertEq(reservation.committedMarginUsdc, 1500 * 1e6);
+        assertEq(reservation.executionBountyUsdc, 400_000);
         assertEq(pending.length, 2);
         assertFalse(pending[1].isClose);
     }
@@ -420,9 +426,9 @@ contract OrderRouterTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 0, 0, true);
 
         (, uint256 marginAfter,,,,,) = engine.positions(account);
-        assertEq(_executionBountyReserve(1), 200_000, "Close orders should still escrow full bounty");
+        assertEq(_executionBountyReserve(1), 200_000, "Close orders should still reservation full bounty");
         assertEq(marginAfter, marginBefore - 200_000, "Close bounty should fall back to active margin");
-        assertEq(usdc.balanceOf(address(router)), 0, "Router should not custody close-order bounty escrow");
+        assertEq(usdc.balanceOf(address(router)), 0, "Router should not custody close-order bounty reservation");
         assertEq(
             clearinghouse.getLockedMarginBuckets(account).reservedSettlementUsdc,
             200_000,
@@ -452,10 +458,12 @@ contract OrderRouterTest is BasePerpTest {
 
         (, uint256 marginAfter,,,,,) = engine.positions(account);
         assertEq(
-            _executionBountyReserve(1), 200_000, "Stale-mark close commits should still escrow the flat router bounty"
+            _executionBountyReserve(1),
+            200_000,
+            "Stale-mark close commits should still reservation the flat router bounty"
         );
         assertEq(marginAfter, marginBefore - 200_000, "Stale-mark close bounty should still fall back to active margin");
-        assertEq(usdc.balanceOf(address(router)), 0, "Router should not custody stale-mark close bounty escrow");
+        assertEq(usdc.balanceOf(address(router)), 0, "Router should not custody stale-mark close bounty reservation");
         assertEq(
             clearinghouse.getLockedMarginBuckets(account).reservedSettlementUsdc,
             200_000,
@@ -492,7 +500,7 @@ contract OrderRouterTest is BasePerpTest {
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 0, true);
 
-        assertEq(_executionBountyReserve(2), 200_000, "Stale close commit should still escrow the full bounty");
+        assertEq(_executionBountyReserve(2), 200_000, "Stale close commit should still reservation the full bounty");
         assertEq(
             clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc,
             1_100_000,
@@ -542,7 +550,7 @@ contract OrderRouterTest is BasePerpTest {
 
         (, uint256 marginAfter,,,,,) = engine.positions(account);
         uint256 marginConsumed = marginBefore - marginAfter;
-        assertEq(_executionBountyReserve(2), 200_000, "Fresh carry checkpoint should still escrow the full bounty");
+        assertEq(_executionBountyReserve(2), 200_000, "Fresh carry checkpoint should still reservation the full bounty");
         assertEq(
             clearinghouse.getLockedMarginBuckets(account).reservedSettlementUsdc - reservedSettlementBefore,
             200_000,
@@ -628,7 +636,7 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(
             _settlementBalance(address(this)) - keeperBefore,
             200_000,
-            "keeper should receive the escrowed margin-backed bounty as clearinghouse credit"
+            "keeper should receive the reserved margin-backed bounty as clearinghouse credit"
         );
         assertEq(_executionBountyReserve(1), 0, "failed close should clear reserved execution bounty");
         assertEq(
@@ -1034,10 +1042,10 @@ contract OrderRouterTest is BasePerpTest {
         OrderRouter.OrderRecord memory secondRecord = _orderRecord(2);
         assertEq(uint256(firstRecord.status), uint256(IOrderRouterAccounting.OrderStatus.Executed));
         assertEq(uint256(secondRecord.status), uint256(IOrderRouterAccounting.OrderStatus.Executed));
-        assertEq(_remainingCommittedMargin(1), 0, "Executed batch order should clear committed margin escrow");
-        assertEq(_remainingCommittedMargin(2), 0, "Executed batch order should clear committed margin escrow");
-        assertEq(firstRecord.executionBountyUsdc, 0, "Executed batch order should clear execution bounty escrow");
-        assertEq(secondRecord.executionBountyUsdc, 0, "Executed batch order should clear execution bounty escrow");
+        assertEq(_remainingCommittedMargin(1), 0, "Executed batch order should clear committed margin reservation");
+        assertEq(_remainingCommittedMargin(2), 0, "Executed batch order should clear committed margin reservation");
+        assertEq(firstRecord.executionBountyUsdc, 0, "Executed batch order should clear execution bounty reservation");
+        assertEq(secondRecord.executionBountyUsdc, 0, "Executed batch order should clear execution bounty reservation");
     }
 
     function test_BatchExecution_MixedResults() public {
@@ -1619,7 +1627,7 @@ contract OrderRouterPythTest is BasePerpTest {
             "Failed binding open-order bounty should not be routed to protocol revenue in this execution path"
         );
         assertEq(router.nextExecuteId(), 0, "Terminal slippage miss should clear the pending order");
-        assertEq(_executionBountyReserve(1), 0, "Terminal slippage miss should clear bounty escrow");
+        assertEq(_executionBountyReserve(1), 0, "Terminal slippage miss should clear bounty reservation");
     }
 
     function _setDegradedModeForTest() internal {
@@ -2036,7 +2044,7 @@ contract OrderRouterPythTest is BasePerpTest {
         );
     }
 
-    function test_ExitedAccount_InvalidCloseOrderPaysEscrowedBounty() public {
+    function test_ExitedAccount_InvalidCloseOrderPaysReservedBounty() public {
         address aliceAccount = alice;
 
         _open(aliceAccount, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
@@ -2059,7 +2067,7 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(
             _settlementBalance(address(this)) - keeperBefore,
             200_000,
-            "Invalid close-order failure should pay the escrowed clearer bounty"
+            "Invalid close-order failure should pay the reserved clearer bounty"
         );
         assertEq(
             engine.protocolTreasuryBalanceUsdc() - feesBefore,
@@ -2153,8 +2161,8 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.stopPrank();
 
         address account = alice;
-        IOrderRouterAccounting.AccountEscrowView memory beforeEscrow = router.getAccountEscrow(account);
-        assertEq(beforeEscrow.pendingOrderCount, 2, "Both orders should be queued");
+        IOrderRouterAccounting.AccountReservationView memory beforeReservation = router.getAccountReservations(account);
+        assertEq(beforeReservation.pendingOrderCount, 2, "Both orders should be queued");
 
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 900);
         vm.warp(1000);
@@ -2163,18 +2171,19 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         router.executeOrder(1, empty);
 
-        IOrderRouterAccounting.AccountEscrowView memory afterRevertEscrow = router.getAccountEscrow(account);
+        IOrderRouterAccounting.AccountReservationView memory afterRevertReservation =
+            router.getAccountReservations(account);
         assertEq(router.nextExecuteId(), 1, "Non-terminal stale failure must leave the queue untouched");
-        assertEq(afterRevertEscrow.pendingOrderCount, 2, "All queued escrow should remain after stale revert");
+        assertEq(afterRevertReservation.pendingOrderCount, 2, "All queued reservation should remain after stale revert");
 
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1050);
         vm.warp(1050);
         vm.roll(block.number + 1);
         router.executeOrderBatch(2, empty);
 
-        IOrderRouterAccounting.AccountEscrowView memory finalEscrow = router.getAccountEscrow(account);
+        IOrderRouterAccounting.AccountReservationView memory finalReservation = router.getAccountReservations(account);
         assertEq(router.nextExecuteId(), 0, "Honest keeper should later consume both queued orders and clear the queue");
-        assertEq(finalEscrow.pendingOrderCount, 0, "Escrow should be fully released after terminal execution");
+        assertEq(finalReservation.pendingOrderCount, 0, "Reservation should be fully released after terminal execution");
     }
 
     function test_StateMachine_BatchClearsSlippageFailedHeadAndContinues() public {
@@ -2194,16 +2203,18 @@ contract OrderRouterPythTest is BasePerpTest {
         mockPyth.setAllPrices(feedIds, int64(105_000_000), int32(-8), 1006);
         router.executeOrderBatch(2, empty);
 
-        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(account);
+        IOrderRouterAccounting.AccountReservationView memory reservation = router.getAccountReservations(account);
         assertEq(router.nextExecuteId(), 2, "Failed head should clear while a later blocked order remains pending");
         assertEq(
-            escrow.pendingOrderCount, 1, "The later blocked order should remain pending after the failed head clears"
+            reservation.pendingOrderCount,
+            1,
+            "The later blocked order should remain pending after the failed head clears"
         );
-        assertEq(_executionBountyReserve(1), 0, "Failed head should clear its execution bounty escrow");
+        assertEq(_executionBountyReserve(1), 0, "Failed head should clear its execution bounty reservation");
         assertEq(
             _executionBountyReserve(2),
             200_000,
-            "Later blocked order should retain its escrow after the failed head clears"
+            "Later blocked order should retain its reservation after the failed head clears"
         );
     }
 
@@ -2238,13 +2249,13 @@ contract OrderRouterPythTest is BasePerpTest {
             "Batch executor should only be paid for the single successful order that remains queued"
         );
 
-        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(account);
+        IOrderRouterAccounting.AccountReservationView memory reservation = router.getAccountReservations(account);
         assertEq(
-            escrow.pendingOrderCount, 0, "Queued orders should be fully consumed even when one close defers payout"
+            reservation.pendingOrderCount, 0, "Queued orders should be fully consumed even when one close defers payout"
         );
     }
 
-    function testFuzz_StaleOracleRevertPreservesEscrowAndQueue(
+    function testFuzz_StaleOracleRevertPreservesReservationAndQueue(
         uint64 age
     ) public {
         age = uint64(bound(age, 61, 600));
@@ -2260,11 +2271,15 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         router.executeOrder(1, empty);
 
-        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(account);
+        IOrderRouterAccounting.AccountReservationView memory reservation = router.getAccountReservations(account);
         assertEq(router.nextExecuteId(), 1, "Stale revert should keep queue head pending");
-        assertEq(escrow.pendingOrderCount, 1, "Stale revert should preserve escrowed order state");
+        assertEq(reservation.pendingOrderCount, 1, "Stale revert should preserve reserved order state");
         assertEq(usdc.balanceOf(address(router)), 0, "Router should not custody the keeper reserve");
-        assertEq(escrow.executionBountyUsdc, 200_000, "Escrow view should continue tracking the pending keeper reserve");
+        assertEq(
+            reservation.executionBountyUsdc,
+            200_000,
+            "Reservation view should continue tracking the pending keeper reserve"
+        );
         assertEq(
             clearinghouse.getLockedMarginBuckets(account).reservedSettlementUsdc,
             200_000,
@@ -2272,7 +2287,7 @@ contract OrderRouterPythTest is BasePerpTest {
         );
     }
 
-    function testFuzz_SlippageFailureClearsEscrowAndOrder(
+    function testFuzz_SlippageFailureClearsReservationAndOrder(
         uint256 adverseTarget
     ) public {
         adverseTarget = bound(adverseTarget, 1, 99_999_999);
@@ -2289,10 +2304,10 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(account);
+        IOrderRouterAccounting.AccountReservationView memory reservation = router.getAccountReservations(account);
         assertEq(router.nextExecuteId(), 0, "Terminal slippage miss should clear the queue head");
-        assertEq(escrow.pendingOrderCount, 0, "Terminal slippage miss should clear pending escrow state");
-        assertEq(usdc.balanceOf(address(router)), 0, "Keeper reserve should not remain escrowed after terminal failure");
+        assertEq(reservation.pendingOrderCount, 0, "Terminal slippage miss should clear pending reservation state");
+        assertEq(usdc.balanceOf(address(router)), 0, "Keeper reserve should not remain reserved after terminal failure");
     }
 
     function test_SingleExecute_EmptyQueueRevertsNoOrders() public {
@@ -2311,7 +2326,7 @@ contract OrderRouterPythTest is BasePerpTest {
         router.executeOrder(1, empty);
     }
 
-    function test_SlippageFailedCloseOrderForfeitsEscrowedBountyToProtocol() public {
+    function test_SlippageFailedCloseOrderForfeitsReservedBountyToProtocol() public {
         address aliceAccount = alice;
 
         _open(aliceAccount, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
@@ -2847,7 +2862,7 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
         assertEq(
             _executionBountyReserve(orderId),
             reservedBounty,
-            "Blocked close-only execution should preserve bounty escrow"
+            "Blocked close-only execution should preserve bounty reservation"
         );
         assertEq(router.nextExecuteId(), orderId, "Blocked close-only execution should leave the FIFO head pending");
         assertEq(
@@ -2899,7 +2914,9 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
             "Blocked batch execution should not refund the trader"
         );
         assertEq(
-            _executionBountyReserve(orderId), reservedBounty, "Blocked batch execution should preserve bounty escrow"
+            _executionBountyReserve(orderId),
+            reservedBounty,
+            "Blocked batch execution should preserve bounty reservation"
         );
         assertEq(router.nextExecuteId(), orderId, "Blocked batch execution should stop at the pending FIFO head");
         assertEq(
@@ -3096,7 +3113,7 @@ contract NormalizePythFuzzTest is Test {
 
 }
 
-contract OrderRouterLiquidationEscrowTest is BasePerpTest {
+contract OrderRouterLiquidationReservationTest is BasePerpTest {
 
     address trader = address(0xC10A);
 
@@ -3167,7 +3184,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         );
     }
 
-    function test_ExecuteLiquidation_ForfeitsEscrowedOpenBountiesWithoutCreditingTraderSettlement() public {
+    function test_ExecuteLiquidation_ForfeitsReservedOpenBountiesWithoutCreditingTraderSettlement() public {
         address account = trader;
         _fundTrader(trader, 900e6);
 
@@ -3181,11 +3198,11 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         clearinghouse.withdraw(account, 70e6);
         vm.stopPrank();
 
-        assertEq(usdc.balanceOf(address(router)), 0, "Router should not custody open-order bounty escrow");
+        assertEq(usdc.balanceOf(address(router)), 0, "Router should not custody open-order bounty reservation");
         assertEq(
             clearinghouse.getLockedMarginBuckets(account).reservedSettlementUsdc,
             _executionBountyReserve(1) * queuedOrderCount,
-            "Clearinghouse should reserve the shielded open-order bounty escrow"
+            "Clearinghouse should reserve the shielded open-order bounty reservation"
         );
         assertEq(
             router.pendingOrderCounts(account),
@@ -3207,13 +3224,13 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         assertEq(
             engine.accumulatedBadDebtUsdc(),
             preview.badDebtUsdc,
-            "Liquidation should not improve previewed bad debt by restoring execution escrow"
+            "Liquidation should not improve previewed bad debt by restoring execution reservation"
         );
-        assertEq(router.getAccountEscrow(account).executionBountyUsdc, 0);
+        assertEq(router.getAccountReservations(account).executionBountyUsdc, 0);
         assertEq(
             preview.reachableCollateralUsdc,
             snapshotBefore.terminalReachableUsdc,
-            "Preview must exclude queued execution escrow from liquidation reachability"
+            "Preview must exclude queued execution reservation from liquidation reachability"
         );
         assertEq(
             router.nextExecuteId(),
@@ -3223,11 +3240,11 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         assertEq(
             clearinghouse.balanceUsdc(account),
             0,
-            "Forfeited open-order bounty escrow must not be credited back into trader settlement"
+            "Forfeited open-order bounty reservation must not be credited back into trader settlement"
         );
     }
 
-    function test_ExecuteLiquidation_ForfeitedEscrowFeedsTreasuryMarginWithoutChangingVaultDepth() public {
+    function test_ExecuteLiquidation_ForfeitedReservationFeedsTreasuryMarginWithoutChangingVaultDepth() public {
         address account = trader;
         _fundTrader(trader, 900e6);
 
@@ -3275,7 +3292,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         );
     }
 
-    function test_ExecuteLiquidation_ForfeitsEscrowedCloseBountiesBeforeClearingOrders() public {
+    function test_ExecuteLiquidation_ForfeitsReservedCloseBountiesBeforeClearingOrders() public {
         address account = trader;
         _fundTrader(trader, 350e6);
 
@@ -3287,11 +3304,13 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         clearinghouse.withdraw(account, 68e6);
         vm.stopPrank();
 
-        assertEq(usdc.balanceOf(address(router)), 0, "Router should not custody prefunded close-order bounty escrow");
+        assertEq(
+            usdc.balanceOf(address(router)), 0, "Router should not custody prefunded close-order bounty reservation"
+        );
         assertEq(
             clearinghouse.getLockedMarginBuckets(account).reservedSettlementUsdc,
             400_000,
-            "Clearinghouse should reserve prefunded close-order bounty escrow"
+            "Clearinghouse should reserve prefunded close-order bounty reservation"
         );
 
         AccountLensViewTypes.AccountLedgerSnapshot memory snapshotBefore =
@@ -3304,25 +3323,29 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         router.executeLiquidation(account, priceData);
 
         assertEq(
-            snapshotBefore.executionEscrowUsdc,
+            snapshotBefore.executionBountyReserveUsdc,
             400_000,
-            "Setup must report queued close-order execution escrow outside trader settlement"
+            "Setup must report queued close-order execution reservation outside trader settlement"
         );
         assertEq(router.pendingOrderCounts(account), 0, "Liquidation should clear queued close orders");
-        assertEq(_executionBountyReserve(1), 0, "Liquidation should forfeit the first close-order bounty escrow");
-        assertEq(_executionBountyReserve(2), 0, "Liquidation should forfeit the second close-order bounty escrow");
+        assertEq(_executionBountyReserve(1), 0, "Liquidation should forfeit the first close-order bounty reservation");
+        assertEq(_executionBountyReserve(2), 0, "Liquidation should forfeit the second close-order bounty reservation");
         assertEq(
-            usdc.balanceOf(address(router)), 0, "Router should not retain close-order bounty escrow after liquidation"
+            usdc.balanceOf(address(router)),
+            0,
+            "Router should not retain close-order bounty reservation after liquidation"
         );
-        assertEq(pool.excessAssets(), 0, "Forfeited close-order bounty escrow should not remain quarantined as excess");
+        assertEq(
+            pool.excessAssets(), 0, "Forfeited close-order bounty reservation should not remain quarantined as excess"
+        );
         assertGe(
             pool.totalAssets(),
             vaultAssetsBefore + 400_000,
-            "Forfeited close-order bounty escrow should contribute to canonical vault assets"
+            "Forfeited close-order bounty reservation should contribute to canonical vault assets"
         );
     }
 
-    function test_ExecuteLiquidation_PreventsPostLiquidationEscrowRecovery() public {
+    function test_ExecuteLiquidation_PreventsPostLiquidationReservationRecovery() public {
         address account = trader;
         _fundTrader(trader, 900e6);
 
@@ -3353,9 +3376,11 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         router.executeOrderBatch(uint64(queuedOrderCount), priceData);
 
         assertEq(
-            usdc.balanceOf(trader), traderUsdcBefore, "Liquidated trader should not recover escrow after liquidation"
+            usdc.balanceOf(trader),
+            traderUsdcBefore,
+            "Liquidated trader should not recover reservation after liquidation"
         );
-        assertEq(usdc.balanceOf(address(router)), 0, "Router should hold no escrow for post-liquidation recovery");
+        assertEq(usdc.balanceOf(address(router)), 0, "Router should hold no reservation for post-liquidation recovery");
     }
 
     function test_ExecuteLiquidation_ClearsOnlyLiquidatedAccountsPendingOrders() public {
@@ -3641,7 +3666,7 @@ contract FadStalenessTest is BasePerpTest {
         assertEq(
             _executionBountyReserve(orderId),
             reservedBounty,
-            "Blocked close-only execution should preserve bounty escrow"
+            "Blocked close-only execution should preserve bounty reservation"
         );
         assertEq(router.nextExecuteId(), orderId, "Blocked close-only execution should leave the FIFO head pending");
         assertEq(
@@ -3692,7 +3717,9 @@ contract FadStalenessTest is BasePerpTest {
             "Blocked batch execution should not refund the trader"
         );
         assertEq(
-            _executionBountyReserve(orderId), reservedBounty, "Blocked batch execution should preserve bounty escrow"
+            _executionBountyReserve(orderId),
+            reservedBounty,
+            "Blocked batch execution should preserve bounty reservation"
         );
         assertEq(router.nextExecuteId(), orderId, "Blocked batch execution should stop at the pending FIFO head");
         assertEq(
@@ -5072,7 +5099,9 @@ contract VpiImrBypassTest is Test {
             "Typed user-invalid open should pay the clearer as clearinghouse credit"
         );
         assertEq(uint256(_orderStatus(1)), uint256(IOrderRouterAccounting.OrderStatus.Failed), "Order should fail");
-        assertEq(usdc.balanceOf(address(router)), 0, "Router should not retain consumed user-invalid bounty escrow");
+        assertEq(
+            usdc.balanceOf(address(router)), 0, "Router should not retain consumed user-invalid bounty reservation"
+        );
     }
 
 }
@@ -5312,9 +5341,9 @@ contract KeeperFeeRefundTest is Test {
 
         assertEq(router.nextExecuteId(), 0, "Impossible slippage head should still be removed from the FIFO queue");
         assertEq(
-            router.getAccountEscrow(account).executionBountyUsdc,
+            router.getAccountReservations(account).executionBountyUsdc,
             0,
-            "Cleanup should clear the escrowed head-order bounty"
+            "Cleanup should clear the reserved head-order bounty"
         );
         assertTrue(
             traderPenaltyUsdc > 0 || keeperRewardUsdc > 0,

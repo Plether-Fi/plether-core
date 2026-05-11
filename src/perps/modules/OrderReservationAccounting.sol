@@ -7,7 +7,7 @@ import {IMarginClearinghouse} from "../interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "../interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterErrors} from "../interfaces/IOrderRouterErrors.sol";
 
-abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
+abstract contract OrderReservationAccounting is IOrderRouterAccounting {
 
     struct OrderRecord {
         CfdTypes.Order core;
@@ -43,12 +43,13 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
             : IMarginClearinghouse(ICfdEngineCore(_engine).clearinghouse());
     }
 
-    function getAccountEscrow(
+    function getAccountReservations(
         address account
-    ) public view override returns (IOrderRouterAccounting.AccountEscrowView memory escrow) {
+    ) public view override returns (IOrderRouterAccounting.AccountReservationView memory reservation) {
         // Clearinghouse remains the canonical owner of committed-order margin value; this module only composes the view.
-        escrow.committedMarginUsdc = clearinghouse.getAccountReservationSummary(account).activeCommittedOrderMarginUsdc;
-        (escrow.pendingOrderCount, escrow.executionBountyUsdc,,) = _summarizePendingOrders(account);
+        reservation.committedMarginUsdc =
+        clearinghouse.getAccountReservationSummary(account).activeCommittedOrderMarginUsdc;
+        (reservation.pendingOrderCount, reservation.executionBountyUsdc,,) = _summarizePendingOrders(account);
     }
 
     function _summarizePendingOrders(
@@ -133,7 +134,7 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
         _linkMarginOrder(account, orderId);
     }
 
-    function _consumeOrderEscrow(
+    function _consumeOrderReservation(
         uint64 orderId,
         bool success,
         uint256 executionPrice,

@@ -6,7 +6,7 @@ import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 
-contract ArchitectureRegression_EscrowShielding is BasePerpTest {
+contract ArchitectureRegression_ReservationShielding is BasePerpTest {
 
     address internal alice = address(0xA11CE);
 
@@ -179,7 +179,9 @@ contract ArchitectureRegression_QueueEconomics is BasePerpTest {
         assertEq(
             marginAfter, marginBefore - 200_000, "close commit should source the configured bounty from active margin"
         );
-        assertEq(_executionBountyReserve(1), 200_000, "close commit must still escrow the configured keeper bounty");
+        assertEq(
+            _executionBountyReserve(1), 200_000, "close commit must still reservation the configured keeper bounty"
+        );
     }
 
 }

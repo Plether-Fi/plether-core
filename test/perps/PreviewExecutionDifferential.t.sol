@@ -466,7 +466,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         );
     }
 
-    function test_PreviewLiquidation_MatchesLiveExecution_WithQueuedExecutionEscrowOutsideReachability() public {
+    function test_PreviewLiquidation_MatchesLiveExecution_WithQueuedExecutionReservationOutsideReachability() public {
         address trader = address(0xC104);
         address account = trader;
         uint256 liquidationPrice = 102_500_000;
@@ -497,27 +497,27 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         assertEq(
             clearinghouse.balanceUsdc(KEEPER) - keeperSettlementBefore,
             preview.keeperBountyUsdc,
-            "Queued-escrow liquidation preview keeper bounty should match live outcome"
+            "Queued-reservation liquidation preview keeper bounty should match live outcome"
         );
         assertEq(
             engine.deferredTraderCreditUsdc(account) - deferredBefore,
             preview.deferredTraderCreditUsdc,
-            "Queued-escrow liquidation preview deferred payout should match live outcome"
+            "Queued-reservation liquidation preview deferred payout should match live outcome"
         );
         assertEq(
             engine.accumulatedBadDebtUsdc() - badDebtBefore,
             preview.badDebtUsdc,
-            "Queued-escrow liquidation preview bad debt should match live outcome"
+            "Queued-reservation liquidation preview bad debt should match live outcome"
         );
         assertEq(
             usdc.balanceOf(address(router)),
             0,
-            "Queued execution escrow should be removed from the router on liquidation"
+            "Queued execution reservation should be removed from the router on liquidation"
         );
         assertEq(
             preview.triggersDegradedMode,
             engine.degradedMode(),
-            "Queued-escrow liquidation preview degraded-mode flag should match live outcome"
+            "Queued-reservation liquidation preview degraded-mode flag should match live outcome"
         );
     }
 

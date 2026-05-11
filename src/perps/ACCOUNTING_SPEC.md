@@ -259,10 +259,10 @@ Not every inflow into `HousePool` is LP equity.
 
 Keep these categories separate:
 
-- `recordProtocolBackingInflow`: non-LP protocol-recognized pool backing; protocol fees route to the treasury clearinghouse account instead of this hook
 - `recordClaimantInflow(amount, Recapitalization, CashArrived)`: recapitalization intended to restore waterfall claimants
 - `recordClaimantInflow(amount, Revenue, CashArrived)`: claimant-owned value where fresh cash entered the vault in this flow
 - `recordClaimantInflow(amount, Revenue, AlreadyRetained)`: claimant-owned value already retained physically by the vault and only needing ownership routing
+- `accountExcess()`: owner-governed admission of unsolicited raw pool cash into canonical assets
 
 Rules:
 
@@ -316,22 +316,22 @@ Rules:
 - fresh payout funding, protocol fee top-ups, and deferred servicing must all agree on what vault cash is actually free,
 - protocol fee top-ups are subordinate to deferred claims and immediate trader payouts; any fee amount that cannot be cash-credited under this priority is not recorded as a deferred protocol liability.
 
-## Pending-Order Escrow Model
+## Pending-Order Reservation Model
 
 Question answered:
 
 - what value is reserved for queued actions and therefore not free to withdraw or reuse?
 
-Escrow / reservation buckets include:
+Reservation / reservation buckets include:
 
 - committed order margin,
 - clearinghouse-reserved execution bounty value.
 
 Rules:
 
-- escrowed value is not withdrawable,
-- escrowed value is not free buying power,
-- releasing or consuming escrow must happen exactly once,
+- reserved value is not withdrawable,
+- reserved value is not free buying power,
+- releasing or consuming reservation must happen exactly once,
 - clearinghouse reservation records are the source of truth for committed trader margin,
 - execution bounty reserves are not LP cash and should not become a deferred vault liability bucket.
 
@@ -340,9 +340,9 @@ Rules:
 - close intents may source their flat clearinghouse-reserved bounty from active position margin when free settlement is exhausted,
 - this is an explicit bounded liveness tradeoff,
 - `closeOrderExecutionBountyUsdc` is governance-configured but hard-capped at `1 USDC`,
-- the amount parked in escrow is bounded by `MAX_PENDING_ORDERS * 1 USDC` per account,
-- collateral reachability should treat that escrow as temporarily unavailable until the order resolves,
-- terminal-invalid close execution must not refund margin-backed bounty escrow to the external wallet.
+- the amount parked in reservation is bounded by `MAX_PENDING_ORDERS * 1 USDC` per account,
+- collateral reachability should treat that reservation as temporarily unavailable until the order resolves,
+- terminal-invalid close execution must not refund margin-backed bounty reservation to the external wallet.
 
 ### Open-order failure policy
 
@@ -497,7 +497,7 @@ Interpretation rules:
 
 Required transition rules:
 
-- execution consumes escrow exactly once,
+- execution consumes reservation exactly once,
 - user cancellation is disallowed once pending,
 - expiry resolves through the configured bounty and reservation policy,
 - stale or missing oracle data does not destroy a valid pending order,

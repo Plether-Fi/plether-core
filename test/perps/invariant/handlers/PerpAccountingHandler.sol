@@ -576,13 +576,13 @@ contract PerpAccountingHandler is Test {
 
     function accountExecutionBountyReserve(
         address account
-    ) public view returns (uint256 totalEscrowUsdc) {
+    ) public view returns (uint256 totalReservationUsdc) {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
             OrderRouter.OrderRecord memory record = _orderRecord(orderId);
             if (record.core.account != account || record.core.sizeDelta == 0) {
                 continue;
             }
-            totalEscrowUsdc += record.executionBountyUsdc;
+            totalReservationUsdc += record.executionBountyUsdc;
         }
     }
 
@@ -1098,7 +1098,7 @@ contract PerpAccountingHandler is Test {
     function _trackedCommittedMargin(
         address account
     ) internal view returns (uint256) {
-        return router.getAccountEscrow(account).committedMarginUsdc;
+        return router.getAccountReservations(account).committedMarginUsdc;
     }
 
     function _ghostTerminalStateForOrder(

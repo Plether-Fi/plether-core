@@ -51,9 +51,9 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
             : snapshot.accountEquityUsdc;
         viewData.withdrawableUsdc = ACCOUNT_LENS.getWithdrawableUsdc(account);
 
-        IOrderRouterAccounting.AccountEscrowView memory escrow = ORDER_ROUTER.getAccountEscrow(account);
-        viewData.pendingOrderMarginUsdc = escrow.committedMarginUsdc;
-        viewData.pendingExecutionBountyUsdc = escrow.executionBountyUsdc;
+        IOrderRouterAccounting.AccountReservationView memory reservation = ORDER_ROUTER.getAccountReservations(account);
+        viewData.pendingOrderMarginUsdc = reservation.committedMarginUsdc;
+        viewData.pendingExecutionBountyUsdc = reservation.executionBountyUsdc;
 
         PerpsViewTypes.PositionView memory position = _getPositionView(account);
         viewData.hasOpenPosition = position.exists;

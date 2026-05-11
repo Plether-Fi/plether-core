@@ -929,8 +929,8 @@ abstract contract BasePerpTest is Test {
         address account
     ) internal view returns (uint256) {
         uint256 settlementBalance = clearinghouse.getAccountUsdcBuckets(account).settlementBalanceUsdc;
-        uint256 executionEscrow = router.getAccountEscrow(account).executionBountyUsdc;
-        return settlementBalance > executionEscrow ? settlementBalance - executionEscrow : 0;
+        uint256 executionReservation = router.getAccountReservations(account).executionBountyUsdc;
+        return settlementBalance > executionReservation ? settlementBalance - executionReservation : 0;
     }
 
     function _publicPosition(

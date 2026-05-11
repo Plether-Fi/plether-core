@@ -456,7 +456,7 @@ contract PerpInvariantTest is BasePerpTest {
             address trader = handler.traders(i);
             address account = trader;
             (uint256 size, uint256 margin,,,,,) = engine.positions(account);
-            IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(account);
+            IOrderRouterAccounting.AccountReservationView memory reservation = router.getAccountReservations(account);
             uint256 locked = clearinghouse.lockedMarginUsdc(account);
 
             if (size > 0) {
@@ -465,7 +465,7 @@ contract PerpInvariantTest is BasePerpTest {
 
             assertGe(
                 locked,
-                margin + escrow.committedMarginUsdc,
+                margin + reservation.committedMarginUsdc,
                 "Locked margin must back open-position margin plus pending committed margin"
             );
         }
@@ -583,11 +583,11 @@ contract PerpInvariantTest is BasePerpTest {
                 rawQueuedCommitted += _remainingCommittedMargin(orderId);
             }
 
-            IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(account);
+            IOrderRouterAccounting.AccountReservationView memory reservation = router.getAccountReservations(account);
             assertEq(
-                escrow.committedMarginUsdc,
+                reservation.committedMarginUsdc,
                 rawQueuedCommitted,
-                "Account escrow must equal the residual committed margin stored on queued orders"
+                "Account reservation must equal the residual committed margin stored on queued orders"
             );
         }
     }
@@ -687,7 +687,7 @@ contract AdversarialPerpHandler is Test {
     uint64 public ghost_lastRetryableSlippageBeforeExecuteId;
     uint64 public ghost_lastRetryableSlippageAfterExecuteId;
     uint8 public ghost_lastRetryableSlippageOrderStatus;
-    uint256 public ghost_lastRetryableSlippageEscrowUsdc;
+    uint256 public ghost_lastRetryableSlippageReservationUsdc;
     uint256 public ghost_lastRetryableSlippageRouterBalanceUsdc;
 
     constructor(
@@ -881,7 +881,7 @@ contract AdversarialPerpHandler is Test {
                 ghost_lastRetryableSlippageBatch++;
                 ghost_lastRetryableSlippageAfterExecuteId = afterExecute;
                 ghost_lastRetryableSlippageOrderStatus = uint8(postRecord.status);
-                ghost_lastRetryableSlippageEscrowUsdc = postRecord.executionBountyUsdc;
+                ghost_lastRetryableSlippageReservationUsdc = postRecord.executionBountyUsdc;
                 ghost_lastRetryableSlippageRouterBalanceUsdc = usdc.balanceOf(address(router));
             }
         }
@@ -991,7 +991,7 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         targetContract(address(handler));
     }
 
-    function invariant_AdversarialEscrowStaysBacked() public view {
+    function invariant_AdversarialReservationStaysBacked() public view {
         uint256 pendingKeeperReserves;
         uint256 reservedSettlementUsdc;
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
@@ -1044,7 +1044,9 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
             "Terminal slippage failure must mark the head order failed"
         );
         assertEq(
-            handler.ghost_lastRetryableSlippageEscrowUsdc(), 0, "Terminal slippage failure must clear escrowed bounty"
+            handler.ghost_lastRetryableSlippageReservationUsdc(),
+            0,
+            "Terminal slippage failure must clear reserved bounty"
         );
         assertEq(
             handler.ghost_lastRetryableSlippageRouterBalanceUsdc(),

@@ -26,16 +26,6 @@ interface ICfdVault {
         uint256 amount
     ) external;
 
-    /// @notice Increases canonical vault assets to recognize legitimate non-LP protocol backing.
-    /// @dev This is the controlled accounting path for non-fee protocol backing that should increase
-    ///      economic vault depth. It does not require raw excess to be
-    ///      present and may also be used to restore canonical accounting after a raw-balance shortfall
-    ///      has already reduced `totalAssets()` via the `min(rawBalance, accountedAssets)` boundary.
-    ///      Reverts if the caller is unauthorized.
-    function recordProtocolBackingInflow(
-        uint256 amount
-    ) external;
-
     /// @notice Records claimant-owned value that should ultimately flow through the tranche waterfall.
     /// @dev `CashArrived` increments canonical accounted assets because raw USDC arrived in this flow.
     ///      `AlreadyRetained` only routes ownership for value already retained physically by the vault.

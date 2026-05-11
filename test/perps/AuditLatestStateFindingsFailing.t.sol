@@ -44,8 +44,8 @@ contract AuditLatestStateFindingsFailing_QueueEconomics is BasePerpTest {
         vm.expectRevert();
         router.commitOrder(CfdTypes.Side.BULL, 1, 0, 0, true);
 
-        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(account);
-        assertEq(escrow.pendingOrderCount, 1, "Rejected close intent should not be queued behind the pending open");
+        IOrderRouterAccounting.AccountReservationView memory reservation = router.getAccountReservations(account);
+        assertEq(reservation.pendingOrderCount, 1, "Rejected close intent should not be queued behind the pending open");
     }
 
 }

@@ -74,7 +74,7 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
         vm.deal(keeper, 1 ether);
     }
 
-    function test_C1_ExpiredOpenBatchExecutionRefundsUserNotKeeper() public {
+    function test_C1_ExpiredOpenBatchExecutionPaysClearerFromReservedBounty() public {
         uint256 t0 = 2_000_000_000;
         vm.warp(t0);
         vm.roll(100);
@@ -107,13 +107,13 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
             "Expired open orders should pay the clearer so bad head orders remain economical to prune"
         );
         assertEq(
-            _settlementBalance(alice) - aliceBalanceBefore,
-            0,
-            "Expired open orders should not refund the reserved bounty to the submitting trader"
+            aliceBalanceBefore - _settlementBalance(alice),
+            pending.executionBountyUsdc,
+            "Expired open orders should consume the submitting trader's reserved bounty"
         );
     }
 
-    function test_C1_BatchMixedSuccessDoesNotRewardExpiredOpenFailure() public {
+    function test_C1_BatchMixedExpiredAndSuccessPaysReservedBounties() public {
         _fundTrader(alice, 50_000e6);
 
         uint256 t0 = 2_000_000_000;
@@ -154,11 +154,11 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
         assertEq(
             _settlementBalance(keeper) - keeperUsdcBefore,
             400_000,
-            "Batch execution should only compensate the clearer for the successful queued order, not the expired open head"
+            "Batch execution should compensate the clearer from both reserved order bounties"
         );
-        assertGt(firstPending.executionBountyUsdc, 0, "Expired open should still have escrowed a positive bounty");
+        assertGt(firstPending.executionBountyUsdc, 0, "Expired open should still have reserved a positive bounty");
         assertGt(
-            secondPending.executionBountyUsdc, 0, "Queued successor open should still have escrowed a positive bounty"
+            secondPending.executionBountyUsdc, 0, "Queued successor open should still have reserved a positive bounty"
         );
     }
 

@@ -14,7 +14,6 @@ interface IMarginClearinghouse {
     error MarginClearinghouse__InsufficientFreeEquity();
     error MarginClearinghouse__InsufficientUsdcForSettlement();
     error MarginClearinghouse__InsufficientAssetToSeize();
-    error MarginClearinghouse__InvalidSeizeRecipient();
     error MarginClearinghouse__InvalidMarginBucket();
     error MarginClearinghouse__ReservationAlreadyExists();
     error MarginClearinghouse__ReservationNotActive();
@@ -196,7 +195,7 @@ interface IMarginClearinghouse {
         address protocolFeeAccount,
         uint256 protocolFeeUsdc
     ) external returns (uint256 seizedUsdc, uint256 shortfallUsdc, uint256 protocolFeeCreditedUsdc);
-    /// @notice Applies a pre-planned liquidation settlement mutation while preserving reserved escrow.
+    /// @notice Applies a pre-planned liquidation settlement mutation while preserving reserved settlement.
     function applyLiquidationSettlementPlan(
         address account,
         uint64[] calldata reservationOrderIds,
@@ -211,18 +210,6 @@ interface IMarginClearinghouse {
         address recipient,
         uint256 amount
     ) external;
-    /// @notice Transfers reserved settlement out to an external recipient.
-    function seizeReservedSettlement(
-        address account,
-        uint256 amount,
-        address recipient
-    ) external;
-    /// @notice Transfers settlement USDC from an account to a recipient (losses, fees, or bad debt)
-    function seizeUsdc(
-        address account,
-        uint256 amount,
-        address recipient
-    ) external;
     /// @notice Reserves free-settlement USDC for a close-order execution bounty with carry checkpointing.
     /// @dev Restricted to the engine's atomic fresh close-bounty path.
     function reserveCloseExecutionBountyFromSettlement(
@@ -234,12 +221,6 @@ interface IMarginClearinghouse {
     function reserveStaleCloseExecutionBountyFromSettlement(
         address account,
         uint256 amount
-    ) external;
-    /// @notice Transfers settlement USDC from active position margin to a recipient and unlocks the same amount.
-    function seizePositionMarginUsdc(
-        address account,
-        uint256 amount,
-        address recipient
     ) external;
     /// @notice Reclassifies active position margin into reserved settlement for a close-order execution bounty.
     function reserveCloseExecutionBountyFromPositionMargin(

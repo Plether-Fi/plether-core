@@ -120,7 +120,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
             address account = _account(handler.actorAt(i));
             AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
                 engineAccountLens.getAccountLedgerSnapshot(account);
-            if (!snapshot.hasPosition || snapshot.executionEscrowUsdc == 0) {
+            if (!snapshot.hasPosition || snapshot.executionBountyReserveUsdc == 0) {
                 continue;
             }
 
@@ -132,7 +132,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
             );
             assertLt(
                 liquidationPreview.reachableCollateralUsdc,
-                snapshot.settlementBalanceUsdc + snapshot.executionEscrowUsdc,
+                snapshot.settlementBalanceUsdc + snapshot.executionBountyReserveUsdc,
                 "Liquidation preview must exclude reserved execution bounty from reachable collateral"
             );
         }

@@ -148,7 +148,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         assertLe(
             clearinghouse.balanceUsdc(traderAccount),
             traderSettlementBefore,
-            "Open-order slippage cleanup should not credit trader settlement after escrow"
+            "Open-order slippage cleanup should not credit trader settlement after reservation"
         );
     }
 

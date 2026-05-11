@@ -22,7 +22,7 @@ abstract contract OrderUtils is OrderRouterBase {
                 : executionBountyUsdc;
     }
 
-    function _forfeitEscrowedOrderBountiesOnLiquidation(
+    function _forfeitReservedOrderBountiesOnLiquidation(
         address account
     ) internal {
         uint256 forfeitedUsdc;

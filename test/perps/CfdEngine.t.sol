@@ -1716,53 +1716,6 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
-    function test_SeizeUsdc_CheckpointsCarryBeforeReachabilityDrops() public {
-        address trader = address(0xABD4);
-        address account = trader;
-        uint256 seizedAmount = 1e6;
-        uint256 depositAmount = 1000e6;
-        uint256 carryElapsed = 30 days;
-
-        _fundTrader(trader, 10_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
-
-        uint256 settlementBefore = clearinghouse.balanceUsdc(account);
-
-        vm.warp(block.timestamp + carryElapsed);
-        vm.prank(address(router));
-        engine.updateMarkPrice(1e8, uint64(block.timestamp));
-
-        uint256 expectedCarry = PositionRiskAccountingLib.computePendingCarryUsdc(
-            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, 1e8, settlementBefore),
-            _riskParams().baseCarryBps,
-            carryElapsed
-        );
-
-        vm.prank(address(engine));
-        clearinghouse.seizeUsdc(account, seizedAmount, address(engine));
-
-        assertEq(
-            clearinghouse.balanceUsdc(account),
-            settlementBefore - expectedCarry - seizedAmount,
-            "Settlement seizure should realize carry before debiting trader cash"
-        );
-        assertEq(
-            engine.unsettledCarryUsdc(account), 0, "Settlement seizure should not leave elapsed carry uncheckpointed"
-        );
-
-        usdc.mint(trader, depositAmount);
-        vm.startPrank(trader);
-        usdc.approve(address(clearinghouse), type(uint256).max);
-        clearinghouse.depositMargin(depositAmount);
-        vm.stopPrank();
-
-        assertEq(
-            clearinghouse.balanceUsdc(account),
-            settlementBefore - expectedCarry - seizedAmount + depositAmount,
-            "Later deposits must not retroactively apply the post-seizure carry basis to prior time"
-        );
-    }
-
     function test_UnlockReservedSettlement_CheckpointsCarryBeforeReachabilityRises() public {
         address trader = address(0xABD6);
         address account = trader;
@@ -1798,32 +1751,6 @@ contract CfdEngineTest is BasePerpTest {
             "Reserved-settlement unlock should checkpoint carry before reserved funds become reachable again"
         );
         assertEq(engine.unsettledCarryUsdc(account), 0, "Unlock should not leave elapsed carry uncheckpointed");
-    }
-
-    function test_SeizeUsdc_RechecksFreeSettlementAfterCarryCheckpoint() public {
-        address trader = address(0xABD7);
-        address account = trader;
-        uint256 carryElapsed = 30 days;
-
-        _fundTrader(trader, 10_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
-
-        uint256 freeSettlementBefore = clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc;
-
-        vm.warp(block.timestamp + carryElapsed);
-        vm.prank(address(router));
-        engine.updateMarkPrice(1e8, uint64(block.timestamp));
-
-        uint256 expectedCarry = PositionRiskAccountingLib.computePendingCarryUsdc(
-            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, 1e8, clearinghouse.balanceUsdc(account)),
-            _riskParams().baseCarryBps,
-            carryElapsed
-        );
-        assertGt(expectedCarry, 0, "Setup must accrue carry before seizure");
-
-        vm.prank(address(engine));
-        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientAssetToSeize.selector);
-        clearinghouse.seizeUsdc(account, freeSettlementBefore, address(engine));
     }
 
     function test_ProfitableClose_DoesNotDoubleBookCarryIntoAccountedAssets() public {
@@ -2041,14 +1968,14 @@ contract CfdEngineTest is BasePerpTest {
         AccountLensViewTypes.AccountLedgerView memory ledgerView = engineAccountLens.getAccountLedgerView(account);
         (, uint256 positionMargin,,,,,) = engine.positions(account);
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(account);
-        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(account);
+        IOrderRouterAccounting.AccountReservationView memory reservation = router.getAccountReservations(account);
 
         assertEq(ledgerView.settlementBalanceUsdc, buckets.settlementBalanceUsdc);
         assertEq(ledgerView.freeSettlementUsdc, buckets.freeSettlementUsdc);
         assertEq(ledgerView.activePositionMarginUsdc, buckets.activePositionMarginUsdc);
         assertEq(ledgerView.otherLockedMarginUsdc, buckets.otherLockedMarginUsdc);
-        assertEq(ledgerView.executionEscrowUsdc, escrow.executionBountyUsdc);
-        assertEq(ledgerView.committedMarginUsdc, escrow.committedMarginUsdc);
+        assertEq(ledgerView.executionBountyReserveUsdc, reservation.executionBountyUsdc);
+        assertEq(ledgerView.committedMarginUsdc, reservation.committedMarginUsdc);
         assertEq(ledgerView.deferredTraderCreditUsdc, engine.deferredTraderCreditUsdc(account));
         assertEq(ledgerView.pendingOrderCount, router.pendingOrderCounts(account));
     }
@@ -2067,7 +1994,7 @@ contract CfdEngineTest is BasePerpTest {
         (uint256 sizeStored, uint256 marginStored, uint256 entryPriceStored,, CfdTypes.Side sideStored,,) =
             engine.positions(account);
         IMarginClearinghouse.LockedMarginBuckets memory lockedBuckets = clearinghouse.getLockedMarginBuckets(account);
-        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(account);
+        IOrderRouterAccounting.AccountReservationView memory reservation = router.getAccountReservations(account);
 
         assertEq(snapshot.settlementBalanceUsdc, collateralView.settlementBalanceUsdc);
         assertEq(snapshot.freeSettlementUsdc, collateralView.freeSettlementUsdc);
@@ -2076,10 +2003,10 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(snapshot.positionMarginBucketUsdc, lockedBuckets.positionMarginUsdc);
         assertEq(snapshot.committedOrderMarginBucketUsdc, lockedBuckets.committedOrderMarginUsdc);
         assertEq(snapshot.reservedSettlementBucketUsdc, lockedBuckets.reservedSettlementUsdc);
-        assertEq(snapshot.executionEscrowUsdc, escrow.executionBountyUsdc);
-        assertEq(snapshot.committedMarginUsdc, escrow.committedMarginUsdc);
+        assertEq(snapshot.executionBountyReserveUsdc, reservation.executionBountyUsdc);
+        assertEq(snapshot.committedMarginUsdc, reservation.committedMarginUsdc);
         assertEq(snapshot.deferredTraderCreditUsdc, collateralView.deferredTraderCreditUsdc);
-        assertEq(snapshot.pendingOrderCount, escrow.pendingOrderCount);
+        assertEq(snapshot.pendingOrderCount, reservation.pendingOrderCount);
         assertEq(snapshot.closeReachableUsdc, collateralView.closeReachableUsdc);
         assertEq(snapshot.terminalReachableUsdc, collateralView.terminalReachableUsdc);
         assertEq(snapshot.accountEquityUsdc, collateralView.accountEquityUsdc);
@@ -2996,7 +2923,7 @@ contract CfdEngineTest is BasePerpTest {
         clearinghouse.withdraw(account, 70e6);
         vm.stopPrank();
 
-        IOrderRouterAccounting.AccountEscrowView memory escrowBefore = router.getAccountEscrow(account);
+        IOrderRouterAccounting.AccountReservationView memory reservationBefore = router.getAccountReservations(account);
         CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 195_000_000);
         LiquidationParitySnapshot memory beforeSnapshot = _captureLiquidationParitySnapshot(account, keeper);
 
@@ -3023,8 +2950,8 @@ contract CfdEngineTest is BasePerpTest {
         );
         assertEq(
             afterSnapshot.protocolTreasuryBalanceUsdc - beforeSnapshot.protocol.protocolTreasuryBalanceUsdc,
-            escrowBefore.executionBountyUsdc,
-            "Live liquidation should book the same forfeited escrow preview assumes as protocol fees"
+            reservationBefore.executionBountyUsdc,
+            "Live liquidation should book the same forfeited reservation preview assumes as protocol fees"
         );
         assertEq(
             observed.effectiveAssetsAfterUsdc,
@@ -3033,7 +2960,7 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
-    function helper_PreviewLiquidation_ForfeitedEscrowChangesPreview() public {
+    function helper_PreviewLiquidation_ForfeitedReservationChangesPreview() public {
         CfdTypes.RiskParams memory params = _riskParams();
         _setRiskParams(params);
 
@@ -3053,18 +2980,18 @@ contract CfdEngineTest is BasePerpTest {
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() - 1);
 
         uint256 canonicalDepth = pool.totalAssets();
-        uint256 forfeitedEscrow = router.getAccountEscrow(account).executionBountyUsdc;
-        assertGt(forfeitedEscrow, 0, "Setup must build forfeitable execution escrow");
-        assertGt(canonicalDepth, forfeitedEscrow, "Setup needs canonical vault depth to exceed escrow");
+        uint256 forfeitedReservation = router.getAccountReservations(account).executionBountyUsdc;
+        assertGt(forfeitedReservation, 0, "Setup must build forfeitable execution reservation");
+        assertGt(canonicalDepth, forfeitedReservation, "Setup needs canonical vault depth to exceed reservation");
 
         CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 101_000_000);
         CfdEngine.LiquidationPreview memory oldModelEquivalent =
-            engineLens.simulateLiquidation(account, 101_000_000, canonicalDepth - forfeitedEscrow);
+            engineLens.simulateLiquidation(account, 101_000_000, canonicalDepth - forfeitedReservation);
 
         assertNotEq(
             preview.reachableCollateralUsdc,
             oldModelEquivalent.reachableCollateralUsdc,
-            "Forfeited escrow should now change the liquidation preview"
+            "Forfeited reservation should now change the liquidation preview"
         );
     }
 
@@ -3382,11 +3309,11 @@ contract CfdEngineTest is BasePerpTest {
         clearinghouse.withdraw(account, 70e6);
         vm.stopPrank();
 
-        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(account);
+        IOrderRouterAccounting.AccountReservationView memory reservation = router.getAccountReservations(account);
         CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 102_500_000);
         AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(account);
 
-        assertGt(escrow.executionBountyUsdc, 0, "Setup must create clearinghouse-reserved execution bounty");
+        assertGt(reservation.executionBountyUsdc, 0, "Setup must create clearinghouse-reserved execution bounty");
         assertEq(
             preview.reachableCollateralUsdc,
             snapshot.terminalReachableUsdc,
@@ -3394,13 +3321,13 @@ contract CfdEngineTest is BasePerpTest {
         );
         assertLt(
             preview.reachableCollateralUsdc,
-            clearinghouse.balanceUsdc(account) + escrow.executionBountyUsdc,
+            clearinghouse.balanceUsdc(account) + reservation.executionBountyUsdc,
             "Liquidation preview must exclude reserved execution bounty from reachable collateral"
         );
         assertEq(
-            snapshot.executionEscrowUsdc,
-            escrow.executionBountyUsdc,
-            "Expanded account ledger must continue to report execution escrow outside liquidation reachability"
+            snapshot.executionBountyReserveUsdc,
+            reservation.executionBountyUsdc,
+            "Expanded account ledger must continue to report execution reservation outside liquidation reachability"
         );
     }
 
@@ -4525,7 +4452,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(
             buckets.otherLockedMarginUsdc,
             4000e6 + _executionBountyReserve(1),
-            "Setup should reserve queued order funds plus clearinghouse-held bounty escrow"
+            "Setup should reserve queued order funds plus clearinghouse-held bounty reservation"
         );
         assertEq(
             MarginClearinghouseAccountingLib.getGenericReachableUsdc(buckets),

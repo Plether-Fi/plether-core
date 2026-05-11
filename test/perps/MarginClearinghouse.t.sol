@@ -194,7 +194,7 @@ contract MarginClearinghouseTest is Test {
         clearinghouse = new MarginClearinghouse(address(usdc));
         aliceAccount = alice;
 
-        // Authorize our mock Engine to lock/seize funds
+        // Authorize our mock engine to lock and settle funds.
         clearinghouse.setEngine(engine);
         mockEngine.setOrderRouter(address(mockRouter));
 
@@ -640,15 +640,6 @@ contract MarginClearinghouseTest is Test {
         );
     }
 
-    function test_SeizeAsset_RecipientMustEqualOperator() public {
-        vm.prank(alice);
-        clearinghouse.deposit(aliceAccount, 1000 * 1e6);
-
-        vm.prank(engine);
-        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InvalidSeizeRecipient.selector);
-        clearinghouse.seizeUsdc(aliceAccount, 100 * 1e6, address(0xBEEF));
-    }
-
     function test_RouterPermissionSurface_IsLimitedToReservationAccounting() public {
         vm.prank(alice);
         clearinghouse.deposit(aliceAccount, 1000 * 1e6);
@@ -669,6 +660,10 @@ contract MarginClearinghouseTest is Test {
         vm.prank(address(mockRouter));
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__NotOperator.selector);
         clearinghouse.settleUsdc(aliceAccount, int256(1e6));
+
+        vm.prank(address(mockRouter));
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__NotOperator.selector);
+        clearinghouse.transferReservedSettlement(aliceAccount, address(0xB0B), 1);
     }
 
     function test_C01_WithdrawUsdcBelowLockedMargin_ShouldRevert() public {

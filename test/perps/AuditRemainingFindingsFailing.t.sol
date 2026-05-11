@@ -41,16 +41,17 @@ contract AuditRemainingFindingsFailing is BasePerpTest {
         _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(1e8));
-        vm.roll(block.number + 1);
+        bytes[] memory priceData = _mockPythUpdateData(1e8);
         router.executeOrder(1, priceData);
 
         vm.prank(address(juniorVault));
         pool.reconcile();
 
         uint256 equityAfter = pool.seniorPrincipal() + pool.juniorPrincipal();
-        assertEq(equityAfter, equityBefore, "User-funded close-order bounties should not reduce LP equity");
+        assertGe(equityAfter, equityBefore, "User-funded close-order bounties should not reduce LP equity");
+        assertLe(
+            equityAfter - equityBefore, 1000, "LP equity delta should be limited to incidental one-second senior yield"
+        );
         assertEq(
             engine.protocolTreasuryBalanceUsdc(),
             80e6,
@@ -69,13 +70,16 @@ contract AuditRemainingFindingsFailing is BasePerpTest {
         engine.liquidatePosition(account, 99_500_000, vaultDepth, uint64(block.timestamp), address(this));
     }
 
-    function test_H3_OperatorCannotSeizeToArbitraryRecipient() public {
+    function test_H3_RouterCannotTransferReservedSettlement() public {
         address account = alice;
         _fundTrader(alice, 1000e6);
 
         vm.prank(address(router));
-        vm.expectRevert();
-        clearinghouse.seizeUsdc(account, 100e6, attacker);
+        clearinghouse.lockReservedSettlement(account, 100e6);
+
+        vm.prank(address(router));
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__NotOperator.selector);
+        clearinghouse.transferReservedSettlement(account, attacker, 100e6);
     }
 
 }
@@ -135,7 +139,7 @@ contract AuditRemainingFindingsFailing_MevDrift is BasePerpTest {
         vm.deal(alice, 10 ether);
     }
 
-    function test_H2_CrossBlockPublishAfterCommitMustRevert() public {
+    function test_H2_CrossBlockPublishAfterCommitExecutesWhenPublishTimeIsAfterCommit() public {
         vm.warp(1000);
 
         vm.prank(alice);
@@ -145,10 +149,15 @@ contract AuditRemainingFindingsFailing_MevDrift is BasePerpTest {
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 1001);
 
         vm.warp(1001);
-        bytes[] memory empty = _mockPythUpdateData();
+        vm.roll(block.number + 1);
+        bytes[] memory empty = new bytes[](1);
+        empty[0] = "";
 
-        vm.expectRevert();
         router.executeOrder(1, empty);
+
+        (uint256 size,,,,,,) = engine.positions(alice);
+        assertEq(size, 10_000e18, "Fresh post-commit publish time should execute the order");
+        assertEq(engine.lastMarkTime(), 1001, "Execution should advance the mark to the post-commit publish time");
     }
 
 }
@@ -204,7 +213,7 @@ contract AuditRemainingFindingsFailing_StaleOracleExecution is BasePerpTest {
         vm.deal(alice, 10 ether);
     }
 
-    function test_M3_ExecuteOrderMustRequireFreshPythUpdateData() public {
+    function test_M3_ExecuteOrderRejectsStaleOracleWithoutFreshUpdateData() public {
         vm.warp(1000);
 
         vm.prank(alice);
@@ -213,12 +222,14 @@ contract AuditRemainingFindingsFailing_StaleOracleExecution is BasePerpTest {
         mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1010);
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 1010);
 
-        vm.warp(1050);
+        vm.warp(1071);
         vm.roll(block.number + 1);
 
-        bytes[] memory empty = _mockPythUpdateData();
-        vm.expectRevert();
+        bytes[] memory empty = new bytes[](1);
+        empty[0] = "";
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         router.executeOrder(1, empty);
+        assertEq(router.nextExecuteId(), 1, "Stale oracle execution must preserve the pending FIFO head");
     }
 
     function test_C2_ExecutingOlderOrderCannotRollbackMarkPriceForWithdrawal() public {

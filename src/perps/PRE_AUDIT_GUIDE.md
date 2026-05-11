@@ -56,7 +56,6 @@ Before trusting a test as a source of truth, ask:
 | `MarginClearinghouse` operator paths | `engine`, `settlementModule` | broad settlement mutations only |
 | `MarginClearinghouse` reservation paths | `engine`, `orderRouter` | router can reserve/release queued margin and execution-bounty buckets, but cannot perform broad settlement |
 | `HousePool.payOut` | `engine`, `settlementModule` | payout authority covers engine-owned settlement only |
-| `HousePool.recordProtocolBackingInflow` | `engine`, `settlementModule` | non-fee pool backing only; protocol-fee inflows route to the treasury clearinghouse account |
 | `HousePool.recordClaimantInflow` | `engine`, `settlementModule` | claimant-owned revenue/recap routing only |
 
 Any new helper/module contract that can reach these sets should be treated as security-critical and explicitly access-controlled.
@@ -93,14 +92,14 @@ Any new helper/module contract that can reach these sets should be treated as se
 
 | Condition | Outcome | Bounty policy | Queue effect |
 |-----------|---------|---------------|--------------|
-| Open/close executes successfully | `Executed` | clearer paid from escrow | dequeue |
+| Open/close executes successfully | `Executed` | clearer paid from reservation | dequeue |
 | Typed `UserInvalid` open | `Failed` | clearer paid | dequeue |
-| Typed `ProtocolStateInvalidated` open | `Failed` | clearer paid from reserved escrow | dequeue |
+| Typed `ProtocolStateInvalidated` open | `Failed` | clearer paid from reserved reservation | dequeue |
 | Terminal invalid close | `Failed` | clearer paid | dequeue |
 | Slippage failure on open | `Failed` | clearer paid under the current terminal-failure policy | dequeue |
 | Slippage failure on close | `Failed` | clearer paid | dequeue |
-| Expired open order | `Failed` | clearer paid from reserved escrow | dequeue |
-| Expired close order | `Failed` | clearer paid from escrow under the current terminal-close policy | dequeue |
+| Expired open order | `Failed` | clearer paid from reserved reservation | dequeue |
+| Expired close order | `Failed` | clearer paid from reservation under the current terminal-close policy | dequeue |
 | Stale oracle | blocked, not terminal | no distribution | keep pending |
 | Live-market publish-time ordering failure | blocked, not terminal | no distribution | keep pending |
 | Close-only ineligibility for queued open | blocked, not terminal | no distribution | keep pending |
@@ -178,7 +177,7 @@ Reachability note:
 - Liveness problem: allowing arbitrary user cancellations would turn the queue into an option-like mechanism.
 - Chosen tradeoff: queued orders are binding until executed, expired, or failed by policy.
 - New risk: user flexibility is reduced once committed.
-- Protecting invariant: failure policy is explicit and terminal paths clean up escrow/reservations exactly once.
+- Protecting invariant: failure policy is explicit and terminal paths clean up reservations exactly once.
 
 ### Stale-mark close bounty commits
 
@@ -244,7 +243,7 @@ Reachability note:
 3. Deferred-liability seniority: deferred trader credit claims remain senior until serviced.
 4. Carry-aware risk: pending carry reduces relevant equity before realization on guard and risk checks.
 5. Bounded queue behavior: cleanup and close-intent projection are account-local.
-6. Escrow conservation: clearinghouse-reserved execution bounty value and admin-held ETH refund claims are each distributed, refunded, forfeited, or left claimable exactly once.
+6. Reservation conservation: clearinghouse-reserved execution bounty value and admin-held ETH refund claims are each distributed, refunded, forfeited, or left claimable exactly once.
 7. No speculative LP asset inflation: unrealized trader losses are not counted as spendable LP assets.
 
 ## Test Map

@@ -85,7 +85,7 @@ Several perps contracts intentionally expose narrow but high-authority capabilit
 - `CfdEngineSettlementModule` is engine-gated, but any external function added there is automatically security-critical because it can reach engine-owned settlement hooks.
 - `MarginClearinghouse` broad operator paths trust only `engine` and `settlementModule` to move trader custody across settlement and seizure buckets; router access is limited to reservation lifecycle paths needed for queued orders.
 - `MarginClearinghouse.reserveStaleCloseExecutionBountyFromSettlement(...)` and `reserveStaleCloseExecutionBountyFromPositionMargin(...)` are intentionally narrow stale close-commit escape hatches; they must remain reserved for risk-reducing stale fallback flows that have already been bounded by router/engine policy.
-- `HousePool.payOut(...)` and `HousePool.recordProtocolBackingInflow(...)` trust only `engine` and `settlementModule`, and the backing-inflow hook is not used for protocol-fee custody in the treasury-margin model.
+- `HousePool.payOut(...)` trusts only `engine` and `settlementModule`; unsolicited raw pool cash must be admitted through owner-governed excess accounting, and protocol fees stay in treasury clearinghouse margin.
 
 Practical rule:
 
@@ -115,7 +115,7 @@ These are the highest-value properties an auditor should expect to hold.
 | Total margin conservation | `sides[BULL].totalMargin + sides[BEAR].totalMargin == sum(pos.margin)` across all live positions |
 | Preview/live parity | Close and liquidation preview math should match live execution semantics |
 
-### Router and escrow accounting
+### Router and reservation accounting
 
 | Invariant | Description |
 |-----------|-------------|
@@ -250,7 +250,7 @@ Current policy is intentionally simple:
 - slippage-invalid orders fail terminally,
 - expired orders fail terminally,
 - typed engine failures route bounty according to semantic failure category,
-- terminal-invalid closes pay the clearer rather than refunding potentially margin-backed escrow to the trader wallet,
+- terminal-invalid closes pay the clearer rather than refunding potentially margin-backed reservation to the trader wallet,
 - open-order refunds and clearer payouts credit clearinghouse settlement rather than sending direct wallet USDC transfers,
 - the router does not maintain a retry or requeue lane.
 

@@ -302,7 +302,7 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
         _open(counterAccount, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
 
         assertEq(
-            _freeSettlementUsdc(account), 1e6, "Setup should leave one USDC of free settlement before close escrow"
+            _freeSettlementUsdc(account), 1e6, "Setup should leave one USDC of free settlement before close reservation"
         );
     }
 
@@ -315,7 +315,9 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
 
         (, uint256 marginAfter,,,,,) = engine.positions(account);
-        assertEq(_executionBountyReserve(1), 200_000, "Close order should still escrow the configured keeper bounty");
+        assertEq(
+            _executionBountyReserve(1), 200_000, "Close order should still reservation the configured keeper bounty"
+        );
         assertEq(
             marginAfter,
             marginBefore - 200_000,
@@ -369,7 +371,7 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
             "Terminal slippage miss should credit the clearer in clearinghouse custody"
         );
         assertEq(router.nextExecuteId(), 0, "Single queued slippage miss should clear the current head");
-        assertEq(_executionBountyReserve(1), 0, "Escrowed close bounty should be consumed on terminal slippage");
+        assertEq(_executionBountyReserve(1), 0, "Reserved close bounty should be consumed on terminal slippage");
     }
 
     function test_H2_ExpiredHeadCloseMustStillPayKeeper() public {
@@ -422,7 +424,7 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
         );
     }
 
-    function test_H2_LiquidationWithQueuedCloseOrderTransfersOnlyEscrowedBounty() public {
+    function test_H2_LiquidationWithQueuedCloseOrderTransfersOnlyReservedBounty() public {
         (address account,) = _setupCloseBountyBacked();
 
         vm.prank(trader);

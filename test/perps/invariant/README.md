@@ -16,7 +16,7 @@ This directory contains stateful Foundry invariant suites for the perps system.
   - Catches view-layer drift between previews and core engine/accounting state
   - Verifies empty positions preview as inactive
   - Verifies liquidation reachable collateral previews match clearinghouse accounting
-  - Verifies liquidation previews exclude clearinghouse-reserved execution escrow from reachable collateral
+  - Verifies liquidation previews exclude clearinghouse-reserved execution reservation from reachable collateral
   - Verifies generic position views expose physical reachable collateral separately from deferred payout netting
   - Verifies degraded-mode trigger flags behave as transition flags rather than persistent state flags
 
@@ -50,7 +50,7 @@ This directory contains stateful Foundry invariant suites for the perps system.
   - Verifies clearinghouse custody matches tracked account balances
   - Verifies the compact per-account ledger view stays aligned with clearinghouse buckets, router order reserves, deferred payouts, and pending order counts
   - Verifies the expanded per-account ledger snapshot stays aligned with typed locked-margin buckets, collateral, position-health, and settlement-reachability views
-  - Verifies tracked per-account settlement, escrow, and deferred payouts aggregate cleanly into protocol custody and obligation buckets
+  - Verifies tracked per-account settlement, reservation, and deferred payouts aggregate cleanly into protocol custody and obligation buckets
   - Verifies deposit/withdraw transitions preserve monotonic reachability expectations
   - Verifies no orphaned account-risk state remains once an account has no position and no pending orders
   - Verifies the expanded account ledger snapshot fully subsumes compact, collateral, and position views

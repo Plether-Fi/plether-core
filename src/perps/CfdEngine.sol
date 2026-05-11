@@ -453,7 +453,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         return clearinghouse.balanceUsdc(protocolTreasury);
     }
 
-    /// @notice Transfers forfeited reserved execution-bounty escrow into the protocol treasury account.
+    /// @notice Transfers forfeited reserved execution-bounty reservation into the protocol treasury account.
     function absorbReservedExecutionBounty(
         address sourceAccount,
         uint256 amountUsdc

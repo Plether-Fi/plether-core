@@ -8,9 +8,9 @@ import {ICfdVault} from "../interfaces/ICfdVault.sol";
 import {IOrderRouterErrors} from "../interfaces/IOrderRouterErrors.sol";
 import {IPletherOracle} from "../interfaces/IPletherOracle.sol";
 import {OracleFreshnessPolicyLib} from "../libraries/OracleFreshnessPolicyLib.sol";
-import {OrderEscrowAccounting} from "./OrderEscrowAccounting.sol";
+import {OrderReservationAccounting} from "./OrderReservationAccounting.sol";
 
-abstract contract OrderOracleExecution is OrderEscrowAccounting {
+abstract contract OrderOracleExecution is OrderReservationAccounting {
 
     struct RouterExecutionContext {
         bool oracleFrozen;
@@ -36,7 +36,7 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
         uint256[] memory _quantities,
         uint256[] memory _basePrices,
         bool[] memory _inversions
-    ) OrderEscrowAccounting(_engine) {
+    ) OrderReservationAccounting(_engine) {
         if (_engineLens == address(0)) {
             revert IOrderRouterErrors.OrderRouter__ZeroEngineLens();
         }

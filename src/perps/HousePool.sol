@@ -136,7 +136,6 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
     event FrozenLpFeesUpdated(uint256 seniorFeeBps, uint256 juniorFeeBps);
     event ExcessAccounted(uint256 amountUsdc, uint256 accountedAssetsUsdc);
     event ExcessSwept(address indexed recipient, uint256 amountUsdc);
-    event ProtocolBackingInflowAccounted(address indexed caller, uint256 amountUsdc, uint256 accountedAssetsUsdc);
     event ClaimantInflowAccounted(
         address indexed caller,
         ICfdVault.ClaimantInflowKind kind,
@@ -394,26 +393,6 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         }
         accountedAssets -= amount;
         USDC.safeTransfer(recipient, amount);
-    }
-
-    /// @notice Accounts legitimate non-LP protocol-recognized backing into canonical vault assets.
-    /// @dev Only the engine or settlement module may use this path. Router-sourced protocol fees
-    ///      must route to the treasury clearinghouse account instead. Unlike `accountExcess()`,
-    ///      this does not require raw excess to exist: it is the explicit accounting hook for
-    ///      non-fee protocol backing and may also be used to restore canonical accounting after a
-    ///      raw-balance shortfall has already reduced effective assets through
-    ///      `totalAssets() = min(raw, accounted)`.
-    function recordProtocolBackingInflow(
-        uint256 amount
-    ) external {
-        if (msg.sender != address(ENGINE) && msg.sender != ENGINE.settlementModule()) {
-            revert HousePool__Unauthorized();
-        }
-        if (amount == 0) {
-            return;
-        }
-        accountedAssets += amount;
-        emit ProtocolBackingInflowAccounted(msg.sender, amount, accountedAssets);
     }
 
     /// @notice Records claimant-owned value into the tranche claimant path.
