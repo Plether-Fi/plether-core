@@ -688,6 +688,9 @@ contract InvarCoinTest is Test {
         uint256 bobUsdcBefore = usdc.balanceOf(bob);
         uint256 bobBearBefore = bearToken.balanceOf(bob);
 
+        vm.expectEmit(true, true, false, false);
+        emit InvarCoin.LpWithdrawn(alice, bob, bal, 0, 0);
+
         vm.prank(alice);
         (uint256 usdcReturned, uint256 bearReturned) = ic.lpWithdraw(bal, 0, 0, bob);
 
