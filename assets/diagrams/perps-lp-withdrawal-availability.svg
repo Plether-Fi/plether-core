@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 853.325 1601.95" width="853.325" height="1601.95" style="--bg:#ffffff;--fg:#1f2328;--line:#9ca3af;--accent:#6b7280;--muted:#59636e;background:var(--bg)">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 821.1500000000001 1601.95" width="821.1500000000001" height="1601.95" style="--bg:#ffffff;--fg:#1f2328;--line:#9ca3af;--accent:#6b7280;--muted:#59636e;background:var(--bg)">
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap');
   text { font-family: 'Inter', system-ui, sans-serif; }
@@ -63,7 +63,7 @@
 <rect x="249.85000000000002" y="993.95" width="167.85000000000002" height="36" rx="18" ry="18" fill="#fee2e2" stroke="#dc2626" stroke-width="2px" />
 <rect x="441.70000000000005" y="993.95" width="210.75000000000003" height="36" rx="0" ry="0" fill="#e0f2fe" stroke="#0284c7" stroke-width="1.5px" />
 <rect x="484.6" y="1069.95" width="124.95" height="36" rx="0" ry="0" fill="#e0f2fe" stroke="#0284c7" stroke-width="1.5px" />
-<rect x="280.82500000000005" y="1145.95" width="532.5" height="36" rx="0" ry="0" fill="#e0f2fe" stroke="#0284c7" stroke-width="1.5px" />
+<rect x="313" y="1145.95" width="468.15000000000003" height="36" rx="0" ry="0" fill="#e0f2fe" stroke="#0284c7" stroke-width="1.5px" />
 <rect x="498.90000000000003" y="1221.95" width="96.35000000000001" height="36" rx="0" ry="0" fill="#e0f2fe" stroke="#0284c7" stroke-width="1.5px" />
 <rect x="391.65000000000003" y="1297.95" width="310.85" height="36" rx="0" ry="0" fill="#e0f2fe" stroke="#0284c7" stroke-width="1.5px" />
 <rect x="448.85" y="1373.95" width="196.45000000000002" height="36" rx="0" ry="0" fill="#e0f2fe" stroke="#0284c7" stroke-width="1.5px" />
@@ -78,7 +78,7 @@
 <text x="333.77500000000003" y="1011.95" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#991b1b">Blocked: stale mark</text>
 <text x="547.075" y="1011.95" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#0c4a6e">Build withdrawal snapshot</text>
 <text x="547.075" y="1087.95" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#0c4a6e">Reserved USDC</text>
-<text x="547.075" y="1163.95" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#0c4a6e">max liability + carry reserve + deferred liabilities + protocol fees</text>
+<text x="547.075" y="1163.95" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#0c4a6e">max liability + carry reserve + trader claims + protocol fees</text>
 <text x="547.075" y="1239.95" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#0c4a6e">Free USDC</text>
 <text x="547.075" y="1315.95" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#0c4a6e">net physical assets minus reserved USDC</text>
 <text x="547.075" y="1391.95" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#0c4a6e">Cap by tranche priority</text>

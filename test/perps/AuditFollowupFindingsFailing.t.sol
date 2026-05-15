@@ -127,7 +127,7 @@ contract AuditFollowupFindingsFailing_CloseSolvency is BasePerpTest {
         _open(newTraderAccount, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
     }
 
-    function test_C3_DeferredTraderCreditDoesNotRequireDegradedModeWithoutOpenLiability() public {
+    function test_C3_TraderClaimDoesNotRequireDegradedModeWithoutOpenLiability() public {
         address bullAccount = bullTrader;
 
         _fundTrader(bullTrader, 11_000e6);
@@ -139,10 +139,10 @@ contract AuditFollowupFindingsFailing_CloseSolvency is BasePerpTest {
 
         _close(bullAccount, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
 
-        assertGt(engine.deferredTraderCreditUsdc(bullAccount), 0, "Setup should create a deferred payout liability");
+        assertGt(engine.traderClaimBalanceUsdc(bullAccount), 0, "Setup should create a trader claim liability");
         assertFalse(
             engine.degradedMode(),
-            "A standalone deferred payout should not force degraded mode once bounded open liability is gone"
+            "A standalone trader claim should not force degraded mode once bounded open liability is gone"
         );
     }
 

@@ -611,21 +611,21 @@ contract PerpInvariantTest is BasePerpTest {
             "Protocol view fees must match accessor"
         );
         assertEq(
-            protocolView.totalDeferredTraderCreditUsdc,
-            engine.totalDeferredTraderCreditUsdc(),
-            "Protocol view trader deferred payouts must match storage"
+            protocolView.totalTraderClaimBalanceUsdc,
+            engine.totalTraderClaimBalanceUsdc(),
+            "Protocol view trader trader claims must match storage"
         );
     }
 
-    function invariant_WithdrawalReserveIncludesDeferredLiabilities() public view {
-        uint256 expectedReserved = _maxLiability() + engine.totalDeferredTraderCreditUsdc();
+    function invariant_WithdrawalReserveIncludesTraderClaimLiabilities() public view {
+        uint256 expectedReserved = _maxLiability() + engine.totalTraderClaimBalanceUsdc();
 
         expectedReserved += uint256(0);
 
         assertEq(
             _withdrawalReservedUsdc(),
             expectedReserved,
-            "Withdrawal reserve must include liabilities and deferred obligations"
+            "Withdrawal reserve must include liabilities and trader claim obligations"
         );
     }
 

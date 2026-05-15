@@ -213,7 +213,7 @@ contract AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees is BasePerp
         router.executeOrder(1, priceData);
 
         (uint256 size,,,,,,) = engine.positions(account);
-        assertEq(size, 0, "A profitable close should complete even when profit payout must be deferred");
+        assertEq(size, 0, "A profitable close should complete even when profit payout becomes a trader claim");
     }
 
     function test_M2_CloseCommitRequiresPrefundedKeeperBounty() public {

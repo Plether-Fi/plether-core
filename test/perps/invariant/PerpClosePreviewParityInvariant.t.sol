@@ -217,7 +217,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
         }
     }
 
-    function invariant_ImmediateDeferredSplitMatchesAdjustedCash() public view {
+    function invariant_ImmediateOrTraderClaimSplitMatchesAdjustedCash() public view {
         uint256 oraclePrice = _previewOraclePrice();
         uint256 poolDepthUsdc = housePool.totalAssets();
         (,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
@@ -254,21 +254,21 @@ contract PerpClosePreviewParityInvariantTest is Test {
     ) internal view {
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, sizeDelta, oraclePrice);
 
-        if (!preview.valid || (preview.immediatePayoutUsdc == 0 && preview.deferredTraderCreditUsdc == 0)) {
+        if (!preview.valid || (preview.immediatePayoutUsdc == 0 && preview.traderClaimBalanceUsdc == 0)) {
             return;
         }
 
         uint256 adjustedCash = housePool.totalAssets();
-        uint256 totalOwed = preview.immediatePayoutUsdc + preview.deferredTraderCreditUsdc;
+        uint256 totalOwed = preview.immediatePayoutUsdc + preview.traderClaimBalanceUsdc;
 
         if (preview.immediatePayoutUsdc > 0) {
             assertGe(adjustedCash, preview.immediatePayoutUsdc, "Post-carry HousePool cash must cover immediate payout");
-            assertEq(preview.deferredTraderCreditUsdc, 0, "Immediate payout excludes deferred payout");
+            assertEq(preview.traderClaimBalanceUsdc, 0, "Immediate payout excludes trader claim");
         }
 
-        if (preview.deferredTraderCreditUsdc > 0) {
-            assertEq(preview.immediatePayoutUsdc, 0, "Deferred payout excludes immediate payout");
-            assertLt(adjustedCash, totalOwed, "Deferred payout implies adjusted cash insufficient for full settlement");
+        if (preview.traderClaimBalanceUsdc > 0) {
+            assertEq(preview.immediatePayoutUsdc, 0, "Trader claim excludes immediate payout");
+            assertLt(adjustedCash, totalOwed, "Trader claim implies adjusted cash insufficient for full settlement");
         }
     }
 
@@ -286,19 +286,17 @@ contract PerpClosePreviewParityInvariantTest is Test {
         assertEq(actual.executionFeeUsdc, expected.executionFeeUsdc, "Close execution fee should match");
         assertEq(actual.freshTraderPayoutUsdc, expected.freshTraderPayoutUsdc, "Close fresh payout should match");
         assertEq(
-            actual.existingDeferredConsumedUsdc,
-            expected.existingDeferredConsumedUsdc,
-            "Close deferred consumption should match"
+            actual.existingTraderClaimConsumedUsdc,
+            expected.existingTraderClaimConsumedUsdc,
+            "Close trader claim consumption should match"
         );
         assertEq(
-            actual.existingDeferredRemainingUsdc,
-            expected.existingDeferredRemainingUsdc,
-            "Close deferred remainder should match"
+            actual.existingTraderClaimRemainingUsdc,
+            expected.existingTraderClaimRemainingUsdc,
+            "Close trader claim remainder should match"
         );
         assertEq(actual.immediatePayoutUsdc, expected.immediatePayoutUsdc, "Close immediate payout should match");
-        assertEq(
-            actual.deferredTraderCreditUsdc, expected.deferredTraderCreditUsdc, "Close deferred payout should match"
-        );
+        assertEq(actual.traderClaimBalanceUsdc, expected.traderClaimBalanceUsdc, "Close trader claim should match");
         assertEq(actual.seizedCollateralUsdc, expected.seizedCollateralUsdc, "Close seized collateral should match");
         assertEq(actual.badDebtUsdc, expected.badDebtUsdc, "Close bad debt should match");
         assertEq(actual.remainingSize, expected.remainingSize, "Close remaining size should match");

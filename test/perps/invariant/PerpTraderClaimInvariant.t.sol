@@ -2,13 +2,13 @@
 pragma solidity 0.8.33;
 
 import {CfdTypes} from "../../../src/perps/CfdTypes.sol";
-import {DeferredEngineViewTypes} from "../../../src/perps/interfaces/DeferredEngineViewTypes.sol";
+import {ClaimEngineViewTypes} from "../../../src/perps/interfaces/ClaimEngineViewTypes.sol";
 import {ICfdEngineTypes} from "../../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {CashPriorityLib} from "../../../src/perps/libraries/CashPriorityLib.sol";
 import {BasePerpInvariantTest} from "./BasePerpInvariantTest.sol";
 import {PerpAccountingHandler} from "./handlers/PerpAccountingHandler.sol";
 
-contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
+contract PerpTraderClaimInvariantTest is BasePerpInvariantTest {
 
     PerpAccountingHandler internal handler;
 
@@ -22,8 +22,8 @@ contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
         selectors[0] = handler.depositCollateral.selector;
         selectors[1] = handler.withdrawCollateral.selector;
         selectors[2] = handler.commitOpenOrder.selector;
-        selectors[3] = handler.createDeferredTraderCredit.selector;
-        selectors[4] = handler.claimDeferredTraderCredit.selector;
+        selectors[3] = handler.createTraderClaim.selector;
+        selectors[4] = handler.settleTraderClaim.selector;
         selectors[5] = handler.setPoolAssets.selector;
         selectors[6] = handler.fundHousePool.selector;
         selectors[7] = handler.liquidate.selector;
@@ -32,63 +32,50 @@ contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
         targetContract(address(handler));
     }
 
-    function invariant_DeferredCreditStatusMatchesEngineAndHousePoolLiquidity() public view {
-        uint256 totalDeferredTraderCreditUsdc;
+    function invariant_TraderClaimStatusMatchesEngineAndHousePoolLiquidity() public view {
+        uint256 totalTraderClaimBalanceUsdc;
         uint256 poolAssets = housePool.totalAssets();
-        uint256 totalDeferredTraderCreditUsdc_ = engine.totalDeferredTraderCreditUsdc();
+        uint256 totalTraderClaimBalanceUsdc_ = engine.totalTraderClaimBalanceUsdc();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
-            DeferredEngineViewTypes.DeferredCreditStatus memory status =
-                _deferredCreditStatus(account, address(handler));
-            uint256 deferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(account);
-            uint256 expectedTraderClaimableNow = CashPriorityLib.availableCashForDeferredBeneficiaryClaim(
-                poolAssets, totalDeferredTraderCreditUsdc_, deferredTraderCreditUsdc
+            ClaimEngineViewTypes.TraderClaimStatus memory status = _traderClaimStatus(account, address(handler));
+            uint256 traderClaimBalanceUsdc = engine.traderClaimBalanceUsdc(account);
+            uint256 expectedTraderClaimServiceableNow = CashPriorityLib.availableCashForClaimService(
+                poolAssets, totalTraderClaimBalanceUsdc_, traderClaimBalanceUsdc
             );
 
+            assertEq(status.traderClaimBalanceUsdc, traderClaimBalanceUsdc, "Trader claim status amount mismatch");
             assertEq(
-                status.deferredTraderCreditUsdc, deferredTraderCreditUsdc, "Deferred payout status amount mismatch"
-            );
-            assertEq(
-                status.traderPayoutClaimableNow,
-                deferredTraderCreditUsdc > 0 && expectedTraderClaimableNow > 0,
-                "Deferred payout claimability mismatch"
+                status.traderClaimServiceableNow,
+                traderClaimBalanceUsdc > 0 && expectedTraderClaimServiceableNow > 0,
+                "Trader claim serviceability mismatch"
             );
 
-            totalDeferredTraderCreditUsdc += deferredTraderCreditUsdc;
+            totalTraderClaimBalanceUsdc += traderClaimBalanceUsdc;
         }
 
-        assertEq(
-            totalDeferredTraderCreditUsdc, engine.totalDeferredTraderCreditUsdc(), "Total deferred payout mismatch"
-        );
+        assertEq(totalTraderClaimBalanceUsdc, engine.totalTraderClaimBalanceUsdc(), "Total trader claim mismatch");
     }
 
-    function invariant_GhostDeferredTraderCreditsRemainFullyModelDerived() public view {
-        uint256 ghostTotalDeferredTraderCreditUsdc;
+    function invariant_GhostTraderClaimsRemainFullyModelDerived() public view {
+        uint256 ghostTotalTraderClaimUsdc;
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
-            uint256 ghostDeferredTraderCreditUsdc = handler.deferredTraderCreditSnapshot(account);
-            uint256 liveDeferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(account);
+            uint256 ghostTraderClaimUsdc = handler.traderClaimSnapshot(account);
+            uint256 liveTraderClaimUsdc = engine.traderClaimBalanceUsdc(account);
 
-            assertEq(
-                ghostDeferredTraderCreditUsdc,
-                liveDeferredTraderCreditUsdc,
-                "Ghost deferred trader credit must match engine state"
-            );
-            ghostTotalDeferredTraderCreditUsdc += ghostDeferredTraderCreditUsdc;
+            assertEq(ghostTraderClaimUsdc, liveTraderClaimUsdc, "Ghost trader claim balance must match engine state");
+            ghostTotalTraderClaimUsdc += ghostTraderClaimUsdc;
         }
 
         assertEq(
-            handler.totalDeferredTraderCreditSnapshot(),
-            ghostTotalDeferredTraderCreditUsdc,
-            "Ghost deferred payout total must match tracked account sum"
+            handler.totalTraderClaimSnapshot(),
+            ghostTotalTraderClaimUsdc,
+            "Ghost trader claim total must match tracked account sum"
         );
-        assertEq(
-            engine.totalDeferredTraderCreditUsdc(),
-            ghostTotalDeferredTraderCreditUsdc,
-            "Engine deferred payout total mismatch"
-        );
+        assertEq(engine.totalTraderClaimBalanceUsdc(), ghostTotalTraderClaimUsdc, "Engine trader claim total mismatch");
     }
 
     function invariant_FullClosePreviewUsesAllOrNothingHousePoolLiquidityGating() public view {
@@ -106,21 +93,21 @@ contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
                 continue;
             }
 
-            uint256 totalPayoutUsdc = preview.immediatePayoutUsdc + preview.deferredTraderCreditUsdc;
+            uint256 totalPayoutUsdc = preview.immediatePayoutUsdc + preview.traderClaimBalanceUsdc;
             if (totalPayoutUsdc == 0) {
                 continue;
             }
 
             assertEq(
                 preview.immediatePayoutUsdc == 0,
-                preview.deferredTraderCreditUsdc > 0,
-                "Close preview must choose immediate or deferred payout"
+                preview.traderClaimBalanceUsdc > 0,
+                "Close preview must choose immediate or trader claim"
             );
             uint256 freeCashForFreshPayouts =
-                CashPriorityLib.reserveFreshPayouts(housePool.totalAssets(), engine.totalDeferredTraderCreditUsdc())
+                CashPriorityLib.reserveFreshPayouts(housePool.totalAssets(), engine.totalTraderClaimBalanceUsdc())
             .freeCashUsdc;
             if (freeCashForFreshPayouts >= totalPayoutUsdc) {
-                assertEq(preview.deferredTraderCreditUsdc, 0, "Close preview must not defer when HousePool is liquid");
+                assertEq(preview.traderClaimBalanceUsdc, 0, "Close preview must not defer when HousePool is liquid");
             } else {
                 assertEq(preview.immediatePayoutUsdc, 0, "Close preview must fully defer when HousePool is illiquid");
             }
@@ -133,11 +120,10 @@ contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
             ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, oraclePrice);
-            uint256 freshDeferredTraderCreditUsdc = preview.deferredTraderCreditUsdc
-                > preview.existingDeferredRemainingUsdc
-                ? preview.deferredTraderCreditUsdc - preview.existingDeferredRemainingUsdc
+            uint256 freshTraderClaimUsdc = preview.traderClaimBalanceUsdc > preview.existingTraderClaimRemainingUsdc
+                ? preview.traderClaimBalanceUsdc - preview.existingTraderClaimRemainingUsdc
                 : 0;
-            uint256 totalFreshPayoutUsdc = preview.immediatePayoutUsdc + freshDeferredTraderCreditUsdc;
+            uint256 totalFreshPayoutUsdc = preview.immediatePayoutUsdc + freshTraderClaimUsdc;
 
             if (totalFreshPayoutUsdc == 0) {
                 continue;
@@ -145,12 +131,12 @@ contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
 
             assertEq(
                 preview.immediatePayoutUsdc == 0,
-                freshDeferredTraderCreditUsdc > 0,
-                "Fresh liquidation payout must choose immediate or deferred settlement"
+                freshTraderClaimUsdc > 0,
+                "Fresh liquidation payout must choose immediate settlement or trader claim balance"
             );
             if (housePool.totalAssets() >= totalFreshPayoutUsdc) {
                 assertEq(
-                    freshDeferredTraderCreditUsdc,
+                    freshTraderClaimUsdc,
                     0,
                     "Liquidation preview must not defer the fresh payout when HousePool liquidity is sufficient"
                 );

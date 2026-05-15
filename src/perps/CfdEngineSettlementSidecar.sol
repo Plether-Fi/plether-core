@@ -101,7 +101,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
     }
 
     /// @notice Applies the live close/decrease settlement plan produced by the planner.
-    /// @dev Can record deferred trader credit, bad debt, and realized carry depending on the close result.
+    /// @dev Can record trader claims, bad debt, and realized carry depending on the close result.
     function executeClose(
         ICfdEngineSettlementHost host,
         CfdEnginePlanTypes.CloseDelta calldata delta,
@@ -124,7 +124,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         uint256 protocolFeeCreditedUsdc;
         if (delta.settlementType == CfdEnginePlanTypes.SettlementType.GAIN) {
             if (delta.freshTraderPayoutUsdc > 0) {
-                host.settlementRecordDeferredTraderPayout(delta.account, delta.freshTraderPayoutUsdc);
+                host.settlementRecordTraderClaim(delta.account, delta.freshTraderPayoutUsdc);
             }
             if (delta.pendingCarryUsdc > 0) {
                 IHousePool(host.pool())
@@ -146,8 +146,8 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
                     delta.deletePosition,
                     host.pool(),
                     host.protocolTreasury(),
-                    delta.executionFeeUsdc > delta.deferredFeeRecoveryUsdc
-                        ? delta.executionFeeUsdc - delta.deferredFeeRecoveryUsdc
+                    delta.executionFeeUsdc > delta.traderClaimFeeRecoveryUsdc
+                        ? delta.executionFeeUsdc - delta.traderClaimFeeRecoveryUsdc
                         : 0
                 );
             protocolFeeCreditedUsdc = cashCreditedProtocolFeeUsdc;
@@ -164,8 +164,8 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
             if (delta.syncMarginQueueAmount > 0) {
                 IOrderRouterAccounting(host.orderRouter()).syncMarginQueue(delta.account);
             }
-            if (delta.existingDeferredConsumedUsdc > 0) {
-                host.settlementConsumeDeferredTraderPayout(delta.account, delta.existingDeferredConsumedUsdc);
+            if (delta.existingTraderClaimConsumedUsdc > 0) {
+                host.settlementConsumeTraderClaim(delta.account, delta.existingTraderClaimConsumedUsdc);
             }
             if (delta.badDebtUsdc > 0) {
                 host.settlementAccumulateBadDebt(delta.badDebtUsdc);
@@ -242,11 +242,11 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         if (delta.syncMarginQueueAmount > 0) {
             IOrderRouterAccounting(host.orderRouter()).syncMarginQueue(delta.account);
         }
-        if (delta.existingDeferredConsumedUsdc > 0) {
-            host.settlementConsumeDeferredTraderPayout(delta.account, delta.existingDeferredConsumedUsdc);
+        if (delta.existingTraderClaimConsumedUsdc > 0) {
+            host.settlementConsumeTraderClaim(delta.account, delta.existingTraderClaimConsumedUsdc);
         }
         if (delta.freshTraderPayoutUsdc > 0) {
-            host.settlementRecordDeferredTraderPayout(delta.account, delta.freshTraderPayoutUsdc);
+            host.settlementRecordTraderClaim(delta.account, delta.freshTraderPayoutUsdc);
             if (delta.pendingCarryUsdc > 0) {
                 IHousePool(host.pool())
                     .recordClaimantInflow(
@@ -277,7 +277,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
 
         IHousePool pool = IHousePool(host.pool());
         CashPriorityLib.SeniorCashReservation memory reservation =
-            CashPriorityLib.reserveFreshPayouts(pool.totalAssets(), host.totalDeferredTraderCreditUsdc());
+            CashPriorityLib.reserveFreshPayouts(pool.totalAssets(), host.totalTraderClaimBalanceUsdc());
         uint256 topUpUsdc = poolFundedUsdc < reservation.freeCashUsdc ? poolFundedUsdc : reservation.freeCashUsdc;
         if (topUpUsdc == 0) {
             return;

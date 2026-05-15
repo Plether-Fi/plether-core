@@ -13,9 +13,9 @@ contract PerpGhostLedger {
 
     mapping(address => LiquidationSnapshot) internal liquidationSnapshots;
     mapping(address => uint256) internal committedMarginUsdc;
-    mapping(address => uint256) internal deferredTraderCreditUsdc;
+    mapping(address => uint256) internal traderClaimBalanceUsdc;
     uint256 internal totalTrackedCommittedMarginUsdc;
-    uint256 internal totalTrackedDeferredTraderCreditUsdc;
+    uint256 internal totalTrackedTraderClaimUsdc;
 
     error PerpGhostLedger__Unauthorized();
 
@@ -62,7 +62,7 @@ contract PerpGhostLedger {
         totalTrackedCommittedMarginUsdc -= amountUsdc;
     }
 
-    function increaseDeferredTraderCredit(
+    function increaseTraderClaim(
         address account,
         uint256 amountUsdc
     ) external {
@@ -70,11 +70,11 @@ contract PerpGhostLedger {
             revert PerpGhostLedger__Unauthorized();
         }
 
-        deferredTraderCreditUsdc[account] += amountUsdc;
-        totalTrackedDeferredTraderCreditUsdc += amountUsdc;
+        traderClaimBalanceUsdc[account] += amountUsdc;
+        totalTrackedTraderClaimUsdc += amountUsdc;
     }
 
-    function decreaseDeferredTraderCredit(
+    function decreaseTraderClaim(
         address account,
         uint256 amountUsdc
     ) external {
@@ -82,8 +82,8 @@ contract PerpGhostLedger {
             revert PerpGhostLedger__Unauthorized();
         }
 
-        deferredTraderCreditUsdc[account] -= amountUsdc;
-        totalTrackedDeferredTraderCreditUsdc -= amountUsdc;
+        traderClaimBalanceUsdc[account] -= amountUsdc;
+        totalTrackedTraderClaimUsdc -= amountUsdc;
     }
 
     function liquidationSnapshot(
@@ -98,18 +98,18 @@ contract PerpGhostLedger {
         return committedMarginUsdc[account];
     }
 
-    function deferredTraderCreditSnapshot(
+    function traderClaimSnapshot(
         address account
     ) external view returns (uint256) {
-        return deferredTraderCreditUsdc[account];
+        return traderClaimBalanceUsdc[account];
     }
 
     function totalCommittedMarginSnapshot() external view returns (uint256) {
         return totalTrackedCommittedMarginUsdc;
     }
 
-    function totalDeferredTraderCreditSnapshot() external view returns (uint256) {
-        return totalTrackedDeferredTraderCreditUsdc;
+    function totalTraderClaimSnapshot() external view returns (uint256) {
+        return totalTrackedTraderClaimUsdc;
     }
 
 }

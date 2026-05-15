@@ -340,32 +340,32 @@ contract GasProfileTest is Test {
         emit log_named_uint("09_addMargin", gas);
     }
 
-    // --- 10. claimDeferredTraderCredit ---
-    function test_gas_10_claimDeferredTraderCredit() public {
+    // --- 10. settleTraderClaim ---
+    function test_gas_10_settleTraderClaim() public {
         _depositToClearinghouse(alice, 11_000e6);
         _openPosition(alice, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
 
         address aliceAccount = _account(alice);
 
-        // Drain pool to force deferred payout
+        // Drain pool to force trader claim
         uint256 poolAssets = IERC20(usdc).balanceOf(address(pool));
         vm.prank(address(pool));
         IERC20(usdc).transfer(address(0xDEAD), poolAssets - 9000e6);
 
-        // Close at profit — payout gets deferred (use external call for clean timestamp reads)
+        // Close at profit; payout becomes a trader claim (use external call for clean timestamp reads)
         this._closeAtPrice(alice, CfdTypes.Side.BULL, 100_000e18, int64(80_000_000));
 
-        uint256 deferred = engine.deferredTraderCreditUsdc(aliceAccount);
-        require(deferred > 0, "Setup failed: no deferred trader credit");
+        uint256 traderClaim = engine.traderClaimBalanceUsdc(aliceAccount);
+        require(traderClaim > 0, "Setup failed: no trader claim balance");
 
         // Replenish pool so claim can succeed
-        _mintUsdc(address(pool), deferred);
+        _mintUsdc(address(pool), traderClaim);
 
         vm.prank(alice);
         uint256 g0 = gasleft();
-        engine.claimDeferredTraderCredit(aliceAccount);
+        engine.settleTraderClaim(aliceAccount);
         uint256 gas = g0 - gasleft();
-        emit log_named_uint("10_claimDeferredTraderCredit", gas);
+        emit log_named_uint("10_settleTraderClaim", gas);
     }
 
     // --- 11. clearinghouse.deposit ---

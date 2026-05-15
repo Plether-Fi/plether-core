@@ -6,26 +6,26 @@ import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 
-contract DeferredClaimsMatrixTest is BasePerpTest {
+contract TraderClaimsMatrixTest is BasePerpTest {
 
     using stdStorage for StdStorage;
 
-    function test_TraderDeferredClaim_RevertsWhenSingleClaimExceedsAvailablePoolCash() public {
+    function test_TraderClaim_RevertsWhenSingleClaimExceedsAvailablePoolCash() public {
         address trader = address(0xDC01);
         address account = trader;
         usdc.burn(address(pool), pool.totalAssets());
         usdc.mint(address(pool), 20e6);
 
-        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(address)").with_key(account)
+        stdstore.target(address(engine)).sig("traderClaimBalanceUsdc(address)").with_key(account)
             .checked_write(uint256(50e6));
-        stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(uint256(50e6));
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(uint256(50e6));
 
         vm.expectRevert(ICfdEngineTypes.CfdEngine__InsufficientPoolLiquidity.selector);
         vm.prank(trader);
-        engine.claimDeferredTraderCredit(account);
+        engine.settleTraderClaim(account);
 
         assertEq(
-            engine.deferredTraderCreditUsdc(account),
+            engine.traderClaimBalanceUsdc(account),
             50e6,
             "Trader claim should remain queued until the shortfall is cured"
         );

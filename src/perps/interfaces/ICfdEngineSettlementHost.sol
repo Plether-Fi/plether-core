@@ -10,7 +10,7 @@ interface ICfdEngineSettlementHost {
     function pool() external view returns (address);
     function orderRouter() external view returns (address);
     function protocolTreasury() external view returns (address);
-    function totalDeferredTraderCreditUsdc() external view returns (uint256);
+    function totalTraderClaimBalanceUsdc() external view returns (uint256);
 
     function settlementApplyCarryAndMark(
         uint256 newMarkPrice,
@@ -27,11 +27,11 @@ interface ICfdEngineSettlementHost {
         int256 openInterestDelta,
         int256 entryNotionalDelta
     ) external;
-    function settlementConsumeDeferredTraderPayout(
+    function settlementConsumeTraderClaim(
         address account,
         uint256 amountUsdc
     ) external;
-    function settlementRecordDeferredTraderPayout(
+    function settlementRecordTraderClaim(
         address account,
         uint256 amountUsdc
     ) external;

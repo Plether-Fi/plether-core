@@ -100,8 +100,8 @@ interface ICfdEngine is ICfdEngineTypes {
     /// @notice Protocol fees custodied by the treasury clearinghouse account (6 decimals).
     function protocolTreasuryBalanceUsdc() external view returns (uint256);
 
-    /// @notice Deferred trader credit still owed to beneficiaries.
-    function totalDeferredTraderCreditUsdc() external view returns (uint256);
+    /// @notice Trader claim balance still owed to beneficiaries.
+    function totalTraderClaimBalanceUsdc() external view returns (uint256);
 
     /// @notice Timestamp of the last mark price update
     function lastMarkTime() external view returns (uint64);

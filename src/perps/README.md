@@ -35,7 +35,7 @@ If you want the accounting model first, read [`ACCOUNTING_SPEC.md`](ACCOUNTING_S
 - Orders are binding once committed. Users cannot cancel queued orders.
 - Queue execution is FIFO from the global head.
 - LP-capital carry is used instead of side-to-side funding.
-- If the HousePool is short on cash, trader profits can become deferred balance claims instead of reverting the state transition; keeper bounties are funded from reserved trader margin inside the clearinghouse.
+- If the HousePool is short on cash, trader profits can become senior trader claims instead of reverting the state transition; keeper bounties are funded from reserved trader margin inside the clearinghouse.
 
 ### Units and accounts
 
@@ -120,13 +120,13 @@ Important details:
 - Close orders can still execute during genuine frozen-oracle windows using the last valid mark subject to the relaxed frozen-market rules.
 - Close-intent queue validation is account-local and bounded by the per-account pending-order queue.
 
-### Deferred trader credit
+### Trader claim balance
 
-Profitable closes and some liquidation residuals can create deferred trader credit if the HousePool cannot immediately fund them.
+Profitable closes and some liquidation residuals can create a trader claim balance if the HousePool cannot immediately fund them.
 
-- Deferred trader credit is tracked by beneficiary balance: `deferredTraderCreditUsdc[account]`.
-- There is no FIFO deferred-claim queue.
-- `claimDeferredTraderCredit(account)` is beneficiary-only and requires the caller to own `account`.
+- Trader claim balance is tracked by beneficiary balance: `traderClaimBalanceUsdc[account]`.
+- There is no FIFO trader-claim queue.
+- `settleTraderClaim(account)` is beneficiary-only and requires the caller to own `account`.
 - Claims can be partial if current HousePool cash is insufficient.
 - Claimed amounts are credited into `MarginClearinghouse`, not sent directly to the wallet.
 
@@ -138,7 +138,7 @@ Order and liquidation bounties are margin transfers inside `MarginClearinghouse`
 - Successful execution credits the keeper's clearinghouse settlement balance from the reservation.
 - Liquidation bounties are capped by liquidation-reachable collateral and credited directly to the keeper.
 
-Protocol fees settle into the treasury clearinghouse account only when they are cash-collected from trader settlement or when remaining free `HousePool` cash can fund a top-up after senior deferred claims and immediate trader payouts. The simplified custody model does not create deferred protocol-fee liabilities; uncredited fee portions stay in pool backing rather than becoming withdrawable treasury margin.
+Protocol fees settle into the treasury clearinghouse account only when they are cash-collected from trader settlement or when remaining free `HousePool` cash can fund a top-up after senior trader claims and immediate trader payouts. The simplified custody model does not create protocol-fee receivables; uncredited fee portions stay in pool backing rather than becoming withdrawable treasury margin.
 
 ## LP Lifecycle
 
@@ -242,14 +242,14 @@ Close and liquidation use the planner's canonical carry-adjusted settlement/equi
 
 Open-risk projection credits skew-reducing trade rebates into reachable collateral before the initial-margin check, so preview and execution do not conservatively reject rebate-backed but valid opens.
 
-### Deferred liabilities
+### Trader claim liabilities
 
 The system can complete terminal transitions even when immediate pool cash is insufficient.
 
-- Trader gains can become deferred trader credit.
+- Trader gains can become trader claim balances.
 - Keeper bounties are direct clearinghouse credits funded from trader margin and do not become vault liabilities.
-- Deferred trader credit is included in reserve and solvency accounting.
-- Deferred balances are beneficiary-based, not queue-based.
+- Trader claim balance is included in reserve and solvency accounting.
+- Trader claim balances are beneficiary-based, not queue-based.
 
 ### Conservative LP accounting
 
@@ -365,7 +365,7 @@ This is a containment latch, not a pause. The protocol still allows transitions 
 - The keeper bounty is proportional with a floor.
 - Liquidation does not compute a fresh VPI delta, but any negative accrued VPI rebate debt is clawed back before residual/bad-debt planning.
 - Residual trader value is preserved when positive.
-- Same-account deferred trader credit is not treated as liquidation-reachable collateral; it is only netted once as terminal settlement bookkeeping.
+- Same-account trader claim balance is not treated as liquidation-reachable collateral; it is only netted once as terminal settlement bookkeeping.
 - Bad debt is socialized to LP capital if losses exceed reachable collateral.
 - Voluntary closes on underwater positions seize what is reachable and let the HousePool absorb the shortfall rather than trapping the user in an impossible state.
 

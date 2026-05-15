@@ -28,8 +28,8 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
         selectors[4] = handler.executeNextOrderBatch.selector;
         selectors[5] = handler.executeNextOrderModelled.selector;
         selectors[6] = handler.liquidate.selector;
-        selectors[7] = handler.claimDeferredTraderCredit.selector;
-        selectors[8] = handler.createDeferredTraderCredit.selector;
+        selectors[7] = handler.settleTraderClaim.selector;
+        selectors[8] = handler.createTraderClaim.selector;
 
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
         targetContract(address(handler));
@@ -83,18 +83,18 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function invariant_DeferredClaimsRemainAccountIsolated() public view {
-        uint256 aggregateDeferredTraderCredits;
+    function invariant_TraderClaimsRemainAccountIsolated() public view {
+        uint256 aggregateTraderClaims;
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
             AccountLensViewTypes.AccountLedgerView memory ledger = engineAccountLens.getAccountLedgerView(account);
-            aggregateDeferredTraderCredits += ledger.deferredTraderCreditUsdc;
+            aggregateTraderClaims += ledger.traderClaimBalanceUsdc;
         }
 
         assertEq(
-            aggregateDeferredTraderCredits,
-            engine.totalDeferredTraderCreditUsdc(),
-            "Per-account deferred payouts must stay isolated and sum cleanly"
+            aggregateTraderClaims,
+            engine.totalTraderClaimBalanceUsdc(),
+            "Per-account trader claims must stay isolated and sum cleanly"
         );
     }
 

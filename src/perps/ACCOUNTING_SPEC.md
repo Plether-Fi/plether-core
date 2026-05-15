@@ -7,7 +7,7 @@ It is the source of truth for:
 - solvency,
 - LP withdrawal limits,
 - close and liquidation settlement,
-- deferred liabilities,
+- trader claim liabilities,
 - clearinghouse reservation treatment,
 - LP-capital carry.
 
@@ -28,7 +28,7 @@ The key rules are:
 2. Unrealized trader losses are not LP assets until they are physically realized.
 3. LP withdrawals are stricter than protocol solvency.
 4. Pending-order reservations are not free trader collateral.
-5. Realized shortfall must become either immediate seizure, deferred liability, or bad debt.
+5. Realized shortfall must become either immediate seizure, trader claim liability, or bad debt.
 6. A valid risk-reducing transition must not revert just to preserve pre-close solvency; the protocol contains the outcome with `degradedMode` instead.
 
 ## Canonical Quantities
@@ -112,7 +112,7 @@ freeUsdc = netPhysicalAssets - withdrawalReservedUsdc
 Where `withdrawalReservedUsdc` is built from the canonical reserve model, including at least:
 
 - bounded trader liability,
-- deferred trader credit,
+- trader claim balance,
 - clearinghouse-backed protocol treasury margin.
 
 Rule:
@@ -134,7 +134,7 @@ Question answered:
 Definition:
 
 - start from `netPhysicalAssets`,
-- subtract deferred liabilities and protocol-owned balances,
+- subtract trader claim liabilities and protocol-owned balances,
 - apply conservative unrealized MtM liability only,
 - do not book unrealized trader losses as assets.
 
@@ -162,7 +162,7 @@ Question answered:
 Rules:
 
 - use physically reachable clearinghouse collateral for generic views and withdraw checks,
-- same-account deferred trader credit is a separate explicit netting bucket rather than generic collateral,
+- same-account trader claim balance is a separate explicit netting bucket rather than generic collateral,
 - liquidation and close settlement must cap seizure and payout logic by actually reachable value,
 - pending-order reservations and execution bounty reserves must be handled explicitly rather than assumed to be free cash.
 
@@ -182,7 +182,7 @@ Key fields:
 - `maxLiabilityUsdc`
 - `supplementalReservedUsdc`: reserved extension slot for LP-withdrawal accounting; currently zero in the carry model
 - `unrealizedMtmLiabilityUsdc`
-- `deferredTraderCreditUsdc`
+- `traderClaimBalanceUsdc`
 - `markFreshnessRequired`
 - `maxMarkStaleness`
 
@@ -291,31 +291,31 @@ Rules:
 - carry does not pause when the oracle is stale or frozen,
 - both sides pay when they consume LP-backed capital,
 - pending carry reduces equity for guard and risk checks before realization,
-- basis-changing settlement credits must checkpoint carry even when physical collection is deferred,
+- basis-changing settlement credits must checkpoint carry even when physical collection remains pending,
 - carry is computed on clearinghouse deposit/withdraw using the pre-mutation reachable basis,
 - on deposit, realized carry may be collected from post-deposit settlement in the same transaction,
 - on withdraw, carry is realized before settlement balance is reduced,
 - liquidation does not have its own separate carry-realization path,
 - realized carry is booked as LP trading revenue.
 
-## Deferred Liabilities
+## Trader Claim Liabilities
 
 The protocol supports fail-soft terminal settlement.
 
-### Deferred trader credit
+### Trader claim balance
 
-- profitable closes and some liquidation residuals may create `deferredTraderCreditUsdc[account]`,
-- only the beneficiary account owner may call `claimDeferredTraderCredit(account)`,
+- profitable closes and some liquidation residuals may create `traderClaimBalanceUsdc[account]`,
+- only the beneficiary account owner may call `settleTraderClaim(account)`,
 - claims may be partial,
 - settlement is credited into `MarginClearinghouse`.
 
 Rules:
 
-- deferred trader liabilities are beneficiary-balance based, not FIFO queue based,
-- deferred trader liabilities are senior claims on pool cash,
-- deferred claim servicing is frozen entirely while physical pool cash is below aggregate deferred liabilities,
-- fresh payout funding, protocol fee top-ups, and deferred servicing must all agree on what pool cash is actually free,
-- protocol fee top-ups are subordinate to deferred claims and immediate trader payouts; any fee amount that cannot be cash-credited under this priority is not recorded as a deferred protocol liability.
+- trader claim liabilities are beneficiary-balance based, not FIFO queue based,
+- trader claim liabilities are senior claims on pool cash,
+- trader claim servicing is frozen entirely while physical pool cash is below aggregate trader claim liabilities,
+- fresh payout funding, protocol fee top-ups, and claim servicing must all agree on what pool cash is actually free,
+- protocol fee top-ups are subordinate to trader claims and immediate trader payouts; any fee amount that cannot be cash-credited under this priority is not recorded as a protocol fee receivable.
 
 ## Pending-Order Reservation Model
 
@@ -334,7 +334,7 @@ Rules:
 - reserved value is not free buying power,
 - releasing or consuming reservation must happen exactly once,
 - clearinghouse reservation records are the source of truth for committed trader margin,
-- execution bounty reserves are not LP cash and should not become a deferred pool liability bucket.
+- execution bounty reserves are not LP cash and should not become a pool liability bucket.
 
 ### Close-order bounty policy
 
@@ -384,7 +384,7 @@ Required properties:
 - `CfdEngine.protocolTreasuryBalanceUsdc()` reports the configured treasury account balance,
 - only cash-collected fees and free-cash-funded top-ups become treasury margin,
 - uncredited fee amounts are not withdrawable protocol inventory in the simplified treasury-margin model,
-- withdrawing treasury margin must not consume `HousePool` cash, deferred claims, or LP withdrawal reserves.
+- withdrawing treasury margin must not consume `HousePool` cash, trader claims, or LP withdrawal reserves.
 
 ### Liquidation settlement
 
@@ -415,7 +415,7 @@ Required property:
 Liquidation residuals must be modeled explicitly as:
 
 - settlement retained on-ledger in the clearinghouse,
-- existing deferred trader credit consumed / remaining,
+- existing trader claim balance consumed / remaining,
 - fresh trader payout created by the liquidation itself.
 
 This prevents overloading one residual bucket with multiple meanings.
@@ -526,7 +526,7 @@ The accounting system should preserve the following:
 
 ## Architecture Goal
 
-The system uses multiple conservative accounting kernels because different paths answer different questions: solvency, withdrawal availability, close settlement, liquidation planning, deferred liabilities, and clearinghouse reservations all need different boundaries.
+The system uses multiple conservative accounting kernels because different paths answer different questions: solvency, withdrawal availability, close settlement, liquidation planning, trader claim liabilities, and clearinghouse reservations all need different boundaries.
 
 Design rules:
 

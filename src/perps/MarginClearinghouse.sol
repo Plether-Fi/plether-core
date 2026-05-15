@@ -502,7 +502,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         _unlockMargin(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, amountUsdc);
     }
 
-    /// @notice Adjusts settlement USDC for realized PnL, deferred servicing, and rebates.
+    /// @notice Adjusts settlement USDC for realized PnL, claim servicing, and rebates.
     ///         Positive amounts credit the account; negative amounts debit it.
     /// @param account Account to settle
     /// @param amount Signed USDC delta: positive credits, negative debits (6 decimals)

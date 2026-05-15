@@ -98,7 +98,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
 
         IMarginClearinghouse.AccountUsdcBuckets memory bucketsBefore = clearinghouse.getAccountUsdcBuckets(account);
         uint256 settlementBefore = clearinghouse.balanceUsdc(account);
-        uint256 deferredBefore = engine.deferredTraderCreditUsdc(account);
+        uint256 traderClaimBefore = engine.traderClaimBalanceUsdc(account);
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(closePrice);
@@ -132,9 +132,9 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             "Close preview immediate payout should match live settlement delta"
         );
         assertEq(
-            engine.deferredTraderCreditUsdc(account) - deferredBefore,
-            preview.deferredTraderCreditUsdc,
-            "Close preview deferred payout should match live deferred payout delta"
+            engine.traderClaimBalanceUsdc(account) - traderClaimBefore,
+            preview.traderClaimBalanceUsdc,
+            "Close preview trader claim should match live trader claim delta"
         );
         assertEq(
             engine.accumulatedBadDebtUsdc() - badDebtBefore,
@@ -175,7 +175,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
 
         IMarginClearinghouse.AccountUsdcBuckets memory bucketsBefore = clearinghouse.getAccountUsdcBuckets(account);
         uint256 settlementBefore = clearinghouse.balanceUsdc(account);
-        uint256 deferredBefore = engine.deferredTraderCreditUsdc(account);
+        uint256 traderClaimBefore = engine.traderClaimBalanceUsdc(account);
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(closePrice);
@@ -211,9 +211,9 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             "Illiquid close preview immediate payout should match live settlement delta"
         );
         assertEq(
-            engine.deferredTraderCreditUsdc(account) - deferredBefore,
-            preview.deferredTraderCreditUsdc,
-            "Illiquid close preview deferred payout should match live deferred payout delta"
+            engine.traderClaimBalanceUsdc(account) - traderClaimBefore,
+            preview.traderClaimBalanceUsdc,
+            "Illiquid close preview trader claim should match live trader claim delta"
         );
         assertEq(
             engine.accumulatedBadDebtUsdc() - badDebtBefore,
@@ -245,7 +245,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(bearAccount, 50_000e18, 1e8);
         assertTrue(preview.valid, "Positive-carry partial close preview should remain valid");
 
-        uint256 deferredBefore = engine.deferredTraderCreditUsdc(bearAccount);
+        uint256 traderClaimBefore = engine.traderClaimBalanceUsdc(bearAccount);
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
 
         _close(bearAccount, CfdTypes.Side.BEAR, 50_000e18, 1e8);
@@ -256,9 +256,9 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             marginAfter, preview.remainingMargin, "Partial close preview remaining margin should match live execution"
         );
         assertEq(
-            engine.deferredTraderCreditUsdc(bearAccount) - deferredBefore,
-            preview.deferredTraderCreditUsdc,
-            "Partial close preview deferred payout should match live deferred payout delta"
+            engine.traderClaimBalanceUsdc(bearAccount) - traderClaimBefore,
+            preview.traderClaimBalanceUsdc,
+            "Partial close preview trader claim should match live trader claim delta"
         );
         assertEq(
             engine.accumulatedBadDebtUsdc() - badDebtBefore,
@@ -330,7 +330,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         vm.assume(preview.liquidatable);
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(KEEPER);
-        uint256 deferredBefore = engine.deferredTraderCreditUsdc(account);
+        uint256 traderClaimBefore = engine.traderClaimBalanceUsdc(account);
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
         IMarginClearinghouse.AccountUsdcBuckets memory bucketsBefore = clearinghouse.getAccountUsdcBuckets(account);
         bytes[] memory priceData = new bytes[](1);
@@ -356,9 +356,9 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             "Liquidation preview keeper bounty should match live clearinghouse credit"
         );
         assertEq(
-            engine.deferredTraderCreditUsdc(account) - deferredBefore,
-            preview.deferredTraderCreditUsdc,
-            "Liquidation preview deferred payout should match live deferred payout delta"
+            engine.traderClaimBalanceUsdc(account) - traderClaimBefore,
+            preview.traderClaimBalanceUsdc,
+            "Liquidation preview trader claim should match live trader claim delta"
         );
         assertEq(
             engine.accumulatedBadDebtUsdc() - badDebtBefore,
@@ -372,14 +372,14 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         );
         assertEq(
             preview.freshTraderPayoutUsdc,
-            preview.immediatePayoutUsdc + preview.deferredTraderCreditUsdc,
-            "Explicit fresh liquidation payout should equal total trader payout when no legacy deferred claim exists"
+            preview.immediatePayoutUsdc + preview.traderClaimBalanceUsdc,
+            "Explicit fresh liquidation payout should equal total trader payout when no legacy trader claim exists"
         );
         assertEq(
-            preview.existingDeferredConsumedUsdc, 0, "Fresh liquidation path should not consume legacy deferred payout"
+            preview.existingTraderClaimConsumedUsdc, 0, "Fresh liquidation path should not consume legacy trader claim"
         );
         assertEq(
-            preview.existingDeferredRemainingUsdc, 0, "Fresh liquidation path should not leave legacy deferred payout"
+            preview.existingTraderClaimRemainingUsdc, 0, "Fresh liquidation path should not leave legacy trader claim"
         );
     }
 
@@ -405,7 +405,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         vm.assume(preview.liquidatable);
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(KEEPER);
-        uint256 deferredBefore = engine.deferredTraderCreditUsdc(account);
+        uint256 traderClaimBefore = engine.traderClaimBalanceUsdc(account);
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
         IMarginClearinghouse.AccountUsdcBuckets memory bucketsBefore = clearinghouse.getAccountUsdcBuckets(account);
         bytes[] memory priceData = new bytes[](1);
@@ -435,9 +435,9 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             "Illiquid liquidation preview keeper bounty should match live clearinghouse credit"
         );
         assertEq(
-            engine.deferredTraderCreditUsdc(account) - deferredBefore,
-            preview.deferredTraderCreditUsdc,
-            "Illiquid liquidation preview deferred payout should match live deferred payout delta"
+            engine.traderClaimBalanceUsdc(account) - traderClaimBefore,
+            preview.traderClaimBalanceUsdc,
+            "Illiquid liquidation preview trader claim should match live trader claim delta"
         );
         assertEq(
             engine.accumulatedBadDebtUsdc() - badDebtBefore,
@@ -451,18 +451,18 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         );
         assertEq(
             preview.freshTraderPayoutUsdc,
-            preview.immediatePayoutUsdc + preview.deferredTraderCreditUsdc,
-            "Explicit fresh liquidation payout should equal total trader payout when no legacy deferred claim exists"
+            preview.immediatePayoutUsdc + preview.traderClaimBalanceUsdc,
+            "Explicit fresh liquidation payout should equal total trader payout when no legacy trader claim exists"
         );
         assertEq(
-            preview.existingDeferredConsumedUsdc,
+            preview.existingTraderClaimConsumedUsdc,
             0,
-            "Fresh illiquid liquidation path should not consume legacy deferred payout"
+            "Fresh illiquid liquidation path should not consume legacy trader claim"
         );
         assertEq(
-            preview.existingDeferredRemainingUsdc,
+            preview.existingTraderClaimRemainingUsdc,
             0,
-            "Fresh illiquid liquidation path should not leave legacy deferred payout"
+            "Fresh illiquid liquidation path should not leave legacy trader claim"
         );
     }
 
@@ -481,7 +481,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         AccountLensViewTypes.AccountLedgerSnapshot memory snapshotBefore =
             engineAccountLens.getAccountLedgerSnapshot(account);
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(KEEPER);
-        uint256 deferredBefore = engine.deferredTraderCreditUsdc(account);
+        uint256 traderClaimBefore = engine.traderClaimBalanceUsdc(account);
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(liquidationPrice);
@@ -500,9 +500,9 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             "Queued-reservation liquidation preview keeper bounty should match live outcome"
         );
         assertEq(
-            engine.deferredTraderCreditUsdc(account) - deferredBefore,
-            preview.deferredTraderCreditUsdc,
-            "Queued-reservation liquidation preview deferred payout should match live outcome"
+            engine.traderClaimBalanceUsdc(account) - traderClaimBefore,
+            preview.traderClaimBalanceUsdc,
+            "Queued-reservation liquidation preview trader claim should match live outcome"
         );
         assertEq(
             engine.accumulatedBadDebtUsdc() - badDebtBefore,

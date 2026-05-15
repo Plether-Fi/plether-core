@@ -13,7 +13,7 @@ import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {AccountLensViewTypes} from "../../src/perps/interfaces/AccountLensViewTypes.sol";
-import {DeferredEngineViewTypes} from "../../src/perps/interfaces/DeferredEngineViewTypes.sol";
+import {ClaimEngineViewTypes} from "../../src/perps/interfaces/ClaimEngineViewTypes.sol";
 import {HousePoolEngineViewTypes} from "../../src/perps/interfaces/HousePoolEngineViewTypes.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
 import {ICfdEngineAdminHost} from "../../src/perps/interfaces/ICfdEngineAdminHost.sol";
@@ -59,7 +59,7 @@ contract CfdEnginePlanLibHarness {
 
     function planLiquidation(
         uint256 settlementReachableUsdc,
-        uint256 deferredTraderCreditUsdc,
+        uint256 traderClaimBalanceUsdc,
         uint256 size,
         uint256 entryPrice,
         uint256 oraclePrice
@@ -88,8 +88,8 @@ contract CfdEnginePlanLibHarness {
             otherLockedMarginUsdc: 0,
             freeSettlementUsdc: settlementReachableUsdc
         });
-        snap.totalDeferredTraderCreditUsdc = deferredTraderCreditUsdc;
-        snap.deferredTraderCreditForAccount = deferredTraderCreditUsdc;
+        snap.totalTraderClaimBalanceUsdc = traderClaimBalanceUsdc;
+        snap.traderClaimBalanceForAccount = traderClaimBalanceUsdc;
         snap.capPrice = 2e8;
         snap.riskParams = CfdTypes.RiskParams({
             vpiFactor: 0,
@@ -107,7 +107,7 @@ contract CfdEnginePlanLibHarness {
 
     function planLiquidationWithCarry(
         uint256 settlementReachableUsdc,
-        uint256 deferredTraderCreditUsdc,
+        uint256 traderClaimBalanceUsdc,
         uint256 size,
         uint256 entryPrice,
         uint256 oraclePrice,
@@ -138,8 +138,8 @@ contract CfdEnginePlanLibHarness {
             otherLockedMarginUsdc: 0,
             freeSettlementUsdc: settlementReachableUsdc
         });
-        snap.totalDeferredTraderCreditUsdc = deferredTraderCreditUsdc;
-        snap.deferredTraderCreditForAccount = deferredTraderCreditUsdc;
+        snap.totalTraderClaimBalanceUsdc = traderClaimBalanceUsdc;
+        snap.traderClaimBalanceForAccount = traderClaimBalanceUsdc;
         snap.capPrice = 2e8;
         snap.riskParams = CfdTypes.RiskParams({
             vpiFactor: 0,
@@ -157,7 +157,7 @@ contract CfdEnginePlanLibHarness {
 
     function planLiquidationWithVpiAccrued(
         uint256 settlementReachableUsdc,
-        uint256 deferredTraderCreditUsdc,
+        uint256 traderClaimBalanceUsdc,
         uint256 size,
         uint256 entryPrice,
         uint256 oraclePrice,
@@ -187,8 +187,8 @@ contract CfdEnginePlanLibHarness {
             otherLockedMarginUsdc: 0,
             freeSettlementUsdc: settlementReachableUsdc
         });
-        snap.totalDeferredTraderCreditUsdc = deferredTraderCreditUsdc;
-        snap.deferredTraderCreditForAccount = deferredTraderCreditUsdc;
+        snap.totalTraderClaimBalanceUsdc = traderClaimBalanceUsdc;
+        snap.traderClaimBalanceForAccount = traderClaimBalanceUsdc;
         snap.capPrice = 2e8;
         snap.riskParams = CfdTypes.RiskParams({
             vpiFactor: 0,
@@ -667,7 +667,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(pool.excessAssets(), 0, "Trade-cost inflows should not remain quarantined as excess");
     }
 
-    function test_ProfitableClose_RecordsDeferredTraderCreditWhenPoolIlliquid() public {
+    function test_ProfitableClose_RecordsTraderClaimWhenPoolIlliquid() public {
         address account = address(0xD301);
         _fundTrader(address(0xD301), 11_000e6);
 
@@ -683,7 +683,7 @@ contract CfdEngineTest is BasePerpTest {
 
         (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Profitable close should still destroy the position");
-        assertGt(engine.deferredTraderCreditUsdc(account), 0, "Unpaid profit should be recorded as deferred payout");
+        assertGt(engine.traderClaimBalanceUsdc(account), 0, "Unpaid profit should be recorded as trader claim");
         assertEq(
             clearinghouse.balanceUsdc(account),
             clearinghouseBefore,
@@ -691,7 +691,7 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
-    function test_ProtocolFeeTopUp_DoesNotLeapfrogDeferredClaims() public {
+    function test_ProtocolFeeTopUp_DoesNotLeapfrogTraderClaims() public {
         address account = address(0xD30F);
         _fundTrader(account, 11_000e6);
 
@@ -705,8 +705,8 @@ contract CfdEngineTest is BasePerpTest {
 
         CfdEngine.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, closePrice);
         assertTrue(preview.valid, "Setup close preview should be valid");
-        assertEq(preview.immediatePayoutUsdc, 0, "Setup must defer the trader payout");
-        assertGt(preview.deferredTraderCreditUsdc, 0, "Setup must create a deferred senior claim");
+        assertEq(preview.immediatePayoutUsdc, 0, "Setup must record the trader payout as a claim");
+        assertGt(preview.traderClaimBalanceUsdc, 0, "Setup must create a trader claim");
         assertEq(pool.totalAssets(), executionFeeUsdc, "Setup leaves only the fee amount physically available");
 
         uint256 feesBefore = engine.protocolTreasuryBalanceUsdc();
@@ -727,8 +727,8 @@ contract CfdEngineTest is BasePerpTest {
 
         (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Close should still destroy the position");
-        assertGt(engine.deferredTraderCreditUsdc(account), 0, "Deferred senior claim should be recorded");
-        assertEq(engine.protocolTreasuryBalanceUsdc(), feesBefore, "Fee top-up must not leapfrog deferred claims");
+        assertGt(engine.traderClaimBalanceUsdc(account), 0, "Trader claim should be recorded");
+        assertEq(engine.protocolTreasuryBalanceUsdc(), feesBefore, "Fee top-up must not leapfrog trader claims");
     }
 
     function test_ProtocolFeeTopUp_PreviewPaysTraderWhenOnlyPayoutCashIsFree() public {
@@ -760,7 +760,7 @@ contract CfdEngineTest is BasePerpTest {
             "Setup cannot also fund the protocol fee top-up"
         );
         assertEq(preview.immediatePayoutUsdc, preview.freshTraderPayoutUsdc, "Preview should follow trader payout cash");
-        assertEq(preview.deferredTraderCreditUsdc, 0, "Preview should not defer when payout cash is free");
+        assertEq(preview.traderClaimBalanceUsdc, 0, "Preview should not defer when payout cash is free");
 
         uint256 feesBefore = engine.protocolTreasuryBalanceUsdc();
         CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(account);
@@ -801,8 +801,8 @@ contract CfdEngineTest is BasePerpTest {
         (uint256 size,,,,,,) = engine.positions(bearAccount);
         assertEq(size, 0, "Illiquid profitable close close should still destroy the position");
         assertEq(
-            engine.deferredTraderCreditUsdc(bearAccount),
-            preview.deferredTraderCreditUsdc,
+            engine.traderClaimBalanceUsdc(bearAccount),
+            preview.traderClaimBalanceUsdc,
             "Live close should match preview"
         );
     }
@@ -845,7 +845,7 @@ contract CfdEngineTest is BasePerpTest {
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 80_000_000);
         assertTrue(preview.valid, "Setup close preview should be valid");
         assertGt(preview.immediatePayoutUsdc, 0, "Profitable liquid close should pay immediately");
-        assertEq(preview.deferredTraderCreditUsdc, 0, "Liquid profitable close should not defer payout");
+        assertEq(preview.traderClaimBalanceUsdc, 0, "Liquid profitable close should not defer payout");
 
         CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(account);
         _close(account, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
@@ -854,7 +854,7 @@ contract CfdEngineTest is BasePerpTest {
         _assertClosePreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
     }
 
-    function test_CloseParity_DeferredProfitMatchesPreview() public {
+    function test_CloseParity_TraderClaimProfitMatchesPreview() public {
         address trader = address(0xD3A2);
         address account = trader;
         _fundTrader(trader, 11_000e6);
@@ -868,7 +868,7 @@ contract CfdEngineTest is BasePerpTest {
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 80_000_000);
         assertTrue(preview.valid, "Setup close preview should be valid");
         assertEq(preview.immediatePayoutUsdc, 0, "Illiquid profitable close should not pay immediately");
-        assertGt(preview.deferredTraderCreditUsdc, 0, "Illiquid profitable close should defer payout");
+        assertGt(preview.traderClaimBalanceUsdc, 0, "Illiquid profitable close should defer payout");
 
         CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(account);
         _close(account, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
@@ -887,7 +887,7 @@ contract CfdEngineTest is BasePerpTest {
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 10_000e18, 120_000_000);
         assertTrue(preview.valid, "Setup loss close preview should be valid");
         assertEq(preview.immediatePayoutUsdc, 0, "Loss-making close should not create immediate payout");
-        assertEq(preview.deferredTraderCreditUsdc, 0, "Loss-making close should not create deferred payout");
+        assertEq(preview.traderClaimBalanceUsdc, 0, "Loss-making close should not create trader claim");
         assertEq(preview.badDebtUsdc, 0, "Setup should keep the loss fully collateralized");
 
         CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(account);
@@ -897,7 +897,7 @@ contract CfdEngineTest is BasePerpTest {
         _assertClosePreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
     }
 
-    function test_ClaimDeferredTraderCredit_CreditsClearinghouseWhenLiquidityReturns() public {
+    function test_SettleTraderClaim_CreditsClearinghouseWhenLiquidityReturns() public {
         address trader = address(0xD302);
         address account = trader;
         _fundTrader(trader, 11_000e6);
@@ -910,32 +910,32 @@ contract CfdEngineTest is BasePerpTest {
 
         _close(account, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
 
-        uint256 deferred = engine.deferredTraderCreditUsdc(account);
-        assertGt(deferred, 0, "Setup should create a deferred payout");
+        uint256 traderClaim = engine.traderClaimBalanceUsdc(account);
+        assertGt(traderClaim, 0, "Setup should create a trader claim");
 
-        usdc.mint(address(pool), deferred);
+        usdc.mint(address(pool), traderClaim);
         uint256 clearinghouseBefore = clearinghouse.balanceUsdc(account);
 
         vm.prank(trader);
-        engine.claimDeferredTraderCredit(account);
+        engine.settleTraderClaim(account);
 
-        assertEq(engine.deferredTraderCreditUsdc(account), 0, "Claim should clear deferred payout state");
+        assertEq(engine.traderClaimBalanceUsdc(account), 0, "Claim should clear trader claim state");
         assertEq(
             clearinghouse.balanceUsdc(account),
-            clearinghouseBefore + deferred,
+            clearinghouseBefore + traderClaim,
             "Claim should credit the clearinghouse balance"
         );
     }
 
-    function test_ClaimDeferredTraderCredit_RealizesCarryBeforeCreditingSettlement() public {
+    function test_SettleTraderClaim_RealizesCarryBeforeCreditingSettlement() public {
         address trader = address(0xD30B);
         address account = trader;
         _fundTrader(trader, 20_000e6);
 
         _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
-        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(address)").with_key(account)
+        stdstore.target(address(engine)).sig("traderClaimBalanceUsdc(address)").with_key(account)
             .checked_write(uint256(5000e6));
-        stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(uint256(5000e6));
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(uint256(5000e6));
 
         vm.warp(block.timestamp + 30 days);
         vm.prank(address(router));
@@ -953,12 +953,12 @@ contract CfdEngineTest is BasePerpTest {
         uint256 poolAccountedBefore = pool.accountedAssets();
 
         vm.prank(trader);
-        engine.claimDeferredTraderCredit(account);
+        engine.settleTraderClaim(account);
 
         assertEq(
             clearinghouse.balanceUsdc(account),
             settlementBefore + 5000e6 - expectedCarry,
-            "Deferred payout claim should realize carry before crediting settlement"
+            "Trader claim settlement should realize carry before crediting settlement"
         );
         assertEq(
             pool.rawAssets(),
@@ -972,15 +972,15 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
-    function test_ClaimDeferredTraderCredit_UsesStoredMarkCarryCheckpointWhenMarkIsStale() public {
+    function test_SettleTraderClaim_UsesStoredMarkCarryCheckpointWhenMarkIsStale() public {
         address trader = address(0xD30C);
         address account = trader;
         _fundTrader(trader, 20_000e6);
 
         _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
-        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(address)").with_key(account)
+        stdstore.target(address(engine)).sig("traderClaimBalanceUsdc(address)").with_key(account)
             .checked_write(uint256(5000e6));
-        stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(uint256(5000e6));
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(uint256(5000e6));
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 30 days);
 
@@ -995,46 +995,46 @@ contract CfdEngineTest is BasePerpTest {
         usdc.mint(address(pool), 5000e6);
 
         vm.prank(trader);
-        engine.claimDeferredTraderCredit(account);
+        engine.settleTraderClaim(account);
 
-        assertEq(engine.deferredTraderCreditUsdc(account), 0, "Claim should clear deferred payout state");
+        assertEq(engine.traderClaimBalanceUsdc(account), 0, "Claim should clear trader claim state");
         assertEq(
             clearinghouse.balanceUsdc(account),
             settlementBefore + 5000e6 - expectedCarry,
-            "Stale deferred payout claim should checkpoint carry against the stored mark before crediting settlement"
+            "Stale trader claim settlement should checkpoint carry against the stored mark before crediting settlement"
         );
         assertEq(
             engine.getPositionLastCarryTimestamp(account),
             block.timestamp,
-            "Stale deferred payout claim should advance the carry clock after checkpointing carry"
+            "Stale trader claim settlement should advance the carry clock after checkpointing carry"
         );
         assertEq(
             engine.unsettledCarryUsdc(account),
             0,
-            "Stale deferred payout claim should not leave carry deferred once the claim-funded settlement can satisfy it"
+            "Stale trader claim settlement should not leave carry unpaid once the claim-funded settlement can satisfy it"
         );
     }
 
-    function test_DeferredClaimConsistency_TraderClaimPreservesOtherReservedCash() public {
+    function test_TraderClaimConsistency_PreservesOtherReservedCash() public {
         address trader = address(0xD30D1);
         address account = trader;
-        uint256 deferredTraderCredit = 5000e6;
+        uint256 traderClaim = 5000e6;
 
         _fundTrader(trader, 20_000e6);
         _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
-        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(address)").with_key(account)
-            .checked_write(deferredTraderCredit);
-        stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(deferredTraderCredit);
+        stdstore.target(address(engine)).sig("traderClaimBalanceUsdc(address)").with_key(account)
+            .checked_write(traderClaim);
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(traderClaim);
 
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory beforeSnapshot =
             engineProtocolLens.getProtocolAccountingSnapshot();
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
-        usdc.mint(address(pool), deferredTraderCredit);
+        usdc.mint(address(pool), traderClaim);
 
         vm.prank(trader);
-        engine.claimDeferredTraderCredit(account);
+        engine.settleTraderClaim(account);
 
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory afterSnapshot =
             engineProtocolLens.getProtocolAccountingSnapshot();
@@ -1042,15 +1042,15 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(
             afterSnapshot.protocolTreasuryBalanceUsdc,
             beforeSnapshot.protocolTreasuryBalanceUsdc,
-            "Trader deferred claim must not consume treasury fee balance"
+            "Trader trader claim must not consume treasury fee balance"
         );
         assertEq(
-            afterSnapshot.totalDeferredTraderCreditUsdc, 0, "Claim should extinguish the trader deferred liability"
+            afterSnapshot.totalTraderClaimBalanceUsdc, 0, "Claim should extinguish the trader trader claim liability"
         );
         assertEq(
             beforeSnapshot.withdrawalReservedUsdc - afterSnapshot.withdrawalReservedUsdc,
-            deferredTraderCredit,
-            "Withdrawal reserve should drop only by the trader deferred amount that was actually claimed"
+            traderClaim,
+            "Withdrawal reserve should drop only by the trader claim amount that was actually claimed"
         );
     }
 
@@ -1097,7 +1097,7 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
-    function test_ClaimDeferredTraderCredit_RevertsForNonOwner() public {
+    function test_SettleTraderClaim_RevertsForNonOwner() public {
         address trader = address(0xD307);
         address relayer = address(0xD308);
         address account = trader;
@@ -1111,15 +1111,15 @@ contract CfdEngineTest is BasePerpTest {
 
         _close(account, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
 
-        uint256 deferred = engine.deferredTraderCreditUsdc(account);
-        usdc.mint(address(pool), deferred);
+        uint256 traderClaim = engine.traderClaimBalanceUsdc(account);
+        usdc.mint(address(pool), traderClaim);
 
         vm.prank(relayer);
         vm.expectRevert(ICfdEngineTypes.CfdEngine__NotAccountOwner.selector);
-        engine.claimDeferredTraderCredit(account);
+        engine.settleTraderClaim(account);
     }
 
-    function test_ClaimDeferredTraderCredit_RevertsUntilDeferredLiabilitiesAreFullyCovered() public {
+    function test_SettleTraderClaim_RevertsUntilTraderClaimLiabilitiesAreFullyCovered() public {
         address trader = address(0xD306);
         address account = trader;
         _fundTrader(trader, 11_000e6);
@@ -1132,24 +1132,24 @@ contract CfdEngineTest is BasePerpTest {
 
         _close(account, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
 
-        uint256 deferred = engine.deferredTraderCreditUsdc(account);
-        assertGt(deferred, 0, "Setup should create a deferred payout");
+        uint256 traderClaim = engine.traderClaimBalanceUsdc(account);
+        assertGt(traderClaim, 0, "Setup should create a trader claim");
 
-        uint256 partialLiquidity = deferred / 2;
+        uint256 partialLiquidity = traderClaim / 2;
         usdc.mint(address(pool), partialLiquidity);
 
         vm.expectRevert(ICfdEngineTypes.CfdEngine__InsufficientPoolLiquidity.selector);
         vm.prank(trader);
-        engine.claimDeferredTraderCredit(account);
+        engine.settleTraderClaim(account);
 
         assertEq(
-            engine.deferredTraderCreditUsdc(account),
-            deferred,
-            "Deferred beneficiary should remain fully queued until aggregate deferred liabilities are fully covered"
+            engine.traderClaimBalanceUsdc(account),
+            traderClaim,
+            "Trader claimant should remain fully queued until aggregate trader claim liabilities are fully covered"
         );
     }
 
-    function test_ClaimDeferredTraderCredit_RevertsDuringAggregateShortfallEvenForLargestClaimant() public {
+    function test_SettleTraderClaim_RevertsDuringAggregateShortfallEvenForLargestClaimant() public {
         address trader = address(0xD309);
         address account = trader;
         _fundTrader(trader, 11_000e6);
@@ -1162,31 +1162,31 @@ contract CfdEngineTest is BasePerpTest {
 
         _close(account, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
 
-        uint256 deferred = engine.deferredTraderCreditUsdc(account);
-        assertGt(deferred, 0, "Setup should create a deferred trader credit");
+        uint256 traderClaim = engine.traderClaimBalanceUsdc(account);
+        assertGt(traderClaim, 0, "Setup should create a trader claim balance");
 
         vm.startPrank(address(pool));
         usdc.transfer(address(0xDEAD), pool.totalAssets());
         vm.stopPrank();
 
-        uint256 partialLiquidity = deferred / 2;
+        uint256 partialLiquidity = traderClaim / 2;
         usdc.mint(address(pool), partialLiquidity);
 
         vm.expectRevert(ICfdEngineTypes.CfdEngine__InsufficientPoolLiquidity.selector);
         vm.prank(trader);
-        engine.claimDeferredTraderCredit(account);
+        engine.settleTraderClaim(account);
 
-        assertEq(engine.deferredTraderCreditUsdc(account), deferred, "Head deferred payout should remain fully queued");
+        assertEq(engine.traderClaimBalanceUsdc(account), traderClaim, "Head trader claim should remain fully queued");
     }
 
-    function test_ClaimDeferredTraderCredit_RevertsWithoutLiquidityOrPayout() public {
+    function test_SettleTraderClaim_RevertsWithoutLiquidityOrPayout() public {
         address trader = address(0xD303);
         address account = trader;
         _fundTrader(trader, 11_000e6);
 
         vm.prank(trader);
-        vm.expectRevert(ICfdEngineTypes.CfdEngine__NoDeferredTraderCredit.selector);
-        engine.claimDeferredTraderCredit(account);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__NoTraderClaim.selector);
+        engine.settleTraderClaim(account);
 
         _open(account, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
 
@@ -1202,7 +1202,7 @@ contract CfdEngineTest is BasePerpTest {
 
         vm.prank(trader);
         vm.expectRevert(ICfdEngineTypes.CfdEngine__InsufficientPoolLiquidity.selector);
-        engine.claimDeferredTraderCredit(account);
+        engine.settleTraderClaim(account);
     }
 
     function test_NoSideCarryRealization_KeepsClearinghouseMarginInSync() public {
@@ -1366,9 +1366,9 @@ contract CfdEngineTest is BasePerpTest {
 
         uint256 fees = engine.protocolTreasuryBalanceUsdc();
         address trader = address(0xFEE2);
-        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(address)").with_key(trader)
+        stdstore.target(address(engine)).sig("traderClaimBalanceUsdc(address)").with_key(trader)
             .checked_write(uint256(25e6));
-        stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(uint256(25e6));
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(uint256(25e6));
 
         uint256 poolAssetsBeforeDrain = pool.totalAssets();
         vm.prank(address(pool));
@@ -1388,7 +1388,7 @@ contract CfdEngineTest is BasePerpTest {
         usdc.mint(address(pool), poolAssetsBeforeDrain);
     }
 
-    function test_TreasuryWithdrawal_ThenDeferredClaims_DrainsResidualCashWithoutDeadlock() public {
+    function test_TreasuryWithdrawal_ThenTraderClaims_DrainsResidualCashWithoutDeadlock() public {
         address trader = address(0xFEA1);
         address traderAccount = trader;
 
@@ -1396,9 +1396,9 @@ contract CfdEngineTest is BasePerpTest {
         usdc.mint(address(pool), 100e6);
 
         _fundProtocolTreasury(60e6);
-        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(address)").with_key(traderAccount)
+        stdstore.target(address(engine)).sig("traderClaimBalanceUsdc(address)").with_key(traderAccount)
             .checked_write(uint256(40e6));
-        stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(uint256(40e6));
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(uint256(40e6));
 
         address treasury = engine.protocolTreasury();
         uint256 treasuryBalanceBefore = usdc.balanceOf(treasury);
@@ -1410,18 +1410,16 @@ contract CfdEngineTest is BasePerpTest {
 
         uint256 traderSettlementBefore = clearinghouse.balanceUsdc(traderAccount);
         vm.prank(trader);
-        engine.claimDeferredTraderCredit(traderAccount);
+        engine.settleTraderClaim(traderAccount);
 
         assertEq(
             clearinghouse.balanceUsdc(traderAccount) - traderSettlementBefore,
             40e6,
-            "Trader should receive the first deferred claim ahead of remaining protocol fees"
+            "Trader should receive the first trader claim ahead of remaining protocol fees"
         );
-        assertEq(pool.totalAssets(), 60e6, "Trader claim should consume only its deferred vault cash");
-        assertEq(
-            engine.protocolTreasuryBalanceUsdc(), 0, "Servicing deferred claims must not affect treasury accounting"
-        );
-        assertEq(engine.deferredTraderCreditUsdc(traderAccount), 0, "Trader deferred balance should be fully consumed");
+        assertEq(pool.totalAssets(), 60e6, "Trader claim should consume only its reserved pool cash");
+        assertEq(engine.protocolTreasuryBalanceUsdc(), 0, "Servicing trader claims must not affect treasury accounting");
+        assertEq(engine.traderClaimBalanceUsdc(traderAccount), 0, "Trader claim balance should be fully consumed");
     }
 
     function test_ProtocolTreasury_AllowsPartialWithdrawal() public {
@@ -1849,7 +1847,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(viewData.terminalReachableUsdc, _terminalReachableUsdc(account));
         assertEq(viewData.accountEquityUsdc, clearinghouse.getAccountEquityUsdc(account));
         assertEq(viewData.freeBuyingPowerUsdc, clearinghouse.getFreeBuyingPowerUsdc(account));
-        assertEq(viewData.deferredTraderCreditUsdc, 0);
+        assertEq(viewData.traderClaimBalanceUsdc, 0);
     }
 
     function test_GetPositionView_ReturnsLivePositionState() public {
@@ -1871,7 +1869,7 @@ contract CfdEngineTest is BasePerpTest {
         assertGt(viewData.unrealizedPnlUsdc, 0);
     }
 
-    function test_GetPositionView_DoesNotCountDeferredTraderCreditAsPhysicalCollateral() public {
+    function test_GetPositionView_DoesNotCountTraderClaimAsPhysicalCollateral() public {
         address trader = address(0xAB1101);
         address account = trader;
         _fundTrader(trader, 5000e6);
@@ -1883,7 +1881,7 @@ contract CfdEngineTest is BasePerpTest {
         usdc.transfer(address(0xDEAD), poolAssets - closeExecutionFeeUsdc - 1);
 
         _close(account, CfdTypes.Side.BEAR, 5000e18, 120_000_000);
-        assertGt(engine.deferredTraderCreditUsdc(account), 0, "Setup must create deferred trader credit");
+        assertGt(engine.traderClaimBalanceUsdc(account), 0, "Setup must create a trader claim balance");
 
         PerpsViewTypes.PositionView memory viewData = _publicPosition(account);
         (, uint256 positionMargin,,,,,) = engine.positions(account);
@@ -1891,11 +1889,11 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(
             viewData.exists,
             true,
-            "Deferred trader credit should not hide the remaining open position from the public lens"
+            "Trader claim balance should not hide the remaining open position from the public lens"
         );
     }
 
-    function test_GetProtocolAccountingView_ReflectsDeferredLiabilities() public {
+    function test_GetProtocolAccountingView_ReflectsTraderClaimLiabilities() public {
         address trader = address(0xAB12);
         address account = trader;
         _fundTrader(trader, 11_000e6);
@@ -1912,7 +1910,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(viewData.poolAssetsUsdc, pool.totalAssets());
         assertEq(viewData.withdrawalReservedUsdc, _withdrawalReservedUsdc());
         assertEq(viewData.protocolTreasuryBalanceUsdc, engine.protocolTreasuryBalanceUsdc());
-        assertEq(viewData.totalDeferredTraderCreditUsdc, engine.totalDeferredTraderCreditUsdc());
+        assertEq(viewData.totalTraderClaimBalanceUsdc, engine.totalTraderClaimBalanceUsdc());
         assertEq(viewData.degradedMode, engine.degradedMode());
         assertEq(viewData.hasLiveLiability, (_maxLiability() > 0));
     }
@@ -1942,7 +1940,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(snapshot.withdrawalReservedUsdc, _withdrawalReservedUsdc());
         assertEq(snapshot.protocolTreasuryBalanceUsdc, engine.protocolTreasuryBalanceUsdc());
         assertEq(snapshot.accumulatedBadDebtUsdc, engine.accumulatedBadDebtUsdc());
-        assertEq(snapshot.totalDeferredTraderCreditUsdc, engine.totalDeferredTraderCreditUsdc());
+        assertEq(snapshot.totalTraderClaimBalanceUsdc, engine.totalTraderClaimBalanceUsdc());
         assertEq(snapshot.degradedMode, engine.degradedMode());
         assertEq(snapshot.hasLiveLiability, (_maxLiability() > 0));
         assertEq(snapshot.poolAssetsUsdc, viewData.poolAssetsUsdc);
@@ -1951,12 +1949,12 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(snapshot.withdrawalReservedUsdc, viewData.withdrawalReservedUsdc);
         assertEq(snapshot.freeUsdc, viewData.freeUsdc);
         assertEq(snapshot.protocolTreasuryBalanceUsdc, viewData.protocolTreasuryBalanceUsdc);
-        assertEq(snapshot.totalDeferredTraderCreditUsdc, viewData.totalDeferredTraderCreditUsdc);
+        assertEq(snapshot.totalTraderClaimBalanceUsdc, viewData.totalTraderClaimBalanceUsdc);
         assertEq(snapshot.degradedMode, viewData.degradedMode);
         assertEq(snapshot.hasLiveLiability, viewData.hasLiveLiability);
         assertEq(snapshot.netPhysicalAssetsUsdc, housePoolSnapshot.netPhysicalAssetsUsdc);
         assertEq(snapshot.maxLiabilityUsdc, housePoolSnapshot.maxLiabilityUsdc);
-        assertEq(snapshot.totalDeferredTraderCreditUsdc, housePoolSnapshot.deferredTraderCreditUsdc);
+        assertEq(snapshot.totalTraderClaimBalanceUsdc, housePoolSnapshot.traderClaimBalanceUsdc);
     }
 
     function test_ProtocolAccountingSnapshot_IgnoresUnaccountedPoolDonationUntilAccounted() public {
@@ -2023,7 +2021,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(ledgerView.otherLockedMarginUsdc, buckets.otherLockedMarginUsdc);
         assertEq(ledgerView.executionBountyReserveUsdc, reservation.executionBountyUsdc);
         assertEq(ledgerView.committedMarginUsdc, reservation.committedMarginUsdc);
-        assertEq(ledgerView.deferredTraderCreditUsdc, engine.deferredTraderCreditUsdc(account));
+        assertEq(ledgerView.traderClaimBalanceUsdc, engine.traderClaimBalanceUsdc(account));
         assertEq(ledgerView.pendingOrderCount, router.pendingOrderCounts(account));
     }
 
@@ -2053,7 +2051,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(snapshot.reservedSettlementBucketUsdc, lockedBuckets.reservedSettlementUsdc);
         assertEq(snapshot.executionBountyReserveUsdc, reservation.executionBountyUsdc);
         assertEq(snapshot.committedMarginUsdc, reservation.committedMarginUsdc);
-        assertEq(snapshot.deferredTraderCreditUsdc, collateralView.deferredTraderCreditUsdc);
+        assertEq(snapshot.traderClaimBalanceUsdc, collateralView.traderClaimBalanceUsdc);
         assertEq(snapshot.pendingOrderCount, reservation.pendingOrderCount);
         assertEq(snapshot.closeReachableUsdc, collateralView.closeReachableUsdc);
         assertEq(snapshot.terminalReachableUsdc, collateralView.terminalReachableUsdc);
@@ -2090,9 +2088,7 @@ contract CfdEngineTest is BasePerpTest {
             snapshot.unrealizedMtmLiabilityUsdc, _poolMtmAdjustment(), "Snapshot MtM liability must match accessor"
         );
         assertEq(
-            snapshot.deferredTraderCreditUsdc,
-            engine.totalDeferredTraderCreditUsdc(),
-            "Snapshot payout must match storage"
+            snapshot.traderClaimBalanceUsdc, engine.totalTraderClaimBalanceUsdc(), "Snapshot payout must match storage"
         );
         assertTrue(snapshot.markFreshnessRequired, "Open directional liability should require fresh marks");
         assertEq(
@@ -2147,7 +2143,7 @@ contract CfdEngineTest is BasePerpTest {
         assertFalse(engine.isFadWindow(), "Sunday 22:00:00 should end FAD");
     }
 
-    function test_PreviewClose_ReturnsDeferredAndImmediateSettlementBreakdown() public {
+    function test_PreviewClose_ReturnsClaimAndImmediateSettlementBreakdown() public {
         address trader = address(0xAB13);
         address account = trader;
         _fundTrader(trader, 11_000e6);
@@ -2156,7 +2152,7 @@ contract CfdEngineTest is BasePerpTest {
         ICfdEngineTypes.ClosePreview memory normalPreview = engineLens.previewClose(account, 100_000e18, 80_000_000);
         assertTrue(normalPreview.valid);
         assertGt(normalPreview.immediatePayoutUsdc, 0);
-        assertEq(normalPreview.deferredTraderCreditUsdc, 0);
+        assertEq(normalPreview.traderClaimBalanceUsdc, 0);
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
@@ -2165,7 +2161,7 @@ contract CfdEngineTest is BasePerpTest {
         ICfdEngineTypes.ClosePreview memory illiquidPreview = engineLens.previewClose(account, 100_000e18, 80_000_000);
         assertTrue(illiquidPreview.valid);
         assertEq(illiquidPreview.immediatePayoutUsdc, 0);
-        assertGt(illiquidPreview.deferredTraderCreditUsdc, 0);
+        assertGt(illiquidPreview.traderClaimBalanceUsdc, 0);
         assertEq(illiquidPreview.remainingSize, 0);
     }
 
@@ -2182,12 +2178,12 @@ contract CfdEngineTest is BasePerpTest {
 
         assertTrue(canonicalPreview.valid);
         assertGt(canonicalPreview.immediatePayoutUsdc, 0, "Live preview should reflect currently available pool cash");
-        assertEq(canonicalPreview.deferredTraderCreditUsdc, 0, "Live preview should not defer when cash is available");
+        assertEq(canonicalPreview.traderClaimBalanceUsdc, 0, "Live preview should not defer when cash is available");
         assertEq(canonicalDepth, pool.totalAssets(), "Setup should keep canonical depth unchanged");
 
         assertTrue(hypotheticalPreview.valid);
         assertEq(hypotheticalPreview.immediatePayoutUsdc, 0, "Hypothetical close should use caller-supplied pool cash");
-        assertGt(hypotheticalPreview.deferredTraderCreditUsdc, 0, "Low hypothetical cash should defer the payout");
+        assertGt(hypotheticalPreview.traderClaimBalanceUsdc, 0, "Low hypothetical cash should defer the payout");
     }
 
     function test_PreviewClose_TriggersDegradedModeMatchesLiveClose() public {
@@ -2400,9 +2396,9 @@ contract CfdEngineTest is BasePerpTest {
             "Preview payout should clamp to CAP_PRICE"
         );
         assertEq(
-            overCapPreview.deferredTraderCreditUsdc,
-            cappedPreview.deferredTraderCreditUsdc,
-            "Preview deferred payout should clamp to CAP_PRICE"
+            overCapPreview.traderClaimBalanceUsdc,
+            cappedPreview.traderClaimBalanceUsdc,
+            "Preview trader claim should clamp to CAP_PRICE"
         );
         assertEq(overCapPreview.badDebtUsdc, cappedPreview.badDebtUsdc, "Preview bad debt should clamp to CAP_PRICE");
     }
@@ -2422,7 +2418,7 @@ contract CfdEngineTest is BasePerpTest {
         assertLe(preview.keeperBountyUsdc, uint256(preview.equityUsdc));
     }
 
-    function test_PlanLiquidation_PositiveResidualAboveDeferredDoesNotUnderflow() public {
+    function test_PlanLiquidation_PositiveResidualAboveTraderClaimDoesNotUnderflow() public {
         CfdEnginePlanLibHarness harness = new CfdEnginePlanLibHarness();
 
         CfdEnginePlanTypes.LiquidationDelta memory delta =
@@ -2435,14 +2431,14 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(delta.residualUsdc, 8e6, "Residual should keep all positive PnL when no bounty is reachable");
         assertEq(delta.settlementRetainedUsdc, 0, "No settlement should remain when none is reachable");
         assertEq(
-            delta.existingDeferredConsumedUsdc,
+            delta.existingTraderClaimConsumedUsdc,
             0,
-            "Positive physical residual should not consume legacy deferred payout"
+            "Positive physical residual should not consume legacy trader claim"
         );
         assertEq(
-            delta.existingDeferredRemainingUsdc,
+            delta.existingTraderClaimRemainingUsdc,
             10e6,
-            "Legacy deferred payout should remain intact on positive residual"
+            "Legacy trader claim should remain intact on positive residual"
         );
         assertEq(delta.freshTraderPayoutUsdc, 8e6, "Only physical residual should become a fresh trader payout");
         assertEq(
@@ -2451,7 +2447,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(delta.badDebtUsdc, 0, "Positive residual should not create bad debt");
     }
 
-    function test_PlanLiquidation_NegativeResidualFullyConsumesLegacyDeferredWithoutReducingBadDebt() public {
+    function test_PlanLiquidation_NegativeResidualFullyConsumesExistingTraderClaimWithoutReducingBadDebt() public {
         CfdEnginePlanLibHarness harness = new CfdEnginePlanLibHarness();
 
         CfdEnginePlanTypes.LiquidationDelta memory delta =
@@ -2459,19 +2455,19 @@ contract CfdEngineTest is BasePerpTest {
 
         assertTrue(delta.liquidatable, "Setup must remain liquidatable");
         assertEq(delta.keeperBountyUsdc, 0, "Zero physically reachable collateral should cap the bounty at zero");
-        assertEq(delta.residualUsdc, -12e6, "Residual should be computed before any deferred-payout netting");
+        assertEq(delta.residualUsdc, -12e6, "Residual should be computed before any trader-claim netting");
         assertEq(
-            delta.existingDeferredConsumedUsdc,
+            delta.existingTraderClaimConsumedUsdc,
             10e6,
-            "Negative residual should consume legacy deferred payout only as terminal shortfall netting"
+            "Negative residual should consume legacy trader claim only as terminal shortfall netting"
         );
         assertEq(
-            delta.existingDeferredRemainingUsdc, 0, "No deferred payout should survive a negative residual wipeout"
+            delta.existingTraderClaimRemainingUsdc, 0, "No trader claim should survive a negative residual wipeout"
         );
-        assertEq(delta.badDebtUsdc, 2e6, "Bad debt should reflect only the shortfall left after deferred netting");
+        assertEq(delta.badDebtUsdc, 2e6, "Bad debt should reflect only the shortfall left after trader claim netting");
     }
 
-    function test_PreviewLiquidation_PreservesLegacyDeferredOnPositivePhysicalResidual() public {
+    function test_PreviewLiquidation_PreservesExistingTraderClaimOnPositivePhysicalResidual() public {
         address trader = address(0xAB14002);
         address account = trader;
         address keeper = address(0xAB14003);
@@ -2480,9 +2476,9 @@ contract CfdEngineTest is BasePerpTest {
 
         stdstore.target(address(clearinghouse)).sig("balanceUsdc(address)").with_key(account).checked_write(uint256(0));
 
-        stdstore.target(address(engine)).sig("deferredTraderCreditUsdc(address)").with_key(account)
+        stdstore.target(address(engine)).sig("traderClaimBalanceUsdc(address)").with_key(account)
             .checked_write(uint256(10e6));
-        stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(uint256(10e6));
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(uint256(10e6));
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
@@ -2497,22 +2493,22 @@ contract CfdEngineTest is BasePerpTest {
             preview.freshTraderPayoutUsdc, 30e6, "Preview should surface the current physical fresh liquidation payout"
         );
         assertEq(
-            preview.existingDeferredConsumedUsdc,
+            preview.existingTraderClaimConsumedUsdc,
             0,
-            "Positive physical residual should not consume legacy deferred payout"
+            "Positive physical residual should not consume legacy trader claim"
         );
         assertEq(
-            preview.existingDeferredRemainingUsdc, 10e6, "Preview should keep the legacy deferred claim outstanding"
+            preview.existingTraderClaimRemainingUsdc, 10e6, "Preview should keep the legacy trader claim outstanding"
         );
         assertEq(
             preview.immediatePayoutUsdc,
             0,
-            "Current preview should keep the physical payout deferred even when the legacy claim remains untouched"
+            "Current preview should keep the physical payout as a trader claim when the existing claim remains untouched"
         );
         assertEq(
-            preview.deferredTraderCreditUsdc,
+            preview.traderClaimBalanceUsdc,
             40e6,
-            "Deferred payout should reflect the untouched legacy claim plus the fresh deferred amount in the current preview model"
+            "Trader claim should reflect the untouched existing claim plus the fresh claim amount in the current preview model"
         );
         assertEq(preview.badDebtUsdc, 0, "Positive residual should not report bad debt");
 
@@ -2527,8 +2523,8 @@ contract CfdEngineTest is BasePerpTest {
         uint256 liveEffective = legacySpread > 0
             ? (postPayoutPoolAssets > uint256(legacySpread) ? postPayoutPoolAssets - uint256(legacySpread) : 0)
             : postPayoutPoolAssets + uint256(-legacySpread);
-        uint256 deferred = engine.totalDeferredTraderCreditUsdc();
-        liveEffective = liveEffective > deferred ? liveEffective - deferred : 0;
+        uint256 traderClaimTotal = engine.totalTraderClaimBalanceUsdc();
+        liveEffective = liveEffective > traderClaimTotal ? liveEffective - traderClaimTotal : 0;
 
         assertEq(
             clearinghouse.balanceUsdc(account) - settlementBefore,
@@ -2536,14 +2532,14 @@ contract CfdEngineTest is BasePerpTest {
             "Live settlement credit should match preview"
         );
         assertEq(
-            engine.deferredTraderCreditUsdc(account),
+            engine.traderClaimBalanceUsdc(account),
             40e6,
-            "Live liquidation should preserve the old deferred claim plus the fresh deferred amount"
+            "Live liquidation should preserve the old trader claim plus the fresh claim amount"
         );
         assertEq(
             preview.effectiveAssetsAfterUsdc,
             liveEffective,
-            "Preview solvency should use net deferred liabilities after consumption"
+            "Preview solvency should use net trader claim liabilities after consumption"
         );
     }
 
@@ -2591,18 +2587,17 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
-    function testFuzz_PlanLiquidation_PositiveResidualPreservesDeferredAndUsesOnlyPhysicalReachability(
+    function testFuzz_PlanLiquidation_PositiveResidualPreservesTraderClaimAndUsesOnlyPhysicalReachability(
         uint256 settlementReachableUsdc,
-        uint256 deferredTraderCreditUsdc
+        uint256 traderClaimBalanceUsdc
     ) public {
         CfdEnginePlanLibHarness harness = new CfdEnginePlanLibHarness();
 
         settlementReachableUsdc = bound(settlementReachableUsdc, 0, 20e6);
-        deferredTraderCreditUsdc = bound(deferredTraderCreditUsdc, 1, 20e6);
+        traderClaimBalanceUsdc = bound(traderClaimBalanceUsdc, 1, 20e6);
 
-        CfdEnginePlanTypes.LiquidationDelta memory delta = harness.planLiquidation(
-            settlementReachableUsdc, deferredTraderCreditUsdc, 2000e18, 99_600_000, 100_000_000
-        );
+        CfdEnginePlanTypes.LiquidationDelta memory delta =
+            harness.planLiquidation(settlementReachableUsdc, traderClaimBalanceUsdc, 2000e18, 99_600_000, 100_000_000);
 
         vm.assume(delta.liquidatable);
         vm.assume(delta.residualUsdc >= 0);
@@ -2610,7 +2605,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(
             delta.liquidationReachableCollateralUsdc,
             settlementReachableUsdc,
-            "Liquidation reachability must ignore legacy deferred payout"
+            "Liquidation reachability must ignore legacy trader claim"
         );
         assertEq(
             delta.liquidationState.reachableCollateralUsdc,
@@ -2618,54 +2613,54 @@ contract CfdEngineTest is BasePerpTest {
             "Keeper bounty state must use only physical reachability"
         );
         assertEq(
-            delta.existingDeferredConsumedUsdc, 0, "Positive physical residual must not consume legacy deferred payout"
+            delta.existingTraderClaimConsumedUsdc, 0, "Positive physical residual must not consume legacy trader claim"
         );
         assertEq(
-            delta.existingDeferredRemainingUsdc,
-            deferredTraderCreditUsdc,
-            "Positive physical residual must preserve the full legacy deferred payout"
+            delta.existingTraderClaimRemainingUsdc,
+            traderClaimBalanceUsdc,
+            "Positive physical residual must preserve the full legacy trader claim"
         );
         assertEq(delta.badDebtUsdc, 0, "Positive residual must not create bad debt");
     }
 
-    function testFuzz_PlanLiquidation_NegativeResidualNetsDeferredExactlyOnce(
+    function testFuzz_PlanLiquidation_NegativeResidualNetsTraderClaimExactlyOnce(
         uint256 settlementReachableUsdc,
-        uint256 deferredTraderCreditUsdc
+        uint256 traderClaimBalanceUsdc
     ) public {
         CfdEnginePlanLibHarness harness = new CfdEnginePlanLibHarness();
 
         settlementReachableUsdc = bound(settlementReachableUsdc, 0, 20e6);
-        deferredTraderCreditUsdc = bound(deferredTraderCreditUsdc, 1, 20e6);
+        traderClaimBalanceUsdc = bound(traderClaimBalanceUsdc, 1, 20e6);
 
         CfdEnginePlanTypes.LiquidationDelta memory delta =
-            harness.planLiquidation(settlementReachableUsdc, deferredTraderCreditUsdc, 2000e18, 99_600_000, 99_000_000);
+            harness.planLiquidation(settlementReachableUsdc, traderClaimBalanceUsdc, 2000e18, 99_600_000, 99_000_000);
 
         vm.assume(delta.liquidatable);
         vm.assume(delta.residualUsdc < 0);
 
-        uint256 expectedConsumed = deferredTraderCreditUsdc < delta.residualPlan.badDebtUsdc
-            ? deferredTraderCreditUsdc
+        uint256 expectedConsumed = traderClaimBalanceUsdc < delta.residualPlan.badDebtUsdc
+            ? traderClaimBalanceUsdc
             : delta.residualPlan.badDebtUsdc;
 
         assertEq(
             delta.liquidationReachableCollateralUsdc,
             settlementReachableUsdc,
-            "Liquidation reachability must ignore legacy deferred payout"
+            "Liquidation reachability must ignore legacy trader claim"
         );
         assertEq(
-            delta.existingDeferredConsumedUsdc,
+            delta.existingTraderClaimConsumedUsdc,
             expectedConsumed,
-            "Negative residual must net legacy deferred payout exactly once against terminal shortfall"
+            "Negative residual must net legacy trader claim exactly once against terminal shortfall"
         );
         assertEq(
-            delta.existingDeferredRemainingUsdc,
-            deferredTraderCreditUsdc - expectedConsumed,
-            "Deferred remainder must equal the unconsumed legacy claim"
+            delta.existingTraderClaimRemainingUsdc,
+            traderClaimBalanceUsdc - expectedConsumed,
+            "Trader claim remainder must equal the unconsumed existing claim"
         );
         assertEq(
             delta.badDebtUsdc,
             delta.residualPlan.badDebtUsdc - expectedConsumed,
-            "Bad debt must only reflect the shortfall left after deferred netting"
+            "Bad debt must only reflect the shortfall left after trader claim netting"
         );
     }
 
@@ -2870,7 +2865,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(interfacePreview.keeperBountyUsdc, contractPreview.keeperBountyUsdc);
         assertEq(interfacePreview.seizedCollateralUsdc, contractPreview.seizedCollateralUsdc);
         assertEq(interfacePreview.immediatePayoutUsdc, contractPreview.immediatePayoutUsdc);
-        assertEq(interfacePreview.deferredTraderCreditUsdc, contractPreview.deferredTraderCreditUsdc);
+        assertEq(interfacePreview.traderClaimBalanceUsdc, contractPreview.traderClaimBalanceUsdc);
         assertEq(interfacePreview.badDebtUsdc, contractPreview.badDebtUsdc);
         assertEq(interfacePreview.triggersDegradedMode, contractPreview.triggersDegradedMode);
         assertEq(interfacePreview.postOpDegradedMode, contractPreview.postOpDegradedMode);
@@ -2904,7 +2899,7 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
-    function test_LiquidationPreview_IlliquidDeferredTraderCreditMatchesLiveOutcome() public {
+    function test_LiquidationPreview_IlliquidTraderClaimMatchesLiveOutcome() public {
         address trader = address(0xAB1404);
         address keeper = address(0xAB1405);
         address account = trader;
@@ -2930,9 +2925,9 @@ contract CfdEngineTest is BasePerpTest {
         _assertLiquidationPreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
 
         assertEq(
-            engine.deferredTraderCreditUsdc(account),
-            preview.deferredTraderCreditUsdc,
-            "Illiquid liquidation preview should match live deferred trader credit"
+            engine.traderClaimBalanceUsdc(account),
+            preview.traderClaimBalanceUsdc,
+            "Illiquid liquidation preview should match live trader claim balance"
         );
         assertEq(observed.badDebtUsdc, preview.badDebtUsdc, "Illiquid liquidation preview should match live bad debt");
     }
@@ -2982,9 +2977,9 @@ contract CfdEngineTest is BasePerpTest {
         _assertLiquidationPreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
 
         assertEq(
-            engine.deferredTraderCreditUsdc(account),
-            preview.deferredTraderCreditUsdc,
-            "Preview deferred payout should match live liquidation after staged forfeiture"
+            engine.traderClaimBalanceUsdc(account),
+            preview.traderClaimBalanceUsdc,
+            "Preview trader claim should match live liquidation after staged forfeiture"
         );
         assertEq(
             observed.badDebtUsdc,
@@ -3038,7 +3033,7 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
-    function test_Liquidation_ConsumesDeferredTraderCreditBeforeRecordingBadDebt() public {
+    function test_Liquidation_ConsumesTraderClaimBeforeRecordingBadDebt() public {
         uint256 poolDepth = 1_000_000 * 1e6;
         address bullAccount = address(uint160(0xD221));
         address bearAccount = address(uint160(0xD222));
@@ -3061,8 +3056,8 @@ contract CfdEngineTest is BasePerpTest {
         usdc.transfer(address(0xDEAD), poolAssets - firstCloseExecutionFeeUsdc - 1);
 
         _closeAt(bearAccount, CfdTypes.Side.BEAR, 5000e18, 120_000_000, poolDepth, refreshTime);
-        uint256 deferredBefore = engine.deferredTraderCreditUsdc(bearAccount);
-        assertGt(deferredBefore, 0, "Setup must create deferred payout while keeping the position open");
+        uint256 traderClaimBefore = engine.traderClaimBalanceUsdc(bearAccount);
+        assertGt(traderClaimBefore, 0, "Setup must create trader claim while keeping the position open");
 
         uint256 reducedSettlement = clearinghouse.balanceUsdc(bearAccount) - 4700e6;
         stdstore.target(address(clearinghouse)).sig("balanceUsdc(address)").with_key(bearAccount)
@@ -3070,10 +3065,10 @@ contract CfdEngineTest is BasePerpTest {
 
         uint256 settlementReachableBefore = _terminalReachableUsdc(bearAccount);
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(bearAccount, 50_000_000);
-        assertTrue(preview.liquidatable, "Setup must produce a liquidatable position even after deferred payout credit");
+        assertTrue(preview.liquidatable, "Setup must produce a liquidatable position even after trader claim credit");
 
         int256 terminalResidual =
-            int256(settlementReachableBefore + deferredBefore) + preview.pnlUsdc - int256(preview.keeperBountyUsdc);
+            int256(settlementReachableBefore + traderClaimBefore) + preview.pnlUsdc - int256(preview.keeperBountyUsdc);
 
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
         bytes[] memory priceData = new bytes[](1);
@@ -3082,33 +3077,33 @@ contract CfdEngineTest is BasePerpTest {
         router.executeLiquidation(bearAccount, priceData);
 
         assertLt(
-            engine.deferredTraderCreditUsdc(bearAccount),
-            deferredBefore,
-            "Liquidation should consume deferred payout before socializing loss"
+            engine.traderClaimBalanceUsdc(bearAccount),
+            traderClaimBefore,
+            "Liquidation should consume trader claim before socializing loss"
         );
         assertEq(
-            engine.deferredTraderCreditUsdc(bearAccount),
-            preview.deferredTraderCreditUsdc,
-            "Preview should match remaining deferred payout after liquidation"
+            engine.traderClaimBalanceUsdc(bearAccount),
+            preview.traderClaimBalanceUsdc,
+            "Preview should match remaining trader claim after liquidation"
         );
         assertEq(
             engine.accumulatedBadDebtUsdc() - badDebtBefore,
             preview.badDebtUsdc,
-            "Bad debt should only reflect the post-deferred shortfall"
+            "Bad debt should only reflect the post-claim shortfall"
         );
         assertEq(
-            clearinghouse.balanceUsdc(bearAccount) + engine.deferredTraderCreditUsdc(bearAccount),
+            clearinghouse.balanceUsdc(bearAccount) + engine.traderClaimBalanceUsdc(bearAccount),
             _positivePart(terminalResidual),
-            "Terminal liquidation residual should equal retained settlement plus remaining deferred and immediate credit"
+            "Terminal liquidation residual should equal retained settlement plus remaining trader claim and immediate credit"
         );
         assertEq(
             engine.accumulatedBadDebtUsdc() - badDebtBefore,
             preview.badDebtUsdc,
-            "Terminal liquidation bad debt should align with the previewed deferred-credit-adjusted shortfall"
+            "Terminal liquidation bad debt should align with the previewed trader-claim-adjusted shortfall"
         );
     }
 
-    function test_Close_ConsumesDeferredTraderCreditBeforeRecordingBadDebt() public {
+    function test_Close_ConsumesTraderClaimBeforeRecordingBadDebt() public {
         uint256 poolDepth = 1_000_000 * 1e6;
         address bullAccount = address(uint160(0xD231));
         address bearAccount = address(uint160(0xD232));
@@ -3131,8 +3126,8 @@ contract CfdEngineTest is BasePerpTest {
         usdc.transfer(address(0xDEAD), poolAssets - setupCloseFeesUsdc - 1);
 
         _closeAt(bearAccount, CfdTypes.Side.BEAR, 5000e18, 120_000_000, poolDepth, refreshTime);
-        uint256 deferredBefore = engine.deferredTraderCreditUsdc(bearAccount);
-        assertGt(deferredBefore, 0, "Setup must create deferred payout while keeping the position open");
+        uint256 traderClaimBefore = engine.traderClaimBalanceUsdc(bearAccount);
+        assertGt(traderClaimBefore, 0, "Setup must create trader claim while keeping the position open");
 
         uint256 reducedSettlement = clearinghouse.balanceUsdc(bearAccount) - 4700e6;
         stdstore.target(address(clearinghouse)).sig("balanceUsdc(address)").with_key(bearAccount)
@@ -3141,14 +3136,14 @@ contract CfdEngineTest is BasePerpTest {
         ICfdEngineTypes.ClosePreview memory preview =
             engineLens.simulateClose(bearAccount, 5000e18, 80_000_000, poolDepth);
         assertGt(
-            preview.existingDeferredConsumedUsdc,
+            preview.existingTraderClaimConsumedUsdc,
             0,
-            "Close preview should seize legacy deferred payout before socializing bad debt"
+            "Close preview should seize legacy trader claim before socializing bad debt"
         );
         assertLt(
-            preview.existingDeferredRemainingUsdc,
-            deferredBefore,
-            "Close preview should show less deferred payout remaining after loss absorption"
+            preview.existingTraderClaimRemainingUsdc,
+            traderClaimBefore,
+            "Close preview should show less trader claim remaining after loss absorption"
         );
 
         CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(bearAccount);
@@ -3157,23 +3152,21 @@ contract CfdEngineTest is BasePerpTest {
         CloseParityObserved memory observed = _observeCloseParity(bearAccount, beforeSnapshot);
 
         assertEq(
-            engine.deferredTraderCreditUsdc(bearAccount),
-            observed.deferredTraderCreditUsdc,
-            "Live close should leave the same deferred payout remainder observed in settlement state"
+            engine.traderClaimBalanceUsdc(bearAccount),
+            observed.traderClaimBalanceUsdc,
+            "Live close should leave the same trader claim remainder observed in settlement state"
         );
         assertEq(
-            observed.badDebtUsdc,
-            preview.badDebtUsdc,
-            "Bad debt should only reflect the post-deferred shortfall on close"
+            observed.badDebtUsdc, preview.badDebtUsdc, "Bad debt should only reflect the post-claim shortfall on close"
         );
         assertEq(
-            preview.existingDeferredConsumedUsdc,
-            deferredBefore - preview.existingDeferredRemainingUsdc,
-            "Preview should expose the exact deferred payout consumed before socializing bad debt"
+            preview.existingTraderClaimConsumedUsdc,
+            traderClaimBefore - preview.existingTraderClaimRemainingUsdc,
+            "Preview should expose the exact trader claim consumed before socializing bad debt"
         );
     }
 
-    function test_Close_ConsumesDeferredTraderCreditBalancesWithoutQueueOrdering() public {
+    function test_Close_ConsumesTraderClaimBalancesWithoutQueueOrdering() public {
         uint256 poolDepth = 1_000_000 * 1e6;
         address bullAccount = address(uint160(0xD241));
         address bearAccount = address(uint160(0xD242));
@@ -3196,13 +3189,13 @@ contract CfdEngineTest is BasePerpTest {
         usdc.transfer(address(0xDEAD), poolAssets - setupCloseFeesUsdc - 1);
 
         _closeAt(bearAccount, CfdTypes.Side.BEAR, 5000e18, 120_000_000, poolDepth, refreshTime);
-        uint256 deferredBefore = engine.deferredTraderCreditUsdc(bearAccount);
-        assertGt(deferredBefore, 0, "Bear account should accrue deferred trader credit balance");
+        uint256 traderClaimBefore = engine.traderClaimBalanceUsdc(bearAccount);
+        assertGt(traderClaimBefore, 0, "Bear account should accrue trader claim balance");
 
         _closeAt(bearAccount, CfdTypes.Side.BEAR, 2500e18, 120_000_000, poolDepth, refreshTime);
-        uint256 deferredAfterAccrual = engine.deferredTraderCreditUsdc(bearAccount);
+        uint256 traderClaimAfterAccrual = engine.traderClaimBalanceUsdc(bearAccount);
         assertGe(
-            deferredAfterAccrual, deferredBefore, "Additional deferred payout should coalesce into the same balance"
+            traderClaimAfterAccrual, traderClaimBefore, "Additional trader claim should coalesce into the same balance"
         );
 
         uint256 reducedSettlement = clearinghouse.balanceUsdc(bearAccount) - 4700e6;
@@ -3211,13 +3204,13 @@ contract CfdEngineTest is BasePerpTest {
 
         _closeAt(bearAccount, CfdTypes.Side.BEAR, 2500e18, 80_000_000, poolDepth, refreshTime);
         assertLe(
-            engine.deferredTraderCreditUsdc(bearAccount),
-            deferredAfterAccrual,
-            "Consuming deferred trader credit should only reduce the tracked balance"
+            engine.traderClaimBalanceUsdc(bearAccount),
+            traderClaimAfterAccrual,
+            "Consuming trader claim balance should only reduce the tracked balance"
         );
     }
 
-    function test_DeferredTraderCredit_CoalescesPerAccountWithoutQueuePosition() public {
+    function test_TraderClaim_CoalescesPerAccountWithoutQueuePosition() public {
         uint256 poolDepth = 1_000_000 * 1e6;
         address bullAccount = address(uint160(0xD261));
         address bearAccount = address(uint160(0xD262));
@@ -3243,22 +3236,20 @@ contract CfdEngineTest is BasePerpTest {
         usdc.transfer(address(0xDEAD), poolAssets - setupCloseFeesUsdc - 1);
 
         _closeAt(bearAccount, CfdTypes.Side.BEAR, 5000e18, 120_000_000, poolDepth, refreshTime);
-        uint256 bearDeferredBefore = engine.deferredTraderCreditUsdc(bearAccount);
-        assertGt(
-            bearDeferredBefore, 0, "Initial deferred payout should create tracked deferred balance for bearAccount"
-        );
+        uint256 bearClaimBefore = engine.traderClaimBalanceUsdc(bearAccount);
+        assertGt(bearClaimBefore, 0, "Initial trader claim should create a tracked balance for bearAccount");
 
         _closeAt(laterAccount, CfdTypes.Side.BEAR, 5000e18, 120_000_000, poolDepth, refreshTime);
-        uint256 laterDeferred = engine.deferredTraderCreditUsdc(laterAccount);
-        assertGt(laterDeferred, 0, "Later claimant should also accrue deferred balance");
+        uint256 laterClaim = engine.traderClaimBalanceUsdc(laterAccount);
+        assertGt(laterClaim, 0, "Later claimant should also accrue a trader claim balance");
 
         _closeAt(bearAccount, CfdTypes.Side.BEAR, 2500e18, 120_000_000, poolDepth, refreshTime);
-        uint256 bearDeferredAfter = engine.deferredTraderCreditUsdc(bearAccount);
+        uint256 bearClaimAfter = engine.traderClaimBalanceUsdc(bearAccount);
 
-        assertGe(bearDeferredAfter, bearDeferredBefore, "Coalescing should not move the account behind later claimants");
+        assertGe(bearClaimAfter, bearClaimBefore, "Coalescing should not move the account behind later claimants");
     }
 
-    function test_Close_RecoversExecutionFeeShortfallFromExistingDeferredTraderCredit() public {
+    function test_Close_RecoversExecutionFeeShortfallFromExistingTraderClaim() public {
         uint256 poolDepth = 1_000_000 * 1e6;
         address bullAccount = address(uint160(0xD251));
         address bearAccount = address(uint160(0xD252));
@@ -3280,9 +3271,9 @@ contract CfdEngineTest is BasePerpTest {
         usdc.transfer(address(0xDEAD), poolAssets - firstCloseExecutionFeeUsdc - 1);
 
         _closeAt(bearAccount, CfdTypes.Side.BEAR, 5000e18, 120_000_000, poolDepth, refreshTime);
-        uint256 deferredBefore = engine.deferredTraderCreditUsdc(bearAccount);
+        uint256 traderClaimBefore = engine.traderClaimBalanceUsdc(bearAccount);
         assertGt(
-            deferredBefore, 1e6, "Setup must create legacy deferred payout large enough to cover the fee shortfall"
+            traderClaimBefore, 1e6, "Setup must create an existing trader claim large enough to cover the fee shortfall"
         );
 
         stdstore.target(address(clearinghouse)).sig("balanceUsdc(address)").with_key(bearAccount)
@@ -3297,9 +3288,7 @@ contract CfdEngineTest is BasePerpTest {
         uint256 nominalExecutionFeeUsdc = _engineExecutionFeeUsdc(5000e18, 1e8);
 
         assertEq(
-            preview.badDebtUsdc,
-            0,
-            "Deferred payout should prevent LP bad debt when close shortfall includes unpaid fees"
+            preview.badDebtUsdc, 0, "Trader claim should prevent LP bad debt when close shortfall includes unpaid fees"
         );
         assertEq(
             preview.executionFeeUsdc,
@@ -3307,9 +3296,9 @@ contract CfdEngineTest is BasePerpTest {
             "Preview should surface the direct execution fee collection required by the current accounting model"
         );
         assertGt(
-            preview.existingDeferredConsumedUsdc,
+            preview.existingTraderClaimConsumedUsdc,
             0,
-            "Deferred payout should still contribute to covering the close shortfall"
+            "Trader claim should still contribute to covering the close shortfall"
         );
 
         uint256 feesBefore = engine.protocolTreasuryBalanceUsdc();
@@ -3330,12 +3319,12 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(
             engine.protocolTreasuryBalanceUsdc(),
             feesBefore,
-            "Treasury fees should not consume cash reserved for remaining deferred claims"
+            "Treasury fees should not consume cash reserved for remaining trader claims"
         );
         assertEq(
-            engine.deferredTraderCreditUsdc(bearAccount),
-            preview.existingDeferredRemainingUsdc,
-            "Deferred payout should be consumed without routing reserved cash to treasury"
+            engine.traderClaimBalanceUsdc(bearAccount),
+            preview.existingTraderClaimRemainingUsdc,
+            "Trader claim should be consumed without routing reserved cash to treasury"
         );
     }
 
@@ -3452,7 +3441,7 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
-    function test_GetDeferredCreditStatus_ReflectsClaimability() public {
+    function test_GetTraderClaimStatus_ReflectsServiceability() public {
         address trader = address(0xAB15);
         address account = trader;
         _fundTrader(trader, 11_000e6);
@@ -3468,17 +3457,17 @@ contract CfdEngineTest is BasePerpTest {
         usdc.transfer(address(0xDEAD), pool.totalAssets());
         vm.stopPrank();
 
-        DeferredEngineViewTypes.DeferredCreditStatus memory statusBefore = _deferredCreditStatus(account, address(this));
-        assertGt(statusBefore.deferredTraderCreditUsdc, 0);
-        assertFalse(statusBefore.traderPayoutClaimableNow);
+        ClaimEngineViewTypes.TraderClaimStatus memory statusBefore = _traderClaimStatus(account, address(this));
+        assertGt(statusBefore.traderClaimBalanceUsdc, 0);
+        assertFalse(statusBefore.traderClaimServiceableNow);
 
-        usdc.mint(address(pool), statusBefore.deferredTraderCreditUsdc);
+        usdc.mint(address(pool), statusBefore.traderClaimBalanceUsdc);
 
-        DeferredEngineViewTypes.DeferredCreditStatus memory statusAfter = _deferredCreditStatus(account, address(this));
-        assertTrue(statusAfter.traderPayoutClaimableNow);
+        ClaimEngineViewTypes.TraderClaimStatus memory statusAfter = _traderClaimStatus(account, address(this));
+        assertTrue(statusAfter.traderClaimServiceableNow);
     }
 
-    function test_GetDeferredCreditStatus_ExposesClaimabilityWithoutHeadOrdering() public {
+    function test_GetTraderClaimStatus_ExposesServiceabilityWithoutHeadOrdering() public {
         address trader = address(0xAB16);
         address account = trader;
         _fundTrader(trader, 11_000e6);
@@ -3490,11 +3479,11 @@ contract CfdEngineTest is BasePerpTest {
 
         _close(account, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
 
-        uint256 deferred = engine.deferredTraderCreditUsdc(account);
-        usdc.mint(address(pool), deferred);
+        uint256 traderClaim = engine.traderClaimBalanceUsdc(account);
+        usdc.mint(address(pool), traderClaim);
 
-        DeferredEngineViewTypes.DeferredCreditStatus memory status = _deferredCreditStatus(account, address(0xAB17));
-        assertTrue(status.traderPayoutClaimableNow, "Deferred trader claim should be claimable under partial liquidity");
+        ClaimEngineViewTypes.TraderClaimStatus memory status = _traderClaimStatus(account, address(0xAB17));
+        assertTrue(status.traderClaimServiceableNow, "Trader claim should be serviceable under partial liquidity");
     }
 
     function test_CloseLoss_ConsumesQueuedCommittedMarginBeforeBadDebt() public {
@@ -4523,7 +4512,7 @@ contract CfdEngineTest is BasePerpTest {
         engine.checkWithdraw(account);
     }
 
-    function test_CheckWithdraw_DoesNotCountDeferredTraderCreditAsReachableCollateral() public {
+    function test_CheckWithdraw_DoesNotCountTraderClaimAsReachableCollateral() public {
         address trader = address(0x51581);
         address account = trader;
         _fundTrader(trader, 5000e6);
@@ -4535,7 +4524,7 @@ contract CfdEngineTest is BasePerpTest {
         usdc.transfer(address(0xDEAD), poolAssets - closeExecutionFeeUsdc - 1);
 
         _close(account, CfdTypes.Side.BEAR, 5000e18, 120_000_000);
-        assertGt(engine.deferredTraderCreditUsdc(account), 0, "Setup must create deferred trader credit");
+        assertGt(engine.traderClaimBalanceUsdc(account), 0, "Setup must create a trader claim balance");
 
         bytes4 expectedError = engine.degradedMode()
             ? ICfdEngineTypes.CfdEngine__DegradedMode.selector

@@ -2353,7 +2353,7 @@ contract OrderRouterPythTest is BasePerpTest {
         );
     }
 
-    function test_DeferredTraderCredit_CloseBehindPendingOpenIsRejected() public {
+    function test_TraderClaim_CloseBehindPendingOpenIsRejected() public {
         address account = alice;
 
         vm.startPrank(alice);

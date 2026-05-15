@@ -45,7 +45,7 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         );
     }
 
-    function test_FreshClosePayout_MustNotLeapfrogExistingDeferredClaims() public {
+    function test_FreshClosePayout_MustNotLeapfrogExistingTraderClaims() public {
         address aliceAccount = alice;
         address bobAccount = bob;
 
@@ -59,27 +59,27 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
 
         _close(aliceAccount, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
-        uint256 aliceDeferred = engine.deferredTraderCreditUsdc(aliceAccount);
-        assertGt(aliceDeferred, 0, "setup must create a deferred senior claim");
+        uint256 aliceClaim = engine.traderClaimBalanceUsdc(aliceAccount);
+        assertGt(aliceClaim, 0, "setup must create a trader claim");
 
-        usdc.mint(address(pool), aliceDeferred);
+        usdc.mint(address(pool), aliceClaim);
 
         uint256 bobSettlementBefore = clearinghouse.balanceUsdc(bobAccount);
         _close(bobAccount, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
 
         assertGt(
-            engine.deferredTraderCreditUsdc(bobAccount),
+            engine.traderClaimBalanceUsdc(bobAccount),
             0,
-            "new payout must defer while older deferred claims reserve cash"
+            "new payout must become a claim while older trader claims reserve cash"
         );
         assertEq(
             clearinghouse.balanceUsdc(bobAccount),
             bobSettlementBefore,
-            "fresh profitable close must not bypass older deferred claims via immediate payment"
+            "fresh profitable close must not bypass older trader claims via immediate payment"
         );
     }
 
-    function test_DeferredClaimability_ViewReportsTraderPath() public {
+    function test_TraderClaimStatus_ViewReportsTraderPath() public {
         address aliceAccount = alice;
         _fundTrader(alice, 11_000e6);
         _open(aliceAccount, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
@@ -89,18 +89,18 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
 
         _close(aliceAccount, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
-        uint256 deferredTraderCredit = engine.deferredTraderCreditUsdc(aliceAccount);
-        assertGt(deferredTraderCredit, 0, "setup must create a deferred payout");
+        uint256 traderClaim = engine.traderClaimBalanceUsdc(aliceAccount);
+        assertGt(traderClaim, 0, "setup must create a trader claim");
 
-        usdc.mint(address(pool), deferredTraderCredit);
+        usdc.mint(address(pool), traderClaim);
 
         assertTrue(
-            _deferredCreditStatus(aliceAccount, address(0)).traderPayoutClaimableNow,
-            "Trader claim should remain claimable when cash fully covers the trader credit"
+            _traderClaimStatus(aliceAccount, address(0)).traderClaimServiceableNow,
+            "Trader claim should remain serviceable when cash fully covers the claim balance"
         );
     }
 
-    function test_DeferredClaims_FreezeForAllClaimantsDuringAggregateShortfall() public {
+    function test_TraderClaims_FreezeForAllClaimantsDuringAggregateShortfall() public {
         address aliceAccount = alice;
         address bobAccount = bob;
 
@@ -116,32 +116,26 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         _close(aliceAccount, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
         _close(bobAccount, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
 
-        uint256 aliceDeferred = engine.deferredTraderCreditUsdc(aliceAccount);
-        uint256 bobDeferred = engine.deferredTraderCreditUsdc(bobAccount);
-        assertGt(aliceDeferred, 0, "setup must create oldest deferred claim");
-        assertGt(bobDeferred, 0, "setup must create second deferred claim");
+        uint256 aliceClaim = engine.traderClaimBalanceUsdc(aliceAccount);
+        uint256 bobClaim = engine.traderClaimBalanceUsdc(bobAccount);
+        assertGt(aliceClaim, 0, "setup must create oldest trader claim");
+        assertGt(bobClaim, 0, "setup must create second trader claim");
 
-        usdc.mint(address(pool), aliceDeferred / 2);
+        usdc.mint(address(pool), aliceClaim / 2);
 
         vm.expectRevert(ICfdEngineTypes.CfdEngine__InsufficientPoolLiquidity.selector);
         vm.prank(alice);
-        engine.claimDeferredTraderCredit(aliceAccount);
+        engine.settleTraderClaim(aliceAccount);
 
-        assertEq(
-            engine.deferredTraderCreditUsdc(aliceAccount), aliceDeferred, "Oldest deferred claim should remain frozen"
-        );
-        assertEq(
-            engine.deferredTraderCreditUsdc(bobAccount), bobDeferred, "Unclaimed later balance should remain unchanged"
-        );
+        assertEq(engine.traderClaimBalanceUsdc(aliceAccount), aliceClaim, "Oldest trader claim should remain frozen");
+        assertEq(engine.traderClaimBalanceUsdc(bobAccount), bobClaim, "Unclaimed later balance should remain unchanged");
 
-        usdc.mint(address(pool), bobDeferred / 2);
+        usdc.mint(address(pool), bobClaim / 2);
         vm.expectRevert(ICfdEngineTypes.CfdEngine__InsufficientPoolLiquidity.selector);
         vm.prank(bob);
-        engine.claimDeferredTraderCredit(bobAccount);
+        engine.settleTraderClaim(bobAccount);
 
-        assertEq(
-            engine.deferredTraderCreditUsdc(bobAccount), bobDeferred, "Later deferred claimant should remain frozen too"
-        );
+        assertEq(engine.traderClaimBalanceUsdc(bobAccount), bobClaim, "Later trader claimant should remain frozen too");
     }
 
 }

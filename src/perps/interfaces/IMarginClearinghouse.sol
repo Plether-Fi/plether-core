@@ -158,7 +158,7 @@ interface IMarginClearinghouse {
         address account,
         uint256 amountUsdc
     ) external;
-    /// @notice Adjusts settlement USDC for realized PnL, deferred-claim servicing, or rebates (+credit, -debit).
+    /// @notice Adjusts settlement USDC for realized PnL, trader claim settlement, or rebates (+credit, -debit).
     function settleUsdc(
         address account,
         int256 amount

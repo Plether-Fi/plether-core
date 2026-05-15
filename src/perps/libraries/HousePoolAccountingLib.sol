@@ -14,8 +14,8 @@ library HousePoolAccountingLib {
 
     struct ReconcileSnapshot {
         uint256 physicalAssets;
-        uint256 deferredLiabilities;
-        uint256 cashAfterDeferredLiabilities;
+        uint256 traderClaimLiabilities;
+        uint256 cashAfterTraderClaimLiabilities;
         uint256 mtm;
         uint256 distributable;
     }
@@ -30,7 +30,7 @@ library HousePoolAccountingLib {
     ) internal pure returns (WithdrawalSnapshot memory snapshot) {
         snapshot.physicalAssets = engineSnapshot.physicalAssetsUsdc;
         snapshot.maxLiability = engineSnapshot.maxLiabilityUsdc;
-        snapshot.reserved = engineSnapshot.maxLiabilityUsdc + engineSnapshot.deferredTraderCreditUsdc
+        snapshot.reserved = engineSnapshot.maxLiabilityUsdc + engineSnapshot.traderClaimBalanceUsdc
             + engineSnapshot.supplementalReservedUsdc;
         snapshot.freeUsdc =
             snapshot.physicalAssets > snapshot.reserved ? snapshot.physicalAssets - snapshot.reserved : 0;
@@ -40,13 +40,13 @@ library HousePoolAccountingLib {
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory engineSnapshot
     ) internal pure returns (ReconcileSnapshot memory snapshot) {
         snapshot.physicalAssets = engineSnapshot.physicalAssetsUsdc;
-        snapshot.deferredLiabilities = engineSnapshot.deferredTraderCreditUsdc;
-        snapshot.cashAfterDeferredLiabilities = engineSnapshot.physicalAssetsUsdc > snapshot.deferredLiabilities
-            ? engineSnapshot.physicalAssetsUsdc - snapshot.deferredLiabilities
+        snapshot.traderClaimLiabilities = engineSnapshot.traderClaimBalanceUsdc;
+        snapshot.cashAfterTraderClaimLiabilities = engineSnapshot.physicalAssetsUsdc > snapshot.traderClaimLiabilities
+            ? engineSnapshot.physicalAssetsUsdc - snapshot.traderClaimLiabilities
             : 0;
         snapshot.mtm = engineSnapshot.unrealizedMtmLiabilityUsdc;
-        snapshot.distributable = snapshot.cashAfterDeferredLiabilities > snapshot.mtm
-            ? snapshot.cashAfterDeferredLiabilities - snapshot.mtm
+        snapshot.distributable = snapshot.cashAfterTraderClaimLiabilities > snapshot.mtm
+            ? snapshot.cashAfterTraderClaimLiabilities - snapshot.mtm
             : 0;
     }
 

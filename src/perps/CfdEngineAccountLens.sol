@@ -50,7 +50,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
             : 0;
         viewData.accountEquityUsdc = engineContract.clearinghouse().getAccountEquityUsdc(account);
         viewData.freeBuyingPowerUsdc = engineContract.clearinghouse().getFreeBuyingPowerUsdc(account);
-        viewData.deferredTraderCreditUsdc = engineContract.deferredTraderCreditUsdc(account);
+        viewData.traderClaimBalanceUsdc = engineContract.traderClaimBalanceUsdc(account);
     }
 
     /// @notice Returns the current withdrawable USDC for an account under engine-side guards.
@@ -133,7 +133,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         return imrHeadroomUsdc < withdrawableUsdc ? imrHeadroomUsdc : withdrawableUsdc;
     }
 
-    /// @notice Returns a compact accounting split for account custody, reservation, and deferred balances.
+    /// @notice Returns a compact accounting split for account custody, reservation, and trader claims.
     function getAccountLedgerView(
         address account
     ) external view returns (AccountLensViewTypes.AccountLedgerView memory viewData) {
@@ -144,7 +144,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         viewData.otherLockedMarginUsdc = snapshot.otherLockedMarginUsdc;
         viewData.executionBountyReserveUsdc = snapshot.executionBountyReserveUsdc;
         viewData.committedMarginUsdc = snapshot.committedMarginUsdc;
-        viewData.deferredTraderCreditUsdc = snapshot.deferredTraderCreditUsdc;
+        viewData.traderClaimBalanceUsdc = snapshot.traderClaimBalanceUsdc;
         viewData.pendingOrderCount = snapshot.pendingOrderCount;
     }
 
@@ -174,7 +174,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         snapshot.reservedSettlementBucketUsdc = lockedBuckets.reservedSettlementUsdc;
         snapshot.executionBountyReserveUsdc = reservation.executionBountyUsdc;
         snapshot.committedMarginUsdc = reservation.committedMarginUsdc;
-        snapshot.deferredTraderCreditUsdc = engineContract.deferredTraderCreditUsdc(account);
+        snapshot.traderClaimBalanceUsdc = engineContract.traderClaimBalanceUsdc(account);
         snapshot.pendingOrderCount = reservation.pendingOrderCount;
         snapshot.closeReachableUsdc = buckets.freeSettlementUsdc;
         uint256 reservationExcludedSettlementUsdc = buckets.settlementBalanceUsdc > reservation.executionBountyUsdc

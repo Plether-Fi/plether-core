@@ -9,7 +9,7 @@ library HousePoolEngineViewTypes {
         uint256 maxLiabilityUsdc;
         uint256 supplementalReservedUsdc;
         uint256 unrealizedMtmLiabilityUsdc;
-        uint256 deferredTraderCreditUsdc;
+        uint256 traderClaimBalanceUsdc;
         bool markFreshnessRequired;
         uint256 maxMarkStaleness;
     }

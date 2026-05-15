@@ -36,10 +36,10 @@ contract HousePoolTest is BasePerpTest {
         pool.accountExcess();
     }
 
-    function _setTotalDeferredTraderCredit(
+    function _setTotalTraderClaim(
         uint256 amount
     ) internal {
-        stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(amount);
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(amount);
     }
 
     function _enterFrozenWindow() internal {
@@ -701,21 +701,21 @@ contract HousePoolTest is BasePerpTest {
         assertEq(maxSeniorWithdraw, 10_000e6, "Projected credited senior assets must remain withdrawable in preview");
     }
 
-    function test_PendingRecapitalization_CapsAgainstDeferredLiabilitiesAndCarriesResidual() public {
+    function test_PendingRecapitalization_CapsAgainstTraderClaimLiabilitiesAndCarriesResidual() public {
         usdc.burn(address(pool), pool.totalAssets());
         vm.prank(address(juniorVault));
         pool.reconcile();
 
         uint256 pendingAmount = 100_000e6;
-        uint256 deferredLiability = 50_040e6;
-        uint256 settleableAmount = pendingAmount - deferredLiability;
+        uint256 traderClaimLiability = 50_040e6;
+        uint256 settleableAmount = pendingAmount - traderClaimLiability;
 
         usdc.mint(address(pool), pendingAmount);
         vm.prank(address(engine));
         pool.recordClaimantInflow(
             pendingAmount, IHousePool.ClaimantInflowKind.Recapitalization, IHousePool.ClaimantInflowCashMode.CashArrived
         );
-        _setTotalDeferredTraderCredit(deferredLiability);
+        _setTotalTraderClaim(traderClaimLiability);
 
         (uint256 pendingSenior,, uint256 maxSeniorWithdraw,) = pool.getPendingTrancheState();
         assertEq(pendingSenior, settleableAmount, "Preview should only credit liability-adjusted recap assets");
@@ -726,16 +726,18 @@ contract HousePoolTest is BasePerpTest {
 
         assertEq(pool.seniorPrincipal(), settleableAmount, "Live reconcile should apply only the settleable recap");
         assertEq(pool.seniorHighWaterMark(), pendingAmount, "Residual recap should preserve senior's recovery target");
-        assertEq(pool.pendingRecapitalizationUsdc(), deferredLiability, "Unsettled recap must remain pending");
+        assertEq(pool.pendingRecapitalizationUsdc(), traderClaimLiability, "Unsettled recap must remain pending");
         assertEq(pool.pendingTradingRevenueUsdc(), 0);
 
         IHousePool.PoolLiquidityView memory viewData = pool.getPoolLiquidityView();
         assertEq(viewData.seniorPrincipalUsdc, settleableAmount, "Liquidity view should not overstate senior NAV");
-        assertEq(viewData.pendingRecapitalizationUsdc, deferredLiability, "Liquidity view should expose residual recap");
+        assertEq(
+            viewData.pendingRecapitalizationUsdc, traderClaimLiability, "Liquidity view should expose residual recap"
+        );
         assertEq(viewData.freeUsdc, 0, "Residual pending recap should reserve remaining free liquidity");
         assertEq(pool.getMaxSeniorWithdraw(), 0, "Residual pending recap should reserve senior withdrawals");
 
-        _setTotalDeferredTraderCredit(0);
+        _setTotalTraderClaim(0);
         vm.prank(address(seniorVault));
         pool.reconcile();
 
@@ -744,21 +746,21 @@ contract HousePoolTest is BasePerpTest {
         assertEq(pool.unassignedAssets(), 0, "Settled recap should keep senior restoration out of unassigned assets");
     }
 
-    function test_PendingRevenue_CapsAgainstDeferredLiabilitiesAndCarriesResidual() public {
+    function test_PendingRevenue_CapsAgainstTraderClaimLiabilitiesAndCarriesResidual() public {
         usdc.burn(address(pool), pool.totalAssets());
         vm.prank(address(juniorVault));
         pool.reconcile();
 
         uint256 pendingAmount = 100_000e6;
-        uint256 deferredLiability = 50_040e6;
-        uint256 settleableAmount = pendingAmount - deferredLiability;
+        uint256 traderClaimLiability = 50_040e6;
+        uint256 settleableAmount = pendingAmount - traderClaimLiability;
 
         usdc.mint(address(pool), pendingAmount);
         vm.prank(address(engine));
         pool.recordClaimantInflow(
             pendingAmount, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.CashArrived
         );
-        _setTotalDeferredTraderCredit(deferredLiability);
+        _setTotalTraderClaim(traderClaimLiability);
 
         (uint256 pendingSenior, uint256 pendingJunior,, uint256 maxJuniorWithdraw) = pool.getPendingTrancheState();
         assertEq(pendingSenior, SEEDED_SENIOR, "Preview should restore seeded senior first");
@@ -770,10 +772,10 @@ contract HousePoolTest is BasePerpTest {
 
         assertEq(pool.seniorPrincipal(), SEEDED_SENIOR, "Live reconcile should restore seeded senior first");
         assertEq(pool.juniorPrincipal(), settleableAmount - SEEDED_SENIOR, "Live reconcile should cap revenue credit");
-        assertEq(pool.pendingTradingRevenueUsdc(), deferredLiability, "Unsettled revenue must remain pending");
+        assertEq(pool.pendingTradingRevenueUsdc(), traderClaimLiability, "Unsettled revenue must remain pending");
         assertFalse(pool.canAcceptTrancheDeposits(false), "Residual pending revenue should keep deposits shut");
 
-        _setTotalDeferredTraderCredit(0);
+        _setTotalTraderClaim(0);
         vm.prank(address(juniorVault));
         pool.reconcile();
 

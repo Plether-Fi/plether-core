@@ -307,7 +307,7 @@ const perpsLpWithdrawalAvailability = `graph TD
     G3 -->|No| B3([Blocked: stale mark])
     G3 -->|Yes| SNAP[Build withdrawal snapshot]
     SNAP --> RES[Reserved USDC]
-    RES --> RES2[max liability + carry reserve + deferred liabilities + protocol fees]
+    RES --> RES2[max liability + carry reserve + trader claims + protocol fees]
     RES2 --> FREE[Free USDC]
     FREE --> FREE2[net physical assets minus reserved USDC]
     FREE2 --> CAP[Cap by tranche priority]
@@ -327,7 +327,7 @@ const perpsInternalArchitecture = `graph TD
     EN -->|Settle, seize, classify liabilities| MC
     EN -->|Account protocol, revenue, recap inflows| HP[HousePool]
     HP -->|Mint / burn shares| TV[TrancheVaults]
-    HP -->|Queue unpaid trader payouts + liquidation bounties| DF[Deferred Claim Queue]
+    HP -->|Record unpaid trader payouts| TC[Trader Claim Balances]
     HP -->|Segregate non-LP fees| PF(Protocol Fees)
     HP -->|Hold exceptional ownership gap| UA(Unassigned / Excess Assets)
 
@@ -339,7 +339,7 @@ const perpsInternalArchitecture = `graph TD
     class U user
     class MC,OR,EN,HP,TV contract
     class PF,UA token
-    class DF external
+    class TC external
     class MCN,ORN,ENN,HPN desc
 ${classes}`;
 

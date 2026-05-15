@@ -13,7 +13,7 @@ import {MarginClearinghouse} from "../../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../../src/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "../../../src/perps/OrderRouterAdmin.sol";
 import {PerpsPublicLens} from "../../../src/perps/PerpsPublicLens.sol";
-import {DeferredEngineViewTypes} from "../../../src/perps/interfaces/DeferredEngineViewTypes.sol";
+import {ClaimEngineViewTypes} from "../../../src/perps/interfaces/ClaimEngineViewTypes.sol";
 import {IOrderRouterAccounting} from "../../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {PerpsViewTypes} from "../../../src/perps/interfaces/PerpsViewTypes.sol";
 import {MockPyth} from "../../mocks/MockPyth.sol";
@@ -203,15 +203,15 @@ abstract contract BasePerpInvariantTest is Test {
         return (notionalUsdc * requiredBps) / 10_000;
     }
 
-    function _deferredCreditStatus(
+    function _traderClaimStatus(
         address account,
         address keeper
-    ) internal view returns (DeferredEngineViewTypes.DeferredCreditStatus memory status) {
-        uint256 deferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(account);
+    ) internal view returns (ClaimEngineViewTypes.TraderClaimStatus memory status) {
+        uint256 traderClaimBalanceUsdc = engine.traderClaimBalanceUsdc(account);
         bool anyLiquidity = housePool.totalAssets() > 0;
 
-        status.deferredTraderCreditUsdc = deferredTraderCreditUsdc;
-        status.traderPayoutClaimableNow = deferredTraderCreditUsdc > 0 && anyLiquidity;
+        status.traderClaimBalanceUsdc = traderClaimBalanceUsdc;
+        status.traderClaimServiceableNow = traderClaimBalanceUsdc > 0 && anyLiquidity;
         keeper;
     }
 
