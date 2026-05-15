@@ -7,6 +7,8 @@ import {ICfdEngineSettlementHost} from "./ICfdEngineSettlementHost.sol";
 
 interface ICfdEngineSettlementSidecar {
 
+    function ENGINE() external view returns (address);
+
     function executeOpen(
         ICfdEngineSettlementHost host,
         CfdEnginePlanTypes.OpenDelta calldata delta,

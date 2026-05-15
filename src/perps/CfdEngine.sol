@@ -239,6 +239,16 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         if (address(planner) != address(0) || address(settlementSidecar) != address(0) || admin != address(0)) {
             revert CfdEngine__DependenciesAlreadySet();
         }
+        if (settlementSidecar_.code.length == 0) {
+            revert CfdEngine__InvalidSettlementSidecar();
+        }
+        try ICfdEngineSettlementSidecar(settlementSidecar_).ENGINE() returns (address settlementEngine) {
+            if (settlementEngine != address(this)) {
+                revert CfdEngine__InvalidSettlementSidecar();
+            }
+        } catch {
+            revert CfdEngine__InvalidSettlementSidecar();
+        }
         planner = ICfdEnginePlanner(planner_);
         settlementSidecar = ICfdEngineSettlementSidecar(settlementSidecar_);
         admin = admin_;

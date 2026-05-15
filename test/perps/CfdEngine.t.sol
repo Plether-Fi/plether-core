@@ -1784,6 +1784,51 @@ contract CfdEngineTest is BasePerpTest {
         sidecar.executeClose(ICfdEngineSettlementHost(address(engine)), delta, position, uint64(block.timestamp));
     }
 
+    function test_SettlementSidecar_RevertsWhenEngineCallerPassesDifferentHost() public {
+        CfdEngineSettlementSidecar sidecar = CfdEngineSettlementSidecar(address(engine.settlementSidecar()));
+        CfdEngine wrongHost = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        CfdEnginePlanTypes.OpenDelta memory openDelta;
+        CfdEnginePlanTypes.CloseDelta memory closeDelta;
+        CfdEnginePlanTypes.LiquidationDelta memory liquidationDelta;
+        CfdTypes.Position memory position;
+
+        vm.startPrank(address(engine));
+
+        vm.expectRevert(CfdEngineSettlementSidecar.CfdEngineSettlementSidecar__Unauthorized.selector);
+        sidecar.executeOpen(ICfdEngineSettlementHost(address(wrongHost)), openDelta, position, uint64(block.timestamp));
+
+        vm.expectRevert(CfdEngineSettlementSidecar.CfdEngineSettlementSidecar__Unauthorized.selector);
+        sidecar.executeClose(
+            ICfdEngineSettlementHost(address(wrongHost)), closeDelta, position, uint64(block.timestamp)
+        );
+
+        vm.expectRevert(CfdEngineSettlementSidecar.CfdEngineSettlementSidecar__Unauthorized.selector);
+        sidecar.executeLiquidation(
+            ICfdEngineSettlementHost(address(wrongHost)), liquidationDelta, uint64(block.timestamp), address(this)
+        );
+
+        vm.stopPrank();
+    }
+
+    function test_SetDependencies_RevertsWhenSettlementSidecarBoundToDifferentEngine() public {
+        CfdEngine victim = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        CfdEnginePlanner planner = new CfdEnginePlanner();
+        CfdEngineSettlementSidecar wrongSidecar = new CfdEngineSettlementSidecar(address(engine));
+        CfdEngineAdmin adminModule = new CfdEngineAdmin(address(victim), address(this));
+
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidSettlementSidecar.selector);
+        victim.setDependencies(address(planner), address(wrongSidecar), address(adminModule));
+    }
+
+    function test_SetDependencies_RevertsWhenSettlementSidecarHasNoEngineBinding() public {
+        CfdEngine victim = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        CfdEnginePlanner planner = new CfdEnginePlanner();
+        CfdEngineAdmin adminModule = new CfdEngineAdmin(address(victim), address(this));
+
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidSettlementSidecar.selector);
+        victim.setDependencies(address(planner), address(0xBEEF), address(adminModule));
+    }
+
     function test_GetAccountCollateralView_ReturnsCurrentBuckets() public {
         address trader = address(0xAB10);
         address account = trader;

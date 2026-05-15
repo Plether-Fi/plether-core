@@ -11,6 +11,7 @@ interface ICfdEngineTypes {
     error CfdEngine__PoolAlreadySet();
     error CfdEngine__RouterAlreadySet();
     error CfdEngine__DependenciesAlreadySet();
+    error CfdEngine__InvalidSettlementSidecar();
     error CfdEngine__ProtocolTreasuryBalanceNotEmpty();
     error CfdEngine__NoDeferredTraderCredit();
     error CfdEngine__InsufficientPoolLiquidity();
