@@ -261,9 +261,9 @@ library CfdEnginePlanLib {
         );
         delta.openState = openState;
 
+        uint256 resultingNotionalUsdc = (openState.newSize * price) / CfdMath.USDC_TO_TOKEN_SCALE;
         if (
-            openState.notionalUsdc * effectiveSnap.riskParams.bountyBps
-                < effectiveSnap.riskParams.minBountyUsdc * 10_000
+            resultingNotionalUsdc * effectiveSnap.riskParams.bountyBps < effectiveSnap.riskParams.minBountyUsdc * 10_000
         ) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.POSITION_TOO_SMALL;
             return delta;
