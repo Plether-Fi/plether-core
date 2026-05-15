@@ -4,11 +4,11 @@ pragma solidity 0.8.33;
 // Audit-history file: tests prefixed with `obsolete_` preserve superseded findings for context only.
 // They are intentionally not statements about the live carry model or current accounting semantics.
 
-import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {ICfdEngineAdminHost} from "../../src/perps/interfaces/ICfdEngineAdminHost.sol";
+import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
@@ -117,7 +117,7 @@ contract AuditFollowupFindingsFailing_CloseSolvency is BasePerpTest {
         _open(bullAccount, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
         _close(bullAccount, CfdTypes.Side.BULL, 500_000e18, 20_000_000);
 
-        vm.expectRevert(CfdEngine.CfdEngine__StillInsolvent.selector);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__StillInsolvent.selector);
         engine.clearDegradedMode();
 
         _fundJunior(address(this), 500_000e6);

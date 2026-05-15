@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 
 contract AuditTightenedFindingsFailing is BasePerpTest {
@@ -34,7 +34,7 @@ contract AuditTightenedFindingsFailing is BasePerpTest {
         engine.updateMarkPrice(103_800_000, uint64(block.timestamp));
 
         vm.prank(alice);
-        vm.expectRevert(CfdEngine.CfdEngine__WithdrawBlockedByOpenPosition.selector);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition.selector);
         clearinghouse.withdraw(account, 5000 * 1e6);
     }
 

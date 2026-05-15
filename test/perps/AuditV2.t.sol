@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
+import {IHousePool} from "../../src/perps/interfaces/IHousePool.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
@@ -102,7 +103,7 @@ contract AuditV2_C02_ReconcileTimeConsumptionTest is BasePerpTest {
     }
 
     function test_C02_FrozenWindowReconcile_DoesNotDestroySeniorYieldEntitlement() public {
-        HousePool.PoolConfig memory config = _currentPoolConfig();
+        IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 1000;
         pool.proposePoolConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
@@ -495,7 +496,7 @@ contract AuditV2_M02_GasGriefingTest is BasePerpTest {
 contract AuditV2_M03_ImmutablePythArraysTest is BasePerpTest {
 
     function test_M03_NoPythFeedUpdateMechanism() public {
-        vm.expectRevert(CfdEngine.CfdEngine__RouterAlreadySet.selector);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__RouterAlreadySet.selector);
         engine.setOrderRouter(address(0x123));
     }
 

@@ -10,6 +10,7 @@ import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {MarginClearinghouseAccountingLib} from "../../src/perps/libraries/MarginClearinghouseAccountingLib.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
@@ -1189,7 +1190,7 @@ contract MarginClearinghouseAuditTest is BasePerpTest {
         router.executeOrder(1, _mockPythUpdateData());
 
         WithdrawParityState memory state = _observeWithdrawParity(account, alice, 5000e6);
-        _assertWithdrawParity(state, CfdEngine.CfdEngine__WithdrawBlockedByOpenPosition.selector);
+        _assertWithdrawParity(state, ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition.selector);
     }
 
     function test_Withdraw_FailsConsistentlyWhenGuardWouldFailOnStaleMark() public {
@@ -1204,7 +1205,7 @@ contract MarginClearinghouseAuditTest is BasePerpTest {
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
 
         WithdrawParityState memory state = _observeWithdrawParity(account, alice, 100e6);
-        _assertWithdrawParity(state, CfdEngine.CfdEngine__MarkPriceStale.selector);
+        _assertWithdrawParity(state, ICfdEngineTypes.CfdEngine__MarkPriceStale.selector);
     }
 
     function test_Withdraw_UsesCarryAwareGuardParityForOpenPositions() public {
@@ -1225,7 +1226,7 @@ contract MarginClearinghouseAuditTest is BasePerpTest {
         vm.warp(block.timestamp + 30);
 
         WithdrawParityState memory state = _observeWithdrawParity(account, alice, 80e6);
-        _assertWithdrawParity(state, CfdEngine.CfdEngine__WithdrawBlockedByOpenPosition.selector);
+        _assertWithdrawParity(state, ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition.selector);
     }
 
 }

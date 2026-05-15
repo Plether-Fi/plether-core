@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {IOrderRouterErrors} from "../../src/perps/interfaces/IOrderRouterErrors.sol";
 import {IPletherOracle} from "../../src/perps/interfaces/IPletherOracle.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
@@ -64,7 +64,7 @@ contract AuditRemainingFindingsFailing is BasePerpTest {
         uint256 poolDepth = pool.totalAssets();
 
         vm.prank(address(router));
-        vm.expectRevert(CfdEngine.CfdEngine__PositionIsSolvent.selector);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__PositionIsSolvent.selector);
         engine.liquidatePosition(account, 99_500_000, poolDepth, uint64(block.timestamp), address(this));
     }
 
@@ -257,7 +257,7 @@ contract AuditRemainingFindingsFailing_StaleOracleExecution is BasePerpTest {
         );
 
         vm.prank(trader);
-        vm.expectRevert(CfdEngine.CfdEngine__WithdrawBlockedByOpenPosition.selector);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition.selector);
         clearinghouse.withdraw(account, 500e6);
     }
 

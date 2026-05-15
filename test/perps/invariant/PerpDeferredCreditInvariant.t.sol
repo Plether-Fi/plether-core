@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEngine} from "../../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../../src/perps/CfdTypes.sol";
 import {DeferredEngineViewTypes} from "../../../src/perps/interfaces/DeferredEngineViewTypes.sol";
+import {ICfdEngineTypes} from "../../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {CashPriorityLib} from "../../../src/perps/libraries/CashPriorityLib.sol";
 import {BasePerpInvariantTest} from "./BasePerpInvariantTest.sol";
 import {PerpAccountingHandler} from "./handlers/PerpAccountingHandler.sol";
@@ -102,7 +102,7 @@ contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
                 continue;
             }
 
-            CfdEngine.ClosePreview memory preview = engineLens.previewClose(account, size, oraclePrice);
+            ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, size, oraclePrice);
             if (!preview.valid) {
                 continue;
             }
@@ -135,7 +135,7 @@ contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
-            CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, oraclePrice);
+            ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, oraclePrice);
             uint256 freshDeferredTraderCreditUsdc = preview.deferredTraderCreditUsdc
                 > preview.existingDeferredRemainingUsdc
                 ? preview.deferredTraderCreditUsdc - preview.existingDeferredRemainingUsdc

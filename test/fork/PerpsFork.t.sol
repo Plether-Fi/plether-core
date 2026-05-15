@@ -13,6 +13,8 @@ import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "../../src/perps/OrderRouterAdmin.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
+import {IOrderRouter} from "../../src/perps/interfaces/IOrderRouter.sol";
 import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IOrderRouterErrors} from "../../src/perps/interfaces/IOrderRouterErrors.sol";
 import {IPletherOracle} from "../../src/perps/interfaces/IPletherOracle.sol";
@@ -352,7 +354,7 @@ contract PerpsForkTest is Test {
             new bool[](1)
         );
 
-        vm.expectRevert(CfdEngine.CfdEngine__RouterAlreadySet.selector);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__RouterAlreadySet.selector);
         engine.setOrderRouter(address(realPythRouter));
 
         assertEq(

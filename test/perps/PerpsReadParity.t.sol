@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {AccountLensViewTypes} from "../../src/perps/interfaces/AccountLensViewTypes.sol";
+import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {PerpsViewTypes} from "../../src/perps/interfaces/PerpsViewTypes.sol";
 import {ProtocolLensViewTypes} from "../../src/perps/interfaces/ProtocolLensViewTypes.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
@@ -17,7 +17,7 @@ contract PerpsReadParityTest is BasePerpTest {
 
         _open(account, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
 
-        CfdEngine.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 80_000_000);
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 80_000_000);
         CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(account);
         _close(account, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
 
@@ -36,7 +36,7 @@ contract PerpsReadParityTest is BasePerpTest {
         vm.prank(trader);
         clearinghouse.withdraw(account, 70e6);
 
-        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 150_000_000);
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 150_000_000);
         LiquidationParitySnapshot memory beforeSnapshot = _captureLiquidationParitySnapshot(account, keeper);
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(150_000_000));
@@ -55,7 +55,8 @@ contract PerpsReadParityTest is BasePerpTest {
         _open(account, CfdTypes.Side.BEAR, 80_000e18, 8000e6, 1e8);
 
         AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(account);
-        CfdEngine.AccountCollateralView memory collateralView = engineAccountLens.getAccountCollateralView(account);
+        ICfdEngineTypes.AccountCollateralView memory collateralView =
+            engineAccountLens.getAccountCollateralView(account);
         (uint256 size, uint256 margin, uint256 entryPrice,, CfdTypes.Side side,,) = engine.positions(account);
 
         assertEq(

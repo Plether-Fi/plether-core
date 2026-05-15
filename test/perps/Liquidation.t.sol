@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
+import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 
 contract LiquidationTest is BasePerpTest {
@@ -53,7 +53,7 @@ contract LiquidationTest is BasePerpTest {
 
         // Keeper tries to liquidate immediately. Should REVERT.
         vm.startPrank(keeper);
-        vm.expectRevert(CfdEngine.CfdEngine__PositionIsSolvent.selector);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__PositionIsSolvent.selector);
         router.executeLiquidation(account, empty);
         vm.stopPrank();
 
@@ -129,7 +129,7 @@ contract LiquidationTest is BasePerpTest {
 
         address account = alice;
 
-        vm.expectRevert(CfdEngine.CfdEngine__PositionIsSolvent.selector);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__PositionIsSolvent.selector);
         router.executeLiquidation(account, empty);
     }
 
@@ -192,7 +192,7 @@ contract LiquidationTest is BasePerpTest {
         address account = alice;
 
         // Without legacy-spread, $3k margin at same price is solvent (MMR = 1% of $100k = $1k)
-        vm.expectRevert(CfdEngine.CfdEngine__PositionIsSolvent.selector);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__PositionIsSolvent.selector);
         router.executeLiquidation(account, empty);
 
         // Warp 180 days — massive negative carry drains equity below MMR
@@ -234,9 +234,7 @@ contract LiquidationTest is BasePerpTest {
         uint256 poolAfter = usdc.balanceOf(address(pool));
 
         uint256 userSeized = chBefore - chAfter;
-        assertEq(
-            poolAfter, poolBefore + userSeized - bounty, "Pool intermediates: receives seized margin, pays bounty"
-        );
+        assertEq(poolAfter, poolBefore + userSeized - bounty, "Pool intermediates: receives seized margin, pays bounty");
     }
 
     function test_FadWindow_ExactBoundaries() public {

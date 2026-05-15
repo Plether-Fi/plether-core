@@ -4,6 +4,7 @@ pragma solidity 0.8.33;
 import {CfdTypes} from "../CfdTypes.sol";
 import {ICfdEngineCore} from "../interfaces/ICfdEngineCore.sol";
 import {IMarginClearinghouse} from "../interfaces/IMarginClearinghouse.sol";
+import {IOrderRouter} from "../interfaces/IOrderRouter.sol";
 import {IOrderRouterAccounting} from "../interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterErrors} from "../interfaces/IOrderRouterErrors.sol";
 

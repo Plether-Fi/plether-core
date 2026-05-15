@@ -2,9 +2,9 @@
 pragma solidity 0.8.33;
 
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
-import {HousePool} from "../../src/perps/HousePool.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "../../src/perps/interfaces/IHousePool.sol";
 import {IOrderRouterErrors} from "../../src/perps/interfaces/IOrderRouterErrors.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
@@ -331,7 +331,7 @@ contract HousePoolTest is BasePerpTest {
 
         vm.warp(block.timestamp + 365 days - 48 hours - 1);
 
-        HousePool.PoolConfig memory config = _currentPoolConfig();
+        IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 1200;
         pool.proposePoolConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
@@ -348,24 +348,24 @@ contract HousePoolTest is BasePerpTest {
         _fundSenior(alice, 200_000e6);
         _fundJunior(bob, 200_000e6);
 
-        HousePool.PoolConfig memory config = _currentPoolConfig();
+        IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 1600;
         pool.proposePoolConfig(config);
         vm.warp(block.timestamp + 48 hours + 121);
 
-        vm.expectRevert(HousePool.HousePool__MarkPriceStale.selector);
+        vm.expectRevert(IHousePool.HousePool__MarkPriceStale.selector);
         pool.finalizePoolConfig();
 
         assertEq(pool.seniorRateBps(), 800, "Senior rate should remain unchanged until a fresh mark is available");
     }
 
     function test_FinalizeSeniorRate_StaleMarkSucceedsAfterFreshMarkUpdate() public {
-        HousePool.PoolConfig memory config = _currentPoolConfig();
+        IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 1600;
         pool.proposePoolConfig(config);
         vm.warp(block.timestamp + 48 hours + 121);
 
-        vm.expectRevert(HousePool.HousePool__MarkPriceStale.selector);
+        vm.expectRevert(IHousePool.HousePool__MarkPriceStale.selector);
         pool.finalizePoolConfig();
 
         vm.prank(address(router));
@@ -381,7 +381,7 @@ contract HousePoolTest is BasePerpTest {
         _mintAndAccountPoolExcess(50_000e6);
 
         uint256 seniorBefore = pool.seniorPrincipal();
-        HousePool.PoolConfig memory config = _currentPoolConfig();
+        IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 1600;
         pool.proposePoolConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
@@ -396,7 +396,7 @@ contract HousePoolTest is BasePerpTest {
     }
 
     function test_FinalizeSeniorRate_NoCarrySyncNeededBeforeReconcile() public {
-        HousePool.PoolConfig memory config = _currentPoolConfig();
+        IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 1600;
         pool.proposePoolConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
@@ -408,9 +408,9 @@ contract HousePoolTest is BasePerpTest {
     }
 
     function test_ProposeSeniorRate_RevertsAbove100PercentApr() public {
-        HousePool.PoolConfig memory config = _currentPoolConfig();
+        IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 10_001;
-        vm.expectRevert(HousePool.HousePool__InvalidSeniorRate.selector);
+        vm.expectRevert(IHousePool.HousePool__InvalidSeniorRate.selector);
         pool.proposePoolConfig(config);
     }
 
@@ -462,7 +462,7 @@ contract HousePoolTest is BasePerpTest {
         uint256 accountedBefore = pool.totalAssets();
         usdc.mint(address(pool), 100_000e6);
 
-        HousePool.PoolLiquidityView memory beforeAccount = pool.getPoolLiquidityView();
+        IHousePool.PoolLiquidityView memory beforeAccount = pool.getPoolLiquidityView();
         assertEq(pool.rawAssets(), accountedBefore + 100_000e6, "Raw balance should include unsolicited donation");
         assertEq(pool.excessAssets(), 100_000e6, "Donation should remain quarantined as excess");
         assertEq(pool.totalAssets(), accountedBefore, "Canonical assets must ignore raw donation until accounted");
@@ -470,7 +470,7 @@ contract HousePoolTest is BasePerpTest {
 
         pool.accountExcess();
 
-        HousePool.PoolLiquidityView memory afterAccount = pool.getPoolLiquidityView();
+        IHousePool.PoolLiquidityView memory afterAccount = pool.getPoolLiquidityView();
         assertEq(pool.excessAssets(), 0, "Accounting excess should clear the quarantine bucket");
         assertEq(
             pool.totalAssets(),
@@ -1098,7 +1098,7 @@ contract HousePoolTest is BasePerpTest {
 
         _enterFrozenWindow();
 
-        vm.expectRevert(HousePool.HousePool__OracleFrozen.selector);
+        vm.expectRevert(IHousePool.HousePool__OracleFrozen.selector);
         pool.assignUnassignedAssets(false, alice);
     }
 
@@ -1121,7 +1121,7 @@ contract HousePoolTest is BasePerpTest {
         usdc.mint(address(pool), 25_000e6);
 
         vm.prank(alice);
-        vm.expectRevert(HousePool.HousePool__Unauthorized.selector);
+        vm.expectRevert(IHousePool.HousePool__Unauthorized.selector);
         pool.recordProtocolInflow(25_000e6);
 
         vm.prank(address(engine));
@@ -1140,7 +1140,7 @@ contract HousePoolTest is BasePerpTest {
         usdc.mint(address(pool), 25_000e6);
 
         vm.prank(address(router));
-        vm.expectRevert(HousePool.HousePool__Unauthorized.selector);
+        vm.expectRevert(IHousePool.HousePool__Unauthorized.selector);
         pool.recordProtocolInflow(25_000e6);
 
         assertEq(pool.excessAssets(), 25_000e6, "Router-originated raw excess should remain quarantined");
@@ -1164,12 +1164,12 @@ contract HousePoolTest is BasePerpTest {
     }
 
     function test_SetSeniorVault_Twice_Reverts() public {
-        vm.expectRevert(HousePool.HousePool__SeniorVaultAlreadySet.selector);
+        vm.expectRevert(IHousePool.HousePool__SeniorVaultAlreadySet.selector);
         pool.setSeniorVault(address(0x999));
     }
 
     function test_SetJuniorVault_Twice_Reverts() public {
-        vm.expectRevert(HousePool.HousePool__JuniorVaultAlreadySet.selector);
+        vm.expectRevert(IHousePool.HousePool__JuniorVaultAlreadySet.selector);
         pool.setJuniorVault(address(0x999));
     }
 
@@ -1177,7 +1177,7 @@ contract HousePoolTest is BasePerpTest {
         _fundJunior(alice, 100_000 * 1e6);
 
         vm.prank(alice);
-        vm.expectRevert(HousePool.HousePool__Unauthorized.selector);
+        vm.expectRevert(IHousePool.HousePool__Unauthorized.selector);
         pool.payOut(alice, 1000 * 1e6);
     }
 
@@ -1283,7 +1283,7 @@ contract HousePoolTest is BasePerpTest {
             20_000e6, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.CashArrived
         );
 
-        HousePool.PoolLiquidityView memory viewData = pool.getPoolLiquidityView();
+        IHousePool.PoolLiquidityView memory viewData = pool.getPoolLiquidityView();
         assertEq(viewData.totalAssetsUsdc, pool.totalAssets());
         assertEq(viewData.freeUsdc, pool.getFreeUSDC());
         assertEq(viewData.pendingRecapitalizationUsdc, pool.pendingRecapitalizationUsdc());
@@ -1827,7 +1827,7 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
 
         _enterFrozenWindow();
 
-        vm.expectRevert(HousePool.HousePool__OracleFrozen.selector);
+        vm.expectRevert(IHousePool.HousePool__OracleFrozen.selector);
         pool.initializeSeedPosition(true, seedAssets, address(this));
     }
 

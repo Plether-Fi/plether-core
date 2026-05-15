@@ -16,6 +16,8 @@ import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {PerpsPublicLens} from "../../src/perps/PerpsPublicLens.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
+import {IHousePool} from "../../src/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
@@ -249,7 +251,7 @@ contract AuditBlockingAccountingFindingsFailing_PartialCloseWithCommittedMargin 
         uint256 committedBefore = _remainingCommittedMargin(1);
         assertEq(committedBefore, 4000e6, "Committed margin should match order margin delta");
 
-        CfdEngine.ClosePreview memory preview = engineLens.previewClose(account, 50_000e18, 1.08e8);
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 50_000e18, 1.08e8);
 
         assertFalse(preview.valid, "Preview should reject a partial close that would need queued committed margin");
         assertEq(
@@ -429,7 +431,7 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
 
-        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 1.96e8);
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 1.96e8);
         assertTrue(preview.liquidatable, "Setup should be liquidatable at the execution price");
         uint256 reservedSettlementBefore = clearinghouse.getLockedMarginBuckets(account).reservedSettlementUsdc;
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(KEEPER);
@@ -494,11 +496,11 @@ contract AuditBlockingAccountingFindingsFailing_StaleSeniorYield is BasePerpTest
 
         uint256 unpaidBefore = pool.unpaidSeniorYield();
 
-        HousePool.PoolConfig memory config = _currentPoolConfig();
+        IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 1600;
         pool.proposePoolConfig(config);
         vm.warp(block.timestamp + 48 hours + 121);
-        vm.expectRevert(HousePool.HousePool__MarkPriceStale.selector);
+        vm.expectRevert(IHousePool.HousePool__MarkPriceStale.selector);
         pool.finalizePoolConfig();
 
         assertEq(pool.unpaidSeniorYield(), unpaidBefore, "Rejected stale finalization should not accrue senior yield");

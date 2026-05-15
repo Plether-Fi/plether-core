@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
-import {HousePool} from "../../src/perps/HousePool.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {IHousePool} from "../../src/perps/interfaces/IHousePool.sol";
@@ -110,11 +108,11 @@ contract AuditLatestStateFindingsFailing_SeniorYieldCheckpoint is BasePerpTest {
 
         uint256 before = pool.lastReconcileTime();
 
-        HousePool.PoolConfig memory config = _currentPoolConfig();
+        IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 1600;
         pool.proposePoolConfig(config);
         vm.warp(block.timestamp + 48 hours + 121);
-        vm.expectRevert(HousePool.HousePool__MarkPriceStale.selector);
+        vm.expectRevert(IHousePool.HousePool__MarkPriceStale.selector);
         pool.finalizePoolConfig();
 
         assertEq(

@@ -5,7 +5,6 @@ import {DecimalConstants} from "../../libraries/DecimalConstants.sol";
 import {CfdEnginePlanTypes} from "../CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../CfdTypes.sol";
 import {OrderRouterAdmin} from "../OrderRouterAdmin.sol";
-import {IOrderRouterErrors} from "../interfaces/IOrderRouterErrors.sol";
 import {OrderFailurePolicyLib} from "../libraries/OrderFailurePolicyLib.sol";
 import {OrderValidationLib} from "../libraries/OrderValidationLib.sol";
 import {OrderBountyAccounting} from "./OrderBountyAccounting.sol";
@@ -63,7 +62,7 @@ abstract contract OrderValidation is OrderBountyAccounting {
         uint256 commitPrice = _commitReferencePrice();
         uint256 notionalUsdc = (sizeDelta * commitPrice) / DecimalConstants.USDC_TO_TOKEN_SCALE;
         if (notionalUsdc < minOpenNotionalUsdc) {
-            revert IOrderRouterErrors.OrderRouter__CommitValidation(11);
+            revert OrderRouter__CommitValidation(11);
         }
         if (_canUseCommitMarkForOpenPrefilter()) {
             uint64 commitMarkTime = engine.lastMarkTime();

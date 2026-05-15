@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
+import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 
@@ -19,7 +20,7 @@ contract DeferredClaimsMatrixTest is BasePerpTest {
             .checked_write(uint256(50e6));
         stdstore.target(address(engine)).sig("totalDeferredTraderCreditUsdc()").checked_write(uint256(50e6));
 
-        vm.expectRevert(CfdEngine.CfdEngine__InsufficientPoolLiquidity.selector);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InsufficientPoolLiquidity.selector);
         vm.prank(trader);
         engine.claimDeferredTraderCredit(account);
 

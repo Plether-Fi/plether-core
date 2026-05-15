@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdMath} from "../../src/perps/CfdMath.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
+import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {ProtocolLensViewTypes} from "../../src/perps/interfaces/ProtocolLensViewTypes.sol";
 import {CfdEngineSnapshotsLib} from "../../src/perps/libraries/CfdEngineSnapshotsLib.sol";
 import {SolvencyAccountingLib} from "../../src/perps/libraries/SolvencyAccountingLib.sol";
@@ -69,7 +69,7 @@ contract PlanApplyRegressionTest is BasePerpTest {
         vm.warp(block.timestamp + 14 days);
 
         uint256 poolDepth = pool.totalAssets();
-        CfdEngine.ClosePreview memory preview = engineLens.previewClose(bullAccount, 40_000e18, 0.9e8);
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(bullAccount, 40_000e18, 0.9e8);
         assertTrue(preview.valid, "Partial close preview should be valid");
 
         this.doClose(bullAccount, CfdTypes.Side.BULL, 40_000e18, 0.9e8);
@@ -97,7 +97,7 @@ contract PlanApplyRegressionTest is BasePerpTest {
 
         uint256 liquidationPrice = 1.15e8;
         uint256 poolDepth = pool.totalAssets();
-        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(bullAccount, liquidationPrice);
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(bullAccount, liquidationPrice);
 
         if (!preview.liquidatable) {
             return;
@@ -140,7 +140,7 @@ contract PlanApplyRegressionTest is BasePerpTest {
 
         uint256 closePrice = 0.95e8;
         uint256 poolDepth = pool.totalAssets();
-        CfdEngine.ClosePreview memory preview = engineLens.previewClose(bullAccount, 100_000e18, closePrice);
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(bullAccount, 100_000e18, closePrice);
 
         if (!preview.valid) {
             return;
@@ -179,7 +179,7 @@ contract PlanApplyRegressionTest is BasePerpTest {
 
         uint256 liquidationPrice = 1.2e8;
         uint256 poolDepth = pool.totalAssets();
-        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(bullAccount, liquidationPrice);
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(bullAccount, liquidationPrice);
 
         if (!preview.liquidatable) {
             return;

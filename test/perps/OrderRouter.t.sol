@@ -20,7 +20,10 @@ import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {AccountLensViewTypes} from "../../src/perps/interfaces/AccountLensViewTypes.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
 import {ICfdEngineAdminHost} from "../../src/perps/interfaces/ICfdEngineAdminHost.sol";
+import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
+import {IHousePool} from "../../src/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
+import {IOrderRouter} from "../../src/perps/interfaces/IOrderRouter.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IOrderRouterErrors} from "../../src/perps/interfaces/IOrderRouterErrors.sol";
@@ -588,7 +591,7 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(_freeSettlementUsdc(account), 0, "setup must fully consume free settlement");
 
         vm.prank(address(router));
-        vm.expectRevert(CfdEngine.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
         engine.reserveCloseOrderExecutionBounty(account, 25_000e18, 1e6);
     }
 
@@ -1490,7 +1493,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_OrderExecution_UsesRouterExecutionStalenessLimit_NotPoolMarkLimit() public {
-        HousePool.PoolConfig memory poolConfig = _currentPoolConfig();
+        IHousePool.PoolConfig memory poolConfig = _currentPoolConfig();
         poolConfig.markStalenessLimit = 300;
         pool.proposePoolConfig(poolConfig);
         vm.warp(block.timestamp + 48 hours + 1);
@@ -2456,7 +2459,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_LiquidationStaleness_UsesRouterLiquidationLimit_NotPoolMarkLimit() public {
-        HousePool.PoolConfig memory poolConfig = _currentPoolConfig();
+        IHousePool.PoolConfig memory poolConfig = _currentPoolConfig();
         poolConfig.markStalenessLimit = 300;
         pool.proposePoolConfig(poolConfig);
         vm.warp(block.timestamp + 48 hours + 1);
@@ -2488,7 +2491,7 @@ contract OrderRouterPythTest is BasePerpTest {
         routerAdmin.finalizeRouterConfig();
 
         vm.warp(2061);
-        vm.expectRevert(CfdEngine.CfdEngine__PositionIsSolvent.selector);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__PositionIsSolvent.selector);
         router.executeLiquidation(account, empty);
     }
 
@@ -3188,7 +3191,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(address(this));
 
-        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 150_000_000);
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 150_000_000);
         LiquidationParitySnapshot memory beforeSnapshot = _captureLiquidationParitySnapshot(account, address(this));
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(150_000_000));
@@ -3211,7 +3214,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
 
         _open(account, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
 
-        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 150_000_000);
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 150_000_000);
         LiquidationParitySnapshot memory beforeSnapshot = _captureLiquidationParitySnapshot(account, address(this));
 
         vm.mockCallRevert(
@@ -3262,7 +3265,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
 
         AccountLensViewTypes.AccountLedgerSnapshot memory snapshotBefore =
             engineAccountLens.getAccountLedgerSnapshot(account);
-        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 150_000_000);
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 150_000_000);
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(150_000_000));
@@ -3321,7 +3324,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         vm.warp(block.timestamp + 60 days);
         uint256 canonicalDepthBefore = pool.totalAssets();
 
-        CfdEngine.LiquidationPreview memory expectedPreview =
+        ICfdEngineTypes.LiquidationPreview memory expectedPreview =
             engineLens.simulateLiquidation(account, 195_000_000, canonicalDepthBefore);
 
         bytes[] memory priceData = new bytes[](1);

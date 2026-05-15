@@ -4,7 +4,6 @@ pragma solidity 0.8.33;
 // Audit-history file: tests prefixed with `obsolete_` preserve superseded findings for context only.
 // They are intentionally not statements about the live carry model or current accounting semantics.
 
-import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
@@ -13,7 +12,9 @@ import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
 import {ICfdEngineAdminHost} from "../../src/perps/interfaces/ICfdEngineAdminHost.sol";
+import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "../../src/perps/interfaces/IHousePool.sol";
+import {IOrderRouter} from "../../src/perps/interfaces/IOrderRouter.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterErrors} from "../../src/perps/interfaces/IOrderRouterErrors.sol";
 import {IPletherOracle} from "../../src/perps/interfaces/IPletherOracle.sol";
@@ -549,7 +550,7 @@ contract AuditConfirmedFindingsFailing_EntryNotionalRounding is BasePerpTest {
         );
 
         uint256 depth = pool.totalAssets();
-        vm.expectRevert(abi.encodeWithSelector(ICfdEngine.CfdEngine__TypedOrderFailure.selector, 1, 3, false));
+        vm.expectRevert(abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__TypedOrderFailure.selector, 1, 3, false));
         engine.processOrderTyped(
             CfdTypes.Order({
                 account: account,
@@ -622,7 +623,7 @@ contract AuditConfirmedFindingsFailing_KeeperReserveLiquidation is BasePerpTest 
 
         uint256 poolDepth = pool.totalAssets();
         vm.prank(address(router));
-        vm.expectRevert(CfdEngine.CfdEngine__PositionIsSolvent.selector);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__PositionIsSolvent.selector);
         engine.liquidatePosition(account, 100_530_000, poolDepth, uint64(block.timestamp), address(this));
     }
 

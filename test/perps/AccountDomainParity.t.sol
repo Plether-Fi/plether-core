@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
-import {HousePool} from "../../src/perps/HousePool.sol";
+import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
+import {IHousePool} from "../../src/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {MarginClearinghouseAccountingLib} from "../../src/perps/libraries/MarginClearinghouseAccountingLib.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
@@ -42,7 +42,8 @@ contract AccountDomainParityTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 4000e6, type(uint256).max, false);
 
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(account);
-        CfdEngine.AccountCollateralView memory collateralView = engineAccountLens.getAccountCollateralView(account);
+        ICfdEngineTypes.AccountCollateralView memory collateralView =
+            engineAccountLens.getAccountCollateralView(account);
 
         assertEq(
             collateralView.settlementBalanceUsdc,
@@ -102,7 +103,7 @@ contract AccountDomainParityTest is BasePerpTest {
     }
 
     function test_WithdrawableParity_UsesSharedFreshnessPolicyWhenPoolLimitIsTighter() public {
-        HousePool.PoolConfig memory config = _currentPoolConfig();
+        IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.markStalenessLimit = 30;
         pool.proposePoolConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
@@ -127,7 +128,7 @@ contract AccountDomainParityTest is BasePerpTest {
         );
 
         vm.prank(trader);
-        vm.expectRevert(CfdEngine.CfdEngine__MarkPriceStale.selector);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__MarkPriceStale.selector);
         clearinghouse.withdraw(account, 1);
     }
 

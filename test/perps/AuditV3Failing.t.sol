@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
-import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {IOrderRouterErrors} from "../../src/perps/interfaces/IOrderRouterErrors.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
@@ -68,7 +67,7 @@ contract AuditV3Failing_FadStaleness is BasePerpTest {
         vm.warp(fridayEvening + 2 hours - 1);
 
         vm.prank(alice);
-        vm.expectRevert(CfdEngine.CfdEngine__MarkPriceStale.selector);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__MarkPriceStale.selector);
         clearinghouse.withdraw(account, 100e6);
     }
 

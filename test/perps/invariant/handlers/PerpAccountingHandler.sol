@@ -10,6 +10,7 @@ import {MarginClearinghouse} from "../../../../src/perps/MarginClearinghouse.sol
 import {OrderRouter} from "../../../../src/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "../../../../src/perps/OrderRouterAdmin.sol";
 import {AccountLensViewTypes} from "../../../../src/perps/interfaces/AccountLensViewTypes.sol";
+import {ICfdEngineTypes} from "../../../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {IMarginClearinghouse} from "../../../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "../../../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {MockUSDC} from "../../../mocks/MockUSDC.sol";
@@ -347,7 +348,7 @@ contract PerpAccountingHandler is Test {
             engineAccountLens.getAccountLedgerSnapshot(account);
         uint256 traderWalletBeforeUsdc = usdc.balanceOf(account);
         if (isClose && marginDelta == 0) {
-            CfdEngine.ClosePreview memory preview = engineLens.previewClose(account, sizeDelta, targetPrice);
+            ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, sizeDelta, targetPrice);
             if (preview.valid) {
                 deferredTraderCreditUsdc = preview.deferredTraderCreditUsdc;
                 allowedDeferredAfterUsdc = preview.deferredTraderCreditUsdc > preview.existingDeferredRemainingUsdc
@@ -410,7 +411,7 @@ contract PerpAccountingHandler is Test {
         uint256 price = bound(priceFuzz, 0.3e8, 1.8e8);
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(price);
-        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, price);
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, price);
         uint256 deferredTraderCreditUsdc = preview.deferredTraderCreditUsdc;
         uint256 allowedDeferredAfterUsdc = preview.deferredTraderCreditUsdc > preview.existingDeferredRemainingUsdc
             ? preview.deferredTraderCreditUsdc - preview.existingDeferredRemainingUsdc
@@ -486,7 +487,7 @@ contract PerpAccountingHandler is Test {
         housePool.setAssets(0);
         uint256 closeOraclePrice = side == CfdTypes.Side.BULL ? uint256(15e7) : uint256(5e7);
 
-        CfdEngine.ClosePreview memory closePreview = engineLens.previewClose(account, size, closeOraclePrice);
+        ICfdEngineTypes.ClosePreview memory closePreview = engineLens.previewClose(account, size, closeOraclePrice);
         uint256 deferredTraderCreditUsdc = closePreview.deferredTraderCreditUsdc;
         _recordTerminalReservationSet(account);
 

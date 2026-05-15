@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdTypes} from "../CfdTypes.sol";
 import {OrderRouterAdmin} from "../OrderRouterAdmin.sol";
+import {IOrderRouter} from "../interfaces/IOrderRouter.sol";
 import {IOrderRouterAccounting} from "../interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterAdminHost} from "../interfaces/IOrderRouterAdminHost.sol";
 import {OrderExecutionOrchestrator} from "./OrderExecutionOrchestrator.sol";
@@ -18,8 +18,6 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
     uint256 public minOpenOrderExecutionBountyUsdc;
     uint256 public maxOpenOrderExecutionBountyUsdc;
     uint256 public closeOrderExecutionBountyUsdc;
-
-    event OrderCommitted(uint64 indexed orderId, address indexed account, CfdTypes.Side side);
 
     /// @param _engine CfdEngine that processes trades and liquidations
     /// @param _housePool HousePool used for depth queries and liquidation bounty payouts

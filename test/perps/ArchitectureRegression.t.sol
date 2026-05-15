@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
+import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 
 contract ArchitectureRegression_EscrowShielding is BasePerpTest {
@@ -109,7 +109,7 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
 
         usdc.mint(address(pool), aliceDeferred / 2);
 
-        vm.expectRevert(CfdEngine.CfdEngine__InsufficientPoolLiquidity.selector);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InsufficientPoolLiquidity.selector);
         vm.prank(alice);
         engine.claimDeferredTraderCredit(aliceAccount);
 
@@ -121,7 +121,7 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         );
 
         usdc.mint(address(pool), bobDeferred / 2);
-        vm.expectRevert(CfdEngine.CfdEngine__InsufficientPoolLiquidity.selector);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InsufficientPoolLiquidity.selector);
         vm.prank(bob);
         engine.claimDeferredTraderCredit(bobAccount);
 

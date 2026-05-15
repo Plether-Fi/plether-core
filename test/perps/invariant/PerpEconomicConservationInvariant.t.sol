@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEngine} from "../../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../../src/perps/CfdTypes.sol";
 import {OrderRouter} from "../../../src/perps/OrderRouter.sol";
 import {AccountLensViewTypes} from "../../../src/perps/interfaces/AccountLensViewTypes.sol";
 import {HousePoolEngineViewTypes} from "../../../src/perps/interfaces/HousePoolEngineViewTypes.sol";
 import {ICfdEngine} from "../../../src/perps/interfaces/ICfdEngine.sol";
+import {ICfdEngineTypes} from "../../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {IMarginClearinghouse} from "../../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "../../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {ProtocolLensViewTypes} from "../../../src/perps/interfaces/ProtocolLensViewTypes.sol";
@@ -246,7 +246,8 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
             AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
                 engineAccountLens.getAccountLedgerSnapshot(account);
             AccountLensViewTypes.AccountLedgerView memory ledgerView = engineAccountLens.getAccountLedgerView(account);
-            CfdEngine.AccountCollateralView memory collateralView = engineAccountLens.getAccountCollateralView(account);
+            ICfdEngineTypes.AccountCollateralView memory collateralView =
+                engineAccountLens.getAccountCollateralView(account);
             AccountLensViewTypes.AccountLedgerSnapshot memory positionView = snapshot;
             IMarginClearinghouse.LockedMarginBuckets memory lockedBuckets =
                 clearinghouse.getLockedMarginBuckets(account);
@@ -409,7 +410,8 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
             AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
                 engineAccountLens.getAccountLedgerSnapshot(account);
             AccountLensViewTypes.AccountLedgerView memory compactView = engineAccountLens.getAccountLedgerView(account);
-            CfdEngine.AccountCollateralView memory collateralView = engineAccountLens.getAccountCollateralView(account);
+            ICfdEngineTypes.AccountCollateralView memory collateralView =
+                engineAccountLens.getAccountCollateralView(account);
             AccountLensViewTypes.AccountLedgerSnapshot memory positionView = snapshot;
 
             assertEq(

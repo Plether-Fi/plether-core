@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
-import {HousePool} from "../../src/perps/HousePool.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
+import {IHousePool} from "../../src/perps/interfaces/IHousePool.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 
 contract AuditFullSecurityFailing_LiquidationFreeUsdc is BasePerpTest {
@@ -17,7 +17,7 @@ contract AuditFullSecurityFailing_LiquidationFreeUsdc is BasePerpTest {
 
         _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
 
-        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 1.09e8);
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 1.09e8);
 
         vm.startPrank(address(router));
         engine.liquidatePosition(account, 1.09e8, pool.totalAssets(), uint64(block.timestamp), address(this));
@@ -73,11 +73,11 @@ contract AuditFullSecurityFailing_SeniorRateRetroactive is BasePerpTest {
         address traderAccount = trader;
         _open(traderAccount, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
-        HousePool.PoolConfig memory config = _currentPoolConfig();
+        IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 1600;
         pool.proposePoolConfig(config);
         vm.warp(block.timestamp + 48 hours + 121);
-        vm.expectRevert(HousePool.HousePool__MarkPriceStale.selector);
+        vm.expectRevert(IHousePool.HousePool__MarkPriceStale.selector);
         pool.finalizePoolConfig();
 
         assertEq(pool.seniorRateBps(), 800, "Rejected stale finalization should leave the prior senior rate in place");

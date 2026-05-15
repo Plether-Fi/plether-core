@@ -3,7 +3,8 @@ pragma solidity 0.8.33;
 
 import {CfdEnginePlanTypes} from "../CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../CfdTypes.sol";
-import {ICfdEngineCore} from "../interfaces/ICfdEngineCore.sol";
+import {ICfdEngineTypes} from "../interfaces/ICfdEngineTypes.sol";
+import {IOrderRouter} from "../interfaces/IOrderRouter.sol";
 import {IOrderRouterAccounting} from "../interfaces/IOrderRouterAccounting.sol";
 import {OrderOracleExecution} from "./OrderOracleExecution.sol";
 import {OrderQueueBook} from "./OrderQueueBook.sol";
@@ -28,8 +29,8 @@ abstract contract OrderExecutionSettlement is OrderOracleExecution, OrderQueueBo
     event OrderFailed(uint64 indexed orderId, OrderFailReason reason);
 
     bytes4 internal constant PANIC_SELECTOR = 0x4e487b71;
-    bytes4 internal constant TYPED_ORDER_FAILURE_SELECTOR = ICfdEngineCore.CfdEngine__TypedOrderFailure.selector;
-    bytes4 internal constant MARK_PRICE_OUT_OF_ORDER_SELECTOR = ICfdEngineCore.CfdEngine__MarkPriceOutOfOrder.selector;
+    bytes4 internal constant TYPED_ORDER_FAILURE_SELECTOR = ICfdEngineTypes.CfdEngine__TypedOrderFailure.selector;
+    bytes4 internal constant MARK_PRICE_OUT_OF_ORDER_SELECTOR = ICfdEngineTypes.CfdEngine__MarkPriceOutOfOrder.selector;
 
     function _deleteOrder(
         uint64 orderId,

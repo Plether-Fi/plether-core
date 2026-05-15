@@ -7,6 +7,7 @@ import {CfdEnginePlanTypes} from "../../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../../../src/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "../../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../../src/perps/OrderRouter.sol";
+import {ICfdEngineTypes} from "../../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {MockPyth} from "../../mocks/MockPyth.sol";
 import {MockUSDC} from "../../mocks/MockUSDC.sol";
 import {PerpAccountingHandler} from "./handlers/PerpAccountingHandler.sol";
@@ -99,7 +100,8 @@ contract PerpClosePreviewParityInvariantTest is Test {
                     continue;
                 }
 
-                CfdEngine.ClosePreview memory preview = engineLens.previewClose(account, fractions[f], oraclePrice);
+                ICfdEngineTypes.ClosePreview memory preview =
+                    engineLens.previewClose(account, fractions[f], oraclePrice);
 
                 if (!preview.valid) {
                     if (preview.invalidReason == CfdTypes.CloseInvalidReason.DustPosition) {
@@ -189,7 +191,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
                 continue;
             }
 
-            CfdEngine.ClosePreview memory fullPreview = engineLens.previewClose(account, size, oraclePrice);
+            ICfdEngineTypes.ClosePreview memory fullPreview = engineLens.previewClose(account, size, oraclePrice);
             if (!fullPreview.valid) {
                 continue;
             }
@@ -200,7 +202,8 @@ contract PerpClosePreviewParityInvariantTest is Test {
                     continue;
                 }
 
-                CfdEngine.ClosePreview memory preview = engineLens.previewClose(account, fractions[f], oraclePrice);
+                ICfdEngineTypes.ClosePreview memory preview =
+                    engineLens.previewClose(account, fractions[f], oraclePrice);
 
                 if (!preview.valid) {
                     CfdTypes.CloseInvalidReason r = preview.invalidReason;
@@ -249,7 +252,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
         uint256 poolDepthUsdc,
         bool isFullClose
     ) internal view {
-        CfdEngine.ClosePreview memory preview = engineLens.previewClose(account, sizeDelta, oraclePrice);
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, sizeDelta, oraclePrice);
 
         if (!preview.valid || (preview.immediatePayoutUsdc == 0 && preview.deferredTraderCreditUsdc == 0)) {
             return;
@@ -270,8 +273,8 @@ contract PerpClosePreviewParityInvariantTest is Test {
     }
 
     function _assertClosePreviewEquals(
-        CfdEngine.ClosePreview memory actual,
-        CfdEngine.ClosePreview memory expected
+        ICfdEngineTypes.ClosePreview memory actual,
+        ICfdEngineTypes.ClosePreview memory expected
     ) internal pure {
         assertEq(actual.valid, expected.valid, "Close preview validity should match canonical simulateClose");
         assertEq(uint8(actual.invalidReason), uint8(expected.invalidReason), "Close invalid reason should match");

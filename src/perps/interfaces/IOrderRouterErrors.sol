@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
+import {CfdTypes} from "../CfdTypes.sol";
+
 interface IOrderRouterErrors {
 
     error OrderRouter__ZeroSize();
@@ -45,5 +47,7 @@ interface IOrderRouterErrors {
 
     error OrderRouter__InsufficientGas();
     error OrderRouter__PredictableOpenInvalid(uint8 code);
+
+    event OrderCommitted(uint64 indexed orderId, address indexed account, CfdTypes.Side side);
 
 }
