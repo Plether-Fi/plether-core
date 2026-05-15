@@ -121,7 +121,6 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
     error HousePool__UnauthorizedPauser();
     error HousePool__OracleFrozen();
 
-    event Reconciled(uint256 seniorPrincipal, uint256 juniorPrincipal, int256 delta);
     event SeniorRateUpdated(uint256 newRateBps);
     event MarkStalenessLimitUpdated(uint256 newLimit);
     event PoolConfigProposed(
@@ -1123,22 +1122,6 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
         if (statusSnapshot.degradedMode) {
             revert HousePool__DegradedMode();
         }
-    }
-
-    function _distributeRevenue(
-        uint256 revenue
-    ) internal {
-        _setWaterfallState(HousePoolWaterfallAccountingLib.distributeRevenue(_getWaterfallState(), revenue));
-
-        emit Reconciled(seniorPrincipal, juniorPrincipal, int256(revenue));
-    }
-
-    function _absorbLoss(
-        uint256 loss
-    ) internal {
-        _setWaterfallState(HousePoolWaterfallAccountingLib.absorbLoss(_getWaterfallState(), loss));
-
-        emit Reconciled(seniorPrincipal, juniorPrincipal, -int256(loss));
     }
 
     function _getWaterfallState() internal view returns (HousePoolWaterfallAccountingLib.WaterfallState memory state) {
