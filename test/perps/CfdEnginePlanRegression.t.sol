@@ -426,7 +426,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         );
     }
 
-    function test_PlanOpen_CreditsNegativeTradeCostIntoReachableCollateral() public view {
+    function test_PlanOpen_CreditsNegativeTradeCostIntoReachableCollateralWithVpiLiability() public view {
         CfdTypes.RiskParams memory params = _riskParams();
         params.vpiFactor = 0.05e18;
 
@@ -451,11 +451,11 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         snap.poolAssetsUsdc = 2_000_000e6;
         snap.poolCashUsdc = 2_000_000e6;
         snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
-            settlementBalanceUsdc: 4000e6,
+            settlementBalanceUsdc: 4620e6,
             totalLockedMarginUsdc: 0,
             activePositionMarginUsdc: 0,
             otherLockedMarginUsdc: 0,
-            freeSettlementUsdc: 4000e6
+            freeSettlementUsdc: 4620e6
         });
         snap.capPrice = CAP_PRICE;
         snap.riskParams = params;
@@ -463,7 +463,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         CfdTypes.Order memory order = CfdTypes.Order({
             account: account,
             sizeDelta: 300_000e18,
-            marginDelta: 4000e6,
+            marginDelta: 4620e6,
             targetPrice: 1e8,
             commitTime: 0,
             commitBlock: 0,
@@ -475,9 +475,18 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         CfdEnginePlanTypes.OpenDelta memory delta = planner.planOpen(snap, order, 1e8, 0);
 
         assertLt(delta.tradeCostUsdc, 0, "Setup must produce a skew-reducing rebate");
-        assertLt(order.marginDelta, delta.openState.initialMarginRequirementUsdc, "Setup must rely on rebate credit");
+        assertEq(
+            order.marginDelta,
+            delta.openState.initialMarginRequirementUsdc + delta.executionFeeUsdc,
+            "Physical margin should cover IMR plus fee once VPI liability is projected"
+        );
+        assertGt(
+            delta.positionMarginAfterOpen,
+            delta.openState.initialMarginRequirementUsdc,
+            "Negative trade cost should still increase projected locked margin"
+        );
         assertEq(uint8(delta.revertCode), 0, "Rebate-backed reachable collateral should keep the open valid");
-        assertTrue(delta.valid, "Planner should accept opens whose IMR is satisfied only after rebate credit");
+        assertTrue(delta.valid, "Planner should accept opens whose live equity remains at IMR after rebate clawback");
     }
 
     function test_PlanOpen_RejectsWhenCarryLeavesFreeSettlementBelowMarginDelta() public view {

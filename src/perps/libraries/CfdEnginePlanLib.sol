@@ -375,6 +375,7 @@ library CfdEnginePlanLib {
         projectedPosition.margin =
             OpenAccountingLib.effectiveMarginAfterTradeCost(delta.positionMarginAfterOpen, delta.tradeCostUsdc);
         projectedPosition.entryPrice = delta.newPosEntryPrice;
+        projectedPosition.vpiAccrued = snap.position.vpiAccrued + delta.posVpiAccruedDelta;
 
         uint256 reachableCollateralUsdc = MarginClearinghouseAccountingLib.getGenericReachableUsdc(snap.accountBuckets);
         if (delta.tradeCostUsdc > 0) {

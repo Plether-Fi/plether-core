@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
+import {CfdEnginePlanTypes} from "../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
@@ -427,6 +428,44 @@ contract AuditV2_M01_VPIRebateIMRTest is BasePerpTest {
             }),
             1e8,
             poolDepth,
+            uint64(block.timestamp)
+        );
+    }
+
+    function test_M01_NonzeroMarginRebateOpenProjectsFreshVpiLiability() public {
+        _fundTrader(alice, 200_000e6);
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        _open(aliceId, CfdTypes.Side.BULL, 300_000e18, 50_000e6, 1e8);
+
+        _fundTrader(bob, 4000e6);
+        bytes32 bobId = bytes32(uint256(uint160(bob)));
+
+        uint8 code = engineLens.previewOpenRevertCode(
+            bobId, CfdTypes.Side.BEAR, 300_000e18, 4000e6, 1e8, uint64(block.timestamp)
+        );
+        assertEq(
+            code,
+            uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN),
+            "planner should subtract fresh negative VPI liability before admitting the open"
+        );
+
+        uint256 vaultDepth = pool.totalAssets();
+        vm.prank(address(router));
+        vm.expectRevert();
+        engine.processOrderTyped(
+            CfdTypes.Order({
+                accountId: bobId,
+                sizeDelta: 300_000e18,
+                marginDelta: 4000e6,
+                targetPrice: 1e8,
+                commitTime: uint64(block.timestamp),
+                commitBlock: uint64(block.number),
+                orderId: 0,
+                side: CfdTypes.Side.BEAR,
+                isClose: false
+            }),
+            1e8,
+            vaultDepth,
             uint64(block.timestamp)
         );
     }
