@@ -314,10 +314,10 @@ function calc() {
   // --- Net LP revenue ---
   const netLpRevenue = totalHouseEdge;
 
-  // --- Senior yield ---
-  const seniorYield = seniorPrincipal * srBps / 10000;
-  const seniorPayout = netLpRevenue > 0 ? Math.min(seniorYield, netLpRevenue) : 0;
-  const unpaidSeniorYield = seniorYield - seniorPayout;
+  // --- Senior coupon ---
+  const seniorCoupon = seniorPrincipal * srBps / 10000;
+  const seniorPayout = Math.min(seniorCoupon, Math.max(juniorPrincipal, 0));
+  const unfundedSeniorCoupon = seniorCoupon - seniorPayout;
 
   // --- Junior surplus ---
   const juniorSurplus = netLpRevenue - seniorPayout;
@@ -325,7 +325,7 @@ function calc() {
   const seniorEffApy = seniorPrincipal > 0 ? seniorPayout / seniorPrincipal : 0;
 
   // --- Break-even house edge ---
-  const beHouseEdge = seniorYield;
+  const beHouseEdge = seniorPayout;
   const beBpsDay = beHouseEdge / (tvl * 365 / 10000);
 
   // --- Intermediates ---
@@ -371,9 +371,9 @@ function calc() {
   tbody += row('Behavioral / directional edge', 'Pool (LPs)', behavAnnual);
   tbody += rowBold('Total house edge', 'Pool', totalHouseEdge);
   tbody += sep();
-  tbody += row(`Senior yield (${(srBps/100).toFixed(1)}% on ${fmt(seniorPrincipal)})`, 'Senior LPs', seniorPayout);
-  if (unpaidSeniorYield > 1) {
-    tbody += row('Unpaid senior yield (accruing)', 'Senior (deferred)', unpaidSeniorYield);
+  tbody += row(`Senior coupon (${(srBps/100).toFixed(1)}% on ${fmt(seniorPrincipal)})`, 'Senior LPs', seniorPayout);
+  if (unfundedSeniorCoupon > 1) {
+    tbody += row('Unfunded senior coupon (not deferred)', 'No claimant', unfundedSeniorCoupon);
   }
   tbody += rowBold('Junior surplus / (deficit)', 'Junior LPs', juniorSurplus);
   document.getElementById('tbody').innerHTML = tbody;
@@ -387,9 +387,9 @@ function calc() {
   const srEl = document.getElementById('sr-apy');
   srEl.textContent = pct(seniorEffApy);
   srEl.className = 'big ' + (seniorEffApy >= srBps/10000 - 0.001 ? 'positive' : 'neutral');
-  document.getElementById('sr-desc').textContent = unpaidSeniorYield > 1
-    ? `Target: ${(srBps/100).toFixed(1)}%. ${fmt(unpaidSeniorYield)}/yr deferred`
-    : `Target: ${(srBps/100).toFixed(1)}%. Fully covered`;
+  document.getElementById('sr-desc').textContent = unfundedSeniorCoupon > 1
+    ? `Target: ${(srBps/100).toFixed(1)}%. ${fmt(unfundedSeniorCoupon)}/yr unfunded`
+    : `Target: ${(srBps/100).toFixed(1)}%. Fully funded by junior`;
 
   document.getElementById('be-vol').textContent = beBpsDay.toFixed(1) + ' bps/day';
   document.getElementById('be-vol').className = 'big ' + (houseEdgeBpsDay > beBpsDay ? 'positive' : 'negative');
@@ -398,11 +398,11 @@ function calc() {
   // --- Note ---
   const noteEl = document.getElementById('note');
   if (juniorSurplus < -1) {
-    noteEl.textContent = 'Junior is in deficit — losses absorbed by junior first (first-loss tranche). Senior yield accrues but remains unpaid until surplus returns.';
-  } else if (unpaidSeniorYield > 1) {
-    noteEl.textContent = 'Net LP revenue is positive but insufficient to cover full senior yield. Unpaid yield has waterfall priority on future surplus.';
+    noteEl.textContent = 'Junior is in deficit — losses and the senior coupon are absorbed by junior first. Coupon shortfalls are not deferred.';
+  } else if (unfundedSeniorCoupon > 1) {
+    noteEl.textContent = 'Junior principal is insufficient to fund the full senior coupon. The shortfall is not carried as future debt.';
   } else {
-    noteEl.textContent = 'Healthy: senior yield fully covered, junior earning surplus. Execution fees are separate protocol-owner revenue. Liquidation retention here means only the collateral the pool keeps after trader residual equity and keeper bounty are accounted for.';
+    noteEl.textContent = 'Healthy: senior coupon funded, junior earning surplus. Execution fees are separate protocol-owner revenue. Liquidation retention here means only the collateral the pool keeps after trader residual equity and keeper bounty are accounted for.';
   }
 }
 

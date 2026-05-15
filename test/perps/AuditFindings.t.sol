@@ -209,7 +209,7 @@ contract AuditC04_StaleOracleMtmBypass is BasePerpTest {
         }
     }
 
-    function test_C04_YieldAccruesWithoutMtm() public {
+    function test_C04_StaleReconcileDoesNotCreateUnpaidDebt() public {
         _fundSenior(alice, 500_000 * 1e6);
         _fundJunior(bob, 500_000 * 1e6);
 
@@ -226,7 +226,8 @@ contract AuditC04_StaleOracleMtmBypass is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        uint256 yieldBefore = pool.unpaidSeniorYield();
+        uint256 seniorBeforeStale = pool.seniorPrincipal();
+        uint256 reconcileBeforeStale = pool.lastReconcileTime();
 
         // Make mark stale (warp 2 days to Friday 06:00, before FAD window starts at 19:00)
         _warpForward(2 days);
@@ -234,19 +235,17 @@ contract AuditC04_StaleOracleMtmBypass is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        uint256 yieldAfterStale = pool.unpaidSeniorYield();
+        uint256 seniorAfterStale = pool.seniorPrincipal();
+        assertEq(
+            pool.lastReconcileTime(), reconcileBeforeStale, "Stale reconcile should skip mark-dependent accounting"
+        );
+        assertGt(seniorAfterStale, seniorBeforeStale, "Coupon can checkpoint as a junior-funded NAV transfer");
 
         // Refresh mark
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
         vm.prank(address(juniorVault));
         pool.reconcile();
-
-        // C-04 BUG: yield accrued during stale period (line 304 runs before staleness check
-        // at line 310), but MTM distribution was skipped. This is a phantom liability.
-        // Yield should NOT accrue when the mark is stale — if MTM can't be evaluated,
-        // yield shouldn't be counted either. They must be atomic.
-        assertEq(yieldAfterStale, yieldBefore, "C-04: yield must not accrue when mark is stale and MTM is skipped");
     }
 
 }
@@ -458,10 +457,10 @@ contract AuditN01_TransferBypassesCooldown is BasePerpTest {
 }
 
 // ============================================================
-// H-04: Unpaid Senior Yield Not Scaled on Withdrawal
+// H-04: Senior coupon accounting on withdrawal
 // ============================================================
 
-contract AuditH04_UnpaidYieldNotScaled is BasePerpTest {
+contract AuditH04_SeniorCouponWithdrawalAccounting is BasePerpTest {
 
     address alice = address(0x111);
     address bob = address(0x222);
@@ -474,7 +473,7 @@ contract AuditH04_UnpaidYieldNotScaled is BasePerpTest {
         return 0;
     }
 
-    function test_H04_UnpaidYieldNotReduced() public {
+    function test_H04_UnpaidYieldDebtRemovedAndHwmScales() public {
         _fundSenior(alice, 500_000 * 1e6);
         _fundSenior(bob, 500_000 * 1e6);
         _fundJunior(address(this), 2_000_000 * 1e6);
@@ -489,32 +488,22 @@ contract AuditH04_UnpaidYieldNotScaled is BasePerpTest {
         vm.prank(address(seniorVault));
         pool.reconcile();
 
-        uint256 unpaidBefore = pool.unpaidSeniorYield();
-        assertGt(unpaidBefore, 0, "Yield should have accrued");
-
         uint256 seniorPrincipalBefore = pool.seniorPrincipal();
+        uint256 hwmBefore = pool.seniorHighWaterMark();
+        assertGt(seniorPrincipalBefore, 1_000_000 * 1e6, "Coupon should be paid directly into senior principal");
 
         uint256 withdrawAmount = seniorVault.maxWithdraw(alice) / 2;
         if (withdrawAmount == 0) {
             return;
         }
 
-        _warpForward(1 hours);
         vm.prank(alice);
         seniorVault.withdraw(withdrawAmount, alice, alice);
 
-        uint256 unpaidAfter = pool.unpaidSeniorYield();
         uint256 seniorPrincipalAfter = pool.seniorPrincipal();
+        uint256 expectedHwm = (hwmBefore * seniorPrincipalAfter) / seniorPrincipalBefore;
 
-        // H-04 BUG: unpaidSeniorYield unchanged after ~50% capital withdrawal.
-        uint256 principalRatio = (seniorPrincipalAfter * 1e18) / seniorPrincipalBefore;
-        uint256 expectedUnpaid = (unpaidBefore * principalRatio) / 1e18;
-
-        assertLe(
-            unpaidAfter,
-            expectedUnpaid + (expectedUnpaid / 100),
-            "H-04: unpaidSeniorYield must scale down proportionally on withdrawal"
-        );
+        assertEq(pool.seniorHighWaterMark(), expectedHwm, "Senior HWM should scale with the withdrawn principal");
     }
 
 }

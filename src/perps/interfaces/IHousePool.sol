@@ -2,7 +2,7 @@
 pragma solidity 0.8.33;
 
 /// @notice Two-tranche USDC pool that acts as counterparty to CFD traders.
-///         Senior tranche earns fixed yield; junior absorbs first-loss and excess profit.
+///         Senior tranche earns a junior-funded target coupon; junior absorbs first-loss and excess profit.
 interface IHousePool {
 
     enum ClaimantInflowKind {
@@ -23,7 +23,6 @@ interface IHousePool {
         uint256 pendingTradingRevenueUsdc;
         uint256 seniorPrincipalUsdc;
         uint256 juniorPrincipalUsdc;
-        uint256 unpaidSeniorYieldUsdc;
         uint256 seniorHighWaterMarkUsdc;
         bool markFresh;
         bool oracleFrozen;
@@ -62,6 +61,7 @@ interface IHousePool {
     error HousePool__TradingActivationNotReady();
     error HousePool__UnauthorizedPauser();
     error HousePool__OracleFrozen();
+    error HousePool__DepositTooSmall();
 
     event Reconciled(uint256 seniorPrincipal, uint256 juniorPrincipal, int256 delta);
     event SeniorRateUpdated(uint256 newRateBps);
@@ -209,5 +209,8 @@ interface IHousePool {
     function frozenLpFeeBps(
         bool isSenior
     ) external view returns (uint256);
+
+    /// @notice Minimum assets accepted by ordinary ERC4626 tranche deposit/mint flows (6 decimals).
+    function minTrancheDepositUsdc() external view returns (uint256);
 
 }

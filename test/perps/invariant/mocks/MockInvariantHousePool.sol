@@ -181,4 +181,8 @@ contract MockInvariantHousePool is IHousePool {
         return 0;
     }
 
+    function minTrancheDepositUsdc() external pure returns (uint256) {
+        return 1e6;
+    }
+
 }

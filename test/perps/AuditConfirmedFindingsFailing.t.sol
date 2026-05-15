@@ -383,11 +383,12 @@ contract AuditConfirmedFindingsFailing_TrancheCooldownGrief is BasePerpTest {
 
         vm.warp(block.timestamp + 50 minutes);
 
-        usdc.mint(attacker, 1);
+        uint256 minimumDeposit = pool.minTrancheDepositUsdc();
+        usdc.mint(attacker, minimumDeposit);
         vm.startPrank(attacker);
-        usdc.approve(address(juniorVault), 1);
+        usdc.approve(address(juniorVault), minimumDeposit);
         vm.expectRevert(TrancheVault.TrancheVault__ThirdPartyDepositForExistingHolder.selector);
-        juniorVault.deposit(1, alice);
+        juniorVault.deposit(minimumDeposit, alice);
         vm.stopPrank();
     }
 

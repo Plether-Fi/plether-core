@@ -173,7 +173,7 @@ contract AuditV3_C01_FIFODeadlockTest is BasePerpTest {
 //       _requireFreshMark uses fadMaxStaleness during FAD,
 //       _reconcile uses hardcoded markStalenessLimit.
 //       The stale early return doesn't update lastReconcileTime,
-//       so 48h of yield accrues retroactively on Monday.
+//       so coupon/revenue/loss state can diverge across the weekend path.
 // ═══════════════════════════════════════════════════════════════════
 
 contract AuditV3_C03_AsymmetricStalenessTest is BasePerpTest {
@@ -240,11 +240,10 @@ contract AuditV3_C03_AsymmetricStalenessTest is BasePerpTest {
         pool.reconcile();
         uint256 lastReconcileFriday = pool.lastReconcileTime();
 
-        // Warp to Saturday — mark is now stale (>120s)
+        // Warp to Saturday during FAD; the mark is stale under the ordinary limit but fresh under the FAD runway.
         vm.warp(SATURDAY_NOON);
 
-        // _reconcile should return early because mark is stale (using markStalenessLimit=120s).
-        // Bug: lastReconcileTime is NOT updated on early return.
+        // _reconcile should use the FAD freshness policy and advance lastReconcileTime.
         vm.prank(address(juniorVault));
         pool.reconcile();
 
@@ -279,20 +278,20 @@ contract AuditV3_C03_AsymmetricStalenessTest is BasePerpTest {
         engine.updateMarkPrice(1e8, uint64(FRIDAY_BEFORE_FREEZE));
         vm.prank(address(juniorVault));
         pool.reconcile();
-        uint256 yieldFriday = pool.unpaidSeniorYield();
+        uint256 seniorFriday = pool.seniorPrincipal();
+        uint256 lastReconcileFriday = pool.lastReconcileTime();
 
         // Saturday during FAD: mark is 14h old.
         // _requireFreshMark uses fadMaxStaleness (3 days) → fresh enough.
-        // Bug: _reconcile uses markStalenessLimit (120s) → stale → early return, no yield.
-        // Fix: _reconcile uses fadMaxStaleness during FAD → consistent, yield accrues.
+        // Fix: _reconcile uses the same FAD freshness policy → consistent coupon and waterfall accounting.
         vm.warp(SATURDAY_NOON);
         vm.prank(address(juniorVault));
         pool.reconcile();
-        uint256 yieldSaturday = pool.unpaidSeniorYield();
+        uint256 seniorSaturday = pool.seniorPrincipal();
+        uint256 lastReconcileSaturday = pool.lastReconcileTime();
 
-        assertGt(
-            yieldSaturday, yieldFriday, "C-03: _reconcile must accrue yield when mark is fresh enough for FAD window"
-        );
+        assertGt(lastReconcileSaturday, lastReconcileFriday, "C-03: _reconcile must run during the FAD-fresh window");
+        assertGt(seniorSaturday, seniorFriday, "C-03: senior coupon should checkpoint during the FAD-fresh window");
     }
 
 }

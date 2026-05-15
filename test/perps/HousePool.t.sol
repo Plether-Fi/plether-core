@@ -90,19 +90,19 @@ contract HousePoolTest is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        // Senior yield = 500k * 8% * 1 year = 40k (capped at revenue=100k, so 40k)
-        // Junior surplus = 100k - 40k = 60k
+        // Senior coupon = 500k * 8% * 1 year = 40k, plus seeded base coupon.
+        // Realized revenue replenishes junior after the coupon transfer.
         assertEq(
-            pool.seniorPrincipal(), SEEDED_SENIOR + 540_080 * 1e6, "Senior gets 8% APY yield plus seeded base yield"
+            pool.seniorPrincipal(), SEEDED_SENIOR + 540_080 * 1e6, "Senior gets 8% APY coupon plus seeded base coupon"
         );
         assertEq(
             pool.juniorPrincipal(),
             SEEDED_JUNIOR + 559_920 * 1e6,
-            "Junior gets residual surplus after seeded base yield"
+            "Junior receives residual surplus after funding the coupon"
         );
     }
 
-    function test_RevenueDistribution_SeniorCapped() public {
+    function test_RevenueDistribution_SeniorCouponFundedByJuniorWhenRevenueIsLow() public {
         _fundSenior(alice, 500_000 * 1e6);
         _fundJunior(bob, 500_000 * 1e6);
 
@@ -113,10 +113,12 @@ contract HousePoolTest is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        // Senior yield would be 40k but capped at 10k revenue
-        assertEq(pool.seniorPrincipal(), SEEDED_SENIOR + 510_000 * 1e6, "Senior capped at available revenue");
+        // Senior coupon is funded by junior NAV; low realized revenue now replenishes junior after the coupon transfer.
+        assertEq(pool.seniorPrincipal(), SEEDED_SENIOR + 540_080 * 1e6, "Senior receives the target coupon");
         assertEq(
-            pool.juniorPrincipal(), SEEDED_JUNIOR + 500_000 * 1e6, "Junior gets nothing when revenue < senior yield"
+            pool.juniorPrincipal(),
+            SEEDED_JUNIOR + 469_920 * 1e6,
+            "Junior pays senior coupon and receives the realized revenue"
         );
     }
 
@@ -150,14 +152,10 @@ contract HousePoolTest is BasePerpTest {
 
         _fundTrader(carol, 50_000 * 1e6);
 
-        vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BULL, 200_000 * 1e18, 20_000 * 1e6, 1e8, false);
-        router.executeOrder(1, _mockPythUpdateData());
+        _open(carol, CfdTypes.Side.BULL, 200_000 * 1e18, 20_000 * 1e6, 1e8);
 
         // Price drops to $0.50 → BULL profits $100k
-        vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BULL, 200_000 * 1e18, 0, 0, true);
-        router.executeOrder(2, _mockPythUpdateData(0.5e8));
+        _close(carol, CfdTypes.Side.BULL, 200_000 * 1e18, 0.5e8);
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -172,14 +170,10 @@ contract HousePoolTest is BasePerpTest {
 
         _fundTrader(carol, 50_000 * 1e6);
 
-        vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BULL, 200_000 * 1e18, 20_000 * 1e6, 1e8, false);
-        router.executeOrder(1, _mockPythUpdateData());
+        _open(carol, CfdTypes.Side.BULL, 200_000 * 1e18, 20_000 * 1e6, 1e8);
 
         // Price drops to $0.50 → BULL profits $100k, exceeding junior's $50k
-        vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BULL, 200_000 * 1e18, 0, 0, true);
-        router.executeOrder(2, _mockPythUpdateData(0.5e8));
+        _close(carol, CfdTypes.Side.BULL, 200_000 * 1e18, 0.5e8);
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -197,9 +191,7 @@ contract HousePoolTest is BasePerpTest {
         _fundJunior(bob, 500_000 * 1e6);
 
         _fundTrader(carol, 50_000 * 1e6);
-        vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BULL, 800_000 * 1e18, 40_000 * 1e6, 1e8, false);
-        router.executeOrder(1, _mockPythUpdateData());
+        _open(carol, CfdTypes.Side.BULL, 800_000 * 1e18, 40_000 * 1e6, 1e8);
 
         // Max liability = 800k (BULL at $1, cap $2 → max profit = entry*size = $800k)
         // Free USDC = totalAssets - maxLiability
@@ -222,9 +214,7 @@ contract HousePoolTest is BasePerpTest {
         _fundJunior(bob, 200_000 * 1e6);
 
         _fundTrader(carol, 50_000 * 1e6);
-        vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BULL, 250_000 * 1e18, 25_000 * 1e6, 1e8, false);
-        router.executeOrder(1, _mockPythUpdateData());
+        _open(carol, CfdTypes.Side.BULL, 250_000 * 1e18, 25_000 * 1e6, 1e8);
 
         // freeUSDC ≈ 400k - 250k + exec_fees. Senior principal = 200k.
         // Senior max = min(200k, freeUSDC) < 200k
@@ -267,9 +257,7 @@ contract HousePoolTest is BasePerpTest {
         _fundJunior(bob, 1_000_000 * 1e6);
 
         _fundTrader(carol, 50_000 * 1e6);
-        vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
-        router.executeOrder(1, _mockPythUpdateData());
+        _open(carol, CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8);
 
         uint256 fees = engine.accumulatedFeesUsdc();
         assertTrue(fees > 0, "Fees should exist after trade");
@@ -283,8 +271,8 @@ contract HousePoolTest is BasePerpTest {
         uint256 unrealizedMtmLiability = _poolMtmAdjustment();
         assertEq(
             pool.juniorPrincipal(),
-            totalBalance - fees - unrealizedMtmLiability - SEEDED_SENIOR,
-            "Reconcile should exclude protocol fees and live MTM liability exactly"
+            totalBalance - fees - SEEDED_SENIOR - _poolMtmAdjustment(),
+            "Reconcile should exclude protocol fees and conservative MTM exactly"
         );
     }
 
@@ -299,14 +287,10 @@ contract HousePoolTest is BasePerpTest {
         _fundTrader(carol, 50_000 * 1e6);
 
         // Trader opens BULL $100k at $1.00
-        vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
-        router.executeOrder(1, _mockPythUpdateData());
+        _open(carol, CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8);
 
         // Price drops to $0.80 → BULL profits $20k (paid from pool)
-        vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 0, 0, true);
-        router.executeOrder(2, _mockPythUpdateData(0.8e8));
+        _close(carol, CfdTypes.Side.BULL, 100_000 * 1e18, 0.8e8);
 
         uint256 staleTime = block.timestamp + 30 days;
         vm.warp(staleTime);
@@ -315,7 +299,13 @@ contract HousePoolTest is BasePerpTest {
 
         // Pool paid out ~$20k profit to trader. Junior absorbs first.
         assertLt(pool.juniorPrincipal(), 500_000 * 1e6, "Junior absorbed trader profit payout");
-        assertEq(pool.seniorPrincipal(), SEEDED_SENIOR + 500_000 * 1e6, "Senior untouched");
+        uint256 expectedCoupon =
+            ((SEEDED_SENIOR + 500_000 * 1e6) * 800 * uint256(30 days)) / (10_000 * uint256(365 days));
+        assertEq(
+            pool.seniorPrincipal(),
+            SEEDED_SENIOR + 500_000 * 1e6 + expectedCoupon,
+            "Senior receives junior-funded coupon before junior absorbs residual loss"
+        );
     }
 
     // ==========================================
@@ -390,7 +380,7 @@ contract HousePoolTest is BasePerpTest {
         pool.finalizePoolConfig();
 
         assertGt(
-            pool.seniorPrincipal(), seniorBefore, "Fresh finalization should checkpoint accrued yield at the old rate"
+            pool.seniorPrincipal(), seniorBefore, "Fresh finalization should checkpoint accrued coupon at the old rate"
         );
         assertEq(pool.seniorRateBps(), 1600, "Senior rate should update after the fresh checkpoint");
     }
@@ -860,7 +850,7 @@ contract HousePoolTest is BasePerpTest {
         assertEq(usdc.balanceOf(alice), aliceBefore + quotedAssets, "Senior withdrawal should remain executable");
     }
 
-    function helper_InitializeSeedPosition_CheckpointsSeniorYieldBeforePrincipalMutation() public {
+    function helper_InitializeSeedPosition_CheckpointsSeniorCouponBeforePrincipalMutation() public {
         uint256 staleTime = block.timestamp + 30 days;
         vm.warp(staleTime);
 
@@ -868,22 +858,20 @@ contract HousePoolTest is BasePerpTest {
         usdc.approve(address(pool), 100_000e6);
         pool.initializeSeedPosition(true, 100_000e6, address(this));
 
-        assertEq(pool.unpaidSeniorYield(), 0, "Seed initialization should not mint retroactive yield");
         assertEq(
-            pool.lastSeniorYieldCheckpointTime(),
+            pool.lastSeniorCouponCheckpointTime(),
             block.timestamp,
-            "Principal mutation should checkpoint the yield clock"
+            "Principal mutation should checkpoint the coupon clock"
         );
 
         vm.prank(address(juniorVault));
         pool.reconcile();
         assertEq(
-            pool.seniorPrincipal(), 100_000e6, "Later reconcile must not retroactively accrue on newly added principal"
+            pool.seniorPrincipal(), 100_000e6, "Later reconcile must not retroactively coupon newly added principal"
         );
-        assertEq(pool.unpaidSeniorYield(), 0, "Later reconcile must not mint retroactive yield on seeded principal");
     }
 
-    function test_RecordRecapitalizationInflow_StaleMarkCheckpointsWithoutAccruingYield() public {
+    function test_RecordRecapitalizationInflow_StaleMarkPaysCouponDirectly() public {
         address trader = address(0x99991);
         _fundSenior(alice, 100_000e6);
         _fundJunior(bob, 100_000e6);
@@ -901,24 +889,24 @@ contract HousePoolTest is BasePerpTest {
             50_000e6, IHousePool.ClaimantInflowKind.Recapitalization, IHousePool.ClaimantInflowCashMode.CashArrived
         );
 
-        assertEq(pool.unpaidSeniorYield(), 0, "Stale-window principal mutation should not accrue yield");
         uint256 reconcileBefore = pool.lastReconcileTime();
         vm.prank(address(juniorVault));
         pool.reconcile();
         assertEq(
             pool.lastReconcileTime(),
             reconcileBefore,
-            "Stale-window queued mutation should not erase senior accrual time while the mark is stale"
+            "Stale-window coupon checkpoint should not mark a full reconcile as fresh"
         );
         assertEq(
-            pool.lastSeniorYieldCheckpointTime(),
-            reconcileBefore,
-            "Non-senior stale bucket routing should not reset the senior yield base"
+            pool.lastSeniorCouponCheckpointTime(),
+            block.timestamp,
+            "Stale-window coupon checkpoint should advance the senior coupon base"
         );
+        uint256 expectedCoupon = ((SEEDED_SENIOR + 100_000e6) * 800 * uint256(30 days)) / (10_000 * uint256(365 days));
         assertEq(
             pool.seniorPrincipal(),
-            SEEDED_SENIOR + 100_000e6,
-            "No senior deficit means recap should not over-credit senior"
+            SEEDED_SENIOR + 100_000e6 + expectedCoupon,
+            "Junior-funded coupon should credit senior before stale pending-bucket routing"
         );
         assertEq(
             pool.unassignedAssets(), 50_000e6, "Queued recapitalization should still route into fallback accounting"
@@ -951,15 +939,16 @@ contract HousePoolTest is BasePerpTest {
             50_000e6, IHousePool.ClaimantInflowKind.Recapitalization, IHousePool.ClaimantInflowCashMode.CashArrived
         );
 
-        uint256 checkpointBefore = pool.lastSeniorYieldCheckpointTime();
+        uint256 checkpointBefore = pool.lastSeniorCouponCheckpointTime();
 
         vm.prank(address(juniorVault));
         pool.reconcile();
 
         assertEq(
-            pool.lastSeniorYieldCheckpointTime(), block.timestamp, "Stale senior mutation should checkpoint yield time"
+            pool.lastSeniorCouponCheckpointTime(),
+            block.timestamp,
+            "Stale senior mutation should checkpoint coupon time"
         );
-        assertEq(pool.unpaidSeniorYield(), 0, "Stale senior mutation should not accrue yield");
         assertEq(pool.seniorPrincipal(), 101_000e6, "Stale recapitalization should restore senior principal to the HWM");
 
         uint256 freshTime = staleTime + 2 days;
@@ -969,20 +958,20 @@ contract HousePoolTest is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        uint256 expectedYieldUpperBound = (101_000e6 * 800 * uint256(2 days)) / (10_000 * uint256(365 days));
+        uint256 expectedCouponUpperBound = (101_000e6 * 800 * uint256(2 days)) / (10_000 * uint256(365 days));
         assertLe(
             pool.seniorPrincipal(),
-            101_000e6 + expectedYieldUpperBound,
-            "Fresh reconcile must not accrue more than the post-checkpoint senior yield interval"
+            101_000e6 + expectedCouponUpperBound,
+            "Fresh reconcile must not accrue more than the post-checkpoint senior coupon interval"
         );
         assertGt(
-            pool.lastSeniorYieldCheckpointTime(),
+            pool.lastSeniorCouponCheckpointTime(),
             checkpointBefore,
-            "Yield checkpoint should advance after stale principal mutation"
+            "Coupon checkpoint should advance after stale principal mutation"
         );
     }
 
-    function test_FreshPendingSeniorMutation_PreservesCheckpointedUnpaidYield() public {
+    function test_FreshPendingSeniorMutation_RestoresHwmWithoutDebtQueue() public {
         _fundSenior(alice, 100_000e6);
         _fundJunior(bob, 100_000e6);
 
@@ -1007,7 +996,6 @@ contract HousePoolTest is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        assertGt(pool.unpaidSeniorYield(), 0, "Fresh pending senior mutation should preserve the checkpointed yield");
         assertEq(pool.seniorPrincipal(), 101_000e6, "Recapitalization should still restore senior principal to the HWM");
     }
 
@@ -1102,6 +1090,18 @@ contract HousePoolTest is BasePerpTest {
         pool.assignUnassignedAssets(false, alice);
     }
 
+    function test_InitializeSeedPosition_RevertsWhenSeedAlreadyInitializedEvenIfOracleFrozen() public {
+        uint256 seedAssets = 50_000e6;
+
+        usdc.mint(address(this), seedAssets);
+        usdc.approve(address(pool), seedAssets);
+
+        _enterFrozenWindow();
+
+        vm.expectRevert(IHousePool.HousePool__SeedAlreadyInitialized.selector);
+        pool.initializeSeedPosition(true, seedAssets, address(this));
+    }
+
     function test_SweepExcess_RemovesDonationWithoutChangingAccountedAssets() public {
         _fundJunior(bob, 500_000e6);
 
@@ -1181,7 +1181,7 @@ contract HousePoolTest is BasePerpTest {
         pool.payOut(alice, 1000 * 1e6);
     }
 
-    function test_H6_ReconcileSpam_DoesNotEraseSeniorYield() public {
+    function test_H6_ReconcileSpam_PaysSeniorCouponDirectly() public {
         _fundSenior(alice, 500_000 * 1e6);
         _fundJunior(bob, 500_000 * 1e6);
 
@@ -1195,20 +1195,11 @@ contract HousePoolTest is BasePerpTest {
             pool.reconcile();
         }
 
-        // Senior's total claim = seniorPrincipal + unpaidSeniorYield
-        // Should be ~$540k (8% * $500k = $40k yield) regardless of reconcile frequency.
-        uint256 totalSeniorClaim = pool.seniorPrincipal() + pool.unpaidSeniorYield();
-        // Integer division across 365 daily reconciles loses ≤ $1 cumulative
-        assertGe(totalSeniorClaim, 541_080 * 1e6 - 1e6, "Senior total claim must reflect 8% APY on seeded baseline");
-
-        // Inject fresh revenue to pay unpaid yield
-        _mintAndAccountPoolExcess(50_000 * 1e6);
-        vm.warp(t0 + 366 days);
-        vm.prank(address(juniorVault));
-        pool.reconcile();
-
-        // Now unpaidSeniorYield should be mostly paid from fresh revenue
-        assertGe(pool.seniorPrincipal(), 541_080 * 1e6 - 1e6, "Senior principal catches up when revenue arrives");
+        assertGe(
+            pool.seniorPrincipal(),
+            541_080 * 1e6 - 1e6,
+            "Senior principal should reflect at least the simple target coupon on seeded baseline"
+        );
     }
 
     function test_M12_GetFreeUSDC_ReservesFees() public {
@@ -1217,9 +1208,7 @@ contract HousePoolTest is BasePerpTest {
         address trader = address(0x444);
         _fundTrader(trader, 50_000 * 1e6);
 
-        vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 5000 * 1e6, 1e8, false);
-        router.executeOrder(1, _mockPythUpdateData());
+        _open(trader, CfdTypes.Side.BULL, 100_000 * 1e18, 5000 * 1e6, 1e8);
 
         // 100k BULL at $1.00: protocol accrues the full $40 execution fee.
         uint256 fees = engine.accumulatedFeesUsdc();
@@ -1236,26 +1225,26 @@ contract HousePoolTest is BasePerpTest {
         );
     }
 
-    function test_SeniorHighWaterMark_RatchetsPaidYieldIntoProtectedClaim() public {
+    function test_SeniorHighWaterMark_RatchetsPaidCouponIntoProtectedClaim() public {
         _fundSenior(alice, 100_000e6);
+        _fundJunior(bob, 100_000e6);
 
-        uint256 hwmBeforeYield = pool.seniorHighWaterMark();
+        uint256 hwmBeforeCoupon = pool.seniorHighWaterMark();
         uint256 originalSeniorPrincipal = pool.seniorPrincipal();
 
         vm.warp(block.timestamp + 365 days);
-        _mintAndAccountPoolExcess(10_000e6);
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        uint256 seniorAfterYield = pool.seniorPrincipal();
-        assertGt(seniorAfterYield, originalSeniorPrincipal, "Setup should pay senior yield into principal");
+        uint256 seniorAfterCoupon = pool.seniorPrincipal();
+        assertGt(seniorAfterCoupon, originalSeniorPrincipal, "Setup should pay senior coupon into principal");
         assertEq(
-            pool.seniorHighWaterMark(), seniorAfterYield, "Paid senior yield should ratchet the protected HWM upward"
+            pool.seniorHighWaterMark(), seniorAfterCoupon, "Paid senior coupon should ratchet the protected HWM upward"
         );
-        assertGt(pool.seniorHighWaterMark(), hwmBeforeYield, "HWM should rise after paying senior yield");
+        assertGt(pool.seniorHighWaterMark(), hwmBeforeCoupon, "HWM should rise after paying senior coupon");
 
         vm.prank(address(pool));
-        usdc.transfer(address(0xdead), 5000e6);
+        usdc.transfer(address(0xdead), 95_000e6);
         vm.prank(address(juniorVault));
         pool.reconcile();
 
@@ -1265,7 +1254,7 @@ contract HousePoolTest is BasePerpTest {
         assertLt(
             pool.seniorPrincipal(),
             pool.seniorHighWaterMark(),
-            "Once yield has been paid, later losses treat that paid yield as protected HWM capital"
+            "Once coupon has been paid, later losses treat that paid coupon as protected HWM capital"
         );
     }
 
@@ -1295,7 +1284,6 @@ contract HousePoolTest is BasePerpTest {
         );
         assertEq(viewData.seniorPrincipalUsdc, pool.seniorPrincipal());
         assertEq(viewData.juniorPrincipalUsdc, pool.juniorPrincipal());
-        assertEq(viewData.unpaidSeniorYieldUsdc, pool.unpaidSeniorYield());
         assertEq(viewData.seniorHighWaterMarkUsdc, pool.seniorHighWaterMark());
         assertEq(viewData.oracleFrozen, engine.isOracleFrozen());
         assertEq(viewData.degradedMode, engine.degradedMode());
@@ -1324,18 +1312,98 @@ contract HousePoolTest is BasePerpTest {
 
         // Third-party deposits into an existing holder should be rejected outright.
         address attacker = address(0xBAD);
-        usdc.mint(attacker, 1);
+        uint256 minimumDeposit = pool.minTrancheDepositUsdc();
+        usdc.mint(attacker, minimumDeposit);
         vm.startPrank(attacker);
-        usdc.approve(address(juniorVault), 1);
+        usdc.approve(address(juniorVault), minimumDeposit);
         vm.expectRevert(TrancheVault.TrancheVault__ThirdPartyDepositForExistingHolder.selector);
-        juniorVault.deposit(1, alice);
+        juniorVault.deposit(minimumDeposit, alice);
         vm.stopPrank();
 
         vm.warp(block.timestamp + 11 minutes);
+        uint256 withdrawable = juniorVault.maxWithdraw(alice);
         vm.prank(alice);
-        juniorVault.withdraw(100_000 * 1e6, alice, alice);
+        juniorVault.withdraw(withdrawable, alice, alice);
 
-        assertEq(usdc.balanceOf(alice), 100_000 * 1e6, "Victim withdraw should succeed after original cooldown");
+        assertEq(usdc.balanceOf(alice), withdrawable, "Victim withdraw should succeed after original cooldown");
+    }
+
+    function test_MinDeposit_BlocksDustBeforeCouponCheckpoint() public {
+        _fundSenior(alice, 100_000e6);
+        _fundJunior(bob, 100_000e6);
+        uint256 checkpointBefore = pool.lastSeniorCouponCheckpointTime();
+
+        vm.warp(block.timestamp + 1 days);
+
+        address dave = address(0x444);
+        usdc.mint(dave, pool.minTrancheDepositUsdc());
+        vm.startPrank(dave);
+        usdc.approve(address(seniorVault), pool.minTrancheDepositUsdc());
+        vm.expectRevert(TrancheVault.TrancheVault__DepositTooSmall.selector);
+        seniorVault.deposit(1, dave);
+        vm.expectRevert(TrancheVault.TrancheVault__DepositTooSmall.selector);
+        seniorVault.mint(1, dave);
+        vm.stopPrank();
+
+        assertEq(
+            pool.lastSeniorCouponCheckpointTime(),
+            checkpointBefore,
+            "Dust deposits must fail before forcing coupon checkpointing"
+        );
+    }
+
+    function test_MinWithdrawal_BlocksDustBeforeCouponCheckpoint() public {
+        _fundSenior(alice, 100_000e6);
+        _fundJunior(bob, 100_000e6);
+        uint256 checkpointBefore = pool.lastSeniorCouponCheckpointTime();
+
+        vm.warp(block.timestamp + 1 days);
+
+        vm.startPrank(alice);
+        vm.expectRevert(TrancheVault.TrancheVault__WithdrawalTooSmall.selector);
+        seniorVault.withdraw(0, alice, alice);
+        vm.expectRevert(TrancheVault.TrancheVault__WithdrawalTooSmall.selector);
+        seniorVault.withdraw(1, alice, alice);
+        vm.expectRevert(TrancheVault.TrancheVault__WithdrawalTooSmall.selector);
+        seniorVault.redeem(0, alice, alice);
+        vm.expectRevert(TrancheVault.TrancheVault__WithdrawalTooSmall.selector);
+        seniorVault.redeem(1, alice, alice);
+        vm.stopPrank();
+
+        assertEq(
+            pool.lastSeniorCouponCheckpointTime(),
+            checkpointBefore,
+            "Dust withdrawals must fail before forcing coupon checkpointing"
+        );
+    }
+
+    function test_MinWithdrawal_AllowsFullDustExit() public {
+        uint256 minimum = pool.minTrancheDepositUsdc();
+        _fundJunior(alice, minimum);
+        _fundJunior(bob, minimum);
+
+        vm.prank(address(engine));
+        pool.payOut(address(0xBEEF), minimum + 2);
+
+        vm.warp(block.timestamp + 1 hours);
+
+        uint256 aliceWithdrawable = juniorVault.maxWithdraw(alice);
+        assertGt(aliceWithdrawable, 0, "Setup should leave Alice withdrawable dust");
+        assertLt(aliceWithdrawable, minimum, "Setup should leave Alice below the ordinary flow minimum");
+        vm.prank(alice);
+        uint256 aliceSharesBurned = juniorVault.withdraw(aliceWithdrawable, alice, alice);
+        assertEq(juniorVault.previewRedeem(juniorVault.balanceOf(alice)), 0, "Full dust withdraw should clear value");
+        assertEq(usdc.balanceOf(alice), aliceWithdrawable, "Alice should receive the full dust value");
+        assertGt(aliceSharesBurned, 0, "Withdraw should burn shares");
+
+        uint256 bobShares = juniorVault.balanceOf(bob);
+        uint256 bobAssets = juniorVault.previewRedeem(bobShares);
+        assertGt(bobAssets, 0, "Setup should leave Bob redeemable dust");
+        assertLt(bobAssets, minimum, "Setup should leave Bob below the ordinary flow minimum");
+        vm.prank(bob);
+        uint256 redeemedAssets = juniorVault.redeem(bobShares, bob, bob);
+        assertEq(juniorVault.balanceOf(bob), 0, "Full dust redeem should let Bob exit");
+        assertEq(redeemedAssets, bobAssets, "Redeem should pay the previewed dust value");
     }
 
     function test_MeaningfulThirdPartyTopUpToExistingHolderReverts() public {
@@ -1352,8 +1420,9 @@ contract HousePoolTest is BasePerpTest {
         vm.stopPrank();
 
         vm.warp(block.timestamp + 11 minutes);
+        uint256 withdrawable = juniorVault.maxWithdraw(alice);
         vm.prank(alice);
-        juniorVault.withdraw(100_000 * 1e6, alice, alice);
+        juniorVault.withdraw(withdrawable, alice, alice);
     }
 
     function test_SeniorPrincipal_RestoredBeforeJuniorSurplus() public {
@@ -1384,7 +1453,7 @@ contract HousePoolTest is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        // Senior yield for ~0 elapsed time is negligible, so nearly all goes to restoration + junior
+        // Coupon for ~0 elapsed time is negligible, so nearly all goes to restoration + junior.
         assertEq(pool.seniorPrincipal(), SEEDED_SENIOR + 500_000 * 1e6, "Senior restored to HWM");
         assertEq(pool.juniorPrincipal(), 51_000 * 1e6, "Junior gets remainder after restoration");
     }
@@ -1395,13 +1464,15 @@ contract HousePoolTest is BasePerpTest {
 
         // Warp past cooldown
         vm.warp(block.timestamp + 1 hours);
+        uint256 projectedSeniorBeforeWithdraw = seniorVault.totalAssets();
 
         // Alice withdraws half her senior position
         vm.prank(alice);
         seniorVault.withdraw(250_000 * 1e6, alice, alice);
 
-        assertEq(pool.seniorPrincipal(), 251_000 * 1e6);
-        assertEq(pool.seniorHighWaterMark(), 251_000 * 1e6, "HWM scales proportionally on withdraw");
+        uint256 expectedSenior = projectedSeniorBeforeWithdraw - 250_000 * 1e6;
+        assertEq(pool.seniorPrincipal(), expectedSenior);
+        assertEq(pool.seniorHighWaterMark(), expectedSenior, "HWM scales proportionally on withdraw");
     }
 
     function test_SeniorHWM_PreservedOnFullWipeout() public {
@@ -1438,9 +1509,10 @@ contract HousePoolTest is BasePerpTest {
 
         // After cooldown passes, withdrawal succeeds
         vm.warp(block.timestamp + 1 hours);
+        uint256 withdrawable = juniorVault.maxWithdraw(alice);
         vm.prank(alice);
-        juniorVault.withdraw(100_000 * 1e6, alice, alice);
-        assertEq(usdc.balanceOf(alice), 100_000 * 1e6, "Withdrawal after cooldown succeeds");
+        juniorVault.withdraw(withdrawable, alice, alice);
+        assertEq(usdc.balanceOf(alice), withdrawable, "Withdrawal after cooldown succeeds");
     }
 
     // ==========================================
@@ -1464,9 +1536,7 @@ contract HousePoolTest is BasePerpTest {
         _fundJunior(bob, 1_000_000 * 1e6);
 
         _fundTrader(carol, 100_000 * 1e6);
-        vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BULL, 500_000 * 1e18, 50_000 * 1e6, 1e8, false);
-        router.executeOrder(1, _mockPythUpdateData());
+        _open(carol, CfdTypes.Side.BULL, 500_000 * 1e18, 50_000 * 1e6, 1e8);
 
         assertEq(int256(0), 0, "Starts at zero");
 
@@ -1503,15 +1573,11 @@ contract HousePoolTest is BasePerpTest {
 
         address trader1 = address(0x444);
         _fundTrader(trader1, 100_000 * 1e6);
-        vm.prank(trader1);
-        router.commitOrder(CfdTypes.Side.BULL, 400_000 * 1e18, 40_000 * 1e6, 1e8, false);
-        router.executeOrder(1, _mockPythUpdateData());
+        _open(trader1, CfdTypes.Side.BULL, 400_000 * 1e18, 40_000 * 1e6, 1e8);
 
         address trader2 = address(0x555);
         _fundTrader(trader2, 100_000 * 1e6);
-        vm.prank(trader2);
-        router.commitOrder(CfdTypes.Side.BEAR, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
-        router.executeOrder(2, _mockPythUpdateData());
+        _open(trader2, CfdTypes.Side.BEAR, 100_000 * 1e18, 10_000 * 1e6, 1e8);
 
         vm.warp(block.timestamp + 20 days);
         vm.prank(address(router));
@@ -1546,15 +1612,11 @@ contract HousePoolTest is BasePerpTest {
         _fundJunior(bob, 1_000_000 * 1e6);
         address trader1 = address(0x444);
         _fundTrader(trader1, 100_000 * 1e6);
-        vm.prank(trader1);
-        router.commitOrder(CfdTypes.Side.BULL, 400_000 * 1e18, 40_000 * 1e6, 1e8, false);
-        router.executeOrder(1, _mockPythUpdateData());
+        _open(trader1, CfdTypes.Side.BULL, 400_000 * 1e18, 40_000 * 1e6, 1e8);
 
         address trader2 = address(0x555);
         _fundTrader(trader2, 100_000 * 1e6);
-        vm.prank(trader2);
-        router.commitOrder(CfdTypes.Side.BEAR, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
-        router.executeOrder(2, _mockPythUpdateData());
+        _open(trader2, CfdTypes.Side.BEAR, 100_000 * 1e18, 10_000 * 1e6, 1e8);
 
         vm.warp(block.timestamp + 20 days);
         vm.prank(address(router));
@@ -1636,6 +1698,36 @@ contract HousePoolSeedLifecycleGateTest is BasePerpTest {
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
+    }
+
+    function test_InitializeJuniorSeed_CheckpointsPreExistingSeniorCouponWithoutChargingSeed() public {
+        uint256 seniorSeed = 100_000e6;
+        uint256 juniorSeed = 50_000e6;
+        usdc.mint(address(this), seniorSeed);
+        usdc.approve(address(pool), seniorSeed);
+        pool.initializeSeedPosition(true, seniorSeed, address(this));
+
+        vm.warp(block.timestamp + 30 days);
+        uint256 juniorSeedTime = block.timestamp;
+        usdc.mint(address(this), juniorSeed);
+        usdc.approve(address(pool), juniorSeed);
+        pool.initializeSeedPosition(false, juniorSeed, address(this));
+
+        assertEq(pool.seniorPrincipal(), seniorSeed, "Junior seed should not pay pre-existing senior coupon time");
+        assertEq(pool.juniorPrincipal(), juniorSeed, "Junior seed should enter at face value");
+        assertEq(
+            pool.lastSeniorCouponCheckpointTime(),
+            juniorSeedTime,
+            "Junior seed should become the new senior coupon checkpoint"
+        );
+
+        vm.warp(juniorSeedTime + 1 days);
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        uint256 expectedCoupon = (seniorSeed * 800 * uint256(1 days)) / (10_000 * uint256(365 days));
+        assertEq(pool.seniorPrincipal(), seniorSeed + expectedCoupon, "Only post-junior-seed coupon should be paid");
+        assertEq(pool.juniorPrincipal(), juniorSeed - expectedCoupon, "Junior should only fund post-entry coupon time");
     }
 
     function test_OrdinaryDeposit_RevertsWhenSeedLifecycleStartedButTradingInactive() public {
@@ -1948,8 +2040,8 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         helper_UnassignedAssets_DoNotTrapExistingSeniorWithdrawals();
     }
 
-    function test_InitializeSeedPosition_CheckpointsSeniorYieldBeforePrincipalMutation() public {
-        helper_InitializeSeedPosition_CheckpointsSeniorYieldBeforePrincipalMutation();
+    function test_InitializeSeedPosition_CheckpointsSeniorCouponBeforePrincipalMutation() public {
+        helper_InitializeSeedPosition_CheckpointsSeniorCouponBeforePrincipalMutation();
     }
 
     function test_AssignUnassignedAssets_ReconcilesBeforeBootstrappingAndAvoidsPhantomAssets() public {
@@ -2204,20 +2296,21 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         uint256 assetsBefore = pool.totalAssets();
         uint256 feesBefore = engine.accumulatedFeesUsdc();
 
+        uint64 orderId = router.nextCommitId();
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8, false);
-        router.executeOrder(1, _mockPythUpdateData());
+        router.executeOrder(orderId, _mockPythUpdateData());
 
         uint256 assetsDelta = pool.totalAssets() - assetsBefore;
         uint256 feesDelta = engine.accumulatedFeesUsdc() - feesBefore;
         (, uint256 pendingJunior,,) = pool.getPendingTrancheState();
         uint256 expectedLpTradingRevenue = assetsDelta > feesDelta ? assetsDelta - feesDelta : 0;
-        uint256 pendingJuniorIncrease = pendingJunior > pendingJuniorBefore ? pendingJunior - pendingJuniorBefore : 0;
+        uint256 pendingJuniorDelta = pendingJunior > pendingJuniorBefore ? pendingJunior - pendingJuniorBefore : 0;
 
         assertEq(feesDelta, 40_000_000, "Open should still accrue the full execution fee as protocol revenue");
         assertEq(pool.excessAssets(), 0, "Execution fee inflow should be canonically accounted, not stranded as excess");
         assertEq(
-            pendingJuniorIncrease,
+            pendingJuniorDelta,
             expectedLpTradingRevenue,
             "Seeded pending LP revenue should exclude the execution fee portion"
         );
@@ -2331,25 +2424,23 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         vm.warp(block.timestamp + seniorVault.DEPOSIT_COOLDOWN() + 1);
         uint256 quotedAssets = seniorVault.maxWithdraw(alice);
         assertEq(pool.unassignedAssets(), 0);
-        assertEq(quotedAssets, 100_000e6);
+        assertGe(quotedAssets, 100_000e6);
         uint256 aliceBefore = usdc.balanceOf(alice);
         vm.prank(alice);
         seniorVault.withdraw(quotedAssets, alice, alice);
         assertEq(usdc.balanceOf(alice), aliceBefore + quotedAssets);
     }
 
-    function helper_InitializeSeedPosition_CheckpointsSeniorYieldBeforePrincipalMutation() public {
+    function helper_InitializeSeedPosition_CheckpointsSeniorCouponBeforePrincipalMutation() public {
         uint256 staleTime = block.timestamp + 30 days;
         vm.warp(staleTime);
         usdc.mint(address(this), 100_000e6);
         usdc.approve(address(pool), 100_000e6);
         pool.initializeSeedPosition(true, 100_000e6, address(this));
-        assertEq(pool.unpaidSeniorYield(), 0);
-        assertEq(pool.lastSeniorYieldCheckpointTime(), block.timestamp);
+        assertEq(pool.lastSeniorCouponCheckpointTime(), block.timestamp);
         vm.prank(address(juniorVault));
         pool.reconcile();
         assertEq(pool.seniorPrincipal(), 100_000e6);
-        assertEq(pool.unpaidSeniorYield(), 0);
     }
 
     function helper_AssignUnassignedAssets_ReconcilesBeforeBootstrappingAndAvoidsPhantomAssets() public {
@@ -2437,6 +2528,10 @@ contract HousePoolSeededBaseSetupTest is BasePerpTest {
         assertGt(pool.seniorHighWaterMark() - pool.seniorPrincipal(), 0, "Senior deficit exists");
         assertEq(seniorVault.maxDeposit(dave), 0, "ERC4626 maxDeposit should be zero while senior is impaired");
         assertEq(seniorVault.maxMint(dave), 0, "ERC4626 maxMint should be zero while senior is impaired");
+        assertEq(juniorVault.maxDeposit(dave), 0, "Junior maxDeposit should be zero while senior is impaired");
+        assertEq(juniorVault.maxMint(dave), 0, "Junior maxMint should be zero while senior is impaired");
+        assertFalse(pool.canAcceptTrancheDeposits(true), "Pool should block ordinary senior deposits while impaired");
+        assertFalse(pool.canAcceptTrancheDeposits(false), "Pool should block ordinary junior deposits while impaired");
     }
 
     function test_MaxDepositAndMaxMint_ReopenForPendingSeniorRecapAfterWipeout() public {
@@ -2532,15 +2627,11 @@ contract HousePoolAuditTest is BasePerpTest {
         _fundTrader(alice, 50_000e6);
         _fundTrader(carol, 50_000e6);
 
-        vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BEAR, 200_000e18, 10_000e6, 1e8, false);
-        router.executeOrder(1, _mockPythUpdateData());
+        _open(alice, CfdTypes.Side.BEAR, 200_000e18, 10_000e6, 1e8);
 
         uint256 juniorBefore = pool.juniorPrincipal();
 
-        vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 10_000e6, 1.2e8, false);
-        router.executeOrder(2, _mockPythUpdateData(1.2e8));
+        _open(carol, CfdTypes.Side.BULL, 50_000e18, 10_000e6, 1.2e8);
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -2557,15 +2648,11 @@ contract HousePoolAuditTest is BasePerpTest {
         _fundTrader(alice, 50_000e6);
         _fundTrader(carol, 50_000e6);
 
-        vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BEAR, 200_000e18, 10_000e6, 1e8, false);
-        router.executeOrder(1, _mockPythUpdateData());
+        _open(alice, CfdTypes.Side.BEAR, 200_000e18, 10_000e6, 1e8);
 
         uint256 juniorBefore = pool.juniorPrincipal();
 
-        vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 10_000e6, 0.8e8, false);
-        router.executeOrder(2, _mockPythUpdateData(0.8e8));
+        _open(carol, CfdTypes.Side.BULL, 50_000e18, 10_000e6, 0.8e8);
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -2583,13 +2670,8 @@ contract HousePoolAuditTest is BasePerpTest {
 
         address account = alice;
 
-        vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 5000e6, 1e8, false);
-        router.executeOrder(1, _mockPythUpdateData());
-
-        vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 0, 1e8, true);
-        router.executeOrder(2, _mockPythUpdateData());
+        _open(alice, CfdTypes.Side.BEAR, 100_000e18, 5000e6, 1e8);
+        _close(alice, CfdTypes.Side.BEAR, 100_000e18, 1e8);
 
         (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0);
@@ -2606,9 +2688,7 @@ contract HousePoolAuditTest is BasePerpTest {
         _fundTrader(alice, 50_000e6);
         vm.warp(block.timestamp + 2 hours);
 
-        vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BEAR, 400_000e18, 20_000e6, 1e8, false);
-        router.executeOrder(1, _mockPythUpdateData());
+        _open(alice, CfdTypes.Side.BEAR, 400_000e18, 20_000e6, 1e8);
 
         vm.warp(block.timestamp + 121);
 
@@ -2641,9 +2721,7 @@ contract HousePoolAuditTest is BasePerpTest {
         _fundJunior(bob, 500_000e6);
         _fundTrader(alice, 50_000e6);
 
-        vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8, false);
-        router.executeOrder(1, _mockPythUpdateData());
+        _open(alice, CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8);
 
         vm.warp(saturdayFrozen);
         assertTrue(engine.isOracleFrozen(), "Test setup should advance into a frozen oracle window");
@@ -2664,15 +2742,11 @@ contract HousePoolAuditTest is BasePerpTest {
 
         address bullTrader = address(0x444);
         _fundTrader(bullTrader, 100_000e6);
-        vm.prank(bullTrader);
-        router.commitOrder(CfdTypes.Side.BULL, 400_000e18, 40_000e6, 1e8, false);
-        router.executeOrder(1, _mockPythUpdateData());
+        _open(bullTrader, CfdTypes.Side.BULL, 400_000e18, 40_000e6, 1e8);
 
         address bearTrader = address(0x555);
         _fundTrader(bearTrader, 100_000e6);
-        vm.prank(bearTrader);
-        router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8, false);
-        router.executeOrder(2, _mockPythUpdateData());
+        _open(bearTrader, CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8);
 
         vm.warp(saturdayFrozen - 12 hours);
         assertTrue(engine.isOracleFrozen(), "setup should enter a frozen-oracle window");
@@ -2701,15 +2775,11 @@ contract HousePoolAuditTest is BasePerpTest {
 
         address bullTrader = address(0x444);
         _fundTrader(bullTrader, 100_000e6);
-        vm.prank(bullTrader);
-        router.commitOrder(CfdTypes.Side.BULL, 400_000e18, 40_000e6, 1e8, false);
-        router.executeOrder(1, _mockPythUpdateData());
+        _open(bullTrader, CfdTypes.Side.BULL, 400_000e18, 40_000e6, 1e8);
 
         address bearTrader = address(0x555);
         _fundTrader(bearTrader, 100_000e6);
-        vm.prank(bearTrader);
-        router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8, false);
-        router.executeOrder(2, _mockPythUpdateData());
+        _open(bearTrader, CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8);
 
         vm.warp(saturdayFrozen - 12 hours);
         assertTrue(engine.isOracleFrozen(), "setup should enter a frozen-oracle window");
@@ -2740,23 +2810,13 @@ contract HousePoolAuditTest is BasePerpTest {
         _fundTrader(alice, 100_000e6);
         _fundTrader(carol, 100_000e6);
 
-        vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BEAR, 300_000e18, 30_000e6, 1e8, false);
-        router.executeOrder(1, _mockPythUpdateData());
-
-        vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
-        router.executeOrder(2, _mockPythUpdateData());
+        _open(alice, CfdTypes.Side.BEAR, 300_000e18, 30_000e6, 1e8);
+        _open(carol, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
         vm.warp(block.timestamp + 90 days);
 
-        vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
-        router.executeOrder(3, _mockPythUpdateData());
-
-        vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BEAR, 300_000e18, 0, 0, true);
-        router.executeOrder(4, _mockPythUpdateData());
+        _close(carol, CfdTypes.Side.BULL, 100_000e18, 1e8);
+        _close(alice, CfdTypes.Side.BEAR, 300_000e18, 1e8);
 
         assertEq(_sideOpenInterest(CfdTypes.Side.BULL), 0, "All bull positions closed");
         assertEq(_sideOpenInterest(CfdTypes.Side.BEAR), 0, "All bear positions closed");
@@ -2770,23 +2830,13 @@ contract HousePoolAuditTest is BasePerpTest {
         _fundTrader(alice, 100_000e6);
         _fundTrader(carol, 100_000e6);
 
-        vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BEAR, 300_000e18, 30_000e6, 1e8, false);
-        router.executeOrder(1, _mockPythUpdateData());
-
-        vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
-        router.executeOrder(2, _mockPythUpdateData());
+        _open(alice, CfdTypes.Side.BEAR, 300_000e18, 30_000e6, 1e8);
+        _open(carol, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
         vm.warp(block.timestamp + 90 days);
 
-        vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
-        router.executeOrder(3, _mockPythUpdateData());
-
-        vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BEAR, 300_000e18, 0, 0, true);
-        router.executeOrder(4, _mockPythUpdateData());
+        _close(carol, CfdTypes.Side.BULL, 100_000e18, 1e8);
+        _close(alice, CfdTypes.Side.BEAR, 300_000e18, 1e8);
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -2807,21 +2857,14 @@ contract HousePoolAuditTest is BasePerpTest {
         _fundTrader(alice, 100_000e6);
         _fundTrader(carol, 100_000e6);
 
-        vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BEAR, 300_000e18, 30_000e6, 1e8, false);
-        router.executeOrder(1, _mockPythUpdateData());
-
-        vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
-        router.executeOrder(2, _mockPythUpdateData());
+        _open(alice, CfdTypes.Side.BEAR, 300_000e18, 30_000e6, 1e8);
+        _open(carol, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
         vm.warp(block.timestamp + 30);
 
-        vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
-        router.executeOrder(3, _mockPythUpdateData());
+        _close(carol, CfdTypes.Side.BULL, 100_000e18, 1e8);
 
         int256 unrealizedLegacySpread = int256(0);
         assertEq(unrealizedLegacySpread, 0, "Carry model should not report legacy side spread state");
@@ -2840,15 +2883,8 @@ contract HousePoolAuditTest is BasePerpTest {
         _fundTrader(alice, 50_000e6);
         _fundTrader(carol, 50_000e6);
 
-        uint64 id1 = router.nextCommitId();
-        vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 250_000e18, 25_000e6, 1e8, false);
-        router.executeOrder(id1, _mockPythUpdateData());
-
-        uint64 id2 = router.nextCommitId();
-        vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BULL, 250_100e18, 25_000e6, 1e8, false);
-        router.executeOrder(id2, _mockPythUpdateData());
+        _open(alice, CfdTypes.Side.BULL, 250_000e18, 25_000e6, 1e8);
+        _open(carol, CfdTypes.Side.BULL, 250_100e18, 25_000e6, 1e8);
 
         uint256 fees = engine.accumulatedFeesUsdc();
         assertGt(fees, 0, "Fees should have accumulated");
@@ -2868,9 +2904,7 @@ contract HousePoolAuditTest is BasePerpTest {
         _fundJunior(bob, 100_000e6);
 
         _fundTrader(carol, 50_000e6);
-        vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BEAR, 200_000e18, 20_000e6, 1e8, false);
-        router.executeOrder(1, _mockPythUpdateData());
+        _open(carol, CfdTypes.Side.BEAR, 200_000e18, 20_000e6, 1e8);
 
         uint256 closeDepth = pool.totalAssets();
         vm.prank(address(router));
@@ -2913,9 +2947,7 @@ contract HousePoolAuditTest is BasePerpTest {
         _fundJunior(bob, 50_000e6);
 
         _fundTrader(carol, 50_000e6);
-        vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 20_000e6, 1e8, false);
-        router.executeOrder(1, _mockPythUpdateData());
+        _open(carol, CfdTypes.Side.BEAR, 100_000e18, 20_000e6, 1e8);
 
         uint256 closeDepth = pool.totalAssets();
         vm.prank(address(router));

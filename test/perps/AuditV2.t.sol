@@ -70,7 +70,7 @@ contract AuditV2_C01_WithdrawGuardTest is BasePerpTest {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// C-02: _reconcile early return permanently destroys senior yield
+// C-02: _reconcile early return permanently destroys senior coupon checkpointing
 // ═══════════════════════════════════════════════════════════════════
 
 contract AuditV2_C02_ReconcileTimeConsumptionTest is BasePerpTest {
@@ -103,7 +103,7 @@ contract AuditV2_C02_ReconcileTimeConsumptionTest is BasePerpTest {
         });
     }
 
-    function test_C02_FrozenWindowReconcile_DoesNotDestroySeniorYieldEntitlement() public {
+    function test_C02_FrozenWindowReconcile_DoesNotDestroySeniorCouponCheckpointing() public {
         IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 1000;
         pool.proposePoolConfig(config);
@@ -116,7 +116,7 @@ contract AuditV2_C02_ReconcileTimeConsumptionTest is BasePerpTest {
         address aliceAccount = alice;
         _open(aliceAccount, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
 
-        uint256 yieldBefore = pool.unpaidSeniorYield();
+        uint256 seniorBefore = pool.seniorPrincipal();
 
         // Capture base timestamp before any warps (block.timestamp is cached per frame)
         uint256 baseTs = SETUP_TIMESTAMP + 48 hours + 1;
@@ -142,8 +142,8 @@ contract AuditV2_C02_ReconcileTimeConsumptionTest is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        uint256 yieldAfter = pool.unpaidSeniorYield();
-        assertGe(yieldAfter, yieldBefore, "Frozen-window reconcile should not destroy accrued senior yield entitlement");
+        uint256 seniorAfter = pool.seniorPrincipal();
+        assertGe(seniorAfter, seniorBefore, "Frozen-window reconcile should not destroy senior coupon value");
     }
 
 }
@@ -434,15 +434,12 @@ contract AuditV2_M01_VPIRebateIMRTest is BasePerpTest {
 
     function test_M01_NonzeroMarginRebateOpenProjectsFreshVpiLiability() public {
         _fundTrader(alice, 200_000e6);
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        _open(aliceId, CfdTypes.Side.BULL, 300_000e18, 50_000e6, 1e8);
+        _open(alice, CfdTypes.Side.BULL, 300_000e18, 50_000e6, 1e8);
 
         _fundTrader(bob, 4000e6);
-        bytes32 bobId = bytes32(uint256(uint160(bob)));
 
-        uint8 code = engineLens.previewOpenRevertCode(
-            bobId, CfdTypes.Side.BEAR, 300_000e18, 4000e6, 1e8, uint64(block.timestamp)
-        );
+        uint8 code =
+            engineLens.previewOpenRevertCode(bob, CfdTypes.Side.BEAR, 300_000e18, 4000e6, 1e8, uint64(block.timestamp));
         assertEq(
             code,
             uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN),
@@ -454,7 +451,7 @@ contract AuditV2_M01_VPIRebateIMRTest is BasePerpTest {
         vm.expectRevert();
         engine.processOrderTyped(
             CfdTypes.Order({
-                accountId: bobId,
+                account: bob,
                 sizeDelta: 300_000e18,
                 marginDelta: 4000e6,
                 targetPrice: 1e8,
@@ -494,8 +491,7 @@ contract AuditV2_M02_GasGriefingTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
 
         uint64 orderId = router.nextCommitId() - 1;
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(1e8));
+        bytes[] memory priceData = _mockPythUpdateData();
 
         // Batch execution wraps processOrder in try/catch (line 412).
         // Under EIP-150's 63/64 rule, a malicious keeper can supply gas G such that:
