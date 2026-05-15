@@ -3,6 +3,7 @@ pragma solidity 0.8.33;
 
 import {DecimalConstants} from "../../libraries/DecimalConstants.sol";
 import {OrderRouterBase} from "./OrderRouterBase.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /// @notice Keeper bounty, liquidation bounty, and forfeited-order bounty accounting for the router stack.
 abstract contract OrderBountyAccounting is OrderRouterBase {
@@ -20,6 +21,14 @@ abstract contract OrderBountyAccounting is OrderRouterBase {
             executionBountyUsdc > maxOpenOrderExecutionBountyUsdc
                 ? maxOpenOrderExecutionBountyUsdc
                 : executionBountyUsdc;
+    }
+
+    function _minSizeDeltaForEngineBountyFloor(
+        uint256 price
+    ) internal view returns (uint256) {
+        (,,,,,, uint256 minBountyUsdc, uint256 bountyBps) = engine.riskParams();
+        uint256 minNotionalUsdc = Math.mulDiv(minBountyUsdc, 10_000, bountyBps, Math.Rounding.Ceil);
+        return Math.mulDiv(minNotionalUsdc, DecimalConstants.USDC_TO_TOKEN_SCALE, price, Math.Rounding.Ceil);
     }
 
     function _forfeitEscrowedOrderBountiesOnLiquidation(

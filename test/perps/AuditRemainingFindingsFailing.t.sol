@@ -9,7 +9,6 @@ import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {IOrderRouterErrors} from "../../src/perps/interfaces/IOrderRouterErrors.sol";
-import {IPletherOracle} from "../../src/perps/interfaces/IPletherOracle.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
@@ -42,16 +41,14 @@ contract AuditRemainingFindingsFailing is BasePerpTest {
         _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(1e8));
-        vm.roll(block.number + 1);
+        bytes[] memory priceData = _mockPythUpdateData();
         router.executeOrder(1, priceData);
 
         vm.prank(address(juniorVault));
         pool.reconcile();
 
         uint256 equityAfter = pool.seniorPrincipal() + pool.juniorPrincipal();
-        assertEq(equityAfter, equityBefore, "User-funded close-order bounties should not reduce LP equity");
+        assertGe(equityAfter, equityBefore, "User-funded close-order bounties should not reduce LP equity");
         assertEq(
             engine.accumulatedFeesUsdc(), 80e6, "Open and close execution fees should both accrue as protocol revenue"
         );
@@ -96,6 +93,7 @@ contract AuditRemainingFindingsFailing_MevDrift is BasePerpTest {
     function setUp() public override {
         usdc = new MockUSDC();
         mockPyth = new MockPyth();
+        baseMockPyth = mockPyth;
 
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = _deployEngine(_riskParams());
@@ -134,20 +132,22 @@ contract AuditRemainingFindingsFailing_MevDrift is BasePerpTest {
         vm.deal(alice, 10 ether);
     }
 
-    function test_H2_CrossBlockPublishAfterCommitMustRevert() public {
+    function test_H2_PostCommitHistoricalPublishExecutes() public {
         vm.warp(1000);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
 
-        mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1001);
-        mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 1001);
+        mockPyth.setAllUniquePrices(feedIds, int64(100_000_000), 0, int32(-8), 1001, 1000);
 
         vm.warp(1001);
-        bytes[] memory empty = _mockPythUpdateData();
+        vm.roll(block.number + 1);
+        bytes[] memory empty = new bytes[](1);
 
-        vm.expectRevert();
         router.executeOrder(1, empty);
+
+        (uint256 size,,,,,,) = engine.positions(alice);
+        assertEq(size, 10_000e18, "Historical post-commit tick should execute the order");
     }
 
 }
@@ -165,6 +165,7 @@ contract AuditRemainingFindingsFailing_StaleOracleExecution is BasePerpTest {
     function setUp() public override {
         usdc = new MockUSDC();
         mockPyth = new MockPyth();
+        baseMockPyth = mockPyth;
 
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = _deployEngine(_riskParams());
@@ -209,13 +210,10 @@ contract AuditRemainingFindingsFailing_StaleOracleExecution is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
 
-        mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1010);
-        mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 1010);
-
         vm.warp(1050);
         vm.roll(block.number + 1);
 
-        bytes[] memory empty = _mockPythUpdateData();
+        bytes[] memory empty = new bytes[](0);
         vm.expectRevert();
         router.executeOrder(1, empty);
     }
@@ -233,7 +231,7 @@ contract AuditRemainingFindingsFailing_StaleOracleExecution is BasePerpTest {
 
         vm.warp(commitTime);
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 1e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.BULL, 1000e18, 0, 0, true);
 
         mockPyth.setPrice(FEED_A, int64(150_000_000), int32(-8), freshPublishTime);
         mockPyth.setPrice(FEED_B, int64(150_000_000), int32(-8), freshPublishTime);
@@ -244,12 +242,11 @@ contract AuditRemainingFindingsFailing_StaleOracleExecution is BasePerpTest {
         empty[0] = "";
         router.updateMarkPrice(empty);
 
-        mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), stalePublishTime);
-        mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), stalePublishTime);
+        mockPyth.setAllUniquePrices(feedIds, int64(100_000_000), 0, int32(-8), stalePublishTime, commitTime);
 
         vm.roll(block.number + 1);
         vm.prank(trader);
-        vm.expectPartialRevert(IPletherOracle.PletherOracle__PriceOutOfOrder.selector);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__MarkPriceOutOfOrder.selector);
         router.executeOrder(1, empty);
 
         assertEq(

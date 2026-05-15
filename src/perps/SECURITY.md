@@ -124,6 +124,7 @@ These are the highest-value properties an auditor should expect to hold.
 | Binding intents | Users cannot cancel queued orders once committed |
 | Bounty conservation | Router-custodied USDC execution bounty escrow is conserved across order lifecycle transitions until distributed or absorbed |
 | Reservation source of truth | Clearinghouse reservation records remain the source of truth for committed order margin |
+| Economic close granularity | Partial close intents must meet the engine notional floor; only full residual closes may be smaller |
 | Bounded cleanup | Queue cleanup, liquidation cleanup, and close-intent position projection are account-local and intentionally bounded |
 
 ### HousePool and LP accounting
@@ -245,6 +246,7 @@ Security properties:
 - batch execution may reuse a parsed historical basket only for later FIFO orders whose `commitTime` is strictly before the cached tick and falls within its proven coverage,
 - basket confidence is included in execution and liquidation prices instead of being treated only as metadata,
 - FIFO execution prevents later orders from bypassing earlier ones,
+- partial-close size floors prevent flat-bounty dust closes from occupying global FIFO slots,
 - binding order semantics prevent traders from turning queued intents into free options.
 
 ### Queue failure handling

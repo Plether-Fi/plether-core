@@ -50,6 +50,10 @@ abstract contract OrderValidation is OrderBountyAccounting {
         OrderValidationLib.validateCloseCommit(
             queuedPosition.exists, queuedPosition.size, queuedPosition.side, side, sizeDelta
         );
+        uint256 minCloseSizeDelta = _minSizeDeltaForEngineBountyFloor(_commitReferencePrice());
+        if (sizeDelta < queuedPosition.size && sizeDelta < minCloseSizeDelta) {
+            revert OrderRouter__CommitValidation(11);
+        }
         return closeOrderExecutionBountyUsdc;
     }
 
