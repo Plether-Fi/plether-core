@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
+import {ICfdEngineCore} from "../../../../src/perps/interfaces/ICfdEngineCore.sol";
 import {IHousePool} from "../../../../src/perps/interfaces/IHousePool.sol";
 import {MockUSDC} from "../../../mocks/MockUSDC.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -45,18 +46,14 @@ contract MockInvariantHousePool is IHousePool {
         address recipient,
         uint256 amount
     ) external {
-        if (msg.sender != engine) {
-            revert("unauthorized");
-        }
+        _requireAuthorized();
         usdc.safeTransfer(recipient, amount);
     }
 
     function recordProtocolInflow(
         uint256
     ) external view {
-        if (msg.sender != engine) {
-            revert("unauthorized");
-        }
+        _requireAuthorized();
     }
 
     function recordClaimantInflow(
@@ -64,7 +61,11 @@ contract MockInvariantHousePool is IHousePool {
         IHousePool.ClaimantInflowKind,
         IHousePool.ClaimantInflowCashMode
     ) external view {
-        if (msg.sender != engine) {
+        _requireAuthorized();
+    }
+
+    function _requireAuthorized() internal view {
+        if (msg.sender != engine && msg.sender != ICfdEngineCore(engine).settlementSidecar()) {
             revert("unauthorized");
         }
     }

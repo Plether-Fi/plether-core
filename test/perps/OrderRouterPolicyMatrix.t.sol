@@ -148,7 +148,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         assertLe(
             clearinghouse.balanceUsdc(traderAccount),
             traderSettlementBefore,
-            "Open-order slippage cleanup should not credit trader settlement after escrow"
+            "Open-order slippage cleanup should not credit trader settlement after reservation"
         );
     }
 
@@ -205,7 +205,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 0.8e8, true);
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
-        uint256 feesBefore = engine.accumulatedFeesUsdc();
+        uint256 feesBefore = engine.protocolTreasuryBalanceUsdc();
         bytes[] memory closePrice = _mockPythUpdateData();
         vm.prank(KEEPER);
         router.executeOrder(2, closePrice);
@@ -216,7 +216,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
             "Close slippage miss should still credit the clearer through the carry-aware keeper settlement path"
         );
         assertGe(
-            engine.accumulatedFeesUsdc() - feesBefore,
+            engine.protocolTreasuryBalanceUsdc() - feesBefore,
             0,
             "Close slippage miss should not reduce accumulated protocol fees"
         );

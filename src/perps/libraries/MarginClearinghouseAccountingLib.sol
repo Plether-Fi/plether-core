@@ -215,8 +215,7 @@ library MarginClearinghouseAccountingLib {
     ) internal pure returns (LiquidationResidualPlan memory plan) {
         uint256 reachableUsdc = getTerminalReachableUsdc(buckets);
         plan.keeperBountyUsdc = keeperBountyUsdc;
-        uint256 reachableAfterBountyUsdc =
-            reachableUsdc > keeperBountyUsdc ? reachableUsdc - keeperBountyUsdc : 0;
+        uint256 reachableAfterBountyUsdc = reachableUsdc > keeperBountyUsdc ? reachableUsdc - keeperBountyUsdc : 0;
 
         if (residualUsdc >= 0) {
             plan.settlementRetainedUsdc =

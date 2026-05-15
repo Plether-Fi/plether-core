@@ -13,6 +13,8 @@ interface ICfdEngineCore is ICfdEngineTypes {
 
     function orderRouter() external view returns (address);
 
+    function protocolTreasury() external view returns (address);
+
     function settlementSidecar() external view returns (address);
 
     function USDC() external view returns (IERC20);
@@ -59,7 +61,7 @@ interface ICfdEngineCore is ICfdEngineTypes {
         uint64 publishTime
     ) external;
 
-    function accumulatedFeesUsdc() external view returns (uint256);
+    function protocolTreasuryBalanceUsdc() external view returns (uint256);
 
     function totalDeferredTraderCreditUsdc() external view returns (uint256);
 

@@ -8,16 +8,14 @@ library HousePoolAccountingLib {
     struct WithdrawalSnapshot {
         uint256 physicalAssets;
         uint256 maxLiability;
-        uint256 protocolFees;
         uint256 reserved;
         uint256 freeUsdc;
     }
 
     struct ReconcileSnapshot {
         uint256 physicalAssets;
-        uint256 protocolFees;
         uint256 deferredLiabilities;
-        uint256 cashMinusFees;
+        uint256 cashAfterDeferredLiabilities;
         uint256 mtm;
         uint256 distributable;
     }
@@ -32,9 +30,8 @@ library HousePoolAccountingLib {
     ) internal pure returns (WithdrawalSnapshot memory snapshot) {
         snapshot.physicalAssets = engineSnapshot.physicalAssetsUsdc;
         snapshot.maxLiability = engineSnapshot.maxLiabilityUsdc;
-        snapshot.protocolFees = engineSnapshot.protocolFeesUsdc;
-        snapshot.reserved = engineSnapshot.maxLiabilityUsdc + engineSnapshot.protocolFeesUsdc
-            + engineSnapshot.deferredTraderCreditUsdc + engineSnapshot.supplementalReservedUsdc;
+        snapshot.reserved = engineSnapshot.maxLiabilityUsdc + engineSnapshot.deferredTraderCreditUsdc
+            + engineSnapshot.supplementalReservedUsdc;
         snapshot.freeUsdc =
             snapshot.physicalAssets > snapshot.reserved ? snapshot.physicalAssets - snapshot.reserved : 0;
     }
@@ -43,13 +40,14 @@ library HousePoolAccountingLib {
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory engineSnapshot
     ) internal pure returns (ReconcileSnapshot memory snapshot) {
         snapshot.physicalAssets = engineSnapshot.physicalAssetsUsdc;
-        snapshot.protocolFees = engineSnapshot.protocolFeesUsdc;
         snapshot.deferredLiabilities = engineSnapshot.deferredTraderCreditUsdc;
-        snapshot.cashMinusFees = engineSnapshot.netPhysicalAssetsUsdc > snapshot.deferredLiabilities
-            ? engineSnapshot.netPhysicalAssetsUsdc - snapshot.deferredLiabilities
+        snapshot.cashAfterDeferredLiabilities = engineSnapshot.physicalAssetsUsdc > snapshot.deferredLiabilities
+            ? engineSnapshot.physicalAssetsUsdc - snapshot.deferredLiabilities
             : 0;
         snapshot.mtm = engineSnapshot.unrealizedMtmLiabilityUsdc;
-        snapshot.distributable = snapshot.cashMinusFees > snapshot.mtm ? snapshot.cashMinusFees - snapshot.mtm : 0;
+        snapshot.distributable = snapshot.cashAfterDeferredLiabilities > snapshot.mtm
+            ? snapshot.cashAfterDeferredLiabilities - snapshot.mtm
+            : 0;
     }
 
     function getMarkFreshnessPolicy(

@@ -6,7 +6,7 @@ import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 
-contract ArchitectureRegression_EscrowShielding is BasePerpTest {
+contract ArchitectureRegression_ReservationShielding is BasePerpTest {
 
     address internal alice = address(0xA11CE);
 
@@ -30,6 +30,20 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
 
     address internal alice = address(0xA11CE);
     address internal bob = address(0xB0B);
+
+    function test_ProtocolFees_AreCustodiedInTreasuryMargin() public {
+        address account = alice;
+        _fundTrader(alice, 20_000e6);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+
+        uint256 fees = engine.protocolTreasuryBalanceUsdc();
+        assertGt(fees, 0, "Setup should accrue protocol fees");
+        assertEq(
+            clearinghouse.balanceUsdc(engine.protocolTreasury()),
+            fees,
+            "Protocol fees should live in the treasury clearinghouse account"
+        );
+    }
 
     function test_FreshClosePayout_MustNotLeapfrogExistingDeferredClaims() public {
         address aliceAccount = alice;
@@ -165,7 +179,9 @@ contract ArchitectureRegression_QueueEconomics is BasePerpTest {
         assertEq(
             marginAfter, marginBefore - 200_000, "close commit should source the configured bounty from active margin"
         );
-        assertEq(_executionBountyReserve(1), 200_000, "close commit must still escrow the configured keeper bounty");
+        assertEq(
+            _executionBountyReserve(1), 200_000, "close commit must still reservation the configured keeper bounty"
+        );
     }
 
 }

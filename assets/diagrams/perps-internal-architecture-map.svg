@@ -80,7 +80,7 @@
 <text x="556.0149999999999" y="523" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#166534">Protocol Fees</text>
 <text x="751.4399999999999" y="523" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#166534">Unassigned / Excess Assets</text>
 <text x="800.3399999999999" y="244" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#737373">Trader domain: free settlement, live position margin, committed order margin</text>
-<text x="1173.365" y="337" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#737373">Queue domain: router-custodied execution-bounty escrow</text>
+<text x="1173.365" y="337" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#737373">Queue domain: clearinghouse-reserved execution-bounty reservations</text>
 <text x="886.1399999999999" y="430" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#737373">Ledger domain: close, liquidation, solvency, withdrawal accounting</text>
 <text x="1138.7649999999999" y="523" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#737373">Pool domain: accounted assets, tranche waterfall, fee segregation</text>
 </svg>

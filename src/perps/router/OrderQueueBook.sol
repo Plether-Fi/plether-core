@@ -4,9 +4,9 @@ pragma solidity 0.8.33;
 import {CfdTypes} from "../CfdTypes.sol";
 import {IOrderRouter} from "../interfaces/IOrderRouter.sol";
 import {IOrderRouterAccounting} from "../interfaces/IOrderRouterAccounting.sol";
-import {OrderEscrowAccounting} from "./OrderEscrowAccounting.sol";
+import {OrderReservationAccounting} from "./OrderReservationAccounting.sol";
 
-abstract contract OrderQueueBook is OrderEscrowAccounting {
+abstract contract OrderQueueBook is OrderReservationAccounting {
 
     struct QueuedPositionView {
         bool exists;

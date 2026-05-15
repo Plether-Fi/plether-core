@@ -716,8 +716,8 @@ contract PerpsForkTest is Test {
         );
 
         deal(USDC, address(pool), IERC20(USDC).balanceOf(address(pool)) + deferred);
-        vm.prank(address(router));
-        pool.recordProtocolInflow(deferred);
+        vm.prank(pool.owner());
+        pool.accountExcess();
 
         vm.prank(alice);
         engine.claimDeferredTraderCredit(aliceAccount);

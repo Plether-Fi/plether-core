@@ -58,9 +58,9 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
             "Protocol accounting view deferred trader credit mismatch"
         );
         assertEq(
-            accountingView.accumulatedFeesUsdc,
-            engine.accumulatedFeesUsdc(),
-            "Protocol accounting view accumulated fees mismatch"
+            accountingView.protocolTreasuryBalanceUsdc,
+            engine.protocolTreasuryBalanceUsdc(),
+            "Protocol accounting view treasury balance mismatch"
         );
     }
 
@@ -115,14 +115,14 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function invariant_LiquidationPreviewExcludesRouterExecutionEscrow() public view {
+    function invariant_LiquidationPreviewExcludesReservedExecutionBounty() public view {
         uint256 oraclePrice = _previewOraclePrice();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
             AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
                 engineAccountLens.getAccountLedgerSnapshot(account);
-            if (!snapshot.hasPosition || snapshot.executionEscrowUsdc == 0) {
+            if (!snapshot.hasPosition || snapshot.executionBountyReserveUsdc == 0) {
                 continue;
             }
 
@@ -135,8 +135,8 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
             );
             assertLt(
                 liquidationPreview.reachableCollateralUsdc,
-                snapshot.settlementBalanceUsdc + snapshot.executionEscrowUsdc,
-                "Liquidation preview must exclude router execution escrow from reachable collateral"
+                snapshot.settlementBalanceUsdc + snapshot.executionBountyReserveUsdc,
+                "Liquidation preview must exclude reserved execution bounty from reachable collateral"
             );
         }
     }

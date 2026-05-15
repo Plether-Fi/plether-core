@@ -10,7 +10,7 @@ library ProtocolLensViewTypes {
         uint256 effectiveSolvencyAssetsUsdc;
         uint256 withdrawalReservedUsdc;
         uint256 freeUsdc;
-        uint256 accumulatedFeesUsdc;
+        uint256 protocolTreasuryBalanceUsdc;
         uint256 accumulatedBadDebtUsdc;
         uint256 totalDeferredTraderCreditUsdc;
         bool degradedMode;

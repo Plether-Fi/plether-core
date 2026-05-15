@@ -332,7 +332,7 @@ const perpsInternalArchitecture = `graph TD
     HP -->|Hold exceptional ownership gap| UA(Unassigned / Excess Assets)
 
     MC -.- MCN>Trader domain: free settlement, live position margin, committed order margin]
-    OR -.- ORN>Queue domain: router-custodied execution-bounty escrow]
+    OR -.- ORN>Queue domain: clearinghouse-reserved execution-bounty reservations]
     EN -.- ENN>Ledger domain: close, liquidation, solvency, withdrawal accounting]
     HP -.- HPN>Pool domain: accounted assets, tranche waterfall, fee segregation]
 

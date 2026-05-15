@@ -9,6 +9,8 @@ interface ICfdEngineSettlementHost {
     function clearinghouse() external view returns (address);
     function pool() external view returns (address);
     function orderRouter() external view returns (address);
+    function protocolTreasury() external view returns (address);
+    function totalDeferredTraderCreditUsdc() external view returns (uint256);
 
     function settlementApplyCarryAndMark(
         uint256 newMarkPrice,
@@ -31,9 +33,6 @@ interface ICfdEngineSettlementHost {
     ) external;
     function settlementRecordDeferredTraderPayout(
         address account,
-        uint256 amountUsdc
-    ) external;
-    function settlementAccumulateFees(
         uint256 amountUsdc
     ) external;
     function settlementAccumulateBadDebt(

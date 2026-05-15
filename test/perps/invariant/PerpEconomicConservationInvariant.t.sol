@@ -62,15 +62,14 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
     }
 
     function invariant_WithdrawalReserveIncludesKnownDeferredLiabilities() public view {
-        uint256 expectedReserved =
-            _maxLiability() + engine.accumulatedFeesUsdc() + engine.totalDeferredTraderCreditUsdc();
+        uint256 expectedReserved = _maxLiability() + engine.totalDeferredTraderCreditUsdc();
 
         expectedReserved += uint256(0);
 
         assertEq(
             _withdrawalReservedUsdc(),
             expectedReserved,
-            "Withdrawal reserve must include liabilities, fees, and deferred obligations"
+            "Withdrawal reserve must include liabilities and deferred obligations"
         );
     }
 
@@ -125,7 +124,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
 
             AccountLensViewTypes.AccountLedgerView memory ledgerView = engineAccountLens.getAccountLedgerView(account);
             IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(account);
-            IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(account);
+            IOrderRouterAccounting.AccountReservationView memory reservation = router.getAccountReservations(account);
 
             assertEq(
                 ledgerView.settlementBalanceUsdc, buckets.settlementBalanceUsdc, "Account ledger settlement mismatch"
@@ -144,10 +143,14 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
                 "Account ledger other locked margin mismatch"
             );
             assertEq(
-                ledgerView.executionEscrowUsdc, escrow.executionBountyUsdc, "Account ledger execution escrow mismatch"
+                ledgerView.executionBountyReserveUsdc,
+                reservation.executionBountyUsdc,
+                "Account ledger execution reservation mismatch"
             );
             assertEq(
-                ledgerView.committedMarginUsdc, escrow.committedMarginUsdc, "Account ledger committed margin mismatch"
+                ledgerView.committedMarginUsdc,
+                reservation.committedMarginUsdc,
+                "Account ledger committed margin mismatch"
             );
             assertEq(
                 ledgerView.deferredTraderCreditUsdc,
@@ -167,14 +170,14 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
             engineAccountLens.getAccountLedgerView(_account(address(handler))).settlementBalanceUsdc;
         uint256 totalReservedSettlementUsdc =
             clearinghouse.getLockedMarginBuckets(_account(address(handler))).reservedSettlementUsdc;
-        uint256 totalExecutionEscrowUsdc;
+        uint256 totalExecutionReservationUsdc;
         uint256 totalDeferredTraderCreditUsdc;
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
             AccountLensViewTypes.AccountLedgerView memory ledgerView = engineAccountLens.getAccountLedgerView(account);
             totalSettlementUsdc += ledgerView.settlementBalanceUsdc;
-            totalExecutionEscrowUsdc += ledgerView.executionEscrowUsdc;
+            totalExecutionReservationUsdc += ledgerView.executionBountyReserveUsdc;
             totalDeferredTraderCreditUsdc += ledgerView.deferredTraderCreditUsdc;
             totalReservedSettlementUsdc += clearinghouse.getLockedMarginBuckets(account).reservedSettlementUsdc;
         }
@@ -185,11 +188,11 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
             "Tracked settlement totals must match clearinghouse custody"
         );
         assertEq(
-            totalExecutionEscrowUsdc,
+            totalExecutionReservationUsdc,
             totalReservedSettlementUsdc,
-            "Tracked execution escrow totals must match clearinghouse reserved settlement"
+            "Tracked execution reservation totals must match clearinghouse reserved settlement"
         );
-        assertEq(usdc.balanceOf(address(router)), 0, "Router must not custody execution bounty escrow");
+        assertEq(usdc.balanceOf(address(router)), 0, "Router must not custody execution bounty reservation");
         assertEq(
             totalDeferredTraderCreditUsdc,
             engine.totalDeferredTraderCreditUsdc(),
@@ -294,9 +297,9 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
                 "Account snapshot other locked margin must equal typed non-position buckets"
             );
             assertEq(
-                snapshot.executionEscrowUsdc,
-                ledgerView.executionEscrowUsdc,
-                "Account snapshot execution escrow mismatch"
+                snapshot.executionBountyReserveUsdc,
+                ledgerView.executionBountyReserveUsdc,
+                "Account snapshot execution reservation mismatch"
             );
             assertEq(
                 snapshot.committedMarginUsdc,
@@ -383,7 +386,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
 
             assertEq(snapshot.activePositionMarginUsdc, 0, "Orphaned accounts must not keep active margin");
             assertEq(snapshot.otherLockedMarginUsdc, 0, "Orphaned accounts must not keep other locked margin");
-            assertEq(snapshot.executionEscrowUsdc, 0, "Orphaned accounts must not keep execution escrow");
+            assertEq(snapshot.executionBountyReserveUsdc, 0, "Orphaned accounts must not keep execution reservation");
             assertEq(snapshot.committedMarginUsdc, 0, "Orphaned accounts must not keep committed margin");
             assertEq(
                 snapshot.closeReachableUsdc,
@@ -425,9 +428,9 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
                 "Snapshot must subsume compact free settlement"
             );
             assertEq(
-                snapshot.executionEscrowUsdc,
-                compactView.executionEscrowUsdc,
-                "Snapshot must subsume compact execution escrow"
+                snapshot.executionBountyReserveUsdc,
+                compactView.executionBountyReserveUsdc,
+                "Snapshot must subsume compact execution reservation"
             );
             assertEq(
                 snapshot.deferredTraderCreditUsdc,
@@ -455,10 +458,13 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory protocolSnapshot =
             engineProtocolLens.getProtocolAccountingSnapshot();
         uint256 poolAssetsUsdc = housePool.totalAssets();
-        uint256 feesUsdc = engine.accumulatedFeesUsdc();
 
         assertEq(protocolSnapshot.poolAssetsUsdc, poolAssetsUsdc, "Protocol snapshot HousePool assets mismatch");
-        assertEq(protocolSnapshot.accumulatedFeesUsdc, feesUsdc, "Protocol snapshot fees mismatch");
+        assertEq(
+            protocolSnapshot.protocolTreasuryBalanceUsdc,
+            engine.protocolTreasuryBalanceUsdc(),
+            "Protocol snapshot fees mismatch"
+        );
         assertEq(
             protocolSnapshot.accumulatedBadDebtUsdc,
             engine.accumulatedBadDebtUsdc(),
@@ -474,7 +480,6 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
             engineProtocolLens.getProtocolAccountingSnapshot().freeUsdc,
             "Protocol snapshot free USDC mismatch"
         );
-        assertEq(snapshot.protocolFeesUsdc, feesUsdc, "House-pool snapshot fees must match engine fees");
         assertEq(
             snapshot.deferredTraderCreditUsdc,
             engine.totalDeferredTraderCreditUsdc(),
@@ -491,8 +496,8 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         );
         assertEq(
             snapshot.netPhysicalAssetsUsdc,
-            poolAssetsUsdc > feesUsdc ? poolAssetsUsdc - feesUsdc : 0,
-            "House-pool snapshot net physical assets must match HousePool assets net of fees"
+            poolAssetsUsdc,
+            "House-pool snapshot net physical assets must not reserve treasury clearinghouse fees"
         );
         assertEq(
             snapshot.physicalAssetsUsdc, poolAssetsUsdc, "House-pool snapshot physical asset decomposition mismatch"
@@ -534,7 +539,11 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
                 continue;
             }
 
-            assertEq(handler.accountRouterEscrow(account), 0, "Bad debt cannot coexist with tracked router escrow");
+            assertEq(
+                handler.accountExecutionBountyReserve(account),
+                0,
+                "Bad debt cannot coexist with tracked execution bounty reserves"
+            );
             assertEq(
                 clearinghouse.balanceUsdc(account), 0, "Bad debt cannot coexist with tracked clearinghouse balance"
             );

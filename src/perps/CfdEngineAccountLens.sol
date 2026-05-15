@@ -39,13 +39,14 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         viewData.otherLockedMarginUsdc = buckets.otherLockedMarginUsdc;
         viewData.freeSettlementUsdc = buckets.freeSettlementUsdc;
         viewData.closeReachableUsdc = buckets.freeSettlementUsdc;
-        uint256 executionEscrowUsdc;
+        uint256 executionBountyReserveUsdc;
         address orderRouter = engineContract.orderRouter();
         if (orderRouter != address(0)) {
-            executionEscrowUsdc = IOrderRouterAccounting(orderRouter).getAccountEscrow(account).executionBountyUsdc;
+            executionBountyReserveUsdc =
+            IOrderRouterAccounting(orderRouter).getAccountReservations(account).executionBountyUsdc;
         }
-        viewData.terminalReachableUsdc = buckets.settlementBalanceUsdc > executionEscrowUsdc
-            ? buckets.settlementBalanceUsdc - executionEscrowUsdc
+        viewData.terminalReachableUsdc = buckets.settlementBalanceUsdc > executionBountyReserveUsdc
+            ? buckets.settlementBalanceUsdc - executionBountyReserveUsdc
             : 0;
         viewData.accountEquityUsdc = engineContract.clearinghouse().getAccountEquityUsdc(account);
         viewData.freeBuyingPowerUsdc = engineContract.clearinghouse().getFreeBuyingPowerUsdc(account);
@@ -132,7 +133,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         return imrHeadroomUsdc < withdrawableUsdc ? imrHeadroomUsdc : withdrawableUsdc;
     }
 
-    /// @notice Returns a compact accounting split for account custody, escrow, and deferred balances.
+    /// @notice Returns a compact accounting split for account custody, reservation, and deferred balances.
     function getAccountLedgerView(
         address account
     ) external view returns (AccountLensViewTypes.AccountLedgerView memory viewData) {
@@ -141,7 +142,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         viewData.freeSettlementUsdc = snapshot.freeSettlementUsdc;
         viewData.activePositionMarginUsdc = snapshot.activePositionMarginUsdc;
         viewData.otherLockedMarginUsdc = snapshot.otherLockedMarginUsdc;
-        viewData.executionEscrowUsdc = snapshot.executionEscrowUsdc;
+        viewData.executionBountyReserveUsdc = snapshot.executionBountyReserveUsdc;
         viewData.committedMarginUsdc = snapshot.committedMarginUsdc;
         viewData.deferredTraderCreditUsdc = snapshot.deferredTraderCreditUsdc;
         viewData.pendingOrderCount = snapshot.pendingOrderCount;
@@ -161,8 +162,8 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         IMarginClearinghouse clearinghouse = engineContract.clearinghouse();
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(account);
         IMarginClearinghouse.LockedMarginBuckets memory lockedBuckets = clearinghouse.getLockedMarginBuckets(account);
-        IOrderRouterAccounting.AccountEscrowView memory escrow =
-            IOrderRouterAccounting(engineContract.orderRouter()).getAccountEscrow(account);
+        IOrderRouterAccounting.AccountReservationView memory reservation =
+            IOrderRouterAccounting(engineContract.orderRouter()).getAccountReservations(account);
 
         snapshot.settlementBalanceUsdc = buckets.settlementBalanceUsdc;
         snapshot.freeSettlementUsdc = buckets.freeSettlementUsdc;
@@ -171,16 +172,16 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         snapshot.positionMarginBucketUsdc = lockedBuckets.positionMarginUsdc;
         snapshot.committedOrderMarginBucketUsdc = lockedBuckets.committedOrderMarginUsdc;
         snapshot.reservedSettlementBucketUsdc = lockedBuckets.reservedSettlementUsdc;
-        snapshot.executionEscrowUsdc = escrow.executionBountyUsdc;
-        snapshot.committedMarginUsdc = escrow.committedMarginUsdc;
+        snapshot.executionBountyReserveUsdc = reservation.executionBountyUsdc;
+        snapshot.committedMarginUsdc = reservation.committedMarginUsdc;
         snapshot.deferredTraderCreditUsdc = engineContract.deferredTraderCreditUsdc(account);
-        snapshot.pendingOrderCount = escrow.pendingOrderCount;
+        snapshot.pendingOrderCount = reservation.pendingOrderCount;
         snapshot.closeReachableUsdc = buckets.freeSettlementUsdc;
-        uint256 escrowExcludedSettlementUsdc = buckets.settlementBalanceUsdc > escrow.executionBountyUsdc
-            ? buckets.settlementBalanceUsdc - escrow.executionBountyUsdc
+        uint256 reservationExcludedSettlementUsdc = buckets.settlementBalanceUsdc > reservation.executionBountyUsdc
+            ? buckets.settlementBalanceUsdc - reservation.executionBountyUsdc
             : 0;
         IMarginClearinghouse.AccountUsdcBuckets memory terminalBuckets = IMarginClearinghouse.AccountUsdcBuckets({
-            settlementBalanceUsdc: escrowExcludedSettlementUsdc,
+            settlementBalanceUsdc: reservationExcludedSettlementUsdc,
             totalLockedMarginUsdc: buckets.totalLockedMarginUsdc,
             activePositionMarginUsdc: buckets.activePositionMarginUsdc,
             otherLockedMarginUsdc: buckets.otherLockedMarginUsdc,

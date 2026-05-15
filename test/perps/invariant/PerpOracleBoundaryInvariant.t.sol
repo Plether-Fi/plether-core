@@ -55,10 +55,12 @@ contract PerpOracleBoundaryInvariantTest is BasePerpInvariantTest {
             return;
         }
 
+        uint256 expectedLiveLimit = engine.engineMarkStalenessLimit() < 300 ? engine.engineMarkStalenessLimit() : 300;
+        uint256 expectedMaxStaleness = engine.isOracleFrozen() ? engine.fadMaxStaleness() : expectedLiveLimit;
         assertEq(
             snapshot.maxMarkStaleness,
-            engine.isOracleFrozen() ? engine.fadMaxStaleness() : 300,
-            "House-pool snapshot freshness limit must follow frozen/unfrozen mode"
+            expectedMaxStaleness,
+            "House-pool snapshot freshness limit must follow frozen/live reconcile policy"
         );
     }
 

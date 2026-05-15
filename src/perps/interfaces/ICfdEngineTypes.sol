@@ -11,7 +11,7 @@ interface ICfdEngineTypes {
     error CfdEngine__PoolAlreadySet();
     error CfdEngine__RouterAlreadySet();
     error CfdEngine__DependenciesAlreadySet();
-    error CfdEngine__NoFeesToWithdraw();
+    error CfdEngine__ProtocolTreasuryBalanceNotEmpty();
     error CfdEngine__NoDeferredTraderCredit();
     error CfdEngine__InsufficientPoolLiquidity();
     error CfdEngine__MustCloseOpposingPosition();
@@ -111,7 +111,7 @@ interface ICfdEngineTypes {
         uint256 maxLiabilityUsdc;
         uint256 withdrawalReservedUsdc;
         uint256 freeUsdc;
-        uint256 accumulatedFeesUsdc;
+        uint256 protocolTreasuryBalanceUsdc;
         uint256 totalDeferredTraderCreditUsdc;
         bool degradedMode;
         bool hasLiveLiability;

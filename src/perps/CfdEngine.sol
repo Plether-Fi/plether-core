@@ -64,7 +64,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     uint256 public lastMarkPrice;
     uint64 public lastMarkTime;
 
-    uint256 public accumulatedFeesUsdc;
     uint256 public accumulatedBadDebtUsdc;
     mapping(address => uint256) public unsettledCarryUsdc;
     bool public degradedMode;
@@ -74,6 +73,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     mapping(address => uint256) public deferredTraderCreditUsdc;
     uint256 public totalDeferredTraderCreditUsdc;
     address public orderRouter;
+    address public protocolTreasury;
 
     mapping(uint256 => bool) public fadDayOverrides;
     uint256[] private _fadOverrideDays;
@@ -81,6 +81,8 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     uint256 public fadRunwaySeconds = 3 hours;
     uint256 public engineMarkStalenessLimit = 60;
     uint256 public executionFeeBps = 4;
+
+    event ProtocolTreasuryUpdated(address indexed treasury);
 
     function _sideIndex(
         CfdTypes.Side side
@@ -158,7 +160,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         address account
     ) internal returns (uint256 claimAmountUsdc) {
         claimAmountUsdc = CashPriorityLib.availableCashForDeferredBeneficiaryClaim(
-            pool.totalAssets(), accumulatedFeesUsdc, totalDeferredTraderCreditUsdc, amount
+            pool.totalAssets(), totalDeferredTraderCreditUsdc, amount
         );
         if (claimAmountUsdc == 0) {
             revert CfdEngine__InsufficientPoolLiquidity();
@@ -222,6 +224,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         clearinghouse = IMarginClearinghouse(_clearinghouse);
         CAP_PRICE = _capPrice;
         riskParams = _riskParams;
+        protocolTreasury = msg.sender;
     }
 
     /// @notice One-time setter for planner, settlement sidecar, and admin sidecars.
@@ -267,35 +270,30 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         orderRouter = _router;
     }
 
-    /// @notice Withdraws accumulated execution fees from the pool to a recipient.
-    function withdrawFees(
-        address recipient
+    /// @notice Updates the clearinghouse account receiving protocol fees.
+    function setProtocolTreasury(
+        address treasury
     ) external onlyOwner {
-        withdrawFees(recipient, accumulatedFeesUsdc);
+        if (treasury == address(0)) {
+            revert CfdEngine__ZeroAddress();
+        }
+        address currentTreasury = protocolTreasury;
+        if (treasury == currentTreasury) {
+            return;
+        }
+        if (clearinghouse.balanceUsdc(currentTreasury) != 0) {
+            revert CfdEngine__ProtocolTreasuryBalanceNotEmpty();
+        }
+        protocolTreasury = treasury;
+        emit ProtocolTreasuryUpdated(treasury);
     }
 
-    /// @notice Withdraws up to `amountUsdc` of accumulated execution fees from the pool to a recipient.
-    function withdrawFees(
-        address recipient,
-        uint256 amountUsdc
-    ) public onlyOwner {
-        uint256 fees = accumulatedFeesUsdc;
-        if (fees == 0) {
-            revert CfdEngine__NoFeesToWithdraw();
-        }
-        if (amountUsdc == 0) {
-            revert CfdEngine__NoFeesToWithdraw();
-        }
-        uint256 withdrawalUsdc = amountUsdc < fees ? amountUsdc : fees;
-        if (!_canWithdrawProtocolFees(withdrawalUsdc)) {
-            revert CfdEngine__InsufficientPoolLiquidity();
-        }
-        accumulatedFeesUsdc = fees - withdrawalUsdc;
-        pool.payOut(recipient, withdrawalUsdc);
-        _assertPostSolvency();
+    /// @notice Current protocol fee balance custodied by the treasury clearinghouse account.
+    function protocolTreasuryBalanceUsdc() public view returns (uint256) {
+        return clearinghouse.balanceUsdc(protocolTreasury);
     }
 
-    /// @notice Moves reserved execution-bounty escrow into protocol-owned pool fees.
+    /// @notice Transfers forfeited reserved execution-bounty reservation into the protocol treasury account.
     function absorbReservedExecutionBounty(
         address sourceAccount,
         uint256 amountUsdc
@@ -304,10 +302,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
             return;
         }
 
-        clearinghouse.seizeReservedSettlement(sourceAccount, amountUsdc, address(pool));
-        pool.recordProtocolInflow(amountUsdc);
-        accumulatedFeesUsdc += amountUsdc;
-        emit BountyCredited(sourceAccount, address(pool), amountUsdc);
+        address treasury = protocolTreasury;
+        clearinghouse.transferReservedSettlement(sourceAccount, treasury, amountUsdc);
+        emit BountyCredited(sourceAccount, treasury, amountUsdc);
     }
 
     /// @notice Transfers reserved bounty value from a source account into a beneficiary clearinghouse account.
@@ -760,19 +757,12 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         return amountUsdc <= _freshPoolReservation().freeCashUsdc;
     }
 
-    function _canWithdrawProtocolFees(
-        uint256 amountUsdc
-    ) internal view returns (bool) {
-        return amountUsdc <= _freshPoolReservation().protocolFeeWithdrawalUsdc;
-    }
-
     function _availableCashForFreshPoolPayouts() internal view returns (uint256) {
         return _freshPoolReservation().freeCashUsdc;
     }
 
     function _freshPoolReservation() internal view returns (CashPriorityLib.SeniorCashReservation memory reservation) {
-        return
-            CashPriorityLib.reserveFreshPayouts(pool.totalAssets(), accumulatedFeesUsdc, totalDeferredTraderCreditUsdc);
+        return CashPriorityLib.reserveFreshPayouts(pool.totalAssets(), totalDeferredTraderCreditUsdc);
     }
 
     // ==========================================
@@ -883,9 +873,8 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     function _buildAdjustedSolvencyState() internal view returns (SolvencyAccountingLib.SolvencyState memory) {
-        return SolvencyAccountingLib.buildSolvencyState(
-            pool.totalAssets(), accumulatedFeesUsdc, _maxLiability(), totalDeferredTraderCreditUsdc
-        );
+        return
+            SolvencyAccountingLib.buildSolvencyState(pool.totalAssets(), _maxLiability(), totalDeferredTraderCreditUsdc);
     }
 
     function _buildAdjustedSolvencySnapshot()
@@ -895,7 +884,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     {
         SolvencyAccountingLib.SolvencyState memory state = _buildAdjustedSolvencyState();
         snapshot.physicalAssets = state.physicalAssetsUsdc;
-        snapshot.protocolFees = state.protocolFeesUsdc;
         snapshot.netPhysicalAssets = state.netPhysicalAssetsUsdc;
         snapshot.maxLiability = state.maxLiabilityUsdc;
         snapshot.effectiveSolvencyAssets = state.effectiveAssetsUsdc;
@@ -929,7 +917,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         snap.lockedBuckets = clearinghouse.getLockedMarginBuckets(account);
         snap.position.margin = snap.lockedBuckets.positionMarginUsdc;
 
-        snap.accumulatedFeesUsdc = accumulatedFeesUsdc;
         snap.accumulatedBadDebtUsdc = accumulatedBadDebtUsdc;
         snap.unsettledCarryUsdc = unsettledCarryUsdc[account];
         snap.totalDeferredTraderCreditUsdc = totalDeferredTraderCreditUsdc;
@@ -1055,12 +1042,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         uint256 amountUsdc
     ) external onlySettlementSidecar {
         _payOrRecordDeferredTraderPayout(account, amountUsdc);
-    }
-
-    function settlementAccumulateFees(
-        uint256 amountUsdc
-    ) external onlySettlementSidecar {
-        accumulatedFeesUsdc += amountUsdc;
     }
 
     function settlementAccumulateBadDebt(

@@ -7,7 +7,7 @@ import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 
-contract AuditRemainingCoverageFindingsFailing_EscrowShielding is BasePerpTest {
+contract AuditRemainingCoverageFindingsFailing_ReservationShielding is BasePerpTest {
 
     address trader = address(0xC10A);
 
@@ -127,7 +127,7 @@ contract AuditRemainingCoverageFindingsFailing_ForfeitedOrderBountyFees is BaseP
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 100e6, type(uint256).max, false);
 
         uint256 forfeitedBounty = _executionBountyReserve(1);
-        uint256 feesBefore = engine.accumulatedFeesUsdc();
+        uint256 feesBefore = engine.protocolTreasuryBalanceUsdc();
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(196_000_000));
@@ -137,7 +137,7 @@ contract AuditRemainingCoverageFindingsFailing_ForfeitedOrderBountyFees is BaseP
         router.executeLiquidation(account, priceData);
 
         assertEq(
-            engine.accumulatedFeesUsdc() - feesBefore,
+            engine.protocolTreasuryBalanceUsdc() - feesBefore,
             forfeitedBounty,
             "Forfeited queued order bounties should accrue to protocol fees"
         );
@@ -149,16 +149,18 @@ contract AuditRemainingCoverageFindingsFailing_DustQueueEconomics is BasePerpTes
 
     address trader = address(0xD057);
 
-    function test_H3_DustOrdersMustEscrowMinimumKeeperReserve() public {
+    function test_H3_DustOrdersMustReserveMinimumKeeperReserve() public {
         _fundTrader(trader, 1e6);
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 1, 0, 0, false);
 
         address account = trader;
-        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(account);
+        IOrderRouterAccounting.AccountReservationView memory reservation = router.getAccountReservations(account);
         assertEq(
-            escrow.executionBountyUsdc, 10_000, "Dust orders should escrow the configured minimum execution bounty"
+            reservation.executionBountyUsdc,
+            10_000,
+            "Dust orders should reservation the configured minimum execution bounty"
         );
     }
 
@@ -226,7 +228,9 @@ contract AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees is BasePerp
         assertEq(
             router.nextCommitId(), 2, "Close commits should still succeed when the trader prefunds the keeper bounty"
         );
-        assertEq(_executionBountyReserve(1), 200_000, "Close commits should escrow the configured flat clearer bounty");
+        assertEq(
+            _executionBountyReserve(1), 200_000, "Close commits should reservation the configured flat clearer bounty"
+        );
     }
 
     function test_H5_CloseKeeperRewardMustCreditFromReservedMarginDespiteVaultCashShortage() public {
@@ -257,7 +261,7 @@ contract AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees is BasePerp
         assertEq(
             clearinghouse.balanceUsdc(keeperAccount) - keeperSettlementBefore,
             200_000,
-            "Illiquid close execution should still pay the keeper from router escrow via clearinghouse settlement"
+            "Illiquid close execution should still pay the keeper from clearinghouse-reserved bounty value"
         );
     }
 

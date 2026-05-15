@@ -35,7 +35,6 @@ contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
     function invariant_DeferredCreditStatusMatchesEngineAndHousePoolLiquidity() public view {
         uint256 totalDeferredTraderCreditUsdc;
         uint256 poolAssets = housePool.totalAssets();
-        uint256 protocolFeesUsdc = engine.accumulatedFeesUsdc();
         uint256 totalDeferredTraderCreditUsdc_ = engine.totalDeferredTraderCreditUsdc();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
@@ -44,7 +43,7 @@ contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
                 _deferredCreditStatus(account, address(handler));
             uint256 deferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(account);
             uint256 expectedTraderClaimableNow = CashPriorityLib.availableCashForDeferredBeneficiaryClaim(
-                poolAssets, protocolFeesUsdc, totalDeferredTraderCreditUsdc_, deferredTraderCreditUsdc
+                poolAssets, totalDeferredTraderCreditUsdc_, deferredTraderCreditUsdc
             );
 
             assertEq(
@@ -118,9 +117,7 @@ contract PerpDeferredCreditInvariantTest is BasePerpInvariantTest {
                 "Close preview must choose immediate or deferred payout"
             );
             uint256 freeCashForFreshPayouts =
-                CashPriorityLib.reserveFreshPayouts(
-                housePool.totalAssets(), engine.accumulatedFeesUsdc(), engine.totalDeferredTraderCreditUsdc()
-            )
+                CashPriorityLib.reserveFreshPayouts(housePool.totalAssets(), engine.totalDeferredTraderCreditUsdc())
             .freeCashUsdc;
             if (freeCashForFreshPayouts >= totalPayoutUsdc) {
                 assertEq(preview.deferredTraderCreditUsdc, 0, "Close preview must not defer when HousePool is liquid");

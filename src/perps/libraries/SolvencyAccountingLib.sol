@@ -7,7 +7,6 @@ library SolvencyAccountingLib {
 
     struct PreviewDelta {
         int256 physicalAssetsDeltaUsdc;
-        uint256 protocolFeesDeltaUsdc;
         uint256 maxLiabilityAfterUsdc;
         int256 deferredTraderPayoutDeltaUsdc;
         uint256 pendingPoolPayoutUsdc;
@@ -22,7 +21,6 @@ library SolvencyAccountingLib {
 
     struct SolvencyState {
         uint256 physicalAssetsUsdc;
-        uint256 protocolFeesUsdc;
         uint256 netPhysicalAssetsUsdc;
         uint256 maxLiabilityUsdc;
         uint256 deferredTraderCreditUsdc;
@@ -54,17 +52,15 @@ library SolvencyAccountingLib {
 
     function buildSolvencyState(
         uint256 physicalAssetsUsdc,
-        uint256 protocolFeesUsdc,
         uint256 maxLiabilityUsdc,
         uint256 deferredTraderCreditUsdc
     ) internal pure returns (SolvencyState memory state) {
         state.physicalAssetsUsdc = physicalAssetsUsdc;
-        state.protocolFeesUsdc = protocolFeesUsdc;
-        state.netPhysicalAssetsUsdc = physicalAssetsUsdc > protocolFeesUsdc ? physicalAssetsUsdc - protocolFeesUsdc : 0;
+        state.netPhysicalAssetsUsdc = physicalAssetsUsdc;
         state.maxLiabilityUsdc = maxLiabilityUsdc;
         state.deferredTraderCreditUsdc = deferredTraderCreditUsdc;
 
-        state.withdrawalReservedUsdc = maxLiabilityUsdc + protocolFeesUsdc + deferredTraderCreditUsdc;
+        state.withdrawalReservedUsdc = maxLiabilityUsdc + deferredTraderCreditUsdc;
         state.freeWithdrawableUsdc =
             physicalAssetsUsdc > state.withdrawalReservedUsdc ? physicalAssetsUsdc - state.withdrawalReservedUsdc : 0;
         state.effectiveAssetsUsdc = state.netPhysicalAssetsUsdc > deferredTraderCreditUsdc
@@ -104,12 +100,8 @@ library SolvencyAccountingLib {
         uint256 deferredTraderPayoutAfterUsdc =
             _applySignedDelta(currentState.deferredTraderCreditUsdc, delta.deferredTraderPayoutDeltaUsdc);
 
-        SolvencyState memory afterState = buildSolvencyState(
-            physicalAssetsAfterUsdc,
-            currentState.protocolFeesUsdc + delta.protocolFeesDeltaUsdc,
-            delta.maxLiabilityAfterUsdc,
-            deferredTraderPayoutAfterUsdc
-        );
+        SolvencyState memory afterState =
+            buildSolvencyState(physicalAssetsAfterUsdc, delta.maxLiabilityAfterUsdc, deferredTraderPayoutAfterUsdc);
 
         result.maxLiabilityAfterUsdc = afterState.maxLiabilityUsdc;
         result.effectiveAssetsAfterUsdc = effectiveAssetsAfterPendingPayout(afterState, delta.pendingPoolPayoutUsdc);

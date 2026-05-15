@@ -41,9 +41,7 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
     ) external view returns (HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot) {
         uint256 poolAssetsUsdc = engineContract.pool().totalAssets();
         snapshot.physicalAssetsUsdc = poolAssetsUsdc;
-        snapshot.protocolFeesUsdc = engineContract.accumulatedFeesUsdc();
-        snapshot.netPhysicalAssetsUsdc =
-            poolAssetsUsdc > snapshot.protocolFeesUsdc ? poolAssetsUsdc - snapshot.protocolFeesUsdc : 0;
+        snapshot.netPhysicalAssetsUsdc = poolAssetsUsdc;
         snapshot.maxLiabilityUsdc = SolvencyAccountingLib.getMaxLiability(
             _sideState(CfdTypes.Side.BULL).maxProfitUsdc, _sideState(CfdTypes.Side.BEAR).maxProfitUsdc
         );
@@ -109,7 +107,7 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         snapshot.effectiveSolvencyAssetsUsdc = solvencyState.effectiveAssetsUsdc;
         snapshot.withdrawalReservedUsdc = solvencyState.withdrawalReservedUsdc;
         snapshot.freeUsdc = solvencyState.freeWithdrawableUsdc;
-        snapshot.accumulatedFeesUsdc = engineContract.accumulatedFeesUsdc();
+        snapshot.protocolTreasuryBalanceUsdc = engineContract.protocolTreasuryBalanceUsdc();
         snapshot.accumulatedBadDebtUsdc = engineContract.accumulatedBadDebtUsdc();
         snapshot.totalDeferredTraderCreditUsdc = engineContract.totalDeferredTraderCreditUsdc();
         snapshot.degradedMode = engineContract.degradedMode();
@@ -121,7 +119,6 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
     function _buildAdjustedSolvencyState() internal view returns (SolvencyAccountingLib.SolvencyState memory) {
         return SolvencyAccountingLib.buildSolvencyState(
             engineContract.pool().totalAssets(),
-            engineContract.accumulatedFeesUsdc(),
             SolvencyAccountingLib.getMaxLiability(
                 _sideState(CfdTypes.Side.BULL).maxProfitUsdc, _sideState(CfdTypes.Side.BEAR).maxProfitUsdc
             ),

@@ -82,7 +82,7 @@ The wider engine, clearinghouse, router, and house-pool interfaces still exist f
 The main runtime and read surfaces are:
 
 - `MarginClearinghouse`: trader custody and typed margin buckets.
-- `OrderRouter`: thin external shell for delayed-order commits, keeper execution, Pyth validation, and keeper bounty escrow.
+- `OrderRouter`: thin external shell for delayed-order commits, keeper execution, Pyth validation, and clearinghouse-reserved keeper bounties.
 - `CfdEngine`: canonical execution ledger and solvency boundary.
 - `CfdEngineSettlementSidecar`: externalized close/liquidation settlement orchestration used by the engine.
 - `CfdEnginePlanner`: externalized open/close/liquidation plan builder wired into the engine after deployment.
@@ -97,8 +97,8 @@ The main runtime and read surfaces are:
 - `CfdEngineSettlementSidecar` executes close and liquidation choreography, while `CfdEngine` remains the storage owner.
 - `CfdEngine`, `CfdEnginePlanner`, `CfdEngineSettlementSidecar`, and `CfdEngineAdmin` are now deployed separately and wired once through `CfdEngine.setDependencies(...)` to keep engine initcode under EIP-3860.
 - `MarginClearinghouse` owns trader settlement balances and locked-margin custody buckets.
-- `OrderRouter` owns queued order records and clearinghouse execution-bounty reservations; its implementation is split into base storage/hooks, handler, validation, and utility modules.
-- `HousePool` owns LP capital and pays protocol obligations that must leave the pool.
+- `OrderRouter` owns queued order records while execution-bounty value remains reserved in `MarginClearinghouse`; its implementation is split into base storage/hooks, handler, validation, and utility modules.
+- `HousePool` owns LP capital and pays engine-authorized obligations that must leave the pool.
 - `PerpsPublicLens` is the default read surface for product consumers.
 - The account and protocol lenses are for deeper diagnostics, tests, audits, and operator tooling.
 
@@ -115,8 +115,8 @@ Important details:
 
 - `acceptablePrice == 0` behaves like a delayed market-style order.
 - Open orders are rejected during degraded mode and close-only windows.
-- Failed orders are finalized from reserved clearinghouse bounty escrow; blocked FIFO heads remain pending.
-- Execution-time user-invalid opens, protocol-state invalidations, and terminal-invalid closes pay the clearer from escrow so FIFO cleanup remains incentive compatible.
+- Failed orders are finalized from reserved clearinghouse bounty reservation; blocked FIFO heads remain pending.
+- Execution-time user-invalid opens, protocol-state invalidations, and terminal-invalid closes pay the clearer from reservation so FIFO cleanup remains incentive compatible.
 - Close orders can still execute during genuine frozen-oracle windows using the last valid mark subject to the relaxed frozen-market rules.
 - Close-intent queue validation is account-local and bounded by the per-account pending-order queue.
 
@@ -137,6 +137,8 @@ Order and liquidation bounties are margin transfers inside `MarginClearinghouse`
 - Open and close order bounties are reserved from trader margin at commit time.
 - Successful execution credits the keeper's clearinghouse settlement balance from the reservation.
 - Liquidation bounties are capped by liquidation-reachable collateral and credited directly to the keeper.
+
+Protocol fees settle into the treasury clearinghouse account only when they are cash-collected from trader settlement or when remaining free `HousePool` cash can fund a top-up after senior deferred claims and immediate trader payouts. The simplified custody model does not create deferred protocol-fee liabilities; uncredited fee portions stay in pool backing rather than becoming withdrawable treasury margin.
 
 ## LP Lifecycle
 
@@ -267,7 +269,7 @@ The perps system intentionally splits accounting into separate kernels:
 - `CloseAccountingLib`: realized PnL, execution fee, trader settlement, and bad-debt handling for voluntary decreases.
 - `LiquidationAccountingLib`: reachable collateral, keeper bounty, residual payout, and bad debt for forced close.
 - `SolvencyAccountingLib`: effective assets, bounded max liability, withdrawal reserves, and free pool cash.
-- `OrderEscrowAccounting`: router-held execution bounty reserves and margin-queue bookkeeping.
+- `OrderReservationAccounting`: clearinghouse-reserved execution bounty accounting and margin-queue bookkeeping.
 - `OrderRouterBase` / `OrderCommitHandler` / `OrderExecutionHandler` / `OrderExecutionSettlement` / `OrderLiquidationHandler` / `OrderBountyAccounting` / `OrderValidation`: shared router state, delayed-order lifecycle handling, terminal execution settlement, liquidation flow, bounty accounting, and preflight validation.
 - `HousePool.recordClaimantInflow(amount, kind, cashMode)`: claimant-owned value routing for both revenue and recapitalization, with explicit cash-arrival vs retained-value modes.
 
@@ -283,7 +285,7 @@ These domains answer different questions. They should not silently share assumpt
 - The router may reject predictably invalid opens at commit time using engine-lens prechecks.
 - Partial closes must meet the same notional floor used for new positions; only full closes may clear a smaller residual.
 - Each account may have at most `5` pending orders.
-- The router escrows the execution bounty at commit time.
+- The router reserves the execution bounty in `MarginClearinghouse` at commit time.
 
 ### Queue and bounty economics
 
@@ -293,7 +295,7 @@ These domains answer different questions. They should not silently share assumpt
 - Partial close size is floored by the engine `minBountyUsdc / bountyBps` notional threshold at the commit reference price, preventing dust closes from occupying the FIFO queue for a flat bounty.
 - Open bounties come from free settlement.
 - Close bounties use free settlement first when carry can be checkpointed from a fresh live mark; otherwise they fall back to bounded active position margin so stale-mark closes remain committable.
-- Failed-order rewards stay independent from pool liquidity because they are paid from router escrow rather than LP cash.
+- Failed-order rewards stay independent from pool liquidity because they are paid from clearinghouse-reserved trader value rather than LP cash.
 
 ### Execute rules
 

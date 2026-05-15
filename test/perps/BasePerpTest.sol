@@ -95,6 +95,7 @@ abstract contract BasePerpTest is Test {
     uint256 constant CAP_PRICE = 2e8;
     bytes32 internal constant BASE_PYTH_FEED_A = bytes32(uint256(1));
     bytes32 internal constant BASE_PYTH_FEED_B = bytes32(uint256(2));
+    address internal constant PROTOCOL_TREASURY_ACCOUNT = address(0xFEE50001);
 
     receive() external payable {}
 
@@ -752,8 +753,9 @@ abstract contract BasePerpTest is Test {
         deployedEngine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, riskParams_);
         CfdEnginePlanner planner = new CfdEnginePlanner();
         CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(deployedEngine));
-        CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(deployedEngine), address(this));
-        deployedEngine.setDependencies(address(planner), address(settlement), address(engineAdmin));
+        CfdEngineAdmin adminModule = new CfdEngineAdmin(address(deployedEngine), address(this));
+        deployedEngine.setDependencies(address(planner), address(settlement), address(adminModule));
+        deployedEngine.setProtocolTreasury(PROTOCOL_TREASURY_ACCOUNT);
     }
 
     function _syncRouterAdmin() internal {
@@ -824,6 +826,14 @@ abstract contract BasePerpTest is Test {
         }
         uint256 maxExecutionBountyUsdc = router.maxOpenOrderExecutionBountyUsdc();
         return executionBountyUsdc > maxExecutionBountyUsdc ? maxExecutionBountyUsdc : executionBountyUsdc;
+    }
+
+    function _engineExecutionFeeUsdc(
+        uint256 sizeDelta,
+        uint256 price
+    ) internal view returns (uint256) {
+        uint256 notionalUsdc = (sizeDelta * price) / DecimalConstants.USDC_TO_TOKEN_SCALE;
+        return (notionalUsdc * engine.executionFeeBps()) / 10_000;
     }
 
     function _sideOpenInterest(
@@ -921,12 +931,29 @@ abstract contract BasePerpTest is Test {
         return clearinghouse.balanceUsdc(_accountOf(account));
     }
 
+    function _fundProtocolTreasury(
+        uint256 amountUsdc
+    ) internal {
+        address treasury = engine.protocolTreasury();
+        usdc.mint(address(clearinghouse), amountUsdc);
+        vm.prank(address(engine));
+        clearinghouse.settleUsdc(treasury, int256(amountUsdc));
+    }
+
+    function _withdrawProtocolTreasury(
+        uint256 amountUsdc
+    ) internal {
+        address treasury = engine.protocolTreasury();
+        vm.prank(treasury);
+        clearinghouse.withdraw(treasury, amountUsdc);
+    }
+
     function _terminalReachableUsdc(
         address account
     ) internal view returns (uint256) {
         uint256 settlementBalance = clearinghouse.getAccountUsdcBuckets(account).settlementBalanceUsdc;
-        uint256 executionEscrow = router.getAccountEscrow(account).executionBountyUsdc;
-        return settlementBalance > executionEscrow ? settlementBalance - executionEscrow : 0;
+        uint256 executionReservation = router.getAccountReservations(account).executionBountyUsdc;
+        return settlementBalance > executionReservation ? settlementBalance - executionReservation : 0;
     }
 
     function _publicPosition(

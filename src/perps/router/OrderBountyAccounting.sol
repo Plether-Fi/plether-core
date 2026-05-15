@@ -31,7 +31,7 @@ abstract contract OrderBountyAccounting is OrderRouterBase {
         return Math.mulDiv(minNotionalUsdc, DecimalConstants.USDC_TO_TOKEN_SCALE, price, Math.Rounding.Ceil);
     }
 
-    function _forfeitEscrowedOrderBountiesOnLiquidation(
+    function _forfeitReservedOrderBountiesOnLiquidation(
         address account
     ) internal {
         uint256 forfeitedUsdc;

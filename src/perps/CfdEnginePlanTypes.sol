@@ -59,7 +59,6 @@ library CfdEnginePlanTypes {
 
         uint64[] marginReservationIds;
 
-        uint256 accumulatedFeesUsdc;
         uint256 accumulatedBadDebtUsdc;
         uint256 unsettledCarryUsdc;
         uint256 totalDeferredTraderCreditUsdc;
@@ -181,6 +180,7 @@ library CfdEnginePlanTypes {
         uint256 syncMarginQueueAmount;
 
         uint256 executionFeeUsdc;
+        uint256 protocolFeeTopUpUsdc;
         uint256 badDebtUsdc;
         uint256 pendingCarryUsdc;
 

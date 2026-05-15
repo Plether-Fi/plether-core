@@ -14,7 +14,6 @@ interface IMarginClearinghouse {
     error MarginClearinghouse__InsufficientFreeEquity();
     error MarginClearinghouse__InsufficientUsdcForSettlement();
     error MarginClearinghouse__InsufficientAssetToSeize();
-    error MarginClearinghouse__InvalidSeizeRecipient();
     error MarginClearinghouse__InvalidMarginBucket();
     error MarginClearinghouse__ReservationAlreadyExists();
     error MarginClearinghouse__ReservationNotActive();
@@ -169,13 +168,15 @@ interface IMarginClearinghouse {
         address account,
         uint256 amountUsdc
     ) external;
-    /// @notice Applies an open/increase trade cost by debiting or crediting settlement and updating locked margin.
+    /// @notice Applies an open/increase trade cost and routes any cash-collected protocol fee to a treasury account.
     function applyOpenCost(
         address account,
         uint256 marginDeltaUsdc,
         int256 tradeCostUsdc,
-        address recipient
-    ) external returns (int256 netMarginChangeUsdc);
+        address recipient,
+        address protocolFeeAccount,
+        uint256 protocolFeeUsdc
+    ) external returns (int256 netMarginChangeUsdc, uint256 protocolFeeCreditedUsdc);
     /// @notice Consumes a realized settlement loss from free settlement plus the active position margin bucket.
     function consumeSettlementLoss(
         address account,
@@ -183,16 +184,18 @@ interface IMarginClearinghouse {
         uint256 lossUsdc,
         address recipient
     ) external returns (uint256 marginConsumedUsdc, uint256 freeSettlementConsumedUsdc, uint256 uncoveredUsdc);
-    /// @notice Consumes close-path losses from settlement buckets while preserving the remaining live position margin and reserved escrow.
+    /// @notice Consumes close-path losses and routes any cash-collected protocol fee to a treasury account.
     function consumeCloseLoss(
         address account,
         uint64[] calldata reservationOrderIds,
         uint256 lossUsdc,
         uint256 protectedLockedMarginUsdc,
         bool includeOtherLockedMargin,
-        address recipient
-    ) external returns (uint256 seizedUsdc, uint256 shortfallUsdc);
-    /// @notice Applies a pre-planned liquidation settlement mutation while preserving reserved escrow.
+        address recipient,
+        address protocolFeeAccount,
+        uint256 protocolFeeUsdc
+    ) external returns (uint256 seizedUsdc, uint256 shortfallUsdc, uint256 protocolFeeCreditedUsdc);
+    /// @notice Applies a pre-planned liquidation settlement mutation while preserving reserved settlement.
     function applyLiquidationSettlementPlan(
         address account,
         uint64[] calldata reservationOrderIds,
@@ -207,18 +210,6 @@ interface IMarginClearinghouse {
         address recipient,
         uint256 amount
     ) external;
-    /// @notice Transfers reserved settlement out to an external recipient.
-    function seizeReservedSettlement(
-        address account,
-        uint256 amount,
-        address recipient
-    ) external;
-    /// @notice Transfers settlement USDC from an account to a recipient (losses, fees, or bad debt)
-    function seizeUsdc(
-        address account,
-        uint256 amount,
-        address recipient
-    ) external;
     /// @notice Reserves free-settlement USDC for a close-order execution bounty with carry checkpointing.
     /// @dev Restricted to the engine's atomic fresh close-bounty path.
     function reserveCloseExecutionBountyFromSettlement(
@@ -230,12 +221,6 @@ interface IMarginClearinghouse {
     function reserveStaleCloseExecutionBountyFromSettlement(
         address account,
         uint256 amount
-    ) external;
-    /// @notice Transfers settlement USDC from active position margin to a recipient and unlocks the same amount.
-    function seizePositionMarginUsdc(
-        address account,
-        uint256 amount,
-        address recipient
     ) external;
     /// @notice Reclassifies active position margin into reserved settlement for a close-order execution bounty.
     function reserveCloseExecutionBountyFromPositionMargin(

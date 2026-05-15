@@ -75,7 +75,11 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
                 continue;
             }
 
-            assertEq(handler.accountRouterEscrow(account), 0, "Liquidated accounts must not retain router-held escrow");
+            assertEq(
+                handler.accountExecutionBountyReserve(account),
+                0,
+                "Liquidated accounts must not retain execution bounty reserves"
+            );
             assertEq(handler.accountLiveReserveCount(account), 0, "Liquidated accounts must not retain live reserves");
         }
     }
@@ -93,7 +97,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function invariant_BadDebtOnlyAppearsAfterAccountEscrowExhaustion() public view {
+    function invariant_BadDebtOnlyAppearsAfterAccountReservationExhaustion() public view {
         uint256 currentBadDebt = engine.accumulatedBadDebtUsdc();
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
@@ -103,26 +107,26 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
             }
 
             assertEq(
-                handler.accountRouterEscrow(account),
+                handler.accountExecutionBountyReserve(account),
                 0,
-                "Bad debt growth cannot coexist with same-account router escrow"
+                "Bad debt growth cannot coexist with same-account execution bounty reserves"
             );
         }
     }
 
-    function invariant_GhostCommittedMarginMatchesAccountEscrow() public view {
+    function invariant_GhostCommittedMarginMatchesAccountReservation() public view {
         uint256 ghostTotalCommittedMargin;
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
             uint256 ghostCommittedMargin = handler.committedMarginSnapshot(account);
-            uint256 liveCommittedMargin = router.getAccountEscrow(account).committedMarginUsdc;
+            uint256 liveCommittedMargin = router.getAccountReservations(account).committedMarginUsdc;
             uint256 reservationCommittedMargin = handler.accountActiveReservationCommittedMargin(account);
 
-            assertEq(ghostCommittedMargin, liveCommittedMargin, "Ghost committed margin must match account escrow");
+            assertEq(ghostCommittedMargin, liveCommittedMargin, "Ghost committed margin must match account reservation");
             assertEq(
                 liveCommittedMargin,
                 reservationCommittedMargin,
-                "Router account escrow must match clearinghouse reservation summary"
+                "Router account reservation must match clearinghouse reservation summary"
             );
             ghostTotalCommittedMargin += ghostCommittedMargin;
         }
@@ -134,10 +138,10 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         );
     }
 
-    function invariant_OrderEscrowModuleSummariesMatchAccountEscrow() public view {
+    function invariant_OrderReservationModuleSummariesMatchAccountReservation() public view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
-            IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(account);
+            IOrderRouterAccounting.AccountReservationView memory reservation = router.getAccountReservations(account);
             IOrderRouterAccounting.PendingOrderView[] memory pending = _pendingOrders(account);
 
             uint256 pendingCloseSize;
@@ -147,14 +151,18 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
                 }
             }
 
-            assertEq(pending.length, escrow.pendingOrderCount, "Pending order count must match account escrow");
             assertEq(
-                clearinghouse.getAccountReservationSummary(account).activeCommittedOrderMarginUsdc,
-                escrow.committedMarginUsdc,
-                "Committed margin summary must match account escrow"
+                pending.length, reservation.pendingOrderCount, "Pending order count must match account reservation"
             );
             assertEq(
-                escrow.executionBountyUsdc, escrow.executionBountyUsdc, "Execution bounty must remain self-consistent"
+                clearinghouse.getAccountReservationSummary(account).activeCommittedOrderMarginUsdc,
+                reservation.committedMarginUsdc,
+                "Committed margin summary must match account reservation"
+            );
+            assertEq(
+                reservation.executionBountyUsdc,
+                reservation.executionBountyUsdc,
+                "Execution bounty must remain self-consistent"
             );
             assertEq(
                 router.pendingCloseSize(account),
@@ -218,8 +226,8 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
             );
             assertEq(
                 handler.accountReservationRemainingSum(account),
-                router.getAccountEscrow(account).committedMarginUsdc,
-                "Account escrow committed margin must derive from the same clearinghouse reservation source"
+                router.getAccountReservations(account).committedMarginUsdc,
+                "Account reservation committed margin must derive from the same clearinghouse reservation source"
             );
         }
     }

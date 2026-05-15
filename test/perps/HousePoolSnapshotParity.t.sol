@@ -31,11 +31,6 @@ contract HousePoolSnapshotParityTest is BasePerpTest {
             "HousePool input max liability should match protocol snapshot"
         );
         assertEq(
-            inputSnapshot.protocolFeesUsdc,
-            protocolSnapshot.accumulatedFeesUsdc,
-            "HousePool input fees should match protocol snapshot"
-        );
-        assertEq(
             inputSnapshot.deferredTraderCreditUsdc,
             protocolSnapshot.totalDeferredTraderCreditUsdc,
             "HousePool input deferred trader credit should match protocol snapshot"

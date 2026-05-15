@@ -51,7 +51,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, Reentra
         _commitOrder(side, sizeDelta, marginDelta, targetPrice, isClose);
     }
 
-    /// @notice Returns the total queued escrow state for an account across all pending orders.
+    /// @notice Returns the total queued reservation state for an account across all pending orders.
     function syncMarginQueue(
         address account
     ) external {
@@ -67,7 +67,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, Reentra
     /// @notice Keeper executes the current global queue head.
     /// @dev Validates oracle freshness, publish-time ordering, and slippage, then delegates to the
     ///      engine. Invalid, expired, or out-of-slippage orders are finalized from clearinghouse-reserved
-    ///      execution bounty escrow; the router does not maintain a retry/requeue lane.
+    ///      execution bounty reservation; the router does not maintain a retry/requeue lane.
     /// @param orderId Must equal the current global queue head (expired orders are auto-skipped)
     /// @param pythUpdateData Pyth price update blobs; attach ETH to cover the Pyth fee
     function executeOrder(
@@ -111,7 +111,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, Reentra
     }
 
     /// @notice Keeper-triggered liquidation using the canonical live-market staleness policy.
-    ///         Forfeits any queued-order execution escrow to the HousePool instead of crediting it back to trader settlement,
+    ///         Forfeits any queued-order execution reservation to the HousePool instead of crediting it back to trader settlement,
     ///         then credits the liquidation keeper directly through the clearinghouse.
     /// @param account The account to liquidate
     /// @param pythUpdateData Pyth price update blobs; attach ETH to cover the Pyth fee

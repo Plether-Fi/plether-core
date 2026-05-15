@@ -250,7 +250,6 @@ contract CfdEngineLens is ICfdEngineLens {
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(engineContract.clearinghouse());
         snap.accountBuckets = clearinghouse.getAccountUsdcBuckets(account);
         snap.lockedBuckets = clearinghouse.getLockedMarginBuckets(account);
-        snap.accumulatedFeesUsdc = engineContract.accumulatedFeesUsdc();
         snap.accumulatedBadDebtUsdc = engineContract.accumulatedBadDebtUsdc();
         snap.unsettledCarryUsdc = engineContract.unsettledCarryUsdc(account);
         snap.totalDeferredTraderCreditUsdc = engineContract.totalDeferredTraderCreditUsdc();
@@ -272,25 +271,28 @@ contract CfdEngineLens is ICfdEngineLens {
         if (orderRouter == address(0)) {
             return;
         }
-        uint256 forfeitedUsdc = IOrderRouterAccounting(orderRouter).getAccountEscrow(account).executionBountyUsdc;
+
+        uint256 forfeitedUsdc = IOrderRouterAccounting(orderRouter).getAccountReservations(account).executionBountyUsdc;
         if (forfeitedUsdc == 0) {
             return;
         }
-        snap.poolAssetsUsdc += forfeitedUsdc;
-        snap.poolCashUsdc += forfeitedUsdc;
-        snap.accumulatedFeesUsdc += forfeitedUsdc;
+        if (forfeitedUsdc > snap.accountBuckets.settlementBalanceUsdc) {
+            forfeitedUsdc = snap.accountBuckets.settlementBalanceUsdc;
+        }
+        snap.accountBuckets.settlementBalanceUsdc -= forfeitedUsdc;
 
-        uint256 lockedReductionUsdc = forfeitedUsdc > snap.lockedBuckets.reservedSettlementUsdc
-            ? snap.lockedBuckets.reservedSettlementUsdc
-            : forfeitedUsdc;
-        snap.lockedBuckets.reservedSettlementUsdc -= lockedReductionUsdc;
-        snap.lockedBuckets.totalLockedMarginUsdc -= lockedReductionUsdc;
-
-        snap.accountBuckets.settlementBalanceUsdc = snap.accountBuckets.settlementBalanceUsdc > forfeitedUsdc
-            ? snap.accountBuckets.settlementBalanceUsdc - forfeitedUsdc
-            : 0;
-        snap.accountBuckets.otherLockedMarginUsdc -= lockedReductionUsdc;
-        snap.accountBuckets.totalLockedMarginUsdc -= lockedReductionUsdc;
+        uint256 releasedReserveUsdc = forfeitedUsdc;
+        if (releasedReserveUsdc > snap.lockedBuckets.reservedSettlementUsdc) {
+            releasedReserveUsdc = snap.lockedBuckets.reservedSettlementUsdc;
+        }
+        snap.lockedBuckets.reservedSettlementUsdc -= releasedReserveUsdc;
+        snap.lockedBuckets.totalLockedMarginUsdc -= releasedReserveUsdc;
+        uint256 accountReserveReleaseUsdc = releasedReserveUsdc;
+        if (accountReserveReleaseUsdc > snap.accountBuckets.otherLockedMarginUsdc) {
+            accountReserveReleaseUsdc = snap.accountBuckets.otherLockedMarginUsdc;
+        }
+        snap.accountBuckets.otherLockedMarginUsdc -= accountReserveReleaseUsdc;
+        snap.accountBuckets.totalLockedMarginUsdc -= accountReserveReleaseUsdc;
         snap.accountBuckets.freeSettlementUsdc = snap.accountBuckets.settlementBalanceUsdc
             > snap.accountBuckets.totalLockedMarginUsdc
             ? snap.accountBuckets.settlementBalanceUsdc - snap.accountBuckets.totalLockedMarginUsdc

@@ -212,8 +212,6 @@ contract PerpInvariantTest is BasePerpTest {
 
     function invariant_GlobalSolvency() public view {
         uint256 effectiveAssets = pool.totalAssets();
-        uint256 fees = engine.accumulatedFeesUsdc();
-        effectiveAssets = effectiveAssets > fees ? effectiveAssets - fees : 0;
 
         int256 cappedLegacySpread = int256(0);
         if (cappedLegacySpread < 0) {
@@ -273,10 +271,14 @@ contract PerpInvariantTest is BasePerpTest {
         assertLe(claimed, effectivePool, "Claimed equity cannot exceed MtM-adjusted pool value");
     }
 
-    function invariant_FeesWithinPool() public view {
-        uint256 fees = engine.accumulatedFeesUsdc();
-        uint256 poolBalance = pool.totalAssets();
-        assertLe(fees, poolBalance, "Accumulated fees must not exceed pool balance");
+    function invariant_FeesWithinClearinghouseTreasury() public view {
+        uint256 fees = engine.protocolTreasuryBalanceUsdc();
+        assertEq(
+            clearinghouse.balanceUsdc(engine.protocolTreasury()),
+            fees,
+            "Accumulated fees must equal the treasury clearinghouse balance"
+        );
+        assertLe(fees, usdc.balanceOf(address(clearinghouse)), "Treasury fees must be clearinghouse-custodied");
     }
 
     function invariant_WithdrawalAccountingMatchesEngineReserve() public view {
@@ -456,7 +458,7 @@ contract PerpInvariantTest is BasePerpTest {
             address trader = handler.traders(i);
             address account = trader;
             (uint256 size, uint256 margin,,,,,) = engine.positions(account);
-            IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(account);
+            IOrderRouterAccounting.AccountReservationView memory reservation = router.getAccountReservations(account);
             uint256 locked = clearinghouse.lockedMarginUsdc(account);
 
             if (size > 0) {
@@ -465,7 +467,7 @@ contract PerpInvariantTest is BasePerpTest {
 
             assertGe(
                 locked,
-                margin + escrow.committedMarginUsdc,
+                margin + reservation.committedMarginUsdc,
                 "Locked margin must back open-position margin plus pending committed margin"
             );
         }
@@ -583,11 +585,11 @@ contract PerpInvariantTest is BasePerpTest {
                 rawQueuedCommitted += _remainingCommittedMargin(orderId);
             }
 
-            IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(account);
+            IOrderRouterAccounting.AccountReservationView memory reservation = router.getAccountReservations(account);
             assertEq(
-                escrow.committedMarginUsdc,
+                reservation.committedMarginUsdc,
                 rawQueuedCommitted,
-                "Account escrow must equal the residual committed margin stored on queued orders"
+                "Account reservation must equal the residual committed margin stored on queued orders"
             );
         }
     }
@@ -604,7 +606,9 @@ contract PerpInvariantTest is BasePerpTest {
             "Protocol view withdrawal reserve must match accessor"
         );
         assertEq(
-            protocolView.accumulatedFeesUsdc, engine.accumulatedFeesUsdc(), "Protocol view fees must match accessor"
+            protocolView.protocolTreasuryBalanceUsdc,
+            engine.protocolTreasuryBalanceUsdc(),
+            "Protocol view fees must match accessor"
         );
         assertEq(
             protocolView.totalDeferredTraderCreditUsdc,
@@ -614,15 +618,14 @@ contract PerpInvariantTest is BasePerpTest {
     }
 
     function invariant_WithdrawalReserveIncludesDeferredLiabilities() public view {
-        uint256 expectedReserved =
-            _maxLiability() + engine.accumulatedFeesUsdc() + engine.totalDeferredTraderCreditUsdc();
+        uint256 expectedReserved = _maxLiability() + engine.totalDeferredTraderCreditUsdc();
 
         expectedReserved += uint256(0);
 
         assertEq(
             _withdrawalReservedUsdc(),
             expectedReserved,
-            "Withdrawal reserve must include liabilities, fees, and deferred obligations"
+            "Withdrawal reserve must include liabilities and deferred obligations"
         );
     }
 
@@ -686,7 +689,7 @@ contract AdversarialPerpHandler is Test {
     uint64 public ghost_lastRetryableSlippageBeforeExecuteId;
     uint64 public ghost_lastRetryableSlippageAfterExecuteId;
     uint8 public ghost_lastRetryableSlippageOrderStatus;
-    uint256 public ghost_lastRetryableSlippageEscrowUsdc;
+    uint256 public ghost_lastRetryableSlippageReservationUsdc;
     uint256 public ghost_lastRetryableSlippageRouterBalanceUsdc;
 
     constructor(
@@ -880,7 +883,7 @@ contract AdversarialPerpHandler is Test {
                 ghost_lastRetryableSlippageBatch++;
                 ghost_lastRetryableSlippageAfterExecuteId = afterExecute;
                 ghost_lastRetryableSlippageOrderStatus = uint8(postRecord.status);
-                ghost_lastRetryableSlippageEscrowUsdc = postRecord.executionBountyUsdc;
+                ghost_lastRetryableSlippageReservationUsdc = postRecord.executionBountyUsdc;
                 ghost_lastRetryableSlippageRouterBalanceUsdc = usdc.balanceOf(address(router));
             }
         }
@@ -990,7 +993,7 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         targetContract(address(handler));
     }
 
-    function invariant_AdversarialEscrowStaysBacked() public view {
+    function invariant_AdversarialReservationStaysBacked() public view {
         uint256 pendingKeeperReserves;
         uint256 reservedSettlementUsdc;
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
@@ -1032,7 +1035,7 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         );
     }
 
-    function invariant_AdversarialSlippageFailureClearsHeadAndEscrow() public view {
+    function invariant_AdversarialSlippageFailureClearsHeadAndReserve() public view {
         if (handler.ghost_lastRetryableSlippageBatch() == 0) {
             return;
         }
@@ -1043,12 +1046,14 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
             "Terminal slippage failure must mark the head order failed"
         );
         assertEq(
-            handler.ghost_lastRetryableSlippageEscrowUsdc(), 0, "Terminal slippage failure must clear escrowed bounty"
+            handler.ghost_lastRetryableSlippageReservationUsdc(),
+            0,
+            "Terminal slippage failure must clear reserved bounty"
         );
-        assertGe(
+        assertEq(
             handler.ghost_lastRetryableSlippageRouterBalanceUsdc(),
-            handler.ghost_lastRetryableSlippageEscrowUsdc(),
-            "Router balance must still cover any remaining queued escrow after slippage failure"
+            0,
+            "Router must not custody bounty reserves after slippage failure"
         );
     }
 
