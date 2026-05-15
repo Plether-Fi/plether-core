@@ -3,7 +3,6 @@ pragma solidity 0.8.33;
 
 import {CfdTypes} from "../CfdTypes.sol";
 import {IOrderRouterAccounting} from "../interfaces/IOrderRouterAccounting.sol";
-import {IOrderRouterErrors} from "../interfaces/IOrderRouterErrors.sol";
 import {IPletherOracle} from "../interfaces/IPletherOracle.sol";
 import {OrderValidation} from "./OrderValidation.sol";
 
@@ -15,7 +14,7 @@ abstract contract OrderExecutionHandler is OrderValidation {
         bytes[] calldata pythUpdateData
     ) internal {
         if (nextExecuteId == 0) {
-            revert IOrderRouterErrors.OrderRouter__QueueState(0);
+            revert OrderRouter__NoOrdersToExecute();
         }
         uint64 oracleOrderId = orderId < nextExecuteId ? nextExecuteId : orderId;
         (OracleUpdateResult memory update, RouterExecutionContext memory executionContext) =
@@ -23,13 +22,13 @@ abstract contract OrderExecutionHandler is OrderValidation {
 
         _skipStaleOrders(orderId, update.executionPrice, update.oraclePublishTime);
         if (nextExecuteId == 0) {
-            revert IOrderRouterErrors.OrderRouter__QueueState(0);
+            revert OrderRouter__NoOrdersToExecute();
         }
         if (orderId < nextExecuteId) {
             orderId = nextExecuteId;
         }
         if (orderId != nextExecuteId) {
-            revert IOrderRouterErrors.OrderRouter__QueueState(1);
+            revert OrderRouter__OrderNotQueueHead();
         }
         (, CfdTypes.Order memory order) = _pendingOrder(orderId);
 

@@ -16,16 +16,6 @@ import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/Reentrancy
 /// @custom:security-contact contact@plether.com
 contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, ReentrancyGuardTransient {
 
-    error OrderRouter__ZeroSize();
-    error OrderRouter__QueueState(uint8 code);
-    error OrderRouter__CommitValidation(uint8 code);
-    error OrderRouter__InsufficientGas();
-    error OrderRouter__PredictableOpenInvalid(uint8 code);
-    error OrderRouter__ZeroEngineLens();
-    error OrderRouter__MarkPriceOutOfOrder();
-    error OrderRouter__SameBlockExecution(uint64 commitBlock, uint256 currentBlock);
-    error OrderRouter__OraclePublishTimeNotAfterCommit(uint64 publishTime, uint64 commitTime);
-
     /// @param _engine CfdEngine that processes trades and liquidations
     /// @param _housePool HousePool used for depth queries and liquidation bounty payouts
     /// @param _pyth Pyth oracle contract

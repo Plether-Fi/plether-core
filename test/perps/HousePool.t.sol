@@ -6,6 +6,7 @@ import {HousePool} from "../../src/perps/HousePool.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {IHousePool} from "../../src/perps/interfaces/IHousePool.sol";
+import {IOrderRouterErrors} from "../../src/perps/interfaces/IOrderRouterErrors.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 
@@ -1604,7 +1605,7 @@ contract HousePoolSeedLifecycleGateTest is BasePerpTest {
 
         _fundTrader(alice, 10_000e6);
         vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__CommitValidation.selector, 0));
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__NotInSeedLifecycle.selector);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
     }
 
@@ -1612,7 +1613,7 @@ contract HousePoolSeedLifecycleGateTest is BasePerpTest {
         _fundTrader(alice, 10_000e6);
 
         vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__CommitValidation.selector, 0));
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__NotInSeedLifecycle.selector);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
     }
 
@@ -1626,7 +1627,7 @@ contract HousePoolSeedLifecycleGateTest is BasePerpTest {
 
         _fundTrader(alice, 11_000e6);
         vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__CommitValidation.selector, 1));
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__VaultRiskBlocked.selector);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
 
         pool.activateTrading();

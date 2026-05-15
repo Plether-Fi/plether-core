@@ -5,7 +5,6 @@ import {CfdEnginePlanTypes} from "../CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../CfdTypes.sol";
 import {ICfdEngineCore} from "../interfaces/ICfdEngineCore.sol";
 import {IOrderRouterAccounting} from "../interfaces/IOrderRouterAccounting.sol";
-import {IOrderRouterErrors} from "../interfaces/IOrderRouterErrors.sol";
 import {OrderOracleExecution} from "./OrderOracleExecution.sol";
 import {OrderQueueBook} from "./OrderQueueBook.sol";
 
@@ -48,7 +47,7 @@ abstract contract OrderExecutionSettlement is OrderOracleExecution, OrderQueueBo
         } catch (bytes memory revertData) {
             bytes4 selector = revertData.length >= 4 ? bytes4(revertData) : bytes4(0);
             if (selector == MARK_PRICE_OUT_OF_ORDER_SELECTOR) {
-                revert IOrderRouterErrors.OrderRouter__MarkPriceOutOfOrder();
+                revert OrderRouter__MarkPriceOutOfOrder();
             }
             failureReason = selector == PANIC_SELECTOR ? OrderFailReason.EnginePanic : OrderFailReason.EngineRevert;
             failureOutcome = _failedOutcomeFromEngineRevert(order, revertData);

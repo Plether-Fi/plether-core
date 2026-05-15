@@ -14,6 +14,7 @@ import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "../../src/perps/OrderRouterAdmin.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
+import {IOrderRouterErrors} from "../../src/perps/interfaces/IOrderRouterErrors.sol";
 import {IPletherOracle} from "../../src/perps/interfaces/IPletherOracle.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "forge-std/Test.sol";
@@ -375,7 +376,7 @@ contract PerpsForkTest is Test {
         vm.roll(commitBlock + 2);
 
         vm.prank(keeper);
-        vm.expectPartialRevert(OrderRouter.OrderRouter__OraclePublishTimeNotAfterCommit.selector);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__MevDetected.selector);
         router.executeOrder(orderId, _pythUpdateData());
 
         vm.warp(commitTime + 1001);

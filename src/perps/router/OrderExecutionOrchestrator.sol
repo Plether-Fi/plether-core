@@ -3,7 +3,6 @@ pragma solidity 0.8.33;
 
 import {CfdTypes} from "../CfdTypes.sol";
 import {IOrderRouterAccounting} from "../interfaces/IOrderRouterAccounting.sol";
-import {IOrderRouterErrors} from "../interfaces/IOrderRouterErrors.sol";
 import {OrderValidationLib} from "../libraries/OrderValidationLib.sol";
 import {OrderExecutionSettlement} from "./OrderExecutionSettlement.sol";
 
@@ -15,14 +14,10 @@ abstract contract OrderExecutionOrchestrator is OrderExecutionSettlement {
         Return
     }
 
+    uint256 internal constant DEFAULT_MAX_ORDER_AGE = 60;
+    uint256 public maxOrderAge = DEFAULT_MAX_ORDER_AGE;
     uint256 public minEngineGas;
     uint256 public maxPruneOrdersPerCall;
-
-    function _maxOrderAge() internal view virtual returns (uint256);
-    function _queueHeadOrderId() internal view virtual override returns (uint64);
-    function _setQueueHeadOrderId(
-        uint64 orderId
-    ) internal virtual override;
 
     function _releaseCommittedMarginForExecution(
         uint64 orderId
@@ -42,12 +37,12 @@ abstract contract OrderExecutionOrchestrator is OrderExecutionSettlement {
         uint256 executionPrice,
         uint64 oraclePublishTime
     ) internal returns (uint256 pruned) {
-        uint256 age = _maxOrderAge();
-        while (_queueHeadOrderId() != 0 && _queueHeadOrderId() <= upToId && pruned < maxPrunes) {
-            uint64 headId = _queueHeadOrderId();
+        uint256 age = maxOrderAge;
+        while (nextExecuteId != 0 && nextExecuteId <= upToId && pruned < maxPrunes) {
+            uint64 headId = nextExecuteId;
             OrderRecord storage record = _orderRecord(headId);
             if (record.status != IOrderRouterAccounting.OrderStatus.Pending) {
-                _setQueueHeadOrderId(record.nextGlobalOrderId);
+                nextExecuteId = record.nextGlobalOrderId;
                 continue;
             }
             if (headId == upToId || age == 0) {
@@ -71,7 +66,7 @@ abstract contract OrderExecutionOrchestrator is OrderExecutionSettlement {
         RouterExecutionContext memory executionContext,
         bool revertOnBlockedExecution
     ) internal returns (OrderExecutionStepResult result) {
-        if (_maxOrderAge() > 0 && block.timestamp - order.commitTime > _maxOrderAge()) {
+        if (maxOrderAge > 0 && block.timestamp - order.commitTime > maxOrderAge) {
             emit OrderFailed(orderId, OrderFailReason.Expired);
             _finalizeOrCleanupOrder(
                 orderId, false, _failedOutcomeForTerminalFailure(order), executionPrice, oraclePublishTime
@@ -81,23 +76,21 @@ abstract contract OrderExecutionOrchestrator is OrderExecutionSettlement {
 
         if (!order.isClose && executionContext.openExecutionCloseOnly) {
             if (revertOnBlockedExecution) {
-                revert IOrderRouterErrors.OrderRouter__CommitValidation(10);
+                revert OrderRouter__CloseOnlyWindow();
             }
             return OrderExecutionStepResult.Break;
         }
 
         if (!executionContext.oracleFrozen && block.number == order.commitBlock) {
             if (revertOnBlockedExecution) {
-                revert IOrderRouterErrors.OrderRouter__SameBlockExecution(order.commitBlock, block.number);
+                revert OrderRouter__MevDetected();
             }
             return OrderExecutionStepResult.Break;
         }
 
         if (!executionContext.oracleFrozen && oraclePublishTime <= order.commitTime) {
             if (revertOnBlockedExecution) {
-                revert IOrderRouterErrors.OrderRouter__OraclePublishTimeNotAfterCommit(
-                    oraclePublishTime, order.commitTime
-                );
+                revert OrderRouter__MevDetected();
             }
             return OrderExecutionStepResult.Break;
         }
@@ -113,7 +106,7 @@ abstract contract OrderExecutionOrchestrator is OrderExecutionSettlement {
         uint256 forwardedGas = gasleft() - (gasleft() / 64);
         if (forwardedGas < minEngineGas) {
             if (revertOnBlockedExecution) {
-                revert IOrderRouterErrors.OrderRouter__InsufficientGas();
+                revert OrderRouter__InsufficientGas();
             }
             return OrderExecutionStepResult.Break;
         }

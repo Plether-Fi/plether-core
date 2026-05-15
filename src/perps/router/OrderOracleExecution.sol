@@ -5,7 +5,6 @@ import {IPyth} from "../../interfaces/IPyth.sol";
 import {PletherOracle} from "../PletherOracle.sol";
 import {ICfdEngineLens} from "../interfaces/ICfdEngineLens.sol";
 import {IHousePool} from "../interfaces/IHousePool.sol";
-import {IOrderRouterErrors} from "../interfaces/IOrderRouterErrors.sol";
 import {IPletherOracle} from "../interfaces/IPletherOracle.sol";
 import {OracleFreshnessPolicyLib} from "../libraries/OracleFreshnessPolicyLib.sol";
 import {OrderEscrowAccounting} from "./OrderEscrowAccounting.sol";
@@ -38,7 +37,7 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
         bool[] memory _inversions
     ) OrderEscrowAccounting(_engine) {
         if (_engineLens == address(0)) {
-            revert IOrderRouterErrors.OrderRouter__ZeroEngineLens();
+            revert OrderRouter__InvalidEngineLens();
         }
         housePool = IHousePool(_housePool);
         engineLens = ICfdEngineLens(_engineLens);
