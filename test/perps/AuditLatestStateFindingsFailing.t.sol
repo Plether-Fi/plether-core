@@ -69,6 +69,40 @@ contract AuditLatestStateFindingsFailing_TrancheCooldownBypass is BasePerpTest {
         vm.stopPrank();
     }
 
+    function test_M2_ThirdPartyWithdrawZeroCannotResetCooldown() public {
+        _fundJunior(alice, 100_000e6);
+        vm.warp(block.timestamp + juniorVault.DEPOSIT_COOLDOWN() + 1);
+
+        uint256 maxWithdrawBefore = juniorVault.maxWithdraw(alice);
+        uint256 lastDepositBefore = juniorVault.lastDepositTime(alice);
+        assertGt(maxWithdrawBefore, 0, "Alice should be withdrawable before zero-amount grief");
+        assertEq(juniorVault.allowance(alice, helper), 0, "Helper should have no share allowance");
+
+        vm.prank(helper);
+        vm.expectRevert(TrancheVault.TrancheVault__ZeroAssets.selector);
+        juniorVault.withdraw(0, helper, alice);
+
+        assertEq(juniorVault.lastDepositTime(alice), lastDepositBefore, "Zero withdraw must not reset cooldown");
+        assertEq(juniorVault.maxWithdraw(alice), maxWithdrawBefore, "Alice should remain withdrawable");
+    }
+
+    function test_M2_ThirdPartyRedeemZeroCannotResetCooldown() public {
+        _fundJunior(alice, 100_000e6);
+        vm.warp(block.timestamp + juniorVault.DEPOSIT_COOLDOWN() + 1);
+
+        uint256 maxRedeemBefore = juniorVault.maxRedeem(alice);
+        uint256 lastDepositBefore = juniorVault.lastDepositTime(alice);
+        assertGt(maxRedeemBefore, 0, "Alice should be redeemable before zero-amount grief");
+        assertEq(juniorVault.allowance(alice, helper), 0, "Helper should have no share allowance");
+
+        vm.prank(helper);
+        vm.expectRevert(TrancheVault.TrancheVault__ZeroShares.selector);
+        juniorVault.redeem(0, helper, alice);
+
+        assertEq(juniorVault.lastDepositTime(alice), lastDepositBefore, "Zero redeem must not reset cooldown");
+        assertEq(juniorVault.maxRedeem(alice), maxRedeemBefore, "Alice should remain redeemable");
+    }
+
 }
 
 contract AuditLatestStateFindingsFailing_LiquidationBounty is BasePerpTest {
