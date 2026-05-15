@@ -11,10 +11,14 @@ library HousePoolPendingLivePlanLib {
 
     function planApplyPendingClaimantBuckets(
         HousePoolPendingPreviewLib.PendingAccountingState memory state,
-        HousePoolPendingPreviewLib.ClaimantPendingBuckets memory claimantBuckets
+        HousePoolPendingPreviewLib.ClaimantPendingBuckets memory claimantBuckets,
+        HousePoolPendingPreviewLib.ClaimantPendingBuckets memory claimantIntentBuckets,
+        bool allowRevenueContinuation
     ) internal pure returns (PendingLivePlan memory plan) {
         plan.state = state;
-        HousePoolPendingPreviewLib.applyPendingClaimantBucketsPreview(plan.state, claimantBuckets);
+        HousePoolPendingPreviewLib.applyPendingClaimantBucketsPreview(
+            plan.state, claimantBuckets, claimantIntentBuckets, allowRevenueContinuation
+        );
     }
 
 }
