@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {IPyth} from "../../interfaces/IPyth.sol";
+import {CfdTypes} from "../CfdTypes.sol";
 
 interface IPletherOracle {
 
@@ -35,6 +36,25 @@ interface IPletherOracle {
         uint256 orderExecutionStalenessLimit;
         uint256 liquidationStalenessLimit;
         uint256 pythMaxConfidenceRatioBps;
+        uint256 orderSettlementWindow;
+        uint256 maxComponentPublishTimeDivergence;
+        uint256 adverseConfidenceMultiplierBps;
+    }
+
+    struct OrderExecutionRequest {
+        uint64 commitTime;
+        uint256 targetPrice;
+        CfdTypes.Side side;
+        bool isClose;
+        bool revertOnHistoricalUnavailable;
+    }
+
+    struct BatchOrderPriceCache {
+        bool hasHistoricalBasket;
+        uint64 minReusableCommitTime;
+        uint256 price;
+        uint256 confidence;
+        uint64 publishTime;
     }
 
     error PletherOracle__Unauthorized();
@@ -59,6 +79,7 @@ interface IPletherOracle {
         PriceMode mode, uint256 minPublishTime, uint256 maxPublishTime, uint256 maxDivergence
     );
     error PletherOracle__ZeroBasketPrice();
+    error PletherOracle__InvalidSettlementConfig();
 
     event EthRefundDeferred(address indexed recipient, uint256 amount);
     event EthRefundClaimed(address indexed recipient, uint256 amount);
@@ -71,6 +92,30 @@ interface IPletherOracle {
         address refundRecipient,
         bytes[] calldata pythUpdateData,
         PriceMode mode
+    ) external payable returns (PriceSnapshot memory snapshot);
+
+    /// @notice Applies order-execution update data and returns a strictly post-commit historical execution price.
+    /// @dev The caller supplies only the Pyth fee for this parse; refunds for unavailable historical
+    ///      parses are returned to the caller so the router can keep aggregate fee accounting correct.
+    function updateOrderExecutionPrice(
+        address refundRecipient,
+        bytes[] calldata pythUpdateData,
+        OrderExecutionRequest calldata request
+    ) external payable returns (bool ok, PriceSnapshot memory snapshot);
+
+    /// @notice Batch variant that can reuse a historical tick already proven unique for later commits.
+    function updateBatchOrderExecutionPrice(
+        address refundRecipient,
+        bytes[] calldata pythUpdateData,
+        OrderExecutionRequest calldata request,
+        BatchOrderPriceCache calldata cache
+    ) external payable returns (bool ok, PriceSnapshot memory snapshot, BatchOrderPriceCache memory nextCache);
+
+    /// @notice Applies liquidation update data and returns a price adverse to the liquidated account.
+    function updateLiquidationPrice(
+        address refundRecipient,
+        bytes[] calldata pythUpdateData,
+        address account
     ) external payable returns (PriceSnapshot memory snapshot);
 
     /// @notice Applies oracle update data and returns the latest order-execution basket price.
@@ -115,6 +160,12 @@ interface IPletherOracle {
     function liquidationStalenessLimit() external view returns (uint256);
 
     function pythMaxConfidenceRatioBps() external view returns (uint256);
+
+    function orderSettlementWindow() external view returns (uint256);
+
+    function maxComponentPublishTimeDivergence() external view returns (uint256);
+
+    function adverseConfidenceMultiplierBps() external view returns (uint256);
 
     function pyth() external view returns (IPyth);
 

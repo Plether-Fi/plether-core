@@ -77,8 +77,9 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, Reentra
         _executeOrder(orderId, pythUpdateData);
     }
 
-    /// @notice Executes queued pending orders against a single Pyth price tick.
-    ///         Updates Pyth once through PletherOracle, then loops through the FIFO queue.
+    /// @notice Executes queued pending orders against strictly post-commit Pyth historical prices.
+    ///         Reuses a parsed historical basket when later FIFO orders are covered by the same tick,
+    ///         aggregates reserved USDC execution bounties, and refunds excess ETH in a single transfer.
     /// @param maxOrderId Inclusive upper bound on committed order ids the batch may begin processing from
     /// @param pythUpdateData Pyth price update blobs; attach ETH to cover the Pyth fee
     function executeOrderBatch(

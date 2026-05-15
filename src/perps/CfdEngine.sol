@@ -686,10 +686,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         uint256 poolDepthUsdc,
         uint64 publishTime
     ) internal {
-        if (publishTime < lastMarkTime) {
-            revert CfdEngine__MarkPriceOutOfOrder();
-        }
-
         CfdEnginePlanTypes.RawSnapshot memory snap =
             _buildRawSnapshot(order.account, currentOraclePrice, poolDepthUsdc, publishTime);
         snap.poolCashUsdc = pool.totalAssets();
@@ -1001,6 +997,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         uint256 newMarkPrice,
         uint64 newMarkTime
     ) internal {
+        if (newMarkTime < lastMarkTime) {
+            return;
+        }
         lastMarkPrice = newMarkPrice;
         lastMarkTime = newMarkTime;
     }

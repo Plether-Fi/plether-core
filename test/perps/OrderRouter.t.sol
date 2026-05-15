@@ -102,8 +102,9 @@ contract OrderRouterTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 50_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         vm.warp(block.timestamp + 1 hours);
+        uint256 bobMaxWithdraw = juniorVault.maxWithdraw(bob);
         vm.prank(bob);
-        juniorVault.withdraw(1_000_000 * 1e6, bob, bob);
+        juniorVault.withdraw(bobMaxWithdraw, bob, bob);
 
         bytes[] memory emptyPayload = _mockPythUpdateData();
         vm.roll(block.number + 1);
@@ -483,8 +484,7 @@ contract OrderRouterTest is BasePerpTest {
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8, false);
-        bytes[] memory openPrice = new bytes[](1);
-        openPrice[0] = abi.encode(uint256(1e8));
+        bytes[] memory openPrice = _mockPythUpdateData();
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
         router.executeOrder(1, openPrice);
@@ -520,8 +520,7 @@ contract OrderRouterTest is BasePerpTest {
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8, false);
-        bytes[] memory openPrice = new bytes[](1);
-        openPrice[0] = abi.encode(uint256(1e8));
+        bytes[] memory openPrice = _mockPythUpdateData();
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
         router.executeOrder(1, openPrice);
@@ -1189,9 +1188,10 @@ contract OrderRouterTest is BasePerpTest {
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 500 * 1e6, 1e8, false);
 
+        bytes[] memory batchData = _mockPythUpdateData();
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 10);
-        router.executeOrderBatch(3, empty);
+        router.executeOrderBatch(3, batchData);
 
         assertEq(router.nextExecuteId(), 0, "terminal slippage miss should not block later queued orders");
         (uint256 aliceSize,,,,,,) = engine.positions(aliceAccount);
@@ -1219,6 +1219,10 @@ contract OrderRouterTest is BasePerpTest {
             router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
             vm.warp(block.timestamp + router.maxOrderAge() + 1);
+            uint256 historicalPublishTime = block.timestamp - router.maxOrderAge();
+            baseMockPyth.setAllUniquePrices(
+                _basePythFeedIds(), int64(100_000_000), 0, int32(-8), historicalPublishTime, historicalPublishTime - 1
+            );
             vm.roll(block.number + 1);
             router.executeOrder(uint64(i + 1), empty);
 
@@ -1237,6 +1241,9 @@ contract OrderRouterTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 500 * 1e6, 1e8, false);
 
         vm.warp(block.timestamp + 1);
+        baseMockPyth.setAllUniquePrices(
+            _basePythFeedIds(), int64(100_000_000), 0, int32(-8), block.timestamp, block.timestamp - 1
+        );
         vm.roll(block.number + 10);
         uint256 gasBefore = gasleft();
         router.executeOrderBatch(26, empty);
@@ -1276,10 +1283,11 @@ contract OrderRouterTest is BasePerpTest {
             router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, 2e8, false);
         }
 
+        bytes[] memory closeData = _mockPythUpdateData();
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 10);
         uint256 gasBefore = gasleft();
-        router.executeOrder(2, empty);
+        router.executeOrder(2, closeData);
         uint256 gasUsed = gasBefore - gasleft();
 
         (uint256 size,,,,,,) = engine.positions(aliceAccount);
@@ -1289,7 +1297,7 @@ contract OrderRouterTest is BasePerpTest {
 
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 10);
-        router.executeOrder(3, empty);
+        router.executeOrder(3, closeData);
         assertEq(router.nextExecuteId(), 4, "tail queue should remain live after terminal close cleanup");
     }
 
@@ -1322,10 +1330,11 @@ contract OrderRouterTest is BasePerpTest {
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
+        bytes[] memory batchData = _mockPythUpdateData();
         uint256 executorBefore = _settlementBalance(address(this));
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 10);
-        router.executeOrderBatch(4, empty);
+        router.executeOrderBatch(4, batchData);
 
         uint256 executorReward = _settlementBalance(address(this)) - executorBefore;
         assertEq(
@@ -1450,7 +1459,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
-        vm.expectRevert(IOrderRouterErrors.OrderRouter__MevDetected.selector);
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         router.executeOrder(1, empty);
 
         assertEq(
@@ -1537,7 +1546,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 0.9e8, false);
 
-        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1120);
+        mockPyth.setAllUniquePrices(feedIds, int64(100_000_000), 0, int32(-8), 1051, 1050);
         bytes[] memory empty = _pythUpdateData();
         address aliceAccount = alice;
         uint256 settlementBefore = clearinghouse.balanceUsdc(aliceAccount);
@@ -1871,18 +1880,27 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_StaleCachedMark_DoesNotBlockMarginDrainInvalidationExecution() public {
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.maxOrderAge = 300;
+        routerAdmin.proposeRouterConfig(config);
+        vm.warp(SETUP_TIMESTAMP);
+        routerAdmin.finalizeRouterConfig();
+
         address aliceAccount = alice;
         _open(aliceAccount, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 1e8, false);
+        (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(1);
 
         vm.store(address(clearinghouse), keccak256(abi.encode(aliceAccount, uint256(3))), bytes32(uint256(1e6)));
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
-        uint64 freshPublishTime = uint64(block.timestamp);
+        uint64 historicalPublishTime = uint64(uint256(pending.commitTime) + router.orderSettlementWindow());
         uint64 staleMarkTimeBefore = engine.lastMarkTime();
-        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), freshPublishTime);
+        mockPyth.setAllUniquePrices(
+            feedIds, int64(100_000_000), 0, int32(-8), historicalPublishTime, pending.commitTime
+        );
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
 
@@ -1891,9 +1909,7 @@ contract OrderRouterPythTest is BasePerpTest {
         (uint256 size, uint256 margin,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 10_000e18, "Fresh execution should fail softly instead of stale-reverting the live position");
         assertEq(margin, 1e6, "Invalidation should preserve the drained custody-backed margin state");
-        assertEq(
-            engine.lastMarkTime(), freshPublishTime, "Execution should push the fresh resolved mark before release"
-        );
+        assertEq(engine.lastMarkTime(), historicalPublishTime, "Execution should push the resolved mark before release");
         assertLt(staleMarkTimeBefore, engine.lastMarkTime(), "Execution should advance the stale cached mark");
         assertEq(router.nextExecuteId(), 0, "Execution should clear the pending head instead of stalling on stale mark");
     }
@@ -1928,18 +1944,27 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_BatchStaleCachedMark_DoesNotBlockMarginDrainInvalidationExecution() public {
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.maxOrderAge = 300;
+        routerAdmin.proposeRouterConfig(config);
+        vm.warp(SETUP_TIMESTAMP);
+        routerAdmin.finalizeRouterConfig();
+
         address aliceAccount = alice;
         _open(aliceAccount, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 1e8, false);
+        (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(1);
 
         vm.store(address(clearinghouse), keccak256(abi.encode(aliceAccount, uint256(3))), bytes32(uint256(1e6)));
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
-        uint64 freshPublishTime = uint64(block.timestamp);
+        uint64 historicalPublishTime = uint64(uint256(pending.commitTime) + router.orderSettlementWindow());
         uint64 staleMarkTimeBefore = engine.lastMarkTime();
-        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), freshPublishTime);
+        mockPyth.setAllUniquePrices(
+            feedIds, int64(100_000_000), 0, int32(-8), historicalPublishTime, pending.commitTime
+        );
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
 
@@ -1949,9 +1974,7 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(size, 10_000e18, "Batch execution should fail softly instead of stale-reverting the live position");
         assertEq(margin, 1e6, "Batch execution should preserve the drained custody-backed margin state");
         assertEq(
-            engine.lastMarkTime(),
-            freshPublishTime,
-            "Batch execution should push the fresh resolved mark before release"
+            engine.lastMarkTime(), historicalPublishTime, "Batch execution should push the resolved mark before release"
         );
         assertLt(staleMarkTimeBefore, engine.lastMarkTime(), "Batch execution should advance the stale cached mark");
         assertEq(
@@ -1960,6 +1983,12 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_BatchExecution_UsesOrderExecutionPublishTimeDivergenceLimit() public {
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.orderSettlementWindow = 60;
+        config.maxComponentPublishTimeDivergence = 60;
+        _setRouterConfig(config);
+        vm.warp(1000);
+
         uint256 basePublishTime = block.timestamp + 6;
 
         vm.prank(alice);
@@ -1983,6 +2012,10 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_FrozenCloseExecution_AllowsFeedPublishDivergenceWithinFadStaleness() public {
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.orderExecutionStalenessLimit = 2 hours;
+        _setRouterConfig(config);
+
         uint256 saturdayNoon = 605_016_000;
         uint256 minPublishTime = saturdayNoon - 2 hours;
         address aliceAccount = alice;
@@ -2080,12 +2113,14 @@ contract OrderRouterPythTest is BasePerpTest {
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
+        (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(closeOrderId);
+        uint64 historicalPublishTime = uint64(uint256(pending.commitTime) + router.orderSettlementWindow());
 
         _close(aliceAccount, CfdTypes.Side.BULL, 10_000 * 1e18, 1e8);
 
         bytes[] memory empty = _pythUpdateData();
         vm.warp(block.timestamp + 120);
-        mockPyth.setAllPrices(feedIds, int64(1e8), int32(-8), block.timestamp);
+        mockPyth.setAllUniquePrices(feedIds, int64(1e8), 0, int32(-8), historicalPublishTime, pending.commitTime);
         vm.roll(block.number + 1);
 
         uint256 keeperBefore = _settlementBalance(address(this));
@@ -2234,7 +2269,7 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(router.nextExecuteId(), 1, "Non-terminal stale failure must leave the queue untouched");
         assertEq(afterRevertEscrow.pendingOrderCount, 2, "All queued escrow should remain after stale revert");
 
-        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1050);
+        mockPyth.setAllUniquePrices(feedIds, int64(100_000_000), 0, int32(-8), 1006, 900);
         vm.warp(1050);
         vm.roll(block.number + 1);
         router.executeOrderBatch(2, empty);
@@ -2625,10 +2660,10 @@ contract OrderRouterPythTest is BasePerpTest {
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         vm.prank(keeper);
-        vm.expectRevert(IOrderRouterErrors.OrderRouter__MevDetected.selector);
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         router.executeOrder(1, empty);
 
-        assertEq(router.nextExecuteId(), 1, "Live execution should reject publish times that predate commit");
+        assertEq(router.nextExecuteId(), 1, "Live execution should reject publish times that are not post-commit");
     }
 
     function test_FreshPublishAfterCommit_Executes() public {
@@ -2645,6 +2680,106 @@ contract OrderRouterPythTest is BasePerpTest {
         router.executeOrder(1, empty);
 
         assertEq(router.nextExecuteId(), 0, "Fresh post-commit publish should execute normally");
+    }
+
+    function test_PublishTimeEqualToCommit_Reverts() public {
+        vm.warp(1000);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+
+        mockPyth.setAllUniquePrices(feedIds, int64(100_000_000), 0, int32(-8), 1000, 999);
+
+        vm.warp(1050);
+        vm.roll(block.number + 1);
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
+        router.executeOrder(1, _pythUpdateData());
+
+        assertEq(router.nextExecuteId(), 1, "Live execution must require a strictly post-commit tick");
+    }
+
+    function test_OrderExecution_UsesPostCommitHistoricalPrice_NotLiveRevealPrice() public {
+        vm.warp(1000);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 0, false);
+
+        mockPyth.setAllUniquePrices(feedIds, int64(100_000_000), 0, int32(-8), 1006, 999);
+        mockPyth.setAllPrices(feedIds, int64(120_000_000), int32(-8), 1050);
+
+        vm.warp(1050);
+        vm.roll(block.number + 1);
+        router.executeOrder(1, _pythUpdateData());
+
+        (uint256 size,, uint256 entryPrice,,,,) = engine.positions(alice);
+        assertEq(size, 10_000 * 1e18, "Historical settlement should execute the open");
+        assertEq(entryPrice, 100_000_000, "Entry price must bind to the first post-commit tick");
+    }
+
+    function test_OrderExecution_RejectsSkippedHistoricalTick() public {
+        vm.warp(1000);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 0, false);
+
+        mockPyth.setAllUniquePrices(feedIds, int64(120_000_000), 0, int32(-8), 1012, 1006);
+
+        vm.warp(1050);
+        vm.roll(block.number + 1);
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
+        router.executeOrder(1, _pythUpdateData());
+
+        assertEq(router.nextExecuteId(), 1, "A skipped historical tick must leave the order pending");
+    }
+
+    function test_BatchExecution_ReusesHistoricalTickForClusteredOrders() public {
+        vm.warp(1000);
+        mockPyth.setFee(1 ether);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 300 * 1e6, 1e8, false);
+
+        mockPyth.setAllUniquePrices(feedIds, int64(100_000_000), 0, int32(-8), 1006, 999);
+
+        vm.deal(address(this), 1 ether);
+        vm.warp(1050);
+        vm.roll(block.number + 1);
+        uint256 callsBefore = mockPyth.parseUniqueCallCount();
+        router.executeOrderBatch{value: 1 ether}(2, _pythUpdateData());
+
+        assertEq(
+            mockPyth.parseUniqueCallCount() - callsBefore,
+            1,
+            "Batch should parse once when later commit times are covered by the same unique tick"
+        );
+        assertEq(router.nextExecuteId(), 0, "Clustered batch should drain the queue");
+
+        (uint256 size,,,,,,) = engine.positions(alice);
+        assertEq(size, 15_000 * 1e18, "Both clustered orders should execute");
+    }
+
+    function test_BatchExecution_DoesNotReuseTickAtCommitTimestamp() public {
+        vm.warp(1000);
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+
+        vm.warp(1006);
+        vm.roll(block.number + 1);
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 300 * 1e6, 1e8, false);
+
+        mockPyth.setAllUniquePrices(feedIds, int64(100_000_000), 0, int32(-8), 1006, 999);
+
+        vm.warp(1050);
+        vm.roll(block.number + 1);
+        router.executeOrderBatch(2, _pythUpdateData());
+
+        assertEq(router.nextExecuteId(), 2, "Order committed at the cached tick must remain pending");
+
+        (uint256 size,,,,,,) = engine.positions(alice);
+        assertEq(size, 10_000 * 1e18, "Only the strictly post-commit order should execute");
     }
 
     function test_BatchExecution_StalePrice_Reverts() public {
@@ -2716,10 +2851,10 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(1050);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
-        vm.expectRevert(IOrderRouterErrors.OrderRouter__MevDetected.selector);
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         router.executeOrder(1, empty);
 
-        assertEq(router.nextExecuteId(), 1, "Weakest-link publish time should still trigger MEV protection");
+        assertEq(router.nextExecuteId(), 1, "Weakest-link publish time should still enforce post-commit settlement");
     }
 
     function test_WeakestLink_Staleness() public {
@@ -2842,6 +2977,7 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
             bases,
             new bool[](2)
         );
+        _syncRouterAdmin();
         engine.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
@@ -3561,6 +3697,7 @@ contract FadStalenessTest is BasePerpTest {
             bases,
             new bool[](2)
         );
+        _syncRouterAdmin();
         engine.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
@@ -3885,7 +4022,7 @@ contract FadStalenessTest is BasePerpTest {
         router.executeOrderBatch(2, empty);
     }
 
-    function test_Weekday_StalenessUnchanged() public {
+    function test_Weekday_CloseExpiresAfterDefaultMaxOrderAge() public {
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), WEDNESDAY_NOON + 6);
 
         vm.warp(WEDNESDAY_NOON);
@@ -3895,12 +4032,12 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(WEDNESDAY_NOON + 67);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
-        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         router.executeOrder(2, empty);
 
         address aliceAccount = alice;
         (uint256 size,,,,,,) = engine.positions(aliceAccount);
-        assertEq(size, 10_000 * 1e18, "61s stale on weekday should leave the close order unexecuted");
+        assertEq(size, 10_000 * 1e18, "Expired weekday close should leave the position unchanged");
+        assertEq(uint256(_orderRecord(2).status), uint256(IOrderRouterAccounting.OrderStatus.Failed));
     }
 
     function test_Weekday_OpenOrder_Allowed() public {
@@ -4041,8 +4178,15 @@ contract FadStalenessTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
     }
 
-    function test_FridayGap_StalenessStill60s() public {
+    function test_FridayGap_HistoricalSettlementWindowAllowsDelayedReveal() public {
         uint256 FRIDAY_20UTC = FRIDAY_18UTC + 2 hours;
+
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.maxOrderAge = 300;
+        vm.warp(FRIDAY_20UTC - 48 hours - 1);
+        routerAdmin.proposeRouterConfig(config);
+        vm.warp(FRIDAY_20UTC);
+        routerAdmin.finalizeRouterConfig();
 
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), FRIDAY_20UTC + 1);
 
@@ -4054,12 +4198,11 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(FRIDAY_20UTC + 63);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
-        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         router.executeOrder(2, empty);
 
         address aliceAccount = alice;
         (uint256 size,,,,,,) = engine.positions(aliceAccount);
-        assertEq(size, 10_000 * 1e18, "60s staleness must apply during Friday gap");
+        assertEq(size, 0, "Historical settlement should use the post-commit tick inside the settlement window");
     }
 
     function obsolete_test_FridayGap_LiquidationUsesRouterLiquidationStalenessLimit() public {
@@ -4396,10 +4539,9 @@ contract OrderRouterAuditTest is BasePerpTest {
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 0, 0.9e8, true);
 
-        bytes[] memory pythData = new bytes[](1);
-        pythData[0] = abi.encode(uint256(1.5e8));
-        vm.warp(block.timestamp + 1);
-        vm.roll(10);
+        bytes[] memory pythData = _mockPythUpdateData(1.5e8);
+        (IOrderRouterAccounting.PendingOrderView memory closeOrder,) = router.getPendingOrderView(2);
+        vm.roll(uint256(closeOrder.commitBlock) + 1);
         router.executeOrder(2, pythData);
 
         address carolAccount = carol;
@@ -4433,16 +4575,13 @@ contract OrderRouterAuditTest is BasePerpTest {
         _fundTrader(alice, 50_000e6);
 
         address account = alice;
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(1e8));
-
         uint64 commitId = router.nextCommitId();
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
 
         vm.warp(block.timestamp + 600);
 
-        vm.roll(block.number + 1);
+        bytes[] memory priceData = _mockPythUpdateData();
         router.executeOrder(commitId, priceData);
 
         (uint256 size,,,,,,) = engine.positions(account);
@@ -4484,9 +4623,10 @@ contract OrderRouterAuditTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, size, 0, 0, true);
 
         routerAdmin.unpause();
-        vm.warp(block.timestamp + 1);
-        vm.roll(10);
-        router.executeOrder(2, empty);
+        bytes[] memory closeData = _mockPythUpdateData();
+        (IOrderRouterAccounting.PendingOrderView memory closeOrder,) = router.getPendingOrderView(2);
+        vm.roll(uint256(closeOrder.commitBlock) + 1);
+        router.executeOrder(2, closeData);
 
         (uint256 sizeAfter,,,,,,) = engine.positions(account);
         assertEq(sizeAfter, 0, "Position should be fully closed");
@@ -5086,8 +5226,26 @@ contract VpiImrBypassTest is Test {
     function _mockPythUpdateData() internal returns (bytes[] memory updateData) {
         vm.roll(block.number + 1);
         vm.warp(block.timestamp + 1);
+        uint256 publishTime = _mockHistoricalPublishTime();
+        mockPyth.setAllUniquePrices(
+            feedIds, int64(100_000_000), 0, int32(-8), publishTime, publishTime == 0 ? 0 : publishTime - 1
+        );
         updateData = new bytes[](1);
         updateData[0] = abi.encode(uint256(1e8));
+    }
+
+    function _mockHistoricalPublishTime() internal view returns (uint256 publishTime) {
+        publishTime = block.timestamp;
+        uint64 nextOrderId = router.nextExecuteId();
+        if (nextOrderId == 0) {
+            return publishTime;
+        }
+
+        (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(nextOrderId);
+        uint256 candidate = uint256(pending.commitTime) + 1;
+        if (pending.orderId != 0 && candidate <= block.timestamp) {
+            publishTime = candidate;
+        }
     }
 
     // Rebate-aware open validation should allow commits when a skew-reducing rebate
@@ -5101,6 +5259,7 @@ contract VpiImrBypassTest is Test {
         bytes[] memory empty = _mockPythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
+        vm.warp(block.timestamp + router.orderExecutionStalenessLimit() + 1);
 
         address eve = address(0xE222);
         address eveAccount = eve;
@@ -5131,10 +5290,7 @@ contract VpiImrBypassTest is Test {
         vm.stopPrank();
 
         uint256 keeperBefore = _settlementBalance(address(this));
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(1e8));
-        vm.warp(block.timestamp + 1);
-        vm.roll(block.number + 1);
+        bytes[] memory priceData = _mockPythUpdateData();
         router.executeOrder(1, priceData);
 
         assertEq(
@@ -5195,8 +5351,26 @@ contract KeeperFeeRefundTest is Test {
     function _mockPythUpdateData() internal returns (bytes[] memory updateData) {
         vm.roll(block.number + 1);
         vm.warp(block.timestamp + 1);
+        uint256 publishTime = _mockHistoricalPublishTime();
+        mockPyth.setAllUniquePrices(
+            feedIds, int64(100_000_000), 0, int32(-8), publishTime, publishTime == 0 ? 0 : publishTime - 1
+        );
         updateData = new bytes[](1);
         updateData[0] = abi.encode(uint256(1e8));
+    }
+
+    function _mockHistoricalPublishTime() internal view returns (uint256 publishTime) {
+        publishTime = block.timestamp;
+        uint64 nextOrderId = router.nextExecuteId();
+        if (nextOrderId == 0) {
+            return publishTime;
+        }
+
+        (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(nextOrderId);
+        uint256 candidate = uint256(pending.commitTime) + 1;
+        if (pending.orderId != 0 && candidate <= block.timestamp) {
+            publishTime = candidate;
+        }
     }
 
     function _warpPastTimelock() internal {
@@ -5270,6 +5444,9 @@ contract KeeperFeeRefundTest is Test {
             orderExecutionStalenessLimit: router.orderExecutionStalenessLimit(),
             liquidationStalenessLimit: router.liquidationStalenessLimit(),
             pythMaxConfidenceRatioBps: router.pythMaxConfidenceRatioBps(),
+            orderSettlementWindow: router.orderSettlementWindow(),
+            maxComponentPublishTimeDivergence: router.maxComponentPublishTimeDivergence(),
+            adverseConfidenceMultiplierBps: router.adverseConfidenceMultiplierBps(),
             minOpenNotionalUsdc: router.minOpenNotionalUsdc(),
             openOrderExecutionBountyBps: router.openOrderExecutionBountyBps(),
             minOpenOrderExecutionBountyUsdc: router.minOpenOrderExecutionBountyUsdc(),
@@ -5336,10 +5513,7 @@ contract KeeperFeeRefundTest is Test {
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1.5e8, false);
 
         uint256 keeperBefore = keeper.balance;
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(1e8));
-        vm.warp(block.timestamp + 1);
-        vm.roll(block.number + 1);
+        bytes[] memory priceData = _mockPythUpdateData();
         vm.prank(keeper);
         router.executeOrder(1, priceData);
 
@@ -5371,11 +5545,7 @@ contract KeeperFeeRefundTest is Test {
 
         uint256 traderSettlementBefore = clearinghouse.balanceUsdc(account);
         uint256 keeperSettlementBefore = _settlementBalance(keeper);
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(1e8));
-
-        vm.warp(block.timestamp + 1);
-        vm.roll(block.number + 1);
+        bytes[] memory priceData = _mockPythUpdateData();
         vm.prank(keeper);
         router.executeOrder(1, priceData);
 
@@ -5404,10 +5574,7 @@ contract KeeperFeeRefundTest is Test {
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8, false);
-        bytes[] memory openPrice = new bytes[](1);
-        openPrice[0] = abi.encode(uint256(1e8));
-        vm.warp(block.timestamp + 1);
-        vm.roll(block.number + 1);
+        bytes[] memory openPrice = _mockPythUpdateData();
         router.executeOrder(1, openPrice);
 
         uint256 freeSettlementBefore = clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc;
@@ -5420,10 +5587,7 @@ contract KeeperFeeRefundTest is Test {
 
         uint256 keeperUsdcBefore = _settlementBalance(keeper);
         uint256 protocolFeesBefore = engine.accumulatedFeesUsdc();
-        bytes[] memory closePrice = new bytes[](1);
-        closePrice[0] = abi.encode(uint256(1e8));
-        vm.warp(block.timestamp + 10);
-        vm.roll(block.number + 10);
+        bytes[] memory closePrice = _mockPythUpdateData();
         vm.prank(keeper);
         router.executeOrder(2, closePrice);
 

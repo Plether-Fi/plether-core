@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {IPyth} from "../../interfaces/IPyth.sol";
+import {CfdTypes} from "../CfdTypes.sol";
 import {PletherOracle} from "../PletherOracle.sol";
 import {ICfdEngineLens} from "../interfaces/ICfdEngineLens.sol";
 import {IHousePool} from "../interfaces/IHousePool.sol";
@@ -20,6 +21,7 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
     struct OracleUpdateResult {
         uint256 executionPrice;
         uint64 oraclePublishTime;
+        uint256 pythFee;
     }
 
     IHousePool internal immutable housePool;
@@ -60,25 +62,74 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
         return pletherOracle.pythMaxConfidenceRatioBps();
     }
 
-    function _prepareOrderExecutionOracle(
-        bytes[] calldata pythUpdateData
-    ) internal returns (OracleUpdateResult memory update, RouterExecutionContext memory executionContext) {
-        return _prepareOrderExecutionOracle(pythUpdateData, IPletherOracle.PriceMode.OrderExecution);
+    function orderSettlementWindow() public view returns (uint256) {
+        return pletherOracle.orderSettlementWindow();
+    }
+
+    function maxComponentPublishTimeDivergence() public view returns (uint256) {
+        return pletherOracle.maxComponentPublishTimeDivergence();
+    }
+
+    function adverseConfidenceMultiplierBps() public view returns (uint256) {
+        return pletherOracle.adverseConfidenceMultiplierBps();
     }
 
     function _prepareOrderExecutionOracle(
         bytes[] calldata pythUpdateData,
-        IPletherOracle.PriceMode mode
+        CfdTypes.Order memory order,
+        uint256 pythFeeAlreadySpent
     ) internal returns (OracleUpdateResult memory update, RouterExecutionContext memory executionContext) {
-        IPletherOracle.PriceSnapshot memory snapshot = _updateAndGetOraclePrice(pythUpdateData, mode);
-        IPletherOracle.PolicySnapshot memory executionPolicy = pletherOracle.getOrderExecutionPolicy(false);
+        uint256 pythFee = _checkedPythFee(pythUpdateData, pythFeeAlreadySpent);
+        (bool ok, IPletherOracle.PriceSnapshot memory snapshot) = pletherOracle.updateOrderExecutionPrice{
+            value: pythFee
+        }(
+            msg.sender, pythUpdateData, _orderExecutionRequest(order, true)
+        );
+        if (!ok) {
+            _revertOrderExecutionStale();
+        }
         update = _toOracleUpdateResult(snapshot);
         executionContext = RouterExecutionContext({
             oracleFrozen: snapshot.oracleFrozen,
             isFadWindow: snapshot.isFadWindow,
-            openExecutionCloseOnly: executionPolicy.closeOnly
+            openExecutionCloseOnly: snapshot.closeOnly
         });
-        engine.updateMarkPrice(update.executionPrice, update.oraclePublishTime);
+        _updateEngineMarkIfCurrent(update);
+    }
+
+    function _tryPrepareBatchOrderExecutionOracle(
+        bytes[] calldata pythUpdateData,
+        CfdTypes.Order memory order,
+        uint256 pythFeeAlreadySpent,
+        IPletherOracle.BatchOrderPriceCache memory cache
+    )
+        internal
+        returns (
+            bool ok,
+            OracleUpdateResult memory update,
+            RouterExecutionContext memory executionContext,
+            IPletherOracle.BatchOrderPriceCache memory nextCache
+        )
+    {
+        uint256 pythFee;
+        if (!_canReuseHistoricalBatchBasket(order, cache)) {
+            pythFee = _checkedPythFee(pythUpdateData, pythFeeAlreadySpent);
+        }
+        IPletherOracle.PriceSnapshot memory snapshot;
+        (ok, snapshot, nextCache) = pletherOracle.updateBatchOrderExecutionPrice{value: pythFee}(
+            msg.sender, pythUpdateData, _orderExecutionRequest(order, false), cache
+        );
+        if (!ok) {
+            update.pythFee = snapshot.updateFee;
+            return (false, update, executionContext, nextCache);
+        }
+        update = _toOracleUpdateResult(snapshot);
+        executionContext = RouterExecutionContext({
+            oracleFrozen: snapshot.oracleFrozen,
+            isFadWindow: snapshot.isFadWindow,
+            openExecutionCloseOnly: snapshot.closeOnly
+        });
+        _updateEngineMarkIfCurrent(update);
     }
 
     function _prepareMarkRefreshOracle(
@@ -91,10 +142,11 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
     }
 
     function _prepareLiquidationOracle(
+        address account,
         bytes[] calldata pythUpdateData
     ) internal returns (OracleUpdateResult memory update) {
         IPletherOracle.PriceSnapshot memory snapshot =
-            _updateAndGetOraclePrice(pythUpdateData, IPletherOracle.PriceMode.Liquidation);
+            pletherOracle.updateLiquidationPrice{value: msg.value}(msg.sender, pythUpdateData, account);
         update = _toOracleUpdateResult(snapshot);
     }
 
@@ -135,6 +187,65 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
     ) internal pure returns (OracleUpdateResult memory update) {
         update.executionPrice = snapshot.price;
         update.oraclePublishTime = snapshot.publishTime;
+        update.pythFee = snapshot.updateFee;
+    }
+
+    function _checkedPythFee(
+        bytes[] calldata pythUpdateData,
+        uint256 pythFeeAlreadySpent
+    ) internal view returns (uint256 pythFee) {
+        pythFee = pletherOracle.getUpdateFee(pythUpdateData);
+        if (msg.value < pythFeeAlreadySpent + pythFee) {
+            revert IPletherOracle.PletherOracle__InsufficientFee(msg.value, pythFeeAlreadySpent + pythFee);
+        }
+    }
+
+    function _orderExecutionRequest(
+        CfdTypes.Order memory order,
+        bool revertOnHistoricalUnavailable
+    ) internal pure returns (IPletherOracle.OrderExecutionRequest memory request) {
+        request = IPletherOracle.OrderExecutionRequest({
+            commitTime: order.commitTime,
+            targetPrice: order.targetPrice,
+            side: order.side,
+            isClose: order.isClose,
+            revertOnHistoricalUnavailable: revertOnHistoricalUnavailable
+        });
+    }
+
+    function _updateEngineMarkIfCurrent(
+        OracleUpdateResult memory update
+    ) internal {
+        if (update.oraclePublishTime >= engine.lastMarkTime()) {
+            engine.updateMarkPrice(update.executionPrice, update.oraclePublishTime);
+        }
+    }
+
+    function _canReuseHistoricalBatchBasket(
+        CfdTypes.Order memory order,
+        IPletherOracle.BatchOrderPriceCache memory cache
+    ) internal view returns (bool) {
+        if (_isOracleFrozen() || !cache.hasHistoricalBasket) {
+            return false;
+        }
+        uint64 commitTime = order.commitTime;
+        if (commitTime < cache.minReusableCommitTime || commitTime >= cache.publishTime) {
+            return false;
+        }
+        if (cache.publishTime > block.timestamp) {
+            return false;
+        }
+        return uint256(cache.publishTime) <= uint256(commitTime) + orderSettlementWindow();
+    }
+
+    function _revertOrderExecutionStale() internal view {
+        revert IPletherOracle.PletherOracle__StalePrice(
+            IPletherOracle.PriceMode.OrderExecution,
+            bytes32(0),
+            block.timestamp,
+            orderExecutionStalenessLimit(),
+            block.timestamp
+        );
     }
 
     function _commitReferencePrice() internal view returns (uint256 price) {

@@ -318,6 +318,9 @@ contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
             orderExecutionStalenessLimit: router.orderExecutionStalenessLimit(),
             liquidationStalenessLimit: router.liquidationStalenessLimit(),
             pythMaxConfidenceRatioBps: router.pythMaxConfidenceRatioBps(),
+            orderSettlementWindow: router.orderSettlementWindow(),
+            maxComponentPublishTimeDivergence: router.maxComponentPublishTimeDivergence(),
+            adverseConfidenceMultiplierBps: router.adverseConfidenceMultiplierBps(),
             minOpenNotionalUsdc: router.minOpenNotionalUsdc(),
             openOrderExecutionBountyBps: router.openOrderExecutionBountyBps(),
             minOpenOrderExecutionBountyUsdc: router.minOpenOrderExecutionBountyUsdc(),
@@ -359,6 +362,9 @@ contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
             orderExecutionStalenessLimit: router.orderExecutionStalenessLimit(),
             liquidationStalenessLimit: router.liquidationStalenessLimit(),
             pythMaxConfidenceRatioBps: router.pythMaxConfidenceRatioBps(),
+            orderSettlementWindow: router.orderSettlementWindow(),
+            maxComponentPublishTimeDivergence: router.maxComponentPublishTimeDivergence(),
+            adverseConfidenceMultiplierBps: router.adverseConfidenceMultiplierBps(),
             minOpenNotionalUsdc: router.minOpenNotionalUsdc(),
             openOrderExecutionBountyBps: router.openOrderExecutionBountyBps(),
             minOpenOrderExecutionBountyUsdc: router.minOpenOrderExecutionBountyUsdc(),
@@ -390,10 +396,11 @@ contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 10_000e6, 1e8, false);
 
         _warpForward(61);
+        bytes[] memory expiredData = _mockPythUpdateData();
 
         usdc.burn(keeper, usdc.balanceOf(keeper));
         vm.prank(keeper);
-        router.executeOrder(2, empty);
+        router.executeOrder(2, expiredData);
         uint256 keeperPayoutFailed = usdc.balanceOf(keeper);
 
         assertEq(

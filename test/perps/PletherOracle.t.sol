@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
+import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {PletherOracle} from "../../src/perps/PletherOracle.sol";
 import {IPletherOracle} from "../../src/perps/interfaces/IPletherOracle.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
@@ -48,6 +49,24 @@ contract PletherOracleEngineMock {
         bool active
     ) external {
         fadDayOverrides[dayNumber] = active;
+    }
+
+    function positions(
+        address
+    )
+        external
+        pure
+        returns (
+            uint256 size,
+            uint256 margin,
+            uint256 entryPrice,
+            uint256 maxProfitUsdc,
+            CfdTypes.Side side,
+            uint64 lastUpdateTime,
+            int256 vpiAccrued
+        )
+    {
+        return (0, 0, 0, 0, CfdTypes.Side.BULL, 0, 0);
     }
 
 }
@@ -189,7 +208,12 @@ contract PletherOracleTest is Test {
         pyth.setPrice(FEED_B, int64(100_000_000), uint64(2_000_000), int32(-8), 990);
         oracle.applyConfig(
             IPletherOracle.OracleConfig({
-                orderExecutionStalenessLimit: 60, liquidationStalenessLimit: 15, pythMaxConfidenceRatioBps: 100
+                orderExecutionStalenessLimit: 60,
+                liquidationStalenessLimit: 15,
+                pythMaxConfidenceRatioBps: 100,
+                orderSettlementWindow: oracle.orderSettlementWindow(),
+                maxComponentPublishTimeDivergence: oracle.maxComponentPublishTimeDivergence(),
+                adverseConfidenceMultiplierBps: oracle.adverseConfidenceMultiplierBps()
             })
         );
 
@@ -226,7 +250,7 @@ contract PletherOracleTest is Test {
         pyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 984);
 
         IPletherOracle.PriceSnapshot memory snapshot =
-            oracle.updatePrice(address(this), _pythUpdateData(), IPletherOracle.PriceMode.Liquidation);
+            oracle.updateLiquidationPrice(address(this), _pythUpdateData(), address(0xCAFE));
 
         assertTrue(snapshot.oracleFrozen, "setup should use frozen oracle policy");
         assertEq(snapshot.maxStaleness, engine.fadMaxStaleness(), "liquidation should use frozen staleness");
@@ -245,7 +269,12 @@ contract PletherOracleTest is Test {
 
     function test_ApplyConfig_OnlyOwnerOrRouter() public {
         IPletherOracle.OracleConfig memory config = IPletherOracle.OracleConfig({
-            orderExecutionStalenessLimit: 120, liquidationStalenessLimit: 30, pythMaxConfidenceRatioBps: 500
+            orderExecutionStalenessLimit: 120,
+            liquidationStalenessLimit: 30,
+            pythMaxConfidenceRatioBps: 500,
+            orderSettlementWindow: oracle.orderSettlementWindow(),
+            maxComponentPublishTimeDivergence: oracle.maxComponentPublishTimeDivergence(),
+            adverseConfidenceMultiplierBps: oracle.adverseConfidenceMultiplierBps()
         });
 
         vm.expectRevert(IPletherOracle.PletherOracle__Unauthorized.selector);

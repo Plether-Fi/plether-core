@@ -355,11 +355,8 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
 
         uint256 keeperBalanceBefore = usdc.balanceOf(KEEPER);
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(KEEPER);
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(1e8));
 
-        vm.warp(block.timestamp + 1);
-        vm.roll(block.number + 1);
+        bytes[] memory priceData = _mockPythUpdateData();
         vm.prank(KEEPER);
         router.executeOrder(1, priceData);
 
@@ -385,6 +382,9 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
             orderExecutionStalenessLimit: router.orderExecutionStalenessLimit(),
             liquidationStalenessLimit: router.liquidationStalenessLimit(),
             pythMaxConfidenceRatioBps: router.pythMaxConfidenceRatioBps(),
+            orderSettlementWindow: router.orderSettlementWindow(),
+            maxComponentPublishTimeDivergence: router.maxComponentPublishTimeDivergence(),
+            adverseConfidenceMultiplierBps: router.adverseConfidenceMultiplierBps(),
             minOpenNotionalUsdc: router.minOpenNotionalUsdc(),
             openOrderExecutionBountyBps: router.openOrderExecutionBountyBps(),
             minOpenOrderExecutionBountyUsdc: router.minOpenOrderExecutionBountyUsdc(),
@@ -402,8 +402,7 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
 
         uint256 keeperBalanceBefore = usdc.balanceOf(KEEPER);
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(KEEPER);
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(1e8));
+        bytes[] memory priceData = _mockPythUpdateData();
 
         vm.prank(KEEPER);
         router.executeOrder(1, priceData);

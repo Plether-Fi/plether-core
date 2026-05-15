@@ -2261,12 +2261,9 @@ contract CfdEngineTest is BasePerpTest {
             "Preview should use the underwater partial-close invalid reason"
         );
 
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(0.8e8));
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BEAR, 100_000 * 1e18, 0, 0, true);
-        vm.warp(block.timestamp + 1);
-        vm.roll(block.number + 1);
+        bytes[] memory priceData = _mockPythUpdateData(0.8e8);
         router.executeOrder(1, priceData);
 
         (uint256 sizeAfter,,,,,,) = engine.positions(account);
@@ -2485,10 +2482,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 100_010_000, true);
 
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(100_010_000));
-        vm.warp(block.timestamp + 1);
-        vm.roll(block.number + 1);
+        bytes[] memory priceData = _mockPythUpdateData(100_010_000);
         router.executeOrder(1, priceData);
 
         (uint256 sizeAfter,,,,,,) = engine.positions(account);
@@ -5007,10 +5001,13 @@ contract CfdEngineAuditTest is BasePerpTest {
         (uint256 sizeBefore,,,,,,) = engine.positions(carolAccount);
 
         IOrderRouterAdminHost.RouterConfig memory config = IOrderRouterAdminHost.RouterConfig({
-            maxOrderAge: 0,
+            maxOrderAge: router.maxOrderAge(),
             orderExecutionStalenessLimit: router.orderExecutionStalenessLimit(),
             liquidationStalenessLimit: router.liquidationStalenessLimit(),
             pythMaxConfidenceRatioBps: router.pythMaxConfidenceRatioBps(),
+            orderSettlementWindow: router.orderSettlementWindow(),
+            maxComponentPublishTimeDivergence: router.maxComponentPublishTimeDivergence(),
+            adverseConfidenceMultiplierBps: router.adverseConfidenceMultiplierBps(),
             minOpenNotionalUsdc: router.minOpenNotionalUsdc(),
             openOrderExecutionBountyBps: router.openOrderExecutionBountyBps(),
             minOpenOrderExecutionBountyUsdc: router.minOpenOrderExecutionBountyUsdc(),
@@ -5062,8 +5059,7 @@ contract CfdEngineAuditTest is BasePerpTest {
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 100_000 * 1e18, 0, 0, true);
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(0.8e8));
+        bytes[] memory priceData = _mockPythUpdateData(0.8e8);
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
         router.executeOrder(2, priceData);
@@ -5305,13 +5301,10 @@ contract MarginCappedMtmTest is BasePerpTest {
         bytes[] memory empty = _mockPythUpdateData();
         router.executeOrder(1, empty);
 
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(0.5e8));
         _fundTrader(carol, 50_000e6);
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 10_000e6, 0.5e8, false);
-        vm.warp(block.timestamp + 1);
-        vm.roll(block.number + 1);
+        bytes[] memory priceData = _mockPythUpdateData(0.5e8);
         router.executeOrder(2, priceData);
 
         int256 uncappedPnl = _unrealizedTraderPnl();
@@ -5333,13 +5326,10 @@ contract MarginCappedMtmTest is BasePerpTest {
 
         uint256 juniorBefore = pool.juniorPrincipal();
 
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(0.5e8));
         _fundTrader(carol, 50_000e6);
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 10_000e6, 0.5e8, false);
-        vm.warp(block.timestamp + 1);
-        vm.roll(block.number + 1);
+        bytes[] memory priceData = _mockPythUpdateData(0.5e8);
         router.executeOrder(2, priceData);
 
         vm.prank(address(juniorVault));
@@ -5363,13 +5353,10 @@ contract MarginCappedMtmTest is BasePerpTest {
         bytes[] memory empty = _mockPythUpdateData();
         router.executeOrder(1, empty);
 
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(1.2e8));
         _fundTrader(carol, 50_000e6);
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 10_000e6, 1.2e8, false);
-        vm.warp(block.timestamp + 1);
-        vm.roll(block.number + 1);
+        bytes[] memory priceData = _mockPythUpdateData(1.2e8);
         router.executeOrder(2, priceData);
 
         uint256 mtm = _poolMtmAdjustment();
@@ -5429,9 +5416,7 @@ contract PhantomExecFeeTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, size, 1000e6, 1e8, false);
         vm.stopPrank();
 
-        vm.warp(block.timestamp + 1);
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(1e8));
+        bytes[] memory priceData = _mockPythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(1, priceData);
 
@@ -5797,8 +5782,7 @@ contract VpiDepthTest is BasePerpTest {
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 0, 0, true);
-        bytes[] memory closePrice = new bytes[](1);
-        closePrice[0] = abi.encode(uint256(1e8));
+        bytes[] memory closePrice = _mockPythUpdateData();
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
         router.executeOrder(3, closePrice);
@@ -5841,8 +5825,7 @@ contract VpiDepthTest is BasePerpTest {
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 110_000 * 1e18, 0, 0, true);
-        bytes[] memory closePrice = new bytes[](1);
-        closePrice[0] = abi.encode(uint256(1e8));
+        bytes[] memory closePrice = _mockPythUpdateData();
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
         router.executeOrder(3, closePrice);

@@ -263,8 +263,26 @@ abstract contract BasePerpTest is Test {
     ) internal returns (bytes[] memory updateData) {
         vm.roll(block.number + 1);
         vm.warp(block.timestamp + 1);
+        uint256 publishTime = _mockHistoricalPublishTime();
+        baseMockPyth.setAllUniquePrices(
+            _basePythFeedIds(), int64(uint64(price)), 0, int32(-8), publishTime, publishTime == 0 ? 0 : publishTime - 1
+        );
         updateData = new bytes[](1);
         updateData[0] = abi.encode(price);
+    }
+
+    function _mockHistoricalPublishTime() internal view returns (uint256 publishTime) {
+        publishTime = block.timestamp;
+        uint64 nextOrderId = router.nextExecuteId();
+        if (nextOrderId == 0) {
+            return publishTime;
+        }
+
+        (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(nextOrderId);
+        uint256 candidate = uint256(pending.commitTime) + 1;
+        if (pending.orderId != 0 && candidate <= block.timestamp) {
+            publishTime = candidate;
+        }
     }
 
     // --- Legacy side-index placeholder helpers ---
@@ -703,6 +721,9 @@ abstract contract BasePerpTest is Test {
         config.orderExecutionStalenessLimit = router.orderExecutionStalenessLimit();
         config.liquidationStalenessLimit = router.liquidationStalenessLimit();
         config.pythMaxConfidenceRatioBps = router.pythMaxConfidenceRatioBps();
+        config.orderSettlementWindow = router.orderSettlementWindow();
+        config.maxComponentPublishTimeDivergence = router.maxComponentPublishTimeDivergence();
+        config.adverseConfidenceMultiplierBps = router.adverseConfidenceMultiplierBps();
         config.minOpenNotionalUsdc = router.minOpenNotionalUsdc();
         config.openOrderExecutionBountyBps = router.openOrderExecutionBountyBps();
         config.minOpenOrderExecutionBountyUsdc = router.minOpenOrderExecutionBountyUsdc();
