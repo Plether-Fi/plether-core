@@ -62,24 +62,21 @@ contract PerpClosePreviewParityInvariantTest is Test {
 
         engine.setPool(address(housePool));
         engine.setOrderRouter(address(router));
-        housePool.setOrderRouter(address(router));
         housePool.seedAssets(100_000e6);
 
         handler = new PerpAccountingHandler(usdc, engine, clearinghouse, router, housePool);
         handler.seedActors(50_000e6, 50_000e6);
 
-        bytes4[] memory selectors = new bytes4[](11);
+        bytes4[] memory selectors = new bytes4[](9);
         selectors[0] = handler.depositCollateral.selector;
         selectors[1] = handler.withdrawCollateral.selector;
         selectors[2] = handler.commitOpenOrder.selector;
         selectors[3] = handler.commitCloseOrder.selector;
         selectors[4] = handler.executeNextOrderBatch.selector;
         selectors[5] = handler.liquidate.selector;
-        selectors[6] = handler.claimDeferredKeeperCredit.selector;
-        selectors[7] = handler.setRouterPayoutFailureMode.selector;
-        selectors[8] = handler.setPoolAssets.selector;
-        selectors[9] = handler.fundHousePool.selector;
-        selectors[10] = handler.drainHousePool.selector;
+        selectors[6] = handler.setPoolAssets.selector;
+        selectors[7] = handler.fundHousePool.selector;
+        selectors[8] = handler.drainHousePool.selector;
 
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
         targetContract(address(handler));

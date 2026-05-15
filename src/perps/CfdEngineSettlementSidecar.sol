@@ -206,7 +206,8 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
     function executeLiquidation(
         ICfdEngineSettlementHost host,
         CfdEnginePlanTypes.LiquidationDelta calldata delta,
-        uint64 publishTime
+        uint64 publishTime,
+        address keeper
     ) external onlyEngine returns (uint256 keeperBountyUsdc) {
         host.settlementApplyCarryAndMark(delta.price, publishTime);
         host.settlementApplySideDelta(
@@ -230,20 +231,14 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
                 otherLockedMarginUnlockedUsdc: delta.residualPlan.mutation.otherLockedMarginUnlockedUsdc
             });
         uint256 seizedUsdc = IMarginClearinghouse(host.clearinghouse())
-            .applyLiquidationSettlementPlan(delta.account, reservationOrderIds, settlementPlan, host.pool());
-        uint256 keeperBountyInflowUsdc = seizedUsdc > delta.keeperBountyUsdc ? delta.keeperBountyUsdc : seizedUsdc;
+            .applyLiquidationSettlementPlan(
+                delta.account, reservationOrderIds, settlementPlan, host.pool(), keeper, delta.keeperBountyUsdc
+            );
         if (seizedUsdc > 0) {
-            if (keeperBountyInflowUsdc > 0) {
-                IHousePool(host.pool()).recordProtocolInflow(keeperBountyInflowUsdc);
-            }
-            if (seizedUsdc > keeperBountyInflowUsdc) {
-                IHousePool(host.pool())
-                    .recordClaimantInflow(
-                        seizedUsdc - keeperBountyInflowUsdc,
-                        IHousePool.ClaimantInflowKind.Revenue,
-                        IHousePool.ClaimantInflowCashMode.CashArrived
-                    );
-            }
+            IHousePool(host.pool())
+                .recordClaimantInflow(
+                    seizedUsdc, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.CashArrived
+                );
         }
         if (delta.syncMarginQueueAmount > 0) {
             IOrderRouterAccounting(host.orderRouter()).syncMarginQueue(delta.account);

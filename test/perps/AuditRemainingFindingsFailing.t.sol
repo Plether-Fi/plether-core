@@ -64,7 +64,7 @@ contract AuditRemainingFindingsFailing is BasePerpTest {
 
         vm.prank(address(router));
         vm.expectRevert(CfdEngine.CfdEngine__PositionIsSolvent.selector);
-        engine.liquidatePosition(account, 99_500_000, poolDepth, uint64(block.timestamp));
+        engine.liquidatePosition(account, 99_500_000, poolDepth, uint64(block.timestamp), address(this));
     }
 
     function test_H3_OperatorCannotSeizeToArbitraryRecipient() public {
@@ -125,7 +125,6 @@ contract AuditRemainingFindingsFailing_MevDrift is BasePerpTest {
             new bool[](2)
         );
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
         _bootstrapSeededLifecycle();
@@ -195,7 +194,6 @@ contract AuditRemainingFindingsFailing_StaleOracleExecution is BasePerpTest {
             new bool[](2)
         );
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
         _bootstrapSeededLifecycle();

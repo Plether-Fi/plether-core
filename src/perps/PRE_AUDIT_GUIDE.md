@@ -54,7 +54,7 @@ Before trusting a test as a source of truth, ask:
 | `CfdEngine` settlement host hooks | `settlementSidecar` only | settlement sidecar itself is engine-gated |
 | `CfdEngine.processOrderTyped` / `liquidatePosition` / fee bookkeeping | `orderRouter` only | router is the external execution boundary |
 | `MarginClearinghouse` operator paths | `engine`, `orderRouter`, `settlementSidecar` | router for queue escrow, engine/sidecar for settlement |
-| `HousePool.payOut` / `recordProtocolInflow` | `engine`, `orderRouter`, `settlementSidecar` | payout/inflow authority is intentionally narrow |
+| `HousePool.payOut` / `recordProtocolInflow` | `engine`, `settlementSidecar` | payout/inflow authority is intentionally narrow |
 | `HousePool.recordClaimantInflow` | `engine`, `settlementSidecar` | claimant-owned revenue/recap routing only |
 
 Any new helper/sidecar contract that can reach these sets should be treated as security-critical and explicitly access-controlled.
@@ -107,8 +107,8 @@ Any new helper/sidecar contract that can reach these sets should be treated as s
 
 | Bounty type | Source of funds | Custody while pending | Success path | Illiquid path | Terminal failure path |
 |-------------|-----------------|-----------------------|--------------|---------------|-----------------------|
-| Order execution bounty | Trader free settlement, then bounded close fallback from active position margin | `OrderRouter` escrow | clearinghouse credit for the clearer | n/a | clearer payment or trader refund via clearinghouse credit depending on failure category/policy |
-| Liquidation bounty | Capped from canonical liquidation value derived from reachable collateral and carry-adjusted equity | planned in engine, then serviced through the liquidation settlement path | immediate keeper clearinghouse credit if cash is available after the settlement path | deferred keeper credit senior claim | n/a |
+| Order execution bounty | Trader free settlement, then bounded close fallback from active position margin | clearinghouse reserved settlement | clearinghouse credit for the clearer | n/a | clearer payment or forfeiture/absorption depending on failure category/policy |
+| Liquidation bounty | Capped from canonical liquidation value derived from reachable collateral and carry-adjusted equity | planned in engine, then settled inside clearinghouse | immediate keeper clearinghouse credit from liquidated account margin | n/a | n/a |
 
 ### Oracle regime table
 
@@ -130,7 +130,7 @@ Any new helper/sidecar contract that can reach these sets should be treated as s
 | Committed order margin | Trader but reserved to one order | clearinghouse reservation keyed by `orderId` | router commit/execute/fail | no | no | no | no |
 | Router execution bounty escrow | Trader-funded keeper escrow | `OrderRouter` balance + order record | router commit/distribute/refund/forfeit | no | no | no | no |
 | Deferred trader credit | Trader senior claim on pool liquidity | `CfdEngine.deferredTraderCreditUsdc` | engine create/service | no | yes, as senior liability | yes | yes |
-| Deferred keeper credit | Keeper senior claim on pool liquidity | `CfdEngine.deferredKeeperCreditUsdc` | engine create/service | no | yes, as senior liability | yes | yes |
+| Keeper bounty credit | Keeper margin credit | `MarginClearinghouse.balanceUsdc(keeper)` | engine/clearinghouse bounty settlement | no | no pool liability | no | no |
 | Unsettled carry | Protocol-recorded carry debt on an account | `CfdEngine.unsettledCarryUsdc[account]` | engine carry-checkpoint paths | no | yes, as carry drag on account equity | no | no |
 | Accumulated protocol fees | Protocol/treasury | `CfdEngine.accumulatedFeesUsdc` + canonical pool cash | engine accrual, owner withdraw | no | reduces net physical assets | yes | yes |
 | Accumulated bad debt | Protocol loss / LP impairment | `CfdEngine.accumulatedBadDebtUsdc` | engine realization, bad debt clear path | n/a | yes, as realized deficit | yes | yes |
@@ -154,16 +154,16 @@ Reachability note:
 ### Deferred trader credit servicing
 
 - Liveness problem: profitable closes and liquidation payouts should not revert only because the HousePool is temporarily illiquid.
-- Chosen tradeoff: record senior deferred trader/keeper credit claims instead of reverting the state transition.
+- Chosen tradeoff: record senior deferred trader credit claims instead of reverting the state transition.
 - New risk: payout servicing becomes asynchronous and must respect seniority.
 - Protecting invariant: deferred liabilities remain senior in withdrawal, solvency, and reconciliation accounting.
 
-### Fail-soft liquidation bounty servicing
+### Direct liquidation bounty servicing
 
 - Liveness problem: liquidation should not fail solely because immediate pool cash is unavailable.
-- Chosen tradeoff: keeper bounty may become deferred keeper credit.
-- New risk: keeper payment timing becomes state-dependent.
-- Protecting invariant: liquidation still completes, and the keeper credit claim remains senior until paid.
+- Chosen tradeoff: keeper bounty is funded from liquidation-reachable trader collateral instead of pool cash.
+- New risk: liquidation settlement must keep bounty caps aligned with reachable collateral.
+- Protecting invariant: liquidation still completes, and the keeper receives clearinghouse credit without creating pool debt.
 
 ### Bounded queue cleanup
 
@@ -240,7 +240,7 @@ Reachability note:
 
 1. Preview/live parity: canonical close and liquidation planner outputs should match live settlement semantics.
 2. Physical-first solvency: physical cash and mathematical claims are distinct objects.
-3. Deferred-liability seniority: deferred trader and keeper credit claims remain senior until serviced.
+3. Deferred-liability seniority: deferred trader credit claims remain senior until serviced.
 4. Carry-aware risk: pending carry reduces relevant equity before realization on guard and risk checks.
 5. Bounded queue behavior: cleanup and close-intent projection are account-local.
 6. Escrow conservation: router-held USDC execution bounty escrow and admin-held ETH refund claims are each distributed, refunded, forfeited, or left claimable exactly once.

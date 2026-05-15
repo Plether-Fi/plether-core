@@ -4,7 +4,6 @@ pragma solidity 0.8.33;
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
-import {DeferredEngineViewTypes} from "../../src/perps/interfaces/DeferredEngineViewTypes.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 
 contract ArchitectureRegression_EscrowShielding is BasePerpTest {
@@ -31,35 +30,6 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
 
     address internal alice = address(0xA11CE);
     address internal bob = address(0xB0B);
-    address internal keeper = address(0xBEEF);
-
-    function test_WithdrawFees_MustHonorDeferredKeeperLiabilities() public {
-        address account = alice;
-        _fundTrader(alice, 20_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
-
-        vm.prank(address(router));
-        engine.recordDeferredKeeperCredit(keeper, 950_001e6);
-
-        vm.expectRevert(CfdEngine.CfdEngine__PostOpSolvencyBreach.selector);
-        engine.withdrawFees(address(this));
-    }
-
-    function test_Reconcile_MustSubtractDeferredLiquidationBounties() public {
-        uint256 juniorPrincipalBefore = pool.juniorPrincipal();
-
-        vm.prank(address(router));
-        engine.recordDeferredKeeperCredit(keeper, 100_000e6);
-
-        vm.prank(address(juniorVault));
-        pool.reconcile();
-
-        assertEq(
-            juniorPrincipalBefore - pool.juniorPrincipal(),
-            100_000e6,
-            "Deferred liquidation bounties must reduce junior distributable equity by the reserved keeper amount"
-        );
-    }
 
     function test_FreshClosePayout_MustNotLeapfrogExistingDeferredClaims() public {
         address aliceAccount = alice;
@@ -84,7 +54,9 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         _close(bobAccount, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
 
         assertGt(
-            engine.deferredTraderCreditUsdc(bobAccount), 0, "new payout must defer while older deferred claims reserve cash"
+            engine.deferredTraderCreditUsdc(bobAccount),
+            0,
+            "new payout must defer while older deferred claims reserve cash"
         );
         assertEq(
             clearinghouse.balanceUsdc(bobAccount),
@@ -93,7 +65,7 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         );
     }
 
-    function test_DeferredClaimability_ViewCanOverstateKeeperClaimabilityDuringShortfall() public {
+    function test_DeferredClaimability_ViewReportsTraderPath() public {
         address aliceAccount = alice;
         _fundTrader(alice, 11_000e6);
         _open(aliceAccount, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
@@ -106,25 +78,12 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         uint256 deferredTraderCredit = engine.deferredTraderCreditUsdc(aliceAccount);
         assertGt(deferredTraderCredit, 0, "setup must create a deferred payout");
 
-        vm.prank(address(router));
-        engine.recordDeferredKeeperCredit(keeper, deferredTraderCredit);
-
         usdc.mint(address(pool), deferredTraderCredit);
 
-        DeferredEngineViewTypes.DeferredCreditStatus memory status = _deferredCreditStatus(aliceAccount, keeper);
         assertTrue(
-            status.traderPayoutClaimableNow,
+            _deferredCreditStatus(aliceAccount, address(0)).traderPayoutClaimableNow,
             "Trader claim should remain claimable when cash fully covers the trader credit"
         );
-        assertTrue(
-            status.keeperCreditClaimableNow, "Keeper view currently reports claimability whenever any cash remains"
-        );
-
-        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeper);
-        vm.expectRevert(CfdEngine.CfdEngine__InsufficientPoolLiquidity.selector);
-        vm.prank(keeper);
-        engine.claimDeferredKeeperCredit();
-        assertEq(clearinghouse.balanceUsdc(keeper), keeperSettlementBefore);
     }
 
     function test_DeferredClaims_FreezeForAllClaimantsDuringAggregateShortfall() public {
@@ -154,8 +113,12 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         vm.prank(alice);
         engine.claimDeferredTraderCredit(aliceAccount);
 
-        assertEq(engine.deferredTraderCreditUsdc(aliceAccount), aliceDeferred, "Oldest deferred claim should remain frozen");
-        assertEq(engine.deferredTraderCreditUsdc(bobAccount), bobDeferred, "Unclaimed later balance should remain unchanged");
+        assertEq(
+            engine.deferredTraderCreditUsdc(aliceAccount), aliceDeferred, "Oldest deferred claim should remain frozen"
+        );
+        assertEq(
+            engine.deferredTraderCreditUsdc(bobAccount), bobDeferred, "Unclaimed later balance should remain unchanged"
+        );
 
         usdc.mint(address(pool), bobDeferred / 2);
         vm.expectRevert(CfdEngine.CfdEngine__InsufficientPoolLiquidity.selector);

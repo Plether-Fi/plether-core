@@ -8,13 +8,9 @@ import {IOrderRouterAdminHost} from "../interfaces/IOrderRouterAdminHost.sol";
 import {IOrderRouterErrors} from "../interfaces/IOrderRouterErrors.sol";
 import {OrderExecutionOrchestrator} from "./OrderExecutionOrchestrator.sol";
 import {OrderOracleExecution} from "./OrderOracleExecution.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /// @notice Shared storage and abstract-hook implementations for the delayed-order router stack.
 abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrchestrator {
-
-    using SafeERC20 for IERC20;
 
     uint64 public nextCommitId = 1;
     uint64 public nextExecuteId = 1;
@@ -60,9 +56,6 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
         maxPendingOrders = 5;
         minEngineGas = 600_000;
         maxPruneOrdersPerCall = 64;
-        if (_engine.code.length > 0) {
-            USDC.forceApprove(_engine, type(uint256).max);
-        }
     }
 
     function _onlyEngine() internal view {
@@ -116,7 +109,7 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
         uint256 sizeDelta,
         uint256 executionBountyUsdc
     ) internal override {
-        try engine.reserveCloseOrderExecutionBounty(account, sizeDelta, executionBountyUsdc, address(this)) {}
+        try engine.reserveCloseOrderExecutionBounty(account, sizeDelta, executionBountyUsdc) {}
         catch {
             revert IOrderRouterErrors.OrderRouter__CommitValidation(6);
         }

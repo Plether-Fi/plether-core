@@ -113,7 +113,6 @@ Where `withdrawalReservedUsdc` is built from the canonical reserve model, includ
 
 - bounded trader liability,
 - deferred trader credit,
-- deferred keeper credit,
 - protocol-owned inventory.
 
 Rule:
@@ -184,7 +183,6 @@ Key fields:
 - `supplementalReservedUsdc`: reserved extension slot for LP-withdrawal accounting; currently zero in the carry model
 - `unrealizedMtmLiabilityUsdc`
 - `deferredTraderCreditUsdc`
-- `deferredKeeperCreditUsdc`
 - `protocolFeesUsdc`
 - `markFreshnessRequired`
 - `maxMarkStaleness`
@@ -312,19 +310,19 @@ The protocol supports fail-soft terminal settlement.
 - claims may be partial,
 - settlement is credited into `MarginClearinghouse`.
 
-### Deferred keeper credit
+### Keeper bounty credit
 
-- illiquid liquidation bounties may create `deferredKeeperCreditUsdc[beneficiary]`,
-- only the recorded beneficiary may call `claimDeferredKeeperCredit()`,
-- settlement is credited into `MarginClearinghouse`.
+- order execution bounties are reserved from trader margin at commit time,
+- liquidation bounties are capped by liquidation-reachable collateral,
+- successful bounty settlement credits the keeper directly in `MarginClearinghouse`.
 
 Rules:
 
-- deferred liabilities are beneficiary-balance based, not FIFO queue based,
-- they are senior claims on pool cash,
+- deferred trader liabilities are beneficiary-balance based, not FIFO queue based,
+- deferred trader liabilities are senior claims on pool cash,
 - deferred claim servicing outranks protocol fee withdrawals when cash is insufficient to satisfy both,
 - deferred claim servicing is frozen entirely while physical pool cash is below aggregate deferred liabilities,
-- fee withdrawal, fresh payout cash, fresh liquidation bounty payment, and deferred servicing must all agree on what cash is actually free.
+- fee withdrawal, fresh payout funding, and deferred servicing must all agree on what cash is actually free; keeper bounties do not compete for pool cash.
 
 ## Pending-Order Escrow Model
 
@@ -335,7 +333,7 @@ Question answered:
 Escrow / reservation buckets include:
 
 - committed order margin,
-- router-custodied execution bounty reserve.
+- clearinghouse reserved execution bounty.
 
 Rules:
 
@@ -343,11 +341,11 @@ Rules:
 - escrowed value is not free buying power,
 - releasing or consuming escrow must happen exactly once,
 - clearinghouse reservation records are the source of truth for committed trader margin,
-- router escrow is not LP cash and should not become a deferred pool liability bucket.
+- execution-bounty escrow is not LP cash and should not become a deferred pool liability bucket.
 
 ### Close-order bounty policy
 
-- close intents may source their flat router-custodied bounty from active position margin when free settlement is exhausted,
+- close intents may source their flat clearinghouse-reserved bounty from active position margin when free settlement is exhausted,
 - this is an explicit bounded liveness tradeoff,
 - `closeOrderExecutionBountyUsdc` is governance-configured but hard-capped at `1 USDC`,
 - the amount parked in escrow is bounded by `MAX_PENDING_ORDERS * 1 USDC` per account,
@@ -397,7 +395,7 @@ Required properties:
 Liquidation must:
 
 1. seize reachable account value,
-2. pay or defer the keeper bounty according to available pool cash,
+2. credit the keeper bounty directly from the liquidated account's reachable margin,
 3. preserve residual trader value when positive,
 4. realize remaining shortfall as bad debt,
 5. delete the position,

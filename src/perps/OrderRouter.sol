@@ -12,7 +12,7 @@ import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/Reentrancy
 
 /// @title OrderRouter (The MEV Shield)
 /// @notice Manages Commit-Reveal, MEV protection, and the un-brickable FIFO queue.
-/// @dev Holds only non-trader-owned keeper execution reserves. Trader collateral remains in MarginClearinghouse.
+/// @dev Does not custody trader collateral or bounty reserves; queued value remains in MarginClearinghouse.
 /// @custom:security-contact contact@plether.com
 contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, ReentrancyGuardTransient {
 
@@ -76,7 +76,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, Reentra
 
     /// @notice Keeper executes the current global queue head.
     /// @dev Validates oracle freshness, publish-time ordering, and slippage, then delegates to the
-    ///      engine. Invalid, expired, or out-of-slippage orders are finalized from router-custodied
+    ///      engine. Invalid, expired, or out-of-slippage orders are finalized from clearinghouse-reserved
     ///      execution bounty escrow; the router does not maintain a retry/requeue lane.
     /// @param orderId Must equal the current global queue head (expired orders are auto-skipped)
     /// @param pythUpdateData Pyth price update blobs; attach ETH to cover the Pyth fee
@@ -121,7 +121,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, Reentra
 
     /// @notice Keeper-triggered liquidation using the canonical live-market staleness policy.
     ///         Forfeits any queued-order execution escrow to the HousePool instead of crediting it back to trader settlement,
-    ///         then credits the liquidation keeper through the clearinghouse when cash is available.
+    ///         then credits the liquidation keeper directly through the clearinghouse.
     /// @param account The account to liquidate
     /// @param pythUpdateData Pyth price update blobs; attach ETH to cover the Pyth fee
     function executeLiquidation(

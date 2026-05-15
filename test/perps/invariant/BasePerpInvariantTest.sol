@@ -75,7 +75,6 @@ abstract contract BasePerpInvariantTest is Test {
 
         engine.setPool(address(housePool));
         engine.setOrderRouter(address(router));
-        housePool.setOrderRouter(address(router));
         publicLens = new PerpsPublicLens(address(engineAccountLens), address(engine), address(router), address(0));
 
         uint256 initialHousePoolAssets = _initialHousePoolAssets();
@@ -209,13 +208,11 @@ abstract contract BasePerpInvariantTest is Test {
         address keeper
     ) internal view returns (DeferredEngineViewTypes.DeferredCreditStatus memory status) {
         uint256 deferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(account);
-        uint256 deferredKeeperCreditUsdc = engine.deferredKeeperCreditUsdc(keeper);
         bool anyLiquidity = housePool.totalAssets() > 0;
 
         status.deferredTraderCreditUsdc = deferredTraderCreditUsdc;
         status.traderPayoutClaimableNow = deferredTraderCreditUsdc > 0 && anyLiquidity;
-        status.deferredKeeperCreditUsdc = deferredKeeperCreditUsdc;
-        status.keeperCreditClaimableNow = deferredKeeperCreditUsdc > 0 && anyLiquidity;
+        keeper;
     }
 
 }

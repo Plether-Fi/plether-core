@@ -87,7 +87,6 @@ contract AuditExecutionPathFindingsFailing_EthRefundFallback is BasePerpTest {
         );
         _syncRouterAdmin();
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
 

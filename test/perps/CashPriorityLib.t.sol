@@ -9,7 +9,7 @@ contract CashPriorityLibTest is Test {
 
     function test_ReserveFreshPayouts_ReservesAllDeferredSeniorClaims() public pure {
         CashPriorityLib.SeniorCashReservation memory reservation =
-            CashPriorityLib.reserveFreshPayouts(100e6, 10e6, 30e6, 20e6);
+            CashPriorityLib.reserveFreshPayouts(100e6, 10e6, 50e6);
 
         assertEq(reservation.totalSeniorClaimsUsdc, 50e6, "Total senior claims should sum deferred obligations");
         assertEq(reservation.reservedSeniorCashUsdc, 50e6, "Fresh payouts must reserve the full deferred queue");
@@ -24,7 +24,7 @@ contract CashPriorityLibTest is Test {
 
     function test_ReserveDeferredClaim_FreezesWhenPhysicalCashFallsBelowAggregateDeferredClaims() public pure {
         CashPriorityLib.SeniorCashReservation memory reservation =
-            CashPriorityLib.reserveDeferredClaim(40e6, 20e6, 30e6, 20e6, 30e6);
+            CashPriorityLib.reserveDeferredClaim(40e6, 20e6, 50e6, 30e6);
 
         assertEq(
             reservation.deferredClaimServiceableUsdc,
@@ -35,7 +35,7 @@ contract CashPriorityLibTest is Test {
 
     function test_ReserveDeferredClaim_RemainsFrozenDuringShortfallEvenIfCurrentClaimCouldBeCovered() public pure {
         CashPriorityLib.SeniorCashReservation memory reservation =
-            CashPriorityLib.reserveDeferredClaim(40e6, 20e6, 60e6, 10e6, 60e6);
+            CashPriorityLib.reserveDeferredClaim(40e6, 20e6, 70e6, 60e6);
 
         assertEq(
             reservation.deferredClaimServiceableUsdc,
@@ -52,7 +52,7 @@ contract CashPriorityLibTest is Test {
 
     function test_ReserveDeferredClaim_ClaimsFullAmountWhenAggregateDeferredLiabilitiesAreFullyCovered() public pure {
         CashPriorityLib.SeniorCashReservation memory reservation =
-            CashPriorityLib.reserveDeferredClaim(20e6, 20e6, 20e6, 0, 20e6);
+            CashPriorityLib.reserveDeferredClaim(20e6, 20e6, 20e6, 20e6);
 
         assertEq(
             reservation.protocolFeeWithdrawalUsdc,
@@ -68,7 +68,7 @@ contract CashPriorityLibTest is Test {
 
     function test_ReserveDeferredClaim_ClaimsFullAmountWhenOnlyClaimantRemains() public pure {
         CashPriorityLib.SeniorCashReservation memory reservation =
-            CashPriorityLib.reserveDeferredClaim(40e6, 10e6, 30e6, 0, 30e6);
+            CashPriorityLib.reserveDeferredClaim(40e6, 10e6, 30e6, 30e6);
 
         assertEq(
             reservation.deferredClaimServiceableUsdc,
@@ -78,8 +78,8 @@ contract CashPriorityLibTest is Test {
     }
 
     function test_CanWithdrawProtocolFees_OnlyUsesCashAboveDeferredClaims() public pure {
-        assertTrue(CashPriorityLib.canWithdrawProtocolFees(100e6, 20e6, 30e6, 10e6, 20e6));
-        assertFalse(CashPriorityLib.canWithdrawProtocolFees(40e6, 20e6, 30e6, 10e6, 20e6));
+        assertTrue(CashPriorityLib.canWithdrawProtocolFees(100e6, 20e6, 40e6, 20e6));
+        assertFalse(CashPriorityLib.canWithdrawProtocolFees(40e6, 20e6, 40e6, 20e6));
     }
 
 }

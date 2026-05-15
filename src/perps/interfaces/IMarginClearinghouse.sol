@@ -197,8 +197,22 @@ interface IMarginClearinghouse {
         address account,
         uint64[] calldata reservationOrderIds,
         LiquidationSettlementPlan calldata plan,
-        address recipient
+        address recipient,
+        address keeper,
+        uint256 keeperBountyUsdc
     ) external returns (uint256 seizedUsdc);
+    /// @notice Transfers already-reserved settlement from one account to another without moving tokens.
+    function transferReservedSettlement(
+        address account,
+        address recipient,
+        uint256 amount
+    ) external;
+    /// @notice Transfers reserved settlement out to an external recipient.
+    function seizeReservedSettlement(
+        address account,
+        uint256 amount,
+        address recipient
+    ) external;
     /// @notice Transfers settlement USDC from an account to a recipient (losses, fees, or bad debt)
     function seizeUsdc(
         address account,
@@ -209,15 +223,13 @@ interface IMarginClearinghouse {
     /// @dev Restricted to the engine's atomic fresh close-bounty path.
     function reserveCloseExecutionBountyFromSettlement(
         address account,
-        uint256 amount,
-        address recipient
+        uint256 amount
     ) external;
     /// @notice Reserves free-settlement USDC for a stale close-order execution bounty without checkpointing carry.
     /// @dev Restricted to the engine's atomic stale close-bounty path.
     function reserveStaleCloseExecutionBountyFromSettlement(
         address account,
-        uint256 amount,
-        address recipient
+        uint256 amount
     ) external;
     /// @notice Transfers settlement USDC from active position margin to a recipient and unlocks the same amount.
     function seizePositionMarginUsdc(
@@ -225,12 +237,16 @@ interface IMarginClearinghouse {
         uint256 amount,
         address recipient
     ) external;
+    /// @notice Reclassifies active position margin into reserved settlement for a close-order execution bounty.
+    function reserveCloseExecutionBountyFromPositionMargin(
+        address account,
+        uint256 amount
+    ) external;
     /// @notice Reserves active position margin for a stale close-order execution bounty without checkpointing carry.
     /// @dev Restricted to the engine's bounded stale close-bounty path.
     function reserveStaleCloseExecutionBountyFromPositionMargin(
         address account,
-        uint256 amount,
-        address recipient
+        uint256 amount
     ) external;
     function getAccountUsdcBuckets(
         address account

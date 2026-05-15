@@ -89,7 +89,6 @@ contract AuditV3_C01_FIFODeadlockTest is BasePerpTest {
             new bool[](2)
         );
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
         _bootstrapSeededLifecycle();

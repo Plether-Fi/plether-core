@@ -50,7 +50,6 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         snapshot.supplementalReservedUsdc = 0;
         snapshot.unrealizedMtmLiabilityUsdc = _getVaultMtmLiability();
         snapshot.deferredTraderCreditUsdc = engineContract.totalDeferredTraderCreditUsdc();
-        snapshot.deferredKeeperCreditUsdc = engineContract.totalDeferredKeeperCreditUsdc();
         ICfdEngine.SideState memory bullState = _sideState(CfdTypes.Side.BULL);
         ICfdEngine.SideState memory bearState = _sideState(CfdTypes.Side.BEAR);
         snapshot.markFreshnessRequired = bullState.maxProfitUsdc + bearState.maxProfitUsdc > 0;
@@ -113,7 +112,6 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         snapshot.accumulatedFeesUsdc = engineContract.accumulatedFeesUsdc();
         snapshot.accumulatedBadDebtUsdc = engineContract.accumulatedBadDebtUsdc();
         snapshot.totalDeferredTraderCreditUsdc = engineContract.totalDeferredTraderCreditUsdc();
-        snapshot.totalDeferredKeeperCreditUsdc = engineContract.totalDeferredKeeperCreditUsdc();
         snapshot.degradedMode = engineContract.degradedMode();
         ICfdEngine.SideState memory bullState = _sideState(CfdTypes.Side.BULL);
         ICfdEngine.SideState memory bearState = _sideState(CfdTypes.Side.BEAR);
@@ -127,8 +125,7 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
             SolvencyAccountingLib.getMaxLiability(
                 _sideState(CfdTypes.Side.BULL).maxProfitUsdc, _sideState(CfdTypes.Side.BEAR).maxProfitUsdc
             ),
-            engineContract.totalDeferredTraderCreditUsdc(),
-            engineContract.totalDeferredKeeperCreditUsdc()
+            engineContract.totalDeferredTraderCreditUsdc()
         );
     }
 

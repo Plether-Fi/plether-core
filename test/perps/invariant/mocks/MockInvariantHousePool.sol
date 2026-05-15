@@ -11,11 +11,6 @@ contract MockInvariantHousePool is IHousePool {
 
     MockUSDC public immutable usdc;
     address public immutable engine;
-    address public orderRouter;
-    bool public failRouterPayouts;
-
-    error MockInvariantHousePool__RouterAlreadySet();
-    error MockInvariantHousePool__ForcedRouterPayoutFailure();
 
     constructor(
         address _usdc,
@@ -23,21 +18,6 @@ contract MockInvariantHousePool is IHousePool {
     ) {
         usdc = MockUSDC(_usdc);
         engine = _engine;
-    }
-
-    function setOrderRouter(
-        address _orderRouter
-    ) external {
-        if (orderRouter != address(0)) {
-            revert MockInvariantHousePool__RouterAlreadySet();
-        }
-        orderRouter = _orderRouter;
-    }
-
-    function setFailRouterPayouts(
-        bool shouldFail
-    ) external {
-        failRouterPayouts = shouldFail;
     }
 
     function seedAssets(
@@ -65,11 +45,8 @@ contract MockInvariantHousePool is IHousePool {
         address recipient,
         uint256 amount
     ) external {
-        if (msg.sender != engine && msg.sender != orderRouter) {
+        if (msg.sender != engine) {
             revert("unauthorized");
-        }
-        if (msg.sender == orderRouter && failRouterPayouts) {
-            revert MockInvariantHousePool__ForcedRouterPayoutFailure();
         }
         usdc.safeTransfer(recipient, amount);
     }

@@ -219,7 +219,6 @@ contract AuditV2_C03_OracleFrozenCloseTest is BasePerpTest {
             new bool[](2)
         );
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
         _bootstrapSeededLifecycle();
@@ -498,9 +497,6 @@ contract AuditV2_M03_ImmutablePythArraysTest is BasePerpTest {
     function test_M03_NoPythFeedUpdateMechanism() public {
         vm.expectRevert(CfdEngine.CfdEngine__RouterAlreadySet.selector);
         engine.setOrderRouter(address(0x123));
-
-        vm.expectRevert(HousePool.HousePool__RouterAlreadySet.selector);
-        pool.setOrderRouter(address(0x123));
     }
 
 }

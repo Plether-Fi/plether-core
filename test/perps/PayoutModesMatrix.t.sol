@@ -55,7 +55,6 @@ contract PayoutModesMatrixTest is BasePerpTest {
             0,
             "Liquid mode should credit keeper bounty immediately"
         );
-        assertEq(engine.deferredKeeperCreditUsdc(keeper), 0, "Liquid mode should not defer keeper bounty");
     }
 
     function test_LiquidationBadDebtMode() public {
@@ -63,7 +62,7 @@ contract PayoutModesMatrixTest is BasePerpTest {
         address account = trader;
         _fundTrader(trader, 400e6);
         _open(account, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
-        stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(account).checked_write(uint256(0));
+        stdstore.target(address(clearinghouse)).sig("balanceUsdc(address)").with_key(account).checked_write(uint256(0));
 
         CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 180_000_000);
         assertGt(preview.badDebtUsdc, 0, "Deeply underwater liquidation should surface bad debt");

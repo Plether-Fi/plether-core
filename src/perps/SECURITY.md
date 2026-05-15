@@ -17,7 +17,7 @@ The perps system is built around a few core security choices:
 - delayed-order execution through a keeper-run FIFO router,
 - strict separation between trader custody, router escrow, engine accounting, and LP capital,
 - conservative LP accounting that refuses to count unrealized trader losses as present assets,
-- fail-soft terminal settlement through deferred trader and clearer balances,
+- fail-soft terminal settlement through deferred trader balances and direct clearinghouse keeper credits,
 - degraded-mode containment if a terminal transition reveals insolvency.
 
 The protocol is intentionally non-upgradeable. Admins can tune risk parameters and pause certain entrypoints, but they cannot swap logic or rewrite deployed code.
@@ -59,7 +59,6 @@ These are one-time configuration setters rather than mutable governance knobs:
 | `setEngine(address)` | `MarginClearinghouse` |
 | `setSeniorVault(address)` | `HousePool` |
 | `setJuniorVault(address)` | `HousePool` |
-| `setOrderRouter(address)` | `HousePool` |
 
 ### Instant owner controls
 
@@ -83,11 +82,11 @@ The owner cannot:
 
 Several perps contracts intentionally expose narrow but high-authority capability surfaces.
 
-- `OrderRouter` is the external execution boundary and can reach engine settlement paths plus `HousePool.payOut(...)` / `recordProtocolInflow(...)` through the approved caller set.
+- `OrderRouter` is the external execution boundary and can reach engine settlement paths, but it does not hold pool payout or protocol-inflow authority.
 - `CfdEngineSettlementSidecar` is engine-gated, but any external function added there is automatically security-critical because it can reach engine-owned settlement hooks.
 - `MarginClearinghouse` operator paths trust `engine`, `orderRouter`, and `settlementSidecar` to move trader custody across settlement, escrow, and seizure buckets.
 - `MarginClearinghouse.reserveStaleCloseExecutionBountyFromSettlement(...)` and `reserveStaleCloseExecutionBountyFromPositionMargin(...)` are intentionally narrow stale close-commit escape hatches; they must remain reserved for risk-reducing stale fallback flows that have already been bounded by router/engine policy.
-- `HousePool.payOut(...)` and `HousePool.recordProtocolInflow(...)` trust `engine`, `orderRouter`, and `settlementSidecar` as capability-bearing callers.
+- `HousePool.payOut(...)` and `HousePool.recordProtocolInflow(...)` trust only `engine` and `settlementSidecar` as capability-bearing callers.
 
 Practical rule:
 
@@ -104,8 +103,8 @@ These are the highest-value properties an auditor should expect to hold.
 | Bounded entry solvency | Risk-increasing opens require `pool.totalAssets() >= max(globalBullMaxProfit, globalBearMaxProfit)` using canonical physical backing rather than raw token balance |
 | Degraded containment | If a close or liquidation reveals post-op insolvency, `degradedMode` latches and blocks further risk expansion while still permitting protective transitions |
 | Bounded payout | No trader payout can exceed the capped market payoff implied by `CAP_PRICE` |
-| Withdrawal firewall | LP withdrawals are limited to conservative free cash after accounting for bounded liability, deferred liabilities, and protocol-owned balances |
-| Deferred liabilities are senior | Deferred trader credit and deferred keeper credit remain senior claims on pool liquidity until serviced |
+| Withdrawal firewall | LP withdrawals are limited to conservative free cash after accounting for bounded liability, deferred trader liabilities, and protocol-owned balances |
+| Deferred trader liabilities are senior | Deferred trader credit remains a senior claim on pool liquidity until serviced; keeper bounties are not pool liabilities |
 
 ### Position and engine accounting
 
@@ -209,7 +208,7 @@ Keepers are permissionless executors.
 
 - They execute queued orders with oracle data.
 - They trigger liquidations.
-- They receive router-custodied execution bounties or liquidation bounties depending on the path.
+- They receive clearinghouse execution-bounty credits or liquidation bounty credits depending on the path.
 - They are not trusted with user intent beyond what the delayed-order model reveals.
 
 ### Engine and router vs clearinghouse
@@ -221,7 +220,7 @@ Those actors can:
 - lock and unlock margin,
 - settle USDC balances,
 - seize settlement into protocol-authorized flows,
-- move execution bounty reserves into router custody.
+- move execution bounty reserves inside clearinghouse custody.
 
 Those actors cannot:
 
@@ -302,9 +301,9 @@ Security implication: oracle freshness still gates execution and LP accounting f
 Terminal transitions are fail-soft when the HousePool lacks immediate cash.
 
 - profitable closes can create deferred trader credit,
-- liquidation bounties can create deferred keeper credit,
-- both are beneficiary-balance based rather than FIFO queue based,
-- both remain part of reserve and solvency accounting until paid.
+- keeper bounties are direct clearinghouse credits funded from trader margin,
+- deferred trader credits are beneficiary-balance based rather than FIFO queue based,
+- deferred trader credits remain part of reserve and solvency accounting until paid.
 
 This preserves risk reduction and liquidation liveness under temporary cash shortfall.
 

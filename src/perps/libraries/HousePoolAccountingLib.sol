@@ -34,8 +34,7 @@ library HousePoolAccountingLib {
         snapshot.maxLiability = engineSnapshot.maxLiabilityUsdc;
         snapshot.protocolFees = engineSnapshot.protocolFeesUsdc;
         snapshot.reserved = engineSnapshot.maxLiabilityUsdc + engineSnapshot.protocolFeesUsdc
-            + engineSnapshot.deferredTraderCreditUsdc + engineSnapshot.deferredKeeperCreditUsdc
-            + engineSnapshot.supplementalReservedUsdc;
+            + engineSnapshot.deferredTraderCreditUsdc + engineSnapshot.supplementalReservedUsdc;
         snapshot.freeUsdc =
             snapshot.physicalAssets > snapshot.reserved ? snapshot.physicalAssets - snapshot.reserved : 0;
     }
@@ -45,7 +44,7 @@ library HousePoolAccountingLib {
     ) internal pure returns (ReconcileSnapshot memory snapshot) {
         snapshot.physicalAssets = engineSnapshot.physicalAssetsUsdc;
         snapshot.protocolFees = engineSnapshot.protocolFeesUsdc;
-        snapshot.deferredLiabilities = engineSnapshot.deferredTraderCreditUsdc + engineSnapshot.deferredKeeperCreditUsdc;
+        snapshot.deferredLiabilities = engineSnapshot.deferredTraderCreditUsdc;
         snapshot.cashMinusFees = engineSnapshot.netPhysicalAssetsUsdc > snapshot.deferredLiabilities
             ? engineSnapshot.netPhysicalAssetsUsdc - snapshot.deferredLiabilities
             : 0;

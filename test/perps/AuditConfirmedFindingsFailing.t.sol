@@ -65,7 +65,6 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
             new bool[](2)
         );
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
         _bootstrapSeededLifecycle();
@@ -237,7 +236,6 @@ contract AuditConfirmedFindingsFailing_OutOfOrderMarkCancellation is BasePerpTes
             new bool[](2)
         );
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
         _bootstrapSeededLifecycle();
@@ -624,7 +622,7 @@ contract AuditConfirmedFindingsFailing_KeeperReserveLiquidation is BasePerpTest 
         uint256 poolDepth = pool.totalAssets();
         vm.prank(address(router));
         vm.expectRevert(CfdEngine.CfdEngine__PositionIsSolvent.selector);
-        engine.liquidatePosition(account, 100_530_000, poolDepth, uint64(block.timestamp));
+        engine.liquidatePosition(account, 100_530_000, poolDepth, uint64(block.timestamp), address(this));
     }
 
 }

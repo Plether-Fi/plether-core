@@ -20,7 +20,7 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
         handler = new PerpAccountingHandler(usdc, engine, clearinghouse, router, housePool);
         handler.seedActors(50_000e6, 100_000e6);
 
-        bytes4[] memory selectors = new bytes4[](10);
+        bytes4[] memory selectors = new bytes4[](9);
         selectors[0] = handler.depositCollateral.selector;
         selectors[1] = handler.withdrawCollateral.selector;
         selectors[2] = handler.commitOpenOrder.selector;
@@ -29,8 +29,7 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
         selectors[5] = handler.executeNextOrderModelled.selector;
         selectors[6] = handler.liquidate.selector;
         selectors[7] = handler.claimDeferredTraderCredit.selector;
-        selectors[8] = handler.claimDeferredKeeperCredit.selector;
-        selectors[9] = handler.createDeferredTraderCredit.selector;
+        selectors[8] = handler.createDeferredTraderCredit.selector;
 
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
         targetContract(address(handler));

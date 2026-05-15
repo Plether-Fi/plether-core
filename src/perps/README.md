@@ -34,8 +34,8 @@ If you want the accounting model first, read [`ACCOUNTING_SPEC.md`](ACCOUNTING_S
 - One live position per account address at a time. Side flips must pass through a close.
 - Orders are binding once committed. Users cannot cancel queued orders.
 - Queue execution is FIFO from the global head.
-- LP-capital carry is used instead of a side-to-side rate mechanism.
-- If the HousePool is short on cash, trader profits and liquidation bounties can become deferred balance claims instead of reverting the state transition.
+- LP-capital carry is used instead of side-to-side funding.
+- If the HousePool is short on cash, trader profits can become deferred balance claims instead of reverting the state transition; keeper bounties are funded from reserved trader margin inside the clearinghouse.
 
 ### Units and accounts
 
@@ -97,7 +97,7 @@ The main runtime and read surfaces are:
 - `CfdEngineSettlementSidecar` executes close and liquidation choreography, while `CfdEngine` remains the storage owner.
 - `CfdEngine`, `CfdEnginePlanner`, `CfdEngineSettlementSidecar`, and `CfdEngineAdmin` are now deployed separately and wired once through `CfdEngine.setDependencies(...)` to keep engine initcode under EIP-3860.
 - `MarginClearinghouse` owns trader settlement balances and locked-margin custody buckets.
-- `OrderRouter` owns queued order records and router-custodied execution bounty escrow; its implementation is split into base storage/hooks, commit, execution, execution-settlement, liquidation, validation, and bounty-accounting components.
+- `OrderRouter` owns queued order records and clearinghouse execution-bounty reservations; its implementation is split into base storage/hooks, handler, validation, and utility modules.
 - `HousePool` owns LP capital and pays protocol obligations that must leave the pool.
 - `PerpsPublicLens` is the default read surface for product consumers.
 - The account and protocol lenses are for deeper diagnostics, tests, audits, and operator tooling.
@@ -106,7 +106,7 @@ The main runtime and read surfaces are:
 
 1. Deposit USDC into `MarginClearinghouse`.
 2. Submit an open or close intent through `OrderRouter.commitOrder(...)`.
-3. The router records a FIFO order, reserves committed margin, and escrows a keeper execution bounty.
+3. The router records a FIFO order, reserves committed margin, and reserves a keeper execution bounty in `MarginClearinghouse`.
 4. A keeper later calls `executeOrder(...)` or `executeOrderBatch(...)` with Pyth update data.
 5. `OrderRouter` validates oracle freshness, live-market `commitTime < publishTime <= block.timestamp` ordering, slippage, and queue eligibility, then calls `CfdEngine.processOrderTyped(...)`.
 6. `CfdEngine` updates the position, realizes fees and carry, and settles through `MarginClearinghouse` and `HousePool`.
@@ -115,7 +115,7 @@ Important details:
 
 - `acceptablePrice == 0` behaves like a delayed market-style order.
 - Open orders are rejected during degraded mode and close-only windows.
-- Failed orders are finalized from router-custodied bounty escrow; blocked FIFO heads remain pending.
+- Failed orders are finalized from reserved clearinghouse bounty escrow; blocked FIFO heads remain pending.
 - Execution-time user-invalid opens, protocol-state invalidations, and terminal-invalid closes pay the clearer from escrow so FIFO cleanup remains incentive compatible.
 - Close orders can still execute during genuine frozen-oracle windows using the last valid mark subject to the relaxed frozen-market rules.
 - Close-intent queue validation is account-local and bounded by the per-account pending-order queue.
@@ -130,14 +130,13 @@ Profitable closes and some liquidation residuals can create deferred trader cred
 - Claims can be partial if current HousePool cash is insufficient.
 - Claimed amounts are credited into `MarginClearinghouse`, not sent directly to the wallet.
 
-### Deferred keeper credit
+### Keeper bounty credit
 
-Liquidation bounties are fail-soft when the HousePool is illiquid.
+Order and liquidation bounties are margin transfers inside `MarginClearinghouse`.
 
-- The liquidation still completes.
-- Any unpaid keeper value is recorded in `deferredKeeperCreditUsdc[keeper]`.
-- `claimDeferredKeeperCredit()` is beneficiary-only and settles to clearinghouse credit rather than direct wallet transfer.
-- Deferred trader credit and deferred keeper credit are included in reserve and solvency accounting.
+- Open and close order bounties are reserved from trader margin at commit time.
+- Successful execution credits the keeper's clearinghouse settlement balance from the reservation.
+- Liquidation bounties are capped by liquidation-reachable collateral and credited directly to the keeper.
 
 ## LP Lifecycle
 
@@ -245,8 +244,8 @@ Open-risk projection credits skew-reducing trade rebates into reachable collater
 The system can complete terminal transitions even when immediate pool cash is insufficient.
 
 - Trader gains can become deferred trader credit.
-- Liquidation bounties can become deferred keeper credit.
-- Both are included in reserve and solvency accounting.
+- Keeper bounties are direct clearinghouse credits funded from trader margin and do not become vault liabilities.
+- Deferred trader credit is included in reserve and solvency accounting.
 - Deferred balances are beneficiary-based, not queue-based.
 
 ### Conservative LP accounting
@@ -379,7 +378,7 @@ The important runtime invariants are:
 - side-local cached accounting stays consistent with the live position set and never overstates bounded payoff or margin state,
 - `sides[BULL].totalMargin + sides[BEAR].totalMargin == sum(pos.margin)` across live positions,
 - commit-time open preview must not admit orders the router can already classify as commit-time rejectable, and close/liquidation preview math must match live accounting semantics,
-- router-custodied USDC execution bounty escrow and admin-custodied ETH refund claims are each conserved across their respective lifecycle transitions.
+- clearinghouse USDC execution-bounty reservations and admin-custodied ETH refund claims are each conserved across their respective lifecycle transitions.
 
 ## Governance and Admin Controls
 

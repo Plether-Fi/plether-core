@@ -10,7 +10,6 @@ library SolvencyAccountingLib {
         uint256 protocolFeesDeltaUsdc;
         uint256 maxLiabilityAfterUsdc;
         int256 deferredTraderPayoutDeltaUsdc;
-        int256 deferredKeeperCreditDeltaUsdc;
         uint256 pendingPoolPayoutUsdc;
     }
 
@@ -27,7 +26,6 @@ library SolvencyAccountingLib {
         uint256 netPhysicalAssetsUsdc;
         uint256 maxLiabilityUsdc;
         uint256 deferredTraderCreditUsdc;
-        uint256 deferredKeeperCreditUsdc;
         uint256 withdrawalReservedUsdc;
         uint256 freeWithdrawableUsdc;
         uint256 effectiveAssetsUsdc;
@@ -58,22 +56,19 @@ library SolvencyAccountingLib {
         uint256 physicalAssetsUsdc,
         uint256 protocolFeesUsdc,
         uint256 maxLiabilityUsdc,
-        uint256 deferredTraderCreditUsdc,
-        uint256 deferredKeeperCreditUsdc
+        uint256 deferredTraderCreditUsdc
     ) internal pure returns (SolvencyState memory state) {
         state.physicalAssetsUsdc = physicalAssetsUsdc;
         state.protocolFeesUsdc = protocolFeesUsdc;
         state.netPhysicalAssetsUsdc = physicalAssetsUsdc > protocolFeesUsdc ? physicalAssetsUsdc - protocolFeesUsdc : 0;
         state.maxLiabilityUsdc = maxLiabilityUsdc;
         state.deferredTraderCreditUsdc = deferredTraderCreditUsdc;
-        state.deferredKeeperCreditUsdc = deferredKeeperCreditUsdc;
 
-        uint256 deferredLiabilitiesUsdc = deferredTraderCreditUsdc + deferredKeeperCreditUsdc;
-        state.withdrawalReservedUsdc = maxLiabilityUsdc + protocolFeesUsdc + deferredLiabilitiesUsdc;
+        state.withdrawalReservedUsdc = maxLiabilityUsdc + protocolFeesUsdc + deferredTraderCreditUsdc;
         state.freeWithdrawableUsdc =
             physicalAssetsUsdc > state.withdrawalReservedUsdc ? physicalAssetsUsdc - state.withdrawalReservedUsdc : 0;
-        state.effectiveAssetsUsdc = state.netPhysicalAssetsUsdc > deferredLiabilitiesUsdc
-            ? state.netPhysicalAssetsUsdc - deferredLiabilitiesUsdc
+        state.effectiveAssetsUsdc = state.netPhysicalAssetsUsdc > deferredTraderCreditUsdc
+            ? state.netPhysicalAssetsUsdc - deferredTraderCreditUsdc
             : 0;
     }
 
@@ -84,8 +79,7 @@ library SolvencyAccountingLib {
         if (pendingPoolPayoutUsdc == 0) {
             return state.effectiveAssetsUsdc;
         }
-        return
-            state.effectiveAssetsUsdc > pendingPoolPayoutUsdc ? state.effectiveAssetsUsdc - pendingPoolPayoutUsdc : 0;
+        return state.effectiveAssetsUsdc > pendingPoolPayoutUsdc ? state.effectiveAssetsUsdc - pendingPoolPayoutUsdc : 0;
     }
 
     function isInsolvent(
@@ -109,15 +103,12 @@ library SolvencyAccountingLib {
 
         uint256 deferredTraderPayoutAfterUsdc =
             _applySignedDelta(currentState.deferredTraderCreditUsdc, delta.deferredTraderPayoutDeltaUsdc);
-        uint256 deferredKeeperCreditAfterUsdc =
-            _applySignedDelta(currentState.deferredKeeperCreditUsdc, delta.deferredKeeperCreditDeltaUsdc);
 
         SolvencyState memory afterState = buildSolvencyState(
             physicalAssetsAfterUsdc,
             currentState.protocolFeesUsdc + delta.protocolFeesDeltaUsdc,
             delta.maxLiabilityAfterUsdc,
-            deferredTraderPayoutAfterUsdc,
-            deferredKeeperCreditAfterUsdc
+            deferredTraderPayoutAfterUsdc
         );
 
         result.maxLiabilityAfterUsdc = afterState.maxLiabilityUsdc;

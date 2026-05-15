@@ -179,11 +179,6 @@ contract PerpsReadParityTest is BasePerpTest {
             "Protocol lens deferred trader credit should match engine state"
         );
         assertEq(
-            protocolSnapshot.totalDeferredKeeperCreditUsdc,
-            engine.totalDeferredKeeperCreditUsdc(),
-            "Protocol lens deferred keeper credit should match engine state"
-        );
-        assertEq(
             protocolSnapshot.degradedMode,
             engine.degradedMode(),
             "Protocol lens degraded mode should match engine state"

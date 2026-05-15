@@ -57,7 +57,6 @@ contract AuditC1SequencerDriftFailing is BasePerpTest {
             new bool[](2)
         );
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
         _bootstrapSeededLifecycle();

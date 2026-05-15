@@ -10,7 +10,6 @@ import {MarginClearinghouse} from "../../../../src/perps/MarginClearinghouse.sol
 import {OrderRouter} from "../../../../src/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "../../../../src/perps/OrderRouterAdmin.sol";
 import {AccountLensViewTypes} from "../../../../src/perps/interfaces/AccountLensViewTypes.sol";
-import {ICfdEngine} from "../../../../src/perps/interfaces/ICfdEngine.sol";
 import {IMarginClearinghouse} from "../../../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "../../../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {MockUSDC} from "../../../mocks/MockUSDC.sol";
@@ -412,8 +411,6 @@ contract PerpAccountingHandler is Test {
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(price);
         CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, price);
-        uint256 keeperBountyUsdc = preview.keeperBountyUsdc;
-        bool shouldDefer = housePool.failRouterPayouts() && keeperBountyUsdc > 0;
         uint256 deferredTraderCreditUsdc = preview.deferredTraderCreditUsdc;
         uint256 allowedDeferredAfterUsdc = preview.deferredTraderCreditUsdc > preview.existingDeferredRemainingUsdc
             ? preview.deferredTraderCreditUsdc - preview.existingDeferredRemainingUsdc
@@ -433,9 +430,6 @@ contract PerpAccountingHandler is Test {
                 ghost.increaseDeferredTraderCredit(account, deferredTraderCreditUsdc);
             }
             _syncGhostDeferredTraderCredit(account);
-            if (shouldDefer) {
-                ghost.increaseDeferredKeeperCredit(address(this), keeperBountyUsdc);
-            }
             uint256 badDebtAfter = engine.accumulatedBadDebtUsdc();
             if (badDebtAfter > badDebtBefore) {
                 _recordBadDebtDeferredEvent(account, badDebtAfter, allowedDeferredAfterUsdc);
@@ -443,14 +437,6 @@ contract PerpAccountingHandler is Test {
             _recordTerminalResidualEvent(
                 account, badDebtBefore, preview.badDebtUsdc, expectedFinalResidualUsdc, traderWalletBeforeUsdc, true
             );
-        } catch {}
-    }
-
-    function claimDeferredKeeperCredit() external {
-        _clearLastBadDebtDeferredEvent();
-        _clearTerminalReservationSet();
-        try engine.claimDeferredKeeperCredit() {
-            _syncGhostDeferredKeeperCredit(address(this));
         } catch {}
     }
 
@@ -555,14 +541,6 @@ contract PerpAccountingHandler is Test {
         ghostTotalHousePoolMinted += amount;
     }
 
-    function setRouterPayoutFailureMode(
-        uint256 modeFuzz
-    ) external {
-        _clearLastBadDebtDeferredEvent();
-        _clearTerminalReservationSet();
-        housePool.setFailRouterPayouts(modeFuzz % 2 == 1);
-    }
-
     function setPoolAssets(
         uint256 amountFuzz
     ) external {
@@ -635,10 +613,6 @@ contract PerpAccountingHandler is Test {
 
     function totalCommittedMarginSnapshot() external view returns (uint256) {
         return ghost.totalCommittedMarginSnapshot();
-    }
-
-    function deferredKeeperCreditSnapshot() external view returns (uint256) {
-        return ghost.deferredKeeperCreditSnapshot(address(this));
     }
 
     function deferredTraderCreditSnapshot(
@@ -729,18 +703,6 @@ contract PerpAccountingHandler is Test {
             ghost.increaseDeferredTraderCredit(account, liveDeferredTraderCredit - ghostDeferredTraderCredit);
         } else if (ghostDeferredTraderCredit > liveDeferredTraderCredit) {
             ghost.decreaseDeferredTraderCredit(account, ghostDeferredTraderCredit - liveDeferredTraderCredit);
-        }
-    }
-
-    function _syncGhostDeferredKeeperCredit(
-        address keeper
-    ) internal {
-        uint256 ghostDeferredBounty = ghost.deferredKeeperCreditSnapshot(keeper);
-        uint256 liveDeferredBounty = engine.deferredKeeperCreditUsdc(keeper);
-        if (liveDeferredBounty > ghostDeferredBounty) {
-            ghost.increaseDeferredKeeperCredit(keeper, liveDeferredBounty - ghostDeferredBounty);
-        } else if (ghostDeferredBounty > liveDeferredBounty) {
-            ghost.decreaseDeferredKeeperCredit(keeper, ghostDeferredBounty - liveDeferredBounty);
         }
     }
 
@@ -927,10 +889,6 @@ contract PerpAccountingHandler is Test {
                 count++;
             }
         }
-    }
-
-    function totalDeferredKeeperCreditSnapshot() external view returns (uint256) {
-        return ghost.totalDeferredKeeperCreditSnapshot();
     }
 
     function _ensureFreeSettlement(
@@ -1170,8 +1128,6 @@ contract PerpAccountingHandler is Test {
     function _freeSettlementUsdc(
         address account
     ) internal view returns (uint256) {
-        (uint256 size, uint256 margin,,,,,) = engine.positions(account);
-        uint256 protectedMargin = size > 0 ? margin : 0;
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(account);
         return buckets.freeSettlementUsdc;
     }

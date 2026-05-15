@@ -112,7 +112,6 @@ contract DeployPerpsArbitrumSepolia is Script {
         deployed.routerAdmin = deployed.router.admin();
 
         deployed.engine.setOrderRouter(address(deployed.router));
-        deployed.housePool.setOrderRouter(address(deployed.router));
         deployed.clearinghouse.setEngine(address(deployed.engine));
 
         deployed.publicLens = new PerpsPublicLens(

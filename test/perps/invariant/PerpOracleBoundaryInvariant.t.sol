@@ -15,7 +15,7 @@ contract PerpOracleBoundaryInvariantTest is BasePerpInvariantTest {
     function setUp() public override {
         super.setUp();
 
-        handler = new PerpOracleHandler(usdc, engine, clearinghouse, router);
+        handler = new PerpOracleHandler(usdc, mockPyth, engine, clearinghouse, router);
         handler.seedPositions();
 
         bytes4[] memory selectors = new bytes4[](6);

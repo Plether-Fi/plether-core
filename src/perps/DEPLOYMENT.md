@@ -47,7 +47,6 @@ It then performs the required set-once wiring:
 - `HousePool.setJuniorVault(...)`
 - `CfdEngine.setPool(...)`
 - `CfdEngine.setOrderRouter(...)`
-- `HousePool.setOrderRouter(...)`
 - `MarginClearinghouse.setEngine(...)`
 
 Important:

@@ -38,7 +38,14 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         viewData.otherLockedMarginUsdc = buckets.otherLockedMarginUsdc;
         viewData.freeSettlementUsdc = buckets.freeSettlementUsdc;
         viewData.closeReachableUsdc = buckets.freeSettlementUsdc;
-        viewData.terminalReachableUsdc = MarginClearinghouseAccountingLib.getTerminalReachableUsdc(buckets);
+        uint256 executionEscrowUsdc;
+        address orderRouter = engineContract.orderRouter();
+        if (orderRouter != address(0)) {
+            executionEscrowUsdc = IOrderRouterAccounting(orderRouter).getAccountEscrow(account).executionBountyUsdc;
+        }
+        viewData.terminalReachableUsdc = buckets.settlementBalanceUsdc > executionEscrowUsdc
+            ? buckets.settlementBalanceUsdc - executionEscrowUsdc
+            : 0;
         viewData.accountEquityUsdc = engineContract.clearinghouse().getAccountEquityUsdc(account);
         viewData.freeBuyingPowerUsdc = engineContract.clearinghouse().getFreeBuyingPowerUsdc(account);
         viewData.deferredTraderCreditUsdc = engineContract.deferredTraderCreditUsdc(account);
@@ -168,7 +175,17 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         snapshot.deferredTraderCreditUsdc = engineContract.deferredTraderCreditUsdc(account);
         snapshot.pendingOrderCount = escrow.pendingOrderCount;
         snapshot.closeReachableUsdc = buckets.freeSettlementUsdc;
-        snapshot.terminalReachableUsdc = MarginClearinghouseAccountingLib.getTerminalReachableUsdc(buckets);
+        uint256 escrowExcludedSettlementUsdc = buckets.settlementBalanceUsdc > escrow.executionBountyUsdc
+            ? buckets.settlementBalanceUsdc - escrow.executionBountyUsdc
+            : 0;
+        IMarginClearinghouse.AccountUsdcBuckets memory terminalBuckets = IMarginClearinghouse.AccountUsdcBuckets({
+            settlementBalanceUsdc: escrowExcludedSettlementUsdc,
+            totalLockedMarginUsdc: buckets.totalLockedMarginUsdc,
+            activePositionMarginUsdc: buckets.activePositionMarginUsdc,
+            otherLockedMarginUsdc: buckets.otherLockedMarginUsdc,
+            freeSettlementUsdc: buckets.freeSettlementUsdc
+        });
+        snapshot.terminalReachableUsdc = MarginClearinghouseAccountingLib.getTerminalReachableUsdc(terminalBuckets);
         snapshot.accountEquityUsdc = clearinghouse.getAccountEquityUsdc(account);
         snapshot.freeBuyingPowerUsdc = clearinghouse.getFreeBuyingPowerUsdc(account);
 
