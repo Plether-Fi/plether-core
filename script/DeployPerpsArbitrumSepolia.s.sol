@@ -56,6 +56,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         CfdEngineAccountLens accountLens;
         CfdEngineLens engineLens;
         OrderRouter router;
+        address pletherOracle;
         address routerAdmin;
         PerpsPublicLens publicLens;
     }
@@ -107,6 +108,7 @@ contract DeployPerpsArbitrumSepolia is Script {
             _basePrices(),
             _inversions()
         );
+        deployed.pletherOracle = address(deployed.router.pletherOracle());
         deployed.routerAdmin = deployed.router.admin();
 
         deployed.engine.setOrderRouter(address(deployed.router));
@@ -195,6 +197,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         console.log("CfdEngineAccountLens:", address(deployed.accountLens));
         console.log("CfdEngineLens:", address(deployed.engineLens));
         console.log("OrderRouter:", address(deployed.router));
+        console.log("PletherOracle:", deployed.pletherOracle);
         console.log("OrderRouterAdmin:", deployed.routerAdmin);
         console.log("PerpsPublicLens:", address(deployed.publicLens));
         console.log("Owner:", deployed.engineAdmin.owner());

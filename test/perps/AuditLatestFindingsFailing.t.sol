@@ -159,7 +159,7 @@ contract AuditLatestFindingsFailing_VPI is BasePerpTest {
         _fundTrader(carol, 50_000e6);
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BEAR, 200_000e18, 40_000e6, 1e8, false);
-        bytes[] memory empty;
+        bytes[] memory empty = _mockPythUpdateData();
         router.executeOrder(1, empty);
 
         _fundTrader(alice, 50_000e6);
@@ -256,7 +256,7 @@ contract AuditLatestFindingsFailing_MevDrift is BasePerpTest {
         bytes[] memory updateData = new bytes[](1);
         updateData[0] = "";
 
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 13));
+        vm.expectPartialRevert(OrderRouter.OrderRouter__SameBlockExecution.selector);
         router.executeOrder(1, updateData);
     }
 

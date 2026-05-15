@@ -14,6 +14,8 @@ contract MockPyth {
 
     mapping(bytes32 => MockPrice) public prices;
     uint256 public mockFee;
+    bytes32[] internal registeredFeedIds;
+    mapping(bytes32 => bool) internal registeredFeedId;
 
     function setPrice(
         bytes32 feedId,
@@ -22,6 +24,7 @@ contract MockPyth {
         int32 _expo,
         uint256 _publishTime
     ) external {
+        _registerFeed(feedId);
         prices[feedId] = MockPrice(_price, _conf, _expo, _publishTime);
     }
 
@@ -33,6 +36,7 @@ contract MockPyth {
         uint256 _publishTime
     ) external {
         for (uint256 i = 0; i < feedIds.length; i++) {
+            _registerFeed(feedIds[i]);
             prices[feedIds[i]] = MockPrice(_price, _conf, _expo, _publishTime);
         }
     }
@@ -43,6 +47,7 @@ contract MockPyth {
         int32 _expo,
         uint256 _publishTime
     ) external {
+        _registerFeed(feedId);
         prices[feedId] = MockPrice(_price, 0, _expo, _publishTime);
     }
 
@@ -53,6 +58,7 @@ contract MockPyth {
         uint256 _publishTime
     ) external {
         for (uint256 i = 0; i < feedIds.length; i++) {
+            _registerFeed(feedIds[i]);
             prices[feedIds[i]] = MockPrice(_price, 0, _expo, _publishTime);
         }
     }
@@ -77,7 +83,27 @@ contract MockPyth {
     }
 
     function updatePriceFeeds(
-        bytes[] calldata
-    ) external payable {}
+        bytes[] calldata updateData
+    ) external payable {
+        if (updateData.length == 0 || updateData[0].length != 32) {
+            return;
+        }
+
+        uint256 price = abi.decode(updateData[0], (uint256));
+        int64 intPrice = int64(uint64(price));
+        for (uint256 i = 0; i < registeredFeedIds.length; i++) {
+            prices[registeredFeedIds[i]] = MockPrice(intPrice, 0, int32(-8), block.timestamp);
+        }
+    }
+
+    function _registerFeed(
+        bytes32 feedId
+    ) internal {
+        if (registeredFeedId[feedId]) {
+            return;
+        }
+        registeredFeedId[feedId] = true;
+        registeredFeedIds.push(feedId);
+    }
 
 }

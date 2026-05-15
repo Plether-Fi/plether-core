@@ -346,7 +346,7 @@ contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
         // Keeper executes the expired order — it fails softly (OrderFailed "Order expired")
         vm.deal(keeper, 0);
         vm.prank(keeper);
-        bytes[] memory empty;
+        bytes[] memory empty = _mockPythUpdateData();
         router.executeOrder(1, empty);
 
         assertEq(keeper.balance, 0, "H-01: keeper should not be paid for failed order execution");
@@ -383,7 +383,7 @@ contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
 
         usdc.burn(keeper, usdc.balanceOf(keeper));
         vm.prank(keeper);
-        bytes[] memory empty;
+        bytes[] memory empty = _mockPythUpdateData();
         router.executeOrder(1, empty);
         uint256 keeperPayoutSuccess = usdc.balanceOf(keeper);
 

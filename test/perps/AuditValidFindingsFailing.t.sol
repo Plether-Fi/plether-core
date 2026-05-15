@@ -59,7 +59,7 @@ contract AuditValidFindingsFailing is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 1, false);
 
         uint256 keeperBefore = keeper.balance;
-        bytes[] memory empty;
+        bytes[] memory empty = _mockPythUpdateData();
         vm.prank(keeper);
         router.executeOrder(1, empty);
 

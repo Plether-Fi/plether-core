@@ -13,6 +13,7 @@ import {OrderRouterAdmin} from "../../../src/perps/OrderRouterAdmin.sol";
 import {PerpsPublicLens} from "../../../src/perps/PerpsPublicLens.sol";
 import {TrancheVault} from "../../../src/perps/TrancheVault.sol";
 import {IOrderRouterAdminHost} from "../../../src/perps/interfaces/IOrderRouterAdminHost.sol";
+import {IPletherOracle} from "../../../src/perps/interfaces/IPletherOracle.sol";
 import {MockPyth} from "../../mocks/MockPyth.sol";
 import {MockUSDC} from "../../mocks/MockUSDC.sol";
 import {MockUSDC} from "../../mocks/MockUSDC.sol";
@@ -170,13 +171,16 @@ contract PerpOraclePathHandler is Test {
         } catch (bytes memory err) {
             bytes4 selector = _revertSelector(err);
             if (expectStale) {
-                if (selector != OrderRouter.OrderRouter__OracleValidation.selector) {
+                if (!_isExpectedStaleOracleSelector(selector)) {
                     revert PerpOraclePathHandler__UnexpectedRevert(selector);
                 }
                 return;
             }
             if (expectOutOfOrder) {
-                if (selector != CfdEngine.CfdEngine__MarkPriceOutOfOrder.selector) {
+                if (
+                    selector != IPletherOracle.PletherOracle__PriceOutOfOrder.selector
+                        && selector != CfdEngine.CfdEngine__MarkPriceOutOfOrder.selector
+                ) {
                     revert PerpOraclePathHandler__UnexpectedRevert(selector);
                 }
                 return;
@@ -208,6 +212,13 @@ contract PerpOraclePathHandler is Test {
                 selector := mload(add(err, 32))
             }
         }
+    }
+
+    function _isExpectedStaleOracleSelector(
+        bytes4 selector
+    ) internal pure returns (bool) {
+        return selector == IPletherOracle.PletherOracle__StalePrice.selector
+            || selector == IPletherOracle.PletherOracle__PublishTimeDivergence.selector;
     }
 
 }

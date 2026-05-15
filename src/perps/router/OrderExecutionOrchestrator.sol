@@ -4,7 +4,6 @@ pragma solidity 0.8.33;
 import {CfdTypes} from "../CfdTypes.sol";
 import {IOrderRouterAccounting} from "../interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterErrors} from "../interfaces/IOrderRouterErrors.sol";
-import {OracleFreshnessPolicyLib} from "../libraries/OracleFreshnessPolicyLib.sol";
 import {OrderValidationLib} from "../libraries/OrderValidationLib.sol";
 import {OrderExecutionSettlement} from "./OrderExecutionSettlement.sol";
 
@@ -72,8 +71,6 @@ abstract contract OrderExecutionOrchestrator is OrderExecutionSettlement {
         RouterExecutionContext memory executionContext,
         bool revertOnBlockedExecution
     ) internal returns (OrderExecutionStepResult result) {
-        OracleFreshnessPolicyLib.Policy memory orderPolicy =
-            _executionPolicyForOrder(order.isClose, executionContext.oracleFrozen, executionContext.isFadWindow);
         if (_maxOrderAge() > 0 && block.timestamp - order.commitTime > _maxOrderAge()) {
             emit OrderFailed(orderId, OrderFailReason.Expired);
             _finalizeOrCleanupOrder(
@@ -82,23 +79,25 @@ abstract contract OrderExecutionOrchestrator is OrderExecutionSettlement {
             return revertOnBlockedExecution ? OrderExecutionStepResult.Return : OrderExecutionStepResult.Continue;
         }
 
-        if (orderPolicy.closeOnly) {
+        if (!order.isClose && executionContext.openExecutionCloseOnly) {
             if (revertOnBlockedExecution) {
                 revert IOrderRouterErrors.OrderRouter__CommitValidation(10);
             }
             return OrderExecutionStepResult.Break;
         }
 
-        if (address(pyth) != address(0) && !executionContext.oracleFrozen && block.number == order.commitBlock) {
+        if (!executionContext.oracleFrozen && block.number == order.commitBlock) {
             if (revertOnBlockedExecution) {
-                revert IOrderRouterErrors.OrderRouter__OracleValidation(13);
+                revert IOrderRouterErrors.OrderRouter__SameBlockExecution(order.commitBlock, block.number);
             }
             return OrderExecutionStepResult.Break;
         }
 
-        if (address(pyth) != address(0) && !executionContext.oracleFrozen && oraclePublishTime <= order.commitTime) {
+        if (!executionContext.oracleFrozen && oraclePublishTime <= order.commitTime) {
             if (revertOnBlockedExecution) {
-                revert IOrderRouterErrors.OrderRouter__OracleValidation(13);
+                revert IOrderRouterErrors.OrderRouter__OraclePublishTimeNotAfterCommit(
+                    oraclePublishTime, order.commitTime
+                );
             }
             return OrderExecutionStepResult.Break;
         }
@@ -134,10 +133,5 @@ abstract contract OrderExecutionOrchestrator is OrderExecutionSettlement {
         _finalizeOrCleanupOrder(orderId, false, failureOutcome, executionPrice, oraclePublishTime);
         return revertOnBlockedExecution ? OrderExecutionStepResult.Return : OrderExecutionStepResult.Continue;
     }
-
-    function _sendEth(
-        address to,
-        uint256 amount
-    ) internal virtual;
 
 }

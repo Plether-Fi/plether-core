@@ -24,6 +24,7 @@ import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAcc
 import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
 import {PerpsViewTypes} from "../../src/perps/interfaces/PerpsViewTypes.sol";
 import {ProtocolLensViewTypes} from "../../src/perps/interfaces/ProtocolLensViewTypes.sol";
+import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {OrderRouterDebugLens} from "../utils/OrderRouterDebugLens.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -88,10 +89,13 @@ abstract contract BasePerpTest is Test {
     OrderRouter router;
     OrderRouterAdmin routerAdmin;
     PerpsPublicLens publicLens;
+    MockPyth baseMockPyth;
 
     /// @dev Monday 2024-03-04 10:00 UTC. Avoids FAD window.
     uint256 constant SETUP_TIMESTAMP = 1_709_532_000;
     uint256 constant CAP_PRICE = 2e8;
+    bytes32 internal constant BASE_PYTH_FEED_A = bytes32(uint256(1));
+    bytes32 internal constant BASE_PYTH_FEED_B = bytes32(uint256(2));
 
     receive() external payable {}
 
@@ -105,6 +109,9 @@ abstract contract BasePerpTest is Test {
         engineLens = new CfdEngineLens(address(engine));
         engineProtocolLens = new CfdEngineProtocolLens(address(engine));
         pool = new HousePool(address(usdc), address(engine));
+        baseMockPyth = new MockPyth();
+        bytes32[] memory baseFeedIds = _basePythFeedIds();
+        baseMockPyth.setAllPrices(baseFeedIds, int64(100_000_000), int32(-8), SETUP_TIMESTAMP);
 
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
@@ -117,11 +124,11 @@ abstract contract BasePerpTest is Test {
             address(engine),
             address(engineLens),
             address(pool),
-            address(0),
-            new bytes32[](0),
-            new uint256[](0),
-            new uint256[](0),
-            new bool[](0)
+            address(baseMockPyth),
+            baseFeedIds,
+            _basePythWeights(),
+            _basePythBasePrices(),
+            _basePythInversions()
         );
         _syncRouterAdmin();
         engine.setOrderRouter(address(router));
@@ -225,6 +232,35 @@ abstract contract BasePerpTest is Test {
 
     function _seniorSeedReceiver() internal view virtual returns (address) {
         return address(this);
+    }
+
+    function _basePythFeedIds() internal pure returns (bytes32[] memory feedIds) {
+        feedIds = new bytes32[](2);
+        feedIds[0] = BASE_PYTH_FEED_A;
+        feedIds[1] = BASE_PYTH_FEED_B;
+    }
+
+    function _basePythWeights() internal pure returns (uint256[] memory weights) {
+        weights = new uint256[](2);
+        weights[0] = 0.5e18;
+        weights[1] = 0.5e18;
+    }
+
+    function _basePythBasePrices() internal pure returns (uint256[] memory basePrices) {
+        basePrices = new uint256[](2);
+        basePrices[0] = 1e8;
+        basePrices[1] = 1e8;
+    }
+
+    function _basePythInversions() internal pure returns (bool[] memory inversions) {
+        inversions = new bool[](2);
+    }
+
+    function _mockPythUpdateData() internal returns (bytes[] memory updateData) {
+        vm.roll(block.number + 1);
+        vm.warp(block.timestamp + 1);
+        updateData = new bytes[](1);
+        updateData[0] = abi.encode(uint256(1e8));
     }
 
     // --- Legacy side-index placeholder helpers ---

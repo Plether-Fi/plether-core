@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {IOrderRouterAdminHost} from "../interfaces/IOrderRouterAdminHost.sol";
+import {IPletherOracle} from "../interfaces/IPletherOracle.sol";
 import {OrderCommitHandler} from "./OrderCommitHandler.sol";
 import {OrderExecutionHandler} from "./OrderExecutionHandler.sol";
 import {OrderLiquidationHandler} from "./OrderLiquidationHandler.sol";
@@ -14,10 +15,14 @@ abstract contract OrderHandler is OrderCommitHandler, OrderExecutionHandler, Ord
     ) internal {
         _onlyAdmin();
         maxOrderAge = config.maxOrderAge;
-        orderExecutionStalenessLimit = config.orderExecutionStalenessLimit;
-        liquidationStalenessLimit = config.liquidationStalenessLimit;
-        pythMaxConfidenceRatioBps = config.pythMaxConfidenceRatioBps;
         minOpenNotionalUsdc = config.minOpenNotionalUsdc;
+        pletherOracle.applyConfig(
+            IPletherOracle.OracleConfig({
+                orderExecutionStalenessLimit: config.orderExecutionStalenessLimit,
+                liquidationStalenessLimit: config.liquidationStalenessLimit,
+                pythMaxConfidenceRatioBps: config.pythMaxConfidenceRatioBps
+            })
+        );
         openOrderExecutionBountyBps = config.openOrderExecutionBountyBps;
         minOpenOrderExecutionBountyUsdc = config.minOpenOrderExecutionBountyUsdc;
         maxOpenOrderExecutionBountyUsdc = config.maxOpenOrderExecutionBountyUsdc;

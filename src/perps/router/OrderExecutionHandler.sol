@@ -4,6 +4,7 @@ pragma solidity 0.8.33;
 import {CfdTypes} from "../CfdTypes.sol";
 import {IOrderRouterAccounting} from "../interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterErrors} from "../interfaces/IOrderRouterErrors.sol";
+import {IPletherOracle} from "../interfaces/IPletherOracle.sol";
 import {OrderValidation} from "./OrderValidation.sol";
 
 /// @notice External-order execution entry handling for single and batch keeper execution.
@@ -16,11 +17,9 @@ abstract contract OrderExecutionHandler is OrderValidation {
         if (nextExecuteId == 0) {
             revert IOrderRouterErrors.OrderRouter__QueueState(0);
         }
-        uint64 initialHeadOrderId = nextExecuteId;
-        (, CfdTypes.Order memory initialHeadOrder) = _pendingOrder(initialHeadOrderId);
-
+        uint64 oracleOrderId = orderId < nextExecuteId ? nextExecuteId : orderId;
         (OracleUpdateResult memory update, RouterExecutionContext memory executionContext) =
-            _prepareOrderExecutionOracle(pythUpdateData, initialHeadOrder.targetPrice);
+            _prepareOrderExecutionOracle(pythUpdateData, _oracleModeForPendingOrder(oracleOrderId));
 
         _skipStaleOrders(orderId, update.executionPrice, update.oraclePublishTime);
         if (nextExecuteId == 0) {
@@ -35,7 +34,6 @@ abstract contract OrderExecutionHandler is OrderValidation {
         (, CfdTypes.Order memory order) = _pendingOrder(orderId);
 
         _executePendingOrder(orderId, order, update.executionPrice, update.oraclePublishTime, executionContext, true);
-        _sendEth(msg.sender, msg.value - update.pythFee);
     }
 
     function _executeOrderBatch(
@@ -45,7 +43,7 @@ abstract contract OrderExecutionHandler is OrderValidation {
         _validateBatchBounds(maxOrderId);
 
         (OracleUpdateResult memory update, RouterExecutionContext memory executionContext) =
-            _prepareOrderExecutionOracle(pythUpdateData, 1e8);
+            _prepareOrderExecutionOracle(pythUpdateData, _oracleModeForPendingOrder(nextExecuteId));
         uint256 expiredPrunes;
 
         while (nextExecuteId != 0 && nextExecuteId <= maxOrderId) {
@@ -77,15 +75,22 @@ abstract contract OrderExecutionHandler is OrderValidation {
                 break;
             }
         }
-
-        _sendEth(msg.sender, msg.value - update.pythFee);
     }
 
     function _updateMarkPrice(
         bytes[] calldata pythUpdateData
     ) internal {
-        OracleUpdateResult memory update = _prepareMarkRefreshOracle(pythUpdateData);
-        _sendEth(msg.sender, msg.value - update.pythFee);
+        _prepareMarkRefreshOracle(pythUpdateData);
+    }
+
+    function _oracleModeForPendingOrder(
+        uint64 orderId
+    ) private view returns (IPletherOracle.PriceMode) {
+        OrderRecord storage record = _orderRecord(orderId);
+        if (record.status == IOrderRouterAccounting.OrderStatus.Pending && record.core.isClose) {
+            return IPletherOracle.PriceMode.MarkRefresh;
+        }
+        return IPletherOracle.PriceMode.OrderExecution;
     }
 
 }

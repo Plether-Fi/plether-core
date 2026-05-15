@@ -111,7 +111,7 @@ contract AuditC02_KeeperFeeRefund is BasePerpTest {
 
         uint256 keeperBefore = keeper.balance;
 
-        bytes[] memory empty;
+        bytes[] memory empty = _mockPythUpdateData();
         vm.prank(keeper);
         router.executeOrder{value: 0}(1, empty);
 

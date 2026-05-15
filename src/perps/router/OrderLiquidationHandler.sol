@@ -20,8 +20,6 @@ abstract contract OrderLiquidationHandler is OrderValidation {
 
         _clearLiquidatedAccountOrders(account);
         _creditOrDeferLiquidationBounty(keeperBountyUsdc, update.executionPrice, update.oraclePublishTime);
-
-        _sendEth(msg.sender, msg.value - update.pythFee);
     }
 
     function _clearLiquidatedAccountOrders(

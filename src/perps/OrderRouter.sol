@@ -8,23 +8,27 @@ import {IPerpsKeeper} from "./interfaces/IPerpsKeeper.sol";
 import {IPerpsTraderActions} from "./interfaces/IPerpsTraderActions.sol";
 import {OrderHandler} from "./router/OrderHandler.sol";
 import {OrderRouterBase} from "./router/OrderRouterBase.sol";
+import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 
 /// @title OrderRouter (The MEV Shield)
 /// @notice Manages Commit-Reveal, MEV protection, and the un-brickable FIFO queue.
 /// @dev Holds only non-trader-owned keeper execution reserves. Trader collateral remains in MarginClearinghouse.
 /// @custom:security-contact contact@plether.com
-contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
+contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, ReentrancyGuardTransient {
 
     error OrderRouter__ZeroSize();
-    error OrderRouter__OracleValidation(uint8 code);
     error OrderRouter__QueueState(uint8 code);
     error OrderRouter__CommitValidation(uint8 code);
     error OrderRouter__InsufficientGas();
     error OrderRouter__PredictableOpenInvalid(uint8 code);
+    error OrderRouter__ZeroEngineLens();
+    error OrderRouter__MarkPriceOutOfOrder();
+    error OrderRouter__SameBlockExecution(uint64 commitBlock, uint256 currentBlock);
+    error OrderRouter__OraclePublishTimeNotAfterCommit(uint64 publishTime, uint64 commitTime);
 
     /// @param _engine CfdEngine that processes trades and liquidations
     /// @param _housePool HousePool used for depth queries and liquidation bounty payouts
-    /// @param _pyth Pyth oracle contract (address(0) enables mock mode on Anvil)
+    /// @param _pyth Pyth oracle contract
     /// @param _feedIds Pyth price feed IDs for each basket component
     /// @param _quantities Weight of each component (must sum to 1e18)
     /// @param _basePrices Base price per component for normalization (8 decimals)
@@ -53,7 +57,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
         uint256 marginDelta,
         uint256 targetPrice,
         bool isClose
-    ) external {
+    ) external nonReentrant {
         _commitOrder(side, sizeDelta, marginDelta, targetPrice, isClose);
     }
 
@@ -79,31 +83,30 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
     function executeOrder(
         uint64 orderId,
         bytes[] calldata pythUpdateData
-    ) external payable {
+    ) external payable nonReentrant {
         _executeOrder(orderId, pythUpdateData);
     }
 
     /// @notice Executes queued pending orders against a single Pyth price tick.
-    ///         Updates Pyth once, then loops through the FIFO queue. Aggregates reserved USDC
-    ///         execution bounties across processed orders and refunds excess ETH in a single transfer.
+    ///         Updates Pyth once through PletherOracle, then loops through the FIFO queue.
     /// @param maxOrderId Inclusive upper bound on committed order ids the batch may begin processing from
     /// @param pythUpdateData Pyth price update blobs; attach ETH to cover the Pyth fee
     function executeOrderBatch(
         uint64 maxOrderId,
         bytes[] calldata pythUpdateData
-    ) external payable {
+    ) external payable nonReentrant {
         _executeOrderBatch(maxOrderId, pythUpdateData);
     }
 
     function applyRouterConfig(
         IOrderRouterAdminHost.RouterConfig calldata config
-    ) external {
+    ) external nonReentrant {
         _applyRouterConfig(config);
     }
 
     function applyOracleConfig(
         IOrderRouterAdminHost.OracleConfig calldata config
-    ) external {
+    ) external nonReentrant {
         _applyOracleConfig(config);
     }
 
@@ -112,7 +115,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
     /// @param pythUpdateData Pyth price update blobs; attach ETH to cover the Pyth fee
     function updateMarkPrice(
         bytes[] calldata pythUpdateData
-    ) external payable {
+    ) external payable nonReentrant {
         _updateMarkPrice(pythUpdateData);
     }
 
@@ -124,7 +127,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
     function executeLiquidation(
         address account,
         bytes[] calldata pythUpdateData
-    ) external payable {
+    ) external payable nonReentrant {
         _executeLiquidation(account, pythUpdateData);
     }
 
