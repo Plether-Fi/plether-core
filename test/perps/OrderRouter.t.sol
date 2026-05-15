@@ -9,7 +9,7 @@ import {CfdEngineAdmin} from "../../src/perps/CfdEngineAdmin.sol";
 import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
 import {CfdEnginePlanTypes} from "../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdEnginePlanner} from "../../src/perps/CfdEnginePlanner.sol";
-import {CfdEngineSettlementModule} from "../../src/perps/CfdEngineSettlementModule.sol";
+import {CfdEngineSettlementSidecar} from "../../src/perps/CfdEngineSettlementSidecar.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
@@ -86,7 +86,7 @@ contract OrderRouterTest is BasePerpTest {
         usdc.mint(alice, 10_000 * 1e6);
         vm.startPrank(alice);
         usdc.approve(address(clearinghouse), type(uint256).max);
-        clearinghouse.deposit(bytes32(uint256(uint160(alice))), 10_000 * 1e6);
+        clearinghouse.deposit(alice, 10_000 * 1e6);
         vm.deal(alice, 10 ether);
         vm.stopPrank();
     }
@@ -105,12 +105,12 @@ contract OrderRouterTest is BasePerpTest {
 
         assertEq(router.nextExecuteId(), 0, "Terminal engine reverts should clear the queue to the zero sentinel");
 
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(accountId);
+        address account = alice;
+        (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Position should not exist");
 
         assertEq(
-            clearinghouse.balanceUsdc(accountId),
+            clearinghouse.balanceUsdc(account),
             10_000 * 1e6 - 200_000,
             "Protocol-state invalidation should preserve the post-commit settlement baseline under the current refund path"
         );
@@ -157,16 +157,16 @@ contract OrderRouterTest is BasePerpTest {
 
     function test_IncreaseOrder_UsesUnlockedPositionMarginToPayTradeCost() public {
         address trader = address(0xC444);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         uint256 sizeDelta = 3334e18;
         uint256 marginDelta = 110e6;
         uint256 executionBountyUsdc = _quoteOpenOrderExecutionBountyUsdc(sizeDelta);
 
         _fundTrader(trader, marginDelta + executionBountyUsdc);
-        _open(accountId, CfdTypes.Side.BULL, sizeDelta, marginDelta, 1e8);
+        _open(account, CfdTypes.Side.BULL, sizeDelta, marginDelta, 1e8);
 
         assertEq(
-            _freeSettlementUsdc(accountId),
+            _freeSettlementUsdc(account),
             executionBountyUsdc,
             "setup must leave only the future execution bounty as free settlement"
         );
@@ -175,17 +175,17 @@ contract OrderRouterTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, sizeDelta, 0, 1e8, false);
 
         assertLt(
-            _freeSettlementUsdc(accountId),
+            _freeSettlementUsdc(account),
             executionBountyUsdc,
             "commit should materially reduce the only free settlement while reserving the execution bounty"
         );
 
-        uint256 keeperBefore = clearinghouse.balanceUsdc(bytes32(uint256(uint160(address(this)))));
+        uint256 keeperBefore = clearinghouse.balanceUsdc(address(this));
         bytes[] memory empty;
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        (uint256 size,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(account);
         assertEq(
             size, sizeDelta * 2, "valid increase should execute even when free settlement is zero at execution time"
         );
@@ -223,10 +223,10 @@ contract OrderRouterTest is BasePerpTest {
         routerAdmin.finalizeRouterConfig();
 
         address other = address(0x333);
-        bytes32 otherId = bytes32(uint256(uint160(other)));
+        address otherAccount = other;
 
         _fundTrader(other, 1000e6);
-        _open(otherId, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
+        _open(otherAccount, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false); // order 1, head
@@ -236,13 +236,13 @@ contract OrderRouterTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false); // order 3, next live order
 
         vm.prank(other);
-        clearinghouse.withdraw(otherId, 70e6);
+        clearinghouse.withdraw(otherAccount, 70e6);
 
         bytes[] memory pythPrice = new bytes[](1);
         pythPrice[0] = abi.encode(uint256(150_000_000));
         vm.deal(other, 10 ether);
         vm.prank(other);
-        router.executeLiquidation{value: 0}(otherId, pythPrice);
+        router.executeLiquidation{value: 0}(otherAccount, pythPrice);
 
         assertEq(router.nextExecuteId(), 1, "Liquidating a non-head account should not advance the global head");
 
@@ -281,22 +281,22 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_MultiPendingOrders_DoNotCorruptLockedMarginOnFail() public {
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
 
         vm.startPrank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
         router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 500 * 1e6, 2e8, false);
         vm.stopPrank();
 
-        assertEq(clearinghouse.lockedMarginUsdc(accountId), 1500 * 1e6, "Both committed margins should be locked");
+        assertEq(clearinghouse.lockedMarginUsdc(account), 1500 * 1e6, "Both committed margins should be locked");
 
         bytes[] memory empty;
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        (, uint256 posMargin,,,,,) = engine.positions(accountId);
+        (, uint256 posMargin,,,,,) = engine.positions(account);
         assertEq(
-            clearinghouse.lockedMarginUsdc(accountId),
+            clearinghouse.lockedMarginUsdc(account),
             posMargin + 500 * 1e6,
             "Lock should preserve pending committed margin for order 2"
         );
@@ -305,9 +305,9 @@ contract OrderRouterTest is BasePerpTest {
         vm.roll(10);
         router.executeOrder(2, empty);
 
-        (, uint256 posMarginAfter,,,,,) = engine.positions(accountId);
+        (, uint256 posMarginAfter,,,,,) = engine.positions(account);
         assertEq(
-            clearinghouse.lockedMarginUsdc(accountId),
+            clearinghouse.lockedMarginUsdc(account),
             posMarginAfter,
             "Failed order 2 should only unlock its own committed margin"
         );
@@ -327,14 +327,14 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_AccountEscrowView_TracksPendingOrders() public {
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
 
         vm.startPrank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
         router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 500 * 1e6, 1e8, false);
         vm.stopPrank();
 
-        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
+        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(account);
         assertEq(escrow.committedMarginUsdc, 1500 * 1e6, "Escrow view should sum committed margin across pending opens");
         assertEq(escrow.executionBountyUsdc, 400_000, "Open and close orders should both escrow execution bounties");
         assertEq(escrow.pendingOrderCount, 2, "Escrow view should count queued orders");
@@ -347,7 +347,7 @@ contract OrderRouterTest is BasePerpTest {
         OrderRouter.OrderRecord memory record = _orderRecord(1);
         assertEq(uint256(record.status), uint256(IOrderRouterAccounting.OrderStatus.Pending));
         assertEq(record.core.orderId, 1);
-        assertEq(record.core.accountId, bytes32(uint256(uint160(alice))));
+        assertEq(record.core.account, alice);
         assertEq(_remainingCommittedMargin(1), 1000 * 1e6);
         assertEq(record.executionBountyUsdc, 200_000);
         assertEq(record.nextMarginOrderId, 0);
@@ -372,15 +372,15 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_GetPendingOrdersAndEscrow_ReturnAggregateOrderState() public {
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
 
         vm.startPrank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
         router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 500 * 1e6, 1e8, false);
         vm.stopPrank();
 
-        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
-        IOrderRouterAccounting.PendingOrderView[] memory pending = _pendingOrders(accountId);
+        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(account);
+        IOrderRouterAccounting.PendingOrderView[] memory pending = _pendingOrders(account);
         assertEq(escrow.pendingOrderCount, 2);
         assertEq(escrow.committedMarginUsdc, 1500 * 1e6);
         assertEq(escrow.executionBountyUsdc, 400_000);
@@ -390,10 +390,10 @@ contract OrderRouterTest is BasePerpTest {
 
     function test_CloseCommit_ReservesPrefundedKeeperBounty() public {
         address trader = address(0x333);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
 
         _fundTrader(trader, 1001e6);
-        _open(accountId, CfdTypes.Side.BULL, 50_000e18, 1000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 50_000e18, 1000e6, 1e8);
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 0, 0, true);
@@ -403,22 +403,22 @@ contract OrderRouterTest is BasePerpTest {
 
     function test_CloseCommit_CanReserveKeeperBountyFromPositionMarginWhenFullyUtilized() public {
         address trader = address(0x334);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         address counterparty = address(0x335);
-        bytes32 counterpartyId = bytes32(uint256(uint160(counterparty)));
+        address counterpartyAccount = counterparty;
 
         _fundTrader(trader, 1000e6);
         _fundTrader(counterparty, 50_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 50_000e18, 1000e6, 1e8);
-        _open(counterpartyId, CfdTypes.Side.BEAR, 50_000e18, 50_000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 50_000e18, 1000e6, 1e8);
+        _open(counterpartyAccount, CfdTypes.Side.BEAR, 50_000e18, 50_000e6, 1e8);
 
-        assertEq(_freeSettlementUsdc(accountId), 0, "setup must fully consume free settlement");
-        (, uint256 marginBefore,,,,,) = engine.positions(accountId);
+        assertEq(_freeSettlementUsdc(account), 0, "setup must fully consume free settlement");
+        (, uint256 marginBefore,,,,,) = engine.positions(account);
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 0, 0, true);
 
-        (, uint256 marginAfter,,,,,) = engine.positions(accountId);
+        (, uint256 marginAfter,,,,,) = engine.positions(account);
         assertEq(_executionBountyReserve(1), 200_000, "Close orders should still escrow full bounty");
         assertEq(marginAfter, marginBefore - 200_000, "Close bounty should fall back to active margin");
         assertEq(usdc.balanceOf(address(router)), 200_000, "Router should custody the close bounty after fallback");
@@ -426,17 +426,17 @@ contract OrderRouterTest is BasePerpTest {
 
     function test_CloseCommit_CanReserveKeeperBountyFromPositionMarginWithStaleStoredMark() public {
         address trader = address(0x3341);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         address counterparty = address(0x3351);
-        bytes32 counterpartyId = bytes32(uint256(uint160(counterparty)));
+        address counterpartyAccount = counterparty;
 
         _fundTrader(trader, 1000e6);
         _fundTrader(counterparty, 50_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 50_000e18, 1000e6, 1e8);
-        _open(counterpartyId, CfdTypes.Side.BEAR, 50_000e18, 50_000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 50_000e18, 1000e6, 1e8);
+        _open(counterpartyAccount, CfdTypes.Side.BEAR, 50_000e18, 50_000e6, 1e8);
 
-        assertEq(_freeSettlementUsdc(accountId), 0, "setup must fully consume free settlement");
-        (, uint256 marginBefore,,,,,) = engine.positions(accountId);
+        assertEq(_freeSettlementUsdc(account), 0, "setup must fully consume free settlement");
+        (, uint256 marginBefore,,,,,) = engine.positions(account);
         assertEq(engine.lastMarkPrice(), 1e8, "setup should leave a stored mark price");
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
@@ -444,7 +444,7 @@ contract OrderRouterTest is BasePerpTest {
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 0, 0, true);
 
-        (, uint256 marginAfter,,,,,) = engine.positions(accountId);
+        (, uint256 marginAfter,,,,,) = engine.positions(account);
         assertEq(
             _executionBountyReserve(1), 200_000, "Stale-mark close commits should still escrow the flat router bounty"
         );
@@ -456,11 +456,11 @@ contract OrderRouterTest is BasePerpTest {
 
     function test_CloseCommit_StaleFallbackDoesNotRevertWhenFreeSettlementExists() public {
         address trader = address(0x3342);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         usdc.mint(trader, 251_500_000);
         vm.startPrank(trader);
         usdc.approve(address(clearinghouse), 251_500_000);
-        clearinghouse.deposit(accountId, 251_500_000);
+        clearinghouse.deposit(account, 251_500_000);
         vm.stopPrank();
 
         vm.prank(trader);
@@ -470,7 +470,7 @@ contract OrderRouterTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, openPrice);
 
-        uint256 freeSettlementBefore = clearinghouse.getAccountUsdcBuckets(accountId).freeSettlementUsdc;
+        uint256 freeSettlementBefore = clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc;
         assertEq(
             freeSettlementBefore,
             1_300_000,
@@ -484,7 +484,7 @@ contract OrderRouterTest is BasePerpTest {
 
         assertEq(_executionBountyReserve(2), 200_000, "Stale close commit should still escrow the full bounty");
         assertEq(
-            clearinghouse.getAccountUsdcBuckets(accountId).freeSettlementUsdc,
+            clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc,
             1_100_000,
             "Stale close fallback should only consume the reduced close-order bounty from free settlement"
         );
@@ -492,11 +492,11 @@ contract OrderRouterTest is BasePerpTest {
 
     function test_CloseCommit_FreshCarryCheckpointStillFallsBackToMargin() public {
         address trader = address(0x3343);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         usdc.mint(trader, 252_000_000);
         vm.startPrank(trader);
         usdc.approve(address(clearinghouse), 252_000_000);
-        clearinghouse.deposit(accountId, 252_000_000);
+        clearinghouse.deposit(account, 252_000_000);
         vm.stopPrank();
 
         vm.prank(trader);
@@ -506,8 +506,8 @@ contract OrderRouterTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, openPrice);
 
-        uint256 freeSettlementBefore = clearinghouse.getAccountUsdcBuckets(accountId).freeSettlementUsdc;
-        (, uint256 marginBefore,,,,,) = engine.positions(accountId);
+        uint256 freeSettlementBefore = clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc;
+        (, uint256 marginBefore,,,,,) = engine.positions(account);
         assertEq(
             freeSettlementBefore,
             1_800_000,
@@ -520,7 +520,7 @@ contract OrderRouterTest is BasePerpTest {
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
         uint256 expectedCarry = PositionRiskAccountingLib.computePendingCarryUsdc(
-            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(10_000e18, 1e8, clearinghouse.balanceUsdc(accountId)),
+            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(10_000e18, 1e8, clearinghouse.balanceUsdc(account)),
             _riskParams().baseCarryBps,
             carryElapsed
         );
@@ -529,7 +529,7 @@ contract OrderRouterTest is BasePerpTest {
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 0, true);
 
-        (, uint256 marginAfter,,,,,) = engine.positions(accountId);
+        (, uint256 marginAfter,,,,,) = engine.positions(account);
         uint256 marginConsumed = marginBefore - marginAfter;
         assertEq(_executionBountyReserve(2), 200_000, "Fresh carry checkpoint should still escrow the full bounty");
         assertEq(
@@ -538,7 +538,7 @@ contract OrderRouterTest is BasePerpTest {
             "Close commit should escrow exactly 0.20 USDC of bounty value"
         );
         assertEq(
-            clearinghouse.getAccountUsdcBuckets(accountId).freeSettlementUsdc,
+            clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc,
             932_040,
             "Carry-aware reservation should only consume the reduced close-order bounty from post-carry free settlement"
         );
@@ -556,59 +556,59 @@ contract OrderRouterTest is BasePerpTest {
 
     function test_ReserveCloseOrderExecutionBounty_RevertsWhenMarginBackedBountyWouldBreakMaintenance() public {
         address trader = address(0x336);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         address counterparty = address(0x337);
-        bytes32 counterpartyId = bytes32(uint256(uint160(counterparty)));
+        address counterpartyAccount = counterparty;
 
         _fundTrader(trader, 1000e6);
         _fundTrader(counterparty, 50_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 50_000e18, 1000e6, 1e8);
-        _open(counterpartyId, CfdTypes.Side.BEAR, 50_000e18, 50_000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 50_000e18, 1000e6, 1e8);
+        _open(counterpartyAccount, CfdTypes.Side.BEAR, 50_000e18, 50_000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(103_000_000, uint64(block.timestamp));
 
-        assertEq(_freeSettlementUsdc(accountId), 0, "setup must fully consume free settlement");
+        assertEq(_freeSettlementUsdc(account), 0, "setup must fully consume free settlement");
 
         vm.prank(address(router));
         vm.expectRevert(CfdEngine.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
-        engine.reserveCloseOrderExecutionBounty(accountId, 25_000e18, 1e6, address(router));
+        engine.reserveCloseOrderExecutionBounty(account, 25_000e18, 1e6, address(router));
     }
 
     function test_InvalidClose_MarginBackedBountyPaysKeeper() public {
         address trader = address(0x338);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         address counterparty = address(0x339);
-        bytes32 counterpartyId = bytes32(uint256(uint160(counterparty)));
+        address counterpartyAccount = counterparty;
 
         uint256 depth = 5_000_000 * 1e6;
         _fundTrader(trader, 50_000e6);
         _fundTrader(counterparty, 500_000e6);
-        _open(counterpartyId, CfdTypes.Side.BEAR, 500_000e18, 50_000e6, 1e8, depth);
+        _open(counterpartyAccount, CfdTypes.Side.BEAR, 500_000e18, 50_000e6, 1e8, depth);
 
         uint256 minNotional = (uint256(1) * 1e6 * 10_000) / 10 + 1e6;
         uint256 minSize = (minNotional * 1e20) / 1e8;
-        _open(accountId, CfdTypes.Side.BULL, minSize, 50_000e6, 1e8, depth);
+        _open(account, CfdTypes.Side.BULL, minSize, 50_000e6, 1e8, depth);
 
-        (, uint256 marginBeforeCommit,,,,,) = engine.positions(accountId);
-        assertEq(_freeSettlementUsdc(accountId), 0, "setup must fully consume free settlement");
+        (, uint256 marginBeforeCommit,,,,,) = engine.positions(account);
+        assertEq(_freeSettlementUsdc(account), 0, "setup must fully consume free settlement");
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, minSize - 1, 0, 0, true);
 
-        (, uint256 marginAfterCommit,,,,,) = engine.positions(accountId);
+        (, uint256 marginAfterCommit,,,,,) = engine.positions(account);
         assertEq(
             marginAfterCommit,
             marginBeforeCommit - 200_000,
             "commit should temporarily reserve only the margin-backed portion of the close bounty"
         );
 
-        uint256 keeperBefore = clearinghouse.balanceUsdc(bytes32(uint256(uint160(address(this)))));
+        uint256 keeperBefore = clearinghouse.balanceUsdc(address(this));
         bytes[] memory empty;
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        (, uint256 marginAfterExecute,,,,,) = engine.positions(accountId);
+        (, uint256 marginAfterExecute,,,,,) = engine.positions(account);
         assertEq(
             marginAfterExecute,
             marginBeforeCommit - 200_000,
@@ -629,20 +629,20 @@ contract OrderRouterTest is BasePerpTest {
 
     function test_InvalidClose_FreeBackedBountyPaysKeeper() public {
         address trader = address(0x340);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         address counterparty = address(0x341);
-        bytes32 counterpartyId = bytes32(uint256(uint160(counterparty)));
+        address counterpartyAccount = counterparty;
 
         uint256 depth = 5_000_000 * 1e6;
         _fundTrader(trader, 55_000e6);
         _fundTrader(counterparty, 500_000e6);
-        _open(counterpartyId, CfdTypes.Side.BEAR, 500_000e18, 50_000e6, 1e8, depth);
+        _open(counterpartyAccount, CfdTypes.Side.BEAR, 500_000e18, 50_000e6, 1e8, depth);
 
         uint256 minNotional = (uint256(1) * 1e6 * 10_000) / 10 + 1e6;
         uint256 minSize = (minNotional * 1e20) / 1e8;
-        _open(accountId, CfdTypes.Side.BULL, minSize, 50_000e6, 1e8, depth);
+        _open(account, CfdTypes.Side.BULL, minSize, 50_000e6, 1e8, depth);
 
-        uint256 freeSettlementBeforeCommit = _freeSettlementUsdc(accountId);
+        uint256 freeSettlementBeforeCommit = _freeSettlementUsdc(account);
         assertEq(freeSettlementBeforeCommit, 5000e6, "setup must leave free settlement to back the bounty");
         assertEq(usdc.balanceOf(trader), 0, "trader wallet should start empty after depositing into the clearinghouse");
 
@@ -650,7 +650,7 @@ contract OrderRouterTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, minSize - 1, 0, 0, true);
 
         assertEq(
-            _freeSettlementUsdc(accountId),
+            _freeSettlementUsdc(account),
             freeSettlementBeforeCommit - 200_000,
             "commit should temporarily seize the close bounty from free settlement"
         );
@@ -661,7 +661,7 @@ contract OrderRouterTest is BasePerpTest {
         router.executeOrder(1, empty);
 
         assertEq(
-            _freeSettlementUsdc(accountId),
+            _freeSettlementUsdc(account),
             freeSettlementBeforeCommit - 200_000,
             "failed invalid close should keep the free-backed bounty consumed"
         );
@@ -674,14 +674,14 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_GetPendingOrdersForAccount_ReturnsQueuedOrderDetails() public {
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
 
         vm.startPrank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
         router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 500 * 1e6, 1e8, false);
         vm.stopPrank();
 
-        IOrderRouterAccounting.PendingOrderView[] memory pending = _pendingOrders(accountId);
+        IOrderRouterAccounting.PendingOrderView[] memory pending = _pendingOrders(account);
         assertEq(pending.length, 2);
         assertEq(pending[0].orderId, 1);
         assertFalse(pending[0].isClose);
@@ -693,8 +693,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_PendingOrderPointers_LinkPerAccountInFIFOOrder() public {
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        bytes32 bobId = bytes32(uint256(uint160(bob)));
+        address aliceAccount = alice;
 
         _fundTrader(bob, 10_000 * 1e6);
 
@@ -707,14 +706,14 @@ contract OrderRouterTest is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 500 * 1e6, 1e8, false);
 
-        IOrderRouterAccounting.PendingOrderView[] memory alicePending = _pendingOrders(aliceId);
+        IOrderRouterAccounting.PendingOrderView[] memory alicePending = _pendingOrders(aliceAccount);
         assertEq(alicePending.length, 2, "Alice should see only her own queued orders");
         assertEq(alicePending[0].orderId, 1, "Alice queue should preserve per-account FIFO order");
         assertEq(alicePending[1].orderId, 3, "Alice tail should remain reachable after foreign inserts");
     }
 
     function test_MarginQueue_CloseIntentBehindPendingOpenIsRejected() public {
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
 
         vm.startPrank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
@@ -724,26 +723,24 @@ contract OrderRouterTest is BasePerpTest {
         vm.stopPrank();
 
         assertEq(
-            router.marginHeadOrderId(accountId), 1, "Margin queue head should start at the first positive-margin order"
+            router.marginHeadOrderId(account), 1, "Margin queue head should start at the first positive-margin order"
         );
-        assertEq(
-            router.marginTailOrderId(accountId), 2, "Margin queue tail should end at the last positive-margin order"
-        );
+        assertEq(router.marginTailOrderId(account), 2, "Margin queue tail should end at the last positive-margin order");
         assertTrue(_isInMarginQueue(1), "Positive-margin open should be linked into the margin queue");
         assertTrue(_isInMarginQueue(2), "Later positive-margin open should be linked into the margin queue");
     }
 
     function test_NoteCommittedMarginConsumed_PartialConsumePreservesMarginQueueMembership() public {
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         vm.prank(address(engine));
-        clearinghouse.consumeAccountOrderReservations(accountId, 400 * 1e6);
+        clearinghouse.consumeAccountOrderReservations(account, 400 * 1e6);
 
         vm.prank(address(engine));
-        router.syncMarginQueue(accountId);
+        router.syncMarginQueue(account);
 
         assertEq(_remainingCommittedMargin(1), 600 * 1e6, "Partial consumption should leave residual committed margin");
         assertEq(
@@ -751,13 +748,13 @@ contract OrderRouterTest is BasePerpTest {
             600 * 1e6,
             "Reservation residual should match router-side committed margin residual"
         );
-        assertEq(router.marginHeadOrderId(accountId), 1, "Partially consumed order should remain at margin-queue head");
-        assertEq(router.marginTailOrderId(accountId), 1, "Single residual order should remain at margin-queue tail");
+        assertEq(router.marginHeadOrderId(account), 1, "Partially consumed order should remain at margin-queue head");
+        assertEq(router.marginTailOrderId(account), 1, "Single residual order should remain at margin-queue tail");
         assertTrue(_isInMarginQueue(1), "Partially consumed order should remain linked in the margin queue");
     }
 
     function test_NoteCommittedMarginConsumed_DrainsHeadExposureWithRejectedCloseIntent() public {
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
 
         vm.startPrank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
@@ -767,22 +764,22 @@ contract OrderRouterTest is BasePerpTest {
         vm.stopPrank();
 
         vm.prank(address(engine));
-        clearinghouse.consumeAccountOrderReservations(accountId, 1000 * 1e6);
+        clearinghouse.consumeAccountOrderReservations(account, 1000 * 1e6);
 
         vm.prank(address(engine));
-        router.syncMarginQueue(accountId);
+        router.syncMarginQueue(account);
 
         assertEq(_remainingCommittedMargin(1), 0, "First margin-paying order should be fully drained");
         assertEq(
             _remainingCommittedMargin(2), 250 * 1e6, "Later positive-margin order should retain its committed margin"
         );
         assertEq(
-            router.marginHeadOrderId(accountId),
+            router.marginHeadOrderId(account),
             2,
             "Account margin head should advance once zero-remaining reservations are pruned"
         );
         assertEq(
-            router.marginTailOrderId(accountId),
+            router.marginTailOrderId(account),
             2,
             "Margin queue tail should still point at the trailing positive-margin order"
         );
@@ -803,28 +800,28 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_NoteCommittedMarginConsumed_ReconcilesPerOrderReleaseAfterPartialBucketConsumption() public {
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
 
         vm.startPrank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 250 * 1e6, 2e8, false);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 250 * 1e6, 2e8, false);
         vm.stopPrank();
 
-        uint256 freeSettlement = _freeSettlementUsdc(accountId);
+        uint256 freeSettlement = _freeSettlementUsdc(account);
         vm.prank(alice);
-        clearinghouse.withdraw(accountId, freeSettlement);
+        clearinghouse.withdraw(account, freeSettlement);
 
-        IMarginClearinghouse.LockedMarginBuckets memory beforeBuckets = clearinghouse.getLockedMarginBuckets(accountId);
+        IMarginClearinghouse.LockedMarginBuckets memory beforeBuckets = clearinghouse.getLockedMarginBuckets(account);
         assertEq(beforeBuckets.committedOrderMarginUsdc, 500 * 1e6, "Setup must lock both committed-order buckets");
 
         vm.prank(address(engine));
         uint64[] memory reservationIds = new uint64[](2);
         reservationIds[0] = 1;
         reservationIds[1] = 2;
-        clearinghouse.consumeCloseLoss(accountId, reservationIds, 300 * 1e6, 0, true, address(engine));
+        clearinghouse.consumeCloseLoss(account, reservationIds, 300 * 1e6, 0, true, address(engine));
 
         vm.prank(address(engine));
-        router.syncMarginQueue(accountId);
+        router.syncMarginQueue(account);
 
         assertEq(_remainingCommittedMargin(1), 0, "First order should be fully consumed before release");
         assertEq(
@@ -835,7 +832,7 @@ contract OrderRouterTest is BasePerpTest {
         router.executeOrder(1, empty);
         router.executeOrder(2, empty);
 
-        IMarginClearinghouse.LockedMarginBuckets memory afterBuckets = clearinghouse.getLockedMarginBuckets(accountId);
+        IMarginClearinghouse.LockedMarginBuckets memory afterBuckets = clearinghouse.getLockedMarginBuckets(account);
         IMarginClearinghouse.OrderReservation memory firstReservation = clearinghouse.getOrderReservation(1);
         IMarginClearinghouse.OrderReservation memory secondReservation = clearinghouse.getOrderReservation(2);
         assertEq(
@@ -854,14 +851,14 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_CommitOrder_DualWritesReservationAndRouterCommittedMarginState() public {
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 250 * 1e6, 1e8, false);
 
         IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(1);
         IMarginClearinghouse.AccountReservationSummary memory summary =
-            clearinghouse.getAccountReservationSummary(accountId);
+            clearinghouse.getAccountReservationSummary(account);
 
         assertEq(
             _remainingCommittedMargin(1), 250 * 1e6, "Router should still track the per-order committed margin locally"
@@ -884,22 +881,22 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_ReleaseCommittedMargin_NoopsWhenReservationAlreadyConsumed() public {
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
 
         vm.startPrank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 250 * 1e6, 2e8, false);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 250 * 1e6, 2e8, false);
         vm.stopPrank();
 
-        uint256 freeSettlement = _freeSettlementUsdc(accountId);
+        uint256 freeSettlement = _freeSettlementUsdc(account);
         vm.prank(alice);
-        clearinghouse.withdraw(accountId, freeSettlement);
+        clearinghouse.withdraw(account, freeSettlement);
 
         vm.prank(address(engine));
         uint64[] memory reservationIds = new uint64[](2);
         reservationIds[0] = 1;
         reservationIds[1] = 2;
-        clearinghouse.consumeCloseLoss(accountId, reservationIds, 300 * 1e6, 0, true, address(engine));
+        clearinghouse.consumeCloseLoss(account, reservationIds, 300 * 1e6, 0, true, address(engine));
 
         bytes[] memory empty;
         router.executeOrder(1, empty);
@@ -912,7 +909,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_ExecuteOrder_UnlinksMarginQueueHeadAndPreservesResidualTail() public {
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
 
         vm.startPrank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
@@ -924,12 +921,12 @@ contract OrderRouterTest is BasePerpTest {
         router.executeOrder(1, empty);
 
         assertEq(
-            router.marginHeadOrderId(accountId),
+            router.marginHeadOrderId(account),
             2,
             "Executing the margin-queue head should advance to the surviving residual order"
         );
         assertEq(
-            router.marginTailOrderId(accountId),
+            router.marginTailOrderId(account),
             2,
             "Executing the margin-queue head should leave the residual order as tail"
         );
@@ -938,8 +935,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_ExecuteOrder_UnlinksAccountHeadWithoutAffectingForeignQueuePointers() public {
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        bytes32 bobId = bytes32(uint256(uint160(bob)));
+        address aliceAccount = alice;
 
         _fundTrader(bob, 10_000 * 1e6);
 
@@ -956,7 +952,7 @@ contract OrderRouterTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        IOrderRouterAccounting.PendingOrderView[] memory alicePending = _pendingOrders(aliceId);
+        IOrderRouterAccounting.PendingOrderView[] memory alicePending = _pendingOrders(aliceAccount);
         assertEq(alicePending.length, 1, "Only Alice's trailing queued order should remain");
         assertEq(alicePending[0].orderId, 3, "Alice residual queue should still be reachable after execution");
     }
@@ -967,7 +963,7 @@ contract OrderRouterTest is BasePerpTest {
         vm.deal(carol, 10 ether);
         vm.startPrank(carol);
         usdc.approve(address(clearinghouse), type(uint256).max);
-        clearinghouse.deposit(bytes32(uint256(uint160(carol))), 10_000 * 1e6);
+        clearinghouse.deposit(carol, 10_000 * 1e6);
         vm.stopPrank();
 
         vm.prank(alice);
@@ -984,12 +980,12 @@ contract OrderRouterTest is BasePerpTest {
 
         assertEq(router.nextExecuteId(), 0, "Empty global queue should clear to zero sentinel after processing");
 
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 aliceSize,,,,,,) = engine.positions(aliceId);
+        address aliceAccount = alice;
+        (uint256 aliceSize,,,,,,) = engine.positions(aliceAccount);
         assertEq(aliceSize, 15_000 * 1e18, "Alice should have 15k BULL");
 
-        bytes32 carolId = bytes32(uint256(uint160(carol)));
-        (uint256 carolSize,,,,,,) = engine.positions(carolId);
+        address carolAccount = carol;
+        (uint256 carolSize,,,,,,) = engine.positions(carolAccount);
         assertEq(carolSize, 10_000 * 1e18, "Carol should have 10k BEAR");
 
         uint256 keeperAfter = _settlementBalance(address(this));
@@ -1010,7 +1006,7 @@ contract OrderRouterTest is BasePerpTest {
         vm.deal(carol, 10 ether);
         vm.startPrank(carol);
         usdc.approve(address(clearinghouse), type(uint256).max);
-        clearinghouse.deposit(bytes32(uint256(uint160(carol))), 10_000 * 1e6);
+        clearinghouse.deposit(carol, 10_000 * 1e6);
         vm.stopPrank();
 
         vm.prank(alice);
@@ -1048,8 +1044,8 @@ contract OrderRouterTest is BasePerpTest {
 
         assertEq(router.nextExecuteId(), 0, "Batch should clear the terminal slippage middle order and drain the queue");
 
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        address aliceAccount = alice;
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 15_000 * 1e18, "Orders 1 and 3 succeed, order 2 cancelled");
     }
 
@@ -1107,18 +1103,18 @@ contract OrderRouterTest is BasePerpTest {
     function test_BoundedQueue_BatchClearsFailedOrdersAndExecutesTail() public {
         address spammer = address(0x444);
         address carol = address(0x555);
-        bytes32 carolId = bytes32(uint256(uint160(carol)));
+        address carolAccount = carol;
 
         usdc.mint(spammer, 100_000 * 1e6);
         vm.startPrank(spammer);
         usdc.approve(address(clearinghouse), type(uint256).max);
-        clearinghouse.deposit(bytes32(uint256(uint160(spammer))), 100_000 * 1e6);
+        clearinghouse.deposit(spammer, 100_000 * 1e6);
         vm.stopPrank();
 
         usdc.mint(carol, 20_000 * 1e6);
         vm.startPrank(carol);
         usdc.approve(address(clearinghouse), type(uint256).max);
-        clearinghouse.deposit(carolId, 20_000 * 1e6);
+        clearinghouse.deposit(carolAccount, 20_000 * 1e6);
         vm.stopPrank();
 
         uint256 spamCount = 5;
@@ -1139,20 +1135,20 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(
             router.nextExecuteId(), 0, "batch should clear adversarial failed heads and still execute the tail order"
         );
-        (uint256 size,,,,,,) = engine.positions(carolId);
+        (uint256 size,,,,,,) = engine.positions(carolAccount);
         assertEq(size, 10_000 * 1e18, "tail order should still execute after many failed head orders");
         assertLt(gasUsed, 40_000_000, "adversarial batch path gas budget regressed");
     }
 
     function test_PoisonedHead_CloseSlippageFailsAndLetsTailExecute() public {
         address carol = address(0x556);
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        bytes32 carolId = bytes32(uint256(uint160(carol)));
+        address aliceAccount = alice;
+        address carolAccount = carol;
 
         usdc.mint(carol, 20_000 * 1e6);
         vm.startPrank(carol);
         usdc.approve(address(clearinghouse), type(uint256).max);
-        clearinghouse.deposit(carolId, 20_000 * 1e6);
+        clearinghouse.deposit(carolAccount, 20_000 * 1e6);
         vm.stopPrank();
 
         vm.prank(alice);
@@ -1175,21 +1171,21 @@ contract OrderRouterTest is BasePerpTest {
         router.executeOrderBatch(3, empty);
 
         assertEq(router.nextExecuteId(), 0, "terminal slippage miss should not block later queued orders");
-        (uint256 aliceSize,,,,,,) = engine.positions(aliceId);
-        (uint256 carolSize,,,,,,) = engine.positions(carolId);
+        (uint256 aliceSize,,,,,,) = engine.positions(aliceAccount);
+        (uint256 carolSize,,,,,,) = engine.positions(carolAccount);
         assertEq(aliceSize, 10_000 * 1e18, "slippage-failed close must leave the live position intact");
         assertEq(carolSize, 5000 * 1e18, "tail order should execute once the failed head is cleared");
     }
 
     function test_HistoricalFailedReservations_DoNotBrickLaterHeadCleanup() public {
         address carol = address(0x559);
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        bytes32 carolId = bytes32(uint256(uint160(carol)));
+        address aliceAccount = alice;
+        address carolAccount = carol;
 
         usdc.mint(carol, 20_000 * 1e6);
         vm.startPrank(carol);
         usdc.approve(address(clearinghouse), type(uint256).max);
-        clearinghouse.deposit(carolId, 20_000 * 1e6);
+        clearinghouse.deposit(carolAccount, 20_000 * 1e6);
         vm.stopPrank();
 
         bytes[] memory empty;
@@ -1205,7 +1201,7 @@ contract OrderRouterTest is BasePerpTest {
 
             assertEq(router.nextExecuteId(), 0, "failed slippage head should clear immediately each cycle");
             assertEq(
-                clearinghouse.getAccountReservationSummary(aliceId).activeReservationCount,
+                clearinghouse.getAccountReservationSummary(aliceAccount).activeReservationCount,
                 0,
                 "historical failed reservations must not leave active residue"
             );
@@ -1223,8 +1219,8 @@ contract OrderRouterTest is BasePerpTest {
         uint256 gasUsed = gasBefore - gasleft();
 
         assertEq(router.nextExecuteId(), 0, "later valid head cleanup should still drain the queue");
-        (uint256 aliceSize,,,,,,) = engine.positions(aliceId);
-        (uint256 carolSize,,,,,,) = engine.positions(carolId);
+        (uint256 aliceSize,,,,,,) = engine.positions(aliceAccount);
+        (uint256 carolSize,,,,,,) = engine.positions(carolAccount);
         assertEq(aliceSize, 10_000 * 1e18, "historical failed reservations must not block later head execution");
         assertEq(carolSize, 5000 * 1e18, "tail order should execute after the cleaned head");
         assertLt(gasUsed, 40_000_000, "historical failed reservations should not cause unbounded cleanup gas");
@@ -1232,12 +1228,12 @@ contract OrderRouterTest is BasePerpTest {
 
     function test_BoundedForeignQueue_FullCloseExecutesAndLeavesTailLive() public {
         address spammer = address(0x557);
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        address aliceAccount = alice;
 
         usdc.mint(spammer, 100_000 * 1e6);
         vm.startPrank(spammer);
         usdc.approve(address(clearinghouse), type(uint256).max);
-        clearinghouse.deposit(bytes32(uint256(uint160(spammer))), 100_000 * 1e6);
+        clearinghouse.deposit(spammer, 100_000 * 1e6);
         vm.stopPrank();
 
         vm.prank(alice);
@@ -1261,7 +1257,7 @@ contract OrderRouterTest is BasePerpTest {
         router.executeOrder(2, empty);
         uint256 gasUsed = gasBefore - gasleft();
 
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 0, "terminal close should still succeed with a bounded foreign queue behind it");
         assertEq(router.nextExecuteId(), 3, "queue head should advance after the full close");
         assertLt(gasUsed, 40_000_000, "terminal close gas budget regressed");
@@ -1273,12 +1269,12 @@ contract OrderRouterTest is BasePerpTest {
 
     function test_QueueEconomics_MixedHeadOrdersPayExecutorAcrossCloseFailuresAndSuccesses() public {
         address carol = address(0x558);
-        bytes32 carolId = bytes32(uint256(uint160(carol)));
+        address carolAccount = carol;
 
         usdc.mint(carol, 20_000 * 1e6);
         vm.startPrank(carol);
         usdc.approve(address(clearinghouse), type(uint256).max);
-        clearinghouse.deposit(carolId, 20_000 * 1e6);
+        clearinghouse.deposit(carolAccount, 20_000 * 1e6);
         vm.stopPrank();
 
         vm.prank(alice);
@@ -1316,7 +1312,7 @@ contract OrderRouterTest is BasePerpTest {
             "mixed failed and successful heads should clear the failed head and drain the queue"
         );
 
-        (uint256 carolSize,,,,,,) = engine.positions(carolId);
+        (uint256 carolSize,,,,,,) = engine.positions(carolAccount);
         assertEq(carolSize, 10_000 * 1e18, "valid tail order should still execute after mixed heads");
     }
 
@@ -1364,7 +1360,7 @@ contract OrderRouterPythTest is BasePerpTest {
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         feedIds.push(FEED_A);
         feedIds.push(FEED_B);
@@ -1405,7 +1401,7 @@ contract OrderRouterPythTest is BasePerpTest {
         usdc.mint(alice, 10_000 * 1e6);
         vm.startPrank(alice);
         usdc.approve(address(clearinghouse), type(uint256).max);
-        clearinghouse.deposit(bytes32(uint256(uint160(alice))), 10_000 * 1e6);
+        clearinghouse.deposit(alice, 10_000 * 1e6);
         vm.deal(alice, 10 ether);
         vm.stopPrank();
 
@@ -1517,8 +1513,8 @@ contract OrderRouterPythTest is BasePerpTest {
 
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1120);
         bytes[] memory empty = _pythUpdateData();
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        uint256 settlementBefore = clearinghouse.balanceUsdc(aliceId);
+        address aliceAccount = alice;
+        uint256 settlementBefore = clearinghouse.balanceUsdc(aliceAccount);
 
         vm.warp(1200);
         vm.roll(block.number + 1);
@@ -1530,7 +1526,7 @@ contract OrderRouterPythTest is BasePerpTest {
             "Router-validated refund path should not revert during settlement credit finalization"
         );
         assertEq(
-            clearinghouse.balanceUsdc(aliceId) - settlementBefore,
+            clearinghouse.balanceUsdc(aliceAccount) - settlementBefore,
             0,
             "Trader refund path should no-op from the post-commit settlement baseline even when engine helper freshness would otherwise be stricter"
         );
@@ -1589,9 +1585,9 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
         assertEq(
-            clearinghouse.balanceUsdc(accountId),
+            clearinghouse.balanceUsdc(account),
             10_000 * 1e6 - 200_000,
             "Open-order slippage failure should forfeit the reserved execution bounty from trader settlement"
         );
@@ -1622,14 +1618,14 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(block.timestamp + 6);
 
         uint256 keeperBefore = _settlementBalance(address(this));
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        uint256 aliceSettlementBefore = clearinghouse.balanceUsdc(aliceId);
+        address aliceAccount = alice;
+        uint256 aliceSettlementBefore = clearinghouse.balanceUsdc(aliceAccount);
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 7);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 0, "Order should fail once degraded mode latches");
         assertEq(
             _settlementBalance(address(this)) - keeperBefore,
@@ -1637,7 +1633,7 @@ contract OrderRouterPythTest is BasePerpTest {
             "Keeper should receive bounty on protocol-state failure under current policy"
         );
         assertEq(
-            clearinghouse.balanceUsdc(aliceId) - aliceSettlementBefore,
+            clearinghouse.balanceUsdc(aliceAccount) - aliceSettlementBefore,
             0,
             "Trader should not be refunded under current policy"
         );
@@ -1645,7 +1641,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
     function test_PostCommitDegradedModePaysClearerAndDoesNotBrickHead() public {
         _fundTrader(bob, 10_000e6);
-        bytes32 aliceAccountId = bytes32(uint256(uint160(alice)));
+        address aliceAccount = alice;
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
@@ -1655,7 +1651,7 @@ contract OrderRouterPythTest is BasePerpTest {
         _setDegradedModeForTest();
         vm.warp(block.timestamp + 6);
 
-        uint256 aliceSettlementBefore = clearinghouse.balanceUsdc(aliceAccountId);
+        uint256 aliceSettlementBefore = clearinghouse.balanceUsdc(aliceAccount);
         uint256 keeperBefore = _settlementBalance(address(this));
 
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 7);
@@ -1670,7 +1666,7 @@ contract OrderRouterPythTest is BasePerpTest {
             "Current policy should still pay the clearer while preserving FIFO progress"
         );
         assertEq(
-            clearinghouse.balanceUsdc(aliceAccountId),
+            clearinghouse.balanceUsdc(aliceAccount),
             aliceSettlementBefore,
             "Trader settlement should remain unchanged by the failure payout"
         );
@@ -1678,7 +1674,6 @@ contract OrderRouterPythTest is BasePerpTest {
 
     function test_CommitOrder_RevertsOnPredictableInsufficientInitialMargin() public {
         address eve = address(0xE111);
-        bytes32 eveId = bytes32(uint256(uint160(eve)));
         _fundTrader(eve, 1000e6);
 
         vm.prank(address(router));
@@ -1690,8 +1685,8 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_CommitOrder_RevertsOnPredictableMustCloseOpposing() public {
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        _open(aliceId, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
+        address aliceAccount = alice;
+        _open(aliceAccount, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
 
         vm.prank(alice);
         vm.expectRevert(
@@ -1704,8 +1699,6 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_CommitOrder_RevertsOnPredictablePositionTooSmall() public {
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
@@ -1716,7 +1709,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
     function test_CommitOrder_DoesNotUseStaleCachedMarkForPredictableOpenPrefilter() public {
         address eve = address(0xE112);
-        bytes32 eveId = bytes32(uint256(uint160(eve)));
+        address eveAccount = eve;
         _fundTrader(eve, 1000e6);
 
         vm.warp(block.timestamp + router.orderExecutionStalenessLimit() + 1);
@@ -1724,7 +1717,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.prank(eve);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 100e6, 1e8, false);
 
-        IOrderRouterAccounting.PendingOrderView[] memory pending = _pendingOrders(eveId);
+        IOrderRouterAccounting.PendingOrderView[] memory pending = _pendingOrders(eveAccount);
         assertEq(pending.length, 1, "Stale cached marks should skip commit-time predictable-open rejection");
         assertEq(pending[0].sizeDelta, 100_000e18, "Queued order should preserve the requested open intent");
     }
@@ -1736,7 +1729,6 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
         vm.prank(alice);
         vm.expectRevert();
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8, false);
@@ -1744,11 +1736,10 @@ contract OrderRouterPythTest is BasePerpTest {
 
     function test_CommitOrder_RevertsOnPredictableSolvencyInvalidation() public {
         address bearTrader = address(0xC333);
-        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        address bearAccount = bearTrader;
 
         _fundTrader(bearTrader, 50_000e6);
-        _open(bearId, CfdTypes.Side.BEAR, 300_000e18, 30_000e6, 1e8);
+        _open(bearAccount, CfdTypes.Side.BEAR, 300_000e18, 30_000e6, 1e8);
         _fundTrader(alice, 40_000e6);
 
         vm.prank(address(pool));
@@ -1767,15 +1758,15 @@ contract OrderRouterPythTest is BasePerpTest {
         usdc.transfer(address(0xDEAD), 800_000e6);
         vm.warp(block.timestamp + 6);
 
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        address aliceAccount = alice;
         uint256 keeperBefore = _settlementBalance(address(this));
-        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(aliceId);
+        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(aliceAccount);
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 7);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 0, "Order should fail once post-commit skew exceeds the cap");
         assertEq(
             _settlementBalance(address(this)) - keeperBefore,
@@ -1783,7 +1774,7 @@ contract OrderRouterPythTest is BasePerpTest {
             "Keeper should receive bounty on skew invalidation under current policy"
         );
         assertEq(
-            clearinghouse.balanceUsdc(aliceId) - traderSettlementBefore,
+            clearinghouse.balanceUsdc(aliceAccount) - traderSettlementBefore,
             0,
             "Trader should not be refunded on skew invalidation"
         );
@@ -1791,11 +1782,11 @@ contract OrderRouterPythTest is BasePerpTest {
 
     function test_PostCommitSolvencyInvalidationPaysClearerBounty() public {
         address bearTrader = address(0xC333);
-        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        address bearAccount = bearTrader;
+        address aliceAccount = alice;
 
         _fundTrader(bearTrader, 50_000e6);
-        _open(bearId, CfdTypes.Side.BEAR, 300_000e18, 30_000e6, 1e8);
+        _open(bearAccount, CfdTypes.Side.BEAR, 300_000e18, 30_000e6, 1e8);
         _fundTrader(alice, 40_000e6);
 
         vm.prank(alice);
@@ -1806,13 +1797,13 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(block.timestamp + 6);
 
         uint256 keeperBefore = _settlementBalance(address(this));
-        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(aliceId);
+        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(aliceAccount);
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 7);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 0, "Order should fail once post-commit solvency is exceeded");
         assertEq(
             _settlementBalance(address(this)) - keeperBefore,
@@ -1820,20 +1811,20 @@ contract OrderRouterPythTest is BasePerpTest {
             "Keeper should receive bounty on solvency invalidation under current policy"
         );
         assertEq(
-            clearinghouse.balanceUsdc(aliceId) - traderSettlementBefore,
+            clearinghouse.balanceUsdc(aliceAccount) - traderSettlementBefore,
             0,
             "Trader should not be refunded on solvency invalidation"
         );
     }
 
     function test_PostCommitMarginDrainInvalidationPaysClearerBounty() public {
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        _open(aliceId, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
+        address aliceAccount = alice;
+        _open(aliceAccount, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 1e8, false);
 
-        vm.store(address(clearinghouse), keccak256(abi.encode(aliceId, uint256(3))), bytes32(uint256(1e6)));
+        vm.store(address(clearinghouse), keccak256(abi.encode(aliceAccount, uint256(3))), bytes32(uint256(1e6)));
 
         uint256 keeperBefore = _settlementBalance(address(this));
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 7);
@@ -1842,7 +1833,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        (uint256 size, uint256 margin,,,,,) = engine.positions(aliceId);
+        (uint256 size, uint256 margin,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 10_000e18, "Order should fail once post-commit margin is drained");
         assertEq(margin, 1e6, "Post-commit state mutation should leave the custody-backed margin state untouched");
         assertEq(
@@ -1854,13 +1845,13 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_StaleCachedMark_DoesNotBlockMarginDrainInvalidationExecution() public {
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        _open(aliceId, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
+        address aliceAccount = alice;
+        _open(aliceAccount, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 1e8, false);
 
-        vm.store(address(clearinghouse), keccak256(abi.encode(aliceId, uint256(3))), bytes32(uint256(1e6)));
+        vm.store(address(clearinghouse), keccak256(abi.encode(aliceAccount, uint256(3))), bytes32(uint256(1e6)));
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
         uint64 freshPublishTime = uint64(block.timestamp);
@@ -1871,7 +1862,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         router.executeOrder(1, empty);
 
-        (uint256 size, uint256 margin,,,,,) = engine.positions(aliceId);
+        (uint256 size, uint256 margin,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 10_000e18, "Fresh execution should fail softly instead of stale-reverting the live position");
         assertEq(margin, 1e6, "Invalidation should preserve the drained custody-backed margin state");
         assertEq(
@@ -1882,13 +1873,13 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_BatchPostCommitMarginDrainInvalidationPaysClearerBounty() public {
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        _open(aliceId, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
+        address aliceAccount = alice;
+        _open(aliceAccount, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 1e8, false);
 
-        vm.store(address(clearinghouse), keccak256(abi.encode(aliceId, uint256(3))), bytes32(uint256(1e6)));
+        vm.store(address(clearinghouse), keccak256(abi.encode(aliceAccount, uint256(3))), bytes32(uint256(1e6)));
 
         uint256 keeperBefore = _settlementBalance(address(this));
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 7);
@@ -1897,7 +1888,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrderBatch(1, empty);
 
-        (uint256 size, uint256 margin,,,,,) = engine.positions(aliceId);
+        (uint256 size, uint256 margin,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 10_000e18, "Batch execution should leave the original position untouched");
         assertEq(margin, 1e6, "Batch execution should preserve the drained custody-backed margin state");
         assertEq(
@@ -1911,13 +1902,13 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_BatchStaleCachedMark_DoesNotBlockMarginDrainInvalidationExecution() public {
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        _open(aliceId, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
+        address aliceAccount = alice;
+        _open(aliceAccount, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 1e8, false);
 
-        vm.store(address(clearinghouse), keccak256(abi.encode(aliceId, uint256(3))), bytes32(uint256(1e6)));
+        vm.store(address(clearinghouse), keccak256(abi.encode(aliceAccount, uint256(3))), bytes32(uint256(1e6)));
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
         uint64 freshPublishTime = uint64(block.timestamp);
@@ -1928,7 +1919,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         router.executeOrderBatch(1, empty);
 
-        (uint256 size, uint256 margin,,,,,) = engine.positions(aliceId);
+        (uint256 size, uint256 margin,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 10_000e18, "Batch execution should fail softly instead of stale-reverting the live position");
         assertEq(margin, 1e6, "Batch execution should preserve the drained custody-backed margin state");
         assertEq(
@@ -1957,8 +1948,8 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrderBatch(1, _pythUpdateData());
 
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        address aliceAccount = alice;
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertEq(
             size, 10_000e18, "Batch execution should accept feed publish dispersion allowed for normal order execution"
         );
@@ -2032,15 +2023,15 @@ contract OrderRouterPythTest is BasePerpTest {
         usdc.transfer(address(0xDEAD), 800_000e6);
         vm.warp(block.timestamp + 6);
 
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        address aliceAccount = alice;
         uint256 keeperBefore = _settlementBalance(address(this));
-        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(aliceId);
+        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(aliceAccount);
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), uint64(block.timestamp));
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrderBatch(1, empty);
 
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 0, "Batch execution should leave invalidated order unopened");
         assertEq(
             _settlementBalance(address(this)) - keeperBefore,
@@ -2048,22 +2039,22 @@ contract OrderRouterPythTest is BasePerpTest {
             "Batch execution should pay the clearer on skew invalidation under current policy"
         );
         assertEq(
-            clearinghouse.balanceUsdc(aliceId) - traderSettlementBefore,
+            clearinghouse.balanceUsdc(aliceAccount) - traderSettlementBefore,
             0,
             "Batch invalidation should not refund the trader"
         );
     }
 
     function test_ExitedAccount_ExpiredCloseOrderPaysClearerBounty() public {
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        address aliceAccount = alice;
 
-        _open(aliceId, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
         uint64 closeOrderId = router.nextCommitId();
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
 
-        _close(aliceId, CfdTypes.Side.BULL, 10_000 * 1e18, 1e8);
+        _close(aliceAccount, CfdTypes.Side.BULL, 10_000 * 1e18, 1e8);
 
         bytes[] memory empty = _pythUpdateData();
         vm.warp(block.timestamp + 120);
@@ -2088,15 +2079,15 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_ExitedAccount_InvalidCloseOrderPaysEscrowedBounty() public {
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        address aliceAccount = alice;
 
-        _open(aliceId, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
         uint64 closeOrderId = router.nextCommitId();
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
 
-        _close(aliceId, CfdTypes.Side.BULL, 10_000 * 1e18, 1e8);
+        _close(aliceAccount, CfdTypes.Side.BULL, 10_000 * 1e18, 1e8);
 
         vm.warp(block.timestamp + 6);
         bytes[] memory empty = _pythUpdateData();
@@ -2119,20 +2110,20 @@ contract OrderRouterPythTest is BasePerpTest {
 
     function test_InvalidClose_OpenPositionFreeBackedBountyPaysKeeper() public {
         address trader = address(0x340);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         address counterparty = address(0x341);
-        bytes32 counterpartyId = bytes32(uint256(uint160(counterparty)));
+        address counterpartyAccount = counterparty;
 
         uint256 depth = 5_000_000 * 1e6;
         _fundTrader(trader, 55_000e6);
         _fundTrader(counterparty, 500_000e6);
-        _open(counterpartyId, CfdTypes.Side.BEAR, 500_000e18, 50_000e6, 1e8, depth);
+        _open(counterpartyAccount, CfdTypes.Side.BEAR, 500_000e18, 50_000e6, 1e8, depth);
 
         uint256 minNotional = (uint256(1) * 1e6 * 10_000) / 10 + 1e6;
         uint256 minSize = (minNotional * 1e20) / 1e8;
-        _open(accountId, CfdTypes.Side.BULL, minSize, 50_000e6, 1e8, depth);
+        _open(account, CfdTypes.Side.BULL, minSize, 50_000e6, 1e8, depth);
 
-        uint256 freeSettlementBeforeCommit = _freeSettlementUsdc(accountId);
+        uint256 freeSettlementBeforeCommit = _freeSettlementUsdc(account);
         assertEq(freeSettlementBeforeCommit, 5000e6, "setup must leave free settlement to back the bounty");
         assertEq(usdc.balanceOf(trader), 0, "trader wallet should start empty after depositing into the clearinghouse");
 
@@ -2140,7 +2131,7 @@ contract OrderRouterPythTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, minSize - 1, 0, 0, true);
 
         assertEq(
-            _freeSettlementUsdc(accountId),
+            _freeSettlementUsdc(account),
             freeSettlementBeforeCommit - 200_000,
             "commit should temporarily seize the close bounty from free settlement"
         );
@@ -2153,7 +2144,7 @@ contract OrderRouterPythTest is BasePerpTest {
         router.executeOrder(1, empty);
 
         assertEq(
-            _freeSettlementUsdc(accountId),
+            _freeSettlementUsdc(account),
             freeSettlementBeforeCommit - 200_000,
             "failed invalid close should keep the free-backed bounty consumed"
         );
@@ -2166,9 +2157,9 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_CloseCommit_RevertsWhenPendingCloseSizeWouldExceedPosition() public {
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        address aliceAccount = alice;
 
-        _open(aliceId, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
 
         vm.startPrank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 6000 * 1e18, 0, 0, true);
@@ -2177,7 +2168,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.stopPrank();
 
         assertEq(
-            router.pendingCloseSize(aliceId),
+            router.pendingCloseSize(aliceAccount),
             6000 * 1e18,
             "Only the first queued close should count toward pending close size"
         );
@@ -2201,8 +2192,8 @@ contract OrderRouterPythTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BEAR, 8000 * 1e18, 400 * 1e6, 1e8, false);
         vm.stopPrank();
 
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
-        IOrderRouterAccounting.AccountEscrowView memory beforeEscrow = router.getAccountEscrow(accountId);
+        address account = alice;
+        IOrderRouterAccounting.AccountEscrowView memory beforeEscrow = router.getAccountEscrow(account);
         assertEq(beforeEscrow.pendingOrderCount, 2, "Both orders should be queued");
 
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 900);
@@ -2212,7 +2203,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
         router.executeOrder(1, empty);
 
-        IOrderRouterAccounting.AccountEscrowView memory afterRevertEscrow = router.getAccountEscrow(accountId);
+        IOrderRouterAccounting.AccountEscrowView memory afterRevertEscrow = router.getAccountEscrow(account);
         assertEq(router.nextExecuteId(), 1, "Non-terminal stale failure must leave the queue untouched");
         assertEq(afterRevertEscrow.pendingOrderCount, 2, "All queued escrow should remain after stale revert");
 
@@ -2221,7 +2212,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrderBatch(2, empty);
 
-        IOrderRouterAccounting.AccountEscrowView memory finalEscrow = router.getAccountEscrow(accountId);
+        IOrderRouterAccounting.AccountEscrowView memory finalEscrow = router.getAccountEscrow(account);
         assertEq(router.nextExecuteId(), 0, "Honest keeper should later consume both queued orders and clear the queue");
         assertEq(finalEscrow.pendingOrderCount, 0, "Escrow should be fully released after terminal execution");
     }
@@ -2237,13 +2228,13 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
         bytes[] memory empty = _pythUpdateData();
 
         mockPyth.setAllPrices(feedIds, int64(105_000_000), int32(-8), 1006);
         router.executeOrderBatch(2, empty);
 
-        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
+        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(account);
         assertEq(router.nextExecuteId(), 2, "Failed head should clear while a later blocked order remains pending");
         assertEq(
             escrow.pendingOrderCount, 1, "The later blocked order should remain pending after the failed head clears"
@@ -2257,7 +2248,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_DeferredTraderCredit_CloseBehindPendingOpenIsRejected() public {
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
 
         vm.startPrank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 8000 * 1e6, 1e8, false);
@@ -2287,7 +2278,7 @@ contract OrderRouterPythTest is BasePerpTest {
             "Batch executor should only be paid for the single successful order that remains queued"
         );
 
-        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
+        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(account);
         assertEq(
             escrow.pendingOrderCount, 0, "Queued orders should be fully consumed even when one close defers payout"
         );
@@ -2302,14 +2293,14 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 2000 - age);
 
         bytes[] memory empty = _pythUpdateData();
         vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
         router.executeOrder(1, empty);
 
-        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
+        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(account);
         assertEq(router.nextExecuteId(), 1, "Stale revert should keep queue head pending");
         assertEq(escrow.pendingOrderCount, 1, "Stale revert should preserve escrowed order state");
         assertEq(
@@ -2326,7 +2317,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, adverseTarget, false);
 
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 3006);
 
         bytes[] memory empty = _pythUpdateData();
@@ -2334,7 +2325,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
+        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(account);
         assertEq(router.nextExecuteId(), 0, "Terminal slippage miss should clear the queue head");
         assertEq(escrow.pendingOrderCount, 0, "Terminal slippage miss should clear pending escrow state");
         assertEq(usdc.balanceOf(address(router)), 0, "Keeper reserve should not remain escrowed after terminal failure");
@@ -2357,9 +2348,9 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_SlippageFailedCloseOrderForfeitsEscrowedBountyToProtocol() public {
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        address aliceAccount = alice;
 
-        _open(aliceId, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
         uint64 closeOrderId = router.nextCommitId();
 
         vm.prank(alice);
@@ -2416,7 +2407,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
 
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         config.orderExecutionStalenessLimit = 60;
@@ -2432,7 +2423,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(2056);
         vm.roll(block.number + 1);
         vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
-        router.executeLiquidation(accountId, empty);
+        router.executeLiquidation(account, empty);
     }
 
     function test_LiquidationStaleness_UsesRouterLiquidationLimit_NotPoolMarkLimit() public {
@@ -2453,13 +2444,13 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
 
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 2000);
 
         vm.warp(2061);
         vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
-        router.executeLiquidation(accountId, empty);
+        router.executeLiquidation(account, empty);
 
         IOrderRouterAdminHost.RouterConfig memory routerConfig = _routerConfig();
         routerConfig.liquidationStalenessLimit = 61;
@@ -2469,7 +2460,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         vm.warp(2061);
         vm.expectRevert(CfdEngine.CfdEngine__PositionIsSolvent.selector);
-        router.executeLiquidation(accountId, empty);
+        router.executeLiquidation(account, empty);
     }
 
     function obsolete_test_Slippage_OpenDirections() public {
@@ -2477,7 +2468,7 @@ contract OrderRouterPythTest is BasePerpTest {
         usdc.mint(trader2, 10_000 * 1e6);
         vm.startPrank(trader2);
         usdc.approve(address(clearinghouse), type(uint256).max);
-        clearinghouse.deposit(bytes32(uint256(uint160(trader2))), 10_000 * 1e6);
+        clearinghouse.deposit(trader2, 10_000 * 1e6);
         vm.stopPrank();
 
         vm.warp(1000);
@@ -2491,8 +2482,8 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        address aliceAccount = alice;
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertGt(size, 0, "BULL open at favorable price should succeed");
 
         vm.warp(2000);
@@ -2504,8 +2495,8 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(10);
         router.executeOrder(2, empty);
 
-        bytes32 trader2Id = bytes32(uint256(uint160(trader2)));
-        (size,,,,,,) = engine.positions(trader2Id);
+        address trader2Account = trader2;
+        (size,,,,,,) = engine.positions(trader2Account);
         assertGt(size, 0, "BEAR open at favorable price should succeed");
 
         vm.warp(3000);
@@ -2517,7 +2508,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(20);
         router.executeOrder(3, empty);
 
-        (size,,,,,,) = engine.positions(aliceId);
+        (size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 10_000 * 1e18, "BULL open at adverse price should be rejected");
 
         vm.warp(4000);
@@ -2529,7 +2520,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(30);
         router.executeOrder(4, empty);
 
-        (size,,,,,,) = engine.positions(trader2Id);
+        (size,,,,,,) = engine.positions(trader2Account);
         assertEq(size, 10_000 * 1e18, "BEAR open at adverse price should be rejected");
     }
 
@@ -2545,8 +2536,8 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(accountId);
+        address account = alice;
+        (uint256 size,,,,,,) = engine.positions(account);
         assertTrue(size > 0, "Position should exist");
 
         vm.warp(2000);
@@ -2559,7 +2550,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(10);
         router.executeOrder(2, empty);
 
-        (size,,,,,,) = engine.positions(accountId);
+        (size,,,,,,) = engine.positions(account);
         assertGt(size, 0, "Close should be rejected by slippage check");
     }
 
@@ -2583,8 +2574,8 @@ contract OrderRouterPythTest is BasePerpTest {
 
         assertEq(router.nextExecuteId(), 2, "Batch should stop once the next order fails publish-time ordering");
 
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        address aliceAccount = alice;
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 10_000 * 1e18, "Only the pre-publish commitment should execute before batch processing stops");
     }
 
@@ -2652,8 +2643,8 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        address aliceAccount = alice;
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertGt(size, 0, "Basket at $1.00 should pass slippage for target $1.00");
     }
 
@@ -2736,8 +2727,8 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(accountId);
+        address account = alice;
+        (uint256 size,,,,,,) = engine.positions(account);
         assertGt(size, 0, "BULL position should exist");
 
         vm.warp(2000);
@@ -2750,7 +2741,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(10);
         router.executeOrder(2, empty);
 
-        (size,,,,,,) = engine.positions(accountId);
+        (size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "BULL close should succeed against clamped price");
     }
 
@@ -2798,7 +2789,7 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         feedIds.push(FEED_A);
         feedIds.push(FEED_B);
@@ -2838,7 +2829,7 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
         usdc.mint(alice, 10_000 * 1e6);
         vm.startPrank(alice);
         usdc.approve(address(clearinghouse), type(uint256).max);
-        clearinghouse.deposit(bytes32(uint256(uint160(alice))), 10_000 * 1e6);
+        clearinghouse.deposit(alice, 10_000 * 1e6);
         vm.deal(alice, 10 ether);
         vm.stopPrank();
 
@@ -2867,9 +2858,9 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
 
         uint256 keeperBefore = _settlementBalance(address(this));
         uint256 reservedBounty = _executionBountyReserve(orderId);
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(aliceId);
-        (uint256 sizeBefore,,,,,,) = engine.positions(aliceId);
+        address aliceAccount = alice;
+        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(aliceAccount);
+        (uint256 sizeBefore,,,,,,) = engine.positions(aliceAccount);
 
         vm.warp(TEST_FRIDAY_18UTC + 2 hours + 1);
         bytes[] memory empty = _pythUpdateData();
@@ -2878,7 +2869,7 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
         vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__CommitValidation.selector, 10));
         router.executeOrder(orderId, empty);
 
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, sizeBefore, "Open order should remain unexecuted during close-only mode");
         assertEq(
             _settlementBalance(address(this)) - keeperBefore,
@@ -2886,7 +2877,7 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
             "Blocked close-only execution should not pay the keeper"
         );
         assertEq(
-            clearinghouse.balanceUsdc(aliceId) - traderSettlementBefore,
+            clearinghouse.balanceUsdc(aliceAccount) - traderSettlementBefore,
             0,
             "Blocked close-only execution should not refund the trader"
         );
@@ -2897,7 +2888,7 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
         );
         assertEq(router.nextExecuteId(), orderId, "Blocked close-only execution should leave the FIFO head pending");
         assertEq(
-            router.pendingOrderCounts(aliceId), 1, "Blocked close-only execution should preserve pending order count"
+            router.pendingOrderCounts(aliceAccount), 1, "Blocked close-only execution should preserve pending order count"
         );
         assertEq(
             uint256(_orderRecord(orderId).status),
@@ -2923,22 +2914,22 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
 
         uint256 keeperBefore = _settlementBalance(address(this));
         uint256 reservedBounty = _executionBountyReserve(orderId);
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(aliceId);
-        (uint256 sizeBefore,,,,,,) = engine.positions(aliceId);
+        address aliceAccount = alice;
+        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(aliceAccount);
+        (uint256 sizeBefore,,,,,,) = engine.positions(aliceAccount);
 
         vm.warp(TEST_FRIDAY_18UTC + 2 hours + 1);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrderBatch(orderId, empty);
 
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, sizeBefore, "Open order should remain unexecuted while the batch head is close-only blocked");
         assertEq(
             _settlementBalance(address(this)) - keeperBefore, 0, "Blocked batch execution should not pay the keeper"
         );
         assertEq(
-            clearinghouse.balanceUsdc(aliceId) - traderSettlementBefore,
+            clearinghouse.balanceUsdc(aliceAccount) - traderSettlementBefore,
             0,
             "Blocked batch execution should not refund the trader"
         );
@@ -2946,7 +2937,7 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
             _executionBountyReserve(orderId), reservedBounty, "Blocked batch execution should preserve bounty escrow"
         );
         assertEq(router.nextExecuteId(), orderId, "Blocked batch execution should stop at the pending FIFO head");
-        assertEq(router.pendingOrderCounts(aliceId), 1, "Blocked batch execution should preserve pending order count");
+        assertEq(router.pendingOrderCounts(aliceAccount), 1, "Blocked batch execution should preserve pending order count");
         assertEq(
             uint256(_orderRecord(orderId).status),
             uint256(IOrderRouterAccounting.OrderStatus.Pending),
@@ -3116,51 +3107,51 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
     }
 
     function test_ExecuteLiquidation_CreditsImmediateKeeperBountyToClearinghouse() public {
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         _fundTrader(trader, 900e6);
 
-        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
 
-        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(bytes32(uint256(uint160(address(this)))));
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(address(this));
 
-        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, 150_000_000);
-        LiquidationParitySnapshot memory beforeSnapshot = _captureLiquidationParitySnapshot(accountId, address(this));
+        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 150_000_000);
+        LiquidationParitySnapshot memory beforeSnapshot = _captureLiquidationParitySnapshot(account, address(this));
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(150_000_000));
 
-        router.executeLiquidation(accountId, priceData);
+        router.executeLiquidation(account, priceData);
 
-        LiquidationParityObserved memory observed = _observeLiquidationParity(accountId, address(this), beforeSnapshot);
+        LiquidationParityObserved memory observed = _observeLiquidationParity(account, address(this), beforeSnapshot);
         _assertLiquidationPreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
 
         assertEq(
-            clearinghouse.balanceUsdc(bytes32(uint256(uint160(address(this))))) - keeperSettlementBefore,
+            clearinghouse.balanceUsdc(address(this)) - keeperSettlementBefore,
             preview.keeperBountyUsdc,
             "Immediate liquidation bounty should credit the keeper clearinghouse balance"
         );
     }
 
-    function test_ExecuteLiquidation_DefersKeeperCreditPerPreviewWhenVaultPayoutFails() public {
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+    function test_ExecuteLiquidation_DefersKeeperCreditPerPreviewWhenPoolPayoutFails() public {
+        address account = trader;
         _fundTrader(trader, 900e6);
 
-        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
 
-        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, 150_000_000);
-        LiquidationParitySnapshot memory beforeSnapshot = _captureLiquidationParitySnapshot(accountId, address(this));
+        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 150_000_000);
+        LiquidationParitySnapshot memory beforeSnapshot = _captureLiquidationParitySnapshot(account, address(this));
 
         vm.mockCallRevert(
             address(pool),
             abi.encodeWithSelector(pool.payOut.selector, address(clearinghouse), preview.keeperBountyUsdc),
-            abi.encodeWithSignature("Error(string)", "vault illiquid")
+            abi.encodeWithSignature("Error(string)", "pool illiquid")
         );
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(150_000_000));
 
-        router.executeLiquidation(accountId, priceData);
+        router.executeLiquidation(account, priceData);
 
-        LiquidationParityObserved memory observed = _observeLiquidationParity(accountId, address(this), beforeSnapshot);
+        LiquidationParityObserved memory observed = _observeLiquidationParity(account, address(this), beforeSnapshot);
         _assertLiquidationPreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
         assertEq(observed.keeperSettlementUsdc, 0, "Failed immediate keeper credit should not reach settlement");
         assertEq(
@@ -3171,17 +3162,17 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
     }
 
     function test_ExecuteLiquidation_ForfeitsEscrowedOpenBountiesWithoutCreditingTraderSettlement() public {
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         _fundTrader(trader, 900e6);
 
-        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
 
         vm.startPrank(trader);
         uint256 queuedOrderCount = 5;
         for (uint256 i = 0; i < queuedOrderCount; i++) {
             router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 100e6, type(uint256).max, false);
         }
-        clearinghouse.withdraw(accountId, 70e6);
+        clearinghouse.withdraw(account, 70e6);
         vm.stopPrank();
 
         assertEq(
@@ -3190,28 +3181,28 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
             "Router should custody the shielded open-order bounty escrow"
         );
         assertEq(
-            router.pendingOrderCounts(accountId),
+            router.pendingOrderCounts(account),
             queuedOrderCount,
             "Queued open orders should remain pending before liquidation"
         );
 
         AccountLensViewTypes.AccountLedgerSnapshot memory snapshotBefore =
-            engineAccountLens.getAccountLedgerSnapshot(accountId);
-        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, 150_000_000);
+            engineAccountLens.getAccountLedgerSnapshot(account);
+        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 150_000_000);
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(150_000_000));
 
-        router.executeLiquidation(accountId, priceData);
+        router.executeLiquidation(account, priceData);
 
-        (uint256 size,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Liquidation should still clear the underwater position");
         assertEq(
             engine.accumulatedBadDebtUsdc(),
             preview.badDebtUsdc,
             "Liquidation should not improve previewed bad debt by restoring execution escrow"
         );
-        assertEq(router.getAccountEscrow(accountId).executionBountyUsdc, _executionBountyReserve(1) * queuedOrderCount);
+        assertEq(router.getAccountEscrow(account).executionBountyUsdc, _executionBountyReserve(1) * queuedOrderCount);
         assertEq(
             preview.reachableCollateralUsdc,
             snapshotBefore.terminalReachableUsdc,
@@ -3223,24 +3214,24 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
             "Liquidation should clear the global queue head when only liquidated-account orders remain"
         );
         assertEq(
-            clearinghouse.balanceUsdc(accountId),
+            clearinghouse.balanceUsdc(account),
             0,
             "Forfeited open-order bounty escrow must not be credited back into trader settlement"
         );
     }
 
-    function test_ExecuteLiquidation_ForfeitedEscrowFeedsPostForfeitureVaultDepth() public {
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+    function test_ExecuteLiquidation_ForfeitedEscrowFeedsPostForfeiturePoolDepth() public {
+        address account = trader;
         _fundTrader(trader, 900e6);
 
-        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
 
         vm.startPrank(trader);
         uint256 queuedOrderCount = 5;
         for (uint256 i = 0; i < queuedOrderCount; i++) {
             router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 100e6, type(uint256).max, false);
         }
-        clearinghouse.withdraw(accountId, 70e6);
+        clearinghouse.withdraw(account, 70e6);
         vm.stopPrank();
 
         ICfdEngineAdminHost.EngineFreshnessConfig memory freshnessConfig = _engineFreshnessConfig();
@@ -3257,55 +3248,55 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         uint256 canonicalDepthBefore = pool.totalAssets();
 
         CfdEngine.LiquidationPreview memory expectedPreview =
-            engineLens.simulateLiquidation(accountId, 195_000_000, canonicalDepthBefore);
+            engineLens.simulateLiquidation(account, 195_000_000, canonicalDepthBefore);
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(195_000_000));
 
-        uint256 keeperBefore = clearinghouse.balanceUsdc(bytes32(uint256(uint160(address(this)))));
-        router.executeLiquidation(accountId, priceData);
+        uint256 keeperBefore = clearinghouse.balanceUsdc(address(this));
+        router.executeLiquidation(account, priceData);
 
         assertEq(
-            clearinghouse.balanceUsdc(bytes32(uint256(uint160(address(this))))) - keeperBefore,
+            clearinghouse.balanceUsdc(address(this)) - keeperBefore,
             expectedPreview.keeperBountyUsdc,
-            "Liquidation bounty should use the post-forfeiture vault depth for funding"
+            "Liquidation bounty should use the post-forfeiture pool depth for carry"
         );
         assertEq(
             engine.accumulatedBadDebtUsdc(),
             expectedPreview.badDebtUsdc,
-            "Liquidation bad debt should use the post-forfeiture vault depth for funding"
+            "Liquidation bad debt should use the post-forfeiture pool depth for carry"
         );
     }
 
     function test_ExecuteLiquidation_ForfeitsEscrowedCloseBountiesBeforeClearingOrders() public {
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         _fundTrader(trader, 350e6);
 
-        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
 
         vm.startPrank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 5000e18, 0, 0, true);
         router.commitOrder(CfdTypes.Side.BULL, 5000e18, 0, 0, true);
-        clearinghouse.withdraw(accountId, 68e6);
+        clearinghouse.withdraw(account, 68e6);
         vm.stopPrank();
 
         assertEq(usdc.balanceOf(address(router)), 400_000, "Router should custody prefunded close-order bounty escrow");
 
         AccountLensViewTypes.AccountLedgerSnapshot memory snapshotBefore =
-            engineAccountLens.getAccountLedgerSnapshot(accountId);
-        uint256 vaultAssetsBefore = pool.totalAssets();
+            engineAccountLens.getAccountLedgerSnapshot(account);
+        uint256 poolAssetsBefore = pool.totalAssets();
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(102_500_000));
 
-        router.executeLiquidation(accountId, priceData);
+        router.executeLiquidation(account, priceData);
 
         assertEq(
             snapshotBefore.executionEscrowUsdc,
             400_000,
             "Setup must report queued close-order execution escrow outside trader settlement"
         );
-        assertEq(router.pendingOrderCounts(accountId), 0, "Liquidation should clear queued close orders");
+        assertEq(router.pendingOrderCounts(account), 0, "Liquidation should clear queued close orders");
         assertEq(_executionBountyReserve(1), 0, "Liquidation should forfeit the first close-order bounty escrow");
         assertEq(_executionBountyReserve(2), 0, "Liquidation should forfeit the second close-order bounty escrow");
         assertEq(
@@ -3314,30 +3305,30 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         assertEq(pool.excessAssets(), 0, "Forfeited close-order bounty escrow should not remain quarantined as excess");
         assertGe(
             pool.totalAssets(),
-            vaultAssetsBefore + 400_000,
-            "Forfeited close-order bounty escrow should contribute to canonical vault assets"
+            poolAssetsBefore + 400_000,
+            "Forfeited close-order bounty escrow should contribute to canonical pool assets"
         );
     }
 
     function test_ExecuteLiquidation_PreventsPostLiquidationEscrowRecovery() public {
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         _fundTrader(trader, 900e6);
 
-        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
 
         vm.startPrank(trader);
         uint256 queuedOrderCount = 5;
         for (uint256 i = 0; i < queuedOrderCount; i++) {
             router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 100e6, type(uint256).max, false);
         }
-        clearinghouse.withdraw(accountId, 70e6);
+        clearinghouse.withdraw(account, 70e6);
         vm.stopPrank();
 
         uint256 traderUsdcBefore = usdc.balanceOf(trader);
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(150_000_000));
-        router.executeLiquidation(accountId, priceData);
+        router.executeLiquidation(account, priceData);
 
         assertEq(
             router.nextExecuteId(),
@@ -3356,19 +3347,19 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
     }
 
     function test_ExecuteLiquidation_ClearsOnlyLiquidatedAccountsPendingOrders() public {
-        bytes32 traderId = bytes32(uint256(uint160(trader)));
+        address traderAccount = trader;
         address otherTrader = address(0xC10B);
-        bytes32 otherId = bytes32(uint256(uint160(otherTrader)));
+        address otherAccount = otherTrader;
 
         _fundTrader(trader, 900e6);
         _fundTrader(otherTrader, 2000e6);
 
-        _open(traderId, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
+        _open(traderAccount, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
 
         vm.startPrank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 100e6, type(uint256).max, false);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 100e6, type(uint256).max, false);
-        clearinghouse.withdraw(traderId, 70e6);
+        clearinghouse.withdraw(traderAccount, 70e6);
         vm.stopPrank();
 
         vm.startPrank(otherTrader);
@@ -3376,29 +3367,29 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, type(uint256).max, false);
         vm.stopPrank();
 
-        assertEq(router.pendingOrderCounts(traderId), 2, "Liquidated account should start with two queued orders");
-        assertEq(router.pendingOrderCounts(otherId), 2, "Unrelated account should start with its own queued orders");
+        assertEq(router.pendingOrderCounts(traderAccount), 2, "Liquidated account should start with two queued orders");
+        assertEq(router.pendingOrderCounts(otherAccount), 2, "Unrelated account should start with its own queued orders");
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(150_000_000));
-        router.executeLiquidation(traderId, priceData);
+        router.executeLiquidation(traderAccount, priceData);
 
-        assertEq(router.pendingOrderCounts(traderId), 0, "Liquidation should clear only the liquidated account queue");
-        assertEq(router.pendingOrderCounts(otherId), 2, "Unrelated account queue should remain intact");
+        assertEq(router.pendingOrderCounts(traderAccount), 0, "Liquidation should clear only the liquidated account queue");
+        assertEq(router.pendingOrderCounts(otherAccount), 2, "Unrelated account queue should remain intact");
 
-        IOrderRouterAccounting.PendingOrderView[] memory otherPending = _pendingOrders(otherId);
+        IOrderRouterAccounting.PendingOrderView[] memory otherPending = _pendingOrders(otherAccount);
         assertEq(otherPending.length, 2, "Per-account traversal should still expose unrelated pending orders");
         assertEq(otherPending[0].orderId, 3, "Unrelated account should retain FIFO order ids after cleanup");
         assertEq(otherPending[1].orderId, 4, "Unrelated account queue should preserve its tail order");
     }
 
     function test_CommitClose_UsesOnlyAccountLocalQueuedPositionProjection() public {
-        bytes32 traderId = bytes32(uint256(uint160(trader)));
+        address traderAccount = trader;
         address otherTrader = address(0xC10C);
 
         _fundTrader(trader, 2000e6);
         _fundTrader(otherTrader, 2000e6);
-        _open(traderId, CfdTypes.Side.BULL, 20_000e18, 500e6, 1e8);
+        _open(traderAccount, CfdTypes.Side.BULL, 20_000e18, 500e6, 1e8);
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 5000e18, 0, type(uint256).max, true);
@@ -3411,7 +3402,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 15_000e18, 0, type(uint256).max, true);
 
-        IOrderRouterAccounting.PendingOrderView[] memory traderPending = _pendingOrders(traderId);
+        IOrderRouterAccounting.PendingOrderView[] memory traderPending = _pendingOrders(traderAccount);
         assertEq(traderPending.length, 2, "Trader should be able to queue closes using only its own pending orders");
         assertEq(traderPending[0].sizeDelta, 5000e18, "First close should remain queued");
         assertEq(traderPending[1].sizeDelta, 15_000e18, "Second close should consume only the trader's residual size");
@@ -3465,7 +3456,7 @@ contract FadStalenessTest is BasePerpTest {
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         feedIds.push(FEED_A);
         feedIds.push(FEED_B);
@@ -3499,7 +3490,7 @@ contract FadStalenessTest is BasePerpTest {
         usdc.mint(alice, 10_000 * 1e6);
         vm.startPrank(alice);
         usdc.approve(address(clearinghouse), type(uint256).max);
-        clearinghouse.deposit(bytes32(uint256(uint160(alice))), 10_000 * 1e6);
+        clearinghouse.deposit(alice, 10_000 * 1e6);
         vm.deal(alice, 10 ether);
         vm.stopPrank();
 
@@ -3515,8 +3506,8 @@ contract FadStalenessTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, setupPyth);
 
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        address aliceAccount = alice;
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         require(size == 10_000 * 1e18, "setUp: position not opened");
 
         vm.warp(FRIDAY_18UTC);
@@ -3580,8 +3571,8 @@ contract FadStalenessTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        address aliceAccount = alice;
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 0, "Close order should execute during frozen oracle");
     }
 
@@ -3610,9 +3601,9 @@ contract FadStalenessTest is BasePerpTest {
 
         uint256 keeperBefore = _settlementBalance(address(this));
         uint256 reservedBounty = _executionBountyReserve(orderId);
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(aliceId);
-        (uint256 sizeBefore,,,,,,) = engine.positions(aliceId);
+        address aliceAccount = alice;
+        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(aliceAccount);
+        (uint256 sizeBefore,,,,,,) = engine.positions(aliceAccount);
         vm.warp(FRIDAY_18UTC + 2 hours + 1);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
@@ -3620,7 +3611,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__CommitValidation.selector, 10));
         router.executeOrder(orderId, empty);
 
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, sizeBefore, "Open order should remain unexecuted during close-only mode");
         assertEq(
             _settlementBalance(address(this)) - keeperBefore,
@@ -3628,7 +3619,7 @@ contract FadStalenessTest is BasePerpTest {
             "Blocked close-only execution should not pay the keeper"
         );
         assertEq(
-            clearinghouse.balanceUsdc(aliceId) - traderSettlementBefore,
+            clearinghouse.balanceUsdc(aliceAccount) - traderSettlementBefore,
             0,
             "Blocked close-only execution should not refund the trader"
         );
@@ -3639,7 +3630,7 @@ contract FadStalenessTest is BasePerpTest {
         );
         assertEq(router.nextExecuteId(), orderId, "Blocked close-only execution should leave the FIFO head pending");
         assertEq(
-            router.pendingOrderCounts(aliceId), 1, "Blocked close-only execution should preserve pending order count"
+            router.pendingOrderCounts(aliceAccount), 1, "Blocked close-only execution should preserve pending order count"
         );
         assertEq(
             uint256(_orderRecord(orderId).status),
@@ -3665,21 +3656,21 @@ contract FadStalenessTest is BasePerpTest {
 
         uint256 keeperBefore = _settlementBalance(address(this));
         uint256 reservedBounty = _executionBountyReserve(orderId);
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(aliceId);
-        (uint256 sizeBefore,,,,,,) = engine.positions(aliceId);
+        address aliceAccount = alice;
+        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(aliceAccount);
+        (uint256 sizeBefore,,,,,,) = engine.positions(aliceAccount);
         vm.warp(FRIDAY_18UTC + 2 hours + 1);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrderBatch(orderId, empty);
 
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, sizeBefore, "Open order should remain unexecuted while the batch head is close-only blocked");
         assertEq(
             _settlementBalance(address(this)) - keeperBefore, 0, "Blocked batch execution should not pay the keeper"
         );
         assertEq(
-            clearinghouse.balanceUsdc(aliceId) - traderSettlementBefore,
+            clearinghouse.balanceUsdc(aliceAccount) - traderSettlementBefore,
             0,
             "Blocked batch execution should not refund the trader"
         );
@@ -3687,7 +3678,7 @@ contract FadStalenessTest is BasePerpTest {
             _executionBountyReserve(orderId), reservedBounty, "Blocked batch execution should preserve bounty escrow"
         );
         assertEq(router.nextExecuteId(), orderId, "Blocked batch execution should stop at the pending FIFO head");
-        assertEq(router.pendingOrderCounts(aliceId), 1, "Blocked batch execution should preserve pending order count");
+        assertEq(router.pendingOrderCounts(aliceAccount), 1, "Blocked batch execution should preserve pending order count");
         assertEq(
             uint256(_orderRecord(orderId).status),
             uint256(IOrderRouterAccounting.OrderStatus.Pending),
@@ -3709,8 +3700,8 @@ contract FadStalenessTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        address aliceAccount = alice;
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 0, "Frozen-window close should execute without MEV rejection");
     }
 
@@ -3729,7 +3720,7 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function test_FadWindow_Liquidation_AcceptsStalePrice() public {
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        address aliceAccount = alice;
         uint64 fridayPublishTime = uint64(FRIDAY_18UTC + 6);
         vm.prank(address(router));
         engine.updateMarkPrice(180_000_000, uint64(block.timestamp));
@@ -3739,9 +3730,9 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(SATURDAY_NOON);
         bytes[] memory empty = _pythUpdateData();
 
-        router.executeLiquidation(aliceId, empty);
+        router.executeLiquidation(aliceAccount, empty);
 
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 0, "Liquidation should succeed during FAD with stale price");
         assertEq(
             engine.lastMarkTime(), fridayPublishTime, "Liquidation should accept the frozen-window Friday publish time"
@@ -3766,10 +3757,10 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.warp(SATURDAY_NOON);
         bytes[] memory empty = _pythUpdateData();
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        address aliceAccount = alice;
 
         vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
-        router.executeLiquidation(aliceId, empty);
+        router.executeLiquidation(aliceAccount, empty);
     }
 
     function test_FadBatch_CloseAllowedDuringFrozenWithPreFreezeCommit() public {
@@ -3786,8 +3777,8 @@ contract FadStalenessTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrderBatch(2, empty);
 
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        address aliceAccount = alice;
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 5000 * 1e18, "Partial close should reduce position");
     }
 
@@ -3818,8 +3809,8 @@ contract FadStalenessTest is BasePerpTest {
         vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
         router.executeOrder(2, empty);
 
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        address aliceAccount = alice;
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 10_000 * 1e18, "61s stale on weekday should leave the close order unexecuted");
     }
 
@@ -3828,7 +3819,7 @@ contract FadStalenessTest is BasePerpTest {
         usdc.mint(carol, 10_000 * 1e6);
         vm.startPrank(carol);
         usdc.approve(address(clearinghouse), type(uint256).max);
-        clearinghouse.deposit(bytes32(uint256(uint160(carol))), 10_000 * 1e6);
+        clearinghouse.deposit(carol, 10_000 * 1e6);
         vm.stopPrank();
 
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), WEDNESDAY_NOON + 10);
@@ -3842,8 +3833,8 @@ contract FadStalenessTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
-        bytes32 carolId = bytes32(uint256(uint160(carol)));
-        (uint256 size,,,,,,) = engine.positions(carolId);
+        address carolAccount = carol;
+        (uint256 size,,,,,,) = engine.positions(carolAccount);
         assertGt(size, 0, "Weekday open orders should work normally");
     }
 
@@ -3946,8 +3937,8 @@ contract FadStalenessTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        address aliceAccount = alice;
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 0, "Close with fresh price should succeed during Friday gap");
     }
 
@@ -3977,8 +3968,8 @@ contract FadStalenessTest is BasePerpTest {
         vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
         router.executeOrder(2, empty);
 
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        address aliceAccount = alice;
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 10_000 * 1e18, "60s staleness must apply during Friday gap");
     }
 
@@ -3988,10 +3979,10 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.warp(FRIDAY_20UTC + 61);
         bytes[] memory empty = _pythUpdateData();
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        address aliceAccount = alice;
 
         vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 12));
-        router.executeLiquidation(aliceId, empty);
+        router.executeLiquidation(aliceAccount, empty);
     }
 
     function test_SundayDst_OracleUnfrozenAt21() public {
@@ -4007,8 +3998,8 @@ contract FadStalenessTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        address aliceAccount = alice;
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 0, "Close should succeed at Sunday 21:00 with fresh price");
     }
 
@@ -4094,8 +4085,8 @@ contract FadStalenessTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        address aliceAccount = alice;
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 0, "Close with fresh price works during runway");
     }
 
@@ -4318,7 +4309,7 @@ contract OrderRouterAuditTest is BasePerpTest {
         vm.roll(10);
         router.executeOrder(2, pythData);
 
-        bytes32 carolAccount = bytes32(uint256(uint160(carol)));
+        address carolAccount = carol;
         (uint256 size,,,,,,) = engine.positions(carolAccount);
         assertGt(size, 0, "Close at bad price should have been rejected by slippage check");
     }
@@ -4350,7 +4341,7 @@ contract OrderRouterAuditTest is BasePerpTest {
         _fundJunior(bob, 1_000_000e6);
         _fundTrader(alice, 50_000e6);
 
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(1e8));
 
@@ -4363,7 +4354,7 @@ contract OrderRouterAuditTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(commitId, priceData);
 
-        (uint256 size,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Expired order must not execute via executeOrder");
     }
 
@@ -4388,8 +4379,8 @@ contract OrderRouterAuditTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(accountId);
+        address account = alice;
+        (uint256 size,,,,,,) = engine.positions(account);
         assertGt(size, 0, "Position should be open");
 
         routerAdmin.pause();
@@ -4405,7 +4396,7 @@ contract OrderRouterAuditTest is BasePerpTest {
         vm.roll(10);
         router.executeOrder(2, empty);
 
-        (uint256 sizeAfter,,,,,,) = engine.positions(accountId);
+        (uint256 sizeAfter,,,,,,) = engine.positions(account);
         assertEq(sizeAfter, 0, "Position should be fully closed");
     }
 
@@ -4698,7 +4689,7 @@ contract MarkPriceStalenessTest is BasePerpTest {
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior LP", "sUSDC");
         pool.setJuniorVault(address(juniorVault));
         pool.setSeniorVault(address(seniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         mockPyth = new MockPyth();
         feedIds.push(FEED_A);
@@ -4811,7 +4802,7 @@ contract StalenessGriefTest is BasePerpTest {
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior LP", "sUSDC");
         pool.setJuniorVault(address(juniorVault));
         pool.setSeniorVault(address(seniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         mockPyth = new MockPyth();
         feedIds.push(FEED_A);
@@ -4862,7 +4853,7 @@ contract StalenessGriefTest is BasePerpTest {
         vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
         router.executeOrder(1, empty);
 
-        bytes32 aliceAccount = bytes32(uint256(uint160(alice)));
+        address aliceAccount = alice;
         (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 0, "stale oracle should leave the order unexecuted when execution reverts");
     }
@@ -4889,7 +4880,7 @@ contract VpiImrBypassTest is Test {
     function _settlementBalance(
         address account
     ) internal view returns (uint256) {
-        return clearinghouse.balanceUsdc(bytes32(uint256(uint160(account))));
+        return clearinghouse.balanceUsdc(account);
     }
 
     function _warpPastTimelock() internal {
@@ -4924,15 +4915,15 @@ contract VpiImrBypassTest is Test {
 
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
         CfdEnginePlanner planner = new CfdEnginePlanner();
-        CfdEngineSettlementModule settlement = new CfdEngineSettlementModule(address(engine));
-        CfdEngineAdmin adminModule = new CfdEngineAdmin(address(engine), address(this));
-        engine.setDependencies(address(planner), address(settlement), address(adminModule));
+        CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(engine));
+        CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
+        engine.setDependencies(address(planner), address(settlement), address(engineAdmin));
         pool = new HousePool(address(usdc), address(engine));
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior LP", "sUSDC");
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC");
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
         router = new OrderRouter(
             address(engine),
             address(new CfdEngineLens(address(engine))),
@@ -4967,11 +4958,11 @@ contract VpiImrBypassTest is Test {
         address trader,
         uint256 amount
     ) internal {
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         usdc.mint(trader, amount);
         vm.startPrank(trader);
         usdc.approve(address(clearinghouse), amount);
-        clearinghouse.deposit(accountId, amount);
+        clearinghouse.deposit(account, amount);
         vm.stopPrank();
     }
 
@@ -4994,7 +4985,7 @@ contract VpiImrBypassTest is Test {
         router.executeOrder(1, empty);
 
         address eve = address(0xE222);
-        bytes32 eveAccount = bytes32(uint256(uint160(eve)));
+        address eveAccount = eve;
 
         vm.startPrank(eve);
         usdc.mint(eve, 1e6);
@@ -5012,7 +5003,7 @@ contract VpiImrBypassTest is Test {
 
     function test_TypedUserInvalidOpenPaysClearer() public {
         address eve = address(0xE223);
-        bytes32 eveAccount = bytes32(uint256(uint160(eve)));
+        address eveAccount = eve;
 
         vm.startPrank(eve);
         usdc.mint(eve, 1e6);
@@ -5028,7 +5019,7 @@ contract VpiImrBypassTest is Test {
         router.executeOrder(1, priceData);
 
         assertEq(
-            clearinghouse.balanceUsdc(bytes32(uint256(uint160(address(this))))) - keeperBefore,
+            clearinghouse.balanceUsdc(address(this)) - keeperBefore,
             200_000,
             "Typed user-invalid open should pay the clearer as clearinghouse credit"
         );
@@ -5063,16 +5054,16 @@ contract KeeperFeeRefundTest is Test {
     address bob = address(0x222);
     address keeper = address(0x999);
 
-    function _accountIdOf(
+    function _accountOf(
         address account
-    ) internal pure returns (bytes32) {
-        return bytes32(uint256(uint160(account)));
+    ) internal pure returns (address) {
+        return account;
     }
 
     function _settlementBalance(
         address account
     ) internal view returns (uint256) {
-        return clearinghouse.balanceUsdc(_accountIdOf(account));
+        return clearinghouse.balanceUsdc(_accountOf(account));
     }
 
     receive() external payable {}
@@ -5108,15 +5099,15 @@ contract KeeperFeeRefundTest is Test {
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
         CfdEnginePlanner planner = new CfdEnginePlanner();
-        CfdEngineSettlementModule settlement = new CfdEngineSettlementModule(address(engine));
-        CfdEngineAdmin adminModule = new CfdEngineAdmin(address(engine), address(this));
-        engine.setDependencies(address(planner), address(settlement), address(adminModule));
+        CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(engine));
+        CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
+        engine.setDependencies(address(planner), address(settlement), address(engineAdmin));
         pool = new HousePool(address(usdc), address(engine));
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior LP", "sUSDC");
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC");
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
         router = new OrderRouter(
             address(engine),
             address(new CfdEngineLens(address(engine))),
@@ -5162,12 +5153,12 @@ contract KeeperFeeRefundTest is Test {
     // Regression: H-01 — fee refunded to user on failure
     function test_ExpiredOrderFeeRefundedToUser() public {
         vm.deal(alice, 1 ether);
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
         usdc.mint(alice, 50_000e6);
         vm.prank(alice);
         usdc.approve(address(clearinghouse), 50_000e6);
         vm.prank(alice);
-        clearinghouse.deposit(accountId, 50_000e6);
+        clearinghouse.deposit(account, 50_000e6);
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
 
@@ -5191,11 +5182,11 @@ contract KeeperFeeRefundTest is Test {
         juniorVault.deposit(1_000_000e6, bob);
         vm.stopPrank();
 
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
         usdc.mint(alice, 50_000e6);
         vm.startPrank(alice);
         usdc.approve(address(clearinghouse), 50_000e6);
-        clearinghouse.deposit(accountId, 50_000e6);
+        clearinghouse.deposit(account, 50_000e6);
         vm.stopPrank();
 
         vm.deal(alice, 1 ether);
@@ -5211,7 +5202,7 @@ contract KeeperFeeRefundTest is Test {
         router.executeOrder(1, priceData);
 
         assertEq(
-            clearinghouse.balanceUsdc(accountId),
+            clearinghouse.balanceUsdc(account),
             49_999_800_000,
             "Open slippage failure should forfeit the reserved bounty from trader settlement"
         );
@@ -5231,17 +5222,17 @@ contract KeeperFeeRefundTest is Test {
         juniorVault.deposit(1_000_000e6, bob);
         vm.stopPrank();
 
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
         usdc.mint(alice, 50_000e6);
         vm.startPrank(alice);
         usdc.approve(address(clearinghouse), 50_000e6);
-        clearinghouse.deposit(accountId, 50_000e6);
+        clearinghouse.deposit(account, 50_000e6);
         vm.stopPrank();
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1.5e8, false);
 
-        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(accountId);
+        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(account);
         uint256 keeperSettlementBefore = _settlementBalance(keeper);
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(1e8));
@@ -5250,12 +5241,12 @@ contract KeeperFeeRefundTest is Test {
         vm.roll(block.number + 1);
         router.executeOrder(1, priceData);
 
-        uint256 traderPenaltyUsdc = traderSettlementBefore - clearinghouse.balanceUsdc(accountId);
+        uint256 traderPenaltyUsdc = traderSettlementBefore - clearinghouse.balanceUsdc(account);
         uint256 keeperRewardUsdc = _settlementBalance(keeper) - keeperSettlementBefore;
 
         assertEq(router.nextExecuteId(), 0, "Impossible slippage head should still be removed from the FIFO queue");
         assertEq(
-            router.getAccountEscrow(accountId).executionBountyUsdc,
+            router.getAccountEscrow(account).executionBountyUsdc,
             0,
             "Cleanup should clear the escrowed head-order bounty"
         );
@@ -5266,11 +5257,11 @@ contract KeeperFeeRefundTest is Test {
     }
 
     function test_CloseSlippageFailForfeitsBountyToProtocolWhenMarginBacked() public {
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
         usdc.mint(alice, 251_500_000);
         vm.startPrank(alice);
         usdc.approve(address(clearinghouse), 251_500_000);
-        clearinghouse.deposit(accountId, 251_500_000);
+        clearinghouse.deposit(account, 251_500_000);
         vm.stopPrank();
 
         vm.prank(alice);
@@ -5280,7 +5271,7 @@ contract KeeperFeeRefundTest is Test {
         vm.roll(block.number + 1);
         router.executeOrder(1, openPrice);
 
-        uint256 freeSettlementBefore = clearinghouse.getAccountUsdcBuckets(accountId).freeSettlementUsdc;
+        uint256 freeSettlementBefore = clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc;
         assertEq(
             freeSettlementBefore, 1_300_000, "Setup should leave only partial free settlement before the close commit"
         );
@@ -5296,7 +5287,7 @@ contract KeeperFeeRefundTest is Test {
         vm.roll(block.number + 1);
         router.executeOrder(2, closePrice);
 
-        (uint256 sizeAfter,,,,,,) = engine.positions(accountId);
+        (uint256 sizeAfter,,,,,,) = engine.positions(account);
         assertEq(sizeAfter, 10_000e18, "Terminal slippage failure should leave the position open");
         assertEq(
             _settlementBalance(keeper) - keeperUsdcBefore,
@@ -5314,12 +5305,12 @@ contract KeeperFeeRefundTest is Test {
     // Regression: H-01
     function test_BatchExpiredFeeRefundedToUser() public {
         vm.deal(alice, 1 ether);
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
         usdc.mint(alice, 50_000e6);
         vm.prank(alice);
         usdc.approve(address(clearinghouse), 50_000e6);
         vm.prank(alice);
-        clearinghouse.deposit(accountId, 50_000e6);
+        clearinghouse.deposit(account, 50_000e6);
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
 
@@ -5390,11 +5381,11 @@ contract WeekendArbitrageTest is Test {
         address trader,
         uint256 amount
     ) internal {
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         usdc.mint(trader, amount);
         vm.startPrank(trader);
         usdc.approve(address(clearinghouse), amount);
-        clearinghouse.deposit(accountId, amount);
+        clearinghouse.deposit(account, amount);
         vm.stopPrank();
     }
 
@@ -5417,15 +5408,15 @@ contract WeekendArbitrageTest is Test {
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
         CfdEnginePlanner planner = new CfdEnginePlanner();
-        CfdEngineSettlementModule settlement = new CfdEngineSettlementModule(address(engine));
-        CfdEngineAdmin adminModule = new CfdEngineAdmin(address(engine), address(this));
-        engine.setDependencies(address(planner), address(settlement), address(adminModule));
+        CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(engine));
+        CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
+        engine.setDependencies(address(planner), address(settlement), address(engineAdmin));
         pool = new HousePool(address(usdc), address(engine));
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior LP", "sUSDC");
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC");
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         feedIds.push(FEED_A);
         feedIds.push(FEED_B);
@@ -5469,7 +5460,7 @@ contract WeekendArbitrageTest is Test {
         vm.roll(block.number + 1);
         router.executeOrder(1, updateData);
 
-        bytes32 aliceAccount = bytes32(uint256(uint160(alice)));
+        address aliceAccount = alice;
         (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertGt(size, 0, "Position should be open");
 

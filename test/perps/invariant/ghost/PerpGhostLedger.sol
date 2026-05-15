@@ -11,9 +11,9 @@ contract PerpGhostLedger {
 
     address public immutable handler;
 
-    mapping(bytes32 => LiquidationSnapshot) internal liquidationSnapshots;
-    mapping(bytes32 => uint256) internal committedMarginUsdc;
-    mapping(bytes32 => uint256) internal deferredTraderCreditUsdc;
+    mapping(address => LiquidationSnapshot) internal liquidationSnapshots;
+    mapping(address => uint256) internal committedMarginUsdc;
+    mapping(address => uint256) internal deferredTraderCreditUsdc;
     mapping(address => uint256) internal deferredKeeperCreditUsdc;
     uint256 internal totalTrackedCommittedMarginUsdc;
     uint256 internal totalTrackedDeferredTraderCreditUsdc;
@@ -28,7 +28,7 @@ contract PerpGhostLedger {
     }
 
     function recordLiquidation(
-        bytes32 accountId,
+        address account,
         uint256 walletUsdc,
         uint256 badDebtUsdc
     ) external {
@@ -36,31 +36,31 @@ contract PerpGhostLedger {
             revert PerpGhostLedger__Unauthorized();
         }
 
-        liquidationSnapshots[accountId] =
+        liquidationSnapshots[account] =
             LiquidationSnapshot({liquidated: true, walletUsdc: walletUsdc, badDebtUsdc: badDebtUsdc});
     }
 
     function increaseCommittedMargin(
-        bytes32 accountId,
+        address account,
         uint256 amountUsdc
     ) external {
         if (msg.sender != handler) {
             revert PerpGhostLedger__Unauthorized();
         }
 
-        committedMarginUsdc[accountId] += amountUsdc;
+        committedMarginUsdc[account] += amountUsdc;
         totalTrackedCommittedMarginUsdc += amountUsdc;
     }
 
     function decreaseCommittedMargin(
-        bytes32 accountId,
+        address account,
         uint256 amountUsdc
     ) external {
         if (msg.sender != handler) {
             revert PerpGhostLedger__Unauthorized();
         }
 
-        committedMarginUsdc[accountId] -= amountUsdc;
+        committedMarginUsdc[account] -= amountUsdc;
         totalTrackedCommittedMarginUsdc -= amountUsdc;
     }
 
@@ -89,39 +89,39 @@ contract PerpGhostLedger {
     }
 
     function increaseDeferredTraderCredit(
-        bytes32 accountId,
+        address account,
         uint256 amountUsdc
     ) external {
         if (msg.sender != handler) {
             revert PerpGhostLedger__Unauthorized();
         }
 
-        deferredTraderCreditUsdc[accountId] += amountUsdc;
+        deferredTraderCreditUsdc[account] += amountUsdc;
         totalTrackedDeferredTraderCreditUsdc += amountUsdc;
     }
 
     function decreaseDeferredTraderCredit(
-        bytes32 accountId,
+        address account,
         uint256 amountUsdc
     ) external {
         if (msg.sender != handler) {
             revert PerpGhostLedger__Unauthorized();
         }
 
-        deferredTraderCreditUsdc[accountId] -= amountUsdc;
+        deferredTraderCreditUsdc[account] -= amountUsdc;
         totalTrackedDeferredTraderCreditUsdc -= amountUsdc;
     }
 
     function liquidationSnapshot(
-        bytes32 accountId
+        address account
     ) external view returns (LiquidationSnapshot memory) {
-        return liquidationSnapshots[accountId];
+        return liquidationSnapshots[account];
     }
 
     function committedMarginSnapshot(
-        bytes32 accountId
+        address account
     ) external view returns (uint256) {
-        return committedMarginUsdc[accountId];
+        return committedMarginUsdc[account];
     }
 
     function deferredKeeperCreditSnapshot(
@@ -131,9 +131,9 @@ contract PerpGhostLedger {
     }
 
     function deferredTraderCreditSnapshot(
-        bytes32 accountId
+        address account
     ) external view returns (uint256) {
-        return deferredTraderCreditUsdc[accountId];
+        return deferredTraderCreditUsdc[account];
     }
 
     function totalCommittedMarginSnapshot() external view returns (uint256) {

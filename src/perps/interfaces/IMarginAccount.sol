@@ -13,13 +13,13 @@ interface IMarginAccount {
     ) external;
 
     function getAccountEquityUsdc(
-        bytes32 accountId
+        address account
     ) external view returns (uint256);
 
     /// @notice Returns settlement equity that is not currently locked into margin buckets.
     /// @dev This is a clearinghouse-local view and does not account for engine withdrawal guards.
     function getFreeBuyingPowerUsdc(
-        bytes32 accountId
+        address account
     ) external view returns (uint256);
 
 }

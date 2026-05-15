@@ -42,7 +42,7 @@ library CfdEnginePlanTypes {
 
     struct RawSnapshot {
         CfdTypes.Position position;
-        bytes32 accountId;
+        address account;
 
         uint256 currentTimestamp;
         uint256 lastMarkPrice;
@@ -51,8 +51,8 @@ library CfdEnginePlanTypes {
         SideSnapshot bullSide;
         SideSnapshot bearSide;
 
-        uint256 vaultAssetsUsdc;
-        uint256 vaultCashUsdc;
+        uint256 poolAssetsUsdc;
+        uint256 poolCashUsdc;
 
         IMarginClearinghouse.AccountUsdcBuckets accountBuckets;
         IMarginClearinghouse.LockedMarginBuckets lockedBuckets;
@@ -110,13 +110,13 @@ library CfdEnginePlanTypes {
 
         uint256 sideOiIncrease;
         int256 sideEntryNotionalDelta;
-        int256 sideEntryFundingContribution;
+        int256 sideEntryCarryContribution;
         uint256 sideMaxProfitIncrease;
 
         int256 tradeCostUsdc;
         uint256 marginDeltaUsdc;
         int256 netMarginChange;
-        uint256 vaultRebatePayoutUsdc;
+        uint256 poolRebatePayoutUsdc;
 
         uint256 executionFeeUsdc;
         uint256 pendingCarryUsdc;
@@ -124,7 +124,7 @@ library CfdEnginePlanTypes {
         uint256 sideTotalMarginBefore;
         uint256 sideTotalMarginAfterOpen;
 
-        bytes32 accountId;
+        address account;
         uint256 sizeDelta;
         uint256 price;
     }
@@ -190,7 +190,7 @@ library CfdEnginePlanTypes {
 
         SolvencyPreview solvency;
 
-        bytes32 accountId;
+        address account;
         uint256 sizeDelta;
         uint256 price;
         int256 realizedPnlUsdc;
@@ -237,7 +237,7 @@ library CfdEnginePlanTypes {
 
         SolvencyPreview solvency;
 
-        bytes32 accountId;
+        address account;
         uint256 price;
     }
 

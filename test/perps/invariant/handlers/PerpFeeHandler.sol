@@ -53,7 +53,7 @@ contract PerpFeeHandler is Test {
             usdc.mint(actors[i], 50_000e6);
             vm.startPrank(actors[i]);
             usdc.approve(address(clearinghouse), type(uint256).max);
-            clearinghouse.deposit(_accountId(actors[i]), 50_000e6);
+            clearinghouse.deposit(_account(actors[i]), 50_000e6);
             vm.stopPrank();
         }
     }
@@ -63,8 +63,8 @@ contract PerpFeeHandler is Test {
         uint256 marginFuzz
     ) external {
         address actor = actors[actorIndex % actors.length];
-        bytes32 accountId = _accountId(actor);
-        (uint256 size,,,,,,) = engine.positions(accountId);
+        address account = _account(actor);
+        (uint256 size,,,,,,) = engine.positions(account);
         if (size > 0) {
             return;
         }
@@ -83,8 +83,8 @@ contract PerpFeeHandler is Test {
         uint256 priceFuzz
     ) external {
         address actor = actors[actorIndex % actors.length];
-        bytes32 accountId = _accountId(actor);
-        (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(accountId);
+        address account = _account(actor);
+        (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(account);
         if (size == 0) {
             return;
         }
@@ -127,10 +127,10 @@ contract PerpFeeHandler is Test {
         }
     }
 
-    function _accountId(
+    function _account(
         address actor
-    ) internal pure returns (bytes32) {
-        return bytes32(uint256(uint160(actor)));
+    ) internal pure returns (address) {
+        return actor;
     }
 
 }

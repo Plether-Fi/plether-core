@@ -10,8 +10,8 @@ import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
 import {ICfdEngineAdminHost} from "./interfaces/ICfdEngineAdminHost.sol";
 import {ICfdEnginePlanner} from "./interfaces/ICfdEnginePlanner.sol";
 import {ICfdEngineSettlementHost} from "./interfaces/ICfdEngineSettlementHost.sol";
-import {ICfdEngineSettlementModule} from "./interfaces/ICfdEngineSettlementModule.sol";
-import {ICfdVault} from "./interfaces/ICfdVault.sol";
+import {ICfdEngineSettlementSidecar} from "./interfaces/ICfdEngineSettlementSidecar.sol";
+import {IHousePool} from "./interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "./interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
 import {IWithdrawGuard} from "./interfaces/IWithdrawGuard.sol";
@@ -39,11 +39,9 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     struct AccountCollateralView {
         uint256 settlementBalanceUsdc;
         uint256 lockedMarginUsdc;
-        // Clearinghouse custody bucket for currently locked live position backing.
         uint256 activePositionMarginUsdc;
         uint256 otherLockedMarginUsdc;
         uint256 freeSettlementUsdc;
-        // Current UI helper only; this does not include terminally reachable queued committed margin.
         uint256 closeReachableUsdc;
         uint256 terminalReachableUsdc;
         uint256 accountEquityUsdc;
@@ -67,7 +65,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     }
 
     struct ProtocolAccountingView {
-        uint256 vaultAssetsUsdc;
+        uint256 poolAssetsUsdc;
         uint256 maxLiabilityUsdc;
         uint256 withdrawalReservedUsdc;
         uint256 freeUsdc;
@@ -134,7 +132,6 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         uint256 maxProfitUsdc;
         uint256 openInterest;
         uint256 entryNotional;
-        // Cached aggregate of engine economic position margins for this side; not a custody bucket.
         uint256 totalMargin;
     }
 
@@ -152,9 +149,9 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
 
     IERC20 public immutable USDC;
     IMarginClearinghouse public immutable clearinghouse;
-    ICfdVault public vault;
+    IHousePool public pool;
     ICfdEnginePlanner public planner;
-    ICfdEngineSettlementModule public settlementModule;
+    ICfdEngineSettlementSidecar public settlementSidecar;
     address public admin;
 
     // ==========================================
@@ -167,12 +164,12 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
 
     uint256 public accumulatedFeesUsdc;
     uint256 public accumulatedBadDebtUsdc;
-    mapping(bytes32 => uint256) public unsettledCarryUsdc;
+    mapping(address => uint256) public unsettledCarryUsdc;
     bool public degradedMode;
 
     CfdTypes.RiskParams public riskParams;
-    mapping(bytes32 => StoredPosition) internal _positions;
-    mapping(bytes32 => uint256) public deferredTraderCreditUsdc;
+    mapping(address => StoredPosition) internal _positions;
+    mapping(address => uint256) public deferredTraderCreditUsdc;
     uint256 public totalDeferredTraderCreditUsdc;
     mapping(address => uint256) public deferredKeeperCreditUsdc;
     uint256 public totalDeferredKeeperCreditUsdc;
@@ -185,16 +182,16 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     uint256 public engineMarkStalenessLimit = 60;
     uint256 public executionFeeBps = 4;
     error CfdEngine__Unauthorized();
-    error CfdEngine__VaultAlreadySet();
+    error CfdEngine__PoolAlreadySet();
     error CfdEngine__RouterAlreadySet();
     error CfdEngine__DependenciesAlreadySet();
     error CfdEngine__NoFeesToWithdraw();
     error CfdEngine__NoDeferredTraderCredit();
-    error CfdEngine__InsufficientVaultLiquidity();
+    error CfdEngine__InsufficientPoolLiquidity();
     error CfdEngine__NoDeferredKeeperCredit();
     error CfdEngine__MustCloseOpposingPosition();
-    error CfdEngine__FundingExceedsMargin();
-    error CfdEngine__VaultSolvencyExceeded();
+    error CfdEngine__CarryExceedsMargin();
+    error CfdEngine__PoolSolvencyExceeded();
     error CfdEngine__MarginDrainedByFees();
     error CfdEngine__CloseSizeExceedsPosition();
     error CfdEngine__NoPositionToLiquidate();
@@ -207,7 +204,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     error CfdEngine__ZeroStaleness();
     error CfdEngine__ZeroAmount();
     error CfdEngine__RunwayTooLong();
-    error CfdEngine__PartialCloseUnderwaterFunding();
+    error CfdEngine__PartialCloseUnderwaterCarry();
     error CfdEngine__DustPosition();
     error CfdEngine__MarkPriceStale();
     error CfdEngine__MarkPriceOutOfOrder();
@@ -222,32 +219,30 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     error CfdEngine__StillInsolvent();
     error CfdEngine__ZeroAddress();
     error CfdEngine__InsufficientCloseOrderBountyBacking();
-    event FundingUpdated(int256 bullIndex, int256 bearIndex, uint256 absSkewUsdc);
+    event CarryUpdated(int256 bullIndex, int256 bearIndex, uint256 absSkewUsdc);
     event PositionOpened(
-        bytes32 indexed accountId, CfdTypes.Side side, uint256 sizeDelta, uint256 price, uint256 marginDelta
+        address indexed account, CfdTypes.Side side, uint256 sizeDelta, uint256 price, uint256 marginDelta
     );
-    event PositionClosed(bytes32 indexed accountId, CfdTypes.Side side, uint256 sizeDelta, uint256 price, int256 pnl);
+    event PositionClosed(address indexed account, CfdTypes.Side side, uint256 sizeDelta, uint256 price, int256 pnl);
     event PositionLiquidated(
-        bytes32 indexed accountId, CfdTypes.Side side, uint256 size, uint256 price, uint256 keeperBounty
+        address indexed account, CfdTypes.Side side, uint256 size, uint256 price, uint256 keeperBounty
     );
-    event MarginAdded(bytes32 indexed accountId, uint256 amount);
+    event MarginAdded(address indexed account, uint256 amount);
     event FadDaysAdded(uint256[] timestamps);
     event FadDaysRemoved(uint256[] timestamps);
     event FadMaxStalenessUpdated(uint256 newStaleness);
     event FadRunwayUpdated(uint256 newRunway);
     event EngineMarkStalenessLimitUpdated(uint256 newStaleness);
     event BadDebtCleared(uint256 amount, uint256 remaining);
-    event DegradedModeEntered(uint256 effectiveAssets, uint256 maxLiability, bytes32 indexed triggeringAccount);
+    event DegradedModeEntered(uint256 effectiveAssets, uint256 maxLiability, address indexed triggeringAccount);
     event DegradedModeCleared();
-    event DeferredTraderCreditRecorded(bytes32 indexed accountId, uint256 amountUsdc);
-    event DeferredTraderCreditClaimed(bytes32 indexed accountId, uint256 amountUsdc);
+    event DeferredTraderCreditRecorded(address indexed account, uint256 amountUsdc);
+    event DeferredTraderCreditClaimed(address indexed account, uint256 amountUsdc);
     event DeferredKeeperCreditRecorded(address indexed keeper, uint256 amountUsdc);
     event DeferredKeeperCreditClaimed(address indexed keeper, uint256 amountUsdc);
-    event CarryCheckpointed(
-        bytes32 indexed accountId, uint256 addedUnsettledCarryUsdc, uint256 totalUnsettledCarryUsdc
-    );
+    event CarryCheckpointed(address indexed account, uint256 addedUnsettledCarryUsdc, uint256 totalUnsettledCarryUsdc);
     event CarryRealized(
-        bytes32 indexed accountId,
+        address indexed account,
         uint256 realizedCarryUsdc,
         uint256 freeSettlementConsumedUsdc,
         uint256 marginConsumedUsdc,
@@ -286,7 +281,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     }
 
     function _checkpointDeferredClaimCarryIfPossible(
-        bytes32 accountId,
+        address account,
         StoredPosition storage pos
     ) internal {
         if (pos.size == 0) {
@@ -295,7 +290,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
 
         (bool priceFresh, uint256 price) = _tryGetFreshLiveMarkPrice();
         if (priceFresh) {
-            _checkpointCarryBeforeBasisChange(accountId, pos, price, _genericReachableCollateralUsdc(accountId));
+            _checkpointCarryBeforeBasisChange(account, pos, price, _genericReachableCollateralUsdc(account));
             return;
         }
 
@@ -304,26 +299,26 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
             revert CfdEngine__MarkPriceStale();
         }
 
-        _checkpointCarryBeforeBasisChange(accountId, pos, price, _genericReachableCollateralUsdc(accountId));
+        _checkpointCarryBeforeBasisChange(account, pos, price, _genericReachableCollateralUsdc(account));
     }
 
     function _claimDeferredBalance(
         uint256 amount,
-        bytes32 accountId
+        address account
     ) internal returns (uint256 claimAmountUsdc) {
         claimAmountUsdc = CashPriorityLib.availableCashForDeferredBeneficiaryClaim(
-            vault.totalAssets(),
+            pool.totalAssets(),
             accumulatedFeesUsdc,
             totalDeferredTraderCreditUsdc,
             totalDeferredKeeperCreditUsdc,
             amount
         );
         if (claimAmountUsdc == 0) {
-            revert CfdEngine__InsufficientVaultLiquidity();
+            revert CfdEngine__InsufficientPoolLiquidity();
         }
 
-        vault.payOut(address(clearinghouse), claimAmountUsdc);
-        clearinghouse.settleUsdc(accountId, int256(claimAmountUsdc));
+        pool.payOut(address(clearinghouse), claimAmountUsdc);
+        clearinghouse.settleUsdc(account, int256(claimAmountUsdc));
     }
 
     function _increaseDeferredLiability(
@@ -351,8 +346,8 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         _;
     }
 
-    modifier onlySettlementModule() {
-        if (msg.sender != address(settlementModule)) {
+    modifier onlySettlementSidecar() {
+        if (msg.sender != address(settlementSidecar)) {
             revert CfdEngine__Unauthorized();
         }
         _;
@@ -382,34 +377,34 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         riskParams = _riskParams;
     }
 
-    /// @notice One-time setter for planner, settlement module, and admin sidecars.
+    /// @notice One-time setter for planner, settlement sidecar, and admin sidecars.
     function setDependencies(
         address planner_,
-        address settlementModule_,
+        address settlementSidecar_,
         address admin_
     ) external onlyOwner {
-        if (planner_ == address(0) || settlementModule_ == address(0) || admin_ == address(0)) {
+        if (planner_ == address(0) || settlementSidecar_ == address(0) || admin_ == address(0)) {
             revert CfdEngine__ZeroAddress();
         }
-        if (address(planner) != address(0) || address(settlementModule) != address(0) || admin != address(0)) {
+        if (address(planner) != address(0) || address(settlementSidecar) != address(0) || admin != address(0)) {
             revert CfdEngine__DependenciesAlreadySet();
         }
         planner = ICfdEnginePlanner(planner_);
-        settlementModule = ICfdEngineSettlementModule(settlementModule_);
+        settlementSidecar = ICfdEngineSettlementSidecar(settlementSidecar_);
         admin = admin_;
     }
 
-    /// @notice One-time setter for the HousePool vault backing all positions
-    function setVault(
-        address _vault
+    /// @notice One-time setter for the HousePool backing all positions
+    function setPool(
+        address _pool
     ) external onlyOwner {
-        if (_vault == address(0)) {
+        if (_pool == address(0)) {
             revert CfdEngine__ZeroAddress();
         }
-        if (address(vault) != address(0)) {
-            revert CfdEngine__VaultAlreadySet();
+        if (address(pool) != address(0)) {
+            revert CfdEngine__PoolAlreadySet();
         }
-        vault = ICfdVault(_vault);
+        pool = IHousePool(_pool);
     }
 
     /// @notice One-time setter for the authorized OrderRouter
@@ -425,14 +420,14 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         orderRouter = _router;
     }
 
-    /// @notice Withdraws accumulated execution fees from the vault to a recipient.
+    /// @notice Withdraws accumulated execution fees from the pool to a recipient.
     function withdrawFees(
         address recipient
     ) external onlyOwner {
         withdrawFees(recipient, accumulatedFeesUsdc);
     }
 
-    /// @notice Withdraws up to `amountUsdc` of accumulated execution fees from the vault to a recipient.
+    /// @notice Withdraws up to `amountUsdc` of accumulated execution fees from the pool to a recipient.
     function withdrawFees(
         address recipient,
         uint256 amountUsdc
@@ -446,14 +441,14 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         }
         uint256 withdrawalUsdc = amountUsdc < fees ? amountUsdc : fees;
         if (!_canWithdrawProtocolFees(withdrawalUsdc)) {
-            revert CfdEngine__InsufficientVaultLiquidity();
+            revert CfdEngine__InsufficientPoolLiquidity();
         }
         accumulatedFeesUsdc = fees - withdrawalUsdc;
-        vault.payOut(recipient, withdrawalUsdc);
+        pool.payOut(recipient, withdrawalUsdc);
         _assertPostSolvency();
     }
 
-    /// @notice Pulls router-custodied cancellation fees into the vault and books them as protocol revenue.
+    /// @notice Pulls router-custodied cancellation fees into the pool and books them as protocol revenue.
     function absorbRouterCancellationFee(
         uint256 amountUsdc
     ) external onlyRouter {
@@ -461,12 +456,12 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
             return;
         }
 
-        USDC.safeTransferFrom(msg.sender, address(vault), amountUsdc);
-        vault.recordProtocolInflow(amountUsdc);
+        USDC.safeTransferFrom(msg.sender, address(pool), amountUsdc);
+        pool.recordProtocolInflow(amountUsdc);
         accumulatedFeesUsdc += amountUsdc;
     }
 
-    /// @notice Books router-delivered protocol-owned inflow as protocol fees after the router has already funded the vault.
+    /// @notice Books router-delivered protocol-owned inflow as protocol fees after the router has already funded the pool.
     function recordRouterProtocolFee(
         uint256 amountUsdc
     ) external onlyRouter {
@@ -500,28 +495,28 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         lastMarkPrice = clampedPrice;
         lastMarkTime = publishTime;
 
-        bytes32 accountId = bytes32(uint256(uint160(beneficiary)));
-        StoredPosition storage pos = _positions[accountId];
+        address account = beneficiary;
+        StoredPosition storage pos = _positions[account];
         if (pos.size > 0) {
-            _checkpointCarryBeforeBasisChange(accountId, pos, clampedPrice, _genericReachableCollateralUsdc(accountId));
+            _checkpointCarryBeforeBasisChange(account, pos, clampedPrice, _genericReachableCollateralUsdc(account));
         }
 
-        clearinghouse.settleUsdc(accountId, int256(amountUsdc));
+        clearinghouse.settleUsdc(account, int256(amountUsdc));
     }
 
     /// @notice Adds isolated margin to an existing open position without changing size.
     function addMargin(
-        bytes32 accountId,
+        address account,
         uint256 amount
     ) external nonReentrant {
-        if (bytes32(uint256(uint160(msg.sender))) != accountId) {
+        if (msg.sender != account) {
             revert CfdEngine__NotAccountOwner();
         }
         if (amount == 0) {
             revert CfdEngine__PositionTooSmall();
         }
 
-        StoredPosition storage pos = _positions[accountId];
+        StoredPosition storage pos = _positions[account];
         if (pos.size == 0) {
             revert CfdEngine__NoOpenPosition();
         }
@@ -530,28 +525,28 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         if (!priceFresh) {
             revert CfdEngine__MarkPriceStale();
         }
-        _realizeCarryFromSettlement(accountId, pos, price, _genericReachableCollateralUsdc(accountId));
+        _realizeCarryFromSettlement(account, pos, price, _genericReachableCollateralUsdc(account));
 
-        uint256 marginBefore = _positionMarginBucketUsdc(accountId);
-        clearinghouse.lockPositionMargin(accountId, amount);
-        _syncTotalSideMargin(pos.side, marginBefore, _positionMarginBucketUsdc(accountId));
+        uint256 marginBefore = _positionMarginBucketUsdc(account);
+        clearinghouse.lockPositionMargin(account, amount);
+        _syncTotalSideMargin(pos.side, marginBefore, _positionMarginBucketUsdc(account));
         pos.lastUpdateTime = uint64(block.timestamp);
         pos.lastCarryTimestamp = uint64(block.timestamp);
 
-        emit MarginAdded(accountId, amount);
+        emit MarginAdded(account, amount);
     }
 
     /// @notice Realizes accrued carry before a user-level clearinghouse balance mutation changes the carry basis.
     /// @dev Called only by the clearinghouse before user deposits and withdrawals.
     function realizeCarryBeforeMarginChange(
-        bytes32 accountId,
+        address account,
         uint256 reachableCollateralBasisUsdc
     ) external nonReentrant {
         if (msg.sender != address(clearinghouse)) {
             revert CfdEngine__NotClearinghouse();
         }
 
-        StoredPosition storage pos = _positions[accountId];
+        StoredPosition storage pos = _positions[account];
         if (pos.size == 0) {
             return;
         }
@@ -561,20 +556,20 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
             revert CfdEngine__MarkPriceStale();
         }
 
-        _realizeCarryFromSettlement(accountId, pos, price, reachableCollateralBasisUsdc);
+        _realizeCarryFromSettlement(account, pos, price, reachableCollateralBasisUsdc);
     }
 
     /// @notice Checkpoints carry against the cached stored mark when fresh-mark liveness is unavailable.
     /// @dev Restricted to the clearinghouse stale-deposit path so deposits preserve pre-mutation carry basis.
     function checkpointCarryUsingStoredMark(
-        bytes32 accountId,
+        address account,
         uint256 reachableCollateralBasisUsdc
     ) external nonReentrant {
         if (msg.sender != address(clearinghouse)) {
             revert CfdEngine__NotClearinghouse();
         }
 
-        StoredPosition storage pos = _positions[accountId];
+        StoredPosition storage pos = _positions[account];
         if (pos.size == 0 || pos.lastCarryTimestamp == 0) {
             return;
         }
@@ -584,49 +579,49 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
             revert CfdEngine__MarkPriceStale();
         }
 
-        _checkpointCarryBeforeBasisChange(accountId, pos, price, reachableCollateralBasisUsdc);
+        _checkpointCarryBeforeBasisChange(account, pos, price, reachableCollateralBasisUsdc);
     }
 
     /// @notice Claims deferred trader credit balance into the clearinghouse.
-    /// @dev The claim can be partial if current vault cash is insufficient. Funds are credited to the
+    /// @dev The claim can be partial if current pool cash is insufficient. Funds are credited to the
     ///      clearinghouse first, so beneficiaries access them through the normal account-balance path.
     ///      Carry is checkpointed before the settlement-basis change using a fresh mark when available,
     ///      otherwise the cached stored mark is used.
     function claimDeferredTraderCredit(
-        bytes32 accountId
+        address account
     ) external nonReentrant {
-        if (bytes32(uint256(uint160(msg.sender))) != accountId) {
+        if (msg.sender != account) {
             revert CfdEngine__NotAccountOwner();
         }
-        StoredPosition storage pos = _positions[accountId];
-        _checkpointDeferredClaimCarryIfPossible(accountId, pos);
+        StoredPosition storage pos = _positions[account];
+        _checkpointDeferredClaimCarryIfPossible(account, pos);
 
-        uint256 amount = deferredTraderCreditUsdc[accountId];
+        uint256 amount = deferredTraderCreditUsdc[account];
         if (amount == 0) {
             revert CfdEngine__NoDeferredTraderCredit();
         }
-        uint256 claimAmountUsdc = _claimDeferredBalance(amount, accountId);
+        uint256 claimAmountUsdc = _claimDeferredBalance(amount, account);
 
-        deferredTraderCreditUsdc[accountId] -= claimAmountUsdc;
+        deferredTraderCreditUsdc[account] -= claimAmountUsdc;
         totalDeferredTraderCreditUsdc -= claimAmountUsdc;
 
-        emit DeferredTraderCreditClaimed(accountId, claimAmountUsdc);
+        emit DeferredTraderCreditClaimed(account, claimAmountUsdc);
     }
 
-    /// @notice Claims previously deferred keeper credit when the vault has replenished cash.
+    /// @notice Claims previously deferred keeper credit when the pool has replenished cash.
     /// @dev Deferred keeper value always settles to clearinghouse credit for the recorded keeper address-derived account.
     function claimDeferredKeeperCredit() external nonReentrant {
         address beneficiary = msg.sender;
-        bytes32 accountId = bytes32(uint256(uint160(beneficiary)));
-        StoredPosition storage pos = _positions[accountId];
-        _checkpointDeferredClaimCarryIfPossible(accountId, pos);
+        address account = beneficiary;
+        StoredPosition storage pos = _positions[account];
+        _checkpointDeferredClaimCarryIfPossible(account, pos);
 
         uint256 amount = deferredKeeperCreditUsdc[beneficiary];
         if (amount == 0) {
             revert CfdEngine__NoDeferredKeeperCredit();
         }
 
-        uint256 claimAmountUsdc = _claimDeferredBalance(amount, accountId);
+        uint256 claimAmountUsdc = _claimDeferredBalance(amount, account);
 
         (deferredKeeperCreditUsdc[beneficiary], totalDeferredKeeperCreditUsdc) = _decreaseDeferredLiability(
             deferredKeeperCreditUsdc[beneficiary], totalDeferredKeeperCreditUsdc, claimAmountUsdc
@@ -635,7 +630,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         emit DeferredKeeperCreditClaimed(beneficiary, claimAmountUsdc);
     }
 
-    /// @notice Records keeper credit that could not be serviced immediately because vault cash was unavailable.
+    /// @notice Records keeper credit that could not be serviced immediately because pool cash was unavailable.
     function recordDeferredKeeperCredit(
         address keeper,
         uint256 amountUsdc
@@ -648,7 +643,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     }
 
     function reserveCloseOrderExecutionBounty(
-        bytes32 accountId,
+        address account,
         uint256 sizeDelta,
         uint256 amountUsdc,
         address recipient
@@ -657,7 +652,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
             return;
         }
 
-        StoredPosition storage pos = _positions[accountId];
+        StoredPosition storage pos = _positions[account];
         if (pos.size == 0) {
             revert CfdEngine__InsufficientCloseOrderBountyBacking();
         }
@@ -677,7 +672,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
             isOracleFrozen(),
             isFadWindow(),
             engineMarkStalenessLimit,
-            address(vault) == address(0) ? 0 : vault.markStalenessLimit(),
+            address(pool) == address(0) ? 0 : pool.markStalenessLimit(),
             0,
             0,
             fadMaxStaleness
@@ -687,30 +682,29 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         }
 
         if (priceFresh) {
-            _realizeCarryFromSettlement(accountId, pos, price, _genericReachableCollateralUsdc(accountId));
+            _realizeCarryFromSettlement(account, pos, price, _genericReachableCollateralUsdc(account));
         }
 
-        uint256 positionMarginUsdc = _positionMarginBucketUsdc(accountId);
-        uint256 freeSettlementUsdc =
-            MarginClearinghouseAccountingLib.getFreeSettlementUsdc(clearinghouse.getAccountUsdcBuckets(accountId));
+        uint256 positionMarginUsdc = _positionMarginBucketUsdc(account);
+        uint256 freeSettlementUsdc = clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc;
         uint256 freeBackedBountyUsdc = freeSettlementUsdc > amountUsdc ? amountUsdc : freeSettlementUsdc;
         uint256 marginBackedBountyUsdc = amountUsdc - freeBackedBountyUsdc;
         if (positionMarginUsdc < marginBackedBountyUsdc) {
             revert CfdEngine__InsufficientCloseOrderBountyBacking();
         }
 
-        uint256 reachableUsdc = _genericReachableCollateralUsdc(accountId);
+        uint256 reachableUsdc = _genericReachableCollateralUsdc(account);
         if (reachableUsdc < amountUsdc) {
             revert CfdEngine__InsufficientCloseOrderBountyBacking();
         }
 
         uint256 postReservationReachableUsdc = reachableUsdc - amountUsdc;
 
-        CfdTypes.Position memory positionAfter = _loadPosition(accountId);
+        CfdTypes.Position memory positionAfter = _loadPosition(account);
         positionAfter.margin = positionMarginUsdc - marginBackedBountyUsdc;
         bool isFullClose = sizeDelta == positionAfter.size;
         uint256 pendingCarryUsdc =
-            _totalPendingCarryUsdc(accountId, positionAfter, price, postReservationReachableUsdc, block.timestamp);
+            _totalPendingCarryUsdc(account, positionAfter, price, postReservationReachableUsdc, block.timestamp);
         PositionRiskAccountingLib.PositionRiskState memory riskState =
             PositionRiskAccountingLib.buildPositionRiskStateWithCarry(
                 positionAfter,
@@ -727,20 +721,18 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         _syncTotalSideMargin(pos.side, positionMarginUsdc, positionMarginUsdc - marginBackedBountyUsdc);
         if (freeBackedBountyUsdc > 0) {
             if (priceFresh) {
-                clearinghouse.reserveCloseExecutionBountyFromSettlement(accountId, freeBackedBountyUsdc, recipient);
+                clearinghouse.reserveCloseExecutionBountyFromSettlement(account, freeBackedBountyUsdc, recipient);
             } else {
-                clearinghouse.reserveStaleCloseExecutionBountyFromSettlement(accountId, freeBackedBountyUsdc, recipient);
+                clearinghouse.reserveStaleCloseExecutionBountyFromSettlement(account, freeBackedBountyUsdc, recipient);
             }
         }
         if (marginBackedBountyUsdc == 0) {
             return;
         }
         if (priceFresh) {
-            clearinghouse.seizePositionMarginUsdc(accountId, marginBackedBountyUsdc, recipient);
+            clearinghouse.seizePositionMarginUsdc(account, marginBackedBountyUsdc, recipient);
         } else {
-            clearinghouse.reserveStaleCloseExecutionBountyFromPositionMargin(
-                accountId, marginBackedBountyUsdc, recipient
-            );
+            clearinghouse.reserveStaleCloseExecutionBountyFromPositionMargin(account, marginBackedBountyUsdc, recipient);
         }
     }
 
@@ -756,9 +748,9 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         if (amount > badDebt) {
             revert CfdEngine__BadDebtTooLarge();
         }
-        USDC.safeTransferFrom(msg.sender, address(vault), amount);
-        vault.recordClaimantInflow(
-            amount, ICfdVault.ClaimantInflowKind.Recapitalization, ICfdVault.ClaimantInflowCashMode.CashArrived
+        USDC.safeTransferFrom(msg.sender, address(pool), amount);
+        pool.recordClaimantInflow(
+            amount, IHousePool.ClaimantInflowKind.Recapitalization, IHousePool.ClaimantInflowCashMode.CashArrived
         );
         accumulatedBadDebtUsdc = badDebt - amount;
         emit BadDebtCleared(amount, accumulatedBadDebtUsdc);
@@ -843,15 +835,15 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     // ==========================================
 
     /// @notice Reverts if the account has an open position that would be undercollateralized after withdrawal
-    /// @param accountId Clearinghouse account to check
+    /// @param account Clearinghouse account to check
     function checkWithdraw(
-        bytes32 accountId
+        address account
     ) external override nonReentrant {
         if (msg.sender != address(clearinghouse)) {
             revert CfdEngine__NotClearinghouse();
         }
 
-        CfdTypes.Position memory pos = _loadPosition(accountId);
+        CfdTypes.Position memory pos = _loadPosition(account);
         if (pos.size == 0) {
             return;
         }
@@ -864,12 +856,12 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
             revert CfdEngine__MarkPriceStale();
         }
 
-        uint256 reachableUsdc = _genericReachableCollateralUsdc(accountId);
-        StoredPosition storage storedPos = _positions[accountId];
-        _realizeCarryFromSettlement(accountId, storedPos, price, reachableUsdc);
-        pos = _loadPosition(accountId);
-        reachableUsdc = _genericReachableCollateralUsdc(accountId);
-        uint256 pendingCarryUsdc = _totalPendingCarryUsdc(accountId, pos, price, reachableUsdc, block.timestamp);
+        uint256 reachableUsdc = _genericReachableCollateralUsdc(account);
+        StoredPosition storage storedPos = _positions[account];
+        _realizeCarryFromSettlement(account, storedPos, price, reachableUsdc);
+        pos = _loadPosition(account);
+        reachableUsdc = _genericReachableCollateralUsdc(account);
+        uint256 pendingCarryUsdc = _totalPendingCarryUsdc(account, pos, price, reachableUsdc, block.timestamp);
         uint256 currentMarginBps = isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps;
         uint256 effectiveMarginBps =
             riskParams.initMarginBps > currentMarginBps ? riskParams.initMarginBps : currentMarginBps;
@@ -892,16 +884,16 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     function processOrderTyped(
         CfdTypes.Order memory order,
         uint256 currentOraclePrice,
-        uint256 vaultDepthUsdc,
+        uint256 poolDepthUsdc,
         uint64 publishTime
     ) external onlyRouter nonReentrant {
-        _processOrder(order, currentOraclePrice, vaultDepthUsdc, publishTime);
+        _processOrder(order, currentOraclePrice, poolDepthUsdc, publishTime);
     }
 
     function _processOrder(
         CfdTypes.Order memory order,
         uint256 currentOraclePrice,
-        uint256 vaultDepthUsdc,
+        uint256 poolDepthUsdc,
         uint64 publishTime
     ) internal {
         if (publishTime < lastMarkTime) {
@@ -909,8 +901,8 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         }
 
         CfdEnginePlanTypes.RawSnapshot memory snap =
-            _buildRawSnapshot(order.accountId, currentOraclePrice, vaultDepthUsdc, publishTime);
-        snap.vaultCashUsdc = vault.totalAssets();
+            _buildRawSnapshot(order.account, currentOraclePrice, poolDepthUsdc, publishTime);
+        snap.poolCashUsdc = pool.totalAssets();
 
         if (order.isClose) {
             CfdEnginePlanTypes.CloseDelta memory delta = planner.planClose(snap, order, currentOraclePrice, publishTime);
@@ -942,38 +934,38 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     }
 
     function _syncMarginQueue(
-        bytes32 accountId,
+        address account,
         uint256 consumedCommittedReservationUsdc
     ) internal {
         if (consumedCommittedReservationUsdc == 0 || orderRouter == address(0)) {
             return;
         }
-        IOrderRouterAccounting(orderRouter).syncMarginQueue(accountId);
+        IOrderRouterAccounting(orderRouter).syncMarginQueue(account);
     }
 
     function _payOrRecordDeferredTraderPayout(
-        bytes32 accountId,
+        address account,
         uint256 amountUsdc
     ) internal {
         if (amountUsdc == 0) {
             return;
         }
 
-        if (_canPayFreshVaultPayout(amountUsdc)) {
-            vault.payOut(address(clearinghouse), amountUsdc);
-            clearinghouse.settleUsdc(accountId, int256(amountUsdc));
+        if (_canPayFreshPoolPayout(amountUsdc)) {
+            pool.payOut(address(clearinghouse), amountUsdc);
+            clearinghouse.settleUsdc(account, int256(amountUsdc));
         } else {
-            _enqueueOrAccrueDeferredTraderPayout(accountId, amountUsdc);
-            emit DeferredTraderCreditRecorded(accountId, amountUsdc);
+            _enqueueOrAccrueDeferredTraderPayout(account, amountUsdc);
+            emit DeferredTraderCreditRecorded(account, amountUsdc);
         }
     }
 
     function _enqueueOrAccrueDeferredTraderPayout(
-        bytes32 accountId,
+        address account,
         uint256 amountUsdc
     ) internal {
-        (deferredTraderCreditUsdc[accountId], totalDeferredTraderCreditUsdc) =
-            _increaseDeferredLiability(deferredTraderCreditUsdc[accountId], totalDeferredTraderCreditUsdc, amountUsdc);
+        (deferredTraderCreditUsdc[account], totalDeferredTraderCreditUsdc) =
+            _increaseDeferredLiability(deferredTraderCreditUsdc[account], totalDeferredTraderCreditUsdc, amountUsdc);
     }
 
     function _enqueueOrAccrueDeferredKeeperCredit(
@@ -984,25 +976,25 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
             _increaseDeferredLiability(deferredKeeperCreditUsdc[keeper], totalDeferredKeeperCreditUsdc, amountUsdc);
     }
 
-    function _canPayFreshVaultPayout(
+    function _canPayFreshPoolPayout(
         uint256 amountUsdc
     ) internal view returns (bool) {
-        return amountUsdc <= _freshVaultReservation().freeCashUsdc;
+        return amountUsdc <= _freshPoolReservation().freeCashUsdc;
     }
 
     function _canWithdrawProtocolFees(
         uint256 amountUsdc
     ) internal view returns (bool) {
-        return amountUsdc <= _freshVaultReservation().protocolFeeWithdrawalUsdc;
+        return amountUsdc <= _freshPoolReservation().protocolFeeWithdrawalUsdc;
     }
 
-    function _availableCashForFreshVaultPayouts() internal view returns (uint256) {
-        return _freshVaultReservation().freeCashUsdc;
+    function _availableCashForFreshPoolPayouts() internal view returns (uint256) {
+        return _freshPoolReservation().freeCashUsdc;
     }
 
-    function _freshVaultReservation() internal view returns (CashPriorityLib.SeniorCashReservation memory reservation) {
+    function _freshPoolReservation() internal view returns (CashPriorityLib.SeniorCashReservation memory reservation) {
         return CashPriorityLib.reserveFreshPayouts(
-            vault.totalAssets(), accumulatedFeesUsdc, totalDeferredTraderCreditUsdc, totalDeferredKeeperCreditUsdc
+            pool.totalAssets(), accumulatedFeesUsdc, totalDeferredTraderCreditUsdc, totalDeferredKeeperCreditUsdc
         );
     }
 
@@ -1027,7 +1019,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     }
 
     function positions(
-        bytes32 accountId
+        address account
     )
         external
         view
@@ -1041,40 +1033,40 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
             int256 vpiAccrued
         )
     {
-        CfdTypes.Position memory pos = _loadPosition(accountId);
+        CfdTypes.Position memory pos = _loadPosition(account);
         return (pos.size, pos.margin, pos.entryPrice, pos.maxProfitUsdc, pos.side, pos.lastUpdateTime, pos.vpiAccrued);
     }
 
     function getPositionLastCarryTimestamp(
-        bytes32 accountId
+        address account
     ) external view returns (uint64) {
-        return _positions[accountId].lastCarryTimestamp;
+        return _positions[account].lastCarryTimestamp;
     }
 
     /// @notice Liquidates an undercollateralized position.
     ///         Surplus equity (after bounty) is returned to the user.
-    ///         In bad-debt cases (equity < bounty), all remaining margin is seized by the vault.
-    /// @param accountId Clearinghouse account that owns the position
+    ///         In bad-debt cases (equity < bounty), all remaining margin is seized by the pool.
+    /// @param account Clearinghouse account that owns the position
     /// @param currentOraclePrice Pyth oracle price (8 decimals), clamped to CAP_PRICE
-    /// @param vaultDepthUsdc HousePool total assets used for post-op solvency checks and payout affordability
+    /// @param poolDepthUsdc HousePool total assets used for post-op solvency checks and payout affordability
     /// @param publishTime Pyth publish timestamp, stored as lastMarkTime
     /// @return keeperBountyUsdc Bounty paid to the liquidation keeper (USDC, 6 decimals)
     function liquidatePosition(
-        bytes32 accountId,
+        address account,
         uint256 currentOraclePrice,
-        uint256 vaultDepthUsdc,
+        uint256 poolDepthUsdc,
         uint64 publishTime
     ) external onlyRouter nonReentrant returns (uint256 keeperBountyUsdc) {
         if (publishTime < lastMarkTime) {
             revert CfdEngine__MarkPriceOutOfOrder();
         }
-        if (_positions[accountId].size == 0) {
+        if (_positions[account].size == 0) {
             revert CfdEngine__NoPositionToLiquidate();
         }
 
         CfdEnginePlanTypes.RawSnapshot memory snap =
-            _buildRawSnapshot(accountId, currentOraclePrice, vaultDepthUsdc, publishTime);
-        snap.vaultCashUsdc = vault.totalAssets();
+            _buildRawSnapshot(account, currentOraclePrice, poolDepthUsdc, publishTime);
+        snap.poolCashUsdc = pool.totalAssets();
         CfdEnginePlanTypes.LiquidationDelta memory delta =
             planner.planLiquidation(snap, currentOraclePrice, publishTime);
 
@@ -1103,7 +1095,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
 
     function _buildAdjustedSolvencyState() internal view returns (SolvencyAccountingLib.SolvencyState memory) {
         return SolvencyAccountingLib.buildSolvencyState(
-            vault.totalAssets(),
+            pool.totalAssets(),
             accumulatedFeesUsdc,
             _maxLiability(),
             totalDeferredTraderCreditUsdc,
@@ -1129,13 +1121,13 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     // ==========================================
 
     function _buildRawSnapshot(
-        bytes32 accountId,
+        address account,
         uint256,
-        uint256 vaultDepthUsdc,
+        uint256 poolDepthUsdc,
         uint64
     ) internal view returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
-        snap.accountId = accountId;
-        snap.position = _loadPosition(accountId);
+        snap.account = account;
+        snap.position = _loadPosition(account);
 
         snap.currentTimestamp = block.timestamp;
         snap.lastMarkPrice = lastMarkPrice;
@@ -1145,19 +1137,19 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         snap.bullSide = _copySideSnapshot(bullState);
         snap.bearSide = _copySideSnapshot(bearState);
 
-        snap.vaultAssetsUsdc = vaultDepthUsdc;
-        snap.vaultCashUsdc = vaultDepthUsdc;
+        snap.poolAssetsUsdc = poolDepthUsdc;
+        snap.poolCashUsdc = poolDepthUsdc;
 
-        snap.accountBuckets = clearinghouse.getAccountUsdcBuckets(accountId);
-        snap.lockedBuckets = clearinghouse.getLockedMarginBuckets(accountId);
+        snap.accountBuckets = clearinghouse.getAccountUsdcBuckets(account);
+        snap.lockedBuckets = clearinghouse.getLockedMarginBuckets(account);
         snap.position.margin = snap.lockedBuckets.positionMarginUsdc;
 
         snap.accumulatedFeesUsdc = accumulatedFeesUsdc;
         snap.accumulatedBadDebtUsdc = accumulatedBadDebtUsdc;
-        snap.unsettledCarryUsdc = unsettledCarryUsdc[accountId];
+        snap.unsettledCarryUsdc = unsettledCarryUsdc[account];
         snap.totalDeferredTraderCreditUsdc = totalDeferredTraderCreditUsdc;
         snap.totalDeferredKeeperCreditUsdc = totalDeferredKeeperCreditUsdc;
-        snap.deferredTraderCreditForAccount = deferredTraderCreditUsdc[accountId];
+        snap.deferredTraderCreditForAccount = deferredTraderCreditUsdc[account];
         snap.degradedMode = degradedMode;
 
         snap.capPrice = CAP_PRICE;
@@ -1217,7 +1209,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         );
     }
 
-    function _applyFundingAndMark(
+    function _applyCarryAndMark(
         uint256 newMarkPrice,
         uint64 newMarkTime
     ) internal {
@@ -1225,18 +1217,18 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         lastMarkTime = newMarkTime;
     }
 
-    function settlementApplyFundingAndMark(
+    function settlementApplyCarryAndMark(
         uint256 newMarkPrice,
         uint64 newMarkTime
-    ) external onlySettlementModule {
-        _applyFundingAndMark(newMarkPrice, newMarkTime);
+    ) external onlySettlementSidecar {
+        _applyCarryAndMark(newMarkPrice, newMarkTime);
     }
 
     function settlementSyncTotalSideMargin(
         CfdTypes.Side side,
         uint256 marginBefore,
         uint256 marginAfter
-    ) external onlySettlementModule {
+    ) external onlySettlementSidecar {
         _syncTotalSideMargin(side, marginBefore, marginAfter);
     }
 
@@ -1245,7 +1237,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         int256 maxProfitDelta,
         int256 openInterestDelta,
         int256 entryNotionalDelta
-    ) external onlySettlementModule {
+    ) external onlySettlementSidecar {
         SideState storage sideState = _sideState(side);
         if (maxProfitDelta >= 0) {
             sideState.maxProfitUsdc += uint256(maxProfitDelta);
@@ -1265,36 +1257,36 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     }
 
     function settlementConsumeDeferredTraderPayout(
-        bytes32 accountId,
+        address account,
         uint256 amountUsdc
-    ) external onlySettlementModule {
-        _consumeDeferredTraderPayout(accountId, amountUsdc);
+    ) external onlySettlementSidecar {
+        _consumeDeferredTraderPayout(account, amountUsdc);
     }
 
     function settlementRecordDeferredTraderPayout(
-        bytes32 accountId,
+        address account,
         uint256 amountUsdc
-    ) external onlySettlementModule {
-        _payOrRecordDeferredTraderPayout(accountId, amountUsdc);
+    ) external onlySettlementSidecar {
+        _payOrRecordDeferredTraderPayout(account, amountUsdc);
     }
 
     function settlementAccumulateFees(
         uint256 amountUsdc
-    ) external onlySettlementModule {
+    ) external onlySettlementSidecar {
         accumulatedFeesUsdc += amountUsdc;
     }
 
     function settlementAccumulateBadDebt(
         uint256 amountUsdc
-    ) external onlySettlementModule {
+    ) external onlySettlementSidecar {
         accumulatedBadDebtUsdc += amountUsdc;
     }
 
     function settlementWritePosition(
-        bytes32 accountId,
+        address account,
         CfdEngineSettlementTypes.PositionState calldata position
-    ) external onlySettlementModule {
-        StoredPosition storage pos = _positions[accountId];
+    ) external onlySettlementSidecar {
+        StoredPosition storage pos = _positions[account];
         pos.size = position.size;
         pos.entryPrice = position.entryPrice;
         pos.maxProfitUsdc = position.maxProfitUsdc;
@@ -1305,42 +1297,40 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     }
 
     function settlementDeletePosition(
-        bytes32 accountId
-    ) external onlySettlementModule {
-        delete _positions[accountId];
+        address account
+    ) external onlySettlementSidecar {
+        delete _positions[account];
     }
 
     function _applyOpen(
         CfdEnginePlanTypes.OpenDelta memory delta,
         uint64 publishTime
     ) internal {
-        StoredPosition storage pos = _positions[delta.accountId];
-        CfdTypes.Position memory currentPosition = _loadPosition(delta.accountId);
+        StoredPosition storage pos = _positions[delta.account];
+        CfdTypes.Position memory currentPosition = _loadPosition(delta.account);
         if (pos.size > 0) {
-            _realizeCarryFromSettlement(
-                delta.accountId, pos, delta.price, _genericReachableCollateralUsdc(delta.accountId)
-            );
-            currentPosition = _loadPosition(delta.accountId);
+            _realizeCarryFromSettlement(delta.account, pos, delta.price, _genericReachableCollateralUsdc(delta.account));
+            currentPosition = _loadPosition(delta.account);
         }
-        settlementModule.executeOpen(ICfdEngineSettlementHost(address(this)), delta, currentPosition, publishTime);
+        settlementSidecar.executeOpen(ICfdEngineSettlementHost(address(this)), delta, currentPosition, publishTime);
         _assertPostSolvency();
 
-        emit PositionOpened(delta.accountId, delta.posSide, delta.sizeDelta, delta.price, delta.marginDeltaUsdc);
+        emit PositionOpened(delta.account, delta.posSide, delta.sizeDelta, delta.price, delta.marginDeltaUsdc);
     }
 
     function _applyClose(
         CfdEnginePlanTypes.CloseDelta memory delta,
         uint64 publishTime
     ) internal {
-        StoredPosition storage pos = _positions[delta.accountId];
+        StoredPosition storage pos = _positions[delta.account];
         CfdTypes.Side marginSide = pos.side;
-        CfdTypes.Position memory currentPosition = _loadPosition(delta.accountId);
-        settlementModule.executeClose(ICfdEngineSettlementHost(address(this)), delta, currentPosition, publishTime);
-        emit PositionClosed(delta.accountId, marginSide, delta.sizeDelta, delta.price, delta.realizedPnlUsdc);
+        CfdTypes.Position memory currentPosition = _loadPosition(delta.account);
+        settlementSidecar.executeClose(ICfdEngineSettlementHost(address(this)), delta, currentPosition, publishTime);
+        emit PositionClosed(delta.account, marginSide, delta.sizeDelta, delta.price, delta.realizedPnlUsdc);
 
-        unsettledCarryUsdc[delta.accountId] = 0;
+        unsettledCarryUsdc[delta.account] = 0;
 
-        _enterDegradedModeIfInsolvent(delta.accountId, 0);
+        _enterDegradedModeIfInsolvent(delta.account, 0);
     }
 
     function _applyLiquidation(
@@ -1348,54 +1338,54 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
         uint64 publishTime
     ) internal returns (uint256 keeperBountyUsdc) {
         keeperBountyUsdc =
-            settlementModule.executeLiquidation(ICfdEngineSettlementHost(address(this)), delta, publishTime);
-        emit PositionLiquidated(delta.accountId, delta.side, delta.posSize, delta.price, keeperBountyUsdc);
+            settlementSidecar.executeLiquidation(ICfdEngineSettlementHost(address(this)), delta, publishTime);
+        emit PositionLiquidated(delta.account, delta.side, delta.posSize, delta.price, keeperBountyUsdc);
 
-        unsettledCarryUsdc[delta.accountId] = 0;
+        unsettledCarryUsdc[delta.account] = 0;
 
-        _enterDegradedModeIfInsolvent(delta.accountId, keeperBountyUsdc);
+        _enterDegradedModeIfInsolvent(delta.account, keeperBountyUsdc);
     }
 
     function _enterDegradedModeIfInsolvent(
-        bytes32 accountId,
-        uint256 pendingVaultPayoutUsdc
+        address account,
+        uint256 pendingPoolPayoutUsdc
     ) internal {
         if (degradedMode) {
             return;
         }
         SolvencyAccountingLib.SolvencyState memory state = _buildAdjustedSolvencyState();
         uint256 effectiveAssetsAfter =
-            SolvencyAccountingLib.effectiveAssetsAfterPendingPayout(state, pendingVaultPayoutUsdc);
+            SolvencyAccountingLib.effectiveAssetsAfterPendingPayout(state, pendingPoolPayoutUsdc);
         if (effectiveAssetsAfter < state.maxLiabilityUsdc) {
             degradedMode = true;
-            emit DegradedModeEntered(effectiveAssetsAfter, state.maxLiabilityUsdc, accountId);
+            emit DegradedModeEntered(effectiveAssetsAfter, state.maxLiabilityUsdc, account);
         }
     }
 
     function _genericReachableCollateralUsdc(
-        bytes32 accountId
+        address account
     ) internal view returns (uint256) {
-        return MarginClearinghouseAccountingLib.getGenericReachableUsdc(clearinghouse.getAccountUsdcBuckets(accountId));
+        return MarginClearinghouseAccountingLib.getGenericReachableUsdc(clearinghouse.getAccountUsdcBuckets(account));
     }
 
     function _terminalReachableCollateralUsdc(
-        bytes32 accountId
+        address account
     ) internal view returns (uint256) {
-        return MarginClearinghouseAccountingLib.getTerminalReachableUsdc(clearinghouse.getAccountUsdcBuckets(accountId));
+        return MarginClearinghouseAccountingLib.getTerminalReachableUsdc(clearinghouse.getAccountUsdcBuckets(account));
     }
 
     function _positionMarginBucketUsdc(
-        bytes32 accountId
+        address account
     ) internal view returns (uint256) {
-        return clearinghouse.getLockedMarginBuckets(accountId).positionMarginUsdc;
+        return clearinghouse.getLockedMarginBuckets(account).positionMarginUsdc;
     }
 
     function _loadPosition(
-        bytes32 accountId
+        address account
     ) internal view returns (CfdTypes.Position memory pos) {
-        StoredPosition storage stored = _positions[accountId];
+        StoredPosition storage stored = _positions[account];
         pos.size = stored.size;
-        pos.margin = _positionMarginBucketUsdc(accountId);
+        pos.margin = _positionMarginBucketUsdc(account);
         pos.entryPrice = stored.entryPrice;
         pos.maxProfitUsdc = stored.maxProfitUsdc;
         pos.side = stored.side;
@@ -1421,84 +1411,82 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     }
 
     function _totalPendingCarryUsdc(
-        bytes32 accountId,
+        address account,
         CfdTypes.Position memory pos,
         uint256 price,
         uint256 reachableCollateralUsdc,
         uint256 timestampNow
     ) internal view returns (uint256) {
-        return unsettledCarryUsdc[accountId] + _elapsedCarryUsdc(pos, price, reachableCollateralUsdc, timestampNow);
+        return unsettledCarryUsdc[account] + _elapsedCarryUsdc(pos, price, reachableCollateralUsdc, timestampNow);
     }
 
     function _canFullyRealizeCarryFromSettlement(
-        bytes32 accountId,
+        address account,
         CfdTypes.Position memory pos,
         uint256 price
     ) internal view returns (bool) {
-        uint256 reachableCollateralUsdc = _genericReachableCollateralUsdc(accountId);
-        uint256 pendingCarryUsdc =
-            _totalPendingCarryUsdc(accountId, pos, price, reachableCollateralUsdc, block.timestamp);
+        uint256 reachableCollateralUsdc = _genericReachableCollateralUsdc(account);
+        uint256 pendingCarryUsdc = _totalPendingCarryUsdc(account, pos, price, reachableCollateralUsdc, block.timestamp);
         if (pendingCarryUsdc == 0) {
             return true;
         }
 
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(accountId);
-        return MarginClearinghouseAccountingLib.planFundingLossConsumption(buckets, pendingCarryUsdc).uncoveredUsdc == 0;
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(account);
+        return MarginClearinghouseAccountingLib.planCarryLossConsumption(buckets, pendingCarryUsdc).uncoveredUsdc == 0;
     }
 
     function _checkpointCarryBeforeBasisChange(
-        bytes32 accountId,
+        address account,
         StoredPosition storage pos,
         uint256 price,
         uint256 reachableCollateralUsdc
     ) internal {
-        if (_canFullyRealizeCarryFromSettlement(accountId, _loadPosition(accountId), price)) {
-            _realizeCarryFromSettlement(accountId, pos, price, reachableCollateralUsdc);
+        if (_canFullyRealizeCarryFromSettlement(account, _loadPosition(account), price)) {
+            _realizeCarryFromSettlement(account, pos, price, reachableCollateralUsdc);
             return;
         }
 
         uint256 elapsedCarryUsdc =
-            _elapsedCarryUsdc(_loadPosition(accountId), price, reachableCollateralUsdc, block.timestamp);
+            _elapsedCarryUsdc(_loadPosition(account), price, reachableCollateralUsdc, block.timestamp);
         if (elapsedCarryUsdc > 0) {
-            unsettledCarryUsdc[accountId] += elapsedCarryUsdc;
-            emit CarryCheckpointed(accountId, elapsedCarryUsdc, unsettledCarryUsdc[accountId]);
+            unsettledCarryUsdc[account] += elapsedCarryUsdc;
+            emit CarryCheckpointed(account, elapsedCarryUsdc, unsettledCarryUsdc[account]);
         }
         pos.lastCarryTimestamp = uint64(block.timestamp);
     }
 
     function _realizeCarryFromSettlement(
-        bytes32 accountId,
+        address account,
         StoredPosition storage pos,
         uint256 price,
         uint256 reachableCollateralUsdc
     ) internal returns (uint256 realizedCarryUsdc) {
-        CfdTypes.Position memory loaded = _loadPosition(accountId);
-        uint256 carryDueUsdc =
-            _totalPendingCarryUsdc(accountId, loaded, price, reachableCollateralUsdc, block.timestamp);
+        CfdTypes.Position memory loaded = _loadPosition(account);
+        uint256 carryDueUsdc = _totalPendingCarryUsdc(account, loaded, price, reachableCollateralUsdc, block.timestamp);
         if (carryDueUsdc == 0) {
             pos.lastCarryTimestamp = uint64(block.timestamp);
             return 0;
         }
 
-        uint256 marginBefore = _positionMarginBucketUsdc(accountId);
+        uint256 marginBefore = _positionMarginBucketUsdc(account);
         (uint256 marginConsumedUsdc, uint256 freeSettlementConsumedUsdc, uint256 uncoveredUsdc) =
-            clearinghouse.consumeSettlementLoss(accountId, marginBefore, carryDueUsdc, address(this));
+            clearinghouse.consumeSettlementLoss(account, marginBefore, carryDueUsdc, address(this));
         freeSettlementConsumedUsdc;
         realizedCarryUsdc = carryDueUsdc - uncoveredUsdc;
-        unsettledCarryUsdc[accountId] = uncoveredUsdc;
+        unsettledCarryUsdc[account] = uncoveredUsdc;
 
         if (marginConsumedUsdc > 0) {
             _syncTotalSideMargin(pos.side, marginBefore, marginBefore - marginConsumedUsdc);
         }
 
         if (realizedCarryUsdc > 0) {
-            USDC.safeTransfer(address(vault), realizedCarryUsdc);
-            vault.recordClaimantInflow(
-                realizedCarryUsdc, ICfdVault.ClaimantInflowKind.Revenue, ICfdVault.ClaimantInflowCashMode.CashArrived
+            USDC.safeTransfer(address(pool), realizedCarryUsdc);
+            pool.recordClaimantInflow(
+                realizedCarryUsdc, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.CashArrived
             );
         }
         emit CarryRealized(
-            accountId, realizedCarryUsdc, freeSettlementConsumedUsdc, marginConsumedUsdc, unsettledCarryUsdc[accountId]
+            account, realizedCarryUsdc, freeSettlementConsumedUsdc, marginConsumedUsdc, unsettledCarryUsdc[account]
         );
         pos.lastCarryTimestamp = uint64(block.timestamp);
     }
@@ -1509,7 +1497,7 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
             isOracleFrozen(),
             isFadWindow(),
             engineMarkStalenessLimit,
-            address(vault) == address(0) ? 0 : vault.markStalenessLimit(),
+            address(pool) == address(0) ? 0 : pool.markStalenessLimit(),
             0,
             0,
             fadMaxStaleness
@@ -1518,14 +1506,14 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     }
 
     function _consumeDeferredTraderPayout(
-        bytes32 accountId,
+        address account,
         uint256 amountUsdc
     ) internal {
         if (amountUsdc == 0) {
             return;
         }
 
-        deferredTraderCreditUsdc[accountId] -= amountUsdc;
+        deferredTraderCreditUsdc[account] -= amountUsdc;
         totalDeferredTraderCreditUsdc -= amountUsdc;
     }
 
@@ -1581,13 +1569,13 @@ contract CfdEngine is IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, Reentra
     }
 
     function _getProtocolPhase() internal view returns (ICfdEngine.ProtocolPhase) {
-        if (address(vault) == address(0) || orderRouter == address(0)) {
+        if (address(pool) == address(0) || orderRouter == address(0)) {
             return ICfdEngine.ProtocolPhase.Configuring;
         }
         if (degradedMode) {
             return ICfdEngine.ProtocolPhase.Degraded;
         }
-        if (!vault.canIncreaseRisk()) {
+        if (!pool.canIncreaseRisk()) {
             return ICfdEngine.ProtocolPhase.Configuring;
         }
         return ICfdEngine.ProtocolPhase.Active;

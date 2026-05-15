@@ -52,7 +52,7 @@
 <text x="194.27499999999998" y="244" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#166534">Closed</text>
 <text x="605.475" y="244" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#991b1b">Liquidated</text>
 <text x="889.125" y="151" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#737373">IMR ≥ 150% MMR · min notional for keeper bounty</text>
-<text x="1035.7" y="244" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#737373">While active: increase (same side) or partial close (dust guard) · each settles funding + VPI</text>
+<text x="1035.7" y="244" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#737373">While active: increase (same side) or partial close (dust guard) · each settles carry + VPI</text>
 <text x="194.275" y="320" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#737373">PnL settled · position struct deleted</text>
 <text x="605.475" y="320" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#737373">Margin seized · bounty paid · FAD: elevated MMR on weekends</text>
 </svg>

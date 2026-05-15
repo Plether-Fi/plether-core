@@ -126,8 +126,8 @@ contract AuditHousePoolViewFindingsFailing_StaleYieldBackfill is BasePerpTest {
         _fundJunior(juniorLp, 200_000e6);
         _fundTrader(trader, 50_000e6);
 
-        bytes32 traderId = bytes32(uint256(uint160(trader)));
-        _open(traderId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        address traderAccount = trader;
+        _open(traderAccount, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
         uint256 before = pool.lastReconcileTime();
 
@@ -162,14 +162,14 @@ contract AuditHousePoolViewFindingsFailing_ProjectedLegacySpreadViews is BasePer
     }
 
     function test_L2_SimpleHealthViewsMustUseProjectedCarryState() public {
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         _fundTrader(trader, 50_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
         vm.warp(block.timestamp + 30 days);
 
-        engineAccountLens.getAccountLedgerSnapshot(accountId);
-        engineLens.previewLiquidation(accountId, 1e8);
+        engineAccountLens.getAccountLedgerSnapshot(account);
+        engineLens.previewLiquidation(account, 1e8);
     }
 
 }
@@ -202,8 +202,8 @@ contract AuditHousePoolViewFindingsFailing_WithdrawalCapLiveness is BasePerpTest
         _fundJunior(juniorLp, 100_000e6);
         _fundTrader(trader, 50_000e6);
 
-        bytes32 traderId = bytes32(uint256(uint160(trader)));
-        _open(traderId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        address traderAccount = trader;
+        _open(traderAccount, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
         vm.warp(block.timestamp + 121);
 
@@ -225,11 +225,11 @@ contract AuditHousePoolViewFindingsFailing_GrossAssetsReconstruction is BasePerp
 
     function test_M2_GrossAssetsMustNotExceedActualCashWhenFeesExceedCash() public {
         address trader = address(0x1234);
-        bytes32 traderId = bytes32(uint256(uint160(trader)));
+        address traderAccount = trader;
 
         _fundJunior(address(this), 500_000e6);
         _fundTrader(trader, 50_000e6);
-        _open(traderId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(traderAccount, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
         uint256 fees = engine.accumulatedFeesUsdc();
         assertGt(fees, 0, "Setup must accrue protocol fees");

@@ -21,19 +21,19 @@ abstract contract OrderCommitHandler is OrderValidation {
         }
         _validateBaseCommit(sizeDelta, marginDelta, isClose);
 
-        bytes32 accountId = bytes32(uint256(uint160(msg.sender)));
+        address account = msg.sender;
         uint256 executionBountyUsdc = isClose
-            ? _validatedCloseExecutionBountyUsdc(accountId, side, sizeDelta)
-            : _validatedOpenExecutionBountyUsdc(accountId, side, sizeDelta, marginDelta);
+            ? _validatedCloseExecutionBountyUsdc(account, side, sizeDelta)
+            : _validatedOpenExecutionBountyUsdc(account, side, sizeDelta, marginDelta);
 
         uint64 orderId = nextCommitId++;
 
-        _reserveExecutionBounty(accountId, orderId, sizeDelta, executionBountyUsdc, isClose);
-        _reserveCommittedMargin(accountId, orderId, isClose, marginDelta);
+        _reserveExecutionBounty(account, orderId, sizeDelta, executionBountyUsdc, isClose);
+        _reserveCommittedMargin(account, orderId, isClose, marginDelta);
 
         OrderRecord storage record = orderRecords[orderId];
         record.core = CfdTypes.Order({
-            accountId: accountId,
+            account: account,
             sizeDelta: sizeDelta,
             marginDelta: marginDelta,
             targetPrice: targetPrice,
@@ -45,21 +45,21 @@ abstract contract OrderCommitHandler is OrderValidation {
         });
         record.status = IOrderRouterAccounting.OrderStatus.Pending;
         if (isClose) {
-            pendingCloseSize[accountId] += sizeDelta;
+            pendingCloseSize[account] += sizeDelta;
         }
         _linkGlobalOrder(orderId);
-        _linkAccountOrder(accountId, orderId);
-        if (++pendingOrderCounts[accountId] > maxPendingOrders) {
+        _linkAccountOrder(account, orderId);
+        if (++pendingOrderCounts[account] > maxPendingOrders) {
             revert IOrderRouterErrors.OrderRouter__CommitValidation(7);
         }
-        emit OrderCommitted(orderId, accountId, side);
+        emit OrderCommitted(orderId, account, side);
     }
 
     function _syncMarginQueue(
-        bytes32 accountId
+        address account
     ) internal {
         _onlyEngine();
-        _pruneMarginQueue(accountId);
+        _pruneMarginQueue(account);
     }
 
     function _getPendingOrderView(

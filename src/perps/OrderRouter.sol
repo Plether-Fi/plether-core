@@ -6,8 +6,8 @@ import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterAdminHost} from "./interfaces/IOrderRouterAdminHost.sol";
 import {IPerpsKeeper} from "./interfaces/IPerpsKeeper.sol";
 import {IPerpsTraderActions} from "./interfaces/IPerpsTraderActions.sol";
-import {OrderHandler} from "./modules/OrderHandler.sol";
-import {OrderRouterBase} from "./modules/OrderRouterBase.sol";
+import {OrderHandler} from "./router/OrderHandler.sol";
+import {OrderRouterBase} from "./router/OrderRouterBase.sol";
 
 /// @title OrderRouter (The MEV Shield)
 /// @notice Manages Commit-Reveal, MEV protection, and the un-brickable FIFO queue.
@@ -59,9 +59,9 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
 
     /// @notice Returns the total queued escrow state for an account across all pending orders.
     function syncMarginQueue(
-        bytes32 accountId
+        address account
     ) external {
-        _syncMarginQueue(accountId);
+        _syncMarginQueue(account);
     }
 
     function getPendingOrderView(
@@ -119,13 +119,13 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
     /// @notice Keeper-triggered liquidation using the canonical live-market staleness policy.
     ///         Forfeits any queued-order execution escrow to the HousePool instead of crediting it back to trader settlement,
     ///         then credits the liquidation keeper through the clearinghouse when cash is available.
-    /// @param accountId The account to liquidate (bytes32-encoded address)
+    /// @param account The account to liquidate
     /// @param pythUpdateData Pyth price update blobs; attach ETH to cover the Pyth fee
     function executeLiquidation(
-        bytes32 accountId,
+        address account,
         bytes[] calldata pythUpdateData
     ) external payable {
-        _executeLiquidation(accountId, pythUpdateData);
+        _executeLiquidation(account, pythUpdateData);
     }
 
 }

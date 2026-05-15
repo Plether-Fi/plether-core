@@ -6,7 +6,7 @@ import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdEngineAdmin} from "../../src/perps/CfdEngineAdmin.sol";
 import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
 import {CfdEnginePlanner} from "../../src/perps/CfdEnginePlanner.sol";
-import {CfdEngineSettlementModule} from "../../src/perps/CfdEngineSettlementModule.sol";
+import {CfdEngineSettlementSidecar} from "../../src/perps/CfdEngineSettlementSidecar.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
@@ -115,7 +115,7 @@ contract PerpsForkTest is Test {
 
         engine = new CfdEngine(USDC, address(clearinghouse), CAP_PRICE, params);
         CfdEnginePlanner planner = new CfdEnginePlanner();
-        CfdEngineSettlementModule settlement = new CfdEngineSettlementModule(address(engine));
+        CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(engine));
         CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
         engine.setDependencies(address(planner), address(settlement), address(engineAdmin));
         pool = new HousePool(USDC, address(engine));
@@ -124,7 +124,7 @@ contract PerpsForkTest is Test {
         juniorVault = new TrancheVault(IERC20(USDC), address(pool), false, "Junior LP", "junUSDC");
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         pyth = new ControllablePyth();
         feedIds.push(EUR_USD_FEED_ID);
@@ -175,7 +175,7 @@ contract PerpsForkTest is Test {
         deal(USDC, trader, IERC20(USDC).balanceOf(trader) + amount);
         vm.startPrank(trader);
         IERC20(USDC).approve(address(clearinghouse), amount);
-        clearinghouse.deposit(bytes32(uint256(uint160(trader))), amount);
+        clearinghouse.deposit(trader, amount);
         vm.stopPrank();
     }
 
@@ -203,10 +203,10 @@ contract PerpsForkTest is Test {
         router.executeOrder(orderId, empty);
     }
 
-    function _accountId(
+    function _account(
         address trader
-    ) internal pure returns (bytes32) {
-        return bytes32(uint256(uint160(trader)));
+    ) internal pure returns (address) {
+        return trader;
     }
 
     function _sideOpenInterest(
@@ -302,15 +302,15 @@ contract PerpsForkTest is Test {
         // Open BULL $50k at $1.00
         this._commitAndExecute(alice, CfdTypes.Side.BULL, 50_000e18, 5000e6, 1e8, int64(100_000_000), false);
 
-        bytes32 aliceId = _accountId(alice);
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        address aliceAccount = _account(alice);
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 50_000e18, "Position should be 50k tokens");
 
         // Close at $0.90 (BULL profits when price drops)
         vm.warp(block.timestamp + 60);
         this._commitAndExecute(alice, CfdTypes.Side.BULL, 50_000e18, 0, 0, int64(90_000_000), true);
 
-        (size,,,,,,) = engine.positions(aliceId);
+        (size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 0, "Position should be closed");
 
         // Verify USDC conservation across all contracts
@@ -383,8 +383,8 @@ contract PerpsForkTest is Test {
         vm.prank(keeper);
         router.executeOrder(orderId, _pythUpdateData());
 
-        bytes32 aliceId = _accountId(alice);
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        address aliceAccount = _account(alice);
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 0, "MEV-tainted order should not open position");
         assertEq(
             router.nextExecuteId(),
@@ -408,8 +408,8 @@ contract PerpsForkTest is Test {
         vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
         router.executeOrder(orderId, _pythUpdateData());
 
-        bytes32 aliceId = _accountId(alice);
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        address aliceAccount = _account(alice);
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 0, "61-second stale price should not open a position");
         assertEq(router.nextExecuteId(), orderId, "Stale price revert should leave order pending");
     }
@@ -428,8 +428,8 @@ contract PerpsForkTest is Test {
         vm.prank(keeper);
         router.executeOrder(orderId, _pythUpdateData());
 
-        bytes32 aliceId = _accountId(alice);
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        address aliceAccount = _account(alice);
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertGt(size, 0, "59-second-old price should execute");
         assertEq(
             router.nextExecuteId(), 0, "Successful execution should advance the queue and clear to the zero sentinel"
@@ -440,14 +440,14 @@ contract PerpsForkTest is Test {
         _depositToClearinghouse(alice, 10_000e6);
         this._commitAndExecute(alice, CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, int64(100_000_000), false);
 
-        bytes32 aliceId = _accountId(alice);
+        address aliceAccount = _account(alice);
         uint256 liqPublishTime = block.timestamp + 1;
         pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), liqPublishTime);
         vm.warp(liqPublishTime + 16);
 
         vm.prank(keeper);
         vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 12));
-        router.executeLiquidation(aliceId, _pythUpdateData());
+        router.executeLiquidation(aliceAccount, _pythUpdateData());
     }
 
     // ==========================================
@@ -460,8 +460,8 @@ contract PerpsForkTest is Test {
         // Open BULL $100k at $1.00
         this._commitAndExecute(alice, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8, int64(100_000_000), false);
 
-        bytes32 aliceId = _accountId(alice);
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        address aliceAccount = _account(alice);
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertGt(size, 0, "Position should exist");
 
         uint256 poolBefore = IERC20(USDC).balanceOf(address(pool));
@@ -475,9 +475,9 @@ contract PerpsForkTest is Test {
 
         bytes[] memory empty = _pythUpdateData();
         vm.prank(keeper);
-        router.executeLiquidation(aliceId, empty);
+        router.executeLiquidation(aliceAccount, empty);
 
-        (size,,,,,,) = engine.positions(aliceId);
+        (size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 0, "Position should be liquidated");
 
         uint256 keeperGain = IERC20(USDC).balanceOf(keeper) - keeperBefore;
@@ -515,8 +515,8 @@ contract PerpsForkTest is Test {
         emit log_named_uint("executeOrder gas", executeGas);
         assertLt(executeGas, 550_000, "executeOrder should use < 550k gas");
 
-        bytes32 aliceId = _accountId(alice);
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        address aliceAccount = _account(alice);
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertGt(size, 0, "Position must exist for liquidation test");
 
         // Move price to make position liquidatable
@@ -526,7 +526,7 @@ contract PerpsForkTest is Test {
 
         gasBefore = gasleft();
         vm.prank(keeper);
-        router.executeLiquidation(aliceId, empty);
+        router.executeLiquidation(aliceAccount, empty);
         uint256 liquidateGas = gasBefore - gasleft();
 
         emit log_named_uint("executeLiquidation gas", liquidateGas);
@@ -596,8 +596,8 @@ contract PerpsForkTest is Test {
         // Lone BULL $200k -> max skew, carry will drain margin
         this._commitAndExecute(alice, CfdTypes.Side.BULL, 200_000e18, 40_000e6, 1e8, int64(100_000_000), false);
 
-        bytes32 aliceId = _accountId(alice);
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        address aliceAccount = _account(alice);
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertGt(size, 0, "Position should exist");
 
         int256 bullIdxBefore = _legacySideIndexZero(CfdTypes.Side.BULL);
@@ -659,13 +659,13 @@ contract PerpsForkTest is Test {
         assertGe(seniorAfter, seniorBefore, "Senior should not lose principal");
 
         // Verify Alice got her profit in real USDC
-        uint256 aliceBalance = clearinghouse.balanceUsdc(_accountId(alice));
+        uint256 aliceBalance = clearinghouse.balanceUsdc(_account(alice));
         assertGt(aliceBalance, 50_000e6, "Alice should have profit");
 
         // Verify real USDC withdrawal from clearinghouse
         uint256 aliceUsdcBefore = IERC20(USDC).balanceOf(alice);
         vm.prank(alice);
-        clearinghouse.withdraw(_accountId(alice), aliceBalance);
+        clearinghouse.withdraw(_account(alice), aliceBalance);
         uint256 aliceUsdcAfter = IERC20(USDC).balanceOf(alice);
         assertEq(aliceUsdcAfter - aliceUsdcBefore, aliceBalance, "Real USDC withdrawal should match");
     }
@@ -675,12 +675,12 @@ contract PerpsForkTest is Test {
 
         this._commitAndExecute(alice, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8, int64(100_000_000), false);
 
-        bytes32 aliceId = _accountId(alice);
+        address aliceAccount = _account(alice);
         uint256 poolAssets = IERC20(USDC).balanceOf(address(pool));
         vm.prank(address(pool));
         IERC20(USDC).transfer(address(0xDEAD), poolAssets - 9000e6);
 
-        uint256 chBefore = clearinghouse.balanceUsdc(aliceId);
+        uint256 chBefore = clearinghouse.balanceUsdc(aliceAccount);
         uint256 closeBountyUsdc = 1e6;
 
         uint256 commitTime = block.timestamp;
@@ -692,11 +692,11 @@ contract PerpsForkTest is Test {
         vm.prank(keeper);
         router.executeOrder(2, _pythUpdateData());
 
-        uint256 deferred = engine.deferredTraderCreditUsdc(aliceId);
+        uint256 deferred = engine.deferredTraderCreditUsdc(aliceAccount);
         assertGt(deferred, 0, "Illiquid profitable close should record a deferred payout");
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 0, "Position should be closed even when payout is deferred");
-        uint256 chAfterClose = clearinghouse.balanceUsdc(aliceId);
+        uint256 chAfterClose = clearinghouse.balanceUsdc(aliceAccount);
         assertLt(
             chAfterClose,
             chBefore,
@@ -713,11 +713,11 @@ contract PerpsForkTest is Test {
         pool.recordProtocolInflow(deferred);
 
         vm.prank(alice);
-        engine.claimDeferredTraderCredit(aliceId);
+        engine.claimDeferredTraderCredit(aliceAccount);
 
-        assertEq(engine.deferredTraderCreditUsdc(aliceId), 0, "Claim should clear deferred payout state");
+        assertEq(engine.deferredTraderCreditUsdc(aliceAccount), 0, "Claim should clear deferred payout state");
         assertEq(
-            clearinghouse.balanceUsdc(aliceId),
+            clearinghouse.balanceUsdc(aliceAccount),
             chAfterClose + deferred,
             "Claim should credit deferred USDC on top of the post-close settlement balance"
         );
@@ -728,7 +728,7 @@ contract PerpsForkTest is Test {
 
         this._commitAndExecute(alice, CfdTypes.Side.BULL, 100_000e18, 8000e6, 1e8, int64(100_000_000), false);
 
-        bytes32 aliceId = _accountId(alice);
+        address aliceAccount = _account(alice);
         uint256 poolAssets = IERC20(USDC).balanceOf(address(pool));
         vm.prank(address(pool));
         IERC20(USDC).transfer(address(0xDEAD), poolAssets - 8000e6);
@@ -752,9 +752,9 @@ contract PerpsForkTest is Test {
             0,
             "Batch execution should continue past a deferred-payout close and clear the queue when exhausted"
         );
-        assertGt(engine.deferredTraderCreditUsdc(aliceId), 0, "Deferred payout should remain recorded after the batch");
+        assertGt(engine.deferredTraderCreditUsdc(aliceAccount), 0, "Deferred payout should remain recorded after the batch");
 
-        (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(aliceId);
+        (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(aliceAccount);
         assertEq(
             size,
             0,

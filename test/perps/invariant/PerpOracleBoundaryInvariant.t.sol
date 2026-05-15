@@ -64,9 +64,9 @@ contract PerpOracleBoundaryInvariantTest is BasePerpInvariantTest {
 
     function invariant_PositionViewsRespectCurrentFadMode() public view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
-            bytes32 accountId = bytes32(uint256(uint160(handler.actorAt(i))));
+            address account = handler.actorAt(i);
             AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
-                engineAccountLens.getAccountLedgerSnapshot(accountId);
+                engineAccountLens.getAccountLedgerSnapshot(account);
             if (!snapshot.hasPosition) {
                 continue;
             }

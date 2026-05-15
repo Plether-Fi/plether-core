@@ -132,8 +132,8 @@ contract PerpOracleHandler is Test {
     function _ensureOpenPosition(
         address actor
     ) internal {
-        bytes32 accountId = bytes32(uint256(uint160(actor)));
-        (uint256 size,,,,,,) = engine.positions(accountId);
+        address account = actor;
+        (uint256 size,,,,,,) = engine.positions(account);
         if (size > 0) {
             return;
         }
@@ -142,7 +142,7 @@ contract PerpOracleHandler is Test {
         uint64 orderId = router.nextCommitId();
         vm.startPrank(actor);
         usdc.approve(address(clearinghouse), type(uint256).max);
-        clearinghouse.deposit(accountId, 25_000e6);
+        clearinghouse.deposit(account, 25_000e6);
         router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 10_000e6, 0, false);
         vm.stopPrank();
 

@@ -59,7 +59,7 @@ contract AuditExecutionPathFindingsFailing_EthRefundFallback is BasePerpTest {
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         mockPyth = new MockPyth();
 
@@ -125,7 +125,7 @@ contract AuditExecutionPathFindingsFailing_CommitPrefilterFeeParity is BasePerpT
 
     function test_H2_CommitPrefilterMustRejectFeeDrainedOpen() public {
         address trader = address(0xE113);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         uint256 sizeDelta = 100_000e18;
         uint256 marginDelta = 1500e6;
 
@@ -135,10 +135,10 @@ contract AuditExecutionPathFindingsFailing_CommitPrefilterFeeParity is BasePerpT
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
         uint8 revertCode = engineLens.previewOpenRevertCode(
-            accountId, CfdTypes.Side.BULL, sizeDelta, marginDelta, 1e8, uint64(block.timestamp)
+            account, CfdTypes.Side.BULL, sizeDelta, marginDelta, 1e8, uint64(block.timestamp)
         );
         CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory = engineLens.previewOpenFailurePolicyCategory(
-            accountId, CfdTypes.Side.BULL, sizeDelta, marginDelta, 1e8, uint64(block.timestamp)
+            account, CfdTypes.Side.BULL, sizeDelta, marginDelta, 1e8, uint64(block.timestamp)
         );
 
         assertEq(

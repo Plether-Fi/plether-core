@@ -5,20 +5,20 @@ import {CfdEnginePlanTypes} from "./CfdEnginePlanTypes.sol";
 import {CfdTypes} from "./CfdTypes.sol";
 import {CfdEngineSettlementTypes} from "./interfaces/CfdEngineSettlementTypes.sol";
 import {ICfdEngineSettlementHost} from "./interfaces/ICfdEngineSettlementHost.sol";
-import {ICfdEngineSettlementModule} from "./interfaces/ICfdEngineSettlementModule.sol";
-import {ICfdVault} from "./interfaces/ICfdVault.sol";
+import {ICfdEngineSettlementSidecar} from "./interfaces/ICfdEngineSettlementSidecar.sol";
+import {IHousePool} from "./interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "./interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
 
-/// @title CfdEngineSettlementModule
+/// @title CfdEngineSettlementSidecar
 /// @notice Externalized settlement executor for `CfdEngine` close and liquidation flows.
-/// @dev `CfdEngine` remains the storage owner and grants this module access only through narrow
-///      settlement-host hooks. The module does not own independent protocol state.
-contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
+/// @dev `CfdEngine` remains the storage owner and grants this sidecar access only through narrow
+///      settlement-host hooks. The sidecar does not own independent protocol state.
+contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
 
     address public immutable ENGINE;
 
-    error CfdEngineSettlementModule__Unauthorized();
+    error CfdEngineSettlementSidecar__Unauthorized();
 
     constructor(
         address engine_
@@ -28,13 +28,13 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
 
     modifier onlyEngine() {
         if (msg.sender != ENGINE) {
-            revert CfdEngineSettlementModule__Unauthorized();
+            revert CfdEngineSettlementSidecar__Unauthorized();
         }
         _;
     }
 
     /// @notice Applies the live open/increase settlement plan produced by the planner.
-    /// @dev Realizes carry, fee, and vault-flow side effects through the settlement host while keeping
+    /// @dev Realizes carry, fee, and pool-flow side effects through the settlement host while keeping
     ///      the engine as the canonical state owner.
     function executeOpen(
         ICfdEngineSettlementHost host,
@@ -42,30 +42,30 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
         CfdTypes.Position calldata currentPosition,
         uint64 publishTime
     ) external onlyEngine {
-        host.settlementApplyFundingAndMark(delta.price, publishTime);
+        host.settlementApplyCarryAndMark(delta.price, publishTime);
         CfdTypes.Side marginSide = currentPosition.size > 0 ? currentPosition.side : delta.posSide;
         uint256 marginBefore =
-            IMarginClearinghouse(host.clearinghouse()).getLockedMarginBuckets(delta.accountId).positionMarginUsdc;
+            IMarginClearinghouse(host.clearinghouse()).getLockedMarginBuckets(delta.account).positionMarginUsdc;
 
-        if (delta.vaultRebatePayoutUsdc > 0) {
-            ICfdVault(host.vault()).payOut(host.clearinghouse(), delta.vaultRebatePayoutUsdc);
+        if (delta.poolRebatePayoutUsdc > 0) {
+            IHousePool(host.pool()).payOut(host.clearinghouse(), delta.poolRebatePayoutUsdc);
         }
 
         int256 netMarginChange = IMarginClearinghouse(host.clearinghouse())
-            .applyOpenCost(delta.accountId, delta.marginDeltaUsdc, delta.tradeCostUsdc, host.vault());
+            .applyOpenCost(delta.account, delta.marginDeltaUsdc, delta.tradeCostUsdc, host.pool());
         if (delta.tradeCostUsdc > 0) {
             uint256 protocolFeeInflowUsdc = uint256(delta.tradeCostUsdc) > delta.executionFeeUsdc
                 ? delta.executionFeeUsdc
                 : uint256(delta.tradeCostUsdc);
             if (protocolFeeInflowUsdc > 0) {
-                ICfdVault(host.vault()).recordProtocolInflow(protocolFeeInflowUsdc);
+                IHousePool(host.pool()).recordProtocolInflow(protocolFeeInflowUsdc);
             }
             if (uint256(delta.tradeCostUsdc) > protocolFeeInflowUsdc) {
-                ICfdVault(host.vault())
+                IHousePool(host.pool())
                     .recordClaimantInflow(
                         uint256(delta.tradeCostUsdc) - protocolFeeInflowUsdc,
-                        ICfdVault.ClaimantInflowKind.Revenue,
-                        ICfdVault.ClaimantInflowCashMode.CashArrived
+                        IHousePool.ClaimantInflowKind.Revenue,
+                        IHousePool.ClaimantInflowCashMode.CashArrived
                     );
             }
         }
@@ -83,7 +83,7 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
             host.settlementAccumulateFees(delta.executionFeeUsdc);
         }
         host.settlementWritePosition(
-            delta.accountId,
+            delta.account,
             CfdEngineSettlementTypes.PositionState({
                 deletePosition: false,
                 size: delta.newPosSize,
@@ -105,9 +105,9 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
         CfdTypes.Position calldata currentPosition,
         uint64 publishTime
     ) external onlyEngine {
-        host.settlementApplyFundingAndMark(delta.price, publishTime);
+        host.settlementApplyCarryAndMark(delta.price, publishTime);
         uint256 marginBefore =
-            IMarginClearinghouse(host.clearinghouse()).getLockedMarginBuckets(delta.accountId).positionMarginUsdc;
+            IMarginClearinghouse(host.clearinghouse()).getLockedMarginBuckets(delta.account).positionMarginUsdc;
         host.settlementSyncTotalSideMargin(delta.side, marginBefore, delta.posMarginAfter);
         host.settlementApplySideDelta(
             delta.side,
@@ -116,31 +116,31 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
             -int256(delta.sideEntryNotionalReduction)
         );
 
-        IMarginClearinghouse(host.clearinghouse()).unlockPositionMargin(delta.accountId, delta.unlockMarginUsdc);
+        IMarginClearinghouse(host.clearinghouse()).unlockPositionMargin(delta.account, delta.unlockMarginUsdc);
 
         if (delta.settlementType == CfdEnginePlanTypes.SettlementType.GAIN) {
             if (delta.freshTraderPayoutUsdc > 0) {
-                host.settlementRecordDeferredTraderPayout(delta.accountId, delta.freshTraderPayoutUsdc);
+                host.settlementRecordDeferredTraderPayout(delta.account, delta.freshTraderPayoutUsdc);
             }
             if (delta.pendingCarryUsdc > 0) {
-                ICfdVault(host.vault())
+                IHousePool(host.pool())
                     .recordClaimantInflow(
                         delta.pendingCarryUsdc,
-                        ICfdVault.ClaimantInflowKind.Revenue,
-                        ICfdVault.ClaimantInflowCashMode.AlreadyRetained
+                        IHousePool.ClaimantInflowKind.Revenue,
+                        IHousePool.ClaimantInflowCashMode.AlreadyRetained
                     );
             }
         } else if (delta.settlementType == CfdEnginePlanTypes.SettlementType.LOSS) {
             uint64[] memory reservationOrderIds =
-                IOrderRouterAccounting(host.orderRouter()).getMarginReservationIds(delta.accountId);
+                IOrderRouterAccounting(host.orderRouter()).getMarginReservationIds(delta.account);
             (uint256 seizedUsdc,) = IMarginClearinghouse(host.clearinghouse())
                 .consumeCloseLoss(
-                    delta.accountId,
+                    delta.account,
                     reservationOrderIds,
                     delta.lossUsdc,
                     delta.posMarginAfter,
                     delta.deletePosition,
-                    host.vault()
+                    host.pool()
                 );
             uint256 cashCollectedExecutionFeeUsdc = delta.executionFeeUsdc > delta.deferredFeeRecoveryUsdc
                 ? delta.executionFeeUsdc - delta.deferredFeeRecoveryUsdc
@@ -149,32 +149,32 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
                 seizedUsdc > cashCollectedExecutionFeeUsdc ? cashCollectedExecutionFeeUsdc : seizedUsdc;
             if (seizedUsdc > 0) {
                 if (protocolFeeInflowUsdc > 0) {
-                    ICfdVault(host.vault()).recordProtocolInflow(protocolFeeInflowUsdc);
+                    IHousePool(host.pool()).recordProtocolInflow(protocolFeeInflowUsdc);
                 }
                 if (seizedUsdc > protocolFeeInflowUsdc) {
-                    ICfdVault(host.vault())
+                    IHousePool(host.pool())
                         .recordClaimantInflow(
                             seizedUsdc - protocolFeeInflowUsdc,
-                            ICfdVault.ClaimantInflowKind.Revenue,
-                            ICfdVault.ClaimantInflowCashMode.CashArrived
+                            IHousePool.ClaimantInflowKind.Revenue,
+                            IHousePool.ClaimantInflowCashMode.CashArrived
                         );
                 }
             }
             if (delta.syncMarginQueueAmount > 0) {
-                IOrderRouterAccounting(host.orderRouter()).syncMarginQueue(delta.accountId);
+                IOrderRouterAccounting(host.orderRouter()).syncMarginQueue(delta.account);
             }
             if (delta.existingDeferredConsumedUsdc > 0) {
-                host.settlementConsumeDeferredTraderPayout(delta.accountId, delta.existingDeferredConsumedUsdc);
+                host.settlementConsumeDeferredTraderPayout(delta.account, delta.existingDeferredConsumedUsdc);
             }
             if (delta.badDebtUsdc > 0) {
                 host.settlementAccumulateBadDebt(delta.badDebtUsdc);
             }
         } else if (delta.pendingCarryUsdc > 0) {
-            ICfdVault(host.vault())
+            IHousePool(host.pool())
                 .recordClaimantInflow(
                     delta.pendingCarryUsdc,
-                    ICfdVault.ClaimantInflowKind.Revenue,
-                    ICfdVault.ClaimantInflowCashMode.AlreadyRetained
+                    IHousePool.ClaimantInflowKind.Revenue,
+                    IHousePool.ClaimantInflowCashMode.AlreadyRetained
                 );
         }
 
@@ -183,10 +183,10 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
         }
 
         if (delta.deletePosition) {
-            host.settlementDeletePosition(delta.accountId);
+            host.settlementDeletePosition(delta.account);
         } else {
             host.settlementWritePosition(
-                delta.accountId,
+                delta.account,
                 CfdEngineSettlementTypes.PositionState({
                     deletePosition: false,
                     size: delta.closeState.remainingSize,
@@ -208,7 +208,7 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
         CfdEnginePlanTypes.LiquidationDelta calldata delta,
         uint64 publishTime
     ) external onlyEngine returns (uint256 keeperBountyUsdc) {
-        host.settlementApplyFundingAndMark(delta.price, publishTime);
+        host.settlementApplyCarryAndMark(delta.price, publishTime);
         host.settlementApplySideDelta(
             delta.side,
             -int256(delta.sideMaxProfitDecrease),
@@ -219,7 +219,7 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
 
         keeperBountyUsdc = delta.keeperBountyUsdc;
         uint64[] memory reservationOrderIds =
-            IOrderRouterAccounting(host.orderRouter()).getMarginReservationIds(delta.accountId);
+            IOrderRouterAccounting(host.orderRouter()).getMarginReservationIds(delta.account);
         IMarginClearinghouse.LiquidationSettlementPlan memory settlementPlan =
             IMarginClearinghouse.LiquidationSettlementPlan({
                 settlementRetainedUsdc: delta.settlementRetainedUsdc,
@@ -230,42 +230,42 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
                 otherLockedMarginUnlockedUsdc: delta.residualPlan.mutation.otherLockedMarginUnlockedUsdc
             });
         uint256 seizedUsdc = IMarginClearinghouse(host.clearinghouse())
-            .applyLiquidationSettlementPlan(delta.accountId, reservationOrderIds, settlementPlan, host.vault());
+            .applyLiquidationSettlementPlan(delta.account, reservationOrderIds, settlementPlan, host.pool());
         uint256 keeperBountyInflowUsdc = seizedUsdc > delta.keeperBountyUsdc ? delta.keeperBountyUsdc : seizedUsdc;
         if (seizedUsdc > 0) {
             if (keeperBountyInflowUsdc > 0) {
-                ICfdVault(host.vault()).recordProtocolInflow(keeperBountyInflowUsdc);
+                IHousePool(host.pool()).recordProtocolInflow(keeperBountyInflowUsdc);
             }
             if (seizedUsdc > keeperBountyInflowUsdc) {
-                ICfdVault(host.vault())
+                IHousePool(host.pool())
                     .recordClaimantInflow(
                         seizedUsdc - keeperBountyInflowUsdc,
-                        ICfdVault.ClaimantInflowKind.Revenue,
-                        ICfdVault.ClaimantInflowCashMode.CashArrived
+                        IHousePool.ClaimantInflowKind.Revenue,
+                        IHousePool.ClaimantInflowCashMode.CashArrived
                     );
             }
         }
         if (delta.syncMarginQueueAmount > 0) {
-            IOrderRouterAccounting(host.orderRouter()).syncMarginQueue(delta.accountId);
+            IOrderRouterAccounting(host.orderRouter()).syncMarginQueue(delta.account);
         }
         if (delta.existingDeferredConsumedUsdc > 0) {
-            host.settlementConsumeDeferredTraderPayout(delta.accountId, delta.existingDeferredConsumedUsdc);
+            host.settlementConsumeDeferredTraderPayout(delta.account, delta.existingDeferredConsumedUsdc);
         }
         if (delta.freshTraderPayoutUsdc > 0) {
-            host.settlementRecordDeferredTraderPayout(delta.accountId, delta.freshTraderPayoutUsdc);
+            host.settlementRecordDeferredTraderPayout(delta.account, delta.freshTraderPayoutUsdc);
             if (delta.pendingCarryUsdc > 0) {
-                ICfdVault(host.vault())
+                IHousePool(host.pool())
                     .recordClaimantInflow(
                         delta.pendingCarryUsdc,
-                        ICfdVault.ClaimantInflowKind.Revenue,
-                        ICfdVault.ClaimantInflowCashMode.AlreadyRetained
+                        IHousePool.ClaimantInflowKind.Revenue,
+                        IHousePool.ClaimantInflowCashMode.AlreadyRetained
                     );
             }
         }
         if (delta.badDebtUsdc > 0) {
             host.settlementAccumulateBadDebt(delta.badDebtUsdc);
         }
-        host.settlementDeletePosition(delta.accountId);
+        host.settlementDeletePosition(delta.account);
     }
 
 }

@@ -8,7 +8,7 @@ import {CfdEngineAdmin} from "../../src/perps/CfdEngineAdmin.sol";
 import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
 import {CfdEnginePlanner} from "../../src/perps/CfdEnginePlanner.sol";
 import {CfdEngineProtocolLens} from "../../src/perps/CfdEngineProtocolLens.sol";
-import {CfdEngineSettlementModule} from "../../src/perps/CfdEngineSettlementModule.sol";
+import {CfdEngineSettlementSidecar} from "../../src/perps/CfdEngineSettlementSidecar.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
@@ -111,7 +111,7 @@ abstract contract BasePerpTest is Test {
 
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         router = new OrderRouter(
             address(engine),
@@ -255,11 +255,11 @@ abstract contract BasePerpTest is Test {
         address trader,
         uint256 amount
     ) internal {
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         usdc.mint(trader, amount);
         vm.startPrank(trader);
         usdc.approve(address(clearinghouse), amount);
-        clearinghouse.deposit(accountId, amount);
+        clearinghouse.deposit(account, amount);
         vm.stopPrank();
     }
 
@@ -275,17 +275,17 @@ abstract contract BasePerpTest is Test {
     // --- Trading helpers ---
 
     function _open(
-        bytes32 accountId,
+        address account,
         CfdTypes.Side side,
         uint256 size,
         uint256 margin,
         uint256 price
     ) internal {
-        _open(accountId, side, size, margin, price, pool.totalAssets());
+        _open(account, side, size, margin, price, pool.totalAssets());
     }
 
     function _open(
-        bytes32 accountId,
+        address account,
         CfdTypes.Side side,
         uint256 size,
         uint256 margin,
@@ -295,7 +295,7 @@ abstract contract BasePerpTest is Test {
         vm.prank(address(router));
         engine.processOrderTyped(
             CfdTypes.Order({
-                accountId: accountId,
+                account: account,
                 sizeDelta: size,
                 marginDelta: margin,
                 targetPrice: price,
@@ -312,26 +312,26 @@ abstract contract BasePerpTest is Test {
     }
 
     function _close(
-        bytes32 accountId,
+        address account,
         CfdTypes.Side side,
         uint256 size,
         uint256 price
     ) internal {
-        _close(accountId, side, size, price, pool.totalAssets());
+        _close(account, side, size, price, pool.totalAssets());
     }
 
     function _close(
-        bytes32 accountId,
+        address account,
         CfdTypes.Side side,
         uint256 size,
         uint256 price,
         uint256 depth
     ) internal {
-        _closeAt(accountId, side, size, price, depth, uint64(block.timestamp));
+        _closeAt(account, side, size, price, depth, uint64(block.timestamp));
     }
 
     function _closeAt(
-        bytes32 accountId,
+        address account,
         CfdTypes.Side side,
         uint256 size,
         uint256 price,
@@ -341,7 +341,7 @@ abstract contract BasePerpTest is Test {
         vm.prank(address(router));
         engine.processOrderTyped(
             CfdTypes.Order({
-                accountId: accountId,
+                account: account,
                 sizeDelta: size,
                 marginDelta: 0,
                 targetPrice: 0,
@@ -358,24 +358,24 @@ abstract contract BasePerpTest is Test {
     }
 
     function _captureCloseParitySnapshot(
-        bytes32 accountId
+        address account
     ) internal view returns (CloseParitySnapshot memory snapshot) {
         snapshot.protocol = engineProtocolLens.getProtocolAccountingSnapshot();
-        snapshot.settlementUsdc = clearinghouse.balanceUsdc(accountId);
-        snapshot.deferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(accountId);
+        snapshot.settlementUsdc = clearinghouse.balanceUsdc(account);
+        snapshot.deferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(account);
     }
 
     function _observeCloseParity(
-        bytes32 accountId,
+        address account,
         CloseParitySnapshot memory beforeSnapshot
     ) internal view returns (CloseParityObserved memory observed) {
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory afterSnapshot =
             engineProtocolLens.getProtocolAccountingSnapshot();
-        (observed.remainingSize, observed.remainingMargin,,,,,) = engine.positions(accountId);
-        uint256 settlementAfter = clearinghouse.balanceUsdc(accountId);
+        (observed.remainingSize, observed.remainingMargin,,,,,) = engine.positions(account);
+        uint256 settlementAfter = clearinghouse.balanceUsdc(account);
         observed.immediatePayoutUsdc =
             settlementAfter > beforeSnapshot.settlementUsdc ? settlementAfter - beforeSnapshot.settlementUsdc : 0;
-        observed.deferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(accountId);
+        observed.deferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(account);
         observed.badDebtUsdc = afterSnapshot.accumulatedBadDebtUsdc - beforeSnapshot.protocol.accumulatedBadDebtUsdc;
         observed.degradedMode = engine.degradedMode();
         observed.effectiveAssetsAfterUsdc = afterSnapshot.effectiveSolvencyAssetsUsdc;
@@ -459,30 +459,30 @@ abstract contract BasePerpTest is Test {
     }
 
     function _captureLiquidationParitySnapshot(
-        bytes32 accountId,
+        address account,
         address keeper
     ) internal view returns (LiquidationParitySnapshot memory snapshot) {
         snapshot.protocol = engineProtocolLens.getProtocolAccountingSnapshot();
-        snapshot.settlementUsdc = clearinghouse.balanceUsdc(accountId);
-        snapshot.deferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(accountId);
-        snapshot.keeperSettlementUsdc = clearinghouse.balanceUsdc(bytes32(uint256(uint160(keeper))));
+        snapshot.settlementUsdc = clearinghouse.balanceUsdc(account);
+        snapshot.deferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(account);
+        snapshot.keeperSettlementUsdc = clearinghouse.balanceUsdc(keeper);
         snapshot.deferredKeeperCreditUsdc = engine.deferredKeeperCreditUsdc(keeper);
     }
 
     function _observeLiquidationParity(
-        bytes32 accountId,
+        address account,
         address keeper,
         LiquidationParitySnapshot memory beforeSnapshot
     ) internal view returns (LiquidationParityObserved memory observed) {
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory afterSnapshot =
             engineProtocolLens.getProtocolAccountingSnapshot();
-        (observed.remainingSize,,,,,,) = engine.positions(accountId);
-        uint256 settlementAfter = clearinghouse.balanceUsdc(accountId);
+        (observed.remainingSize,,,,,,) = engine.positions(account);
+        uint256 settlementAfter = clearinghouse.balanceUsdc(account);
         observed.immediatePayoutUsdc =
             settlementAfter > beforeSnapshot.settlementUsdc ? settlementAfter - beforeSnapshot.settlementUsdc : 0;
-        observed.deferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(accountId);
+        observed.deferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(account);
         observed.badDebtUsdc = afterSnapshot.accumulatedBadDebtUsdc - beforeSnapshot.protocol.accumulatedBadDebtUsdc;
-        uint256 keeperSettlementAfter = clearinghouse.balanceUsdc(bytes32(uint256(uint160(keeper))));
+        uint256 keeperSettlementAfter = clearinghouse.balanceUsdc(keeper);
         observed.keeperSettlementUsdc = keeperSettlementAfter > beforeSnapshot.keeperSettlementUsdc
             ? keeperSettlementAfter - beforeSnapshot.keeperSettlementUsdc
             : 0;
@@ -569,19 +569,19 @@ abstract contract BasePerpTest is Test {
     }
 
     function _observeWithdrawParity(
-        bytes32 accountId,
+        address account,
         address trader,
         uint256 amountUsdc
     ) internal returns (WithdrawParityState memory state) {
         vm.prank(address(clearinghouse));
-        try engine.checkWithdraw(accountId) {
+        try engine.checkWithdraw(account) {
             state.checkWithdrawPasses = true;
         } catch (bytes memory err) {
             state.checkWithdrawSelector = _revertSelector(err);
         }
 
         vm.prank(trader);
-        try clearinghouse.withdraw(accountId, amountUsdc) {
+        try clearinghouse.withdraw(account, amountUsdc) {
             state.withdrawPasses = true;
         } catch (bytes memory err) {
             state.withdrawSelector = _revertSelector(err);
@@ -695,9 +695,9 @@ abstract contract BasePerpTest is Test {
     ) internal returns (CfdEngine deployedEngine) {
         deployedEngine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, riskParams_);
         CfdEnginePlanner planner = new CfdEnginePlanner();
-        CfdEngineSettlementModule settlement = new CfdEngineSettlementModule(address(deployedEngine));
-        CfdEngineAdmin adminModule = new CfdEngineAdmin(address(deployedEngine), address(this));
-        deployedEngine.setDependencies(address(planner), address(settlement), address(adminModule));
+        CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(deployedEngine));
+        CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(deployedEngine), address(this));
+        deployedEngine.setDependencies(address(planner), address(settlement), address(engineAdmin));
     }
 
     function _syncRouterAdmin() internal {
@@ -819,10 +819,10 @@ abstract contract BasePerpTest is Test {
     }
 
     function _pendingOrders(
-        bytes32 accountId
+        address account
     ) internal view returns (IOrderRouterAccounting.PendingOrderView[] memory pending) {
-        uint64 orderId = router.accountHeadOrderId(accountId);
-        uint256 pendingCount = router.pendingOrderCounts(accountId);
+        uint64 orderId = router.accountHeadOrderId(account);
+        uint256 pendingCount = router.pendingOrderCounts(account);
         pending = new IOrderRouterAccounting.PendingOrderView[](pendingCount);
         for (uint256 i; i < pendingCount; ++i) {
             (pending[i], orderId) = router.getPendingOrderView(orderId);
@@ -848,33 +848,33 @@ abstract contract BasePerpTest is Test {
     }
 
     function _freeSettlementUsdc(
-        bytes32 accountId
+        address account
     ) internal view returns (uint256) {
-        return clearinghouse.getAccountUsdcBuckets(accountId).freeSettlementUsdc;
+        return clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc;
     }
 
-    function _accountIdOf(
+    function _accountOf(
         address account
-    ) internal pure returns (bytes32) {
-        return bytes32(uint256(uint160(account)));
+    ) internal pure returns (address) {
+        return account;
     }
 
     function _settlementBalance(
         address account
     ) internal view returns (uint256) {
-        return clearinghouse.balanceUsdc(_accountIdOf(account));
+        return clearinghouse.balanceUsdc(_accountOf(account));
     }
 
     function _terminalReachableUsdc(
-        bytes32 accountId
+        address account
     ) internal view returns (uint256) {
-        return clearinghouse.getAccountUsdcBuckets(accountId).settlementBalanceUsdc;
+        return clearinghouse.getAccountUsdcBuckets(account).settlementBalanceUsdc;
     }
 
     function _publicPosition(
-        bytes32 accountId
+        address account
     ) internal view returns (PerpsViewTypes.PositionView memory viewData) {
-        return publicLens.getPosition(accountId);
+        return publicLens.getPosition(account);
     }
 
     function _publicProtocolStatus() internal view returns (PerpsViewTypes.ProtocolStatusView memory viewData) {
@@ -882,10 +882,10 @@ abstract contract BasePerpTest is Test {
     }
 
     function _deferredCreditStatus(
-        bytes32 accountId,
+        address account,
         address keeper
     ) internal view returns (DeferredEngineViewTypes.DeferredCreditStatus memory status) {
-        uint256 deferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(accountId);
+        uint256 deferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(account);
         uint256 deferredKeeperCreditUsdc = engine.deferredKeeperCreditUsdc(keeper);
         bool anyLiquidity = pool.totalAssets() > 0;
 
@@ -895,7 +895,7 @@ abstract contract BasePerpTest is Test {
         status.keeperCreditClaimableNow = deferredKeeperCreditUsdc > 0 && anyLiquidity;
     }
 
-    function _vaultMtmAdjustment() internal view returns (uint256) {
+    function _poolMtmAdjustment() internal view returns (uint256) {
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot =
             engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
         return snapshot.unrealizedMtmLiabilityUsdc;

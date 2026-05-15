@@ -11,39 +11,39 @@ contract AuditFixesTest is BasePerpTest {
 
     function test_CloseClearsUnsettledCarryAfterSettlement() public {
         address trader = address(0xA1101);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
 
         _fundTrader(trader, 100_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 50_000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 50_000e6, 1e8);
 
-        stdstore.target(address(engine)).sig("unsettledCarryUsdc(bytes32)").with_key(accountId)
+        stdstore.target(address(engine)).sig("unsettledCarryUsdc(bytes32)").with_key(account)
             .checked_write(uint256(10e6));
 
-        _close(accountId, CfdTypes.Side.BULL, 100_000e18, 1e8);
+        _close(account, CfdTypes.Side.BULL, 100_000e18, 1e8);
 
-        assertEq(engine.unsettledCarryUsdc(accountId), 0, "Close should clear cached unsettled carry");
+        assertEq(engine.unsettledCarryUsdc(account), 0, "Close should clear cached unsettled carry");
     }
 
     function test_LiquidationClearsUnsettledCarryAfterSettlement() public {
         address trader = address(0xA1102);
         address keeper = address(0xA1103);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
 
         _fundTrader(trader, 10_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
 
         vm.prank(trader);
-        clearinghouse.withdraw(accountId, 8000e6);
+        clearinghouse.withdraw(account, 8000e6);
 
-        stdstore.target(address(engine)).sig("unsettledCarryUsdc(bytes32)").with_key(accountId)
+        stdstore.target(address(engine)).sig("unsettledCarryUsdc(bytes32)").with_key(account)
             .checked_write(uint256(1e6));
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(195_000_000));
         vm.prank(keeper);
-        router.executeLiquidation(accountId, priceData);
+        router.executeLiquidation(account, priceData);
 
-        assertEq(engine.unsettledCarryUsdc(accountId), 0, "Liquidation should clear cached unsettled carry");
+        assertEq(engine.unsettledCarryUsdc(account), 0, "Liquidation should clear cached unsettled carry");
     }
 
 }

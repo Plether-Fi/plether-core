@@ -11,7 +11,7 @@ library SolvencyAccountingLib {
         uint256 maxLiabilityAfterUsdc;
         int256 deferredTraderPayoutDeltaUsdc;
         int256 deferredKeeperCreditDeltaUsdc;
-        uint256 pendingVaultPayoutUsdc;
+        uint256 pendingPoolPayoutUsdc;
     }
 
     struct PreviewResult {
@@ -79,13 +79,13 @@ library SolvencyAccountingLib {
 
     function effectiveAssetsAfterPendingPayout(
         SolvencyState memory state,
-        uint256 pendingVaultPayoutUsdc
+        uint256 pendingPoolPayoutUsdc
     ) internal pure returns (uint256) {
-        if (pendingVaultPayoutUsdc == 0) {
+        if (pendingPoolPayoutUsdc == 0) {
             return state.effectiveAssetsUsdc;
         }
         return
-            state.effectiveAssetsUsdc > pendingVaultPayoutUsdc ? state.effectiveAssetsUsdc - pendingVaultPayoutUsdc : 0;
+            state.effectiveAssetsUsdc > pendingPoolPayoutUsdc ? state.effectiveAssetsUsdc - pendingPoolPayoutUsdc : 0;
     }
 
     function isInsolvent(
@@ -121,7 +121,7 @@ library SolvencyAccountingLib {
         );
 
         result.maxLiabilityAfterUsdc = afterState.maxLiabilityUsdc;
-        result.effectiveAssetsAfterUsdc = effectiveAssetsAfterPendingPayout(afterState, delta.pendingVaultPayoutUsdc);
+        result.effectiveAssetsAfterUsdc = effectiveAssetsAfterPendingPayout(afterState, delta.pendingPoolPayoutUsdc);
         result.postOpDegradedMode = result.effectiveAssetsAfterUsdc < result.maxLiabilityAfterUsdc;
         result.triggersDegradedMode = !alreadyDegraded && result.postOpDegradedMode;
     }

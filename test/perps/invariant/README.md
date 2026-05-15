@@ -22,7 +22,7 @@ This directory contains stateful Foundry invariant suites for the perps system.
 
 - `PerpDeferredPayoutInvariant.t.sol`
   - Catches deferred trader payout and liquidity-gating bugs
-  - Verifies deferred payout status matches engine storage and current vault liquidity
+  - Verifies deferred payout status matches engine storage and current HousePool liquidity
   - Verifies deferred trader payout ghost accounting stays fully model-derived and reconciles with engine totals
   - Verifies close and liquidation previews use all-or-nothing immediate vs deferred payout gating
 
@@ -31,7 +31,7 @@ This directory contains stateful Foundry invariant suites for the perps system.
   - Verifies oracle-frozen boundary logic matches the intended weekend/admin-day formula
   - Verifies house-pool freshness limits switch correctly between weekday and frozen-oracle modes
   - Verifies maintenance margin switches cleanly between weekday and FAD settings
-  - Verifies stale live marks do not silently keep advancing weekday funding policy
+  - Verifies stale live marks do not silently keep advancing weekday carry policy
 
 - `PerpMultiAccountInvariant.t.sol`
   - Catches cross-account contamination bugs under overlapping commits, cancels, executions, liquidations, and claims
@@ -42,7 +42,7 @@ This directory contains stateful Foundry invariant suites for the perps system.
   - Catches fee accrual, custody, and withdrawal drift
   - Verifies a handler-side fee model tracks accumulated and withdrawn fees
   - Verifies the canonical protocol accounting snapshot includes the same live fee bucket
-  - Verifies the live fee bucket remains vault-custodied
+  - Verifies the live fee bucket remains HousePool-custodied
 
 - `PerpEconomicConservationInvariant.t.sol`
   - Catches protocol-wide ledger drift and conservation bugs
@@ -56,7 +56,7 @@ This directory contains stateful Foundry invariant suites for the perps system.
   - Verifies the expanded account ledger snapshot fully subsumes compact, collateral, and position views
   - Verifies per-account settlement buckets reconcile with clearinghouse storage
   - Verifies the canonical protocol accounting snapshot stays aligned with accessors and house-pool snapshots
-  - Verifies house-pool input/status snapshots stay aligned with vault assets, fees, deferred liabilities, and engine status
+  - Verifies house-pool input/status snapshots stay aligned with HousePool assets, fees, deferred liabilities, and engine status
   - Verifies withdrawal reserves include liabilities, fees, and deferred obligations
   - Verifies tracked bad debt only remains after reachable tracked account value is exhausted
   - Verifies ghost-tracked deferred trader payouts match engine storage and totals
@@ -64,16 +64,16 @@ This directory contains stateful Foundry invariant suites for the perps system.
 ## Harness Pieces
 
 - `BasePerpInvariantTest.sol`
-  - Shared invariant deployment harness using a deterministic mock vault
+  - Shared invariant deployment harness using a deterministic mock HousePool
 
 - `handlers/PerpAccountingHandler.sol`
-  - Stateful fuzz actor that performs deposits, withdrawals, order commits, execution, liquidation, payout claims, and vault mode changes
+  - Stateful fuzz actor that performs deposits, withdrawals, order commits, execution, liquidation, payout claims, and HousePool mode changes
 
 - `ghost/PerpGhostLedger.sol`
   - Independent ghost model for liquidation snapshots, committed margin ownership, and deferred clearer bounty tracking
 
-- `mocks/MockInvariantVault.sol`
-  - Deterministic test vault that can force router payout success or failure and directly control available vault liquidity
+- `mocks/MockInvariantHousePool.sol`
+  - Deterministic test HousePool that can force router payout success or failure and directly control available HousePool liquidity
 
 ## Typical Commands
 

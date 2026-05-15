@@ -34,9 +34,9 @@ All perps contracts are non-upgradeable.
 ### Timelocked admin state
 
 The following parameter families are owner-controlled behind a 48-hour propose/finalize delay.
-Engine risk controls live in `CfdEngineAdmin`, and router risk controls live in `OrderRouterAdmin`, with each admin module applying finalized values onto its host contract:
+Engine risk controls live in `CfdEngineAdmin`, and router risk controls live in `OrderRouterAdmin`, with each deployed admin contract applying finalized values onto its host contract:
 
-`CfdEngine` sidecars (`CfdEnginePlanner`, `CfdEngineSettlementModule`, `CfdEngineAdmin`) are now deployed separately and wired once via `setDependencies(...)`. That wiring is owner-only and one-time.
+`CfdEngine` sidecars (`CfdEnginePlanner`, `CfdEngineSettlementSidecar`, `CfdEngineAdmin`) are now deployed separately and wired once via `setDependencies(...)`. That wiring is owner-only and one-time.
 
 | Parameter | Contract | Guard |
 |-----------|----------|-------|
@@ -54,7 +54,7 @@ These are one-time configuration setters rather than mutable governance knobs:
 
 | Setter | Contract |
 |--------|----------|
-| `setVault(address)` | `CfdEngine` |
+| `setPool(address)` | `CfdEngine` |
 | `setOrderRouter(address)` | `CfdEngine` |
 | `setEngine(address)` | `MarginClearinghouse` |
 | `setSeniorVault(address)` | `HousePool` |
@@ -84,14 +84,14 @@ The owner cannot:
 Several perps contracts intentionally expose narrow but high-authority capability surfaces.
 
 - `OrderRouter` is the external execution boundary and can reach engine settlement paths plus `HousePool.payOut(...)` / `recordProtocolInflow(...)` through the approved caller set.
-- `CfdEngineSettlementModule` is engine-gated, but any external function added there is automatically security-critical because it can reach engine-owned settlement hooks.
-- `MarginClearinghouse` operator paths trust `engine`, `orderRouter`, and `settlementModule` to move trader custody across settlement, escrow, and seizure buckets.
+- `CfdEngineSettlementSidecar` is engine-gated, but any external function added there is automatically security-critical because it can reach engine-owned settlement hooks.
+- `MarginClearinghouse` operator paths trust `engine`, `orderRouter`, and `settlementSidecar` to move trader custody across settlement, escrow, and seizure buckets.
 - `MarginClearinghouse.reserveStaleCloseExecutionBountyFromSettlement(...)` and `reserveStaleCloseExecutionBountyFromPositionMargin(...)` are intentionally narrow stale close-commit escape hatches; they must remain reserved for risk-reducing stale fallback flows that have already been bounded by router/engine policy.
-- `HousePool.payOut(...)` and `HousePool.recordProtocolInflow(...)` trust `engine`, `orderRouter`, and `settlementModule` as capability-bearing callers.
+- `HousePool.payOut(...)` and `HousePool.recordProtocolInflow(...)` trust `engine`, `orderRouter`, and `settlementSidecar` as capability-bearing callers.
 
 Practical rule:
 
-- any new external function on `OrderRouter` or `CfdEngineSettlementModule`, and any new helper/module that can reach these caller sets, must be treated as security-critical and reviewed like a core custody or settlement change.
+- any new external function on `OrderRouter` or `CfdEngineSettlementSidecar`, and any new helper/sidecar that can reach these caller sets, must be treated as security-critical and reviewed like a core custody or settlement change.
 
 ## Critical Protocol Invariants
 
@@ -101,17 +101,17 @@ These are the highest-value properties an auditor should expect to hold.
 
 | Invariant | Description |
 |-----------|-------------|
-| Bounded entry solvency | Risk-increasing opens require `vault.totalAssets() >= max(globalBullMaxProfit, globalBearMaxProfit)` using canonical physical backing rather than raw token balance |
+| Bounded entry solvency | Risk-increasing opens require `pool.totalAssets() >= max(globalBullMaxProfit, globalBearMaxProfit)` using canonical physical backing rather than raw token balance |
 | Degraded containment | If a close or liquidation reveals post-op insolvency, `degradedMode` latches and blocks further risk expansion while still permitting protective transitions |
 | Bounded payout | No trader payout can exceed the capped market payoff implied by `CAP_PRICE` |
 | Withdrawal firewall | LP withdrawals are limited to conservative free cash after accounting for bounded liability, deferred liabilities, and protocol-owned balances |
-| Deferred liabilities are senior | Deferred trader credit and deferred keeper credit remain senior claims on vault liquidity until serviced |
+| Deferred liabilities are senior | Deferred trader credit and deferred keeper credit remain senior claims on pool liquidity until serviced |
 
 ### Position and engine accounting
 
 | Invariant | Description |
 |-----------|-------------|
-| Single direction per account | An `accountId` holds at most one live directional position at a time |
+| Single direction per account | An account address holds at most one live directional position at a time |
 | Margin sufficiency | Opens and withdraw-facing checks use explicit initial/maintenance/FAD margin policy surfaces |
 | Side symmetry | Side-local cached accounting stays consistent with the live position set |
 | Total margin conservation | `sides[BULL].totalMargin + sides[BEAR].totalMargin == sum(pos.margin)` across all live positions |
@@ -282,9 +282,9 @@ That means:
 
 This is an explicit design choice, not an accounting accident.
 
-### Carry instead of funding
+### LP-capital carry
 
-The perps system uses LP-capital carry instead of side-to-side funding.
+The perps system uses LP-capital carry instead of a side-to-side rate mechanism.
 
 - carry base: `max(positionNotionalUsdc - reachableCollateralUsdc, 0)`
 - accrual clock: wall-clock time
@@ -299,7 +299,7 @@ Security implication: oracle freshness still gates execution and LP accounting f
 
 ### Deferred liabilities
 
-Terminal transitions are fail-soft when the vault lacks immediate cash.
+Terminal transitions are fail-soft when the HousePool lacks immediate cash.
 
 - profitable closes can create deferred trader credit,
 - liquidation bounties can create deferred keeper credit,
@@ -314,7 +314,7 @@ Same-account deferred trader credit is not generic collateral.
 
 - generic account-health and withdraw checks use physically reachable clearinghouse collateral,
 - terminal settlement paths may still explicitly net same-account deferred trader credit,
-- this avoids accidentally reusing a vault IOU as immediately spendable account cash.
+- this avoids accidentally reusing a pool IOU as immediately spendable account cash.
 
 ## HousePool And LP-Specific Risks
 
@@ -406,7 +406,7 @@ This preserves terminal liveness without requiring an unbounded global queue sca
 ### VPI limitations
 
 - liquidation does not compute a fresh VPI delta, but negative accrued VPI is clawed back into liquidation shortfall,
-- VPI depends on live vault depth,
+- VPI depends on live pool depth,
 - the lifetime clamp intentionally zeroes otherwise extractable rebate-only round trips,
 - partial-close VPI release is a bounded linear approximation.
 

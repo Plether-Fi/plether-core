@@ -4,7 +4,7 @@ pragma solidity 0.8.33;
 import {IPyth, PythStructs} from "../../interfaces/IPyth.sol";
 import {DecimalConstants} from "../../libraries/DecimalConstants.sol";
 import {ICfdEngineLens} from "../interfaces/ICfdEngineLens.sol";
-import {ICfdVault} from "../interfaces/ICfdVault.sol";
+import {IHousePool} from "../interfaces/IHousePool.sol";
 import {IOrderRouterErrors} from "../interfaces/IOrderRouterErrors.sol";
 import {MarketCalendarLib} from "../libraries/MarketCalendarLib.sol";
 import {OracleFreshnessPolicyLib} from "../libraries/OracleFreshnessPolicyLib.sol";
@@ -24,7 +24,7 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
         uint256 pythFee;
     }
 
-    ICfdVault internal immutable housePool;
+    IHousePool internal immutable housePool;
     ICfdEngineLens internal immutable engineLens;
     IPyth public pyth;
     bytes32[] public pythFeedIds;
@@ -49,7 +49,7 @@ abstract contract OrderOracleExecution is OrderEscrowAccounting {
         if (_engineLens == address(0)) {
             revert IOrderRouterErrors.OrderRouter__OracleValidation(7);
         }
-        housePool = ICfdVault(_housePool);
+        housePool = IHousePool(_housePool);
         engineLens = ICfdEngineLens(_engineLens);
         _setOracleConfig(_pyth, _feedIds, _quantities, _basePrices, _inversions);
     }

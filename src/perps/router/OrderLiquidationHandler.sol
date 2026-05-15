@@ -8,26 +8,26 @@ import {OrderValidation} from "./OrderValidation.sol";
 abstract contract OrderLiquidationHandler is OrderValidation {
 
     function _executeLiquidation(
-        bytes32 accountId,
+        address account,
         bytes[] calldata pythUpdateData
     ) internal {
         OracleUpdateResult memory update = _prepareLiquidationOracle(pythUpdateData);
 
-        _forfeitEscrowedOrderBountiesOnLiquidation(accountId);
+        _forfeitEscrowedOrderBountiesOnLiquidation(account);
         uint256 housePoolDepth = housePool.totalAssets();
         uint256 keeperBountyUsdc =
-            engine.liquidatePosition(accountId, update.executionPrice, housePoolDepth, update.oraclePublishTime);
+            engine.liquidatePosition(account, update.executionPrice, housePoolDepth, update.oraclePublishTime);
 
-        _clearLiquidatedAccountOrders(accountId);
+        _clearLiquidatedAccountOrders(account);
         _creditOrDeferLiquidationBounty(keeperBountyUsdc, update.executionPrice, update.oraclePublishTime);
 
         _sendEth(msg.sender, msg.value - update.pythFee);
     }
 
     function _clearLiquidatedAccountOrders(
-        bytes32 accountId
+        address account
     ) internal {
-        uint64 orderId = accountHeadOrderId[accountId];
+        uint64 orderId = accountHeadOrderId[account];
         while (orderId != 0) {
             OrderRecord storage record = orderRecords[orderId];
             uint64 nextOrderId = record.nextAccountOrderId;

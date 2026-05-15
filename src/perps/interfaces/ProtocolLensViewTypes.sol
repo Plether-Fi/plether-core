@@ -4,7 +4,7 @@ pragma solidity 0.8.33;
 library ProtocolLensViewTypes {
 
     struct ProtocolAccountingSnapshot {
-        uint256 vaultAssetsUsdc;
+        uint256 poolAssetsUsdc;
         uint256 netPhysicalAssetsUsdc;
         uint256 maxLiabilityUsdc;
         uint256 effectiveSolvencyAssetsUsdc;

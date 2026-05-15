@@ -30,7 +30,7 @@ library CloseAccountingLib {
         uint256 capPrice,
         uint256 preSkewUsdc,
         uint256 postSkewUsdc,
-        uint256 vaultDepthUsdc,
+        uint256 poolDepthUsdc,
         uint256 vpiFactor,
         uint256 executionFeeBps
     ) internal pure returns (CloseState memory state) {
@@ -52,7 +52,7 @@ library CloseAccountingLib {
         state.remainingSize = positionSize - sizeDelta;
         state.maxProfitReductionUsdc = (maxProfitUsdc * sizeDelta) / positionSize;
 
-        state.vpiDeltaUsdc = CfdMath.calculateVPI(preSkewUsdc, postSkewUsdc, vaultDepthUsdc, vpiFactor);
+        state.vpiDeltaUsdc = CfdMath.calculateVPI(preSkewUsdc, postSkewUsdc, poolDepthUsdc, vpiFactor);
         state.proportionalAccrualUsdc = (vpiAccrued * int256(sizeDelta)) / int256(positionSize);
         // Clamp so lifetime VPI (accrued + delta) never goes negative. Prevents LP sandwich attacks
         // where an attacker opens at high depth, donates to shrink depth, then closes to extract a
