@@ -2773,6 +2773,42 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(entryPrice, 100_000_000, "Entry price must bind to the first post-commit tick");
     }
 
+    function test_OlderHistoricalExecutionAfterMarkRefresh_ClearsOrderAndPaysBounty() public {
+        vm.warp(1000);
+        vm.roll(100);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 0, false);
+        (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(1);
+
+        uint64 historicalPublishTime = pending.commitTime + 10;
+        uint64 refreshedPublishTime = pending.commitTime + 16;
+        mockPyth.setAllPrices(feedIds, int64(120_000_000), int32(-8), refreshedPublishTime);
+
+        vm.warp(refreshedPublishTime);
+        router.updateMarkPrice(_pythUpdateData());
+        assertEq(engine.lastMarkTime(), refreshedPublishTime, "Setup should advance the cached mark past execution");
+
+        mockPyth.setAllUniquePrices(
+            feedIds, int64(100_000_000), 0, int32(-8), historicalPublishTime, pending.commitTime
+        );
+
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(address(this));
+        vm.roll(block.number + 1);
+        router.executeOrder(1, _pythUpdateData());
+
+        (uint256 size,, uint256 entryPrice,,,,) = engine.positions(alice);
+        assertEq(size, 10_000 * 1e18, "Historical order should execute even after a fresher mark refresh");
+        assertEq(entryPrice, 100_000_000, "Execution should still bind to the historical settlement tick");
+        assertEq(engine.lastMarkTime(), refreshedPublishTime, "Bounty credit must not roll back the cached mark");
+        assertEq(router.nextExecuteId(), 0, "Executed order should clear the FIFO head");
+        assertEq(
+            clearinghouse.balanceUsdc(address(this)) - keeperSettlementBefore,
+            pending.executionBountyUsdc,
+            "Keeper should receive the reserved execution bounty"
+        );
+    }
+
     function test_OrderExecution_RejectsSkippedHistoricalTick() public {
         vm.warp(1000);
 

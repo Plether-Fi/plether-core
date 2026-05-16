@@ -141,17 +141,18 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         uint256 price,
         uint64 publishTime
     ) internal {
-        if (publishTime < lastMarkTime) {
-            revert CfdEngine__MarkPriceOutOfOrder();
-        }
-
         uint256 clampedPrice = price > CAP_PRICE ? CAP_PRICE : price;
-        lastMarkPrice = clampedPrice;
-        lastMarkTime = publishTime;
+        uint256 checkpointPrice = clampedPrice;
+        if (publishTime >= lastMarkTime) {
+            lastMarkPrice = clampedPrice;
+            lastMarkTime = publishTime;
+        } else {
+            checkpointPrice = lastMarkPrice;
+        }
 
         StoredPosition storage pos = _positions[account];
         if (pos.size > 0) {
-            _checkpointCarryBeforeBasisChange(account, pos, clampedPrice, _genericReachableCollateralUsdc(account));
+            _checkpointCarryBeforeBasisChange(account, pos, checkpointPrice, _genericReachableCollateralUsdc(account));
         }
     }
 
