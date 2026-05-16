@@ -1607,19 +1607,28 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_PythConfidenceTooWide_RevertsExecution() public {
-        vm.warp(1000);
-
-        vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        vm.warp(SETUP_TIMESTAMP);
 
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         config.pythMaxConfidenceRatioBps = 100;
         routerAdmin.proposeRouterConfig(config);
-        vm.warp(1000 + 48 hours + 1);
+        vm.warp(SETUP_TIMESTAMP + 48 hours + 1);
         routerAdmin.finalizeRouterConfig();
 
-        mockPyth.setAllPrices(feedIds, int64(100_000_000), uint64(2_000_000), int32(-8), uint64(block.timestamp - 10));
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
+        (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(1);
+        mockPyth.setAllUniquePrices(
+            feedIds,
+            int64(100_000_000),
+            uint64(2_000_000),
+            int32(-8),
+            uint256(pending.commitTime) + 1,
+            pending.commitTime
+        );
+
+        vm.warp(uint256(pending.commitTime) + 1);
         vm.roll(block.number + 1);
         vm.expectPartialRevert(IPletherOracle.PletherOracle__ConfidenceTooWide.selector);
         router.executeOrder(1, _pythUpdateData());
@@ -5137,7 +5146,14 @@ contract StalenessGriefTest is BasePerpTest {
     }
 
     // Regression: H-02
-    function test_StaleOracleRevertsInsteadOfCancelling() public {
+    function test_LiveStaleOracleRevertsInsteadOfCancelling() public {
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.maxOrderAge = 300;
+        OrderRouterAdmin admin = OrderRouterAdmin(router.admin());
+        admin.proposeRouterConfig(config);
+        vm.warp(block.timestamp + 48 hours + 1);
+        admin.finalizeRouterConfig();
+
         _fundJunior(bob, 1_000_000e6);
         _fundTrader(alice, 50_000e6);
 
@@ -5441,6 +5457,11 @@ contract KeeperFeeRefundTest is Test {
         }
     }
 
+    function _missingHistoricalUpdateData() internal pure returns (bytes[] memory updateData) {
+        updateData = new bytes[](1);
+        updateData[0] = abi.encode(uint256(1e8));
+    }
+
     function _warpPastTimelock() internal {
         vm.warp(block.timestamp + 48 hours + 1);
     }
@@ -5561,6 +5582,67 @@ contract KeeperFeeRefundTest is Test {
         assertEq(alice.balance, 1 ether, "User receives failed-order fee refund");
     }
 
+    function test_ExpiredHeadOrderPrunesWithoutHistoricalOracle() public {
+        address account = alice;
+        usdc.mint(alice, 50_000e6);
+        vm.startPrank(alice);
+        usdc.approve(address(clearinghouse), 50_000e6);
+        clearinghouse.deposit(account, 50_000e6);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+        vm.stopPrank();
+
+        (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(1);
+        uint256 keeperSettlementBefore = _settlementBalance(keeper);
+        uint256 parseCallsBefore = mockPyth.parseUniqueCallCount();
+
+        vm.warp(block.timestamp + 301);
+        vm.roll(block.number + 1);
+        vm.prank(keeper);
+        router.executeOrder(1, _missingHistoricalUpdateData());
+
+        assertEq(router.nextExecuteId(), 0, "Expired head should be removed even when historical Pyth is missing");
+        assertEq(
+            mockPyth.parseUniqueCallCount(),
+            parseCallsBefore,
+            "Expired cleanup should not call the historical Pyth parser"
+        );
+        assertEq(
+            _settlementBalance(keeper) - keeperSettlementBefore,
+            pending.executionBountyUsdc,
+            "Keeper should still receive the reserved bounty for pruning the expired head"
+        );
+    }
+
+    function test_BatchExpiredHeadOrdersPruneWithoutHistoricalOracle() public {
+        address account = alice;
+        usdc.mint(alice, 50_000e6);
+        vm.startPrank(alice);
+        usdc.approve(address(clearinghouse), 50_000e6);
+        clearinghouse.deposit(account, 50_000e6);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+        vm.stopPrank();
+
+        uint256 parseCallsBefore = mockPyth.parseUniqueCallCount();
+
+        vm.warp(block.timestamp + 301);
+        vm.roll(block.number + 1);
+        vm.prank(keeper);
+        router.executeOrderBatch(2, _missingHistoricalUpdateData());
+
+        assertEq(router.nextExecuteId(), 0, "Batch should remove expired heads without historical Pyth data");
+        assertEq(
+            mockPyth.parseUniqueCallCount(),
+            parseCallsBefore,
+            "Batch expired cleanup should not call the historical Pyth parser"
+        );
+        assertEq(
+            router.getAccountReservations(account).executionBountyUsdc,
+            0,
+            "Expired batch cleanup should clear all reserved execution bounties"
+        );
+    }
+
     // Regression: H-01 — open slippage failure forfeits the bounty instead of refunding it.
     function test_OpenSlippageFailForfeitsBountyToProtocol() public {
         usdc.mint(bob, 1_000_000e6);
@@ -5655,10 +5737,7 @@ contract KeeperFeeRefundTest is Test {
 
         uint256 keeperUsdcBefore = _settlementBalance(keeper);
         uint256 protocolFeesBefore = engine.protocolTreasuryBalanceUsdc();
-        bytes[] memory closePrice = new bytes[](1);
-        closePrice[0] = abi.encode(uint256(1e8));
-        vm.warp(block.timestamp + 10);
-        vm.roll(block.number + 10);
+        bytes[] memory closePrice = _mockPythUpdateData();
         vm.prank(keeper);
         router.executeOrder(2, closePrice);
 

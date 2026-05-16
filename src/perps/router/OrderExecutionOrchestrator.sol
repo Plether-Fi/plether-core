@@ -29,14 +29,25 @@ abstract contract OrderExecutionOrchestrator is OrderExecutionSettlement {
         uint256 executionPrice,
         uint64 oraclePublishTime
     ) internal returns (uint256 skipped) {
-        skipped = _pruneExpiredHeadOrders(upToId, maxPruneOrdersPerCall, executionPrice, oraclePublishTime);
+        skipped = _pruneExpiredHeadOrders(upToId, maxPruneOrdersPerCall, executionPrice, oraclePublishTime, false);
+    }
+
+    function _skipExpiredHeadOrdersBeforeOracle(
+        uint64 upToId,
+        bool includeUpTo
+    ) internal returns (uint256 skipped) {
+        OracleUpdateResult memory cleanupMark = _cachedMarkForExpiredOrderCleanup();
+        skipped = _pruneExpiredHeadOrders(
+            upToId, maxPruneOrdersPerCall, cleanupMark.executionPrice, cleanupMark.oraclePublishTime, includeUpTo
+        );
     }
 
     function _pruneExpiredHeadOrders(
         uint64 upToId,
         uint256 maxPrunes,
         uint256 executionPrice,
-        uint64 oraclePublishTime
+        uint64 oraclePublishTime,
+        bool includeUpTo
     ) internal returns (uint256 pruned) {
         uint256 age = maxOrderAge;
         while (nextExecuteId != 0 && nextExecuteId <= upToId && pruned < maxPrunes) {
@@ -46,7 +57,7 @@ abstract contract OrderExecutionOrchestrator is OrderExecutionSettlement {
                 nextExecuteId = record.nextGlobalOrderId;
                 continue;
             }
-            if (headId == upToId || age == 0) {
+            if ((!includeUpTo && headId == upToId) || age == 0) {
                 break;
             }
             CfdTypes.Order memory order = record.core;
@@ -57,6 +68,11 @@ abstract contract OrderExecutionOrchestrator is OrderExecutionSettlement {
             _cleanupOrder(headId, _failedOutcomeForTerminalFailure(order), executionPrice, oraclePublishTime);
             pruned++;
         }
+    }
+
+    function _cachedMarkForExpiredOrderCleanup() internal view returns (OracleUpdateResult memory update) {
+        update.executionPrice = _commitReferencePrice();
+        update.oraclePublishTime = engine.lastMarkTime();
     }
 
     function _executePendingOrder(

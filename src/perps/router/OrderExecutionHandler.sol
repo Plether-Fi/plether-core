@@ -17,6 +17,11 @@ abstract contract OrderExecutionHandler is OrderValidation {
         if (nextExecuteId == 0) {
             revert OrderRouter__NoOrdersToExecute();
         }
+        uint256 expiredPrunes = _skipExpiredHeadOrdersBeforeOracle(orderId, true);
+        if (nextExecuteId == 0 || orderId < nextExecuteId || (expiredPrunes > 0 && orderId != nextExecuteId)) {
+            _sendEth(msg.sender, msg.value);
+            return;
+        }
         uint64 initialHeadOrderId = nextExecuteId;
         (, CfdTypes.Order memory initialHeadOrder) = _pendingOrder(initialHeadOrderId);
         (OracleUpdateResult memory update, RouterExecutionContext memory executionContext) =
@@ -63,6 +68,23 @@ abstract contract OrderExecutionHandler is OrderValidation {
 
             if (record.status != IOrderRouterAccounting.OrderStatus.Pending) {
                 nextExecuteId = record.nextGlobalOrderId;
+                continue;
+            }
+
+            if (maxOrderAge > 0 && block.timestamp - order.commitTime > maxOrderAge) {
+                if (expiredPrunes >= maxPruneOrdersPerCall) {
+                    break;
+                }
+                OracleUpdateResult memory cleanupMark = _cachedMarkForExpiredOrderCleanup();
+                emit OrderFailed(orderId, OrderFailReason.Expired);
+                _cleanupOrder(
+                    orderId,
+                    _failedOutcomeForTerminalFailure(order),
+                    cleanupMark.executionPrice,
+                    cleanupMark.oraclePublishTime
+                );
+                expiredPrunes++;
+                madeProgress = true;
                 continue;
             }
 
