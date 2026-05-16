@@ -15,6 +15,7 @@ library CfdEngineSettlementLib {
         uint256 seizedUsdc;
         uint256 shortfallUsdc;
         uint256 collectedExecFeeUsdc;
+        uint256 retainedExecFeeUsdc;
         uint256 badDebtUsdc;
     }
 
@@ -41,9 +42,14 @@ library CfdEngineSettlementLib {
         DebtCollectionResult memory collection = collectSettlementDeficit(availableUsdc, owedUsdc);
         result.seizedUsdc = collection.seizedUsdc;
         result.shortfallUsdc = collection.shortfallUsdc;
+        uint256 feeEmbeddedInOwedUsdc = execFeeUsdc < owedUsdc ? execFeeUsdc : owedUsdc;
+        result.retainedExecFeeUsdc = execFeeUsdc - feeEmbeddedInOwedUsdc;
         result.collectedExecFeeUsdc =
-            execFeeUsdc > collection.shortfallUsdc ? execFeeUsdc - collection.shortfallUsdc : 0;
-        result.badDebtUsdc = collection.shortfallUsdc > execFeeUsdc ? collection.shortfallUsdc - execFeeUsdc : 0;
+            feeEmbeddedInOwedUsdc < collection.seizedUsdc ? feeEmbeddedInOwedUsdc : collection.seizedUsdc;
+        uint256 uncollectedEmbeddedFeeUsdc = feeEmbeddedInOwedUsdc - result.collectedExecFeeUsdc;
+        result.badDebtUsdc = collection.shortfallUsdc > uncollectedEmbeddedFeeUsdc
+            ? collection.shortfallUsdc - uncollectedEmbeddedFeeUsdc
+            : 0;
     }
 
     function closeSettlementResultForTerminalBuckets(

@@ -146,9 +146,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
                     delta.deletePosition,
                     host.pool(),
                     host.protocolTreasury(),
-                    delta.executionFeeUsdc > delta.traderClaimFeeRecoveryUsdc
-                        ? delta.executionFeeUsdc - delta.traderClaimFeeRecoveryUsdc
-                        : 0
+                    delta.lossResult.collectedExecFeeUsdc
                 );
             protocolFeeCreditedUsdc = cashCreditedProtocolFeeUsdc;
             if (seizedUsdc > 0) {

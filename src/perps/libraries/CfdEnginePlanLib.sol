@@ -564,7 +564,8 @@ library CfdEnginePlanLib {
                 delta.traderClaimFeeRecoveryUsdc,
                 delta.badDebtUsdc
             ) = _planCloseTraderClaimConsumption(snap.traderClaimBalanceForAccount, delta.lossResult);
-            delta.executionFeeUsdc = delta.lossResult.collectedExecFeeUsdc + delta.traderClaimFeeRecoveryUsdc;
+            delta.executionFeeUsdc = delta.lossResult.collectedExecFeeUsdc + delta.traderClaimFeeRecoveryUsdc
+                + delta.lossResult.retainedExecFeeUsdc;
             delta.protocolFeeTopUpUsdc = _closeLossProtocolFeeTopUpUsdc(snap, delta);
 
             if (delta.lossResult.shortfallUsdc > 0 && cs.remainingMarginUsdc > 0) {

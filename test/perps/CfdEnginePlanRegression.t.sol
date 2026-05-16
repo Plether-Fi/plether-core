@@ -15,8 +15,10 @@ import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {PerpsPublicLens} from "../../src/perps/PerpsPublicLens.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {CfdEnginePlanLib} from "../../src/perps/libraries/CfdEnginePlanLib.sol";
+import {CfdEngineSettlementLib} from "../../src/perps/libraries/CfdEngineSettlementLib.sol";
 import {MarginClearinghouseAccountingLib} from "../../src/perps/libraries/MarginClearinghouseAccountingLib.sol";
 import {PositionRiskAccountingLib} from "../../src/perps/libraries/PositionRiskAccountingLib.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
@@ -181,6 +183,80 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
     ) internal pure returns (uint256) {
         delta;
         return currentMargin;
+    }
+
+    function test_CloseSettlementResult_FeeOffsetSeparatesRetainedFee() public pure {
+        CfdEngineSettlementLib.CloseSettlementResult memory result =
+            CfdEngineSettlementLib.closeSettlementResult(2e6, 2e6, 10e6);
+
+        assertEq(result.seizedUsdc, 2e6, "Covered net close debit should be seized");
+        assertEq(result.shortfallUsdc, 0, "Covered net close debit should have no shortfall");
+        assertEq(result.collectedExecFeeUsdc, 2e6, "Only seized cash can be cash-collected");
+        assertEq(result.retainedExecFeeUsdc, 8e6, "Profit-offset fee should be marked for pool top-up");
+        assertEq(result.badDebtUsdc, 0, "Fee offset by retained trader profit is not bad debt");
+    }
+
+    function test_CloseSettlementResult_UnderfundedLossKeepsProtocolFeeSenior() public pure {
+        CfdEngineSettlementLib.CloseSettlementResult memory result =
+            CfdEngineSettlementLib.closeSettlementResult(45e6, 50e6, 10e6);
+
+        assertEq(result.seizedUsdc, 45e6, "Available close collateral should be seized");
+        assertEq(result.shortfallUsdc, 5e6, "Uncovered close debit should remain shortfall");
+        assertEq(result.collectedExecFeeUsdc, 10e6, "Protocol fee should be senior in seized cash");
+        assertEq(result.retainedExecFeeUsdc, 0, "Underfunded losses do not create retained-profit fees");
+        assertEq(result.badDebtUsdc, 5e6, "Remaining shortfall should be LP bad debt");
+    }
+
+    function test_CloseSettlementResult_DeepShortfallDoesNotTopUpUnpaidFee() public pure {
+        CfdEngineSettlementLib.CloseSettlementResult memory result =
+            CfdEngineSettlementLib.closeSettlementResult(5e6, 50e6, 10e6);
+
+        assertEq(result.seizedUsdc, 5e6, "Only available close collateral should be seized");
+        assertEq(result.shortfallUsdc, 45e6, "Uncovered close debit should remain shortfall");
+        assertEq(result.collectedExecFeeUsdc, 5e6, "Cash-collected fee should be bounded by seized cash");
+        assertEq(result.retainedExecFeeUsdc, 0, "Missing margin is not retained trader profit");
+        assertEq(result.badDebtUsdc, 40e6, "Only the non-fee shortfall should become LP bad debt");
+    }
+
+    function test_CloseLoss_FeeOffsetTopUpMatchesRetainedTraderProfit() public {
+        address account = address(0xFEE0FF);
+        uint256 size = 25_000e18;
+        uint256 openPrice = 1e8;
+        uint256 closePrice = 99_968_000;
+        uint256 profitUsdc = 8e6;
+
+        _fundTrader(account, 2000e6);
+        _open(account, CfdTypes.Side.BULL, size, 1000e6, openPrice);
+
+        uint256 closeFeeUsdc = _engineExecutionFeeUsdc(size, closePrice);
+        uint256 netOwedUsdc = closeFeeUsdc - profitUsdc;
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, size, closePrice);
+
+        assertTrue(preview.valid, "Fee-offset close should preview as valid");
+        assertEq(preview.realizedPnlUsdc, int256(profitUsdc), "Setup should produce the intended trader profit");
+        assertEq(preview.executionFeeUsdc, closeFeeUsdc, "Preview should retain the total collectible fee");
+        assertEq(preview.seizedCollateralUsdc, netOwedUsdc, "Only the net owed cash should be seized");
+        assertEq(preview.badDebtUsdc, 0, "Retained trader profit should not be bad debt");
+
+        uint256 treasuryBefore = engine.protocolTreasuryBalanceUsdc();
+        uint256 poolAssetsBefore = pool.totalAssets();
+        CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(account);
+        bool degradedBefore = engine.degradedMode();
+
+        _close(account, CfdTypes.Side.BULL, size, closePrice);
+
+        CloseParityObserved memory observed = _observeCloseParity(account, beforeSnapshot);
+        _assertClosePreviewMatchesObserved(preview, observed, degradedBefore);
+        assertEq(
+            engine.protocolTreasuryBalanceUsdc() - treasuryBefore,
+            closeFeeUsdc,
+            "Treasury should receive seized cash plus retained-profit top-up"
+        );
+        assertEq(
+            poolAssetsBefore - pool.totalAssets(),
+            profitUsdc,
+            "Pool should pass through the trader profit it retained against the fee"
+        );
     }
 
     function test_PlanOpen_FreshAccountUsesGlobalSideMarginBaseline() public {
