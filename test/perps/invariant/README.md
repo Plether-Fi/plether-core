@@ -61,6 +61,11 @@ This directory contains stateful Foundry invariant suites for the perps system.
   - Verifies tracked bad debt only remains after reachable tracked account value is exhausted
   - Verifies ghost-tracked trader claims match engine storage and totals
 
+- `PerpValueConservationInvariant.t.sol`
+  - Catches adversarial value-category transitions in the full perps stack
+  - Fuzzes failed full-close execution, neutral MTM LP deposits/withdrawals, timed carry checkpoints, and recapitalization/revenue reconciliation
+  - Verifies active margin, LP share value, historical carry, and pending claimant revenue cannot move owners without an intended settlement path
+
 ## Harness Pieces
 
 - `BasePerpInvariantTest.sol`
@@ -85,4 +90,5 @@ forge test --match-contract PerpOracleBoundaryInvariantTest
 forge test --match-contract PerpMultiAccountInvariantTest
 forge test --match-contract PerpFeeFlowInvariantTest
 forge test --match-contract PerpEconomicConservationInvariantTest
+forge test --match-contract PerpValueConservationInvariantTest
 ```
