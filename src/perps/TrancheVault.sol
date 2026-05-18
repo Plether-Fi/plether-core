@@ -145,11 +145,12 @@ contract TrancheVault is ERC4626 {
         emit DepositRequested(msg.sender, receiver, epochId, assets);
     }
 
-    /// @notice Cancels a pending deposit before its activation epoch begins.
+    /// @notice Cancels a pending deposit before activation, or while active if senior impairment blocks finalization.
     function cancelPendingDeposit(
         uint256 epochId
     ) public returns (uint256 assets) {
-        if (block.timestamp >= depositEpochStart(epochId)) {
+        bool activeEpoch = block.timestamp >= depositEpochStart(epochId);
+        if (activeEpoch && !POOL.isSeniorImpairedAfterPendingDepositReconcile()) {
             revert TrancheVault__DepositEpochAlreadyActive();
         }
         DepositEpoch storage epoch = depositEpochs[epochId];

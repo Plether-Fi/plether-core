@@ -196,6 +196,9 @@ interface IHousePool {
         view
         returns (uint256 seniorPrincipalUsdc, uint256 juniorPrincipalUsdc);
 
+    /// @notice Whether pending deposit finalization would hit the senior impairment gate after reconcile.
+    function isSeniorImpairedAfterPendingDepositReconcile() external view returns (bool);
+
     /// @notice Settles revenue/loss waterfall between tranches
     function reconcile() external;
 

@@ -176,6 +176,41 @@ contract AuditFixRegressionTest is BasePerpTest {
         vm.stopPrank();
     }
 
+    function test_ActivePendingDepositCanCancelWhenSeniorImpairmentBlocksFinalization() public {
+        address pendingLp = address(0xCAFE2);
+        uint256 depositUsdc = 50_000e6;
+
+        usdc.mint(pendingLp, depositUsdc);
+        vm.startPrank(pendingLp);
+        usdc.approve(address(juniorVault), depositUsdc);
+        uint256 epochId = juniorVault.requestDeposit(depositUsdc, pendingLp);
+        vm.stopPrank();
+
+        uint256 activationTime = juniorVault.depositEpochStart(epochId);
+        vm.warp(activationTime);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(activationTime));
+
+        vm.prank(address(engine));
+        pool.payOut(address(0xD15C0), 1_001_500e6);
+
+        assertTrue(
+            pool.isSeniorImpairedAfterPendingDepositReconcile(), "pending deposit finalization should be impaired"
+        );
+        vm.expectRevert(IHousePool.HousePool__SeniorImpaired.selector);
+        juniorVault.finalizeDepositEpoch(epochId);
+
+        vm.prank(pendingLp);
+        uint256 refunded = juniorVault.cancelPendingDeposit(epochId);
+
+        (uint256 epochAssets,,,, bool finalized) = juniorVault.depositEpochs(epochId);
+        assertEq(refunded, depositUsdc, "active impaired cancellation should refund pending assets");
+        assertEq(usdc.balanceOf(pendingLp), depositUsdc, "depositor should recover escrowed USDC");
+        assertEq(juniorVault.pendingDepositAssets(pendingLp, epochId), 0, "pending balance should clear");
+        assertEq(epochAssets, 0, "epoch aggregate assets should decrease");
+        assertFalse(finalized, "epoch should remain unfinalized");
+    }
+
     function test_PendingDepositClaimsAllocateAllFinalizedShares() public {
         address alice = address(0xA11CE);
         address bob = address(0xB0B);

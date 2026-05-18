@@ -654,6 +654,11 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
         juniorPrincipalUsdc = ctx.pendingState.waterfall.juniorPrincipal;
     }
 
+    function isSeniorImpairedAfterPendingDepositReconcile() external view returns (bool) {
+        HousePoolContext memory ctx = _buildCurrentHousePoolDepositContext();
+        return ctx.pendingState.waterfall.seniorPrincipal < ctx.pendingState.waterfall.seniorHighWaterMark;
+    }
+
     function isWithdrawalLive() external view returns (bool) {
         return _withdrawalsLive(_getHousePoolInputSnapshot(), _getHousePoolStatusSnapshot());
     }
