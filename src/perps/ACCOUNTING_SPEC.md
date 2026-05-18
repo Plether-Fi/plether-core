@@ -345,6 +345,7 @@ Rules:
 
 - reserved value is not withdrawable,
 - reserved value is not free buying power,
+- reserved execution bounty value is not reachable collateral for unrelated close losses,
 - releasing or consuming reservation must happen exactly once,
 - clearinghouse reservation records are the source of truth for committed trader margin,
 - execution bounty reserves are not LP cash and should not become a pool liability bucket.

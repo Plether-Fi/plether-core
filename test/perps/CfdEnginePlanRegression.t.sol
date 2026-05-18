@@ -710,6 +710,82 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         assertGt(delta.pendingCarryUsdc, 0, "Close plan should report observational pending carry");
     }
 
+    function test_PlanClose_LossConsumptionExcludesReservedSettlementBounty() public pure {
+        address account = address(uint160(0xB007));
+        uint256 positionMarginUsdc = 1000e6;
+        uint256 reservedBountyUsdc = 200_000;
+        CfdEnginePlanTypes.RawSnapshot memory snap;
+        snap.account = account;
+        snap.position = CfdTypes.Position({
+            size: 100_000e18,
+            margin: positionMarginUsdc,
+            entryPrice: 1e8,
+            maxProfitUsdc: 100_000e6,
+            side: CfdTypes.Side.BULL,
+            lastUpdateTime: 0,
+            lastCarryTimestamp: 0,
+            vpiAccrued: 0
+        });
+        snap.lastMarkPrice = 150_000_000;
+        snap.lastMarkTime = 1;
+        snap.bullSide = CfdEnginePlanTypes.SideSnapshot({
+            maxProfitUsdc: 100_000e6,
+            openInterest: 100_000e18,
+            entryNotional: 100_000e18 * 1e8,
+            totalMargin: positionMarginUsdc,
+            borrowBaseUsdc: 0,
+            carryIndex: 0
+        });
+        snap.poolAssetsUsdc = 2_000_000e6;
+        snap.poolCashUsdc = 2_000_000e6;
+        snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
+            settlementBalanceUsdc: positionMarginUsdc + reservedBountyUsdc,
+            totalLockedMarginUsdc: positionMarginUsdc + reservedBountyUsdc,
+            activePositionMarginUsdc: positionMarginUsdc,
+            otherLockedMarginUsdc: reservedBountyUsdc,
+            freeSettlementUsdc: 0
+        });
+        snap.lockedBuckets = IMarginClearinghouse.LockedMarginBuckets({
+            positionMarginUsdc: positionMarginUsdc,
+            committedOrderMarginUsdc: 0,
+            reservedSettlementUsdc: reservedBountyUsdc,
+            totalLockedMarginUsdc: positionMarginUsdc + reservedBountyUsdc
+        });
+        snap.capPrice = CAP_PRICE;
+        snap.riskParams = _riskParams();
+        snap.executionFeeBps = 4;
+        CfdTypes.Order memory closeOrder = CfdTypes.Order({
+            account: account,
+            sizeDelta: snap.position.size,
+            marginDelta: 0,
+            targetPrice: 0,
+            commitTime: 0,
+            commitBlock: 0,
+            orderId: 0,
+            side: snap.position.side,
+            isClose: true
+        });
+
+        CfdEnginePlanTypes.CloseDelta memory delta = CfdEnginePlanLib.planClose(snap, closeOrder, 150_000_000, 0);
+
+        assertTrue(delta.valid, "Underwater full close should remain executable");
+        assertEq(
+            delta.lossConsumption.totalConsumedUsdc,
+            positionMarginUsdc,
+            "Close loss must not consume clearinghouse-reserved bounty value"
+        );
+        assertEq(
+            delta.lossConsumption.otherLockedMarginConsumedUsdc,
+            0,
+            "Reserved execution bounty must stay isolated from terminal close loss"
+        );
+        assertGe(
+            delta.lossConsumption.uncoveredUsdc,
+            reservedBountyUsdc,
+            "Reserved bounty should remain outside reachable collateral even when loss has shortfall"
+        );
+    }
+
     function test_PlanLiquidation_ReportsPendingCarry() public {
         address account = freshBullTrader;
         _fundTrader(freshBullTrader, 20_000e6);
