@@ -243,13 +243,10 @@ contract CfdEngineLens is ICfdEngineLens {
             snap.lastMarkPrice = lastMarkPrice;
         }
         snap.lastMarkTime = publishTime == 0 ? lastMarkTime : publishTime;
-        snap.carryPriceTimeIndex = engineContract.carryPriceTimeIndex();
-        snap.carryIndexTimestamp = engineContract.carryIndexTimestamp();
-        snap.carryIndexPrice = engineContract.carryIndexPrice();
-        snap.lastCarryPriceTimeIndex = engineContract.lastCarryPriceTimeIndex(account);
-        snap.carryIndexInitialized = engineContract.carryIndexInitialized();
-        snap.bullSide = _sideSnapshot(bull);
-        snap.bearSide = _sideSnapshot(bear);
+        snap.positionBorrowBaseUsdc = engineContract.getPositionBorrowBaseUsdc(account);
+        snap.positionLastCarryIndex = engineContract.getPositionLastCarryIndex(account);
+        snap.bullSide = _sideSnapshot(CfdTypes.Side.BULL, bull);
+        snap.bearSide = _sideSnapshot(CfdTypes.Side.BEAR, bear);
         snap.poolAssetsUsdc = poolDepthUsdc;
         snap.poolCashUsdc = poolDepthUsdc;
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(engineContract.clearinghouse());
@@ -313,13 +310,16 @@ contract CfdEngineLens is ICfdEngineLens {
     }
 
     function _sideSnapshot(
+        CfdTypes.Side sideId,
         ICfdEngineTypes.SideState memory side
-    ) internal pure returns (CfdEnginePlanTypes.SideSnapshot memory snap) {
+    ) internal view returns (CfdEnginePlanTypes.SideSnapshot memory snap) {
         snap = CfdEnginePlanTypes.SideSnapshot({
             maxProfitUsdc: side.maxProfitUsdc,
             openInterest: side.openInterest,
             entryNotional: side.entryNotional,
-            totalMargin: side.totalMargin
+            totalMargin: side.totalMargin,
+            borrowBaseUsdc: engineContract.sideBorrowBaseUsdc(uint256(sideId)),
+            carryIndex: engineContract.currentSideCarryIndex(sideId)
         });
     }
 

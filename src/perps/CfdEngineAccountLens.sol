@@ -95,15 +95,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
 
         uint256 reachableUsdc = MarginClearinghouseAccountingLib.getGenericReachableUsdc(buckets);
         uint256 pendingCarryUsdc = engineContract.unsettledCarryUsdc(account);
-        if (pos.size > 0 && pos.lastCarryTimestamp > 0 && block.timestamp > pos.lastCarryTimestamp) {
-            uint256 carryTimeDelta = block.timestamp - pos.lastCarryTimestamp;
-            uint256 carryPrice = _averageCarryPrice(account, price, carryTimeDelta, block.timestamp);
-            uint256 lpBackedNotionalUsdc =
-                PositionRiskAccountingLib.computeLpBackedNotionalUsdc(pos.size, carryPrice, reachableUsdc);
-            pendingCarryUsdc += PositionRiskAccountingLib.computePendingCarryUsdc(
-                lpBackedNotionalUsdc, _riskParams().baseCarryBps, carryTimeDelta
-            );
-        }
+        pendingCarryUsdc += _elapsedCarryUsdc(account, pos);
         if (pendingCarryUsdc > 0) {
             MarginClearinghouseAccountingLib.SettlementConsumption memory carryConsumption =
                 MarginClearinghouseAccountingLib.planCarryLossConsumption(buckets, pendingCarryUsdc);
@@ -199,18 +191,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
 
         CfdTypes.RiskParams memory params = _riskParams();
         uint256 price = engineContract.lastMarkPrice();
-        uint256 pendingCarryUsdc = 0;
-        if (price > 0 && pos.lastCarryTimestamp > 0 && block.timestamp > pos.lastCarryTimestamp) {
-            uint256 carryTimeDelta = block.timestamp - pos.lastCarryTimestamp;
-            uint256 carryPrice = _averageCarryPrice(account, price, carryTimeDelta, block.timestamp);
-            uint256 lpBackedNotionalUsdc = PositionRiskAccountingLib.computeLpBackedNotionalUsdc(
-                pos.size, carryPrice, snapshot.terminalReachableUsdc
-            );
-            pendingCarryUsdc = PositionRiskAccountingLib.computePendingCarryUsdc(
-                lpBackedNotionalUsdc, params.baseCarryBps, carryTimeDelta
-            );
-        }
-        pendingCarryUsdc += engineContract.unsettledCarryUsdc(account);
+        uint256 pendingCarryUsdc = engineContract.unsettledCarryUsdc(account) + _elapsedCarryUsdc(account, pos);
         PositionRiskAccountingLib.PositionRiskState memory riskState =
             PositionRiskAccountingLib.buildPositionRiskStateWithCarry(
                 pos,
@@ -239,31 +220,23 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         pos.lastCarryTimestamp = engineContract.getPositionLastCarryTimestamp(account);
     }
 
-    function _averageCarryPrice(
+    function _elapsedCarryUsdc(
         address account,
-        uint256 fallbackPrice,
-        uint256 carryTimeDelta,
-        uint256 timestampNow
+        CfdTypes.Position memory pos
     ) internal view returns (uint256) {
-        if (!engineContract.carryIndexInitialized() || carryTimeDelta == 0) {
-            return fallbackPrice;
+        if (pos.size == 0) {
+            return 0;
         }
-        uint256 endIndex = _currentCarryPriceTimeIndex(timestampNow);
-        uint256 startIndex = engineContract.lastCarryPriceTimeIndex(account);
+        uint256 borrowBaseUsdc = engineContract.getPositionBorrowBaseUsdc(account);
+        if (borrowBaseUsdc == 0) {
+            return 0;
+        }
+        uint256 endIndex = engineContract.currentSideCarryIndex(pos.side);
+        uint256 startIndex = engineContract.getPositionLastCarryIndex(account);
         if (endIndex <= startIndex) {
-            return fallbackPrice;
+            return 0;
         }
-        return (endIndex - startIndex) / carryTimeDelta;
-    }
-
-    function _currentCarryPriceTimeIndex(
-        uint256 timestampNow
-    ) internal view returns (uint256 index) {
-        index = engineContract.carryPriceTimeIndex();
-        if (!engineContract.carryIndexInitialized() || timestampNow <= engineContract.carryIndexTimestamp()) {
-            return index;
-        }
-        index += engineContract.carryIndexPrice() * (timestampNow - engineContract.carryIndexTimestamp());
+        return PositionRiskAccountingLib.computeIndexedCarryUsdc(borrowBaseUsdc, endIndex - startIndex);
     }
 
     function _riskParams() internal view returns (CfdTypes.RiskParams memory params) {

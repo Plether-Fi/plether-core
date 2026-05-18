@@ -53,7 +53,6 @@ contract MockClearinghouseEngine {
     uint256 public carryCheckpointCalls;
     uint256 public storedMarkCheckpointCalls;
     address public lastCarryAccountId;
-    uint256 public lastReachableCollateralBasisUsdc;
     bool public carryRealizationStale;
 
     function setOrderRouter(
@@ -73,24 +72,20 @@ contract MockClearinghouseEngine {
     }
 
     function realizeCarryBeforeMarginChange(
-        address account,
-        uint256 reachableCollateralBasisUsdc
+        address account
     ) external {
         if (carryRealizationStale) {
             revert CfdEngine__MarkPriceStale();
         }
         carryCheckpointCalls += 1;
         lastCarryAccountId = account;
-        lastReachableCollateralBasisUsdc = reachableCollateralBasisUsdc;
     }
 
     function checkpointCarryUsingStoredMark(
-        address account,
-        uint256 reachableCollateralBasisUsdc
+        address account
     ) external {
         storedMarkCheckpointCalls += 1;
         lastCarryAccountId = account;
-        lastReachableCollateralBasisUsdc = reachableCollateralBasisUsdc;
     }
 
     function syncLegacyPlaceholder() external {}

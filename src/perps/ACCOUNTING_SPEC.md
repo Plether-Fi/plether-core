@@ -141,6 +141,8 @@ Withdrawal/reconcile definition:
 Deposit/mint pricing definition:
 
 - start from the same physical assets, trader-claim liabilities, claimant buckets, recapitalizations, and revenue state,
+- immediate active-share tranche deposits are disabled while any trader position is open,
+- ordinary LP entry remains available through pending deposit epochs: assets are funded up front, cancellation is allowed only before the activation epoch begins, and shares are minted only after permissionless finalization fixes the epoch price,
 - do not subtract unrealized MtM liability unless it comes from an exact, non-manipulable deposit-side model,
 - realized pool losses still lower deposit NAV,
 - conservative unrealized MtM remains a withdrawal protection, not a discount offered to incoming LPs.
@@ -150,13 +152,14 @@ Rules:
 - over-recognition is forbidden,
 - temporary under-recognition is acceptable,
 - value with no valid claimant path must sit in explicit `unassignedAssets`.
-- during `oracleFrozen`, tranche entry/exit pricing remains live by applying fixed tranche-local LP surcharges instead of requiring a fresh live mark.
+- during `oracleFrozen`, tranche exit pricing remains live by applying fixed tranche-local LP surcharges instead of requiring a fresh live mark; immediate active-share entry pricing still requires zero open trader positions.
 - during `oracleFrozen`, bootstrap admin flows (`initializeSeedPosition`, `assignUnassignedAssets`) are blocked rather than inheriting LP frozen-fee pricing.
 - during `oracleFrozen`, ERC4626 `maxMint` reports the finite share cap implied by the active frozen-entry fee.
 
 Required consequences:
 
-- `unassignedAssets > 0` blocks ordinary tranche deposits,
+- immediate active-share tranche deposits are unavailable whenever `hasOpenPositions` is true,
+- `unassignedAssets > 0` blocks immediate and pending tranche deposits,
 - a wiped tranche cannot be silently revived by a normal ERC-4626 deposit,
 - seeded ownership continuity is preferred over governance re-assignment.
 
@@ -196,6 +199,8 @@ Key fields:
 Rule:
 
 - downstream LP accounting should not need to re-derive these values from raw engine state.
+- `hasOpenPositions` gates immediate active-share tranche deposits because the current O(1) side aggregates cannot compute an exact,
+  collateral-capped per-position loser receivable for instant deposit pricing.
 
 ### `HousePoolStatusSnapshot`
 

@@ -28,7 +28,6 @@ import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAcc
 import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IOrderRouterErrors} from "../../src/perps/interfaces/IOrderRouterErrors.sol";
 import {IPletherOracle} from "../../src/perps/interfaces/IPletherOracle.sol";
-import {PositionRiskAccountingLib} from "../../src/perps/libraries/PositionRiskAccountingLib.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {MockOracle} from "../utils/MockOracle.sol";
@@ -493,6 +492,7 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(engine.lastMarkPrice(), 1e8, "setup should leave a stored mark price");
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
+        uint256 expectedCarry = _expectedIndexedCarryUsdc(account);
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 0, 0, true);
@@ -503,7 +503,11 @@ contract OrderRouterTest is BasePerpTest {
             200_000,
             "Stale-mark close commits should still reservation the flat router bounty"
         );
-        assertEq(marginAfter, marginBefore - 200_000, "Stale-mark close bounty should still fall back to active margin");
+        assertEq(
+            marginAfter,
+            marginBefore - expectedCarry - 200_000,
+            "Stale-mark close bounty should realize indexed carry then fall back to active margin"
+        );
         assertEq(usdc.balanceOf(address(router)), 0, "Router should not custody stale-mark close bounty reservation");
         assertEq(
             clearinghouse.getLockedMarginBuckets(account).reservedSettlementUsdc,
@@ -536,6 +540,7 @@ contract OrderRouterTest is BasePerpTest {
         );
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
+        uint256 expectedCarry = _expectedIndexedCarryUsdc(account);
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 0, true);
@@ -543,8 +548,8 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(_executionBountyReserve(2), 200_000, "Stale close commit should still reservation the full bounty");
         assertEq(
             clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc,
-            1_100_000,
-            "Stale close fallback should only consume the reduced close-order bounty from free settlement"
+            1_100_000 - expectedCarry,
+            "Stale close fallback should realize indexed carry before reserving from free settlement"
         );
     }
 
@@ -572,17 +577,11 @@ contract OrderRouterTest is BasePerpTest {
             "Setup should leave the larger free-settlement buffer under the lower open bounty cap"
         );
 
-        uint256 carryStart = engine.getPositionLastCarryTimestamp(account);
         vm.warp(block.timestamp + 12 hours);
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
-        uint256 carryElapsed = block.timestamp - carryStart;
-        uint256 expectedCarry = PositionRiskAccountingLib.computePendingCarryUsdc(
-            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(10_000e18, 1e8, clearinghouse.balanceUsdc(account)),
-            _riskParams().baseCarryBps,
-            carryElapsed
-        );
+        uint256 expectedCarry = _expectedIndexedCarryUsdc(account);
         uint256 reservedSettlementBefore = clearinghouse.getLockedMarginBuckets(account).reservedSettlementUsdc;
 
         vm.prank(trader);

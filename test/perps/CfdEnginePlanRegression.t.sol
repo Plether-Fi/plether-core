@@ -185,6 +185,25 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         return currentMargin;
     }
 
+    function _attachFullRateCarry(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        CfdTypes.Side side,
+        uint256 borrowBaseUsdc,
+        uint256 timeDelta
+    ) internal pure {
+        uint256 carryIndex =
+            PositionRiskAccountingLib.computeCarryIndexIncrement(snap.riskParams.baseCarryBps, timeDelta);
+        snap.positionBorrowBaseUsdc = borrowBaseUsdc;
+        snap.positionLastCarryIndex = 0;
+        if (side == CfdTypes.Side.BULL) {
+            snap.bullSide.borrowBaseUsdc = borrowBaseUsdc;
+            snap.bullSide.carryIndex = carryIndex;
+        } else {
+            snap.bearSide.borrowBaseUsdc = borrowBaseUsdc;
+            snap.bearSide.carryIndex = carryIndex;
+        }
+    }
+
     function test_CloseSettlementResult_FeeOffsetSeparatesRetainedFee() public pure {
         CfdEngineSettlementLib.CloseSettlementResult memory result =
             CfdEngineSettlementLib.closeSettlementResult(2e6, 2e6, 10e6);
@@ -455,10 +474,10 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         snap.lastMarkPrice = 1e8;
         snap.lastMarkTime = uint64(block.timestamp);
         snap.bullSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: 100_000e6, openInterest: 100_000e18, entryNotional: 100_000e6, totalMargin: 2500e6
+            maxProfitUsdc: 100_000e6, openInterest: 100_000e18, entryNotional: 100_000e6, totalMargin: 2500e6, borrowBaseUsdc: 0, carryIndex: 0
         });
         snap.bearSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: 100_000e6, openInterest: 100_000e18, entryNotional: 100_000e6, totalMargin: 2500e6
+            maxProfitUsdc: 100_000e6, openInterest: 100_000e18, entryNotional: 100_000e6, totalMargin: 2500e6, borrowBaseUsdc: 0, carryIndex: 0
         });
         snap.poolAssetsUsdc = 2_000_000e6;
         snap.poolCashUsdc = 2_000_000e6;
@@ -478,6 +497,12 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         snap.capPrice = CAP_PRICE;
         snap.riskParams = _riskParams();
         snap.executionFeeBps = engine.executionFeeBps();
+        _attachFullRateCarry(
+            snap,
+            CfdTypes.Side.BULL,
+            PositionRiskAccountingLib.computeBorrowBaseUsdc(snap.position.maxProfitUsdc, snap.position.margin),
+            30 days
+        );
         CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(
             snap, _openOrder(account, CfdTypes.Side.BULL, 5000e18, 0, 1e8), 1e8, uint64(block.timestamp)
         );
@@ -520,10 +545,10 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             vpiAccrued: 0
         });
         snap.bullSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: 0, openInterest: 300_000e18, entryNotional: 300_000e6, totalMargin: 50_000e6
+            maxProfitUsdc: 0, openInterest: 300_000e18, entryNotional: 300_000e6, totalMargin: 50_000e6, borrowBaseUsdc: 0, carryIndex: 0
         });
         snap.bearSide =
-            CfdEnginePlanTypes.SideSnapshot({maxProfitUsdc: 0, openInterest: 0, entryNotional: 0, totalMargin: 0});
+            CfdEnginePlanTypes.SideSnapshot({maxProfitUsdc: 0, openInterest: 0, entryNotional: 0, totalMargin: 0, borrowBaseUsdc: 0, carryIndex: 0});
         snap.poolAssetsUsdc = 2_000_000e6;
         snap.poolCashUsdc = 2_000_000e6;
         snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
@@ -583,10 +608,10 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         snap.lastMarkPrice = 1e8;
         snap.lastMarkTime = uint64(block.timestamp);
         snap.bullSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: 100_000e6, openInterest: 10_000e18, entryNotional: 10_000e18 * 1e8, totalMargin: 100e6
+            maxProfitUsdc: 100_000e6, openInterest: 10_000e18, entryNotional: 10_000e18 * 1e8, totalMargin: 100e6, borrowBaseUsdc: 0, carryIndex: 0
         });
         snap.bearSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: 100_000e6, openInterest: 10_000e18, entryNotional: 10_000e18 * 1e8, totalMargin: 100e6
+            maxProfitUsdc: 100_000e6, openInterest: 10_000e18, entryNotional: 10_000e18 * 1e8, totalMargin: 100e6, borrowBaseUsdc: 0, carryIndex: 0
         });
         snap.poolAssetsUsdc = 50_000_000e6;
         snap.poolCashUsdc = 50_000_000e6;
@@ -606,9 +631,17 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         snap.capPrice = CAP_PRICE;
         snap.riskParams = _riskParams();
         snap.executionFeeBps = engine.executionFeeBps();
+        _attachFullRateCarry(
+            snap,
+            CfdTypes.Side.BULL,
+            PositionRiskAccountingLib.computeBorrowBaseUsdc(snap.position.maxProfitUsdc, snap.position.margin),
+            30 days
+        );
         CfdTypes.Order memory order = _openOrder(account, CfdTypes.Side.BULL, 10_000e18, 100e6, 1e8);
         CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(snap, order, 1e8, uint64(block.timestamp));
-        uint256 freeSettlementAfterCarry = snap.accountBuckets.freeSettlementUsdc - delta.pendingCarryUsdc;
+        uint256 freeSettlementAfterCarry = delta.pendingCarryUsdc >= snap.accountBuckets.freeSettlementUsdc
+            ? 0
+            : snap.accountBuckets.freeSettlementUsdc - delta.pendingCarryUsdc;
 
         assertGt(delta.pendingCarryUsdc, 0, "Setup must accrue pending carry");
         assertLt(
@@ -714,10 +747,10 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             maxProfitUsdc: 100_000e6,
             openInterest: 1_000_000e18,
             entryNotional: 1_000_000e18 * 1e8,
-            totalMargin: 50_000e6
+            totalMargin: 50_000e6, borrowBaseUsdc: 0, carryIndex: 0
         });
         snap.bearSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: 10_000e6, openInterest: 100_000e18, entryNotional: 100_000e18 * 1e8, totalMargin: 1e6
+            maxProfitUsdc: 10_000e6, openInterest: 100_000e18, entryNotional: 100_000e18 * 1e8, totalMargin: 1e6, borrowBaseUsdc: 0, carryIndex: 0
         });
         snap.poolAssetsUsdc = 50_000_000e6;
         snap.poolCashUsdc = 0;
@@ -769,10 +802,10 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         snap.lastMarkPrice = 1e8;
         snap.lastMarkTime = uint64(block.timestamp);
         snap.bullSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: 100_000e6, openInterest: 100_000e18, entryNotional: 100_000e18 * 1e8, totalMargin: 2000e6
+            maxProfitUsdc: 100_000e6, openInterest: 100_000e18, entryNotional: 100_000e18 * 1e8, totalMargin: 2000e6, borrowBaseUsdc: 0, carryIndex: 0
         });
         snap.bearSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: 100_000e6, openInterest: 100_000e18, entryNotional: 100_000e18 * 1e8, totalMargin: 2000e6
+            maxProfitUsdc: 100_000e6, openInterest: 100_000e18, entryNotional: 100_000e18 * 1e8, totalMargin: 2000e6, borrowBaseUsdc: 0, carryIndex: 0
         });
         snap.poolAssetsUsdc = 50_000_000e6;
         snap.poolCashUsdc = 50_000_000e6;
@@ -792,18 +825,41 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         snap.capPrice = CAP_PRICE;
         snap.riskParams = _riskParams();
         snap.executionFeeBps = engine.executionFeeBps();
-        uint256 terminalCarryUsdc = PositionRiskAccountingLib.computePendingCarryUsdc(
-            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(
-                snap.position.size, 1e8, snap.accountBuckets.settlementBalanceUsdc
-            ),
-            snap.riskParams.baseCarryBps,
+        uint256 borrowBaseUsdc =
+            PositionRiskAccountingLib.computeBorrowBaseUsdc(snap.position.maxProfitUsdc, snap.position.margin);
+        _attachFullRateCarry(
+            snap,
+            CfdTypes.Side.BULL,
+            borrowBaseUsdc,
             30 days
         );
 
         CfdEnginePlanTypes.OpenDelta memory delta =
             CfdEnginePlanLib.planOpen(snap, _openOrder(account, CfdTypes.Side.BULL, 10_000e18, 0, 1e8), 1e8, 0);
+        CfdEnginePlanTypes.RawSnapshot memory withoutQueuedReservations = snap;
+        withoutQueuedReservations.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
+            settlementBalanceUsdc: 5000e6,
+            totalLockedMarginUsdc: 2000e6,
+            activePositionMarginUsdc: 2000e6,
+            otherLockedMarginUsdc: 0,
+            freeSettlementUsdc: 3000e6
+        });
+        withoutQueuedReservations.lockedBuckets = IMarginClearinghouse.LockedMarginBuckets({
+            positionMarginUsdc: 2000e6,
+            committedOrderMarginUsdc: 0,
+            reservedSettlementUsdc: 0,
+            totalLockedMarginUsdc: 2000e6
+        });
+        CfdEnginePlanTypes.OpenDelta memory noQueueDelta = CfdEnginePlanLib.planOpen(
+            withoutQueuedReservations, _openOrder(account, CfdTypes.Side.BULL, 10_000e18, 0, 1e8), 1e8, 0
+        );
 
-        assertGt(delta.pendingCarryUsdc, terminalCarryUsdc, "Planner carry basis must exclude queued reservations");
+        assertGt(delta.pendingCarryUsdc, 0, "Setup must accrue indexed carry");
+        assertEq(
+            delta.pendingCarryUsdc,
+            noQueueDelta.pendingCarryUsdc,
+            "Queued reservations must not change historical indexed carry"
+        );
     }
 
     function test_PlanOpen_SolvencyFailureCategoryMatchesTypedExecutionFailure() public {

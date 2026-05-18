@@ -6,6 +6,9 @@ import {CfdTypes} from "../CfdTypes.sol";
 
 library PositionRiskAccountingLib {
 
+    uint256 internal constant CARRY_INDEX_SCALE = 1e18;
+    uint256 internal constant UTILIZATION_BPS = 10_000;
+
     struct PositionRiskState {
         int256 unrealizedPnlUsdc;
         int256 equityUsdc;
@@ -38,6 +41,59 @@ library PositionRiskAccountingLib {
             return 0;
         }
         carryUsdc = (baseCarryBps * lpBackedNotionalUsdc * timeDelta) / (CfdMath.SECONDS_PER_YEAR * 10_000);
+    }
+
+    function computeBorrowBaseUsdc(
+        uint256 maxProfitUsdc,
+        uint256 marginUsdc
+    ) internal pure returns (uint256) {
+        return maxProfitUsdc > marginUsdc ? maxProfitUsdc - marginUsdc : 0;
+    }
+
+    function computeBorrowUtilizationBps(
+        uint256 borrowBaseUsdc,
+        uint256 poolAssetsUsdc
+    ) internal pure returns (uint256 utilizationBps) {
+        if (borrowBaseUsdc == 0) {
+            return 0;
+        }
+        if (poolAssetsUsdc == 0) {
+            return UTILIZATION_BPS;
+        }
+        utilizationBps = (borrowBaseUsdc * UTILIZATION_BPS) / poolAssetsUsdc;
+        if (utilizationBps > UTILIZATION_BPS) {
+            utilizationBps = UTILIZATION_BPS;
+        }
+    }
+
+    function computeUtilizedCarryRateBps(
+        uint256 baseCarryBps,
+        uint256 utilizationBps
+    ) internal pure returns (uint256) {
+        if (utilizationBps > UTILIZATION_BPS) {
+            utilizationBps = UTILIZATION_BPS;
+        }
+        return (baseCarryBps * utilizationBps) / UTILIZATION_BPS;
+    }
+
+    function computeCarryIndexIncrement(
+        uint256 carryRateBps,
+        uint256 timeDelta
+    ) internal pure returns (uint256) {
+        if (carryRateBps == 0 || timeDelta == 0) {
+            return 0;
+        }
+        return (carryRateBps * CARRY_INDEX_SCALE * timeDelta) / (CfdMath.SECONDS_PER_YEAR * 10_000);
+    }
+
+    function computeIndexedCarryUsdc(
+        uint256 borrowBaseUsdc,
+        uint256 carryIndexDelta
+    ) internal pure returns (uint256) {
+        if (borrowBaseUsdc == 0 || carryIndexDelta == 0) {
+            return 0;
+        }
+        return (borrowBaseUsdc * carryIndexDelta) / CARRY_INDEX_SCALE;
     }
 
     function buildPositionRiskState(

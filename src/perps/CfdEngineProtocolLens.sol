@@ -50,9 +50,10 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         // Deposit pricing is intentionally neutral to unrealized trader PnL. Conservative MtM remains
         // withdrawal-only; without per-position netting, any aggregate deposit-side MtM is manipulable.
         snapshot.depositMtmLiabilityUsdc = 0;
-        snapshot.traderClaimBalanceUsdc = engineContract.totalTraderClaimBalanceUsdc();
         ICfdEngineTypes.SideState memory bullState = _sideState(CfdTypes.Side.BULL);
         ICfdEngineTypes.SideState memory bearState = _sideState(CfdTypes.Side.BEAR);
+        snapshot.traderClaimBalanceUsdc = engineContract.totalTraderClaimBalanceUsdc();
+        snapshot.hasOpenPositions = bullState.openInterest > 0 || bearState.openInterest > 0;
         snapshot.markFreshnessRequired = bullState.maxProfitUsdc + bearState.maxProfitUsdc > 0;
         if (snapshot.markFreshnessRequired) {
             snapshot.maxMarkStaleness =

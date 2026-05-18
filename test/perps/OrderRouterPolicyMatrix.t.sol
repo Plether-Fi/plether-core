@@ -7,7 +7,6 @@ import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {ICfdEngineCore} from "../../src/perps/interfaces/ICfdEngineCore.sol";
 import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
-import {PositionRiskAccountingLib} from "../../src/perps/libraries/PositionRiskAccountingLib.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 
@@ -231,11 +230,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         engine.updateMarkPrice(1e8, uint64(warpedTime));
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
-        uint256 expectedCarry = PositionRiskAccountingLib.computePendingCarryUsdc(
-            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, 1e8, keeperSettlementBefore),
-            _riskParams().baseCarryBps,
-            30 days
-        );
+        uint256 expectedCarry = _expectedIndexedCarryUsdc(keeperAccount);
 
         _fundTrader(BOB, 1e6);
         vm.prank(address(router));

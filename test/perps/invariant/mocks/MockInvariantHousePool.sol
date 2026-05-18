@@ -180,6 +180,12 @@ contract MockInvariantHousePool is IHousePool {
         return true;
     }
 
+    function canAcceptInstantTrancheDeposits(
+        bool
+    ) external pure returns (bool) {
+        return true;
+    }
+
     function isOracleFrozen() external pure returns (bool) {
         return false;
     }

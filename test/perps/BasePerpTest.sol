@@ -25,6 +25,7 @@ import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAcc
 import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
 import {PerpsViewTypes} from "../../src/perps/interfaces/PerpsViewTypes.sol";
 import {ProtocolLensViewTypes} from "../../src/perps/interfaces/ProtocolLensViewTypes.sol";
+import {PositionRiskAccountingLib} from "../../src/perps/libraries/PositionRiskAccountingLib.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {OrderRouterDebugLens} from "../utils/OrderRouterDebugLens.sol";
@@ -915,6 +916,25 @@ abstract contract BasePerpTest is Test {
         address account
     ) internal view returns (uint256) {
         return clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc;
+    }
+
+    function _expectedIndexedCarryUsdc(
+        address account
+    ) internal view returns (uint256) {
+        (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(account);
+        if (size == 0) {
+            return 0;
+        }
+        uint256 borrowBaseUsdc = engine.getPositionBorrowBaseUsdc(account);
+        if (borrowBaseUsdc == 0) {
+            return 0;
+        }
+        uint256 startIndex = engine.getPositionLastCarryIndex(account);
+        uint256 endIndex = engine.currentSideCarryIndex(side);
+        if (endIndex <= startIndex) {
+            return 0;
+        }
+        return PositionRiskAccountingLib.computeIndexedCarryUsdc(borrowBaseUsdc, endIndex - startIndex);
     }
 
     function _accountOf(

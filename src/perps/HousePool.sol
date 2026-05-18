@@ -237,12 +237,28 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
     }
 
     function canAcceptTrancheDeposits(
-        bool
+        bool isSenior
     ) public view override returns (bool) {
+        return _canAcceptTrancheDeposits(isSenior, false);
+    }
+
+    function canAcceptInstantTrancheDeposits(
+        bool isSenior
+    ) public view override returns (bool) {
+        return _canAcceptTrancheDeposits(isSenior, true);
+    }
+
+    function _canAcceptTrancheDeposits(
+        bool,
+        bool requireNoOpenPositions
+    ) internal view returns (bool) {
         (
             HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
             HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
         ) = _getHousePoolSnapshots();
+        if (requireNoOpenPositions && accountingSnapshot.hasOpenPositions) {
+            return false;
+        }
         HousePoolContext memory ctx = _buildHousePoolContext(accountingSnapshot, statusSnapshot);
         return HousePoolTrancheGateLib.trancheDepositsAllowed(
             canAcceptOrdinaryDeposits(),
@@ -285,6 +301,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
         if (amount == 0) {
             revert HousePool__NoExcessAssets();
         }
+        _checkpointEngineCarryIndexes();
         accountedAssets += amount;
         emit ExcessAccounted(amount, accountedAssets);
     }
@@ -441,6 +458,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
             revert HousePool__BootstrapSharesZero();
         }
 
+        _checkpointEngineCarryIndexes();
         USDC.safeTransferFrom(msg.sender, address(this), amount);
 
         accountedAssets += amount;
@@ -479,6 +497,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
         if (seniorPrincipal < seniorHighWaterMark) {
             revert HousePool__SeniorImpaired();
         }
+        _checkpointEngineCarryIndexes();
         USDC.safeTransferFrom(msg.sender, address(this), amount);
         accountedAssets += amount;
         if (seniorPrincipal == 0) {
@@ -512,6 +531,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
         if (amount > getMaxSeniorWithdraw()) {
             revert HousePool__ExceedsMaxSeniorWithdraw();
         }
+        _checkpointEngineCarryIndexes();
         HousePoolWaterfallAccountingLib.WaterfallState memory state = _getWaterfallState();
         HousePoolWaterfallAccountingLib.WaterfallState memory nextState =
             HousePoolWaterfallAccountingLib.scaleSeniorOnWithdraw(state, amount);
@@ -536,6 +556,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
         if (seniorPrincipal < seniorHighWaterMark) {
             revert HousePool__SeniorImpaired();
         }
+        _checkpointEngineCarryIndexes();
         USDC.safeTransferFrom(msg.sender, address(this), amount);
         accountedAssets += amount;
         juniorPrincipal += amount;
@@ -558,6 +579,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
         if (amount > getMaxJuniorWithdraw()) {
             revert HousePool__ExceedsMaxJuniorWithdraw();
         }
+        _checkpointEngineCarryIndexes();
         juniorPrincipal -= amount;
         accountedAssets -= amount;
         USDC.safeTransfer(receiver, amount);
@@ -732,6 +754,10 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
         if (amount < MIN_TRANCHE_DEPOSIT_USDC) {
             revert HousePool__DepositTooSmall();
         }
+    }
+
+    function _checkpointEngineCarryIndexes() internal {
+        ENGINE.checkpointCarryIndexes();
     }
 
     function _reconcile(

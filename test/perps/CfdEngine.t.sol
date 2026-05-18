@@ -116,11 +116,12 @@ contract CfdEnginePlanLibHarness {
         uint64 lastCarryTimestamp
     ) external pure returns (CfdEnginePlanTypes.LiquidationDelta memory delta) {
         CfdEnginePlanTypes.RawSnapshot memory snap;
+        uint256 maxProfitUsdc = CfdMath.calculateMaxProfit(size, entryPrice, CfdTypes.Side.BEAR, 2e8);
         snap.position = CfdTypes.Position({
             size: size,
             margin: 0,
             entryPrice: entryPrice,
-            maxProfitUsdc: 0,
+            maxProfitUsdc: maxProfitUsdc,
             side: CfdTypes.Side.BEAR,
             lastUpdateTime: 0,
             lastCarryTimestamp: lastCarryTimestamp,
@@ -129,7 +130,9 @@ contract CfdEnginePlanLibHarness {
         snap.currentTimestamp = currentTimestamp;
         snap.lastMarkPrice = oraclePrice;
         snap.lastMarkTime = currentTimestamp;
+        snap.bearSide.maxProfitUsdc = maxProfitUsdc;
         snap.bearSide.openInterest = size;
+        snap.bearSide.entryNotional = size * entryPrice;
         snap.poolAssetsUsdc = 1_000_000e6;
         snap.poolCashUsdc = 1;
         snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
@@ -152,6 +155,14 @@ contract CfdEnginePlanLibHarness {
             minBountyUsdc: 1e6,
             bountyBps: 10
         });
+        uint256 carryTimeDelta = currentTimestamp > lastCarryTimestamp ? currentTimestamp - lastCarryTimestamp : 0;
+        snap.positionBorrowBaseUsdc = maxProfitUsdc;
+        snap.positionLastCarryIndex = 0;
+        snap.bearSide.borrowBaseUsdc = snap.poolAssetsUsdc;
+        snap.bearSide.carryIndex = PositionRiskAccountingLib.computeCarryIndexIncrement(
+            snap.riskParams.baseCarryBps,
+            carryTimeDelta
+        );
         snap.executionFeeBps = 4;
         return CfdEnginePlanLib.planLiquidation(snap, oraclePrice, 0);
     }
@@ -234,10 +245,10 @@ contract CfdEnginePlanLibHarness {
             maxProfitUsdc: 100_000e6,
             openInterest: currentSize,
             entryNotional: currentSize * currentEntryPrice,
-            totalMargin: positionMarginUsdc
+            totalMargin: positionMarginUsdc, borrowBaseUsdc: 0, carryIndex: 0
         });
         snap.bearSide =
-            CfdEnginePlanTypes.SideSnapshot({maxProfitUsdc: 0, openInterest: 0, entryNotional: 0, totalMargin: 0});
+            CfdEnginePlanTypes.SideSnapshot({maxProfitUsdc: 0, openInterest: 0, entryNotional: 0, totalMargin: 0, borrowBaseUsdc: 0, carryIndex: 0});
         snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
             settlementBalanceUsdc: settlementBalanceUsdc,
             totalLockedMarginUsdc: positionMarginUsdc,
@@ -321,6 +332,23 @@ contract CfdEngineTest is BasePerpTest {
             bearMaxProfit -= maxProfitReductionUsdc;
         }
         return bullMaxProfit > bearMaxProfit ? bullMaxProfit : bearMaxProfit;
+    }
+
+    function _expectedIndexedCarry(
+        address account
+    ) internal view returns (uint256) {
+        (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(account);
+        if (size == 0) {
+            return 0;
+        }
+        uint256 startIndex = engine.getPositionLastCarryIndex(account);
+        uint256 endIndex = engine.currentSideCarryIndex(side);
+        if (endIndex <= startIndex) {
+            return 0;
+        }
+        return PositionRiskAccountingLib.computeIndexedCarryUsdc(
+            engine.getPositionBorrowBaseUsdc(account), endIndex - startIndex
+        );
     }
 
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
@@ -933,7 +961,7 @@ contract CfdEngineTest is BasePerpTest {
         address account = trader;
         _fundTrader(trader, 20_000e6);
 
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 500_000e18, 10_000e6, 1e8);
         stdstore.target(address(engine)).sig("traderClaimBalanceUsdc(address)").with_key(account)
             .checked_write(uint256(5000e6));
         stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(uint256(5000e6));
@@ -943,11 +971,7 @@ contract CfdEngineTest is BasePerpTest {
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
         uint256 settlementBefore = clearinghouse.balanceUsdc(account);
-        uint256 expectedCarry = PositionRiskAccountingLib.computePendingCarryUsdc(
-            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, 1e8, settlementBefore),
-            _riskParams().baseCarryBps,
-            30 days
-        );
+        uint256 expectedCarry = _expectedIndexedCarry(account);
 
         usdc.mint(address(pool), 5000e6);
         uint256 poolRawBefore = pool.rawAssets();
@@ -978,7 +1002,7 @@ contract CfdEngineTest is BasePerpTest {
         address account = trader;
         _fundTrader(trader, 20_000e6);
 
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 500_000e18, 10_000e6, 1e8);
         stdstore.target(address(engine)).sig("traderClaimBalanceUsdc(address)").with_key(account)
             .checked_write(uint256(5000e6));
         stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(uint256(5000e6));
@@ -986,12 +1010,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 30 days);
 
         uint256 settlementBefore = clearinghouse.balanceUsdc(account);
-        uint64 carryTimestampBefore = engine.getPositionLastCarryTimestamp(account);
-        uint256 expectedCarry = PositionRiskAccountingLib.computePendingCarryUsdc(
-            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, engine.lastMarkPrice(), settlementBefore),
-            _riskParams().baseCarryBps,
-            block.timestamp - carryTimestampBefore
-        );
+        uint256 expectedCarry = _expectedIndexedCarry(account);
 
         usdc.mint(address(pool), 5000e6);
 
@@ -1065,16 +1084,8 @@ contract CfdEngineTest is BasePerpTest {
         _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
 
         uint256 settlementBefore = clearinghouse.balanceUsdc(account);
-        uint256 reachableBefore =
-            MarginClearinghouseAccountingLib.getGenericReachableUsdc(clearinghouse.getAccountUsdcBuckets(account));
-
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 30 days);
-        uint256 elapsed = 30 days + engine.engineMarkStalenessLimit();
-        uint256 expectedCarry = PositionRiskAccountingLib.computePendingCarryUsdc(
-            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, 1e8, reachableBefore),
-            _riskParams().baseCarryBps,
-            elapsed
-        );
+        uint256 expectedCarry = _expectedIndexedCarry(account);
 
         vm.startPrank(trader);
         usdc.approve(address(clearinghouse), type(uint256).max);
@@ -1516,7 +1527,7 @@ contract CfdEngineTest is BasePerpTest {
         engine.addMargin(account, 0);
     }
 
-    function test_AddMargin_RevertsOnStaleMark() public {
+    function test_AddMargin_SucceedsOnStaleMark() public {
         address trader = address(0xABD3);
         address account = trader;
         _fundTrader(trader, 10_000e6);
@@ -1525,8 +1536,14 @@ contract CfdEngineTest is BasePerpTest {
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
 
         vm.prank(trader);
-        vm.expectRevert(ICfdEngineTypes.CfdEngine__MarkPriceStale.selector);
         engine.addMargin(account, 100e6);
+
+        (, uint256 marginAfter,, uint256 maxProfitUsdc,,,) = engine.positions(account);
+        assertEq(
+            engine.getPositionBorrowBaseUsdc(account),
+            PositionRiskAccountingLib.computeBorrowBaseUsdc(maxProfitUsdc, marginAfter),
+            "stale-mark add-margin should reduce future borrow base"
+        );
     }
 
     function test_CheckWithdraw_RevertsForNonClearinghouseCaller() public {
@@ -1555,11 +1572,7 @@ contract CfdEngineTest is BasePerpTest {
         uint256 poolRawBefore = pool.rawAssets();
         uint256 poolAccountedBefore = pool.accountedAssets();
         uint256 clearinghouseRawBefore = usdc.balanceOf(address(clearinghouse));
-        uint256 expectedCarry = PositionRiskAccountingLib.computePendingCarryUsdc(
-            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, 1e8, settlementBefore),
-            _riskParams().baseCarryBps,
-            1 days
-        );
+        uint256 expectedCarry = _expectedIndexedCarry(account);
         assertGt(expectedCarry, 0, "Setup must accrue carry before the balance mutation");
 
         vm.startPrank(trader);
@@ -1599,7 +1612,7 @@ contract CfdEngineTest is BasePerpTest {
         uint256 carryElapsed = 365 days * 3;
 
         _fundTrader(trader, 10_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 500_000e18, 10_000e6, 1e8);
 
         uint256 settlementBefore = clearinghouse.balanceUsdc(account);
 
@@ -1610,11 +1623,7 @@ contract CfdEngineTest is BasePerpTest {
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
         vm.roll(block.number + 1);
 
-        uint256 expectedCarry = PositionRiskAccountingLib.computePendingCarryUsdc(
-            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, 1e8, settlementBefore),
-            _riskParams().baseCarryBps,
-            carryElapsed
-        );
+        uint256 expectedCarry = _expectedIndexedCarry(account);
         assertGt(
             expectedCarry, settlementBefore, "Setup must accrue more carry than the pre-deposit settlement balance"
         );
@@ -1641,15 +1650,9 @@ contract CfdEngineTest is BasePerpTest {
         _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
 
         uint256 settlementBefore = clearinghouse.balanceUsdc(account);
-        uint64 carryTimestampBefore = engine.getPositionLastCarryTimestamp(account);
-
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 30 days);
 
-        uint256 expectedCarry = PositionRiskAccountingLib.computePendingCarryUsdc(
-            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, engine.lastMarkPrice(), settlementBefore),
-            _riskParams().baseCarryBps,
-            block.timestamp - carryTimestampBefore
-        );
+        uint256 expectedCarry = _expectedIndexedCarry(account);
 
         vm.startPrank(trader);
         usdc.approve(address(clearinghouse), type(uint256).max);
@@ -1686,11 +1689,7 @@ contract CfdEngineTest is BasePerpTest {
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
         vm.roll(block.number + 1);
 
-        uint256 expectedCarry = PositionRiskAccountingLib.computePendingCarryUsdc(
-            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, 1e8, settlementBefore),
-            _riskParams().baseCarryBps,
-            carryElapsed
-        );
+        uint256 expectedCarry = _expectedIndexedCarry(account);
 
         vm.prank(address(router));
         clearinghouse.reserveCommittedOrderMargin(account, 77, reserveAmount);
@@ -1730,18 +1729,11 @@ contract CfdEngineTest is BasePerpTest {
         clearinghouse.lockReservedSettlement(account, reservedAmount);
 
         uint256 settlementBeforeUnlock = clearinghouse.balanceUsdc(account);
-        uint256 reservedReachable =
-            MarginClearinghouseAccountingLib.getGenericReachableUsdc(clearinghouse.getAccountUsdcBuckets(account));
-
         vm.warp(block.timestamp + carryElapsed);
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
-        uint256 expectedCarry = PositionRiskAccountingLib.computePendingCarryUsdc(
-            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, 1e8, reservedReachable),
-            _riskParams().baseCarryBps,
-            carryElapsed
-        );
+        uint256 expectedCarry = _expectedIndexedCarry(account);
 
         vm.prank(address(engine));
         clearinghouse.unlockReservedSettlement(account, reservedAmount);
@@ -4647,7 +4639,9 @@ contract CfdEngineTest is BasePerpTest {
         engine.reserveCloseOrderExecutionBounty(account, 50_000e18, 1400e6);
     }
 
-    function test_ReserveCloseOrderExecutionBounty_RecomputesCarryAfterReservationReachabilityDrop() public {
+    function test_ReserveCloseOrderExecutionBounty_DoesNotRecomputeHistoricalCarryAfterReservationReachabilityDrop()
+        public
+    {
         CfdTypes.RiskParams memory params = _riskParams();
         _setRiskParams(params);
 
@@ -4666,35 +4660,19 @@ contract CfdEngineTest is BasePerpTest {
         engine.updateMarkPrice(price, uint64(block.timestamp));
         vm.warp(block.timestamp + carryTimeDelta);
 
-        uint256 postReservationReachableUsdc = marginUsdc - bountyUsdc;
-        uint256 staleCarryUsdc = PositionRiskAccountingLib.computePendingCarryUsdc(
-            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(size, price, marginUsdc),
-            params.baseCarryBps,
-            carryTimeDelta
-        );
-        uint256 recomputedCarryUsdc = PositionRiskAccountingLib.computePendingCarryUsdc(
-            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(size, price, postReservationReachableUsdc),
-            params.baseCarryBps,
-            carryTimeDelta
-        );
-        uint256 maintMarginUsdc = ((size * price) / CfdMath.USDC_TO_TOKEN_SCALE) * params.maintMarginBps / 10_000;
-
-        assertEq(staleCarryUsdc, 598_993_930, "Setup must pin the pre-reservation carry projection");
-        assertEq(recomputedCarryUsdc, 599_000_018, "Setup must increase carry once reachability drops by the bounty");
-        assertGt(
-            postReservationReachableUsdc - staleCarryUsdc,
-            maintMarginUsdc,
-            "Pre-patch carry snapshot would leave the account barely above maintenance"
-        );
-        assertLe(
-            postReservationReachableUsdc - recomputedCarryUsdc,
-            maintMarginUsdc,
-            "Recomputed carry must make the reservation fail once maintenance is breached"
-        );
+        uint256 borrowBaseBefore = engine.getPositionBorrowBaseUsdc(account);
+        uint256 expectedCarry = _expectedIndexedCarry(account);
+        assertGt(expectedCarry, 0, "Setup must accrue indexed carry");
 
         vm.prank(address(router));
-        vm.expectRevert(ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
         engine.reserveCloseOrderExecutionBounty(account, size / 2, bountyUsdc);
+
+        assertEq(engine.unsettledCarryUsdc(account), 0, "Reservation should realize indexed carry first");
+        assertEq(
+            engine.getPositionBorrowBaseUsdc(account),
+            borrowBaseBefore + expectedCarry + bountyUsdc,
+            "Future borrow base should rise only after old carry is realized and margin is reserved"
+        );
     }
 
     function test_ReserveCloseOrderExecutionBounty_RevertsFullCloseNearMaintenance() public {

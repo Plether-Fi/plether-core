@@ -166,14 +166,11 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
             revert MarginClearinghouse__ZeroAmount();
         }
 
-        uint256 reachableCollateralBasisUsdc =
-            MarginClearinghouseAccountingLib.getGenericReachableUsdc(getAccountUsdcBuckets(account));
-
         IERC20(settlementAsset).safeTransferFrom(owner, address(this), amount);
 
         settlementBalances[account] += amount;
 
-        _realizeOrCheckpointCarryBeforeMarginChange(account, reachableCollateralBasisUsdc);
+        _realizeOrCheckpointCarryBeforeMarginChange(account);
 
         emit Deposit(account, settlementAsset, amount);
     }
@@ -190,10 +187,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
             revert MarginClearinghouse__InsufficientBalance();
         }
 
-        uint256 reachableCollateralBasisUsdc =
-            MarginClearinghouseAccountingLib.getGenericReachableUsdc(getAccountUsdcBuckets(account));
-
-        _checkpointCarryBeforeMarginChange(account, reachableCollateralBasisUsdc);
+        _checkpointCarryBeforeMarginChange(account);
 
         address engine_ = engine;
 
@@ -805,21 +799,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
             return;
         }
 
-        uint256 reachableCollateralBasisUsdc =
-            MarginClearinghouseAccountingLib.getGenericReachableUsdc(getAccountUsdcBuckets(account));
-        _checkpointCarryBeforeMarginChange(account, reachableCollateralBasisUsdc);
-    }
-
-    function _checkpointCarryBeforeMarginChange(
-        address account,
-        uint256 reachableCollateralBasisUsdc
-    ) internal {
-        address engine_ = engine;
-        if (engine_ == address(0)) {
-            return;
-        }
-
-        _realizeOrCheckpointCarryBeforeMarginChange(account, reachableCollateralBasisUsdc);
+        _realizeOrCheckpointCarryBeforeMarginChange(account);
     }
 
     function _requireNoActiveReservations(
@@ -831,15 +811,14 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     }
 
     function _realizeOrCheckpointCarryBeforeMarginChange(
-        address account,
-        uint256 reachableCollateralBasisUsdc
+        address account
     ) internal {
         address engine_ = engine;
         if (engine_ == address(0)) {
             return;
         }
 
-        try ICfdEngineCore(engine_).realizeCarryBeforeMarginChange(account, reachableCollateralBasisUsdc) {}
+        try ICfdEngineCore(engine_).realizeCarryBeforeMarginChange(account) {}
         catch (bytes memory revertData) {
             if (revertData.length < 4 || bytes4(revertData) != MARK_PRICE_STALE_SELECTOR) {
                 assembly {
@@ -847,7 +826,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
                 }
             }
 
-            ICfdEngineCore(engine_).checkpointCarryUsingStoredMark(account, reachableCollateralBasisUsdc);
+            ICfdEngineCore(engine_).checkpointCarryUsingStoredMark(account);
         }
     }
 

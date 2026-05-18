@@ -84,14 +84,14 @@ interface ICfdEngineCore is ICfdEngineTypes {
     function CAP_PRICE() external view returns (uint256);
 
     function realizeCarryBeforeMarginChange(
-        address account,
-        uint256 reachableCollateralBasisUsdc
+        address account
     ) external;
 
     function checkpointCarryUsingStoredMark(
-        address account,
-        uint256 reachableCollateralBasisUsdc
+        address account
     ) external;
+
+    function checkpointCarryIndexes() external;
 
     function isFadWindow() external view returns (bool);
 
