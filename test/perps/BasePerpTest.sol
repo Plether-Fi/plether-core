@@ -300,6 +300,27 @@ abstract contract BasePerpTest is Test {
         vm.stopPrank();
     }
 
+    function _fundJuniorDelayed(
+        address lp,
+        uint256 amount
+    ) internal returns (uint256 shares) {
+        usdc.mint(lp, amount);
+        vm.startPrank(lp);
+        usdc.approve(address(juniorVault), amount);
+        uint256 epochId = juniorVault.requestDeposit(amount, lp);
+        vm.stopPrank();
+
+        uint256 activationTime = juniorVault.depositEpochStart(epochId);
+        vm.warp(activationTime);
+        uint256 markPrice = engine.lastMarkPrice();
+        vm.prank(address(router));
+        engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(activationTime));
+        shares = juniorVault.finalizeDepositEpoch(epochId);
+
+        vm.prank(lp);
+        juniorVault.claimDepositShares(epochId);
+    }
+
     function _fundSenior(
         address lp,
         uint256 amount
@@ -925,16 +946,42 @@ abstract contract BasePerpTest is Test {
         if (size == 0) {
             return 0;
         }
-        uint256 borrowBaseUsdc = engine.getPositionBorrowBaseUsdc(account);
+        (uint256 borrowBaseUsdc, uint256 startIndex,) = engine.positionCarryState(account);
         if (borrowBaseUsdc == 0) {
             return 0;
         }
-        uint256 startIndex = engine.getPositionLastCarryIndex(account);
-        uint256 endIndex = engine.currentSideCarryIndex(side);
+        uint256 endIndex = _currentSideCarryIndex(side);
         if (endIndex <= startIndex) {
             return 0;
         }
         return PositionRiskAccountingLib.computeIndexedCarryUsdc(borrowBaseUsdc, endIndex - startIndex);
+    }
+
+    function _positionBorrowBaseUsdc(
+        address account
+    ) internal view returns (uint256 borrowBaseUsdc) {
+        (borrowBaseUsdc,,) = engine.positionCarryState(account);
+    }
+
+    function _lastCarryTimestamp(
+        address account
+    ) internal view returns (uint64 lastCarryTimestamp) {
+        (,, lastCarryTimestamp) = engine.positionCarryState(account);
+    }
+
+    function _currentSideCarryIndex(
+        CfdTypes.Side side
+    ) internal view returns (uint256 index) {
+        uint256 sideIndex = uint256(side);
+        (,,,,, uint256 baseCarryBps,,) = engine.riskParams();
+        index = PositionRiskAccountingLib.computeCurrentCarryIndex(
+            engine.sideCarryIndex(sideIndex),
+            engine.sideCarryTimestamp(sideIndex),
+            block.timestamp,
+            engine.sideBorrowBaseUsdc(sideIndex),
+            pool.totalAssets(),
+            baseCarryBps
+        );
     }
 
     function _accountOf(

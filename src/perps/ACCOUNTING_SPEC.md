@@ -292,19 +292,20 @@ The protocol uses LP-capital carry instead of a side-to-side rate mechanism.
 
 Definitions:
 
-- `positionNotionalUsdc = size * markPrice / scale`
-- `lpBackedNotionalUsdc = max(positionNotionalUsdc - reachableCollateralUsdc, 0)`
-- `pendingCarryUsdc = lpBackedNotionalUsdc * baseCarryBps * elapsedSeconds / (10_000 * 365 days)`
+- `borrowBaseUsdc = max(positionMaxProfitUsdc - activePositionMarginUsdc, 0)`
+- `sideBorrowBaseUsdc`: sum of open-position borrow bases for one side
+- `sideUtilizationBps = min(sideBorrowBaseUsdc / poolAssetsUsdc, 100%)`
+- `pendingCarryUsdc = borrowBaseUsdc * (currentSideCarryIndex - positionLastCarryIndex)`
 - `unsettledCarryUsdc[account]`: carry that has been checkpointed at a basis change but not yet physically collected
 
 Rules:
 
 - carry accrues continuously by wall-clock time,
 - carry does not pause when the oracle is stale or frozen,
-- both sides pay when they consume LP-backed capital,
+- both sides pay when they have nonzero borrow base,
 - pending carry reduces equity for guard and risk checks before realization,
 - basis-changing settlement credits must checkpoint carry even when physical collection remains pending,
-- carry is computed on clearinghouse deposit/withdraw using the pre-mutation reachable basis,
+- carry is realized before margin, pool-asset, or risk-parameter mutations change the carry base/rate denominator,
 - on deposit, realized carry may be collected from post-deposit settlement in the same transaction,
 - on withdraw, carry is realized before settlement balance is reduced,
 - liquidation does not have its own separate carry-realization path,

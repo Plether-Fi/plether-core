@@ -357,20 +357,15 @@ contract MarginClearinghouseTest is Test {
         vm.stopPrank();
     }
 
-    function test_LockCommittedOrderMargin_UsesStoredMarkFallbackWhenFreshCarryIsStale() public {
+    function test_LockCommittedOrderMargin_CheckpointsIndexedCarryDirectly() public {
         vm.prank(alice);
         clearinghouse.deposit(aliceAccount, 1000 * 1e6);
-
-        mockEngine.setCarryRealizationStale(true);
 
         vm.prank(engine);
         clearinghouse.lockCommittedOrderMargin(aliceAccount, 200 * 1e6);
 
-        assertEq(mockEngine.carryCheckpointCalls(), 1, "Initial deposit should be the only fresh carry realization");
-        assertEq(
-            mockEngine.storedMarkCheckpointCalls(), 1, "Stale committed-margin lock should checkpoint using stored mark"
-        );
-        assertEq(mockEngine.lastCarryAccountId(), aliceAccount, "Fallback checkpoint should use the mutated account id");
+        assertEq(mockEngine.carryCheckpointCalls(), 2, "Committed-margin lock should checkpoint indexed carry directly");
+        assertEq(mockEngine.lastCarryAccountId(), aliceAccount, "Checkpoint should use the mutated account id");
     }
 
     function test_ReserveCommittedOrderMargin_CreatesReservationAndMatchesBucketTotals() public {
@@ -463,49 +458,47 @@ contract MarginClearinghouseTest is Test {
         );
     }
 
-    function test_ReleaseOrderReservationIfActive_UsesStoredMarkFallbackWhenFreshCarryIsStale() public {
+    function test_ReleaseOrderReservationIfActive_CheckpointsIndexedCarryDirectly() public {
         vm.prank(alice);
         clearinghouse.deposit(aliceAccount, 1000 * 1e6);
 
         vm.prank(engine);
         clearinghouse.reserveCommittedOrderMargin(aliceAccount, 16, 180 * 1e6);
 
-        mockEngine.setCarryRealizationStale(true);
+        uint256 checkpointCallsBeforeRelease = mockEngine.carryCheckpointCalls();
 
         vm.prank(engine);
         clearinghouse.releaseOrderReservationIfActive(16);
 
         assertEq(
-            mockEngine.storedMarkCheckpointCalls(), 1, "Stale reservation release should checkpoint using stored mark"
+            mockEngine.carryCheckpointCalls(),
+            checkpointCallsBeforeRelease + 1,
+            "Reservation release should checkpoint indexed carry directly"
         );
-        assertEq(
-            mockEngine.lastCarryAccountId(),
-            aliceAccount,
-            "Fallback release checkpoint should use the reservation account"
-        );
+        assertEq(mockEngine.lastCarryAccountId(), aliceAccount, "Release checkpoint should use the reservation account");
     }
 
-    function test_UnlockReservedSettlement_UsesStoredMarkFallbackWhenFreshCarryIsStale() public {
+    function test_UnlockReservedSettlement_CheckpointsIndexedCarryDirectly() public {
         vm.prank(alice);
         clearinghouse.deposit(aliceAccount, 1000 * 1e6);
 
         vm.prank(engine);
         clearinghouse.lockReservedSettlement(aliceAccount, 200 * 1e6);
 
-        mockEngine.setCarryRealizationStale(true);
+        uint256 checkpointCallsBeforeUnlock = mockEngine.carryCheckpointCalls();
 
         vm.prank(engine);
         clearinghouse.unlockReservedSettlement(aliceAccount, 200 * 1e6);
 
         assertEq(
-            mockEngine.storedMarkCheckpointCalls(),
-            1,
-            "Stale reserved-settlement unlock should checkpoint using stored mark"
+            mockEngine.carryCheckpointCalls(),
+            checkpointCallsBeforeUnlock + 1,
+            "Reserved-settlement unlock should checkpoint indexed carry directly"
         );
         assertEq(
             mockEngine.lastCarryAccountId(),
             aliceAccount,
-            "Fallback reserved-settlement checkpoint should use the mutated account"
+            "Reserved-settlement checkpoint should use the mutated account"
         );
     }
 

@@ -140,8 +140,8 @@ library CfdEnginePlanLib {
         }
         return snap.unsettledCarryUsdc
             + PositionRiskAccountingLib.computeIndexedCarryUsdc(
-                snap.positionBorrowBaseUsdc, side.carryIndex - snap.positionLastCarryIndex
-            );
+            snap.positionBorrowBaseUsdc, side.carryIndex - snap.positionLastCarryIndex
+        );
     }
 
     function _absSkewUsdc(

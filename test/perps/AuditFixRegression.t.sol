@@ -334,7 +334,7 @@ contract AuditFixRegressionTest is BasePerpTest {
 
         _fundTrader(account, margin + 20_000e6);
         _open(account, CfdTypes.Side.BULL, size, margin, 1e8);
-        uint256 borrowBaseBefore = engine.getPositionBorrowBaseUsdc(account);
+        uint256 borrowBaseBefore = _positionBorrowBaseUsdc(account);
 
         vm.warp(block.timestamp + 10 days);
         vm.prank(address(router));
@@ -347,7 +347,7 @@ contract AuditFixRegressionTest is BasePerpTest {
 
         assertGt(realizedCarry, 0, "old borrow base should accrue before the margin increase");
         assertEq(
-            engine.getPositionBorrowBaseUsdc(account),
+            _positionBorrowBaseUsdc(account),
             borrowBaseBefore - 10_000e6,
             "added position margin should reduce future borrow base"
         );

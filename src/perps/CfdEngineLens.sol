@@ -243,8 +243,7 @@ contract CfdEngineLens is ICfdEngineLens {
             snap.lastMarkPrice = lastMarkPrice;
         }
         snap.lastMarkTime = publishTime == 0 ? lastMarkTime : publishTime;
-        snap.positionBorrowBaseUsdc = engineContract.getPositionBorrowBaseUsdc(account);
-        snap.positionLastCarryIndex = engineContract.getPositionLastCarryIndex(account);
+        (snap.positionBorrowBaseUsdc, snap.positionLastCarryIndex,) = engineContract.positionCarryState(account);
         snap.bullSide = _sideSnapshot(CfdTypes.Side.BULL, bull);
         snap.bearSide = _sideSnapshot(CfdTypes.Side.BEAR, bear);
         snap.poolAssetsUsdc = poolDepthUsdc;
@@ -306,7 +305,7 @@ contract CfdEngineLens is ICfdEngineLens {
     ) internal view returns (CfdTypes.Position memory pos) {
         (pos.size, pos.margin, pos.entryPrice, pos.maxProfitUsdc, pos.side, pos.lastUpdateTime, pos.vpiAccrued) =
             engineContract.positions(account);
-        pos.lastCarryTimestamp = engineContract.getPositionLastCarryTimestamp(account);
+        (,, pos.lastCarryTimestamp) = engineContract.positionCarryState(account);
     }
 
     function _sideSnapshot(

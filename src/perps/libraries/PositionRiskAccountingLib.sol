@@ -23,26 +23,6 @@ library PositionRiskAccountingLib {
         return vpiAccrued < 0 ? uint256(-vpiAccrued) : 0;
     }
 
-    function computeLpBackedNotionalUsdc(
-        uint256 size,
-        uint256 price,
-        uint256 reachableCollateralUsdc
-    ) internal pure returns (uint256 lpBackedNotionalUsdc) {
-        uint256 notionalUsdc = (size * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        lpBackedNotionalUsdc = notionalUsdc > reachableCollateralUsdc ? notionalUsdc - reachableCollateralUsdc : 0;
-    }
-
-    function computePendingCarryUsdc(
-        uint256 lpBackedNotionalUsdc,
-        uint256 baseCarryBps,
-        uint256 timeDelta
-    ) internal pure returns (uint256 carryUsdc) {
-        if (timeDelta == 0 || lpBackedNotionalUsdc == 0 || baseCarryBps == 0) {
-            return 0;
-        }
-        carryUsdc = (baseCarryBps * lpBackedNotionalUsdc * timeDelta) / (CfdMath.SECONDS_PER_YEAR * 10_000);
-    }
-
     function computeBorrowBaseUsdc(
         uint256 maxProfitUsdc,
         uint256 marginUsdc
@@ -84,6 +64,28 @@ library PositionRiskAccountingLib {
             return 0;
         }
         return (carryRateBps * CARRY_INDEX_SCALE * timeDelta) / (CfdMath.SECONDS_PER_YEAR * 10_000);
+    }
+
+    function computeCurrentCarryIndex(
+        uint256 storedIndex,
+        uint64 previousTimestamp,
+        uint256 currentTimestamp,
+        uint256 borrowBaseUsdc,
+        uint256 poolAssetsUsdc,
+        uint256 baseCarryBps
+    ) internal pure returns (uint256 index) {
+        index = storedIndex;
+        if (currentTimestamp <= previousTimestamp || borrowBaseUsdc == 0 || baseCarryBps == 0) {
+            return index;
+        }
+
+        uint256 utilizationBps = computeBorrowUtilizationBps(borrowBaseUsdc, poolAssetsUsdc);
+        if (utilizationBps == 0) {
+            return index;
+        }
+
+        index += (baseCarryBps * utilizationBps * CARRY_INDEX_SCALE * (currentTimestamp - previousTimestamp))
+            / (CfdMath.SECONDS_PER_YEAR * UTILIZATION_BPS * 10_000);
     }
 
     function computeIndexedCarryUsdc(

@@ -143,10 +143,10 @@ interface ICfdEngine is ICfdEngineTypes {
             int256 vpiAccrued
         );
 
-    /// @notice Returns the timestamp through which carry has been realized for the position.
-    function getPositionLastCarryTimestamp(
+    /// @notice Returns the indexed carry basis for a position.
+    function positionCarryState(
         address account
-    ) external view returns (uint64);
+    ) external view returns (uint256 borrowBaseUsdc, uint256 lastCarryIndex, uint64 lastCarryTimestamp);
 
     /// @notice True when the engine has latched degraded mode after a close revealed insolvency.
     function degradedMode() external view returns (bool);

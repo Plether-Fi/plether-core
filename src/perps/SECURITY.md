@@ -300,11 +300,11 @@ This is an explicit design choice, not an accounting accident.
 
 The perps system uses LP-capital carry instead of a side-to-side rate mechanism.
 
-- carry base: `max(positionNotionalUsdc - reachableCollateralUsdc, 0)`
+- carry base: `max(positionMaxProfitUsdc - activePositionMarginUsdc, 0)`
 - accrual clock: wall-clock time
 - stale/frozen behavior: carry does not pause during stale or frozen oracle windows
 - basis-change fallback: if physical collection is unsafe, elapsed carry is checkpointed into `unsettledCarryUsdc`
-- realization points: open, close, add margin, and clearinghouse deposit/withdraw using the pre-mutation reachable basis; deposits may collect realized carry from post-deposit settlement in the same transaction, while withdraws realize carry before reducing settlement
+- realization points: open, close, add margin, pool-asset changes, risk-parameter changes, and clearinghouse deposit/withdraw before the carry base/rate denominator changes; deposits may collect realized carry from post-deposit settlement in the same transaction, while withdraws realize carry before reducing settlement
 - destination: realized carry becomes LP trading revenue
 
 Close and liquidation security depends on using the planner's canonical carry-adjusted settlement outputs directly in the live executor rather than recomputing a second carry-blind kernel.

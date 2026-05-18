@@ -159,10 +159,8 @@ contract CfdEnginePlanLibHarness {
         snap.positionBorrowBaseUsdc = maxProfitUsdc;
         snap.positionLastCarryIndex = 0;
         snap.bearSide.borrowBaseUsdc = snap.poolAssetsUsdc;
-        snap.bearSide.carryIndex = PositionRiskAccountingLib.computeCarryIndexIncrement(
-            snap.riskParams.baseCarryBps,
-            carryTimeDelta
-        );
+        snap.bearSide.carryIndex =
+            PositionRiskAccountingLib.computeCarryIndexIncrement(snap.riskParams.baseCarryBps, carryTimeDelta);
         snap.executionFeeBps = 4;
         return CfdEnginePlanLib.planLiquidation(snap, oraclePrice, 0);
     }
@@ -245,10 +243,13 @@ contract CfdEnginePlanLibHarness {
             maxProfitUsdc: 100_000e6,
             openInterest: currentSize,
             entryNotional: currentSize * currentEntryPrice,
-            totalMargin: positionMarginUsdc, borrowBaseUsdc: 0, carryIndex: 0
+            totalMargin: positionMarginUsdc,
+            borrowBaseUsdc: 0,
+            carryIndex: 0
         });
-        snap.bearSide =
-            CfdEnginePlanTypes.SideSnapshot({maxProfitUsdc: 0, openInterest: 0, entryNotional: 0, totalMargin: 0, borrowBaseUsdc: 0, carryIndex: 0});
+        snap.bearSide = CfdEnginePlanTypes.SideSnapshot({
+            maxProfitUsdc: 0, openInterest: 0, entryNotional: 0, totalMargin: 0, borrowBaseUsdc: 0, carryIndex: 0
+        });
         snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
             settlementBalanceUsdc: settlementBalanceUsdc,
             totalLockedMarginUsdc: positionMarginUsdc,
@@ -341,14 +342,12 @@ contract CfdEngineTest is BasePerpTest {
         if (size == 0) {
             return 0;
         }
-        uint256 startIndex = engine.getPositionLastCarryIndex(account);
-        uint256 endIndex = engine.currentSideCarryIndex(side);
+        (uint256 borrowBaseUsdc, uint256 startIndex,) = engine.positionCarryState(account);
+        uint256 endIndex = _currentSideCarryIndex(side);
         if (endIndex <= startIndex) {
             return 0;
         }
-        return PositionRiskAccountingLib.computeIndexedCarryUsdc(
-            engine.getPositionBorrowBaseUsdc(account), endIndex - startIndex
-        );
+        return PositionRiskAccountingLib.computeIndexedCarryUsdc(borrowBaseUsdc, endIndex - startIndex);
     }
 
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
@@ -956,6 +955,37 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
+    function test_SettleTraderClaim_NoOpenPositionCheckpointsCarryBeforePoolPayout() public {
+        address trader = address(0xD30A11CE);
+        address claimant = address(0xD30B0B);
+
+        _fundTrader(trader, 20_000e6);
+        _open(trader, CfdTypes.Side.BULL, 500_000e18, 10_000e6, 1e8);
+
+        uint256 claimUsdc = 1000e6;
+        stdstore.target(address(engine)).sig("traderClaimBalanceUsdc(address)").with_key(claimant)
+            .checked_write(claimUsdc);
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(claimUsdc);
+
+        vm.warp(block.timestamp + 30 days);
+        uint256 expectedCarryIndex = _currentSideCarryIndex(CfdTypes.Side.BULL);
+        uint256 poolAssetsBefore = pool.totalAssets();
+
+        vm.prank(claimant);
+        engine.settleTraderClaim(claimant);
+
+        uint256 sideIndex = uint256(CfdTypes.Side.BULL);
+        assertEq(
+            engine.sideCarryIndex(sideIndex),
+            expectedCarryIndex,
+            "Claim payout should checkpoint carry with the pre-payout pool denominator"
+        );
+        assertEq(engine.sideCarryTimestamp(sideIndex), block.timestamp, "Claim payout should advance carry timestamp");
+        assertEq(
+            pool.totalAssets(), poolAssetsBefore - claimUsdc, "Setup should reduce pool assets after claim service"
+        );
+    }
+
     function test_SettleTraderClaim_RealizesCarryBeforeCreditingSettlement() public {
         address trader = address(0xD30B);
         address account = trader;
@@ -997,7 +1027,7 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
-    function test_SettleTraderClaim_UsesStoredMarkCarryCheckpointWhenMarkIsStale() public {
+    function test_SettleTraderClaim_UsesIndexedCarryCheckpointWhenMarkIsStale() public {
         address trader = address(0xD30C);
         address account = trader;
         _fundTrader(trader, 20_000e6);
@@ -1021,10 +1051,10 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(
             clearinghouse.balanceUsdc(account),
             settlementBefore + 5000e6 - expectedCarry,
-            "Stale trader claim settlement should checkpoint carry against the stored mark before crediting settlement"
+            "Stale trader claim settlement should checkpoint indexed carry before crediting settlement"
         );
         assertEq(
-            engine.getPositionLastCarryTimestamp(account),
+            _lastCarryTimestamp(account),
             block.timestamp,
             "Stale trader claim settlement should advance the carry clock after checkpointing carry"
         );
@@ -1103,7 +1133,7 @@ contract CfdEngineTest is BasePerpTest {
             "Covered stale deposit carry should not leave residual unsettled carry"
         );
         assertEq(
-            engine.getPositionLastCarryTimestamp(account),
+            _lastCarryTimestamp(account),
             block.timestamp,
             "Stored-mark carry checkpoint should advance the carry timestamp at the stale deposit time"
         );
@@ -1540,7 +1570,7 @@ contract CfdEngineTest is BasePerpTest {
 
         (, uint256 marginAfter,, uint256 maxProfitUsdc,,,) = engine.positions(account);
         assertEq(
-            engine.getPositionBorrowBaseUsdc(account),
+            _positionBorrowBaseUsdc(account),
             PositionRiskAccountingLib.computeBorrowBaseUsdc(maxProfitUsdc, marginAfter),
             "stale-mark add-margin should reduce future borrow base"
         );
@@ -1662,14 +1692,12 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(
             clearinghouse.balanceUsdc(account),
             settlementBefore + depositAmount - expectedCarry,
-            "Stale-mark deposit should checkpoint carry against the stored mark before crediting settlement"
+            "Stale-oracle deposit should checkpoint indexed carry before crediting settlement"
         );
         assertEq(
-            engine.getPositionLastCarryTimestamp(account),
-            block.timestamp,
-            "Stale-mark deposit should advance the carry checkpoint"
+            _lastCarryTimestamp(account), block.timestamp, "Stale-mark deposit should advance the carry checkpoint"
         );
-        assertEq(engine.unsettledCarryUsdc(account), 0, "Stored-mark deposit fallback should settle elapsed carry");
+        assertEq(engine.unsettledCarryUsdc(account), 0, "Indexed carry deposit should settle elapsed carry");
     }
 
     function test_ReserveCommittedOrderMargin_CheckpointsCarryBeforeReachabilityDrops() public {
@@ -4660,7 +4688,7 @@ contract CfdEngineTest is BasePerpTest {
         engine.updateMarkPrice(price, uint64(block.timestamp));
         vm.warp(block.timestamp + carryTimeDelta);
 
-        uint256 borrowBaseBefore = engine.getPositionBorrowBaseUsdc(account);
+        uint256 borrowBaseBefore = _positionBorrowBaseUsdc(account);
         uint256 expectedCarry = _expectedIndexedCarry(account);
         assertGt(expectedCarry, 0, "Setup must accrue indexed carry");
 
@@ -4669,7 +4697,7 @@ contract CfdEngineTest is BasePerpTest {
 
         assertEq(engine.unsettledCarryUsdc(account), 0, "Reservation should realize indexed carry first");
         assertEq(
-            engine.getPositionBorrowBaseUsdc(account),
+            _positionBorrowBaseUsdc(account),
             borrowBaseBefore + expectedCarry + bountyUsdc,
             "Future borrow base should rise only after old carry is realized and margin is reserved"
         );
@@ -5669,7 +5697,7 @@ contract DegradedModeLifecycleTest is BasePerpTest {
         vm.expectRevert(ICfdEngineTypes.CfdEngine__StillInsolvent.selector);
         engine.clearDegradedMode();
 
-        _fundJunior(address(this), 500_000e6);
+        _fundJuniorDelayed(address(this), 500_000e6);
         engine.clearDegradedMode();
 
         assertFalse(engine.degradedMode(), "Owner should clear degraded mode after recapitalization");
@@ -5758,7 +5786,7 @@ contract ProtocolPhaseTest is BasePerpTest {
             "Insolvency-revealing close should latch Degraded"
         );
 
-        _fundJunior(address(this), 500_000e6);
+        _fundJuniorDelayed(address(this), 500_000e6);
         engine.clearDegradedMode();
 
         assertEq(
@@ -5857,7 +5885,7 @@ contract VpiDepthTest is BasePerpTest {
         empty = _mockPythUpdateData();
         router.executeOrder(2, empty);
 
-        _fundJunior(bob, 9_000_000 * 1e6);
+        _fundJuniorDelayed(bob, 9_000_000 * 1e6);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 0, 0, true);
@@ -5884,7 +5912,7 @@ contract VpiDepthTest is BasePerpTest {
         bytes[] memory empty = _mockPythUpdateData();
         router.executeOrder(1, empty);
 
-        _fundJunior(bob, 9_000_000 * 1e6);
+        _fundJuniorDelayed(bob, 9_000_000 * 1e6);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);

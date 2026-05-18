@@ -217,7 +217,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
     ) internal view returns (CfdTypes.Position memory pos) {
         (pos.size, pos.margin, pos.entryPrice, pos.maxProfitUsdc, pos.side, pos.lastUpdateTime, pos.vpiAccrued) =
             engineContract.positions(account);
-        pos.lastCarryTimestamp = engineContract.getPositionLastCarryTimestamp(account);
+        (,, pos.lastCarryTimestamp) = engineContract.positionCarryState(account);
     }
 
     function _elapsedCarryUsdc(
@@ -227,12 +227,11 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         if (pos.size == 0) {
             return 0;
         }
-        uint256 borrowBaseUsdc = engineContract.getPositionBorrowBaseUsdc(account);
+        (uint256 borrowBaseUsdc, uint256 startIndex,) = engineContract.positionCarryState(account);
         if (borrowBaseUsdc == 0) {
             return 0;
         }
         uint256 endIndex = engineContract.currentSideCarryIndex(pos.side);
-        uint256 startIndex = engineContract.getPositionLastCarryIndex(account);
         if (endIndex <= startIndex) {
             return 0;
         }
