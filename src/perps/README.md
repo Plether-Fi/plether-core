@@ -116,7 +116,7 @@ Important details:
 - `acceptablePrice == 0` behaves like a delayed market-style order.
 - Open orders are rejected during degraded mode and close-only windows.
 - Failed orders are finalized from reserved clearinghouse bounty reservation; blocked FIFO heads remain pending.
-- Execution-time user-invalid opens, protocol-state invalidations, and terminal-invalid closes pay the clearer from reservation so FIFO cleanup remains incentive compatible.
+- Execution-time user-invalid opens, protocol-state invalidations, and terminal-invalid closes pay the keeper from reservation so FIFO cleanup remains incentive compatible.
 - Close orders can still execute during genuine frozen-oracle windows using the last valid mark subject to the relaxed frozen-market rules.
 - Close-intent queue validation is account-local and bounded by the per-account pending-order queue.
 
@@ -127,7 +127,7 @@ Profitable closes and some liquidation residuals can create a trader claim balan
 - Trader claim balance is tracked by beneficiary balance: `traderClaimBalanceUsdc[account]`.
 - There is no FIFO trader-claim queue.
 - `settleTraderClaim(account)` is beneficiary-only and requires the caller to own `account`.
-- Claims can be partial if current HousePool cash is insufficient.
+- Settlement is all-or-nothing for the account claim and only succeeds when aggregate trader claim liabilities are fully cash-covered.
 - Claimed amounts are credited into `MarginClearinghouse`, not sent directly to the wallet.
 
 ### Keeper bounty credit
@@ -260,7 +260,7 @@ LP accounting intentionally refuses to count unrealized trader losses as present
 - Side MtM uses a conservative max-profit envelope so same-side loser debt cannot net down live winner liability before settlement.
 - Realized losses increase physical pool cash only when settlement actually happens.
 
-This keeps LP share pricing and withdrawal limits conservative.
+This keeps LP withdrawal limits conservative. Incoming deposits are priced from a separate unrealized-MtM-neutral NAV so conservative phantom liabilities cannot become a discount for new shares, while realized pool losses still lower deposit pricing.
 
 ### Accounting domains
 

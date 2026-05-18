@@ -11,6 +11,7 @@ import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
+import {PerpsPublicLens} from "../../src/perps/PerpsPublicLens.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {AccountLensViewTypes} from "../../src/perps/interfaces/AccountLensViewTypes.sol";
 import {ClaimEngineViewTypes} from "../../src/perps/interfaces/ClaimEngineViewTypes.sol";
@@ -4696,7 +4697,7 @@ contract CfdEngineTest is BasePerpTest {
         engine.reserveCloseOrderExecutionBounty(account, size / 2, bountyUsdc);
     }
 
-    function test_ReserveCloseOrderExecutionBounty_AllowsFullCloseNearMaintenance() public {
+    function test_ReserveCloseOrderExecutionBounty_RevertsFullCloseNearMaintenance() public {
         address trader = address(0x515991);
         address account = trader;
         address counterparty = address(0x515992);
@@ -4714,6 +4715,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(_freeSettlementUsdc(account), 0, "setup must fully consume free settlement");
 
         vm.prank(address(router));
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
         engine.reserveCloseOrderExecutionBounty(account, size, 1e6);
     }
 
@@ -5511,8 +5513,7 @@ contract PhantomExecFeeTest is BasePerpTest {
 
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(1e8));
+        bytes[] memory priceData = _mockPythUpdateData(1e8);
         vm.roll(block.number + 1);
         router.executeOrder(1, priceData);
 
@@ -5791,8 +5792,10 @@ contract ProtocolPhaseTest is BasePerpTest {
 
     function test_ConfiguringPhase() public {
         CfdEngine unconfigured = new CfdEngine(address(usdc), address(clearinghouse), 2e8, _riskParams());
+        PerpsPublicLens unconfiguredLens =
+            new PerpsPublicLens(address(engineAccountLens), address(unconfigured), address(router), address(0));
         assertEq(
-            unconfigured.getProtocolStatus().phase,
+            unconfiguredLens.getProtocolStatus().phase,
             uint8(ICfdEngine.ProtocolPhase.Configuring),
             "Engine without pool/router should be Configuring"
         );

@@ -160,6 +160,14 @@ contract MockInvariantHousePool is IHousePool {
         return (0, 0, 0, 0);
     }
 
+    function getPendingDepositTrancheState()
+        external
+        pure
+        returns (uint256 seniorPrincipalUsdc, uint256 juniorPrincipalUsdc)
+    {
+        return (0, 0);
+    }
+
     function reconcile() external pure {}
 
     function isWithdrawalLive() external pure returns (bool) {

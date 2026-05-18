@@ -107,8 +107,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         uint256 traderSettlementBefore = clearinghouse.balanceUsdc(traderAccount);
         uint256 keeperEthBefore = KEEPER.balance;
 
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(1e8));
+        bytes[] memory priceData = _mockPythUpdateData(1e8);
         vm.deal(ALICE, 1 ether);
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
@@ -138,8 +137,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1.5e8, false);
 
         uint256 traderSettlementBefore = clearinghouse.balanceUsdc(traderAccount);
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(1e8));
+        bytes[] memory priceData = _mockPythUpdateData(1e8);
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
         vm.prank(KEEPER);
@@ -195,8 +193,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
 
         vm.prank(ALICE);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8, false);
-        bytes[] memory openPrice = new bytes[](1);
-        openPrice[0] = abi.encode(uint256(1e8));
+        bytes[] memory openPrice = _mockPythUpdateData(1e8);
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
         router.executeOrder(1, openPrice);
@@ -273,8 +270,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
         uint64 carryTimestampBefore = engine.getPositionLastCarryTimestamp(keeperAccount);
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(1e8));
+        bytes[] memory priceData = _mockPythUpdateData(1e8);
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
         vm.prank(KEEPER);
@@ -308,8 +304,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(1);
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
         uint256 traderSettlementBefore = clearinghouse.balanceUsdc(traderAccount);
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(1e8));
+        bytes[] memory priceData = _mockPythUpdateData(1e8);
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
         vm.prank(KEEPER);
@@ -340,8 +335,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         vm.stopPrank();
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(1e8));
+        bytes[] memory priceData = _mockPythUpdateData(1e8);
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
         vm.prank(KEEPER);
@@ -409,8 +403,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
 
         uint256 traderWalletBefore = usdc.balanceOf(ALICE);
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(1e8));
+        bytes[] memory priceData = _mockPythUpdateData(1e8);
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
         vm.prank(KEEPER);
@@ -439,8 +432,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         vm.store(address(clearinghouse), positionMarginSlot, bytes32(uint256(0)));
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(1e8));
+        bytes[] memory priceData = _mockPythUpdateData(1e8);
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
         vm.prank(KEEPER);

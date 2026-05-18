@@ -47,6 +47,9 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         );
         snapshot.supplementalReservedUsdc = 0;
         snapshot.unrealizedMtmLiabilityUsdc = _getVaultMtmLiability();
+        // Deposit pricing is intentionally neutral to unrealized trader PnL. Conservative MtM remains
+        // withdrawal-only; without per-position netting, any aggregate deposit-side MtM is manipulable.
+        snapshot.depositMtmLiabilityUsdc = 0;
         snapshot.traderClaimBalanceUsdc = engineContract.totalTraderClaimBalanceUsdc();
         ICfdEngineTypes.SideState memory bullState = _sideState(CfdTypes.Side.BULL);
         ICfdEngineTypes.SideState memory bearState = _sideState(CfdTypes.Side.BEAR);

@@ -5,8 +5,6 @@ import {CfdEnginePlanTypes} from "./CfdEnginePlanTypes.sol";
 import {CfdMath} from "./CfdMath.sol";
 import {CfdTypes} from "./CfdTypes.sol";
 import {CfdEngineSettlementTypes} from "./interfaces/CfdEngineSettlementTypes.sol";
-import {EngineStatusViewTypes} from "./interfaces/EngineStatusViewTypes.sol";
-import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
 import {ICfdEngineAdminHost} from "./interfaces/ICfdEngineAdminHost.sol";
 import {ICfdEnginePlanner} from "./interfaces/ICfdEnginePlanner.sol";
 import {ICfdEngineSettlementHost} from "./interfaces/ICfdEngineSettlementHost.sol";
@@ -63,9 +61,14 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     SideState[2] public sides;
     uint256 public lastMarkPrice;
     uint64 public lastMarkTime;
+    uint256 public carryPriceTimeIndex;
+    uint64 public carryIndexTimestamp;
+    uint256 public carryIndexPrice;
+    bool public carryIndexInitialized;
 
     uint256 public accumulatedBadDebtUsdc;
     mapping(address => uint256) public unsettledCarryUsdc;
+    mapping(address => uint256) public lastCarryPriceTimeIndex;
     bool public degradedMode;
 
     CfdTypes.RiskParams public riskParams;
@@ -144,8 +147,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         uint256 clampedPrice = price > CAP_PRICE ? CAP_PRICE : price;
         uint256 checkpointPrice = clampedPrice;
         if (publishTime >= lastMarkTime) {
-            lastMarkPrice = clampedPrice;
-            lastMarkTime = publishTime;
+            _applyCarryAndMark(clampedPrice, publishTime);
         } else {
             checkpointPrice = lastMarkPrice;
         }
@@ -189,24 +191,36 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     modifier onlyRouter() {
-        if (msg.sender != orderRouter) {
-            revert CfdEngine__Unauthorized();
-        }
+        _onlyRouter();
         _;
     }
 
     modifier onlySettlementSidecar() {
-        if (msg.sender != address(settlementSidecar)) {
-            revert CfdEngine__Unauthorized();
-        }
+        _onlySettlementSidecar();
         _;
     }
 
     modifier onlyAdmin() {
+        _onlyAdmin();
+        _;
+    }
+
+    function _onlyRouter() internal view {
+        if (msg.sender != orderRouter) {
+            revert CfdEngine__Unauthorized();
+        }
+    }
+
+    function _onlySettlementSidecar() internal view {
+        if (msg.sender != address(settlementSidecar)) {
+            revert CfdEngine__Unauthorized();
+        }
+    }
+
+    function _onlyAdmin() internal view {
         if (msg.sender != admin) {
             revert CfdEngine__Unauthorized();
         }
-        _;
     }
 
     /// @param _usdc USDC token used as margin and settlement currency
@@ -364,6 +378,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         _syncTotalSideMargin(pos.side, marginBefore, _positionMarginBucketUsdc(account));
         pos.lastUpdateTime = uint64(block.timestamp);
         pos.lastCarryTimestamp = uint64(block.timestamp);
+        lastCarryPriceTimeIndex[account] = _currentCarryPriceTimeIndex(block.timestamp);
 
         emit MarginAdded(account, amount);
     }
@@ -457,6 +472,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
             revert CfdEngine__InsufficientCloseOrderBountyBacking();
         }
 
+        bool isFullClose = sizeDelta == pos.size;
         (bool priceFresh, uint256 price) = _tryGetFreshLiveMarkPrice();
         if (price == 0) {
             price = lastMarkPrice;
@@ -499,7 +515,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
 
         CfdTypes.Position memory positionAfter = _loadPosition(account);
         positionAfter.margin = positionMarginUsdc - marginBackedBountyUsdc;
-        bool isFullClose = sizeDelta == positionAfter.size;
         uint256 pendingCarryUsdc =
             _totalPendingCarryUsdc(account, positionAfter, price, postReservationReachableUsdc, block.timestamp);
         PositionRiskAccountingLib.PositionRiskState memory riskState =
@@ -511,8 +526,10 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
                 postReservationReachableUsdc,
                 isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps
             );
-        if (riskState.liquidatable && !isFullClose) {
-            revert CfdEngine__InsufficientCloseOrderBountyBacking();
+        if (riskState.liquidatable) {
+            if (!isFullClose || marginBackedBountyUsdc > 0) {
+                revert CfdEngine__InsufficientCloseOrderBountyBacking();
+            }
         }
 
         _syncTotalSideMargin(pos.side, positionMarginUsdc, positionMarginUsdc - marginBackedBountyUsdc);
@@ -562,7 +579,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
             revert CfdEngine__ZeroAddress();
         }
         IERC20(token).safeTransfer(to, amount);
-        emit TokenSwept(token, to, amount);
     }
 
     function clearDegradedMode() external onlyOwner {
@@ -595,10 +611,8 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
             revert CfdEngine__RunwayTooLong();
         }
         uint256 oldLength = _fadOverrideDays.length;
-        uint256[] memory removedTimestamps = new uint256[](oldLength);
         for (uint256 i; i < oldLength; i++) {
             uint256 day = _fadOverrideDays[i];
-            removedTimestamps[i] = day * 86_400;
             delete fadDayOverrides[day];
         }
         delete _fadOverrideDays;
@@ -610,9 +624,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
             }
         }
         fadRunwaySeconds = config.fadRunwaySeconds;
-        emit FadDaysRemoved(removedTimestamps);
-        emit FadDaysAdded(config.fadDayTimestamps);
-        emit FadRunwayUpdated(config.fadRunwaySeconds);
     }
 
     function applyFreshnessConfig(
@@ -623,8 +634,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         }
         fadMaxStaleness = config.fadMaxStaleness;
         engineMarkStalenessLimit = config.engineMarkStalenessLimit;
-        emit FadMaxStalenessUpdated(config.fadMaxStaleness);
-        emit EngineMarkStalenessLimitUpdated(config.engineMarkStalenessLimit);
     }
 
     // ==========================================
@@ -915,6 +924,11 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         snap.currentTimestamp = block.timestamp;
         snap.lastMarkPrice = lastMarkPrice;
         snap.lastMarkTime = lastMarkTime;
+        snap.carryPriceTimeIndex = carryPriceTimeIndex;
+        snap.carryIndexTimestamp = carryIndexTimestamp;
+        snap.carryIndexPrice = carryIndexPrice;
+        snap.lastCarryPriceTimeIndex = lastCarryPriceTimeIndex[account];
+        snap.carryIndexInitialized = carryIndexInitialized;
 
         (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
         snap.bullSide = _copySideSnapshot(bullState);
@@ -997,8 +1011,44 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         if (newMarkTime < lastMarkTime) {
             return;
         }
+        _advanceCarryPriceTimeIndex(newMarkPrice, newMarkTime);
         lastMarkPrice = newMarkPrice;
         lastMarkTime = newMarkTime;
+    }
+
+    function _advanceCarryPriceTimeIndex(
+        uint256 newMarkPrice,
+        uint64 newMarkTime
+    ) internal {
+        if (!carryIndexInitialized) {
+            carryIndexInitialized = true;
+            carryIndexTimestamp = newMarkTime;
+            carryIndexPrice = newMarkPrice;
+            return;
+        }
+
+        if (newMarkTime > carryIndexTimestamp) {
+            carryPriceTimeIndex += carryIndexPrice * (newMarkTime - carryIndexTimestamp);
+            carryIndexTimestamp = newMarkTime;
+            carryIndexPrice = newMarkPrice;
+            return;
+        }
+
+        if (block.timestamp > carryIndexTimestamp) {
+            carryPriceTimeIndex += carryIndexPrice * (block.timestamp - carryIndexTimestamp);
+            carryIndexTimestamp = uint64(block.timestamp);
+        }
+        carryIndexPrice = newMarkPrice;
+    }
+
+    function _currentCarryPriceTimeIndex(
+        uint256 timestampNow
+    ) internal view returns (uint256 index) {
+        index = carryPriceTimeIndex;
+        if (!carryIndexInitialized || timestampNow <= carryIndexTimestamp) {
+            return index;
+        }
+        index += carryIndexPrice * (timestampNow - carryIndexTimestamp);
     }
 
     function settlementApplyCarryAndMark(
@@ -1072,12 +1122,14 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         pos.lastUpdateTime = position.lastUpdateTime;
         pos.lastCarryTimestamp = position.lastCarryTimestamp;
         pos.vpiAccrued = position.vpiAccrued;
+        lastCarryPriceTimeIndex[account] = _currentCarryPriceTimeIndex(block.timestamp);
     }
 
     function settlementDeletePosition(
         address account
     ) external onlySettlementSidecar {
         delete _positions[account];
+        delete lastCarryPriceTimeIndex[account];
     }
 
     function _applyOpen(
@@ -1177,6 +1229,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     function _elapsedCarryUsdc(
+        address account,
         CfdTypes.Position memory pos,
         uint256 price,
         uint256 reachableCollateralUsdc,
@@ -1185,11 +1238,30 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         if (pos.size == 0 || pos.lastCarryTimestamp == 0 || timestampNow <= pos.lastCarryTimestamp) {
             return 0;
         }
+        uint256 carryTimeDelta = timestampNow - pos.lastCarryTimestamp;
+        uint256 carryPrice = _averageCarryPrice(account, price, carryTimeDelta, timestampNow);
         uint256 lpBackedNotionalUsdc =
-            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(pos.size, price, reachableCollateralUsdc);
+            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(pos.size, carryPrice, reachableCollateralUsdc);
         return PositionRiskAccountingLib.computePendingCarryUsdc(
-            lpBackedNotionalUsdc, riskParams.baseCarryBps, timestampNow - pos.lastCarryTimestamp
+            lpBackedNotionalUsdc, riskParams.baseCarryBps, carryTimeDelta
         );
+    }
+
+    function _averageCarryPrice(
+        address account,
+        uint256 fallbackPrice,
+        uint256 carryTimeDelta,
+        uint256 timestampNow
+    ) internal view returns (uint256) {
+        if (!carryIndexInitialized || carryTimeDelta == 0) {
+            return fallbackPrice;
+        }
+        uint256 endIndex = _currentCarryPriceTimeIndex(timestampNow);
+        uint256 startIndex = lastCarryPriceTimeIndex[account];
+        if (endIndex <= startIndex) {
+            return fallbackPrice;
+        }
+        return (endIndex - startIndex) / carryTimeDelta;
     }
 
     function _totalPendingCarryUsdc(
@@ -1199,7 +1271,8 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         uint256 reachableCollateralUsdc,
         uint256 timestampNow
     ) internal view returns (uint256) {
-        return unsettledCarryUsdc[account] + _elapsedCarryUsdc(pos, price, reachableCollateralUsdc, timestampNow);
+        return
+            unsettledCarryUsdc[account] + _elapsedCarryUsdc(account, pos, price, reachableCollateralUsdc, timestampNow);
     }
 
     function _canFullyRealizeCarryFromSettlement(
@@ -1229,12 +1302,13 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         }
 
         uint256 elapsedCarryUsdc =
-            _elapsedCarryUsdc(_loadPosition(account), price, reachableCollateralUsdc, block.timestamp);
+            _elapsedCarryUsdc(account, _loadPosition(account), price, reachableCollateralUsdc, block.timestamp);
         if (elapsedCarryUsdc > 0) {
             unsettledCarryUsdc[account] += elapsedCarryUsdc;
             emit CarryCheckpointed(account, elapsedCarryUsdc, unsettledCarryUsdc[account]);
         }
         pos.lastCarryTimestamp = uint64(block.timestamp);
+        lastCarryPriceTimeIndex[account] = _currentCarryPriceTimeIndex(block.timestamp);
     }
 
     function _realizeCarryFromSettlement(
@@ -1247,6 +1321,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         uint256 carryDueUsdc = _totalPendingCarryUsdc(account, loaded, price, reachableCollateralUsdc, block.timestamp);
         if (carryDueUsdc == 0) {
             pos.lastCarryTimestamp = uint64(block.timestamp);
+            lastCarryPriceTimeIndex[account] = _currentCarryPriceTimeIndex(block.timestamp);
             return 0;
         }
 
@@ -1271,6 +1346,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
             account, realizedCarryUsdc, freeSettlementConsumedUsdc, marginConsumedUsdc, unsettledCarryUsdc[account]
         );
         pos.lastCarryTimestamp = uint64(block.timestamp);
+        lastCarryPriceTimeIndex[account] = _currentCarryPriceTimeIndex(block.timestamp);
     }
 
     function _liveMarkStalenessLimit() internal view returns (uint256) {
@@ -1331,8 +1407,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
             revert CfdEngine__MarkPriceOutOfOrder();
         }
         uint256 clamped = price > CAP_PRICE ? CAP_PRICE : price;
-        lastMarkPrice = clamped;
-        lastMarkTime = publishTime;
+        _applyCarryAndMark(clamped, publishTime);
     }
 
     // ==========================================
@@ -1348,28 +1423,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
         return CfdMath.conservativeMtmLiability(bullState.maxProfitUsdc, CfdTypes.Side.BULL, price, CAP_PRICE)
             + CfdMath.conservativeMtmLiability(bearState.maxProfitUsdc, CfdTypes.Side.BEAR, price, CAP_PRICE);
-    }
-
-    function _getProtocolPhase() internal view returns (ICfdEngine.ProtocolPhase) {
-        if (address(pool) == address(0) || orderRouter == address(0)) {
-            return ICfdEngine.ProtocolPhase.Configuring;
-        }
-        if (degradedMode) {
-            return ICfdEngine.ProtocolPhase.Degraded;
-        }
-        if (!pool.canIncreaseRisk()) {
-            return ICfdEngine.ProtocolPhase.Configuring;
-        }
-        return ICfdEngine.ProtocolPhase.Active;
-    }
-
-    function getProtocolStatus() external view returns (EngineStatusViewTypes.ProtocolStatus memory status) {
-        status.phase = uint8(_getProtocolPhase());
-        status.lastMarkPrice = lastMarkPrice;
-        status.lastMarkTime = lastMarkTime;
-        status.oracleFrozen = isOracleFrozen();
-        status.fadWindow = isFadWindow();
-        status.fadMaxStaleness = fadMaxStaleness;
     }
 
 }

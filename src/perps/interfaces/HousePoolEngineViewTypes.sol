@@ -9,6 +9,7 @@ library HousePoolEngineViewTypes {
         uint256 maxLiabilityUsdc;
         uint256 supplementalReservedUsdc;
         uint256 unrealizedMtmLiabilityUsdc;
+        uint256 depositMtmLiabilityUsdc; // zero unless an exact, non-manipulable deposit-side liability model is added
         uint256 traderClaimBalanceUsdc;
         bool markFreshnessRequired;
         uint256 maxMarkStaleness;

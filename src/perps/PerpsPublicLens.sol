@@ -3,7 +3,7 @@ pragma solidity 0.8.33;
 
 import {HousePool} from "./HousePool.sol";
 import {AccountLensViewTypes} from "./interfaces/AccountLensViewTypes.sol";
-import {EngineStatusViewTypes} from "./interfaces/EngineStatusViewTypes.sol";
+import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
 import {ICfdEngineAccountLens} from "./interfaces/ICfdEngineAccountLens.sol";
 import {ICfdEngineCore} from "./interfaces/ICfdEngineCore.sol";
 import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
@@ -177,14 +177,29 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
     }
 
     function _getProtocolStatusView() internal view returns (PerpsViewTypes.ProtocolStatusView memory viewData) {
-        EngineStatusViewTypes.ProtocolStatus memory status = ENGINE.getProtocolStatus();
-        viewData.phase = status.phase;
-        viewData.lastMarkPrice = status.lastMarkPrice;
-        viewData.lastMarkTime = status.lastMarkTime;
-        viewData.oracleFrozen = status.oracleFrozen;
-        viewData.fadWindow = status.fadWindow;
-        viewData.tradingActive = HOUSE_POOL.isTradingActive();
-        viewData.withdrawalLive = HOUSE_POOL.isWithdrawalLive();
+        viewData.phase = _getProtocolPhase();
+        viewData.lastMarkPrice = ENGINE.lastMarkPrice();
+        viewData.lastMarkTime = ENGINE.lastMarkTime();
+        viewData.oracleFrozen = ENGINE.isOracleFrozen();
+        viewData.fadWindow = ENGINE.isFadWindow();
+        if (address(HOUSE_POOL) != address(0)) {
+            viewData.tradingActive = HOUSE_POOL.isTradingActive();
+            viewData.withdrawalLive = HOUSE_POOL.isWithdrawalLive();
+        }
+    }
+
+    function _getProtocolPhase() internal view returns (uint8) {
+        address enginePool = ENGINE.pool();
+        if (enginePool == address(0) || ENGINE.orderRouter() == address(0)) {
+            return uint8(ICfdEngine.ProtocolPhase.Configuring);
+        }
+        if (ENGINE.degradedMode()) {
+            return uint8(ICfdEngine.ProtocolPhase.Degraded);
+        }
+        if (!HousePool(enginePool).canIncreaseRisk()) {
+            return uint8(ICfdEngine.ProtocolPhase.Configuring);
+        }
+        return uint8(ICfdEngine.ProtocolPhase.Active);
     }
 
 }

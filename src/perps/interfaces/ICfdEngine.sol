@@ -2,7 +2,6 @@
 pragma solidity 0.8.33;
 
 import {CfdTypes} from "../CfdTypes.sol";
-import {EngineStatusViewTypes} from "./EngineStatusViewTypes.sol";
 import {ICfdEngineTypes} from "./ICfdEngineTypes.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
@@ -163,7 +162,5 @@ interface ICfdEngine is ICfdEngineTypes {
         Active,
         Degraded
     }
-
-    function getProtocolStatus() external view returns (EngineStatusViewTypes.ProtocolStatus memory);
 
 }

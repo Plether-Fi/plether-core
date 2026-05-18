@@ -186,6 +186,14 @@ interface IHousePool {
             uint256 maxJuniorWithdrawUsdc
         );
 
+    /// @notice Read-only tranche principals for deposit pricing using unrealized-MtM-neutral NAV.
+    /// @return seniorPrincipalUsdc Simulated senior principal after reconcile (6 decimals)
+    /// @return juniorPrincipalUsdc Simulated junior principal after reconcile (6 decimals)
+    function getPendingDepositTrancheState()
+        external
+        view
+        returns (uint256 seniorPrincipalUsdc, uint256 juniorPrincipalUsdc);
+
     /// @notice Settles revenue/loss waterfall between tranches
     function reconcile() external;
 

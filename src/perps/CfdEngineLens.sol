@@ -243,6 +243,11 @@ contract CfdEngineLens is ICfdEngineLens {
             snap.lastMarkPrice = lastMarkPrice;
         }
         snap.lastMarkTime = publishTime == 0 ? lastMarkTime : publishTime;
+        snap.carryPriceTimeIndex = engineContract.carryPriceTimeIndex();
+        snap.carryIndexTimestamp = engineContract.carryIndexTimestamp();
+        snap.carryIndexPrice = engineContract.carryIndexPrice();
+        snap.lastCarryPriceTimeIndex = engineContract.lastCarryPriceTimeIndex(account);
+        snap.carryIndexInitialized = engineContract.carryIndexInitialized();
         snap.bullSide = _sideSnapshot(bull);
         snap.bearSide = _sideSnapshot(bear);
         snap.poolAssetsUsdc = poolDepthUsdc;

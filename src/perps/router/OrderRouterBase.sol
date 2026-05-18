@@ -69,8 +69,9 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
         uint256 sizeDelta,
         uint256 executionBountyUsdc
     ) internal override {
-        try engine.reserveCloseOrderExecutionBounty(account, sizeDelta, executionBountyUsdc) {}
-        catch {
+        try engine.reserveCloseOrderExecutionBounty(account, sizeDelta, executionBountyUsdc) {
+            return;
+        } catch {
             revert OrderRouter__InsufficientFreeEquity();
         }
     }

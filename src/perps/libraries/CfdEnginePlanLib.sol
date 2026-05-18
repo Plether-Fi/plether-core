@@ -200,7 +200,7 @@ library CfdEnginePlanLib {
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdTypes.Order memory order,
         uint256 executionPrice,
-        uint64
+        uint64 publishTime
     ) internal pure returns (CfdEnginePlanTypes.OpenDelta memory delta) {
         uint256 price = executionPrice > snap.capPrice ? snap.capPrice : executionPrice;
         CfdEnginePlanTypes.RawSnapshot memory effectiveSnap = snap;
@@ -214,8 +214,9 @@ library CfdEnginePlanLib {
             : 0;
         uint256 genericReachableUsdc =
             MarginClearinghouseAccountingLib.getGenericReachableUsdc(effectiveSnap.accountBuckets);
+        uint256 carryPrice = _averageCarryPrice(effectiveSnap, price, publishTime, carryTimeDelta);
         uint256 carryBaseUsdc = PositionRiskAccountingLib.computeLpBackedNotionalUsdc(
-            effectiveSnap.position.size, price, genericReachableUsdc
+            effectiveSnap.position.size, carryPrice, genericReachableUsdc
         );
         delta.pendingCarryUsdc = effectiveSnap.unsettledCarryUsdc
             + PositionRiskAccountingLib.computePendingCarryUsdc(
@@ -443,7 +444,7 @@ library CfdEnginePlanLib {
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdTypes.Order memory order,
         uint256 executionPrice,
-        uint64
+        uint64 publishTime
     ) internal pure returns (CfdEnginePlanTypes.CloseDelta memory delta) {
         uint256 price = executionPrice > snap.capPrice ? snap.capPrice : executionPrice;
         delta.account = order.account;
@@ -454,8 +455,9 @@ library CfdEnginePlanLib {
             ? snap.currentTimestamp - snap.position.lastCarryTimestamp
             : 0;
         uint256 genericReachableUsdc = MarginClearinghouseAccountingLib.getGenericReachableUsdc(snap.accountBuckets);
+        uint256 carryPrice = _averageCarryPrice(snap, price, publishTime, carryTimeDelta);
         uint256 carryBaseUsdc =
-            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(snap.position.size, price, genericReachableUsdc);
+            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(snap.position.size, carryPrice, genericReachableUsdc);
         delta.pendingCarryUsdc = snap.unsettledCarryUsdc
             + PositionRiskAccountingLib.computePendingCarryUsdc(
                 carryBaseUsdc, snap.riskParams.baseCarryBps, carryTimeDelta
@@ -671,7 +673,7 @@ library CfdEnginePlanLib {
     function planLiquidation(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         uint256 executionPrice,
-        uint64
+        uint64 publishTime
     ) internal pure returns (CfdEnginePlanTypes.LiquidationDelta memory delta) {
         uint256 price = executionPrice > snap.capPrice ? snap.capPrice : executionPrice;
         delta.account = snap.account;
@@ -698,8 +700,10 @@ library CfdEnginePlanLib {
             && snap.currentTimestamp > snap.position.lastCarryTimestamp
             ? snap.currentTimestamp - snap.position.lastCarryTimestamp
             : 0;
-        uint256 carryBaseUsdc =
-            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(snap.position.size, price, settlementReachableUsdc);
+        uint256 carryPrice = _averageCarryPrice(snap, price, publishTime, carryTimeDelta);
+        uint256 carryBaseUsdc = PositionRiskAccountingLib.computeLpBackedNotionalUsdc(
+            snap.position.size, carryPrice, settlementReachableUsdc
+        );
         delta.pendingCarryUsdc = snap.unsettledCarryUsdc
             + PositionRiskAccountingLib.computePendingCarryUsdc(
                 carryBaseUsdc, snap.riskParams.baseCarryBps, carryTimeDelta
@@ -790,6 +794,49 @@ library CfdEnginePlanLib {
         delta.solvency.maxLiabilityAfterUsdc = result.maxLiabilityAfterUsdc;
         delta.solvency.triggersDegradedMode = result.triggersDegradedMode;
         delta.solvency.postOpDegradedMode = result.postOpDegradedMode;
+    }
+
+    function _averageCarryPrice(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        uint256 fallbackPrice,
+        uint64 publishTime,
+        uint256 carryTimeDelta
+    ) private pure returns (uint256) {
+        if (!snap.carryIndexInitialized || carryTimeDelta == 0) {
+            return fallbackPrice;
+        }
+
+        uint256 endIndex = _carryPriceTimeIndexAt(snap, fallbackPrice, publishTime, snap.currentTimestamp);
+        if (endIndex <= snap.lastCarryPriceTimeIndex) {
+            return fallbackPrice;
+        }
+
+        return (endIndex - snap.lastCarryPriceTimeIndex) / carryTimeDelta;
+    }
+
+    function _carryPriceTimeIndexAt(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        uint256 executionPrice,
+        uint64 publishTime,
+        uint256 timestampNow
+    ) private pure returns (uint256 index) {
+        index = snap.carryPriceTimeIndex;
+        uint64 indexTimestamp = snap.carryIndexTimestamp;
+        uint256 indexPrice = snap.carryIndexPrice;
+
+        if (publishTime > indexTimestamp) {
+            index += indexPrice * (publishTime - indexTimestamp);
+            indexTimestamp = publishTime;
+            indexPrice = executionPrice;
+        } else if (timestampNow > indexTimestamp) {
+            index += indexPrice * (timestampNow - indexTimestamp);
+            indexTimestamp = uint64(timestampNow);
+            indexPrice = executionPrice;
+        }
+
+        if (timestampNow > indexTimestamp) {
+            index += indexPrice * (timestampNow - indexTimestamp);
+        }
     }
 
 }

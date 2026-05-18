@@ -92,14 +92,14 @@ Any new helper/sidecar contract that can reach these sets should be treated as s
 
 | Condition | Outcome | Bounty policy | Queue effect |
 |-----------|---------|---------------|--------------|
-| Open/close executes successfully | `Executed` | clearer paid from reservation | dequeue |
-| Typed `UserInvalid` open | `Failed` | clearer paid | dequeue |
-| Typed `ProtocolStateInvalidated` open | `Failed` | clearer paid from reserved reservation | dequeue |
-| Terminal invalid close | `Failed` | clearer paid | dequeue |
-| Slippage failure on open | `Failed` | clearer paid under the current terminal-failure policy | dequeue |
-| Slippage failure on close | `Failed` | clearer paid | dequeue |
-| Expired open order | `Failed` | clearer paid from reserved reservation | dequeue |
-| Expired close order | `Failed` | clearer paid from reservation under the current terminal-close policy | dequeue |
+| Open/close executes successfully | `Executed` | keeper paid from reservation | dequeue |
+| Typed `UserInvalid` open | `Failed` | keeper paid | dequeue |
+| Typed `ProtocolStateInvalidated` open | `Failed` | keeper paid from reserved bounty | dequeue |
+| Terminal invalid close | `Failed` | keeper paid | dequeue |
+| Slippage failure on open | `Failed` | keeper paid under the current terminal-failure policy | dequeue |
+| Slippage failure on close | `Failed` | keeper paid | dequeue |
+| Expired open order | `Failed` | keeper paid from reserved bounty | dequeue |
+| Expired close order | `Failed` | keeper paid from reservation under the current terminal-close policy | dequeue |
 | Stale oracle | blocked, not terminal | no distribution | keep pending |
 | Live-market publish-time ordering failure | blocked, not terminal | no distribution | keep pending |
 | Close-only ineligibility for queued open | blocked, not terminal | no distribution | keep pending |
@@ -108,7 +108,7 @@ Any new helper/sidecar contract that can reach these sets should be treated as s
 
 | Bounty type | Source of funds | Custody while pending | Success path | Illiquid path | Terminal failure path |
 |-------------|-----------------|-----------------------|--------------|---------------|-----------------------|
-| Order execution bounty | Trader free settlement, then bounded close fallback from active position margin | `MarginClearinghouse` reserved settlement bucket plus router order record | clearinghouse credit for the clearer | n/a | clearer payment or trader refund via clearinghouse credit depending on failure category/policy |
+| Order execution bounty | Trader free settlement, then bounded close fallback from active position margin | `MarginClearinghouse` reserved settlement bucket plus router order record | clearinghouse credit for the keeper | n/a | terminal close failures pay the keeper; other failure handling follows the typed policy |
 | Liquidation bounty | Liquidated account reachable collateral, capped by canonical liquidation value and carry-adjusted equity | planned in engine, then transferred by the liquidation settlement path | direct keeper clearinghouse credit | n/a | n/a |
 
 ### Oracle regime table
@@ -129,7 +129,7 @@ Any new helper/sidecar contract that can reach these sets should be treated as s
 | Active position margin | Trader until terminal settlement outcome | clearinghouse locked bucket + engine position mirror | engine open/close/liquidation, bounded router close-bounty sourcing | yes for terminal paths, no for ordinary withdraw | yes, via risk/equity view | no | no |
 | Other locked margin | Trader, but reserved to queued intents until an explicit terminal path unlocks it | clearinghouse reservations | router commit/release/consume | no for ordinary close reachability; only available where terminal settlement explicitly unlocks/consumes it | indirectly and only through explicit terminal settlement plans | no | no |
 | Committed order margin | Trader but reserved to one order | clearinghouse reservation keyed by `orderId` | router commit/execute/fail | no | no | no | no |
-| Execution bounty reserve | Trader-funded keeper reserve | `MarginClearinghouse` reserved settlement bucket + router order record | router commit/distribute/refund/forfeit through engine/clearinghouse | no | no | no | no |
+| Execution bounty reserve | Trader-funded keeper reserve | `MarginClearinghouse` reserved settlement bucket + router order record | router commit/distribute/forfeit through engine/clearinghouse | no | no | no | no |
 | Trader claim balance | Trader senior claim on pool liquidity | `CfdEngine.traderClaimBalanceUsdc` | engine create/service | no | yes, as senior liability | yes | yes |
 | Keeper bounty credit | Keeper margin credit | `MarginClearinghouse.balanceUsdc(keeper)` | engine/clearinghouse bounty settlement | no | no pool liability | no | no |
 | Unsettled carry | Protocol-recorded carry debt on an account | `CfdEngine.unsettledCarryUsdc[account]` | engine carry-checkpoint paths | no | yes, as carry drag on account equity | no | no |

@@ -261,8 +261,8 @@ Current policy is intentionally simple:
 - slippage-invalid orders fail terminally,
 - expired orders fail terminally,
 - typed engine failures route bounty according to semantic failure category,
-- terminal-invalid closes pay the clearer rather than refunding potentially margin-backed reservation to the trader wallet,
-- open-order refunds and clearer payouts credit clearinghouse settlement rather than sending direct wallet USDC transfers,
+- terminal-invalid closes pay the keeper rather than refunding potentially margin-backed reservation to the trader wallet,
+- open-order refunds and keeper payouts credit clearinghouse settlement rather than sending direct wallet USDC transfers,
 - the router does not maintain a retry or requeue lane.
 
 ### Oracle regimes
@@ -291,6 +291,8 @@ That means:
 - junior principal can dip before later realized recovery arrives,
 - same-side loser debt cannot net down live winner liability before settlement,
 - but the protocol avoids phantom-profit withdrawal bugs.
+
+Deposit pricing uses an unrealized-MtM-neutral NAV instead of the conservative withdrawal NAV. This avoids letting attackers mint new LP shares at a discount created only by conservative phantom liabilities; realized losses still impair deposit pricing.
 
 This is an explicit design choice, not an accounting accident.
 

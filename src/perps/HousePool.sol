@@ -622,6 +622,16 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
         );
     }
 
+    function getPendingDepositTrancheState()
+        external
+        view
+        returns (uint256 seniorPrincipalUsdc, uint256 juniorPrincipalUsdc)
+    {
+        HousePoolContext memory ctx = _buildCurrentHousePoolDepositContext();
+        seniorPrincipalUsdc = ctx.pendingState.waterfall.seniorPrincipal;
+        juniorPrincipalUsdc = ctx.pendingState.waterfall.juniorPrincipal;
+    }
+
     function isWithdrawalLive() external view returns (bool) {
         return _withdrawalsLive(_getHousePoolInputSnapshot(), _getHousePoolStatusSnapshot());
     }
@@ -783,10 +793,19 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
         HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
     ) internal view returns (HousePoolContext memory ctx) {
+        return _buildHousePoolContext(accountingSnapshot, statusSnapshot, true);
+    }
+
+    function _buildHousePoolContext(
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
+        HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot,
+        bool useWithdrawalMtm
+    ) internal view returns (HousePoolContext memory ctx) {
         ctx.accountingSnapshot = accountingSnapshot;
         ctx.statusSnapshot = statusSnapshot;
-        HousePoolAccountingLib.ReconcileSnapshot memory reconcileSnapshot =
-            HousePoolAccountingLib.buildReconcileSnapshot(accountingSnapshot);
+        HousePoolAccountingLib.ReconcileSnapshot memory reconcileSnapshot = useWithdrawalMtm
+            ? HousePoolAccountingLib.buildReconcileSnapshot(accountingSnapshot)
+            : HousePoolAccountingLib.buildDepositReconcileSnapshot(accountingSnapshot);
         HousePoolPendingPreviewLib.ClaimantPendingBuckets memory claimantBuckets = _getPendingClaimantBuckets();
         HousePoolPendingPreviewLib.ClaimantPendingBuckets memory settleableClaimantBuckets =
             _settleablePendingClaimantBuckets(reconcileSnapshot, claimantBuckets);
@@ -806,6 +825,10 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
 
     function _buildCurrentHousePoolContext() internal view returns (HousePoolContext memory ctx) {
         return _buildHousePoolContext(_getHousePoolInputSnapshot(), _getHousePoolStatusSnapshot());
+    }
+
+    function _buildCurrentHousePoolDepositContext() internal view returns (HousePoolContext memory ctx) {
+        return _buildHousePoolContext(_getHousePoolInputSnapshot(), _getHousePoolStatusSnapshot(), false);
     }
 
     function _previewPendingAccountingState(

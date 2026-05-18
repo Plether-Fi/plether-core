@@ -125,18 +125,25 @@ Notes:
 - it ignores uncollected trader debts as a cash source for withdrawal.
 - during `oracleFrozen`, ERC4626 LP exits remain live but the user-facing withdraw/redeem output is reduced by the tranche's frozen-window surcharge rather than hard-blocking immediately.
 
-### 3. LP reconciliation view
+### 3. LP reconciliation and deposit-pricing views
 
 Question answered:
 
 - what is tranche equity for share pricing and revenue distribution?
 
-Definition:
+Withdrawal/reconcile definition:
 
 - start from `netPhysicalAssets`,
 - subtract trader claim liabilities and protocol-owned balances,
 - apply conservative unrealized MtM liability only,
 - do not book unrealized trader losses as assets.
+
+Deposit/mint pricing definition:
+
+- start from the same physical assets, trader-claim liabilities, claimant buckets, recapitalizations, and revenue state,
+- do not subtract unrealized MtM liability unless it comes from an exact, non-manipulable deposit-side model,
+- realized pool losses still lower deposit NAV,
+- conservative unrealized MtM remains a withdrawal protection, not a discount offered to incoming LPs.
 
 Rules:
 
@@ -306,7 +313,7 @@ The protocol supports fail-soft terminal settlement.
 
 - profitable closes and some liquidation residuals may create `traderClaimBalanceUsdc[account]`,
 - only the beneficiary account owner may call `settleTraderClaim(account)`,
-- claims may be partial,
+- settlement is all-or-nothing for the account claim once aggregate trader claim liabilities are fully cash-covered,
 - settlement is credited into `MarginClearinghouse`.
 
 Rules:
@@ -344,13 +351,13 @@ Rules:
 - `closeOrderExecutionBountyUsdc` is governance-configured but hard-capped at `1 USDC`,
 - the amount parked in reservation is bounded by `MAX_PENDING_ORDERS * 1 USDC` per account,
 - collateral reachability should treat that reservation as temporarily unavailable until the order resolves,
-- terminal-invalid close execution must not refund margin-backed bounty reservation to the external wallet.
+- terminal-invalid close execution pays the keeper from the clearinghouse-reserved bounty; liquidatable full closes may reserve that bounty only from free settlement, not active position margin.
 
 ### Open-order failure policy
 
 - deterministic live-state open failures may be rejected at commit time,
-- execution-time user-invalid opens pay the clearer from clearinghouse-reserved bounty value,
-- genuine post-commit protocol-state invalidations pay the clearer from clearinghouse-reserved bounty value so FIFO head cleanup remains incentive compatible,
+- execution-time user-invalid opens pay the keeper from clearinghouse-reserved bounty value,
+- genuine post-commit protocol-state invalidations pay the keeper from clearinghouse-reserved bounty value so FIFO head cleanup remains incentive compatible,
 - typed engine policy categories, not raw revert selectors, should drive the split.
 
 ## Settlement Rules
@@ -391,7 +398,7 @@ Required properties:
 Liquidation must:
 
 1. seize reachable account value,
-2. pay or defer the keeper bounty according to available vault cash,
+2. pay the keeper bounty immediately or credit the keeper through clearinghouse settlement according to available cash,
 3. preserve residual trader value when positive,
 4. realize remaining shortfall as bad debt,
 5. delete the position,

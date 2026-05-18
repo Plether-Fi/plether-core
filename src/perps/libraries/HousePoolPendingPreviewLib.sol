@@ -126,6 +126,7 @@ library HousePoolPendingPreviewLib {
         bool allowClaimedEquity
     ) internal pure {
         if (!allowClaimedEquity && state.waterfall.seniorPrincipal + state.waterfall.juniorPrincipal != 0) {
+            state.unassignedAssets += amount;
             return;
         }
 

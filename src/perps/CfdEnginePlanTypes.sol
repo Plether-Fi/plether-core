@@ -47,6 +47,11 @@ library CfdEnginePlanTypes {
         uint256 currentTimestamp;
         uint256 lastMarkPrice;
         uint64 lastMarkTime;
+        uint256 carryPriceTimeIndex;
+        uint64 carryIndexTimestamp;
+        uint256 carryIndexPrice;
+        uint256 lastCarryPriceTimeIndex;
+        bool carryIndexInitialized;
 
         SideSnapshot bullSide;
         SideSnapshot bearSide;

@@ -572,11 +572,12 @@ contract OrderRouterTest is BasePerpTest {
             "Setup should leave the larger free-settlement buffer under the lower open bounty cap"
         );
 
-        uint256 carryElapsed = 12 hours;
+        uint256 carryStart = engine.getPositionLastCarryTimestamp(account);
         vm.warp(block.timestamp + 12 hours);
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
+        uint256 carryElapsed = block.timestamp - carryStart;
         uint256 expectedCarry = PositionRiskAccountingLib.computePendingCarryUsdc(
             PositionRiskAccountingLib.computeLpBackedNotionalUsdc(10_000e18, 1e8, clearinghouse.balanceUsdc(account)),
             _riskParams().baseCarryBps,
@@ -595,9 +596,10 @@ contract OrderRouterTest is BasePerpTest {
             200_000,
             "Close commit should reserve exactly 0.20 USDC of bounty value"
         );
-        assertEq(
+        assertApproxEqAbs(
             clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc,
-            932_040,
+            freeSettlementBefore - expectedCarry - 200_000,
+            32,
             "Carry-aware reservation should only consume the reduced close-order bounty from post-carry free settlement"
         );
         assertEq(

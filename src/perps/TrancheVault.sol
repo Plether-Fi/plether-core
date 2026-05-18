@@ -86,6 +86,13 @@ contract TrancheVault is ERC4626 {
         return IS_SENIOR ? seniorPrincipalUsdc : juniorPrincipalUsdc;
     }
 
+    /// @notice Converts assets to shares using deposit-side NAV, neutral to unrealized trader MtM.
+    function convertToShares(
+        uint256 assets
+    ) public view override returns (uint256) {
+        return _convertToSharesUsingAssets(assets, _depositPricingAssets(), Math.Rounding.Floor);
+    }
+
     /// @notice Deposits assets into the tranche after reconciling pool accounting and lifecycle gates.
     function deposit(
         uint256 assets,
@@ -129,7 +136,7 @@ contract TrancheVault is ERC4626 {
     ) public view override returns (uint256) {
         uint256 feeBps = _frozenLpFeeBps();
         if (feeBps == 0) {
-            return super.previewDeposit(assets);
+            return _previewDepositShares(assets);
         }
         return _previewFrozenDepositShares(assets, feeBps);
     }
@@ -139,7 +146,7 @@ contract TrancheVault is ERC4626 {
     ) public view override returns (uint256) {
         uint256 feeBps = _frozenLpFeeBps();
         if (feeBps == 0) {
-            return super.previewMint(shares);
+            return _previewMintAssets(shares);
         }
         return _previewFrozenMintAssets(shares, feeBps);
     }
@@ -463,13 +470,46 @@ contract TrancheVault is ERC4626 {
         return Math.mulDiv(netShares, 10_000, 10_000 - feeBps, Math.Rounding.Ceil);
     }
 
+    function _depositPricingAssets() internal view returns (uint256 assets) {
+        (uint256 seniorPrincipalUsdc, uint256 juniorPrincipalUsdc) = POOL.getPendingDepositTrancheState();
+        return IS_SENIOR ? seniorPrincipalUsdc : juniorPrincipalUsdc;
+    }
+
+    function _convertToSharesUsingAssets(
+        uint256 assets,
+        uint256 totalAssets_,
+        Math.Rounding rounding
+    ) internal view returns (uint256) {
+        return Math.mulDiv(assets, totalSupply() + 10 ** _decimalsOffset(), totalAssets_ + 1, rounding);
+    }
+
+    function _convertToAssetsUsingAssets(
+        uint256 shares,
+        uint256 totalAssets_,
+        Math.Rounding rounding
+    ) internal view returns (uint256) {
+        return Math.mulDiv(shares, totalAssets_ + 1, totalSupply() + 10 ** _decimalsOffset(), rounding);
+    }
+
+    function _previewDepositShares(
+        uint256 assets
+    ) internal view returns (uint256) {
+        return _convertToSharesUsingAssets(assets, _depositPricingAssets(), Math.Rounding.Floor);
+    }
+
+    function _previewMintAssets(
+        uint256 shares
+    ) internal view returns (uint256) {
+        return _convertToAssetsUsingAssets(shares, _depositPricingAssets(), Math.Rounding.Ceil);
+    }
+
     function _previewFrozenDepositShares(
         uint256 assets,
         uint256 feeBps
     ) internal view returns (uint256) {
         uint256 netAssets = _applyFee(assets, feeBps);
         uint256 adjustedShares = totalSupply() + 10 ** _decimalsOffset();
-        uint256 adjustedAssetsAfterDeposit = totalAssets() + assets + 1;
+        uint256 adjustedAssetsAfterDeposit = _depositPricingAssets() + assets + 1;
         uint256 denominator = adjustedAssetsAfterDeposit - netAssets;
         return Math.mulDiv(netAssets, adjustedShares, denominator, Math.Rounding.Floor);
     }
@@ -482,7 +522,7 @@ contract TrancheVault is ERC4626 {
             return type(uint256).max;
         }
         uint256 adjustedShares = totalSupply() + 10 ** _decimalsOffset();
-        uint256 adjustedAssets = totalAssets() + 1;
+        uint256 adjustedAssets = _depositPricingAssets() + 1;
         uint256 denominator = ((10_000 - feeBps) * adjustedShares) - (feeBps * shares);
         return Math.mulDiv(10_000 * shares, adjustedAssets, denominator, Math.Rounding.Ceil);
     }

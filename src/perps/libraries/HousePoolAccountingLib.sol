@@ -39,12 +39,25 @@ library HousePoolAccountingLib {
     function buildReconcileSnapshot(
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory engineSnapshot
     ) internal pure returns (ReconcileSnapshot memory snapshot) {
+        return _buildReconcileSnapshot(engineSnapshot, engineSnapshot.unrealizedMtmLiabilityUsdc);
+    }
+
+    function buildDepositReconcileSnapshot(
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory engineSnapshot
+    ) internal pure returns (ReconcileSnapshot memory snapshot) {
+        return _buildReconcileSnapshot(engineSnapshot, engineSnapshot.depositMtmLiabilityUsdc);
+    }
+
+    function _buildReconcileSnapshot(
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory engineSnapshot,
+        uint256 mtmLiabilityUsdc
+    ) private pure returns (ReconcileSnapshot memory snapshot) {
         snapshot.physicalAssets = engineSnapshot.physicalAssetsUsdc;
         snapshot.traderClaimLiabilities = engineSnapshot.traderClaimBalanceUsdc;
         snapshot.cashAfterTraderClaimLiabilities = engineSnapshot.physicalAssetsUsdc > snapshot.traderClaimLiabilities
             ? engineSnapshot.physicalAssetsUsdc - snapshot.traderClaimLiabilities
             : 0;
-        snapshot.mtm = engineSnapshot.unrealizedMtmLiabilityUsdc;
+        snapshot.mtm = mtmLiabilityUsdc;
         snapshot.distributable = snapshot.cashAfterTraderClaimLiabilities > snapshot.mtm
             ? snapshot.cashAfterTraderClaimLiabilities - snapshot.mtm
             : 0;

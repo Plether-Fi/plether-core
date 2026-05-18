@@ -96,10 +96,12 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         uint256 reachableUsdc = MarginClearinghouseAccountingLib.getGenericReachableUsdc(buckets);
         uint256 pendingCarryUsdc = engineContract.unsettledCarryUsdc(account);
         if (pos.size > 0 && pos.lastCarryTimestamp > 0 && block.timestamp > pos.lastCarryTimestamp) {
+            uint256 carryTimeDelta = block.timestamp - pos.lastCarryTimestamp;
+            uint256 carryPrice = _averageCarryPrice(account, price, carryTimeDelta, block.timestamp);
             uint256 lpBackedNotionalUsdc =
-                PositionRiskAccountingLib.computeLpBackedNotionalUsdc(pos.size, price, reachableUsdc);
+                PositionRiskAccountingLib.computeLpBackedNotionalUsdc(pos.size, carryPrice, reachableUsdc);
             pendingCarryUsdc += PositionRiskAccountingLib.computePendingCarryUsdc(
-                lpBackedNotionalUsdc, _riskParams().baseCarryBps, block.timestamp - pos.lastCarryTimestamp
+                lpBackedNotionalUsdc, _riskParams().baseCarryBps, carryTimeDelta
             );
         }
         if (pendingCarryUsdc > 0) {
@@ -199,10 +201,13 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         uint256 price = engineContract.lastMarkPrice();
         uint256 pendingCarryUsdc = 0;
         if (price > 0 && pos.lastCarryTimestamp > 0 && block.timestamp > pos.lastCarryTimestamp) {
-            uint256 lpBackedNotionalUsdc =
-                PositionRiskAccountingLib.computeLpBackedNotionalUsdc(pos.size, price, snapshot.terminalReachableUsdc);
+            uint256 carryTimeDelta = block.timestamp - pos.lastCarryTimestamp;
+            uint256 carryPrice = _averageCarryPrice(account, price, carryTimeDelta, block.timestamp);
+            uint256 lpBackedNotionalUsdc = PositionRiskAccountingLib.computeLpBackedNotionalUsdc(
+                pos.size, carryPrice, snapshot.terminalReachableUsdc
+            );
             pendingCarryUsdc = PositionRiskAccountingLib.computePendingCarryUsdc(
-                lpBackedNotionalUsdc, params.baseCarryBps, block.timestamp - pos.lastCarryTimestamp
+                lpBackedNotionalUsdc, params.baseCarryBps, carryTimeDelta
             );
         }
         pendingCarryUsdc += engineContract.unsettledCarryUsdc(account);
@@ -232,6 +237,33 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         (pos.size, pos.margin, pos.entryPrice, pos.maxProfitUsdc, pos.side, pos.lastUpdateTime, pos.vpiAccrued) =
             engineContract.positions(account);
         pos.lastCarryTimestamp = engineContract.getPositionLastCarryTimestamp(account);
+    }
+
+    function _averageCarryPrice(
+        address account,
+        uint256 fallbackPrice,
+        uint256 carryTimeDelta,
+        uint256 timestampNow
+    ) internal view returns (uint256) {
+        if (!engineContract.carryIndexInitialized() || carryTimeDelta == 0) {
+            return fallbackPrice;
+        }
+        uint256 endIndex = _currentCarryPriceTimeIndex(timestampNow);
+        uint256 startIndex = engineContract.lastCarryPriceTimeIndex(account);
+        if (endIndex <= startIndex) {
+            return fallbackPrice;
+        }
+        return (endIndex - startIndex) / carryTimeDelta;
+    }
+
+    function _currentCarryPriceTimeIndex(
+        uint256 timestampNow
+    ) internal view returns (uint256 index) {
+        index = engineContract.carryPriceTimeIndex();
+        if (!engineContract.carryIndexInitialized() || timestampNow <= engineContract.carryIndexTimestamp()) {
+            return index;
+        }
+        index += engineContract.carryIndexPrice() * (timestampNow - engineContract.carryIndexTimestamp());
     }
 
     function _riskParams() internal view returns (CfdTypes.RiskParams memory params) {
