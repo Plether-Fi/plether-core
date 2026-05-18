@@ -416,6 +416,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         if (msg.sender != account) {
             revert CfdEngine__NotAccountOwner();
         }
+        _advanceAllCarryIndexes(block.timestamp);
         StoredPosition storage pos = _positions[account];
         _checkpointTraderClaimCarryIfPossible(account, pos);
 

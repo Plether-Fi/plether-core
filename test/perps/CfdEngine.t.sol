@@ -955,6 +955,37 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
+    function test_SettleTraderClaim_NoOpenPositionCheckpointsCarryBeforePoolPayout() public {
+        address trader = address(0xD30A11CE);
+        address claimant = address(0xD30B0B);
+
+        _fundTrader(trader, 20_000e6);
+        _open(trader, CfdTypes.Side.BULL, 500_000e18, 10_000e6, 1e8);
+
+        uint256 claimUsdc = 1000e6;
+        stdstore.target(address(engine)).sig("traderClaimBalanceUsdc(address)").with_key(claimant)
+            .checked_write(claimUsdc);
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(claimUsdc);
+
+        vm.warp(block.timestamp + 30 days);
+        uint256 expectedCarryIndex = _currentSideCarryIndex(CfdTypes.Side.BULL);
+        uint256 poolAssetsBefore = pool.totalAssets();
+
+        vm.prank(claimant);
+        engine.settleTraderClaim(claimant);
+
+        uint256 sideIndex = uint256(CfdTypes.Side.BULL);
+        assertEq(
+            engine.sideCarryIndex(sideIndex),
+            expectedCarryIndex,
+            "Claim payout should checkpoint carry with the pre-payout pool denominator"
+        );
+        assertEq(engine.sideCarryTimestamp(sideIndex), block.timestamp, "Claim payout should advance carry timestamp");
+        assertEq(
+            pool.totalAssets(), poolAssetsBefore - claimUsdc, "Setup should reduce pool assets after claim service"
+        );
+    }
+
     function test_SettleTraderClaim_RealizesCarryBeforeCreditingSettlement() public {
         address trader = address(0xD30B);
         address account = trader;
