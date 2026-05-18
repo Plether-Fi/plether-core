@@ -111,7 +111,8 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         snapshot.effectiveSolvencyAssetsUsdc = solvencyState.effectiveAssetsUsdc;
         snapshot.withdrawalReservedUsdc = solvencyState.withdrawalReservedUsdc;
         snapshot.freeUsdc = solvencyState.freeWithdrawableUsdc;
-        snapshot.protocolTreasuryBalanceUsdc = engineContract.protocolTreasuryBalanceUsdc();
+        snapshot.protocolTreasuryBalanceUsdc =
+            engineContract.clearinghouse().balanceUsdc(engineContract.protocolTreasury());
         snapshot.accumulatedBadDebtUsdc = engineContract.accumulatedBadDebtUsdc();
         snapshot.totalTraderClaimBalanceUsdc = engineContract.totalTraderClaimBalanceUsdc();
         snapshot.degradedMode = engineContract.degradedMode();

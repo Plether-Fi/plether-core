@@ -257,7 +257,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         assertEq(preview.seizedCollateralUsdc, netOwedUsdc, "Only the net owed cash should be seized");
         assertEq(preview.badDebtUsdc, 0, "Retained trader profit should not be bad debt");
 
-        uint256 treasuryBefore = engine.protocolTreasuryBalanceUsdc();
+        uint256 treasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
         uint256 poolAssetsBefore = pool.totalAssets();
         CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(account);
         bool degradedBefore = engine.degradedMode();
@@ -267,7 +267,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         CloseParityObserved memory observed = _observeCloseParity(account, beforeSnapshot);
         _assertClosePreviewMatchesObserved(preview, observed, degradedBefore);
         assertEq(
-            engine.protocolTreasuryBalanceUsdc() - treasuryBefore,
+            clearinghouse.balanceUsdc(engine.protocolTreasury()) - treasuryBefore,
             closeFeeUsdc,
             "Treasury should receive seized cash plus retained-profit top-up"
         );
@@ -394,7 +394,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             uint8(delta.revertCode), uint8(CfdEnginePlanTypes.OpenRevertCode.OK), "Setup should not predict failure"
         );
 
-        uint256 feesBefore = engine.protocolTreasuryBalanceUsdc();
+        uint256 feesBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
         _open(account, CfdTypes.Side.BULL, order.sizeDelta, order.marginDelta, 1e8);
 
         (uint256 size, uint256 margin, uint256 entryPrice,,,,) = engine.positions(account);
@@ -402,7 +402,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         assertEq(margin, delta.positionMarginAfterOpen, "Live open margin should match planner delta");
         assertEq(entryPrice, delta.newPosEntryPrice, "Live open entry price should match planner delta");
         assertEq(
-            engine.protocolTreasuryBalanceUsdc() - feesBefore,
+            clearinghouse.balanceUsdc(engine.protocolTreasury()) - feesBefore,
             delta.executionFeeUsdc,
             "Live open fee collection should match planner execution fee"
         );

@@ -321,11 +321,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         emit ProtocolTreasuryUpdated(treasury);
     }
 
-    /// @notice Current protocol fee balance custodied by the treasury clearinghouse account.
-    function protocolTreasuryBalanceUsdc() public view returns (uint256) {
-        return clearinghouse.balanceUsdc(protocolTreasury);
-    }
-
     /// @notice Transfers forfeited reserved execution-bounty reservation into the protocol treasury account.
     function absorbReservedExecutionBounty(
         address sourceAccount,
@@ -403,23 +398,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         }
 
         _realizeCarryFromSettlement(account, pos);
-    }
-
-    /// @notice Checkpoints carry without requiring physical collection.
-    /// @dev Kept as a clearinghouse fallback path, but carry no longer depends on mark freshness.
-    function checkpointCarryUsingStoredMark(
-        address account
-    ) external nonReentrant {
-        if (msg.sender != address(clearinghouse)) {
-            revert CfdEngine__NotClearinghouse();
-        }
-
-        StoredPosition storage pos = _positions[account];
-        if (pos.size == 0 || pos.lastCarryTimestamp == 0) {
-            return;
-        }
-
-        _checkpointCarryBeforeBasisChange(account, pos);
     }
 
     /// @notice Settles the caller's trader claim balance into the clearinghouse.
@@ -592,7 +570,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         if (config.executionFeeBps == 0 || config.executionFeeBps > 10_000) {
             revert CfdEngine__InvalidRiskParams();
         }
-        _validateRiskParams(config.riskParams);
         _advanceAllCarryIndexes(block.timestamp);
         riskParams = config.riskParams;
         executionFeeBps = config.executionFeeBps;
@@ -861,25 +838,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     ) external view returns (uint256 borrowBaseUsdc, uint256 lastCarryIndex, uint64 lastCarryTimestamp) {
         StoredPosition storage pos = _positions[account];
         return (pos.borrowBaseUsdc, pos.lastCarryIndex, pos.lastCarryTimestamp);
-    }
-
-    function getPositionBorrowBaseUsdc(
-        address account
-    ) external view returns (uint256) {
-        return _positions[account].borrowBaseUsdc;
-    }
-
-    function getPositionLastCarryIndex(
-        address account
-    ) external view returns (uint256) {
-        return _positions[account].lastCarryIndex;
-    }
-
-    function currentSideCarryIndex(
-        CfdTypes.Side side
-    ) external view returns (uint256) {
-        uint256 poolAssetsUsdc = address(pool) == address(0) ? 0 : pool.totalAssets();
-        return _currentSideCarryIndex(side, block.timestamp, poolAssetsUsdc);
     }
 
     /// @notice Liquidates an undercollateralized position.
@@ -1420,29 +1378,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
 
         traderClaimBalanceUsdc[account] -= amountUsdc;
         totalTraderClaimBalanceUsdc -= amountUsdc;
-    }
-
-    function _validateRiskParams(
-        CfdTypes.RiskParams memory _riskParams
-    ) internal pure {
-        if (_riskParams.maintMarginBps == 0 || _riskParams.initMarginBps < _riskParams.maintMarginBps) {
-            revert CfdEngine__InvalidRiskParams();
-        }
-        if (_riskParams.fadMarginBps < _riskParams.maintMarginBps) {
-            revert CfdEngine__InvalidRiskParams();
-        }
-        if (_riskParams.initMarginBps > 10_000 || _riskParams.fadMarginBps > 10_000) {
-            revert CfdEngine__InvalidRiskParams();
-        }
-        if (_riskParams.baseCarryBps > 100_000) {
-            revert CfdEngine__InvalidRiskParams();
-        }
-        if (_riskParams.minBountyUsdc == 0 || _riskParams.bountyBps == 0) {
-            revert CfdEngine__InvalidRiskParams();
-        }
-        if (_riskParams.maxSkewRatio > CfdMath.WAD) {
-            revert CfdEngine__InvalidRiskParams();
-        }
     }
 
     /// @notice Updates the cached mark price without processing a trade or liquidation.

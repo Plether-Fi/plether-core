@@ -54,7 +54,7 @@ contract AuditRemainingFindingsFailing is BasePerpTest {
             equityAfter - equityBefore, 1000, "LP equity delta should be limited to incidental one-second senior yield"
         );
         assertEq(
-            engine.protocolTreasuryBalanceUsdc(),
+            clearinghouse.balanceUsdc(engine.protocolTreasury()),
             80e6,
             "Open and close execution fees should both accrue as protocol revenue"
         );

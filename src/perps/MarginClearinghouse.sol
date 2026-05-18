@@ -21,8 +21,6 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
 
     using SafeERC20 for IERC20;
 
-    bytes4 internal constant MARK_PRICE_STALE_SELECTOR = bytes4(keccak256("CfdEngine__MarkPriceStale()"));
-
     mapping(address => uint256) internal settlementBalances;
 
     mapping(address => uint256) internal positionMarginUsdc;
@@ -818,16 +816,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
             return;
         }
 
-        try ICfdEngineCore(engine_).realizeCarryBeforeMarginChange(account) {}
-        catch (bytes memory revertData) {
-            if (revertData.length < 4 || bytes4(revertData) != MARK_PRICE_STALE_SELECTOR) {
-                assembly {
-                    revert(add(revertData, 32), mload(revertData))
-                }
-            }
-
-            ICfdEngineCore(engine_).checkpointCarryUsingStoredMark(account);
-        }
+        ICfdEngineCore(engine_).realizeCarryBeforeMarginChange(account);
     }
 
     function _isOrderRouter(

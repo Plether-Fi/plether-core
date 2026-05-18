@@ -199,7 +199,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 0.8e8, true);
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
-        uint256 feesBefore = engine.protocolTreasuryBalanceUsdc();
+        uint256 feesBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
         bytes[] memory closePrice = _mockPythUpdateData();
         vm.prank(KEEPER);
         router.executeOrder(2, closePrice);
@@ -210,7 +210,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
             "Close slippage miss should still credit the clearer through the carry-aware keeper settlement path"
         );
         assertGe(
-            engine.protocolTreasuryBalanceUsdc() - feesBefore,
+            clearinghouse.balanceUsdc(engine.protocolTreasury()) - feesBefore,
             0,
             "Close slippage miss should not reduce accumulated protocol fees"
         );

@@ -229,7 +229,7 @@ contract AuditHousePoolViewFindingsFailing_GrossAssetsReconstruction is BasePerp
         _fundTrader(trader, 50_000e6);
         _open(traderAccount, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
-        uint256 fees = engine.protocolTreasuryBalanceUsdc();
+        uint256 fees = clearinghouse.balanceUsdc(engine.protocolTreasury());
         assertGt(fees, 0, "Setup must accrue protocol fees");
 
         uint256 actualCash = 10_000_000;

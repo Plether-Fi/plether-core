@@ -287,7 +287,7 @@ contract AuditFollowupFindingsFailing_LegacySpreadReserve is BasePerpTest {
 
         uint256 bal = usdc.balanceOf(address(pool));
         uint256 maxLiability = _sideMaxProfit(CfdTypes.Side.BULL);
-        uint256 pendingFees = engine.protocolTreasuryBalanceUsdc();
+        uint256 pendingFees = clearinghouse.balanceUsdc(engine.protocolTreasury());
         uint256 expectedFree = bal > maxLiability + pendingFees + uint256(bearLegacySpread)
             ? bal - maxLiability - pendingFees - uint256(bearLegacySpread)
             : 0;

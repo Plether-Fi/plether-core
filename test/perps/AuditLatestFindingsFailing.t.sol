@@ -92,7 +92,7 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
             equityAfter, equityBefore, "User-funded close-order bounties should not reduce LP distributable equity"
         );
         assertEq(
-            engine.protocolTreasuryBalanceUsdc(),
+            clearinghouse.balanceUsdc(engine.protocolTreasury()),
             80e6,
             "Open and close execution fees should both accrue as protocol revenue"
         );

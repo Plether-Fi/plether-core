@@ -43,7 +43,7 @@ Use these terms consistently:
 - `accountedAssets`: canonical protocol-owned USDC recognized by pool accounting
 - `excessAssets = max(rawAssets - accountedAssets, 0)`: unsolicited or otherwise unaccounted positive balance
 - `physicalAssets = totalAssets() = min(rawAssets, accountedAssets)`: conservative economic pool backing
-- `treasuryFees = protocolTreasuryBalanceUsdc()`: cash-realized protocol-owned inventory held as treasury margin in `MarginClearinghouse`, not LP equity
+- `treasuryFees = clearinghouse.balanceUsdc(protocolTreasury)`: cash-realized protocol-owned inventory held as treasury margin in `MarginClearinghouse`, not LP equity
 - `netPhysicalAssets = physicalAssets`
 
 Operational rules:
@@ -394,7 +394,7 @@ Required properties:
 ### Treasury fee withdrawals
 
 - protocol fee withdrawal is a standard `MarginClearinghouse` withdrawal from the configured treasury account,
-- `CfdEngine.protocolTreasuryBalanceUsdc()` reports the configured treasury account balance,
+- `MarginClearinghouse.balanceUsdc(CfdEngine.protocolTreasury())` reports the configured treasury account balance,
 - only cash-collected fees and free-cash-funded top-ups become treasury margin,
 - uncredited fee amounts are not withdrawable protocol inventory in the simplified treasury-margin model,
 - withdrawing treasury margin must not consume `HousePool` cash, trader claims, or LP withdrawal reserves.

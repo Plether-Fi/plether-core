@@ -62,8 +62,6 @@ interface ICfdEngineCore is ICfdEngineTypes {
         uint64 publishTime
     ) external;
 
-    function protocolTreasuryBalanceUsdc() external view returns (uint256);
-
     function totalTraderClaimBalanceUsdc() external view returns (uint256);
 
     function liquidatePosition(
@@ -84,10 +82,6 @@ interface ICfdEngineCore is ICfdEngineTypes {
     function CAP_PRICE() external view returns (uint256);
 
     function realizeCarryBeforeMarginChange(
-        address account
-    ) external;
-
-    function checkpointCarryUsingStoredMark(
         address account
     ) external;
 

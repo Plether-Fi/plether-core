@@ -47,13 +47,9 @@ contract MockToken is ERC20 {
 
 contract MockClearinghouseEngine {
 
-    error CfdEngine__MarkPriceStale();
-
     address public orderRouter;
     uint256 public carryCheckpointCalls;
-    uint256 public storedMarkCheckpointCalls;
     address public lastCarryAccountId;
-    bool public carryRealizationStale;
 
     function setOrderRouter(
         address router
@@ -65,26 +61,10 @@ contract MockClearinghouseEngine {
         address
     ) external pure {}
 
-    function setCarryRealizationStale(
-        bool stale
-    ) external {
-        carryRealizationStale = stale;
-    }
-
     function realizeCarryBeforeMarginChange(
         address account
     ) external {
-        if (carryRealizationStale) {
-            revert CfdEngine__MarkPriceStale();
-        }
         carryCheckpointCalls += 1;
-        lastCarryAccountId = account;
-    }
-
-    function checkpointCarryUsingStoredMark(
-        address account
-    ) external {
-        storedMarkCheckpointCalls += 1;
         lastCarryAccountId = account;
     }
 

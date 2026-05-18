@@ -9,6 +9,7 @@ import {ICfdEnginePlanner} from "./interfaces/ICfdEnginePlanner.sol";
 import {ICfdEngineTypes} from "./interfaces/ICfdEngineTypes.sol";
 import {IMarginClearinghouse} from "./interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
+import {PositionRiskAccountingLib} from "./libraries/PositionRiskAccountingLib.sol";
 
 contract CfdEngineLens is ICfdEngineLens {
 
@@ -318,8 +319,23 @@ contract CfdEngineLens is ICfdEngineLens {
             entryNotional: side.entryNotional,
             totalMargin: side.totalMargin,
             borrowBaseUsdc: engineContract.sideBorrowBaseUsdc(uint256(sideId)),
-            carryIndex: engineContract.currentSideCarryIndex(sideId)
+            carryIndex: _currentSideCarryIndex(sideId)
         });
+    }
+
+    function _currentSideCarryIndex(
+        CfdTypes.Side side
+    ) internal view returns (uint256) {
+        uint256 sideIndex = uint256(side);
+        (,,,,, uint256 baseCarryBps,,) = engineContract.riskParams();
+        return PositionRiskAccountingLib.computeCurrentCarryIndex(
+            engineContract.sideCarryIndex(sideIndex),
+            engineContract.sideCarryTimestamp(sideIndex),
+            block.timestamp,
+            engineContract.sideBorrowBaseUsdc(sideIndex),
+            engineContract.pool().totalAssets(),
+            baseCarryBps
+        );
     }
 
     function _riskParams() internal view returns (CfdTypes.RiskParams memory params) {

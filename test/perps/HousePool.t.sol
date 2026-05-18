@@ -8,6 +8,7 @@ import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "../../src/perps/interfaces/IHousePool.sol";
 import {IOrderRouterErrors} from "../../src/perps/interfaces/IOrderRouterErrors.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
+import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 
 contract HousePoolTest is BasePerpTest {
@@ -265,7 +266,7 @@ contract HousePoolTest is BasePerpTest {
         _fundTrader(carol, 50_000 * 1e6);
         _open(carol, CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8);
 
-        uint256 fees = engine.protocolTreasuryBalanceUsdc();
+        uint256 fees = clearinghouse.balanceUsdc(engine.protocolTreasury());
         assertTrue(fees > 0, "Fees should exist after trade");
 
         vm.prank(address(juniorVault));
@@ -578,9 +579,9 @@ contract HousePoolTest is BasePerpTest {
         usdc.mint(alice, 1e6);
         vm.startPrank(alice);
         usdc.approve(address(juniorVault), 1e6);
-        vm.expectRevert(TrancheVault.TrancheVault__TerminallyWiped.selector);
+        vm.expectRevert(abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, alice, 1e6, 0));
         juniorVault.deposit(1e6, alice);
-        vm.expectRevert(TrancheVault.TrancheVault__TerminallyWiped.selector);
+        vm.expectRevert(abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxMint.selector, alice, 1e18, 0));
         juniorVault.mint(1e18, alice);
         vm.stopPrank();
     }
@@ -1296,7 +1297,7 @@ contract HousePoolTest is BasePerpTest {
         _open(trader, CfdTypes.Side.BULL, 100_000 * 1e18, 5000 * 1e6, 1e8);
 
         // 100k BULL at $1.00: protocol accrues the full $40 execution fee.
-        uint256 fees = engine.protocolTreasuryBalanceUsdc();
+        uint256 fees = clearinghouse.balanceUsdc(engine.protocolTreasury());
         assertEq(fees, 40_000_000, "Protocol fees should remain separate from reserved execution bounty reservation");
 
         uint256 freeUSDC = pool.getFreeUSDC();
@@ -1717,7 +1718,7 @@ contract HousePoolTest is BasePerpTest {
         // Pool cash must cover LP claims + fees + conservative unrealized liabilities
         uint256 poolBalance = usdc.balanceOf(address(pool));
         uint256 juniorAfter = pool.juniorPrincipal();
-        uint256 fees = engine.protocolTreasuryBalanceUsdc();
+        uint256 fees = clearinghouse.balanceUsdc(engine.protocolTreasury());
         uint256 reserved = fees;
         assertGe(poolBalance, juniorAfter + reserved, "Pool cash must cover LP claims + reserved obligations");
     }
@@ -1824,7 +1825,9 @@ contract HousePoolSeedLifecycleGateTest is BasePerpTest {
         pool.initializeSeedPosition(false, juniorSeed, address(this));
 
         usdc.approve(address(juniorVault), depositAmount);
-        vm.expectRevert(TrancheVault.TrancheVault__TradingNotActive.selector);
+        vm.expectRevert(
+            abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, address(this), depositAmount, 0)
+        );
         juniorVault.deposit(depositAmount, address(this));
         assertEq(juniorVault.maxDeposit(address(this)), 0, "ERC4626 maxDeposit should reflect lifecycle gating");
         assertEq(juniorVault.maxMint(address(this)), 0, "ERC4626 maxMint should reflect lifecycle gating");
@@ -1836,7 +1839,9 @@ contract HousePoolSeedLifecycleGateTest is BasePerpTest {
         usdc.mint(address(this), depositAmount);
         usdc.approve(address(juniorVault), depositAmount);
 
-        vm.expectRevert(TrancheVault.TrancheVault__TradingNotActive.selector);
+        vm.expectRevert(
+            abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, address(this), depositAmount, 0)
+        );
         juniorVault.deposit(depositAmount, address(this));
         assertEq(juniorVault.maxDeposit(address(this)), 0, "ERC4626 maxDeposit should be zero before bootstrap");
         assertEq(juniorVault.maxMint(address(this)), 0, "ERC4626 maxMint should be zero before bootstrap");
@@ -1868,7 +1873,9 @@ contract HousePoolSeedLifecycleGateTest is BasePerpTest {
         pool.initializeSeedPosition(true, seniorSeed, address(this));
 
         usdc.approve(address(juniorVault), depositAmount);
-        vm.expectRevert(TrancheVault.TrancheVault__TradingNotActive.selector);
+        vm.expectRevert(
+            abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, address(this), depositAmount, 0)
+        );
         juniorVault.deposit(depositAmount, address(this));
         assertEq(juniorVault.maxDeposit(address(this)), 0, "ERC4626 maxDeposit should be zero before activation");
         assertEq(juniorVault.maxMint(address(this)), 0, "ERC4626 maxMint should be zero before activation");
@@ -2224,9 +2231,9 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         usdc.mint(alice, 1e6);
         vm.startPrank(alice);
         usdc.approve(address(juniorVault), 1e6);
-        vm.expectRevert(TrancheVault.TrancheVault__TerminallyWiped.selector);
+        vm.expectRevert(abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, alice, 1e6, 0));
         juniorVault.deposit(1e6, alice);
-        vm.expectRevert(TrancheVault.TrancheVault__TerminallyWiped.selector);
+        vm.expectRevert(abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxMint.selector, alice, 1e18, 0));
         juniorVault.mint(1e18, alice);
         vm.stopPrank();
     }
@@ -2379,7 +2386,7 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         _fundTrader(trader, 50_000e6);
 
         uint256 assetsBefore = pool.totalAssets();
-        uint256 feesBefore = engine.protocolTreasuryBalanceUsdc();
+        uint256 feesBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
 
         uint64 orderId = router.nextCommitId();
         vm.prank(trader);
@@ -2387,7 +2394,7 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         router.executeOrder(orderId, _mockPythUpdateData());
 
         uint256 assetsDelta = pool.totalAssets() - assetsBefore;
-        uint256 feesDelta = engine.protocolTreasuryBalanceUsdc() - feesBefore;
+        uint256 feesDelta = clearinghouse.balanceUsdc(engine.protocolTreasury()) - feesBefore;
         (, uint256 pendingJunior,,) = pool.getPendingTrancheState();
         uint256 expectedLpTradingRevenue = assetsDelta > feesDelta ? assetsDelta - feesDelta : 0;
         uint256 pendingJuniorDelta = pendingJunior > pendingJuniorBefore ? pendingJunior - pendingJuniorBefore : 0;
@@ -2933,7 +2940,7 @@ contract HousePoolAuditTest is BasePerpTest {
 
         uint256 poolBalance = usdc.balanceOf(address(pool));
         uint256 totalClaimed = pool.seniorPrincipal() + pool.juniorPrincipal();
-        uint256 pendingFees = engine.protocolTreasuryBalanceUsdc();
+        uint256 pendingFees = clearinghouse.balanceUsdc(engine.protocolTreasury());
 
         assertGe(totalClaimed + pendingFees, poolBalance, "All pool cash must be accounted for with zero open interest");
     }
@@ -2976,7 +2983,7 @@ contract HousePoolAuditTest is BasePerpTest {
         _open(alice, CfdTypes.Side.BULL, 250_000e18, 25_000e6, 1e8);
         _open(carol, CfdTypes.Side.BULL, 250_100e18, 25_000e6, 1e8);
 
-        uint256 fees = engine.protocolTreasuryBalanceUsdc();
+        uint256 fees = clearinghouse.balanceUsdc(engine.protocolTreasury());
         assertGt(fees, 0, "Fees should have accumulated");
 
         uint256 maxLiability = _sideMaxProfit(CfdTypes.Side.BULL);

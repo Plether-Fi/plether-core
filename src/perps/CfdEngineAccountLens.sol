@@ -231,11 +231,26 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         if (borrowBaseUsdc == 0) {
             return 0;
         }
-        uint256 endIndex = engineContract.currentSideCarryIndex(pos.side);
+        uint256 endIndex = _currentSideCarryIndex(pos.side);
         if (endIndex <= startIndex) {
             return 0;
         }
         return PositionRiskAccountingLib.computeIndexedCarryUsdc(borrowBaseUsdc, endIndex - startIndex);
+    }
+
+    function _currentSideCarryIndex(
+        CfdTypes.Side side
+    ) internal view returns (uint256) {
+        uint256 sideIndex = uint256(side);
+        (,,,,, uint256 baseCarryBps,,) = engineContract.riskParams();
+        return PositionRiskAccountingLib.computeCurrentCarryIndex(
+            engineContract.sideCarryIndex(sideIndex),
+            engineContract.sideCarryTimestamp(sideIndex),
+            block.timestamp,
+            engineContract.sideBorrowBaseUsdc(sideIndex),
+            engineContract.pool().totalAssets(),
+            baseCarryBps
+        );
     }
 
     function _riskParams() internal view returns (CfdTypes.RiskParams memory params) {
