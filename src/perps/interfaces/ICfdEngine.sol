@@ -79,9 +79,10 @@ interface ICfdEngine is ICfdEngineTypes {
     /// @notice Realizes accrued carry against the current reachable collateral before a user-level
     ///         settlement balance mutation changes the carry basis.
     function realizeCarryBeforeMarginChange(
-        address account,
-        uint256 reachableCollateralBasisUsdc
+        address account
     ) external;
+
+    function checkpointCarryIndexes() external;
 
     /// @notice Canonical liquidation preview using the pool's current accounted depth.
     function previewLiquidation(
@@ -142,10 +143,10 @@ interface ICfdEngine is ICfdEngineTypes {
             int256 vpiAccrued
         );
 
-    /// @notice Returns the timestamp through which carry has been realized for the position.
-    function getPositionLastCarryTimestamp(
+    /// @notice Returns the indexed carry basis for a position.
+    function positionCarryState(
         address account
-    ) external view returns (uint64);
+    ) external view returns (uint256 borrowBaseUsdc, uint256 lastCarryIndex, uint64 lastCarryTimestamp);
 
     /// @notice True when the engine has latched degraded mode after a close revealed insolvency.
     function degradedMode() external view returns (bool);

@@ -25,6 +25,7 @@ import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAcc
 import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
 import {PerpsViewTypes} from "../../src/perps/interfaces/PerpsViewTypes.sol";
 import {ProtocolLensViewTypes} from "../../src/perps/interfaces/ProtocolLensViewTypes.sol";
+import {PositionRiskAccountingLib} from "../../src/perps/libraries/PositionRiskAccountingLib.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {OrderRouterDebugLens} from "../utils/OrderRouterDebugLens.sol";
@@ -915,6 +916,65 @@ abstract contract BasePerpTest is Test {
         address account
     ) internal view returns (uint256) {
         return clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc;
+    }
+
+    function _expectedIndexedCarryUsdc(
+        address account
+    ) internal view returns (uint256) {
+        (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(account);
+        if (size == 0) {
+            return 0;
+        }
+        (uint256 borrowBaseUsdc, uint256 startIndex,) = engine.positionCarryState(account);
+        if (borrowBaseUsdc == 0) {
+            return 0;
+        }
+        uint256 endIndex = _currentSideCarryIndex(side);
+        if (endIndex <= startIndex) {
+            return 0;
+        }
+        return PositionRiskAccountingLib.computeIndexedCarryUsdc(borrowBaseUsdc, endIndex - startIndex);
+    }
+
+    function _positionBorrowBaseUsdc(
+        address account
+    ) internal view returns (uint256 borrowBaseUsdc) {
+        (borrowBaseUsdc,,) = engine.positionCarryState(account);
+    }
+
+    function _lastCarryTimestamp(
+        address account
+    ) internal view returns (uint64 lastCarryTimestamp) {
+        (,, lastCarryTimestamp) = engine.positionCarryState(account);
+    }
+
+    function _currentSideCarryIndex(
+        CfdTypes.Side side
+    ) internal view returns (uint256 index) {
+        uint256 sideIndex = uint256(side);
+        index = engine.sideCarryIndex(sideIndex);
+        uint64 previousTimestamp = engine.sideCarryTimestamp(sideIndex);
+        if (block.timestamp <= previousTimestamp) {
+            return index;
+        }
+        uint256 borrowBaseUsdc = engine.sideBorrowBaseUsdc(sideIndex);
+        (,,,,, uint256 baseCarryBps,,) = engine.riskParams();
+        if (borrowBaseUsdc == 0 || baseCarryBps == 0) {
+            return index;
+        }
+        uint256 utilizationBps = 10_000;
+        uint256 poolAssetsUsdc = pool.totalAssets();
+        if (poolAssetsUsdc > 0) {
+            utilizationBps = (borrowBaseUsdc * 10_000) / poolAssetsUsdc;
+            if (utilizationBps > 10_000) {
+                utilizationBps = 10_000;
+            }
+        }
+        if (utilizationBps == 0) {
+            return index;
+        }
+        index += (baseCarryBps * utilizationBps * 1e18 * (block.timestamp - previousTimestamp))
+            / (31_536_000 * 100_000_000);
     }
 
     function _accountOf(

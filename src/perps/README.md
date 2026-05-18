@@ -219,20 +219,23 @@ This does not mean LPs can never take loss. It means trader upside is bounded an
 
 ### LP-capital carry
 
-Plether Perps uses a fixed global carry rate on LP-backed exposure rather than a side-to-side rate mechanism.
+Plether Perps uses utilization-indexed carry on each side's fixed borrow base rather than a side-to-side rate
+mechanism.
 
 ```text
-lpBackedNotionalUsdc = max(positionNotionalUsdc - reachableCollateralUsdc, 0)
+borrowBaseUsdc = max(positionMaxProfitUsdc - activePositionMarginUsdc, 0)
+sideUtilizationBps = min(sideBorrowBaseUsdc / poolAssetsUsdc, 100%)
+positionCarryUsdc = borrowBaseUsdc * (sideCarryIndex - positionLastCarryIndex)
 ```
 
 Carry behavior:
 
 - Accrues continuously by wall-clock time.
 - Continues accruing even during stale or frozen oracle windows.
-- Is assessed per position on that position's own LP-backed notional rather than on net market imbalance.
-- Both `BULL` and `BEAR` positions can accrue carry at the same time if both sides are consuming LP capital.
+- Is assessed per position on a stored borrow base, not on a checkpoint-time mark price.
+- Both `BULL` and `BEAR` positions can accrue carry at the same time if both sides have nonzero borrow base.
 - Can be checkpointed into `unsettledCarryUsdc` when a basis-changing settlement credit occurs before physical collection is possible.
-- Is computed on clearinghouse deposit/withdraw using the pre-mutation reachable basis.
+- Is realized before margin, pool-asset, or risk-parameter mutations change the carry base/rate denominator.
 - On deposit, realized carry may be collected from post-deposit settlement in the same transaction.
 - On withdraw, carry is realized before settlement balance is reduced.
 - Flows to LP trading revenue once realized.

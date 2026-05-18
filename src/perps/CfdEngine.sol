@@ -42,6 +42,8 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         CfdTypes.Side side;
         uint64 lastUpdateTime;
         uint64 lastCarryTimestamp;
+        uint256 borrowBaseUsdc;
+        uint256 lastCarryIndex;
         int256 vpiAccrued;
     }
 
@@ -61,14 +63,12 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     SideState[2] public sides;
     uint256 public lastMarkPrice;
     uint64 public lastMarkTime;
-    uint256 public carryPriceTimeIndex;
-    uint64 public carryIndexTimestamp;
-    uint256 public carryIndexPrice;
-    bool public carryIndexInitialized;
+    uint256[2] public sideBorrowBaseUsdc;
+    uint256[2] public sideCarryIndex;
+    uint64[2] public sideCarryTimestamp;
 
     uint256 public accumulatedBadDebtUsdc;
     mapping(address => uint256) public unsettledCarryUsdc;
-    mapping(address => uint256) public lastCarryPriceTimeIndex;
     bool public degradedMode;
 
     CfdTypes.RiskParams public riskParams;
@@ -125,18 +125,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
             return;
         }
 
-        (bool priceFresh, uint256 price) = _tryGetFreshLiveMarkPrice();
-        if (priceFresh) {
-            _checkpointCarryBeforeBasisChange(account, pos, price, _genericReachableCollateralUsdc(account));
-            return;
-        }
-
-        price = lastMarkPrice;
-        if (price == 0 || lastMarkTime == 0) {
-            revert CfdEngine__MarkPriceStale();
-        }
-
-        _checkpointCarryBeforeBasisChange(account, pos, price, _genericReachableCollateralUsdc(account));
+        _checkpointCarryBeforeBasisChange(account, pos);
     }
 
     function _checkpointBountyRecipient(
@@ -145,16 +134,13 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         uint64 publishTime
     ) internal {
         uint256 clampedPrice = price > CAP_PRICE ? CAP_PRICE : price;
-        uint256 checkpointPrice = clampedPrice;
         if (publishTime >= lastMarkTime) {
             _applyCarryAndMark(clampedPrice, publishTime);
-        } else {
-            checkpointPrice = lastMarkPrice;
         }
 
         StoredPosition storage pos = _positions[account];
         if (pos.size > 0) {
-            _checkpointCarryBeforeBasisChange(account, pos, checkpointPrice, _genericReachableCollateralUsdc(account));
+            _checkpointCarryBeforeBasisChange(account, pos);
         }
     }
 
@@ -233,7 +219,30 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         uint256 _capPrice,
         CfdTypes.RiskParams memory _riskParams
     ) Ownable(msg.sender) {
-        _validateRiskParams(_riskParams);
+        if (_usdc == address(0) || _clearinghouse == address(0)) {
+            revert CfdEngine__ZeroAddress();
+        }
+        if (_capPrice == 0) {
+            revert CfdEngine__InvalidRiskParams();
+        }
+        if (_riskParams.maintMarginBps == 0 || _riskParams.initMarginBps < _riskParams.maintMarginBps) {
+            revert CfdEngine__InvalidRiskParams();
+        }
+        if (_riskParams.fadMarginBps < _riskParams.maintMarginBps) {
+            revert CfdEngine__InvalidRiskParams();
+        }
+        if (_riskParams.initMarginBps > 10_000 || _riskParams.fadMarginBps > 10_000) {
+            revert CfdEngine__InvalidRiskParams();
+        }
+        if (_riskParams.baseCarryBps > 100_000) {
+            revert CfdEngine__InvalidRiskParams();
+        }
+        if (_riskParams.minBountyUsdc == 0 || _riskParams.bountyBps == 0) {
+            revert CfdEngine__InvalidRiskParams();
+        }
+        if (_riskParams.maxSkewRatio > CfdMath.WAD) {
+            revert CfdEngine__InvalidRiskParams();
+        }
         USDC = IERC20(_usdc);
         clearinghouse = IMarginClearinghouse(_clearinghouse);
         CAP_PRICE = _capPrice;
@@ -367,18 +376,14 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
             revert CfdEngine__NoOpenPosition();
         }
 
-        (bool priceFresh, uint256 price) = _tryGetFreshLiveMarkPrice();
-        if (!priceFresh) {
-            revert CfdEngine__MarkPriceStale();
-        }
-        _realizeCarryFromSettlement(account, pos, price, _genericReachableCollateralUsdc(account));
+        _realizeCarryFromSettlement(account, pos);
 
         uint256 marginBefore = _positionMarginBucketUsdc(account);
         clearinghouse.lockPositionMargin(account, amount);
         _syncTotalSideMargin(pos.side, marginBefore, _positionMarginBucketUsdc(account));
+        _syncPositionBorrowBase(account, pos);
         pos.lastUpdateTime = uint64(block.timestamp);
         pos.lastCarryTimestamp = uint64(block.timestamp);
-        lastCarryPriceTimeIndex[account] = _currentCarryPriceTimeIndex(block.timestamp);
 
         emit MarginAdded(account, amount);
     }
@@ -386,8 +391,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     /// @notice Realizes accrued carry before a user-level clearinghouse balance mutation changes the carry basis.
     /// @dev Called only by the clearinghouse before user deposits and withdrawals.
     function realizeCarryBeforeMarginChange(
-        address account,
-        uint256 reachableCollateralBasisUsdc
+        address account
     ) external nonReentrant {
         if (msg.sender != address(clearinghouse)) {
             revert CfdEngine__NotClearinghouse();
@@ -398,35 +402,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
             return;
         }
 
-        (bool priceFresh, uint256 price) = _tryGetFreshLiveMarkPrice();
-        if (!priceFresh) {
-            revert CfdEngine__MarkPriceStale();
-        }
-
-        _realizeCarryFromSettlement(account, pos, price, reachableCollateralBasisUsdc);
-    }
-
-    /// @notice Checkpoints carry against the cached stored mark when fresh-mark liveness is unavailable.
-    /// @dev Restricted to the clearinghouse stale-deposit path so deposits preserve pre-mutation carry basis.
-    function checkpointCarryUsingStoredMark(
-        address account,
-        uint256 reachableCollateralBasisUsdc
-    ) external nonReentrant {
-        if (msg.sender != address(clearinghouse)) {
-            revert CfdEngine__NotClearinghouse();
-        }
-
-        StoredPosition storage pos = _positions[account];
-        if (pos.size == 0 || pos.lastCarryTimestamp == 0) {
-            return;
-        }
-
-        uint256 price = lastMarkPrice;
-        if (price == 0 || lastMarkTime == 0) {
-            revert CfdEngine__MarkPriceStale();
-        }
-
-        _checkpointCarryBeforeBasisChange(account, pos, price, reachableCollateralBasisUsdc);
+        _realizeCarryFromSettlement(account, pos);
     }
 
     /// @notice Settles the caller's trader claim balance into the clearinghouse.
@@ -494,9 +470,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
             revert CfdEngine__InsufficientCloseOrderBountyBacking();
         }
 
-        if (priceFresh) {
-            _realizeCarryFromSettlement(account, pos, price, _genericReachableCollateralUsdc(account));
-        }
+        _realizeCarryFromSettlement(account, pos);
 
         uint256 positionMarginUsdc = _positionMarginBucketUsdc(account);
         uint256 freeSettlementUsdc = clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc;
@@ -515,8 +489,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
 
         CfdTypes.Position memory positionAfter = _loadPosition(account);
         positionAfter.margin = positionMarginUsdc - marginBackedBountyUsdc;
-        uint256 pendingCarryUsdc =
-            _totalPendingCarryUsdc(account, positionAfter, price, postReservationReachableUsdc, block.timestamp);
+        uint256 pendingCarryUsdc = _totalPendingCarryUsdc(account, positionAfter, block.timestamp);
         PositionRiskAccountingLib.PositionRiskState memory riskState =
             PositionRiskAccountingLib.buildPositionRiskStateWithCarry(
                 positionAfter,
@@ -533,6 +506,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         }
 
         _syncTotalSideMargin(pos.side, positionMarginUsdc, positionMarginUsdc - marginBackedBountyUsdc);
+        _syncPositionBorrowBaseToMargin(pos, positionMarginUsdc - marginBackedBountyUsdc);
         if (freeBackedBountyUsdc > 0) {
             if (priceFresh) {
                 clearinghouse.reserveCloseExecutionBountyFromSettlement(account, freeBackedBountyUsdc);
@@ -562,6 +536,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         if (amount > badDebt) {
             revert CfdEngine__BadDebtTooLarge();
         }
+        _advanceAllCarryIndexes(block.timestamp);
         USDC.safeTransferFrom(msg.sender, address(pool), amount);
         pool.recordClaimantInflow(
             amount, IHousePool.ClaimantInflowKind.Recapitalization, IHousePool.ClaimantInflowCashMode.CashArrived
@@ -596,10 +571,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     function applyRiskConfig(
         ICfdEngineAdminHost.EngineRiskConfig calldata config
     ) external onlyAdmin {
-        if (config.executionFeeBps == 0 || config.executionFeeBps > 10_000) {
-            revert CfdEngine__InvalidRiskParams();
-        }
-        _validateRiskParams(config.riskParams);
+        _advanceAllCarryIndexes(block.timestamp);
         riskParams = config.riskParams;
         executionFeeBps = config.executionFeeBps;
     }
@@ -664,10 +636,10 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
 
         uint256 reachableUsdc = _genericReachableCollateralUsdc(account);
         StoredPosition storage storedPos = _positions[account];
-        _realizeCarryFromSettlement(account, storedPos, price, reachableUsdc);
+        _realizeCarryFromSettlement(account, storedPos);
         pos = _loadPosition(account);
         reachableUsdc = _genericReachableCollateralUsdc(account);
-        uint256 pendingCarryUsdc = _totalPendingCarryUsdc(account, pos, price, reachableUsdc, block.timestamp);
+        uint256 pendingCarryUsdc = _totalPendingCarryUsdc(account, pos, block.timestamp);
         uint256 currentMarginBps = isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps;
         uint256 effectiveMarginBps =
             riskParams.initMarginBps > currentMarginBps ? riskParams.initMarginBps : currentMarginBps;
@@ -733,6 +705,45 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
             uint256 delta = marginBefore - marginAfter;
             _sideState(side).totalMargin -= delta;
         }
+    }
+
+    function _positionBorrowBase(
+        uint256 maxProfitUsdc,
+        uint256 marginUsdc
+    ) internal pure returns (uint256) {
+        return PositionRiskAccountingLib.computeBorrowBaseUsdc(maxProfitUsdc, marginUsdc);
+    }
+
+    function _applySideBorrowBaseDelta(
+        CfdTypes.Side side,
+        uint256 oldBorrowBaseUsdc,
+        uint256 newBorrowBaseUsdc
+    ) internal {
+        uint256 index = _sideIndex(side);
+        if (newBorrowBaseUsdc > oldBorrowBaseUsdc) {
+            sideBorrowBaseUsdc[index] += newBorrowBaseUsdc - oldBorrowBaseUsdc;
+        } else if (oldBorrowBaseUsdc > newBorrowBaseUsdc) {
+            sideBorrowBaseUsdc[index] -= oldBorrowBaseUsdc - newBorrowBaseUsdc;
+        }
+    }
+
+    function _syncPositionBorrowBase(
+        address account,
+        StoredPosition storage pos
+    ) internal {
+        _syncPositionBorrowBaseToMargin(pos, _positionMarginBucketUsdc(account));
+    }
+
+    function _syncPositionBorrowBaseToMargin(
+        StoredPosition storage pos,
+        uint256 marginUsdc
+    ) internal {
+        if (pos.size == 0) {
+            return;
+        }
+        uint256 newBorrowBaseUsdc = _positionBorrowBase(pos.maxProfitUsdc, marginUsdc);
+        _applySideBorrowBaseDelta(pos.side, pos.borrowBaseUsdc, newBorrowBaseUsdc);
+        pos.borrowBaseUsdc = newBorrowBaseUsdc;
     }
 
     function _syncMarginQueue(
@@ -823,10 +834,11 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         return (pos.size, pos.margin, pos.entryPrice, pos.maxProfitUsdc, pos.side, pos.lastUpdateTime, pos.vpiAccrued);
     }
 
-    function getPositionLastCarryTimestamp(
+    function positionCarryState(
         address account
-    ) external view returns (uint64) {
-        return _positions[account].lastCarryTimestamp;
+    ) external view returns (uint256 borrowBaseUsdc, uint256 lastCarryIndex, uint64 lastCarryTimestamp) {
+        StoredPosition storage pos = _positions[account];
+        return (pos.borrowBaseUsdc, pos.lastCarryIndex, pos.lastCarryTimestamp);
     }
 
     /// @notice Liquidates an undercollateralized position.
@@ -924,15 +936,12 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         snap.currentTimestamp = block.timestamp;
         snap.lastMarkPrice = lastMarkPrice;
         snap.lastMarkTime = lastMarkTime;
-        snap.carryPriceTimeIndex = carryPriceTimeIndex;
-        snap.carryIndexTimestamp = carryIndexTimestamp;
-        snap.carryIndexPrice = carryIndexPrice;
-        snap.lastCarryPriceTimeIndex = lastCarryPriceTimeIndex[account];
-        snap.carryIndexInitialized = carryIndexInitialized;
+        snap.positionBorrowBaseUsdc = _positions[account].borrowBaseUsdc;
+        snap.positionLastCarryIndex = _positions[account].lastCarryIndex;
 
         (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
-        snap.bullSide = _copySideSnapshot(bullState);
-        snap.bearSide = _copySideSnapshot(bearState);
+        snap.bullSide = _copySideSnapshot(CfdTypes.Side.BULL, poolDepthUsdc, bullState);
+        snap.bearSide = _copySideSnapshot(CfdTypes.Side.BEAR, poolDepthUsdc, bearState);
 
         snap.poolAssetsUsdc = poolDepthUsdc;
         snap.poolCashUsdc = poolDepthUsdc;
@@ -954,12 +963,16 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     function _copySideSnapshot(
+        CfdTypes.Side side,
+        uint256 poolAssetsUsdc,
         SideState storage state
     ) internal view returns (CfdEnginePlanTypes.SideSnapshot memory snap) {
         snap.maxProfitUsdc = state.maxProfitUsdc;
         snap.openInterest = state.openInterest;
         snap.entryNotional = state.entryNotional;
         snap.totalMargin = state.totalMargin;
+        snap.borrowBaseUsdc = sideBorrowBaseUsdc[_sideIndex(side)];
+        snap.carryIndex = _currentSideCarryIndex(side, block.timestamp, poolAssetsUsdc);
     }
 
     function _tryGetFreshLiveMarkPrice() internal view returns (bool fresh, uint256 price) {
@@ -1008,47 +1021,71 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         uint256 newMarkPrice,
         uint64 newMarkTime
     ) internal {
+        _advanceAllCarryIndexes(block.timestamp);
         if (newMarkTime < lastMarkTime) {
             return;
         }
-        _advanceCarryPriceTimeIndex(newMarkPrice, newMarkTime);
         lastMarkPrice = newMarkPrice;
         lastMarkTime = newMarkTime;
     }
 
-    function _advanceCarryPriceTimeIndex(
-        uint256 newMarkPrice,
-        uint64 newMarkTime
-    ) internal {
-        if (!carryIndexInitialized) {
-            carryIndexInitialized = true;
-            carryIndexTimestamp = newMarkTime;
-            carryIndexPrice = newMarkPrice;
-            return;
-        }
-
-        if (newMarkTime > carryIndexTimestamp) {
-            carryPriceTimeIndex += carryIndexPrice * (newMarkTime - carryIndexTimestamp);
-            carryIndexTimestamp = newMarkTime;
-            carryIndexPrice = newMarkPrice;
-            return;
-        }
-
-        if (block.timestamp > carryIndexTimestamp) {
-            carryPriceTimeIndex += carryIndexPrice * (block.timestamp - carryIndexTimestamp);
-            carryIndexTimestamp = uint64(block.timestamp);
-        }
-        carryIndexPrice = newMarkPrice;
+    function checkpointCarryIndexes() external {
+        _advanceAllCarryIndexes(block.timestamp);
     }
 
-    function _currentCarryPriceTimeIndex(
+    function _advanceAllCarryIndexes(
         uint256 timestampNow
+    ) internal {
+        _advanceSideCarryIndex(CfdTypes.Side.BULL, timestampNow);
+        _advanceSideCarryIndex(CfdTypes.Side.BEAR, timestampNow);
+    }
+
+    function _advanceSideCarryIndex(
+        CfdTypes.Side side,
+        uint256 timestampNow
+    ) internal {
+        uint256 index = _sideIndex(side);
+        uint64 previousTimestamp = sideCarryTimestamp[index];
+        if (timestampNow <= previousTimestamp) {
+            return;
+        }
+        uint256 poolAssetsUsdc = address(pool) == address(0) ? 0 : pool.totalAssets();
+        sideCarryIndex[index] = _currentSideCarryIndex(side, timestampNow, poolAssetsUsdc);
+        sideCarryTimestamp[index] = uint64(timestampNow);
+    }
+
+    function _currentSideCarryIndex(
+        CfdTypes.Side side,
+        uint256 timestampNow,
+        uint256 poolAssetsUsdc
     ) internal view returns (uint256 index) {
-        index = carryPriceTimeIndex;
-        if (!carryIndexInitialized || timestampNow <= carryIndexTimestamp) {
+        uint256 sideIndex = _sideIndex(side);
+        index = sideCarryIndex[sideIndex];
+        uint64 previousTimestamp = sideCarryTimestamp[sideIndex];
+        if (timestampNow <= previousTimestamp) {
             return index;
         }
-        index += carryIndexPrice * (timestampNow - carryIndexTimestamp);
+        uint256 borrowBaseUsdc = sideBorrowBaseUsdc[sideIndex];
+        uint256 baseCarryBps = riskParams.baseCarryBps;
+        if (borrowBaseUsdc == 0 || baseCarryBps == 0) {
+            return index;
+        }
+        uint256 utilizationBps = 10_000;
+        if (poolAssetsUsdc > 0) {
+            utilizationBps = (borrowBaseUsdc * 10_000) / poolAssetsUsdc;
+            if (utilizationBps > 10_000) {
+                utilizationBps = 10_000;
+            }
+        }
+        if (utilizationBps == 0) {
+            return index;
+        }
+        index += (baseCarryBps * utilizationBps * 1e18 * (timestampNow - previousTimestamp))
+            / (CfdMath.SECONDS_PER_YEAR * 100_000_000);
+    }
+
+    function _poolAssetsForCarry() internal view returns (uint256) {
+        return address(pool) == address(0) ? 0 : pool.totalAssets();
     }
 
     function settlementApplyCarryAndMark(
@@ -1115,21 +1152,30 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         CfdEngineSettlementTypes.PositionState calldata position
     ) external onlySettlementSidecar {
         StoredPosition storage pos = _positions[account];
+        if (pos.size > 0 || pos.borrowBaseUsdc > 0) {
+            _applySideBorrowBaseDelta(pos.side, pos.borrowBaseUsdc, 0);
+        }
+        uint256 newBorrowBaseUsdc = _positionBorrowBase(position.maxProfitUsdc, _positionMarginBucketUsdc(account));
         pos.size = position.size;
         pos.entryPrice = position.entryPrice;
         pos.maxProfitUsdc = position.maxProfitUsdc;
         pos.side = position.side;
         pos.lastUpdateTime = position.lastUpdateTime;
         pos.lastCarryTimestamp = position.lastCarryTimestamp;
+        pos.borrowBaseUsdc = newBorrowBaseUsdc;
+        pos.lastCarryIndex = _currentSideCarryIndex(position.side, block.timestamp, _poolAssetsForCarry());
         pos.vpiAccrued = position.vpiAccrued;
-        lastCarryPriceTimeIndex[account] = _currentCarryPriceTimeIndex(block.timestamp);
+        _applySideBorrowBaseDelta(position.side, 0, newBorrowBaseUsdc);
     }
 
     function settlementDeletePosition(
         address account
     ) external onlySettlementSidecar {
+        StoredPosition storage pos = _positions[account];
+        if (pos.size > 0 || pos.borrowBaseUsdc > 0) {
+            _applySideBorrowBaseDelta(pos.side, pos.borrowBaseUsdc, 0);
+        }
         delete _positions[account];
-        delete lastCarryPriceTimeIndex[account];
     }
 
     function _applyOpen(
@@ -1139,7 +1185,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         StoredPosition storage pos = _positions[delta.account];
         CfdTypes.Position memory currentPosition = _loadPosition(delta.account);
         if (pos.size > 0) {
-            _realizeCarryFromSettlement(delta.account, pos, delta.price, _genericReachableCollateralUsdc(delta.account));
+            _realizeCarryFromSettlement(delta.account, pos);
             currentPosition = _loadPosition(delta.account);
         }
         settlementSidecar.executeOpen(ICfdEngineSettlementHost(address(this)), delta, currentPosition, publishTime);
@@ -1231,57 +1277,33 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     function _elapsedCarryUsdc(
         address account,
         CfdTypes.Position memory pos,
-        uint256 price,
-        uint256 reachableCollateralUsdc,
         uint256 timestampNow
     ) internal view returns (uint256) {
-        if (pos.size == 0 || pos.lastCarryTimestamp == 0 || timestampNow <= pos.lastCarryTimestamp) {
+        StoredPosition storage stored = _positions[account];
+        if (pos.size == 0 || stored.borrowBaseUsdc == 0) {
             return 0;
         }
-        uint256 carryTimeDelta = timestampNow - pos.lastCarryTimestamp;
-        uint256 carryPrice = _averageCarryPrice(account, price, carryTimeDelta, timestampNow);
-        uint256 lpBackedNotionalUsdc =
-            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(pos.size, carryPrice, reachableCollateralUsdc);
-        return PositionRiskAccountingLib.computePendingCarryUsdc(
-            lpBackedNotionalUsdc, riskParams.baseCarryBps, carryTimeDelta
-        );
-    }
-
-    function _averageCarryPrice(
-        address account,
-        uint256 fallbackPrice,
-        uint256 carryTimeDelta,
-        uint256 timestampNow
-    ) internal view returns (uint256) {
-        if (!carryIndexInitialized || carryTimeDelta == 0) {
-            return fallbackPrice;
-        }
-        uint256 endIndex = _currentCarryPriceTimeIndex(timestampNow);
-        uint256 startIndex = lastCarryPriceTimeIndex[account];
+        uint256 endIndex = _currentSideCarryIndex(pos.side, timestampNow, _poolAssetsForCarry());
+        uint256 startIndex = stored.lastCarryIndex;
         if (endIndex <= startIndex) {
-            return fallbackPrice;
+            return 0;
         }
-        return (endIndex - startIndex) / carryTimeDelta;
+        return PositionRiskAccountingLib.computeIndexedCarryUsdc(stored.borrowBaseUsdc, endIndex - startIndex);
     }
 
     function _totalPendingCarryUsdc(
         address account,
         CfdTypes.Position memory pos,
-        uint256 price,
-        uint256 reachableCollateralUsdc,
         uint256 timestampNow
     ) internal view returns (uint256) {
-        return
-            unsettledCarryUsdc[account] + _elapsedCarryUsdc(account, pos, price, reachableCollateralUsdc, timestampNow);
+        return unsettledCarryUsdc[account] + _elapsedCarryUsdc(account, pos, timestampNow);
     }
 
     function _canFullyRealizeCarryFromSettlement(
         address account,
-        CfdTypes.Position memory pos,
-        uint256 price
+        CfdTypes.Position memory pos
     ) internal view returns (bool) {
-        uint256 reachableCollateralUsdc = _genericReachableCollateralUsdc(account);
-        uint256 pendingCarryUsdc = _totalPendingCarryUsdc(account, pos, price, reachableCollateralUsdc, block.timestamp);
+        uint256 pendingCarryUsdc = _totalPendingCarryUsdc(account, pos, block.timestamp);
         if (pendingCarryUsdc == 0) {
             return true;
         }
@@ -1292,36 +1314,33 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
 
     function _checkpointCarryBeforeBasisChange(
         address account,
-        StoredPosition storage pos,
-        uint256 price,
-        uint256 reachableCollateralUsdc
+        StoredPosition storage pos
     ) internal {
-        if (_canFullyRealizeCarryFromSettlement(account, _loadPosition(account), price)) {
-            _realizeCarryFromSettlement(account, pos, price, reachableCollateralUsdc);
+        if (_canFullyRealizeCarryFromSettlement(account, _loadPosition(account))) {
+            _realizeCarryFromSettlement(account, pos);
             return;
         }
 
-        uint256 elapsedCarryUsdc =
-            _elapsedCarryUsdc(account, _loadPosition(account), price, reachableCollateralUsdc, block.timestamp);
+        uint256 elapsedCarryUsdc = _elapsedCarryUsdc(account, _loadPosition(account), block.timestamp);
         if (elapsedCarryUsdc > 0) {
             unsettledCarryUsdc[account] += elapsedCarryUsdc;
             emit CarryCheckpointed(account, elapsedCarryUsdc, unsettledCarryUsdc[account]);
         }
+        _advanceAllCarryIndexes(block.timestamp);
         pos.lastCarryTimestamp = uint64(block.timestamp);
-        lastCarryPriceTimeIndex[account] = _currentCarryPriceTimeIndex(block.timestamp);
+        pos.lastCarryIndex = _currentSideCarryIndex(pos.side, block.timestamp, _poolAssetsForCarry());
     }
 
     function _realizeCarryFromSettlement(
         address account,
-        StoredPosition storage pos,
-        uint256 price,
-        uint256 reachableCollateralUsdc
+        StoredPosition storage pos
     ) internal returns (uint256 realizedCarryUsdc) {
+        _advanceAllCarryIndexes(block.timestamp);
         CfdTypes.Position memory loaded = _loadPosition(account);
-        uint256 carryDueUsdc = _totalPendingCarryUsdc(account, loaded, price, reachableCollateralUsdc, block.timestamp);
+        uint256 carryDueUsdc = _totalPendingCarryUsdc(account, loaded, block.timestamp);
         if (carryDueUsdc == 0) {
             pos.lastCarryTimestamp = uint64(block.timestamp);
-            lastCarryPriceTimeIndex[account] = _currentCarryPriceTimeIndex(block.timestamp);
+            pos.lastCarryIndex = _currentSideCarryIndex(pos.side, block.timestamp, _poolAssetsForCarry());
             return 0;
         }
 
@@ -1334,6 +1353,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
 
         if (marginConsumedUsdc > 0) {
             _syncTotalSideMargin(pos.side, marginBefore, marginBefore - marginConsumedUsdc);
+            _syncPositionBorrowBaseToMargin(pos, marginBefore - marginConsumedUsdc);
         }
 
         if (realizedCarryUsdc > 0) {
@@ -1346,7 +1366,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
             account, realizedCarryUsdc, freeSettlementConsumedUsdc, marginConsumedUsdc, unsettledCarryUsdc[account]
         );
         pos.lastCarryTimestamp = uint64(block.timestamp);
-        lastCarryPriceTimeIndex[account] = _currentCarryPriceTimeIndex(block.timestamp);
+        pos.lastCarryIndex = _currentSideCarryIndex(pos.side, block.timestamp, _poolAssetsForCarry());
     }
 
     function _liveMarkStalenessLimit() internal view returns (uint256) {
@@ -1373,26 +1393,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
 
         traderClaimBalanceUsdc[account] -= amountUsdc;
         totalTraderClaimBalanceUsdc -= amountUsdc;
-    }
-
-    function _validateRiskParams(
-        CfdTypes.RiskParams memory _riskParams
-    ) internal pure {
-        if (_riskParams.maintMarginBps == 0 || _riskParams.initMarginBps < _riskParams.maintMarginBps) {
-            revert CfdEngine__InvalidRiskParams();
-        }
-        if (_riskParams.fadMarginBps < _riskParams.maintMarginBps) {
-            revert CfdEngine__InvalidRiskParams();
-        }
-        if (_riskParams.initMarginBps > 10_000 || _riskParams.fadMarginBps > 10_000) {
-            revert CfdEngine__InvalidRiskParams();
-        }
-        if (_riskParams.minBountyUsdc == 0 || _riskParams.bountyBps == 0) {
-            revert CfdEngine__InvalidRiskParams();
-        }
-        if (_riskParams.maxSkewRatio > CfdMath.WAD) {
-            revert CfdEngine__InvalidRiskParams();
-        }
     }
 
     /// @notice Updates the cached mark price without processing a trade or liquidation.

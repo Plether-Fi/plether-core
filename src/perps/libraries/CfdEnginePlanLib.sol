@@ -121,6 +121,29 @@ library CfdEnginePlanLib {
         }
     }
 
+    function _selectedSide(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        CfdTypes.Side side
+    ) private pure returns (CfdEnginePlanTypes.SideSnapshot memory selected) {
+        selected = side == CfdTypes.Side.BULL ? snap.bullSide : snap.bearSide;
+    }
+
+    function _pendingCarryUsdc(
+        CfdEnginePlanTypes.RawSnapshot memory snap
+    ) private pure returns (uint256) {
+        if (snap.position.size == 0 || snap.positionBorrowBaseUsdc == 0) {
+            return snap.unsettledCarryUsdc;
+        }
+        CfdEnginePlanTypes.SideSnapshot memory side = _selectedSide(snap, snap.position.side);
+        if (side.carryIndex <= snap.positionLastCarryIndex) {
+            return snap.unsettledCarryUsdc;
+        }
+        return snap.unsettledCarryUsdc
+            + PositionRiskAccountingLib.computeIndexedCarryUsdc(
+            snap.positionBorrowBaseUsdc, side.carryIndex - snap.positionLastCarryIndex
+        );
+    }
+
     function _absSkewUsdc(
         CfdEnginePlanTypes.SideSnapshot memory bull,
         CfdEnginePlanTypes.SideSnapshot memory bear,
@@ -208,20 +231,8 @@ library CfdEnginePlanLib {
         delta.sizeDelta = order.sizeDelta;
         delta.price = price;
         delta.posSide = order.side;
-        uint256 carryTimeDelta = effectiveSnap.position.lastCarryTimestamp > 0
-            && effectiveSnap.currentTimestamp > effectiveSnap.position.lastCarryTimestamp
-            ? effectiveSnap.currentTimestamp - effectiveSnap.position.lastCarryTimestamp
-            : 0;
-        uint256 genericReachableUsdc =
-            MarginClearinghouseAccountingLib.getGenericReachableUsdc(effectiveSnap.accountBuckets);
-        uint256 carryPrice = _averageCarryPrice(effectiveSnap, price, publishTime, carryTimeDelta);
-        uint256 carryBaseUsdc = PositionRiskAccountingLib.computeLpBackedNotionalUsdc(
-            effectiveSnap.position.size, carryPrice, genericReachableUsdc
-        );
-        delta.pendingCarryUsdc = effectiveSnap.unsettledCarryUsdc
-            + PositionRiskAccountingLib.computePendingCarryUsdc(
-                carryBaseUsdc, effectiveSnap.riskParams.baseCarryBps, carryTimeDelta
-            );
+        publishTime;
+        delta.pendingCarryUsdc = _pendingCarryUsdc(effectiveSnap);
 
         if (_applyPendingCarryRealizationToOpenSnapshot(effectiveSnap, delta.pendingCarryUsdc)) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES;
@@ -450,18 +461,8 @@ library CfdEnginePlanLib {
         delta.account = order.account;
         delta.sizeDelta = order.sizeDelta;
         delta.price = price;
-        uint256 carryTimeDelta = snap.position.lastCarryTimestamp > 0
-            && snap.currentTimestamp > snap.position.lastCarryTimestamp
-            ? snap.currentTimestamp - snap.position.lastCarryTimestamp
-            : 0;
-        uint256 genericReachableUsdc = MarginClearinghouseAccountingLib.getGenericReachableUsdc(snap.accountBuckets);
-        uint256 carryPrice = _averageCarryPrice(snap, price, publishTime, carryTimeDelta);
-        uint256 carryBaseUsdc =
-            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(snap.position.size, carryPrice, genericReachableUsdc);
-        delta.pendingCarryUsdc = snap.unsettledCarryUsdc
-            + PositionRiskAccountingLib.computePendingCarryUsdc(
-                carryBaseUsdc, snap.riskParams.baseCarryBps, carryTimeDelta
-            );
+        publishTime;
+        delta.pendingCarryUsdc = _pendingCarryUsdc(snap);
 
         CfdTypes.Position memory pos = snap.position;
         delta.side = pos.side;
@@ -696,18 +697,8 @@ library CfdEnginePlanLib {
         uint256 maintMarginBps = snap.isFadWindow ? snap.riskParams.fadMarginBps : snap.riskParams.maintMarginBps;
         uint256 settlementReachableUsdc = MarginClearinghouseAccountingLib.getTerminalReachableUsdc(snap.accountBuckets);
         delta.liquidationReachableCollateralUsdc = settlementReachableUsdc;
-        uint256 carryTimeDelta = snap.position.lastCarryTimestamp > 0
-            && snap.currentTimestamp > snap.position.lastCarryTimestamp
-            ? snap.currentTimestamp - snap.position.lastCarryTimestamp
-            : 0;
-        uint256 carryPrice = _averageCarryPrice(snap, price, publishTime, carryTimeDelta);
-        uint256 carryBaseUsdc = PositionRiskAccountingLib.computeLpBackedNotionalUsdc(
-            snap.position.size, carryPrice, settlementReachableUsdc
-        );
-        delta.pendingCarryUsdc = snap.unsettledCarryUsdc
-            + PositionRiskAccountingLib.computePendingCarryUsdc(
-                carryBaseUsdc, snap.riskParams.baseCarryBps, carryTimeDelta
-            );
+        publishTime;
+        delta.pendingCarryUsdc = _pendingCarryUsdc(snap);
 
         delta.riskState = PositionRiskAccountingLib.buildPositionRiskStateWithCarry(
             pos, price, snap.capPrice, delta.pendingCarryUsdc, settlementReachableUsdc, maintMarginBps
@@ -794,49 +785,6 @@ library CfdEnginePlanLib {
         delta.solvency.maxLiabilityAfterUsdc = result.maxLiabilityAfterUsdc;
         delta.solvency.triggersDegradedMode = result.triggersDegradedMode;
         delta.solvency.postOpDegradedMode = result.postOpDegradedMode;
-    }
-
-    function _averageCarryPrice(
-        CfdEnginePlanTypes.RawSnapshot memory snap,
-        uint256 fallbackPrice,
-        uint64 publishTime,
-        uint256 carryTimeDelta
-    ) private pure returns (uint256) {
-        if (!snap.carryIndexInitialized || carryTimeDelta == 0) {
-            return fallbackPrice;
-        }
-
-        uint256 endIndex = _carryPriceTimeIndexAt(snap, fallbackPrice, publishTime, snap.currentTimestamp);
-        if (endIndex <= snap.lastCarryPriceTimeIndex) {
-            return fallbackPrice;
-        }
-
-        return (endIndex - snap.lastCarryPriceTimeIndex) / carryTimeDelta;
-    }
-
-    function _carryPriceTimeIndexAt(
-        CfdEnginePlanTypes.RawSnapshot memory snap,
-        uint256 executionPrice,
-        uint64 publishTime,
-        uint256 timestampNow
-    ) private pure returns (uint256 index) {
-        index = snap.carryPriceTimeIndex;
-        uint64 indexTimestamp = snap.carryIndexTimestamp;
-        uint256 indexPrice = snap.carryIndexPrice;
-
-        if (publishTime > indexTimestamp) {
-            index += indexPrice * (publishTime - indexTimestamp);
-            indexTimestamp = publishTime;
-            indexPrice = executionPrice;
-        } else if (timestampNow > indexTimestamp) {
-            index += indexPrice * (timestampNow - indexTimestamp);
-            indexTimestamp = uint64(timestampNow);
-            indexPrice = executionPrice;
-        }
-
-        if (timestampNow > indexTimestamp) {
-            index += indexPrice * (timestampNow - indexTimestamp);
-        }
     }
 
 }

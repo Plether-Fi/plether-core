@@ -2,7 +2,6 @@
 pragma solidity 0.8.33;
 
 import {CfdEngine} from "../../../src/perps/CfdEngine.sol";
-import {CfdMath} from "../../../src/perps/CfdMath.sol";
 import {CfdTypes} from "../../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../../src/perps/MarginClearinghouse.sol";
@@ -10,6 +9,7 @@ import {OrderRouter} from "../../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../../src/perps/TrancheVault.sol";
 import {IHousePool} from "../../../src/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "../../../src/perps/interfaces/IMarginClearinghouse.sol";
+import {PositionRiskAccountingLib} from "../../../src/perps/libraries/PositionRiskAccountingLib.sol";
 import {MockPyth} from "../../mocks/MockPyth.sol";
 import {MockUSDC} from "../../mocks/MockUSDC.sol";
 import {BasePerpTest} from "../BasePerpTest.sol";
@@ -168,17 +168,11 @@ contract PerpValueConservationHandler is Test {
         uint256 balanceBeforeCheckpoint = clearinghouse.balanceUsdc(CARRY_TRADER);
         uint256 elapsed = bound(elapsedFuzz, 7 days, 60 days);
         uint256 checkpointPrice = bound(checkpointPriceFuzz, 0.4e8, 0.7e8);
-        uint256 entryNotionalUsdc = (200_000e18 * 1e8) / CfdMath.USDC_TO_TOKEN_SCALE;
-        uint256 entryLpBackedUsdc =
-            entryNotionalUsdc > balanceBeforeCheckpoint ? entryNotionalUsdc - balanceBeforeCheckpoint : 0;
-
-        (,,,,, uint256 baseCarryBps,,) = engine.riskParams();
-        uint256 minimumHistoricalCarryUsdc =
-            (entryLpBackedUsdc * baseCarryBps * elapsed) / (CfdMath.SECONDS_PER_YEAR * 10_000);
 
         vm.warp(block.timestamp + elapsed);
         vm.prank(address(router));
         engine.updateMarkPrice(checkpointPrice, uint64(block.timestamp));
+        uint256 minimumHistoricalCarryUsdc = _pendingIndexedCarryUsdc(CARRY_TRADER);
 
         usdc.mint(CARRY_TRADER, 1);
         vm.startPrank(CARRY_TRADER);
@@ -338,6 +332,53 @@ contract PerpValueConservationHandler is Test {
     function _claimantLedgerUsdc() internal view returns (uint256) {
         return pool.seniorPrincipal() + pool.juniorPrincipal() + pool.unassignedAssets()
             + pool.pendingRecapitalizationUsdc() + pool.pendingTradingRevenueUsdc();
+    }
+
+    function _pendingIndexedCarryUsdc(
+        address account
+    ) internal view returns (uint256) {
+        (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(account);
+        if (size == 0) {
+            return 0;
+        }
+        (uint256 borrowBaseUsdc, uint256 startIndex,) = engine.positionCarryState(account);
+        if (borrowBaseUsdc == 0) {
+            return 0;
+        }
+        uint256 endIndex = _currentSideCarryIndex(side);
+        if (endIndex <= startIndex) {
+            return 0;
+        }
+        return PositionRiskAccountingLib.computeIndexedCarryUsdc(borrowBaseUsdc, endIndex - startIndex);
+    }
+
+    function _currentSideCarryIndex(
+        CfdTypes.Side side
+    ) internal view returns (uint256 index) {
+        uint256 sideIndex = uint256(side);
+        index = engine.sideCarryIndex(sideIndex);
+        uint64 previousTimestamp = engine.sideCarryTimestamp(sideIndex);
+        if (block.timestamp <= previousTimestamp) {
+            return index;
+        }
+        uint256 borrowBaseUsdc = engine.sideBorrowBaseUsdc(sideIndex);
+        (,,,,, uint256 baseCarryBps,,) = engine.riskParams();
+        if (borrowBaseUsdc == 0 || baseCarryBps == 0) {
+            return index;
+        }
+        uint256 utilizationBps = 10_000;
+        uint256 poolAssetsUsdc = pool.totalAssets();
+        if (poolAssetsUsdc > 0) {
+            utilizationBps = (borrowBaseUsdc * 10_000) / poolAssetsUsdc;
+            if (utilizationBps > 10_000) {
+                utilizationBps = 10_000;
+            }
+        }
+        if (utilizationBps == 0) {
+            return index;
+        }
+        index += (baseCarryBps * utilizationBps * 1e18 * (block.timestamp - previousTimestamp))
+            / (31_536_000 * 100_000_000);
     }
 
 }

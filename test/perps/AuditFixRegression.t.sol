@@ -81,23 +81,70 @@ contract AuditFixRegressionTest is BasePerpTest {
         );
     }
 
-    function test_CarryIndexDoesNotRewindAndDoubleChargeSamePublishTime() public {
-        vm.warp(SETUP_TIMESTAMP + 100);
-        uint64 stalePublishTime = uint64(block.timestamp - 20);
+    function test_CarryIndexIsAccountCheckpointTimingInvariantAcrossPriceSwing() public {
+        address checkpointed = address(0xCA11);
+        address lazy = address(0x1A2E);
+        uint256 size = 100_000e18;
+        uint256 margin = 10_000e6;
 
-        vm.prank(address(router));
-        engine.updateMarkPrice(1e8, stalePublishTime);
-        assertEq(engine.carryIndexTimestamp(), stalePublishTime, "first mark initializes at publish time");
+        _fundTrader(checkpointed, margin + 300e6);
+        _fundTrader(lazy, margin + 300e6);
+        _open(checkpointed, CfdTypes.Side.BULL, size, margin, 1e8);
+        _open(lazy, CfdTypes.Side.BULL, size, margin, 1e8);
 
+        vm.warp(block.timestamp + 10 days);
         vm.prank(address(router));
-        engine.updateMarkPrice(1e8, stalePublishTime);
-        uint256 indexAfterFirstCatchUp = engine.carryPriceTimeIndex();
-        assertEq(engine.carryIndexTimestamp(), uint64(block.timestamp), "same stale mark catches up once");
+        engine.updateMarkPrice(150_000_000, uint64(block.timestamp));
 
+        uint256 poolBeforeCheckpoint = pool.totalAssets();
+        _fundTrader(checkpointed, 100e6);
+        uint256 checkpointedFirstCarry = pool.totalAssets() - poolBeforeCheckpoint;
+        assertGt(checkpointedFirstCarry, 0, "first interval should accrue carry");
+
+        vm.warp(block.timestamp + 10 days);
         vm.prank(address(router));
-        engine.updateMarkPrice(1e8, stalePublishTime);
-        assertEq(engine.carryIndexTimestamp(), uint64(block.timestamp), "same stale mark must not rewind");
-        assertEq(engine.carryPriceTimeIndex(), indexAfterFirstCatchUp, "same stale interval must not be charged twice");
+        engine.updateMarkPrice(50_000_000, uint64(block.timestamp));
+
+        uint256 poolBeforeSecondCheckpoint = pool.totalAssets();
+        _fundTrader(checkpointed, 100e6);
+        uint256 checkpointedSecondCarry = pool.totalAssets() - poolBeforeSecondCheckpoint;
+
+        uint256 poolBeforeLazyCheckpoint = pool.totalAssets();
+        _fundTrader(lazy, 100e6);
+        uint256 lazyCarry = pool.totalAssets() - poolBeforeLazyCheckpoint;
+
+        assertApproxEqAbs(
+            lazyCarry,
+            checkpointedFirstCarry + checkpointedSecondCarry,
+            2,
+            "one late checkpoint should match two earlier checkpoints"
+        );
+    }
+
+    function test_AddingPositionMarginUpdatesBorrowBaseOnlyAfterOldCarryAccrues() public {
+        address account = address(0xB0A);
+        uint256 size = 100_000e18;
+        uint256 margin = 10_000e6;
+
+        _fundTrader(account, margin + 20_000e6);
+        _open(account, CfdTypes.Side.BULL, size, margin, 1e8);
+        uint256 borrowBaseBefore = _positionBorrowBaseUsdc(account);
+
+        vm.warp(block.timestamp + 10 days);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        assertEq(engine.lastMarkTime(), uint64(block.timestamp), "test mark should be fresh");
+        uint256 poolBefore = pool.totalAssets();
+        vm.prank(account);
+        engine.addMargin(account, 10_000e6);
+        uint256 realizedCarry = pool.totalAssets() - poolBefore;
+
+        assertGt(realizedCarry, 0, "old borrow base should accrue before the margin increase");
+        assertEq(
+            _positionBorrowBaseUsdc(account),
+            borrowBaseBefore - 10_000e6,
+            "added position margin should reduce future borrow base"
+        );
     }
 
     function test_UnderwaterFullCloseFreeFundedBountyCanCommitAndPaysKeeperOnFailure() public {

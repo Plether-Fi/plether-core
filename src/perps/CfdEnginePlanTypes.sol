@@ -38,6 +38,8 @@ library CfdEnginePlanTypes {
         uint256 openInterest;
         uint256 entryNotional;
         uint256 totalMargin;
+        uint256 borrowBaseUsdc;
+        uint256 carryIndex;
     }
 
     struct RawSnapshot {
@@ -47,11 +49,8 @@ library CfdEnginePlanTypes {
         uint256 currentTimestamp;
         uint256 lastMarkPrice;
         uint64 lastMarkTime;
-        uint256 carryPriceTimeIndex;
-        uint64 carryIndexTimestamp;
-        uint256 carryIndexPrice;
-        uint256 lastCarryPriceTimeIndex;
-        bool carryIndexInitialized;
+        uint256 positionBorrowBaseUsdc;
+        uint256 positionLastCarryIndex;
 
         SideSnapshot bullSide;
         SideSnapshot bearSide;

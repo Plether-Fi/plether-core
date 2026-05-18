@@ -7,7 +7,6 @@ import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {ICfdEngineCore} from "../../src/perps/interfaces/ICfdEngineCore.sol";
 import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
-import {PositionRiskAccountingLib} from "../../src/perps/libraries/PositionRiskAccountingLib.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 
@@ -159,7 +158,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
 
         uint256 traderSettlementBefore = clearinghouse.balanceUsdc(traderAccount);
-        uint64 carryTimestampBefore = engine.getPositionLastCarryTimestamp(traderAccount);
+        uint64 carryTimestampBefore = _lastCarryTimestamp(traderAccount);
         _fundTrader(BOB, 1e6);
         vm.prank(address(router));
         clearinghouse.lockReservedSettlement(BOB, 1e6);
@@ -167,14 +166,12 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         engine.creditBounty(BOB, ALICE, 1e6, 110_000_000, uint64(block.timestamp));
 
         assertEq(
-            engine.getPositionLastCarryTimestamp(traderAccount),
+            _lastCarryTimestamp(traderAccount),
             uint64(block.timestamp),
             "Stale cached mark should still checkpoint carry before crediting settlement"
         );
         assertEq(engine.lastMarkPrice(), 110_000_000, "Refund cleanup should refresh the cached engine mark");
-        assertLt(
-            carryTimestampBefore, engine.getPositionLastCarryTimestamp(traderAccount), "Carry clock should advance"
-        );
+        assertLt(carryTimestampBefore, _lastCarryTimestamp(traderAccount), "Carry clock should advance");
         assertGt(
             clearinghouse.balanceUsdc(traderAccount),
             traderSettlementBefore,
@@ -231,11 +228,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         engine.updateMarkPrice(1e8, uint64(warpedTime));
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
-        uint256 expectedCarry = PositionRiskAccountingLib.computePendingCarryUsdc(
-            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, 1e8, keeperSettlementBefore),
-            _riskParams().baseCarryBps,
-            30 days
-        );
+        uint256 expectedCarry = _expectedIndexedCarryUsdc(keeperAccount);
 
         _fundTrader(BOB, 1e6);
         vm.prank(address(router));
@@ -269,7 +262,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
-        uint64 carryTimestampBefore = engine.getPositionLastCarryTimestamp(keeperAccount);
+        uint64 carryTimestampBefore = _lastCarryTimestamp(keeperAccount);
         bytes[] memory priceData = _mockPythUpdateData(1e8);
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
@@ -282,13 +275,11 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
             "Failed-order clearer payout should still credit settlement when the cached mark is stale"
         );
         assertGe(
-            engine.getPositionLastCarryTimestamp(keeperAccount),
+            _lastCarryTimestamp(keeperAccount),
             uint64(block.timestamp),
             "Stale-mark clearer payout should checkpoint carry before mutating the basis"
         );
-        assertLt(
-            carryTimestampBefore, engine.getPositionLastCarryTimestamp(keeperAccount), "Carry clock should advance"
-        );
+        assertLt(carryTimestampBefore, _lastCarryTimestamp(keeperAccount), "Carry clock should advance");
     }
 
     function test_ProtocolInvalidationPaysClearerAndDoesNotRefundTrader() public {
