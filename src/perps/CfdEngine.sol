@@ -134,7 +134,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         uint64 publishTime
     ) internal {
         uint256 clampedPrice = price > CAP_PRICE ? CAP_PRICE : price;
-        if (publishTime >= lastMarkTime) {
+        if (publishTime > lastMarkTime) {
             _applyCarryAndMark(clampedPrice, publishTime);
         }
 
@@ -1077,6 +1077,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         uint256 newMarkPrice,
         uint64 newMarkTime
     ) external onlySettlementSidecar {
+        if (newMarkTime <= lastMarkTime) {
+            return;
+        }
         _applyCarryAndMark(newMarkPrice, newMarkTime);
     }
 
