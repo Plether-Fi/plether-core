@@ -243,7 +243,6 @@ contract TrancheVault is ERC4626 {
         }
         _requireActiveTranche();
         _requireMinimumDeposit(assets);
-        POOL.reconcile();
         _requireLifecycleActiveForOrdinaryDeposit();
         _requireActiveTranche();
         uint256 feeBps = _frozenLpFeeBps();
@@ -265,7 +264,6 @@ contract TrancheVault is ERC4626 {
         }
         _requireActiveTranche();
         _requireMinimumDeposit(previewMint(shares));
-        POOL.reconcile();
         _requireLifecycleActiveForOrdinaryDeposit();
         _requireActiveTranche();
         uint256 feeBps = _frozenLpFeeBps();
