@@ -1061,28 +1061,14 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         uint256 poolAssetsUsdc
     ) internal view returns (uint256 index) {
         uint256 sideIndex = _sideIndex(side);
-        index = sideCarryIndex[sideIndex];
-        uint64 previousTimestamp = sideCarryTimestamp[sideIndex];
-        if (timestampNow <= previousTimestamp) {
-            return index;
-        }
-        uint256 borrowBaseUsdc = sideBorrowBaseUsdc[sideIndex];
-        uint256 baseCarryBps = riskParams.baseCarryBps;
-        if (borrowBaseUsdc == 0 || baseCarryBps == 0) {
-            return index;
-        }
-        uint256 utilizationBps = 10_000;
-        if (poolAssetsUsdc > 0) {
-            utilizationBps = (borrowBaseUsdc * 10_000) / poolAssetsUsdc;
-            if (utilizationBps > 10_000) {
-                utilizationBps = 10_000;
-            }
-        }
-        if (utilizationBps == 0) {
-            return index;
-        }
-        index += (baseCarryBps * utilizationBps * 1e18 * (timestampNow - previousTimestamp))
-            / (CfdMath.SECONDS_PER_YEAR * 100_000_000);
+        index = PositionRiskAccountingLib.computeCurrentCarryIndex(
+            sideCarryIndex[sideIndex],
+            sideCarryTimestamp[sideIndex],
+            timestampNow,
+            sideBorrowBaseUsdc[sideIndex],
+            poolAssetsUsdc,
+            riskParams.baseCarryBps
+        );
     }
 
     function _poolAssetsForCarry() internal view returns (uint256) {

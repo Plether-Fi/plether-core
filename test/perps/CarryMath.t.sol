@@ -33,4 +33,10 @@ contract CarryMathTest is Test {
         assertEq(carryUsdc, 4500e6);
     }
 
+    function test_ComputeCurrentCarryIndex_UsesSinglePassUtilizationFormula() public pure {
+        uint256 index =
+            PositionRiskAccountingLib.computeCurrentCarryIndex(1e18, 100, 100 + 365 days, 100_000e6, 200_000e6, 500);
+        assertEq(index, 1.025e18);
+    }
+
 }

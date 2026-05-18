@@ -952,29 +952,15 @@ abstract contract BasePerpTest is Test {
         CfdTypes.Side side
     ) internal view returns (uint256 index) {
         uint256 sideIndex = uint256(side);
-        index = engine.sideCarryIndex(sideIndex);
-        uint64 previousTimestamp = engine.sideCarryTimestamp(sideIndex);
-        if (block.timestamp <= previousTimestamp) {
-            return index;
-        }
-        uint256 borrowBaseUsdc = engine.sideBorrowBaseUsdc(sideIndex);
         (,,,,, uint256 baseCarryBps,,) = engine.riskParams();
-        if (borrowBaseUsdc == 0 || baseCarryBps == 0) {
-            return index;
-        }
-        uint256 utilizationBps = 10_000;
-        uint256 poolAssetsUsdc = pool.totalAssets();
-        if (poolAssetsUsdc > 0) {
-            utilizationBps = (borrowBaseUsdc * 10_000) / poolAssetsUsdc;
-            if (utilizationBps > 10_000) {
-                utilizationBps = 10_000;
-            }
-        }
-        if (utilizationBps == 0) {
-            return index;
-        }
-        index += (baseCarryBps * utilizationBps * 1e18 * (block.timestamp - previousTimestamp))
-            / (31_536_000 * 100_000_000);
+        index = PositionRiskAccountingLib.computeCurrentCarryIndex(
+            engine.sideCarryIndex(sideIndex),
+            engine.sideCarryTimestamp(sideIndex),
+            block.timestamp,
+            engine.sideBorrowBaseUsdc(sideIndex),
+            pool.totalAssets(),
+            baseCarryBps
+        );
     }
 
     function _accountOf(
