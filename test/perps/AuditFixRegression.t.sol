@@ -425,3 +425,65 @@ contract AuditFixRegressionTest is BasePerpTest {
     }
 
 }
+
+contract AuditFixRegressionConservativePendingDepositImpairmentTest is BasePerpTest {
+
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
+            vpiFactor: 0,
+            maxSkewRatio: 1e18,
+            maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
+            fadMarginBps: 300,
+            baseCarryBps: 500,
+            minBountyUsdc: 1 * 1e6,
+            bountyBps: 10
+        });
+    }
+
+    function _initialJuniorDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
+
+    function test_ActivePendingDepositCanCancelWhenConservativeMtmImpairsSenior() public {
+        address pendingLp = address(0xCAFE3);
+        address trader = address(0xBEA4);
+        uint256 depositUsdc = 50e6;
+
+        usdc.mint(pendingLp, depositUsdc);
+        vm.startPrank(pendingLp);
+        usdc.approve(address(juniorVault), depositUsdc);
+        uint256 epochId = juniorVault.requestDeposit(depositUsdc, pendingLp);
+        vm.stopPrank();
+
+        _fundTrader(trader, 100e6);
+        _open(trader, CfdTypes.Side.BEAR, 1600e18, 50e6, 1e8);
+
+        uint256 activationTime = juniorVault.depositEpochStart(epochId);
+        vm.warp(activationTime);
+        vm.prank(address(router));
+        engine.updateMarkPrice(CAP_PRICE, uint64(activationTime));
+
+        (uint256 depositSeniorAssets,) = pool.getPendingDepositTrancheState();
+        assertGe(
+            depositSeniorAssets,
+            pool.seniorHighWaterMark(),
+            "deposit-neutral view should not see the conservative MTM impairment"
+        );
+        assertTrue(
+            pool.isSeniorImpairedAfterPendingDepositReconcile(),
+            "active cancellation gate must match conservative finalization accounting"
+        );
+
+        vm.expectRevert(IHousePool.HousePool__SeniorImpaired.selector);
+        juniorVault.finalizeDepositEpoch(epochId);
+
+        vm.prank(pendingLp);
+        uint256 refunded = juniorVault.cancelPendingDeposit(epochId);
+
+        assertEq(refunded, depositUsdc, "active cancellation should refund escrowed assets");
+        assertEq(usdc.balanceOf(pendingLp), depositUsdc, "depositor should recover escrowed USDC");
+        assertEq(juniorVault.pendingDepositAssets(pendingLp, epochId), 0, "pending balance should clear");
+    }
+
+}

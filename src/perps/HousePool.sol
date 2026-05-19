@@ -655,7 +655,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
     }
 
     function isSeniorImpairedAfterPendingDepositReconcile() external view returns (bool) {
-        HousePoolContext memory ctx = _buildCurrentHousePoolDepositContext();
+        HousePoolContext memory ctx = _buildCurrentHousePoolContext();
         return ctx.pendingState.waterfall.seniorPrincipal < ctx.pendingState.waterfall.seniorHighWaterMark;
     }
 

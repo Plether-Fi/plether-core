@@ -143,6 +143,7 @@ Deposit/mint pricing definition:
 - start from the same physical assets, trader-claim liabilities, claimant buckets, recapitalizations, and revenue state,
 - immediate active-share tranche deposits are disabled while any trader position is open,
 - ordinary LP entry remains available through pending deposit epochs: assets are funded up front, cancellation is allowed only before the activation epoch begins, and shares are minted only after permissionless finalization fixes the epoch price,
+- matured epochs are expected to be finalized promptly by permissionless keepers or finalizers; if finalization is delayed, the epoch can still be finalized before a later close or liquidation realizes trader losses into pool cash, which is an accepted residual MEV risk of the current ordering model,
 - do not subtract unrealized MtM liability unless it comes from an exact, non-manipulable deposit-side model,
 - realized pool losses still lower deposit NAV,
 - conservative unrealized MtM remains a withdrawal protection, not a discount offered to incoming LPs.

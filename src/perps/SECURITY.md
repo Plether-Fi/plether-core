@@ -294,6 +294,8 @@ That means:
 
 Deposit pricing uses an unrealized-MtM-neutral NAV instead of the conservative withdrawal NAV. Immediate active-share deposits are disabled while any trader position is open, while ordinary LP entry uses pending deposit epochs: assets are funded up front, cancellation is allowed only before the activation epoch begins, and shares are minted only after permissionless finalization fixes the batch price. This avoids letting attackers mint new LP shares at a discount created only by conservative phantom liabilities, and avoids the opposite toxic-flow case where incoming LPs buy immediately before an under-collateralized trader loss is realized. Realized losses still impair deposit pricing.
 
+Accepted residual risk: a matured, unfinalized deposit epoch can be finalized before a later transaction that realizes a large trader loss into pool cash. The depositor's assets were already committed through the activation delay and cannot be cancelled after activation in normal conditions, but finalization timing is still permissionless and can be priority-gas ordered ahead of a liquidation or close. The deployed protocol relies on permissionless keepers/finalizers to promptly finalize matured epochs; this is a fixed pre-deployment design trade-off, not a governance-adjustable safety valve.
+
 This is an explicit design choice, not an accounting accident.
 
 ### LP-capital carry
