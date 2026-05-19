@@ -97,11 +97,7 @@ contract OrderRouterAdmin is Ownable, Pausable {
         IOrderRouterAdminHost.OracleConfig calldata config
     ) external onlyOwner {
         _validateOracleConfig(config);
-        _pendingOracleConfig.pyth = config.pyth;
-        _pendingOracleConfig.feedIds = config.feedIds;
-        _pendingOracleConfig.quantities = config.quantities;
-        _pendingOracleConfig.basePrices = config.basePrices;
-        _pendingOracleConfig.inversions = config.inversions;
+        _pendingOracleConfig.pletherOracle = config.pletherOracle;
         oracleConfigActivationTime = block.timestamp + TIMELOCK_DELAY;
         emit OracleConfigProposed(config, oracleConfigActivationTime);
     }
@@ -226,25 +222,8 @@ contract OrderRouterAdmin is Ownable, Pausable {
 
     function _validateOracleConfig(
         IOrderRouterAdminHost.OracleConfig calldata config
-    ) internal pure {
-        if (config.pyth == address(0)) {
-            revert OrderRouterAdmin__InvalidOracleConfig();
-        }
-        if (
-            config.feedIds.length == 0 || config.feedIds.length != config.quantities.length
-                || config.feedIds.length != config.basePrices.length
-                || config.feedIds.length != config.inversions.length
-        ) {
-            revert OrderRouterAdmin__InvalidOracleConfig();
-        }
-        uint256 totalWeight;
-        for (uint256 i = 0; i < config.basePrices.length; i++) {
-            if (config.basePrices[i] == 0) {
-                revert OrderRouterAdmin__InvalidOracleConfig();
-            }
-            totalWeight += config.quantities[i];
-        }
-        if (totalWeight != 1e18) {
+    ) internal view {
+        if (config.pletherOracle == address(0) || config.pletherOracle.code.length == 0) {
             revert OrderRouterAdmin__InvalidOracleConfig();
         }
     }

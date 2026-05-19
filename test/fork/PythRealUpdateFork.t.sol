@@ -11,6 +11,7 @@ import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
+import {PletherOracle} from "../../src/perps/PletherOracle.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -155,11 +156,11 @@ contract PythRealUpdateForkTest is Test {
             address(engine),
             address(new CfdEngineLens(address(engine))),
             address(pool),
-            REAL_PYTH,
-            _singleFeedIds(),
-            weights,
-            basePrices,
-            new bool[](1)
+            address(
+                new PletherOracle(
+                    address(engine), address(pool), REAL_PYTH, _singleFeedIds(), weights, basePrices, new bool[](1)
+                )
+            )
         );
 
         engine.setOrderRouter(address(router));

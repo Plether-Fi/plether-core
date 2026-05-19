@@ -15,6 +15,7 @@ import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {PerpsPublicLens} from "../../src/perps/PerpsPublicLens.sol";
+import {PletherOracle} from "../../src/perps/PletherOracle.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "../../src/perps/interfaces/IHousePool.sol";
@@ -140,11 +141,17 @@ contract AuditBlockingAccountingFindingsFailing_SolvencyTiming is BasePerpTest {
             address(engine),
             address(engineLens),
             address(pool),
-            address(baseMockPyth),
-            baseFeedIds,
-            _basePythWeights(),
-            _basePythBasePrices(),
-            _basePythInversions()
+            address(
+                new PletherOracle(
+                    address(engine),
+                    address(pool),
+                    address(baseMockPyth),
+                    baseFeedIds,
+                    _basePythWeights(),
+                    _basePythBasePrices(),
+                    _basePythInversions()
+                )
+            )
         );
         _syncRouterAdmin();
         engine.setOrderRouter(address(router));

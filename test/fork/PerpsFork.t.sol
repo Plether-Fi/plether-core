@@ -12,6 +12,7 @@ import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "../../src/perps/OrderRouterAdmin.sol";
+import {PletherOracle} from "../../src/perps/PletherOracle.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {IOrderRouter} from "../../src/perps/interfaces/IOrderRouter.sol";
@@ -140,11 +141,7 @@ contract PerpsForkTest is Test {
             address(engine),
             address(new CfdEngineLens(address(engine))),
             address(pool),
-            address(pyth),
-            feedIds,
-            w,
-            b,
-            new bool[](1)
+            address(new PletherOracle(address(engine), address(pool), address(pyth), feedIds, w, b, new bool[](1)))
         );
         routerAdmin = OrderRouterAdmin(router.admin());
         engine.setOrderRouter(address(router));
@@ -350,11 +347,7 @@ contract PerpsForkTest is Test {
             address(engine),
             address(new CfdEngineLens(address(engine))),
             address(pool),
-            REAL_PYTH,
-            feedIds,
-            rw,
-            rb,
-            new bool[](1)
+            address(new PletherOracle(address(engine), address(pool), REAL_PYTH, feedIds, rw, rb, new bool[](1)))
         );
 
         vm.expectRevert(ICfdEngineTypes.CfdEngine__RouterAlreadySet.selector);

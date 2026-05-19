@@ -39,7 +39,7 @@ abstract contract OrderHandler is OrderCommitHandler, OrderExecutionHandler, Ord
         IOrderRouterAdminHost.OracleConfig calldata config
     ) internal {
         _onlyAdmin();
-        _setOracleConfig(config.pyth, config.feedIds, config.quantities, config.basePrices, config.inversions);
+        _setOracleConfig(config.pletherOracle);
     }
 
 }

@@ -21,21 +21,13 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
 
     /// @param _engine CfdEngine that processes trades and liquidations
     /// @param _housePool HousePool used for depth queries and liquidation bounty payouts
-    /// @param _pyth Pyth oracle contract
-    /// @param _feedIds Pyth price feed IDs for each basket component
-    /// @param _quantities Weight of each component (must sum to 1e18)
-    /// @param _basePrices Base price per component for normalization (8 decimals)
-    /// @param _inversions Whether to invert each feed (e.g. USD/JPY -> JPY/USD)
+    /// @param _pletherOracle Deployed perps oracle used for Pyth basket pricing
     constructor(
         address _engine,
         address _engineLens,
         address _housePool,
-        address _pyth,
-        bytes32[] memory _feedIds,
-        uint256[] memory _quantities,
-        uint256[] memory _basePrices,
-        bool[] memory _inversions
-    ) OrderOracleExecution(_engine, _engineLens, _housePool, _pyth, _feedIds, _quantities, _basePrices, _inversions) {
+        address _pletherOracle
+    ) OrderOracleExecution(_engine, _engineLens, _housePool, _pletherOracle) {
         admin = address(new OrderRouterAdmin(address(this), msg.sender));
         minOpenNotionalUsdc = 100_000_000;
         openOrderExecutionBountyBps = 1;

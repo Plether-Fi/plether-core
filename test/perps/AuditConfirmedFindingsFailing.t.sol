@@ -9,6 +9,7 @@ import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
+import {PletherOracle} from "../../src/perps/PletherOracle.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {ICfdEngineAdminHost} from "../../src/perps/interfaces/ICfdEngineAdminHost.sol";
 import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
@@ -59,11 +60,11 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
             address(engine),
             address(new CfdEngineLens(address(engine))),
             address(pool),
-            address(mockPyth),
-            feedIds,
-            weights,
-            bases,
-            new bool[](2)
+            address(
+                new PletherOracle(
+                    address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
+                )
+            )
         );
         engine.setOrderRouter(address(router));
 
@@ -228,11 +229,11 @@ contract AuditConfirmedFindingsFailing_OutOfOrderMarkCancellation is BasePerpTes
             address(engine),
             address(new CfdEngineLens(address(engine))),
             address(pool),
-            address(mockPyth),
-            feedIds,
-            weights,
-            bases,
-            new bool[](2)
+            address(
+                new PletherOracle(
+                    address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
+                )
+            )
         );
         engine.setOrderRouter(address(router));
 

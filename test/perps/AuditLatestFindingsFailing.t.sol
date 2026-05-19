@@ -6,6 +6,7 @@ import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
+import {PletherOracle} from "../../src/perps/PletherOracle.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {IOrderRouterErrors} from "../../src/perps/interfaces/IOrderRouterErrors.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
@@ -228,11 +229,11 @@ contract AuditLatestFindingsFailing_MevDrift is BasePerpTest {
             address(engine),
             address(new CfdEngineLens(address(engine))),
             address(pool),
-            address(mockPyth),
-            feedIds,
-            weights,
-            bases,
-            new bool[](2)
+            address(
+                new PletherOracle(
+                    address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
+                )
+            )
         );
         engine.setOrderRouter(address(router));
 

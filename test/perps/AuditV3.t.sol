@@ -6,6 +6,7 @@ import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
+import {PletherOracle} from "../../src/perps/PletherOracle.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {IHousePool} from "../../src/perps/interfaces/IHousePool.sol";
 import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
@@ -82,11 +83,11 @@ contract AuditV3_C01_FIFODeadlockTest is BasePerpTest {
             address(engine),
             address(new CfdEngineLens(address(engine))),
             address(pool),
-            address(mockPyth),
-            feedIds,
-            weights,
-            bases,
-            new bool[](2)
+            address(
+                new PletherOracle(
+                    address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
+                )
+            )
         );
         engine.setOrderRouter(address(router));
 
