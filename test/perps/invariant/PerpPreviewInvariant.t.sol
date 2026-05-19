@@ -59,7 +59,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
         );
         assertEq(
             accountingView.protocolTreasuryBalanceUsdc,
-            engine.protocolTreasuryBalanceUsdc(),
+            clearinghouse.balanceUsdc(engine.protocolTreasury()),
             "Protocol accounting view treasury balance mismatch"
         );
     }

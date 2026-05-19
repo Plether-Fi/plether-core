@@ -272,7 +272,7 @@ contract PerpInvariantTest is BasePerpTest {
     }
 
     function invariant_FeesWithinClearinghouseTreasury() public view {
-        uint256 fees = engine.protocolTreasuryBalanceUsdc();
+        uint256 fees = clearinghouse.balanceUsdc(engine.protocolTreasury());
         assertEq(
             clearinghouse.balanceUsdc(engine.protocolTreasury()),
             fees,
@@ -607,7 +607,7 @@ contract PerpInvariantTest is BasePerpTest {
         );
         assertEq(
             protocolView.protocolTreasuryBalanceUsdc,
-            engine.protocolTreasuryBalanceUsdc(),
+            clearinghouse.balanceUsdc(engine.protocolTreasury()),
             "Protocol view fees must match accessor"
         );
         assertEq(

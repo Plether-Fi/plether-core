@@ -425,7 +425,7 @@ contract PerpExplicitAccountingHandler is Test {
         uint256 lpNetAssets = pool.totalAssets() > traderClaims ? pool.totalAssets() - traderClaims : 0;
         return lpNetAssets + traderClaims + clearinghouse.balanceUsdc(BULL_TRADER)
             + clearinghouse.balanceUsdc(BEAR_TRADER) + clearinghouse.balanceUsdc(KEEPER)
-            + engine.protocolTreasuryBalanceUsdc();
+            + clearinghouse.balanceUsdc(engine.protocolTreasury());
     }
 
     function _protocolPhysicalCash() internal view returns (uint256) {

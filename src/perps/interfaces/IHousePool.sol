@@ -186,13 +186,18 @@ interface IHousePool {
             uint256 maxJuniorWithdrawUsdc
         );
 
-    /// @notice Read-only tranche principals for deposit pricing using unrealized-MtM-neutral NAV.
+    /// @notice Read-only tranche principals for deposit pricing.
+    /// @dev Immediate vault deposits are disabled while trader positions are open. Pending deposit epochs
+    ///      may still use this view when finalized after their activation delay.
     /// @return seniorPrincipalUsdc Simulated senior principal after reconcile (6 decimals)
     /// @return juniorPrincipalUsdc Simulated junior principal after reconcile (6 decimals)
     function getPendingDepositTrancheState()
         external
         view
         returns (uint256 seniorPrincipalUsdc, uint256 juniorPrincipalUsdc);
+
+    /// @notice Whether pending deposit finalization would hit the senior impairment gate after reconcile.
+    function isSeniorImpairedAfterPendingDepositReconcile() external view returns (bool);
 
     /// @notice Settles revenue/loss waterfall between tranches
     function reconcile() external;
@@ -205,6 +210,10 @@ interface IHousePool {
     function canAcceptOrdinaryDeposits() external view returns (bool);
 
     function canAcceptTrancheDeposits(
+        bool isSenior
+    ) external view returns (bool);
+
+    function canAcceptInstantTrancheDeposits(
         bool isSenior
     ) external view returns (bool);
 

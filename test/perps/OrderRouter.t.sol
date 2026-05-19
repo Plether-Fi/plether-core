@@ -135,7 +135,7 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(_sideMaxProfit(CfdTypes.Side.BULL), 50_000 * 1e6, "Max liability = $50k for 50k BULL at $1.00");
 
         uint256 freeUsdc = pool.getFreeUSDC();
-        uint256 fees = engine.protocolTreasuryBalanceUsdc();
+        uint256 fees = clearinghouse.balanceUsdc(engine.protocolTreasury());
         assertEq(fees, 20_000_000, "Protocol should still retain the full 4 bps execution fee");
         assertEq(
             _settlementBalance(address(this)) - keeperUsdcBefore,
@@ -1681,7 +1681,7 @@ contract OrderRouterPythTest is BasePerpTest {
             "Terminal slippage failures currently credit the clearer through the carry-aware settlement path"
         );
         assertEq(
-            engine.protocolTreasuryBalanceUsdc(),
+            clearinghouse.balanceUsdc(engine.protocolTreasury()),
             0,
             "Failed binding open-order bounty should not be routed to protocol revenue in this execution path"
         );
@@ -2173,7 +2173,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(block.number + 1);
 
         uint256 keeperBefore = _settlementBalance(address(this));
-        uint256 feesBefore = engine.protocolTreasuryBalanceUsdc();
+        uint256 feesBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
         vm.roll(block.number + 1);
         router.executeOrder(closeOrderId, empty);
 
@@ -2183,7 +2183,7 @@ contract OrderRouterPythTest is BasePerpTest {
             "Keeper should recover the full expired close-order bounty"
         );
         assertEq(
-            engine.protocolTreasuryBalanceUsdc() - feesBefore,
+            clearinghouse.balanceUsdc(engine.protocolTreasury()) - feesBefore,
             0,
             "Expired close-order bounty should not be routed to protocol revenue"
         );
@@ -2206,7 +2206,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(block.number + 1);
 
         uint256 keeperBefore = _settlementBalance(address(this));
-        uint256 feesBefore = engine.protocolTreasuryBalanceUsdc();
+        uint256 feesBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
         router.executeOrder(closeOrderId, empty);
 
         assertEq(
@@ -2215,7 +2215,7 @@ contract OrderRouterPythTest is BasePerpTest {
             "Invalid close-order failure should pay the reserved clearer bounty"
         );
         assertEq(
-            engine.protocolTreasuryBalanceUsdc() - feesBefore,
+            clearinghouse.balanceUsdc(engine.protocolTreasury()) - feesBefore,
             0,
             "Invalid close-order failure should not book protocol revenue"
         );
@@ -2487,7 +2487,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(block.number + 1);
 
         uint256 keeperBefore = _settlementBalance(address(this));
-        uint256 feesBefore = engine.protocolTreasuryBalanceUsdc();
+        uint256 feesBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
         router.executeOrder(closeOrderId, empty);
 
         assertEq(
@@ -2496,7 +2496,7 @@ contract OrderRouterPythTest is BasePerpTest {
             "Terminal close slippage miss should still credit the clearer through the carry-aware keeper settlement path"
         );
         assertEq(
-            engine.protocolTreasuryBalanceUsdc() - feesBefore,
+            clearinghouse.balanceUsdc(engine.protocolTreasury()) - feesBefore,
             0,
             "Slippage-failed close order should not additionally book protocol revenue in this path"
         );
@@ -3601,7 +3601,7 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
         AccountLensViewTypes.AccountLedgerSnapshot memory snapshotBefore =
             engineAccountLens.getAccountLedgerSnapshot(account);
         uint256 poolAssetsBefore = pool.totalAssets();
-        uint256 treasuryBefore = engine.protocolTreasuryBalanceUsdc();
+        uint256 treasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(102_500_000));
@@ -3625,7 +3625,7 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
             pool.excessAssets(), 0, "Forfeited close-order bounty reservation should not remain quarantined as excess"
         );
         assertEq(
-            engine.protocolTreasuryBalanceUsdc() - treasuryBefore,
+            clearinghouse.balanceUsdc(engine.protocolTreasury()) - treasuryBefore,
             400_000,
             "Forfeited close-order bounty reservation should transfer into treasury margin"
         );
@@ -4974,7 +4974,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
         (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(1);
         uint256 traderSettlementBefore = _settlementBalance(spammer);
         uint256 keeperSettlementBefore = _settlementBalance(localKeeper);
-        uint256 feesBefore = engine.protocolTreasuryBalanceUsdc();
+        uint256 feesBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
 
         vm.warp(block.timestamp + 301);
         bytes[] memory empty = _mockPythUpdateData();
@@ -4984,7 +4984,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
 
         uint256 traderDebit = traderSettlementBefore - _settlementBalance(spammer);
         uint256 keeperReward = _settlementBalance(localKeeper) - keeperSettlementBefore;
-        uint256 protocolRetained = engine.protocolTreasuryBalanceUsdc() - feesBefore;
+        uint256 protocolRetained = clearinghouse.balanceUsdc(engine.protocolTreasury()) - feesBefore;
 
         assertEq(
             traderDebit,
@@ -5773,7 +5773,7 @@ contract KeeperFeeRefundTest is Test {
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 0.8e8, true);
 
         uint256 keeperUsdcBefore = _settlementBalance(keeper);
-        uint256 protocolFeesBefore = engine.protocolTreasuryBalanceUsdc();
+        uint256 protocolFeesBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
         bytes[] memory closePrice = _mockPythUpdateData();
         vm.prank(keeper);
         router.executeOrder(2, closePrice);
@@ -5786,7 +5786,7 @@ contract KeeperFeeRefundTest is Test {
             "Terminal close slippage should still pay the clearer through the carry-aware settlement path"
         );
         assertEq(
-            engine.protocolTreasuryBalanceUsdc() - protocolFeesBefore,
+            clearinghouse.balanceUsdc(engine.protocolTreasury()) - protocolFeesBefore,
             0,
             "Terminal close slippage should not additionally route bounty value to protocol fees in this path"
         );

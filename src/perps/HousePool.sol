@@ -237,12 +237,28 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
     }
 
     function canAcceptTrancheDeposits(
-        bool
+        bool isSenior
     ) public view override returns (bool) {
+        return _canAcceptTrancheDeposits(isSenior, false);
+    }
+
+    function canAcceptInstantTrancheDeposits(
+        bool isSenior
+    ) public view override returns (bool) {
+        return _canAcceptTrancheDeposits(isSenior, true);
+    }
+
+    function _canAcceptTrancheDeposits(
+        bool,
+        bool requireNoOpenPositions
+    ) internal view returns (bool) {
         (
             HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
             HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
         ) = _getHousePoolSnapshots();
+        if (requireNoOpenPositions && accountingSnapshot.hasOpenPositions) {
+            return false;
+        }
         HousePoolContext memory ctx = _buildHousePoolContext(accountingSnapshot, statusSnapshot);
         return HousePoolTrancheGateLib.trancheDepositsAllowed(
             canAcceptOrdinaryDeposits(),
@@ -636,6 +652,11 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
         HousePoolContext memory ctx = _buildCurrentHousePoolDepositContext();
         seniorPrincipalUsdc = ctx.pendingState.waterfall.seniorPrincipal;
         juniorPrincipalUsdc = ctx.pendingState.waterfall.juniorPrincipal;
+    }
+
+    function isSeniorImpairedAfterPendingDepositReconcile() external view returns (bool) {
+        HousePoolContext memory ctx = _buildCurrentHousePoolContext();
+        return ctx.pendingState.waterfall.seniorPrincipal < ctx.pendingState.waterfall.seniorHighWaterMark;
     }
 
     function isWithdrawalLive() external view returns (bool) {

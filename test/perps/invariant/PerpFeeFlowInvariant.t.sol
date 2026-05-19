@@ -28,7 +28,7 @@ contract PerpFeeFlowInvariantTest is BasePerpInvariantTest {
     function invariant_FeeModelTracksTreasuryBalanceAndWithdrawals() public view {
         assertEq(
             handler.ghostTrackedFeesUsdc(),
-            engine.protocolTreasuryBalanceUsdc(),
+            clearinghouse.balanceUsdc(engine.protocolTreasury()),
             "Ghost tracked fees must match engine fees"
         );
         assertEq(
@@ -43,7 +43,7 @@ contract PerpFeeFlowInvariantTest is BasePerpInvariantTest {
             engineProtocolLens.getProtocolAccountingSnapshot();
         assertEq(
             snapshot.protocolTreasuryBalanceUsdc,
-            engine.protocolTreasuryBalanceUsdc(),
+            clearinghouse.balanceUsdc(engine.protocolTreasury()),
             "Protocol snapshot treasury mismatch"
         );
         assertEq(
@@ -56,11 +56,11 @@ contract PerpFeeFlowInvariantTest is BasePerpInvariantTest {
     function invariant_FeeBalanceRemainsClearinghouseCustodied() public view {
         assertEq(
             clearinghouse.balanceUsdc(engine.protocolTreasury()),
-            engine.protocolTreasuryBalanceUsdc(),
+            clearinghouse.balanceUsdc(engine.protocolTreasury()),
             "Tracked fees must remain in the treasury clearinghouse account"
         );
         assertLe(
-            engine.protocolTreasuryBalanceUsdc(),
+            clearinghouse.balanceUsdc(engine.protocolTreasury()),
             usdc.balanceOf(address(clearinghouse)),
             "Treasury balance must remain backed by clearinghouse USDC"
         );

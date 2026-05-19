@@ -134,7 +134,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         uint64 publishTime
     ) internal {
         uint256 clampedPrice = price > CAP_PRICE ? CAP_PRICE : price;
-        if (publishTime >= lastMarkTime) {
+        if (publishTime > lastMarkTime) {
             _applyCarryAndMark(clampedPrice, publishTime);
         }
 
@@ -319,11 +319,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         }
         protocolTreasury = treasury;
         emit ProtocolTreasuryUpdated(treasury);
-    }
-
-    /// @notice Current protocol fee balance custodied by the treasury clearinghouse account.
-    function protocolTreasuryBalanceUsdc() public view returns (uint256) {
-        return clearinghouse.balanceUsdc(protocolTreasury);
     }
 
     /// @notice Transfers forfeited reserved execution-bounty reservation into the protocol treasury account.
@@ -572,6 +567,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     function applyRiskConfig(
         ICfdEngineAdminHost.EngineRiskConfig calldata config
     ) external onlyAdmin {
+        if (config.executionFeeBps == 0 || config.executionFeeBps > 10_000) {
+            revert CfdEngine__InvalidRiskParams();
+        }
         _advanceAllCarryIndexes(block.timestamp);
         riskParams = config.riskParams;
         executionFeeBps = config.executionFeeBps;
@@ -1079,6 +1077,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         uint256 newMarkPrice,
         uint64 newMarkTime
     ) external onlySettlementSidecar {
+        if (newMarkTime <= lastMarkTime) {
+            return;
+        }
         _applyCarryAndMark(newMarkPrice, newMarkTime);
     }
 

@@ -20,6 +20,7 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
 
     struct OracleUpdateResult {
         uint256 executionPrice;
+        uint256 markPrice;
         uint64 oraclePublishTime;
         uint256 pythFee;
     }
@@ -138,7 +139,7 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
         IPletherOracle.PriceSnapshot memory snapshot =
             _updateAndGetOraclePrice(pythUpdateData, IPletherOracle.PriceMode.MarkRefresh);
         update = _toOracleUpdateResult(snapshot);
-        engine.updateMarkPrice(update.executionPrice, update.oraclePublishTime);
+        engine.updateMarkPrice(update.markPrice, update.oraclePublishTime);
     }
 
     function _prepareLiquidationOracle(
@@ -148,6 +149,7 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
         IPletherOracle.PriceSnapshot memory snapshot =
             pletherOracle.updateLiquidationPrice{value: msg.value}(msg.sender, pythUpdateData, account);
         update = _toOracleUpdateResult(snapshot);
+        _updateEngineMarkIfCurrent(update);
     }
 
     function _updateAndGetOraclePrice(
@@ -186,6 +188,7 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
         IPletherOracle.PriceSnapshot memory snapshot
     ) internal pure returns (OracleUpdateResult memory update) {
         update.executionPrice = snapshot.price;
+        update.markPrice = snapshot.markPrice;
         update.oraclePublishTime = snapshot.publishTime;
         update.pythFee = snapshot.updateFee;
     }
@@ -217,7 +220,7 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
         OracleUpdateResult memory update
     ) internal {
         if (update.oraclePublishTime >= engine.lastMarkTime()) {
-            engine.updateMarkPrice(update.executionPrice, update.oraclePublishTime);
+            engine.updateMarkPrice(update.markPrice, update.oraclePublishTime);
         }
     }
 

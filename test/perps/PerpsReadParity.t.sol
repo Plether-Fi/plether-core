@@ -166,7 +166,7 @@ contract PerpsReadParityTest is BasePerpTest {
         );
         assertEq(
             protocolSnapshot.protocolTreasuryBalanceUsdc,
-            engine.protocolTreasuryBalanceUsdc(),
+            clearinghouse.balanceUsdc(engine.protocolTreasury()),
             "Protocol lens fees should match engine state"
         );
         assertEq(

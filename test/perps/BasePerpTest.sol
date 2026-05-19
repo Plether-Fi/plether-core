@@ -300,6 +300,27 @@ abstract contract BasePerpTest is Test {
         vm.stopPrank();
     }
 
+    function _fundJuniorDelayed(
+        address lp,
+        uint256 amount
+    ) internal returns (uint256 shares) {
+        usdc.mint(lp, amount);
+        vm.startPrank(lp);
+        usdc.approve(address(juniorVault), amount);
+        uint256 epochId = juniorVault.requestDeposit(amount, lp);
+        vm.stopPrank();
+
+        uint256 activationTime = juniorVault.depositEpochStart(epochId);
+        vm.warp(activationTime);
+        uint256 markPrice = engine.lastMarkPrice();
+        vm.prank(address(router));
+        engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(activationTime));
+        shares = juniorVault.finalizeDepositEpoch(epochId);
+
+        vm.prank(lp);
+        juniorVault.claimDepositShares(epochId);
+    }
+
     function _fundSenior(
         address lp,
         uint256 amount

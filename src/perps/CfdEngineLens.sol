@@ -325,10 +325,10 @@ contract CfdEngineLens is ICfdEngineLens {
 
     function _currentSideCarryIndex(
         CfdTypes.Side side
-    ) internal view returns (uint256 index) {
+    ) internal view returns (uint256) {
         uint256 sideIndex = uint256(side);
         (,,,,, uint256 baseCarryBps,,) = engineContract.riskParams();
-        index = PositionRiskAccountingLib.computeCurrentCarryIndex(
+        return PositionRiskAccountingLib.computeCurrentCarryIndex(
             engineContract.sideCarryIndex(sideIndex),
             engineContract.sideCarryTimestamp(sideIndex),
             block.timestamp,

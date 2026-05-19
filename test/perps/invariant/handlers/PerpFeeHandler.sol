@@ -69,13 +69,13 @@ contract PerpFeeHandler is Test {
             return;
         }
 
-        uint256 beforeFees = engine.protocolTreasuryBalanceUsdc();
+        uint256 beforeFees = clearinghouse.balanceUsdc(engine.protocolTreasury());
         uint256 margin = bound(marginFuzz, 2000e6, 10_000e6);
         vm.prank(actor);
         router.commitOrder(CfdTypes.Side.BULL, 50_000e18, margin, 0, false);
         bytes[] memory empty;
         router.executeOrderBatch(1, empty);
-        _syncFeeDelta(beforeFees, engine.protocolTreasuryBalanceUsdc());
+        _syncFeeDelta(beforeFees, clearinghouse.balanceUsdc(engine.protocolTreasury()));
     }
 
     function closePosition(
@@ -89,18 +89,18 @@ contract PerpFeeHandler is Test {
             return;
         }
 
-        uint256 beforeFees = engine.protocolTreasuryBalanceUsdc();
+        uint256 beforeFees = clearinghouse.balanceUsdc(engine.protocolTreasury());
         uint256 price = bound(priceFuzz, 0.6e8, 1.2e8);
         vm.prank(actor);
         router.commitOrder(side, size, 0, price, true);
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(price);
         router.executeOrderBatch(1, priceData);
-        _syncFeeDelta(beforeFees, engine.protocolTreasuryBalanceUsdc());
+        _syncFeeDelta(beforeFees, clearinghouse.balanceUsdc(engine.protocolTreasury()));
     }
 
     function withdrawTreasuryFees() external {
-        uint256 beforeFees = engine.protocolTreasuryBalanceUsdc();
+        uint256 beforeFees = clearinghouse.balanceUsdc(engine.protocolTreasury());
         if (beforeFees == 0) {
             return;
         }

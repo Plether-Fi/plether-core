@@ -472,6 +472,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         snapshot.oracleFrozen = policy.oracleFrozen;
         snapshot.isFadWindow = policy.isFadWindow;
         snapshot.price = _clampToCap(basket.price);
+        snapshot.markPrice = snapshot.price;
         snapshot.publishTime = basket.publishTime;
         snapshot.updateFee = basket.pythFee;
 

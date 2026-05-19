@@ -148,7 +148,7 @@ LPs provide USDC to the `HousePool`, which is split into senior and junior ERC-4
 - Junior absorbs first loss and receives residual upside.
 - LP withdrawals are gated by solvency, reserved liabilities, lifecycle state, mark freshness policy, and holder cooldown rules.
 - Ordinary tranche deposits and partial withdrawals must be at least `1 USDC`, preventing dust flows from forcing coupon checkpoint churn while still allowing full dust exits.
-- During `oracleFrozen`, tranche deposits and withdrawals remain live under stale-priced ERC4626 math with a fixed tranche-local surcharge: entry charges the fee by minting fewer net shares, exit charges the fee by paying fewer net assets, and the retained value stays in that same tranche (senior `25 bps`, junior `75 bps`).
+- During `oracleFrozen`, withdrawals remain live under stale-priced ERC4626 math with a fixed tranche-local surcharge. Immediate active-share deposits use the same surcharge only if no trader positions are open; otherwise LP entry must use pending deposit epochs.
 - During `oracleFrozen`, bootstrap admin flows stay blocked: `initializeSeedPosition(...)` and `assignUnassignedAssets(...)` must wait for the oracle to become live again instead of inheriting the stale-window LP fee path.
 
 The withdrawal firewall is the key LP safety mechanism:
@@ -190,7 +190,8 @@ Operationally:
 
 - Trading does not become live until both tranche seed positions exist and the owner activates trading.
 - Risk-increasing order commits and ordinary tranche deposits stay blocked during the seed lifecycle.
-- `TrancheVault.maxDeposit()` / `maxMint()` return zero while lifecycle, stale-mark, deposit-pause, senior-impairment, or pending-bootstrap-assignment gates block deposits.
+- `TrancheVault.maxDeposit()` / `maxMint()` return zero while lifecycle, stale-mark, deposit-pause, open-position, senior-impairment, or pending-bootstrap-assignment gates block immediate active-share deposits.
+- `TrancheVault.requestDeposit()` keeps ordinary LP entry available through pending deposit epochs; requests are funded up front, become non-cancellable at their activation epoch, and mint shares only after permissionless epoch finalization fixes the batch price.
 - During `oracleFrozen`, `TrancheVault.maxMint()` returns the finite share cap implied by the active frozen-entry fee rather than the default unbounded ERC4626 value.
 - `TrancheVault.maxWithdraw()` / `maxRedeem()` enforce cooldown plus pool-level withdrawal availability.
 
@@ -264,6 +265,7 @@ LP accounting intentionally refuses to count unrealized trader losses as present
 - Realized losses increase physical pool cash only when settlement actually happens.
 
 This keeps LP withdrawal limits conservative. Incoming deposits are priced from a separate unrealized-MtM-neutral NAV so conservative phantom liabilities cannot become a discount for new shares, while realized pool losses still lower deposit pricing.
+Immediate active-share deposits are only accepted when no trader positions are open. While positions are open, ordinary LP entry moves through pending deposit epochs: the user funds the request up front, waits at least one full epoch, loses cancellation rights once the activation epoch begins, and later receives the batch-priced shares after permissionless finalization. This avoids pricing instantly active new LP shares against an incomplete unrealized-loss model: the engine's O(1) side aggregates can conservatively bound winner liabilities, but they cannot compute exact collateral-capped loser receivables without per-position accounting.
 
 ### Accounting domains
 
@@ -334,7 +336,7 @@ The system distinguishes between:
 LP policy follows that split as well:
 
 - `FAD` alone does not change LP entry/exit pricing.
-- `oracleFrozen` keeps LP deposits and withdrawals live, but senior and junior tranche actions pay fixed stale-price surcharges that compensate incumbent LPs in that same tranche.
+- `oracleFrozen` keeps LP withdrawals live and keeps immediate LP deposits live only when no trader positions are open; pending deposit epochs remain the ordinary entry path. Senior and junior stale-window actions pay fixed surcharges that compensate incumbent LPs in that same tranche.
 
 This preserves close and liquidation liveness during real market closures without turning normal live trading into a free option.
 

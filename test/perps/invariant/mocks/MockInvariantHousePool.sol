@@ -168,6 +168,10 @@ contract MockInvariantHousePool is IHousePool {
         return (0, 0);
     }
 
+    function isSeniorImpairedAfterPendingDepositReconcile() external pure returns (bool) {
+        return false;
+    }
+
     function reconcile() external pure {}
 
     function isWithdrawalLive() external pure returns (bool) {
@@ -175,6 +179,12 @@ contract MockInvariantHousePool is IHousePool {
     }
 
     function canAcceptTrancheDeposits(
+        bool
+    ) external pure returns (bool) {
+        return true;
+    }
+
+    function canAcceptInstantTrancheDeposits(
         bool
     ) external pure returns (bool) {
         return true;

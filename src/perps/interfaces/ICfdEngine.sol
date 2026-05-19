@@ -97,9 +97,6 @@ interface ICfdEngine is ICfdEngineTypes {
         uint256 poolDepthUsdc
     ) external view returns (LiquidationPreview memory preview);
 
-    /// @notice Protocol fees custodied by the treasury clearinghouse account (6 decimals).
-    function protocolTreasuryBalanceUsdc() external view returns (uint256);
-
     /// @notice Trader claim balance still owed to beneficiaries.
     function totalTraderClaimBalanceUsdc() external view returns (uint256);
 

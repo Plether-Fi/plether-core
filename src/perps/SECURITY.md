@@ -123,7 +123,7 @@ These are the highest-value properties an auditor should expect to hold.
 |-----------|-------------|
 | Global FIFO | Execution always starts from the current global queue head |
 | Binding intents | Users cannot cancel queued orders once committed |
-| Bounty conservation | Clearinghouse-reserved execution bounty value is conserved across order lifecycle transitions until distributed or absorbed |
+| Bounty conservation | Clearinghouse-reserved execution bounty value is conserved across order lifecycle transitions until distributed or absorbed, and is excluded from close-loss reachability while reserved |
 | Reservation source of truth | Clearinghouse reservation records remain the source of truth for committed order margin |
 | Economic close granularity | Partial close intents must meet the engine notional floor; only full residual closes may be smaller |
 | Bounded cleanup | Queue cleanup, liquidation cleanup, and close-intent position projection are account-local and intentionally bounded |
@@ -275,7 +275,7 @@ The protocol distinguishes two states around market closure:
 LP actions intentionally stay live across that split:
 
 - `FAD` alone keeps ordinary LP pricing,
-- `oracle frozen` keeps tranche deposits and withdrawals live but charges fixed stale-price surcharges (`25 bps` senior, `75 bps` junior) that remain in the same tranche for incumbent LPs.
+- `oracle frozen` keeps tranche withdrawals live and keeps immediate tranche deposits live only when no trader positions are open; pending deposit epochs remain the ordinary entry path. Stale-window LP actions charge fixed surcharges (`25 bps` senior, `75 bps` junior) that remain in the same tranche for incumbent LPs.
 
 This is a deliberate trade-off: preserve close and liquidation liveness during real closures without weakening live-market MEV protections.
 
@@ -292,7 +292,9 @@ That means:
 - same-side loser debt cannot net down live winner liability before settlement,
 - but the protocol avoids phantom-profit withdrawal bugs.
 
-Deposit pricing uses an unrealized-MtM-neutral NAV instead of the conservative withdrawal NAV. This avoids letting attackers mint new LP shares at a discount created only by conservative phantom liabilities; realized losses still impair deposit pricing.
+Deposit pricing uses an unrealized-MtM-neutral NAV instead of the conservative withdrawal NAV. Immediate active-share deposits are disabled while any trader position is open, while ordinary LP entry uses pending deposit epochs: assets are funded up front, cancellation is allowed only before the activation epoch begins, and shares are minted only after permissionless finalization fixes the batch price. This avoids letting attackers mint new LP shares at a discount created only by conservative phantom liabilities, and avoids the opposite toxic-flow case where incoming LPs buy immediately before an under-collateralized trader loss is realized. Realized losses still impair deposit pricing.
+
+Accepted residual risk: a matured, unfinalized deposit epoch can be finalized before a later transaction that realizes a large trader loss into pool cash. The depositor's assets were already committed through the activation delay and cannot be cancelled after activation in normal conditions, but finalization timing is still permissionless and can be priority-gas ordered ahead of a liquidation or close. The deployed protocol relies on permissionless keepers/finalizers to promptly finalize matured epochs; this is a fixed pre-deployment design trade-off, not a governance-adjustable safety valve.
 
 This is an explicit design choice, not an accounting accident.
 
@@ -361,7 +363,7 @@ When marks are stale and freshness is required:
 - already-funded pending buckets may still settle,
 - fresh oracle publication is the recovery path.
 
-Exception: once the protocol enters `oracle frozen`, tranche deposits and withdrawals remain live under fixed stale-price surcharges instead of hard-blocking immediately.
+Exception: once the protocol enters `oracle frozen`, tranche withdrawals remain live under fixed stale-price surcharges instead of hard-blocking immediately. Immediate active-share deposits still require zero open trader positions.
 
 ### Senior coupon model
 
@@ -412,7 +414,7 @@ This preserves terminal liveness without requiring an unbounded global queue sca
 ### LP accounting limitations
 
 - conservative MtM can temporarily understate junior value,
-- `oracleFrozen` keeps LP deposits and withdrawals live under fixed tranche-local frozen fees rather than a separate stale-action gate,
+- `oracleFrozen` keeps LP withdrawals live under fixed tranche-local frozen fees rather than a separate stale-action gate; immediate active-share deposits still require zero open trader positions,
 - senior coupon payments are capped by available junior principal,
 - deposit cooldown can be griefed only by economically irrational donation-style top-ups.
 

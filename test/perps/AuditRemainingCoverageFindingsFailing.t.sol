@@ -127,7 +127,7 @@ contract AuditRemainingCoverageFindingsFailing_ForfeitedOrderBountyFees is BaseP
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 100e6, type(uint256).max, false);
 
         uint256 forfeitedBounty = _executionBountyReserve(1);
-        uint256 feesBefore = engine.protocolTreasuryBalanceUsdc();
+        uint256 feesBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(196_000_000));
@@ -137,7 +137,7 @@ contract AuditRemainingCoverageFindingsFailing_ForfeitedOrderBountyFees is BaseP
         router.executeLiquidation(account, priceData);
 
         assertEq(
-            engine.protocolTreasuryBalanceUsdc() - feesBefore,
+            clearinghouse.balanceUsdc(engine.protocolTreasury()) - feesBefore,
             forfeitedBounty,
             "Forfeited queued order bounties should accrue to protocol fees"
         );

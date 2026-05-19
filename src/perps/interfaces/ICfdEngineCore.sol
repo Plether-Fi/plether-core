@@ -62,8 +62,6 @@ interface ICfdEngineCore is ICfdEngineTypes {
         uint64 publishTime
     ) external;
 
-    function protocolTreasuryBalanceUsdc() external view returns (uint256);
-
     function totalTraderClaimBalanceUsdc() external view returns (uint256);
 
     function liquidatePosition(

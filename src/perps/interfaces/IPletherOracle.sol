@@ -15,6 +15,7 @@ interface IPletherOracle {
 
     struct PriceSnapshot {
         uint256 price;
+        uint256 markPrice;
         uint64 publishTime;
         uint256 updateFee;
         uint256 maxStaleness;

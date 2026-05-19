@@ -168,7 +168,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
 
         settlementBalances[account] += amount;
 
-        _realizeCarryBeforeMarginChange(account);
+        _realizeOrCheckpointCarryBeforeMarginChange(account);
 
         emit Deposit(account, settlementAsset, amount);
     }
@@ -797,7 +797,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
             return;
         }
 
-        _realizeCarryBeforeMarginChange(account);
+        _realizeOrCheckpointCarryBeforeMarginChange(account);
     }
 
     function _requireNoActiveReservations(
@@ -808,7 +808,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         }
     }
 
-    function _realizeCarryBeforeMarginChange(
+    function _realizeOrCheckpointCarryBeforeMarginChange(
         address account
     ) internal {
         address engine_ = engine;

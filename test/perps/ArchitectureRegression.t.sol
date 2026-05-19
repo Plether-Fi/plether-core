@@ -36,7 +36,7 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         _fundTrader(alice, 20_000e6);
         _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
-        uint256 fees = engine.protocolTreasuryBalanceUsdc();
+        uint256 fees = clearinghouse.balanceUsdc(engine.protocolTreasury());
         assertGt(fees, 0, "Setup should accrue protocol fees");
         assertEq(
             clearinghouse.balanceUsdc(engine.protocolTreasury()),

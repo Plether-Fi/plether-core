@@ -463,7 +463,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         assertEq(protocolSnapshot.poolAssetsUsdc, poolAssetsUsdc, "Protocol snapshot HousePool assets mismatch");
         assertEq(
             protocolSnapshot.protocolTreasuryBalanceUsdc,
-            engine.protocolTreasuryBalanceUsdc(),
+            clearinghouse.balanceUsdc(engine.protocolTreasury()),
             "Protocol snapshot fees mismatch"
         );
         assertEq(
