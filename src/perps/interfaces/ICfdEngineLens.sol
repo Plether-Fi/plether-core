@@ -1,22 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEngine} from "../CfdEngine.sol";
 import {CfdEnginePlanTypes} from "../CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../CfdTypes.sol";
+import {ICfdEngineTypes} from "./ICfdEngineTypes.sol";
 
 interface ICfdEngineLens {
 
     function engine() external view returns (address);
 
     function previewClose(
-        bytes32 accountId,
+        address account,
         uint256 sizeDelta,
         uint256 oraclePrice
-    ) external view returns (CfdEngine.ClosePreview memory preview);
+    ) external view returns (ICfdEngineTypes.ClosePreview memory preview);
 
     function previewOpenRevertCode(
-        bytes32 accountId,
+        address account,
         CfdTypes.Side side,
         uint256 sizeDelta,
         uint256 marginDelta,
@@ -25,7 +25,7 @@ interface ICfdEngineLens {
     ) external view returns (uint8 code);
 
     function previewOpenFailurePolicyCategory(
-        bytes32 accountId,
+        address account,
         CfdTypes.Side side,
         uint256 sizeDelta,
         uint256 marginDelta,
@@ -34,21 +34,21 @@ interface ICfdEngineLens {
     ) external view returns (CfdEnginePlanTypes.OpenFailurePolicyCategory category);
 
     function simulateClose(
-        bytes32 accountId,
+        address account,
         uint256 sizeDelta,
         uint256 oraclePrice,
-        uint256 vaultDepthUsdc
-    ) external view returns (CfdEngine.ClosePreview memory preview);
+        uint256 poolDepthUsdc
+    ) external view returns (ICfdEngineTypes.ClosePreview memory preview);
 
     function previewLiquidation(
-        bytes32 accountId,
+        address account,
         uint256 oraclePrice
-    ) external view returns (CfdEngine.LiquidationPreview memory preview);
+    ) external view returns (ICfdEngineTypes.LiquidationPreview memory preview);
 
     function simulateLiquidation(
-        bytes32 accountId,
+        address account,
         uint256 oraclePrice,
-        uint256 vaultDepthUsdc
-    ) external view returns (CfdEngine.LiquidationPreview memory preview);
+        uint256 poolDepthUsdc
+    ) external view returns (ICfdEngineTypes.LiquidationPreview memory preview);
 
 }

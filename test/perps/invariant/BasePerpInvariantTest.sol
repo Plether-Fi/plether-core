@@ -7,18 +7,19 @@ import {CfdEngineAdmin} from "../../../src/perps/CfdEngineAdmin.sol";
 import {CfdEngineLens} from "../../../src/perps/CfdEngineLens.sol";
 import {CfdEnginePlanner} from "../../../src/perps/CfdEnginePlanner.sol";
 import {CfdEngineProtocolLens} from "../../../src/perps/CfdEngineProtocolLens.sol";
-import {CfdEngineSettlementModule} from "../../../src/perps/CfdEngineSettlementModule.sol";
+import {CfdEngineSettlementSidecar} from "../../../src/perps/CfdEngineSettlementSidecar.sol";
 import {CfdTypes} from "../../../src/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "../../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../../src/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "../../../src/perps/OrderRouterAdmin.sol";
 import {PerpsPublicLens} from "../../../src/perps/PerpsPublicLens.sol";
-import {DeferredEngineViewTypes} from "../../../src/perps/interfaces/DeferredEngineViewTypes.sol";
+import {ClaimEngineViewTypes} from "../../../src/perps/interfaces/ClaimEngineViewTypes.sol";
 import {IOrderRouterAccounting} from "../../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {PerpsViewTypes} from "../../../src/perps/interfaces/PerpsViewTypes.sol";
+import {MockPyth} from "../../mocks/MockPyth.sol";
 import {MockUSDC} from "../../mocks/MockUSDC.sol";
 import {OrderRouterDebugLens} from "../../utils/OrderRouterDebugLens.sol";
-import {MockInvariantVault} from "./mocks/MockInvariantVault.sol";
+import {MockInvariantHousePool} from "./mocks/MockInvariantHousePool.sol";
 import {Test} from "forge-std/Test.sol";
 
 abstract contract BasePerpInvariantTest is Test {
@@ -30,7 +31,8 @@ abstract contract BasePerpInvariantTest is Test {
     CfdEngineLens internal engineLens;
     CfdEngineProtocolLens internal engineProtocolLens;
     MarginClearinghouse internal clearinghouse;
-    MockInvariantVault internal vault;
+    MockInvariantHousePool internal housePool;
+    MockPyth internal mockPyth;
     OrderRouter internal router;
     OrderRouterAdmin internal routerAdmin;
     PerpsPublicLens internal publicLens;
@@ -47,30 +49,37 @@ abstract contract BasePerpInvariantTest is Test {
         engineAccountLens = new CfdEngineAccountLens(address(engine));
         engineLens = new CfdEngineLens(address(engine));
         engineProtocolLens = new CfdEngineProtocolLens(address(engine));
-        vault = new MockInvariantVault(address(usdc), address(engine));
+        housePool = new MockInvariantHousePool(address(usdc), address(engine));
+        mockPyth = new MockPyth();
+        mockPyth.setPrice(bytes32(uint256(1)), int64(100_000_000), int32(-8), uint64(SETUP_TIMESTAMP));
+        bytes32[] memory feedIds = new bytes32[](1);
+        feedIds[0] = bytes32(uint256(1));
+        uint256[] memory weights = new uint256[](1);
+        weights[0] = 1e18;
+        uint256[] memory basePrices = new uint256[](1);
+        basePrices[0] = 1e8;
         router = new OrderRouter(
             address(engine),
             address(engineLens),
-            address(vault),
-            address(0),
-            new bytes32[](0),
-            new uint256[](0),
-            new uint256[](0),
-            new bool[](0)
+            address(housePool),
+            address(mockPyth),
+            feedIds,
+            weights,
+            basePrices,
+            new bool[](1)
         );
         _syncRouterAdmin();
 
         clearinghouse.setEngine(address(engine));
         vm.warp(SETUP_TIMESTAMP);
 
-        engine.setVault(address(vault));
+        engine.setPool(address(housePool));
         engine.setOrderRouter(address(router));
-        vault.setOrderRouter(address(router));
         publicLens = new PerpsPublicLens(address(engineAccountLens), address(engine), address(router), address(0));
 
-        uint256 initialVaultAssets = _initialVaultAssets();
-        if (initialVaultAssets > 0) {
-            vault.seedAssets(initialVaultAssets);
+        uint256 initialHousePoolAssets = _initialHousePoolAssets();
+        if (initialHousePoolAssets > 0) {
+            housePool.seedAssets(initialHousePoolAssets);
         }
     }
 
@@ -87,7 +96,7 @@ abstract contract BasePerpInvariantTest is Test {
         });
     }
 
-    function _initialVaultAssets() internal pure virtual returns (uint256) {
+    function _initialHousePoolAssets() internal pure virtual returns (uint256) {
         return 1_000_000_000e6;
     }
 
@@ -100,9 +109,9 @@ abstract contract BasePerpInvariantTest is Test {
     ) internal returns (CfdEngine deployedEngine) {
         deployedEngine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, riskParams_);
         CfdEnginePlanner planner = new CfdEnginePlanner();
-        CfdEngineSettlementModule settlement = new CfdEngineSettlementModule(address(deployedEngine));
-        CfdEngineAdmin adminModule = new CfdEngineAdmin(address(deployedEngine), address(this));
-        deployedEngine.setDependencies(address(planner), address(settlement), address(adminModule));
+        CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(deployedEngine));
+        CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(deployedEngine), address(this));
+        deployedEngine.setDependencies(address(planner), address(settlement), address(engineAdmin));
     }
 
     function _syncRouterAdmin() internal {
@@ -116,10 +125,10 @@ abstract contract BasePerpInvariantTest is Test {
     }
 
     function _pendingOrders(
-        bytes32 accountId
+        address account
     ) internal view returns (IOrderRouterAccounting.PendingOrderView[] memory pending) {
-        uint64 orderId = router.accountHeadOrderId(accountId);
-        uint256 pendingCount = router.pendingOrderCounts(accountId);
+        uint64 orderId = router.accountHeadOrderId(account);
+        uint256 pendingCount = router.pendingOrderCounts(account);
         pending = new IOrderRouterAccounting.PendingOrderView[](pendingCount);
         for (uint256 i; i < pendingCount; ++i) {
             (pending[i], orderId) = router.getPendingOrderView(orderId);
@@ -139,21 +148,21 @@ abstract contract BasePerpInvariantTest is Test {
     }
 
     function _freeSettlementUsdc(
-        bytes32 accountId
+        address account
     ) internal view returns (uint256) {
-        return clearinghouse.getAccountUsdcBuckets(accountId).freeSettlementUsdc;
+        return clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc;
     }
 
     function _terminalReachableUsdc(
-        bytes32 accountId
+        address account
     ) internal view returns (uint256) {
-        return clearinghouse.getAccountUsdcBuckets(accountId).settlementBalanceUsdc;
+        return clearinghouse.getAccountUsdcBuckets(account).settlementBalanceUsdc;
     }
 
     function _publicPosition(
-        bytes32 accountId
+        address account
     ) internal view returns (PerpsViewTypes.PositionView memory viewData) {
-        return publicLens.getPosition(accountId);
+        return publicLens.getPosition(account);
     }
 
     function _publicProtocolStatus() internal view returns (PerpsViewTypes.ProtocolStatusView memory viewData) {
@@ -194,18 +203,16 @@ abstract contract BasePerpInvariantTest is Test {
         return (notionalUsdc * requiredBps) / 10_000;
     }
 
-    function _deferredCreditStatus(
-        bytes32 accountId,
+    function _traderClaimStatus(
+        address account,
         address keeper
-    ) internal view returns (DeferredEngineViewTypes.DeferredCreditStatus memory status) {
-        uint256 deferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(accountId);
-        uint256 deferredKeeperCreditUsdc = engine.deferredKeeperCreditUsdc(keeper);
-        bool anyLiquidity = vault.totalAssets() > 0;
+    ) internal view returns (ClaimEngineViewTypes.TraderClaimStatus memory status) {
+        uint256 traderClaimBalanceUsdc = engine.traderClaimBalanceUsdc(account);
+        bool anyLiquidity = housePool.totalAssets() > 0;
 
-        status.deferredTraderCreditUsdc = deferredTraderCreditUsdc;
-        status.traderPayoutClaimableNow = deferredTraderCreditUsdc > 0 && anyLiquidity;
-        status.deferredKeeperCreditUsdc = deferredKeeperCreditUsdc;
-        status.keeperCreditClaimableNow = deferredKeeperCreditUsdc > 0 && anyLiquidity;
+        status.traderClaimBalanceUsdc = traderClaimBalanceUsdc;
+        status.traderClaimServiceableNow = traderClaimBalanceUsdc > 0 && anyLiquidity;
+        keeper;
     }
 
 }

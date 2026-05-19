@@ -19,8 +19,20 @@ contract TrancheVault is ERC4626 {
     IHousePool public immutable POOL;
     bool public immutable IS_SENIOR;
     uint256 public constant DEPOSIT_COOLDOWN = 1 hours;
+    uint256 public constant DEPOSIT_EPOCH_DURATION = 1 hours;
+    uint256 public constant DEPOSIT_ACTIVATION_EPOCH_DELAY = 2;
+
+    struct DepositEpoch {
+        uint256 assets;
+        uint256 shares;
+        uint256 claimedAssets;
+        uint256 claimedShares;
+        bool finalized;
+    }
 
     mapping(address => uint256) public lastDepositTime;
+    mapping(uint256 => DepositEpoch) public depositEpochs;
+    mapping(address => mapping(uint256 => uint256)) public pendingDepositAssets;
 
     address public seedReceiver;
     uint256 public seedShareFloor;
@@ -34,6 +46,22 @@ contract TrancheVault is ERC4626 {
     error TrancheVault__InvalidSeedPosition();
     error TrancheVault__TerminallyWiped();
     error TrancheVault__TradingNotActive();
+    error TrancheVault__DepositTooSmall();
+    error TrancheVault__WithdrawalTooSmall();
+    error TrancheVault__DepositsUnavailable();
+    error TrancheVault__DepositEpochNotActive();
+    error TrancheVault__DepositEpochAlreadyActive();
+    error TrancheVault__DepositEpochFinalized();
+    error TrancheVault__DepositEpochNotFinalized();
+    error TrancheVault__DepositEpochEmpty();
+    error TrancheVault__NoPendingDeposit();
+    error TrancheVault__ClaimSharesZero();
+    error TrancheVault__ZeroAddress();
+
+    event DepositRequested(address indexed caller, address indexed owner, uint256 indexed epochId, uint256 assets);
+    event DepositRequestCancelled(address indexed owner, uint256 indexed epochId, uint256 assets);
+    event DepositEpochFinalized(uint256 indexed epochId, bool indexed isSenior, uint256 assets, uint256 shares);
+    event DepositSharesClaimed(address indexed owner, uint256 indexed epochId, uint256 assets, uint256 shares);
 
     /// @param _usdc         Underlying USDC token used as the vault asset
     /// @param _pool         HousePool that holds USDC and manages the tranche waterfall
@@ -59,6 +87,7 @@ contract TrancheVault is ERC4626 {
     /// @notice Enforces a deposit cooldown on share transfers.
     ///         Prevents flash-deposit-then-transfer to bypass the withdrawal cooldown.
     ///         Propagates the sender's cooldown to the receiver if it is more recent.
+    ///         Escrowed pending-deposit shares are exempt when released by the vault itself.
     function _update(
         address from,
         address to,
@@ -67,7 +96,7 @@ contract TrancheVault is ERC4626 {
         if (from == seedReceiver && from != address(0) && balanceOf(from) - amount < seedShareFloor) {
             revert TrancheVault__SeedFloorBreached();
         }
-        if (from != address(0) && to != address(0)) {
+        if (from != address(0) && to != address(0) && from != address(this)) {
             if (block.timestamp < lastDepositTime[from] + DEPOSIT_COOLDOWN) {
                 revert TrancheVault__TransferDuringCooldown();
             }
@@ -84,12 +113,136 @@ contract TrancheVault is ERC4626 {
         return IS_SENIOR ? seniorPrincipalUsdc : juniorPrincipalUsdc;
     }
 
-    /// @notice Deposits assets into the tranche after reconciling pool accounting and lifecycle gates.
+    /// @notice Converts assets to shares using the current deposit-side NAV estimate.
+    function convertToShares(
+        uint256 assets
+    ) public view override returns (uint256) {
+        return _convertToSharesUsingAssets(assets, _depositPricingAssets(), Math.Rounding.Floor);
+    }
+
+    function currentDepositEpoch() public view returns (uint256) {
+        return block.timestamp / DEPOSIT_EPOCH_DURATION;
+    }
+
+    function depositEpochStart(
+        uint256 epochId
+    ) public pure returns (uint256) {
+        return epochId * DEPOSIT_EPOCH_DURATION;
+    }
+
+    /// @notice Funds a delayed deposit request assigned to the next activation epoch.
+    /// @dev The receiver owns the pending assets and is the only account that can cancel or claim them.
+    function requestDeposit(
+        uint256 assets,
+        address receiver
+    ) public returns (uint256 epochId) {
+        _requireRequestDepositPreflight(assets, receiver);
+
+        epochId = currentDepositEpoch() + DEPOSIT_ACTIVATION_EPOCH_DELAY;
+        IERC20(asset()).safeTransferFrom(msg.sender, address(this), assets);
+        depositEpochs[epochId].assets += assets;
+        pendingDepositAssets[receiver][epochId] += assets;
+        emit DepositRequested(msg.sender, receiver, epochId, assets);
+    }
+
+    /// @notice Cancels a pending deposit before activation, or while active if senior impairment blocks finalization.
+    function cancelPendingDeposit(
+        uint256 epochId
+    ) public returns (uint256 assets) {
+        bool activeEpoch = block.timestamp >= depositEpochStart(epochId);
+        if (activeEpoch && !POOL.isSeniorImpairedAfterPendingDepositReconcile()) {
+            revert TrancheVault__DepositEpochAlreadyActive();
+        }
+        DepositEpoch storage epoch = depositEpochs[epochId];
+        if (epoch.finalized) {
+            revert TrancheVault__DepositEpochFinalized();
+        }
+        assets = pendingDepositAssets[msg.sender][epochId];
+        if (assets == 0) {
+            revert TrancheVault__NoPendingDeposit();
+        }
+
+        pendingDepositAssets[msg.sender][epochId] = 0;
+        epoch.assets -= assets;
+        IERC20(asset()).safeTransfer(msg.sender, assets);
+        emit DepositRequestCancelled(msg.sender, epochId, assets);
+    }
+
+    /// @notice Permissionlessly prices and accepts a matured deposit epoch into the HousePool.
+    function finalizeDepositEpoch(
+        uint256 epochId
+    ) public returns (uint256 shares) {
+        if (block.timestamp < depositEpochStart(epochId)) {
+            revert TrancheVault__DepositEpochNotActive();
+        }
+        DepositEpoch storage epoch = depositEpochs[epochId];
+        if (epoch.finalized) {
+            revert TrancheVault__DepositEpochFinalized();
+        }
+        uint256 assets = epoch.assets;
+        if (assets == 0) {
+            revert TrancheVault__DepositEpochEmpty();
+        }
+
+        shares = previewDeposit(assets);
+        if (shares == 0) {
+            revert TrancheVault__ClaimSharesZero();
+        }
+        epoch.shares = shares;
+        epoch.finalized = true;
+
+        IERC20(asset()).forceApprove(address(POOL), assets);
+        if (IS_SENIOR) {
+            POOL.depositSenior(assets);
+        } else {
+            POOL.depositJunior(assets);
+        }
+        _mint(address(this), shares);
+
+        emit DepositEpochFinalized(epochId, IS_SENIOR, assets, shares);
+    }
+
+    /// @notice Claims finalized tranche shares for the caller's pending assets.
+    function claimDepositShares(
+        uint256 epochId
+    ) public returns (uint256 shares) {
+        DepositEpoch storage epoch = depositEpochs[epochId];
+        if (!epoch.finalized) {
+            revert TrancheVault__DepositEpochNotFinalized();
+        }
+        uint256 assets = pendingDepositAssets[msg.sender][epochId];
+        if (assets == 0) {
+            revert TrancheVault__NoPendingDeposit();
+        }
+
+        uint256 remainingAssets = epoch.assets - epoch.claimedAssets;
+        if (assets == remainingAssets) {
+            shares = epoch.shares - epoch.claimedShares;
+        } else {
+            shares = Math.mulDiv(assets, epoch.shares, epoch.assets, Math.Rounding.Floor);
+        }
+        if (shares == 0) {
+            revert TrancheVault__ClaimSharesZero();
+        }
+        pendingDepositAssets[msg.sender][epochId] = 0;
+        epoch.claimedAssets += assets;
+        epoch.claimedShares += shares;
+        _transfer(address(this), msg.sender, shares);
+
+        emit DepositSharesClaimed(msg.sender, epochId, assets, shares);
+        emit Deposit(msg.sender, msg.sender, assets, shares);
+    }
+
+    /// @notice Deposits assets immediately only when no trader positions are open.
     function deposit(
         uint256 assets,
         address receiver
     ) public override returns (uint256) {
-        POOL.reconcile();
+        if (!_canInstantDepositNow()) {
+            revert ERC4626ExceededMaxDeposit(receiver, assets, 0);
+        }
+        _requireActiveTranche();
+        _requireMinimumDeposit(assets);
         _requireLifecycleActiveForOrdinaryDeposit();
         _requireActiveTranche();
         uint256 feeBps = _frozenLpFeeBps();
@@ -101,12 +254,16 @@ contract TrancheVault is ERC4626 {
         return super.deposit(assets, receiver);
     }
 
-    /// @notice Mints tranche shares after reconciling pool accounting and lifecycle gates.
+    /// @notice Mints tranche shares immediately only when no trader positions are open.
     function mint(
         uint256 shares,
         address receiver
     ) public override returns (uint256) {
-        POOL.reconcile();
+        if (!_canInstantDepositNow()) {
+            revert ERC4626ExceededMaxMint(receiver, shares, 0);
+        }
+        _requireActiveTranche();
+        _requireMinimumDeposit(previewMint(shares));
         _requireLifecycleActiveForOrdinaryDeposit();
         _requireActiveTranche();
         uint256 feeBps = _frozenLpFeeBps();
@@ -123,7 +280,7 @@ contract TrancheVault is ERC4626 {
     ) public view override returns (uint256) {
         uint256 feeBps = _frozenLpFeeBps();
         if (feeBps == 0) {
-            return super.previewDeposit(assets);
+            return _previewDepositShares(assets);
         }
         return _previewFrozenDepositShares(assets, feeBps);
     }
@@ -133,7 +290,7 @@ contract TrancheVault is ERC4626 {
     ) public view override returns (uint256) {
         uint256 feeBps = _frozenLpFeeBps();
         if (feeBps == 0) {
-            return super.previewMint(shares);
+            return _previewMintAssets(shares);
         }
         return _previewFrozenMintAssets(shares, feeBps);
     }
@@ -142,7 +299,8 @@ contract TrancheVault is ERC4626 {
     function maxDeposit(
         address receiver
     ) public view override returns (uint256) {
-        if (!_canDepositNow()) {
+        receiver;
+        if (!_canInstantDepositNow()) {
             return 0;
         }
         return super.maxDeposit(receiver);
@@ -152,7 +310,8 @@ contract TrancheVault is ERC4626 {
     function maxMint(
         address receiver
     ) public view override returns (uint256) {
-        if (!_canDepositNow()) {
+        receiver;
+        if (!_canInstantDepositNow()) {
             return 0;
         }
         uint256 feeBps = _frozenLpFeeBps();
@@ -162,12 +321,23 @@ contract TrancheVault is ERC4626 {
         return super.maxMint(receiver);
     }
 
+    function maxRequestDeposit(
+        address receiver
+    ) public view returns (uint256) {
+        receiver;
+        if (!_canDepositNow()) {
+            return 0;
+        }
+        return type(uint256).max;
+    }
+
     /// @notice Withdraws tranche assets after reconciling pool accounting.
     function withdraw(
         uint256 assets,
         address receiver,
         address _owner
     ) public override returns (uint256) {
+        _requireWithdrawPreflight(assets, _owner);
         POOL.reconcile();
         uint256 feeBps = _frozenLpFeeBps();
         if (feeBps > 0) {
@@ -184,6 +354,7 @@ contract TrancheVault is ERC4626 {
         address receiver,
         address _owner
     ) public override returns (uint256) {
+        _requireRedeemPreflight(shares, _owner);
         POOL.reconcile();
         uint256 feeBps = _frozenLpFeeBps();
         if (feeBps > 0) {
@@ -355,12 +526,82 @@ contract TrancheVault is ERC4626 {
         }
     }
 
+    function _requireMinimumDeposit(
+        uint256 assets
+    ) internal view {
+        if (assets < POOL.minTrancheDepositUsdc()) {
+            revert TrancheVault__DepositTooSmall();
+        }
+    }
+
+    function _requireRequestDepositPreflight(
+        uint256 assets,
+        address receiver
+    ) internal view {
+        _requireActiveTranche();
+        _requireMinimumDeposit(assets);
+        _requireLifecycleActiveForOrdinaryDeposit();
+        if (receiver == address(0)) {
+            revert TrancheVault__ZeroAddress();
+        }
+        if (!_canDepositNow()) {
+            revert TrancheVault__DepositsUnavailable();
+        }
+        if (msg.sender != receiver && balanceOf(receiver) != 0) {
+            revert TrancheVault__ThirdPartyDepositForExistingHolder();
+        }
+    }
+
+    function _requireWithdrawPreflight(
+        uint256 assets,
+        address _owner
+    ) internal view {
+        if (assets == 0) {
+            revert TrancheVault__WithdrawalTooSmall();
+        }
+        uint256 maxAssets = maxWithdraw(_owner);
+        if (assets > maxAssets) {
+            revert ERC4626ExceededMaxWithdraw(_owner, assets, maxAssets);
+        }
+        if (assets >= POOL.minTrancheDepositUsdc()) {
+            return;
+        }
+        uint256 ownerShares = _unlockedOwnerShares(_owner);
+        uint256 ownerAssets = previewRedeem(ownerShares);
+        if (assets < ownerAssets && previewWithdraw(assets) < ownerShares) {
+            revert TrancheVault__WithdrawalTooSmall();
+        }
+    }
+
+    function _requireRedeemPreflight(
+        uint256 shares,
+        address _owner
+    ) internal view {
+        if (shares == 0) {
+            revert TrancheVault__WithdrawalTooSmall();
+        }
+        uint256 maxShares = maxRedeem(_owner);
+        if (shares > maxShares) {
+            revert ERC4626ExceededMaxRedeem(_owner, shares, maxShares);
+        }
+        if (previewRedeem(shares) >= POOL.minTrancheDepositUsdc()) {
+            return;
+        }
+        if (shares < _unlockedOwnerShares(_owner)) {
+            revert TrancheVault__WithdrawalTooSmall();
+        }
+    }
+
     function _ordinaryDepositsAllowed() internal view returns (bool) {
         return POOL.canAcceptOrdinaryDeposits();
     }
 
     function _canDepositNow() internal view returns (bool) {
         return !_isTerminallyWiped() && POOL.canAcceptTrancheDeposits(IS_SENIOR);
+    }
+
+    function _canInstantDepositNow() internal view returns (bool) {
+        return !_isTerminallyWiped() && POOL.canAcceptInstantTrancheDeposits(IS_SENIOR);
     }
 
     function _frozenLpFeeBps() internal view returns (uint256) {
@@ -407,13 +648,46 @@ contract TrancheVault is ERC4626 {
         return Math.mulDiv(netShares, 10_000, 10_000 - feeBps, Math.Rounding.Ceil);
     }
 
+    function _depositPricingAssets() internal view returns (uint256 assets) {
+        (uint256 seniorPrincipalUsdc, uint256 juniorPrincipalUsdc) = POOL.getPendingDepositTrancheState();
+        return IS_SENIOR ? seniorPrincipalUsdc : juniorPrincipalUsdc;
+    }
+
+    function _convertToSharesUsingAssets(
+        uint256 assets,
+        uint256 totalAssets_,
+        Math.Rounding rounding
+    ) internal view returns (uint256) {
+        return Math.mulDiv(assets, totalSupply() + 10 ** _decimalsOffset(), totalAssets_ + 1, rounding);
+    }
+
+    function _convertToAssetsUsingAssets(
+        uint256 shares,
+        uint256 totalAssets_,
+        Math.Rounding rounding
+    ) internal view returns (uint256) {
+        return Math.mulDiv(shares, totalAssets_ + 1, totalSupply() + 10 ** _decimalsOffset(), rounding);
+    }
+
+    function _previewDepositShares(
+        uint256 assets
+    ) internal view returns (uint256) {
+        return _convertToSharesUsingAssets(assets, _depositPricingAssets(), Math.Rounding.Floor);
+    }
+
+    function _previewMintAssets(
+        uint256 shares
+    ) internal view returns (uint256) {
+        return _convertToAssetsUsingAssets(shares, _depositPricingAssets(), Math.Rounding.Ceil);
+    }
+
     function _previewFrozenDepositShares(
         uint256 assets,
         uint256 feeBps
     ) internal view returns (uint256) {
         uint256 netAssets = _applyFee(assets, feeBps);
         uint256 adjustedShares = totalSupply() + 10 ** _decimalsOffset();
-        uint256 adjustedAssetsAfterDeposit = totalAssets() + assets + 1;
+        uint256 adjustedAssetsAfterDeposit = _depositPricingAssets() + assets + 1;
         uint256 denominator = adjustedAssetsAfterDeposit - netAssets;
         return Math.mulDiv(netAssets, adjustedShares, denominator, Math.Rounding.Floor);
     }
@@ -426,7 +700,7 @@ contract TrancheVault is ERC4626 {
             return type(uint256).max;
         }
         uint256 adjustedShares = totalSupply() + 10 ** _decimalsOffset();
-        uint256 adjustedAssets = totalAssets() + 1;
+        uint256 adjustedAssets = _depositPricingAssets() + 1;
         uint256 denominator = ((10_000 - feeBps) * adjustedShares) - (feeBps * shares);
         return Math.mulDiv(10_000 * shares, adjustedAssets, denominator, Math.Rounding.Ceil);
     }

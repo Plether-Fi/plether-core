@@ -5,8 +5,8 @@ import {CfdEngine} from "./CfdEngine.sol";
 import {CfdMath} from "./CfdMath.sol";
 import {CfdTypes} from "./CfdTypes.sol";
 import {HousePoolEngineViewTypes} from "./interfaces/HousePoolEngineViewTypes.sol";
-import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
 import {ICfdEngineProtocolLens} from "./interfaces/ICfdEngineProtocolLens.sol";
+import {ICfdEngineTypes} from "./interfaces/ICfdEngineTypes.sol";
 import {ProtocolLensViewTypes} from "./interfaces/ProtocolLensViewTypes.sol";
 import {OracleFreshnessPolicyLib} from "./libraries/OracleFreshnessPolicyLib.sol";
 import {SolvencyAccountingLib} from "./libraries/SolvencyAccountingLib.sol";
@@ -39,20 +39,21 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
     function getHousePoolInputSnapshot(
         uint256 markStalenessLimit
     ) external view returns (HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot) {
-        uint256 vaultAssetsUsdc = engineContract.vault().totalAssets();
-        snapshot.physicalAssetsUsdc = vaultAssetsUsdc;
-        snapshot.protocolFeesUsdc = engineContract.accumulatedFeesUsdc();
-        snapshot.netPhysicalAssetsUsdc =
-            vaultAssetsUsdc > snapshot.protocolFeesUsdc ? vaultAssetsUsdc - snapshot.protocolFeesUsdc : 0;
+        uint256 poolAssetsUsdc = engineContract.pool().totalAssets();
+        snapshot.physicalAssetsUsdc = poolAssetsUsdc;
+        snapshot.netPhysicalAssetsUsdc = poolAssetsUsdc;
         snapshot.maxLiabilityUsdc = SolvencyAccountingLib.getMaxLiability(
             _sideState(CfdTypes.Side.BULL).maxProfitUsdc, _sideState(CfdTypes.Side.BEAR).maxProfitUsdc
         );
         snapshot.supplementalReservedUsdc = 0;
         snapshot.unrealizedMtmLiabilityUsdc = _getVaultMtmLiability();
-        snapshot.deferredTraderCreditUsdc = engineContract.totalDeferredTraderCreditUsdc();
-        snapshot.deferredKeeperCreditUsdc = engineContract.totalDeferredKeeperCreditUsdc();
-        ICfdEngine.SideState memory bullState = _sideState(CfdTypes.Side.BULL);
-        ICfdEngine.SideState memory bearState = _sideState(CfdTypes.Side.BEAR);
+        // Deposit pricing is intentionally neutral to unrealized trader PnL. Conservative MtM remains
+        // withdrawal-only; without per-position netting, any aggregate deposit-side MtM is manipulable.
+        snapshot.depositMtmLiabilityUsdc = 0;
+        ICfdEngineTypes.SideState memory bullState = _sideState(CfdTypes.Side.BULL);
+        ICfdEngineTypes.SideState memory bearState = _sideState(CfdTypes.Side.BEAR);
+        snapshot.traderClaimBalanceUsdc = engineContract.totalTraderClaimBalanceUsdc();
+        snapshot.hasOpenPositions = bullState.openInterest > 0 || bearState.openInterest > 0;
         snapshot.markFreshnessRequired = bullState.maxProfitUsdc + bearState.maxProfitUsdc > 0;
         if (snapshot.markFreshnessRequired) {
             snapshot.maxMarkStaleness =
@@ -87,8 +88,8 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         }
 
         uint256 price = engineContract.lastMarkPrice();
-        ICfdEngine.SideState memory bullState = _sideState(CfdTypes.Side.BULL);
-        ICfdEngine.SideState memory bearState = _sideState(CfdTypes.Side.BEAR);
+        ICfdEngineTypes.SideState memory bullState = _sideState(CfdTypes.Side.BULL);
+        ICfdEngineTypes.SideState memory bearState = _sideState(CfdTypes.Side.BEAR);
         uint256 capPrice = engineContract.CAP_PRICE();
         return CfdMath.conservativeMtmLiability(bullState.maxProfitUsdc, CfdTypes.Side.BULL, price, capPrice)
             + CfdMath.conservativeMtmLiability(bearState.maxProfitUsdc, CfdTypes.Side.BEAR, price, capPrice);
@@ -99,42 +100,40 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         view
         returns (ProtocolLensViewTypes.ProtocolAccountingSnapshot memory snapshot)
     {
-        uint256 vaultAssetsUsdc = engineContract.vault().totalAssets();
+        uint256 poolAssetsUsdc = engineContract.pool().totalAssets();
         uint256 maxLiabilityUsdc = SolvencyAccountingLib.getMaxLiability(
             _sideState(CfdTypes.Side.BULL).maxProfitUsdc, _sideState(CfdTypes.Side.BEAR).maxProfitUsdc
         );
         SolvencyAccountingLib.SolvencyState memory solvencyState = _buildAdjustedSolvencyState();
-        snapshot.vaultAssetsUsdc = vaultAssetsUsdc;
+        snapshot.poolAssetsUsdc = poolAssetsUsdc;
         snapshot.netPhysicalAssetsUsdc = solvencyState.netPhysicalAssetsUsdc;
         snapshot.maxLiabilityUsdc = maxLiabilityUsdc;
         snapshot.effectiveSolvencyAssetsUsdc = solvencyState.effectiveAssetsUsdc;
         snapshot.withdrawalReservedUsdc = solvencyState.withdrawalReservedUsdc;
         snapshot.freeUsdc = solvencyState.freeWithdrawableUsdc;
-        snapshot.accumulatedFeesUsdc = engineContract.accumulatedFeesUsdc();
+        snapshot.protocolTreasuryBalanceUsdc =
+            engineContract.clearinghouse().balanceUsdc(engineContract.protocolTreasury());
         snapshot.accumulatedBadDebtUsdc = engineContract.accumulatedBadDebtUsdc();
-        snapshot.totalDeferredTraderCreditUsdc = engineContract.totalDeferredTraderCreditUsdc();
-        snapshot.totalDeferredKeeperCreditUsdc = engineContract.totalDeferredKeeperCreditUsdc();
+        snapshot.totalTraderClaimBalanceUsdc = engineContract.totalTraderClaimBalanceUsdc();
         snapshot.degradedMode = engineContract.degradedMode();
-        ICfdEngine.SideState memory bullState = _sideState(CfdTypes.Side.BULL);
-        ICfdEngine.SideState memory bearState = _sideState(CfdTypes.Side.BEAR);
+        ICfdEngineTypes.SideState memory bullState = _sideState(CfdTypes.Side.BULL);
+        ICfdEngineTypes.SideState memory bearState = _sideState(CfdTypes.Side.BEAR);
         snapshot.hasLiveLiability = bullState.maxProfitUsdc + bearState.maxProfitUsdc > 0;
     }
 
     function _buildAdjustedSolvencyState() internal view returns (SolvencyAccountingLib.SolvencyState memory) {
         return SolvencyAccountingLib.buildSolvencyState(
-            engineContract.vault().totalAssets(),
-            engineContract.accumulatedFeesUsdc(),
+            engineContract.pool().totalAssets(),
             SolvencyAccountingLib.getMaxLiability(
                 _sideState(CfdTypes.Side.BULL).maxProfitUsdc, _sideState(CfdTypes.Side.BEAR).maxProfitUsdc
             ),
-            engineContract.totalDeferredTraderCreditUsdc(),
-            engineContract.totalDeferredKeeperCreditUsdc()
+            engineContract.totalTraderClaimBalanceUsdc()
         );
     }
 
     function _sideState(
         CfdTypes.Side side
-    ) internal view returns (ICfdEngine.SideState memory state) {
+    ) internal view returns (ICfdEngineTypes.SideState memory state) {
         (state.maxProfitUsdc, state.openInterest, state.entryNotional, state.totalMargin) =
             engineContract.sides(uint8(side));
     }

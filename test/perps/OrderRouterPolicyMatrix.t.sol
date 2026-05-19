@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdEnginePlanTypes} from "../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {ICfdEngineCore} from "../../src/perps/interfaces/ICfdEngineCore.sol";
+import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
-import {PositionRiskAccountingLib} from "../../src/perps/libraries/PositionRiskAccountingLib.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 
@@ -16,19 +15,13 @@ contract OrderRouterFailurePolicyHarness is OrderRouter {
     constructor(
         address engine_,
         address engineLens_,
-        address vault_
-    )
-        OrderRouter(
-            engine_,
-            engineLens_,
-            vault_,
-            address(0),
-            new bytes32[](0),
-            new uint256[](0),
-            new uint256[](0),
-            new bool[](0)
-        )
-    {}
+        address vault_,
+        address pyth_,
+        bytes32[] memory feedIds_,
+        uint256[] memory weights_,
+        uint256[] memory basePrices_,
+        bool[] memory inversions_
+    ) OrderRouter(engine_, engineLens_, vault_, pyth_, feedIds_, weights_, basePrices_, inversions_) {}
 
     function failedOutcomeFromEngineRevert(
         CfdTypes.Order memory order,
@@ -49,54 +42,52 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
 
     function test_ExpiredOpenPaysClearerAndDoesNotRefundTrader() public {
         _fundTrader(ALICE, 10_000e6);
-        bytes32 traderAccountId = bytes32(uint256(uint160(ALICE)));
-        bytes32 keeperAccountId = bytes32(uint256(uint160(KEEPER)));
+        address traderAccount = ALICE;
+        address keeperAccount = KEEPER;
 
         vm.prank(ALICE);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
 
         (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(1);
-        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(traderAccountId);
-        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccountId);
+        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(traderAccount);
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
 
         vm.warp(block.timestamp + router.maxOrderAge() + 1);
-        bytes[] memory empty;
+        bytes[] memory empty = _mockPythUpdateData();
         vm.prank(KEEPER);
-        vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
         assertEq(
-            clearinghouse.balanceUsdc(keeperAccountId) - keeperSettlementBefore,
+            clearinghouse.balanceUsdc(keeperAccount) - keeperSettlementBefore,
             pending.executionBountyUsdc,
             "Expired open should pay the clearer from reserved bounty settlement"
         );
         assertEq(
-            clearinghouse.balanceUsdc(traderAccountId) - traderSettlementBefore,
-            0,
-            "Expired open cleanup should not refund the trader after the bounty was already escrowed"
+            traderSettlementBefore - clearinghouse.balanceUsdc(traderAccount),
+            pending.executionBountyUsdc,
+            "Expired open cleanup should debit only the already-reserved bounty"
         );
     }
 
     function test_ExpiredClosePaysClearer() public {
-        bytes32 accountId = bytes32(uint256(uint160(ALICE)));
-        bytes32 keeperAccountId = bytes32(uint256(uint160(KEEPER)));
+        address account = ALICE;
+        address keeperAccount = KEEPER;
         _fundTrader(ALICE, 20_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
 
         vm.prank(ALICE);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 1e8, true);
 
         uint256 traderWalletBefore = usdc.balanceOf(ALICE);
-        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccountId);
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
 
         vm.warp(block.timestamp + router.maxOrderAge() + 1);
-        bytes[] memory empty;
+        bytes[] memory empty = _mockPythUpdateData();
         vm.prank(KEEPER);
-        vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
         assertEq(
-            clearinghouse.balanceUsdc(keeperAccountId) - keeperSettlementBefore,
+            clearinghouse.balanceUsdc(keeperAccount) - keeperSettlementBefore,
             200_000,
             "Expired close should still credit the clearer even after carry-aware settlement crediting"
         );
@@ -106,34 +97,35 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
     function test_SlippageOpenForfeitsBountyToProtocol() public {
         _fundJunior(BOB, 1_000_000e6);
         _fundTrader(ALICE, 50_000e6);
-        bytes32 traderAccountId = bytes32(uint256(uint160(ALICE)));
+        address traderAccount = ALICE;
 
         vm.prank(ALICE);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1.5e8, false);
 
-        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(traderAccountId);
+        (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(1);
+        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(traderAccount);
         uint256 keeperEthBefore = KEEPER.balance;
 
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(1e8));
+        bytes[] memory priceData = _mockPythUpdateData(1e8);
         vm.deal(ALICE, 1 ether);
-        vm.prank(KEEPER);
+        vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
+        vm.prank(KEEPER);
         router.executeOrder(1, priceData);
 
         assertEq(KEEPER.balance - keeperEthBefore, 0, "Open slippage miss should not pay the clearer");
         assertEq(
-            clearinghouse.balanceUsdc(traderAccountId) - traderSettlementBefore,
-            0,
-            "Open slippage miss should not further change trader settlement after the bounty was escrowed"
+            traderSettlementBefore - clearinghouse.balanceUsdc(traderAccount),
+            pending.executionBountyUsdc,
+            "Open slippage cleanup should debit only the already-reserved bounty"
         );
     }
 
     function test_OpenSlippageCleanup_DoesNotFurtherCreditTrader() public {
-        bytes32 traderAccountId = bytes32(uint256(uint160(ALICE)));
+        address traderAccount = ALICE;
 
         _fundTrader(ALICE, 20_000e6);
-        _open(traderAccountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(traderAccount, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
         uint256 warpedTime = block.timestamp + 30 days;
         vm.warp(warpedTime);
@@ -143,162 +135,157 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         vm.prank(ALICE);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1.5e8, false);
 
-        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(traderAccountId);
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(1e8));
-        vm.prank(KEEPER);
+        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(traderAccount);
+        bytes[] memory priceData = _mockPythUpdateData(1e8);
+        vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
+        vm.prank(KEEPER);
         router.executeOrder(1, priceData);
 
-        assertEq(
-            clearinghouse.balanceUsdc(traderAccountId),
+        assertLe(
+            clearinghouse.balanceUsdc(traderAccount),
             traderSettlementBefore,
-            "Open-order slippage cleanup should not change trader settlement after escrow"
+            "Open-order slippage cleanup should not credit trader settlement after reservation"
         );
     }
 
     function test_CreditKeeperExecutionBounty_UsesCachedMarkWhenCurrentMarkIsStale() public {
-        bytes32 traderAccountId = bytes32(uint256(uint160(ALICE)));
+        address traderAccount = ALICE;
 
         _fundTrader(ALICE, 20_000e6);
-        _open(traderAccountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(traderAccount, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
 
-        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(traderAccountId);
-        uint64 carryTimestampBefore = engine.getPositionLastCarryTimestamp(traderAccountId);
+        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(traderAccount);
+        uint64 carryTimestampBefore = _lastCarryTimestamp(traderAccount);
+        _fundTrader(BOB, 1e6);
         vm.prank(address(router));
-        engine.creditKeeperExecutionBounty(ALICE, 1e6, 110_000_000, uint64(block.timestamp));
+        clearinghouse.lockReservedSettlement(BOB, 1e6);
+        vm.prank(address(router));
+        engine.creditBounty(BOB, ALICE, 1e6, 110_000_000, uint64(block.timestamp));
 
         assertEq(
-            engine.getPositionLastCarryTimestamp(traderAccountId),
+            _lastCarryTimestamp(traderAccount),
             uint64(block.timestamp),
             "Stale cached mark should still checkpoint carry before crediting settlement"
         );
         assertEq(engine.lastMarkPrice(), 110_000_000, "Refund cleanup should refresh the cached engine mark");
-        assertLt(
-            carryTimestampBefore, engine.getPositionLastCarryTimestamp(traderAccountId), "Carry clock should advance"
-        );
+        assertLt(carryTimestampBefore, _lastCarryTimestamp(traderAccount), "Carry clock should advance");
         assertGt(
-            clearinghouse.balanceUsdc(traderAccountId),
+            clearinghouse.balanceUsdc(traderAccount),
             traderSettlementBefore,
             "Validated stale helper credit should still reach settlement"
         );
     }
 
     function test_SlippageCloseForfeitsBountyToProtocol() public {
-        bytes32 accountId = bytes32(uint256(uint160(ALICE)));
-        bytes32 keeperAccountId = bytes32(uint256(uint160(KEEPER)));
+        address account = ALICE;
+        address keeperAccount = KEEPER;
         usdc.mint(ALICE, 400_500_000);
         vm.startPrank(ALICE);
         usdc.approve(address(clearinghouse), 400_500_000);
-        clearinghouse.deposit(accountId, 400_500_000);
+        clearinghouse.deposit(account, 400_500_000);
         vm.stopPrank();
 
         vm.prank(ALICE);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8, false);
-        bytes[] memory openPrice = new bytes[](1);
-        openPrice[0] = abi.encode(uint256(1e8));
+        bytes[] memory openPrice = _mockPythUpdateData(1e8);
+        vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
         router.executeOrder(1, openPrice);
 
         vm.prank(ALICE);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 0.8e8, true);
 
-        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccountId);
-        uint256 feesBefore = engine.accumulatedFeesUsdc();
-        bytes[] memory closePrice = new bytes[](1);
-        closePrice[0] = abi.encode(uint256(1e8));
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
+        uint256 feesBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        bytes[] memory closePrice = _mockPythUpdateData();
         vm.prank(KEEPER);
-        vm.roll(block.number + 1);
         router.executeOrder(2, closePrice);
 
         assertEq(
-            clearinghouse.balanceUsdc(keeperAccountId) - keeperSettlementBefore,
+            clearinghouse.balanceUsdc(keeperAccount) - keeperSettlementBefore,
             200_000,
             "Close slippage miss should still credit the clearer through the carry-aware keeper settlement path"
         );
         assertGe(
-            engine.accumulatedFeesUsdc() - feesBefore,
+            clearinghouse.balanceUsdc(engine.protocolTreasury()) - feesBefore,
             0,
             "Close slippage miss should not reduce accumulated protocol fees"
         );
     }
 
     function test_CreditKeeperExecutionBounty_RealizesCarryBeforeCreditingSettlement() public {
-        bytes32 keeperAccountId = bytes32(uint256(uint160(KEEPER)));
+        address keeperAccount = KEEPER;
 
         _fundTrader(KEEPER, 20_000e6);
-        _open(keeperAccountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(keeperAccount, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
         uint256 warpedTime = block.timestamp + 30 days;
         vm.warp(warpedTime);
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(warpedTime));
 
-        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccountId);
-        uint256 expectedCarry = PositionRiskAccountingLib.computePendingCarryUsdc(
-            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, 1e8, keeperSettlementBefore),
-            _riskParams().baseCarryBps,
-            30 days
-        );
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
+        uint256 expectedCarry = _expectedIndexedCarryUsdc(keeperAccount);
 
-        usdc.mint(address(clearinghouse), 1e6);
+        _fundTrader(BOB, 1e6);
         vm.prank(address(router));
-        engine.creditKeeperExecutionBounty(KEEPER, 1e6, 1e8, uint64(warpedTime));
+        clearinghouse.lockReservedSettlement(BOB, 1e6);
+        vm.prank(address(router));
+        engine.creditBounty(BOB, KEEPER, 1e6, 1e8, uint64(warpedTime));
 
         assertEq(
-            clearinghouse.balanceUsdc(keeperAccountId),
+            clearinghouse.balanceUsdc(keeperAccount),
             keeperSettlementBefore + 1e6 - expectedCarry,
             "Keeper execution bounty credit should realize carry before crediting settlement"
         );
     }
 
     function test_UntypedCloseRevertPaysClearerEvenWhenKeeperMarkIsStale() public {
-        bytes32 accountId = bytes32(uint256(uint160(ALICE)));
-        bytes32 keeperAccountId = bytes32(uint256(uint160(KEEPER)));
+        address account = ALICE;
+        address keeperAccount = KEEPER;
 
         _fundTrader(KEEPER, 20_000e6);
-        _open(keeperAccountId, CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8);
+        _open(keeperAccount, CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8);
 
         _fundTrader(ALICE, 20_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
 
         vm.prank(ALICE);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 1e8, true);
 
-        bytes32 positionMarginSlot = keccak256(abi.encode(accountId, uint256(1)));
+        bytes32 positionMarginSlot = keccak256(abi.encode(account, uint256(1)));
         vm.store(address(clearinghouse), positionMarginSlot, bytes32(uint256(0)));
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
 
-        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccountId);
-        uint64 carryTimestampBefore = engine.getPositionLastCarryTimestamp(keeperAccountId);
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(1e8));
-        vm.prank(KEEPER);
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
+        uint64 carryTimestampBefore = _lastCarryTimestamp(keeperAccount);
+        bytes[] memory priceData = _mockPythUpdateData(1e8);
+        vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
+        vm.prank(KEEPER);
         router.executeOrder(1, priceData);
 
         assertGt(
-            clearinghouse.balanceUsdc(keeperAccountId),
+            clearinghouse.balanceUsdc(keeperAccount),
             keeperSettlementBefore,
             "Failed-order clearer payout should still credit settlement when the cached mark is stale"
         );
         assertGe(
-            engine.getPositionLastCarryTimestamp(keeperAccountId),
+            _lastCarryTimestamp(keeperAccount),
             uint64(block.timestamp),
             "Stale-mark clearer payout should checkpoint carry before mutating the basis"
         );
-        assertLt(
-            carryTimestampBefore, engine.getPositionLastCarryTimestamp(keeperAccountId), "Carry clock should advance"
-        );
+        assertLt(carryTimestampBefore, _lastCarryTimestamp(keeperAccount), "Carry clock should advance");
     }
 
     function test_ProtocolInvalidationPaysClearerAndDoesNotRefundTrader() public {
         _fundTrader(ALICE, 10_000e6);
-        bytes32 traderAccountId = bytes32(uint256(uint160(ALICE)));
-        bytes32 keeperAccountId = bytes32(uint256(uint160(KEEPER)));
+        address traderAccount = ALICE;
+        address keeperAccount = KEEPER;
 
         vm.prank(ALICE);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
@@ -306,30 +293,30 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         stdstore.target(address(engine)).sig("degradedMode()").checked_write(true);
 
         (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(1);
-        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccountId);
-        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(traderAccountId);
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(1e8));
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
+        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(traderAccount);
+        bytes[] memory priceData = _mockPythUpdateData(1e8);
+        vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
         vm.prank(KEEPER);
         router.executeOrder(1, priceData);
 
         assertEq(
-            clearinghouse.balanceUsdc(keeperAccountId) - keeperSettlementBefore,
+            clearinghouse.balanceUsdc(keeperAccount) - keeperSettlementBefore,
             pending.executionBountyUsdc,
             "Protocol invalidation should pay the clearer so queue-head cleanup remains incentive compatible"
         );
         assertEq(
-            clearinghouse.balanceUsdc(traderAccountId) - traderSettlementBefore,
-            0,
-            "Protocol invalidation should not refund the trader once the reserved bounty funds the clearer cleanup"
+            traderSettlementBefore - clearinghouse.balanceUsdc(traderAccount),
+            pending.executionBountyUsdc,
+            "Protocol invalidation should debit only the already-reserved bounty"
         );
     }
 
     function test_UserInvalidPaysClearer() public {
         address eve = address(0xE223);
-        bytes32 eveAccount = bytes32(uint256(uint160(eve)));
-        bytes32 keeperAccountId = bytes32(uint256(uint160(KEEPER)));
+        address eveAccount = eve;
+        address keeperAccount = KEEPER;
 
         vm.startPrank(eve);
         usdc.mint(eve, 1e6);
@@ -338,15 +325,15 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 1e8, false);
         vm.stopPrank();
 
-        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccountId);
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(1e8));
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
+        bytes[] memory priceData = _mockPythUpdateData(1e8);
+        vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
         vm.prank(KEEPER);
         router.executeOrder(1, priceData);
 
         assertEq(
-            clearinghouse.balanceUsdc(keeperAccountId) - keeperSettlementBefore,
+            clearinghouse.balanceUsdc(keeperAccount) - keeperSettlementBefore,
             200_000,
             "User-invalid open should pay the clearer into clearinghouse custody"
         );
@@ -358,10 +345,18 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
     }
 
     function test_MarginDrainedByFeesTypedRevertMapsToClearerFull() public {
-        OrderRouterFailurePolicyHarness harness =
-            new OrderRouterFailurePolicyHarness(address(engine), address(engineLens), address(pool));
+        OrderRouterFailurePolicyHarness harness = new OrderRouterFailurePolicyHarness(
+            address(engine),
+            address(engineLens),
+            address(pool),
+            address(baseMockPyth),
+            _basePythFeedIds(),
+            _basePythWeights(),
+            _basePythBasePrices(),
+            _basePythInversions()
+        );
         CfdTypes.Order memory order = CfdTypes.Order({
-            accountId: bytes32(uint256(uint160(ALICE))),
+            account: ALICE,
             sizeDelta: 10_000e18,
             marginDelta: 100e6,
             targetPrice: 1e8,
@@ -372,7 +367,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
             isClose: false
         });
         bytes memory revertData = abi.encodeWithSelector(
-            ICfdEngineCore.CfdEngine__TypedOrderFailure.selector,
+            ICfdEngineTypes.CfdEngine__TypedOrderFailure.selector,
             CfdEnginePlanTypes.ExecutionFailurePolicyCategory.ProtocolStateInvalidated,
             uint8(CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES),
             false
@@ -386,27 +381,27 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
     }
 
     function test_UntypedCloseRevertPaysClearer() public {
-        bytes32 accountId = bytes32(uint256(uint160(ALICE)));
-        bytes32 keeperAccountId = bytes32(uint256(uint160(KEEPER)));
+        address account = ALICE;
+        address keeperAccount = KEEPER;
         _fundTrader(ALICE, 20_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
 
         vm.prank(ALICE);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 1e8, true);
 
-        bytes32 positionMarginSlot = keccak256(abi.encode(accountId, uint256(1)));
+        bytes32 positionMarginSlot = keccak256(abi.encode(account, uint256(1)));
         vm.store(address(clearinghouse), positionMarginSlot, bytes32(uint256(0)));
 
         uint256 traderWalletBefore = usdc.balanceOf(ALICE);
-        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccountId);
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(1e8));
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
+        bytes[] memory priceData = _mockPythUpdateData(1e8);
+        vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
         vm.prank(KEEPER);
         router.executeOrder(1, priceData);
 
         assertEq(
-            clearinghouse.balanceUsdc(keeperAccountId) - keeperSettlementBefore,
+            clearinghouse.balanceUsdc(keeperAccount) - keeperSettlementBefore,
             200_000,
             "Untyped close revert should keep the clearer-paid fallback"
         );
@@ -416,26 +411,26 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
     }
 
     function test_NonSlippageCloseTerminalFailureStillPaysClearer() public {
-        bytes32 accountId = bytes32(uint256(uint160(ALICE)));
-        bytes32 keeperAccountId = bytes32(uint256(uint160(KEEPER)));
+        address account = ALICE;
+        address keeperAccount = KEEPER;
         _fundTrader(ALICE, 20_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
 
         vm.prank(ALICE);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 1e8, true);
 
-        bytes32 positionMarginSlot = keccak256(abi.encode(accountId, uint256(1)));
+        bytes32 positionMarginSlot = keccak256(abi.encode(account, uint256(1)));
         vm.store(address(clearinghouse), positionMarginSlot, bytes32(uint256(0)));
 
-        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccountId);
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(1e8));
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
+        bytes[] memory priceData = _mockPythUpdateData(1e8);
+        vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
         vm.prank(KEEPER);
         router.executeOrder(1, priceData);
 
         assertEq(
-            clearinghouse.balanceUsdc(keeperAccountId) - keeperSettlementBefore,
+            clearinghouse.balanceUsdc(keeperAccount) - keeperSettlementBefore,
             200_000,
             "Non-slippage close terminal failures should stay on the clearer-paid path"
         );

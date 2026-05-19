@@ -2,6 +2,8 @@
 
 This document outlines the security assumptions, trust model, known limitations, and emergency procedures for the Plether protocol.
 
+The perps module has its own security model and audit packet. Use [`src/perps/SECURITY.md`](src/perps/SECURITY.md) and [`src/perps/PRE_AUDIT_GUIDE.md`](src/perps/PRE_AUDIT_GUIDE.md) for perps-specific assumptions, order-flow policy, trader claim handling, keeper bounty routing, and LP risk.
+
 ## Upgradeability
 
 All Plether contracts are **non-upgradeable**. Once deployed, the bytecode cannot be changed. This provides strong guarantees:

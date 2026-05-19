@@ -15,7 +15,7 @@ contract PerpOracleBoundaryInvariantTest is BasePerpInvariantTest {
     function setUp() public override {
         super.setUp();
 
-        handler = new PerpOracleHandler(usdc, engine, clearinghouse, router);
+        handler = new PerpOracleHandler(usdc, mockPyth, engine, clearinghouse, router);
         handler.seedPositions();
 
         bytes4[] memory selectors = new bytes4[](6);
@@ -55,18 +55,20 @@ contract PerpOracleBoundaryInvariantTest is BasePerpInvariantTest {
             return;
         }
 
+        uint256 expectedLiveLimit = engine.engineMarkStalenessLimit() < 300 ? engine.engineMarkStalenessLimit() : 300;
+        uint256 expectedMaxStaleness = engine.isOracleFrozen() ? engine.fadMaxStaleness() : expectedLiveLimit;
         assertEq(
             snapshot.maxMarkStaleness,
-            engine.isOracleFrozen() ? engine.fadMaxStaleness() : 300,
-            "House-pool snapshot freshness limit must follow frozen/unfrozen mode"
+            expectedMaxStaleness,
+            "House-pool snapshot freshness limit must follow frozen/live reconcile policy"
         );
     }
 
     function invariant_PositionViewsRespectCurrentFadMode() public view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
-            bytes32 accountId = bytes32(uint256(uint160(handler.actorAt(i))));
+            address account = handler.actorAt(i);
             AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
-                engineAccountLens.getAccountLedgerSnapshot(accountId);
+                engineAccountLens.getAccountLedgerSnapshot(account);
             if (!snapshot.hasPosition) {
                 continue;
             }

@@ -2,6 +2,8 @@
 
 This document provides the complete deployment procedure for the Plether protocol on Ethereum mainnet.
 
+This root guide covers the original synthetic-token, staking, router, oracle, yield-adapter, and INVAR deployment flow. For the perps deployment packet, use [`src/perps/DEPLOYMENT.md`](src/perps/DEPLOYMENT.md) alongside [`src/perps/CANONICAL_ENTRYPOINTS.md`](src/perps/CANONICAL_ENTRYPOINTS.md).
+
 ## Prerequisites
 
 ### Required Accounts & Keys

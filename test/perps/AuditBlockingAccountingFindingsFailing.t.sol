@@ -8,7 +8,7 @@ import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
 import {CfdEnginePlanTypes} from "../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdEnginePlanner} from "../../src/perps/CfdEnginePlanner.sol";
 import {CfdEngineProtocolLens} from "../../src/perps/CfdEngineProtocolLens.sol";
-import {CfdEngineSettlementModule} from "../../src/perps/CfdEngineSettlementModule.sol";
+import {CfdEngineSettlementSidecar} from "../../src/perps/CfdEngineSettlementSidecar.sol";
 import {CfdMath} from "../../src/perps/CfdMath.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
@@ -16,6 +16,8 @@ import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {PerpsPublicLens} from "../../src/perps/PerpsPublicLens.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
+import {IHousePool} from "../../src/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
@@ -23,6 +25,7 @@ import {CfdEnginePlanLib} from "../../src/perps/libraries/CfdEnginePlanLib.sol";
 import {CfdEngineSnapshotsLib} from "../../src/perps/libraries/CfdEngineSnapshotsLib.sol";
 import {MarginClearinghouseAccountingLib} from "../../src/perps/libraries/MarginClearinghouseAccountingLib.sol";
 import {SolvencyAccountingLib} from "../../src/perps/libraries/SolvencyAccountingLib.sol";
+import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -114,35 +117,37 @@ contract AuditBlockingAccountingFindingsFailing_SolvencyTiming is BasePerpTest {
         clearinghouse = new MarginClearinghouse(address(usdc));
 
         engine = new CfdEngineSolvencyTimingHarness(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
-        CfdEnginePlanner plannerModule = new CfdEnginePlanner();
-        CfdEngineSettlementModule settlementModule = new CfdEngineSettlementModule(address(engine));
-        CfdEngineAdmin adminModule = new CfdEngineAdmin(address(engine), address(this));
-        engine.setDependencies(address(plannerModule), address(settlementModule), address(adminModule));
+        CfdEnginePlanner planner = new CfdEnginePlanner();
+        CfdEngineSettlementSidecar settlementSidecar = new CfdEngineSettlementSidecar(address(engine));
+        CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
+        engine.setDependencies(address(planner), address(settlementSidecar), address(engineAdmin));
         _syncEngineAdmin();
         engineAccountLens = new CfdEngineAccountLens(address(engine));
         engineLens = new CfdEngineLens(address(engine));
         engineProtocolLens = new CfdEngineProtocolLens(address(engine));
         pool = new HousePool(address(usdc), address(engine));
+        baseMockPyth = new MockPyth();
+        bytes32[] memory baseFeedIds = _basePythFeedIds();
+        baseMockPyth.setAllPrices(baseFeedIds, int64(100_000_000), int32(-8), SETUP_TIMESTAMP);
 
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         router = new OrderRouter(
             address(engine),
             address(engineLens),
             address(pool),
-            address(0),
-            new bytes32[](0),
-            new uint256[](0),
-            new uint256[](0),
-            new bool[](0)
+            address(baseMockPyth),
+            baseFeedIds,
+            _basePythWeights(),
+            _basePythBasePrices(),
+            _basePythInversions()
         );
         _syncRouterAdmin();
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
         publicLens = new PerpsPublicLens(address(engineAccountLens), address(engine), address(router), address(pool));
 
         _bypassAllTimelocks();
@@ -155,13 +160,13 @@ contract AuditBlockingAccountingFindingsFailing_SolvencyTiming is BasePerpTest {
         _fundTrader(bullTraderB, 400_000e6);
         _fundTrader(bearTrader, 100_000e6);
 
-        bytes32 bullIdA = bytes32(uint256(uint160(bullTraderA)));
-        bytes32 bullIdB = bytes32(uint256(uint160(bullTraderB)));
-        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
+        address bullIdA = bullTraderA;
+        address bullIdB = bullTraderB;
+        address bearAccount = bearTrader;
 
         _open(bullIdA, CfdTypes.Side.BULL, 390_000e18, 6500e6, 1e8);
         _open(bullIdB, CfdTypes.Side.BULL, 10_000e18, 300_000e6, 1e8);
-        _open(bearId, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
+        _open(bearAccount, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
 
         vm.warp(block.timestamp + 180 days);
         vm.prank(address(router));
@@ -175,7 +180,7 @@ contract AuditBlockingAccountingFindingsFailing_SolvencyTiming is BasePerpTest {
             uint256 syncedBullMargin
         ) = harness.previewEffectiveAssetsWithoutMarginSync(
             CfdTypes.Order({
-                accountId: bullIdA,
+                account: bullIdA,
                 sizeDelta: 390_000e18,
                 marginDelta: 0,
                 targetPrice: 0,
@@ -208,13 +213,13 @@ contract AuditBlockingAccountingFindingsFailing_PartialCloseWithCommittedMargin 
     address constant KEEPER = address(0xC0FFEE);
 
     function test_H1_PartialCloseWithPendingOrderDoesNotRevert() public {
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
-        bytes32 counterId = bytes32(uint256(uint160(counterparty)));
+        address account = trader;
+        address counterAccount = counterparty;
 
         _fundTrader(trader, 10_000e6);
         _fundTrader(counterparty, 50_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
-        _open(counterId, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
+        _open(counterAccount, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 4000e6, type(uint256).max, false);
@@ -222,23 +227,23 @@ contract AuditBlockingAccountingFindingsFailing_PartialCloseWithCommittedMargin 
         uint256 committedBefore = _remainingCommittedMargin(1);
         assertGt(committedBefore, 0, "Should have committed margin from pending open order");
 
-        uint256 freeSettlement = _freeSettlementUsdc(accountId);
+        uint256 freeSettlement = _freeSettlementUsdc(account);
         assertLt(freeSettlement, 1100e6, "Free settlement should be small after committing margin");
 
-        _close(accountId, CfdTypes.Side.BULL, 50_000e18, 1.05e8);
+        _close(account, CfdTypes.Side.BULL, 50_000e18, 1.05e8);
 
-        (uint256 sizeAfter,,,,,,) = engine.positions(accountId);
+        (uint256 sizeAfter,,,,,,) = engine.positions(account);
         assertEq(sizeAfter, 50_000e18, "Partial close should leave half the position");
     }
 
     function test_H1_PartialCloseLossMustNotConsumeQueuedCommittedMargin() public {
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
-        bytes32 counterId = bytes32(uint256(uint160(counterparty)));
+        address account = trader;
+        address counterAccount = counterparty;
 
         _fundTrader(trader, 10_000e6);
         _fundTrader(counterparty, 50_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
-        _open(counterId, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
+        _open(counterAccount, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 4000e6, type(uint256).max, false);
@@ -246,7 +251,7 @@ contract AuditBlockingAccountingFindingsFailing_PartialCloseWithCommittedMargin 
         uint256 committedBefore = _remainingCommittedMargin(1);
         assertEq(committedBefore, 4000e6, "Committed margin should match order margin delta");
 
-        CfdEngine.ClosePreview memory preview = engineLens.previewClose(accountId, 50_000e18, 1.08e8);
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 50_000e18, 1.08e8);
 
         assertFalse(preview.valid, "Preview should reject a partial close that would need queued committed margin");
         assertEq(
@@ -271,48 +276,50 @@ contract AuditBlockingAccountingFindingsFailing_PartialCloseWithCommittedMargin 
 
 }
 
-contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
+contract AuditBlockingAccountingFindingsFailing_ReservedBounty is BasePerpTest {
 
     address trader = address(0xC200);
     address counterparty = address(0xBEA3);
     address constant KEEPER = address(0xC0FFEE);
 
-    function _setupFullyUtilized() internal returns (bytes32 accountId, bytes32 counterId) {
-        accountId = bytes32(uint256(uint160(trader)));
-        counterId = bytes32(uint256(uint160(counterparty)));
+    function _setupFullyUtilized() internal returns (address account, address counterAccount) {
+        account = trader;
+        counterAccount = counterparty;
 
         _fundTrader(trader, 5000e6);
         _fundTrader(counterparty, 50_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
-        _open(counterId, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
+        _open(counterAccount, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
 
-        assertEq(_freeSettlementUsdc(accountId), 0, "Trader should be fully utilized before commit");
+        assertEq(_freeSettlementUsdc(account), 0, "Trader should be fully utilized before commit");
     }
 
-    function _setupCloseBountyBacked() internal returns (bytes32 accountId, bytes32 counterId) {
-        accountId = bytes32(uint256(uint160(trader)));
-        counterId = bytes32(uint256(uint160(counterparty)));
+    function _setupCloseBountyBacked() internal returns (address account, address counterAccount) {
+        account = trader;
+        counterAccount = counterparty;
 
         _fundTrader(trader, 5001e6);
         _fundTrader(counterparty, 50_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
-        _open(counterId, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
+        _open(counterAccount, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
 
         assertEq(
-            _freeSettlementUsdc(accountId), 1e6, "Setup should leave one USDC of free settlement before close escrow"
+            _freeSettlementUsdc(account), 1e6, "Setup should leave one USDC of free settlement before close reservation"
         );
     }
 
     function test_H2_FullyUtilizedTraderCanSubmitCloseOrderAgainstPositionMargin() public {
-        (bytes32 accountId,) = _setupFullyUtilized();
+        (address account,) = _setupFullyUtilized();
 
-        (, uint256 marginBefore,,,,,) = engine.positions(accountId);
+        (, uint256 marginBefore,,,,,) = engine.positions(account);
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
 
-        (, uint256 marginAfter,,,,,) = engine.positions(accountId);
-        assertEq(_executionBountyReserve(1), 200_000, "Close order should still escrow the configured keeper bounty");
+        (, uint256 marginAfter,,,,,) = engine.positions(account);
+        assertEq(
+            _executionBountyReserve(1), 200_000, "Close order should still reservation the configured keeper bounty"
+        );
         assertEq(
             marginAfter,
             marginBefore - 200_000,
@@ -321,14 +328,14 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
     }
 
     function test_H2_HeadCloseOrderMustBeEconomicallyBackedAtCommit() public {
-        (bytes32 accountId,) = _setupCloseBountyBacked();
+        (address account,) = _setupCloseBountyBacked();
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
 
         uint64 headOrderId = router.nextExecuteId();
         uint256 reservedBounty = _executionBountyReserve(headOrderId);
-        uint256 freeSettlement = _freeSettlementUsdc(accountId);
+        uint256 freeSettlement = _freeSettlementUsdc(account);
 
         assertGe(
             reservedBounty + freeSettlement,
@@ -338,32 +345,36 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
         assertEq(
             _orderRecord(headOrderId).executionBountyUsdc,
             200_000,
-            "Close orders should escrow the full bounty in router custody"
+            "Close orders should reserve the full bounty in clearinghouse custody"
         );
     }
 
-    function test_H2_SlippageFailedHeadCloseMustSkipWithoutPayingKeeper() public {
+    function test_H2_SlippageFailedHeadCloseCreditsKeeperInClearinghouseOnly() public {
         _setupCloseBountyBacked();
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 90_000_000, true);
 
         uint256 keeperBalanceBefore = usdc.balanceOf(KEEPER);
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(1e8));
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(KEEPER);
 
-        vm.roll(block.number + 1);
+        bytes[] memory priceData = _mockPythUpdateData();
         vm.prank(KEEPER);
         router.executeOrder(1, priceData);
 
         uint256 keeperBounty = usdc.balanceOf(KEEPER) - keeperBalanceBefore;
-        assertEq(keeperBounty, 0, "Terminal slippage miss should not pay the keeper bounty");
+        assertEq(keeperBounty, 0, "Terminal slippage miss should not pay the keeper wallet");
+        assertEq(
+            clearinghouse.balanceUsdc(KEEPER) - keeperSettlementBefore,
+            200_000,
+            "Terminal slippage miss should credit the clearer in clearinghouse custody"
+        );
         assertEq(router.nextExecuteId(), 0, "Single queued slippage miss should clear the current head");
-        assertEq(_executionBountyReserve(1), 0, "Escrowed close bounty should be refunded on terminal slippage");
+        assertEq(_executionBountyReserve(1), 0, "Reserved close bounty should be consumed on terminal slippage");
     }
 
     function test_H2_ExpiredHeadCloseMustStillPayKeeper() public {
-        (bytes32 accountId,) = _setupCloseBountyBacked();
+        (address account,) = _setupCloseBountyBacked();
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
@@ -373,6 +384,9 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
             orderExecutionStalenessLimit: router.orderExecutionStalenessLimit(),
             liquidationStalenessLimit: router.liquidationStalenessLimit(),
             pythMaxConfidenceRatioBps: router.pythMaxConfidenceRatioBps(),
+            orderSettlementWindow: router.orderSettlementWindow(),
+            maxComponentPublishTimeDivergence: router.maxComponentPublishTimeDivergence(),
+            adverseConfidenceMultiplierBps: router.adverseConfidenceMultiplierBps(),
             minOpenNotionalUsdc: router.minOpenNotionalUsdc(),
             openOrderExecutionBountyBps: router.openOrderExecutionBountyBps(),
             minOpenOrderExecutionBountyUsdc: router.minOpenOrderExecutionBountyUsdc(),
@@ -389,9 +403,8 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
         vm.warp(block.timestamp + 61);
 
         uint256 keeperBalanceBefore = usdc.balanceOf(KEEPER);
-        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(bytes32(uint256(uint160(KEEPER))));
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(1e8));
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(KEEPER);
+        bytes[] memory priceData = _mockPythUpdateData();
 
         vm.prank(KEEPER);
         router.executeOrder(1, priceData);
@@ -401,43 +414,61 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
             keeperBounty, 0, "Expired head close should credit the clearer in clearinghouse custody, not the wallet"
         );
         assertEq(
-            clearinghouse.balanceUsdc(bytes32(uint256(uint160(KEEPER)))) - keeperSettlementBefore,
+            clearinghouse.balanceUsdc(KEEPER) - keeperSettlementBefore,
             200_000,
             "Expired head close should still pay the configured bounty to the clearer"
         );
 
         assertEq(
-            _freeSettlementUsdc(accountId),
+            _freeSettlementUsdc(account),
             800_000,
             "Only the committed close bounty slice should leave prefunded free settlement"
         );
     }
 
-    function test_H2_LiquidationWithQueuedCloseOrderTransfersOnlyEscrowedBounty() public {
-        (bytes32 accountId,) = _setupCloseBountyBacked();
+    function test_H2_LiquidationWithQueuedCloseOrderTransfersOnlyReservedBounty() public {
+        (address account,) = _setupCloseBountyBacked();
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
 
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 1.96e8);
+        assertTrue(preview.liquidatable, "Setup should be liquidatable at the execution price");
+        uint256 reservedSettlementBefore = clearinghouse.getLockedMarginBuckets(account).reservedSettlementUsdc;
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(KEEPER);
         uint256 routerBalanceBefore = usdc.balanceOf(address(router));
+        assertEq(reservedSettlementBefore, 200_000, "Queued close bounty should be reserved in clearinghouse custody");
+        assertEq(routerBalanceBefore, 0, "Router should not custody queued close bounties");
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(1.96e8));
 
+        vm.warp(block.timestamp + 1);
+        vm.roll(block.number + 1);
         vm.prank(KEEPER);
-        router.executeLiquidation(accountId, priceData);
+        router.executeLiquidation(account, priceData);
 
-        (uint256 sizeAfter,,,,,,) = engine.positions(accountId);
+        (uint256 sizeAfter,,,,,,) = engine.positions(account);
         assertEq(sizeAfter, 0, "Position should be liquidated");
 
         assertEq(
             usdc.balanceOf(address(router)),
-            routerBalanceBefore - 200_000,
-            "Router should transfer exactly the escrowed close bounty on liquidation"
+            routerBalanceBefore,
+            "Router should remain out of bounty custody on liquidation"
+        );
+        assertEq(
+            clearinghouse.getLockedMarginBuckets(account).reservedSettlementUsdc,
+            0,
+            "Queued close bounty reservation should be cleared on liquidation"
+        );
+        assertEq(
+            clearinghouse.balanceUsdc(KEEPER) - keeperSettlementBefore,
+            preview.keeperBountyUsdc,
+            "Keeper should receive only the liquidation bounty as a clearinghouse credit"
         );
 
         OrderRouter.OrderRecord memory record = _orderRecord(1);
-        assertEq(record.executionBountyUsdc, 0, "Deferred bounty should be cleared on liquidation");
+        assertEq(record.executionBountyUsdc, 0, "Reserved bounty should be cleared on liquidation");
     }
 
     function test_H2_OpenOrderStillRevertsWhenFullyUtilized() public {
@@ -450,30 +481,28 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
 
 }
 
-contract AuditBlockingAccountingFindingsFailing_StaleSeniorYield is BasePerpTest {
+contract AuditBlockingAccountingFindingsFailing_StaleSeniorCoupon is BasePerpTest {
 
     address seniorLp = address(0xA11CE);
     address juniorLp = address(0xB0B);
 
-    function test_L1_FinalizeSeniorRate_StaleMarkMustNotAccrueYield() public {
+    function test_L1_FinalizeSeniorRate_StaleMarkMustNotApplyRateChange() public {
         address trader = address(0x3333);
-        bytes32 traderId = bytes32(uint256(uint160(trader)));
+        address traderAccount = trader;
 
         _fundSenior(seniorLp, 200_000e6);
         _fundJunior(juniorLp, 200_000e6);
         _fundTrader(trader, 50_000e6);
-        _open(traderId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(traderAccount, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
-        uint256 unpaidBefore = pool.unpaidSeniorYield();
-
-        HousePool.PoolConfig memory config = _currentPoolConfig();
+        IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 1600;
         pool.proposePoolConfig(config);
         vm.warp(block.timestamp + 48 hours + 121);
-        vm.expectRevert(HousePool.HousePool__MarkPriceStale.selector);
+        vm.expectRevert(IHousePool.HousePool__MarkPriceStale.selector);
         pool.finalizePoolConfig();
 
-        assertEq(pool.unpaidSeniorYield(), unpaidBefore, "Rejected stale finalization should not accrue senior yield");
+        assertEq(pool.seniorRateBps(), 800, "Rejected stale finalization should leave the prior coupon rate in place");
     }
 
 }

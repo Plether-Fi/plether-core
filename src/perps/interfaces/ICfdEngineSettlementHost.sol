@@ -7,10 +7,12 @@ import {CfdEngineSettlementTypes} from "./CfdEngineSettlementTypes.sol";
 interface ICfdEngineSettlementHost {
 
     function clearinghouse() external view returns (address);
-    function vault() external view returns (address);
+    function pool() external view returns (address);
     function orderRouter() external view returns (address);
+    function protocolTreasury() external view returns (address);
+    function totalTraderClaimBalanceUsdc() external view returns (uint256);
 
-    function settlementApplyFundingAndMark(
+    function settlementApplyCarryAndMark(
         uint256 newMarkPrice,
         uint64 newMarkTime
     ) external;
@@ -25,26 +27,23 @@ interface ICfdEngineSettlementHost {
         int256 openInterestDelta,
         int256 entryNotionalDelta
     ) external;
-    function settlementConsumeDeferredTraderPayout(
-        bytes32 accountId,
+    function settlementConsumeTraderClaim(
+        address account,
         uint256 amountUsdc
     ) external;
-    function settlementRecordDeferredTraderPayout(
-        bytes32 accountId,
-        uint256 amountUsdc
-    ) external;
-    function settlementAccumulateFees(
+    function settlementRecordTraderClaim(
+        address account,
         uint256 amountUsdc
     ) external;
     function settlementAccumulateBadDebt(
         uint256 amountUsdc
     ) external;
     function settlementWritePosition(
-        bytes32 accountId,
+        address account,
         CfdEngineSettlementTypes.PositionState calldata position
     ) external;
     function settlementDeletePosition(
-        bytes32 accountId
+        address account
     ) external;
 
 }

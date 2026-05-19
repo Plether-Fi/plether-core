@@ -7,12 +7,14 @@ import {CfdTypes} from "../../../../src/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "../../../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../../../src/perps/OrderRouter.sol";
 import {ICfdEngineAdminHost} from "../../../../src/perps/interfaces/ICfdEngineAdminHost.sol";
+import {MockPyth} from "../../../mocks/MockPyth.sol";
 import {MockUSDC} from "../../../mocks/MockUSDC.sol";
 import {Test} from "forge-std/Test.sol";
 
 contract PerpOracleHandler is Test {
 
     MockUSDC public immutable usdc;
+    MockPyth public immutable mockPyth;
     CfdEngine public immutable engine;
     CfdEngineAdmin public immutable engineAdmin;
     MarginClearinghouse public immutable clearinghouse;
@@ -23,11 +25,13 @@ contract PerpOracleHandler is Test {
 
     constructor(
         MockUSDC _usdc,
+        MockPyth _mockPyth,
         CfdEngine _engine,
         MarginClearinghouse _clearinghouse,
         OrderRouter _router
     ) {
         usdc = _usdc;
+        mockPyth = _mockPyth;
         engine = _engine;
         engineAdmin = CfdEngineAdmin(_engine.admin());
         clearinghouse = _clearinghouse;
@@ -132,8 +136,8 @@ contract PerpOracleHandler is Test {
     function _ensureOpenPosition(
         address actor
     ) internal {
-        bytes32 accountId = bytes32(uint256(uint160(actor)));
-        (uint256 size,,,,,,) = engine.positions(accountId);
+        address account = actor;
+        (uint256 size,,,,,,) = engine.positions(account);
         if (size > 0) {
             return;
         }
@@ -142,12 +146,15 @@ contract PerpOracleHandler is Test {
         uint64 orderId = router.nextCommitId();
         vm.startPrank(actor);
         usdc.approve(address(clearinghouse), type(uint256).max);
-        clearinghouse.deposit(accountId, 25_000e6);
+        clearinghouse.deposit(account, 25_000e6);
         router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 10_000e6, 0, false);
         vm.stopPrank();
 
-        bytes[] memory empty;
-        router.executeOrder(orderId, empty);
+        vm.roll(block.number + 1);
+        vm.warp(block.timestamp + 1);
+        bytes[] memory updateData = new bytes[](1);
+        updateData[0] = abi.encode(uint256(1e8));
+        router.executeOrder{value: mockPyth.mockFee()}(orderId, updateData);
     }
 
 }

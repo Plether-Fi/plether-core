@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
-import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
+import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
+import {IHousePool} from "../../src/perps/interfaces/IHousePool.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -54,10 +54,10 @@ contract AuditC01_HwmInflation is BasePerpTest {
 
         // Open a BEAR position. BEAR profits when oracle price rises.
         // 100k tokens at $1.00, max profit = 100k * ($2 - $1) = $100k
-        // Vault has $150k, so solvency check passes.
+        // Pool has $150k, so solvency check passes.
         _fundTrader(address(0xAAA), 5000 * 1e6);
-        bytes32 traderId = bytes32(uint256(uint160(address(0xAAA))));
-        _open(traderId, CfdTypes.Side.BEAR, 100_000 * 1e18, 5000 * 1e6, 1e8);
+        address traderAccount = address(0xAAA);
+        _open(traderAccount, CfdTypes.Side.BEAR, 100_000 * 1e18, 5000 * 1e6, 1e8);
 
         // Price rises to $1.80 → BEAR unrealized PnL = 100k * 0.8 = $80k
         // Reconcile: distributable ≈ cash - mtm, loss ≈ $80k
@@ -111,7 +111,7 @@ contract AuditC02_KeeperFeeRefund is BasePerpTest {
 
         uint256 keeperBefore = keeper.balance;
 
-        bytes[] memory empty;
+        bytes[] memory empty = _mockPythUpdateData();
         vm.prank(keeper);
         router.executeOrder{value: 0}(1, empty);
 
@@ -131,7 +131,7 @@ contract AuditC03_MarginCheck is BasePerpTest {
 
     function test_C03_PostFeeMarginBelowImr() public {
         _fundTrader(alice, 100_000 * 1e6);
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        address aliceAccount = alice;
 
         // Open 200k BULL tokens at $1.00
         // Notional = $200k, MMR = 1% = $2000, explicit IMR = 1.5% = $3000
@@ -139,11 +139,11 @@ contract AuditC03_MarginCheck is BasePerpTest {
         // execFee = 4bps * $200k = $80 → pos.margin = $2990 < $3000
         // C-03 FIX: IMR check now uses pos.margin, so this correctly reverts
         uint256 depth = pool.totalAssets();
-        vm.expectRevert(abi.encodeWithSelector(ICfdEngine.CfdEngine__TypedOrderFailure.selector, 1, 6, false));
+        vm.expectRevert(abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__TypedOrderFailure.selector, 1, 6, false));
         vm.prank(address(router));
         engine.processOrderTyped(
             CfdTypes.Order({
-                accountId: aliceId,
+                account: aliceAccount,
                 sizeDelta: 200_000 * 1e18,
                 marginDelta: 3070 * 1e6,
                 targetPrice: 1e8,
@@ -185,8 +185,8 @@ contract AuditC04_StaleOracleMtmBypass is BasePerpTest {
         // Open a position so staleness path triggers (bullMax+bearMax > 0)
         address trader = address(0xAAA);
         _fundTrader(trader, 50_000 * 1e6);
-        bytes32 traderId = bytes32(uint256(uint160(trader)));
-        _open(traderId, CfdTypes.Side.BULL, 200_000 * 1e18, 20_000 * 1e6, 1e8);
+        address traderAccount = trader;
+        _open(traderAccount, CfdTypes.Side.BULL, 200_000 * 1e18, 20_000 * 1e6, 1e8);
 
         // Crash: BULL loses when oracle rises
         vm.prank(address(router));
@@ -209,24 +209,25 @@ contract AuditC04_StaleOracleMtmBypass is BasePerpTest {
         }
     }
 
-    function test_C04_YieldAccruesWithoutMtm() public {
+    function test_C04_StaleReconcileDoesNotCreateUnpaidDebt() public {
         _fundSenior(alice, 500_000 * 1e6);
         _fundJunior(bob, 500_000 * 1e6);
 
-        HousePool.PoolConfig memory config = _currentPoolConfig();
+        IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 800; // 8% APY
         pool.proposePoolConfig(config);
         _warpForward(48 hours + 1);
         pool.finalizePoolConfig();
 
         _fundTrader(address(0xBBB), 10_000 * 1e6);
-        bytes32 traderId = bytes32(uint256(uint160(address(0xBBB))));
-        _open(traderId, CfdTypes.Side.BULL, 50_000 * 1e18, 5000 * 1e6, 1e8);
+        address traderAccount = address(0xBBB);
+        _open(traderAccount, CfdTypes.Side.BULL, 50_000 * 1e18, 5000 * 1e6, 1e8);
 
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        uint256 yieldBefore = pool.unpaidSeniorYield();
+        uint256 seniorBeforeStale = pool.seniorPrincipal();
+        uint256 reconcileBeforeStale = pool.lastReconcileTime();
 
         // Make mark stale (warp 2 days to Friday 06:00, before FAD window starts at 19:00)
         _warpForward(2 days);
@@ -234,19 +235,17 @@ contract AuditC04_StaleOracleMtmBypass is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        uint256 yieldAfterStale = pool.unpaidSeniorYield();
+        uint256 seniorAfterStale = pool.seniorPrincipal();
+        assertEq(
+            pool.lastReconcileTime(), reconcileBeforeStale, "Stale reconcile should skip mark-dependent accounting"
+        );
+        assertGt(seniorAfterStale, seniorBeforeStale, "Coupon can checkpoint as a junior-funded NAV transfer");
 
         // Refresh mark
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
         vm.prank(address(juniorVault));
         pool.reconcile();
-
-        // C-04 BUG: yield accrued during stale period (line 304 runs before staleness check
-        // at line 310), but MTM distribution was skipped. This is a phantom liability.
-        // Yield should NOT accrue when the mark is stale — if MTM can't be evaluated,
-        // yield shouldn't be counted either. They must be atomic.
-        assertEq(yieldAfterStale, yieldBefore, "C-04: yield must not accrue when mark is stale and MTM is skipped");
     }
 
 }
@@ -287,8 +286,8 @@ contract AuditC05_ImpairedDeposit is BasePerpTest {
 
         // Create a deficit: BEAR trader profits, wiping junior and dipping into senior
         _fundTrader(address(0xAAA), 5000 * 1e6);
-        bytes32 traderId = bytes32(uint256(uint160(address(0xAAA))));
-        _open(traderId, CfdTypes.Side.BEAR, 100_000 * 1e18, 5000 * 1e6, 1e8);
+        address traderAccount = address(0xAAA);
+        _open(traderAccount, CfdTypes.Side.BEAR, 100_000 * 1e18, 5000 * 1e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1.8e8, uint64(block.timestamp));
@@ -324,15 +323,15 @@ contract AuditH01_MarkTimeLookback is BasePerpTest {
 
     function test_H01_UpdateMarkUsesPublishTime() public {
         _fundTrader(address(0xAAA), 10_000 * 1e6);
-        bytes32 traderId = bytes32(uint256(uint160(address(0xAAA))));
-        _open(traderId, CfdTypes.Side.BULL, 50_000 * 1e18, 5000 * 1e6, 1e8);
+        address traderAccount = address(0xAAA);
+        _open(traderAccount, CfdTypes.Side.BULL, 50_000 * 1e18, 5000 * 1e6, 1e8);
 
         _warpForward(50);
 
         // H-01 FIX: engine.updateMarkPrice now uses publishTime, not block.timestamp
         uint64 vaaTime = uint64(block.timestamp) - 30;
         vm.prank(address(router));
-        vm.expectRevert(CfdEngine.CfdEngine__MarkPriceOutOfOrder.selector);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__MarkPriceOutOfOrder.selector);
         engine.updateMarkPrice(0.8e8, vaaTime);
     }
 
@@ -352,17 +351,17 @@ contract AuditH02_WithdrawBlocked is BasePerpTest {
 
     function test_H02_WithdrawBlockedWithAnyPosition() public {
         _fundTrader(alice, 100_000 * 1e6);
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        address aliceAccount = alice;
 
         // Open a small position: 50k tokens, $1000 margin (well above IMR)
         // Notional = $50k, IMR = max(1.5% * $50k, $5) = $750
-        _open(aliceId, CfdTypes.Side.BULL, 50_000 * 1e18, 1000 * 1e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.BULL, 50_000 * 1e18, 1000 * 1e6, 1e8);
 
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertGt(size, 0);
 
-        uint256 balance = clearinghouse.balanceUsdc(aliceId);
-        uint256 locked = clearinghouse.lockedMarginUsdc(aliceId);
+        uint256 balance = clearinghouse.balanceUsdc(aliceAccount);
+        uint256 locked = clearinghouse.lockedMarginUsdc(aliceAccount);
         uint256 freeBalance = balance - locked;
         assertGt(freeBalance, 90_000 * 1e6, "Alice has ~$99k free but can't touch it");
 
@@ -370,7 +369,7 @@ contract AuditH02_WithdrawBlocked is BasePerpTest {
         // Instead, checkWithdraw reverts for ANY size > 0, trapping all excess collateral.
         uint256 aliceBalanceBefore = usdc.balanceOf(alice);
         vm.prank(alice);
-        clearinghouse.withdraw(aliceId, 1e6);
+        clearinghouse.withdraw(aliceAccount, 1e6);
         assertEq(usdc.balanceOf(alice), aliceBalanceBefore + 1e6, "H-02: should withdraw $1 of free equity");
     }
 
@@ -386,13 +385,13 @@ contract AuditH03_DustPosition is BasePerpTest {
 
     function test_H03_PartialCloseAllowsResidualDustPosition() public {
         _fundTrader(alice, 50_000 * 1e6);
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        address aliceAccount = alice;
 
         // Open 50k tokens at $1.00: notional = $50k
         // IMR = max(1.5% * $50k, $5) = $750. Use $800 margin.
         // execFee = 6bps * $50k = $30. pos.margin = $800 - $30 = $770
         uint256 posSize = 50_000 * 1e18;
-        _open(aliceId, CfdTypes.Side.BULL, posSize, 800 * 1e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.BULL, posSize, 800 * 1e6, 1e8);
 
         // Close 99.5%: currently leaves a small residual position rather than reverting.
         uint256 closeSize = (posSize * 995) / 1000;
@@ -400,7 +399,7 @@ contract AuditH03_DustPosition is BasePerpTest {
         vm.prank(address(router));
         engine.processOrderTyped(
             CfdTypes.Order({
-                accountId: aliceId,
+                account: aliceAccount,
                 sizeDelta: closeSize,
                 marginDelta: 0,
                 targetPrice: 0,
@@ -415,7 +414,7 @@ contract AuditH03_DustPosition is BasePerpTest {
             uint64(block.timestamp)
         );
 
-        (uint256 remainingSize, uint256 remainingMargin,,,,,) = engine.positions(aliceId);
+        (uint256 remainingSize, uint256 remainingMargin,,,,,) = engine.positions(aliceAccount);
         assertEq(remainingSize, posSize - closeSize, "Partial close should leave only the dust residual size");
         assertLt(remainingMargin, 5e6, "Residual dust margin should remain economically tiny after the partial close");
     }
@@ -458,10 +457,10 @@ contract AuditN01_TransferBypassesCooldown is BasePerpTest {
 }
 
 // ============================================================
-// H-04: Unpaid Senior Yield Not Scaled on Withdrawal
+// H-04: Senior coupon accounting on withdrawal
 // ============================================================
 
-contract AuditH04_UnpaidYieldNotScaled is BasePerpTest {
+contract AuditH04_SeniorCouponWithdrawalAccounting is BasePerpTest {
 
     address alice = address(0x111);
     address bob = address(0x222);
@@ -474,12 +473,12 @@ contract AuditH04_UnpaidYieldNotScaled is BasePerpTest {
         return 0;
     }
 
-    function test_H04_UnpaidYieldNotReduced() public {
+    function test_H04_UnpaidYieldDebtRemovedAndHwmScales() public {
         _fundSenior(alice, 500_000 * 1e6);
         _fundSenior(bob, 500_000 * 1e6);
         _fundJunior(address(this), 2_000_000 * 1e6);
 
-        HousePool.PoolConfig memory config = _currentPoolConfig();
+        IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 800; // 8% APY
         pool.proposePoolConfig(config);
         _warpForward(48 hours + 1);
@@ -489,32 +488,22 @@ contract AuditH04_UnpaidYieldNotScaled is BasePerpTest {
         vm.prank(address(seniorVault));
         pool.reconcile();
 
-        uint256 unpaidBefore = pool.unpaidSeniorYield();
-        assertGt(unpaidBefore, 0, "Yield should have accrued");
-
         uint256 seniorPrincipalBefore = pool.seniorPrincipal();
+        uint256 hwmBefore = pool.seniorHighWaterMark();
+        assertGt(seniorPrincipalBefore, 1_000_000 * 1e6, "Coupon should be paid directly into senior principal");
 
         uint256 withdrawAmount = seniorVault.maxWithdraw(alice) / 2;
         if (withdrawAmount == 0) {
             return;
         }
 
-        _warpForward(1 hours);
         vm.prank(alice);
         seniorVault.withdraw(withdrawAmount, alice, alice);
 
-        uint256 unpaidAfter = pool.unpaidSeniorYield();
         uint256 seniorPrincipalAfter = pool.seniorPrincipal();
+        uint256 expectedHwm = (hwmBefore * seniorPrincipalAfter) / seniorPrincipalBefore;
 
-        // H-04 BUG: unpaidSeniorYield unchanged after ~50% capital withdrawal.
-        uint256 principalRatio = (seniorPrincipalAfter * 1e18) / seniorPrincipalBefore;
-        uint256 expectedUnpaid = (unpaidBefore * principalRatio) / 1e18;
-
-        assertLe(
-            unpaidAfter,
-            expectedUnpaid + (expectedUnpaid / 100),
-            "H-04: unpaidSeniorYield must scale down proportionally on withdrawal"
-        );
+        assertEq(pool.seniorHighWaterMark(), expectedHwm, "Senior HWM should scale with the withdrawn principal");
     }
 
 }

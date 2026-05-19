@@ -38,33 +38,35 @@ library CfdEnginePlanTypes {
         uint256 openInterest;
         uint256 entryNotional;
         uint256 totalMargin;
+        uint256 borrowBaseUsdc;
+        uint256 carryIndex;
     }
 
     struct RawSnapshot {
         CfdTypes.Position position;
-        bytes32 accountId;
+        address account;
 
         uint256 currentTimestamp;
         uint256 lastMarkPrice;
         uint64 lastMarkTime;
+        uint256 positionBorrowBaseUsdc;
+        uint256 positionLastCarryIndex;
 
         SideSnapshot bullSide;
         SideSnapshot bearSide;
 
-        uint256 vaultAssetsUsdc;
-        uint256 vaultCashUsdc;
+        uint256 poolAssetsUsdc;
+        uint256 poolCashUsdc;
 
         IMarginClearinghouse.AccountUsdcBuckets accountBuckets;
         IMarginClearinghouse.LockedMarginBuckets lockedBuckets;
 
         uint64[] marginReservationIds;
 
-        uint256 accumulatedFeesUsdc;
         uint256 accumulatedBadDebtUsdc;
         uint256 unsettledCarryUsdc;
-        uint256 totalDeferredTraderCreditUsdc;
-        uint256 totalDeferredKeeperCreditUsdc;
-        uint256 deferredTraderCreditForAccount;
+        uint256 totalTraderClaimBalanceUsdc;
+        uint256 traderClaimBalanceForAccount;
         bool degradedMode;
 
         uint256 capPrice;
@@ -110,13 +112,13 @@ library CfdEnginePlanTypes {
 
         uint256 sideOiIncrease;
         int256 sideEntryNotionalDelta;
-        int256 sideEntryFundingContribution;
+        int256 sideEntryCarryContribution;
         uint256 sideMaxProfitIncrease;
 
         int256 tradeCostUsdc;
         uint256 marginDeltaUsdc;
         int256 netMarginChange;
-        uint256 vaultRebatePayoutUsdc;
+        uint256 poolRebatePayoutUsdc;
 
         uint256 executionFeeUsdc;
         uint256 pendingCarryUsdc;
@@ -124,7 +126,7 @@ library CfdEnginePlanTypes {
         uint256 sideTotalMarginBefore;
         uint256 sideTotalMarginAfterOpen;
 
-        bytes32 accountId;
+        address account;
         uint256 sizeDelta;
         uint256 price;
     }
@@ -172,16 +174,17 @@ library CfdEnginePlanTypes {
 
         uint256 freshTraderPayoutUsdc;
         bool freshPayoutIsImmediate;
-        bool freshPayoutIsDeferred;
-        uint256 existingDeferredConsumedUsdc;
-        uint256 existingDeferredRemainingUsdc;
-        uint256 deferredFeeRecoveryUsdc;
+        bool freshPayoutCreatesClaim;
+        uint256 existingTraderClaimConsumedUsdc;
+        uint256 existingTraderClaimRemainingUsdc;
+        uint256 traderClaimFeeRecoveryUsdc;
 
         CfdEngineSettlementLib.CloseSettlementResult lossResult;
         MarginClearinghouseAccountingLib.SettlementConsumption lossConsumption;
         uint256 syncMarginQueueAmount;
 
         uint256 executionFeeUsdc;
+        uint256 protocolFeeTopUpUsdc;
         uint256 badDebtUsdc;
         uint256 pendingCarryUsdc;
 
@@ -190,7 +193,7 @@ library CfdEnginePlanTypes {
 
         SolvencyPreview solvency;
 
-        bytes32 accountId;
+        address account;
         uint256 sizeDelta;
         uint256 price;
         int256 realizedPnlUsdc;
@@ -226,9 +229,9 @@ library CfdEnginePlanTypes {
         uint256 settlementRetainedUsdc;
         uint256 freshTraderPayoutUsdc;
         bool freshPayoutIsImmediate;
-        bool freshPayoutIsDeferred;
-        uint256 existingDeferredConsumedUsdc;
-        uint256 existingDeferredRemainingUsdc;
+        bool freshPayoutCreatesClaim;
+        uint256 existingTraderClaimConsumedUsdc;
+        uint256 existingTraderClaimRemainingUsdc;
 
         uint256 syncMarginQueueAmount;
 
@@ -237,7 +240,7 @@ library CfdEnginePlanTypes {
 
         SolvencyPreview solvency;
 
-        bytes32 accountId;
+        address account;
         uint256 price;
     }
 

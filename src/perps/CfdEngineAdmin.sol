@@ -153,6 +153,9 @@ contract CfdEngineAdmin is Ownable {
         if (riskParams_.initMarginBps > 10_000 || riskParams_.fadMarginBps > 10_000) {
             revert CfdEngineAdmin__InvalidRiskParams();
         }
+        if (riskParams_.baseCarryBps > 100_000) {
+            revert CfdEngineAdmin__InvalidRiskParams();
+        }
         if (riskParams_.minBountyUsdc == 0 || riskParams_.bountyBps == 0) {
             revert CfdEngineAdmin__InvalidRiskParams();
         }

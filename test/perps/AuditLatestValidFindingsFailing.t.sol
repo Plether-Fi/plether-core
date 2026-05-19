@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {IOrderRouterErrors} from "../../src/perps/interfaces/IOrderRouterErrors.sol";
+import {IPletherOracle} from "../../src/perps/interfaces/IPletherOracle.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
@@ -46,7 +47,7 @@ contract AuditLatestValidFindingsFailing_Mev is BasePerpTest {
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         feedIds.push(FEED_A);
         feedIds.push(FEED_B);
@@ -66,7 +67,6 @@ contract AuditLatestValidFindingsFailing_Mev is BasePerpTest {
             new bool[](2)
         );
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
         _bootstrapSeededLifecycle();
@@ -88,7 +88,7 @@ contract AuditLatestValidFindingsFailing_Mev is BasePerpTest {
         bytes[] memory updateData = new bytes[](1);
         updateData[0] = "";
 
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 13));
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__MevDetected.selector);
         router.executeOrder(1, updateData);
     }
 
@@ -103,7 +103,7 @@ contract AuditLatestValidFindingsFailing_Mev is BasePerpTest {
 
         bytes[] memory updateData = new bytes[](1);
         updateData[0] = "";
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 13));
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         router.executeOrder(1, updateData);
     }
 

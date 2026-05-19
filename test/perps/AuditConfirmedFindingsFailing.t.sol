@@ -4,17 +4,19 @@ pragma solidity 0.8.33;
 // Audit-history file: tests prefixed with `obsolete_` preserve superseded findings for context only.
 // They are intentionally not statements about the live carry model or current accounting semantics.
 
-import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
-import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
 import {ICfdEngineAdminHost} from "../../src/perps/interfaces/ICfdEngineAdminHost.sol";
-import {ICfdVault} from "../../src/perps/interfaces/ICfdVault.sol";
+import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
+import {IHousePool} from "../../src/perps/interfaces/IHousePool.sol";
+import {IOrderRouter} from "../../src/perps/interfaces/IOrderRouter.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
+import {IOrderRouterErrors} from "../../src/perps/interfaces/IOrderRouterErrors.sol";
+import {IPletherOracle} from "../../src/perps/interfaces/IPletherOracle.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
@@ -44,7 +46,7 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         feedIds.push(FEED_A);
         feedIds.push(FEED_B);
@@ -64,7 +66,6 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
             new bool[](2)
         );
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
         _bootstrapSeededLifecycle();
@@ -74,7 +75,7 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
         vm.deal(keeper, 1 ether);
     }
 
-    function test_C1_ExpiredOpenBatchExecutionRefundsUserNotKeeper() public {
+    function test_C1_ExpiredOpenBatchExecutionPaysClearerFromReservedBounty() public {
         uint256 t0 = 2_000_000_000;
         vm.warp(t0);
         vm.roll(100);
@@ -89,8 +90,7 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
 
         vm.warp(t0 + 61);
         vm.roll(200);
-        mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), t0 + 61);
-        mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), t0 + 61);
+        mockPyth.setAllUniquePrices(feedIds, int64(100_000_000), 0, int32(-8), t0 + 1, t0);
 
         uint256 keeperBalanceBefore = _settlementBalance(keeper);
         uint256 aliceBalanceBefore = _settlementBalance(alice);
@@ -107,13 +107,13 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
             "Expired open orders should pay the clearer so bad head orders remain economical to prune"
         );
         assertEq(
-            _settlementBalance(alice) - aliceBalanceBefore,
-            0,
-            "Expired open orders should not refund the reserved bounty to the submitting trader"
+            aliceBalanceBefore - _settlementBalance(alice),
+            pending.executionBountyUsdc,
+            "Expired open orders should consume the submitting trader's reserved bounty"
         );
     }
 
-    function test_C1_BatchMixedSuccessDoesNotRewardExpiredOpenFailure() public {
+    function test_C1_BatchMixedExpiredAndSuccessPaysReservedBounties() public {
         _fundTrader(alice, 50_000e6);
 
         uint256 t0 = 2_000_000_000;
@@ -136,8 +136,7 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
 
         vm.warp(t0 + 61);
         vm.roll(300);
-        mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), t0 + 61);
-        mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), t0 + 61);
+        mockPyth.setAllUniquePrices(feedIds, int64(100_000_000), 0, int32(-8), t0 + 11, t0);
 
         (IOrderRouterAccounting.PendingOrderView memory firstPending, uint64 nextAfterFirst) =
             router.getPendingOrderView(1);
@@ -154,11 +153,11 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
         assertEq(
             _settlementBalance(keeper) - keeperUsdcBefore,
             400_000,
-            "Batch execution should only compensate the clearer for the successful queued order, not the expired open head"
+            "Batch execution should compensate the clearer from both reserved order bounties"
         );
-        assertGt(firstPending.executionBountyUsdc, 0, "Expired open should still have escrowed a positive bounty");
+        assertGt(firstPending.executionBountyUsdc, 0, "Expired open should still have reserved a positive bounty");
         assertGt(
-            secondPending.executionBountyUsdc, 0, "Queued successor open should still have escrowed a positive bounty"
+            secondPending.executionBountyUsdc, 0, "Queued successor open should still have reserved a positive bounty"
         );
     }
 
@@ -179,7 +178,7 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
         vm.warp(1001);
         vm.roll(block.number + 1);
         vm.prank(keeper);
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 10));
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         router.executeOrder(1, updateData);
 
         assertEq(keeper.balance, keeperBalanceBefore, "Keeper should not collect fee when cancelling a stale order");
@@ -216,7 +215,7 @@ contract AuditConfirmedFindingsFailing_OutOfOrderMarkCancellation is BasePerpTes
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         feedIds.push(FEED_A);
         feedIds.push(FEED_B);
@@ -236,7 +235,6 @@ contract AuditConfirmedFindingsFailing_OutOfOrderMarkCancellation is BasePerpTes
             new bool[](2)
         );
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
         _bootstrapSeededLifecycle();
@@ -266,7 +264,7 @@ contract AuditConfirmedFindingsFailing_OutOfOrderMarkCancellation is BasePerpTes
         vm.warp(1025);
         vm.roll(101);
         vm.prank(keeper);
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 9));
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__MarkPriceOutOfOrder.selector);
         router.executeOrder(1, updateData);
 
         assertEq(router.nextExecuteId(), 1, "Out-of-order keeper input must not consume the order");
@@ -296,7 +294,7 @@ contract AuditConfirmedFindingsFailing_OutOfOrderMarkCancellation is BasePerpTes
         vm.warp(1025);
         vm.roll(101);
         vm.prank(keeper);
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 9));
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__MarkPriceOutOfOrder.selector);
         router.executeOrderBatch(2, updateData);
 
         assertEq(router.nextExecuteId(), 1, "Batch execution must not burn queued orders on out-of-order marks");
@@ -317,7 +315,7 @@ contract AuditConfirmedFindingsFailing_HwmRouteConsistency is BasePerpTest {
         return 0;
     }
 
-    function test_M1_PostWipeoutRecapPathMustMatchDepositPathHwmSemantics() public {
+    function test_M1_PostWipeoutRequiresExplicitRecapForHwmReset() public {
         uint256 seedAssets = 50_000e6;
         uint256 recapAmount = 10_000e6;
         address seed = address(0xBEEF);
@@ -333,41 +331,20 @@ contract AuditConfirmedFindingsFailing_HwmRouteConsistency is BasePerpTest {
         usdc.mint(address(seniorVault), recapAmount);
         vm.startPrank(address(seniorVault));
         usdc.approve(address(pool), recapAmount);
+        vm.expectRevert(IHousePool.HousePool__SeniorImpaired.selector);
         pool.depositSenior(recapAmount);
         vm.stopPrank();
 
-        uint256 depositRouteHwm = pool.seniorHighWaterMark();
-        assertEq(depositRouteHwm, recapAmount, "Deposit route should establish the baseline post-wipeout HWM");
-
-        HousePool recapPool = new HousePool(address(usdc), address(engine));
-        TrancheVault recapSeniorVault =
-            new TrancheVault(IERC20(address(usdc)), address(recapPool), true, "Plether Senior LP", "seniorUSDC");
-        TrancheVault recapJuniorVault =
-            new TrancheVault(IERC20(address(usdc)), address(recapPool), false, "Plether Junior LP", "juniorUSDC");
-        recapPool.setSeniorVault(address(recapSeniorVault));
-        recapPool.setJuniorVault(address(recapJuniorVault));
-
-        usdc.mint(address(this), seedAssets);
-        usdc.approve(address(recapPool), seedAssets);
-        recapPool.initializeSeedPosition(true, seedAssets, seed);
-
-        usdc.burn(address(recapPool), recapPool.totalAssets());
-        vm.prank(address(recapJuniorVault));
-        recapPool.reconcile();
-
-        usdc.mint(address(recapPool), recapAmount);
+        usdc.mint(address(pool), recapAmount);
         vm.prank(address(engine));
-        recapPool.recordClaimantInflow(
-            recapAmount, ICfdVault.ClaimantInflowKind.Recapitalization, ICfdVault.ClaimantInflowCashMode.CashArrived
+        pool.recordClaimantInflow(
+            recapAmount, IHousePool.ClaimantInflowKind.Recapitalization, IHousePool.ClaimantInflowCashMode.CashArrived
         );
-        vm.prank(address(recapJuniorVault));
-        recapPool.reconcile();
+        vm.prank(address(juniorVault));
+        pool.reconcile();
 
-        assertEq(
-            recapPool.seniorHighWaterMark(),
-            depositRouteHwm,
-            "Governance recap and direct deposit should share the same post-wipeout HWM semantics"
-        );
+        assertEq(pool.seniorPrincipal(), recapAmount, "Explicit recapitalization should restore senior principal");
+        assertEq(pool.seniorHighWaterMark(), recapAmount, "Explicit recapitalization should reset the HWM");
     }
 
 }
@@ -382,11 +359,12 @@ contract AuditConfirmedFindingsFailing_TrancheCooldownGrief is BasePerpTest {
 
         vm.warp(block.timestamp + 50 minutes);
 
-        usdc.mint(attacker, 1);
+        uint256 minimumDeposit = pool.minTrancheDepositUsdc();
+        usdc.mint(attacker, minimumDeposit);
         vm.startPrank(attacker);
-        usdc.approve(address(juniorVault), 1);
+        usdc.approve(address(juniorVault), minimumDeposit);
         vm.expectRevert(TrancheVault.TrancheVault__ThirdPartyDepositForExistingHolder.selector);
-        juniorVault.deposit(1, alice);
+        juniorVault.deposit(minimumDeposit, alice);
         vm.stopPrank();
     }
 
@@ -452,20 +430,20 @@ contract AuditConfirmedFindingsFailing_LegacySpreadReserve is BasePerpTest {
         _fundTrader(bullTrader, 20_000e6);
         _fundTrader(bearTrader, 100_000e6);
 
-        bytes32 bullId = bytes32(uint256(uint160(bullTrader)));
-        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
+        address bullAccount = bullTrader;
+        address bearAccount = bearTrader;
 
-        _open(bullId, CfdTypes.Side.BULL, 400_000e18, 10_000e6, 1e8);
-        _open(bearId, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
+        _open(bullAccount, CfdTypes.Side.BULL, 400_000e18, 10_000e6, 1e8);
+        _open(bearAccount, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
 
         vm.warp(block.timestamp + 180 days);
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
         (uint256 bullSize, uint256 bullMargin, uint256 bullEntryPrice,, CfdTypes.Side bullSide,,) =
-            engine.positions(bullId);
+            engine.positions(bullAccount);
         (uint256 bearSize, uint256 bearMargin, uint256 bearEntryPrice,, CfdTypes.Side bearSide,,) =
-            engine.positions(bearId);
+            engine.positions(bearAccount);
 
         CfdTypes.Position memory bullPos = CfdTypes.Position({
             size: bullSize,
@@ -498,7 +476,7 @@ contract AuditConfirmedFindingsFailing_LegacySpreadReserve is BasePerpTest {
 
         uint256 bal = usdc.balanceOf(address(pool));
         uint256 maxLiability = _sideMaxProfit(CfdTypes.Side.BULL);
-        uint256 pendingFees = engine.accumulatedFeesUsdc();
+        uint256 pendingFees = clearinghouse.balanceUsdc(engine.protocolTreasury());
         uint256 expectedReserved = maxLiability + pendingFees + uint256(cappedLegacySpread);
         uint256 expectedFree = bal > expectedReserved ? bal - expectedReserved : 0;
 
@@ -526,14 +504,14 @@ contract AuditConfirmedFindingsFailing_EntryNotionalRounding is BasePerpTest {
         });
     }
 
-    function test_H2_ScalingLargePositionWithDustIncreaseUsesTypedFailure() public {
-        bytes32 accountId = bytes32(uint256(1));
-        _fundTrader(address(uint160(uint256(accountId))), 10_000e6);
+    function test_H2_ScalingLargePositionWithDustIncreaseUsesResultingNotionalFloor() public {
+        address account = address(uint160(1));
+        _fundTrader(account, 10_000e6);
 
         vm.startPrank(address(router));
         engine.processOrderTyped(
             CfdTypes.Order({
-                accountId: accountId,
+                account: account,
                 sizeDelta: 1000e18,
                 marginDelta: 2000e6,
                 targetPrice: 150_000_001,
@@ -548,11 +526,9 @@ contract AuditConfirmedFindingsFailing_EntryNotionalRounding is BasePerpTest {
             uint64(block.timestamp)
         );
 
-        uint256 depth = pool.totalAssets();
-        vm.expectRevert(abi.encodeWithSelector(ICfdEngine.CfdEngine__TypedOrderFailure.selector, 1, 3, false));
         engine.processOrderTyped(
             CfdTypes.Order({
-                accountId: accountId,
+                account: account,
                 sizeDelta: 1,
                 marginDelta: 0,
                 targetPrice: 150_000_000,
@@ -563,10 +539,18 @@ contract AuditConfirmedFindingsFailing_EntryNotionalRounding is BasePerpTest {
                 isClose: false
             }),
             150_000_000,
-            depth,
+            pool.totalAssets(),
             uint64(block.timestamp)
         );
         vm.stopPrank();
+
+        (uint256 size,, uint256 entryPrice,,,,) = engine.positions(account);
+        assertEq(size, 1000e18 + 1, "Same-side dust increase should grow an already-valid live position");
+        assertEq(
+            _sideEntryNotional(CfdTypes.Side.BULL),
+            size * entryPrice,
+            "Side entry notional must stay aligned with the resulting live position"
+        );
     }
 
 }
@@ -590,18 +574,18 @@ contract AuditConfirmedFindingsFailing_OpenSkewCap is BasePerpTest {
         address bearTrader = address(0xBEA2);
         address bullTrader = address(0xB011);
 
-        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
-        bytes32 bullId = bytes32(uint256(uint160(bullTrader)));
+        address bearAccount = bearTrader;
+        address bullAccount = bullTrader;
 
         _fundTrader(bearTrader, 60_000e6);
         _fundTrader(bullTrader, 120_000e6);
 
-        _open(bearId, CfdTypes.Side.BEAR, 100_000e18, 20_000e6, 1e8);
-        _open(bullId, CfdTypes.Side.BULL, 100_000e18, 20_000e6, 1e8);
+        _open(bearAccount, CfdTypes.Side.BEAR, 100_000e18, 20_000e6, 1e8);
+        _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 20_000e6, 1e8);
 
-        _open(bullId, CfdTypes.Side.BULL, 100_000e18, 20_000e6, 1e8);
+        _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 20_000e6, 1e8);
 
-        (uint256 bullSize,,,,,,) = engine.positions(bullId);
+        (uint256 bullSize,,,,,,) = engine.positions(bullAccount);
         assertEq(bullSize, 200_000e18, "Open-path skew cap should use the intended post-trade skew");
     }
 
@@ -612,18 +596,18 @@ contract AuditConfirmedFindingsFailing_KeeperReserveLiquidation is BasePerpTest 
     address trader = address(0xA11CE);
 
     function test_C4_KeeperFeeReserveMustReduceLiquidationEquity() public {
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         _fundTrader(trader, 200e6);
 
-        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 160e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 10_000e18, 160e6, 1e8);
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 0, true);
 
-        uint256 vaultDepth = pool.totalAssets();
+        uint256 poolDepth = pool.totalAssets();
         vm.prank(address(router));
-        vm.expectRevert(CfdEngine.CfdEngine__PositionIsSolvent.selector);
-        engine.liquidatePosition(accountId, 100_530_000, vaultDepth, uint64(block.timestamp));
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__PositionIsSolvent.selector);
+        engine.liquidatePosition(account, 100_530_000, poolDepth, uint64(block.timestamp), address(this));
     }
 
 }

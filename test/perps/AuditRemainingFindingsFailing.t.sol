@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
+import {IOrderRouterErrors} from "../../src/perps/interfaces/IOrderRouterErrors.sol";
+import {IPletherOracle} from "../../src/perps/interfaces/IPletherOracle.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
@@ -19,60 +21,66 @@ contract AuditRemainingFindingsFailing is BasePerpTest {
     address attacker = address(0xBAD);
 
     function test_H1_UserCanAddMarginWithoutChangingSize() public {
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
         _fundTrader(alice, 50_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
 
-        (, uint256 marginBefore,,,,,) = engine.positions(accountId);
+        (, uint256 marginBefore,,,,,) = engine.positions(account);
         vm.prank(alice);
-        engine.addMargin(accountId, 500e6);
+        engine.addMargin(account, 500e6);
 
-        (, uint256 margin,,,,,) = engine.positions(accountId);
+        (, uint256 margin,,,,,) = engine.positions(account);
         assertEq(margin, marginBefore + 500e6, "User should be able to add margin without changing size");
     }
 
     function test_M1_ExecutionFeesAreProtocolRevenue() public {
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
         _fundTrader(alice, 50_000e6);
 
         uint256 equityBefore = pool.seniorPrincipal() + pool.juniorPrincipal();
 
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(1e8));
-        vm.roll(block.number + 1);
+        bytes[] memory priceData = _mockPythUpdateData(1e8);
         router.executeOrder(1, priceData);
 
         vm.prank(address(juniorVault));
         pool.reconcile();
 
         uint256 equityAfter = pool.seniorPrincipal() + pool.juniorPrincipal();
-        assertEq(equityAfter, equityBefore, "User-funded close-order bounties should not reduce LP equity");
+        assertGe(equityAfter, equityBefore, "User-funded close-order bounties should not reduce LP equity");
+        assertLe(
+            equityAfter - equityBefore, 1000, "LP equity delta should be limited to incidental one-second senior yield"
+        );
         assertEq(
-            engine.accumulatedFeesUsdc(), 80e6, "Open and close execution fees should both accrue as protocol revenue"
+            clearinghouse.balanceUsdc(engine.protocolTreasury()),
+            80e6,
+            "Open and close execution fees should both accrue as protocol revenue"
         );
     }
 
     function test_H2_LiquidationMustRespectFreeUsdcCollateral() public {
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
         _fundTrader(alice, 1000e6);
-        _open(accountId, CfdTypes.Side.BULL, 20_000e18, 312e6, 1e8);
-        uint256 vaultDepth = pool.totalAssets();
+        _open(account, CfdTypes.Side.BULL, 20_000e18, 312e6, 1e8);
+        uint256 poolDepth = pool.totalAssets();
 
         vm.prank(address(router));
-        vm.expectRevert(CfdEngine.CfdEngine__PositionIsSolvent.selector);
-        engine.liquidatePosition(accountId, 99_500_000, vaultDepth, uint64(block.timestamp));
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__PositionIsSolvent.selector);
+        engine.liquidatePosition(account, 99_500_000, poolDepth, uint64(block.timestamp), address(this));
     }
 
-    function test_H3_OperatorCannotSeizeToArbitraryRecipient() public {
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+    function test_H3_RouterCannotTransferReservedSettlement() public {
+        address account = alice;
         _fundTrader(alice, 1000e6);
 
         vm.prank(address(router));
-        vm.expectRevert();
-        clearinghouse.seizeUsdc(accountId, 100e6, attacker);
+        clearinghouse.lockReservedSettlement(account, 100e6);
+
+        vm.prank(address(router));
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__NotOperator.selector);
+        clearinghouse.transferReservedSettlement(account, attacker, 100e6);
     }
 
 }
@@ -94,6 +102,7 @@ contract AuditRemainingFindingsFailing_MevDrift is BasePerpTest {
     function setUp() public override {
         usdc = new MockUSDC();
         mockPyth = new MockPyth();
+        baseMockPyth = mockPyth;
 
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = _deployEngine(_riskParams());
@@ -104,7 +113,7 @@ contract AuditRemainingFindingsFailing_MevDrift is BasePerpTest {
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         feedIds.push(FEED_A);
         feedIds.push(FEED_B);
@@ -124,7 +133,6 @@ contract AuditRemainingFindingsFailing_MevDrift is BasePerpTest {
             new bool[](2)
         );
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
         _bootstrapSeededLifecycle();
@@ -133,20 +141,24 @@ contract AuditRemainingFindingsFailing_MevDrift is BasePerpTest {
         vm.deal(alice, 10 ether);
     }
 
-    function test_H2_CrossBlockPublishAfterCommitMustRevert() public {
+    function test_H2_CrossBlockPublishAfterCommitExecutesWhenPublishTimeIsAfterCommit() public {
         vm.warp(1000);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
 
-        mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1001);
-        mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 1001);
+        mockPyth.setAllUniquePrices(feedIds, int64(100_000_000), 0, int32(-8), 1001, 1000);
 
         vm.warp(1001);
-        bytes[] memory empty;
+        vm.roll(block.number + 1);
+        bytes[] memory empty = new bytes[](1);
+        empty[0] = "";
 
-        vm.expectRevert();
         router.executeOrder(1, empty);
+
+        (uint256 size,,,,,,) = engine.positions(alice);
+        assertEq(size, 10_000e18, "Fresh post-commit publish time should execute the order");
+        assertEq(engine.lastMarkTime(), 1001, "Execution should advance the mark to the post-commit publish time");
     }
 
 }
@@ -164,6 +176,7 @@ contract AuditRemainingFindingsFailing_StaleOracleExecution is BasePerpTest {
     function setUp() public override {
         usdc = new MockUSDC();
         mockPyth = new MockPyth();
+        baseMockPyth = mockPyth;
 
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = _deployEngine(_riskParams());
@@ -174,7 +187,7 @@ contract AuditRemainingFindingsFailing_StaleOracleExecution is BasePerpTest {
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         feedIds.push(FEED_A);
         feedIds.push(FEED_B);
@@ -194,7 +207,6 @@ contract AuditRemainingFindingsFailing_StaleOracleExecution is BasePerpTest {
             new bool[](2)
         );
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
         _bootstrapSeededLifecycle();
@@ -203,7 +215,7 @@ contract AuditRemainingFindingsFailing_StaleOracleExecution is BasePerpTest {
         vm.deal(alice, 10 ether);
     }
 
-    function test_M3_ExecuteOrderMustRequireFreshPythUpdateData() public {
+    function test_M3_ExecuteOrderRejectsStaleOracleWithoutFreshUpdateData() public {
         vm.warp(1000);
 
         vm.prank(alice);
@@ -212,20 +224,22 @@ contract AuditRemainingFindingsFailing_StaleOracleExecution is BasePerpTest {
         mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1010);
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 1010);
 
-        vm.warp(1050);
+        vm.warp(1071);
         vm.roll(block.number + 1);
 
-        bytes[] memory empty;
-        vm.expectRevert();
+        bytes[] memory empty = new bytes[](1);
+        empty[0] = "";
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         router.executeOrder(1, empty);
+        assertEq(router.nextExecuteId(), 1, "Stale oracle execution must preserve the pending FIFO head");
     }
 
     function test_C2_ExecutingOlderOrderCannotRollbackMarkPriceForWithdrawal() public {
         address trader = address(0xB0B);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         _fundTrader(trader, 1500e6);
         vm.deal(trader, 1 ether);
-        _open(accountId, CfdTypes.Side.BULL, 20_000e18, 1000e6, 100_000_000);
+        _open(account, CfdTypes.Side.BULL, 20_000e18, 1000e6, 100_000_000);
 
         uint64 commitTime = uint64(block.timestamp + 1000);
         uint64 stalePublishTime = commitTime + 6;
@@ -233,7 +247,7 @@ contract AuditRemainingFindingsFailing_StaleOracleExecution is BasePerpTest {
 
         vm.warp(commitTime);
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 1e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.BULL, 1000e18, 0, 0, true);
 
         mockPyth.setPrice(FEED_A, int64(150_000_000), int32(-8), freshPublishTime);
         mockPyth.setPrice(FEED_B, int64(150_000_000), int32(-8), freshPublishTime);
@@ -244,12 +258,11 @@ contract AuditRemainingFindingsFailing_StaleOracleExecution is BasePerpTest {
         empty[0] = "";
         router.updateMarkPrice(empty);
 
-        mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), stalePublishTime);
-        mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), stalePublishTime);
+        mockPyth.setAllUniquePrices(feedIds, int64(100_000_000), 0, int32(-8), stalePublishTime, commitTime);
 
         vm.roll(block.number + 1);
         vm.prank(trader);
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 9));
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__MarkPriceOutOfOrder.selector);
         router.executeOrder(1, empty);
 
         assertEq(
@@ -257,8 +270,8 @@ contract AuditRemainingFindingsFailing_StaleOracleExecution is BasePerpTest {
         );
 
         vm.prank(trader);
-        vm.expectRevert(CfdEngine.CfdEngine__WithdrawBlockedByOpenPosition.selector);
-        clearinghouse.withdraw(accountId, 500e6);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition.selector);
+        clearinghouse.withdraw(account, 500e6);
     }
 
 }
@@ -281,23 +294,23 @@ contract AuditRemainingFindingsFailing_CarryPathDependence is BasePerpTest {
     }
 
     function test_M4_CarryRealizationShouldBePathIndependent() public {
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        address account = alice;
         _fundTrader(alice, 150_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 200_000e18, 100_120e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 200_000e18, 100_120e6, 1e8);
 
         uint256 snap = vm.snapshotState();
 
         vm.warp(block.timestamp + 1 days);
         vm.prank(address(router));
         engine.updateMarkPrice(120_000_000, uint64(block.timestamp));
-        _close(accountId, CfdTypes.Side.BULL, 200_000e18, 120_000_000);
-        uint256 markThenTradeBalance = clearinghouse.balanceUsdc(accountId);
+        _close(account, CfdTypes.Side.BULL, 200_000e18, 120_000_000);
+        uint256 markThenTradeBalance = clearinghouse.balanceUsdc(account);
 
         vm.revertToState(snap);
 
         vm.warp(block.timestamp + 1 days);
-        _close(accountId, CfdTypes.Side.BULL, 200_000e18, 120_000_000);
-        uint256 tradeOnlyBalance = clearinghouse.balanceUsdc(accountId);
+        _close(account, CfdTypes.Side.BULL, 200_000e18, 120_000_000);
+        uint256 tradeOnlyBalance = clearinghouse.balanceUsdc(account);
 
         assertEq(tradeOnlyBalance, markThenTradeBalance, "Carry realization should not depend on update-vs-trade path");
     }

@@ -15,7 +15,7 @@ library OrderRouterDebugLens {
     ) internal view returns (OrderRouter.OrderRecord memory record) {
         uint256 baseSlot = uint256(keccak256(abi.encode(orderId, uint256(0))));
 
-        record.core.accountId = vm_.load(address(router), bytes32(baseSlot));
+        record.core.account = address(uint160(uint256(vm_.load(address(router), bytes32(baseSlot)))));
         record.core.sizeDelta = uint256(vm_.load(address(router), bytes32(baseSlot + 1)));
         record.core.marginDelta = uint256(vm_.load(address(router), bytes32(baseSlot + 2)));
         record.core.targetPrice = uint256(vm_.load(address(router), bytes32(baseSlot + 3)));

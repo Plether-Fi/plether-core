@@ -19,15 +19,17 @@ contract PerpFeeFlowInvariantTest is BasePerpInvariantTest {
         bytes4[] memory selectors = new bytes4[](3);
         selectors[0] = handler.openPosition.selector;
         selectors[1] = handler.closePosition.selector;
-        selectors[2] = handler.withdrawFees.selector;
+        selectors[2] = handler.withdrawTreasuryFees.selector;
 
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
         targetContract(address(handler));
     }
 
-    function invariant_FeeModelTracksAccumulatedFeesAndWithdrawals() public view {
+    function invariant_FeeModelTracksTreasuryBalanceAndWithdrawals() public view {
         assertEq(
-            handler.ghostTrackedFeesUsdc(), engine.accumulatedFeesUsdc(), "Ghost tracked fees must match engine fees"
+            handler.ghostTrackedFeesUsdc(),
+            clearinghouse.balanceUsdc(engine.protocolTreasury()),
+            "Ghost tracked fees must match engine fees"
         );
         assertEq(
             handler.ghostAccruedFeesUsdc(),
@@ -36,17 +38,32 @@ contract PerpFeeFlowInvariantTest is BasePerpInvariantTest {
         );
     }
 
-    function invariant_ProtocolAccountingSnapshotIncludesFeeBucket() public view {
+    function invariant_ProtocolAccountingSnapshotIncludesTreasuryBalance() public view {
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory snapshot =
             engineProtocolLens.getProtocolAccountingSnapshot();
-        assertEq(snapshot.accumulatedFeesUsdc, engine.accumulatedFeesUsdc(), "Protocol snapshot fee bucket mismatch");
         assertEq(
-            snapshot.accumulatedFeesUsdc, handler.ghostTrackedFeesUsdc(), "Fee model and protocol snapshot must agree"
+            snapshot.protocolTreasuryBalanceUsdc,
+            clearinghouse.balanceUsdc(engine.protocolTreasury()),
+            "Protocol snapshot treasury mismatch"
+        );
+        assertEq(
+            snapshot.protocolTreasuryBalanceUsdc,
+            handler.ghostTrackedFeesUsdc(),
+            "Fee model and protocol snapshot must agree"
         );
     }
 
-    function invariant_FeeBucketRemainsVaultCustodied() public view {
-        assertLe(engine.accumulatedFeesUsdc(), vault.totalAssets(), "Tracked fees must remain custodied by the vault");
+    function invariant_FeeBalanceRemainsClearinghouseCustodied() public view {
+        assertEq(
+            clearinghouse.balanceUsdc(engine.protocolTreasury()),
+            clearinghouse.balanceUsdc(engine.protocolTreasury()),
+            "Tracked fees must remain in the treasury clearinghouse account"
+        );
+        assertLe(
+            clearinghouse.balanceUsdc(engine.protocolTreasury()),
+            usdc.balanceOf(address(clearinghouse)),
+            "Treasury balance must remain backed by clearinghouse USDC"
+        );
     }
 
 }

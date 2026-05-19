@@ -33,6 +33,7 @@ library MarginClearinghouseAccountingLib {
     }
 
     struct LiquidationResidualPlan {
+        uint256 keeperBountyUsdc;
         uint256 settlementRetainedUsdc;
         uint256 settlementSeizedUsdc;
         uint256 freshTraderPayoutUsdc;
@@ -69,47 +70,23 @@ library MarginClearinghouseAccountingLib {
         return buildAccountUsdcBuckets(effectiveSettlementBalance, positionMarginUsdc, 0, 0);
     }
 
-    function getSettlementBalanceUsdc(
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets
-    ) internal pure returns (uint256) {
-        return buckets.settlementBalanceUsdc;
-    }
-
-    function getFreeSettlementUsdc(
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets
-    ) internal pure returns (uint256) {
-        return buckets.freeSettlementUsdc;
-    }
-
-    function getPositionMarginUsdc(
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets
-    ) internal pure returns (uint256) {
-        return buckets.activePositionMarginUsdc;
-    }
-
-    function getQueuedReservedUsdc(
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets
-    ) internal pure returns (uint256) {
-        return buckets.otherLockedMarginUsdc;
-    }
-
     function getGenericReachableUsdc(
         IMarginClearinghouse.AccountUsdcBuckets memory buckets
     ) internal pure returns (uint256 reachableUsdc) {
-        uint256 settlementBalanceUsdc = getSettlementBalanceUsdc(buckets);
-        uint256 queuedReservedUsdc = getQueuedReservedUsdc(buckets);
+        uint256 settlementBalanceUsdc = buckets.settlementBalanceUsdc;
+        uint256 queuedReservedUsdc = buckets.otherLockedMarginUsdc;
         reachableUsdc = settlementBalanceUsdc > queuedReservedUsdc ? settlementBalanceUsdc - queuedReservedUsdc : 0;
     }
 
-    function planFundingLossConsumption(
+    function planCarryLossConsumption(
         IMarginClearinghouse.AccountUsdcBuckets memory buckets,
         uint256 lossUsdc
     ) internal pure returns (SettlementConsumption memory consumption) {
-        uint256 freeSettlementUsdc = getFreeSettlementUsdc(buckets);
+        uint256 freeSettlementUsdc = buckets.freeSettlementUsdc;
         consumption.freeSettlementConsumedUsdc = freeSettlementUsdc > lossUsdc ? lossUsdc : freeSettlementUsdc;
 
         uint256 remainingLossUsdc = lossUsdc - consumption.freeSettlementConsumedUsdc;
-        uint256 positionMarginUsdc = getPositionMarginUsdc(buckets);
+        uint256 positionMarginUsdc = buckets.activePositionMarginUsdc;
         consumption.activeMarginConsumedUsdc =
             positionMarginUsdc > remainingLossUsdc ? remainingLossUsdc : positionMarginUsdc;
         consumption.totalConsumedUsdc = consumption.freeSettlementConsumedUsdc + consumption.activeMarginConsumedUsdc;
@@ -123,9 +100,9 @@ library MarginClearinghouseAccountingLib {
     ) internal pure returns (OpenCostPlan memory plan) {
         plan.netMarginChangeUsdc = int256(marginDeltaUsdc) - tradeCostUsdc;
 
-        uint256 settlementBalanceUsdc = getSettlementBalanceUsdc(buckets);
-        uint256 positionMarginUsdc = getPositionMarginUsdc(buckets);
-        uint256 otherLockedMarginUsdc = getQueuedReservedUsdc(buckets);
+        uint256 settlementBalanceUsdc = buckets.settlementBalanceUsdc;
+        uint256 positionMarginUsdc = buckets.activePositionMarginUsdc;
+        uint256 otherLockedMarginUsdc = buckets.otherLockedMarginUsdc;
 
         if (tradeCostUsdc < 0) {
             plan.settlementCreditUsdc = uint256(-tradeCostUsdc);
@@ -181,7 +158,7 @@ library MarginClearinghouseAccountingLib {
         uint256 protectedLockedMarginUsdc
     ) internal pure returns (uint256 reachableUsdc) {
         uint256 protectedBalance = protectedLockedMarginUsdc;
-        uint256 settlementBalanceUsdc = getSettlementBalanceUsdc(buckets);
+        uint256 settlementBalanceUsdc = buckets.settlementBalanceUsdc;
         reachableUsdc = settlementBalanceUsdc > protectedBalance ? settlementBalanceUsdc - protectedBalance : 0;
     }
 
@@ -193,12 +170,12 @@ library MarginClearinghouseAccountingLib {
         uint256 reachableUsdc = getSettlementReachableUsdc(buckets, protectedLockedMarginUsdc);
         consumption.totalConsumedUsdc = reachableUsdc > lossUsdc ? lossUsdc : reachableUsdc;
         consumption.uncoveredUsdc = lossUsdc - consumption.totalConsumedUsdc;
-        uint256 freeSettlementUsdc = getFreeSettlementUsdc(buckets);
+        uint256 freeSettlementUsdc = buckets.freeSettlementUsdc;
         consumption.freeSettlementConsumedUsdc =
             freeSettlementUsdc > consumption.totalConsumedUsdc ? consumption.totalConsumedUsdc : freeSettlementUsdc;
 
         uint256 remainingConsumedUsdc = consumption.totalConsumedUsdc - consumption.freeSettlementConsumedUsdc;
-        uint256 positionMarginUsdc = getPositionMarginUsdc(buckets);
+        uint256 positionMarginUsdc = buckets.activePositionMarginUsdc;
         uint256 consumableActiveMarginUsdc =
             positionMarginUsdc > protectedLockedMarginUsdc ? positionMarginUsdc - protectedLockedMarginUsdc : 0;
         consumption.activeMarginConsumedUsdc =
@@ -206,7 +183,7 @@ library MarginClearinghouseAccountingLib {
         consumption.otherLockedMarginConsumedUsdc = remainingConsumedUsdc - consumption.activeMarginConsumedUsdc;
     }
 
-    function applyFundingLossMutation(
+    function applyCarryLossMutation(
         IMarginClearinghouse.AccountUsdcBuckets memory,
         SettlementConsumption memory consumption
     ) internal pure returns (BucketMutation memory mutation) {
@@ -228,25 +205,36 @@ library MarginClearinghouseAccountingLib {
         IMarginClearinghouse.AccountUsdcBuckets memory buckets,
         int256 residualUsdc
     ) internal pure returns (LiquidationResidualPlan memory plan) {
+        return planLiquidationResidual(buckets, residualUsdc, 0);
+    }
+
+    function planLiquidationResidual(
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets,
+        int256 residualUsdc,
+        uint256 keeperBountyUsdc
+    ) internal pure returns (LiquidationResidualPlan memory plan) {
         uint256 reachableUsdc = getTerminalReachableUsdc(buckets);
+        plan.keeperBountyUsdc = keeperBountyUsdc;
+        uint256 reachableAfterBountyUsdc = reachableUsdc > keeperBountyUsdc ? reachableUsdc - keeperBountyUsdc : 0;
 
         if (residualUsdc >= 0) {
-            plan.settlementRetainedUsdc = reachableUsdc > uint256(residualUsdc) ? uint256(residualUsdc) : reachableUsdc;
-            plan.settlementSeizedUsdc = reachableUsdc - plan.settlementRetainedUsdc;
+            plan.settlementRetainedUsdc =
+                reachableAfterBountyUsdc > uint256(residualUsdc) ? uint256(residualUsdc) : reachableAfterBountyUsdc;
+            plan.settlementSeizedUsdc = reachableAfterBountyUsdc - plan.settlementRetainedUsdc;
             plan.freshTraderPayoutUsdc = uint256(residualUsdc) - plan.settlementRetainedUsdc;
         } else {
             plan.settlementRetainedUsdc = 0;
-            plan.settlementSeizedUsdc = reachableUsdc;
+            plan.settlementSeizedUsdc = reachableAfterBountyUsdc;
             plan.badDebtUsdc = uint256(-residualUsdc);
         }
 
-        plan.mutation.settlementDebitUsdc = plan.settlementSeizedUsdc;
-        uint256 freeSettlementUsdc = getFreeSettlementUsdc(buckets);
-        uint256 positionMarginUsdc = getPositionMarginUsdc(buckets);
+        plan.mutation.settlementDebitUsdc = plan.settlementSeizedUsdc + keeperBountyUsdc;
+        uint256 freeSettlementUsdc = buckets.freeSettlementUsdc;
+        uint256 positionMarginUsdc = buckets.activePositionMarginUsdc;
         plan.mutation.positionMarginUnlockedUsdc = positionMarginUsdc;
-        plan.mutation.otherLockedMarginUnlockedUsdc = plan.settlementSeizedUsdc
+        plan.mutation.otherLockedMarginUnlockedUsdc = plan.mutation.settlementDebitUsdc
             > freeSettlementUsdc + positionMarginUsdc
-            ? plan.settlementSeizedUsdc - freeSettlementUsdc - positionMarginUsdc
+            ? plan.mutation.settlementDebitUsdc - freeSettlementUsdc - positionMarginUsdc
             : 0;
     }
 

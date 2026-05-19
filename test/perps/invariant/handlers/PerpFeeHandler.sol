@@ -53,7 +53,7 @@ contract PerpFeeHandler is Test {
             usdc.mint(actors[i], 50_000e6);
             vm.startPrank(actors[i]);
             usdc.approve(address(clearinghouse), type(uint256).max);
-            clearinghouse.deposit(_accountId(actors[i]), 50_000e6);
+            clearinghouse.deposit(_account(actors[i]), 50_000e6);
             vm.stopPrank();
         }
     }
@@ -63,19 +63,19 @@ contract PerpFeeHandler is Test {
         uint256 marginFuzz
     ) external {
         address actor = actors[actorIndex % actors.length];
-        bytes32 accountId = _accountId(actor);
-        (uint256 size,,,,,,) = engine.positions(accountId);
+        address account = _account(actor);
+        (uint256 size,,,,,,) = engine.positions(account);
         if (size > 0) {
             return;
         }
 
-        uint256 beforeFees = engine.accumulatedFeesUsdc();
+        uint256 beforeFees = clearinghouse.balanceUsdc(engine.protocolTreasury());
         uint256 margin = bound(marginFuzz, 2000e6, 10_000e6);
         vm.prank(actor);
         router.commitOrder(CfdTypes.Side.BULL, 50_000e18, margin, 0, false);
         bytes[] memory empty;
         router.executeOrderBatch(1, empty);
-        _syncFeeDelta(beforeFees, engine.accumulatedFeesUsdc());
+        _syncFeeDelta(beforeFees, clearinghouse.balanceUsdc(engine.protocolTreasury()));
     }
 
     function closePosition(
@@ -83,34 +83,35 @@ contract PerpFeeHandler is Test {
         uint256 priceFuzz
     ) external {
         address actor = actors[actorIndex % actors.length];
-        bytes32 accountId = _accountId(actor);
-        (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(accountId);
+        address account = _account(actor);
+        (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(account);
         if (size == 0) {
             return;
         }
 
-        uint256 beforeFees = engine.accumulatedFeesUsdc();
+        uint256 beforeFees = clearinghouse.balanceUsdc(engine.protocolTreasury());
         uint256 price = bound(priceFuzz, 0.6e8, 1.2e8);
         vm.prank(actor);
         router.commitOrder(side, size, 0, price, true);
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(price);
         router.executeOrderBatch(1, priceData);
-        _syncFeeDelta(beforeFees, engine.accumulatedFeesUsdc());
+        _syncFeeDelta(beforeFees, clearinghouse.balanceUsdc(engine.protocolTreasury()));
     }
 
-    function withdrawFees() external {
-        uint256 beforeFees = engine.accumulatedFeesUsdc();
+    function withdrawTreasuryFees() external {
+        uint256 beforeFees = clearinghouse.balanceUsdc(engine.protocolTreasury());
         if (beforeFees == 0) {
             return;
         }
-        uint256 beforeBalance = usdc.balanceOf(address(this));
-        vm.prank(owner);
-        engine.withdrawFees(address(this));
+        address treasury = engine.protocolTreasury();
+        uint256 beforeBalance = usdc.balanceOf(treasury);
+        vm.prank(treasury);
+        clearinghouse.withdraw(treasury, beforeFees);
         ghostTrackedFeesUsdc -= beforeFees;
         ghostWithdrawnFeesUsdc += beforeFees;
         assertEq(
-            usdc.balanceOf(address(this)) - beforeBalance, beforeFees, "Fee withdrawal must transfer full tracked fees"
+            usdc.balanceOf(treasury) - beforeBalance, beforeFees, "Treasury withdrawal must transfer full tracked fees"
         );
     }
 
@@ -127,10 +128,10 @@ contract PerpFeeHandler is Test {
         }
     }
 
-    function _accountId(
+    function _account(
         address actor
-    ) internal pure returns (bytes32) {
-        return bytes32(uint256(uint160(actor)));
+    ) internal pure returns (address) {
+        return actor;
     }
 
 }

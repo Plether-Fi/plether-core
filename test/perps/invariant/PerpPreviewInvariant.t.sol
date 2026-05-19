@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEngine} from "../../../src/perps/CfdEngine.sol";
 import {CfdEnginePlanTypes} from "../../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../../../src/perps/CfdTypes.sol";
 import {AccountLensViewTypes} from "../../../src/perps/interfaces/AccountLensViewTypes.sol";
 import {ICfdEngine} from "../../../src/perps/interfaces/ICfdEngine.sol";
+import {ICfdEngineTypes} from "../../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {ProtocolLensViewTypes} from "../../../src/perps/interfaces/ProtocolLensViewTypes.sol";
 import {BasePerpInvariantTest} from "./BasePerpInvariantTest.sol";
 import {PerpAccountingHandler} from "./handlers/PerpAccountingHandler.sol";
@@ -30,20 +30,18 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
     function setUp() public override {
         super.setUp();
 
-        handler = new PerpAccountingHandler(usdc, engine, clearinghouse, router, vault);
+        handler = new PerpAccountingHandler(usdc, engine, clearinghouse, router, housePool);
         handler.seedActors(50_000e6, 100_000e6);
 
-        bytes4[] memory selectors = new bytes4[](10);
+        bytes4[] memory selectors = new bytes4[](8);
         selectors[0] = handler.depositCollateral.selector;
         selectors[1] = handler.withdrawCollateral.selector;
         selectors[2] = handler.commitOpenOrder.selector;
         selectors[3] = handler.commitCloseOrder.selector;
         selectors[4] = handler.executeNextOrderBatch.selector;
         selectors[5] = handler.liquidate.selector;
-        selectors[6] = handler.claimDeferredKeeperCredit.selector;
-        selectors[7] = handler.setRouterPayoutFailureMode.selector;
-        selectors[8] = handler.warpForward.selector;
-        selectors[9] = handler.syncMarkNow.selector;
+        selectors[6] = handler.warpForward.selector;
+        selectors[7] = handler.syncMarkNow.selector;
 
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
         targetContract(address(handler));
@@ -55,19 +53,14 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
 
         assertEq(accountingView.degradedMode, engine.degradedMode(), "Protocol accounting view degraded flag mismatch");
         assertEq(
-            accountingView.totalDeferredTraderCreditUsdc,
-            engine.totalDeferredTraderCreditUsdc(),
-            "Protocol accounting view deferred trader credit mismatch"
+            accountingView.totalTraderClaimBalanceUsdc,
+            engine.totalTraderClaimBalanceUsdc(),
+            "Protocol accounting view trader claim balance mismatch"
         );
         assertEq(
-            accountingView.totalDeferredKeeperCreditUsdc,
-            engine.totalDeferredKeeperCreditUsdc(),
-            "Protocol accounting view deferred keeper credit mismatch"
-        );
-        assertEq(
-            accountingView.accumulatedFeesUsdc,
-            engine.accumulatedFeesUsdc(),
-            "Protocol accounting view accumulated fees mismatch"
+            accountingView.protocolTreasuryBalanceUsdc,
+            clearinghouse.balanceUsdc(engine.protocolTreasury()),
+            "Protocol accounting view treasury balance mismatch"
         );
     }
 
@@ -75,21 +68,21 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
         uint256 oraclePrice = _previewOraclePrice();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
-            bytes32 accountId = _accountId(handler.actorAt(i));
-            (uint256 size,,,,,,) = engine.positions(accountId);
+            address account = _account(handler.actorAt(i));
+            (uint256 size,,,,,,) = engine.positions(account);
             if (size != 0) {
                 continue;
             }
 
-            CfdEngine.LiquidationPreview memory liquidationPreview =
-                engineLens.previewLiquidation(accountId, oraclePrice);
+            ICfdEngineTypes.LiquidationPreview memory liquidationPreview =
+                engineLens.previewLiquidation(account, oraclePrice);
             assertFalse(liquidationPreview.liquidatable, "Empty positions must not preview as liquidatable");
             assertEq(
                 liquidationPreview.reachableCollateralUsdc, 0, "Empty positions must not expose reachable collateral"
             );
             assertFalse(liquidationPreview.triggersDegradedMode, "Empty positions must not trigger degraded mode");
 
-            CfdEngine.ClosePreview memory closePreview = engineLens.previewClose(accountId, 1, oraclePrice);
+            ICfdEngineTypes.ClosePreview memory closePreview = engineLens.previewClose(account, 1, oraclePrice);
             assertFalse(closePreview.valid, "Empty positions must not preview as valid closes");
             assertEq(
                 uint8(closePreview.invalidReason),
@@ -106,35 +99,35 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
         uint256 oraclePrice = _previewOraclePrice();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
-            bytes32 accountId = _accountId(handler.actorAt(i));
-            (uint256 size,,,,,,) = engine.positions(accountId);
+            address account = _account(handler.actorAt(i));
+            (uint256 size,,,,,,) = engine.positions(account);
             if (size == 0) {
                 continue;
             }
 
-            CfdEngine.LiquidationPreview memory liquidationPreview =
-                engineLens.previewLiquidation(accountId, oraclePrice);
+            ICfdEngineTypes.LiquidationPreview memory liquidationPreview =
+                engineLens.previewLiquidation(account, oraclePrice);
             assertEq(
                 liquidationPreview.reachableCollateralUsdc,
-                _terminalReachableUsdc(accountId),
+                _terminalReachableUsdc(account),
                 "Liquidation preview reachable collateral mismatch"
             );
         }
     }
 
-    function invariant_LiquidationPreviewExcludesRouterExecutionEscrow() public view {
+    function invariant_LiquidationPreviewExcludesReservedExecutionBounty() public view {
         uint256 oraclePrice = _previewOraclePrice();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
-            bytes32 accountId = _accountId(handler.actorAt(i));
+            address account = _account(handler.actorAt(i));
             AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
-                engineAccountLens.getAccountLedgerSnapshot(accountId);
-            if (!snapshot.hasPosition || snapshot.executionEscrowUsdc == 0) {
+                engineAccountLens.getAccountLedgerSnapshot(account);
+            if (!snapshot.hasPosition || snapshot.executionBountyReserveUsdc == 0) {
                 continue;
             }
 
-            CfdEngine.LiquidationPreview memory liquidationPreview =
-                engineLens.previewLiquidation(accountId, oraclePrice);
+            ICfdEngineTypes.LiquidationPreview memory liquidationPreview =
+                engineLens.previewLiquidation(account, oraclePrice);
             assertEq(
                 liquidationPreview.reachableCollateralUsdc,
                 snapshot.terminalReachableUsdc,
@@ -142,21 +135,21 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
             );
             assertLt(
                 liquidationPreview.reachableCollateralUsdc,
-                snapshot.settlementBalanceUsdc + snapshot.executionEscrowUsdc,
-                "Liquidation preview must exclude router execution escrow from reachable collateral"
+                snapshot.settlementBalanceUsdc + snapshot.executionBountyReserveUsdc,
+                "Liquidation preview must exclude reserved execution bounty from reachable collateral"
             );
         }
     }
 
     function invariant_PreviewLiquidation_EqualsSimulateLiquidationAtCanonicalDepth() public view {
         uint256 oraclePrice = _previewOraclePrice();
-        uint256 canonicalDepth = vault.totalAssets();
+        uint256 canonicalDepth = housePool.totalAssets();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
-            bytes32 accountId = _accountId(handler.actorAt(i));
-            CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, oraclePrice);
-            CfdEngine.LiquidationPreview memory simulation =
-                engineLens.simulateLiquidation(accountId, oraclePrice, canonicalDepth);
+            address account = _account(handler.actorAt(i));
+            ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, oraclePrice);
+            ICfdEngineTypes.LiquidationPreview memory simulation =
+                engineLens.simulateLiquidation(account, oraclePrice, canonicalDepth);
 
             _assertLiquidationPreviewEquals(preview, simulation);
         }
@@ -167,13 +160,13 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
         uint256 oraclePrice = _previewOraclePrice();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
-            bytes32 accountId = _accountId(handler.actorAt(i));
-            (uint256 size,,,,,,) = engine.positions(accountId);
+            address account = _account(handler.actorAt(i));
+            (uint256 size,,,,,,) = engine.positions(account);
             if (size == 0) {
                 continue;
             }
 
-            CfdEngine.ClosePreview memory closePreview = engineLens.previewClose(accountId, size, oraclePrice);
+            ICfdEngineTypes.ClosePreview memory closePreview = engineLens.previewClose(account, size, oraclePrice);
             assertTrue(closePreview.valid, "Full close preview should stay valid for open positions");
 
             if (alreadyDegraded) {
@@ -187,19 +180,19 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
         uint256 oraclePrice = _previewOraclePrice();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
-            bytes32 accountId = _accountId(handler.actorAt(i));
-            CfdEngine.LiquidationPreview memory liquidationPreview =
-                engineLens.previewLiquidation(accountId, oraclePrice);
+            address account = _account(handler.actorAt(i));
+            ICfdEngineTypes.LiquidationPreview memory liquidationPreview =
+                engineLens.previewLiquidation(account, oraclePrice);
             if (liquidationPreview.triggersDegradedMode) {
                 assertFalse(alreadyDegraded, "Liquidation preview trigger flag must be transition-only");
             }
 
-            (uint256 size,,,,,,) = engine.positions(accountId);
+            (uint256 size,,,,,,) = engine.positions(account);
             if (size == 0) {
                 continue;
             }
 
-            CfdEngine.ClosePreview memory closePreview = engineLens.previewClose(accountId, size, oraclePrice);
+            ICfdEngineTypes.ClosePreview memory closePreview = engineLens.previewClose(account, size, oraclePrice);
             if (closePreview.triggersDegradedMode) {
                 assertFalse(alreadyDegraded, "Close preview trigger flag must be transition-only");
             }
@@ -210,21 +203,21 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
         uint256 oraclePrice = _previewOraclePrice();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
-            bytes32 accountId = _accountId(handler.actorAt(i));
-            CfdEngine.LiquidationPreview memory liquidationPreview =
-                engineLens.previewLiquidation(accountId, oraclePrice);
+            address account = _account(handler.actorAt(i));
+            ICfdEngineTypes.LiquidationPreview memory liquidationPreview =
+                engineLens.previewLiquidation(account, oraclePrice);
             assertEq(
                 liquidationPreview.postOpDegradedMode,
                 liquidationPreview.effectiveAssetsAfterUsdc < liquidationPreview.maxLiabilityAfterUsdc,
                 "Liquidation preview post-op degraded flag mismatch"
             );
 
-            (uint256 size,,,,,,) = engine.positions(accountId);
+            (uint256 size,,,,,,) = engine.positions(account);
             if (size == 0) {
                 continue;
             }
 
-            CfdEngine.ClosePreview memory closePreview = engineLens.previewClose(accountId, size, oraclePrice);
+            ICfdEngineTypes.ClosePreview memory closePreview = engineLens.previewClose(account, size, oraclePrice);
             assertEq(
                 closePreview.postOpDegradedMode,
                 closePreview.effectiveAssetsAfterUsdc < closePreview.maxLiabilityAfterUsdc,
@@ -267,7 +260,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
         if (attempt.withdrawPasses) {
             assertTrue(
                 attempt.checkWithdrawPasses,
-                "Successful withdraws must only happen when checkWithdraw also passes under randomized funding/time evolution"
+                "Successful withdraws must only happen when checkWithdraw also passes under randomized carry/time evolution"
             );
         }
         if (!attempt.checkWithdrawPasses) {
@@ -285,15 +278,15 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
         return price == 0 ? 1e8 : price;
     }
 
-    function _accountId(
+    function _account(
         address actor
-    ) internal pure returns (bytes32) {
-        return bytes32(uint256(uint160(actor)));
+    ) internal pure returns (address) {
+        return actor;
     }
 
     function _assertLiquidationPreviewEquals(
-        CfdEngine.LiquidationPreview memory actual,
-        CfdEngine.LiquidationPreview memory expected
+        ICfdEngineTypes.LiquidationPreview memory actual,
+        ICfdEngineTypes.LiquidationPreview memory expected
     ) internal pure {
         assertEq(actual.liquidatable, expected.liquidatable, "Liquidatable flag should match canonical simulation");
         assertEq(actual.oraclePrice, expected.oraclePrice, "Liquidation oracle price should match");
@@ -305,17 +298,17 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
         assertEq(actual.settlementRetainedUsdc, expected.settlementRetainedUsdc, "Settlement retained should match");
         assertEq(actual.freshTraderPayoutUsdc, expected.freshTraderPayoutUsdc, "Fresh trader payout should match");
         assertEq(
-            actual.existingDeferredConsumedUsdc,
-            expected.existingDeferredConsumedUsdc,
-            "Deferred consumption should match"
+            actual.existingTraderClaimConsumedUsdc,
+            expected.existingTraderClaimConsumedUsdc,
+            "Trader claim consumption should match"
         );
         assertEq(
-            actual.existingDeferredRemainingUsdc,
-            expected.existingDeferredRemainingUsdc,
-            "Deferred remainder should match"
+            actual.existingTraderClaimRemainingUsdc,
+            expected.existingTraderClaimRemainingUsdc,
+            "Trader claim remainder should match"
         );
         assertEq(actual.immediatePayoutUsdc, expected.immediatePayoutUsdc, "Immediate payout should match");
-        assertEq(actual.deferredTraderCreditUsdc, expected.deferredTraderCreditUsdc, "Deferred payout should match");
+        assertEq(actual.traderClaimBalanceUsdc, expected.traderClaimBalanceUsdc, "Trader claim should match");
         assertEq(actual.badDebtUsdc, expected.badDebtUsdc, "Bad debt should match");
         assertEq(actual.triggersDegradedMode, expected.triggersDegradedMode, "Degraded trigger should match");
         assertEq(actual.postOpDegradedMode, expected.postOpDegradedMode, "Post-op degraded mode should match");

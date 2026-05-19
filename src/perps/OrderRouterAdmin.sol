@@ -14,6 +14,7 @@ contract OrderRouterAdmin is Ownable, Pausable {
     uint256 internal constant MIN_ENGINE_GAS_CAP = 5_000_000;
     uint256 internal constant MAX_PRUNE_ORDERS_PER_CALL_LIMIT = 256;
     uint256 internal constant MAX_ORDER_AGE_LIMIT = 1 hours;
+    uint256 internal constant MAX_CONFIDENCE_MULTIPLIER_BPS = 30_000;
 
     IOrderRouterAdminHost public immutable router;
     mapping(address => uint256) public claimableEth;
@@ -186,10 +187,18 @@ contract OrderRouterAdmin is Ownable, Pausable {
         if (config.maxOrderAge == 0 || config.maxOrderAge > MAX_ORDER_AGE_LIMIT) {
             revert OrderRouterAdmin__InvalidMaxOrderAge();
         }
-        if (config.orderExecutionStalenessLimit == 0 || config.liquidationStalenessLimit == 0) {
+        if (
+            config.orderExecutionStalenessLimit == 0 || config.liquidationStalenessLimit == 0
+                || config.orderSettlementWindow == 0 || config.orderSettlementWindow > config.maxOrderAge
+                || config.maxComponentPublishTimeDivergence == 0
+                || config.maxComponentPublishTimeDivergence > config.orderSettlementWindow
+        ) {
             revert OrderRouterAdmin__InvalidStalenessLimit();
         }
-        if (config.pythMaxConfidenceRatioBps > 10_000) {
+        if (
+            config.pythMaxConfidenceRatioBps > 10_000
+                || config.adverseConfidenceMultiplierBps > MAX_CONFIDENCE_MULTIPLIER_BPS
+        ) {
             revert OrderRouterAdmin__InvalidConfidenceRatio();
         }
         if (config.minOpenNotionalUsdc == 0) {

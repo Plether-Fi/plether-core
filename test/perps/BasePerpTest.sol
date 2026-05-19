@@ -8,7 +8,7 @@ import {CfdEngineAdmin} from "../../src/perps/CfdEngineAdmin.sol";
 import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
 import {CfdEnginePlanner} from "../../src/perps/CfdEnginePlanner.sol";
 import {CfdEngineProtocolLens} from "../../src/perps/CfdEngineProtocolLens.sol";
-import {CfdEngineSettlementModule} from "../../src/perps/CfdEngineSettlementModule.sol";
+import {CfdEngineSettlementSidecar} from "../../src/perps/CfdEngineSettlementSidecar.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
@@ -16,14 +16,17 @@ import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "../../src/perps/OrderRouterAdmin.sol";
 import {PerpsPublicLens} from "../../src/perps/PerpsPublicLens.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
-import {DeferredEngineViewTypes} from "../../src/perps/interfaces/DeferredEngineViewTypes.sol";
+import {ClaimEngineViewTypes} from "../../src/perps/interfaces/ClaimEngineViewTypes.sol";
 import {HousePoolEngineViewTypes} from "../../src/perps/interfaces/HousePoolEngineViewTypes.sol";
-import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
 import {ICfdEngineAdminHost} from "../../src/perps/interfaces/ICfdEngineAdminHost.sol";
+import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
+import {IHousePool} from "../../src/perps/interfaces/IHousePool.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
 import {PerpsViewTypes} from "../../src/perps/interfaces/PerpsViewTypes.sol";
 import {ProtocolLensViewTypes} from "../../src/perps/interfaces/ProtocolLensViewTypes.sol";
+import {PositionRiskAccountingLib} from "../../src/perps/libraries/PositionRiskAccountingLib.sol";
+import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {OrderRouterDebugLens} from "../utils/OrderRouterDebugLens.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -34,12 +37,12 @@ abstract contract BasePerpTest is Test {
     struct CloseParitySnapshot {
         ProtocolLensViewTypes.ProtocolAccountingSnapshot protocol;
         uint256 settlementUsdc;
-        uint256 deferredTraderCreditUsdc;
+        uint256 traderClaimBalanceUsdc;
     }
 
     struct CloseParityObserved {
         uint256 immediatePayoutUsdc;
-        uint256 deferredTraderCreditUsdc;
+        uint256 traderClaimBalanceUsdc;
         uint256 badDebtUsdc;
         uint256 remainingSize;
         uint256 remainingMargin;
@@ -51,17 +54,15 @@ abstract contract BasePerpTest is Test {
     struct LiquidationParitySnapshot {
         ProtocolLensViewTypes.ProtocolAccountingSnapshot protocol;
         uint256 settlementUsdc;
-        uint256 deferredTraderCreditUsdc;
+        uint256 traderClaimBalanceUsdc;
         uint256 keeperSettlementUsdc;
-        uint256 deferredKeeperCreditUsdc;
     }
 
     struct LiquidationParityObserved {
         uint256 immediatePayoutUsdc;
-        uint256 deferredTraderCreditUsdc;
+        uint256 traderClaimBalanceUsdc;
         uint256 badDebtUsdc;
         uint256 keeperSettlementUsdc;
-        uint256 deferredKeeperCreditUsdc;
         uint256 remainingSize;
         bool degradedMode;
         uint256 effectiveAssetsAfterUsdc;
@@ -88,10 +89,14 @@ abstract contract BasePerpTest is Test {
     OrderRouter router;
     OrderRouterAdmin routerAdmin;
     PerpsPublicLens publicLens;
+    MockPyth baseMockPyth;
 
     /// @dev Monday 2024-03-04 10:00 UTC. Avoids FAD window.
     uint256 constant SETUP_TIMESTAMP = 1_709_532_000;
     uint256 constant CAP_PRICE = 2e8;
+    bytes32 internal constant BASE_PYTH_FEED_A = bytes32(uint256(1));
+    bytes32 internal constant BASE_PYTH_FEED_B = bytes32(uint256(2));
+    address internal constant PROTOCOL_TREASURY_ACCOUNT = address(0xFEE50001);
 
     receive() external payable {}
 
@@ -105,27 +110,29 @@ abstract contract BasePerpTest is Test {
         engineLens = new CfdEngineLens(address(engine));
         engineProtocolLens = new CfdEngineProtocolLens(address(engine));
         pool = new HousePool(address(usdc), address(engine));
+        baseMockPyth = new MockPyth();
+        bytes32[] memory baseFeedIds = _basePythFeedIds();
+        baseMockPyth.setAllPrices(baseFeedIds, int64(100_000_000), int32(-8), SETUP_TIMESTAMP);
 
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
 
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         router = new OrderRouter(
             address(engine),
             address(engineLens),
             address(pool),
-            address(0),
-            new bytes32[](0),
-            new uint256[](0),
-            new uint256[](0),
-            new bool[](0)
+            address(baseMockPyth),
+            baseFeedIds,
+            _basePythWeights(),
+            _basePythBasePrices(),
+            _basePythInversions()
         );
         _syncRouterAdmin();
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
         publicLens = new PerpsPublicLens(address(engineAccountLens), address(engine), address(router), address(pool));
 
         _bypassAllTimelocks();
@@ -227,6 +234,59 @@ abstract contract BasePerpTest is Test {
         return address(this);
     }
 
+    function _basePythFeedIds() internal pure returns (bytes32[] memory feedIds) {
+        feedIds = new bytes32[](2);
+        feedIds[0] = BASE_PYTH_FEED_A;
+        feedIds[1] = BASE_PYTH_FEED_B;
+    }
+
+    function _basePythWeights() internal pure returns (uint256[] memory weights) {
+        weights = new uint256[](2);
+        weights[0] = 0.5e18;
+        weights[1] = 0.5e18;
+    }
+
+    function _basePythBasePrices() internal pure returns (uint256[] memory basePrices) {
+        basePrices = new uint256[](2);
+        basePrices[0] = 1e8;
+        basePrices[1] = 1e8;
+    }
+
+    function _basePythInversions() internal pure returns (bool[] memory inversions) {
+        inversions = new bool[](2);
+    }
+
+    function _mockPythUpdateData() internal returns (bytes[] memory updateData) {
+        return _mockPythUpdateData(1e8);
+    }
+
+    function _mockPythUpdateData(
+        uint256 price
+    ) internal returns (bytes[] memory updateData) {
+        vm.roll(block.number + 1);
+        vm.warp(block.timestamp + 1);
+        uint256 publishTime = _mockHistoricalPublishTime();
+        baseMockPyth.setAllUniquePrices(
+            _basePythFeedIds(), int64(uint64(price)), 0, int32(-8), publishTime, publishTime == 0 ? 0 : publishTime - 1
+        );
+        updateData = new bytes[](1);
+        updateData[0] = abi.encode(price);
+    }
+
+    function _mockHistoricalPublishTime() internal view returns (uint256 publishTime) {
+        publishTime = block.timestamp;
+        uint64 nextOrderId = router.nextExecuteId();
+        if (nextOrderId == 0) {
+            return publishTime;
+        }
+
+        (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(nextOrderId);
+        uint256 candidate = uint256(pending.commitTime) + 1;
+        if (pending.orderId != 0 && candidate <= block.timestamp) {
+            publishTime = candidate;
+        }
+    }
+
     // --- Legacy side-index placeholder helpers ---
 
     function _fundJunior(
@@ -238,6 +298,27 @@ abstract contract BasePerpTest is Test {
         usdc.approve(address(juniorVault), amount);
         juniorVault.deposit(amount, lp);
         vm.stopPrank();
+    }
+
+    function _fundJuniorDelayed(
+        address lp,
+        uint256 amount
+    ) internal returns (uint256 shares) {
+        usdc.mint(lp, amount);
+        vm.startPrank(lp);
+        usdc.approve(address(juniorVault), amount);
+        uint256 epochId = juniorVault.requestDeposit(amount, lp);
+        vm.stopPrank();
+
+        uint256 activationTime = juniorVault.depositEpochStart(epochId);
+        vm.warp(activationTime);
+        uint256 markPrice = engine.lastMarkPrice();
+        vm.prank(address(router));
+        engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(activationTime));
+        shares = juniorVault.finalizeDepositEpoch(epochId);
+
+        vm.prank(lp);
+        juniorVault.claimDepositShares(epochId);
     }
 
     function _fundSenior(
@@ -255,16 +336,16 @@ abstract contract BasePerpTest is Test {
         address trader,
         uint256 amount
     ) internal {
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         usdc.mint(trader, amount);
         vm.startPrank(trader);
         usdc.approve(address(clearinghouse), amount);
-        clearinghouse.deposit(accountId, amount);
+        clearinghouse.deposit(account, amount);
         vm.stopPrank();
     }
 
-    function _currentPoolConfig() internal view returns (HousePool.PoolConfig memory config) {
-        config = HousePool.PoolConfig({
+    function _currentPoolConfig() internal view returns (IHousePool.PoolConfig memory config) {
+        config = IHousePool.PoolConfig({
             seniorRateBps: pool.seniorRateBps(),
             markStalenessLimit: pool.markStalenessLimit(),
             seniorFrozenLpFeeBps: pool.seniorFrozenLpFeeBps(),
@@ -275,17 +356,17 @@ abstract contract BasePerpTest is Test {
     // --- Trading helpers ---
 
     function _open(
-        bytes32 accountId,
+        address account,
         CfdTypes.Side side,
         uint256 size,
         uint256 margin,
         uint256 price
     ) internal {
-        _open(accountId, side, size, margin, price, pool.totalAssets());
+        _open(account, side, size, margin, price, pool.totalAssets());
     }
 
     function _open(
-        bytes32 accountId,
+        address account,
         CfdTypes.Side side,
         uint256 size,
         uint256 margin,
@@ -295,7 +376,7 @@ abstract contract BasePerpTest is Test {
         vm.prank(address(router));
         engine.processOrderTyped(
             CfdTypes.Order({
-                accountId: accountId,
+                account: account,
                 sizeDelta: size,
                 marginDelta: margin,
                 targetPrice: price,
@@ -312,26 +393,26 @@ abstract contract BasePerpTest is Test {
     }
 
     function _close(
-        bytes32 accountId,
+        address account,
         CfdTypes.Side side,
         uint256 size,
         uint256 price
     ) internal {
-        _close(accountId, side, size, price, pool.totalAssets());
+        _close(account, side, size, price, pool.totalAssets());
     }
 
     function _close(
-        bytes32 accountId,
+        address account,
         CfdTypes.Side side,
         uint256 size,
         uint256 price,
         uint256 depth
     ) internal {
-        _closeAt(accountId, side, size, price, depth, uint64(block.timestamp));
+        _closeAt(account, side, size, price, depth, uint64(block.timestamp));
     }
 
     function _closeAt(
-        bytes32 accountId,
+        address account,
         CfdTypes.Side side,
         uint256 size,
         uint256 price,
@@ -341,7 +422,7 @@ abstract contract BasePerpTest is Test {
         vm.prank(address(router));
         engine.processOrderTyped(
             CfdTypes.Order({
-                accountId: accountId,
+                account: account,
                 sizeDelta: size,
                 marginDelta: 0,
                 targetPrice: 0,
@@ -358,24 +439,24 @@ abstract contract BasePerpTest is Test {
     }
 
     function _captureCloseParitySnapshot(
-        bytes32 accountId
+        address account
     ) internal view returns (CloseParitySnapshot memory snapshot) {
         snapshot.protocol = engineProtocolLens.getProtocolAccountingSnapshot();
-        snapshot.settlementUsdc = clearinghouse.balanceUsdc(accountId);
-        snapshot.deferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(accountId);
+        snapshot.settlementUsdc = clearinghouse.balanceUsdc(account);
+        snapshot.traderClaimBalanceUsdc = engine.traderClaimBalanceUsdc(account);
     }
 
     function _observeCloseParity(
-        bytes32 accountId,
+        address account,
         CloseParitySnapshot memory beforeSnapshot
     ) internal view returns (CloseParityObserved memory observed) {
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory afterSnapshot =
             engineProtocolLens.getProtocolAccountingSnapshot();
-        (observed.remainingSize, observed.remainingMargin,,,,,) = engine.positions(accountId);
-        uint256 settlementAfter = clearinghouse.balanceUsdc(accountId);
+        (observed.remainingSize, observed.remainingMargin,,,,,) = engine.positions(account);
+        uint256 settlementAfter = clearinghouse.balanceUsdc(account);
         observed.immediatePayoutUsdc =
             settlementAfter > beforeSnapshot.settlementUsdc ? settlementAfter - beforeSnapshot.settlementUsdc : 0;
-        observed.deferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(accountId);
+        observed.traderClaimBalanceUsdc = engine.traderClaimBalanceUsdc(account);
         observed.badDebtUsdc = afterSnapshot.accumulatedBadDebtUsdc - beforeSnapshot.protocol.accumulatedBadDebtUsdc;
         observed.degradedMode = engine.degradedMode();
         observed.effectiveAssetsAfterUsdc = afterSnapshot.effectiveSolvencyAssetsUsdc;
@@ -383,10 +464,10 @@ abstract contract BasePerpTest is Test {
     }
 
     function _assertClosePreviewMatchesObserved(
-        CfdEngine.ClosePreview memory preview,
+        ICfdEngineTypes.ClosePreview memory preview,
         CloseParityObserved memory observed,
         bool degradedModeBefore
-    ) internal {
+    ) internal pure {
         assertApproxEqAbs(
             observed.immediatePayoutUsdc,
             preview.immediatePayoutUsdc,
@@ -394,10 +475,10 @@ abstract contract BasePerpTest is Test {
             "Immediate payout should stay close to close preview"
         );
         assertApproxEqAbs(
-            observed.deferredTraderCreditUsdc,
-            preview.deferredTraderCreditUsdc,
+            observed.traderClaimBalanceUsdc,
+            preview.traderClaimBalanceUsdc,
             40_000_000,
-            "Deferred payout should stay close to close preview"
+            "Trader claim should stay close to close preview"
         );
         assertEq(observed.badDebtUsdc, preview.badDebtUsdc, "Bad debt should match close preview");
         assertEq(observed.remainingSize, preview.remainingSize, "Remaining size should match close preview");
@@ -420,8 +501,8 @@ abstract contract BasePerpTest is Test {
     }
 
     function _assertClosePreviewEquals(
-        CfdEngine.ClosePreview memory actual,
-        CfdEngine.ClosePreview memory expected
+        ICfdEngineTypes.ClosePreview memory actual,
+        ICfdEngineTypes.ClosePreview memory expected
     ) internal pure {
         assertEq(actual.valid, expected.valid, "Close preview validity should match");
         assertEq(uint8(actual.invalidReason), uint8(expected.invalidReason), "Close invalid reason should match");
@@ -433,19 +514,17 @@ abstract contract BasePerpTest is Test {
         assertEq(actual.executionFeeUsdc, expected.executionFeeUsdc, "Close execution fee should match");
         assertEq(actual.freshTraderPayoutUsdc, expected.freshTraderPayoutUsdc, "Close fresh payout should match");
         assertEq(
-            actual.existingDeferredConsumedUsdc,
-            expected.existingDeferredConsumedUsdc,
-            "Close deferred consumption should match"
+            actual.existingTraderClaimConsumedUsdc,
+            expected.existingTraderClaimConsumedUsdc,
+            "Close trader claim consumption should match"
         );
         assertEq(
-            actual.existingDeferredRemainingUsdc,
-            expected.existingDeferredRemainingUsdc,
-            "Close deferred remainder should match"
+            actual.existingTraderClaimRemainingUsdc,
+            expected.existingTraderClaimRemainingUsdc,
+            "Close trader claim remainder should match"
         );
         assertEq(actual.immediatePayoutUsdc, expected.immediatePayoutUsdc, "Close immediate payout should match");
-        assertEq(
-            actual.deferredTraderCreditUsdc, expected.deferredTraderCreditUsdc, "Close deferred payout should match"
-        );
+        assertEq(actual.traderClaimBalanceUsdc, expected.traderClaimBalanceUsdc, "Close trader claim should match");
         assertEq(actual.seizedCollateralUsdc, expected.seizedCollateralUsdc, "Close seized collateral should match");
         assertEq(actual.badDebtUsdc, expected.badDebtUsdc, "Close bad debt should match");
         assertEq(actual.remainingSize, expected.remainingSize, "Close remaining size should match");
@@ -459,36 +538,31 @@ abstract contract BasePerpTest is Test {
     }
 
     function _captureLiquidationParitySnapshot(
-        bytes32 accountId,
+        address account,
         address keeper
     ) internal view returns (LiquidationParitySnapshot memory snapshot) {
         snapshot.protocol = engineProtocolLens.getProtocolAccountingSnapshot();
-        snapshot.settlementUsdc = clearinghouse.balanceUsdc(accountId);
-        snapshot.deferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(accountId);
-        snapshot.keeperSettlementUsdc = clearinghouse.balanceUsdc(bytes32(uint256(uint160(keeper))));
-        snapshot.deferredKeeperCreditUsdc = engine.deferredKeeperCreditUsdc(keeper);
+        snapshot.settlementUsdc = clearinghouse.balanceUsdc(account);
+        snapshot.traderClaimBalanceUsdc = engine.traderClaimBalanceUsdc(account);
+        snapshot.keeperSettlementUsdc = clearinghouse.balanceUsdc(keeper);
     }
 
     function _observeLiquidationParity(
-        bytes32 accountId,
+        address account,
         address keeper,
         LiquidationParitySnapshot memory beforeSnapshot
     ) internal view returns (LiquidationParityObserved memory observed) {
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory afterSnapshot =
             engineProtocolLens.getProtocolAccountingSnapshot();
-        (observed.remainingSize,,,,,,) = engine.positions(accountId);
-        uint256 settlementAfter = clearinghouse.balanceUsdc(accountId);
+        (observed.remainingSize,,,,,,) = engine.positions(account);
+        uint256 settlementAfter = clearinghouse.balanceUsdc(account);
         observed.immediatePayoutUsdc =
             settlementAfter > beforeSnapshot.settlementUsdc ? settlementAfter - beforeSnapshot.settlementUsdc : 0;
-        observed.deferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(accountId);
+        observed.traderClaimBalanceUsdc = engine.traderClaimBalanceUsdc(account);
         observed.badDebtUsdc = afterSnapshot.accumulatedBadDebtUsdc - beforeSnapshot.protocol.accumulatedBadDebtUsdc;
-        uint256 keeperSettlementAfter = clearinghouse.balanceUsdc(bytes32(uint256(uint160(keeper))));
+        uint256 keeperSettlementAfter = clearinghouse.balanceUsdc(keeper);
         observed.keeperSettlementUsdc = keeperSettlementAfter > beforeSnapshot.keeperSettlementUsdc
             ? keeperSettlementAfter - beforeSnapshot.keeperSettlementUsdc
-            : 0;
-        uint256 deferredKeeperCreditAfter = engine.deferredKeeperCreditUsdc(keeper);
-        observed.deferredKeeperCreditUsdc = deferredKeeperCreditAfter > beforeSnapshot.deferredKeeperCreditUsdc
-            ? deferredKeeperCreditAfter - beforeSnapshot.deferredKeeperCreditUsdc
             : 0;
         observed.degradedMode = engine.degradedMode();
         observed.effectiveAssetsAfterUsdc = afterSnapshot.effectiveSolvencyAssetsUsdc;
@@ -496,7 +570,7 @@ abstract contract BasePerpTest is Test {
     }
 
     function _assertLiquidationPreviewMatchesObserved(
-        CfdEngine.LiquidationPreview memory preview,
+        ICfdEngineTypes.LiquidationPreview memory preview,
         LiquidationParityObserved memory observed,
         bool degradedModeBefore
     ) internal pure {
@@ -506,13 +580,13 @@ abstract contract BasePerpTest is Test {
             "Immediate trader payout should match liquidation preview"
         );
         assertEq(
-            observed.deferredTraderCreditUsdc,
-            preview.deferredTraderCreditUsdc,
-            "Deferred trader credit should match liquidation preview"
+            observed.traderClaimBalanceUsdc,
+            preview.traderClaimBalanceUsdc,
+            "Trader claim balance should match liquidation preview"
         );
         assertEq(observed.badDebtUsdc, preview.badDebtUsdc, "Bad debt should match liquidation preview");
         assertEq(
-            observed.keeperSettlementUsdc + observed.deferredKeeperCreditUsdc,
+            observed.keeperSettlementUsdc,
             preview.keeperBountyUsdc,
             "Keeper bounty settlement should match liquidation preview"
         );
@@ -535,8 +609,8 @@ abstract contract BasePerpTest is Test {
     }
 
     function _assertLiquidationPreviewEquals(
-        CfdEngine.LiquidationPreview memory actual,
-        CfdEngine.LiquidationPreview memory expected
+        ICfdEngineTypes.LiquidationPreview memory actual,
+        ICfdEngineTypes.LiquidationPreview memory expected
     ) internal pure {
         assertEq(
             actual.liquidatable, expected.liquidatable, "Liquidatable flag should match canonical simulateLiquidation"
@@ -550,17 +624,17 @@ abstract contract BasePerpTest is Test {
         assertEq(actual.settlementRetainedUsdc, expected.settlementRetainedUsdc, "Settlement retained should match");
         assertEq(actual.freshTraderPayoutUsdc, expected.freshTraderPayoutUsdc, "Fresh trader payout should match");
         assertEq(
-            actual.existingDeferredConsumedUsdc,
-            expected.existingDeferredConsumedUsdc,
-            "Deferred consumption should match"
+            actual.existingTraderClaimConsumedUsdc,
+            expected.existingTraderClaimConsumedUsdc,
+            "Trader claim consumption should match"
         );
         assertEq(
-            actual.existingDeferredRemainingUsdc,
-            expected.existingDeferredRemainingUsdc,
-            "Deferred remainder should match"
+            actual.existingTraderClaimRemainingUsdc,
+            expected.existingTraderClaimRemainingUsdc,
+            "Trader claim remainder should match"
         );
         assertEq(actual.immediatePayoutUsdc, expected.immediatePayoutUsdc, "Immediate payout should match");
-        assertEq(actual.deferredTraderCreditUsdc, expected.deferredTraderCreditUsdc, "Deferred payout should match");
+        assertEq(actual.traderClaimBalanceUsdc, expected.traderClaimBalanceUsdc, "Trader claim should match");
         assertEq(actual.badDebtUsdc, expected.badDebtUsdc, "Bad debt should match");
         assertEq(actual.triggersDegradedMode, expected.triggersDegradedMode, "Degraded trigger should match");
         assertEq(actual.postOpDegradedMode, expected.postOpDegradedMode, "Post-op degraded mode should match");
@@ -569,19 +643,19 @@ abstract contract BasePerpTest is Test {
     }
 
     function _observeWithdrawParity(
-        bytes32 accountId,
+        address account,
         address trader,
         uint256 amountUsdc
     ) internal returns (WithdrawParityState memory state) {
         vm.prank(address(clearinghouse));
-        try engine.checkWithdraw(accountId) {
+        try engine.checkWithdraw(account) {
             state.checkWithdrawPasses = true;
         } catch (bytes memory err) {
             state.checkWithdrawSelector = _revertSelector(err);
         }
 
         vm.prank(trader);
-        try clearinghouse.withdraw(accountId, amountUsdc) {
+        try clearinghouse.withdraw(account, amountUsdc) {
             state.withdrawPasses = true;
         } catch (bytes memory err) {
             state.withdrawSelector = _revertSelector(err);
@@ -668,6 +742,9 @@ abstract contract BasePerpTest is Test {
         config.orderExecutionStalenessLimit = router.orderExecutionStalenessLimit();
         config.liquidationStalenessLimit = router.liquidationStalenessLimit();
         config.pythMaxConfidenceRatioBps = router.pythMaxConfidenceRatioBps();
+        config.orderSettlementWindow = router.orderSettlementWindow();
+        config.maxComponentPublishTimeDivergence = router.maxComponentPublishTimeDivergence();
+        config.adverseConfidenceMultiplierBps = router.adverseConfidenceMultiplierBps();
         config.minOpenNotionalUsdc = router.minOpenNotionalUsdc();
         config.openOrderExecutionBountyBps = router.openOrderExecutionBountyBps();
         config.minOpenOrderExecutionBountyUsdc = router.minOpenOrderExecutionBountyUsdc();
@@ -695,9 +772,10 @@ abstract contract BasePerpTest is Test {
     ) internal returns (CfdEngine deployedEngine) {
         deployedEngine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, riskParams_);
         CfdEnginePlanner planner = new CfdEnginePlanner();
-        CfdEngineSettlementModule settlement = new CfdEngineSettlementModule(address(deployedEngine));
+        CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(deployedEngine));
         CfdEngineAdmin adminModule = new CfdEngineAdmin(address(deployedEngine), address(this));
         deployedEngine.setDependencies(address(planner), address(settlement), address(adminModule));
+        deployedEngine.setProtocolTreasury(PROTOCOL_TREASURY_ACCOUNT);
     }
 
     function _syncRouterAdmin() internal {
@@ -718,13 +796,13 @@ abstract contract BasePerpTest is Test {
 
     function _sideState(
         CfdTypes.Side side
-    ) internal view returns (ICfdEngine.SideState memory state) {
+    ) internal view returns (ICfdEngineTypes.SideState memory state) {
         (state.maxProfitUsdc, state.openInterest, state.entryNotional, state.totalMargin) = engine.sides(uint8(side));
     }
 
     function _maxLiability() internal view returns (uint256) {
-        ICfdEngine.SideState memory bull = _sideState(CfdTypes.Side.BULL);
-        ICfdEngine.SideState memory bear = _sideState(CfdTypes.Side.BEAR);
+        ICfdEngineTypes.SideState memory bull = _sideState(CfdTypes.Side.BULL);
+        ICfdEngineTypes.SideState memory bear = _sideState(CfdTypes.Side.BEAR);
         return bull.maxProfitUsdc > bear.maxProfitUsdc ? bull.maxProfitUsdc : bear.maxProfitUsdc;
     }
 
@@ -737,8 +815,8 @@ abstract contract BasePerpTest is Test {
         if (price == 0) {
             return 0;
         }
-        ICfdEngine.SideState memory bull = _sideState(CfdTypes.Side.BULL);
-        ICfdEngine.SideState memory bear = _sideState(CfdTypes.Side.BEAR);
+        ICfdEngineTypes.SideState memory bull = _sideState(CfdTypes.Side.BULL);
+        ICfdEngineTypes.SideState memory bear = _sideState(CfdTypes.Side.BEAR);
         int256 bullPnl = (int256(bull.entryNotional) - int256(bull.openInterest * price)) / int256(1e20);
         int256 bearPnl = (int256(bear.openInterest * price) - int256(bear.entryNotional)) / int256(1e20);
         return bullPnl + bearPnl;
@@ -770,6 +848,14 @@ abstract contract BasePerpTest is Test {
         return executionBountyUsdc > maxExecutionBountyUsdc ? maxExecutionBountyUsdc : executionBountyUsdc;
     }
 
+    function _engineExecutionFeeUsdc(
+        uint256 sizeDelta,
+        uint256 price
+    ) internal view returns (uint256) {
+        uint256 notionalUsdc = (sizeDelta * price) / DecimalConstants.USDC_TO_TOKEN_SCALE;
+        return (notionalUsdc * engine.executionFeeBps()) / 10_000;
+    }
+
     function _sideOpenInterest(
         CfdTypes.Side side
     ) internal view returns (uint256) {
@@ -792,7 +878,7 @@ abstract contract BasePerpTest is Test {
     // The live system does not maintain a legacy side-index state; this helper is intentionally zero.
     function _legacySideIndexZero(
         CfdTypes.Side side
-    ) internal view returns (int256) {
+    ) internal pure returns (int256) {
         side;
         return 0;
     }
@@ -801,7 +887,7 @@ abstract contract BasePerpTest is Test {
     // The live carry model does not use a legacy side-entry index; this helper is intentionally zero.
     function _legacySideEntryIndexZero(
         CfdTypes.Side side
-    ) internal view returns (int256) {
+    ) internal pure returns (int256) {
         side;
         return 0;
     }
@@ -819,10 +905,10 @@ abstract contract BasePerpTest is Test {
     }
 
     function _pendingOrders(
-        bytes32 accountId
+        address account
     ) internal view returns (IOrderRouterAccounting.PendingOrderView[] memory pending) {
-        uint64 orderId = router.accountHeadOrderId(accountId);
-        uint256 pendingCount = router.pendingOrderCounts(accountId);
+        uint64 orderId = router.accountHeadOrderId(account);
+        uint256 pendingCount = router.pendingOrderCounts(account);
         pending = new IOrderRouterAccounting.PendingOrderView[](pendingCount);
         for (uint256 i; i < pendingCount; ++i) {
             (pending[i], orderId) = router.getPendingOrderView(orderId);
@@ -848,54 +934,116 @@ abstract contract BasePerpTest is Test {
     }
 
     function _freeSettlementUsdc(
-        bytes32 accountId
+        address account
     ) internal view returns (uint256) {
-        return clearinghouse.getAccountUsdcBuckets(accountId).freeSettlementUsdc;
+        return clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc;
     }
 
-    function _accountIdOf(
+    function _expectedIndexedCarryUsdc(
         address account
-    ) internal pure returns (bytes32) {
-        return bytes32(uint256(uint160(account)));
+    ) internal view returns (uint256) {
+        (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(account);
+        if (size == 0) {
+            return 0;
+        }
+        (uint256 borrowBaseUsdc, uint256 startIndex,) = engine.positionCarryState(account);
+        if (borrowBaseUsdc == 0) {
+            return 0;
+        }
+        uint256 endIndex = _currentSideCarryIndex(side);
+        if (endIndex <= startIndex) {
+            return 0;
+        }
+        return PositionRiskAccountingLib.computeIndexedCarryUsdc(borrowBaseUsdc, endIndex - startIndex);
+    }
+
+    function _positionBorrowBaseUsdc(
+        address account
+    ) internal view returns (uint256 borrowBaseUsdc) {
+        (borrowBaseUsdc,,) = engine.positionCarryState(account);
+    }
+
+    function _lastCarryTimestamp(
+        address account
+    ) internal view returns (uint64 lastCarryTimestamp) {
+        (,, lastCarryTimestamp) = engine.positionCarryState(account);
+    }
+
+    function _currentSideCarryIndex(
+        CfdTypes.Side side
+    ) internal view returns (uint256 index) {
+        uint256 sideIndex = uint256(side);
+        (,,,,, uint256 baseCarryBps,,) = engine.riskParams();
+        index = PositionRiskAccountingLib.computeCurrentCarryIndex(
+            engine.sideCarryIndex(sideIndex),
+            engine.sideCarryTimestamp(sideIndex),
+            block.timestamp,
+            engine.sideBorrowBaseUsdc(sideIndex),
+            pool.totalAssets(),
+            baseCarryBps
+        );
+    }
+
+    function _accountOf(
+        address account
+    ) internal pure returns (address) {
+        return account;
     }
 
     function _settlementBalance(
         address account
     ) internal view returns (uint256) {
-        return clearinghouse.balanceUsdc(_accountIdOf(account));
+        return clearinghouse.balanceUsdc(_accountOf(account));
+    }
+
+    function _fundProtocolTreasury(
+        uint256 amountUsdc
+    ) internal {
+        address treasury = engine.protocolTreasury();
+        usdc.mint(address(clearinghouse), amountUsdc);
+        vm.prank(address(engine));
+        clearinghouse.settleUsdc(treasury, int256(amountUsdc));
+    }
+
+    function _withdrawProtocolTreasury(
+        uint256 amountUsdc
+    ) internal {
+        address treasury = engine.protocolTreasury();
+        vm.prank(treasury);
+        clearinghouse.withdraw(treasury, amountUsdc);
     }
 
     function _terminalReachableUsdc(
-        bytes32 accountId
+        address account
     ) internal view returns (uint256) {
-        return clearinghouse.getAccountUsdcBuckets(accountId).settlementBalanceUsdc;
+        uint256 settlementBalance = clearinghouse.getAccountUsdcBuckets(account).settlementBalanceUsdc;
+        uint256 executionReservation = router.getAccountReservations(account).executionBountyUsdc;
+        return settlementBalance > executionReservation ? settlementBalance - executionReservation : 0;
     }
 
     function _publicPosition(
-        bytes32 accountId
+        address account
     ) internal view returns (PerpsViewTypes.PositionView memory viewData) {
-        return publicLens.getPosition(accountId);
+        return publicLens.getPosition(account);
     }
 
     function _publicProtocolStatus() internal view returns (PerpsViewTypes.ProtocolStatusView memory viewData) {
         return publicLens.getProtocolStatus();
     }
 
-    function _deferredCreditStatus(
-        bytes32 accountId,
+    function _traderClaimStatus(
+        address account,
         address keeper
-    ) internal view returns (DeferredEngineViewTypes.DeferredCreditStatus memory status) {
-        uint256 deferredTraderCreditUsdc = engine.deferredTraderCreditUsdc(accountId);
-        uint256 deferredKeeperCreditUsdc = engine.deferredKeeperCreditUsdc(keeper);
+    ) internal view returns (ClaimEngineViewTypes.TraderClaimStatus memory status) {
+        uint256 traderClaimBalanceUsdc = engine.traderClaimBalanceUsdc(account);
         bool anyLiquidity = pool.totalAssets() > 0;
 
-        status.deferredTraderCreditUsdc = deferredTraderCreditUsdc;
-        status.traderPayoutClaimableNow = deferredTraderCreditUsdc > 0 && anyLiquidity;
-        status.deferredKeeperCreditUsdc = deferredKeeperCreditUsdc;
-        status.keeperCreditClaimableNow = deferredKeeperCreditUsdc > 0 && anyLiquidity;
+        status.traderClaimBalanceUsdc = traderClaimBalanceUsdc;
+        status.traderClaimServiceableNow = traderClaimBalanceUsdc > 0 && anyLiquidity;
+        keeper;
     }
 
-    function _vaultMtmAdjustment() internal view returns (uint256) {
+    function _poolMtmAdjustment() internal view returns (uint256) {
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot =
             engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
         return snapshot.unrealizedMtmLiabilityUsdc;

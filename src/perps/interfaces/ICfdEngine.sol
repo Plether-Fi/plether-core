@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEnginePlanTypes} from "../CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../CfdTypes.sol";
-import {EngineStatusViewTypes} from "./EngineStatusViewTypes.sol";
+import {ICfdEngineTypes} from "./ICfdEngineTypes.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /// @notice Stateful CFD trading engine: processes orders and liquidates positions.
@@ -12,46 +11,16 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 ///      `IPerpsTraderActions`, `IPerpsTraderViews`, `IPerpsLPActions`, `IPerpsLPViews`,
 ///      `IPerpsKeeper`, `IProtocolViews`, and `IMarginAccount`.
 ///      Live protocol contracts should prefer smaller role-specific interfaces like `ICfdEngineCore`.
-interface ICfdEngine {
-
-    error CfdEngine__TypedOrderFailure(
-        CfdEnginePlanTypes.ExecutionFailurePolicyCategory failureCategory, uint8 failureCode, bool isClose
-    );
-    error CfdEngine__MarkPriceOutOfOrder();
-
-    struct SideState {
-        uint256 maxProfitUsdc;
-        uint256 openInterest;
-        uint256 entryNotional;
-        uint256 totalMargin;
-    }
-
-    struct LiquidationPreview {
-        bool liquidatable;
-        uint256 oraclePrice;
-        int256 equityUsdc;
-        int256 pnlUsdc;
-        uint256 reachableCollateralUsdc;
-        uint256 keeperBountyUsdc;
-        uint256 seizedCollateralUsdc;
-        uint256 settlementRetainedUsdc;
-        uint256 freshTraderPayoutUsdc;
-        uint256 existingDeferredConsumedUsdc;
-        uint256 existingDeferredRemainingUsdc;
-        uint256 immediatePayoutUsdc;
-        uint256 deferredTraderCreditUsdc;
-        uint256 badDebtUsdc;
-        bool triggersDegradedMode;
-        bool postOpDegradedMode;
-        uint256 effectiveAssetsAfterUsdc;
-        uint256 maxLiabilityAfterUsdc;
-    }
+interface ICfdEngine is ICfdEngineTypes {
 
     /// @notice Margin clearinghouse address used for account margin locking/unlocking
     function clearinghouse() external view returns (address);
 
     /// @notice Current order router allowed to execute orders through the engine.
     function orderRouter() external view returns (address);
+
+    /// @notice Clearinghouse account that receives protocol fee credits.
+    function protocolTreasury() external view returns (address);
 
     /// @notice Settlement token used for fees, margin, and payouts
     function USDC() external view returns (IERC20);
@@ -65,39 +34,28 @@ interface ICfdEngine {
     function processOrderTyped(
         CfdTypes.Order memory order,
         uint256 currentOraclePrice,
-        uint256 vaultDepthUsdc,
+        uint256 poolDepthUsdc,
         uint64 publishTime
-    ) external;
-
-    /// @notice Records deferred keeper credit when immediate clearinghouse settlement is unavailable.
-    /// @dev Deferred keeper value is always later claimed as clearinghouse credit.
-    function recordDeferredKeeperCredit(
-        address keeper,
-        uint256 amountUsdc
     ) external;
 
     /// @notice Reserves close-order execution bounty from free settlement first, then active position margin.
     function reserveCloseOrderExecutionBounty(
-        bytes32 accountId,
+        address account,
         uint256 sizeDelta,
-        uint256 amountUsdc,
-        address recipient
-    ) external;
-
-    /// @notice Pulls router-custodied cancellation fees into protocol revenue.
-    function absorbRouterCancellationFee(
         uint256 amountUsdc
     ) external;
 
-    /// @notice Books router-delivered protocol-owned inflow as accumulated fees after the router has already paid the vault.
-    function recordRouterProtocolFee(
+    /// @notice Moves forfeited reserved execution-bounty reservation into the protocol treasury account.
+    function absorbReservedExecutionBounty(
+        address sourceAccount,
         uint256 amountUsdc
     ) external;
 
-    /// @notice Credits a keeper execution bounty into the beneficiary's clearinghouse account.
+    /// @notice Credits a reserved execution bounty into the beneficiary's clearinghouse account.
     /// @dev Realizes carry first when the beneficiary account currently has an open position so the
     ///      settlement-balance credit cannot retroactively dilute carry owed over the elapsed interval.
-    function creditKeeperExecutionBounty(
+    function creditBounty(
+        address sourceAccount,
         address beneficiary,
         uint256 amountUsdc,
         uint256 price,
@@ -105,46 +63,42 @@ interface ICfdEngine {
     ) external;
 
     /// @notice Liquidates an undercollateralized position, returns keeper bounty in USDC
-    /// @param accountId          Account holding the position to liquidate
+    /// @param account          Account holding the position to liquidate
     /// @param currentOraclePrice Mark price from the oracle (8 decimals)
-    /// @param vaultDepthUsdc     Available vault liquidity (6 decimals)
+    /// @param poolDepthUsdc     Available pool liquidity (6 decimals)
     /// @param publishTime        Oracle publish timestamp
     /// @return keeperBountyUsdc  Bounty paid to the liquidation keeper (6 decimals)
     function liquidatePosition(
-        bytes32 accountId,
+        address account,
         uint256 currentOraclePrice,
-        uint256 vaultDepthUsdc,
-        uint64 publishTime
+        uint256 poolDepthUsdc,
+        uint64 publishTime,
+        address keeper
     ) external returns (uint256 keeperBountyUsdc);
 
     /// @notice Realizes accrued carry against the current reachable collateral before a user-level
     ///         settlement balance mutation changes the carry basis.
     function realizeCarryBeforeMarginChange(
-        bytes32 accountId,
-        uint256 reachableCollateralBasisUsdc
+        address account
     ) external;
 
-    /// @notice Canonical liquidation preview using the vault's current accounted depth.
+    function checkpointCarryIndexes() external;
+
+    /// @notice Canonical liquidation preview using the pool's current accounted depth.
     function previewLiquidation(
-        bytes32 accountId,
+        address account,
         uint256 oraclePrice
     ) external view returns (LiquidationPreview memory preview);
 
-    /// @notice Hypothetical liquidation simulation at a caller-supplied vault depth.
+    /// @notice Hypothetical liquidation simulation at a caller-supplied pool depth.
     function simulateLiquidation(
-        bytes32 accountId,
+        address account,
         uint256 oraclePrice,
-        uint256 vaultDepthUsdc
+        uint256 poolDepthUsdc
     ) external view returns (LiquidationPreview memory preview);
 
-    /// @notice Accumulated execution fees awaiting withdrawal (6 decimals)
-    function accumulatedFeesUsdc() external view returns (uint256);
-
-    /// @notice Deferred trader credit still owed to beneficiaries.
-    function totalDeferredTraderCreditUsdc() external view returns (uint256);
-
-    /// @notice Deferred keeper credit still owed after failed immediate settlement.
-    function totalDeferredKeeperCreditUsdc() external view returns (uint256);
+    /// @notice Trader claim balance still owed to beneficiaries.
+    function totalTraderClaimBalanceUsdc() external view returns (uint256);
 
     /// @notice Timestamp of the last mark price update
     function lastMarkTime() external view returns (uint64);
@@ -172,7 +126,7 @@ interface ICfdEngine {
 
     /// @notice Returns the current position tuple for an account.
     function positions(
-        bytes32 accountId
+        address account
     )
         external
         view
@@ -186,10 +140,10 @@ interface ICfdEngine {
             int256 vpiAccrued
         );
 
-    /// @notice Returns the timestamp through which carry has been realized for the position.
-    function getPositionLastCarryTimestamp(
-        bytes32 accountId
-    ) external view returns (uint64);
+    /// @notice Returns the indexed carry basis for a position.
+    function positionCarryState(
+        address account
+    ) external view returns (uint256 borrowBaseUsdc, uint256 lastCarryIndex, uint64 lastCarryTimestamp);
 
     /// @notice True when the engine has latched degraded mode after a close revealed insolvency.
     function degradedMode() external view returns (bool);
@@ -200,13 +154,11 @@ interface ICfdEngine {
     ) external view returns (bool);
 
     /// @notice High-level protocol lifecycle used by external status consumers.
-    ///         `Active` means the engine is wired and the vault has enabled live risk-taking.
+    ///         `Active` means the engine is wired and the HousePool has enabled live risk-taking.
     enum ProtocolPhase {
         Configuring,
         Active,
         Degraded
     }
-
-    function getProtocolStatus() external view returns (EngineStatusViewTypes.ProtocolStatus memory);
 
 }

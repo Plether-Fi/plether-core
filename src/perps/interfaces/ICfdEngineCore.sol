@@ -1,24 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEnginePlanTypes} from "../CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../CfdTypes.sol";
-import {EngineStatusViewTypes} from "./EngineStatusViewTypes.sol";
+import {ICfdEngineTypes} from "./ICfdEngineTypes.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /// @notice Core/operator-facing engine surface used by live perps contracts.
-interface ICfdEngineCore {
-
-    error CfdEngine__TypedOrderFailure(
-        CfdEnginePlanTypes.ExecutionFailurePolicyCategory failureCategory, uint8 failureCode, bool isClose
-    );
-    error CfdEngine__MarkPriceOutOfOrder();
+interface ICfdEngineCore is ICfdEngineTypes {
 
     function clearinghouse() external view returns (address);
 
     function orderRouter() external view returns (address);
 
-    function settlementModule() external view returns (address);
+    function pool() external view returns (address);
+
+    function protocolTreasury() external view returns (address);
+
+    function settlementSidecar() external view returns (address);
 
     function USDC() external view returns (IERC20);
 
@@ -41,48 +39,37 @@ interface ICfdEngineCore {
     function processOrderTyped(
         CfdTypes.Order memory order,
         uint256 currentOraclePrice,
-        uint256 vaultDepthUsdc,
+        uint256 poolDepthUsdc,
         uint64 publishTime
     ) external;
 
-    function recordDeferredKeeperCredit(
-        address keeper,
-        uint256 amountUsdc
-    ) external;
-
     function reserveCloseOrderExecutionBounty(
-        bytes32 accountId,
+        address account,
         uint256 sizeDelta,
-        uint256 amountUsdc,
-        address recipient
-    ) external;
-
-    function absorbRouterCancellationFee(
         uint256 amountUsdc
     ) external;
 
-    function recordRouterProtocolFee(
+    function absorbReservedExecutionBounty(
+        address sourceAccount,
         uint256 amountUsdc
     ) external;
 
-    function creditKeeperExecutionBounty(
+    function creditBounty(
+        address sourceAccount,
         address beneficiary,
         uint256 amountUsdc,
         uint256 price,
         uint64 publishTime
     ) external;
 
-    function accumulatedFeesUsdc() external view returns (uint256);
-
-    function totalDeferredTraderCreditUsdc() external view returns (uint256);
-
-    function totalDeferredKeeperCreditUsdc() external view returns (uint256);
+    function totalTraderClaimBalanceUsdc() external view returns (uint256);
 
     function liquidatePosition(
-        bytes32 accountId,
+        address account,
         uint256 currentOraclePrice,
-        uint256 vaultDepthUsdc,
-        uint64 publishTime
+        uint256 poolDepthUsdc,
+        uint64 publishTime,
+        address keeper
     ) external returns (uint256 keeperBountyUsdc);
 
     function lastMarkTime() external view returns (uint64);
@@ -95,14 +82,10 @@ interface ICfdEngineCore {
     function CAP_PRICE() external view returns (uint256);
 
     function realizeCarryBeforeMarginChange(
-        bytes32 accountId,
-        uint256 reachableCollateralBasisUsdc
+        address account
     ) external;
 
-    function checkpointCarryUsingStoredMark(
-        bytes32 accountId,
-        uint256 reachableCollateralBasisUsdc
-    ) external;
+    function checkpointCarryIndexes() external;
 
     function isFadWindow() external view returns (bool);
 
@@ -117,7 +100,7 @@ interface ICfdEngineCore {
     function isOracleFrozen() external view returns (bool);
 
     function positions(
-        bytes32 accountId
+        address account
     )
         external
         view
@@ -132,7 +115,5 @@ interface ICfdEngineCore {
         );
 
     function degradedMode() external view returns (bool);
-
-    function getProtocolStatus() external view returns (EngineStatusViewTypes.ProtocolStatus memory status);
 
 }

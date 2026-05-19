@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {IOrderRouterErrors} from "../../src/perps/interfaces/IOrderRouterErrors.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
@@ -38,31 +38,31 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
     function test_C1_RealizedBadDebtShouldNotBeDoubleCountedInMtM() public {
         address winner = address(0xAAA1);
         address loser = address(0xBBB1);
-        bytes32 winnerId = bytes32(uint256(uint160(winner)));
-        bytes32 loserId = bytes32(uint256(uint160(loser)));
+        address winnerAccount = winner;
+        address loserAccount = loser;
 
         _fundTrader(winner, 200_000e6);
         _fundTrader(loser, 2000e6);
 
-        _open(winnerId, CfdTypes.Side.BULL, 100_000e18, 100_000e6, 1.5e8);
-        _open(loserId, CfdTypes.Side.BULL, 100_000e18, 1000e6, 0.5e8);
+        _open(winnerAccount, CfdTypes.Side.BULL, 100_000e18, 100_000e6, 1.5e8);
+        _open(loserAccount, CfdTypes.Side.BULL, 100_000e18, 1000e6, 0.5e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
         uint256 depth = pool.totalAssets();
         vm.prank(address(router));
-        engine.liquidatePosition(loserId, 1e8, depth, uint64(block.timestamp));
+        engine.liquidatePosition(loserAccount, 1e8, depth, uint64(block.timestamp), address(this));
 
         assertGt(engine.accumulatedBadDebtUsdc(), 0, "Setup must realize bad debt");
 
-        assertEq(_vaultMtmAdjustment(), 75_000e6, "MtM should use the conservative post-liquidation envelope");
+        assertEq(_poolMtmAdjustment(), 75_000e6, "MtM should use the conservative post-liquidation envelope");
     }
 
     function test_H1_MarginOnlyUpdateViaRouterReverts() public {
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        address aliceAccount = alice;
         _fundTrader(alice, 50_000e6);
-        _open(aliceId, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
 
         vm.prank(alice);
         (bool ok,) = address(router)
@@ -71,12 +71,12 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
     }
 
     function test_M1_ExecutionFeesAccrueToProtocolNotLpEquity() public {
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        address aliceAccount = alice;
         _fundTrader(alice, 50_000e6);
 
         uint256 equityBefore = pool.seniorPrincipal() + pool.juniorPrincipal();
 
-        _open(aliceId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
         bytes[] memory priceData = new bytes[](1);
@@ -92,7 +92,9 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
             equityAfter, equityBefore, "User-funded close-order bounties should not reduce LP distributable equity"
         );
         assertEq(
-            engine.accumulatedFeesUsdc(), 80e6, "Open and close execution fees should both accrue as protocol revenue"
+            clearinghouse.balanceUsdc(engine.protocolTreasury()),
+            80e6,
+            "Open and close execution fees should both accrue as protocol revenue"
         );
     }
 
@@ -118,9 +120,9 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
     }
 
     function test_I1_CloseWithMarginDeltaMustRevert() public {
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        address aliceAccount = alice;
         _fundTrader(alice, 50_000e6);
-        _open(aliceId, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
 
         vm.prank(alice);
         (bool ok,) = address(router)
@@ -159,11 +161,11 @@ contract AuditLatestFindingsFailing_VPI is BasePerpTest {
         _fundTrader(carol, 50_000e6);
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BEAR, 200_000e18, 40_000e6, 1e8, false);
-        bytes[] memory empty;
+        bytes[] memory empty = _mockPythUpdateData();
         router.executeOrder(1, empty);
 
         _fundTrader(alice, 50_000e6);
-        bytes32 aliceAccount = bytes32(uint256(uint160(alice)));
+        address aliceAccount = alice;
         uint256 aliceBalBefore = clearinghouse.balanceUsdc(aliceAccount);
 
         vm.prank(alice);
@@ -213,7 +215,7 @@ contract AuditLatestFindingsFailing_MevDrift is BasePerpTest {
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         feedIds.push(FEED_A);
         feedIds.push(FEED_B);
@@ -233,7 +235,6 @@ contract AuditLatestFindingsFailing_MevDrift is BasePerpTest {
             new bool[](2)
         );
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
         _bootstrapSeededLifecycle();
@@ -256,7 +257,7 @@ contract AuditLatestFindingsFailing_MevDrift is BasePerpTest {
         bytes[] memory updateData = new bytes[](1);
         updateData[0] = "";
 
-        vm.expectRevert(abi.encodeWithSelector(OrderRouter.OrderRouter__OracleValidation.selector, 13));
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__MevDetected.selector);
         router.executeOrder(1, updateData);
     }
 

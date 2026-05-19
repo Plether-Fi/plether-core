@@ -11,7 +11,7 @@ contract AuditBindingAndReleaseFindingsFailing is BasePerpTest {
     address bob = address(0xB0B);
 
     function test_H1_ExecutionReleaseMustNotUnlockConsumedCommittedMargin() public {
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        address aliceAccount = alice;
 
         _fundTrader(alice, 50_000e6);
 
@@ -19,10 +19,10 @@ contract AuditBindingAndReleaseFindingsFailing is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 350_000e18, 35_000e6, 1e8, false);
 
         vm.prank(address(engine));
-        clearinghouse.consumeAccountOrderReservations(aliceId, 35_000e6);
+        clearinghouse.consumeAccountOrderReservations(aliceAccount, 35_000e6);
 
         vm.prank(address(engine));
-        router.syncMarginQueue(aliceId);
+        router.syncMarginQueue(aliceAccount);
 
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), 700_000e6);
@@ -31,15 +31,15 @@ contract AuditBindingAndReleaseFindingsFailing is BasePerpTest {
             _remainingCommittedMargin(1), 0, "Consumed committed margin should be charged to the queued order itself"
         );
 
-        uint256 lockedBeforeExecution = clearinghouse.lockedMarginUsdc(aliceId);
+        uint256 lockedBeforeExecution = clearinghouse.lockedMarginUsdc(aliceAccount);
 
-        bytes[] memory empty;
+        bytes[] memory empty = _mockPythUpdateData();
         vm.roll(block.number + 1);
         vm.prank(address(this));
         router.executeOrder(1, empty);
 
         assertEq(
-            clearinghouse.lockedMarginUsdc(aliceId),
+            clearinghouse.lockedMarginUsdc(aliceAccount),
             lockedBeforeExecution,
             "Execution release must not unlock consumed committed margin when the open order later reverts"
         );
@@ -51,7 +51,7 @@ contract AuditBindingAndReleaseFindingsFailing is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
 
-        bytes[] memory empty;
+        bytes[] memory empty = _mockPythUpdateData();
         uint256 keeperBefore = usdc.balanceOf(address(this));
 
         vm.warp(block.timestamp + router.maxOrderAge() + 1);

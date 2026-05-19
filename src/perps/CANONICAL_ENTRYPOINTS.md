@@ -8,6 +8,7 @@ For audit review that needs policy tables and read-surface canonicality in one p
 
 - Margin actions: `MarginClearinghouse.depositMargin(uint256)` and `MarginClearinghouse.withdrawMargin(uint256)`
 - Trade actions: `OrderRouter.commitOrder(CfdTypes.Side side, uint256 sizeDelta, uint256 marginDelta, uint256 targetPrice, bool isClose)`
+- Trader claim settlement: `CfdEngine.settleTraderClaim(address account)` for the account owner
 - Compact reads: `PerpsPublicLens`
 
 Use these interfaces:
@@ -67,7 +68,7 @@ The following remain useful for tests, admin tooling, migration, and deep accoun
 ## Boundary Summary
 
 - `CfdEngine` / `ICfdEngineCore`: canonical runtime truth for execution, liquidation, and protocol status.
-- `CfdEngineSettlementModule`: externalized close/liquidation settlement orchestration used by `CfdEngine`; not a product-facing surface.
+- `CfdEngineSettlementSidecar`: externalized close/liquidation settlement orchestration used by `CfdEngine`; not a product-facing surface.
 - `PerpsPublicLens`: canonical product-facing read layer.
 - `CfdEngineAccountLens`: rich account/accounting diagnostics.
 - `CfdEngineProtocolLens`: protocol-accounting and house-pool snapshot diagnostics.

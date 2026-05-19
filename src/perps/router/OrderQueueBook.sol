@@ -2,10 +2,11 @@
 pragma solidity 0.8.33;
 
 import {CfdTypes} from "../CfdTypes.sol";
+import {IOrderRouter} from "../interfaces/IOrderRouter.sol";
 import {IOrderRouterAccounting} from "../interfaces/IOrderRouterAccounting.sol";
-import {OrderEscrowAccounting} from "./OrderEscrowAccounting.sol";
+import {OrderReservationAccounting} from "./OrderReservationAccounting.sol";
 
-abstract contract OrderQueueBook is OrderEscrowAccounting {
+abstract contract OrderQueueBook is OrderReservationAccounting {
 
     struct QueuedPositionView {
         bool exists;
@@ -13,33 +14,22 @@ abstract contract OrderQueueBook is OrderEscrowAccounting {
         uint256 size;
     }
 
-    function _queueHeadOrderId() internal view virtual returns (uint64);
-
-    function _setQueueHeadOrderId(
-        uint64 orderId
-    ) internal virtual;
-
-    function _queueTailOrderId() internal view virtual returns (uint64);
-
-    function _setQueueTailOrderId(
-        uint64 orderId
-    ) internal virtual;
-
-    function _revertOrderNotPending() internal pure virtual;
+    uint64 public nextExecuteId = 1;
+    uint64 public globalTailOrderId;
 
     function _linkGlobalOrder(
         uint64 orderId
     ) internal {
-        uint64 tailOrderId = _queueTailOrderId();
+        uint64 tailOrderId = globalTailOrderId;
         if (tailOrderId == 0) {
-            _setQueueHeadOrderId(orderId);
-            _setQueueTailOrderId(orderId);
+            nextExecuteId = orderId;
+            globalTailOrderId = orderId;
             return;
         }
 
         orderRecords[tailOrderId].nextGlobalOrderId = orderId;
         orderRecords[orderId].prevGlobalOrderId = tailOrderId;
-        _setQueueTailOrderId(orderId);
+        globalTailOrderId = orderId;
     }
 
     function _unlinkGlobalOrder(
@@ -48,23 +38,23 @@ abstract contract OrderQueueBook is OrderEscrowAccounting {
         OrderRecord storage record = _orderRecord(orderId);
         uint64 prevOrderId = record.prevGlobalOrderId;
         uint64 nextOrderId = record.nextGlobalOrderId;
-        uint64 headOrderId = _queueHeadOrderId();
-        uint64 tailOrderId = _queueTailOrderId();
+        uint64 headOrderId = nextExecuteId;
+        uint64 tailOrderId = globalTailOrderId;
 
         if (headOrderId == orderId) {
-            _setQueueHeadOrderId(nextOrderId);
+            nextExecuteId = nextOrderId;
         } else if (prevOrderId != 0) {
             orderRecords[prevOrderId].nextGlobalOrderId = nextOrderId;
         } else if (tailOrderId != orderId) {
-            _revertPendingOrderLinkCorrupted();
+            revert OrderRouter__GlobalQueueCorrupt();
         }
 
         if (tailOrderId == orderId) {
-            _setQueueTailOrderId(prevOrderId);
+            globalTailOrderId = prevOrderId;
         } else if (nextOrderId != 0) {
             orderRecords[nextOrderId].prevGlobalOrderId = prevOrderId;
         } else if (headOrderId != orderId) {
-            _revertPendingOrderLinkCorrupted();
+            revert OrderRouter__GlobalQueueCorrupt();
         }
 
         record.nextGlobalOrderId = 0;
@@ -76,15 +66,15 @@ abstract contract OrderQueueBook is OrderEscrowAccounting {
     ) internal view returns (OrderRecord storage record, CfdTypes.Order memory order) {
         record = _orderRecord(orderId);
         if (record.status != IOrderRouterAccounting.OrderStatus.Pending) {
-            _revertOrderNotPending();
+            revert OrderRouter__OrderNotPending();
         }
         order = record.core;
     }
 
     function _getQueuedPositionView(
-        bytes32 accountId
+        address account
     ) internal view returns (QueuedPositionView memory queuedPosition) {
-        (uint256 positionSize,,,, CfdTypes.Side side,,) = engine.positions(accountId);
+        (uint256 positionSize,,,, CfdTypes.Side side,,) = engine.positions(account);
         if (positionSize > 0) {
             queuedPosition.exists = true;
             queuedPosition.side = side;
@@ -92,7 +82,7 @@ abstract contract OrderQueueBook is OrderEscrowAccounting {
         }
 
         for (
-            uint64 orderId = accountHeadOrderId[accountId];
+            uint64 orderId = accountHeadOrderId[account];
             orderId != 0;
             orderId = orderRecords[orderId].nextAccountOrderId
         ) {

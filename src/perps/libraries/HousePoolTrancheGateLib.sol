@@ -9,7 +9,6 @@ library HousePoolTrancheGateLib {
         uint256 unassignedAssets,
         bool markFreshForReconcile,
         uint256 projectedUnassignedAssets,
-        bool isSenior,
         uint256 projectedSeniorPrincipal,
         uint256 projectedSeniorHighWaterMark
     ) internal pure returns (bool) {
@@ -21,11 +20,11 @@ library HousePoolTrancheGateLib {
             return false;
         }
 
-        if (!isSenior) {
-            return true;
+        if (projectedSeniorPrincipal < projectedSeniorHighWaterMark) {
+            return false;
         }
 
-        return projectedSeniorPrincipal == 0 || projectedSeniorPrincipal >= projectedSeniorHighWaterMark;
+        return true;
     }
 
 }

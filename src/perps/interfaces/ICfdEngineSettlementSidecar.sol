@@ -5,7 +5,9 @@ import {CfdEnginePlanTypes} from "../CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../CfdTypes.sol";
 import {ICfdEngineSettlementHost} from "./ICfdEngineSettlementHost.sol";
 
-interface ICfdEngineSettlementModule {
+interface ICfdEngineSettlementSidecar {
+
+    function ENGINE() external view returns (address);
 
     function executeOpen(
         ICfdEngineSettlementHost host,
@@ -24,7 +26,8 @@ interface ICfdEngineSettlementModule {
     function executeLiquidation(
         ICfdEngineSettlementHost host,
         CfdEnginePlanTypes.LiquidationDelta calldata delta,
-        uint64 publishTime
+        uint64 publishTime,
+        address keeper
     ) external returns (uint256 keeperBountyUsdc);
 
 }

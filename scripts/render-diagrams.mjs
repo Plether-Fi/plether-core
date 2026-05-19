@@ -217,7 +217,7 @@ const positionLifecycle = `graph TD
     OPEN -->|equity < MMR · keeper triggers| LIQ([Liquidated])
 
     NONE -.- ND>IMR ≥ 150% MMR · min notional for keeper bounty]
-    OPEN -.- OD>While active: increase (same side) or partial close (dust guard) · each settles funding + VPI]
+    OPEN -.- OD>While active: increase (same side) or partial close (dust guard) · each settles carry + VPI]
     CLOSED -.- CD>PnL settled · position struct deleted]
     LIQ -.- LD>Margin seized · bounty paid · FAD: elevated MMR on weekends]
 
@@ -307,7 +307,7 @@ const perpsLpWithdrawalAvailability = `graph TD
     G3 -->|No| B3([Blocked: stale mark])
     G3 -->|Yes| SNAP[Build withdrawal snapshot]
     SNAP --> RES[Reserved USDC]
-    RES --> RES2[max liability + funding reserve + deferred liabilities + protocol fees]
+    RES --> RES2[max liability + carry reserve + trader claims + protocol fees]
     RES2 --> FREE[Free USDC]
     FREE --> FREE2[net physical assets minus reserved USDC]
     FREE2 --> CAP[Cap by tranche priority]
@@ -327,19 +327,19 @@ const perpsInternalArchitecture = `graph TD
     EN -->|Settle, seize, classify liabilities| MC
     EN -->|Account protocol, revenue, recap inflows| HP[HousePool]
     HP -->|Mint / burn shares| TV[TrancheVaults]
-    HP -->|Queue unpaid trader payouts + liquidation bounties| DF[Deferred Claim Queue]
+    HP -->|Record unpaid trader payouts| TC[Trader Claim Balances]
     HP -->|Segregate non-LP fees| PF(Protocol Fees)
     HP -->|Hold exceptional ownership gap| UA(Unassigned / Excess Assets)
 
     MC -.- MCN>Trader domain: free settlement, live position margin, committed order margin]
-    OR -.- ORN>Queue domain: router-custodied execution-bounty escrow]
+    OR -.- ORN>Queue domain: clearinghouse-reserved execution-bounty reservations]
     EN -.- ENN>Ledger domain: close, liquidation, solvency, withdrawal accounting]
     HP -.- HPN>Pool domain: accounted assets, tranche waterfall, fee segregation]
 
     class U user
     class MC,OR,EN,HP,TV contract
     class PF,UA token
-    class DF external
+    class TC external
     class MCN,ORN,ENN,HPN desc
 ${classes}`;
 

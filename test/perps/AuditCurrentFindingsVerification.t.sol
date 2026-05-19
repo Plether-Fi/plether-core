@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
 import {CfdEnginePlanTypes} from "../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
@@ -9,6 +8,7 @@ import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
@@ -23,23 +23,23 @@ contract AuditCurrentFindingsFailing is BasePerpTest {
     function test_C3_RealizedBadDebtShouldNotBeDoubleCounted() public {
         address winner = address(0xAAA1);
         address loser = address(0xBBB1);
-        bytes32 winnerId = bytes32(uint256(uint160(winner)));
-        bytes32 loserId = bytes32(uint256(uint160(loser)));
+        address winnerAccount = winner;
+        address loserAccount = loser;
 
         _fundTrader(winner, 200_000e6);
         _fundTrader(loser, 2000e6);
 
-        _open(winnerId, CfdTypes.Side.BULL, 100_000e18, 100_000e6, 1.5e8);
-        _open(loserId, CfdTypes.Side.BULL, 100_000e18, 1000e6, 0.5e8);
+        _open(winnerAccount, CfdTypes.Side.BULL, 100_000e18, 100_000e6, 1.5e8);
+        _open(loserAccount, CfdTypes.Side.BULL, 100_000e18, 1000e6, 0.5e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
         uint256 depth = pool.totalAssets();
         vm.prank(address(router));
-        engine.liquidatePosition(loserId, 1e8, depth, uint64(block.timestamp));
+        engine.liquidatePosition(loserAccount, 1e8, depth, uint64(block.timestamp), address(this));
 
-        assertEq(_vaultMtmAdjustment(), 75_000e6, "MtM should use the conservative post-liquidation envelope");
+        assertEq(_poolMtmAdjustment(), 75_000e6, "MtM should use the conservative post-liquidation envelope");
     }
 
     function test_H1_UpdateMarkPriceMustRejectOlderPublishTime() public {
@@ -47,7 +47,7 @@ contract AuditCurrentFindingsFailing is BasePerpTest {
         engine.updateMarkPrice(1.1e8, uint64(block.timestamp));
 
         vm.prank(address(router));
-        vm.expectRevert(CfdEngine.CfdEngine__MarkPriceOutOfOrder.selector);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__MarkPriceOutOfOrder.selector);
         engine.updateMarkPrice(1.0e8, uint64(block.timestamp - 30));
     }
 
@@ -69,7 +69,7 @@ contract AuditCurrentFindingsFailing is BasePerpTest {
 
 contract AuditCurrentFindingsFailing_BountyCap is BasePerpTest {
 
-    bytes32 internal constant ACCOUNT_ID = bytes32(uint256(1234));
+    address internal constant ACCOUNT_ID = address(uint160(1234));
 
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
         return CfdTypes.RiskParams({
@@ -85,7 +85,7 @@ contract AuditCurrentFindingsFailing_BountyCap is BasePerpTest {
     }
 
     function test_M2_KeeperBountyShouldUseExplicitSubsidyModel() public {
-        address trader = address(uint160(uint256(ACCOUNT_ID)));
+        address trader = ACCOUNT_ID;
         _fundTrader(trader, 100e6);
 
         _open(ACCOUNT_ID, CfdTypes.Side.BULL, 100e18, 6e6, 1e8);
@@ -95,10 +95,10 @@ contract AuditCurrentFindingsFailing_BountyCap is BasePerpTest {
 
         vm.warp(1_709_971_200); // Saturday during FAD
         uint256 depth = pool.totalAssets();
-        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(ACCOUNT_ID, 1.01e8);
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(ACCOUNT_ID, 1.01e8);
 
         vm.prank(address(router));
-        uint256 bounty = engine.liquidatePosition(ACCOUNT_ID, 1.01e8, depth, uint64(block.timestamp));
+        uint256 bounty = engine.liquidatePosition(ACCOUNT_ID, 1.01e8, depth, uint64(block.timestamp), address(this));
 
         assertEq(bounty, preview.keeperBountyUsdc, "Keeper bounty should use the explicit subsidy model");
     }
@@ -165,7 +165,7 @@ contract AuditCurrentFindingsVerifiedInvalid_Mev is BasePerpTest {
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         feedIds.push(FEED_A);
         feedIds.push(FEED_B);
@@ -185,7 +185,6 @@ contract AuditCurrentFindingsVerifiedInvalid_Mev is BasePerpTest {
             new bool[](2)
         );
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
         _bootstrapSeededLifecycle();
@@ -209,8 +208,8 @@ contract AuditCurrentFindingsVerifiedInvalid_Mev is BasePerpTest {
         updateData[0] = "";
         router.executeOrder(1, updateData);
 
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(accountId);
+        address account = alice;
+        (uint256 size,,,,,,) = engine.positions(account);
         assertGt(size, 0, "Fresh price after commit should execute");
     }
 
@@ -239,18 +238,18 @@ contract AuditCurrentFindingsVerifiedInvalid_RebateIlliquidity is BasePerpTest {
     }
 
     function test_M1_RebateIlliquidityIsTypedAsSolvencyInvalidation() public {
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        bytes32 bobId = bytes32(uint256(uint160(bob)));
+        address aliceAccount = alice;
+        address bobAccount = bob;
 
         _fundTrader(alice, 200_000e6);
-        _open(aliceId, CfdTypes.Side.BULL, 300_000e18, 50_000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.BULL, 300_000e18, 50_000e6, 1e8);
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 2000e6);
 
         uint8 code = engineLens.previewOpenRevertCode(
-            bobId, CfdTypes.Side.BEAR, 300_000e18, 10_000e6, 1e8, uint64(block.timestamp)
+            bobAccount, CfdTypes.Side.BEAR, 300_000e18, 10_000e6, 1e8, uint64(block.timestamp)
         );
         assertEq(
             code,
@@ -260,11 +259,11 @@ contract AuditCurrentFindingsVerifiedInvalid_RebateIlliquidity is BasePerpTest {
     }
 
     function test_M1_RebateIlliquidityPaysClearerBounty() public {
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        bytes32 bobId = bytes32(uint256(uint160(bob)));
+        address aliceAccount = alice;
+        address bobAccount = bob;
 
         _fundTrader(alice, 200_000e6);
-        _open(aliceId, CfdTypes.Side.BULL, 300_000e18, 50_000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.BULL, 300_000e18, 50_000e6, 1e8);
 
         _fundTrader(bob, 20_000e6);
         vm.deal(bob, 1 ether);
@@ -277,22 +276,22 @@ contract AuditCurrentFindingsVerifiedInvalid_RebateIlliquidity is BasePerpTest {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 2000e6);
 
-        bytes32 keeperId = bytes32(uint256(uint160(address(this))));
-        uint256 keeperBefore = clearinghouse.balanceUsdc(keeperId);
-        uint256 bobSettlementBefore = clearinghouse.balanceUsdc(bobId);
-        bytes[] memory empty;
+        address keeperAccount = address(this);
+        uint256 keeperBefore = clearinghouse.balanceUsdc(keeperAccount);
+        uint256 bobSettlementBefore = clearinghouse.balanceUsdc(bobAccount);
+        bytes[] memory empty = _mockPythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        (uint256 size,,,,,,) = engine.positions(bobId);
-        assertEq(size, 0, "rebate-bearing open should not execute once vault cash is insufficient");
+        (uint256 size,,,,,,) = engine.positions(bobAccount);
+        assertEq(size, 0, "rebate-bearing open should not execute once pool cash is insufficient");
         assertEq(
-            clearinghouse.balanceUsdc(keeperId) - keeperBefore,
+            clearinghouse.balanceUsdc(keeperAccount) - keeperBefore,
             pending.executionBountyUsdc,
             "keeper should receive the reserved bounty on typed solvency invalidation under current policy"
         );
         assertEq(
-            clearinghouse.balanceUsdc(bobId) - bobSettlementBefore,
+            clearinghouse.balanceUsdc(bobAccount) - bobSettlementBefore,
             0,
             "user should not receive a refund under current policy"
         );
@@ -305,17 +304,17 @@ contract AuditCurrentFindingsFuturePublishSafety is BasePerpTest {
     address alice = address(0xA11CE);
 
     function test_FutureLastMarkTime_DoesNotBreakWithdrawGuardOrReconcile() public {
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        address aliceAccount = alice;
 
         _fundSenior(address(0xBEEF), 100_000e6);
         _fundTrader(alice, 50_000e6);
-        _open(aliceId, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp + 5));
 
         vm.prank(address(clearinghouse));
-        engine.checkWithdraw(aliceId);
+        engine.checkWithdraw(aliceAccount);
 
         vm.prank(address(juniorVault));
         pool.reconcile();

@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {IHousePool} from "../../src/perps/interfaces/IHousePool.sol";
 import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
@@ -69,7 +69,7 @@ contract AuditV3_C01_FIFODeadlockTest is BasePerpTest {
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior", "jUSDC");
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         feedIds.push(FEED_A);
         feedIds.push(FEED_B);
@@ -89,7 +89,6 @@ contract AuditV3_C01_FIFODeadlockTest is BasePerpTest {
             new bool[](2)
         );
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
         _bootstrapSeededLifecycle();
@@ -130,8 +129,8 @@ contract AuditV3_C01_FIFODeadlockTest is BasePerpTest {
     }
 
     function test_C01_CloseOrderBlockedByOpenInFrozenQueue() public {
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        _open(aliceId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        address aliceAccount = alice;
+        _open(aliceAccount, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
         // Bob commits an OPEN order on Thursday (before FAD window)
         address bob = address(0xB0B);
@@ -163,7 +162,7 @@ contract AuditV3_C01_FIFODeadlockTest is BasePerpTest {
             abi.encodeWithSelector(router.executeOrder.selector, uint64(2), priceData)
         );
 
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 0, "C-01: close order must not be blocked by open order in frozen queue");
     }
 
@@ -174,7 +173,7 @@ contract AuditV3_C01_FIFODeadlockTest is BasePerpTest {
 //       _requireFreshMark uses fadMaxStaleness during FAD,
 //       _reconcile uses hardcoded markStalenessLimit.
 //       The stale early return doesn't update lastReconcileTime,
-//       so 48h of yield accrues retroactively on Monday.
+//       so coupon/revenue/loss state can diverge across the weekend path.
 // ═══════════════════════════════════════════════════════════════════
 
 contract AuditV3_C03_AsymmetricStalenessTest is BasePerpTest {
@@ -219,7 +218,7 @@ contract AuditV3_C03_AsymmetricStalenessTest is BasePerpTest {
         _fundSenior(address(this), 500_000e6);
         _fundJunior(address(this), 500_000e6);
 
-        HousePool.PoolConfig memory config = _currentPoolConfig();
+        IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 1000; // 10% APY
         pool.proposePoolConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
@@ -228,8 +227,8 @@ contract AuditV3_C03_AsymmetricStalenessTest is BasePerpTest {
         pool.finalizePoolConfig();
 
         _fundTrader(alice, 50_000e6);
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        _open(aliceId, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
+        address aliceAccount = alice;
+        _open(aliceAccount, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
 
         // Set fresh mark on Friday before freeze
         vm.warp(FRIDAY_BEFORE_FREEZE);
@@ -241,11 +240,10 @@ contract AuditV3_C03_AsymmetricStalenessTest is BasePerpTest {
         pool.reconcile();
         uint256 lastReconcileFriday = pool.lastReconcileTime();
 
-        // Warp to Saturday — mark is now stale (>120s)
+        // Warp to Saturday during FAD; the mark is stale under the ordinary limit but fresh under the FAD runway.
         vm.warp(SATURDAY_NOON);
 
-        // _reconcile should return early because mark is stale (using markStalenessLimit=120s).
-        // Bug: lastReconcileTime is NOT updated on early return.
+        // _reconcile should use the FAD freshness policy and advance lastReconcileTime.
         vm.prank(address(juniorVault));
         pool.reconcile();
 
@@ -262,7 +260,7 @@ contract AuditV3_C03_AsymmetricStalenessTest is BasePerpTest {
         _fundSenior(address(this), 500_000e6);
         _fundJunior(address(this), 500_000e6);
 
-        HousePool.PoolConfig memory config = _currentPoolConfig();
+        IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 1000; // 10% APY
         pool.proposePoolConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
@@ -271,8 +269,8 @@ contract AuditV3_C03_AsymmetricStalenessTest is BasePerpTest {
         pool.finalizePoolConfig();
 
         _fundTrader(alice, 50_000e6);
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        _open(aliceId, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
+        address aliceAccount = alice;
+        _open(aliceAccount, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
 
         // Fresh mark on Friday
         vm.warp(FRIDAY_BEFORE_FREEZE);
@@ -280,20 +278,20 @@ contract AuditV3_C03_AsymmetricStalenessTest is BasePerpTest {
         engine.updateMarkPrice(1e8, uint64(FRIDAY_BEFORE_FREEZE));
         vm.prank(address(juniorVault));
         pool.reconcile();
-        uint256 yieldFriday = pool.unpaidSeniorYield();
+        uint256 seniorFriday = pool.seniorPrincipal();
+        uint256 lastReconcileFriday = pool.lastReconcileTime();
 
         // Saturday during FAD: mark is 14h old.
         // _requireFreshMark uses fadMaxStaleness (3 days) → fresh enough.
-        // Bug: _reconcile uses markStalenessLimit (120s) → stale → early return, no yield.
-        // Fix: _reconcile uses fadMaxStaleness during FAD → consistent, yield accrues.
+        // Fix: _reconcile uses the same FAD freshness policy → consistent coupon and waterfall accounting.
         vm.warp(SATURDAY_NOON);
         vm.prank(address(juniorVault));
         pool.reconcile();
-        uint256 yieldSaturday = pool.unpaidSeniorYield();
+        uint256 seniorSaturday = pool.seniorPrincipal();
+        uint256 lastReconcileSaturday = pool.lastReconcileTime();
 
-        assertGt(
-            yieldSaturday, yieldFriday, "C-03: _reconcile must accrue yield when mark is fresh enough for FAD window"
-        );
+        assertGt(lastReconcileSaturday, lastReconcileFriday, "C-03: _reconcile must run during the FAD-fresh window");
+        assertGt(seniorSaturday, seniorFriday, "C-03: senior coupon should checkpoint during the FAD-fresh window");
     }
 
 }
@@ -320,6 +318,9 @@ contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
             orderExecutionStalenessLimit: router.orderExecutionStalenessLimit(),
             liquidationStalenessLimit: router.liquidationStalenessLimit(),
             pythMaxConfidenceRatioBps: router.pythMaxConfidenceRatioBps(),
+            orderSettlementWindow: router.orderSettlementWindow(),
+            maxComponentPublishTimeDivergence: router.maxComponentPublishTimeDivergence(),
+            adverseConfidenceMultiplierBps: router.adverseConfidenceMultiplierBps(),
             minOpenNotionalUsdc: router.minOpenNotionalUsdc(),
             openOrderExecutionBountyBps: router.openOrderExecutionBountyBps(),
             minOpenOrderExecutionBountyUsdc: router.minOpenOrderExecutionBountyUsdc(),
@@ -346,7 +347,7 @@ contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
         // Keeper executes the expired order — it fails softly (OrderFailed "Order expired")
         vm.deal(keeper, 0);
         vm.prank(keeper);
-        bytes[] memory empty;
+        bytes[] memory empty = _mockPythUpdateData();
         router.executeOrder(1, empty);
 
         assertEq(keeper.balance, 0, "H-01: keeper should not be paid for failed order execution");
@@ -361,6 +362,9 @@ contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
             orderExecutionStalenessLimit: router.orderExecutionStalenessLimit(),
             liquidationStalenessLimit: router.liquidationStalenessLimit(),
             pythMaxConfidenceRatioBps: router.pythMaxConfidenceRatioBps(),
+            orderSettlementWindow: router.orderSettlementWindow(),
+            maxComponentPublishTimeDivergence: router.maxComponentPublishTimeDivergence(),
+            adverseConfidenceMultiplierBps: router.adverseConfidenceMultiplierBps(),
             minOpenNotionalUsdc: router.minOpenNotionalUsdc(),
             openOrderExecutionBountyBps: router.openOrderExecutionBountyBps(),
             minOpenOrderExecutionBountyUsdc: router.minOpenOrderExecutionBountyUsdc(),
@@ -383,7 +387,7 @@ contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
 
         usdc.burn(keeper, usdc.balanceOf(keeper));
         vm.prank(keeper);
-        bytes[] memory empty;
+        bytes[] memory empty = _mockPythUpdateData();
         router.executeOrder(1, empty);
         uint256 keeperPayoutSuccess = usdc.balanceOf(keeper);
 
@@ -392,10 +396,11 @@ contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 10_000e6, 1e8, false);
 
         _warpForward(61);
+        bytes[] memory expiredData = _mockPythUpdateData();
 
         usdc.burn(keeper, usdc.balanceOf(keeper));
         vm.prank(keeper);
-        router.executeOrder(2, empty);
+        router.executeOrder(2, expiredData);
         uint256 keeperPayoutFailed = usdc.balanceOf(keeper);
 
         assertEq(
@@ -412,7 +417,7 @@ contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
 
 // ═══════════════════════════════════════════════════════════════════
 // H-02: Junior tranche ERC4626 wipeout hyper-dilution.
-//       When _absorbLoss wipes juniorPrincipal to 0, shares survive.
+//       When reconciliation wipes juniorPrincipal to 0, shares survive.
 //       A $1 deposit captures >99% ownership of the tranche.
 // ═══════════════════════════════════════════════════════════════════
 
@@ -449,11 +454,11 @@ contract AuditV3_H02_JuniorWipeoutDilutionTest is BasePerpTest {
 
         // Trader opens a BULL position. Max profit = $50K = pool total.
         _fundTrader(trader, 50_000e6);
-        bytes32 traderId = bytes32(uint256(uint160(trader)));
-        _open(traderId, CfdTypes.Side.BULL, 50_000e18, 10_000e6, 1e8);
+        address traderAccount = trader;
+        _open(traderAccount, CfdTypes.Side.BULL, 50_000e18, 10_000e6, 1e8);
 
         // BULL profits when oracle drops. Close at 0 for exact max payout.
-        _close(traderId, CfdTypes.Side.BULL, 50_000e18, 0);
+        _close(traderAccount, CfdTypes.Side.BULL, 50_000e18, 0);
 
         // Reconcile: loss exceeds juniorPrincipal → junior wiped to exactly 0.
         vm.prank(address(router));
@@ -528,7 +533,7 @@ contract AuditV3_M01_MissingGasFloorTest is BasePerpTest {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// M-02: historical legacy-funding desync note kept obsolete for context.
+// M-02: historical legacy-spread desync note kept obsolete for context.
 //       The live carry model does not use side indices.
 //       This obsolete test remains only as audit-history context.
 // ═══════════════════════════════════════════════════════════════════
@@ -543,8 +548,8 @@ contract AuditV3_M02_CarryDesyncTest is BasePerpTest {
 
     function obsolete_M02_UpdateMarkPriceDoesNotRealizeCarry() public {
         _fundTrader(alice, 50_000e6);
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        _open(aliceId, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
+        address aliceAccount = alice;
+        _open(aliceAccount, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
 
         // Warp forward 1 hour in the carry model
         _warpForward(3600);

@@ -7,8 +7,8 @@ It is the source of truth for:
 - solvency,
 - LP withdrawal limits,
 - close and liquidation settlement,
-- deferred liabilities,
-- router escrow treatment,
+- trader claim liabilities,
+- clearinghouse reservation treatment,
 - LP-capital carry.
 
 Use it together with:
@@ -28,7 +28,7 @@ The key rules are:
 2. Unrealized trader losses are not LP assets until they are physically realized.
 3. LP withdrawals are stricter than protocol solvency.
 4. Pending-order reservations are not free trader collateral.
-5. Realized shortfall must become either immediate seizure, deferred liability, or bad debt.
+5. Realized shortfall must become either immediate seizure, trader claim liability, or bad debt.
 6. A valid risk-reducing transition must not revert just to preserve pre-close solvency; the protocol contains the outcome with `degradedMode` instead.
 
 ## Canonical Quantities
@@ -43,8 +43,8 @@ Use these terms consistently:
 - `accountedAssets`: canonical protocol-owned USDC recognized by pool accounting
 - `excessAssets = max(rawAssets - accountedAssets, 0)`: unsolicited or otherwise unaccounted positive balance
 - `physicalAssets = totalAssets() = min(rawAssets, accountedAssets)`: conservative economic pool backing
-- `protocolFees = accumulatedFeesUsdc`: protocol-owned inventory, not LP equity
-- `netPhysicalAssets = physicalAssets - protocolFees`
+- `treasuryFees = clearinghouse.balanceUsdc(protocolTreasury)`: cash-realized protocol-owned inventory held as treasury margin in `MarginClearinghouse`, not LP equity
+- `netPhysicalAssets = physicalAssets`
 
 Operational rules:
 
@@ -70,7 +70,7 @@ Definition:
 - for BEAR, scale side max profit by `markPrice / CAP_PRICE`,
 - sum the two conservative side liabilities.
 
-This quantity is appropriate for conservative LP equity and tranche reconciliation, not for pretending the vault has already collected losing traders' money. It can temporarily over-reserve LP value when entry prices are dispersed inside a side, but it avoids netting winners against uncollected same-side loser debt.
+This quantity is appropriate for conservative LP equity and tranche reconciliation, not for pretending the pool has already collected losing traders' money. It can temporarily over-reserve LP value when entry prices are dispersed inside a side, but it avoids netting winners against uncollected same-side loser debt.
 
 ## The Four Core Accounting Views
 
@@ -112,9 +112,8 @@ freeUsdc = netPhysicalAssets - withdrawalReservedUsdc
 Where `withdrawalReservedUsdc` is built from the canonical reserve model, including at least:
 
 - bounded trader liability,
-- deferred trader credit,
-- deferred keeper credit,
-- protocol-owned inventory.
+- trader claim balance,
+- clearinghouse-backed protocol treasury margin.
 
 Rule:
 
@@ -123,34 +122,45 @@ Rule:
 Notes:
 
 - this view is intentionally stricter than solvency,
-- it ignores uncollected trader debts as a funding source for withdrawal.
+- it ignores uncollected trader debts as a cash source for withdrawal.
 - during `oracleFrozen`, ERC4626 LP exits remain live but the user-facing withdraw/redeem output is reduced by the tranche's frozen-window surcharge rather than hard-blocking immediately.
 
-### 3. LP reconciliation view
+### 3. LP reconciliation and deposit-pricing views
 
 Question answered:
 
 - what is tranche equity for share pricing and revenue distribution?
 
-Definition:
+Withdrawal/reconcile definition:
 
 - start from `netPhysicalAssets`,
-- subtract deferred liabilities and protocol-owned balances,
+- subtract trader claim liabilities and protocol-owned balances,
 - apply conservative unrealized MtM liability only,
 - do not book unrealized trader losses as assets.
+
+Deposit/mint pricing definition:
+
+- start from the same physical assets, trader-claim liabilities, claimant buckets, recapitalizations, and revenue state,
+- immediate active-share tranche deposits are disabled while any trader position is open,
+- ordinary LP entry remains available through pending deposit epochs: assets are funded up front, cancellation is allowed only before the activation epoch begins, and shares are minted only after permissionless finalization fixes the epoch price,
+- matured epochs are expected to be finalized promptly by permissionless keepers or finalizers; if finalization is delayed, the epoch can still be finalized before a later close or liquidation realizes trader losses into pool cash, which is an accepted residual MEV risk of the current ordering model,
+- do not subtract unrealized MtM liability unless it comes from an exact, non-manipulable deposit-side model,
+- realized pool losses still lower deposit NAV,
+- conservative unrealized MtM remains a withdrawal protection, not a discount offered to incoming LPs.
 
 Rules:
 
 - over-recognition is forbidden,
 - temporary under-recognition is acceptable,
 - value with no valid claimant path must sit in explicit `unassignedAssets`.
-- during `oracleFrozen`, tranche entry/exit pricing remains live by applying fixed tranche-local LP surcharges instead of requiring a fresh live mark.
+- during `oracleFrozen`, tranche exit pricing remains live by applying fixed tranche-local LP surcharges instead of requiring a fresh live mark; immediate active-share entry pricing still requires zero open trader positions.
 - during `oracleFrozen`, bootstrap admin flows (`initializeSeedPosition`, `assignUnassignedAssets`) are blocked rather than inheriting LP frozen-fee pricing.
 - during `oracleFrozen`, ERC4626 `maxMint` reports the finite share cap implied by the active frozen-entry fee.
 
 Required consequences:
 
-- `unassignedAssets > 0` blocks ordinary tranche deposits,
+- immediate active-share tranche deposits are unavailable whenever `hasOpenPositions` is true,
+- `unassignedAssets > 0` blocks immediate and pending tranche deposits,
 - a wiped tranche cannot be silently revived by a normal ERC-4626 deposit,
 - seeded ownership continuity is preferred over governance re-assignment.
 
@@ -163,9 +173,9 @@ Question answered:
 Rules:
 
 - use physically reachable clearinghouse collateral for generic views and withdraw checks,
-- same-account deferred trader credit is a separate explicit netting bucket rather than generic collateral,
+- same-account trader claim balance is a separate explicit netting bucket rather than generic collateral,
 - liquidation and close settlement must cap seizure and payout logic by actually reachable value,
-- pending-order reservations and router escrow must be handled explicitly rather than assumed to be free cash.
+- pending-order reservations and execution bounty reserves must be handled explicitly rather than assumed to be free cash.
 
 ## Snapshot Boundaries
 
@@ -183,15 +193,15 @@ Key fields:
 - `maxLiabilityUsdc`
 - `supplementalReservedUsdc`: reserved extension slot for LP-withdrawal accounting; currently zero in the carry model
 - `unrealizedMtmLiabilityUsdc`
-- `deferredTraderCreditUsdc`
-- `deferredKeeperCreditUsdc`
-- `protocolFeesUsdc`
+- `traderClaimBalanceUsdc`
 - `markFreshnessRequired`
 - `maxMarkStaleness`
 
 Rule:
 
 - downstream LP accounting should not need to re-derive these values from raw engine state.
+- `hasOpenPositions` gates immediate active-share tranche deposits because the current O(1) side aggregates cannot compute an exact,
+  collateral-capped per-position loser receivable for instant deposit pricing.
 
 ### `HousePoolStatusSnapshot`
 
@@ -228,7 +238,7 @@ Accounting rules:
 - `deposit` and `mint` move gross USDC into the tranche while charging the frozen fee by minting fewer net shares (or grossing up the requested share target for `mint`),
 - `withdraw` and `redeem` burn shares against the gross tranche claim while paying only net user assets after the frozen fee,
 - the fee does not become protocol revenue,
-- the fee does not increase `accumulatedFeesUsdc`,
+- the fee does not increase `protocolTreasuryBalanceUsdc`,
 - the fee remains inside the same tranche and therefore benefits incumbent LPs of that tranche only.
 
 Consequences:
@@ -263,10 +273,10 @@ Not every inflow into `HousePool` is LP equity.
 
 Keep these categories separate:
 
-- `recordProtocolInflow`: protocol-owned value such as fees
 - `recordClaimantInflow(amount, Recapitalization, CashArrived)`: recapitalization intended to restore waterfall claimants
-- `recordClaimantInflow(amount, Revenue, CashArrived)`: claimant-owned value where fresh cash entered the vault in this flow
-- `recordClaimantInflow(amount, Revenue, AlreadyRetained)`: claimant-owned value already retained physically by the vault and only needing ownership routing
+- `recordClaimantInflow(amount, Revenue, CashArrived)`: claimant-owned value where fresh cash entered the pool in this flow
+- `recordClaimantInflow(amount, Revenue, AlreadyRetained)`: claimant-owned value already retained physically by the pool and only needing ownership routing
+- `accountExcess()`: owner-governed admission of unsolicited raw pool cash into canonical assets
 
 Rules:
 
@@ -279,86 +289,83 @@ Rules:
 
 ## LP-Capital Carry
 
-The protocol uses LP-capital carry instead of side-to-side funding.
+The protocol uses LP-capital carry instead of a side-to-side rate mechanism.
 
 Definitions:
 
-- `positionNotionalUsdc = size * markPrice / scale`
-- `lpBackedNotionalUsdc = max(positionNotionalUsdc - reachableCollateralUsdc, 0)`
-- `pendingCarryUsdc = lpBackedNotionalUsdc * baseCarryBps * elapsedSeconds / (10_000 * 365 days)`
-- `unsettledCarryUsdc[accountId]`: carry that has been checkpointed at a basis change but not yet physically collected
+- `borrowBaseUsdc = max(positionMaxProfitUsdc - activePositionMarginUsdc, 0)`
+- `sideBorrowBaseUsdc`: sum of open-position borrow bases for one side
+- `sideUtilizationBps = min(sideBorrowBaseUsdc / poolAssetsUsdc, 100%)`
+- `pendingCarryUsdc = borrowBaseUsdc * (currentSideCarryIndex - positionLastCarryIndex)`
+- `unsettledCarryUsdc[account]`: carry that has been checkpointed at a basis change but not yet physically collected
 
 Rules:
 
 - carry accrues continuously by wall-clock time,
 - carry does not pause when the oracle is stale or frozen,
-- both sides pay when they consume LP-backed capital,
+- both sides pay when they have nonzero borrow base,
 - pending carry reduces equity for guard and risk checks before realization,
-- basis-changing settlement credits must checkpoint carry even when physical collection is deferred,
-- carry is computed on clearinghouse deposit/withdraw using the pre-mutation reachable basis,
+- basis-changing settlement credits must checkpoint carry even when physical collection remains pending,
+- carry is realized before margin, pool-asset, or risk-parameter mutations change the carry base/rate denominator,
 - on deposit, realized carry may be collected from post-deposit settlement in the same transaction,
 - on withdraw, carry is realized before settlement balance is reduced,
 - liquidation does not have its own separate carry-realization path,
 - realized carry is booked as LP trading revenue.
 
-## Deferred Liabilities
+## Trader Claim Liabilities
 
 The protocol supports fail-soft terminal settlement.
 
-### Deferred trader credit
+### Trader claim balance
 
-- profitable closes and some liquidation residuals may create `deferredTraderCreditUsdc[accountId]`,
-- only the beneficiary account owner may call `claimDeferredTraderCredit(accountId)`,
-- claims may be partial,
-- settlement is credited into `MarginClearinghouse`.
-
-### Deferred keeper credit
-
-- illiquid liquidation bounties may create `deferredKeeperCreditUsdc[beneficiary]`,
-- only the recorded beneficiary may call `claimDeferredKeeperCredit()`,
+- profitable closes and some liquidation residuals may create `traderClaimBalanceUsdc[account]`,
+- only the beneficiary account owner may call `settleTraderClaim(account)`,
+- settlement is all-or-nothing for the account claim once aggregate trader claim liabilities are fully cash-covered,
 - settlement is credited into `MarginClearinghouse`.
 
 Rules:
 
-- deferred liabilities are beneficiary-balance based, not FIFO queue based,
-- they are senior claims on vault cash,
-- deferred claim servicing outranks protocol fee withdrawals when cash is insufficient to satisfy both,
-- deferred claim servicing is frozen entirely while physical vault cash is below aggregate deferred liabilities,
-- fee withdrawal, fresh payout funding, fresh liquidation bounty payment, and deferred servicing must all agree on what cash is actually free.
+- trader claim liabilities are beneficiary-balance based, not FIFO queue based,
+- trader claim liabilities are senior claims on pool cash,
+- trader claim servicing is frozen entirely while physical pool cash is below aggregate trader claim liabilities,
+- fresh payout funding, protocol fee top-ups, and claim servicing must all agree on what pool cash is actually free,
+- protocol fee top-ups are subordinate to trader claims and immediate trader payouts; any fee amount that cannot be cash-credited under this priority is not recorded as a protocol fee receivable.
 
-## Pending-Order Escrow Model
+## Pending-Order Reservation Model
 
 Question answered:
 
 - what value is reserved for queued actions and therefore not free to withdraw or reuse?
 
-Escrow / reservation buckets include:
+Reservation / reservation buckets include:
 
 - committed order margin,
-- router-custodied execution bounty reserve.
+- clearinghouse-reserved execution bounty value.
 
 Rules:
 
-- escrowed value is not withdrawable,
-- escrowed value is not free buying power,
-- releasing or consuming escrow must happen exactly once,
+- reserved value is not withdrawable,
+- reserved value is not free buying power,
+- reserved execution bounty value is not reachable collateral for unrelated close losses,
+- releasing or consuming reservation must happen exactly once,
 - clearinghouse reservation records are the source of truth for committed trader margin,
-- router escrow is not LP cash and should not become a deferred vault liability bucket.
+- execution bounty reserves are not LP cash and should not become a pool liability bucket.
 
 ### Close-order bounty policy
 
-- close intents may source their flat router-custodied bounty from active position margin when free settlement is exhausted,
+- close intents may source their flat clearinghouse-reserved bounty from active position margin when free settlement is exhausted,
 - this is an explicit bounded liveness tradeoff,
+- partial close intents below the engine's minimum meaningful notional are rejected at commit time unless they fully close the queued residual position,
 - `closeOrderExecutionBountyUsdc` is governance-configured but hard-capped at `1 USDC`,
-- the amount parked in escrow is bounded by `MAX_PENDING_ORDERS * 1 USDC` per account,
-- collateral reachability should treat that escrow as temporarily unavailable until the order resolves,
-- terminal-invalid close execution must not refund margin-backed bounty escrow to the external wallet.
+- the amount parked in reservation is bounded by `MAX_PENDING_ORDERS * 1 USDC` per account,
+- collateral reachability should treat that reservation as temporarily unavailable until the order resolves,
+- terminal-invalid close execution pays the keeper from the clearinghouse-reserved bounty; liquidatable full closes may reserve that bounty only from free settlement, not active position margin.
 
 ### Open-order failure policy
 
 - deterministic live-state open failures may be rejected at commit time,
-- execution-time user-invalid opens pay the clearer from router escrow,
-- genuine post-commit protocol-state invalidations pay the clearer from router escrow so FIFO head cleanup remains incentive compatible,
+- execution-time user-invalid opens pay the keeper from clearinghouse-reserved bounty value,
+- genuine post-commit protocol-state invalidations pay the keeper from clearinghouse-reserved bounty value so FIFO head cleanup remains incentive compatible,
 - typed engine policy categories, not raw revert selectors, should drive the split.
 
 ## Settlement Rules
@@ -386,18 +393,20 @@ Required properties:
 - skew-reducing rebates must count as reachable collateral for projected IMR checks,
 - open preview and execution should not reject a trade solely because the planner omitted a rebate that the live settlement would credit.
 
-### Fee withdrawals
+### Treasury fee withdrawals
 
-- protocol fee withdrawal may be partial,
-- withdrawing a safe subset of `accumulatedFeesUsdc` must not require the entire fee balance to be currently withdrawable,
-- post-withdraw solvency and deferred-liability reservations must still hold.
+- protocol fee withdrawal is a standard `MarginClearinghouse` withdrawal from the configured treasury account,
+- `MarginClearinghouse.balanceUsdc(CfdEngine.protocolTreasury())` reports the configured treasury account balance,
+- only cash-collected fees and free-cash-funded top-ups become treasury margin,
+- uncredited fee amounts are not withdrawable protocol inventory in the simplified treasury-margin model,
+- withdrawing treasury margin must not consume `HousePool` cash, trader claims, or LP withdrawal reserves.
 
 ### Liquidation settlement
 
 Liquidation must:
 
 1. seize reachable account value,
-2. pay or defer the keeper bounty according to available vault cash,
+2. pay the keeper bounty immediately or credit the keeper through clearinghouse settlement according to available cash,
 3. preserve residual trader value when positive,
 4. realize remaining shortfall as bad debt,
 5. delete the position,
@@ -421,7 +430,7 @@ Required property:
 Liquidation residuals must be modeled explicitly as:
 
 - settlement retained on-ledger in the clearinghouse,
-- existing deferred trader credit consumed / remaining,
+- existing trader claim balance consumed / remaining,
 - fresh trader payout created by the liquidation itself.
 
 This prevents overloading one residual bucket with multiple meanings.
@@ -505,7 +514,7 @@ Interpretation rules:
 
 Required transition rules:
 
-- execution consumes escrow exactly once,
+- execution consumes reservation exactly once,
 - user cancellation is disallowed once pending,
 - expiry resolves through the configured bounty and reservation policy,
 - stale or missing oracle data does not destroy a valid pending order,
@@ -532,7 +541,7 @@ The accounting system should preserve the following:
 
 ## Architecture Goal
 
-The system uses multiple conservative accounting kernels because different paths answer different questions: solvency, withdrawal availability, close settlement, liquidation planning, deferred liabilities, and router escrow all need different boundaries.
+The system uses multiple conservative accounting kernels because different paths answer different questions: solvency, withdrawal availability, close settlement, liquidation planning, trader claim liabilities, and clearinghouse reservations all need different boundaries.
 
 Design rules:
 

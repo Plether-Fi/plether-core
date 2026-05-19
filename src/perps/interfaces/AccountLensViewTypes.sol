@@ -10,9 +10,9 @@ library AccountLensViewTypes {
         uint256 freeSettlementUsdc;
         uint256 activePositionMarginUsdc;
         uint256 otherLockedMarginUsdc;
-        uint256 executionEscrowUsdc;
+        uint256 executionBountyReserveUsdc;
         uint256 committedMarginUsdc;
-        uint256 deferredTraderCreditUsdc;
+        uint256 traderClaimBalanceUsdc;
         uint256 pendingOrderCount;
     }
 
@@ -24,9 +24,9 @@ library AccountLensViewTypes {
         uint256 positionMarginBucketUsdc;
         uint256 committedOrderMarginBucketUsdc;
         uint256 reservedSettlementBucketUsdc;
-        uint256 executionEscrowUsdc;
+        uint256 executionBountyReserveUsdc;
         uint256 committedMarginUsdc;
-        uint256 deferredTraderCreditUsdc;
+        uint256 traderClaimBalanceUsdc;
         uint256 pendingOrderCount;
         uint256 closeReachableUsdc;
         uint256 terminalReachableUsdc;

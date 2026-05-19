@@ -3,7 +3,7 @@ pragma solidity 0.8.33;
 
 import {HousePool} from "./HousePool.sol";
 import {AccountLensViewTypes} from "./interfaces/AccountLensViewTypes.sol";
-import {EngineStatusViewTypes} from "./interfaces/EngineStatusViewTypes.sol";
+import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
 import {ICfdEngineAccountLens} from "./interfaces/ICfdEngineAccountLens.sol";
 import {ICfdEngineCore} from "./interfaces/ICfdEngineCore.sol";
 import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
@@ -43,38 +43,38 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
 
     /// @notice Returns the compact trader account summary for a canonical perps account.
     function getTraderAccount(
-        bytes32 accountId
+        address account
     ) external view returns (PerpsViewTypes.TraderAccountView memory viewData) {
-        AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = ACCOUNT_LENS.getAccountLedgerSnapshot(accountId);
+        AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = ACCOUNT_LENS.getAccountLedgerSnapshot(account);
         viewData.equityUsdc = snapshot.hasPosition
             ? (snapshot.netEquityUsdc > 0 ? uint256(snapshot.netEquityUsdc) : 0)
             : snapshot.accountEquityUsdc;
-        viewData.withdrawableUsdc = ACCOUNT_LENS.getWithdrawableUsdc(accountId);
+        viewData.withdrawableUsdc = ACCOUNT_LENS.getWithdrawableUsdc(account);
 
-        IOrderRouterAccounting.AccountEscrowView memory escrow = ORDER_ROUTER.getAccountEscrow(accountId);
-        viewData.pendingOrderMarginUsdc = escrow.committedMarginUsdc;
-        viewData.pendingExecutionBountyUsdc = escrow.executionBountyUsdc;
+        IOrderRouterAccounting.AccountReservationView memory reservation = ORDER_ROUTER.getAccountReservations(account);
+        viewData.pendingOrderMarginUsdc = reservation.committedMarginUsdc;
+        viewData.pendingExecutionBountyUsdc = reservation.executionBountyUsdc;
 
-        PerpsViewTypes.PositionView memory position = _getPositionView(accountId);
+        PerpsViewTypes.PositionView memory position = _getPositionView(account);
         viewData.hasOpenPosition = position.exists;
         viewData.liquidatable = position.liquidatable;
     }
 
     /// @notice Returns the compact current-position view for an account.
     function getPosition(
-        bytes32 accountId
+        address account
     ) external view returns (PerpsViewTypes.PositionView memory viewData) {
-        return _getPositionView(accountId);
+        return _getPositionView(account);
     }
 
     /// @notice Returns all currently pending orders for an account.
     /// @dev The public surface only returns pending orders because executed and failed orders are not
     ///      part of the compact product-facing queue summary.
     function getPendingOrders(
-        bytes32 accountId
+        address account
     ) external view returns (PerpsViewTypes.PendingOrderView[] memory pending) {
-        uint64 orderId = ORDER_ROUTER.accountHeadOrderId(accountId);
-        uint256 pendingCount = ORDER_ROUTER.pendingOrderCounts(accountId);
+        uint64 orderId = ORDER_ROUTER.accountHeadOrderId(account);
+        uint256 pendingCount = ORDER_ROUTER.pendingOrderCounts(account);
         pending = new PerpsViewTypes.PendingOrderView[](pendingCount);
 
         for (uint256 i; i < pendingCount; ++i) {
@@ -95,9 +95,9 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
 
     /// @notice Returns whether the account's current live position is liquidatable.
     function isLiquidatable(
-        bytes32 accountId
+        address account
     ) external view returns (bool) {
-        return _getPositionView(accountId).liquidatable;
+        return _getPositionView(account).liquidatable;
     }
 
     /// @notice Returns the compact senior tranche view.
@@ -118,7 +118,7 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
 
         PerpsViewTypes.ProtocolStatusView memory status = _getProtocolStatusView();
         viewData.lastMarkTime = status.lastMarkTime;
-        viewData.oracleFresh = HOUSE_POOL.getVaultLiquidityView().markFresh;
+        viewData.oracleFresh = HOUSE_POOL.getPoolLiquidityView().markFresh;
     }
 
     /// @notice Returns high-level protocol runtime status flags.
@@ -127,9 +127,9 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
     }
 
     function _getPositionView(
-        bytes32 accountId
+        address account
     ) internal view returns (PerpsViewTypes.PositionView memory viewData) {
-        AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = ACCOUNT_LENS.getAccountLedgerSnapshot(accountId);
+        AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = ACCOUNT_LENS.getAccountLedgerSnapshot(account);
         viewData.exists = snapshot.hasPosition;
         if (!viewData.exists) {
             return viewData;
@@ -177,14 +177,29 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
     }
 
     function _getProtocolStatusView() internal view returns (PerpsViewTypes.ProtocolStatusView memory viewData) {
-        EngineStatusViewTypes.ProtocolStatus memory status = ENGINE.getProtocolStatus();
-        viewData.phase = status.phase;
-        viewData.lastMarkPrice = status.lastMarkPrice;
-        viewData.lastMarkTime = status.lastMarkTime;
-        viewData.oracleFrozen = status.oracleFrozen;
-        viewData.fadWindow = status.fadWindow;
-        viewData.tradingActive = HOUSE_POOL.isTradingActive();
-        viewData.withdrawalLive = HOUSE_POOL.isWithdrawalLive();
+        viewData.phase = _getProtocolPhase();
+        viewData.lastMarkPrice = ENGINE.lastMarkPrice();
+        viewData.lastMarkTime = ENGINE.lastMarkTime();
+        viewData.oracleFrozen = ENGINE.isOracleFrozen();
+        viewData.fadWindow = ENGINE.isFadWindow();
+        if (address(HOUSE_POOL) != address(0)) {
+            viewData.tradingActive = HOUSE_POOL.isTradingActive();
+            viewData.withdrawalLive = HOUSE_POOL.isWithdrawalLive();
+        }
+    }
+
+    function _getProtocolPhase() internal view returns (uint8) {
+        address enginePool = ENGINE.pool();
+        if (enginePool == address(0) || ENGINE.orderRouter() == address(0)) {
+            return uint8(ICfdEngine.ProtocolPhase.Configuring);
+        }
+        if (ENGINE.degradedMode()) {
+            return uint8(ICfdEngine.ProtocolPhase.Degraded);
+        }
+        if (!HousePool(enginePool).canIncreaseRisk()) {
+            return uint8(ICfdEngine.ProtocolPhase.Configuring);
+        }
+        return uint8(ICfdEngine.ProtocolPhase.Active);
     }
 
 }

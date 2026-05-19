@@ -6,7 +6,7 @@ import {CfdEngineAccountLens} from "../src/perps/CfdEngineAccountLens.sol";
 import {CfdEngineAdmin} from "../src/perps/CfdEngineAdmin.sol";
 import {CfdEngineLens} from "../src/perps/CfdEngineLens.sol";
 import {CfdEnginePlanner} from "../src/perps/CfdEnginePlanner.sol";
-import {CfdEngineSettlementModule} from "../src/perps/CfdEngineSettlementModule.sol";
+import {CfdEngineSettlementSidecar} from "../src/perps/CfdEngineSettlementSidecar.sol";
 import {CfdTypes} from "../src/perps/CfdTypes.sol";
 import {HousePool} from "../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../src/perps/MarginClearinghouse.sol";
@@ -48,7 +48,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         MarginClearinghouse clearinghouse;
         CfdEngine engine;
         CfdEnginePlanner planner;
-        CfdEngineSettlementModule settlementModule;
+        CfdEngineSettlementSidecar settlementSidecar;
         CfdEngineAdmin engineAdmin;
         HousePool housePool;
         TrancheVault seniorVault;
@@ -56,6 +56,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         CfdEngineAccountLens accountLens;
         CfdEngineLens engineLens;
         OrderRouter router;
+        address pletherOracle;
         address routerAdmin;
         PerpsPublicLens publicLens;
     }
@@ -76,11 +77,11 @@ contract DeployPerpsArbitrumSepolia is Script {
             new CfdEngine(address(deployed.usdc), address(deployed.clearinghouse), CAP_PRICE, _riskParams());
 
         deployed.planner = new CfdEnginePlanner();
-        deployed.settlementModule = new CfdEngineSettlementModule(address(deployed.engine));
+        deployed.settlementSidecar = new CfdEngineSettlementSidecar(address(deployed.engine));
         deployed.engineAdmin = new CfdEngineAdmin(address(deployed.engine), deployer);
         deployed.engine
             .setDependencies(
-                address(deployed.planner), address(deployed.settlementModule), address(deployed.engineAdmin)
+                address(deployed.planner), address(deployed.settlementSidecar), address(deployed.engineAdmin)
             );
 
         deployed.housePool = new HousePool(address(deployed.usdc), address(deployed.engine));
@@ -93,7 +94,7 @@ contract DeployPerpsArbitrumSepolia is Script {
 
         deployed.housePool.setSeniorVault(address(deployed.seniorVault));
         deployed.housePool.setJuniorVault(address(deployed.juniorVault));
-        deployed.engine.setVault(address(deployed.housePool));
+        deployed.engine.setPool(address(deployed.housePool));
 
         deployed.accountLens = new CfdEngineAccountLens(address(deployed.engine));
         deployed.engineLens = new CfdEngineLens(address(deployed.engine));
@@ -107,10 +108,10 @@ contract DeployPerpsArbitrumSepolia is Script {
             _basePrices(),
             _inversions()
         );
+        deployed.pletherOracle = address(deployed.router.pletherOracle());
         deployed.routerAdmin = deployed.router.admin();
 
         deployed.engine.setOrderRouter(address(deployed.router));
-        deployed.housePool.setOrderRouter(address(deployed.router));
         deployed.clearinghouse.setEngine(address(deployed.engine));
 
         deployed.publicLens = new PerpsPublicLens(
@@ -187,7 +188,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         console.log("MarginClearinghouse:", address(deployed.clearinghouse));
         console.log("CfdEngine:", address(deployed.engine));
         console.log("CfdEnginePlanner:", address(deployed.planner));
-        console.log("CfdEngineSettlementModule:", address(deployed.settlementModule));
+        console.log("CfdEngineSettlementSidecar:", address(deployed.settlementSidecar));
         console.log("CfdEngineAdmin:", address(deployed.engineAdmin));
         console.log("HousePool:", address(deployed.housePool));
         console.log("SeniorVault:", address(deployed.seniorVault));
@@ -195,6 +196,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         console.log("CfdEngineAccountLens:", address(deployed.accountLens));
         console.log("CfdEngineLens:", address(deployed.engineLens));
         console.log("OrderRouter:", address(deployed.router));
+        console.log("PletherOracle:", deployed.pletherOracle);
         console.log("OrderRouterAdmin:", deployed.routerAdmin);
         console.log("PerpsPublicLens:", address(deployed.publicLens));
         console.log("Owner:", deployed.engineAdmin.owner());

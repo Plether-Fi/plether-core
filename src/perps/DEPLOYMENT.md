@@ -30,7 +30,7 @@ The deploy script creates and wires:
 2. `MarginClearinghouse`
 3. `CfdEngine`
 4. `CfdEnginePlanner`
-5. `CfdEngineSettlementModule`
+5. `CfdEngineSettlementSidecar`
 6. `CfdEngineAdmin`
 7. `HousePool`
 8. `TrancheVault` senior
@@ -45,9 +45,8 @@ It then performs the required set-once wiring:
 - `CfdEngine.setDependencies(...)`
 - `HousePool.setSeniorVault(...)`
 - `HousePool.setJuniorVault(...)`
-- `CfdEngine.setVault(...)`
+- `CfdEngine.setPool(...)`
 - `CfdEngine.setOrderRouter(...)`
-- `HousePool.setOrderRouter(...)`
 - `MarginClearinghouse.setEngine(...)`
 
 Important:

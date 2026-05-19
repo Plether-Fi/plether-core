@@ -7,8 +7,9 @@ import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
-import {OrderRouterAdmin} from "../../src/perps/OrderRouterAdmin.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {IOrderRouterErrors} from "../../src/perps/interfaces/IOrderRouterErrors.sol";
+import {IPletherOracle} from "../../src/perps/interfaces/IPletherOracle.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
@@ -59,7 +60,7 @@ contract AuditExecutionPathFindingsFailing_EthRefundFallback is BasePerpTest {
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         mockPyth = new MockPyth();
 
@@ -87,7 +88,6 @@ contract AuditExecutionPathFindingsFailing_EthRefundFallback is BasePerpTest {
         );
         _syncRouterAdmin();
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
 
@@ -95,7 +95,7 @@ contract AuditExecutionPathFindingsFailing_EthRefundFallback is BasePerpTest {
         vm.deal(address(refundReceiver), 1 ether);
     }
 
-    function test_H1_FallbackRefundMustFundRouterAdminClaimBalance() public {
+    function test_H1_FallbackRefundMustFundPletherOracleClaimBalance() public {
         uint256 publishTime = block.timestamp;
         uint256 pythFee = 0.01 ether;
         uint256 overpay = 0.05 ether;
@@ -111,12 +111,9 @@ contract AuditExecutionPathFindingsFailing_EthRefundFallback is BasePerpTest {
 
         refundReceiver.refreshMark{value: pythFee + overpay}(router, updateData);
 
-        assertEq(routerAdmin.claimableEth(address(refundReceiver)), overpay, "failed refund should become claimable");
-        assertEq(
-            address(routerAdmin).balance,
-            overpay,
-            "fallback accounting must move the stranded ETH into OrderRouterAdmin"
-        );
+        IPletherOracle oracle = router.pletherOracle();
+        assertEq(oracle.claimableEth(address(refundReceiver)), overpay, "failed refund should become claimable");
+        assertEq(address(oracle).balance, overpay, "fallback accounting must move the stranded ETH into PletherOracle");
     }
 
 }
@@ -125,7 +122,7 @@ contract AuditExecutionPathFindingsFailing_CommitPrefilterFeeParity is BasePerpT
 
     function test_H2_CommitPrefilterMustRejectFeeDrainedOpen() public {
         address trader = address(0xE113);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address account = trader;
         uint256 sizeDelta = 100_000e18;
         uint256 marginDelta = 1500e6;
 
@@ -135,10 +132,10 @@ contract AuditExecutionPathFindingsFailing_CommitPrefilterFeeParity is BasePerpT
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
         uint8 revertCode = engineLens.previewOpenRevertCode(
-            accountId, CfdTypes.Side.BULL, sizeDelta, marginDelta, 1e8, uint64(block.timestamp)
+            account, CfdTypes.Side.BULL, sizeDelta, marginDelta, 1e8, uint64(block.timestamp)
         );
         CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory = engineLens.previewOpenFailurePolicyCategory(
-            accountId, CfdTypes.Side.BULL, sizeDelta, marginDelta, 1e8, uint64(block.timestamp)
+            account, CfdTypes.Side.BULL, sizeDelta, marginDelta, 1e8, uint64(block.timestamp)
         );
 
         assertEq(
@@ -155,7 +152,7 @@ contract AuditExecutionPathFindingsFailing_CommitPrefilterFeeParity is BasePerpT
         vm.prank(trader);
         vm.expectRevert(
             abi.encodeWithSelector(
-                OrderRouter.OrderRouter__PredictableOpenInvalid.selector,
+                IOrderRouterErrors.OrderRouter__PredictableOpenInvalid.selector,
                 uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN)
             )
         );

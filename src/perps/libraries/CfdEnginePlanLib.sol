@@ -31,10 +31,10 @@ library CfdEnginePlanLib {
     // ──────────────────────────────────────────────
 
     function computeOpenMarginAfter(
-        uint256 marginAfterFunding,
+        uint256 marginAfterCarry,
         int256 netMarginChange
     ) internal pure returns (bool drained, uint256 marginAfter) {
-        int256 computedMarginAfterSigned = int256(marginAfterFunding) + netMarginChange;
+        int256 computedMarginAfterSigned = int256(marginAfterCarry) + netMarginChange;
         if (computedMarginAfterSigned < 0) {
             return (true, 0);
         }
@@ -42,13 +42,13 @@ library CfdEnginePlanLib {
     }
 
     function computeSideTotalMarginAfterOpen(
-        uint256 sideTotalMarginAfterFunding,
-        uint256 effectivePositionMarginAfterFunding,
+        uint256 sideTotalMarginAfterCarry,
+        uint256 effectivePositionMarginAfterCarry,
         uint256 positionMarginAfterOpen
     ) internal pure returns (uint256 sideTotalMarginAfterOpen) {
         return uint256(
-            int256(sideTotalMarginAfterFunding) + int256(positionMarginAfterOpen)
-                - int256(effectivePositionMarginAfterFunding)
+            int256(sideTotalMarginAfterCarry) + int256(positionMarginAfterOpen)
+                - int256(effectivePositionMarginAfterCarry)
         );
     }
 
@@ -121,6 +121,29 @@ library CfdEnginePlanLib {
         }
     }
 
+    function _selectedSide(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        CfdTypes.Side side
+    ) private pure returns (CfdEnginePlanTypes.SideSnapshot memory selected) {
+        selected = side == CfdTypes.Side.BULL ? snap.bullSide : snap.bearSide;
+    }
+
+    function _pendingCarryUsdc(
+        CfdEnginePlanTypes.RawSnapshot memory snap
+    ) private pure returns (uint256) {
+        if (snap.position.size == 0 || snap.positionBorrowBaseUsdc == 0) {
+            return snap.unsettledCarryUsdc;
+        }
+        CfdEnginePlanTypes.SideSnapshot memory side = _selectedSide(snap, snap.position.side);
+        if (side.carryIndex <= snap.positionLastCarryIndex) {
+            return snap.unsettledCarryUsdc;
+        }
+        return snap.unsettledCarryUsdc
+            + PositionRiskAccountingLib.computeIndexedCarryUsdc(
+            snap.positionBorrowBaseUsdc, side.carryIndex - snap.positionLastCarryIndex
+        );
+    }
+
     function _absSkewUsdc(
         CfdEnginePlanTypes.SideSnapshot memory bull,
         CfdEnginePlanTypes.SideSnapshot memory bear,
@@ -150,39 +173,39 @@ library CfdEnginePlanLib {
         return postBullUsdc > postBearUsdc ? postBullUsdc - postBearUsdc : postBearUsdc - postBullUsdc;
     }
 
-    function _planDeferredTraderCreditConsumption(
-        uint256 deferredTraderCreditUsdc,
+    function _planTraderClaimConsumption(
+        uint256 traderClaimBalanceUsdc,
         uint256 shortfallUsdc,
-        bool shortfallAlreadyIncludesDeferred
+        bool shortfallAlreadyIncludesTraderClaim
     ) private pure returns (uint256 consumedUsdc, uint256 remainingUsdc, uint256 badDebtUsdc) {
-        if (deferredTraderCreditUsdc == 0) {
+        if (traderClaimBalanceUsdc == 0) {
             return (0, 0, shortfallUsdc);
         }
 
-        if (shortfallAlreadyIncludesDeferred) {
-            return (deferredTraderCreditUsdc, 0, shortfallUsdc);
+        if (shortfallAlreadyIncludesTraderClaim) {
+            return (traderClaimBalanceUsdc, 0, shortfallUsdc);
         }
 
-        consumedUsdc = deferredTraderCreditUsdc < shortfallUsdc ? deferredTraderCreditUsdc : shortfallUsdc;
-        remainingUsdc = deferredTraderCreditUsdc - consumedUsdc;
+        consumedUsdc = traderClaimBalanceUsdc < shortfallUsdc ? traderClaimBalanceUsdc : shortfallUsdc;
+        remainingUsdc = traderClaimBalanceUsdc - consumedUsdc;
         badDebtUsdc = shortfallUsdc - consumedUsdc;
     }
 
-    function _planCloseDeferredTraderCreditConsumption(
-        uint256 deferredTraderCreditUsdc,
+    function _planCloseTraderClaimConsumption(
+        uint256 traderClaimBalanceUsdc,
         CfdEngineSettlementLib.CloseSettlementResult memory lossResult
     )
         private
         pure
         returns (uint256 consumedUsdc, uint256 remainingUsdc, uint256 feeRecoveredUsdc, uint256 badDebtUsdc)
     {
-        if (deferredTraderCreditUsdc == 0 || lossResult.shortfallUsdc == 0) {
-            return (0, deferredTraderCreditUsdc, 0, lossResult.badDebtUsdc);
+        if (traderClaimBalanceUsdc == 0 || lossResult.shortfallUsdc == 0) {
+            return (0, traderClaimBalanceUsdc, 0, lossResult.badDebtUsdc);
         }
 
         consumedUsdc =
-            deferredTraderCreditUsdc < lossResult.shortfallUsdc ? deferredTraderCreditUsdc : lossResult.shortfallUsdc;
-        remainingUsdc = deferredTraderCreditUsdc - consumedUsdc;
+            traderClaimBalanceUsdc < lossResult.shortfallUsdc ? traderClaimBalanceUsdc : lossResult.shortfallUsdc;
+        remainingUsdc = traderClaimBalanceUsdc - consumedUsdc;
 
         uint256 feeShortfallUsdc =
             lossResult.shortfallUsdc > lossResult.badDebtUsdc ? lossResult.shortfallUsdc - lossResult.badDebtUsdc : 0;
@@ -204,23 +227,12 @@ library CfdEnginePlanLib {
     ) internal pure returns (CfdEnginePlanTypes.OpenDelta memory delta) {
         uint256 price = executionPrice > snap.capPrice ? snap.capPrice : executionPrice;
         CfdEnginePlanTypes.RawSnapshot memory effectiveSnap = snap;
-        delta.accountId = order.accountId;
+        delta.account = order.account;
         delta.sizeDelta = order.sizeDelta;
         delta.price = price;
         delta.posSide = order.side;
-        uint256 carryTimeDelta = effectiveSnap.position.lastCarryTimestamp > 0
-            && effectiveSnap.currentTimestamp > effectiveSnap.position.lastCarryTimestamp
-            ? effectiveSnap.currentTimestamp - effectiveSnap.position.lastCarryTimestamp
-            : 0;
-        uint256 genericReachableUsdc =
-            MarginClearinghouseAccountingLib.getGenericReachableUsdc(effectiveSnap.accountBuckets);
-        uint256 carryBaseUsdc = PositionRiskAccountingLib.computeLpBackedNotionalUsdc(
-            effectiveSnap.position.size, price, genericReachableUsdc
-        );
-        delta.pendingCarryUsdc = effectiveSnap.unsettledCarryUsdc
-            + PositionRiskAccountingLib.computePendingCarryUsdc(
-                carryBaseUsdc, effectiveSnap.riskParams.baseCarryBps, carryTimeDelta
-            );
+        publishTime;
+        delta.pendingCarryUsdc = _pendingCarryUsdc(effectiveSnap);
 
         if (_applyPendingCarryRealizationToOpenSnapshot(effectiveSnap, delta.pendingCarryUsdc)) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES;
@@ -254,16 +266,16 @@ library CfdEnginePlanLib {
                 capPrice: effectiveSnap.capPrice,
                 preSkewUsdc: preSkewUsdc,
                 postSkewUsdc: postSkewUsdc,
-                vaultDepthUsdc: effectiveSnap.vaultAssetsUsdc,
+                poolDepthUsdc: effectiveSnap.poolAssetsUsdc,
                 executionFeeBps: effectiveSnap.executionFeeBps,
                 riskParams: effectiveSnap.riskParams
             })
         );
         delta.openState = openState;
 
+        uint256 resultingNotionalUsdc = (openState.newSize * price) / CfdMath.USDC_TO_TOKEN_SCALE;
         if (
-            openState.notionalUsdc * effectiveSnap.riskParams.bountyBps
-                < effectiveSnap.riskParams.minBountyUsdc * 10_000
+            resultingNotionalUsdc * effectiveSnap.riskParams.bountyBps < effectiveSnap.riskParams.minBountyUsdc * 10_000
         ) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.POSITION_TOO_SMALL;
             return delta;
@@ -272,7 +284,7 @@ library CfdEnginePlanLib {
         delta.tradeCostUsdc = openState.tradeCostUsdc;
         delta.marginDeltaUsdc = order.marginDelta;
         delta.netMarginChange = int256(order.marginDelta) - openState.tradeCostUsdc;
-        delta.vaultRebatePayoutUsdc = openState.tradeCostUsdc < 0 ? uint256(-openState.tradeCostUsdc) : 0;
+        delta.poolRebatePayoutUsdc = openState.tradeCostUsdc < 0 ? uint256(-openState.tradeCostUsdc) : 0;
 
         MarginClearinghouseAccountingLib.OpenCostPlan memory openCostPlan =
             MarginClearinghouseAccountingLib.planOpenCostApplication(
@@ -295,7 +307,7 @@ library CfdEnginePlanLib {
         } else {
             delta.sideEntryNotionalDelta = -int256(openState.oldEntryNotional - openState.newEntryNotional);
         }
-        delta.sideEntryFundingContribution = 0;
+        delta.sideEntryCarryContribution = 0;
         delta.sideMaxProfitIncrease = openState.addedMaxProfitUsdc;
 
         delta.executionFeeUsdc = openState.executionFeeUsdc;
@@ -319,9 +331,8 @@ library CfdEnginePlanLib {
         }
 
         if (
-            effectiveSnap.vaultAssetsUsdc > 0
-                && ((postSkewUsdc * CfdMath.WAD) / effectiveSnap.vaultAssetsUsdc)
-                    > effectiveSnap.riskParams.maxSkewRatio
+            effectiveSnap.poolAssetsUsdc > 0
+                && ((postSkewUsdc * CfdMath.WAD) / effectiveSnap.poolAssetsUsdc) > effectiveSnap.riskParams.maxSkewRatio
         ) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH;
             return delta;
@@ -339,17 +350,16 @@ library CfdEnginePlanLib {
         }
 
         MarginClearinghouseAccountingLib.SettlementConsumption memory consumption =
-            MarginClearinghouseAccountingLib.planFundingLossConsumption(snap.accountBuckets, pendingCarryUsdc);
+            MarginClearinghouseAccountingLib.planCarryLossConsumption(snap.accountBuckets, pendingCarryUsdc);
         if (consumption.uncoveredUsdc > 0) {
             return true;
         }
 
-        uint256 settlementBalanceUsdc = MarginClearinghouseAccountingLib.getSettlementBalanceUsdc(snap.accountBuckets)
-            - consumption.totalConsumedUsdc;
+        uint256 settlementBalanceUsdc = snap.accountBuckets.settlementBalanceUsdc - consumption.totalConsumedUsdc;
         snap.lockedBuckets.positionMarginUsdc -= consumption.activeMarginConsumedUsdc;
         snap.position.margin -= consumption.activeMarginConsumedUsdc;
-        snap.vaultAssetsUsdc += pendingCarryUsdc;
-        snap.vaultCashUsdc += pendingCarryUsdc;
+        snap.poolAssetsUsdc += pendingCarryUsdc;
+        snap.poolCashUsdc += pendingCarryUsdc;
 
         snap.accountBuckets = MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(
             settlementBalanceUsdc,
@@ -377,6 +387,7 @@ library CfdEnginePlanLib {
         projectedPosition.margin =
             OpenAccountingLib.effectiveMarginAfterTradeCost(delta.positionMarginAfterOpen, delta.tradeCostUsdc);
         projectedPosition.entryPrice = delta.newPosEntryPrice;
+        projectedPosition.vpiAccrued = snap.position.vpiAccrued + delta.posVpiAccruedDelta;
 
         uint256 reachableCollateralUsdc = MarginClearinghouseAccountingLib.getGenericReachableUsdc(snap.accountBuckets);
         if (delta.tradeCostUsdc > 0) {
@@ -416,24 +427,20 @@ library CfdEnginePlanLib {
 
         uint256 postMaxLiability = SolvencyAccountingLib.getMaxLiability(bull.maxProfitUsdc, bear.maxProfitUsdc);
 
-        int256 physicalAssetsDeltaUsdc = delta.tradeCostUsdc;
+        int256 physicalAssetsDeltaUsdc = delta.tradeCostUsdc - int256(delta.executionFeeUsdc);
 
         SolvencyAccountingLib.SolvencyState memory currentState = SolvencyAccountingLib.buildSolvencyState(
-            snap.vaultCashUsdc,
-            snap.accumulatedFeesUsdc,
+            snap.poolCashUsdc,
             SolvencyAccountingLib.getMaxLiability(snap.bullSide.maxProfitUsdc, snap.bearSide.maxProfitUsdc),
-            snap.totalDeferredTraderCreditUsdc,
-            snap.totalDeferredKeeperCreditUsdc
+            snap.totalTraderClaimBalanceUsdc
         );
         SolvencyAccountingLib.PreviewResult memory result = SolvencyAccountingLib.previewPostOpSolvency(
             currentState,
             SolvencyAccountingLib.PreviewDelta({
                 physicalAssetsDeltaUsdc: physicalAssetsDeltaUsdc,
-                protocolFeesDeltaUsdc: delta.executionFeeUsdc,
                 maxLiabilityAfterUsdc: postMaxLiability,
-                deferredTraderPayoutDeltaUsdc: 0,
-                deferredKeeperCreditDeltaUsdc: 0,
-                pendingVaultPayoutUsdc: 0
+                traderClaimDeltaUsdc: 0,
+                pendingPoolPayoutUsdc: 0
             }),
             snap.degradedMode
         );
@@ -451,20 +458,11 @@ library CfdEnginePlanLib {
         uint64 publishTime
     ) internal pure returns (CfdEnginePlanTypes.CloseDelta memory delta) {
         uint256 price = executionPrice > snap.capPrice ? snap.capPrice : executionPrice;
-        delta.accountId = order.accountId;
+        delta.account = order.account;
         delta.sizeDelta = order.sizeDelta;
         delta.price = price;
-        uint256 carryTimeDelta = snap.position.lastCarryTimestamp > 0
-            && snap.currentTimestamp > snap.position.lastCarryTimestamp
-            ? snap.currentTimestamp - snap.position.lastCarryTimestamp
-            : 0;
-        uint256 genericReachableUsdc = MarginClearinghouseAccountingLib.getGenericReachableUsdc(snap.accountBuckets);
-        uint256 carryBaseUsdc =
-            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(snap.position.size, price, genericReachableUsdc);
-        delta.pendingCarryUsdc = snap.unsettledCarryUsdc
-            + PositionRiskAccountingLib.computePendingCarryUsdc(
-                carryBaseUsdc, snap.riskParams.baseCarryBps, carryTimeDelta
-            );
+        publishTime;
+        delta.pendingCarryUsdc = _pendingCarryUsdc(snap);
 
         CfdTypes.Position memory pos = snap.position;
         delta.side = pos.side;
@@ -505,7 +503,7 @@ library CfdEnginePlanLib {
             snap.capPrice,
             preSkewUsdc,
             postSkewUsdc,
-            snap.vaultAssetsUsdc,
+            snap.poolAssetsUsdc,
             snap.riskParams.vpiFactor,
             snap.executionFeeBps
         );
@@ -529,19 +527,13 @@ library CfdEnginePlanLib {
             return delta;
         }
 
-        uint256 effectiveVaultCash = snap.vaultCashUsdc;
+        uint256 effectivePoolCash = snap.poolCashUsdc;
 
         delta.executionFeeUsdc = cs.executionFeeUsdc;
         delta.realizedPnlUsdc = cs.realizedPnlUsdc;
 
         uint256 availableCashForFreshPayouts =
-            CashPriorityLib.reserveFreshPayouts(
-            effectiveVaultCash,
-            snap.accumulatedFeesUsdc,
-            snap.totalDeferredTraderCreditUsdc,
-            snap.totalDeferredKeeperCreditUsdc
-        )
-        .freeCashUsdc;
+            CashPriorityLib.reserveFreshPayouts(effectivePoolCash, snap.totalTraderClaimBalanceUsdc).freeCashUsdc;
 
         int256 carryAdjustedSettlementUsdc = cs.netSettlementUsdc - int256(delta.pendingCarryUsdc);
 
@@ -549,7 +541,12 @@ library CfdEnginePlanLib {
             delta.settlementType = CfdEnginePlanTypes.SettlementType.GAIN;
             delta.freshTraderPayoutUsdc = uint256(carryAdjustedSettlementUsdc);
             delta.freshPayoutIsImmediate = availableCashForFreshPayouts >= delta.freshTraderPayoutUsdc;
-            delta.freshPayoutIsDeferred = !delta.freshPayoutIsImmediate;
+            delta.freshPayoutCreatesClaim = !delta.freshPayoutIsImmediate;
+            if (delta.freshPayoutIsImmediate) {
+                uint256 cashAfterTraderPayout = availableCashForFreshPayouts - delta.freshTraderPayoutUsdc;
+                delta.protocolFeeTopUpUsdc =
+                    delta.executionFeeUsdc < cashAfterTraderPayout ? delta.executionFeeUsdc : cashAfterTraderPayout;
+            }
         } else if (carryAdjustedSettlementUsdc < 0) {
             delta.settlementType = CfdEnginePlanTypes.SettlementType.LOSS;
             delta.lossUsdc = uint256(-carryAdjustedSettlementUsdc);
@@ -565,12 +562,14 @@ library CfdEnginePlanLib {
             );
             delta.syncMarginQueueAmount = delta.lossConsumption.otherLockedMarginConsumedUsdc;
             (
-                delta.existingDeferredConsumedUsdc,
-                delta.existingDeferredRemainingUsdc,
-                delta.deferredFeeRecoveryUsdc,
+                delta.existingTraderClaimConsumedUsdc,
+                delta.existingTraderClaimRemainingUsdc,
+                delta.traderClaimFeeRecoveryUsdc,
                 delta.badDebtUsdc
-            ) = _planCloseDeferredTraderCreditConsumption(snap.deferredTraderCreditForAccount, delta.lossResult);
-            delta.executionFeeUsdc = delta.lossResult.collectedExecFeeUsdc + delta.deferredFeeRecoveryUsdc;
+            ) = _planCloseTraderClaimConsumption(snap.traderClaimBalanceForAccount, delta.lossResult);
+            delta.executionFeeUsdc = delta.lossResult.collectedExecFeeUsdc + delta.traderClaimFeeRecoveryUsdc
+                + delta.lossResult.retainedExecFeeUsdc;
+            delta.protocolFeeTopUpUsdc = _closeLossProtocolFeeTopUpUsdc(snap, delta);
 
             if (delta.lossResult.shortfallUsdc > 0 && cs.remainingMarginUsdc > 0) {
                 delta.revertCode = CfdEnginePlanTypes.CloseRevertCode.PARTIAL_CLOSE_UNDERWATER;
@@ -582,51 +581,35 @@ library CfdEnginePlanLib {
             + (cs.remainingMarginUsdc > pos.margin ? cs.remainingMarginUsdc - pos.margin : 0)
             - (pos.margin > cs.remainingMarginUsdc ? pos.margin - cs.remainingMarginUsdc : 0);
 
-        delta.solvency = _computeCloseSolvency(snap, delta, bull, bear);
+        delta.solvency = _computeCloseSolvency(snap, delta);
         delta.valid = true;
     }
 
     function _computeCloseSolvency(
         CfdEnginePlanTypes.RawSnapshot memory snap,
-        CfdEnginePlanTypes.CloseDelta memory delta,
-        CfdEnginePlanTypes.SideSnapshot memory bull,
-        CfdEnginePlanTypes.SideSnapshot memory bear
+        CfdEnginePlanTypes.CloseDelta memory delta
     ) private pure returns (CfdEnginePlanTypes.SolvencyPreview memory sp) {
-        if (delta.side == CfdTypes.Side.BULL) {
-            bull.openInterest -= delta.sideOiDecrease;
-            bull.totalMargin = delta.totalMarginAfterClose;
-        } else {
-            bear.openInterest -= delta.sideOiDecrease;
-            bear.totalMargin = delta.totalMarginAfterClose;
-        }
-
         uint256 postMaxLiability = SolvencyAccountingLib.getMaxLiabilityAfterClose(
             snap.bullSide.maxProfitUsdc, snap.bearSide.maxProfitUsdc, delta.side, delta.posMaxProfitReduction
         );
 
-        int256 physicalAssetsDelta = int256(delta.lossResult.seizedUsdc)
-            - int256(delta.freshPayoutIsImmediate ? delta.freshTraderPayoutUsdc : 0);
+        int256 physicalAssetsDelta = _closePoolPhysicalAssetsDelta(delta);
 
-        uint256 deferredTraderPayoutIncrease = delta.freshPayoutIsDeferred ? delta.freshTraderPayoutUsdc : 0;
+        uint256 traderClaimIncrease = delta.freshPayoutCreatesClaim ? delta.freshTraderPayoutUsdc : 0;
 
         SolvencyAccountingLib.SolvencyState memory currentState = SolvencyAccountingLib.buildSolvencyState(
-            snap.vaultAssetsUsdc,
-            snap.accumulatedFeesUsdc,
+            snap.poolAssetsUsdc,
             SolvencyAccountingLib.getMaxLiability(snap.bullSide.maxProfitUsdc, snap.bearSide.maxProfitUsdc),
-            snap.totalDeferredTraderCreditUsdc,
-            snap.totalDeferredKeeperCreditUsdc
+            snap.totalTraderClaimBalanceUsdc
         );
 
         SolvencyAccountingLib.PreviewResult memory result = SolvencyAccountingLib.previewPostOpSolvency(
             currentState,
             SolvencyAccountingLib.PreviewDelta({
                 physicalAssetsDeltaUsdc: physicalAssetsDelta,
-                protocolFeesDeltaUsdc: delta.executionFeeUsdc,
                 maxLiabilityAfterUsdc: postMaxLiability,
-                deferredTraderPayoutDeltaUsdc: int256(deferredTraderPayoutIncrease)
-                    - int256(delta.existingDeferredConsumedUsdc),
-                deferredKeeperCreditDeltaUsdc: 0,
-                pendingVaultPayoutUsdc: 0
+                traderClaimDeltaUsdc: int256(traderClaimIncrease) - int256(delta.existingTraderClaimConsumedUsdc),
+                pendingPoolPayoutUsdc: 0
             }),
             snap.degradedMode
         );
@@ -634,6 +617,31 @@ library CfdEnginePlanLib {
         sp.maxLiabilityAfterUsdc = result.maxLiabilityAfterUsdc;
         sp.triggersDegradedMode = result.triggersDegradedMode;
         sp.postOpDegradedMode = result.postOpDegradedMode;
+    }
+
+    function _closeLossProtocolFeeTopUpUsdc(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        CfdEnginePlanTypes.CloseDelta memory delta
+    ) private pure returns (uint256 topUpUsdc) {
+        uint256 uncreditedFeeUsdc = delta.executionFeeUsdc - delta.lossResult.collectedExecFeeUsdc;
+        if (uncreditedFeeUsdc == 0) {
+            return 0;
+        }
+
+        uint256 poolCashAfterSeizure =
+            snap.poolCashUsdc + delta.lossResult.seizedUsdc - delta.lossResult.collectedExecFeeUsdc;
+        uint256 traderClaimAfterConsumption = snap.totalTraderClaimBalanceUsdc - delta.existingTraderClaimConsumedUsdc;
+        uint256 freeCashUsdc =
+            CashPriorityLib.reserveFreshPayouts(poolCashAfterSeizure, traderClaimAfterConsumption).freeCashUsdc;
+        return uncreditedFeeUsdc < freeCashUsdc ? uncreditedFeeUsdc : freeCashUsdc;
+    }
+
+    function _closePoolPhysicalAssetsDelta(
+        CfdEnginePlanTypes.CloseDelta memory delta
+    ) private pure returns (int256) {
+        return int256(delta.lossResult.seizedUsdc) - int256(delta.lossResult.collectedExecFeeUsdc)
+            - int256(delta.protocolFeeTopUpUsdc)
+            - int256(delta.freshPayoutIsImmediate ? delta.freshTraderPayoutUsdc : 0);
     }
 
     function _buildCloseSettlementBuckets(
@@ -644,21 +652,18 @@ library CfdEnginePlanLib {
         uint256 adjustedPosMargin = snap.lockedBuckets.positionMarginUsdc > marginToFreeUsdc
             ? snap.lockedBuckets.positionMarginUsdc - marginToFreeUsdc
             : 0;
-        uint256 settlementBalance = MarginClearinghouseAccountingLib.getSettlementBalanceUsdc(snap.accountBuckets);
+        uint256 reservedSettlementUsdc = snap.lockedBuckets.reservedSettlementUsdc;
+        uint256 settlementBalance = snap.accountBuckets.settlementBalanceUsdc > reservedSettlementUsdc
+            ? snap.accountBuckets.settlementBalanceUsdc - reservedSettlementUsdc
+            : 0;
         if (includeOtherLockedMargin) {
             return MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(
-                settlementBalance,
-                adjustedPosMargin,
-                snap.lockedBuckets.committedOrderMarginUsdc,
-                snap.lockedBuckets.reservedSettlementUsdc
+                settlementBalance, adjustedPosMargin, snap.lockedBuckets.committedOrderMarginUsdc, 0
             );
         }
 
         return MarginClearinghouseAccountingLib.buildPartialCloseUsdcBuckets(
-            settlementBalance,
-            adjustedPosMargin,
-            snap.lockedBuckets.committedOrderMarginUsdc,
-            snap.lockedBuckets.reservedSettlementUsdc
+            settlementBalance, adjustedPosMargin, snap.lockedBuckets.committedOrderMarginUsdc, 0
         );
     }
 
@@ -672,7 +677,7 @@ library CfdEnginePlanLib {
         uint64 publishTime
     ) internal pure returns (CfdEnginePlanTypes.LiquidationDelta memory delta) {
         uint256 price = executionPrice > snap.capPrice ? snap.capPrice : executionPrice;
-        delta.accountId = snap.accountId;
+        delta.account = snap.account;
         delta.price = price;
 
         CfdTypes.Position memory pos = snap.position;
@@ -692,16 +697,8 @@ library CfdEnginePlanLib {
         uint256 maintMarginBps = snap.isFadWindow ? snap.riskParams.fadMarginBps : snap.riskParams.maintMarginBps;
         uint256 settlementReachableUsdc = MarginClearinghouseAccountingLib.getTerminalReachableUsdc(snap.accountBuckets);
         delta.liquidationReachableCollateralUsdc = settlementReachableUsdc;
-        uint256 carryTimeDelta = snap.position.lastCarryTimestamp > 0
-            && snap.currentTimestamp > snap.position.lastCarryTimestamp
-            ? snap.currentTimestamp - snap.position.lastCarryTimestamp
-            : 0;
-        uint256 carryBaseUsdc =
-            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(snap.position.size, price, settlementReachableUsdc);
-        delta.pendingCarryUsdc = snap.unsettledCarryUsdc
-            + PositionRiskAccountingLib.computePendingCarryUsdc(
-                carryBaseUsdc, snap.riskParams.baseCarryBps, carryTimeDelta
-            );
+        publishTime;
+        delta.pendingCarryUsdc = _pendingCarryUsdc(snap);
 
         delta.riskState = PositionRiskAccountingLib.buildPositionRiskStateWithCarry(
             pos, price, snap.capPrice, delta.pendingCarryUsdc, settlementReachableUsdc, maintMarginBps
@@ -732,27 +729,23 @@ library CfdEnginePlanLib {
         delta.sideTotalMarginReduction = pos.margin;
 
         delta.residualUsdc = liquidationEquityUsdc - int256(delta.keeperBountyUsdc);
-        delta.residualPlan =
-            MarginClearinghouseAccountingLib.planLiquidationResidual(snap.accountBuckets, delta.residualUsdc);
+        delta.residualPlan = MarginClearinghouseAccountingLib.planLiquidationResidual(
+            snap.accountBuckets, delta.residualUsdc, delta.keeperBountyUsdc
+        );
         delta.settlementRetainedUsdc = delta.residualPlan.settlementRetainedUsdc;
-        (delta.existingDeferredConsumedUsdc, delta.existingDeferredRemainingUsdc, delta.badDebtUsdc) =
-            _planDeferredTraderCreditConsumption(
-                snap.deferredTraderCreditForAccount, delta.residualPlan.badDebtUsdc, false
-            );
+        (delta.existingTraderClaimConsumedUsdc, delta.existingTraderClaimRemainingUsdc, delta.badDebtUsdc) =
+            _planTraderClaimConsumption(snap.traderClaimBalanceForAccount, delta.residualPlan.badDebtUsdc, false);
         delta.syncMarginQueueAmount = delta.residualPlan.mutation.otherLockedMarginUnlockedUsdc;
 
         if (delta.residualPlan.freshTraderPayoutUsdc > 0) {
             delta.freshTraderPayoutUsdc = delta.residualPlan.freshTraderPayoutUsdc;
-            uint256 deferredTraderPayoutAfterConsumption =
-                snap.totalDeferredTraderCreditUsdc - delta.existingDeferredConsumedUsdc;
+            uint256 traderClaimAfterConsumption =
+                snap.totalTraderClaimBalanceUsdc - delta.existingTraderClaimConsumedUsdc;
             delta.freshPayoutIsImmediate = CashPriorityLib.reserveFreshPayouts(
-                    snap.vaultCashUsdc,
-                    snap.accumulatedFeesUsdc,
-                    deferredTraderPayoutAfterConsumption,
-                    snap.totalDeferredKeeperCreditUsdc
+                    snap.poolCashUsdc, traderClaimAfterConsumption
                 )
                 .freeCashUsdc >= delta.freshTraderPayoutUsdc;
-            delta.freshPayoutIsDeferred = !delta.freshPayoutIsImmediate;
+            delta.freshPayoutCreatesClaim = !delta.freshPayoutIsImmediate;
         }
 
         if (pos.side == CfdTypes.Side.BULL) {
@@ -768,11 +761,9 @@ library CfdEnginePlanLib {
         );
 
         SolvencyAccountingLib.SolvencyState memory currentState = SolvencyAccountingLib.buildSolvencyState(
-            snap.vaultAssetsUsdc,
-            snap.accumulatedFeesUsdc,
+            snap.poolAssetsUsdc,
             SolvencyAccountingLib.getMaxLiability(snap.bullSide.maxProfitUsdc, snap.bearSide.maxProfitUsdc),
-            snap.totalDeferredTraderCreditUsdc,
-            snap.totalDeferredKeeperCreditUsdc
+            snap.totalTraderClaimBalanceUsdc
         );
 
         int256 physicalAssetsDelta = int256(delta.residualPlan.settlementSeizedUsdc)
@@ -782,12 +773,10 @@ library CfdEnginePlanLib {
             currentState,
             SolvencyAccountingLib.PreviewDelta({
                 physicalAssetsDeltaUsdc: physicalAssetsDelta,
-                protocolFeesDeltaUsdc: 0,
                 maxLiabilityAfterUsdc: postMaxLiability,
-                deferredTraderPayoutDeltaUsdc: int256(delta.freshPayoutIsDeferred ? delta.freshTraderPayoutUsdc : 0)
-                    - int256(delta.existingDeferredConsumedUsdc),
-                deferredKeeperCreditDeltaUsdc: 0,
-                pendingVaultPayoutUsdc: delta.keeperBountyUsdc
+                traderClaimDeltaUsdc: int256(delta.freshPayoutCreatesClaim ? delta.freshTraderPayoutUsdc : 0)
+                - int256(delta.existingTraderClaimConsumedUsdc),
+                pendingPoolPayoutUsdc: 0
             }),
             snap.degradedMode
         );

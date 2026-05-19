@@ -9,9 +9,9 @@ library HousePoolEngineViewTypes {
         uint256 maxLiabilityUsdc;
         uint256 supplementalReservedUsdc;
         uint256 unrealizedMtmLiabilityUsdc;
-        uint256 deferredTraderCreditUsdc;
-        uint256 deferredKeeperCreditUsdc;
-        uint256 protocolFeesUsdc;
+        uint256 depositMtmLiabilityUsdc; // zero unless an exact, non-manipulable deposit-side liability model is added
+        uint256 traderClaimBalanceUsdc;
+        bool hasOpenPositions;
         bool markFreshnessRequired;
         uint256 maxMarkStaleness;
     }

@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
+import {CfdEnginePlanTypes} from "../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
+import {IHousePool} from "../../src/perps/interfaces/IHousePool.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
@@ -40,11 +42,11 @@ contract AuditV2_C01_WithdrawGuardTest is BasePerpTest {
     }
 
     function test_C01_WithdrawWhilePositionUnderwater() public {
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        address aliceAccount = alice;
         _fundTrader(alice, 100_000e6);
 
         // BULL profits when price drops, loses when price rises
-        _open(aliceId, CfdTypes.Side.BULL, 500_000e18, 10_000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.BULL, 500_000e18, 10_000e6, 1e8);
 
         // Price rises to 1.15e8 → BULL unrealized loss ≈ 75K.
         // Alice's true cross-margin equity = 100K deposit - fees - 75K loss ≈ 25K.
@@ -53,8 +55,8 @@ contract AuditV2_C01_WithdrawGuardTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(underwaterPrice, uint64(block.timestamp));
 
-        uint256 chBalance = clearinghouse.balanceUsdc(aliceId);
-        uint256 locked = clearinghouse.lockedMarginUsdc(aliceId);
+        uint256 chBalance = clearinghouse.balanceUsdc(aliceAccount);
+        uint256 locked = clearinghouse.lockedMarginUsdc(aliceAccount);
         uint256 withdrawable = chBalance - locked;
 
         // checkWithdraw is a no-op. Clearinghouse ignores unrealized PnL.
@@ -62,13 +64,13 @@ contract AuditV2_C01_WithdrawGuardTest is BasePerpTest {
         // This should revert (withdrawal exceeds PnL-aware equity) but doesn't.
         vm.prank(alice);
         vm.expectRevert();
-        clearinghouse.withdraw(aliceId, withdrawable);
+        clearinghouse.withdraw(aliceAccount, withdrawable);
     }
 
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// C-02: _reconcile early return permanently destroys senior yield
+// C-02: _reconcile early return permanently destroys senior coupon checkpointing
 // ═══════════════════════════════════════════════════════════════════
 
 contract AuditV2_C02_ReconcileTimeConsumptionTest is BasePerpTest {
@@ -101,8 +103,8 @@ contract AuditV2_C02_ReconcileTimeConsumptionTest is BasePerpTest {
         });
     }
 
-    function test_C02_FrozenWindowReconcile_DoesNotDestroySeniorYieldEntitlement() public {
-        HousePool.PoolConfig memory config = _currentPoolConfig();
+    function test_C02_FrozenWindowReconcile_DoesNotDestroySeniorCouponCheckpointing() public {
+        IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 1000;
         pool.proposePoolConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
@@ -111,10 +113,10 @@ contract AuditV2_C02_ReconcileTimeConsumptionTest is BasePerpTest {
         pool.finalizePoolConfig();
 
         _fundTrader(alice, 50_000e6);
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        _open(aliceId, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
+        address aliceAccount = alice;
+        _open(aliceAccount, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
 
-        uint256 yieldBefore = pool.unpaidSeniorYield();
+        uint256 seniorBefore = pool.seniorPrincipal();
 
         // Capture base timestamp before any warps (block.timestamp is cached per frame)
         uint256 baseTs = SETUP_TIMESTAMP + 48 hours + 1;
@@ -140,8 +142,8 @@ contract AuditV2_C02_ReconcileTimeConsumptionTest is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        uint256 yieldAfter = pool.unpaidSeniorYield();
-        assertGe(yieldAfter, yieldBefore, "Frozen-window reconcile should not destroy accrued senior yield entitlement");
+        uint256 seniorAfter = pool.seniorPrincipal();
+        assertGe(seniorAfter, seniorBefore, "Frozen-window reconcile should not destroy senior coupon value");
     }
 
 }
@@ -199,7 +201,7 @@ contract AuditV2_C03_OracleFrozenCloseTest is BasePerpTest {
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+        engine.setPool(address(pool));
 
         feedIds.push(FEED_A);
         feedIds.push(FEED_B);
@@ -219,7 +221,6 @@ contract AuditV2_C03_OracleFrozenCloseTest is BasePerpTest {
             new bool[](2)
         );
         engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
         _bootstrapSeededLifecycle();
@@ -233,12 +234,12 @@ contract AuditV2_C03_OracleFrozenCloseTest is BasePerpTest {
     }
 
     function test_C03_CloseOrderBlockedDuringOracleFrozen() public {
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        address aliceAccount = alice;
 
         // Open position directly via engine (bypass router oracle timing)
-        _open(aliceId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertGt(size, 0, "Position should be open");
 
         // Warp to Saturday (oracle frozen per _isOracleFrozen: dayOfWeek==6)
@@ -256,7 +257,7 @@ contract AuditV2_C03_OracleFrozenCloseTest is BasePerpTest {
         updateData[0] = "";
         router.executeOrder{value: 0.01 ether}(1, updateData);
 
-        (size,,,,,,) = engine.positions(aliceId);
+        (size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 0, "C-03: close orders must execute during oracle freeze");
     }
 
@@ -285,8 +286,8 @@ contract AuditV2_H01_DepositStaleMark is BasePerpTest {
         _fundJunior(address(this), 500_000e6);
 
         _fundTrader(alice, 50_000e6);
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        _open(aliceId, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
+        address aliceAccount = alice;
+        _open(aliceAccount, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
@@ -307,8 +308,8 @@ contract AuditV2_H01_DepositStaleMark is BasePerpTest {
         _fundJunior(bob, 500_000e6);
 
         _fundTrader(alice, 50_000e6);
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        _open(aliceId, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
+        address aliceAccount = alice;
+        _open(aliceAccount, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
@@ -347,8 +348,8 @@ contract AuditV2_H02_WeekendWithdrawalDoS is BasePerpTest {
         _fundJunior(bob, 100_000e6);
 
         _fundTrader(alice, 50_000e6);
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        _open(aliceId, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
+        address aliceAccount = alice;
+        _open(aliceAccount, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
@@ -401,23 +402,58 @@ contract AuditV2_M01_VPIRebateIMRTest is BasePerpTest {
 
     function test_M01_ZeroMarginPositionViaVPIRebate() public {
         _fundTrader(alice, 200_000e6);
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        address aliceAccount = alice;
         // Alice creates BULL skew; pays VPI to open
-        _open(aliceId, CfdTypes.Side.BULL, 300_000e18, 50_000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.BULL, 300_000e18, 50_000e6, 1e8);
 
         // Bob opens opposing BEAR with 0 margin — the VPI rebate (skew reduction)
         // should NOT satisfy IMR. With vpiFactor=0.05, rebate ≈ 2250 USDC > exec fee 180.
         _fundTrader(bob, 1e6);
-        bytes32 bobId = bytes32(uint256(uint160(bob)));
+        address bobAccount = bob;
+
+        uint256 poolDepth = pool.totalAssets();
+        vm.prank(address(router));
+        vm.expectRevert();
+        engine.processOrderTyped(
+            CfdTypes.Order({
+                account: bobAccount,
+                sizeDelta: 300_000e18,
+                marginDelta: 0,
+                targetPrice: 1e8,
+                commitTime: uint64(block.timestamp),
+                commitBlock: uint64(block.number),
+                orderId: 0,
+                side: CfdTypes.Side.BEAR,
+                isClose: false
+            }),
+            1e8,
+            poolDepth,
+            uint64(block.timestamp)
+        );
+    }
+
+    function test_M01_NonzeroMarginRebateOpenProjectsFreshVpiLiability() public {
+        _fundTrader(alice, 200_000e6);
+        _open(alice, CfdTypes.Side.BULL, 300_000e18, 50_000e6, 1e8);
+
+        _fundTrader(bob, 4000e6);
+
+        uint8 code =
+            engineLens.previewOpenRevertCode(bob, CfdTypes.Side.BEAR, 300_000e18, 4000e6, 1e8, uint64(block.timestamp));
+        assertEq(
+            code,
+            uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN),
+            "planner should subtract fresh negative VPI liability before admitting the open"
+        );
 
         uint256 vaultDepth = pool.totalAssets();
         vm.prank(address(router));
         vm.expectRevert();
         engine.processOrderTyped(
             CfdTypes.Order({
-                accountId: bobId,
+                account: bob,
                 sizeDelta: 300_000e18,
-                marginDelta: 0,
+                marginDelta: 4000e6,
                 targetPrice: 1e8,
                 commitTime: uint64(block.timestamp),
                 commitBlock: uint64(block.number),
@@ -455,8 +491,7 @@ contract AuditV2_M02_GasGriefingTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
 
         uint64 orderId = router.nextCommitId() - 1;
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(1e8));
+        bytes[] memory priceData = _mockPythUpdateData();
 
         // Batch execution wraps processOrder in try/catch (line 412).
         // Under EIP-150's 63/64 rule, a malicious keeper can supply gas G such that:
@@ -478,8 +513,8 @@ contract AuditV2_M02_GasGriefingTest is BasePerpTest {
         vm.prank(keeper);
         router.executeOrderBatch{value: 0.01 ether}(orderId, priceData);
 
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        address aliceAccount = alice;
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
 
         // With enough gas, the order executes fine. The vulnerability is that
         // the same code path with insufficient gas silently cancels instead of
@@ -496,11 +531,8 @@ contract AuditV2_M02_GasGriefingTest is BasePerpTest {
 contract AuditV2_M03_ImmutablePythArraysTest is BasePerpTest {
 
     function test_M03_NoPythFeedUpdateMechanism() public {
-        vm.expectRevert(CfdEngine.CfdEngine__RouterAlreadySet.selector);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__RouterAlreadySet.selector);
         engine.setOrderRouter(address(0x123));
-
-        vm.expectRevert(HousePool.HousePool__RouterAlreadySet.selector);
-        pool.setOrderRouter(address(0x123));
     }
 
 }

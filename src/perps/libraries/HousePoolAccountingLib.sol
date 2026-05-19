@@ -8,16 +8,14 @@ library HousePoolAccountingLib {
     struct WithdrawalSnapshot {
         uint256 physicalAssets;
         uint256 maxLiability;
-        uint256 protocolFees;
         uint256 reserved;
         uint256 freeUsdc;
     }
 
     struct ReconcileSnapshot {
         uint256 physicalAssets;
-        uint256 protocolFees;
-        uint256 deferredLiabilities;
-        uint256 cashMinusFees;
+        uint256 traderClaimLiabilities;
+        uint256 cashAfterTraderClaimLiabilities;
         uint256 mtm;
         uint256 distributable;
     }
@@ -32,9 +30,7 @@ library HousePoolAccountingLib {
     ) internal pure returns (WithdrawalSnapshot memory snapshot) {
         snapshot.physicalAssets = engineSnapshot.physicalAssetsUsdc;
         snapshot.maxLiability = engineSnapshot.maxLiabilityUsdc;
-        snapshot.protocolFees = engineSnapshot.protocolFeesUsdc;
-        snapshot.reserved = engineSnapshot.maxLiabilityUsdc + engineSnapshot.protocolFeesUsdc
-            + engineSnapshot.deferredTraderCreditUsdc + engineSnapshot.deferredKeeperCreditUsdc
+        snapshot.reserved = engineSnapshot.maxLiabilityUsdc + engineSnapshot.traderClaimBalanceUsdc
             + engineSnapshot.supplementalReservedUsdc;
         snapshot.freeUsdc =
             snapshot.physicalAssets > snapshot.reserved ? snapshot.physicalAssets - snapshot.reserved : 0;
@@ -43,14 +39,28 @@ library HousePoolAccountingLib {
     function buildReconcileSnapshot(
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory engineSnapshot
     ) internal pure returns (ReconcileSnapshot memory snapshot) {
+        return _buildReconcileSnapshot(engineSnapshot, engineSnapshot.unrealizedMtmLiabilityUsdc);
+    }
+
+    function buildDepositReconcileSnapshot(
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory engineSnapshot
+    ) internal pure returns (ReconcileSnapshot memory snapshot) {
+        return _buildReconcileSnapshot(engineSnapshot, engineSnapshot.depositMtmLiabilityUsdc);
+    }
+
+    function _buildReconcileSnapshot(
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory engineSnapshot,
+        uint256 mtmLiabilityUsdc
+    ) private pure returns (ReconcileSnapshot memory snapshot) {
         snapshot.physicalAssets = engineSnapshot.physicalAssetsUsdc;
-        snapshot.protocolFees = engineSnapshot.protocolFeesUsdc;
-        snapshot.deferredLiabilities = engineSnapshot.deferredTraderCreditUsdc + engineSnapshot.deferredKeeperCreditUsdc;
-        snapshot.cashMinusFees = engineSnapshot.netPhysicalAssetsUsdc > snapshot.deferredLiabilities
-            ? engineSnapshot.netPhysicalAssetsUsdc - snapshot.deferredLiabilities
+        snapshot.traderClaimLiabilities = engineSnapshot.traderClaimBalanceUsdc;
+        snapshot.cashAfterTraderClaimLiabilities = engineSnapshot.physicalAssetsUsdc > snapshot.traderClaimLiabilities
+            ? engineSnapshot.physicalAssetsUsdc - snapshot.traderClaimLiabilities
             : 0;
-        snapshot.mtm = engineSnapshot.unrealizedMtmLiabilityUsdc;
-        snapshot.distributable = snapshot.cashMinusFees > snapshot.mtm ? snapshot.cashMinusFees - snapshot.mtm : 0;
+        snapshot.mtm = mtmLiabilityUsdc;
+        snapshot.distributable = snapshot.cashAfterTraderClaimLiabilities > snapshot.mtm
+            ? snapshot.cashAfterTraderClaimLiabilities - snapshot.mtm
+            : 0;
     }
 
     function getMarkFreshnessPolicy(
