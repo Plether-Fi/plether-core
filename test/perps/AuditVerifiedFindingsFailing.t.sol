@@ -14,6 +14,7 @@ import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "../../src/perps/OrderRouterAdmin.sol";
+import {PletherOracle} from "../../src/perps/PletherOracle.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {IOrderRouter} from "../../src/perps/interfaces/IOrderRouter.sol";
 import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
@@ -213,11 +214,11 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
             address(engine),
             address(new CfdEngineLens(address(engine))),
             address(pool),
-            address(mockPyth),
-            feedIds,
-            weights,
-            bases,
-            inversions
+            address(
+                new PletherOracle(
+                    address(engine), address(pool), address(mockPyth), feedIds, weights, bases, inversions
+                )
+            )
         );
         routerAdmin = OrderRouterAdmin(router.admin());
         engine.setOrderRouter(address(router));

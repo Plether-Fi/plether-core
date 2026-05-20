@@ -13,6 +13,7 @@ interface IOrderRouterErrors {
     error OrderRouter__InvalidBasePrice();
     error OrderRouter__InvalidWeights();
     error OrderRouter__MockOracleUnavailable();
+    error OrderRouter__InvalidPletherOracle();
     error OrderRouter__EmptyPythUpdateData();
     error OrderRouter__InsufficientPythFee();
     error OrderRouter__InvalidEngineLens();

@@ -12,6 +12,7 @@ import {HousePool} from "../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../src/perps/OrderRouter.sol";
 import {PerpsPublicLens} from "../src/perps/PerpsPublicLens.sol";
+import {PletherOracle} from "../src/perps/PletherOracle.sol";
 import {TrancheVault} from "../src/perps/TrancheVault.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -98,17 +99,20 @@ contract DeployPerpsArbitrumSepolia is Script {
 
         deployed.accountLens = new CfdEngineAccountLens(address(deployed.engine));
         deployed.engineLens = new CfdEngineLens(address(deployed.engine));
-        deployed.router = new OrderRouter(
-            address(deployed.engine),
-            address(deployed.engineLens),
-            address(deployed.housePool),
-            PYTH,
-            _pythFeedIds(),
-            _quantities(),
-            _basePrices(),
-            _inversions()
+        deployed.pletherOracle = address(
+            new PletherOracle(
+                address(deployed.engine),
+                address(deployed.housePool),
+                PYTH,
+                _pythFeedIds(),
+                _quantities(),
+                _basePrices(),
+                _inversions()
+            )
         );
-        deployed.pletherOracle = address(deployed.router.pletherOracle());
+        deployed.router = new OrderRouter(
+            address(deployed.engine), address(deployed.engineLens), address(deployed.housePool), deployed.pletherOracle
+        );
         deployed.routerAdmin = deployed.router.admin();
 
         deployed.engine.setOrderRouter(address(deployed.router));

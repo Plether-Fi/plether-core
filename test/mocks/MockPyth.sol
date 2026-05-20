@@ -130,15 +130,34 @@ contract MockPyth {
     }
 
     function parsePriceFeedUpdatesUnique(
-        bytes[] calldata,
+        bytes[] calldata updateData,
         bytes32[] calldata priceIds,
         uint64 minPublishTime,
         uint64 maxPublishTime
     ) external payable returns (PythStructs.PriceFeed[] memory priceFeeds) {
         parseUniqueCallCount++;
+        bool hasEncodedUpdate = updateData.length > 0 && updateData[0].length == 32;
+        uint256 encodedPrice;
+        if (hasEncodedUpdate) {
+            encodedPrice = abi.decode(updateData[0], (uint256));
+        }
+
         priceFeeds = new PythStructs.PriceFeed[](priceIds.length);
         for (uint256 i = 0; i < priceIds.length; i++) {
-            MockPrice memory p = hasUniquePrice[priceIds[i]] ? uniquePrices[priceIds[i]] : prices[priceIds[i]];
+            MockPrice memory p;
+            if (hasUniquePrice[priceIds[i]]) {
+                p = uniquePrices[priceIds[i]];
+            } else if (hasEncodedUpdate) {
+                p = MockPrice(
+                    int64(uint64(encodedPrice)),
+                    0,
+                    int32(-8),
+                    maxPublishTime,
+                    minPublishTime == 0 ? 0 : uint256(minPublishTime) - 1
+                );
+            } else {
+                p = prices[priceIds[i]];
+            }
             require(p.prevPublishTime < minPublishTime, "not unique");
             require(p.publishTime >= minPublishTime && p.publishTime <= maxPublishTime, "outside range");
             PythStructs.Price memory price =

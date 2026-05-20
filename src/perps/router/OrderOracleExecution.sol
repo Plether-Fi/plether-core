@@ -3,7 +3,7 @@ pragma solidity 0.8.33;
 
 import {IPyth} from "../../interfaces/IPyth.sol";
 import {CfdTypes} from "../CfdTypes.sol";
-import {PletherOracle} from "../PletherOracle.sol";
+import {ICfdEngineCore} from "../interfaces/ICfdEngineCore.sol";
 import {ICfdEngineLens} from "../interfaces/ICfdEngineLens.sol";
 import {IHousePool} from "../interfaces/IHousePool.sol";
 import {IPletherOracle} from "../interfaces/IPletherOracle.sol";
@@ -33,18 +33,14 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
         address _engine,
         address _engineLens,
         address _housePool,
-        address _pyth,
-        bytes32[] memory _feedIds,
-        uint256[] memory _quantities,
-        uint256[] memory _basePrices,
-        bool[] memory _inversions
+        address _pletherOracle
     ) OrderReservationAccounting(_engine) {
         if (_engineLens == address(0)) {
             revert OrderRouter__InvalidEngineLens();
         }
         housePool = IHousePool(_housePool);
         engineLens = ICfdEngineLens(_engineLens);
-        _setOracleConfig(_engine, _housePool, _pyth, _feedIds, _quantities, _basePrices, _inversions);
+        _setOracleConfig(_pletherOracle);
     }
 
     function pyth() public view returns (IPyth) {
@@ -160,28 +156,34 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
     }
 
     function _setOracleConfig(
-        address newPyth,
-        bytes32[] memory newFeedIds,
-        uint256[] memory newQuantities,
-        uint256[] memory newBasePrices,
-        bool[] memory newInversions
+        address newPletherOracle
     ) internal {
-        _setOracleConfig(
-            address(engine), address(housePool), newPyth, newFeedIds, newQuantities, newBasePrices, newInversions
-        );
-    }
-
-    function _setOracleConfig(
-        address engine_,
-        address housePool_,
-        address newPyth,
-        bytes32[] memory newFeedIds,
-        uint256[] memory newQuantities,
-        uint256[] memory newBasePrices,
-        bool[] memory newInversions
-    ) internal {
-        pletherOracle =
-            new PletherOracle(engine_, housePool_, newPyth, newFeedIds, newQuantities, newBasePrices, newInversions);
+        if (newPletherOracle == address(0) || newPletherOracle.code.length == 0) {
+            revert OrderRouter__InvalidPletherOracle();
+        }
+        IPletherOracle oracle = IPletherOracle(newPletherOracle);
+        try oracle.pyth() returns (IPyth pyth_) {
+            if (address(pyth_) == address(0)) {
+                revert OrderRouter__InvalidPletherOracle();
+            }
+        } catch {
+            revert OrderRouter__InvalidPletherOracle();
+        }
+        try oracle.engine() returns (ICfdEngineCore oracleEngine) {
+            if (address(oracleEngine) != address(engine)) {
+                revert OrderRouter__InvalidPletherOracle();
+            }
+        } catch {
+            revert OrderRouter__InvalidPletherOracle();
+        }
+        try oracle.housePool() returns (IHousePool oracleHousePool) {
+            if (address(oracleHousePool) != address(housePool)) {
+                revert OrderRouter__InvalidPletherOracle();
+            }
+        } catch {
+            revert OrderRouter__InvalidPletherOracle();
+        }
+        pletherOracle = oracle;
     }
 
     function _toOracleUpdateResult(

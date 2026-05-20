@@ -1449,11 +1449,11 @@ contract OrderRouterPythTest is BasePerpTest {
             address(engine),
             address(new CfdEngineLens(address(engine))),
             address(pool),
-            address(mockPyth),
-            feedIds,
-            weights,
-            bases,
-            new bool[](2)
+            address(
+                new PletherOracle(
+                    address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
+                )
+            )
         );
         _syncRouterAdmin();
         engine.setOrderRouter(address(router));
@@ -2101,13 +2101,11 @@ contract OrderRouterPythTest is BasePerpTest {
         newBases[0] = 1e8;
         newBases[1] = 1e8;
 
-        IOrderRouterAdminHost.OracleConfig memory config = IOrderRouterAdminHost.OracleConfig({
-            pyth: address(newPyth),
-            feedIds: newFeedIds,
-            quantities: newWeights,
-            basePrices: newBases,
-            inversions: newInversions
-        });
+        PletherOracle newOracle = new PletherOracle(
+            address(engine), address(pool), address(newPyth), newFeedIds, newWeights, newBases, newInversions
+        );
+        IOrderRouterAdminHost.OracleConfig memory config =
+            IOrderRouterAdminHost.OracleConfig({pletherOracle: address(newOracle)});
 
         routerAdmin.proposeOracleConfig(config);
         vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__TimelockNotReady.selector);
@@ -2118,10 +2116,39 @@ contract OrderRouterPythTest is BasePerpTest {
 
         assertEq(address(router.pyth()), address(newPyth), "Pyth endpoint should rotate after timelock");
         PletherOracle rotatedOracle = PletherOracle(address(router.pletherOracle()));
+        assertEq(address(rotatedOracle), address(newOracle), "Oracle endpoint should rotate after timelock");
         assertEq(rotatedOracle.pythFeedIds(0), newFeedIds[0], "First feed id should rotate");
         assertEq(rotatedOracle.pythFeedIds(1), newFeedIds[1], "Second feed id should rotate");
         assertEq(rotatedOracle.quantities(0), newWeights[0], "First weight should rotate");
         assertEq(rotatedOracle.quantities(1), newWeights[1], "Second weight should rotate");
+    }
+
+    function test_OracleConfigTimelock_RejectsOracleForDifferentEngine() public {
+        PletherOracle wrongEngineOracle = new PletherOracle(
+            address(0xE111), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
+        );
+        IOrderRouterAdminHost.OracleConfig memory config =
+            IOrderRouterAdminHost.OracleConfig({pletherOracle: address(wrongEngineOracle)});
+
+        routerAdmin.proposeOracleConfig(config);
+        vm.warp(block.timestamp + 48 hours + 1);
+
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidPletherOracle.selector);
+        routerAdmin.finalizeOracleConfig();
+    }
+
+    function test_OracleConfigTimelock_RejectsOracleForDifferentPool() public {
+        PletherOracle wrongPoolOracle = new PletherOracle(
+            address(engine), address(0xB001), address(mockPyth), feedIds, weights, bases, new bool[](2)
+        );
+        IOrderRouterAdminHost.OracleConfig memory config =
+            IOrderRouterAdminHost.OracleConfig({pletherOracle: address(wrongPoolOracle)});
+
+        routerAdmin.proposeOracleConfig(config);
+        vm.warp(block.timestamp + 48 hours + 1);
+
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidPletherOracle.selector);
+        routerAdmin.finalizeOracleConfig();
     }
 
     function test_BatchPostCommitSkewInvalidationPaysClearerBounty() public {
@@ -3065,11 +3092,11 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
             address(engine),
             address(new CfdEngineLens(address(engine))),
             address(pool),
-            address(mockPyth),
-            feedIds,
-            weights,
-            bases,
-            new bool[](2)
+            address(
+                new PletherOracle(
+                    address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
+                )
+            )
         );
         _syncRouterAdmin();
         engine.setOrderRouter(address(router));
@@ -3230,7 +3257,14 @@ contract BasketPriceHarness is OrderRouter {
         uint256[] memory _quantities,
         uint256[] memory _basePrices,
         bool[] memory _inversions
-    ) OrderRouter(address(1), address(1), address(1), _pyth, _feedIds, _quantities, _basePrices, _inversions) {
+    )
+        OrderRouter(
+            address(1),
+            address(1),
+            address(1),
+            address(new PletherOracle(address(1), address(1), _pyth, _feedIds, _quantities, _basePrices, _inversions))
+        )
+    {
         localPyth = IPyth(_pyth);
         localPythFeedIds = _feedIds;
         localQuantities = _quantities;
@@ -3323,11 +3357,17 @@ contract NormalizePythHarness is OrderRouter {
             address(1),
             address(1),
             address(1),
-            address(1),
-            _normalizeHarnessFeedIds(),
-            _normalizeHarnessWeights(),
-            _normalizeHarnessBasePrices(),
-            _normalizeHarnessInversions()
+            address(
+                new PletherOracle(
+                    address(1),
+                    address(1),
+                    address(1),
+                    _normalizeHarnessFeedIds(),
+                    _normalizeHarnessWeights(),
+                    _normalizeHarnessBasePrices(),
+                    _normalizeHarnessInversions()
+                )
+            )
         )
     {}
 
@@ -3801,11 +3841,11 @@ contract FadStalenessTest is BasePerpTest {
             address(engine),
             address(new CfdEngineLens(address(engine))),
             address(pool),
-            address(mockPyth),
-            feedIds,
-            weights,
-            bases,
-            new bool[](2)
+            address(
+                new PletherOracle(
+                    address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
+                )
+            )
         );
         _syncRouterAdmin();
         engine.setOrderRouter(address(router));
@@ -4661,18 +4701,9 @@ contract OrderRouterAuditTest is BasePerpTest {
         assertGt(size, 0, "Close at bad price should have been rejected by slippage check");
     }
 
-    function test_Constructor_ZeroPythReverts() public {
-        vm.expectRevert(IPletherOracle.PletherOracle__ZeroPyth.selector);
-        new OrderRouter(
-            address(engine),
-            address(engineLens),
-            address(pool),
-            address(0),
-            _basePythFeedIds(),
-            _basePythWeights(),
-            _basePythBasePrices(),
-            _basePythInversions()
-        );
+    function test_Constructor_ZeroPletherOracleReverts() public {
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidPletherOracle.selector);
+        new OrderRouter(address(engine), address(engineLens), address(pool), address(0));
     }
 
     // Regression: H-02 — stale order executes via executeOrder
@@ -5052,11 +5083,11 @@ contract MarkPriceStalenessTest is BasePerpTest {
             address(engine),
             address(new CfdEngineLens(address(engine))),
             address(pool),
-            address(mockPyth),
-            feedIds,
-            weights,
-            bases,
-            new bool[](2)
+            address(
+                new PletherOracle(
+                    address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
+                )
+            )
         );
         engine.setOrderRouter(address(router));
 
@@ -5098,10 +5129,11 @@ contract MarkPriceStalenessTest is BasePerpTest {
     }
 
     function test_Constructor_ZeroEngineLensReverts() public {
-        vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidEngineLens.selector);
-        new OrderRouter(
-            address(engine), address(0), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
+        PletherOracle testOracle = new PletherOracle(
+            address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
         );
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidEngineLens.selector);
+        new OrderRouter(address(engine), address(0), address(pool), address(testOracle));
     }
 
 }
@@ -5164,11 +5196,11 @@ contract StalenessGriefTest is BasePerpTest {
             address(engine),
             address(new CfdEngineLens(address(engine))),
             address(pool),
-            address(mockPyth),
-            feedIds,
-            weights,
-            bases,
-            new bool[](2)
+            address(
+                new PletherOracle(
+                    address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
+                )
+            )
         );
         engine.setOrderRouter(address(router));
 
@@ -5299,11 +5331,11 @@ contract VpiImrBypassTest is Test {
             address(engine),
             address(new CfdEngineLens(address(engine))),
             address(pool),
-            address(mockPyth),
-            feedIds,
-            weights,
-            basePrices,
-            inversions
+            address(
+                new PletherOracle(
+                    address(engine), address(pool), address(mockPyth), feedIds, weights, basePrices, inversions
+                )
+            )
         );
         routerAdmin = OrderRouterAdmin(router.admin());
         engine.setOrderRouter(address(router));
@@ -5555,11 +5587,11 @@ contract KeeperFeeRefundTest is Test {
             address(engine),
             address(new CfdEngineLens(address(engine))),
             address(pool),
-            address(mockPyth),
-            feedIds,
-            weights,
-            basePrices,
-            inversions
+            address(
+                new PletherOracle(
+                    address(engine), address(pool), address(mockPyth), feedIds, weights, basePrices, inversions
+                )
+            )
         );
         routerAdmin = OrderRouterAdmin(router.admin());
         engine.setOrderRouter(address(router));
@@ -5920,11 +5952,11 @@ contract WeekendArbitrageTest is Test {
             address(engine),
             address(new CfdEngineLens(address(engine))),
             address(pool),
-            address(mockPyth),
-            feedIds,
-            weights,
-            bases,
-            new bool[](2)
+            address(
+                new PletherOracle(
+                    address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
+                )
+            )
         );
         engine.setOrderRouter(address(router));
 

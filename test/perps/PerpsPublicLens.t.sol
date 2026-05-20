@@ -209,8 +209,8 @@ contract PerpsPublicLensTest is BasePerpTest {
         assertFalse(publicLens.isLiquidatable(account), "Setup should start above maintenance before carry accrues");
 
         vm.prank(address(router));
-        engine.updateMarkPrice(1e8, uint64(block.timestamp));
-        vm.warp(block.timestamp + 100 days);
+        engine.updateMarkPrice(100_500_000, uint64(block.timestamp));
+        vm.warp(block.timestamp + 2 * 365 days);
 
         AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(account);
         assertTrue(

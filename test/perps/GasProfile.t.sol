@@ -12,6 +12,7 @@ import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
+import {PletherOracle} from "../../src/perps/PletherOracle.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -54,6 +55,30 @@ contract ControllablePythGas {
     function updatePriceFeeds(
         bytes[] calldata
     ) external payable {}
+
+    function parsePriceFeedUpdatesUnique(
+        bytes[] calldata updateData,
+        bytes32[] calldata priceIds,
+        uint64 minPublishTime,
+        uint64 maxPublishTime
+    ) external view returns (PythStructs.PriceFeed[] memory priceFeeds) {
+        bool hasEncodedUpdate = updateData.length > 0 && updateData[0].length == 32;
+        uint256 encodedPrice;
+        if (hasEncodedUpdate) {
+            encodedPrice = abi.decode(updateData[0], (uint256));
+        }
+
+        priceFeeds = new PythStructs.PriceFeed[](priceIds.length);
+        for (uint256 i = 0; i < priceIds.length; i++) {
+            MockPrice memory p = hasEncodedUpdate
+                ? MockPrice(int64(uint64(encodedPrice)), int32(-8), maxPublishTime)
+                : prices[priceIds[i]];
+            require(p.publishTime >= minPublishTime && p.publishTime <= maxPublishTime, "outside range");
+            PythStructs.Price memory price =
+                PythStructs.Price({price: p.price, conf: 0, expo: p.expo, publishTime: p.publishTime});
+            priceFeeds[i] = PythStructs.PriceFeed({id: priceIds[i], price: price, emaPrice: price});
+        }
+    }
 
 }
 
@@ -139,11 +164,7 @@ contract GasProfileTest is Test {
             address(engine),
             address(new CfdEngineLens(address(engine))),
             address(pool),
-            address(pyth),
-            feedIds,
-            w,
-            b,
-            new bool[](1)
+            address(new PletherOracle(address(engine), address(pool), address(pyth), feedIds, w, b, new bool[](1)))
         );
         engine.setOrderRouter(address(router));
 
@@ -621,9 +642,13 @@ contract GasProfileTest is Test {
         return trader;
     }
 
-    function _pythUpdateData() internal pure returns (bytes[] memory updateData) {
+    function _pythUpdateData() internal view returns (bytes[] memory updateData) {
+        (int64 price,,) = pyth.prices(feedIds[0]);
+        if (price <= 0) {
+            price = int64(100_000_000);
+        }
         updateData = new bytes[](1);
-        updateData[0] = "";
+        updateData[0] = abi.encode(uint256(uint64(price)));
     }
 
 }

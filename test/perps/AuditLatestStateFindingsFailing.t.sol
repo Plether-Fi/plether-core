@@ -36,7 +36,7 @@ contract AuditLatestStateFindingsFailing_QueueEconomics is BasePerpTest {
         _fundTrader(attacker, 2e6);
 
         vm.prank(attacker);
-        router.commitOrder(CfdTypes.Side.BULL, 1, 0, 0, false);
+        router.commitOrder(CfdTypes.Side.BULL, 100e18, 1e6, 0, false);
 
         vm.prank(attacker);
         vm.expectRevert();

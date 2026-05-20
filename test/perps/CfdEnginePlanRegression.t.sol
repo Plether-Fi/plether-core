@@ -14,6 +14,7 @@ import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {PerpsPublicLens} from "../../src/perps/PerpsPublicLens.sol";
+import {PletherOracle} from "../../src/perps/PletherOracle.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
@@ -123,11 +124,11 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             address(engine),
             address(engineLens),
             address(pool),
-            address(mockPyth),
-            feedIds,
-            weights,
-            basePrices,
-            new bool[](1)
+            address(
+                new PletherOracle(
+                    address(engine), address(pool), address(mockPyth), feedIds, weights, basePrices, new bool[](1)
+                )
+            )
         );
         _syncRouterAdmin();
         engine.setOrderRouter(address(router));

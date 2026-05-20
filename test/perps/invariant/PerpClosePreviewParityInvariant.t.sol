@@ -7,6 +7,7 @@ import {CfdEnginePlanTypes} from "../../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../../../src/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "../../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../../src/perps/OrderRouter.sol";
+import {PletherOracle} from "../../../src/perps/PletherOracle.sol";
 import {ICfdEngineTypes} from "../../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {MockPyth} from "../../mocks/MockPyth.sol";
 import {MockUSDC} from "../../mocks/MockUSDC.sol";
@@ -51,11 +52,11 @@ contract PerpClosePreviewParityInvariantTest is Test {
             address(engine),
             address(engineLens),
             address(housePool),
-            address(mockPyth),
-            feedIds,
-            weights,
-            basePrices,
-            new bool[](1)
+            address(
+                new PletherOracle(
+                    address(engine), address(housePool), address(mockPyth), feedIds, weights, basePrices, new bool[](1)
+                )
+            )
         );
 
         clearinghouse.setEngine(address(engine));

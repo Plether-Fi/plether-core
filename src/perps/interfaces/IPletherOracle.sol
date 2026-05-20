@@ -3,6 +3,8 @@ pragma solidity 0.8.33;
 
 import {IPyth} from "../../interfaces/IPyth.sol";
 import {CfdTypes} from "../CfdTypes.sol";
+import {ICfdEngineCore} from "./ICfdEngineCore.sol";
+import {IHousePool} from "./IHousePool.sol";
 
 interface IPletherOracle {
 
@@ -167,6 +169,10 @@ interface IPletherOracle {
     function maxComponentPublishTimeDivergence() external view returns (uint256);
 
     function adverseConfidenceMultiplierBps() external view returns (uint256);
+
+    function engine() external view returns (ICfdEngineCore);
+
+    function housePool() external view returns (IHousePool);
 
     function pyth() external view returns (IPyth);
 

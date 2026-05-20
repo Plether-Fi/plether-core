@@ -72,8 +72,8 @@ contract AccountDomainParityTest is BasePerpTest {
         );
         assertEq(
             collateralView.terminalReachableUsdc,
-            MarginClearinghouseAccountingLib.getTerminalReachableUsdc(buckets),
-            "Terminal reachability should come from the named domain helper"
+            buckets.settlementBalanceUsdc - router.getAccountReservations(account).executionBountyUsdc,
+            "Terminal reachability should exclude queued execution bounty"
         );
         assertLt(
             MarginClearinghouseAccountingLib.getGenericReachableUsdc(buckets),

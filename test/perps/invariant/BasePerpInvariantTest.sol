@@ -13,6 +13,7 @@ import {MarginClearinghouse} from "../../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../../src/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "../../../src/perps/OrderRouterAdmin.sol";
 import {PerpsPublicLens} from "../../../src/perps/PerpsPublicLens.sol";
+import {PletherOracle} from "../../../src/perps/PletherOracle.sol";
 import {ClaimEngineViewTypes} from "../../../src/perps/interfaces/ClaimEngineViewTypes.sol";
 import {IOrderRouterAccounting} from "../../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {PerpsViewTypes} from "../../../src/perps/interfaces/PerpsViewTypes.sol";
@@ -62,11 +63,11 @@ abstract contract BasePerpInvariantTest is Test {
             address(engine),
             address(engineLens),
             address(housePool),
-            address(mockPyth),
-            feedIds,
-            weights,
-            basePrices,
-            new bool[](1)
+            address(
+                new PletherOracle(
+                    address(engine), address(housePool), address(mockPyth), feedIds, weights, basePrices, new bool[](1)
+                )
+            )
         );
         _syncRouterAdmin();
 

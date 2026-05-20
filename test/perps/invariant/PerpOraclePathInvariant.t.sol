@@ -11,6 +11,7 @@ import {MarginClearinghouse} from "../../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../../src/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "../../../src/perps/OrderRouterAdmin.sol";
 import {PerpsPublicLens} from "../../../src/perps/PerpsPublicLens.sol";
+import {PletherOracle} from "../../../src/perps/PletherOracle.sol";
 import {TrancheVault} from "../../../src/perps/TrancheVault.sol";
 import {ICfdEngineTypes} from "../../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {IOrderRouter} from "../../../src/perps/interfaces/IOrderRouter.sol";
@@ -281,7 +282,14 @@ contract PerpOraclePathInvariantTest is BasePerpTest {
         inversions.push(false);
 
         router = new OrderRouter(
-            address(engine), address(engineLens), address(pool), address(mockPyth), feedIds, weights, bases, inversions
+            address(engine),
+            address(engineLens),
+            address(pool),
+            address(
+                new PletherOracle(
+                    address(engine), address(pool), address(mockPyth), feedIds, weights, bases, inversions
+                )
+            )
         );
         _syncRouterAdmin();
         engine.setOrderRouter(address(router));

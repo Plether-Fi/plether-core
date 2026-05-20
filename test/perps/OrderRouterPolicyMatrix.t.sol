@@ -4,6 +4,7 @@ pragma solidity 0.8.33;
 import {CfdEnginePlanTypes} from "../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
+import {PletherOracle} from "../../src/perps/PletherOracle.sol";
 import {ICfdEngineCore} from "../../src/perps/interfaces/ICfdEngineCore.sol";
 import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
@@ -21,7 +22,14 @@ contract OrderRouterFailurePolicyHarness is OrderRouter {
         uint256[] memory weights_,
         uint256[] memory basePrices_,
         bool[] memory inversions_
-    ) OrderRouter(engine_, engineLens_, vault_, pyth_, feedIds_, weights_, basePrices_, inversions_) {}
+    )
+        OrderRouter(
+            engine_,
+            engineLens_,
+            vault_,
+            address(new PletherOracle(engine_, vault_, pyth_, feedIds_, weights_, basePrices_, inversions_))
+        )
+    {}
 
     function failedOutcomeFromEngineRevert(
         CfdTypes.Order memory order,

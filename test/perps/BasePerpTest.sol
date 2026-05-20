@@ -15,6 +15,7 @@ import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "../../src/perps/OrderRouterAdmin.sol";
 import {PerpsPublicLens} from "../../src/perps/PerpsPublicLens.sol";
+import {PletherOracle} from "../../src/perps/PletherOracle.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {ClaimEngineViewTypes} from "../../src/perps/interfaces/ClaimEngineViewTypes.sol";
 import {HousePoolEngineViewTypes} from "../../src/perps/interfaces/HousePoolEngineViewTypes.sol";
@@ -88,6 +89,7 @@ abstract contract BasePerpTest is Test {
     TrancheVault juniorVault;
     OrderRouter router;
     OrderRouterAdmin routerAdmin;
+    PletherOracle pletherOracle;
     PerpsPublicLens publicLens;
     MockPyth baseMockPyth;
 
@@ -121,9 +123,8 @@ abstract contract BasePerpTest is Test {
         pool.setJuniorVault(address(juniorVault));
         engine.setPool(address(pool));
 
-        router = new OrderRouter(
+        pletherOracle = new PletherOracle(
             address(engine),
-            address(engineLens),
             address(pool),
             address(baseMockPyth),
             baseFeedIds,
@@ -131,6 +132,7 @@ abstract contract BasePerpTest is Test {
             _basePythBasePrices(),
             _basePythInversions()
         );
+        router = new OrderRouter(address(engine), address(engineLens), address(pool), address(pletherOracle));
         _syncRouterAdmin();
         engine.setOrderRouter(address(router));
         publicLens = new PerpsPublicLens(address(engineAccountLens), address(engine), address(router), address(pool));

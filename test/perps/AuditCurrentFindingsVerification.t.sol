@@ -7,6 +7,7 @@ import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
+import {PletherOracle} from "../../src/perps/PletherOracle.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
@@ -178,11 +179,11 @@ contract AuditCurrentFindingsVerifiedInvalid_Mev is BasePerpTest {
             address(engine),
             address(new CfdEngineLens(address(engine))),
             address(pool),
-            address(mockPyth),
-            feedIds,
-            weights,
-            bases,
-            new bool[](2)
+            address(
+                new PletherOracle(
+                    address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
+                )
+            )
         );
         engine.setOrderRouter(address(router));
 
@@ -291,9 +292,9 @@ contract AuditCurrentFindingsVerifiedInvalid_RebateIlliquidity is BasePerpTest {
             "keeper should receive the reserved bounty on typed solvency invalidation under current policy"
         );
         assertEq(
-            clearinghouse.balanceUsdc(bobAccount) - bobSettlementBefore,
-            0,
-            "user should not receive a refund under current policy"
+            bobSettlementBefore - clearinghouse.balanceUsdc(bobAccount),
+            pending.executionBountyUsdc,
+            "user should pay the reserved bounty under current failure policy"
         );
     }
 

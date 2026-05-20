@@ -22,11 +22,7 @@ interface IOrderRouterAdminHost {
     }
 
     struct OracleConfig {
-        address pyth;
-        bytes32[] feedIds;
-        uint256[] quantities;
-        uint256[] basePrices;
-        bool[] inversions;
+        address pletherOracle;
     }
 
     function applyRouterConfig(

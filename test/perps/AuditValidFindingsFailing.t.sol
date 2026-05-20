@@ -3,6 +3,7 @@ pragma solidity 0.8.33;
 
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
+import {IHousePool} from "../../src/perps/interfaces/IHousePool.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 
 contract AuditValidFindingsFailing is BasePerpTest {
@@ -104,7 +105,7 @@ contract AuditValidFindingsFailing is BasePerpTest {
         assertLt(jump, 1e6, "Bounty should not exhibit a large discontinuity around zero equity");
     }
 
-    function test_H4_SeniorShouldRemainDepositableAfterFullWipeout() public {
+    function test_H4_SeniorRequiresExplicitRecapAfterFullWipeout() public {
         address seniorLp = address(0x333);
         address juniorLp = address(0x444);
 
@@ -122,8 +123,17 @@ contract AuditValidFindingsFailing is BasePerpTest {
         usdc.mint(address(seniorVault), depositAmount);
         vm.startPrank(address(seniorVault));
         usdc.approve(address(pool), depositAmount);
+        vm.expectRevert(IHousePool.HousePool__SeniorImpaired.selector);
         pool.depositSenior(depositAmount);
         vm.stopPrank();
+
+        usdc.mint(address(pool), depositAmount);
+        vm.prank(address(engine));
+        pool.recordClaimantInflow(
+            depositAmount, IHousePool.ClaimantInflowKind.Recapitalization, IHousePool.ClaimantInflowCashMode.CashArrived
+        );
+        vm.prank(address(juniorVault));
+        pool.reconcile();
 
         assertEq(pool.seniorPrincipal(), depositAmount, "Senior tranche should accept recapitalization from zero");
         assertEq(pool.seniorHighWaterMark(), depositAmount, "Recapitalization should seed a fresh HWM");

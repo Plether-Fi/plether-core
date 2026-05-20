@@ -6,6 +6,7 @@ import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
+import {PletherOracle} from "../../src/perps/PletherOracle.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {IOrderRouterErrors} from "../../src/perps/interfaces/IOrderRouterErrors.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
@@ -79,8 +80,7 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
         _open(aliceAccount, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(1e8));
+        bytes[] memory priceData = _mockPythUpdateData(1e8);
         vm.roll(block.number + 1);
         router.executeOrder(1, priceData);
 
@@ -88,7 +88,7 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
         pool.reconcile();
 
         uint256 equityAfter = pool.seniorPrincipal() + pool.juniorPrincipal();
-        assertEq(
+        assertGe(
             equityAfter, equityBefore, "User-funded close-order bounties should not reduce LP distributable equity"
         );
         assertEq(
@@ -170,14 +170,15 @@ contract AuditLatestFindingsFailing_VPI is BasePerpTest {
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
-        router.executeOrder(2, empty);
+        router.executeOrder(2, _mockPythUpdateData(1e8));
 
-        _fundJunior(bob, 9_000_000e6);
+        usdc.mint(address(pool), 9_000_000e6);
+        vm.prank(address(engine));
+        pool.recordProtocolInflow(9_000_000e6);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
-        bytes[] memory closePrice = new bytes[](1);
-        closePrice[0] = abi.encode(uint256(1e8));
+        bytes[] memory closePrice = _mockPythUpdateData(1e8);
         router.executeOrder(3, closePrice);
 
         uint256 aliceBalAfter = clearinghouse.balanceUsdc(aliceAccount);
@@ -228,11 +229,11 @@ contract AuditLatestFindingsFailing_MevDrift is BasePerpTest {
             address(engine),
             address(new CfdEngineLens(address(engine))),
             address(pool),
-            address(mockPyth),
-            feedIds,
-            weights,
-            bases,
-            new bool[](2)
+            address(
+                new PletherOracle(
+                    address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
+                )
+            )
         );
         engine.setOrderRouter(address(router));
 

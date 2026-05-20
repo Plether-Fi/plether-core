@@ -733,8 +733,15 @@ library CfdEnginePlanLib {
             snap.accountBuckets, delta.residualUsdc, delta.keeperBountyUsdc
         );
         delta.settlementRetainedUsdc = delta.residualPlan.settlementRetainedUsdc;
+        uint256 liquidationBadDebtUsdc = delta.residualPlan.badDebtUsdc;
+        if (liquidationEquityUsdc >= 0) {
+            uint256 equityUsdc = uint256(liquidationEquityUsdc);
+            uint256 keeperSubsidyUsdc = delta.keeperBountyUsdc > equityUsdc ? delta.keeperBountyUsdc - equityUsdc : 0;
+            liquidationBadDebtUsdc =
+                liquidationBadDebtUsdc > keeperSubsidyUsdc ? liquidationBadDebtUsdc - keeperSubsidyUsdc : 0;
+        }
         (delta.existingTraderClaimConsumedUsdc, delta.existingTraderClaimRemainingUsdc, delta.badDebtUsdc) =
-            _planTraderClaimConsumption(snap.traderClaimBalanceForAccount, delta.residualPlan.badDebtUsdc, false);
+            _planTraderClaimConsumption(snap.traderClaimBalanceForAccount, liquidationBadDebtUsdc, false);
         delta.syncMarginQueueAmount = delta.residualPlan.mutation.otherLockedMarginUnlockedUsdc;
 
         if (delta.residualPlan.freshTraderPayoutUsdc > 0) {
