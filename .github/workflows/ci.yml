@@ -34,7 +34,8 @@ jobs:
       - name: Run tests
         run: forge test --no-match-path "test/fork/*" --no-match-test "testFuzz_|invariant_"
 
-  coverage:
+  coverage-core:
+    name: Coverage (core protocol)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -47,18 +48,73 @@ jobs:
           version: v1.5.1
 
       - name: Run coverage
-        run: forge coverage --ir-minimum --report lcov --no-match-path "test/fork/*"
+        run: forge coverage --ir-minimum --report lcov --no-match-path "test/{fork,perps,options}/**"
 
       - name: Filter coverage report
-        run: |
-          # Remove test files and scripts from coverage report
-          sed -i '/^SF:.*test\//,/^end_of_record$/d' lcov.info
-          sed -i '/^SF:.*script\//,/^end_of_record$/d' lcov.info
+        run: awk -v scope=core -f scripts/filter-lcov-by-scope.awk lcov.info > lcov-core.info
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
-          files: ./lcov.info
+          files: ./lcov-core.info
+          flags: core_protocol
+          name: core-protocol
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  coverage-perps:
+    name: Coverage (perps)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.5.1
+
+      - name: Run coverage
+        run: forge coverage --ir-minimum --report lcov --match-path "test/perps/**/*.sol"
+
+      - name: Filter coverage report
+        run: awk -v scope=perps -f scripts/filter-lcov-by-scope.awk lcov.info > lcov-perps.info
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./lcov-perps.info
+          flags: perps
+          name: perps
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  coverage-options:
+    name: Coverage (options)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.5.1
+
+      - name: Run coverage
+        run: forge coverage --ir-minimum --report lcov --match-path "test/options/**/*.sol"
+
+      - name: Filter coverage report
+        run: awk -v scope=options -f scripts/filter-lcov-by-scope.awk lcov.info > lcov-options.info
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./lcov-options.info
+          flags: options
+          name: options
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 
