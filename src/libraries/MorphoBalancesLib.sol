@@ -46,19 +46,17 @@ library MorphoBalancesLib {
             return totalSupplyAssets;
         }
 
+        IMorpho.MarketState memory marketState = IMorpho.MarketState({
+            totalSupplyAssets: totalSupplyAssets,
+            totalSupplyShares: totalSupplyShares,
+            totalBorrowAssets: totalBorrowAssets,
+            totalBorrowShares: totalBorrowShares,
+            lastUpdate: lastUpdate,
+            fee: fee
+        });
+
         // Get borrow rate from IRM
-        uint256 borrowRate = IIrm(marketParams.irm)
-            .borrowRateView(
-                marketParams,
-                IMorpho.MarketState({
-                    totalSupplyAssets: totalSupplyAssets,
-                    totalSupplyShares: totalSupplyShares,
-                    totalBorrowAssets: totalBorrowAssets,
-                    totalBorrowShares: totalBorrowShares,
-                    lastUpdate: lastUpdate,
-                    fee: fee
-                })
-            );
+        uint256 borrowRate = IIrm(marketParams.irm).borrowRateView(marketParams, marketState);
 
         // Interest = borrowAssets * rate * elapsed (using linear approximation)
         // Note: Morpho uses wTaylorCompounded for precision, but linear is sufficient for short periods
