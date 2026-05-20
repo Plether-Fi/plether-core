@@ -48,7 +48,7 @@ jobs:
           version: v1.5.1
 
       - name: Run coverage
-        run: forge coverage --ir-minimum --report lcov --no-match-path "test/{fork,perps,options}/**"
+        run: bash scripts/run-with-heartbeat.sh forge coverage --ir-minimum --report lcov --no-match-path "test/{fork,perps,options}/**"
 
       - name: Filter coverage report
         run: awk -v scope=core -f scripts/filter-lcov-by-scope.awk lcov.info > lcov-core.info
@@ -76,7 +76,7 @@ jobs:
           version: v1.5.1
 
       - name: Run coverage
-        run: forge coverage --ir-minimum --report lcov --match-path "test/perps/**/*.sol"
+        run: bash scripts/run-with-heartbeat.sh forge coverage --ir-minimum --report lcov --match-path "test/perps/**/*.sol"
 
       - name: Filter coverage report
         run: awk -v scope=perps -f scripts/filter-lcov-by-scope.awk lcov.info > lcov-perps.info
@@ -104,7 +104,7 @@ jobs:
           version: v1.5.1
 
       - name: Run coverage
-        run: forge coverage --ir-minimum --report lcov --match-path "test/options/**/*.sol"
+        run: bash scripts/run-with-heartbeat.sh forge coverage --ir-minimum --report lcov --match-path "test/options/**/*.sol"
 
       - name: Filter coverage report
         run: awk -v scope=options -f scripts/filter-lcov-by-scope.awk lcov.info > lcov-options.info
