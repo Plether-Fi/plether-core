@@ -79,25 +79,23 @@ contract AuditFollowupFindingsFailing_CloseSolvency is BasePerpTest {
         _close(bullAccount, CfdTypes.Side.BULL, 500_000e18, 20_000_000);
 
         assertTrue(engine.degradedMode(), "Setup must enter degraded mode");
+        CfdTypes.Order memory blockedOpen = CfdTypes.Order({
+            account: newTraderAccount,
+            sizeDelta: 10_000e18,
+            marginDelta: 1000e6,
+            targetPrice: 1e8,
+            commitTime: uint64(block.timestamp),
+            commitBlock: uint64(block.number),
+            orderId: 0,
+            side: CfdTypes.Side.BULL,
+            isClose: false
+        });
+
         vm.prank(address(router));
         (bool ok,) = address(engine)
             .call(
                 abi.encodeWithSelector(
-                    engine.processOrderTyped.selector,
-                    CfdTypes.Order({
-                        account: newTraderAccount,
-                        sizeDelta: 10_000e18,
-                        marginDelta: 1000e6,
-                        targetPrice: 1e8,
-                        commitTime: uint64(block.timestamp),
-                        commitBlock: uint64(block.number),
-                        orderId: 0,
-                        side: CfdTypes.Side.BULL,
-                        isClose: false
-                    }),
-                    1e8,
-                    pool.totalAssets(),
-                    uint64(block.timestamp)
+                    engine.processOrderTyped.selector, blockedOpen, 1e8, pool.totalAssets(), uint64(block.timestamp)
                 )
             );
         assertFalse(ok, "Degraded mode must block new opens until recapitalized");
