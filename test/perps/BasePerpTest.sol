@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.33;
+pragma solidity 0.8.35;
 
 import {DecimalConstants} from "../../src/libraries/DecimalConstants.sol";
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
@@ -31,6 +31,7 @@ import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {OrderRouterDebugLens} from "../utils/OrderRouterDebugLens.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {Test} from "forge-std/Test.sol";
 
 abstract contract BasePerpTest is Test {
@@ -269,7 +270,12 @@ abstract contract BasePerpTest is Test {
         vm.warp(block.timestamp + 1);
         uint256 publishTime = _mockHistoricalPublishTime();
         baseMockPyth.setAllUniquePrices(
-            _basePythFeedIds(), int64(uint64(price)), 0, int32(-8), publishTime, publishTime == 0 ? 0 : publishTime - 1
+            _basePythFeedIds(),
+            SafeCast.toInt64(SafeCast.toInt256(price)),
+            0,
+            int32(-8),
+            publishTime,
+            publishTime == 0 ? 0 : publishTime - 1
         );
         updateData = new bytes[](1);
         updateData[0] = abi.encode(price);
@@ -316,7 +322,7 @@ abstract contract BasePerpTest is Test {
         vm.warp(activationTime);
         uint256 markPrice = engine.lastMarkPrice();
         vm.prank(address(router));
-        engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(activationTime));
+        engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, SafeCast.toUint64(activationTime));
         shares = juniorVault.finalizeDepositEpoch(epochId);
 
         vm.prank(lp);
@@ -819,8 +825,10 @@ abstract contract BasePerpTest is Test {
         }
         ICfdEngineTypes.SideState memory bull = _sideState(CfdTypes.Side.BULL);
         ICfdEngineTypes.SideState memory bear = _sideState(CfdTypes.Side.BEAR);
-        int256 bullPnl = (int256(bull.entryNotional) - int256(bull.openInterest * price)) / int256(1e20);
-        int256 bearPnl = (int256(bear.openInterest * price) - int256(bear.entryNotional)) / int256(1e20);
+        int256 bullPnl =
+            (SafeCast.toInt256(bull.entryNotional) - SafeCast.toInt256(bull.openInterest * price)) / int256(1e20);
+        int256 bearPnl =
+            (SafeCast.toInt256(bear.openInterest * price) - SafeCast.toInt256(bear.entryNotional)) / int256(1e20);
         return bullPnl + bearPnl;
     }
 
@@ -1004,7 +1012,7 @@ abstract contract BasePerpTest is Test {
         address treasury = engine.protocolTreasury();
         usdc.mint(address(clearinghouse), amountUsdc);
         vm.prank(address(engine));
-        clearinghouse.settleUsdc(treasury, int256(amountUsdc));
+        clearinghouse.settleUsdc(treasury, SafeCast.toInt256(amountUsdc));
     }
 
     function _withdrawProtocolTreasury(
