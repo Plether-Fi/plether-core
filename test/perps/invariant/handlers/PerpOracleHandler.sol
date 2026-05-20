@@ -152,6 +152,9 @@ contract PerpOracleHandler is Test {
 
         vm.roll(block.number + 1);
         vm.warp(block.timestamp + 1);
+        mockPyth.setUniquePrice(
+            bytes32(uint256(1)), int64(100_000_000), 0, int32(-8), block.timestamp, block.timestamp - 1
+        );
         bytes[] memory updateData = new bytes[](1);
         updateData[0] = abi.encode(uint256(1e8));
         router.executeOrder{value: mockPyth.mockFee()}(orderId, updateData);

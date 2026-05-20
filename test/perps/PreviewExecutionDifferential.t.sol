@@ -100,6 +100,9 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         uint256 settlementBefore = clearinghouse.balanceUsdc(account);
         uint256 traderClaimBefore = engine.traderClaimBalanceUsdc(account);
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
+        baseMockPyth.setAllUniquePrices(
+            _basePythFeedIds(), int64(uint64(closePrice)), 0, int32(-8), block.timestamp, block.timestamp - 1
+        );
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(closePrice);
 
@@ -177,6 +180,9 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         uint256 settlementBefore = clearinghouse.balanceUsdc(account);
         uint256 traderClaimBefore = engine.traderClaimBalanceUsdc(account);
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
+        baseMockPyth.setAllUniquePrices(
+            _basePythFeedIds(), int64(uint64(closePrice)), 0, int32(-8), block.timestamp, block.timestamp - 1
+        );
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(closePrice);
 
