@@ -1971,8 +1971,12 @@ contract CfdEngineTest is BasePerpTest {
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory housePoolSnapshot =
             engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
 
+        uint256 expectedNetPhysicalAssetsUsdc = snapshot.poolAssetsUsdc > snapshot.protocolTreasuryBalanceUsdc
+            ? snapshot.poolAssetsUsdc - snapshot.protocolTreasuryBalanceUsdc
+            : 0;
+
         assertEq(snapshot.poolAssetsUsdc, pool.totalAssets());
-        assertEq(snapshot.netPhysicalAssetsUsdc, snapshot.poolAssetsUsdc);
+        assertEq(snapshot.netPhysicalAssetsUsdc, expectedNetPhysicalAssetsUsdc);
         assertEq(snapshot.maxLiabilityUsdc, _maxLiability());
         assertEq(snapshot.withdrawalReservedUsdc, _withdrawalReservedUsdc());
         assertEq(snapshot.protocolTreasuryBalanceUsdc, clearinghouse.balanceUsdc(engine.protocolTreasury()));
@@ -2110,14 +2114,17 @@ contract CfdEngineTest is BasePerpTest {
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot =
             engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
         HousePoolEngineViewTypes.HousePoolStatusSnapshot memory status = engineProtocolLens.getHousePoolStatusSnapshot();
+        uint256 protocolTreasuryBalanceUsdc = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 expectedNetPhysicalAssetsUsdc =
+            pool.totalAssets() > protocolTreasuryBalanceUsdc ? pool.totalAssets() - protocolTreasuryBalanceUsdc : 0;
 
         assertEq(
             snapshot.physicalAssetsUsdc, pool.totalAssets(), "Snapshot physical assets must match canonical pool assets"
         );
         assertEq(
             snapshot.netPhysicalAssetsUsdc,
-            pool.totalAssets(),
-            "Treasury clearinghouse fees must not reduce vault net assets"
+            expectedNetPhysicalAssetsUsdc,
+            "Treasury clearinghouse fees should be excluded from pool net assets"
         );
         assertEq(snapshot.maxLiabilityUsdc, _maxLiability(), "Snapshot liability must match accessor");
         assertEq(snapshot.supplementalReservedUsdc, uint256(0), "Snapshot supplemental reserve must match accessor");
@@ -2675,9 +2682,15 @@ contract CfdEngineTest is BasePerpTest {
         vm.assume(delta.liquidatable);
         vm.assume(delta.residualUsdc < 0);
 
-        uint256 expectedConsumed = traderClaimBalanceUsdc < delta.residualPlan.badDebtUsdc
-            ? traderClaimBalanceUsdc
-            : delta.residualPlan.badDebtUsdc;
+        uint256 expectedShortfallUsdc = delta.residualPlan.badDebtUsdc;
+        if (delta.liquidationState.equityUsdc >= 0) {
+            uint256 equityUsdc = uint256(delta.liquidationState.equityUsdc);
+            uint256 keeperSubsidyUsdc = delta.keeperBountyUsdc > equityUsdc ? delta.keeperBountyUsdc - equityUsdc : 0;
+            expectedShortfallUsdc =
+                expectedShortfallUsdc > keeperSubsidyUsdc ? expectedShortfallUsdc - keeperSubsidyUsdc : 0;
+        }
+        uint256 expectedConsumed =
+            traderClaimBalanceUsdc < expectedShortfallUsdc ? traderClaimBalanceUsdc : expectedShortfallUsdc;
 
         assertEq(
             delta.liquidationReachableCollateralUsdc,
@@ -2696,7 +2709,7 @@ contract CfdEngineTest is BasePerpTest {
         );
         assertEq(
             delta.badDebtUsdc,
-            delta.residualPlan.badDebtUsdc - expectedConsumed,
+            expectedShortfallUsdc - expectedConsumed,
             "Bad debt must only reflect the shortfall left after trader claim netting"
         );
     }

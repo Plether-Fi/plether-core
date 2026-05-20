@@ -579,9 +579,9 @@ contract HousePoolTest is BasePerpTest {
         usdc.mint(alice, 1e6);
         vm.startPrank(alice);
         usdc.approve(address(juniorVault), 1e6);
-        vm.expectRevert(abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, alice, 1e6, 0));
+        vm.expectRevert(TrancheVault.TrancheVault__TerminallyWiped.selector);
         juniorVault.deposit(1e6, alice);
-        vm.expectRevert(abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxMint.selector, alice, 1e18, 0));
+        vm.expectRevert(TrancheVault.TrancheVault__TerminallyWiped.selector);
         juniorVault.mint(1e18, alice);
         vm.stopPrank();
     }
@@ -1382,11 +1382,7 @@ contract HousePoolTest is BasePerpTest {
 
         _mintAndAccountPoolExcess(50_000 * 1e6);
 
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                bytes4(keccak256("ERC4626ExceededMaxWithdraw(address,uint256,uint256)")), carol, 500_000 * 1e6, 0
-            )
-        );
+        vm.expectRevert(TrancheVault.TrancheVault__DepositCooldown.selector);
         vm.prank(carol);
         juniorVault.withdraw(500_000 * 1e6, carol, carol);
     }
@@ -1585,11 +1581,7 @@ contract HousePoolTest is BasePerpTest {
         _fundJunior(alice, 100_000 * 1e6);
 
         // Alice deposits and tries to withdraw in the same block
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                bytes4(keccak256("ERC4626ExceededMaxWithdraw(address,uint256,uint256)")), alice, 100_000 * 1e6, 0
-            )
-        );
+        vm.expectRevert(TrancheVault.TrancheVault__DepositCooldown.selector);
         vm.prank(alice);
         juniorVault.withdraw(100_000 * 1e6, alice, alice);
 
@@ -1825,9 +1817,7 @@ contract HousePoolSeedLifecycleGateTest is BasePerpTest {
         pool.initializeSeedPosition(false, juniorSeed, address(this));
 
         usdc.approve(address(juniorVault), depositAmount);
-        vm.expectRevert(
-            abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, address(this), depositAmount, 0)
-        );
+        vm.expectRevert(TrancheVault.TrancheVault__TradingNotActive.selector);
         juniorVault.deposit(depositAmount, address(this));
         assertEq(juniorVault.maxDeposit(address(this)), 0, "ERC4626 maxDeposit should reflect lifecycle gating");
         assertEq(juniorVault.maxMint(address(this)), 0, "ERC4626 maxMint should reflect lifecycle gating");
@@ -1839,9 +1829,7 @@ contract HousePoolSeedLifecycleGateTest is BasePerpTest {
         usdc.mint(address(this), depositAmount);
         usdc.approve(address(juniorVault), depositAmount);
 
-        vm.expectRevert(
-            abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, address(this), depositAmount, 0)
-        );
+        vm.expectRevert(TrancheVault.TrancheVault__TradingNotActive.selector);
         juniorVault.deposit(depositAmount, address(this));
         assertEq(juniorVault.maxDeposit(address(this)), 0, "ERC4626 maxDeposit should be zero before bootstrap");
         assertEq(juniorVault.maxMint(address(this)), 0, "ERC4626 maxMint should be zero before bootstrap");
@@ -1873,9 +1861,7 @@ contract HousePoolSeedLifecycleGateTest is BasePerpTest {
         pool.initializeSeedPosition(true, seniorSeed, address(this));
 
         usdc.approve(address(juniorVault), depositAmount);
-        vm.expectRevert(
-            abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, address(this), depositAmount, 0)
-        );
+        vm.expectRevert(TrancheVault.TrancheVault__TradingNotActive.selector);
         juniorVault.deposit(depositAmount, address(this));
         assertEq(juniorVault.maxDeposit(address(this)), 0, "ERC4626 maxDeposit should be zero before activation");
         assertEq(juniorVault.maxMint(address(this)), 0, "ERC4626 maxMint should be zero before activation");
@@ -2231,9 +2217,9 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         usdc.mint(alice, 1e6);
         vm.startPrank(alice);
         usdc.approve(address(juniorVault), 1e6);
-        vm.expectRevert(abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, alice, 1e6, 0));
+        vm.expectRevert(TrancheVault.TrancheVault__TerminallyWiped.selector);
         juniorVault.deposit(1e6, alice);
-        vm.expectRevert(abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxMint.selector, alice, 1e18, 0));
+        vm.expectRevert(TrancheVault.TrancheVault__TerminallyWiped.selector);
         juniorVault.mint(1e18, alice);
         vm.stopPrank();
     }

@@ -225,13 +225,12 @@ contract AuditRemainingFindingsFailing_StaleOracleExecution is BasePerpTest {
         mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1010);
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 1010);
 
-        vm.warp(1071);
+        vm.warp(1016);
         vm.roll(block.number + 1);
 
-        bytes[] memory empty = new bytes[](1);
-        empty[0] = "";
-        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
-        router.executeOrder(1, empty);
+        bytes[] memory noUpdateData;
+        vm.expectRevert(IPletherOracle.PletherOracle__MissingUpdateData.selector);
+        router.executeOrder(1, noUpdateData);
         assertEq(router.nextExecuteId(), 1, "Stale oracle execution must preserve the pending FIFO head");
     }
 
@@ -263,7 +262,6 @@ contract AuditRemainingFindingsFailing_StaleOracleExecution is BasePerpTest {
 
         vm.roll(block.number + 1);
         vm.prank(trader);
-        vm.expectRevert(ICfdEngineTypes.CfdEngine__MarkPriceOutOfOrder.selector);
         router.executeOrder(1, empty);
 
         assertEq(

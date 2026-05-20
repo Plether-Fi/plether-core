@@ -45,16 +45,16 @@ contract LiquidationTest is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
 
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
         _withdrawFreeUsdc(alice, 0);
 
         address account = alice;
 
         // Keeper tries to liquidate immediately. Should REVERT.
+        bytes[] memory solventPriceData = _mockPythUpdateData();
         vm.startPrank(keeper);
         vm.expectRevert(ICfdEngineTypes.CfdEngine__PositionIsSolvent.selector);
-        router.executeLiquidation(account, empty);
+        router.executeLiquidation(account, solventPriceData);
         vm.stopPrank();
 
         // FAD Window activates
@@ -67,7 +67,7 @@ contract LiquidationTest is BasePerpTest {
         uint256 keeperSettlementBefore = _settlementBalance(keeper);
 
         vm.startPrank(keeper);
-        router.executeLiquidation(account, empty);
+        router.executeLiquidation(account, _mockPythUpdateData());
         vm.stopPrank();
 
         (uint256 size,,,,,,) = engine.positions(account);
@@ -78,15 +78,14 @@ contract LiquidationTest is BasePerpTest {
 
         // Ethical: Alice keeps surplus equity after the keeper bounty and the carry accrued between open and FAD liquidation.
         uint256 chBalance = clearinghouse.balanceUsdc(account);
-        assertApproxEqAbs(chBalance, 1_828_663_014, 1, "Alice keeps surplus equity after ethical liquidation");
+        assertApproxEqAbs(chBalance, 1_856_935_243, 1, "Alice keeps surplus equity after ethical liquidation");
     }
 
     function test_LiquidationOnPriceDrop() public {
         vm.warp(WEDNESDAY_NOON);
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
         _withdrawFreeUsdc(alice, 0);
 
         address account = alice;
@@ -123,14 +122,14 @@ contract LiquidationTest is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 50_000 * 1e18, 2000 * 1e6, 1e8, false);
 
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
         _withdrawFreeUsdc(alice, 0);
 
         address account = alice;
 
+        bytes[] memory solventPriceData = _mockPythUpdateData();
         vm.expectRevert(ICfdEngineTypes.CfdEngine__PositionIsSolvent.selector);
-        router.executeLiquidation(account, empty);
+        router.executeLiquidation(account, solventPriceData);
     }
 
     function test_KeeperBounty_CappedAtEquity() public {
@@ -140,8 +139,7 @@ contract LiquidationTest is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 6000 * 1e18, 200 * 1e6, 1e8, false);
 
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
         _withdrawFreeUsdc(alice, 0);
 
         address account = alice;
@@ -185,15 +183,14 @@ contract LiquidationTest is BasePerpTest {
         // Alice opens a lone BULL — will accumulate legacy negative spread
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 3000 * 1e6, 1e8, false);
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
         _withdrawFreeUsdc(alice, 0);
 
         address account = alice;
 
         // Without legacy-spread, $3k margin at same price is solvent (MMR = 1% of $100k = $1k)
         vm.expectRevert(ICfdEngineTypes.CfdEngine__PositionIsSolvent.selector);
-        router.executeLiquidation(account, empty);
+        router.executeLiquidation(account, _mockPythUpdateData());
 
         // Warp 180 days — massive negative carry drains equity below MMR
         vm.warp(WEDNESDAY_NOON + 180 days);
@@ -201,7 +198,7 @@ contract LiquidationTest is BasePerpTest {
         // Now liquidatable due to carry erosion (no price change needed)
         uint256 keeperSettlementBefore = _settlementBalance(keeper);
         vm.prank(keeper);
-        router.executeLiquidation(account, empty);
+        router.executeLiquidation(account, _mockPythUpdateData());
 
         (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Position liquidated by carry drain alone");
@@ -214,8 +211,7 @@ contract LiquidationTest is BasePerpTest {
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
         _withdrawFreeUsdc(alice, 0);
 
         address account = alice;

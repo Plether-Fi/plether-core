@@ -292,9 +292,9 @@ contract AuditCurrentFindingsVerifiedInvalid_RebateIlliquidity is BasePerpTest {
             "keeper should receive the reserved bounty on typed solvency invalidation under current policy"
         );
         assertEq(
-            clearinghouse.balanceUsdc(bobAccount) - bobSettlementBefore,
-            0,
-            "user should not receive a refund under current policy"
+            bobSettlementBefore - clearinghouse.balanceUsdc(bobAccount),
+            pending.executionBountyUsdc,
+            "user should pay the reserved bounty under current failure policy"
         );
     }
 

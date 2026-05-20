@@ -40,8 +40,11 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         uint256 markStalenessLimit
     ) external view returns (HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot) {
         uint256 poolAssetsUsdc = engineContract.pool().totalAssets();
+        uint256 protocolTreasuryBalanceUsdc =
+            engineContract.clearinghouse().balanceUsdc(engineContract.protocolTreasury());
         snapshot.physicalAssetsUsdc = poolAssetsUsdc;
-        snapshot.netPhysicalAssetsUsdc = poolAssetsUsdc;
+        snapshot.netPhysicalAssetsUsdc =
+            poolAssetsUsdc > protocolTreasuryBalanceUsdc ? poolAssetsUsdc - protocolTreasuryBalanceUsdc : 0;
         snapshot.maxLiabilityUsdc = SolvencyAccountingLib.getMaxLiability(
             _sideState(CfdTypes.Side.BULL).maxProfitUsdc, _sideState(CfdTypes.Side.BEAR).maxProfitUsdc
         );
@@ -101,18 +104,21 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         returns (ProtocolLensViewTypes.ProtocolAccountingSnapshot memory snapshot)
     {
         uint256 poolAssetsUsdc = engineContract.pool().totalAssets();
+        uint256 protocolTreasuryBalanceUsdc =
+            engineContract.clearinghouse().balanceUsdc(engineContract.protocolTreasury());
         uint256 maxLiabilityUsdc = SolvencyAccountingLib.getMaxLiability(
             _sideState(CfdTypes.Side.BULL).maxProfitUsdc, _sideState(CfdTypes.Side.BEAR).maxProfitUsdc
         );
         SolvencyAccountingLib.SolvencyState memory solvencyState = _buildAdjustedSolvencyState();
         snapshot.poolAssetsUsdc = poolAssetsUsdc;
-        snapshot.netPhysicalAssetsUsdc = solvencyState.netPhysicalAssetsUsdc;
+        snapshot.netPhysicalAssetsUsdc = solvencyState.netPhysicalAssetsUsdc > protocolTreasuryBalanceUsdc
+            ? solvencyState.netPhysicalAssetsUsdc - protocolTreasuryBalanceUsdc
+            : 0;
         snapshot.maxLiabilityUsdc = maxLiabilityUsdc;
         snapshot.effectiveSolvencyAssetsUsdc = solvencyState.effectiveAssetsUsdc;
         snapshot.withdrawalReservedUsdc = solvencyState.withdrawalReservedUsdc;
         snapshot.freeUsdc = solvencyState.freeWithdrawableUsdc;
-        snapshot.protocolTreasuryBalanceUsdc =
-            engineContract.clearinghouse().balanceUsdc(engineContract.protocolTreasury());
+        snapshot.protocolTreasuryBalanceUsdc = protocolTreasuryBalanceUsdc;
         snapshot.accumulatedBadDebtUsdc = engineContract.accumulatedBadDebtUsdc();
         snapshot.totalTraderClaimBalanceUsdc = engineContract.totalTraderClaimBalanceUsdc();
         snapshot.degradedMode = engineContract.degradedMode();

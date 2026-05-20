@@ -9,6 +9,7 @@ import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {ICfdEngineAdminHost} from "../../src/perps/interfaces/ICfdEngineAdminHost.sol";
 import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
+import {IHousePool} from "../../src/perps/interfaces/IHousePool.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
@@ -118,7 +119,13 @@ contract AuditFollowupFindingsFailing_CloseSolvency is BasePerpTest {
         vm.expectRevert(ICfdEngineTypes.CfdEngine__StillInsolvent.selector);
         engine.clearDegradedMode();
 
-        _fundJunior(address(this), 500_000e6);
+        usdc.mint(address(pool), 500_000e6);
+        vm.prank(address(engine));
+        pool.recordClaimantInflow(
+            500_000e6, IHousePool.ClaimantInflowKind.Recapitalization, IHousePool.ClaimantInflowCashMode.CashArrived
+        );
+        vm.prank(address(juniorVault));
+        pool.reconcile();
         engine.clearDegradedMode();
 
         assertFalse(engine.degradedMode(), "Owner should clear degraded mode after recapitalization restores solvency");

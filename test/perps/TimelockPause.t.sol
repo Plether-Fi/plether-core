@@ -453,8 +453,7 @@ contract TimelockPauseTest is BasePerpTest {
 
         routerAdmin.pause();
 
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
         assertEq(router.nextExecuteId(), 0);
     }
 
@@ -462,8 +461,7 @@ contract TimelockPauseTest is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
 
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        router.executeOrder(1, _mockPythUpdateData());
 
         routerAdmin.pause();
 

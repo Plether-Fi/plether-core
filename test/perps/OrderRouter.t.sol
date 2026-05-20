@@ -4701,24 +4701,9 @@ contract OrderRouterAuditTest is BasePerpTest {
         assertGt(size, 0, "Close at bad price should have been rejected by slippage check");
     }
 
-    function test_Constructor_ZeroPythReverts() public {
-        vm.expectRevert(IPletherOracle.PletherOracle__ZeroPyth.selector);
-        new OrderRouter(
-            address(engine),
-            address(engineLens),
-            address(pool),
-            address(
-                new PletherOracle(
-                    address(engine),
-                    address(pool),
-                    address(0),
-                    _basePythFeedIds(),
-                    _basePythWeights(),
-                    _basePythBasePrices(),
-                    _basePythInversions()
-                )
-            )
-        );
+    function test_Constructor_ZeroPletherOracleReverts() public {
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidPletherOracle.selector);
+        new OrderRouter(address(engine), address(engineLens), address(pool), address(0));
     }
 
     // Regression: H-02 — stale order executes via executeOrder
@@ -5144,17 +5129,11 @@ contract MarkPriceStalenessTest is BasePerpTest {
     }
 
     function test_Constructor_ZeroEngineLensReverts() public {
-        vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidEngineLens.selector);
-        new OrderRouter(
-            address(engine),
-            address(0),
-            address(pool),
-            address(
-                new PletherOracle(
-                    address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
-                )
-            )
+        PletherOracle testOracle = new PletherOracle(
+            address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
         );
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidEngineLens.selector);
+        new OrderRouter(address(engine), address(0), address(pool), address(testOracle));
     }
 
 }

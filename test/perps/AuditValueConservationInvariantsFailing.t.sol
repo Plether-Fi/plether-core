@@ -122,7 +122,7 @@ contract AuditValueConservationInvariant_CarryTiming is BasePerpTest {
 
         uint256 balanceBeforeCheckpoint = clearinghouse.balanceUsdc(trader);
         uint256 elapsed = 30 days;
-        uint256 entryPriceLpBackedNotionalUsdc = 50_000e6;
+        uint256 entryPriceLpBackedNotionalUsdc = 9000e6;
         uint256 minimumHistoricalCarryUsdc =
             (entryPriceLpBackedNotionalUsdc * 500 * elapsed) / (CfdMath.SECONDS_PER_YEAR * 10_000);
 

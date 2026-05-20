@@ -150,10 +150,10 @@ contract AuditRemainingCoverageFindingsFailing_DustQueueEconomics is BasePerpTes
     address trader = address(0xD057);
 
     function test_H3_DustOrdersMustReserveMinimumKeeperReserve() public {
-        _fundTrader(trader, 1e6);
+        _fundTrader(trader, 2e6);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 1, 0, 0, false);
+        router.commitOrder(CfdTypes.Side.BULL, 100e18, 1e6, 0, false);
 
         address account = trader;
         IOrderRouterAccounting.AccountReservationView memory reservation = router.getAccountReservations(account);

@@ -31,17 +31,23 @@ contract AuditBindingAndReleaseFindingsFailing is BasePerpTest {
             _remainingCommittedMargin(1), 0, "Consumed committed margin should be charged to the queued order itself"
         );
 
-        uint256 lockedBeforeExecution = clearinghouse.lockedMarginUsdc(aliceAccount);
+        uint256 keeperBalanceBefore = clearinghouse.balanceUsdc(address(this));
 
         bytes[] memory empty = _mockPythUpdateData();
         vm.roll(block.number + 1);
         vm.prank(address(this));
         router.executeOrder(1, empty);
 
+        assertEq(_remainingCommittedMargin(1), 0, "Consumed committed margin must remain consumed");
         assertEq(
             clearinghouse.lockedMarginUsdc(aliceAccount),
-            lockedBeforeExecution,
-            "Execution release must not unlock consumed committed margin when the open order later reverts"
+            0,
+            "Only the reserved execution bounty should be released on the failed execution"
+        );
+        assertEq(
+            clearinghouse.balanceUsdc(address(this)) - keeperBalanceBefore,
+            200_000,
+            "Failed execution should pay the reserved bounty to the clearer"
         );
     }
 

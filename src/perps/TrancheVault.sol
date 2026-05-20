@@ -238,13 +238,12 @@ contract TrancheVault is ERC4626 {
         uint256 assets,
         address receiver
     ) public override returns (uint256) {
-        if (!_canInstantDepositNow()) {
+        _requireActiveTranche();
+        _requireLifecycleActiveForOrdinaryDeposit();
+        if (!POOL.canAcceptInstantTrancheDeposits(IS_SENIOR)) {
             revert ERC4626ExceededMaxDeposit(receiver, assets, 0);
         }
-        _requireActiveTranche();
         _requireMinimumDeposit(assets);
-        _requireLifecycleActiveForOrdinaryDeposit();
-        _requireActiveTranche();
         uint256 feeBps = _frozenLpFeeBps();
         if (feeBps > 0) {
             uint256 shares = previewDeposit(assets);
@@ -259,13 +258,12 @@ contract TrancheVault is ERC4626 {
         uint256 shares,
         address receiver
     ) public override returns (uint256) {
-        if (!_canInstantDepositNow()) {
+        _requireActiveTranche();
+        _requireLifecycleActiveForOrdinaryDeposit();
+        if (!POOL.canAcceptInstantTrancheDeposits(IS_SENIOR)) {
             revert ERC4626ExceededMaxMint(receiver, shares, 0);
         }
-        _requireActiveTranche();
         _requireMinimumDeposit(previewMint(shares));
-        _requireLifecycleActiveForOrdinaryDeposit();
-        _requireActiveTranche();
         uint256 feeBps = _frozenLpFeeBps();
         if (feeBps > 0) {
             uint256 assets = previewMint(shares);
@@ -559,6 +557,9 @@ contract TrancheVault is ERC4626 {
         if (assets == 0) {
             revert TrancheVault__WithdrawalTooSmall();
         }
+        if (block.timestamp < lastDepositTime[_owner] + DEPOSIT_COOLDOWN) {
+            revert TrancheVault__DepositCooldown();
+        }
         uint256 maxAssets = maxWithdraw(_owner);
         if (assets > maxAssets) {
             revert ERC4626ExceededMaxWithdraw(_owner, assets, maxAssets);
@@ -579,6 +580,9 @@ contract TrancheVault is ERC4626 {
     ) internal view {
         if (shares == 0) {
             revert TrancheVault__WithdrawalTooSmall();
+        }
+        if (block.timestamp < lastDepositTime[_owner] + DEPOSIT_COOLDOWN) {
+            revert TrancheVault__DepositCooldown();
         }
         uint256 maxShares = maxRedeem(_owner);
         if (shares > maxShares) {

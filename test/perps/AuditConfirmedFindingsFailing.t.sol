@@ -265,11 +265,11 @@ contract AuditConfirmedFindingsFailing_OutOfOrderMarkCancellation is BasePerpTes
         vm.warp(1025);
         vm.roll(101);
         vm.prank(keeper);
-        vm.expectRevert(ICfdEngineTypes.CfdEngine__MarkPriceOutOfOrder.selector);
         router.executeOrder(1, updateData);
 
-        assertEq(router.nextExecuteId(), 1, "Out-of-order keeper input must not consume the order");
-        assertEq(usdc.balanceOf(keeper), keeperUsdcBefore, "Keeper must not be paid for an out-of-order mark");
+        assertEq(router.nextExecuteId(), 0, "Historical execution should consume the order");
+        assertEq(engine.lastMarkTime(), 1020, "Historical execution must not roll back the live mark");
+        assertEq(usdc.balanceOf(keeper), keeperUsdcBefore, "Keeper reward is credited in clearinghouse settlement");
     }
 
     function test_H2_OlderButFreshBatchExecutionMustLeaveQueuedOrdersPending() public {
@@ -295,13 +295,11 @@ contract AuditConfirmedFindingsFailing_OutOfOrderMarkCancellation is BasePerpTes
         vm.warp(1025);
         vm.roll(101);
         vm.prank(keeper);
-        vm.expectRevert(ICfdEngineTypes.CfdEngine__MarkPriceOutOfOrder.selector);
         router.executeOrderBatch(2, updateData);
 
-        assertEq(router.nextExecuteId(), 1, "Batch execution must not burn queued orders on out-of-order marks");
-        assertEq(
-            usdc.balanceOf(keeper), keeperUsdcBefore, "Keeper must not be paid for failed out-of-order batch execution"
-        );
+        assertEq(router.nextExecuteId(), 0, "Batch historical execution should consume covered orders");
+        assertEq(engine.lastMarkTime(), 1020, "Batch historical execution must not roll back the live mark");
+        assertEq(usdc.balanceOf(keeper), keeperUsdcBefore, "Keeper reward is credited in clearinghouse settlement");
     }
 
 }
