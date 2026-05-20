@@ -2123,6 +2123,34 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(rotatedOracle.quantities(1), newWeights[1], "Second weight should rotate");
     }
 
+    function test_OracleConfigTimelock_RejectsOracleForDifferentEngine() public {
+        PletherOracle wrongEngineOracle = new PletherOracle(
+            address(0xE111), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
+        );
+        IOrderRouterAdminHost.OracleConfig memory config =
+            IOrderRouterAdminHost.OracleConfig({pletherOracle: address(wrongEngineOracle)});
+
+        routerAdmin.proposeOracleConfig(config);
+        vm.warp(block.timestamp + 48 hours + 1);
+
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidPletherOracle.selector);
+        routerAdmin.finalizeOracleConfig();
+    }
+
+    function test_OracleConfigTimelock_RejectsOracleForDifferentPool() public {
+        PletherOracle wrongPoolOracle = new PletherOracle(
+            address(engine), address(0xB001), address(mockPyth), feedIds, weights, bases, new bool[](2)
+        );
+        IOrderRouterAdminHost.OracleConfig memory config =
+            IOrderRouterAdminHost.OracleConfig({pletherOracle: address(wrongPoolOracle)});
+
+        routerAdmin.proposeOracleConfig(config);
+        vm.warp(block.timestamp + 48 hours + 1);
+
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidPletherOracle.selector);
+        routerAdmin.finalizeOracleConfig();
+    }
+
     function test_BatchPostCommitSkewInvalidationPaysClearerBounty() public {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8, false);

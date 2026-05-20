@@ -3,6 +3,7 @@ pragma solidity 0.8.33;
 
 import {IPyth} from "../../interfaces/IPyth.sol";
 import {CfdTypes} from "../CfdTypes.sol";
+import {ICfdEngineCore} from "../interfaces/ICfdEngineCore.sol";
 import {ICfdEngineLens} from "../interfaces/ICfdEngineLens.sol";
 import {IHousePool} from "../interfaces/IHousePool.sol";
 import {IPletherOracle} from "../interfaces/IPletherOracle.sol";
@@ -160,14 +161,29 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
         if (newPletherOracle == address(0) || newPletherOracle.code.length == 0) {
             revert OrderRouter__InvalidPletherOracle();
         }
-        try IPletherOracle(newPletherOracle).pyth() returns (IPyth pyth_) {
+        IPletherOracle oracle = IPletherOracle(newPletherOracle);
+        try oracle.pyth() returns (IPyth pyth_) {
             if (address(pyth_) == address(0)) {
                 revert OrderRouter__InvalidPletherOracle();
             }
         } catch {
             revert OrderRouter__InvalidPletherOracle();
         }
-        pletherOracle = IPletherOracle(newPletherOracle);
+        try oracle.engine() returns (ICfdEngineCore oracleEngine) {
+            if (address(oracleEngine) != address(engine)) {
+                revert OrderRouter__InvalidPletherOracle();
+            }
+        } catch {
+            revert OrderRouter__InvalidPletherOracle();
+        }
+        try oracle.housePool() returns (IHousePool oracleHousePool) {
+            if (address(oracleHousePool) != address(housePool)) {
+                revert OrderRouter__InvalidPletherOracle();
+            }
+        } catch {
+            revert OrderRouter__InvalidPletherOracle();
+        }
+        pletherOracle = oracle;
     }
 
     function _toOracleUpdateResult(
