@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.33;
+pragma solidity 0.8.35;
 
 import {OracleLib} from "../../src/libraries/OracleLib.sol";
 import {MarginEngine} from "../../src/options/MarginEngine.sol";

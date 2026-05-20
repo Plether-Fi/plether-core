@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.33;
+pragma solidity 0.8.35;
 
 import {FlashLoanBase} from "../../src/base/FlashLoanBase.sol";
 import {ISyntheticSplitter} from "../../src/interfaces/ISyntheticSplitter.sol";

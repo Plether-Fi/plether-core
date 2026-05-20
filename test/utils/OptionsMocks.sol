@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.33;
+pragma solidity 0.8.35;
 
 import {ISyntheticSplitter} from "../../src/interfaces/ISyntheticSplitter.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";

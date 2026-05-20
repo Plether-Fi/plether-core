@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.30;
+pragma solidity 0.8.35;
 
 import {DecimalConstants} from "../src/libraries/DecimalConstants.sol";
 import {MorphoOracle} from "../src/oracles/MorphoOracle.sol";

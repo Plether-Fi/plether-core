@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.30;
+pragma solidity 0.8.35;
 
 import {IPyth, PythStructs} from "../../src/interfaces/IPyth.sol";
 import {PythAdapter} from "../../src/oracles/PythAdapter.sol";

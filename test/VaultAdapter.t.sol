@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity 0.8.35;
 
 import {VaultAdapter} from "../src/VaultAdapter.sol";
 import {MockUSDC as MockUSDC6} from "./mocks/MockUSDC.sol";
