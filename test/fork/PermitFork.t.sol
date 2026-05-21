@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.33;
+pragma solidity 0.8.35;
 
 import {ZapRouter} from "../../src/ZapRouter.sol";
 import {BaseForkTest} from "./BaseForkTest.sol";

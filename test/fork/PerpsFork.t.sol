@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.33;
+pragma solidity 0.8.35;
 
 import {IPyth, PythStructs} from "../../src/interfaces/IPyth.sol";
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
@@ -15,12 +15,11 @@ import {OrderRouterAdmin} from "../../src/perps/OrderRouterAdmin.sol";
 import {PletherOracle} from "../../src/perps/PletherOracle.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
-import {IOrderRouter} from "../../src/perps/interfaces/IOrderRouter.sol";
 import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
-import {IOrderRouterErrors} from "../../src/perps/interfaces/IOrderRouterErrors.sol";
 import {IPletherOracle} from "../../src/perps/interfaces/IPletherOracle.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "forge-std/Test.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Test} from "forge-std/Test.sol";
 
 contract ControllablePyth {
 
@@ -38,7 +37,7 @@ contract ControllablePyth {
         int32 _expo,
         uint256 _publishTime
     ) external {
-        prices[feedId] = MockPrice(_price, _expo, _publishTime);
+        prices[feedId] = MockPrice({price: _price, expo: _expo, publishTime: _publishTime});
     }
 
     function setAllPrices(
@@ -48,7 +47,7 @@ contract ControllablePyth {
         uint256 _publishTime
     ) external {
         for (uint256 i = 0; i < feedIds.length; i++) {
-            prices[feedIds[i]] = MockPrice(_price, _expo, _publishTime);
+            prices[feedIds[i]] = MockPrice({price: _price, expo: _expo, publishTime: _publishTime});
         }
     }
 
@@ -74,6 +73,8 @@ contract ControllablePyth {
 /// @title Perps Fork Tests
 /// @notice Validates perps against real USDC, real gas economics, and real Pyth ABI on a mainnet fork.
 contract PerpsForkTest is Test {
+
+    using SafeERC20 for IERC20;
 
     address constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
     address constant REAL_PYTH = 0x4305FB66699C3B2702D4d05CF36551390A4c69C6;
@@ -218,7 +219,7 @@ contract PerpsForkTest is Test {
 
     function _legacySideIndexZero(
         CfdTypes.Side side
-    ) internal view returns (int256) {
+    ) internal pure returns (int256) {
         side;
         return 0;
     }
@@ -678,7 +679,7 @@ contract PerpsForkTest is Test {
         address aliceAccount = _account(alice);
         uint256 poolAssets = IERC20(USDC).balanceOf(address(pool));
         vm.prank(address(pool));
-        IERC20(USDC).transfer(address(0xDEAD), poolAssets - 9000e6);
+        IERC20(USDC).safeTransfer(address(0xDEAD), poolAssets - 9000e6);
 
         uint256 chBefore = clearinghouse.balanceUsdc(aliceAccount);
         uint256 closeBountyUsdc = 1e6;
@@ -731,7 +732,7 @@ contract PerpsForkTest is Test {
         address aliceAccount = _account(alice);
         uint256 poolAssets = IERC20(USDC).balanceOf(address(pool));
         vm.prank(address(pool));
-        IERC20(USDC).transfer(address(0xDEAD), poolAssets - 8000e6);
+        IERC20(USDC).safeTransfer(address(0xDEAD), poolAssets - 8000e6);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);

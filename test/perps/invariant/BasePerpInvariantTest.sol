@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.33;
+pragma solidity 0.8.35;
 
 import {CfdEngine} from "../../../src/perps/CfdEngine.sol";
 import {CfdEngineAccountLens} from "../../../src/perps/CfdEngineAccountLens.sol";
@@ -21,6 +21,7 @@ import {MockPyth} from "../../mocks/MockPyth.sol";
 import {MockUSDC} from "../../mocks/MockUSDC.sol";
 import {OrderRouterDebugLens} from "../../utils/OrderRouterDebugLens.sol";
 import {MockInvariantHousePool} from "./mocks/MockInvariantHousePool.sol";
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {Test} from "forge-std/Test.sol";
 
 abstract contract BasePerpInvariantTest is Test {
@@ -52,7 +53,7 @@ abstract contract BasePerpInvariantTest is Test {
         engineProtocolLens = new CfdEngineProtocolLens(address(engine));
         housePool = new MockInvariantHousePool(address(usdc), address(engine));
         mockPyth = new MockPyth();
-        mockPyth.setPrice(bytes32(uint256(1)), int64(100_000_000), int32(-8), uint64(SETUP_TIMESTAMP));
+        mockPyth.setPrice(bytes32(uint256(1)), int64(100_000_000), int32(-8), SafeCast.toUint64(SETUP_TIMESTAMP));
         bytes32[] memory feedIds = new bytes32[](1);
         feedIds[0] = bytes32(uint256(1));
         uint256[] memory weights = new uint256[](1);
@@ -111,8 +112,8 @@ abstract contract BasePerpInvariantTest is Test {
         deployedEngine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, riskParams_);
         CfdEnginePlanner planner = new CfdEnginePlanner();
         CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(deployedEngine));
-        CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(deployedEngine), address(this));
-        deployedEngine.setDependencies(address(planner), address(settlement), address(engineAdmin));
+        CfdEngineAdmin deployedEngineAdmin = new CfdEngineAdmin(address(deployedEngine), address(this));
+        deployedEngine.setDependencies(address(planner), address(settlement), address(deployedEngineAdmin));
     }
 
     function _syncRouterAdmin() internal {
@@ -189,8 +190,8 @@ abstract contract BasePerpInvariantTest is Test {
         bullMaxProfit;
         (uint256 bearMaxProfit, uint256 bearOi, uint256 bearEntryNotional,) = engine.sides(uint8(CfdTypes.Side.BEAR));
         bearMaxProfit;
-        int256 bullPnl = (int256(bullEntryNotional) - int256(bullOi * price)) / int256(1e20);
-        int256 bearPnl = (int256(bearOi * price) - int256(bearEntryNotional)) / int256(1e20);
+        int256 bullPnl = (SafeCast.toInt256(bullEntryNotional) - SafeCast.toInt256(bullOi * price)) / int256(1e20);
+        int256 bearPnl = (SafeCast.toInt256(bearOi * price) - SafeCast.toInt256(bearEntryNotional)) / int256(1e20);
         return bullPnl + bearPnl;
     }
 

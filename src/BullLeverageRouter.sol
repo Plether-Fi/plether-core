@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.33;
+pragma solidity 0.8.35;
 
 import {IERC3156FlashLender} from "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";

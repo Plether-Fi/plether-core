@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.30;
+pragma solidity 0.8.35;
 
 import {LeverageRouter} from "../src/LeverageRouter.sol";
 import {FlashLoanBase} from "../src/base/FlashLoanBase.sol";

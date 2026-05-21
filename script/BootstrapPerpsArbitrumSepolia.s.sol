@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.33;
+pragma solidity 0.8.35;
 
 import {HousePool} from "../src/perps/HousePool.sol";
 import {OrderRouter} from "../src/perps/OrderRouter.sol";

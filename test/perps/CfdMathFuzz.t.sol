@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.33;
+pragma solidity 0.8.35;
 
 import {CfdMath} from "../../src/perps/CfdMath.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";

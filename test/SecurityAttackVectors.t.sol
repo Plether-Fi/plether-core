@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.30;
+pragma solidity 0.8.35;
 
 import {SyntheticSplitter} from "../src/SyntheticSplitter.sol";
 import {BasketOracle} from "../src/oracles/BasketOracle.sol";
