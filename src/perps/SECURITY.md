@@ -494,8 +494,8 @@ The perps system has completed one external pre-audit / security consultation, b
 **Auditor:** SC Audit Studio OY (Linus L. / oot2k, Ihtisham U. / ihtishamSudo)  
 **Review period:** April 14-May 4, 2026  
 **Report date:** May 4, 2026  
-**Reviewed commit:** `fc5f03ba8b91e879e0fa7f0d9be208d4c518a305`  
-**Resolution commit:** `86263b00b6f92301c4cb62fa0aab4317f0cbe7cd`  
+**Reviewed commit:** [`fc5f03ba8b91e879e0fa7f0d9be208d4c518a305`](https://github.com/Plether-Fi/plether-core/commit/fc5f03ba8b91e879e0fa7f0d9be208d4c518a305)
+**Resolution commit:** [`86263b00b6f92301c4cb62fa0aab4317f0cbe7cd`](https://github.com/Plether-Fi/plether-core/commit/86263b00b6f92301c4cb62fa0aab4317f0cbe7cd)
 **Report:** [`audits/plether-pre-audit-report.pdf`](../../audits/plether-pre-audit-report.pdf)
 
 This engagement was a pre-audit consultation intended to challenge the protocol design, find obvious security issues, improve code quality, and prepare the codebase for a later formal audit. Although it should not be treated as a production-readiness endorsement, it was performed to assess and improve readiness for testnet deployment.

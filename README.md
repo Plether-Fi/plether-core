@@ -118,21 +118,21 @@ InvarCoin is a passive savings token that maintains exposure to a basket of glob
 - Mark CRV and any other gauge incentives with `protectRewardToken(token)` so they cannot be swept with `rescueToken()`
 - After claiming rewards, route protected balances only through `sweepGaugeRewards(token)`
 
-**Keeper operations:**
-- `deployToCurve()` — pushes excess USDC buffer (>2% target) into single-sided Curve LP
-- `replenishBuffer()` — burns Curve LP to restore the 2% USDC buffer
-- `harvest()` — captures LP fee yield and streams to sINVAR stakers
+**Rebalancing operations:**
+- `sellLpToVault(lpAmount, minUsdcOut)` - permissionless solver sells Curve LP to the vault when the USDC buffer exceeds target
+- `buyLpFromVault(lpAmount, maxUsdcIn)` - permissionless solver buys Curve LP from the vault to restore the USDC buffer
+- `harvest()` - captures LP fee yield and streams to sINVAR stakers
 
 **Safety:**
 - Dual LP pricing: pessimistic (min of EMA, oracle) for withdrawals, optimistic (max) for deposits
-- Spot-vs-EMA deviation guard (0.5%) blocks deposits/deployments during pool manipulation
+- Oracle/EMA fair-value checks price deposits, solver fills, and redeployments during pool manipulation
 - Virtual shares (1e18/1e6) prevent first-depositor inflation attacks
 - `totalAssets()` is a best-effort NAV view for UX/monitoring; use `totalAssetsValidated()` for strict oracle-validated accounting reads
 - `_harvestSafe()` gracefully skips when Curve VP reads fail; if yield is pending, strict oracle validation is still enforced
 - `setEmergencyMode()` pauses deposits and single-sided withdrawals without discarding LP accounting; `emergencyWithdrawFromCurve()` only zeroes LP tracking after assets are actually recovered
 - `stakedInvarCoin` and `gaugeRewardsReceiver` both use 7-day timelocked propose/finalize flows
 - Protected reward tokens cannot be rescued arbitrarily and must be swept to the configured reward receiver
-- L2 sequencer uptime validation is enforced on state-changing oracle-critical flows (deposit/lpDeposit/harvest/deploy/replenish)
+- L2 sequencer uptime validation is enforced on state-changing oracle-critical flows (deposit/lpDeposit/harvest/solver fills/redeploy)
 
 ## Ecosystem Integrations
 
@@ -365,4 +365,4 @@ For detailed security assumptions, trust model, and emergency procedures, see [S
 
 ## Disclaimer
 
-This software is provided "as is" without warranty of any kind. Use at your own risk. This protocol has not been audited. Do not use in production without a professional security audit.
+This software is provided "as is" without warranty of any kind. Use at your own risk. Some components have undergone external security review, but audit coverage is partial and release-specific. Do not use in production without reviewing [SECURITY.md](SECURITY.md), the audit reports, and the exact deployment scope.

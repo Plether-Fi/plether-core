@@ -83,7 +83,7 @@ These properties must always hold. Violation indicates a critical bug.
 - **Assumption**: Curve twocrypto-ng pool for USDC/plDXY-BEAR correctly implements `add_liquidity`, `remove_liquidity`, `remove_liquidity_one_coin`, `get_virtual_price`, and `lp_price`
 - **LP Pricing**: `lp_price()` returns the EMA-smoothed LP price (flash-loan resistant); `get_virtual_price()` returns monotonically increasing virtual price used for fee yield isolation
 - **Oracle-Derived LP Price**: `2 * virtualPrice * sqrt(bearPrice)` mirrors the twocrypto-ng formula; used alongside `lp_price()` for dual pricing (pessimistic = min, optimistic = max)
-- **Risk (Pool Manipulation)**: Spot-vs-EMA deviation guard (0.5%) blocks `deployToCurve`, `replenishBuffer`, and `lpDeposit` during pool manipulation. `withdraw` uses EMA-based slippage floor via try/catch on `lp_price()`.
+- **Risk (Pool Manipulation)**: Spot-vs-EMA deviation guard (0.5%) blocks `lpDeposit` and `redeployToCurve` when balanced Curve LP minting would execute away from EMA. Solver fills (`sellLpToVault` / `buyLpFromVault`) use oracle/EMA fair-value bid/ask pricing, and `withdraw` uses an EMA-based slippage floor via try/catch on `lp_price()`.
 - **Risk (Pool Bricking)**: If `remove_liquidity` reverts permanently, `lpWithdraw` and `emergencyWithdrawFromCurve` are blocked. Users must wait for `setEmergencyMode()` + `forceRemoveGauge()` to write off stuck LP, then exit with remaining local USDC and BEAR.
 - **Risk (Virtual Price Regression)**: If `get_virtual_price()` decreases (Curve bug or exploit), `_harvest` produces no yield (safe), but `curveLpCostVp` retains the old higher value, suppressing future harvests until VP recovers.
 
@@ -101,8 +101,8 @@ These properties must always hold. Violation indicates a critical bug.
 #### L2 Sequencer Uptime Feed (InvarCoin)
 - **Assumption**: Chainlink sequencer uptime feed accurately reports L2 sequencer status
 - **Mitigation**: 1-hour grace period after sequencer restart before oracle reads are trusted; `address(0)` on L1 (check skipped)
-- **Affected Operations**: `deposit`, `lpDeposit`, `harvest`, `deployToCurve`, `replenishBuffer`, `redeployToCurve`, `donateUsdc` — all revert during sequencer downtime or grace period
-- **Unaffected Operations**: `withdraw`, `lpWithdraw` — use `_harvestSafe()` with best-effort oracle reads that skip on oracle or sequencer failures, preserving withdrawal liveness
+- **Affected Operations**: `deposit`, `lpDeposit`, `harvest`, `sellLpToVault`, `buyLpFromVault`, `redeployToCurve`, `donateUsdc` - all revert during sequencer downtime or grace period
+- **Unaffected Operations**: `withdraw`, `lpWithdraw` - use `_harvestSafe()` with best-effort oracle reads that skip on oracle or sequencer failures, preserving withdrawal liveness
 
 #### Morpho Blue (Lending)
 - **Assumption**: Morpho Blue lending protocol correctly handles collateral, borrows, liquidations, and flash loans
@@ -172,8 +172,8 @@ Anyone can call:
 - `distributeRewards()` - converts RewardDistributor's USDC into staker rewards (1-hour cooldown)
 - InvarCoin `deposit()` / `withdraw()` / `lpWithdraw()` / `lpDeposit()` - user vault operations
 - InvarCoin `harvest()` - mints INVAR from Curve fee yield and donates to sINVAR (reverts if no yield)
-- InvarCoin `deployToCurve()` - deploys excess USDC buffer to Curve ($1000 minimum)
-- InvarCoin `replenishBuffer()` - burns Curve LP to restore USDC buffer
+- InvarCoin `sellLpToVault()` - buys Curve LP from solvers when the USDC buffer exceeds target
+- InvarCoin `buyLpFromVault()` - sells Curve LP to solvers when the USDC buffer is below target
 - InvarCoin `donateUsdc()` - accepts USDC donations, mints proportional INVAR to sINVAR
 
 #### Timelock Protection
@@ -426,7 +426,7 @@ InvarCoin uses two oracle modes for different contexts:
 |------|----------|--------------------------|---------|
 | **Permissive** | `totalAssets()` | Returns best-effort value (no revert) | `getBufferMetrics()`, view functions |
 | **Strict** | `totalAssetsValidated()` | Reverts with `OracleLib__StalePrice` | N/A (external callers only) |
-| **Validated** | `_validatedOraclePrice()` | Reverts | `deposit`, `lpDeposit`, `harvest`, `deployToCurve`, `replenishBuffer`, `donateUsdc` |
+| **Validated** | `_validatedOraclePrice()` | Reverts | `deposit`, `lpDeposit`, `harvest`, `sellLpToVault`, `buyLpFromVault`, `redeployToCurve`, `donateUsdc` |
 | **Safe** | `_harvestSafe()` | Silently skips harvest | `withdraw`, `lpWithdraw` |
 
 Staleness timeout is 24 hours (`ORACLE_TIMEOUT`). L2 sequencer uptime is checked with a 1-hour grace period.
@@ -447,12 +447,12 @@ LP tokens are valued using both Curve's `lp_price()` (EMA) and an oracle-derived
 | Parameter | Value | Purpose |
 |-----------|-------|---------|
 | `BUFFER_TARGET_BPS` | 200 (2%) | Target USDC held locally for gas-efficient withdrawals |
-| `DEPLOY_THRESHOLD` | $1,000 | Minimum excess before `deployToCurve` activates |
+| `DEPLOY_THRESHOLD` | $1,000 | Minimum excess before `sellLpToVault` activates |
 | `MAX_SPOT_DEVIATION_BPS` | 50 (0.5%) | Circuit breaker for pool manipulation |
 
-The spot deviation guard compares spot execution against EMA-derived fair value. It blocks `deployToCurve`, `replenishBuffer`, `lpDeposit`, and `redeployToCurve` when the pool is being manipulated in either direction beyond the configured tolerance.
+The spot deviation guard compares spot execution against EMA-derived fair value. It blocks `lpDeposit` and `redeployToCurve` when the pool is being manipulated in either direction beyond the configured tolerance.
 
-For permissionless maintenance actions (`deployToCurve` and `replenishBuffer`), Curve min-out parameters are derived from the EMA fair-value bound rather than the current spot quote. This prevents callers from using a manipulated spot quote as the vault's slippage floor.
+For permissionless solver rebalancing actions (`sellLpToVault` and `buyLpFromVault`), the vault bid/ask is derived from oracle/EMA fair LP pricing plus or minus the solver spread. The vault does not trade directly on Curve in these paths, so solvers own Curve execution and slippage risk.
 
 #### Gauge Integration
 
@@ -491,7 +491,7 @@ This prevents the owner from instantly draining reward tokens via `rescueToken()
 
 - **`withdraw()` ignores loose BEAR**: Single-sided withdrawal only returns USDC (buffer + Curve LP burn). If the contract holds material BEAR (e.g., after emergency recovery), users should use `lpWithdraw()` or set `minUsdcOut` to enforce fair value.
 - **`lpWithdraw()` during emergency with bricked Curve**: If both the gauge and Curve pool are bricked, `lpWithdraw` reverts on `remove_liquidity`. Users must wait for `forceRemoveGauge()` to write off gauge LP, then `lpWithdraw` succeeds with remaining local USDC + BEAR only.
-- **No keeper incentive**: `harvest()`, `deployToCurve()`, and `replenishBuffer()` have no on-chain caller reward. Keepers must be incentivized externally (Gelato, Keep3r, etc.). This is intentional — paying rewards from principal in fungible-share vaults enables small-loop MEV extraction.
+- **Keeper and solver incentives**: `harvest()` has no on-chain caller reward and must be incentivized externally if regular harvesting is desired. Buffer rebalancing uses permissionless solver fills (`sellLpToVault()` / `buyLpFromVault()`) priced with a spread instead of a separate caller bounty.
 - **Harvest frequency**: If `harvest()` is not called regularly, `curveLpCostVp` becomes stale and the next harvest mints a larger-than-normal INVAR batch. This is not exploitable — the yield is real VP growth — but creates lumpy reward distribution to sINVAR stakers.
 
 ### Curve Pool Configuration
@@ -661,12 +661,42 @@ contact@plether.com
 
 ## Audit Status
 
+### Collaborative Audit (March 2026)
+
+**Lead security experts:** blockace, eeyore
+**Review period:** March 19-24, 2026
+**Report date:** May 12, 2026
+**Audited commit:** [`e54cabc3b21c7598132a0cda171bcc0776648db6`](https://github.com/Plether-Fi/plether-core/commit/e54cabc3b21c7598132a0cda171bcc0776648db6)
+**Final commit:** [`c61b5f18f49f52caf3f192a845fa767abaf55593`](https://github.com/Plether-Fi/plether-core/commit/c61b5f18f49f52caf3f192a845fa767abaf55593)
+**Report:** [`audits/plether-collaborative-audit-report-2026-05-12.pdf`](audits/plether-collaborative-audit-report-2026-05-12.pdf)
+
+**Scope:**
+- `src/InvarCoin.sol`
+- `src/libraries/OracleLib.sol`
+- `src/StakedToken.sol`
+
+**Findings:**
+
+| Severity | Count | Resolved | Acknowledged | Unaddressed |
+|----------|-------|----------|--------------|-------------|
+| High | 1 | 1 | 0 | 0 |
+| Medium | 2 | 2 | 0 | 0 |
+| Low/Info | 6 | 2 | 4 | 0 |
+| **Total** | **9** | **5** | **4** | **0** |
+
+**High/medium findings (all resolved):**
+1. **Slippage protection anchored to stale EMA allows sandwich extraction up to the full spot-vs-EMA deviation window** - resolved by removing direct protocol deposits into Curve in favor of solver-mediated LP inventory flows.
+2. **Missing receiver parameter in `lpWithdraw()`** - resolved by adding receiver support so USDC-blacklisted callers can route proceeds to another address.
+3. **BasketOracle deviation check combined with no secondary market for BEAR/BULL arbitrage freezes InvarCoin operations when FX rates move** - resolved for withdrawal and emergency-exit paths by wrapping oracle reads through non-reverting validation; normal operations may still revert when Chainlink and Curve EMA diverge beyond the configured threshold.
+
+**Acknowledged low/info findings:** 24-hour oracle heartbeat timing, gauge validation assumptions, 1 wei reward-vesting rounding, and minor withdraw EMA floor precision loss.
+
 ### Cantina Managed Review (January 2026)
 
 **Auditor:** Cantina (Red-Swan, Security Researcher)
 **Review period:** January 25–28, 2026
 **Report date:** February 13, 2026
-**Commit:** `596b0179`
+**Commit:** [`596b0179`](https://github.com/Plether-Fi/plether-core/commit/596b0179ce212047c3d100fd92a2d53a785e019d)
 **Report:** [`audits/report-cli-cantina-plether-0126.pdf`](audits/report-cli-cantina-plether-0126.pdf)
 
 **Scope:**
@@ -702,11 +732,12 @@ contact@plether.com
 | SyntheticSplitter | Audited (Cantina, Jan 2026) |
 | SyntheticToken | Audited (Cantina, Jan 2026) |
 | BasketOracle | Audited (Cantina, Jan 2026) |
-| InvarCoin | Not yet audited |
+| InvarCoin | Audited (Collaborative, Mar 2026) |
+| OracleLib | Audited (Collaborative, Mar 2026) |
 | ZapRouter | Not yet audited |
 | LeverageRouter | Not yet audited |
 | BullLeverageRouter | Not yet audited |
-| StakedToken | Not yet audited |
+| StakedToken | Audited (Collaborative, Mar 2026) |
 | RewardDistributor | Not yet audited |
 | VaultAdapter | Not yet audited |
 | MorphoOracle / StakedOracle | Not yet audited |
@@ -716,6 +747,7 @@ contact@plether.com
 
 | Date | Change |
 |------|--------|
+| 2026-05-21 | Added collaborative audit results for InvarCoin, OracleLib, and StakedToken (9 findings: 1 high, 2 medium, 6 low/info; 5 resolved, 4 acknowledged, 0 unaddressed); updated coverage gaps |
 | 2026-03-17 | Added InvarCoin security documentation: trust assumptions (Curve twocrypto, gauge, CRV minter, L2 sequencer), invariants, dual pricing model, buffer management, gauge integration, protected reward tokens, donation resistance, emergency procedures; updated owner capabilities, permissionless operations, and timelock list; added to coverage gaps |
 | 2026-02-24 | Acknowledged BasketOracle deviation check freezing Morpho liquidations as intentional circuit breaker |
 | 2026-02-13 | Added Cantina audit results (8 findings: 0 critical, 0 high, 2 medium, 5 low, 1 informational; 7 fixed, 1 acknowledged); added coverage gaps table |
