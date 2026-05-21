@@ -303,12 +303,32 @@ abstract contract BaseForkTest is Test {
             target.sellLpToVault(1, 0);
             return 0;
         }
+        deployable -= 1;
         lpAmount = _maxLpForSell(target, deployable);
         _acquireCurveLp(lpAmount);
+        (,, deployable,) = target.getBufferMetrics();
+        if (maxUsdc > 0 && maxUsdc < deployable) {
+            deployable = maxUsdc;
+        }
+        if (deployable == 0) {
+            target.sellLpToVault(1, 0);
+            return 0;
+        }
+        deployable -= 1;
         lpAmount = _maxLpForSell(target, deployable);
         uint256 solverLp = IERC20(curvePool).balanceOf(address(this));
         if (solverLp < lpAmount) {
             _acquireCurveLp(lpAmount - solverLp);
+            (,, deployable,) = target.getBufferMetrics();
+            if (maxUsdc > 0 && maxUsdc < deployable) {
+                deployable = maxUsdc;
+            }
+            if (deployable == 0) {
+                target.sellLpToVault(1, 0);
+                return 0;
+            }
+            deployable -= 1;
+            lpAmount = _maxLpForSell(target, deployable);
         }
         IERC20(curvePool).approve(address(target), lpAmount);
         target.sellLpToVault(lpAmount, 0);
@@ -327,6 +347,7 @@ abstract contract BaseForkTest is Test {
             target.buyLpFromVault(1, type(uint256).max);
             return 0;
         }
+        replenishable -= 1;
         uint256 lpAmount = _maxLpForBuy(target, replenishable, lpCap);
         usdcIn = target.previewBuyLpFromVault(lpAmount);
         deal(USDC, address(this), IERC20(USDC).balanceOf(address(this)) + usdcIn);

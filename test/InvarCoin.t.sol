@@ -2461,7 +2461,7 @@ contract InvarCoinTest is InvarCoinSolverTestHelpers {
         assertEq(usdcOut, bufferShare + curveUsdcOut, "Exact USDC from buffer + LP burn");
     }
 
-    function test_Withdraw_JIT_EmaFloorViaExpectCall() public {
+    function test_Withdraw_JIT_UsesZeroCurveMinWithoutUserSlippage() public {
         vm.prank(alice);
         ic.deposit(20_000e6, alice, 0);
         _deployToCurve(ic, curveLp, 0);
@@ -2471,10 +2471,8 @@ contract InvarCoinTest is InvarCoinSolverTestHelpers {
         uint256 shares = ic.balanceOf(alice);
 
         uint256 lpShare = Math.mulDiv(lpBal, shares, supply);
-        uint256 lpPrice = curve.lp_price();
-        uint256 emaMin = (lpShare * lpPrice) / 1e30 * 9950 / 10_000;
 
-        vm.expectCall(address(curve), abi.encodeCall(curve.remove_liquidity_one_coin, (lpShare, 0, emaMin)));
+        vm.expectCall(address(curve), abi.encodeCall(curve.remove_liquidity_one_coin, (lpShare, 0, 0)));
 
         vm.prank(alice);
         ic.withdraw(shares, alice, 0);

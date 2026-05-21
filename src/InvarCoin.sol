@@ -669,6 +669,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     ///      Does not distribute raw BEAR balances — if the contract holds material BEAR,
     ///      use lpWithdraw() or set minUsdcOut to enforce fair value.
     ///      Blocked during emergencyActive since single-sided LP exit may be unavailable.
+    ///      The caller-provided minUsdcOut is the slippage guard for the whole withdrawal.
     /// @param glUsdAmount Amount of INVAR shares to burn.
     /// @param receiver Address that receives the withdrawn USDC.
     /// @param minUsdcOut Minimum USDC to receive (slippage protection).
@@ -697,12 +698,6 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             if (lpShare > 0) {
                 _reduceLpAccounting(lpShare, lpBal);
                 uint256 minCurveOut = minUsdcOut > usdcOut ? minUsdcOut - usdcOut : 0;
-                try CURVE_POOL.lp_price() returns (uint256 lpPrice) {
-                    uint256 emaMin = (lpShare * lpPrice) / 1e30 * (BPS - MAX_SPOT_DEVIATION_BPS) / BPS;
-                    if (emaMin > minCurveOut) {
-                        minCurveOut = emaMin;
-                    }
-                } catch {}
                 _ensureUnstakedLp(lpShare);
                 usdcOut += CURVE_POOL.remove_liquidity_one_coin(lpShare, USDC_INDEX, minCurveOut);
             }

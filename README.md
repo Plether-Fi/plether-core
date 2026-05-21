@@ -96,7 +96,7 @@ InvarCoin is a passive savings token that maintains exposure to a basket of glob
 
 ![Deposit Flow](assets/diagrams/invar-deposit.svg)
 
-**Withdraw flow:** Burn INVAR → receive USDC from local buffer + JIT Curve LP unwinding. An EMA-based slippage floor prevents MEV sandwich amplification on the Curve leg.
+**Withdraw flow:** Burn INVAR → receive USDC from local buffer + JIT Curve LP unwinding. Callers set `minUsdcOut` for slippage protection across the full withdrawal.
 
 ![Withdraw Flow](assets/diagrams/invar-withdraw.svg)
 

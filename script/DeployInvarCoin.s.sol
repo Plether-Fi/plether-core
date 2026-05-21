@@ -4,7 +4,26 @@ pragma solidity 0.8.35;
 import {InvarCoin} from "../src/InvarCoin.sol";
 import {StakedToken} from "../src/StakedToken.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "forge-std/Script.sol";
+
+interface IMainnetCurvePoolPreflight is IERC20 {
+
+    function coins(
+        uint256 index
+    ) external view returns (address);
+    function get_virtual_price() external view returns (uint256);
+    function lp_price() external view returns (uint256);
+    function price_oracle() external view returns (uint256);
+
+}
+
+interface IMainnetOraclePreflight {
+
+    function decimals() external view returns (uint8);
+    function latestRoundData() external view returns (uint80, int256, uint256, uint256, uint80);
+
+}
 
 /// @title DeployInvarCoin
 /// @notice Deploys InvarCoin (INVAR) and StakedInvarCoin (sINVAR) with mainnet addresses.
@@ -31,6 +50,8 @@ contract DeployInvarCoin is Script {
 
         console.log("Deployer:", deployer);
         console.log("");
+
+        _preflight();
 
         vm.startBroadcast(privateKey);
 
@@ -62,6 +83,38 @@ contract DeployInvarCoin is Script {
         console.log("  4. Transfer ownership if needed");
         console.log("  5. Test deposit/deploy/harvest cycle");
         console.log("========================================");
+    }
+
+    function _preflight() internal view {
+        require(USDC.code.length > 0, "USDC has no code");
+        require(PLDXY_BEAR.code.length > 0, "PLDXY_BEAR has no code");
+        require(CURVE_POOL.code.length > 0, "CURVE_POOL has no code");
+        require(BASKET_ORACLE.code.length > 0, "BASKET_ORACLE has no code");
+        require(CRV_MINTER.code.length > 0, "CRV_MINTER has no code");
+
+        require(IERC20Metadata(USDC).decimals() == 6, "USDC decimals mismatch");
+        require(IERC20Metadata(PLDXY_BEAR).decimals() == 18, "PLDXY_BEAR decimals mismatch");
+
+        IMainnetCurvePoolPreflight pool = IMainnetCurvePoolPreflight(CURVE_POOL);
+        require(pool.coins(0) == USDC, "Curve coin0 mismatch");
+        require(pool.coins(1) == PLDXY_BEAR, "Curve coin1 mismatch");
+        require(pool.totalSupply() > 0, "Curve pool is not seeded");
+        require(pool.price_oracle() > 0, "Curve price_oracle is zero");
+        require(pool.lp_price() > 0, "Curve lp_price is zero");
+        try pool.get_virtual_price() returns (uint256 virtualPrice) {
+            require(virtualPrice > 0, "Curve virtual price is zero");
+        } catch {
+            revert("Curve get_virtual_price reverts");
+        }
+
+        IMainnetOraclePreflight oracle = IMainnetOraclePreflight(BASKET_ORACLE);
+        require(oracle.decimals() == 8, "BasketOracle decimals mismatch");
+        try oracle.latestRoundData() returns (uint80, int256 answer, uint256, uint256 updatedAt, uint80) {
+            require(answer > 0, "BasketOracle answer <= 0");
+            require(updatedAt > 0, "BasketOracle updatedAt is zero");
+        } catch {
+            revert("BasketOracle latestRoundData reverts");
+        }
     }
 
 }

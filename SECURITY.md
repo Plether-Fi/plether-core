@@ -83,7 +83,7 @@ These properties must always hold. Violation indicates a critical bug.
 - **Assumption**: Curve twocrypto-ng pool for USDC/plDXY-BEAR correctly implements `add_liquidity`, `remove_liquidity`, `remove_liquidity_one_coin`, `get_virtual_price`, and `lp_price`
 - **LP Pricing**: `lp_price()` returns the EMA-smoothed LP price (flash-loan resistant); `get_virtual_price()` returns monotonically increasing virtual price used for fee yield isolation
 - **Oracle-Derived LP Price**: `2 * virtualPrice * sqrt(bearPrice)` mirrors the twocrypto-ng formula; used alongside `lp_price()` for dual pricing (pessimistic = min, optimistic = max)
-- **Risk (Pool Manipulation)**: Spot-vs-EMA deviation guard (0.5%) blocks `lpDeposit` and `redeployToCurve` when balanced Curve LP minting would execute away from EMA. Solver fills (`sellLpToVault` / `buyLpFromVault`) use oracle/EMA fair-value bid/ask pricing, and `withdraw` uses an EMA-based slippage floor via try/catch on `lp_price()`.
+- **Risk (Pool Manipulation)**: Spot-vs-EMA deviation guard (0.5%) blocks `lpDeposit` and `redeployToCurve` when balanced Curve LP minting would execute away from EMA. Solver fills (`sellLpToVault` / `buyLpFromVault`) use oracle/EMA fair-value bid/ask pricing. `withdraw` relies on caller-provided `minUsdcOut` for slippage protection across the full single-sided exit.
 - **Risk (Pool Bricking)**: If `remove_liquidity` reverts permanently, `lpWithdraw` and `emergencyWithdrawFromCurve` are blocked. Users must wait for `setEmergencyMode()` + `forceRemoveGauge()` to write off stuck LP, then exit with remaining local USDC and BEAR.
 - **Risk (Virtual Price Regression)**: If `get_virtual_price()` decreases (Curve bug or exploit), `_harvest` produces no yield (safe), but `curveLpCostVp` retains the old higher value, suppressing future harvests until VP recovers.
 
@@ -490,6 +490,7 @@ This prevents the owner from instantly draining reward tokens via `rescueToken()
 #### Known Limitations
 
 - **`withdraw()` ignores loose BEAR**: Single-sided withdrawal only returns USDC (buffer + Curve LP burn). If the contract holds material BEAR (e.g., after emergency recovery), users should use `lpWithdraw()` or set `minUsdcOut` to enforce fair value.
+- **Single-sided withdrawal slippage**: `withdraw()` passes the caller's remaining `minUsdcOut` to Curve rather than enforcing a protocol-level EMA floor. This preserves withdrawal liveness when Curve's EMA is stale or the pool is imbalanced, but callers and frontends must set `minUsdcOut` thoughtfully.
 - **`lpWithdraw()` during emergency with bricked Curve**: If both the gauge and Curve pool are bricked, `lpWithdraw` reverts on `remove_liquidity`. Users must wait for `forceRemoveGauge()` to write off gauge LP, then `lpWithdraw` succeeds with remaining local USDC + BEAR only.
 - **Keeper and solver incentives**: `harvest()` has no on-chain caller reward and must be incentivized externally if regular harvesting is desired. Buffer rebalancing uses permissionless solver fills (`sellLpToVault()` / `buyLpFromVault()`) priced with a spread instead of a separate caller bounty.
 - **Harvest frequency**: If `harvest()` is not called regularly, `curveLpCostVp` becomes stale and the next harvest mints a larger-than-normal INVAR batch. This is not exploitable — the yield is real VP growth — but creates lumpy reward distribution to sINVAR stakers.

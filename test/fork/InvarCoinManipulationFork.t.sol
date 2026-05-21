@@ -173,9 +173,11 @@ contract InvarCoinManipulationForkTest is BaseForkTest {
         _sellLpToVault(ic, 0);
 
         uint256 attackerUsdcBefore = IERC20(USDC).balanceOf(attacker);
+        uint256 bearInventory = 5_000_000e18;
+        uint256 attackerValueBefore = attackerUsdcBefore + (bearInventory * bearPrice) / 1e30;
 
         // Dump BEAR to try to depress LP pricing so deposit is cheaper
-        _dumpBear(5_000_000e18);
+        _dumpBear(bearInventory);
 
         vm.prank(attacker);
         uint256 attackerShares = ic.deposit(1_000_000e6, attacker, 0);
@@ -193,11 +195,12 @@ contract InvarCoinManipulationForkTest is BaseForkTest {
         ic.withdraw(attackerShares, attacker, 0);
 
         uint256 attackerUsdcAfter = IERC20(USDC).balanceOf(attacker);
-        // deal() gives free BEAR; Curve fee asymmetry on round-trip leaves dust profit (<3 bps of deposit)
+        uint256 attackerBearAfter = IERC20(bearToken).balanceOf(attacker);
+        uint256 attackerValueAfter = attackerUsdcAfter + (attackerBearAfter * bearPrice) / 1e30;
         uint256 dustTolerance = 1_000_000e6 * 5 / 10_000; // 5 bps of deposit
         assertLe(
-            attackerUsdcAfter,
-            attackerUsdcBefore + dustTolerance,
+            attackerValueAfter,
+            attackerValueBefore + dustTolerance,
             "Attacker should not profit from deposit/withdraw manipulation"
         );
     }
