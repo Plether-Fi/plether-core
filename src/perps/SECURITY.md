@@ -487,16 +487,48 @@ If yield overlays are desired, they should sit above the base protocol as opt-in
 
 ## Audit Status
 
-Not yet audited. The perps system remains pre-deployment.
+The perps system has completed one external pre-audit / security consultation, but has not completed a formal production audit. It remains pre-deployment.
+
+### SC Audit Studio Pre-Audit (April-May 2026)
+
+**Auditor:** SC Audit Studio OY (Linus L. / oot2k, Ihtisham U. / ihtishamSudo)  
+**Review period:** April 14-May 4, 2026  
+**Report date:** May 4, 2026  
+**Reviewed commit:** `fc5f03ba8b91e879e0fa7f0d9be208d4c518a305`  
+**Resolution commit:** `86263b00b6f92301c4cb62fa0aab4317f0cbe7cd`  
+**Report:** [`audits/plether-pre-audit-report.pdf`](../../audits/plether-pre-audit-report.pdf)
+
+This engagement was a pre-audit consultation intended to challenge the protocol design, find obvious security issues, improve code quality, and prepare the codebase for a later formal audit. Although it should not be treated as a production-readiness endorsement, it was performed to assess and improve readiness for testnet deployment.
+
+Findings summary:
+
+| Severity | Count |
+|----------|-------|
+| High | 2 |
+| Medium | 7 |
+| Low | 1 |
+| Informational | 18 |
+
+The review also produced code-quality and architecture recommendations. The most important outcomes were fixes or mitigations for LP yield dilution, zero-value withdrawal cooldown griefing, oracle-frozen liquidation liveness, same-side increase dust handling, rebate-backed undercollateralized opens, stale senior-yield accrual, oracle-window option value, queue dust DoS, and pending claimant accounting.
+
+Several items were intentionally acknowledged or left for follow-up rather than fully redesigned in this pre-audit cycle:
+
+- `CAP_PRICE` is immutable and cannot be changed after deployment.
+- Users cannot manually cancel committed queued orders.
+- Bounty and deferred payout accounting could be simplified further.
+- Some broader HousePool/ERC-4626 architecture and test-suite organization recommendations remain open.
+- Large fixes, especially the senior accounting rewrite and oracle-window mitigation, should receive follow-up formal audit coverage.
+
+As of May 21, 2026, `master` includes the resolution commit and later changes. Future releases should be assessed against their exact deployment commit.
 
 | Component | Status |
 |-----------|--------|
-| `CfdEngine` | Not yet audited |
-| `CfdMath` | Not yet audited |
-| `OrderRouter` | Not yet audited |
-| `MarginClearinghouse` | Not yet audited |
-| `HousePool` | Not yet audited |
-| `TrancheVault` | Not yet audited |
+| `CfdEngine` | Pre-audit reviewed; formal audit pending |
+| `CfdMath` | Pre-audit reviewed as supporting logic; formal audit pending |
+| `OrderRouter` | Pre-audit reviewed; formal audit pending |
+| `MarginClearinghouse` | Pre-audit reviewed; formal audit pending |
+| `HousePool` | Pre-audit reviewed; formal audit pending |
+| `TrancheVault` | Pre-audit reviewed; formal audit pending |
 
 ## Security Contact
 
