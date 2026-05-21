@@ -26,12 +26,16 @@ jobs:
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: nightly
+          version: v1.5.1
 
       - name: Build documentation
+        env:
+          FOUNDRY_PROFILE: docs
         run: |
+          mkdir -p .docs-empty/test .docs-empty/script
+
           # Generate NatSpec docs
-          forge doc
+          bash scripts/run-with-heartbeat.sh forge doc
 
           # Add SECURITY.md to docs
           cp SECURITY.md docs/src/SECURITY.md
@@ -40,7 +44,7 @@ jobs:
           echo "- [Security](SECURITY.md)" >> docs/src/SUMMARY.md
 
           # Build the book
-          forge doc --build
+          bash scripts/run-with-heartbeat.sh forge doc --build
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
