@@ -77,11 +77,16 @@ abstract contract OrderExecutionSettlement is OrderOracleExecution, OrderQueueBo
         pure
         returns (CfdEnginePlanTypes.ExecutionFailurePolicyCategory failureCategory, uint8 failureCode, bool isClose)
     {
-        assembly {
-            failureCategory := mload(add(revertData, 36))
-            failureCode := mload(add(revertData, 68))
-            isClose := mload(add(revertData, 100))
+        if (revertData.length < 100) {
+            return (failureCategory, failureCode, isClose);
         }
+
+        bytes memory args = new bytes(revertData.length - 4);
+        for (uint256 i; i < args.length; ++i) {
+            args[i] = revertData[i + 4];
+        }
+        (failureCategory, failureCode, isClose) =
+            abi.decode(args, (CfdEnginePlanTypes.ExecutionFailurePolicyCategory, uint8, bool));
     }
 
     function _failedOutcomeFromEngineRevert(

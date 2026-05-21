@@ -683,9 +683,7 @@ abstract contract BasePerpTest is Test {
         if (err.length < 4) {
             return bytes4(0);
         }
-        assembly {
-            selector := mload(add(err, 32))
-        }
+        return bytes4(err);
     }
 
     // --- Governance helpers ---
@@ -789,11 +787,7 @@ abstract contract BasePerpTest is Test {
     function _warpForward(
         uint256 delta
     ) internal {
-        uint256 ts;
-        assembly {
-            ts := timestamp()
-        }
-        vm.warp(ts + delta);
+        vm.warp(block.timestamp + delta);
     }
 
     function _sideState(

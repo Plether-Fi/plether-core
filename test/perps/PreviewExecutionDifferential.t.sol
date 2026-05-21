@@ -13,6 +13,14 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
 
     address internal constant KEEPER = address(0xC0FFEE);
 
+    struct CloseExecutionCheckpoint {
+        IMarginClearinghouse.AccountUsdcBuckets bucketsBefore;
+        uint256 settlementBefore;
+        uint256 traderClaimBefore;
+        uint256 badDebtBefore;
+        uint256 executionBountyUsdc;
+    }
+
     function testFuzz_ValidPreviewOpen_DoesNotUntypedRevertOnSameStateExecution(
         uint256 initialMarginFuzz,
         uint256 marginDeltaFuzz,
@@ -96,10 +104,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, closePrice);
         vm.assume(preview.valid);
 
-        IMarginClearinghouse.AccountUsdcBuckets memory bucketsBefore = clearinghouse.getAccountUsdcBuckets(account);
-        uint256 settlementBefore = clearinghouse.balanceUsdc(account);
-        uint256 traderClaimBefore = engine.traderClaimBalanceUsdc(account);
-        uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
+        CloseExecutionCheckpoint memory checkpoint = _closeExecutionCheckpoint(account, executionBountyUsdc);
         baseMockPyth.setAllUniquePrices(
             _basePythFeedIds(), int64(uint64(closePrice)), 0, int32(-8), block.timestamp, block.timestamp - 1
         );
@@ -109,46 +114,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         vm.prank(KEEPER);
         router.executeOrder(1, priceData);
 
-        IMarginClearinghouse.AccountUsdcBuckets memory bucketsAfter = clearinghouse.getAccountUsdcBuckets(account);
-        (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(account);
-        assertEq(sizeAfter, preview.remainingSize, "Close preview remaining size should match live execution");
-        assertEq(marginAfter, preview.remainingMargin, "Close preview remaining margin should match live execution");
-        assertEq(
-            bucketsAfter.settlementBalanceUsdc,
-            bucketsBefore.settlementBalanceUsdc + preview.immediatePayoutUsdc - preview.seizedCollateralUsdc
-                - executionBountyUsdc,
-            "Close preview should match the live settlement-balance mutation"
-        );
-        assertEq(
-            bucketsAfter.activePositionMarginUsdc,
-            preview.remainingMargin,
-            "Close preview remaining margin should match the live position-margin bucket"
-        );
-        assertEq(
-            bucketsAfter.totalLockedMarginUsdc,
-            preview.remainingMargin,
-            "Full close should leave no locked margin beyond the surviving position margin"
-        );
-        assertEq(
-            clearinghouse.balanceUsdc(account),
-            settlementBefore + preview.immediatePayoutUsdc - preview.seizedCollateralUsdc - executionBountyUsdc,
-            "Close preview immediate payout should match live settlement delta"
-        );
-        assertEq(
-            engine.traderClaimBalanceUsdc(account) - traderClaimBefore,
-            preview.traderClaimBalanceUsdc,
-            "Close preview trader claim should match live trader claim delta"
-        );
-        assertEq(
-            engine.accumulatedBadDebtUsdc() - badDebtBefore,
-            preview.badDebtUsdc,
-            "Close preview bad debt should match live bad debt delta"
-        );
-        assertEq(
-            preview.triggersDegradedMode,
-            engine.degradedMode(),
-            "Close preview degraded-mode flag should match live outcome"
-        );
+        _assertFullClosePreviewMatchesLive(account, preview, checkpoint);
     }
 
     function testFuzz_PreviewClose_FullCloseMatchesLiveExecution_IlliquidVault(
@@ -176,10 +142,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, closePrice);
         vm.assume(preview.valid);
 
-        IMarginClearinghouse.AccountUsdcBuckets memory bucketsBefore = clearinghouse.getAccountUsdcBuckets(account);
-        uint256 settlementBefore = clearinghouse.balanceUsdc(account);
-        uint256 traderClaimBefore = engine.traderClaimBalanceUsdc(account);
-        uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
+        CloseExecutionCheckpoint memory checkpoint = _closeExecutionCheckpoint(account, executionBountyUsdc);
         baseMockPyth.setAllUniquePrices(
             _basePythFeedIds(), int64(uint64(closePrice)), 0, int32(-8), block.timestamp, block.timestamp - 1
         );
@@ -189,47 +152,65 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         vm.prank(KEEPER);
         router.executeOrder(1, priceData);
 
+        _assertFullClosePreviewMatchesLive(account, preview, checkpoint);
+    }
+
+    function _closeExecutionCheckpoint(
+        address account,
+        uint256 executionBountyUsdc
+    ) internal view returns (CloseExecutionCheckpoint memory checkpoint) {
+        checkpoint.bucketsBefore = clearinghouse.getAccountUsdcBuckets(account);
+        checkpoint.settlementBefore = clearinghouse.balanceUsdc(account);
+        checkpoint.traderClaimBefore = engine.traderClaimBalanceUsdc(account);
+        checkpoint.badDebtBefore = engine.accumulatedBadDebtUsdc();
+        checkpoint.executionBountyUsdc = executionBountyUsdc;
+    }
+
+    function _assertFullClosePreviewMatchesLive(
+        address account,
+        ICfdEngineTypes.ClosePreview memory preview,
+        CloseExecutionCheckpoint memory checkpoint
+    ) internal {
         IMarginClearinghouse.AccountUsdcBuckets memory bucketsAfter = clearinghouse.getAccountUsdcBuckets(account);
         (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(account);
-        assertEq(sizeAfter, preview.remainingSize, "Illiquid close preview remaining size should match live execution");
-        assertEq(
-            marginAfter, preview.remainingMargin, "Illiquid close preview remaining margin should match live execution"
-        );
+        uint256 expectedSettlement = checkpoint.settlementBefore + preview.immediatePayoutUsdc
+            - preview.seizedCollateralUsdc - checkpoint.executionBountyUsdc;
+
+        assertEq(sizeAfter, preview.remainingSize, "Close preview remaining size should match live execution");
+        assertEq(marginAfter, preview.remainingMargin, "Close preview remaining margin should match live execution");
         assertEq(
             bucketsAfter.settlementBalanceUsdc,
-            bucketsBefore.settlementBalanceUsdc + preview.immediatePayoutUsdc - preview.seizedCollateralUsdc
-                - executionBountyUsdc,
-            "Illiquid close preview should match the live settlement-balance mutation"
+            checkpoint.bucketsBefore.settlementBalanceUsdc + preview.immediatePayoutUsdc - preview.seizedCollateralUsdc
+                - checkpoint.executionBountyUsdc,
+            "Close preview should match the live settlement-balance mutation"
         );
         assertEq(
             bucketsAfter.activePositionMarginUsdc,
             preview.remainingMargin,
-            "Illiquid close preview remaining margin should match the live position-margin bucket"
+            "Close preview remaining margin should match the live position-margin bucket"
         );
         assertEq(
             bucketsAfter.totalLockedMarginUsdc,
             preview.remainingMargin,
-            "Illiquid full close should leave no locked margin beyond the surviving position margin"
+            "Full close should leave no locked margin beyond the surviving position margin"
         );
         assertEq(
-            clearinghouse.balanceUsdc(account),
-            settlementBefore + preview.immediatePayoutUsdc - preview.seizedCollateralUsdc - executionBountyUsdc,
-            "Illiquid close preview immediate payout should match live settlement delta"
+            clearinghouse.balanceUsdc(account), expectedSettlement, "Close preview settlement delta should match live"
         );
         assertEq(
-            engine.traderClaimBalanceUsdc(account) - traderClaimBefore,
+            engine.traderClaimBalanceUsdc(account) - checkpoint.traderClaimBefore,
             preview.traderClaimBalanceUsdc,
-            "Illiquid close preview trader claim should match live trader claim delta"
+            "Close preview trader claim should match live trader claim delta"
         );
         assertEq(
-            engine.accumulatedBadDebtUsdc() - badDebtBefore,
+            engine.accumulatedBadDebtUsdc() - checkpoint.badDebtBefore,
             preview.badDebtUsdc,
-            "Illiquid close preview bad debt should match live bad debt delta"
+            "Close preview bad debt should match live bad debt delta"
         );
         assertEq(
             preview.triggersDegradedMode,
             engine.degradedMode(),
-            "Illiquid close preview degraded-mode flag should match live outcome"
+            "Close preview degraded-mode flag should match live outcome"
         );
     }
 

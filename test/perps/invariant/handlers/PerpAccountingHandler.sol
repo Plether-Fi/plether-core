@@ -74,6 +74,18 @@ contract PerpAccountingHandler is Test {
         bytes4 withdrawSelector;
     }
 
+    struct ModelledOrderPreview {
+        address account;
+        bool isClose;
+        bool terminalClose;
+        uint256 traderClaimBalanceUsdc;
+        uint256 allowedTraderClaimAfterUsdc;
+        uint256 expectedBadDebtDeltaUsdc;
+        uint256 expectedFinalResidualUsdc;
+        uint256 traderWalletBeforeUsdc;
+        uint256 badDebtBefore;
+    }
+
     MockUSDC public immutable usdc;
     CfdEngine public immutable engine;
     CfdEngineAccountLens public immutable engineAccountLens;
@@ -333,63 +345,80 @@ contract PerpAccountingHandler is Test {
             return;
         }
 
+        ModelledOrderPreview memory model = _modelOrderPreview(orderId);
+        uint256[4] memory committedBefore = _snapshotTrackedCommittedMargin();
+        model.badDebtBefore = engine.accumulatedBadDebtUsdc();
+        if (_tryExecuteOrder(orderId)) {
+            _afterModelledOrderExecution(orderId, committedBefore, model);
+        }
+    }
+
+    function _modelOrderPreview(
+        uint64 orderId
+    ) internal view returns (ModelledOrderPreview memory model) {
         OrderRouter.OrderRecord memory orderRecord = _orderRecord(orderId);
-        address account = orderRecord.core.account;
-        uint256 sizeDelta = orderRecord.core.sizeDelta;
-        uint256 marginDelta = orderRecord.core.marginDelta;
-        uint256 targetPrice = orderRecord.core.targetPrice;
-        bool isClose = orderRecord.core.isClose;
-        uint256 traderClaimBalanceUsdc;
-        uint256 allowedTraderClaimAfterUsdc;
-        uint256 expectedBadDebtDeltaUsdc;
-        uint256 expectedFinalResidualUsdc;
-        bool terminalClose;
+        model.account = orderRecord.core.account;
+        model.isClose = orderRecord.core.isClose;
         AccountLensViewTypes.AccountLedgerSnapshot memory beforeSnapshot =
-            engineAccountLens.getAccountLedgerSnapshot(account);
-        uint256 traderWalletBeforeUsdc = usdc.balanceOf(account);
-        if (isClose && marginDelta == 0) {
-            ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, sizeDelta, targetPrice);
+            engineAccountLens.getAccountLedgerSnapshot(model.account);
+        model.traderWalletBeforeUsdc = usdc.balanceOf(model.account);
+        if (model.isClose && orderRecord.core.marginDelta == 0) {
+            ICfdEngineTypes.ClosePreview memory preview =
+                engineLens.previewClose(model.account, orderRecord.core.sizeDelta, orderRecord.core.targetPrice);
             if (preview.valid) {
-                traderClaimBalanceUsdc = preview.traderClaimBalanceUsdc;
-                allowedTraderClaimAfterUsdc = preview.traderClaimBalanceUsdc > preview.existingTraderClaimRemainingUsdc
+                model.traderClaimBalanceUsdc = preview.traderClaimBalanceUsdc;
+                model.allowedTraderClaimAfterUsdc = preview.traderClaimBalanceUsdc
+                    > preview.existingTraderClaimRemainingUsdc
                     ? preview.traderClaimBalanceUsdc - preview.existingTraderClaimRemainingUsdc
                     : 0;
                 if (preview.remainingSize == 0) {
-                    terminalClose = true;
-                    expectedBadDebtDeltaUsdc = preview.badDebtUsdc;
+                    model.terminalClose = true;
+                    model.expectedBadDebtDeltaUsdc = preview.badDebtUsdc;
                     uint256 grossResidualUsdc = beforeSnapshot.settlementBalanceUsdc + preview.immediatePayoutUsdc
                         + preview.traderClaimBalanceUsdc;
-                    expectedFinalResidualUsdc = grossResidualUsdc > preview.seizedCollateralUsdc
+                    model.expectedFinalResidualUsdc = grossResidualUsdc > preview.seizedCollateralUsdc
                         ? grossResidualUsdc - preview.seizedCollateralUsdc
                         : 0;
                 }
             }
         }
+    }
 
-        uint256[4] memory committedBefore = _snapshotTrackedCommittedMargin();
-        uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
+    function _afterModelledOrderExecution(
+        uint64 orderId,
+        uint256[4] memory committedBefore,
+        ModelledOrderPreview memory model
+    ) internal {
+        _reconcileCommittedMarginAfterProcessedOrders(committedBefore, orderId, router.nextExecuteId());
+        if (model.traderClaimBalanceUsdc > 0) {
+            ghost.increaseTraderClaim(model.account, model.traderClaimBalanceUsdc);
+        }
+        _syncGhostTraderClaim(model.account);
+        uint256 badDebtAfter = engine.accumulatedBadDebtUsdc();
+        if (model.isClose && badDebtAfter > model.badDebtBefore) {
+            _recordBadDebtTraderClaimEvent(model.account, badDebtAfter, model.allowedTraderClaimAfterUsdc);
+        }
+        if (model.terminalClose) {
+            _recordTerminalResidualEvent(
+                model.account,
+                model.badDebtBefore,
+                model.expectedBadDebtDeltaUsdc,
+                model.expectedFinalResidualUsdc,
+                model.traderWalletBeforeUsdc,
+                false
+            );
+        }
+    }
+
+    function _tryExecuteOrder(
+        uint64 orderId
+    ) internal returns (bool) {
         bytes[] memory empty;
         try router.executeOrder(orderId, empty) {
-            _reconcileCommittedMarginAfterProcessedOrders(committedBefore, orderId, router.nextExecuteId());
-            if (traderClaimBalanceUsdc > 0) {
-                ghost.increaseTraderClaim(account, traderClaimBalanceUsdc);
-            }
-            _syncGhostTraderClaim(account);
-            uint256 badDebtAfter = engine.accumulatedBadDebtUsdc();
-            if (isClose && badDebtAfter > badDebtBefore) {
-                _recordBadDebtTraderClaimEvent(account, badDebtAfter, allowedTraderClaimAfterUsdc);
-            }
-            if (terminalClose) {
-                _recordTerminalResidualEvent(
-                    account,
-                    badDebtBefore,
-                    expectedBadDebtDeltaUsdc,
-                    expectedFinalResidualUsdc,
-                    traderWalletBeforeUsdc,
-                    false
-                );
-            }
-        } catch {}
+            return true;
+        } catch {
+            return false;
+        }
     }
 
     function liquidate(
@@ -424,7 +453,7 @@ contract PerpAccountingHandler is Test {
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
 
         try router.executeLiquidation(account, priceData) {
-            ghost.recordLiquidation(account, usdc.balanceOf(actor), engine.accumulatedBadDebtUsdc());
+            _recordLiquidationSuccess(account, actor);
             ghostSuccessfulLiquidations++;
             _reconcileCommittedMarginAfterLiquidation(account, committedBefore);
             if (traderClaimBalanceUsdc > 0) {
@@ -439,6 +468,13 @@ contract PerpAccountingHandler is Test {
                 account, badDebtBefore, preview.badDebtUsdc, expectedFinalResidualUsdc, traderWalletBeforeUsdc, true
             );
         } catch {}
+    }
+
+    function _recordLiquidationSuccess(
+        address account,
+        address actor
+    ) internal {
+        ghost.recordLiquidation(account, usdc.balanceOf(actor), engine.accumulatedBadDebtUsdc());
     }
 
     function createTraderClaim(
@@ -633,9 +669,7 @@ contract PerpAccountingHandler is Test {
         if (err.length < 4) {
             return bytes4(0);
         }
-        assembly {
-            selector := mload(add(err, 32))
-        }
+        return bytes4(err);
     }
 
     function _commitReferencePrice() internal view returns (uint256 price) {

@@ -3352,19 +3352,7 @@ contract CfdEngineTest is BasePerpTest {
         );
 
         uint256 feesBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
-        CfdTypes.Order memory underfundedFeeClose = CfdTypes.Order({
-            account: bearAccount,
-            sizeDelta: 5000e18,
-            marginDelta: 0,
-            targetPrice: 0,
-            commitTime: refreshTime,
-            commitBlock: uint64(block.number),
-            orderId: 0,
-            side: CfdTypes.Side.BEAR,
-            isClose: true
-        });
-        vm.prank(address(router));
-        engine.processOrderTyped(underfundedFeeClose, 1e8, poolDepth, refreshTime);
+        _processUnderfundedFeeClose(bearAccount, poolDepth, refreshTime);
 
         assertEq(
             clearinghouse.balanceUsdc(engine.protocolTreasury()),
@@ -4827,6 +4815,26 @@ contract CfdEngineTest is BasePerpTest {
         int256 value
     ) internal pure returns (uint256) {
         return value > 0 ? uint256(value) : 0;
+    }
+
+    function _processUnderfundedFeeClose(
+        address account,
+        uint256 poolDepth,
+        uint64 refreshTime
+    ) internal {
+        CfdTypes.Order memory order = CfdTypes.Order({
+            account: account,
+            sizeDelta: 5000e18,
+            marginDelta: 0,
+            targetPrice: 0,
+            commitTime: refreshTime,
+            commitBlock: uint64(block.number),
+            orderId: 0,
+            side: CfdTypes.Side.BEAR,
+            isClose: true
+        });
+        vm.prank(address(router));
+        engine.processOrderTyped(order, 1e8, poolDepth, refreshTime);
     }
 
     function _negativePart(

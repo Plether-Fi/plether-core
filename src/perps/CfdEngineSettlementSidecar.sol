@@ -135,39 +135,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
                     );
             }
         } else if (delta.settlementType == CfdEnginePlanTypes.SettlementType.LOSS) {
-            uint64[] memory reservationOrderIds =
-                IOrderRouterAccounting(host.orderRouter()).getMarginReservationIds(delta.account);
-            (uint256 seizedUsdc,, uint256 cashCreditedProtocolFeeUsdc) = IMarginClearinghouse(host.clearinghouse())
-                .consumeCloseLoss(
-                    delta.account,
-                    reservationOrderIds,
-                    delta.lossUsdc,
-                    delta.posMarginAfter,
-                    delta.deletePosition,
-                    host.pool(),
-                    host.protocolTreasury(),
-                    delta.lossResult.collectedExecFeeUsdc
-                );
-            protocolFeeCreditedUsdc = cashCreditedProtocolFeeUsdc;
-            if (seizedUsdc > 0) {
-                if (seizedUsdc > protocolFeeCreditedUsdc) {
-                    IHousePool(host.pool())
-                        .recordClaimantInflow(
-                            seizedUsdc - protocolFeeCreditedUsdc,
-                            IHousePool.ClaimantInflowKind.Revenue,
-                            IHousePool.ClaimantInflowCashMode.CashArrived
-                        );
-                }
-            }
-            if (delta.syncMarginQueueAmount > 0) {
-                IOrderRouterAccounting(host.orderRouter()).syncMarginQueue(delta.account);
-            }
-            if (delta.existingTraderClaimConsumedUsdc > 0) {
-                host.settlementConsumeTraderClaim(delta.account, delta.existingTraderClaimConsumedUsdc);
-            }
-            if (delta.badDebtUsdc > 0) {
-                host.settlementAccumulateBadDebt(delta.badDebtUsdc);
-            }
+            protocolFeeCreditedUsdc = _executeCloseLoss(host, delta);
         } else if (delta.pendingCarryUsdc > 0) {
             IHousePool(host.pool())
                 .recordClaimantInflow(
@@ -195,6 +163,43 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
                     side: currentPosition.side
                 })
             );
+        }
+    }
+
+    function _executeCloseLoss(
+        ICfdEngineSettlementHost host,
+        CfdEnginePlanTypes.CloseDelta calldata delta
+    ) private returns (uint256 protocolFeeCreditedUsdc) {
+        uint64[] memory reservationOrderIds =
+            IOrderRouterAccounting(host.orderRouter()).getMarginReservationIds(delta.account);
+        (uint256 seizedUsdc,, uint256 cashCreditedProtocolFeeUsdc) = IMarginClearinghouse(host.clearinghouse())
+            .consumeCloseLoss(
+                delta.account,
+                reservationOrderIds,
+                delta.lossUsdc,
+                delta.posMarginAfter,
+                delta.deletePosition,
+                host.pool(),
+                host.protocolTreasury(),
+                delta.lossResult.collectedExecFeeUsdc
+            );
+        protocolFeeCreditedUsdc = cashCreditedProtocolFeeUsdc;
+        if (seizedUsdc > protocolFeeCreditedUsdc) {
+            IHousePool(host.pool())
+                .recordClaimantInflow(
+                    seizedUsdc - protocolFeeCreditedUsdc,
+                    IHousePool.ClaimantInflowKind.Revenue,
+                    IHousePool.ClaimantInflowCashMode.CashArrived
+                );
+        }
+        if (delta.syncMarginQueueAmount > 0) {
+            IOrderRouterAccounting(host.orderRouter()).syncMarginQueue(delta.account);
+        }
+        if (delta.existingTraderClaimConsumedUsdc > 0) {
+            host.settlementConsumeTraderClaim(delta.account, delta.existingTraderClaimConsumedUsdc);
+        }
+        if (delta.badDebtUsdc > 0) {
+            host.settlementAccumulateBadDebt(delta.badDebtUsdc);
         }
     }
 

@@ -652,16 +652,8 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
             return (0, 0, 0);
         }
 
-        uint256 reservedUsdc = reservedSettlementUsdc[account];
-        uint256 settlementAvailableUsdc =
-            settlementBalances[account] > reservedUsdc ? settlementBalances[account] - reservedUsdc : 0;
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = includeOtherLockedMargin
-            ? MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(
-                settlementAvailableUsdc, positionMarginUsdc[account], committedOrderMarginUsdc[account], 0
-            )
-            : MarginClearinghouseAccountingLib.buildPartialCloseUsdcBuckets(
-                settlementAvailableUsdc, positionMarginUsdc[account], committedOrderMarginUsdc[account], 0
-            );
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets =
+            _buildCloseLossBuckets(account, includeOtherLockedMargin);
         MarginClearinghouseAccountingLib.SettlementConsumption memory consumption =
             MarginClearinghouseAccountingLib.planTerminalLossConsumption(buckets, protectedLockedMarginUsdc, lossUsdc);
         MarginClearinghouseAccountingLib.BucketMutation memory mutation =
@@ -686,6 +678,25 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
 
         protocolFeeCreditedUsdc = _routeSettlementDebit(
             account, mutation.settlementDebitUsdc, recipient, protocolFeeAccount, protocolFeeUsdc
+        );
+    }
+
+    function _buildCloseLossBuckets(
+        address account,
+        bool includeOtherLockedMargin
+    ) internal view returns (IMarginClearinghouse.AccountUsdcBuckets memory) {
+        uint256 reservedUsdc = reservedSettlementUsdc[account];
+        uint256 settlementAvailableUsdc =
+            settlementBalances[account] > reservedUsdc ? settlementBalances[account] - reservedUsdc : 0;
+
+        if (includeOtherLockedMargin) {
+            return MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(
+                settlementAvailableUsdc, positionMarginUsdc[account], committedOrderMarginUsdc[account], 0
+            );
+        }
+
+        return MarginClearinghouseAccountingLib.buildPartialCloseUsdcBuckets(
+            settlementAvailableUsdc, positionMarginUsdc[account], committedOrderMarginUsdc[account], 0
         );
     }
 

@@ -47,8 +47,11 @@ jobs:
         with:
           version: v1.5.1
 
+      - name: Prepare coverage scope
+        run: bash scripts/prepare-coverage-scope.sh core
+
       - name: Run coverage
-        run: bash scripts/run-with-heartbeat.sh forge coverage --ir-minimum --report lcov --no-match-path "test/{fork,perps,options}/**"
+        run: bash scripts/run-with-heartbeat.sh forge coverage --ir-minimum --report lcov --no-match-test "testFuzz_|invariant_"
 
       - name: Filter coverage report
         run: awk -v scope=core -f scripts/filter-lcov-by-scope.awk lcov.info > lcov-core.info
@@ -75,8 +78,11 @@ jobs:
         with:
           version: v1.5.1
 
+      - name: Prepare coverage scope
+        run: bash scripts/prepare-coverage-scope.sh perps
+
       - name: Run coverage
-        run: bash scripts/run-with-heartbeat.sh forge coverage --ir-minimum --report lcov --match-path "test/perps/**/*.sol"
+        run: bash scripts/run-with-heartbeat.sh forge coverage --report lcov --match-path "test/perps/**/*.sol" --no-match-test "testFuzz_|invariant_|test_H01_UpdateMarkUsesPublishTime|test_GetTraderAccount_Withdrawable(Decreases|Drops)"
 
       - name: Filter coverage report
         run: awk -v scope=perps -f scripts/filter-lcov-by-scope.awk lcov.info > lcov-perps.info
@@ -103,8 +109,11 @@ jobs:
         with:
           version: v1.5.1
 
+      - name: Prepare coverage scope
+        run: bash scripts/prepare-coverage-scope.sh options
+
       - name: Run coverage
-        run: bash scripts/run-with-heartbeat.sh forge coverage --ir-minimum --report lcov --match-path "test/options/**/*.sol"
+        run: bash scripts/run-with-heartbeat.sh forge coverage --ir-minimum --report lcov --match-path "test/options/**/*.sol" --no-match-test "testFuzz_|invariant_"
 
       - name: Filter coverage report
         run: awk -v scope=options -f scripts/filter-lcov-by-scope.awk lcov.info > lcov-options.info

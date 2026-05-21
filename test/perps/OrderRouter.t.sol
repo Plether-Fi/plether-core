@@ -3892,9 +3892,7 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function _currentTimestamp() internal view returns (uint256 ts) {
-        assembly {
-            ts := timestamp()
-        }
+        return block.timestamp;
     }
 
     function _addFadDays(
