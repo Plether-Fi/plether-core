@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity 0.8.35;
 
 import {IMorpho, IMorphoFlashLoanCallback, MarketParams} from "../../src/interfaces/IMorpho.sol";
 import {MockToken} from "./MockToken.sol";

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.33;
+pragma solidity 0.8.35;
 
 import {ICurveGauge, ICurveTwocrypto, InvarCoin} from "../../src/InvarCoin.sol";
 import {StakedToken} from "../../src/StakedToken.sol";

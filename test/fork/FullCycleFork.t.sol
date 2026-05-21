@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.33;
+pragma solidity 0.8.35;
 
 import {AggregatorV3Interface} from "../../src/interfaces/AggregatorV3Interface.sol";
 import {BaseForkTest, MockCurvePoolForOracle} from "./BaseForkTest.sol";

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.33;
+pragma solidity 0.8.35;
 
 import {BaseForkTest} from "./BaseForkTest.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.30;
+pragma solidity 0.8.35;
 
 import {RewardDistributor} from "../src/RewardDistributor.sol";
 import "forge-std/Script.sol";

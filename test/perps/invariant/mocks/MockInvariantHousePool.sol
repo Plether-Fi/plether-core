@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.33;
+pragma solidity 0.8.35;
 
 import {ICfdEngineCore} from "../../../../src/perps/interfaces/ICfdEngineCore.sol";
 import {IHousePool} from "../../../../src/perps/interfaces/IHousePool.sol";

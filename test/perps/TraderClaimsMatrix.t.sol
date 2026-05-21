@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.33;
+pragma solidity 0.8.35;
 
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";

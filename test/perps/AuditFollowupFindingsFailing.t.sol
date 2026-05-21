@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.33;
+pragma solidity 0.8.35;
 
 // Audit-history file: tests prefixed with `obsolete_` preserve superseded findings for context only.
 // They are intentionally not statements about the live carry model or current accounting semantics.

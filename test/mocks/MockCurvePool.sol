@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity 0.8.35;
 
 import {ICurvePool} from "../../src/interfaces/ICurvePool.sol";
 import {MockToken} from "./MockToken.sol";
