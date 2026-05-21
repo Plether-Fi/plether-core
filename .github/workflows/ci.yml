@@ -62,6 +62,7 @@ jobs:
           files: ./lcov-core.info
           flags: core_protocol
           name: core-protocol
+          disable_search: true
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 
@@ -93,6 +94,7 @@ jobs:
           files: ./lcov-perps.info
           flags: perps
           name: perps
+          disable_search: true
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 
@@ -124,6 +126,7 @@ jobs:
           files: ./lcov-options.info
           flags: options
           name: options
+          disable_search: true
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 
