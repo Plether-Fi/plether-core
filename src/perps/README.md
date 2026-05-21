@@ -26,7 +26,7 @@ If you want the accounting model first, read [`ACCOUNTING_SPEC.md`](ACCOUNTING_S
 - Keepers execute queued orders and liquidations using Pyth update data.
 - LPs deposit USDC into `HousePool` through senior and junior `TrancheVault`s.
 - `CfdEngine` is the canonical ledger. It does the math but does not custody raw tokens.
-- The owner can delegate emergency `pause()` authority on `OrderRouter` and `HousePool` to a dedicated `pauser` address while retaining owner-only `unpause()` and role assignment.
+- The owner can delegate emergency router pause authority through `OrderRouterAdmin` and pool pause authority on `HousePool` to dedicated `pauser` addresses while retaining owner-only `unpause()` and role assignment.
 
 ### Core product rules
 
@@ -57,7 +57,7 @@ In practice, the compact public API is:
 - Keepers:
   - `OrderRouter.executeOrder(uint64,bytes[])`
   - `OrderRouter.executeOrderBatch(uint64,bytes[])`
-  - `OrderRouter.executeLiquidation(bytes32,bytes[])`
+  - `OrderRouter.executeLiquidation(address,bytes[])`
 - LPs:
   - `HousePool.depositSenior(uint256)` / `HousePool.withdrawSenior(uint256,address)`
   - `HousePool.depositJunior(uint256)` / `HousePool.withdrawJunior(uint256,address)`
@@ -84,7 +84,7 @@ The main runtime and read surfaces are:
 - `MarginClearinghouse`: trader custody and typed margin buckets.
 - `OrderRouter`: thin external shell for delayed-order commits, keeper execution, Pyth validation, and clearinghouse-reserved keeper bounties.
 - `CfdEngine`: canonical execution ledger and solvency boundary.
-- `CfdEngineSettlementSidecar`: externalized close/liquidation settlement orchestration used by the engine.
+- `CfdEngineSettlementSidecar`: externalized open/close/liquidation settlement orchestration used by the engine.
 - `CfdEnginePlanner`: externalized open/close/liquidation plan builder wired into the engine after deployment.
 - `HousePool`: LP capital, liabilities, reserves, and tranche waterfall.
 - `TrancheVault`: ERC-4626 LP vault wrappers for senior and junior capital.
@@ -94,7 +94,7 @@ The main runtime and read surfaces are:
 ### Intended boundaries
 
 - `CfdEngine` and `ICfdEngineCore` are the canonical runtime truth for execution, liquidation, and protocol status.
-- `CfdEngineSettlementSidecar` executes close and liquidation choreography, while `CfdEngine` remains the storage owner.
+- `CfdEngineSettlementSidecar` executes open, close, and liquidation settlement choreography, while `CfdEngine` remains the storage owner.
 - `CfdEngine`, `CfdEnginePlanner`, `CfdEngineSettlementSidecar`, and `CfdEngineAdmin` are now deployed separately and wired once through `CfdEngine.setDependencies(...)` to keep engine initcode under EIP-3860.
 - `MarginClearinghouse` owns trader settlement balances and locked-margin custody buckets.
 - `OrderRouter` owns queued order records while execution-bounty value remains reserved in `MarginClearinghouse`; its implementation is split into base storage/hooks, handler, validation, and utility modules.
@@ -313,17 +313,17 @@ These domains answer different questions. They should not silently share assumpt
 
 ### Basket oracle and publish-time checks
 
-The router is configured with parallel arrays of Pyth feed ids, quantities, and base prices.
+The router is configured with a `PletherOracle` contract. The oracle instance owns the Pyth endpoint plus the basket feed ids, quantities, base prices, and inversion flags set at deployment.
 
-- `_computeBasketPrice()` normalizes each feed to 8 decimals.
-- The router computes the weighted basket price in the same shape as the spot basket oracle.
+- `PletherOracle` normalizes each feed to 8 decimals while computing the basket price.
+- The oracle computes the weighted basket price in the same shape as the spot basket oracle.
 - Basket confidence is propagated conservatively by summing weighted component relative confidence, then multiplying by the basket price.
 - Opening and closing orders use the adverse side of the confidence interval for the trader's side: `BULL` opens are priced lower, `BEAR` opens are priced higher, `BULL` closes are priced higher, and `BEAR` closes are priced lower.
 - Liquidation checks also use the side-adverse confidence-adjusted mark for the liquidated account.
 - Component publish times must stay within `maxComponentPublishTimeDivergence`; if one basket leg is too far from the others, live opens are blocked rather than mixing fresh and stale components.
 - The minimum `publishTime` across feeds remains the basket publish time passed to the engine; historical order fills can use an older post-commit price without rewinding a newer cached engine mark.
 - Frozen-oracle close-only windows are the only regime that relaxes historical live-market settlement.
-- The Pyth endpoint and basket arrays are recoverable through `OrderRouterAdmin`'s timelocked oracle-config flow.
+- The router's `PletherOracle` address is recoverable through `OrderRouterAdmin`'s timelocked oracle-config flow; changing the Pyth endpoint or basket arrays requires deploying a new oracle and timelocking the router onto it.
 - The execution price is clamped to `CAP_PRICE` before the slippage check so the user sees the same price the engine executes.
 
 ### Frozen oracle behavior
@@ -408,7 +408,7 @@ Timelocked surfaces include:
 - `HousePool.seniorRateBps`
 - `HousePool.markStalenessLimit`
 - `OrderRouterAdmin` -> `OrderRouter.RouterConfig`
-- `OrderRouterAdmin` -> `OrderRouter.OracleConfig`
+- `OrderRouterAdmin` -> `OrderRouter.OracleConfig` for the configured `PletherOracle` address
 
 Instant controls remain for one-time wiring and fee withdrawal. `OrderRouter` pause/unpause is now owner-gated on `OrderRouterAdmin` rather than the router itself.
 

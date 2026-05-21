@@ -42,6 +42,8 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
     }
 
     /// @notice Returns the compact trader account summary for a canonical perps account.
+    /// @param account Account to inspect
+    /// @return viewData Trader account summary
     function getTraderAccount(
         address account
     ) external view returns (PerpsViewTypes.TraderAccountView memory viewData) {
@@ -61,6 +63,8 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
     }
 
     /// @notice Returns the compact current-position view for an account.
+    /// @param account Account to inspect
+    /// @return viewData Position summary
     function getPosition(
         address account
     ) external view returns (PerpsViewTypes.PositionView memory viewData) {
@@ -70,6 +74,8 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
     /// @notice Returns all currently pending orders for an account.
     /// @dev The public surface only returns pending orders because executed and failed orders are not
     ///      part of the compact product-facing queue summary.
+    /// @param account Account to inspect
+    /// @return pending Pending orders in account queue order
     function getPendingOrders(
         address account
     ) external view returns (PerpsViewTypes.PendingOrderView[] memory pending) {
@@ -94,6 +100,7 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
     }
 
     /// @notice Returns whether the account's current live position is liquidatable.
+    /// @param account Account to inspect
     function isLiquidatable(
         address account
     ) external view returns (bool) {
@@ -101,16 +108,19 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
     }
 
     /// @notice Returns the compact senior tranche view.
+    /// @return viewData Senior tranche balances, shares, and availability
     function getSeniorTranche() external view returns (PerpsViewTypes.TrancheView memory viewData) {
         return _getTrancheView(HOUSE_POOL.seniorVault(), true);
     }
 
     /// @notice Returns the compact junior tranche view.
+    /// @return viewData Junior tranche balances, shares, and availability
     function getJuniorTranche() external view returns (PerpsViewTypes.TrancheView memory viewData) {
         return _getTrancheView(HOUSE_POOL.juniorVault(), false);
     }
 
     /// @notice Returns high-level LP status flags.
+    /// @return viewData Deposit, withdrawal, and lifecycle status flags
     function getLpStatus() external view returns (PerpsViewTypes.LpStatusView memory viewData) {
         viewData.tradingActive = HOUSE_POOL.isTradingActive();
         viewData.withdrawalLive = HOUSE_POOL.isWithdrawalLive();
@@ -122,6 +132,7 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
     }
 
     /// @notice Returns high-level protocol runtime status flags.
+    /// @return viewData Protocol phase, oracle, and degraded-mode status
     function getProtocolStatus() external view returns (PerpsViewTypes.ProtocolStatusView memory viewData) {
         return _getProtocolStatusView();
     }

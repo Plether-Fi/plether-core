@@ -109,6 +109,7 @@ interface IHousePool {
     ///      also be used to restore canonical accounting after a raw-balance shortfall has already
     ///      reduced `totalAssets()` via the `min(rawBalance, accountedAssets)` boundary.
     ///      Reverts if the caller is unauthorized.
+    /// @param amount USDC amount to add to canonical accounted assets
     function recordProtocolInflow(
         uint256 amount
     ) external;
@@ -116,6 +117,9 @@ interface IHousePool {
     /// @notice Records claimant-owned value that should ultimately flow through the tranche waterfall.
     /// @dev `CashArrived` increments canonical accounted assets because raw USDC arrived in this flow.
     ///      `AlreadyRetained` only routes ownership for value already retained physically by the pool.
+    /// @param amount USDC amount to route through claimant accounting
+    /// @param kind Economic source bucket for the claimant inflow
+    /// @param cashMode Whether the inflow arrived with this call or was already retained by the pool
     function recordClaimantInflow(
         uint256 amount,
         ClaimantInflowKind kind,
@@ -130,29 +134,47 @@ interface IHousePool {
 
     /// @notice Total USDC attributed to the senior tranche (6 decimals)
     function seniorPrincipal() external view returns (uint256);
+
     /// @notice Total USDC attributed to the junior tranche (6 decimals)
     function juniorPrincipal() external view returns (uint256);
+
     /// @notice Senior high-water mark used to block dilutive recapitalizing deposits.
     function seniorHighWaterMark() external view returns (uint256);
+
     /// @notice Accounted LP assets currently quarantined pending explicit bootstrap / assignment (6 decimals)
     function unassignedAssets() external view returns (uint256);
 
+    /// @notice Deposits USDC into the senior tranche through the pool-level legacy action surface.
+    /// @param amount USDC amount to deposit
     function depositSenior(
         uint256 amount
     ) external;
+
+    /// @notice Withdraws USDC from the senior tranche through the pool-level legacy action surface.
+    /// @param amount USDC amount to withdraw
+    /// @param receiver Address receiving withdrawn USDC
     function withdrawSenior(
         uint256 amount,
         address receiver
     ) external;
+
+    /// @notice Deposits USDC into the junior tranche through the pool-level legacy action surface.
+    /// @param amount USDC amount to deposit
     function depositJunior(
         uint256 amount
     ) external;
+
+    /// @notice Withdraws USDC from the junior tranche through the pool-level legacy action surface.
+    /// @param amount USDC amount to withdraw
+    /// @param receiver Address receiving withdrawn USDC
     function withdrawJunior(
         uint256 amount,
         address receiver
     ) external;
 
     /// @notice Explicitly bootstraps quarantined LP assets into a tranche and mints matching shares.
+    /// @param toSenior True to assign assets to senior, false to junior
+    /// @param receiver Account receiving bootstrap tranche shares
     function assignUnassignedAssets(
         bool toSenior,
         address receiver
@@ -160,6 +182,9 @@ interface IHousePool {
 
     /// @notice Seeds a tranche with permanent share-backed minimum ownership using real USDC.
     /// @dev Canonical deployment should initialize both tranche seeds before enabling ordinary LP lifecycle.
+    /// @param toSenior True to seed senior, false to seed junior
+    /// @param amount USDC amount supplied by the owner for the seed
+    /// @param receiver Account receiving permanent seed shares
     function initializeSeedPosition(
         bool toSenior,
         uint256 amount,
@@ -168,6 +193,7 @@ interface IHousePool {
 
     /// @notice Max withdrawable by senior, capped by free USDC
     function getMaxSeniorWithdraw() external view returns (uint256);
+
     /// @notice Max withdrawable by junior, subordinated behind senior
     function getMaxJuniorWithdraw() external view returns (uint256);
 
@@ -205,24 +231,35 @@ interface IHousePool {
     /// @notice Whether withdrawals are currently possible (not degraded, mark is fresh)
     function isWithdrawalLive() external view returns (bool);
 
+    /// @notice Returns true after either tranche seed position has been initialized.
     function hasSeedLifecycleStarted() external view returns (bool);
 
+    /// @notice Returns true when both seeds exist and trading has not yet been activated.
     function canAcceptOrdinaryDeposits() external view returns (bool);
 
+    /// @notice Returns whether a delayed deposit request may be accepted for a tranche.
+    /// @param isSenior True for senior tranche, false for junior tranche
     function canAcceptTrancheDeposits(
         bool isSenior
     ) external view returns (bool);
 
+    /// @notice Returns whether an immediate ERC4626 deposit may be accepted for a tranche.
+    /// @param isSenior True for senior tranche, false for junior tranche
     function canAcceptInstantTrancheDeposits(
         bool isSenior
     ) external view returns (bool);
 
+    /// @notice Returns true when the seed/trading lifecycle allows new trader risk.
     function canIncreaseRisk() external view returns (bool);
 
+    /// @notice Returns whether live trading has been activated.
     function isTradingActive() external view returns (bool);
 
+    /// @notice Returns whether the engine reports frozen-oracle mode.
     function isOracleFrozen() external view returns (bool);
 
+    /// @notice Returns the active frozen-oracle LP fee for a tranche, or zero outside frozen mode.
+    /// @param isSenior True for senior tranche, false for junior tranche
     function frozenLpFeeBps(
         bool isSenior
     ) external view returns (uint256);

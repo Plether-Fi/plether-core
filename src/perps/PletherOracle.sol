@@ -45,6 +45,13 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
     uint256 public override adverseConfidenceMultiplierBps = 10_000;
     mapping(address => uint256) public override claimableEth;
 
+    /// @param engine_ Engine used for FAD state, cap price, and liquidation side lookup
+    /// @param housePool_ HousePool used for pool-side oracle freshness policy
+    /// @param pyth_ Pyth contract used for update and historical parse calls
+    /// @param feedIds_ Pyth feed ids included in the basket
+    /// @param quantities_ Basket weights; must sum to 1e18
+    /// @param basePrices_ Base prices used to normalize each component
+    /// @param inversions_ Whether each component price should be inverted before normalization
     constructor(
         address engine_,
         address housePool_,
@@ -92,6 +99,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         inversions = inversions_;
     }
 
+    /// @inheritdoc IPletherOracle
     function updatePrice(
         address refundRecipient,
         bytes[] calldata pythUpdateData,
@@ -100,6 +108,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         return _updateAndGetSnapshot(refundRecipient, pythUpdateData, mode);
     }
 
+    /// @inheritdoc IPletherOracle
     function updatePrice(
         address refundRecipient,
         bytes[] calldata pythUpdateData
@@ -107,6 +116,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         return _updateAndGetSnapshot(refundRecipient, pythUpdateData, PriceMode.OrderExecution).price;
     }
 
+    /// @inheritdoc IPletherOracle
     function updateOrderExecutionPrice(
         address refundRecipient,
         bytes[] calldata pythUpdateData,
@@ -115,6 +125,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         return _updateOrderExecutionPrice(refundRecipient, pythUpdateData, request);
     }
 
+    /// @inheritdoc IPletherOracle
     function updateBatchOrderExecutionPrice(
         address refundRecipient,
         bytes[] calldata pythUpdateData,
@@ -159,6 +170,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         ok = true;
     }
 
+    /// @inheritdoc IPletherOracle
     function updateLiquidationPrice(
         address refundRecipient,
         bytes[] calldata pythUpdateData,
@@ -175,16 +187,19 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         _refundExcess(refundRecipient, pythFee);
     }
 
+    /// @inheritdoc IPletherOracle
     function getLatestPrice(
         PriceMode mode
     ) external view override returns (PriceSnapshot memory snapshot) {
         return _getLatestPriceSnapshot(mode);
     }
 
+    /// @inheritdoc IPletherOracle
     function getLatestPrice() external view override returns (uint256 latestPrice) {
         return _getLatestPriceSnapshot(PriceMode.OrderExecution).price;
     }
 
+    /// @inheritdoc IPletherOracle
     function claimEthRefund() external override nonReentrant {
         uint256 amount = claimableEth[msg.sender];
         if (amount == 0) {
@@ -199,12 +214,14 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         emit EthRefundClaimed(msg.sender, amount);
     }
 
+    /// @inheritdoc IPletherOracle
     function getOrderExecutionPolicy(
         bool isClose
     ) external view override returns (PolicySnapshot memory policy) {
         return _policyForOrder(isClose);
     }
 
+    /// @inheritdoc IPletherOracle
     function applyConfig(
         OracleConfig calldata config
     ) external override {
@@ -226,6 +243,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         adverseConfidenceMultiplierBps = config.adverseConfidenceMultiplierBps;
     }
 
+    /// @inheritdoc IPletherOracle
     function getUpdateFee(
         bytes[] calldata pythUpdateData
     ) public view override returns (uint256 pythFee) {
@@ -235,6 +253,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         return pyth.getUpdateFee(pythUpdateData);
     }
 
+    /// @inheritdoc IPletherOracle
     function isOracleFrozen() public view override returns (bool) {
         return MarketCalendarLib.isOracleFrozen(block.timestamp, engine.fadDayOverrides(block.timestamp / 86_400));
     }

@@ -5,6 +5,7 @@ import {IOrderRouterAdminHost} from "./interfaces/IOrderRouterAdminHost.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 
+/// @notice Timelocked owner-controlled admin for OrderRouter queue, bounty, oracle, and pause configuration.
 contract OrderRouterAdmin is Ownable, Pausable {
 
     uint256 public constant TIMELOCK_DELAY = 48 hours;
@@ -48,6 +49,8 @@ contract OrderRouterAdmin is Ownable, Pausable {
     event OracleConfigCancelled();
     event PauserUpdated(address indexed previousPauser, address indexed newPauser);
 
+    /// @param router_ Router host that receives finalized configuration
+    /// @param initialOwner Owner allowed to propose, cancel, finalize, and unpause
     constructor(
         address router_,
         address initialOwner
@@ -69,6 +72,8 @@ contract OrderRouterAdmin is Ownable, Pausable {
         _;
     }
 
+    /// @notice Proposes router queue, bounty, and execution bounds behind the timelock.
+    /// @param config Router configuration to validate and stage
     function proposeRouterConfig(
         IOrderRouterAdminHost.RouterConfig calldata config
     ) external onlyOwner {
@@ -78,6 +83,7 @@ contract OrderRouterAdmin is Ownable, Pausable {
         emit RouterConfigProposed(config, routerConfigActivationTime);
     }
 
+    /// @notice Finalizes the pending router configuration after the timelock expires.
     function finalizeRouterConfig() external onlyOwner {
         _requireTimelockReady(routerConfigActivationTime);
         IOrderRouterAdminHost.RouterConfig memory config = _pendingRouterConfig;
@@ -87,12 +93,15 @@ contract OrderRouterAdmin is Ownable, Pausable {
         emit RouterConfigFinalized(config);
     }
 
+    /// @notice Cancels any pending router configuration.
     function cancelRouterConfig() external onlyOwner {
         delete _pendingRouterConfig;
         routerConfigActivationTime = 0;
         emit RouterConfigCancelled();
     }
 
+    /// @notice Proposes the router oracle address behind the timelock.
+    /// @param config Oracle configuration to validate and stage
     function proposeOracleConfig(
         IOrderRouterAdminHost.OracleConfig calldata config
     ) external onlyOwner {
@@ -102,6 +111,7 @@ contract OrderRouterAdmin is Ownable, Pausable {
         emit OracleConfigProposed(config, oracleConfigActivationTime);
     }
 
+    /// @notice Finalizes the pending oracle configuration after the timelock expires.
     function finalizeOracleConfig() external onlyOwner {
         _requireTimelockReady(oracleConfigActivationTime);
         IOrderRouterAdminHost.OracleConfig memory config = _pendingOracleConfig;
@@ -111,20 +121,27 @@ contract OrderRouterAdmin is Ownable, Pausable {
         emit OracleConfigFinalized(config);
     }
 
+    /// @notice Cancels any pending oracle configuration.
     function cancelOracleConfig() external onlyOwner {
         delete _pendingOracleConfig;
         oracleConfigActivationTime = 0;
         emit OracleConfigCancelled();
     }
 
+    /// @notice Returns the pending oracle configuration.
+    /// @return config Pending oracle configuration
     function getPendingOracleConfig() external view returns (IOrderRouterAdminHost.OracleConfig memory config) {
         config = _pendingOracleConfig;
     }
 
+    /// @notice Returns the pending router configuration.
+    /// @return config Pending router configuration
     function pendingRouterConfig() external view returns (IOrderRouterAdminHost.RouterConfig memory config) {
         config = _pendingRouterConfig;
     }
 
+    /// @notice Updates the account allowed to pause alongside the owner.
+    /// @param newPauser New emergency pauser account
     function setPauser(
         address newPauser
     ) external onlyOwner {
@@ -132,14 +149,19 @@ contract OrderRouterAdmin is Ownable, Pausable {
         pauser = newPauser;
     }
 
+    /// @notice Pauses router-controlled execution paths; callable by owner or configured pauser.
     function pause() external onlyPauserOrOwner {
         _pause();
     }
 
+    /// @notice Unpauses router-controlled execution paths; callable only by owner.
     function unpause() external onlyOwner {
         _unpause();
     }
 
+    /// @notice Records ETH owed to a beneficiary after router-side refund forwarding fails or is deferred.
+    /// @param beneficiary Account credited with claimable ETH
+    /// @param amount ETH amount credited; must match msg.value
     function creditClaimableEth(
         address beneficiary,
         uint256 amount
@@ -153,6 +175,8 @@ contract OrderRouterAdmin is Ownable, Pausable {
         claimableEth[beneficiary] += amount;
     }
 
+    /// @notice Claims deferred ETH refunds owed to the caller.
+    /// @param ethBalance Must be true; retained for compatibility with the public claim interface shape
     function claimBalance(
         bool ethBalance
     ) external {

@@ -43,14 +43,15 @@ Use these terms consistently:
 - `accountedAssets`: canonical protocol-owned USDC recognized by pool accounting
 - `excessAssets = max(rawAssets - accountedAssets, 0)`: unsolicited or otherwise unaccounted positive balance
 - `physicalAssets = totalAssets() = min(rawAssets, accountedAssets)`: conservative economic pool backing
-- `treasuryFees = clearinghouse.balanceUsdc(protocolTreasury)`: cash-realized protocol-owned inventory held as treasury margin in `MarginClearinghouse`, not LP equity
-- `netPhysicalAssets = physicalAssets`
+- `protocolTreasuryBalance = clearinghouse.balanceUsdc(protocolTreasury)`: cash-realized protocol-owned inventory held as treasury margin in `MarginClearinghouse`, not LP equity
+- `netPhysicalAssets = max(physicalAssets - protocolTreasuryBalance, 0)`: protocol/lens diagnostic quantity exposed by accounting snapshots when treasury margin should be excluded from protocol-owned pool depth
 
 Operational rules:
 
 - unsolicited positive transfers do not become economic depth until explicitly admitted,
 - raw-balance shortfalls reduce effective backing immediately,
-- all core accounting paths should read canonical physical assets rather than raw token balance.
+- all core accounting paths should read canonical physical assets rather than raw token balance,
+- live HousePool withdrawal and reconcile kernels start from `physicalAssets` and subtract explicit reserve buckets; they do not implicitly reserve `protocolTreasuryBalance`.
 
 ### Liability terms
 
@@ -84,7 +85,8 @@ Question answered:
 
 Definition:
 
-- start from `netPhysicalAssets`,
+- start from `physicalAssets`,
+- subtract existing trader claim liabilities when deriving effective solvency assets,
 - compare post-op assets to post-op `maxLiability`.
 
 Rule:
@@ -106,14 +108,15 @@ Question answered:
 Definition:
 
 ```text
-freeUsdc = netPhysicalAssets - withdrawalReservedUsdc
+freeUsdc = physicalAssets - withdrawalReservedUsdc
 ```
 
 Where `withdrawalReservedUsdc` is built from the canonical reserve model, including at least:
 
 - bounded trader liability,
 - trader claim balance,
-- clearinghouse-backed protocol treasury margin.
+- supplemental withdrawal reserves,
+- pool-level pending claimant and unassigned-asset reservations where applicable.
 
 Rule:
 
@@ -133,8 +136,8 @@ Question answered:
 
 Withdrawal/reconcile definition:
 
-- start from `netPhysicalAssets`,
-- subtract trader claim liabilities and protocol-owned balances,
+- start from `physicalAssets`,
+- subtract trader claim liabilities,
 - apply conservative unrealized MtM liability only,
 - do not book unrealized trader losses as assets.
 
@@ -185,10 +188,11 @@ Snapshot structs are boundary objects between engine accounting and downstream c
 
 Purpose:
 
-- canonical accounting payload for LP withdrawals and tranche reconciliation.
+- canonical accounting payload for LP withdrawals and tranche reconciliation. Live LP kernels consume `physicalAssetsUsdc` plus explicit reserve fields; `netPhysicalAssetsUsdc` is exposed for protocol and read-layer parity where treasury margin should be excluded.
 
 Key fields:
 
+- `physicalAssetsUsdc`
 - `netPhysicalAssetsUsdc`
 - `maxLiabilityUsdc`
 - `supplementalReservedUsdc`: reserved extension slot for LP-withdrawal accounting; currently zero in the carry model
@@ -527,7 +531,7 @@ Required transition rules:
 
 The accounting system should preserve the following:
 
-1. `withdrawableAssets <= netPhysicalAssets`
+1. `withdrawableAssets <= physicalAssets` after explicit withdrawal reserves
 2. LP-withdrawable cash is at least as conservative as solvency assets
 3. no realized shortfall goes unrecorded
 4. no pending-order reservation is treated as free trader equity

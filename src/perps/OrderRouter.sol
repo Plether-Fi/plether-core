@@ -11,12 +11,13 @@ import {OrderRouterBase} from "./router/OrderRouterBase.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 
 /// @title OrderRouter (The MEV Shield)
-/// @notice Manages Commit-Reveal, MEV protection, and the un-brickable FIFO queue.
+/// @notice Manages delayed order commits, MEV protection, and the un-brickable FIFO queue.
 /// @dev Does not custody trader collateral or bounty reserves; queued value remains in MarginClearinghouse.
 /// @custom:security-contact contact@plether.com
 contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, ReentrancyGuardTransient {
 
     /// @param _engine CfdEngine that processes trades and liquidations
+    /// @param _engineLens CfdEngineLens used for commit-time open validation previews
     /// @param _housePool HousePool used for depth queries and liquidation bounty payouts
     /// @param _pletherOracle Deployed perps oracle used for Pyth basket pricing
     constructor(
@@ -43,13 +44,18 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, Reentra
         _commitOrder(side, sizeDelta, marginDelta, targetPrice, isClose);
     }
 
-    /// @notice Returns the total queued reservation state for an account across all pending orders.
+    /// @notice Prunes spent margin-reservation links for an account's pending-order queue.
+    /// @param account Account whose router-side margin reservation queue should be synchronized
     function syncMarginQueue(
         address account
     ) external {
         _syncMarginQueue(account);
     }
 
+    /// @notice Returns the pending-order view and next account-queue link for an order id.
+    /// @param orderId Order id to inspect
+    /// @return pending Pending order data, or an empty view when the order is not pending
+    /// @return nextAccountOrderId Next order id in the account queue, or zero at the tail
     function getPendingOrderView(
         uint64 orderId
     ) external view returns (IOrderRouterAccounting.PendingOrderView memory pending, uint64 nextAccountOrderId) {
@@ -81,12 +87,18 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, Reentra
         _executeOrderBatch(maxOrderId, pythUpdateData);
     }
 
+    /// @notice Applies a finalized router risk and queue configuration.
+    /// @dev Callable only by the configured router admin.
+    /// @param config Timelocked router configuration to apply
     function applyRouterConfig(
         IOrderRouterAdminHost.RouterConfig calldata config
     ) external nonReentrant {
         _applyRouterConfig(config);
     }
 
+    /// @notice Applies a finalized oracle integration configuration.
+    /// @dev Callable only by the configured router admin.
+    /// @param config Timelocked oracle configuration to apply
     function applyOracleConfig(
         IOrderRouterAdminHost.OracleConfig calldata config
     ) external nonReentrant {

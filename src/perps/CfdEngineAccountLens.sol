@@ -28,6 +28,8 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
     }
 
     /// @notice Returns detailed clearinghouse bucket and reachability state for an account.
+    /// @param account Account to inspect
+    /// @return viewData Collateral, reachability, and claim balances for the account
     function getAccountCollateralView(
         address account
     ) external view returns (ICfdEngineTypes.AccountCollateralView memory viewData) {
@@ -56,6 +58,8 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
     /// @notice Returns the current withdrawable USDC for an account under engine-side guards.
     /// @dev Open-position withdrawals are limited by free buying power, degraded mode, mark freshness,
     ///      pending carry, and the post-withdraw initial margin requirement.
+    /// @param account Account to inspect
+    /// @return withdrawableUsdc Free settlement amount currently withdrawable
     function getWithdrawableUsdc(
         address account
     ) external view returns (uint256 withdrawableUsdc) {
@@ -128,6 +132,8 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
     }
 
     /// @notice Returns a compact accounting split for account custody, reservation, and trader claims.
+    /// @param account Account to inspect
+    /// @return viewData Compact ledger view
     function getAccountLedgerView(
         address account
     ) external view returns (AccountLensViewTypes.AccountLedgerView memory viewData) {
@@ -143,6 +149,8 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
     }
 
     /// @notice Returns the full account ledger snapshot used by tests and richer read paths.
+    /// @param account Account to inspect
+    /// @return snapshot Full account ledger snapshot
     function getAccountLedgerSnapshot(
         address account
     ) external view returns (AccountLensViewTypes.AccountLedgerSnapshot memory snapshot) {

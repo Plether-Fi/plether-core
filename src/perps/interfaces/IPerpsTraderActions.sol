@@ -6,6 +6,12 @@ import {CfdTypes} from "../CfdTypes.sol";
 /// @notice Trader-facing action surface aligned with the current delayed-order router model.
 interface IPerpsTraderActions {
 
+    /// @notice Submits a trade intent to the delayed FIFO order queue.
+    /// @param side BULL or BEAR
+    /// @param sizeDelta Position size change (18 decimals)
+    /// @param marginDelta Margin to add or remove (6 decimals, USDC)
+    /// @param targetPrice Slippage limit price (8 decimals, zero for market)
+    /// @param isClose True for close/decrease orders
     function commitOrder(
         CfdTypes.Side side,
         uint256 sizeDelta,

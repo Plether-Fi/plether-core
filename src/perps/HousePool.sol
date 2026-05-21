@@ -110,6 +110,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
     // ==========================================
 
     /// @notice Set the senior tranche vault address (one-time, immutable after set)
+    /// @param _vault Senior tranche ERC4626 vault address
     function setSeniorVault(
         address _vault
     ) external onlyOwner {
@@ -123,6 +124,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
     }
 
     /// @notice Set the junior tranche vault address (one-time, immutable after set)
+    /// @param _vault Junior tranche ERC4626 vault address
     function setJuniorVault(
         address _vault
     ) external onlyOwner {
@@ -136,6 +138,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
     }
 
     /// @notice Propose a new pool config, subject to a 48h timelock.
+    /// @param newConfig Pool configuration to validate and stage
     function proposePoolConfig(
         PoolConfig calldata newConfig
     ) external onlyOwner {
@@ -193,6 +196,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
 
     /// @notice Updates the dedicated emergency pauser.
     /// @dev The owner retains unpause authority and may still pause directly.
+    /// @param newPauser Account allowed to pause alongside the owner
     function setPauser(
         address newPauser
     ) external onlyOwner {
@@ -222,26 +226,33 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
         return raw < accountedAssets ? raw : accountedAssets;
     }
 
+    /// @notice Returns true once both tranche seed positions have been initialized.
     function isSeedLifecycleComplete() public view returns (bool) {
         return HousePoolSeedLifecycleLib.isSeedLifecycleComplete(seniorSeedInitialized, juniorSeedInitialized);
     }
 
+    /// @notice Returns true after either tranche seed position has been initialized.
     function hasSeedLifecycleStarted() public view override returns (bool) {
         return HousePoolSeedLifecycleLib.hasSeedLifecycleStarted(seniorSeedInitialized, juniorSeedInitialized);
     }
 
+    /// @notice Returns true when both seeds exist and trading has not yet been activated.
     function canAcceptOrdinaryDeposits() public view override returns (bool) {
         return HousePoolSeedLifecycleLib.canAcceptOrdinaryDeposits(
             seniorSeedInitialized, juniorSeedInitialized, isTradingActive
         );
     }
 
+    /// @notice Returns whether a delayed deposit request may be accepted for a tranche.
+    /// @param isSenior True for senior tranche, false for junior tranche
     function canAcceptTrancheDeposits(
         bool isSenior
     ) public view override returns (bool) {
         return _canAcceptTrancheDeposits(isSenior, false);
     }
 
+    /// @notice Returns whether an immediate ERC4626 deposit may be accepted for a tranche.
+    /// @param isSenior True for senior tranche, false for junior tranche
     function canAcceptInstantTrancheDeposits(
         bool isSenior
     ) public view override returns (bool) {
@@ -271,10 +282,12 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
         );
     }
 
+    /// @notice Returns true when the seed/trading lifecycle allows new trader risk.
     function canIncreaseRisk() public view override returns (bool) {
         return HousePoolSeedLifecycleLib.canIncreaseRisk(seniorSeedInitialized, juniorSeedInitialized, isTradingActive);
     }
 
+    /// @notice Enables live trading after both tranche seed positions are initialized.
     function activateTrading() external onlyOwner {
         if (!HousePoolSeedLifecycleLib.tradingActivationReady(seniorSeedInitialized, juniorSeedInitialized)) {
             revert HousePool__TradingActivationNotReady();
@@ -307,6 +320,8 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
     }
 
     /// @notice Sweeps unsolicited USDC that has not been accounted into protocol economics.
+    /// @param recipient Address receiving swept excess USDC
+    /// @param amount Excess USDC amount to sweep
     function sweepExcess(
         address recipient,
         uint256 amount
@@ -340,6 +355,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
     ///      not require raw excess to exist: it is the explicit accounting hook for endogenous
     ///      protocol gains and may also be used to restore canonical accounting after a raw-balance
     ///      shortfall has already reduced effective assets through `totalAssets() = min(raw, accounted)`.
+    /// @param amount USDC amount to add to canonical accounted assets
     function recordProtocolInflow(
         uint256 amount
     ) external {
@@ -355,6 +371,9 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
 
     /// @notice Records claimant-owned value into the tranche claimant path.
     /// @dev Revenue and recapitalization remain distinct economic buckets, but share one API.
+    /// @param amount USDC amount to route through claimant accounting
+    /// @param kind Economic source bucket for the claimant inflow
+    /// @param cashMode Whether the inflow arrived with this call or was already retained by the pool
     function recordClaimantInflow(
         uint256 amount,
         IHousePool.ClaimantInflowKind kind,
@@ -386,6 +405,8 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
 
     /// @notice Explicitly bootstraps quarantined LP assets into a tranche by minting matching shares.
     /// @dev Prevents later LPs from implicitly capturing value that arrived while no claimant shares existed.
+    /// @param toSenior True to assign assets to senior, false to junior
+    /// @param receiver Account receiving bootstrap tranche shares
     function assignUnassignedAssets(
         bool toSenior,
         address receiver
@@ -431,6 +452,9 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
 
     /// @notice Seeds a tranche with a permanent minimum share supply backed by real USDC.
     /// @dev Mints bootstrap shares so a tranche never becomes ownerless in steady state.
+    /// @param toSenior True to seed senior, false to seed junior
+    /// @param amount USDC amount supplied by the owner for the seed
+    /// @param receiver Account receiving permanent seed shares
     function initializeSeedPosition(
         bool toSenior,
         uint256 amount,
@@ -615,6 +639,10 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
 
     /// @notice Returns tranche principals and withdrawal caps as if reconcile ran right now.
     /// @dev Read-only preview for ERC4626 consumers that need same-tx parity with reconcile-first vault flows.
+    /// @return seniorPrincipalUsdc Simulated senior principal after reconcile
+    /// @return juniorPrincipalUsdc Simulated junior principal after reconcile
+    /// @return maxSeniorWithdrawUsdc Simulated senior withdrawal cap after reconcile
+    /// @return maxJuniorWithdrawUsdc Simulated junior withdrawal cap after reconcile
     function getPendingTrancheState()
         external
         view
@@ -644,6 +672,9 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
         );
     }
 
+    /// @notice Returns tranche principals for deposit pricing as if the deposit-side reconcile ran now.
+    /// @return seniorPrincipalUsdc Simulated senior principal after deposit reconcile
+    /// @return juniorPrincipalUsdc Simulated junior principal after deposit reconcile
     function getPendingDepositTrancheState()
         external
         view
@@ -654,35 +685,44 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
         juniorPrincipalUsdc = ctx.pendingState.waterfall.juniorPrincipal;
     }
 
+    /// @notice Returns whether pending deposit finalization would leave senior below its high-water mark.
     function isSeniorImpairedAfterPendingDepositReconcile() external view returns (bool) {
         HousePoolContext memory ctx = _buildCurrentHousePoolContext();
         return ctx.pendingState.waterfall.seniorPrincipal < ctx.pendingState.waterfall.seniorHighWaterMark;
     }
 
+    /// @notice Returns whether withdrawals are live under current mark freshness and runtime mode.
     function isWithdrawalLive() external view returns (bool) {
         return _withdrawalsLive(_getHousePoolInputSnapshot(), _getHousePoolStatusSnapshot());
     }
 
+    /// @notice Returns the configured senior target coupon rate in basis points.
     function seniorRateBps() public view returns (uint256) {
         return poolConfig.seniorRateBps;
     }
 
+    /// @notice Returns the pool mark staleness limit used for reconcile and withdrawal checks.
     function markStalenessLimit() public view returns (uint256) {
         return poolConfig.markStalenessLimit;
     }
 
+    /// @notice Returns the senior LP fee charged while the oracle is frozen.
     function seniorFrozenLpFeeBps() public view returns (uint256) {
         return poolConfig.seniorFrozenLpFeeBps;
     }
 
+    /// @notice Returns the junior LP fee charged while the oracle is frozen.
     function juniorFrozenLpFeeBps() public view returns (uint256) {
         return poolConfig.juniorFrozenLpFeeBps;
     }
 
+    /// @notice Returns whether the engine reports frozen-oracle mode.
     function isOracleFrozen() public view override returns (bool) {
         return ENGINE.isOracleFrozen();
     }
 
+    /// @notice Returns the active frozen-oracle LP fee for a tranche, or zero outside frozen mode.
+    /// @param isSenior True for senior tranche, false for junior tranche
     function frozenLpFeeBps(
         bool isSenior
     ) public view override returns (uint256) {
@@ -692,6 +732,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
         return isSenior ? poolConfig.seniorFrozenLpFeeBps : poolConfig.juniorFrozenLpFeeBps;
     }
 
+    /// @notice Minimum assets accepted by ordinary ERC4626 tranche deposit/mint flows.
     function minTrancheDepositUsdc() external pure override returns (uint256) {
         return MIN_TRANCHE_DEPOSIT_USDC;
     }

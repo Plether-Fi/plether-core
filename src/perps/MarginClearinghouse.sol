@@ -102,6 +102,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     }
 
     /// @notice Sets the CfdEngine address (one-time, reverts if already set).
+    /// @param _engine Engine authorized for settlement and position margin operations
     function setEngine(
         address _engine
     ) external onlyOwner {
@@ -118,8 +119,8 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     // USER ACTIONS
     // ==========================================
 
-    /// @notice Deposits settlement USDC into the specified margin account.
-    /// @param account Deterministic account ID derived from msg.sender address
+    /// @notice Deposits settlement USDC into the caller's margin account.
+    /// @param account Account receiving the deposit; must equal msg.sender
     /// @param amount Token amount to transfer in
     function deposit(
         address account,
@@ -129,14 +130,15 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     }
 
     /// @notice Trader-facing wrapper that deposits into the caller's canonical account id.
+    /// @param amount USDC amount to deposit
     function depositMargin(
         uint256 amount
     ) external nonReentrant {
         _deposit(msg.sender, msg.sender, amount);
     }
 
-    /// @notice Withdraws settlement USDC from a margin account.
-    /// @param account Deterministic account ID derived from msg.sender address
+    /// @notice Withdraws settlement USDC from the caller's margin account.
+    /// @param account Account sending the withdrawal; must equal msg.sender
     /// @param amount USDC amount to withdraw
     function withdraw(
         address account,
@@ -146,6 +148,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     }
 
     /// @notice Trader-facing wrapper that withdraws from the caller's canonical account id.
+    /// @param amount USDC amount to withdraw
     function withdrawMargin(
         uint256 amount
     ) external nonReentrant {
@@ -237,6 +240,8 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     }
 
     /// @notice Returns the explicit USDC bucket split after subtracting the clearinghouse's typed locked-margin buckets.
+    /// @param account Account to inspect
+    /// @return buckets Settlement, locked, and free USDC buckets
     function getAccountUsdcBuckets(
         address account
     ) public view returns (IMarginClearinghouse.AccountUsdcBuckets memory buckets) {
@@ -280,6 +285,10 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         _lockMargin(account, IMarginClearinghouse.MarginBucket.CommittedOrder, amountUsdc);
     }
 
+    /// @notice Reserves committed-order margin for a specific order id inside the clearinghouse reservation ledger.
+    /// @param account Account whose committed-order margin backs the reservation
+    /// @param orderId Router order id receiving the reservation
+    /// @param amountUsdc USDC amount to reserve
     function reserveCommittedOrderMargin(
         address account,
         uint64 orderId,
@@ -320,6 +329,9 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         _unlockMargin(account, IMarginClearinghouse.MarginBucket.CommittedOrder, amountUsdc);
     }
 
+    /// @notice Releases any remaining reservation balance for an order back into free settlement.
+    /// @param orderId Order reservation id to release
+    /// @return releasedUsdc USDC amount released
     function releaseOrderReservation(
         uint64 orderId
     ) external onlyOperator returns (uint256 releasedUsdc) {
@@ -329,6 +341,9 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         emit ReservationReleased(orderId, reservation.account, releasedUsdc);
     }
 
+    /// @notice Releases any remaining reservation balance for an order if it is still active.
+    /// @param orderId Order reservation id to release
+    /// @return releasedUsdc USDC amount released, or zero if the reservation was not active
     function releaseOrderReservationIfActive(
         uint64 orderId
     ) external onlyEngineOrOrderRouter returns (uint256 releasedUsdc) {
@@ -342,6 +357,10 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         emit ReservationReleased(orderId, reservation.account, releasedUsdc);
     }
 
+    /// @notice Consumes a specific amount from an order reservation, capped by its remaining balance.
+    /// @param orderId Order reservation id to consume
+    /// @param amountUsdc Requested USDC amount to consume
+    /// @return consumedUsdc USDC amount consumed
     function consumeOrderReservation(
         uint64 orderId,
         uint256 amountUsdc
@@ -357,6 +376,10 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         emit ReservationConsumed(orderId, reservation.account, consumedUsdc, reservation.remainingAmountUsdc);
     }
 
+    /// @notice Consumes active order reservations for an account in FIFO reservation order.
+    /// @param account Account whose active reservations should be consumed
+    /// @param amountUsdc Requested USDC amount to consume
+    /// @return consumedUsdc USDC amount consumed
     function consumeAccountOrderReservations(
         address account,
         uint256 amountUsdc
@@ -364,6 +387,10 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         return _consumeAccountOrderReservations(account, amountUsdc, true);
     }
 
+    /// @notice Consumes the supplied active order reservations in supplied order until the requested amount is exhausted.
+    /// @param orderIds Reservation order ids to consume
+    /// @param amountUsdc Requested USDC amount to consume
+    /// @return consumedUsdc USDC amount consumed
     function consumeOrderReservationsById(
         uint64[] calldata orderIds,
         uint256 amountUsdc
@@ -478,6 +505,9 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         activeCommittedOrderReservationUsdc[account] -= amountUsdc;
     }
 
+    /// @notice Locks settlement into a reserved bucket excluded from generic order/position margin release paths.
+    /// @param account Account whose settlement should be reserved
+    /// @param amountUsdc USDC amount to lock as reserved settlement
     function lockReservedSettlement(
         address account,
         uint256 amountUsdc
@@ -486,6 +516,9 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         _lockMargin(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, amountUsdc);
     }
 
+    /// @notice Unlocks settlement from the reserved bucket back into free settlement.
+    /// @param account Account whose reserved settlement should be unlocked
+    /// @param amountUsdc USDC amount to unlock
     function unlockReservedSettlement(
         address account,
         uint256 amountUsdc
@@ -510,6 +543,8 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     }
 
     /// @notice Credits settlement USDC and locks the same amount as active margin.
+    /// @param account Account receiving the settlement credit and position margin lock
+    /// @param amountUsdc USDC amount to credit and lock
     function creditSettlementAndLockMargin(
         address account,
         uint256 amountUsdc
@@ -523,6 +558,14 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     }
 
     /// @notice Applies an open/increase trade cost and routes any cash-collected protocol fee to a treasury account.
+    /// @param account Account whose settlement/margin pays or receives the open cost
+    /// @param marginDeltaUsdc Margin supplied with the order
+    /// @param tradeCostUsdc Signed VPI/trade cost; positive debits, negative rebates
+    /// @param recipient Pool recipient for cash debits
+    /// @param protocolFeeAccount Clearinghouse account receiving any protocol fee credit
+    /// @param protocolFeeUsdc Protocol fee amount included in the open cost
+    /// @return netMarginChangeUsdc Signed change applied to active position margin
+    /// @return protocolFeeCreditedUsdc Protocol fee credited to the treasury account
     function applyOpenCost(
         address account,
         uint256 marginDeltaUsdc,
@@ -576,6 +619,12 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
 
     /// @notice Consumes a realized settlement loss from free settlement first, then from active position margin.
     /// @dev Unrelated locked margin remains protected.
+    /// @param account Account paying the loss
+    /// @param lossUsdc USDC loss to collect
+    /// @param recipient Recipient of seized USDC
+    /// @return marginConsumedUsdc Active position margin consumed
+    /// @return freeSettlementConsumedUsdc Free settlement consumed
+    /// @return uncoveredUsdc Loss left uncovered after available funds are exhausted
     function consumeSettlementLoss(
         address account,
         uint256,
@@ -616,6 +665,17 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     }
 
     /// @notice Consumes close-path losses and routes any cash-collected protocol fee to a treasury account.
+    /// @param account Account paying the close loss
+    /// @param reservationOrderIds Active reservation ids that may cover close settlement
+    /// @param lossUsdc USDC loss to collect
+    /// @param protectedLockedMarginUsdc Active position margin protected from loss consumption
+    /// @param includeOtherLockedMargin Whether committed/reserved locked buckets may be consumed
+    /// @param recipient Recipient of seized USDC
+    /// @param protocolFeeAccount Clearinghouse account receiving any protocol fee credit
+    /// @param protocolFeeUsdc Protocol fee amount included in the close cost
+    /// @return seizedUsdc USDC transferred to the recipient
+    /// @return shortfallUsdc Loss left uncovered after available funds are exhausted
+    /// @return protocolFeeCreditedUsdc Protocol fee credited to the treasury account
     function consumeCloseLoss(
         address account,
         uint64[] calldata reservationOrderIds,
@@ -702,6 +762,13 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
 
     /// @notice Applies a pre-planned liquidation settlement mutation and credits the keeper bounty internally.
     /// @dev Releases the active position margin bucket and covered committed margin exactly as planned.
+    /// @param account Liquidated account
+    /// @param reservationOrderIds Active reservation ids to release or consume during settlement
+    /// @param plan Liquidation settlement plan computed by the engine planner
+    /// @param recipient Pool recipient of seized USDC
+    /// @param keeper Keeper credited with bounty settlement
+    /// @param keeperBountyUsdc USDC bounty to credit to the keeper
+    /// @return seizedUsdc USDC transferred to the recipient
     function applyLiquidationSettlementPlan(
         address account,
         uint64[] calldata reservationOrderIds,
@@ -1035,6 +1102,8 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     }
 
     /// @notice Reserves free settlement for the engine's fresh close-bounty path with carry checkpointing.
+    /// @param account Account whose free settlement should be reserved
+    /// @param amount USDC amount to reserve
     function reserveCloseExecutionBountyFromSettlement(
         address account,
         uint256 amount
@@ -1044,6 +1113,8 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     }
 
     /// @notice Reserves free settlement for the engine's stale close-bounty path without checkpointing carry.
+    /// @param account Account whose free settlement should be reserved
+    /// @param amount USDC amount to reserve
     function reserveStaleCloseExecutionBountyFromSettlement(
         address account,
         uint256 amount
@@ -1051,6 +1122,10 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         _lockMargin(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, amount);
     }
 
+    /// @notice Transfers already-reserved settlement from one account to another without moving tokens.
+    /// @param account Account whose reserved settlement is transferred
+    /// @param recipient Account receiving settlement credit
+    /// @param amount Reserved settlement amount to transfer
     function transferReservedSettlement(
         address account,
         address recipient,
@@ -1074,6 +1149,9 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         emit ReservedSettlementTransferred(account, recipient, amount);
     }
 
+    /// @notice Reclassifies active position margin into reserved settlement for a close-order execution bounty.
+    /// @param account Account whose position margin should be reserved
+    /// @param amount USDC amount to reserve
     function reserveCloseExecutionBountyFromPositionMargin(
         address account,
         uint256 amount
@@ -1086,6 +1164,8 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     }
 
     /// @notice Reserves active position margin for the engine's stale close-bounty path without checkpointing carry.
+    /// @param account Account whose position margin should be reserved
+    /// @param amount USDC amount to reserve
     function reserveStaleCloseExecutionBountyFromPositionMargin(
         address account,
         uint256 amount
@@ -1100,18 +1180,25 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         _reservePositionMarginAsSettlement(account, amount);
     }
 
+    /// @notice Returns the settlement USDC balance for an account.
+    /// @param account Account to inspect
     function balanceUsdc(
         address account
     ) external view returns (uint256) {
         return settlementBalances[account];
     }
 
+    /// @notice Returns the total locked USDC margin across all buckets for an account.
+    /// @param account Account to inspect
     function lockedMarginUsdc(
         address account
     ) external view returns (uint256) {
         return _totalLockedMarginUsdc(account);
     }
 
+    /// @notice Returns the typed locked-margin buckets for an account.
+    /// @param account Account to inspect
+    /// @return buckets Position, committed-order, reserved-settlement, and total locked buckets
     function getLockedMarginBuckets(
         address account
     ) external view returns (IMarginClearinghouse.LockedMarginBuckets memory buckets) {
@@ -1121,12 +1208,18 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         buckets.totalLockedMarginUsdc = _totalLockedMarginUsdc(account);
     }
 
+    /// @notice Returns the reservation record for a specific order id.
+    /// @param orderId Order reservation id to inspect
+    /// @return reservation Reservation record
     function getOrderReservation(
         uint64 orderId
     ) external view returns (IMarginClearinghouse.OrderReservation memory reservation) {
         return orderReservations[orderId];
     }
 
+    /// @notice Returns the aggregate active reservation summary for an account.
+    /// @param account Account to inspect
+    /// @return summary Active committed-order margin and count
     function getAccountReservationSummary(
         address account
     ) external view returns (IMarginClearinghouse.AccountReservationSummary memory summary) {

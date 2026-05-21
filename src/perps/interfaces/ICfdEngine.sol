@@ -31,6 +31,10 @@ interface ICfdEngine is ICfdEngineTypes {
     /// @notice Router-facing order execution entrypoint with typed business-rule failures.
     /// @dev Reverts with `CfdEngine__TypedOrderFailure` for expected order invalidations so the
     ///      router can apply deterministic failed-order bounty policy without selector matching.
+    /// @param order Queued order being executed by the router
+    /// @param currentOraclePrice Execution oracle price (8 decimals), clamped to CAP_PRICE
+    /// @param poolDepthUsdc HousePool depth used for planning and solvency checks
+    /// @param publishTime Oracle publish timestamp recorded as the latest mark time
     function processOrderTyped(
         CfdTypes.Order memory order,
         uint256 currentOraclePrice,
@@ -39,6 +43,9 @@ interface ICfdEngine is ICfdEngineTypes {
     ) external;
 
     /// @notice Reserves close-order execution bounty from free settlement first, then active position margin.
+    /// @param account Account committing the close order
+    /// @param sizeDelta Position size the close order intends to close
+    /// @param amountUsdc Execution bounty amount to reserve
     function reserveCloseOrderExecutionBounty(
         address account,
         uint256 sizeDelta,
@@ -46,6 +53,8 @@ interface ICfdEngine is ICfdEngineTypes {
     ) external;
 
     /// @notice Moves forfeited reserved execution-bounty reservation into the protocol treasury account.
+    /// @param sourceAccount Account whose reserved settlement bounty is forfeited
+    /// @param amountUsdc Reserved USDC amount to transfer into the protocol treasury account
     function absorbReservedExecutionBounty(
         address sourceAccount,
         uint256 amountUsdc
@@ -54,6 +63,11 @@ interface ICfdEngine is ICfdEngineTypes {
     /// @notice Credits a reserved execution bounty into the beneficiary's clearinghouse account.
     /// @dev Realizes carry first when the beneficiary account currently has an open position so the
     ///      settlement-balance credit cannot retroactively dilute carry owed over the elapsed interval.
+    /// @param sourceAccount Account whose reserved settlement bounty funds the credit
+    /// @param beneficiary Account receiving the clearinghouse settlement credit
+    /// @param amountUsdc Reserved USDC amount to transfer
+    /// @param price Fresh mark price used to checkpoint beneficiary carry when needed
+    /// @param publishTime Mark publish timestamp used when checkpointing beneficiary carry
     function creditBounty(
         address sourceAccount,
         address beneficiary,
@@ -67,6 +81,7 @@ interface ICfdEngine is ICfdEngineTypes {
     /// @param currentOraclePrice Mark price from the oracle (8 decimals)
     /// @param poolDepthUsdc     Available pool liquidity (6 decimals)
     /// @param publishTime        Oracle publish timestamp
+    /// @param keeper             Keeper credited with any liquidation bounty
     /// @return keeperBountyUsdc  Bounty paid to the liquidation keeper (6 decimals)
     function liquidatePosition(
         address account,
@@ -78,19 +93,28 @@ interface ICfdEngine is ICfdEngineTypes {
 
     /// @notice Realizes accrued carry against the current reachable collateral before a user-level
     ///         settlement balance mutation changes the carry basis.
+    /// @param account Account whose open-position carry should be realized if a position exists
     function realizeCarryBeforeMarginChange(
         address account
     ) external;
 
+    /// @notice Permissionlessly advances both side carry indexes to the current timestamp.
     function checkpointCarryIndexes() external;
 
     /// @notice Canonical liquidation preview using the pool's current accounted depth.
+    /// @param account Account whose position would be tested
+    /// @param oraclePrice Oracle price used for the preview
+    /// @return preview Liquidation result and bounty data
     function previewLiquidation(
         address account,
         uint256 oraclePrice
     ) external view returns (LiquidationPreview memory preview);
 
     /// @notice Hypothetical liquidation simulation at a caller-supplied pool depth.
+    /// @param account Account whose position would be tested
+    /// @param oraclePrice Oracle price used for the simulation
+    /// @param poolDepthUsdc Hypothetical HousePool depth
+    /// @return preview Liquidation result and bounty data
     function simulateLiquidation(
         address account,
         uint256 oraclePrice,
@@ -125,6 +149,14 @@ interface ICfdEngine is ICfdEngineTypes {
     function isOracleFrozen() external view returns (bool);
 
     /// @notice Returns the current position tuple for an account.
+    /// @param account Account to inspect
+    /// @return size Position size (18 decimals)
+    /// @return margin Current active position margin (6 decimals)
+    /// @return entryPrice Average entry price (8 decimals)
+    /// @return maxProfitUsdc Position maximum profit envelope (6 decimals)
+    /// @return side Position side
+    /// @return lastUpdateTime Last position mutation timestamp
+    /// @return vpiAccrued Net VPI accrued on the position
     function positions(
         address account
     )
@@ -141,6 +173,10 @@ interface ICfdEngine is ICfdEngineTypes {
         );
 
     /// @notice Returns the indexed carry basis for a position.
+    /// @param account Account to inspect
+    /// @return borrowBaseUsdc Position borrow base used for carry utilization
+    /// @return lastCarryIndex Side carry index last stored on the position
+    /// @return lastCarryTimestamp Timestamp used for the position's last carry checkpoint
     function positionCarryState(
         address account
     ) external view returns (uint256 borrowBaseUsdc, uint256 lastCarryIndex, uint64 lastCarryTimestamp);
@@ -149,6 +185,7 @@ interface ICfdEngine is ICfdEngineTypes {
     function degradedMode() external view returns (bool);
 
     /// @notice Whether a given day number is an admin-configured FAD override
+    /// @param dayNumber Unix day number to inspect
     function fadDayOverrides(
         uint256 dayNumber
     ) external view returns (bool);

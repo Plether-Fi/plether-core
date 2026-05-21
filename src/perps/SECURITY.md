@@ -29,7 +29,7 @@ All perps contracts are non-upgradeable.
 - No proxy patterns.
 - Runtime logic is fixed at deployment.
 - Core constructor parameters such as `CAP_PRICE` are immutable.
-- `OrderRouter` oracle feed configuration, basket weights, base prices, and Pyth endpoint can be rotated only through `OrderRouterAdmin`'s 48-hour timelocked oracle config flow.
+- `OrderRouter`'s configured `PletherOracle` address can be rotated only through `OrderRouterAdmin`'s 48-hour timelocked oracle config flow. Feed ids, basket weights, base prices, inversion flags, and the Pyth endpoint are fixed on each `PletherOracle` instance, so changing them requires deploying a new oracle and timelocking the router onto it.
 
 ### Timelocked admin state
 
@@ -46,7 +46,7 @@ Engine risk controls live in `CfdEngineAdmin`, and router risk controls live in 
 | `seniorRateBps` | `HousePool` | `onlyOwner`, 48-hour timelock |
 | `markStalenessLimit` | `HousePool` | `onlyOwner`, 48-hour timelock |
 | `RouterConfig` (`maxOrderAge`, staleness limits, Pyth confidence ratio, historical settlement window, component publish-time skew, adverse confidence multiplier, bounty limits) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
-| `OracleConfig` (`pyth`, feed ids, quantities, base prices, inversions) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
+| `OracleConfig` (`pletherOracle`) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
 
 ### One-time wiring
 
@@ -59,7 +59,6 @@ These are one-time configuration setters rather than mutable governance knobs:
 | `setEngine(address)` | `MarginClearinghouse` |
 | `setSeniorVault(address)` | `HousePool` |
 | `setJuniorVault(address)` | `HousePool` |
-| `setOrderRouter(address)` | `HousePool` |
 
 ### Instant owner controls
 
@@ -67,7 +66,7 @@ The owner can act immediately to:
 
 - pause and unpause `OrderRouter` through `OrderRouterAdmin`,
 - pause and unpause `HousePool`,
-- assign the dedicated `pauser` role on `OrderRouter` and `HousePool`,
+- assign the dedicated `pauser` role on `OrderRouterAdmin` and `HousePool`,
 - set the protocol treasury account,
 - transfer ownership.
 
@@ -162,10 +161,10 @@ The protocol assumes Pyth provides timely and correct FX feed data for the baske
 
 Mitigations:
 
-- delayed-order execution that settles against the first unique Pyth tick at or after commit while the oracle is live,
+- delayed-order execution that settles against the first unique Pyth tick strictly after commit while the oracle is live,
 - distinct staleness thresholds for order execution, liquidation, engine-side guards, and HousePool freshness,
 - shared normalized basket-price construction across execution paths,
-- timelocked Pyth endpoint and basket-feed rotation if an upstream feed is deprecated or replaced,
+- timelocked rotation of the router's `PletherOracle` address if the Pyth endpoint or basket-feed set must be replaced,
 - conservative basket confidence propagation and side-adverse pricing for execution, equity checks, and liquidation,
 - component publish-time skew limits so a basket cannot mix fresh and stale legs,
 - frozen-oracle regime for close liveness during genuine market closure.
@@ -201,7 +200,7 @@ The owner can tune risk and liveness configuration and activate pauses, but cann
 
 ### Dedicated pauser
 
-`OrderRouter` and `HousePool` each support an owner-assigned `pauser` address.
+`OrderRouterAdmin` and `HousePool` each support an owner-assigned `pauser` address. Router pausing is applied through the admin contract onto router-controlled paths.
 
 - The `pauser` can call `pause()` immediately.
 - The `pauser` cannot call `unpause()` or change configuration.

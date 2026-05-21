@@ -3,7 +3,7 @@
 [![CI](https://github.com/Plether-Fi/plether-core/actions/workflows/ci.yml/badge.svg)](https://github.com/Plether-Fi/plether-core/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/Plether-Fi/plether-core/branch/master/graph/badge.svg)](https://codecov.io/gh/Plether-Fi/plether-core)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
-[![Solidity](https://img.shields.io/badge/Solidity-0.8.33-363636?logo=solidity)](https://docs.soliditylang.org/)
+[![Solidity](https://img.shields.io/badge/Solidity-0.8.35-363636?logo=solidity)](https://docs.soliditylang.org/)
 
 Plether is a DeFi protocol for synthetic dollar-denominated tokens with inverse and direct exposure to the US Dollar Index (USDX). Users deposit USDC to mint paired tokens that track USD strength, enabling speculation and hedging on dollar movements.
 

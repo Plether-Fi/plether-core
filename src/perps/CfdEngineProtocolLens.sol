@@ -26,6 +26,7 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
     }
 
     /// @notice Returns the canonical protocol-accounting snapshot used by diagnostics and audits.
+    /// @return snapshot Protocol-level accounting, liability, and solvency values
     function getProtocolAccountingSnapshot()
         external
         view
@@ -36,6 +37,8 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
 
     /// @notice Builds the HousePool accounting snapshot against a caller-supplied freshness limit.
     /// @dev This packages the engine-side values HousePool needs for reconcile and withdrawal logic.
+    /// @param markStalenessLimit Pool-configured live mark staleness limit
+    /// @return snapshot Engine input values consumed by HousePool accounting
     function getHousePoolInputSnapshot(
         uint256 markStalenessLimit
     ) external view returns (HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot) {
@@ -75,6 +78,7 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
     }
 
     /// @notice Returns the current HousePool status flags sourced from engine runtime state.
+    /// @return snapshot Current engine mark time and runtime mode flags
     function getHousePoolStatusSnapshot()
         external
         view

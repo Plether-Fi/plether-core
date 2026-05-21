@@ -20,6 +20,7 @@ interface IOrderRouter is IPerpsKeeper, IPerpsTraderActions, IOrderRouterAccount
     event OrderCommitted(uint64 indexed orderId, address indexed account, CfdTypes.Side side);
 
     /// @notice Push a fresh mark price to the engine without processing an order.
+    /// @param pythUpdateData Pyth price update blobs; attach ETH to cover the Pyth fee
     function updateMarkPrice(
         bytes[] calldata pythUpdateData
     ) external payable;

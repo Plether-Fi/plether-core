@@ -11,6 +11,7 @@ import {IMarginClearinghouse} from "./interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
 import {PositionRiskAccountingLib} from "./libraries/PositionRiskAccountingLib.sol";
 
+/// @notice Read-only planner and liquidation diagnostics for the CFD engine.
 contract CfdEngineLens is ICfdEngineLens {
 
     CfdEngine public immutable engineContract;
@@ -21,10 +22,12 @@ contract CfdEngineLens is ICfdEngineLens {
         engineContract = CfdEngine(engine_);
     }
 
+    /// @inheritdoc ICfdEngineLens
     function engine() external view returns (address) {
         return address(engineContract);
     }
 
+    /// @inheritdoc ICfdEngineLens
     function previewClose(
         address account,
         uint256 sizeDelta,
@@ -33,6 +36,7 @@ contract CfdEngineLens is ICfdEngineLens {
         preview = _previewClose(account, sizeDelta, oraclePrice, engineContract.pool().totalAssets());
     }
 
+    /// @inheritdoc ICfdEngineLens
     function previewOpenRevertCode(
         address account,
         CfdTypes.Side side,
@@ -57,6 +61,7 @@ contract CfdEngineLens is ICfdEngineLens {
         return uint8(engineContract.planner().planOpen(snap, order, oraclePrice, publishTime).revertCode);
     }
 
+    /// @inheritdoc ICfdEngineLens
     function previewOpenFailurePolicyCategory(
         address account,
         CfdTypes.Side side,
@@ -83,6 +88,7 @@ contract CfdEngineLens is ICfdEngineLens {
         return engineContract.planner().getOpenFailurePolicyCategory(delta.revertCode);
     }
 
+    /// @inheritdoc ICfdEngineLens
     function simulateClose(
         address account,
         uint256 sizeDelta,
@@ -92,6 +98,7 @@ contract CfdEngineLens is ICfdEngineLens {
         preview = _previewClose(account, sizeDelta, oraclePrice, poolDepthUsdc);
     }
 
+    /// @inheritdoc ICfdEngineLens
     function previewLiquidation(
         address account,
         uint256 oraclePrice
@@ -99,6 +106,7 @@ contract CfdEngineLens is ICfdEngineLens {
         preview = _previewLiquidation(account, oraclePrice, engineContract.pool().totalAssets());
     }
 
+    /// @inheritdoc ICfdEngineLens
     function simulateLiquidation(
         address account,
         uint256 oraclePrice,

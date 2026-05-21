@@ -21,6 +21,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
 
     error CfdEngineSettlementSidecar__Unauthorized();
 
+    /// @param engine_ Engine host authorized to call this sidecar
     constructor(
         address engine_
     ) {
@@ -39,6 +40,10 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
     /// @notice Applies the live open/increase settlement plan produced by the planner.
     /// @dev Realizes carry, fee, and pool-flow side effects through the settlement host while keeping
     ///      the engine as the canonical state owner.
+    /// @param host Engine settlement host owning the storage mutation
+    /// @param delta Planned open/increase settlement delta
+    /// @param currentPosition Current position loaded by the engine before settlement
+    /// @param publishTime Oracle publish timestamp for the execution mark
     function executeOpen(
         ICfdEngineSettlementHost host,
         CfdEnginePlanTypes.OpenDelta calldata delta,
@@ -102,6 +107,10 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
 
     /// @notice Applies the live close/decrease settlement plan produced by the planner.
     /// @dev Can record trader claims, bad debt, and realized carry depending on the close result.
+    /// @param host Engine settlement host owning the storage mutation
+    /// @param delta Planned close/decrease settlement delta
+    /// @param currentPosition Current position loaded by the engine before settlement
+    /// @param publishTime Oracle publish timestamp for the execution mark
     function executeClose(
         ICfdEngineSettlementHost host,
         CfdEnginePlanTypes.CloseDelta calldata delta,
@@ -204,6 +213,10 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
     }
 
     /// @notice Applies the live liquidation settlement plan produced by the planner.
+    /// @param host Engine settlement host owning the storage mutation
+    /// @param delta Planned liquidation settlement delta
+    /// @param publishTime Oracle publish timestamp for the liquidation mark
+    /// @param keeper Keeper credited with any liquidation bounty
     /// @return keeperBountyUsdc Liquidation bounty owed to the keeper after the state transition.
     function executeLiquidation(
         ICfdEngineSettlementHost host,

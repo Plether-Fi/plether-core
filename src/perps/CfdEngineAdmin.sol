@@ -6,6 +6,7 @@ import {CfdTypes} from "./CfdTypes.sol";
 import {ICfdEngineAdminHost} from "./interfaces/ICfdEngineAdminHost.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
+/// @notice Timelocked owner-controlled admin for CfdEngine risk, FAD calendar, and freshness configuration.
 contract CfdEngineAdmin is Ownable {
 
     uint256 public constant TIMELOCK_DELAY = 48 hours;
@@ -38,6 +39,8 @@ contract CfdEngineAdmin is Ownable {
     event FreshnessConfigFinalized(ICfdEngineAdminHost.EngineFreshnessConfig config);
     event FreshnessConfigCancelled();
 
+    /// @param engine_ Engine host that receives finalized configuration
+    /// @param initialOwner Owner allowed to propose, cancel, and finalize configuration
     constructor(
         address engine_,
         address initialOwner
@@ -45,6 +48,8 @@ contract CfdEngineAdmin is Ownable {
         engine = ICfdEngineAdminHost(engine_);
     }
 
+    /// @notice Proposes risk parameters and execution-fee changes behind the timelock.
+    /// @param config Risk configuration to validate and stage
     function proposeRiskConfig(
         ICfdEngineAdminHost.EngineRiskConfig calldata config
     ) external onlyOwner {
@@ -57,6 +62,7 @@ contract CfdEngineAdmin is Ownable {
         emit RiskConfigProposed(config, riskConfigActivationTime);
     }
 
+    /// @notice Finalizes the pending risk configuration after the timelock expires.
     function finalizeRiskConfig() external onlyOwner {
         _requireTimelockReady(riskConfigActivationTime);
         ICfdEngineAdminHost.EngineRiskConfig memory config = pendingRiskConfig;
@@ -66,12 +72,15 @@ contract CfdEngineAdmin is Ownable {
         emit RiskConfigFinalized(config);
     }
 
+    /// @notice Cancels any pending risk configuration.
     function cancelRiskConfig() external onlyOwner {
         delete pendingRiskConfig;
         riskConfigActivationTime = 0;
         emit RiskConfigCancelled();
     }
 
+    /// @notice Proposes FAD calendar overrides and runway seconds behind the timelock.
+    /// @param config Calendar configuration to validate and stage
     function proposeCalendarConfig(
         ICfdEngineAdminHost.EngineCalendarConfig calldata config
     ) external onlyOwner {
@@ -85,6 +94,7 @@ contract CfdEngineAdmin is Ownable {
         emit CalendarConfigProposed(config, calendarConfigActivationTime);
     }
 
+    /// @notice Finalizes the pending calendar configuration after the timelock expires.
     function finalizeCalendarConfig() external onlyOwner {
         _requireTimelockReady(calendarConfigActivationTime);
         ICfdEngineAdminHost.EngineCalendarConfig memory config = _pendingCalendarConfig;
@@ -94,16 +104,21 @@ contract CfdEngineAdmin is Ownable {
         emit CalendarConfigFinalized(config);
     }
 
+    /// @notice Cancels any pending calendar configuration.
     function cancelCalendarConfig() external onlyOwner {
         delete _pendingCalendarConfig.fadDayTimestamps;
         calendarConfigActivationTime = 0;
         emit CalendarConfigCancelled();
     }
 
+    /// @notice Returns the pending calendar configuration, including staged dynamic FAD days.
+    /// @return config Pending calendar configuration
     function getPendingCalendarConfig() external view returns (ICfdEngineAdminHost.EngineCalendarConfig memory config) {
         config = _pendingCalendarConfig;
     }
 
+    /// @notice Proposes engine freshness limits behind the timelock.
+    /// @param config Freshness configuration to validate and stage
     function proposeFreshnessConfig(
         ICfdEngineAdminHost.EngineFreshnessConfig calldata config
     ) external onlyOwner {
@@ -115,6 +130,7 @@ contract CfdEngineAdmin is Ownable {
         emit FreshnessConfigProposed(config, freshnessConfigActivationTime);
     }
 
+    /// @notice Finalizes the pending freshness configuration after the timelock expires.
     function finalizeFreshnessConfig() external onlyOwner {
         _requireTimelockReady(freshnessConfigActivationTime);
         ICfdEngineAdminHost.EngineFreshnessConfig memory config = pendingFreshnessConfig;
@@ -124,6 +140,7 @@ contract CfdEngineAdmin is Ownable {
         emit FreshnessConfigFinalized(config);
     }
 
+    /// @notice Cancels any pending freshness configuration.
     function cancelFreshnessConfig() external onlyOwner {
         delete pendingFreshnessConfig;
         freshnessConfigActivationTime = 0;

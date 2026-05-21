@@ -251,6 +251,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     /// @notice One-time setter for planner, settlement sidecar, and admin sidecars.
+    /// @param planner_ Planner contract that computes open, close, and liquidation deltas
+    /// @param settlementSidecar_ Settlement sidecar bound to this engine
+    /// @param admin_ Timelocked admin contract authorized to apply engine config
     function setDependencies(
         address planner_,
         address settlementSidecar_,
@@ -278,6 +281,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     /// @notice One-time setter for the HousePool backing all positions
+    /// @param _pool HousePool address that provides counterparty liquidity
     function setPool(
         address _pool
     ) external onlyOwner {
@@ -291,6 +295,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     /// @notice One-time setter for the authorized OrderRouter
+    /// @param _router Router allowed to process orders and liquidations
     function setOrderRouter(
         address _router
     ) external onlyOwner {
@@ -304,6 +309,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     /// @notice Updates the clearinghouse account receiving protocol fees.
+    /// @param treasury Clearinghouse account that will receive future protocol fee credits
     function setProtocolTreasury(
         address treasury
     ) external onlyOwner {
@@ -322,6 +328,8 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     /// @notice Transfers forfeited reserved execution-bounty reservation into the protocol treasury account.
+    /// @param sourceAccount Account whose reserved settlement bounty is forfeited
+    /// @param amountUsdc Reserved USDC amount to transfer into the protocol treasury account
     function absorbReservedExecutionBounty(
         address sourceAccount,
         uint256 amountUsdc
@@ -338,6 +346,11 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     /// @notice Transfers reserved bounty value from a source account into a beneficiary clearinghouse account.
     /// @dev Realizes carry first when the beneficiary currently has an open position because the
     ///      clearinghouse settlement credit changes the carry basis.
+    /// @param sourceAccount Account whose reserved settlement bounty funds the credit
+    /// @param beneficiary Account receiving the clearinghouse settlement credit
+    /// @param amountUsdc Reserved USDC amount to transfer
+    /// @param price Fresh mark price used to checkpoint beneficiary carry when needed
+    /// @param publishTime Mark publish timestamp used when checkpointing beneficiary carry
     function creditBounty(
         address sourceAccount,
         address beneficiary,
@@ -355,6 +368,8 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     /// @notice Adds isolated margin to an existing open position without changing size.
+    /// @param account Position owner; must be the caller
+    /// @param amount USDC amount to move from free settlement into position margin
     function addMargin(
         address account,
         uint256 amount
@@ -385,6 +400,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
 
     /// @notice Realizes accrued carry before a user-level clearinghouse balance mutation changes the carry basis.
     /// @dev Called only by the clearinghouse before user deposits and withdrawals.
+    /// @param account Account whose open-position carry should be realized if a position exists
     function realizeCarryBeforeMarginChange(
         address account
     ) external nonReentrant {
@@ -405,6 +421,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     ///      first, so beneficiaries access them through the normal account-balance path. Carry is checkpointed
     ///      before the settlement-basis change using a fresh mark when available; otherwise the cached stored
     ///      mark is used.
+    /// @param account Claim beneficiary; must be the caller
     function settleTraderClaim(
         address account
     ) external nonReentrant {
@@ -427,6 +444,10 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         emit TraderClaimSettled(account, claimAmountUsdc);
     }
 
+    /// @notice Reserves the fixed close-order execution bounty against a proportional slice of an open position.
+    /// @param account Account committing the close order
+    /// @param sizeDelta Position size the close order intends to close
+    /// @param amountUsdc Execution bounty amount to reserve
     function reserveCloseOrderExecutionBounty(
         address account,
         uint256 sizeDelta,
@@ -526,6 +547,10 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         emit BadDebtCleared(amount, accumulatedBadDebtUsdc);
     }
 
+    /// @notice Sweeps an arbitrary ERC20 accidentally sent to the engine.
+    /// @param token ERC20 token to transfer
+    /// @param to Recipient of the swept tokens
+    /// @param amount Token amount to sweep
     function sweepToken(
         address token,
         address to,
@@ -537,6 +562,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         IERC20(token).safeTransfer(to, amount);
     }
 
+    /// @notice Clears degraded mode once adjusted solvency has recovered.
     function clearDegradedMode() external onlyOwner {
         if (!degradedMode) {
             revert CfdEngine__NotDegraded();
@@ -549,6 +575,8 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         emit DegradedModeCleared();
     }
 
+    /// @notice Applies finalized risk parameters from the timelocked engine admin.
+    /// @param config Risk parameter and execution-fee configuration to apply
     function applyRiskConfig(
         ICfdEngineAdminHost.EngineRiskConfig calldata config
     ) external onlyAdmin {
@@ -560,6 +588,8 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         executionFeeBps = config.executionFeeBps;
     }
 
+    /// @notice Applies finalized FAD calendar overrides from the timelocked engine admin.
+    /// @param config FAD day timestamps and runway configuration to apply
     function applyCalendarConfig(
         ICfdEngineAdminHost.EngineCalendarConfig calldata config
     ) external onlyAdmin {
@@ -582,6 +612,8 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         fadRunwaySeconds = config.fadRunwaySeconds;
     }
 
+    /// @notice Applies finalized mark freshness limits from the timelocked engine admin.
+    /// @param config FAD and live mark-staleness configuration to apply
     function applyFreshnessConfig(
         ICfdEngineAdminHost.EngineFreshnessConfig calldata config
     ) external onlyAdmin {
@@ -643,6 +675,10 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     // ==========================================
 
     /// @notice Router-facing order execution entrypoint with typed business-rule failures.
+    /// @param order Queued order being executed by the router
+    /// @param currentOraclePrice Execution oracle price (8 decimals), clamped to CAP_PRICE
+    /// @param poolDepthUsdc HousePool depth used for planning and solvency checks
+    /// @param publishTime Oracle publish timestamp recorded as the latest mark time
     function processOrderTyped(
         CfdTypes.Order memory order,
         uint256 currentOraclePrice,
@@ -799,6 +835,15 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         return MarketCalendarLib.isOracleFrozen(block.timestamp, fadDayOverrides[block.timestamp / 86_400]);
     }
 
+    /// @notice Returns the current live position tuple for an account.
+    /// @param account Account to inspect
+    /// @return size Position size (18 decimals)
+    /// @return margin Current active position margin (6 decimals)
+    /// @return entryPrice Average entry price (8 decimals)
+    /// @return maxProfitUsdc Position maximum profit envelope (6 decimals)
+    /// @return side Position side
+    /// @return lastUpdateTime Last position mutation timestamp
+    /// @return vpiAccrued Net VPI accrued on the position
     function positions(
         address account
     )
@@ -818,6 +863,11 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         return (pos.size, pos.margin, pos.entryPrice, pos.maxProfitUsdc, pos.side, pos.lastUpdateTime, pos.vpiAccrued);
     }
 
+    /// @notice Returns the carry-index basis stored for an account's current position.
+    /// @param account Account to inspect
+    /// @return borrowBaseUsdc Position borrow base used for carry utilization
+    /// @return lastCarryIndex Side carry index last stored on the position
+    /// @return lastCarryTimestamp Timestamp used for the position's last carry checkpoint
     function positionCarryState(
         address account
     ) external view returns (uint256 borrowBaseUsdc, uint256 lastCarryIndex, uint64 lastCarryTimestamp) {
@@ -1013,6 +1063,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         lastMarkTime = newMarkTime;
     }
 
+    /// @notice Permissionlessly advances both side carry indexes to the current timestamp.
     function checkpointCarryIndexes() external {
         _advanceAllCarryIndexes(block.timestamp);
     }
@@ -1058,6 +1109,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         return address(pool) == address(0) ? 0 : pool.totalAssets();
     }
 
+    /// @notice Applies a newer mark price and advances carry from the settlement sidecar.
+    /// @param newMarkPrice New mark price (8 decimals)
+    /// @param newMarkTime Oracle publish timestamp for the mark
     function settlementApplyCarryAndMark(
         uint256 newMarkPrice,
         uint64 newMarkTime
@@ -1068,6 +1122,10 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         _applyCarryAndMark(newMarkPrice, newMarkTime);
     }
 
+    /// @notice Synchronizes aggregate side margin after settlement changes a position margin bucket.
+    /// @param side Side whose aggregate margin should be updated
+    /// @param marginBefore Account position margin before settlement
+    /// @param marginAfter Account position margin after settlement
     function settlementSyncTotalSideMargin(
         CfdTypes.Side side,
         uint256 marginBefore,
@@ -1076,6 +1134,11 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         _syncTotalSideMargin(side, marginBefore, marginAfter);
     }
 
+    /// @notice Applies aggregate side-accounting deltas produced by the settlement sidecar.
+    /// @param side Side whose totals are mutated
+    /// @param maxProfitDelta Signed max-profit envelope delta
+    /// @param openInterestDelta Signed open-interest delta
+    /// @param entryNotionalDelta Signed entry-notional delta
     function settlementApplySideDelta(
         CfdTypes.Side side,
         int256 maxProfitDelta,
@@ -1100,6 +1163,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         }
     }
 
+    /// @notice Consumes previously recorded trader-claim balance during settlement.
+    /// @param account Claim account to debit
+    /// @param amountUsdc Claim amount to consume
     function settlementConsumeTraderClaim(
         address account,
         uint256 amountUsdc
@@ -1107,6 +1173,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         _consumeTraderClaim(account, amountUsdc);
     }
 
+    /// @notice Pays or records trader-claim value during settlement.
+    /// @param account Claim beneficiary
+    /// @param amountUsdc Claim amount to pay from fresh cash or record as liability
     function settlementRecordTraderClaim(
         address account,
         uint256 amountUsdc
@@ -1114,12 +1183,17 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         _payOrRecordTraderClaim(account, amountUsdc);
     }
 
+    /// @notice Increases accumulated bad debt during settlement.
+    /// @param amountUsdc Bad-debt amount to add
     function settlementAccumulateBadDebt(
         uint256 amountUsdc
     ) external onlySettlementSidecar {
         accumulatedBadDebtUsdc += amountUsdc;
     }
 
+    /// @notice Writes the post-settlement position state and refreshes side borrow-base accounting.
+    /// @param account Position account to write
+    /// @param position New stored position state from the settlement sidecar
     function settlementWritePosition(
         address account,
         CfdEngineSettlementTypes.PositionState calldata position
@@ -1141,6 +1215,8 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         _applySideBorrowBaseDelta(position.side, 0, newBorrowBaseUsdc);
     }
 
+    /// @notice Deletes an account position and removes its side borrow-base contribution.
+    /// @param account Position account to delete
     function settlementDeletePosition(
         address account
     ) external onlySettlementSidecar {

@@ -114,16 +114,20 @@ contract TrancheVault is ERC4626 {
     }
 
     /// @notice Converts assets to shares using the current deposit-side NAV estimate.
+    /// @param assets Asset amount to convert
     function convertToShares(
         uint256 assets
     ) public view override returns (uint256) {
         return _convertToSharesUsingAssets(assets, _depositPricingAssets(), Math.Rounding.Floor);
     }
 
+    /// @notice Returns the current delayed-deposit epoch id.
     function currentDepositEpoch() public view returns (uint256) {
         return block.timestamp / DEPOSIT_EPOCH_DURATION;
     }
 
+    /// @notice Returns the start timestamp for a delayed-deposit epoch.
+    /// @param epochId Deposit epoch id
     function depositEpochStart(
         uint256 epochId
     ) public pure returns (uint256) {
@@ -132,6 +136,9 @@ contract TrancheVault is ERC4626 {
 
     /// @notice Funds a delayed deposit request assigned to the next activation epoch.
     /// @dev The receiver owns the pending assets and is the only account that can cancel or claim them.
+    /// @param assets USDC amount to request for delayed deposit
+    /// @param receiver Account that owns and can later claim the pending deposit
+    /// @return epochId Epoch assigned to the request
     function requestDeposit(
         uint256 assets,
         address receiver
@@ -146,6 +153,8 @@ contract TrancheVault is ERC4626 {
     }
 
     /// @notice Cancels a pending deposit before activation, or while active if senior impairment blocks finalization.
+    /// @param epochId Epoch containing the caller's pending deposit
+    /// @return assets USDC amount returned to the caller
     function cancelPendingDeposit(
         uint256 epochId
     ) public returns (uint256 assets) {
@@ -169,6 +178,8 @@ contract TrancheVault is ERC4626 {
     }
 
     /// @notice Permissionlessly prices and accepts a matured deposit epoch into the HousePool.
+    /// @param epochId Matured epoch to finalize
+    /// @return shares Vault shares minted to the vault for later claimant distribution
     function finalizeDepositEpoch(
         uint256 epochId
     ) public returns (uint256 shares) {
@@ -203,6 +214,8 @@ contract TrancheVault is ERC4626 {
     }
 
     /// @notice Claims finalized tranche shares for the caller's pending assets.
+    /// @param epochId Finalized epoch containing the caller's pending deposit
+    /// @return shares Vault shares transferred to the caller
     function claimDepositShares(
         uint256 epochId
     ) public returns (uint256 shares) {
@@ -234,6 +247,8 @@ contract TrancheVault is ERC4626 {
     }
 
     /// @notice Deposits assets immediately only when no trader positions are open.
+    /// @param assets USDC amount to deposit
+    /// @param receiver Account receiving shares
     function deposit(
         uint256 assets,
         address receiver
@@ -254,6 +269,8 @@ contract TrancheVault is ERC4626 {
     }
 
     /// @notice Mints tranche shares immediately only when no trader positions are open.
+    /// @param shares Shares to mint
+    /// @param receiver Account receiving shares
     function mint(
         uint256 shares,
         address receiver
@@ -273,6 +290,8 @@ contract TrancheVault is ERC4626 {
         return super.mint(shares, receiver);
     }
 
+    /// @notice Previews shares minted for an asset deposit, net of frozen-oracle LP fee when active.
+    /// @param assets Asset amount to deposit
     function previewDeposit(
         uint256 assets
     ) public view override returns (uint256) {
@@ -283,6 +302,8 @@ contract TrancheVault is ERC4626 {
         return _previewFrozenDepositShares(assets, feeBps);
     }
 
+    /// @notice Previews assets required to mint shares, grossed up for frozen-oracle LP fee when active.
+    /// @param shares Share amount to mint
     function previewMint(
         uint256 shares
     ) public view override returns (uint256) {
@@ -294,6 +315,7 @@ contract TrancheVault is ERC4626 {
     }
 
     /// @notice Returns the current max deposit if lifecycle, freshness, and impairment gates allow deposits.
+    /// @param receiver Account that would receive shares
     function maxDeposit(
         address receiver
     ) public view override returns (uint256) {
@@ -305,6 +327,7 @@ contract TrancheVault is ERC4626 {
     }
 
     /// @notice Returns the current max mint if lifecycle, freshness, and impairment gates allow deposits.
+    /// @param receiver Account that would receive shares
     function maxMint(
         address receiver
     ) public view override returns (uint256) {
@@ -319,6 +342,8 @@ contract TrancheVault is ERC4626 {
         return super.maxMint(receiver);
     }
 
+    /// @notice Returns the maximum delayed deposit request assets currently accepted for a receiver.
+    /// @param receiver Account that would own the pending deposit
     function maxRequestDeposit(
         address receiver
     ) public view returns (uint256) {
@@ -330,6 +355,9 @@ contract TrancheVault is ERC4626 {
     }
 
     /// @notice Withdraws tranche assets after reconciling pool accounting.
+    /// @param assets USDC amount to withdraw
+    /// @param receiver Account receiving assets
+    /// @param _owner Share owner
     function withdraw(
         uint256 assets,
         address receiver,
@@ -347,6 +375,9 @@ contract TrancheVault is ERC4626 {
     }
 
     /// @notice Redeems tranche shares after reconciling pool accounting.
+    /// @param shares Share amount to redeem
+    /// @param receiver Account receiving assets
+    /// @param _owner Share owner
     function redeem(
         uint256 shares,
         address receiver,
@@ -363,6 +394,8 @@ contract TrancheVault is ERC4626 {
         return super.redeem(shares, receiver, _owner);
     }
 
+    /// @notice Previews shares required to withdraw assets, grossed up for frozen-oracle LP fee when active.
+    /// @param assets Asset amount to withdraw
     function previewWithdraw(
         uint256 assets
     ) public view override returns (uint256) {
@@ -373,6 +406,8 @@ contract TrancheVault is ERC4626 {
         return _convertToShares(_grossUpForFee(assets, feeBps), Math.Rounding.Ceil);
     }
 
+    /// @notice Previews assets received for redeeming shares, net of frozen-oracle LP fee when active.
+    /// @param shares Share amount to redeem
     function previewRedeem(
         uint256 shares
     ) public view override returns (uint256) {
@@ -384,6 +419,7 @@ contract TrancheVault is ERC4626 {
     }
 
     /// @notice Returns the withdrawable asset amount after cooldown and pool-level withdrawal gates.
+    /// @param _owner Share owner to inspect
     function maxWithdraw(
         address _owner
     ) public view override returns (uint256) {
@@ -401,6 +437,7 @@ contract TrancheVault is ERC4626 {
     }
 
     /// @notice Returns the redeemable share amount after cooldown and pool-level withdrawal gates.
+    /// @param _owner Share owner to inspect
     function maxRedeem(
         address _owner
     ) public view override returns (uint256) {
@@ -466,6 +503,8 @@ contract TrancheVault is ERC4626 {
 
     /// @notice Mints shares to explicitly bootstrap previously quarantined pool assets into this tranche.
     /// @dev Only the pool may call this. The pool must have already assigned matching assets to the tranche principal.
+    /// @param shares Shares to mint
+    /// @param receiver Account receiving minted shares
     function bootstrapMint(
         uint256 shares,
         address receiver
@@ -479,6 +518,8 @@ contract TrancheVault is ERC4626 {
 
     /// @notice Registers or increases the permanent seed-share floor for this tranche.
     /// @dev The pool must mint the corresponding shares before or within the same flow.
+    /// @param receiver Seed owner account
+    /// @param floorShares Minimum shares that must remain owned by the seed owner
     function configureSeedPosition(
         address receiver,
         uint256 floorShares

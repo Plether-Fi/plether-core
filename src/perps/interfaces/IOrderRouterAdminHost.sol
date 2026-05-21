@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+/// @notice Router host surface called by the timelocked router admin.
 interface IOrderRouterAdminHost {
 
     struct RouterConfig {
@@ -25,10 +26,14 @@ interface IOrderRouterAdminHost {
         address pletherOracle;
     }
 
+    /// @notice Applies finalized router queue, bounty, and execution bounds.
+    /// @param config Router configuration to apply
     function applyRouterConfig(
         RouterConfig calldata config
     ) external;
 
+    /// @notice Applies finalized oracle integration configuration.
+    /// @param config Oracle configuration to apply
     function applyOracleConfig(
         OracleConfig calldata config
     ) external;

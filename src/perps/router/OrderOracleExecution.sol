@@ -10,6 +10,7 @@ import {IPletherOracle} from "../interfaces/IPletherOracle.sol";
 import {OracleFreshnessPolicyLib} from "../libraries/OracleFreshnessPolicyLib.sol";
 import {OrderReservationAccounting} from "./OrderReservationAccounting.sol";
 
+/// @notice Oracle integration helpers and oracle-policy passthrough getters for the router stack.
 abstract contract OrderOracleExecution is OrderReservationAccounting {
 
     struct RouterExecutionContext {
@@ -43,30 +44,37 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
         _setOracleConfig(_pletherOracle);
     }
 
+    /// @notice Returns the Pyth contract used by the configured Plether oracle.
     function pyth() public view returns (IPyth) {
         return pletherOracle.pyth();
     }
 
+    /// @notice Returns the order-execution staleness limit from the configured Plether oracle.
     function orderExecutionStalenessLimit() public view returns (uint256) {
         return pletherOracle.orderExecutionStalenessLimit();
     }
 
+    /// @notice Returns the liquidation staleness limit from the configured Plether oracle.
     function liquidationStalenessLimit() public view returns (uint256) {
         return pletherOracle.liquidationStalenessLimit();
     }
 
+    /// @notice Returns the max accepted Pyth confidence ratio from the configured Plether oracle.
     function pythMaxConfidenceRatioBps() public view returns (uint256) {
         return pletherOracle.pythMaxConfidenceRatioBps();
     }
 
+    /// @notice Returns the historical order settlement window from the configured Plether oracle.
     function orderSettlementWindow() public view returns (uint256) {
         return pletherOracle.orderSettlementWindow();
     }
 
+    /// @notice Returns max allowed basket component publish-time divergence.
     function maxComponentPublishTimeDivergence() public view returns (uint256) {
         return pletherOracle.maxComponentPublishTimeDivergence();
     }
 
+    /// @notice Returns confidence multiplier used for adverse execution/liquidation pricing.
     function adverseConfidenceMultiplierBps() public view returns (uint256) {
         return pletherOracle.adverseConfidenceMultiplierBps();
     }

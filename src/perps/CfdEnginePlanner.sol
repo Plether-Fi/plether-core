@@ -6,8 +6,10 @@ import {CfdTypes} from "./CfdTypes.sol";
 import {ICfdEnginePlanner} from "./interfaces/ICfdEnginePlanner.sol";
 import {CfdEnginePlanLib} from "./libraries/CfdEnginePlanLib.sol";
 
+/// @notice Stateless wrapper exposing the CfdEngine planning library through an external interface.
 contract CfdEnginePlanner is ICfdEnginePlanner {
 
+    /// @inheritdoc ICfdEnginePlanner
     function computeOpenMarginAfter(
         uint256 marginAfterCarry,
         int256 netMarginChange
@@ -15,6 +17,7 @@ contract CfdEnginePlanner is ICfdEnginePlanner {
         return CfdEnginePlanLib.computeOpenMarginAfter(marginAfterCarry, netMarginChange);
     }
 
+    /// @inheritdoc ICfdEnginePlanner
     function planOpen(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdTypes.Order memory order,
@@ -24,6 +27,7 @@ contract CfdEnginePlanner is ICfdEnginePlanner {
         return CfdEnginePlanLib.planOpen(snap, order, executionPrice, publishTime);
     }
 
+    /// @inheritdoc ICfdEnginePlanner
     function planClose(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdTypes.Order memory order,
@@ -33,6 +37,7 @@ contract CfdEnginePlanner is ICfdEnginePlanner {
         return CfdEnginePlanLib.planClose(snap, order, executionPrice, publishTime);
     }
 
+    /// @inheritdoc ICfdEnginePlanner
     function planLiquidation(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         uint256 executionPrice,
@@ -41,18 +46,21 @@ contract CfdEnginePlanner is ICfdEnginePlanner {
         return CfdEnginePlanLib.planLiquidation(snap, executionPrice, publishTime);
     }
 
+    /// @inheritdoc ICfdEnginePlanner
     function getOpenFailurePolicyCategory(
         CfdEnginePlanTypes.OpenRevertCode code
     ) external pure returns (CfdEnginePlanTypes.OpenFailurePolicyCategory) {
         return CfdEnginePlanLib.getOpenFailurePolicyCategory(code);
     }
 
+    /// @inheritdoc ICfdEnginePlanner
     function getExecutionFailurePolicyCategory(
         CfdEnginePlanTypes.OpenRevertCode code
     ) external pure returns (CfdEnginePlanTypes.ExecutionFailurePolicyCategory) {
         return CfdEnginePlanLib.getExecutionFailurePolicyCategory(code);
     }
 
+    /// @inheritdoc ICfdEnginePlanner
     function getCloseExecutionFailurePolicyCategory(
         CfdEnginePlanTypes.CloseRevertCode code
     ) external pure returns (CfdEnginePlanTypes.ExecutionFailurePolicyCategory) {

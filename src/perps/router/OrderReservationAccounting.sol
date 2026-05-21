@@ -8,6 +8,7 @@ import {IOrderRouter} from "../interfaces/IOrderRouter.sol";
 import {IOrderRouterAccounting} from "../interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterErrors} from "../interfaces/IOrderRouterErrors.sol";
 
+/// @notice Router-side reservation and queue accounting shared by commit, execution, and liquidation handlers.
 abstract contract OrderReservationAccounting is IOrderRouterAccounting, IOrderRouterErrors {
 
     struct OrderRecord {
@@ -44,6 +45,9 @@ abstract contract OrderReservationAccounting is IOrderRouterAccounting, IOrderRo
             : IMarginClearinghouse(ICfdEngineCore(_engine).clearinghouse());
     }
 
+    /// @notice Returns aggregate queued reservation attributed to an account across all pending orders.
+    /// @param account Account to inspect
+    /// @return reservation Pending-order count plus committed-margin and bounty reservation totals
     function getAccountReservations(
         address account
     ) public view override returns (IOrderRouterAccounting.AccountReservationView memory reservation) {
@@ -79,6 +83,9 @@ abstract contract OrderReservationAccounting is IOrderRouterAccounting, IOrderRo
         }
     }
 
+    /// @notice Returns the current router-maintained margin-reservation order ids for an account.
+    /// @param account Account to inspect
+    /// @return orderIds Pending order ids linked into the account's margin reservation queue
     function getMarginReservationIds(
         address account
     ) public view override returns (uint64[] memory orderIds) {
