@@ -482,24 +482,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         }
 
         uint256 postReservationReachableUsdc = reachableUsdc - amountUsdc;
-
-        CfdTypes.Position memory positionAfter = _loadPosition(account);
-        positionAfter.margin = positionMarginUsdc - marginBackedBountyUsdc;
-        uint256 pendingCarryUsdc = _totalPendingCarryUsdc(account, positionAfter, block.timestamp);
-        PositionRiskAccountingLib.PositionRiskState memory riskState =
-            PositionRiskAccountingLib.buildPositionRiskStateWithCarry(
-                positionAfter,
-                price,
-                CAP_PRICE,
-                pendingCarryUsdc,
-                postReservationReachableUsdc,
-                isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps
-            );
-        if (riskState.liquidatable) {
-            if (!isFullClose || marginBackedBountyUsdc > 0) {
-                revert CfdEngine__InsufficientCloseOrderBountyBacking();
-            }
-        }
+        _validateCloseBountyReservationRisk(
+            account, price, positionMarginUsdc, marginBackedBountyUsdc, postReservationReachableUsdc, isFullClose
+        );
 
         _syncTotalSideMargin(pos.side, positionMarginUsdc, positionMarginUsdc - marginBackedBountyUsdc);
         _syncPositionBorrowBaseToMargin(pos, positionMarginUsdc - marginBackedBountyUsdc);
@@ -1285,6 +1270,33 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         uint256 timestampNow
     ) internal view returns (uint256) {
         return unsettledCarryUsdc[account] + _elapsedCarryUsdc(account, pos, timestampNow);
+    }
+
+    function _validateCloseBountyReservationRisk(
+        address account,
+        uint256 price,
+        uint256 positionMarginUsdc,
+        uint256 marginBackedBountyUsdc,
+        uint256 postReservationReachableUsdc,
+        bool isFullClose
+    ) internal view {
+        CfdTypes.Position memory positionAfter = _loadPosition(account);
+        positionAfter.margin = positionMarginUsdc - marginBackedBountyUsdc;
+
+        uint256 pendingCarryUsdc = _totalPendingCarryUsdc(account, positionAfter, block.timestamp);
+        PositionRiskAccountingLib.PositionRiskState memory riskState =
+            PositionRiskAccountingLib.buildPositionRiskStateWithCarry(
+                positionAfter,
+                price,
+                CAP_PRICE,
+                pendingCarryUsdc,
+                postReservationReachableUsdc,
+                isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps
+            );
+
+        if (riskState.liquidatable && (!isFullClose || marginBackedBountyUsdc > 0)) {
+            revert CfdEngine__InsufficientCloseOrderBountyBacking();
+        }
     }
 
     function _canFullyRealizeCarryFromSettlement(

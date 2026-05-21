@@ -20,7 +20,7 @@ contract OrderRouterAdmin is Ownable, Pausable {
     mapping(address => uint256) public claimableEth;
     address public pauser;
 
-    IOrderRouterAdminHost.RouterConfig public pendingRouterConfig;
+    IOrderRouterAdminHost.RouterConfig private _pendingRouterConfig;
     uint256 public routerConfigActivationTime;
     IOrderRouterAdminHost.OracleConfig private _pendingOracleConfig;
     uint256 public oracleConfigActivationTime;
@@ -73,22 +73,22 @@ contract OrderRouterAdmin is Ownable, Pausable {
         IOrderRouterAdminHost.RouterConfig calldata config
     ) external onlyOwner {
         _validateRouterConfig(config);
-        pendingRouterConfig = config;
+        _pendingRouterConfig = config;
         routerConfigActivationTime = block.timestamp + TIMELOCK_DELAY;
         emit RouterConfigProposed(config, routerConfigActivationTime);
     }
 
     function finalizeRouterConfig() external onlyOwner {
         _requireTimelockReady(routerConfigActivationTime);
-        IOrderRouterAdminHost.RouterConfig memory config = pendingRouterConfig;
-        delete pendingRouterConfig;
+        IOrderRouterAdminHost.RouterConfig memory config = _pendingRouterConfig;
+        delete _pendingRouterConfig;
         routerConfigActivationTime = 0;
         router.applyRouterConfig(config);
         emit RouterConfigFinalized(config);
     }
 
     function cancelRouterConfig() external onlyOwner {
-        delete pendingRouterConfig;
+        delete _pendingRouterConfig;
         routerConfigActivationTime = 0;
         emit RouterConfigCancelled();
     }
@@ -119,6 +119,10 @@ contract OrderRouterAdmin is Ownable, Pausable {
 
     function getPendingOracleConfig() external view returns (IOrderRouterAdminHost.OracleConfig memory config) {
         config = _pendingOracleConfig;
+    }
+
+    function pendingRouterConfig() external view returns (IOrderRouterAdminHost.RouterConfig memory config) {
+        config = _pendingRouterConfig;
     }
 
     function setPauser(
@@ -180,9 +184,25 @@ contract OrderRouterAdmin is Ownable, Pausable {
     function _validateRouterConfig(
         IOrderRouterAdminHost.RouterConfig memory config
     ) internal pure {
-        if (config.maxOrderAge == 0 || config.maxOrderAge > MAX_ORDER_AGE_LIMIT) {
+        _validateOrderAge(config.maxOrderAge);
+        _validateStalenessConfig(config);
+        _validateConfidenceConfig(config);
+        _validateExecutionBountyConfig(config);
+        _validatePendingOrderLimit(config.maxPendingOrders);
+        _validateGasConfig(config.minEngineGas, config.maxPruneOrdersPerCall);
+    }
+
+    function _validateOrderAge(
+        uint256 maxOrderAge
+    ) private pure {
+        if (maxOrderAge == 0 || maxOrderAge > MAX_ORDER_AGE_LIMIT) {
             revert OrderRouterAdmin__InvalidMaxOrderAge();
         }
+    }
+
+    function _validateStalenessConfig(
+        IOrderRouterAdminHost.RouterConfig memory config
+    ) private pure {
         if (
             config.orderExecutionStalenessLimit == 0 || config.liquidationStalenessLimit == 0
                 || config.orderSettlementWindow == 0 || config.orderSettlementWindow > config.maxOrderAge
@@ -191,12 +211,22 @@ contract OrderRouterAdmin is Ownable, Pausable {
         ) {
             revert OrderRouterAdmin__InvalidStalenessLimit();
         }
+    }
+
+    function _validateConfidenceConfig(
+        IOrderRouterAdminHost.RouterConfig memory config
+    ) private pure {
         if (
             config.pythMaxConfidenceRatioBps > 10_000
                 || config.adverseConfidenceMultiplierBps > MAX_CONFIDENCE_MULTIPLIER_BPS
         ) {
             revert OrderRouterAdmin__InvalidConfidenceRatio();
         }
+    }
+
+    function _validateExecutionBountyConfig(
+        IOrderRouterAdminHost.RouterConfig memory config
+    ) private pure {
         if (config.minOpenNotionalUsdc == 0) {
             revert OrderRouterAdmin__InvalidExecutionBounty();
         }
@@ -209,13 +239,24 @@ contract OrderRouterAdmin is Ownable, Pausable {
         ) {
             revert OrderRouterAdmin__InvalidExecutionBounty();
         }
-        if (config.maxPendingOrders == 0 || config.maxPendingOrders > MAX_PENDING_ORDERS_LIMIT) {
+    }
+
+    function _validatePendingOrderLimit(
+        uint256 maxPendingOrders
+    ) private pure {
+        if (maxPendingOrders == 0 || maxPendingOrders > MAX_PENDING_ORDERS_LIMIT) {
             revert OrderRouterAdmin__InvalidPendingOrderLimit();
         }
-        if (
-            config.minEngineGas < MIN_ENGINE_GAS_FLOOR || config.minEngineGas > MIN_ENGINE_GAS_CAP
-                || config.maxPruneOrdersPerCall == 0 || config.maxPruneOrdersPerCall > MAX_PRUNE_ORDERS_PER_CALL_LIMIT
-        ) {
+    }
+
+    function _validateGasConfig(
+        uint256 minEngineGas,
+        uint256 maxPruneOrdersPerCall
+    ) private pure {
+        if (minEngineGas < MIN_ENGINE_GAS_FLOOR || minEngineGas > MIN_ENGINE_GAS_CAP) {
+            revert OrderRouterAdmin__InvalidGasLimit();
+        }
+        if (maxPruneOrdersPerCall == 0 || maxPruneOrdersPerCall > MAX_PRUNE_ORDERS_PER_CALL_LIMIT) {
             revert OrderRouterAdmin__InvalidGasLimit();
         }
     }

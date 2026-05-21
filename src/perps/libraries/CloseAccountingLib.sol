@@ -19,12 +19,7 @@ library CloseAccountingLib {
     }
 
     function buildCloseState(
-        uint256 positionSize,
-        uint256 positionMarginUsdc,
-        uint256 entryPrice,
-        uint256 maxProfitUsdc,
-        int256 vpiAccrued,
-        CfdTypes.Side side,
+        CfdTypes.Position memory position,
         uint256 sizeDelta,
         uint256 oraclePrice,
         uint256 capPrice,
@@ -36,24 +31,24 @@ library CloseAccountingLib {
     ) internal pure returns (CloseState memory state) {
         CfdTypes.Position memory closedPart = CfdTypes.Position({
             size: sizeDelta,
-            margin: positionMarginUsdc,
-            entryPrice: entryPrice,
-            maxProfitUsdc: maxProfitUsdc,
-            side: side,
+            margin: position.margin,
+            entryPrice: position.entryPrice,
+            maxProfitUsdc: position.maxProfitUsdc,
+            side: position.side,
             lastUpdateTime: 0,
             lastCarryTimestamp: 0,
-            vpiAccrued: vpiAccrued
+            vpiAccrued: position.vpiAccrued
         });
         (bool isProfit, uint256 pnlAbs) = CfdMath.calculatePnL(closedPart, oraclePrice, capPrice);
         state.realizedPnlUsdc = isProfit ? int256(pnlAbs) : -int256(pnlAbs);
 
-        state.marginToFreeUsdc = (positionMarginUsdc * sizeDelta) / positionSize;
-        state.remainingMarginUsdc = positionMarginUsdc - state.marginToFreeUsdc;
-        state.remainingSize = positionSize - sizeDelta;
-        state.maxProfitReductionUsdc = (maxProfitUsdc * sizeDelta) / positionSize;
+        state.marginToFreeUsdc = (position.margin * sizeDelta) / position.size;
+        state.remainingMarginUsdc = position.margin - state.marginToFreeUsdc;
+        state.remainingSize = position.size - sizeDelta;
+        state.maxProfitReductionUsdc = (position.maxProfitUsdc * sizeDelta) / position.size;
 
         state.vpiDeltaUsdc = CfdMath.calculateVPI(preSkewUsdc, postSkewUsdc, poolDepthUsdc, vpiFactor);
-        state.proportionalAccrualUsdc = (vpiAccrued * int256(sizeDelta)) / int256(positionSize);
+        state.proportionalAccrualUsdc = (position.vpiAccrued * int256(sizeDelta)) / int256(position.size);
         // Clamp so lifetime VPI (accrued + delta) never goes negative. Prevents LP sandwich attacks
         // where an attacker opens at high depth, donates to shrink depth, then closes to extract a
         // net-negative VPI rebate. Trade-off: market makers who heal skew on both open and close

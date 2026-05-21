@@ -472,41 +472,12 @@ library CfdEnginePlanLib {
             return delta;
         }
 
-        CfdEnginePlanTypes.SideSnapshot memory bull = snap.bullSide;
-        CfdEnginePlanTypes.SideSnapshot memory bear = snap.bearSide;
+        uint256 preSkewUsdc;
+        uint256 postSkewUsdc;
+        (delta.totalMarginBefore, delta.postBullOi, delta.postBearOi, preSkewUsdc, postSkewUsdc) =
+            _closeOpenInterestAndSkew(snap, pos.side, order.sizeDelta, price);
 
-        (CfdEnginePlanTypes.SideSnapshot memory selected, CfdEnginePlanTypes.SideSnapshot memory opposite) =
-            _selectedAndOpposite(snap, pos.side);
-
-        delta.totalMarginBefore = selected.totalMargin;
-
-        uint256 preSkewUsdc = _absSkewUsdc(bull, bear, price);
-
-        uint256 selectedOiAfter = selected.openInterest - order.sizeDelta;
-        uint256 oppositeOi = opposite.openInterest;
-        delta.postBullOi = pos.side == CfdTypes.Side.BULL ? selectedOiAfter : oppositeOi;
-        delta.postBearOi = pos.side == CfdTypes.Side.BEAR ? selectedOiAfter : oppositeOi;
-
-        uint256 postBullUsdc = (delta.postBullOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        uint256 postBearUsdc = (delta.postBearOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        uint256 postSkewUsdc = postBullUsdc > postBearUsdc ? postBullUsdc - postBearUsdc : postBearUsdc - postBullUsdc;
-
-        delta.closeState = CloseAccountingLib.buildCloseState(
-            pos.size,
-            pos.margin,
-            pos.entryPrice,
-            pos.maxProfitUsdc,
-            pos.vpiAccrued,
-            pos.side,
-            order.sizeDelta,
-            price,
-            snap.capPrice,
-            preSkewUsdc,
-            postSkewUsdc,
-            snap.poolAssetsUsdc,
-            snap.riskParams.vpiFactor,
-            snap.executionFeeBps
-        );
+        delta.closeState = _buildCloseState(snap, pos, order.sizeDelta, price, preSkewUsdc, postSkewUsdc);
 
         CloseAccountingLib.CloseState memory cs = delta.closeState;
         delta.posMarginAfter = cs.remainingMarginUsdc;
@@ -548,31 +519,17 @@ library CfdEnginePlanLib {
                     delta.executionFeeUsdc < cashAfterTraderPayout ? delta.executionFeeUsdc : cashAfterTraderPayout;
             }
         } else if (carryAdjustedSettlementUsdc < 0) {
-            delta.settlementType = CfdEnginePlanTypes.SettlementType.LOSS;
-            delta.lossUsdc = uint256(-carryAdjustedSettlementUsdc);
-            bool includeOtherLockedMargin = remainingSize == 0;
-
-            IMarginClearinghouse.AccountUsdcBuckets memory closeBuckets =
-                _buildCloseSettlementBuckets(snap, cs.marginToFreeUsdc, includeOtherLockedMargin);
-            delta.lossConsumption = MarginClearinghouseAccountingLib.planTerminalLossConsumption(
-                closeBuckets, cs.remainingMarginUsdc, delta.lossUsdc
+            delta = _applyCloseLossSettlement(
+                snap,
+                delta,
+                cs.marginToFreeUsdc,
+                cs.remainingMarginUsdc,
+                cs.executionFeeUsdc,
+                remainingSize == 0,
+                uint256(-carryAdjustedSettlementUsdc)
             );
-            delta.lossResult = CfdEngineSettlementLib.closeSettlementResult(
-                delta.lossConsumption.totalConsumedUsdc, delta.lossUsdc, cs.executionFeeUsdc
-            );
-            delta.syncMarginQueueAmount = delta.lossConsumption.otherLockedMarginConsumedUsdc;
-            (
-                delta.existingTraderClaimConsumedUsdc,
-                delta.existingTraderClaimRemainingUsdc,
-                delta.traderClaimFeeRecoveryUsdc,
-                delta.badDebtUsdc
-            ) = _planCloseTraderClaimConsumption(snap.traderClaimBalanceForAccount, delta.lossResult);
-            delta.executionFeeUsdc = delta.lossResult.collectedExecFeeUsdc + delta.traderClaimFeeRecoveryUsdc
-                + delta.lossResult.retainedExecFeeUsdc;
-            delta.protocolFeeTopUpUsdc = _closeLossProtocolFeeTopUpUsdc(snap, delta);
 
-            if (delta.lossResult.shortfallUsdc > 0 && cs.remainingMarginUsdc > 0) {
-                delta.revertCode = CfdEnginePlanTypes.CloseRevertCode.PARTIAL_CLOSE_UNDERWATER;
+            if (delta.revertCode != CfdEnginePlanTypes.CloseRevertCode.OK) {
                 return delta;
             }
         }
@@ -583,6 +540,98 @@ library CfdEnginePlanLib {
 
         delta.solvency = _computeCloseSolvency(snap, delta);
         delta.valid = true;
+    }
+
+    function _closeOpenInterestAndSkew(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        CfdTypes.Side side,
+        uint256 sizeDelta,
+        uint256 price
+    )
+        private
+        pure
+        returns (
+            uint256 totalMarginBefore,
+            uint256 postBullOi,
+            uint256 postBearOi,
+            uint256 preSkewUsdc,
+            uint256 postSkewUsdc
+        )
+    {
+        CfdEnginePlanTypes.SideSnapshot memory bull = snap.bullSide;
+        CfdEnginePlanTypes.SideSnapshot memory bear = snap.bearSide;
+        (CfdEnginePlanTypes.SideSnapshot memory selected, CfdEnginePlanTypes.SideSnapshot memory opposite) =
+            _selectedAndOpposite(snap, side);
+
+        totalMarginBefore = selected.totalMargin;
+        preSkewUsdc = _absSkewUsdc(bull, bear, price);
+
+        uint256 selectedOiAfter = selected.openInterest - sizeDelta;
+        uint256 oppositeOi = opposite.openInterest;
+        postBullOi = side == CfdTypes.Side.BULL ? selectedOiAfter : oppositeOi;
+        postBearOi = side == CfdTypes.Side.BEAR ? selectedOiAfter : oppositeOi;
+
+        uint256 postBullUsdc = (postBullOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
+        uint256 postBearUsdc = (postBearOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
+        postSkewUsdc = postBullUsdc > postBearUsdc ? postBullUsdc - postBearUsdc : postBearUsdc - postBullUsdc;
+    }
+
+    function _buildCloseState(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        CfdTypes.Position memory pos,
+        uint256 sizeDelta,
+        uint256 price,
+        uint256 preSkewUsdc,
+        uint256 postSkewUsdc
+    ) private pure returns (CloseAccountingLib.CloseState memory) {
+        return CloseAccountingLib.buildCloseState(
+            pos,
+            sizeDelta,
+            price,
+            snap.capPrice,
+            preSkewUsdc,
+            postSkewUsdc,
+            snap.poolAssetsUsdc,
+            snap.riskParams.vpiFactor,
+            snap.executionFeeBps
+        );
+    }
+
+    function _applyCloseLossSettlement(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        CfdEnginePlanTypes.CloseDelta memory delta,
+        uint256 marginToFreeUsdc,
+        uint256 remainingMarginUsdc,
+        uint256 executionFeeUsdc,
+        bool includeOtherLockedMargin,
+        uint256 lossUsdc
+    ) private pure returns (CfdEnginePlanTypes.CloseDelta memory) {
+        delta.settlementType = CfdEnginePlanTypes.SettlementType.LOSS;
+        delta.lossUsdc = lossUsdc;
+
+        IMarginClearinghouse.AccountUsdcBuckets memory closeBuckets =
+            _buildCloseSettlementBuckets(snap, marginToFreeUsdc, includeOtherLockedMargin);
+        delta.lossConsumption =
+            MarginClearinghouseAccountingLib.planTerminalLossConsumption(closeBuckets, remainingMarginUsdc, lossUsdc);
+        delta.lossResult = CfdEngineSettlementLib.closeSettlementResult(
+            delta.lossConsumption.totalConsumedUsdc, lossUsdc, executionFeeUsdc
+        );
+        delta.syncMarginQueueAmount = delta.lossConsumption.otherLockedMarginConsumedUsdc;
+        (
+            delta.existingTraderClaimConsumedUsdc,
+            delta.existingTraderClaimRemainingUsdc,
+            delta.traderClaimFeeRecoveryUsdc,
+            delta.badDebtUsdc
+        ) = _planCloseTraderClaimConsumption(snap.traderClaimBalanceForAccount, delta.lossResult);
+        delta.executionFeeUsdc = delta.lossResult.collectedExecFeeUsdc + delta.traderClaimFeeRecoveryUsdc
+            + delta.lossResult.retainedExecFeeUsdc;
+        delta.protocolFeeTopUpUsdc = _closeLossProtocolFeeTopUpUsdc(snap, delta);
+
+        if (delta.lossResult.shortfallUsdc > 0 && remainingMarginUsdc > 0) {
+            delta.revertCode = CfdEnginePlanTypes.CloseRevertCode.PARTIAL_CLOSE_UNDERWATER;
+        }
+
+        return delta;
     }
 
     function _computeCloseSolvency(
@@ -691,9 +740,6 @@ library CfdEnginePlanLib {
         delta.posMaxProfit = pos.maxProfitUsdc;
         delta.posEntryPrice = pos.entryPrice;
 
-        CfdEnginePlanTypes.SideSnapshot memory bull = snap.bullSide;
-        CfdEnginePlanTypes.SideSnapshot memory bear = snap.bearSide;
-
         uint256 maintMarginBps = snap.isFadWindow ? snap.riskParams.fadMarginBps : snap.riskParams.maintMarginBps;
         uint256 settlementReachableUsdc = MarginClearinghouseAccountingLib.getTerminalReachableUsdc(snap.accountBuckets);
         delta.liquidationReachableCollateralUsdc = settlementReachableUsdc;
@@ -709,6 +755,18 @@ library CfdEnginePlanLib {
         }
         delta.liquidatable = true;
 
+        delta = _applyLiquidationSettlement(snap, delta, pos, price, settlementReachableUsdc, maintMarginBps);
+        delta.solvency = _computeLiquidationSolvency(snap, delta, pos);
+    }
+
+    function _applyLiquidationSettlement(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        CfdEnginePlanTypes.LiquidationDelta memory delta,
+        CfdTypes.Position memory pos,
+        uint256 price,
+        uint256 settlementReachableUsdc,
+        uint256 maintMarginBps
+    ) private pure returns (CfdEnginePlanTypes.LiquidationDelta memory) {
         int256 liquidationEquityUsdc = delta.riskState.equityUsdc;
 
         delta.liquidationState = LiquidationAccountingLib.buildLiquidationState(
@@ -755,16 +813,16 @@ library CfdEnginePlanLib {
             delta.freshPayoutCreatesClaim = !delta.freshPayoutIsImmediate;
         }
 
-        if (pos.side == CfdTypes.Side.BULL) {
-            bull.openInterest -= pos.size;
-            bull.totalMargin -= pos.margin;
-        } else {
-            bear.openInterest -= pos.size;
-            bear.totalMargin -= pos.margin;
-        }
+        return delta;
+    }
 
+    function _computeLiquidationSolvency(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        CfdEnginePlanTypes.LiquidationDelta memory delta,
+        CfdTypes.Position memory pos
+    ) private pure returns (CfdEnginePlanTypes.SolvencyPreview memory sp) {
         uint256 postMaxLiability = SolvencyAccountingLib.getMaxLiabilityAfterClose(
-            bull.maxProfitUsdc, bear.maxProfitUsdc, pos.side, pos.maxProfitUsdc
+            snap.bullSide.maxProfitUsdc, snap.bearSide.maxProfitUsdc, pos.side, pos.maxProfitUsdc
         );
 
         SolvencyAccountingLib.SolvencyState memory currentState = SolvencyAccountingLib.buildSolvencyState(
@@ -788,10 +846,10 @@ library CfdEnginePlanLib {
             snap.degradedMode
         );
 
-        delta.solvency.effectiveAssetsAfterUsdc = result.effectiveAssetsAfterUsdc;
-        delta.solvency.maxLiabilityAfterUsdc = result.maxLiabilityAfterUsdc;
-        delta.solvency.triggersDegradedMode = result.triggersDegradedMode;
-        delta.solvency.postOpDegradedMode = result.postOpDegradedMode;
+        sp.effectiveAssetsAfterUsdc = result.effectiveAssetsAfterUsdc;
+        sp.maxLiabilityAfterUsdc = result.maxLiabilityAfterUsdc;
+        sp.triggersDegradedMode = result.triggersDegradedMode;
+        sp.postOpDegradedMode = result.postOpDegradedMode;
     }
 
 }

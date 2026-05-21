@@ -795,11 +795,7 @@ abstract contract BasePerpTest is Test {
     function _warpForward(
         uint256 delta
     ) internal {
-        uint256 ts;
-        assembly {
-            ts := timestamp()
-        }
-        vm.warp(ts + delta);
+        vm.warp(block.timestamp + delta);
     }
 
     function _sideState(

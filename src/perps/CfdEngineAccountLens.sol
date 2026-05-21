@@ -189,18 +189,8 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
             return snapshot;
         }
 
-        CfdTypes.RiskParams memory params = _riskParams();
-        uint256 price = engineContract.lastMarkPrice();
-        uint256 pendingCarryUsdc = engineContract.unsettledCarryUsdc(account) + _elapsedCarryUsdc(account, pos);
         PositionRiskAccountingLib.PositionRiskState memory riskState =
-            PositionRiskAccountingLib.buildPositionRiskStateWithCarry(
-                pos,
-                price,
-                engineContract.CAP_PRICE(),
-                pendingCarryUsdc,
-                snapshot.terminalReachableUsdc,
-                engineContract.isFadWindow() ? params.fadMarginBps : params.maintMarginBps
-            );
+            _buildSnapshotRiskState(account, pos, snapshot.terminalReachableUsdc);
 
         snapshot.hasPosition = true;
         snapshot.side = pos.side;
@@ -210,6 +200,24 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         snapshot.unrealizedPnlUsdc = riskState.unrealizedPnlUsdc;
         snapshot.netEquityUsdc = riskState.equityUsdc;
         snapshot.liquidatable = riskState.liquidatable;
+    }
+
+    function _buildSnapshotRiskState(
+        address account,
+        CfdTypes.Position memory pos,
+        uint256 terminalReachableUsdc
+    ) internal view returns (PositionRiskAccountingLib.PositionRiskState memory) {
+        CfdTypes.RiskParams memory params = _riskParams();
+        uint256 pendingCarryUsdc = engineContract.unsettledCarryUsdc(account) + _elapsedCarryUsdc(account, pos);
+
+        return PositionRiskAccountingLib.buildPositionRiskStateWithCarry(
+            pos,
+            engineContract.lastMarkPrice(),
+            engineContract.CAP_PRICE(),
+            pendingCarryUsdc,
+            terminalReachableUsdc,
+            engineContract.isFadWindow() ? params.fadMarginBps : params.maintMarginBps
+        );
     }
 
     function _position(
