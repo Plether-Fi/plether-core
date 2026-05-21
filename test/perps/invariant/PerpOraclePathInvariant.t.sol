@@ -218,7 +218,9 @@ contract PerpOraclePathHandler is Test {
         bytes memory err
     ) internal pure returns (bytes4 selector) {
         if (err.length >= 4) {
-            return bytes4(err);
+            assembly {
+                selector := mload(add(err, 32))
+            }
         }
     }
 

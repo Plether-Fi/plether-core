@@ -669,7 +669,9 @@ contract PerpAccountingHandler is Test {
         if (err.length < 4) {
             return bytes4(0);
         }
-        return bytes4(err);
+        assembly {
+            selector := mload(add(err, 32))
+        }
     }
 
     function _commitReferencePrice() internal view returns (uint256 price) {

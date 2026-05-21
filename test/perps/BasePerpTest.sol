@@ -683,7 +683,9 @@ abstract contract BasePerpTest is Test {
         if (err.length < 4) {
             return bytes4(0);
         }
-        return bytes4(err);
+        assembly {
+            selector := mload(add(err, 32))
+        }
     }
 
     // --- Governance helpers ---
