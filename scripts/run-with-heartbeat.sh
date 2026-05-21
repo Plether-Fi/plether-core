@@ -12,9 +12,17 @@ start="${SECONDS}"
 "$@" &
 cmd_pid="$!"
 
+heartbeat_pid=""
+
 forward_signal() {
     kill "${cmd_pid}" 2>/dev/null || true
+    if [ -n "${heartbeat_pid}" ]; then
+        kill "${heartbeat_pid}" 2>/dev/null || true
+    fi
     wait "${cmd_pid}" 2>/dev/null || true
+    if [ -n "${heartbeat_pid}" ]; then
+        wait "${heartbeat_pid}" 2>/dev/null || true
+    fi
 }
 
 trap forward_signal INT TERM
@@ -25,6 +33,12 @@ while kill -0 "${cmd_pid}" 2>/dev/null; do
         elapsed="$((SECONDS - start))"
         echo "[heartbeat] command still running after ${elapsed}s: $*"
     fi
-done
+done &
+heartbeat_pid="$!"
 
 wait "${cmd_pid}"
+status="$?"
+
+kill "${heartbeat_pid}" 2>/dev/null || true
+wait "${heartbeat_pid}" 2>/dev/null || true
+exit "${status}"
