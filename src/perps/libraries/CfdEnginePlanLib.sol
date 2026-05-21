@@ -477,7 +477,22 @@ library CfdEnginePlanLib {
         (delta.totalMarginBefore, delta.postBullOi, delta.postBearOi, preSkewUsdc, postSkewUsdc) =
             _closeOpenInterestAndSkew(snap, pos.side, order.sizeDelta, price);
 
-        delta.closeState = _buildCloseState(snap, pos, order.sizeDelta, price, preSkewUsdc, postSkewUsdc);
+        delta.closeState = CloseAccountingLib.buildCloseState(
+            pos.size,
+            pos.margin,
+            pos.entryPrice,
+            pos.maxProfitUsdc,
+            pos.vpiAccrued,
+            pos.side,
+            order.sizeDelta,
+            price,
+            snap.capPrice,
+            preSkewUsdc,
+            postSkewUsdc,
+            snap.poolAssetsUsdc,
+            snap.riskParams.vpiFactor,
+            snap.executionFeeBps
+        );
 
         CloseAccountingLib.CloseState memory cs = delta.closeState;
         delta.posMarginAfter = cs.remainingMarginUsdc;
@@ -574,28 +589,6 @@ library CfdEnginePlanLib {
         uint256 postBullUsdc = (postBullOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
         uint256 postBearUsdc = (postBearOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
         postSkewUsdc = postBullUsdc > postBearUsdc ? postBullUsdc - postBearUsdc : postBearUsdc - postBullUsdc;
-    }
-
-    function _buildCloseState(
-        CfdEnginePlanTypes.RawSnapshot memory snap,
-        CfdTypes.Position memory pos,
-        uint256 sizeDelta,
-        uint256 price,
-        uint256 preSkewUsdc,
-        uint256 postSkewUsdc
-    ) private pure returns (CloseAccountingLib.CloseState memory) {
-        CloseAccountingLib.CloseInputs memory inputs;
-        inputs.position = pos;
-        inputs.sizeDelta = sizeDelta;
-        inputs.oraclePrice = price;
-        inputs.capPrice = snap.capPrice;
-        inputs.preSkewUsdc = preSkewUsdc;
-        inputs.postSkewUsdc = postSkewUsdc;
-        inputs.poolDepthUsdc = snap.poolAssetsUsdc;
-        inputs.vpiFactor = snap.riskParams.vpiFactor;
-        inputs.executionFeeBps = snap.executionFeeBps;
-
-        return CloseAccountingLib.buildCloseState(inputs);
     }
 
     function _applyCloseLossSettlement(
