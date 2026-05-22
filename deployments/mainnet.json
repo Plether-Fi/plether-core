@@ -1,8 +1,8 @@
 {
   "network": "mainnet",
   "chainId": 1,
-  "deployedAt": "2026-02-26",
-  "commit": "207c1f1",
+  "deployedAt": "2026-05-22",
+  "commit": "1de9c15",
   "contracts": {
     "core": {
       "SyntheticSplitter": "0x81D7f6eE951f5272043de05E6EE25c58a440c2DF",
@@ -38,8 +38,8 @@
       "RewardDistributor": "0x34558F6eC05F91773b7d269f50ce0bbeC4403760"
     },
     "invarCoin": {
-      "InvarCoin": "0x125B1F77Ef927eFf08EDd362c00BF059FFD9d3E6",
-      "sINVAR": "0xa99477f3d822dFa1b7E51832565C1f89fE3608D9"
+      "InvarCoin": "0x54daa79ebF983fF1d4742ae1bC055B7aDC53dC2B",
+      "sINVAR": "0x94Fca57189E7b45FF0daCd2598bEa9efA3fbdF9b"
     },
     "external": {
       "USDC": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
@@ -69,8 +69,8 @@
     "LeverageRouter": "https://etherscan.io/address/0x72D0687ADeC9E16D188DFeD6c6C756De94ea7434",
     "BullLeverageRouter": "https://etherscan.io/address/0xd73794c7DeEb80b30c46E6A11b2d0CF071e6a8D0",
     "CurvePool": "https://etherscan.io/address/0x2354579380cAd0518C6518e5Ee2A66d30d0149bE",
-    "InvarCoin": "https://etherscan.io/address/0x125B1F77Ef927eFf08EDd362c00BF059FFD9d3E6",
-    "sINVAR": "https://etherscan.io/address/0xa99477f3d822dFa1b7E51832565C1f89fE3608D9",
+    "InvarCoin": "https://etherscan.io/address/0x54daa79ebF983fF1d4742ae1bC055B7aDC53dC2B",
+    "sINVAR": "https://etherscan.io/address/0x94Fca57189E7b45FF0daCd2598bEa9efA3fbdF9b",
     "RewardDistributor": "https://etherscan.io/address/0x34558F6eC05F91773b7d269f50ce0bbeC4403760"
   }
 }

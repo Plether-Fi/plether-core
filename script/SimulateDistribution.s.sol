@@ -25,7 +25,7 @@ contract SimulateDistribution is Script {
     address constant PYTH_ADAPTER = 0xEf0e44465a18f848165Bf1A007BE51f628a6FC06;
     address constant ORACLE = 0xfFc35FD33C2acF241F6e46625C7571D64f8AddbD;
     address constant OWNER = 0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B;
-    address constant INVAR_COIN = 0x125B1F77Ef927eFf08EDd362c00BF059FFD9d3E6;
+    address constant INVAR_COIN = 0x54daa79ebF983fF1d4742ae1bC055B7aDC53dC2B;
 
     IERC20 constant USDC = IERC20(USDC_ADDR);
     IERC20 constant BEAR = IERC20(BEAR_ADDR);
