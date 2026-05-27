@@ -30,7 +30,6 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
     ICfdEngineCore public immutable engine;
     IHousePool public immutable housePool;
     IPyth public immutable override pyth;
-    address public immutable owner;
 
     bytes32[] public pythFeedIds;
     uint256[] public quantities;
@@ -68,7 +67,6 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         engine = ICfdEngineCore(engine_);
         housePool = IHousePool(housePool_);
         pyth = IPyth(pyth_);
-        owner = msg.sender;
 
         if (feedIds_.length == 0) {
             revert PletherOracle__NoFeeds();
@@ -225,7 +223,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
     function applyConfig(
         OracleConfig calldata config
     ) external override {
-        if (msg.sender != owner && msg.sender != engine.orderRouter()) {
+        if (msg.sender != engine.orderRouter()) {
             revert PletherOracle__Unauthorized();
         }
         if (

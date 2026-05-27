@@ -181,7 +181,7 @@ interface IPletherOracle {
         bool isClose
     ) external view returns (PolicySnapshot memory policy);
 
-    /// @notice Applies oracle policy configuration from owner or the router.
+    /// @notice Applies oracle policy configuration from the configured router.
     /// @param config Oracle policy configuration to apply
     function applyConfig(
         OracleConfig calldata config

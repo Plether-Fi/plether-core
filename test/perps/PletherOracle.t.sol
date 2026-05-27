@@ -267,7 +267,7 @@ contract PletherOracleTest is Test {
         oracle.updatePrice(address(this), _pythUpdateData(), IPletherOracle.PriceMode.MarkRefresh);
     }
 
-    function test_ApplyConfig_OnlyOwnerOrRouter() public {
+    function test_ApplyConfig_OnlyConfiguredRouter() public {
         IPletherOracle.OracleConfig memory config = IPletherOracle.OracleConfig({
             orderExecutionStalenessLimit: 120,
             liquidationStalenessLimit: 30,
@@ -287,6 +287,28 @@ contract PletherOracleTest is Test {
         assertEq(oracle.orderExecutionStalenessLimit(), 120, "router can apply config");
         assertEq(oracle.liquidationStalenessLimit(), 30, "liquidation limit");
         assertEq(oracle.pythMaxConfidenceRatioBps(), 500, "confidence bps");
+    }
+
+    function test_ApplyConfig_DeployerCannotBypassRouter() public {
+        address router = address(0xA11CE);
+        engine.setOrderRouter(router);
+
+        IPletherOracle.OracleConfig memory config = IPletherOracle.OracleConfig({
+            orderExecutionStalenessLimit: 120,
+            liquidationStalenessLimit: 30,
+            pythMaxConfidenceRatioBps: 500,
+            orderSettlementWindow: oracle.orderSettlementWindow(),
+            maxComponentPublishTimeDivergence: oracle.maxComponentPublishTimeDivergence(),
+            adverseConfidenceMultiplierBps: oracle.adverseConfidenceMultiplierBps()
+        });
+
+        vm.expectRevert(IPletherOracle.PletherOracle__Unauthorized.selector);
+        oracle.applyConfig(config);
+
+        vm.prank(router);
+        oracle.applyConfig(config);
+
+        assertEq(oracle.orderExecutionStalenessLimit(), 120, "router can apply config");
     }
 
     function _deployOracle(
