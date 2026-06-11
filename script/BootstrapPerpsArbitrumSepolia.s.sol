@@ -58,7 +58,13 @@ contract BootstrapPerpsArbitrumSepolia is Script {
 
         _configurePauser(housePool, routerAdmin, pauser);
         _seedLifecycle(
-            housePool, IMintableERC20(usdc), seniorSeedUsdc, juniorSeedUsdc, seniorSeedReceiver, juniorSeedReceiver
+            housePool,
+            IMintableERC20(usdc),
+            seniorSeedUsdc,
+            juniorSeedUsdc,
+            seniorSeedReceiver,
+            juniorSeedReceiver,
+            deployer
         );
         _fundTestUsers(IMintableERC20(usdc), testUsers, testUserAmounts);
         _activateTrading(housePool, activateTrading);
@@ -100,7 +106,8 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         uint256 seniorSeedUsdc,
         uint256 juniorSeedUsdc,
         address seniorSeedReceiver,
-        address juniorSeedReceiver
+        address juniorSeedReceiver,
+        address seedFunder
     ) internal {
         uint256 totalSeedUsdc;
         if (!housePool.seniorSeedInitialized() && seniorSeedUsdc > 0) {
@@ -111,9 +118,10 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         }
 
         if (totalSeedUsdc > 0) {
-            usdc.mint(address(this), totalSeedUsdc);
+            usdc.mint(seedFunder, totalSeedUsdc);
             usdc.approve(address(housePool), totalSeedUsdc);
-            console.log("Minted seed USDC to broadcaster:", totalSeedUsdc);
+            console.log("Minted seed USDC to broadcaster:", seedFunder);
+            console.log("Seed USDC amount:", totalSeedUsdc);
         }
 
         if (!housePool.juniorSeedInitialized() && juniorSeedUsdc > 0) {
