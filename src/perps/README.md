@@ -384,6 +384,7 @@ This is a containment latch, not a pause. The protocol still allows transitions 
 ### Liquidations
 
 - Liquidations are proportional and bounded by actually reachable collateral.
+- Liquidations are designed to avoid price-impact-driven cascades: positions settle against an external bounded oracle mark, not forced selling into an AMM or order book, so one liquidation does not mechanically move the execution price for the next. Large oracle moves can still make many positions independently liquidatable.
 - The keeper bounty is proportional with a floor.
 - Liquidation does not compute a fresh VPI delta, but any negative accrued VPI rebate debt is clawed back before residual/bad-debt planning.
 - Residual trader value is preserved when positive.
