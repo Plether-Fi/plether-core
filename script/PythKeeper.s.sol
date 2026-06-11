@@ -6,7 +6,7 @@ import "forge-std/Script.sol";
 
 /**
  * @title PythKeeper
- * @notice Pushes fresh Pyth price data on-chain. Supports Sepolia and Mainnet.
+ * @notice Pushes fresh Pyth price data on-chain.
  * @dev Usage: PYTH_ADDRESS=<addr> KEEPER_PRIVATE_KEY=<key> PYTH_UPDATE_DATA=<abi-encoded bytes[]> \
  *             forge script script/PythKeeper.s.sol --tc PythKeeper --rpc-url $RPC_URL --broadcast
  *      Use scripts/pyth-keeper.sh to fetch data from Hermes and run this automatically.
