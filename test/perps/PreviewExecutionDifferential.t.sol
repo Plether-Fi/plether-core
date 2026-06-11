@@ -21,6 +21,62 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         uint256 executionBountyUsdc;
     }
 
+    function testFuzz_PreviewOpen_MatchesLiveExecution_AfterCarryAndSkew(
+        bool isBull,
+        uint256 initialMarginFuzz,
+        uint256 marginDeltaFuzz,
+        uint256 sizeDeltaFuzz,
+        uint256 oraclePriceFuzz,
+        uint256 carryDelayFuzz
+    ) public {
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.vpiFactor = 0.0002e18;
+        _setRiskParams(params);
+
+        address trader = address(0xC109);
+        address account = trader;
+        CfdTypes.Side side = isBull ? CfdTypes.Side.BULL : CfdTypes.Side.BEAR;
+        uint256 initialMargin = bound(initialMarginFuzz, 20_000e6, 70_000e6);
+        uint256 marginDelta = bound(marginDeltaFuzz, 0, 40_000e6);
+        uint256 sizeDelta = bound(sizeDeltaFuzz, 1000e18, 40_000e18);
+        uint256 oraclePrice = bound(oraclePriceFuzz, 80_000_000, 120_000_000);
+        uint256 carryDelay = bound(carryDelayFuzz, 1 days, 60 days);
+
+        _fundTrader(trader, 150_000e6);
+        _open(account, side, 75_000e18, initialMargin, 1e8);
+        vm.warp(block.timestamp + carryDelay);
+
+        ICfdEngineTypes.OpenPreview memory preview =
+            engineLens.previewOpen(account, side, sizeDelta, marginDelta, oraclePrice, uint64(block.timestamp));
+        vm.assume(preview.valid);
+        assertGt(preview.pendingCarryUsdc, 0, "Setup should exercise pending carry realization");
+
+        _executeOpen(account, side, sizeDelta, marginDelta, oraclePrice, uint64(block.timestamp));
+
+        _assertOpenPreviewMatchesLive(account, side, preview);
+    }
+
+    function test_PreviewOpen_VpiRebateMatchesLiveExecution() public {
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.vpiFactor = 0.0005e18;
+        _setRiskParams(params);
+
+        address bullTrader = address(0xC10A);
+        address bearTrader = address(0xC10B);
+        _fundTrader(bullTrader, 20_000e6);
+        _fundTrader(bearTrader, 20_000e6);
+        _open(bullTrader, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+
+        ICfdEngineTypes.OpenPreview memory preview =
+            engineLens.previewOpen(bearTrader, CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8, uint64(block.timestamp));
+        assertTrue(preview.valid, "Healing open should be valid");
+        assertLt(preview.vpiUsdc, 0, "Healing open should receive a VPI rebate");
+
+        _executeOpen(bearTrader, CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8, uint64(block.timestamp));
+
+        _assertOpenPreviewMatchesLive(bearTrader, CfdTypes.Side.BEAR, preview);
+    }
+
     function testFuzz_ValidPreviewOpen_DoesNotUntypedRevertOnSameStateExecution(
         uint256 initialMarginFuzz,
         uint256 marginDeltaFuzz,
@@ -81,6 +137,144 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             );
             fail("Valid preview open unexpectedly reverted on the live open path");
         }
+    }
+
+    function _executeOpen(
+        address account,
+        CfdTypes.Side side,
+        uint256 sizeDelta,
+        uint256 marginDelta,
+        uint256 oraclePrice,
+        uint64 publishTime
+    ) internal {
+        uint256 poolDepthUsdc = pool.totalAssets();
+        vm.prank(address(router));
+        engine.processOrderTyped(
+            CfdTypes.Order({
+                account: account,
+                sizeDelta: sizeDelta,
+                marginDelta: marginDelta,
+                targetPrice: oraclePrice,
+                commitTime: publishTime,
+                commitBlock: uint64(block.number),
+                orderId: 0,
+                side: side,
+                isClose: false
+            }),
+            oraclePrice,
+            poolDepthUsdc,
+            publishTime
+        );
+    }
+
+    function _assertOpenPreviewMatchesLive(
+        address account,
+        CfdTypes.Side side,
+        ICfdEngineTypes.OpenPreview memory preview
+    ) internal view {
+        (
+            uint256 liveSize,
+            uint256 liveMargin,
+            uint256 liveEntryPrice,,
+            CfdTypes.Side liveSide,,
+            int256 liveVpiAccrued
+        ) = engine.positions(account);
+        assertEq(uint256(liveSide), uint256(side), "Open preview side should match live execution");
+        assertEq(liveSize, preview.postSize, "Open preview size should match live execution");
+        assertEq(liveMargin, preview.postMarginUsdc, "Open preview margin should match live execution");
+        assertEq(liveEntryPrice, preview.postEntryPrice, "Open preview entry should match live execution");
+        assertEq(liveVpiAccrued, preview.postVpiAccrued, "Open preview VPI accrual should match live execution");
+        assertEq(engine.unsettledCarryUsdc(account), 0, "Valid open should clear realizable pending carry");
+
+        ICfdEngineTypes.LiquidationPreview memory liquidationAtExecution =
+            engineLens.previewLiquidation(account, preview.executionPrice);
+        assertEq(
+            liquidationAtExecution.pnlUsdc,
+            preview.postUnrealizedPnlUsdc,
+            "Open preview PnL should match post-execution liquidation lens"
+        );
+        int256 liveEquityUsdc = _liveOpenEquityUsdc(account, liveVpiAccrued, liquidationAtExecution.pnlUsdc);
+        assertEq(liveEquityUsdc, preview.postEquityUsdc, "Open preview equity should match live reachable collateral");
+        assertEq(
+            liquidationAtExecution.liquidatable,
+            preview.postLiquidatable,
+            "Open preview liquidatable flag should match post-execution liquidation lens"
+        );
+
+        uint256 liveMaintenanceMarginUsdc = _maintenanceMarginUsdc(preview.postSize, preview.executionPrice);
+        assertEq(
+            preview.maintenanceMarginUsdc,
+            liveMaintenanceMarginUsdc,
+            "Open preview maintenance margin should match live risk config"
+        );
+        assertEq(
+            preview.postHealthBps,
+            _healthBps(preview.postEquityUsdc, liveMaintenanceMarginUsdc),
+            "Open preview health should match live risk inputs"
+        );
+        _assertOpenLiquidationThresholdMatchesLive(account, side, preview);
+    }
+
+    function _liveOpenEquityUsdc(
+        address account,
+        int256 liveVpiAccrued,
+        int256 livePnlUsdc
+    ) internal view returns (int256 equityUsdc) {
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(account);
+        uint256 reachableCollateralUsdc = buckets.settlementBalanceUsdc > buckets.otherLockedMarginUsdc
+            ? buckets.settlementBalanceUsdc - buckets.otherLockedMarginUsdc
+            : 0;
+        uint256 vpiClawbackUsdc = liveVpiAccrued < 0 ? uint256(-liveVpiAccrued) : 0;
+        equityUsdc = int256(reachableCollateralUsdc) - int256(vpiClawbackUsdc) + livePnlUsdc;
+    }
+
+    function _assertOpenLiquidationThresholdMatchesLive(
+        address account,
+        CfdTypes.Side side,
+        ICfdEngineTypes.OpenPreview memory preview
+    ) internal view {
+        if (!preview.hasLiquidationPrice) {
+            assertFalse(
+                engineLens.previewLiquidation(account, 0).liquidatable,
+                "Missing threshold should mean zero price is solvent"
+            );
+            assertFalse(
+                engineLens.previewLiquidation(account, CAP_PRICE).liquidatable,
+                "Missing threshold should mean cap price is solvent"
+            );
+            return;
+        }
+
+        assertTrue(
+            engineLens.previewLiquidation(account, preview.liquidationPrice).liquidatable,
+            "Returned liquidation threshold should be liquidatable"
+        );
+        if (side == CfdTypes.Side.BULL) {
+            if (preview.liquidationPrice > 0) {
+                assertFalse(
+                    engineLens.previewLiquidation(account, preview.liquidationPrice - 1).liquidatable,
+                    "BULL should be solvent below liquidation threshold"
+                );
+            }
+            return;
+        }
+
+        if (preview.liquidationPrice < CAP_PRICE) {
+            assertFalse(
+                engineLens.previewLiquidation(account, preview.liquidationPrice + 1).liquidatable,
+                "BEAR should be solvent above liquidation threshold"
+            );
+        }
+    }
+
+    function _healthBps(
+        int256 equityUsdc,
+        uint256 maintenanceMarginUsdc
+    ) internal pure returns (uint256 healthBps) {
+        if (equityUsdc <= 0 || maintenanceMarginUsdc == 0) {
+            return 0;
+        }
+        return (uint256(equityUsdc) * 10_000) / maintenanceMarginUsdc;
     }
 
     function testFuzz_PreviewClose_FullCloseMatchesLiveExecution_LiquidVault(
@@ -170,7 +364,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         address account,
         ICfdEngineTypes.ClosePreview memory preview,
         CloseExecutionCheckpoint memory checkpoint
-    ) internal {
+    ) internal view {
         IMarginClearinghouse.AccountUsdcBuckets memory bucketsAfter = clearinghouse.getAccountUsdcBuckets(account);
         (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(account);
         uint256 expectedSettlement = checkpoint.settlementBefore + preview.immediatePayoutUsdc

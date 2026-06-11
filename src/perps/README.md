@@ -63,12 +63,14 @@ In practice, the compact public API is:
   - `HousePool.depositJunior(uint256)` / `HousePool.withdrawJunior(uint256,address)`
 - Readers:
   - `PerpsPublicLens`
+  - `CfdEngineLens.previewOpen(...)` / `previewClose(...)` for trade-ticket simulations using caller-supplied oracle prices
 
 The simplified public interfaces live in `src/perps/interfaces/`:
 
 - `IMarginAccount.sol`
 - `IPerpsTraderActions.sol`
 - `IPerpsTraderViews.sol`
+- `ICfdEngineLens.sol` for `previewOpen(...)` / `previewClose(...)` trade-ticket previews
 - `IPerpsLPActions.sol`
 - `IPerpsLPViews.sol`
 - `IPerpsKeeper.sol`
@@ -76,6 +78,21 @@ The simplified public interfaces live in `src/perps/interfaces/`:
 - `PerpsViewTypes.sol`
 
 The wider engine, clearinghouse, router, and house-pool interfaces still exist for tests, admin tooling, and deep accounting inspection, but they are not the recommended product integration surface.
+
+### Trade-ticket previews
+
+Frontends should use `CfdEngineLens.previewOpen(account, side, sizeDelta, marginDelta, oraclePrice, publishTime)` to simulate opens and same-side increases before committing an order. The lens is read-only: it uses the caller-supplied `oraclePrice` and `publishTime`, does not fetch Hermes data, does not ingest Pyth updates, and does not mutate engine mark state.
+
+Preview units match the rest of perps:
+
+- USDC amounts, fees, VPI, margin, equity, and PnL use 6 decimals.
+- Oracle prices and returned execution/liquidation prices use 8 decimals.
+- Position sizes use 18 decimals.
+- Signed fields such as `vpiUsdc`, `tradeCostUsdc`, `postVpiAccrued`, `postUnrealizedPnlUsdc`, and `postEquityUsdc` may be negative.
+
+`executionPrice` is clamped to `CAP_PRICE`. `valid`, `invalidReason`, and `failureCategory` are authoritative for whether the order would pass planner validation. For invalid previews, numeric economics or post-trade fields may be zero or partial depending on where planning stopped.
+
+For valid previews, `postSize`, `postMarginUsdc`, `postEntryPrice`, `postVpiAccrued`, post-trade health, and liquidation fields are projected from the same planner/accounting logic used by live execution. `hasLiquidationPrice == false` means no liquidation threshold exists inside `[0, CAP_PRICE]`. For BULL positions, `liquidationPrice` is the lowest in-range price that is liquidatable. For BEAR positions, it is the highest in-range price that is liquidatable.
 
 ## Runtime Components
 

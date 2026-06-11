@@ -142,6 +142,42 @@ interface ICfdEngineTypes {
         uint256 maxLiabilityAfterUsdc;
     }
 
+    /// @notice Read-only open/increase trade-ticket preview.
+    /// @dev Unless stated otherwise, USDC fields use 6 decimals, prices use 8 decimals, and position sizes use 18
+    ///      decimals. Invalid previews return authoritative validity fields; economics/risk fields may be zero or
+    ///      partial depending on where planning stopped.
+    struct OpenPreview {
+        // Validity.
+        bool valid;
+        CfdEnginePlanTypes.OpenRevertCode invalidReason;
+        CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory;
+        // Trade economics.
+        uint256 executionPrice;
+        uint256 sizeDelta;
+        uint256 notionalUsdc;
+        uint256 marginDeltaUsdc;
+        int256 vpiUsdc;
+        uint256 executionFeeUsdc;
+        int256 tradeCostUsdc;
+        uint256 poolRebatePayoutUsdc;
+        uint256 pendingCarryUsdc;
+        // Margin and projected post-trade position.
+        uint256 initialMarginRequirementUsdc;
+        uint256 maintenanceMarginUsdc;
+        uint256 postSize;
+        uint256 postMarginUsdc;
+        uint256 postEntryPrice;
+        int256 postVpiAccrued;
+        // Projected post-trade health.
+        int256 postUnrealizedPnlUsdc;
+        int256 postEquityUsdc;
+        uint256 postHealthBps;
+        bool postLiquidatable;
+        // Liquidation threshold inside [0, CAP_PRICE], if one exists.
+        bool hasLiquidationPrice;
+        uint256 liquidationPrice;
+    }
+
     struct LiquidationPreview {
         bool liquidatable;
         uint256 oraclePrice;

@@ -10,14 +10,16 @@ For audit review that needs policy tables and read-surface canonicality in one p
 - Trade actions: `OrderRouter.commitOrder(CfdTypes.Side side, uint256 sizeDelta, uint256 marginDelta, uint256 targetPrice, bool isClose)`
 - Trader claim settlement: `CfdEngine.settleTraderClaim(address account)` for the account owner
 - Compact reads: `PerpsPublicLens`
+- Trade-ticket previews: `CfdEngineLens.previewOpen(...)` and `CfdEngineLens.previewClose(...)`
 
 Use these interfaces:
 
 - `IMarginAccount`
 - `IPerpsTraderActions`
 - `IPerpsTraderViews`
+- `ICfdEngineLens` for `previewOpen(...)` / `previewClose(...)` only
 
-Do not use the wide clearinghouse reservation API or the detailed engine/accounting lenses as the canonical trader integration surface.
+Do not use the wide clearinghouse reservation API or detailed accounting lenses as the canonical trader integration surface, except for `CfdEngineLens` trade-ticket previews.
 
 ## LPs
 
@@ -61,7 +63,7 @@ The following remain useful for tests, admin tooling, migration, and deep accoun
 - `IMarginClearinghouse`
 - `ICfdEngineAccountLens`
 - `ICfdEngineProtocolLens`
-- `ICfdEngineLens`
+- Non-preview `ICfdEngineLens` diagnostics such as simulation helpers and legacy open failure probes
 - `IOrderRouterAccounting`
 - `IHousePool`
 

@@ -9,7 +9,10 @@ import {ICfdEnginePlanner} from "./interfaces/ICfdEnginePlanner.sol";
 import {ICfdEngineTypes} from "./interfaces/ICfdEngineTypes.sol";
 import {IMarginClearinghouse} from "./interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
+import {MarginClearinghouseAccountingLib} from "./libraries/MarginClearinghouseAccountingLib.sol";
+import {OpenAccountingLib} from "./libraries/OpenAccountingLib.sol";
 import {PositionRiskAccountingLib} from "./libraries/PositionRiskAccountingLib.sol";
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
 /// @notice Read-only planner and liquidation diagnostics for the CFD engine.
 contract CfdEngineLens is ICfdEngineLens {
@@ -37,6 +40,18 @@ contract CfdEngineLens is ICfdEngineLens {
     }
 
     /// @inheritdoc ICfdEngineLens
+    function previewOpen(
+        address account,
+        CfdTypes.Side side,
+        uint256 sizeDelta,
+        uint256 marginDelta,
+        uint256 oraclePrice,
+        uint64 publishTime
+    ) external view returns (ICfdEngineTypes.OpenPreview memory preview) {
+        preview = _previewOpen(account, side, sizeDelta, marginDelta, oraclePrice, publishTime);
+    }
+
+    /// @inheritdoc ICfdEngineLens
     function previewOpenRevertCode(
         address account,
         CfdTypes.Side side,
@@ -45,20 +60,7 @@ contract CfdEngineLens is ICfdEngineLens {
         uint256 oraclePrice,
         uint64 publishTime
     ) external view returns (uint8 code) {
-        CfdEnginePlanTypes.RawSnapshot memory snap =
-            _buildRawSnapshot(account, oraclePrice, engineContract.pool().totalAssets(), publishTime);
-        CfdTypes.Order memory order = CfdTypes.Order({
-            account: account,
-            sizeDelta: sizeDelta,
-            marginDelta: marginDelta,
-            targetPrice: 0,
-            commitTime: 0,
-            commitBlock: 0,
-            orderId: 0,
-            side: side,
-            isClose: false
-        });
-        return uint8(engineContract.planner().planOpen(snap, order, oraclePrice, publishTime).revertCode);
+        return uint8(_previewOpen(account, side, sizeDelta, marginDelta, oraclePrice, publishTime).invalidReason);
     }
 
     /// @inheritdoc ICfdEngineLens
@@ -70,22 +72,7 @@ contract CfdEngineLens is ICfdEngineLens {
         uint256 oraclePrice,
         uint64 publishTime
     ) external view returns (CfdEnginePlanTypes.OpenFailurePolicyCategory category) {
-        CfdEnginePlanTypes.RawSnapshot memory snap =
-            _buildRawSnapshot(account, oraclePrice, engineContract.pool().totalAssets(), publishTime);
-        CfdTypes.Order memory order = CfdTypes.Order({
-            account: account,
-            sizeDelta: sizeDelta,
-            marginDelta: marginDelta,
-            targetPrice: 0,
-            commitTime: 0,
-            commitBlock: 0,
-            orderId: 0,
-            side: side,
-            isClose: false
-        });
-        CfdEnginePlanTypes.OpenDelta memory delta =
-            engineContract.planner().planOpen(snap, order, oraclePrice, publishTime);
-        return engineContract.planner().getOpenFailurePolicyCategory(delta.revertCode);
+        return _previewOpen(account, side, sizeDelta, marginDelta, oraclePrice, publishTime).failureCategory;
     }
 
     /// @inheritdoc ICfdEngineLens
@@ -113,6 +100,73 @@ contract CfdEngineLens is ICfdEngineLens {
         uint256 poolDepthUsdc
     ) external view returns (ICfdEngineTypes.LiquidationPreview memory preview) {
         preview = _previewLiquidation(account, oraclePrice, poolDepthUsdc);
+    }
+
+    function _previewOpen(
+        address account,
+        CfdTypes.Side side,
+        uint256 sizeDelta,
+        uint256 marginDelta,
+        uint256 oraclePrice,
+        uint64 publishTime
+    ) internal view returns (ICfdEngineTypes.OpenPreview memory preview) {
+        uint256 price = oraclePrice > engineContract.CAP_PRICE() ? engineContract.CAP_PRICE() : oraclePrice;
+        preview.executionPrice = price;
+        preview.sizeDelta = sizeDelta;
+        preview.marginDeltaUsdc = marginDelta;
+
+        CfdEnginePlanTypes.RawSnapshot memory snap =
+            _buildRawSnapshot(account, oraclePrice, engineContract.pool().totalAssets(), publishTime);
+        CfdTypes.Order memory order = CfdTypes.Order({
+            account: account,
+            sizeDelta: sizeDelta,
+            marginDelta: marginDelta,
+            targetPrice: 0,
+            commitTime: 0,
+            commitBlock: 0,
+            orderId: 0,
+            side: side,
+            isClose: false
+        });
+        ICfdEnginePlanner planner = engineContract.planner();
+        CfdEnginePlanTypes.OpenDelta memory delta = planner.planOpen(snap, order, oraclePrice, publishTime);
+
+        preview.valid = delta.valid;
+        preview.invalidReason = delta.revertCode;
+        preview.failureCategory = planner.getOpenFailurePolicyCategory(delta.revertCode);
+        preview.notionalUsdc = delta.openState.notionalUsdc;
+        preview.vpiUsdc = delta.openState.vpiUsdc;
+        preview.executionFeeUsdc = delta.executionFeeUsdc;
+        preview.tradeCostUsdc = delta.tradeCostUsdc;
+        preview.poolRebatePayoutUsdc = delta.poolRebatePayoutUsdc;
+        preview.pendingCarryUsdc = delta.pendingCarryUsdc;
+        preview.initialMarginRequirementUsdc = delta.openState.initialMarginRequirementUsdc;
+        preview.maintenanceMarginUsdc = delta.openState.maintenanceMarginUsdc;
+        preview.postSize = delta.newPosSize;
+        preview.postMarginUsdc = delta.positionMarginAfterOpen;
+        preview.postEntryPrice = delta.newPosEntryPrice;
+        preview.postVpiAccrued = snap.position.vpiAccrued + delta.posVpiAccruedDelta;
+
+        if (!delta.valid) {
+            return preview;
+        }
+
+        CfdTypes.Position memory projected = _projectOpenPosition(snap.position, delta);
+        uint256 reachableCollateralUsdc =
+            _postOpenReachableCollateral(snap, delta.pendingCarryUsdc, delta.tradeCostUsdc);
+        uint256 maintenanceBps = snap.isFadWindow ? snap.riskParams.fadMarginBps : snap.riskParams.maintMarginBps;
+        PositionRiskAccountingLib.PositionRiskState memory risk =
+            PositionRiskAccountingLib.buildPositionRiskStateWithCarry(
+                projected, price, snap.capPrice, 0, reachableCollateralUsdc, maintenanceBps
+            );
+
+        preview.postUnrealizedPnlUsdc = risk.unrealizedPnlUsdc;
+        preview.postEquityUsdc = risk.equityUsdc;
+        preview.maintenanceMarginUsdc = risk.maintenanceMarginUsdc;
+        preview.postLiquidatable = risk.liquidatable;
+        preview.postHealthBps = _healthBps(risk.equityUsdc, risk.maintenanceMarginUsdc);
+        (preview.hasLiquidationPrice, preview.liquidationPrice) =
+            _findLiquidationPrice(projected, snap.capPrice, reachableCollateralUsdc, maintenanceBps);
     }
 
     function _previewClose(
@@ -185,6 +239,132 @@ contract CfdEngineLens is ICfdEngineLens {
         preview.postOpDegradedMode = delta.solvency.postOpDegradedMode;
         preview.effectiveAssetsAfterUsdc = delta.solvency.effectiveAssetsAfterUsdc;
         preview.maxLiabilityAfterUsdc = delta.solvency.maxLiabilityAfterUsdc;
+    }
+
+    function _projectOpenPosition(
+        CfdTypes.Position memory current,
+        CfdEnginePlanTypes.OpenDelta memory delta
+    ) internal pure returns (CfdTypes.Position memory projected) {
+        projected = current;
+        projected.side = delta.posSide;
+        projected.size = delta.newPosSize;
+        projected.margin =
+            OpenAccountingLib.effectiveMarginAfterTradeCost(delta.positionMarginAfterOpen, delta.tradeCostUsdc);
+        projected.entryPrice = delta.newPosEntryPrice;
+        projected.maxProfitUsdc = current.maxProfitUsdc + delta.posMaxProfitIncrease;
+        projected.vpiAccrued = current.vpiAccrued + delta.posVpiAccruedDelta;
+    }
+
+    function _postOpenReachableCollateral(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        uint256 pendingCarryUsdc,
+        int256 tradeCostUsdc
+    ) internal pure returns (uint256 reachableCollateralUsdc) {
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets =
+            _accountBucketsAfterOpenCarryRealization(snap, pendingCarryUsdc);
+        reachableCollateralUsdc = MarginClearinghouseAccountingLib.getGenericReachableUsdc(buckets);
+        if (tradeCostUsdc > 0) {
+            uint256 costUsdc = SafeCast.toUint256(tradeCostUsdc);
+            reachableCollateralUsdc = reachableCollateralUsdc > costUsdc ? reachableCollateralUsdc - costUsdc : 0;
+        } else if (tradeCostUsdc < 0) {
+            reachableCollateralUsdc += SafeCast.toUint256(-tradeCostUsdc);
+        }
+    }
+
+    function _accountBucketsAfterOpenCarryRealization(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        uint256 pendingCarryUsdc
+    ) internal pure returns (IMarginClearinghouse.AccountUsdcBuckets memory buckets) {
+        buckets = snap.accountBuckets;
+        if (pendingCarryUsdc == 0 || snap.position.size == 0) {
+            return buckets;
+        }
+
+        MarginClearinghouseAccountingLib.SettlementConsumption memory consumption =
+            MarginClearinghouseAccountingLib.planCarryLossConsumption(buckets, pendingCarryUsdc);
+        if (consumption.uncoveredUsdc > 0) {
+            return buckets;
+        }
+
+        return MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(
+            buckets.settlementBalanceUsdc - consumption.totalConsumedUsdc,
+            snap.lockedBuckets.positionMarginUsdc - consumption.activeMarginConsumedUsdc,
+            snap.lockedBuckets.committedOrderMarginUsdc,
+            snap.lockedBuckets.reservedSettlementUsdc
+        );
+    }
+
+    function _healthBps(
+        int256 equityUsdc,
+        uint256 maintenanceMarginUsdc
+    ) internal pure returns (uint256 healthBps) {
+        if (equityUsdc <= 0 || maintenanceMarginUsdc == 0) {
+            return 0;
+        }
+        return (SafeCast.toUint256(equityUsdc) * 10_000) / maintenanceMarginUsdc;
+    }
+
+    function _findLiquidationPrice(
+        CfdTypes.Position memory projected,
+        uint256 capPrice,
+        uint256 reachableCollateralUsdc,
+        uint256 maintenanceBps
+    ) internal pure returns (bool hasLiquidationPrice, uint256 liquidationPrice) {
+        bool liquidatableAtZero =
+            _isProjectedLiquidatable(projected, 0, capPrice, reachableCollateralUsdc, maintenanceBps);
+        bool liquidatableAtCap =
+            _isProjectedLiquidatable(projected, capPrice, capPrice, reachableCollateralUsdc, maintenanceBps);
+
+        if (projected.side == CfdTypes.Side.BULL) {
+            if (!liquidatableAtCap) {
+                return (false, 0);
+            }
+            if (liquidatableAtZero) {
+                return (true, 0);
+            }
+            uint256 low;
+            uint256 high = capPrice;
+            while (low < high) {
+                uint256 mid = (low + high) / 2;
+                if (_isProjectedLiquidatable(projected, mid, capPrice, reachableCollateralUsdc, maintenanceBps)) {
+                    high = mid;
+                } else {
+                    low = mid + 1;
+                }
+            }
+            return (true, high);
+        }
+
+        if (!liquidatableAtZero) {
+            return (false, 0);
+        }
+        if (liquidatableAtCap) {
+            return (true, capPrice);
+        }
+        uint256 lo;
+        uint256 hi = capPrice;
+        while (lo < hi) {
+            uint256 mid = (lo + hi + 1) / 2;
+            if (_isProjectedLiquidatable(projected, mid, capPrice, reachableCollateralUsdc, maintenanceBps)) {
+                lo = mid;
+            } else {
+                hi = mid - 1;
+            }
+        }
+        return (true, lo);
+    }
+
+    function _isProjectedLiquidatable(
+        CfdTypes.Position memory projected,
+        uint256 price,
+        uint256 capPrice,
+        uint256 reachableCollateralUsdc,
+        uint256 maintenanceBps
+    ) internal pure returns (bool) {
+        return PositionRiskAccountingLib.buildPositionRiskStateWithCarry(
+            projected, price, capPrice, 0, reachableCollateralUsdc, maintenanceBps
+        )
+        .liquidatable;
     }
 
     function _previewLiquidation(
