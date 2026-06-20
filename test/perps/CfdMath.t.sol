@@ -201,6 +201,26 @@ contract CfdMathTest is Test {
         assertEq(vpi, 0, "VPI should be zero when depth is zero");
     }
 
+    function test_OneWayVPI_ChargesSameSignSkewIncrease() public pure {
+        uint256 vpi = CfdMath.calculateOneWayVPI(100_000e6, 200_000e6, 1_000_000e6, 0.005e18);
+        assertEq(vpi, 75e6, "One-way VPI should charge post minus pre cost");
+    }
+
+    function test_OneWayVPI_ChargesSameSignSkewDecrease() public pure {
+        uint256 vpi = CfdMath.calculateOneWayVPI(200_000e6, 100_000e6, 1_000_000e6, 0.005e18);
+        assertEq(vpi, 75e6, "One-way VPI should charge absolute cost reduction instead of rebating");
+    }
+
+    function test_OneWayVPI_ChargesBothSidesWhenCrossingZero() public pure {
+        uint256 vpi = CfdMath.calculateOneWayVPI(100_000e6, -200_000e6, 1_000_000e6, 0.005e18);
+        assertEq(vpi, 125e6, "One-way VPI should charge pre plus post cost when skew flips sign");
+    }
+
+    function test_OneWayVPI_ZeroDepthOrFactor() public pure {
+        assertEq(CfdMath.calculateOneWayVPI(100_000e6, 200_000e6, 0, 0.005e18), 0, "Zero depth");
+        assertEq(CfdMath.calculateOneWayVPI(100_000e6, 200_000e6, 1_000_000e6, 0), 0, "Zero factor");
+    }
+
     function test_MaxProfit_BearAtCap_IsZero() public pure {
         uint256 maxProfit = CfdMath.calculateMaxProfit(100_000 * 1e18, CAP_PRICE, CfdTypes.Side.BEAR, CAP_PRICE);
         assertEq(maxProfit, 0, "BEAR at CAP entry has zero max profit");

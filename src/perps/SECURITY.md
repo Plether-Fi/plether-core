@@ -40,7 +40,7 @@ Engine risk controls live in `CfdEngineAdmin`, and router risk controls live in 
 
 | Parameter | Contract | Guard |
 |-----------|----------|-------|
-| `EngineRiskConfig` (`riskParams`) | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 48-hour timelock |
+| `EngineRiskConfig` (`riskParams`, `executionFeeBps`, `frozenCloseVpiFactor`) | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 48-hour timelock |
 | `EngineCalendarConfig` (`fadDayOverrides`, `fadRunwaySeconds`) | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 48-hour timelock |
 | `EngineFreshnessConfig` (`fadMaxStaleness`, `engineMarkStalenessLimit`) | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 48-hour timelock |
 | `seniorRateBps` | `HousePool` | `onlyOwner`, 48-hour timelock |
@@ -400,6 +400,7 @@ This preserves terminal liveness without requiring an unbounded global queue sca
 ### Oracle and market-closure limitations
 
 - frozen-oracle windows prioritize close liveness over live-market-style freshness guarantees,
+- oracle-frozen close/reduce execution applies a one-way VPI surcharge with `frozenCloseVpiFactor`; normal FAD-only live-market closes keep signed VPI behavior,
 - DST and holiday boundaries can create short safe liveness gaps around market reopen,
 - execution remains dependent on fresh keeper infrastructure and oracle publication outside frozen windows.
 
@@ -421,6 +422,7 @@ This preserves terminal liveness without requiring an unbounded global queue sca
 
 - liquidation does not compute a fresh VPI delta, but negative accrued VPI is clawed back into liquidation shortfall,
 - VPI depends on live pool depth,
+- oracle-frozen close/reduce VPI intentionally has no rebate path; it is an LP-protection surcharge for stale-oracle execution, not a market-making incentive,
 - the lifetime clamp intentionally zeroes otherwise extractable rebate-only round trips,
 - partial-close VPI release is a bounded linear approximation.
 

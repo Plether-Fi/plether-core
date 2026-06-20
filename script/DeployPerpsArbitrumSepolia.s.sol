@@ -22,6 +22,7 @@ contract DeployPerpsArbitrumSepolia is Script {
 
     address internal constant PYTH = 0x4374e5a8b9C22271E9EB878A2AA31DE97DF15DAF;
     uint256 internal constant CAP_PRICE = 2e8;
+    uint256 internal constant FROZEN_CLOSE_VPI_FACTOR = 0.005e18;
 
     bytes32 internal constant PYTH_EUR_USD = 0xa995d00bb36a63cef7fd2c287dc105fc8f3d93779f062f09551b0af3e81ec30b;
     bytes32 internal constant PYTH_USD_JPY = 0xef2c98c804ba503c6a707e38be4dfbb16683775f195b091252bf24693042fd52;
@@ -74,8 +75,9 @@ contract DeployPerpsArbitrumSepolia is Script {
 
         deployed.usdc = new MockUSDC();
         deployed.clearinghouse = new MarginClearinghouse(address(deployed.usdc));
-        deployed.engine =
-            new CfdEngine(address(deployed.usdc), address(deployed.clearinghouse), CAP_PRICE, _riskParams());
+        deployed.engine = new CfdEngine(
+            address(deployed.usdc), address(deployed.clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_VPI_FACTOR
+        );
 
         deployed.planner = new CfdEnginePlanner();
         deployed.settlementSidecar = new CfdEngineSettlementSidecar(address(deployed.engine));
@@ -191,6 +193,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         console.log("MockUSDC:", address(deployed.usdc));
         console.log("MarginClearinghouse:", address(deployed.clearinghouse));
         console.log("CfdEngine:", address(deployed.engine));
+        console.log("FrozenCloseVpiFactor:", deployed.engine.frozenCloseVpiFactor());
         console.log("CfdEnginePlanner:", address(deployed.planner));
         console.log("CfdEngineSettlementSidecar:", address(deployed.settlementSidecar));
         console.log("CfdEngineAdmin:", address(deployed.engineAdmin));

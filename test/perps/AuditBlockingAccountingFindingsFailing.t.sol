@@ -67,8 +67,9 @@ contract CfdEngineSolvencyTimingHarness is CfdEngine {
         address usdc,
         address clearinghouse,
         uint256 capPrice,
-        CfdTypes.RiskParams memory params
-    ) CfdEngine(usdc, clearinghouse, capPrice, params) {}
+        CfdTypes.RiskParams memory params,
+        uint256 frozenCloseVpiFactor
+    ) CfdEngine(usdc, clearinghouse, capPrice, params, frozenCloseVpiFactor) {}
 
     function previewEffectiveAssetsWithoutMarginSync(
         CfdTypes.Order memory order
@@ -117,7 +118,9 @@ contract AuditBlockingAccountingFindingsFailing_SolvencyTiming is BasePerpTest {
         usdc = new MockUSDC();
         clearinghouse = new MarginClearinghouse(address(usdc));
 
-        engine = new CfdEngineSolvencyTimingHarness(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        engine = new CfdEngineSolvencyTimingHarness(
+            address(usdc), address(clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_VPI_FACTOR
+        );
         CfdEnginePlanner planner = new CfdEnginePlanner();
         CfdEngineSettlementSidecar settlementSidecar = new CfdEngineSettlementSidecar(address(engine));
         CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));

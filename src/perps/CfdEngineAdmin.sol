@@ -57,6 +57,9 @@ contract CfdEngineAdmin is Ownable {
         if (config.executionFeeBps == 0 || config.executionFeeBps > 10_000) {
             revert CfdEngineAdmin__InvalidExecutionFee();
         }
+        if (config.frozenCloseVpiFactor < config.riskParams.vpiFactor) {
+            revert CfdEngineAdmin__InvalidRiskParams();
+        }
         pendingRiskConfig = config;
         riskConfigActivationTime = block.timestamp + TIMELOCK_DELAY;
         emit RiskConfigProposed(config, riskConfigActivationTime);

@@ -73,6 +73,8 @@ library CfdEnginePlanTypes {
         CfdTypes.RiskParams riskParams;
         uint256 executionFeeBps;
         bool isFadWindow;
+        bool oracleFrozen;
+        uint256 frozenCloseVpiFactor;
     }
 
     struct SolvencyPreview {

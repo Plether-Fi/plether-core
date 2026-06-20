@@ -35,7 +35,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
         usdc = new MockUSDC();
         clearinghouse = new MarginClearinghouse(address(usdc));
 
-        harness = new CfdEngineHarness(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        harness = new CfdEngineHarness(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams(), 0.005e18);
         engine = harness;
         engineLens = new CfdEngineLens(address(engine));
 

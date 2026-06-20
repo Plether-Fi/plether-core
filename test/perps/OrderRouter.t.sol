@@ -5302,7 +5302,7 @@ contract VpiImrBypassTest is Test {
 
         clearinghouse = new MarginClearinghouse(address(usdc));
 
-        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
+        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params, params.vpiFactor);
         CfdEnginePlanner planner = new CfdEnginePlanner();
         CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(engine));
         CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
@@ -5558,7 +5558,7 @@ contract KeeperFeeRefundTest is Test {
         });
 
         clearinghouse = new MarginClearinghouse(address(usdc));
-        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
+        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params, 0.005e18);
         CfdEnginePlanner planner = new CfdEnginePlanner();
         CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(engine));
         CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
@@ -5927,7 +5927,7 @@ contract WeekendArbitrageTest is Test {
         });
 
         clearinghouse = new MarginClearinghouse(address(usdc));
-        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
+        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params, 0.005e18);
         CfdEnginePlanner planner = new CfdEnginePlanner();
         CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(engine));
         CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));

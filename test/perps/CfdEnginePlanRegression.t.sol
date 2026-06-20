@@ -33,8 +33,9 @@ contract CfdEnginePlanHarness is CfdEngine {
         address usdc,
         address clearinghouse,
         uint256 capPrice,
-        CfdTypes.RiskParams memory params
-    ) CfdEngine(usdc, clearinghouse, capPrice, params) {}
+        CfdTypes.RiskParams memory params,
+        uint256 frozenCloseVpiFactor
+    ) CfdEngine(usdc, clearinghouse, capPrice, params, frozenCloseVpiFactor) {}
 
     function previewOpenPlan(
         CfdTypes.Order memory order,
@@ -94,7 +95,9 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         usdc = new MockUSDC();
         clearinghouse = new MarginClearinghouse(address(usdc));
 
-        engine = new CfdEnginePlanHarness(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        engine = new CfdEnginePlanHarness(
+            address(usdc), address(clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_VPI_FACTOR
+        );
         planner = new CfdEnginePlanner();
         CfdEngineSettlementSidecar settlementSidecar = new CfdEngineSettlementSidecar(address(engine));
         CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));

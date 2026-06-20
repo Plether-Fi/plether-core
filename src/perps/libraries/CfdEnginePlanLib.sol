@@ -173,6 +173,25 @@ library CfdEnginePlanLib {
         return postBullUsdc > postBearUsdc ? postBullUsdc - postBearUsdc : postBearUsdc - postBullUsdc;
     }
 
+    function _signedSkewUsdc(
+        uint256 bullOi,
+        uint256 bearOi,
+        uint256 price
+    ) private pure returns (int256 signedSkewUsdc) {
+        uint256 bullUsdc = (bullOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
+        uint256 bearUsdc = (bearOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
+        signedSkewUsdc = int256(bullUsdc) - int256(bearUsdc);
+    }
+
+    function _absSignedSkewUsdc(
+        uint256 bullOi,
+        uint256 bearOi,
+        uint256 price
+    ) private pure returns (uint256) {
+        int256 signedSkewUsdc = _signedSkewUsdc(bullOi, bearOi, price);
+        return signedSkewUsdc < 0 ? uint256(-signedSkewUsdc) : uint256(signedSkewUsdc);
+    }
+
     function _planTraderClaimConsumption(
         uint256 traderClaimBalanceUsdc,
         uint256 shortfallUsdc,
@@ -472,12 +491,10 @@ library CfdEnginePlanLib {
             return delta;
         }
 
-        uint256 preSkewUsdc;
-        uint256 postSkewUsdc;
-        (delta.totalMarginBefore, delta.postBullOi, delta.postBearOi, preSkewUsdc, postSkewUsdc) =
-            _closeOpenInterestAndSkew(snap, pos.side, order.sizeDelta, price);
+        (delta.totalMarginBefore, delta.postBullOi, delta.postBearOi) =
+            _closeOpenInterest(snap, pos.side, order.sizeDelta);
 
-        delta.closeState = _buildCloseState(snap, pos, order.sizeDelta, price, preSkewUsdc, postSkewUsdc);
+        delta.closeState = _buildCloseState(snap, pos, order.sizeDelta, price, delta.postBullOi, delta.postBearOi);
 
         CloseAccountingLib.CloseState memory cs = delta.closeState;
         delta.posMarginAfter = cs.remainingMarginUsdc;
@@ -542,38 +559,20 @@ library CfdEnginePlanLib {
         delta.valid = true;
     }
 
-    function _closeOpenInterestAndSkew(
+    function _closeOpenInterest(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdTypes.Side side,
-        uint256 sizeDelta,
-        uint256 price
-    )
-        private
-        pure
-        returns (
-            uint256 totalMarginBefore,
-            uint256 postBullOi,
-            uint256 postBearOi,
-            uint256 preSkewUsdc,
-            uint256 postSkewUsdc
-        )
-    {
-        CfdEnginePlanTypes.SideSnapshot memory bull = snap.bullSide;
-        CfdEnginePlanTypes.SideSnapshot memory bear = snap.bearSide;
+        uint256 sizeDelta
+    ) private pure returns (uint256 totalMarginBefore, uint256 postBullOi, uint256 postBearOi) {
         (CfdEnginePlanTypes.SideSnapshot memory selected, CfdEnginePlanTypes.SideSnapshot memory opposite) =
             _selectedAndOpposite(snap, side);
 
         totalMarginBefore = selected.totalMargin;
-        preSkewUsdc = _absSkewUsdc(bull, bear, price);
 
         uint256 selectedOiAfter = selected.openInterest - sizeDelta;
         uint256 oppositeOi = opposite.openInterest;
         postBullOi = side == CfdTypes.Side.BULL ? selectedOiAfter : oppositeOi;
         postBearOi = side == CfdTypes.Side.BEAR ? selectedOiAfter : oppositeOi;
-
-        uint256 postBullUsdc = (postBullOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        uint256 postBearUsdc = (postBearOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        postSkewUsdc = postBullUsdc > postBearUsdc ? postBullUsdc - postBearUsdc : postBearUsdc - postBullUsdc;
     }
 
     function _buildCloseState(
@@ -581,19 +580,27 @@ library CfdEnginePlanLib {
         CfdTypes.Position memory pos,
         uint256 sizeDelta,
         uint256 price,
-        uint256 preSkewUsdc,
-        uint256 postSkewUsdc
+        uint256 postBullOi,
+        uint256 postBearOi
     ) private pure returns (CloseAccountingLib.CloseState memory) {
+        uint256 preSkewUsdc = _absSkewUsdc(snap.bullSide, snap.bearSide, price);
+        uint256 postSkewUsdc = _absSignedSkewUsdc(postBullOi, postBearOi, price);
         return CloseAccountingLib.buildCloseState(
-            pos,
-            sizeDelta,
-            price,
-            snap.capPrice,
-            preSkewUsdc,
-            postSkewUsdc,
-            snap.poolAssetsUsdc,
-            snap.riskParams.vpiFactor,
-            snap.executionFeeBps
+            CloseAccountingLib.CloseInputs({
+                position: pos,
+                sizeDelta: sizeDelta,
+                oraclePrice: price,
+                capPrice: snap.capPrice,
+                preSkewUsdc: preSkewUsdc,
+                postSkewUsdc: postSkewUsdc,
+                preSignedSkewUsdc: _signedSkewUsdc(snap.bullSide.openInterest, snap.bearSide.openInterest, price),
+                postSignedSkewUsdc: _signedSkewUsdc(postBullOi, postBearOi, price),
+                poolDepthUsdc: snap.poolAssetsUsdc,
+                vpiFactor: snap.riskParams.vpiFactor,
+                frozenCloseVpiFactor: snap.frozenCloseVpiFactor,
+                oracleFrozen: snap.oracleFrozen,
+                executionFeeBps: snap.executionFeeBps
+            })
         );
     }
 

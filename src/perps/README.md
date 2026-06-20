@@ -353,6 +353,8 @@ The system distinguishes between:
 LP policy follows that split as well:
 
 - `FAD` alone does not change LP entry/exit pricing.
+- `oracleFrozen` close/reduce execution keeps the normal quadratic skew curve but switches to `frozenCloseVpiFactor` and charges a one-way surcharge. It never exposes a negative close VPI rebate during the frozen window, including when the close reduces pool skew.
+- `FAD` alone keeps normal signed close VPI behavior; the surcharge starts only after the oracle is actually frozen.
 - `oracleFrozen` keeps LP withdrawals live and keeps immediate LP deposits live only when no trader positions are open; pending deposit epochs remain the ordinary entry path. Senior and junior stale-window actions pay fixed surcharges that compensate incumbent LPs in that same tranche.
 
 This preserves close and liquidation liveness during real market closures without turning normal live trading into a free option.
@@ -420,7 +422,7 @@ Engine risk controls live on `CfdEngineAdmin`, and router risk controls plus pau
 
 Timelocked surfaces include:
 
-- `CfdEngineAdmin.EngineRiskConfig` -> `CfdEngine.riskParams`
+- `CfdEngineAdmin.EngineRiskConfig` -> `CfdEngine.riskParams`, `CfdEngine.executionFeeBps`, `CfdEngine.frozenCloseVpiFactor`
 - `CfdEngineAdmin.EngineCalendarConfig` -> `CfdEngine.fadDayOverrides`, `CfdEngine.fadRunwaySeconds`
 - `CfdEngineAdmin.EngineFreshnessConfig` -> `CfdEngine.fadMaxStaleness`, `CfdEngine.engineMarkStalenessLimit`
 - `HousePool.seniorRateBps`
@@ -447,6 +449,7 @@ Instant controls remain for one-time wiring and fee withdrawal. `OrderRouter` pa
 | `bountyBps` | 10 (0.10%) | Liquidation bounty rate |
 | `minBountyUsdc` | 1,000,000 ($1) | Liquidation bounty floor |
 | `executionFeeBps` | 4 (0.04%) | Timelocked protocol trading fee |
+| `frozenCloseVpiFactor` | 0.005e18 (0.5%) | One-way close VPI factor during `oracleFrozen` |
 | Open execution bounty | 0.01 to 0.20 USDC | Timelocked router reserve bounds |
 | Close execution bounty | 0.20 USDC | Timelocked router reserve amount |
 | Normal execution staleness | 60s | Normal order execution freshness |

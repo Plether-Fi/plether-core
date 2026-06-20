@@ -1821,7 +1821,8 @@ contract CfdEngineTest is BasePerpTest {
 
     function test_SettlementSidecar_RevertsWhenEngineCallerPassesDifferentHost() public {
         CfdEngineSettlementSidecar sidecar = CfdEngineSettlementSidecar(address(engine.settlementSidecar()));
-        CfdEngine wrongHost = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        CfdEngine wrongHost =
+            new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_VPI_FACTOR);
         CfdEnginePlanTypes.OpenDelta memory openDelta;
         CfdEnginePlanTypes.CloseDelta memory closeDelta;
         CfdEnginePlanTypes.LiquidationDelta memory liquidationDelta;
@@ -1846,7 +1847,8 @@ contract CfdEngineTest is BasePerpTest {
     }
 
     function test_SetDependencies_RevertsWhenSettlementSidecarBoundToDifferentEngine() public {
-        CfdEngine victim = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        CfdEngine victim =
+            new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_VPI_FACTOR);
         CfdEnginePlanner planner = new CfdEnginePlanner();
         CfdEngineSettlementSidecar wrongSidecar = new CfdEngineSettlementSidecar(address(engine));
         CfdEngineAdmin adminModule = new CfdEngineAdmin(address(victim), address(this));
@@ -1856,7 +1858,8 @@ contract CfdEngineTest is BasePerpTest {
     }
 
     function test_SetDependencies_RevertsWhenSettlementSidecarHasNoEngineBinding() public {
-        CfdEngine victim = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        CfdEngine victim =
+            new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_VPI_FACTOR);
         CfdEnginePlanner planner = new CfdEnginePlanner();
         CfdEngineAdmin adminModule = new CfdEngineAdmin(address(victim), address(this));
 
@@ -2345,6 +2348,98 @@ contract CfdEngineTest is BasePerpTest {
         assertTrue(preview.valid, "Preview should remain valid when close earns a negative VPI rebate");
         assertLt(preview.vpiDeltaUsdc, 0, "Preview should expose negative VPI as a rebate instead of panicking");
         assertEq(preview.vpiUsdc, 0, "Positive-only VPI charge field should clamp rebates to zero");
+    }
+
+    function test_PreviewClose_FadButLiveMarketKeepsSignedVpiRebate() public {
+        address trader = address(0xAB1311);
+        address account = trader;
+        _fundTrader(trader, 10_000e6);
+
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 4000e6, 1e8);
+
+        vm.warp(1_709_928_000); // Friday 20:00 UTC: FAD, but not oracle-frozen.
+        assertTrue(engine.isFadWindow(), "Setup should be in FAD");
+        assertFalse(engine.isOracleFrozen(), "FAD runway should still be live-market mode");
+
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 1e8);
+
+        assertTrue(preview.valid, "Live FAD close should be previewable");
+        assertLt(preview.vpiDeltaUsdc, 0, "Live FAD should keep normal signed VPI rebate behavior");
+        assertEq(preview.vpiUsdc, 0, "Positive-only VPI field should clamp normal rebates to zero");
+    }
+
+    function test_PreviewClose_OracleFrozenSkewHealingClosePaysOneWayVpi() public {
+        address trader = address(0xAB1312);
+        address account = trader;
+        _fundTrader(trader, 10_000e6);
+
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 4000e6, 1e8);
+
+        vm.warp(1_709_985_600); // Saturday 12:00 UTC: oracle-frozen close-only mode.
+        assertTrue(engine.isOracleFrozen(), "Setup should be in oracle-frozen mode");
+
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 1e8);
+
+        assertTrue(preview.valid, "Frozen close should be previewable");
+        assertGt(preview.vpiDeltaUsdc, 0, "Frozen skew-healing close should pay a one-way surcharge");
+        assertEq(preview.vpiUsdc, uint256(preview.vpiDeltaUsdc), "Positive VPI field should expose the surcharge");
+    }
+
+    function test_PreviewClose_OracleFrozenSkewWorseningClosePaysOneWayVpi() public {
+        address bullTrader = address(0xAB1313);
+        address bearTrader = address(0xAB1314);
+        _fundTrader(bullTrader, 10_000e6);
+        _fundTrader(bearTrader, 10_000e6);
+
+        _open(bullTrader, CfdTypes.Side.BULL, 100_000e18, 4000e6, 1e8);
+        _open(bearTrader, CfdTypes.Side.BEAR, 150_000e18, 6000e6, 1e8);
+
+        vm.warp(1_709_985_600);
+        assertTrue(engine.isOracleFrozen(), "Setup should be in oracle-frozen mode");
+
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(bullTrader, 100_000e18, 1e8);
+
+        assertTrue(preview.valid, "Frozen close should be previewable");
+        assertGt(preview.vpiDeltaUsdc, 0, "Frozen skew-worsening close should pay a one-way surcharge");
+        assertEq(preview.vpiUsdc, uint256(preview.vpiDeltaUsdc), "Positive VPI field should expose the surcharge");
+    }
+
+    function test_PreviewClose_OracleFrozenZeroCrossingClosePaysOneWayVpi() public {
+        address bullTrader = address(0xAB1315);
+        address bearTrader = address(0xAB1316);
+        _fundTrader(bullTrader, 20_000e6);
+        _fundTrader(bearTrader, 10_000e6);
+
+        _open(bullTrader, CfdTypes.Side.BULL, 200_000e18, 8000e6, 1e8);
+        _open(bearTrader, CfdTypes.Side.BEAR, 100_000e18, 4000e6, 1e8);
+
+        vm.warp(1_709_985_600);
+        assertTrue(engine.isOracleFrozen(), "Setup should be in oracle-frozen mode");
+
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(bullTrader, 150_000e18, 1e8);
+
+        assertTrue(preview.valid, "Frozen partial close should be previewable");
+        assertGt(preview.vpiDeltaUsdc, 0, "Frozen zero-crossing close should pay a one-way surcharge");
+        assertEq(preview.vpiUsdc, uint256(preview.vpiDeltaUsdc), "Positive VPI field should expose the surcharge");
+    }
+
+    function test_PreviewClose_OracleFrozenOneWayVpiMatchesLiveClose() public {
+        address trader = address(0xAB1317);
+        address account = trader;
+        _fundTrader(trader, 10_000e6);
+
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 4000e6, 1e8);
+
+        vm.warp(1_709_985_600);
+        assertTrue(engine.isOracleFrozen(), "Setup should be in oracle-frozen mode");
+
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 1e8);
+        CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(account);
+        _close(account, CfdTypes.Side.BULL, 100_000e18, 1e8);
+        CloseParityObserved memory observed = _observeCloseParity(account, beforeSnapshot);
+
+        assertGt(preview.vpiDeltaUsdc, 0, "Setup should charge frozen one-way VPI");
+        _assertClosePreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
     }
 
     function test_PreviewClose_UsesPostUnlockFreeSettlementForLosses() public {
@@ -5831,7 +5926,8 @@ contract ProtocolPhaseTest is BasePerpTest {
     }
 
     function test_ConfiguringPhase() public {
-        CfdEngine unconfigured = new CfdEngine(address(usdc), address(clearinghouse), 2e8, _riskParams());
+        CfdEngine unconfigured =
+            new CfdEngine(address(usdc), address(clearinghouse), 2e8, _riskParams(), FROZEN_CLOSE_VPI_FACTOR);
         PerpsPublicLens unconfiguredLens =
             new PerpsPublicLens(address(engineAccountLens), address(unconfigured), address(router), address(0));
         assertEq(
@@ -6095,7 +6191,7 @@ contract VpiChunkingTest is Test {
         });
 
         clearinghouse = new MarginClearinghouse(address(usdc));
-        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
+        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params, 0.005e18);
         CfdEnginePlanner planner = new CfdEnginePlanner();
         CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(engine));
         CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
