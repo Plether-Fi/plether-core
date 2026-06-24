@@ -588,16 +588,15 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     function applyRiskConfig(
         ICfdEngineAdminHost.EngineRiskConfig calldata config
     ) external onlyAdmin {
-        if (config.executionFeeBps == 0 || config.executionFeeBps > 10_000) {
-            revert CfdEngine__InvalidRiskParams();
-        }
-        if (config.frozenCloseVpiFactor < config.riskParams.vpiFactor) {
+        uint256 executionFeeBps_ = config.executionFeeBps;
+        uint256 frozenCloseVpiFactor_ = config.frozenCloseVpiFactor;
+        if (executionFeeBps_ == 0 || executionFeeBps_ > 10_000 || frozenCloseVpiFactor_ < config.riskParams.vpiFactor) {
             revert CfdEngine__InvalidRiskParams();
         }
         _advanceAllCarryIndexes(block.timestamp);
         riskParams = config.riskParams;
-        executionFeeBps = config.executionFeeBps;
-        frozenCloseVpiFactor = config.frozenCloseVpiFactor;
+        executionFeeBps = executionFeeBps_;
+        frozenCloseVpiFactor = frozenCloseVpiFactor_;
     }
 
     /// @notice Applies finalized FAD calendar overrides from the timelocked engine admin.
@@ -835,16 +834,24 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     ///         (Friday 19:00 UTC → Sunday 22:00 UTC), on admin-configured FAD days,
     ///         or within fadRunwaySeconds before an admin FAD day (deleverage runway).
     function isFadWindow() public view returns (bool) {
-        uint256 today = block.timestamp / 86_400;
-        return MarketCalendarLib.isFadWindow(
-            block.timestamp, fadDayOverrides[today], fadDayOverrides[today + 1], fadRunwaySeconds
-        );
+        (bool fadWindow,) = _marketStatus();
+        return fadWindow;
     }
 
     /// @notice Returns true only when FX markets are closed and oracle freshness can be relaxed.
     ///         Distinct from FAD, which starts earlier for deleveraging risk controls.
     function isOracleFrozen() public view returns (bool) {
-        return MarketCalendarLib.isOracleFrozen(block.timestamp, fadDayOverrides[block.timestamp / 86_400]);
+        (, bool oracleFrozen) = _marketStatus();
+        return oracleFrozen;
+    }
+
+    function _marketStatus() internal view returns (bool fadWindow, bool oracleFrozen) {
+        uint256 timestamp = block.timestamp;
+        uint256 today = timestamp / 86_400;
+        bool todayOverride = fadDayOverrides[today];
+        fadWindow =
+            MarketCalendarLib.isFadWindow(timestamp, todayOverride, fadDayOverrides[today + 1], fadRunwaySeconds);
+        oracleFrozen = MarketCalendarLib.isOracleFrozen(timestamp, todayOverride);
     }
 
     /// @notice Returns the current live position tuple for an account.
@@ -1005,8 +1012,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         snap.capPrice = CAP_PRICE;
         snap.riskParams = riskParams;
         snap.executionFeeBps = executionFeeBps;
-        snap.isFadWindow = isFadWindow();
-        snap.oracleFrozen = isOracleFrozen();
+        (snap.isFadWindow, snap.oracleFrozen) = _marketStatus();
         snap.frozenCloseVpiFactor = frozenCloseVpiFactor;
     }
 
