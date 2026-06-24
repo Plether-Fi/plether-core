@@ -4430,17 +4430,17 @@ contract FadStalenessTest is BasePerpTest {
         _addFadDays(timestamps);
 
         uint256 wednesdayMidnight = WEDNESDAY_NOON - 12 hours;
-        uint256 tuesdayJustOutside = wednesdayMidnight - 3 hours - 1;
+        uint256 tuesdayJustOutside = wednesdayMidnight - 1 hours - 1;
 
         vm.warp(tuesdayJustOutside);
         assertFalse(engine.isFadWindow(), "Before runway: FAD should be inactive");
 
-        uint256 tuesdayRunwayStart = wednesdayMidnight - 3 hours;
+        uint256 tuesdayRunwayStart = wednesdayMidnight - 1 hours;
         vm.warp(tuesdayRunwayStart);
         assertTrue(engine.isFadWindow(), "At runway start: FAD should be active");
 
-        uint256 tuesday22 = wednesdayMidnight - 2 hours;
-        vm.warp(tuesday22);
+        uint256 duringRunway = wednesdayMidnight - 30 minutes;
+        vm.warp(duringRunway);
         assertTrue(engine.isFadWindow(), "During runway: FAD should be active");
     }
 
@@ -4450,19 +4450,20 @@ contract FadStalenessTest is BasePerpTest {
         _addFadDays(timestamps);
 
         uint256 wednesdayMidnight = WEDNESDAY_NOON - 12 hours;
+        uint256 runwayStart = wednesdayMidnight - 1 hours;
 
-        vm.warp(wednesdayMidnight - 3 hours);
+        vm.warp(runwayStart);
         assertTrue(engine.isFadWindow());
 
         vm.prank(alice);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__CloseOnlyWindow.selector);
         router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
 
-        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), wednesdayMidnight - 3 hours + 6);
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), runwayStart + 6);
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
 
-        vm.warp(wednesdayMidnight - 3 hours + 50);
+        vm.warp(runwayStart + 50);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 10);
         router.executeOrder(2, empty);
@@ -4478,7 +4479,7 @@ contract FadStalenessTest is BasePerpTest {
         _addFadDays(timestamps);
 
         uint256 wednesdayMidnight = WEDNESDAY_NOON - 12 hours;
-        uint256 runwayTime = wednesdayMidnight - 2 hours;
+        uint256 runwayTime = wednesdayMidnight - 30 minutes;
 
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), runwayTime - 60);
 
@@ -4494,7 +4495,7 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function test_Runway_SetFadRunway() public {
-        assertEq(engine.fadRunwaySeconds(), 3 hours);
+        assertEq(engine.fadRunwaySeconds(), 1 hours);
         _setFadRunway(6 hours);
         assertEq(engine.fadRunwaySeconds(), 6 hours);
     }

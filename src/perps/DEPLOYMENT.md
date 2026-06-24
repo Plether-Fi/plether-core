@@ -71,6 +71,29 @@ The router basket uses 6 FX feeds with DXY weights:
 
 Base prices and weights are currently hardcoded in the script to match the existing perps basket assumptions.
 
+### Arbitrum Sepolia Release Parameters
+
+The next Arbitrum Sepolia perps deployment uses these initial defaults:
+
+| Parameter | Value |
+| --- | --- |
+| `vpiFactor` | `0.005e18` |
+| `frozenCloseVpiFactor` | `0.005e18` |
+| `maxSkewRatio` | `0.4e18` |
+| `maintMarginBps` | `30` |
+| `initMarginBps` | `45` |
+| `fadMarginBps` | `300` |
+| `baseCarryBps` | `500` |
+| `minBountyUsdc` | `1e6` |
+| `bountyBps` | `10` |
+| `executionFeeBps` | `4` |
+| `fadRunwaySeconds` | `1 hours` |
+| `pythMaxConfidenceRatioBps` | `10` |
+
+`pythMaxConfidenceRatioBps = 10` rejects a component feed when Pyth's reported confidence interval exceeds
+`0.10%` of that component's price. Pyth confidence is an uncertainty band, so larger values mean less precise
+prices.
+
 ## Environment
 
 ### Deploy
@@ -114,8 +137,8 @@ Optional:
 ```bash
 PERPS_PAUSER=0x...
 
-SENIOR_SEED_USDC=1000000000
-JUNIOR_SEED_USDC=1000000000
+SENIOR_SEED_USDC=50000000000000
+JUNIOR_SEED_USDC=50000000000000
 
 SENIOR_SEED_RECEIVER=0x...
 JUNIOR_SEED_RECEIVER=0x...
@@ -129,7 +152,7 @@ TEST_USER_AMOUNTS=1000000000000,500000000000
 Notes:
 
 - USDC amounts are raw 6-decimal values.
-- `1000000000` means `1000e6`, or 1,000 mock USDC.
+- `50000000000000` means `50_000_000e6`, or 50,000,000 mock USDC.
 - `TEST_USER_RECIPIENTS` and `TEST_USER_AMOUNTS` must have the same length.
 
 Run:

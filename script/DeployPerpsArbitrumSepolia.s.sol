@@ -137,10 +137,10 @@ contract DeployPerpsArbitrumSepolia is Script {
 
     function _riskParams() internal pure returns (CfdTypes.RiskParams memory) {
         return CfdTypes.RiskParams({
-            vpiFactor: 0,
+            vpiFactor: 0.005e18,
             maxSkewRatio: 0.4e18,
-            maintMarginBps: 100,
-            initMarginBps: 150,
+            maintMarginBps: 30,
+            initMarginBps: 45,
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
@@ -194,6 +194,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         console.log("MarginClearinghouse:", address(deployed.clearinghouse));
         console.log("CfdEngine:", address(deployed.engine));
         console.log("FrozenCloseVpiFactor:", deployed.engine.frozenCloseVpiFactor());
+        console.log("FadRunwaySeconds:", deployed.engine.fadRunwaySeconds());
         console.log("CfdEnginePlanner:", address(deployed.planner));
         console.log("CfdEngineSettlementSidecar:", address(deployed.settlementSidecar));
         console.log("CfdEngineAdmin:", address(deployed.engineAdmin));
@@ -204,6 +205,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         console.log("CfdEngineLens:", address(deployed.engineLens));
         console.log("OrderRouter:", address(deployed.router));
         console.log("PletherOracle:", deployed.pletherOracle);
+        console.log("PythMaxConfidenceRatioBps:", PletherOracle(deployed.pletherOracle).pythMaxConfidenceRatioBps());
         console.log("OrderRouterAdmin:", deployed.routerAdmin);
         console.log("PerpsPublicLens:", address(deployed.publicLens));
         console.log("Owner:", deployed.engineAdmin.owner());

@@ -38,7 +38,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
 
     uint256 public override orderExecutionStalenessLimit = 60;
     uint256 public override liquidationStalenessLimit = 15;
-    uint256 public override pythMaxConfidenceRatioBps = 10_000;
+    uint256 public override pythMaxConfidenceRatioBps = 10;
     uint256 public override orderSettlementWindow = 15;
     uint256 public override maxComponentPublishTimeDivergence = 5;
     uint256 public override adverseConfidenceMultiplierBps = 10_000;
