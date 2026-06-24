@@ -20,7 +20,7 @@ contract OracleMarkPriceIsolationTest is BasePerpTest {
         vm.warp(publishTime);
         vm.roll(block.number + 1);
         baseMockPyth.setAllUniquePrices(
-            _basePythFeedIds(), int64(100_000_000), 1_000_000, int32(-8), publishTime, commitTime
+            _basePythFeedIds(), int64(100_000_000), 100_000, int32(-8), publishTime, commitTime
         );
 
         bytes[] memory updateData = new bytes[](1);
@@ -29,7 +29,7 @@ contract OracleMarkPriceIsolationTest is BasePerpTest {
 
         (uint256 size,, uint256 entryPrice,,,,) = engine.positions(trader);
         assertEq(size, 10_000e18, "order should execute");
-        assertEq(entryPrice, 99_000_000, "position should use adverse execution price");
+        assertEq(entryPrice, 99_900_000, "position should use adverse execution price");
         assertEq(engine.lastMarkPrice(), 100_000_000, "global mark should stay neutral");
         assertEq(engine.lastMarkTime(), publishTime, "global mark should use oracle publish time");
     }
@@ -41,7 +41,7 @@ contract OracleMarkPriceIsolationTest is BasePerpTest {
         uint64 publishTime = uint64(block.timestamp + 1);
         vm.warp(publishTime);
         vm.roll(block.number + 1);
-        baseMockPyth.setAllPrices(_basePythFeedIds(), int64(110_000_000), 1_000_000, int32(-8), publishTime);
+        baseMockPyth.setAllPrices(_basePythFeedIds(), int64(110_000_000), 100_000, int32(-8), publishTime);
 
         bytes[] memory updateData = new bytes[](1);
         updateData[0] = "";

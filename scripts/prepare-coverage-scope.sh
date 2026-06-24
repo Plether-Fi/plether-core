@@ -62,6 +62,7 @@ case "${scope}" in
         move_path src/perps
         move_path src/options
         move_path test/perps
+        move_path test/scripts
         move_path test/options
         move_path test/utils/OptionsMocks.sol
         move_path test/utils/OptionsTestSetup.sol
@@ -80,6 +81,7 @@ case "${scope}" in
         move_path test/options
         move_path test/oracles
         move_path test/perps/invariant
+        move_path test/scripts
         move_path test/utils/OptionsMocks.sol
         move_path test/utils/OptionsTestSetup.sol
         ;;
@@ -95,6 +97,7 @@ case "${scope}" in
         move_dir_files_except test/utils MockOracle.sol MockUSDCPermit.sol OptionsMocks.sol OptionsTestSetup.sol
         move_path test/perps
         move_path test/oracles
+        move_path test/scripts
         move_path test/utils/OrderRouterDebugLens.sol
         ;;
     *)
