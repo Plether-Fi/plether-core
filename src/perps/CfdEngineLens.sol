@@ -449,6 +449,8 @@ contract CfdEngineLens is ICfdEngineLens {
         snap.riskParams = _riskParams();
         snap.executionFeeBps = engineContract.executionFeeBps();
         snap.isFadWindow = engineContract.isFadWindow();
+        snap.oracleFrozen = engineContract.isOracleFrozen();
+        snap.frozenCloseVpiFactor = engineContract.frozenCloseVpiFactor();
         liveMarkAge;
         maxStaleness;
     }

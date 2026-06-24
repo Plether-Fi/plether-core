@@ -482,6 +482,7 @@ Freshness policy is action-specific.
 - in live markets, require fresh oracle data under the close execution rule,
 - stale data is a keeper/oracle failure rather than a user failure,
 - frozen-oracle windows use the dedicated frozen-market policy, including relaxed cross-feed publish-time divergence up to the frozen staleness window.
+- during `oracleFrozen`, close/reduce VPI is a one-way LP-protection surcharge using `frozenCloseVpiFactor`; FAD-only live closes continue to use normal signed VPI and the lifetime rebate clamp.
 
 ### Liquidations
 

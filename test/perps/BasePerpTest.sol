@@ -97,6 +97,7 @@ abstract contract BasePerpTest is Test {
     /// @dev Monday 2024-03-04 10:00 UTC. Avoids FAD window.
     uint256 constant SETUP_TIMESTAMP = 1_709_532_000;
     uint256 constant CAP_PRICE = 2e8;
+    uint256 constant FROZEN_CLOSE_VPI_FACTOR = 0.005e18;
     bytes32 internal constant BASE_PYTH_FEED_A = bytes32(uint256(1));
     bytes32 internal constant BASE_PYTH_FEED_B = bytes32(uint256(2));
     address internal constant PROTOCOL_TREASURY_ACCOUNT = address(0xFEE50001);
@@ -707,6 +708,8 @@ abstract contract BasePerpTest is Test {
             config.riskParams.minBountyUsdc,
             config.riskParams.bountyBps
         ) = engine.riskParams();
+        config.frozenCloseVpiFactor = engine.frozenCloseVpiFactor();
+        config.executionFeeBps = engine.executionFeeBps();
     }
 
     function _engineCalendarConfig() internal view returns (ICfdEngineAdminHost.EngineCalendarConfig memory config) {
@@ -724,6 +727,8 @@ abstract contract BasePerpTest is Test {
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = params;
         config.executionFeeBps = engine.executionFeeBps();
+        config.frozenCloseVpiFactor =
+            engine.frozenCloseVpiFactor() > params.vpiFactor ? engine.frozenCloseVpiFactor() : params.vpiFactor;
         engineAdmin.proposeRiskConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
         engineAdmin.finalizeRiskConfig();
@@ -778,12 +783,20 @@ abstract contract BasePerpTest is Test {
     function _deployEngine(
         CfdTypes.RiskParams memory riskParams_
     ) internal returns (CfdEngine deployedEngine) {
-        deployedEngine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, riskParams_);
+        deployedEngine = new CfdEngine(
+            address(usdc), address(clearinghouse), CAP_PRICE, riskParams_, _frozenCloseVpiFactor(riskParams_)
+        );
         CfdEnginePlanner planner = new CfdEnginePlanner();
         CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(deployedEngine));
         CfdEngineAdmin adminModule = new CfdEngineAdmin(address(deployedEngine), address(this));
         deployedEngine.setDependencies(address(planner), address(settlement), address(adminModule));
         deployedEngine.setProtocolTreasury(PROTOCOL_TREASURY_ACCOUNT);
+    }
+
+    function _frozenCloseVpiFactor(
+        CfdTypes.RiskParams memory riskParams_
+    ) internal pure virtual returns (uint256) {
+        return riskParams_.vpiFactor > FROZEN_CLOSE_VPI_FACTOR ? riskParams_.vpiFactor : FROZEN_CLOSE_VPI_FACTOR;
     }
 
     function _syncRouterAdmin() internal {

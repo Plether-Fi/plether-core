@@ -10,7 +10,8 @@ contract CfdEngineHarness is CfdEngine {
         address _usdc,
         address _clearinghouse,
         uint256 _capPrice,
-        CfdTypes.RiskParams memory _riskParams
-    ) CfdEngine(_usdc, _clearinghouse, _capPrice, _riskParams) {}
+        CfdTypes.RiskParams memory _riskParams,
+        uint256 _frozenCloseVpiFactor
+    ) CfdEngine(_usdc, _clearinghouse, _capPrice, _riskParams, _frozenCloseVpiFactor) {}
 
 }

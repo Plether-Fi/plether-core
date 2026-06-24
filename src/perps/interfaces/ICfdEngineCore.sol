@@ -43,6 +43,9 @@ interface ICfdEngineCore is ICfdEngineTypes {
             uint256 bountyBps
         );
 
+    /// @notice One-way VPI factor used by oracle-frozen close execution (18 decimals WAD).
+    function frozenCloseVpiFactor() external view returns (uint256);
+
     /// @notice Router-facing order execution entrypoint with typed business-rule failures.
     /// @param order Queued order being executed by the router
     /// @param currentOraclePrice Execution oracle price (8 decimals), clamped to CAP_PRICE
