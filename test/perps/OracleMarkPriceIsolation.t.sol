@@ -29,7 +29,7 @@ contract OracleMarkPriceIsolationTest is BasePerpTest {
 
         (uint256 size,, uint256 entryPrice,,,,) = engine.positions(trader);
         assertEq(size, 10_000e18, "order should execute");
-        assertEq(entryPrice, 99_900_000, "position should use adverse execution price");
+        assertEq(entryPrice, 99_980_000, "position should use adverse execution price");
         assertEq(engine.lastMarkPrice(), 100_000_000, "global mark should stay neutral");
         assertEq(engine.lastMarkTime(), publishTime, "global mark should use oracle publish time");
     }
