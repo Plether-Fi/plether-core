@@ -21,6 +21,9 @@ interface IMintableERC20 {
 
 contract BootstrapPerpsArbitrumSepolia is Script {
 
+    uint256 internal constant DEFAULT_SENIOR_SEED_USDC = 50_000_000e6;
+    uint256 internal constant DEFAULT_JUNIOR_SEED_USDC = 50_000_000e6;
+
     function run() external {
         uint256 privateKey = vm.envUint("TEST_PRIVATE_KEY");
         address deployer = vm.addr(privateKey);
@@ -30,8 +33,8 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         address routerAddr = vm.envAddress("PERPS_ORDER_ROUTER");
 
         address pauser = vm.envOr("PERPS_PAUSER", address(0));
-        uint256 seniorSeedUsdc = vm.envOr("SENIOR_SEED_USDC", uint256(1000e6));
-        uint256 juniorSeedUsdc = vm.envOr("JUNIOR_SEED_USDC", uint256(1000e6));
+        uint256 seniorSeedUsdc = vm.envOr("SENIOR_SEED_USDC", DEFAULT_SENIOR_SEED_USDC);
+        uint256 juniorSeedUsdc = vm.envOr("JUNIOR_SEED_USDC", DEFAULT_JUNIOR_SEED_USDC);
         address seniorSeedReceiver = vm.envOr("SENIOR_SEED_RECEIVER", deployer);
         address juniorSeedReceiver = vm.envOr("JUNIOR_SEED_RECEIVER", deployer);
         bool activateTrading = vm.envOr("ACTIVATE_TRADING", true);

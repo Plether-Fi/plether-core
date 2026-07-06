@@ -57,7 +57,7 @@
 <body>
 
 <h1>Plether Perps — Pool Economics Model</h1>
-<p class="subtitle">Interactive model for HousePool tranche returns using the current carry/VPI/liquidation design. Execution fees remain separate protocol revenue.</p>
+<p class="subtitle">Interactive model for HousePool tranche returns using the current carry/VPI/oracle-confidence/liquidation design. Execution fees remain separate protocol revenue.</p>
 
 <div class="scenario-bar">
   <button onclick="loadScenario('conservative')">Conservative</button>
@@ -89,28 +89,38 @@
     <h2>Protocol Parameters (On-Chain)</h2>
     <div class="field">
       <label>VPI Factor (k) <span class="val" id="v-vpi"></span></label>
-      <input type="range" id="vpi" min="0" max="0.2" step="0.002" value="0.02" oninput="calc()">
-      <div class="hint">vpiFactor — quadratic skew cost. 0 = disabled</div>
+      <input type="range" id="vpi" min="0" max="0.02" step="0.0005" value="0.005" oninput="calc()">
+      <div class="hint">vpiFactor — release value 0.005; capped at 4x release for bounded stress</div>
     </div>
     <div class="field">
       <label>Execution Fee <span class="val" id="v-execfee"></span></label>
-      <input type="range" id="execfee" min="1" max="20" step="1" value="4" oninput="calc()">
-      <div class="hint">Hardcoded. Charged on notional at open + close</div>
+      <input type="range" id="execfee" min="1" max="10" step="1" value="4" oninput="calc()">
+      <div class="hint">Release value 4 bps. Charged on notional at open + close</div>
+    </div>
+    <div class="field">
+      <label>Oracle confidence <span class="val" id="v-oracleconf"></span></label>
+      <input type="range" id="oracleconf" min="0" max="10" step="0.1" value="10" oninput="calc()">
+      <div class="hint">Accepted Pyth confidence ratio; feeds above 10 bps are rejected on-chain</div>
+    </div>
+    <div class="field">
+      <label>Adverse confidence multiplier <span class="val" id="v-confmult"></span></label>
+      <input type="range" id="confmult" min="0" max="2" step="0.05" value="0.2" oninput="calc()">
+      <div class="hint">0.20x matches the 2,000 bps default multiplier</div>
     </div>
     <div class="field">
       <label>Maintenance Margin <span class="val" id="v-mmr"></span></label>
-      <input type="range" id="mmr" min="25" max="500" step="25" value="100" oninput="calc()">
-      <div class="hint">maintMarginBps — liquidation threshold</div>
+      <input type="range" id="mmr" min="25" max="100" step="5" value="30" oninput="calc()">
+      <div class="hint">maintMarginBps — release value 30 bps; bounded to DXY-style range</div>
     </div>
     <div class="field">
       <label>Keeper Bounty <span class="val" id="v-bounty"></span></label>
-      <input type="range" id="bounty" min="5" max="50" step="1" value="10" oninput="calc()">
-      <div class="hint">bountyBps — paid from vault to liquidation keepers</div>
+      <input type="range" id="bounty" min="5" max="25" step="1" value="10" oninput="calc()">
+      <div class="hint">bountyBps — release value 10 bps; paid from vault to liquidation keepers</div>
     </div>
     <div class="field">
       <label>Base carry <span class="val" id="v-carry"></span></label>
-      <input type="range" id="carry" min="0" max="2000" step="25" value="500" oninput="calc()">
-      <div class="hint">baseCarryBps — annualized carry on LP-backed notional</div>
+      <input type="range" id="carry" min="0" max="1000" step="25" value="500" oninput="calc()">
+      <div class="hint">baseCarryBps — release value 500 bps; capped at 10% APY here</div>
     </div>
   </div>
 
@@ -191,11 +201,11 @@
 
 <script>
 const scenarios = {
-  conservative: { tvl:1e6, ratio:50, sr:800, vpi:0.01, execfee:4, mmr:100, bounty:10, carry:500, vol:1, oi:0.5, lev:4, skew:0.1, ndf:15, liq:0.3, behav:3 },
-  moderate:     { tvl:5e6, ratio:50, sr:800, vpi:0.02, execfee:4, mmr:100, bounty:10, carry:500, vol:2, oi:0.8, lev:5, skew:0.15, ndf:20, liq:0.5, behav:5 },
-  optimistic:   { tvl:20e6, ratio:40, sr:800, vpi:0.03, execfee:4, mmr:100, bounty:10, carry:500, vol:3, oi:1.2, lev:6, skew:0.2, ndf:25, liq:0.8, behav:8 },
-  bear:         { tvl:2e6, ratio:60, sr:800, vpi:0.02, execfee:4, mmr:100, bounty:10, carry:500, vol:0.5, oi:0.3, lev:3, skew:0.05, ndf:10, liq:1.5, behav:-5 },
-  highVpi:      { tvl:5e6, ratio:50, sr:800, vpi:0.08, execfee:4, mmr:100, bounty:10, carry:500, vol:1.5, oi:0.6, lev:5, skew:0.25, ndf:30, liq:0.4, behav:3 },
+  conservative: { tvl:1e6, ratio:50, sr:800, vpi:0.0025, execfee:4, oracleconf:10, confmult:0.2, mmr:30, bounty:10, carry:500, vol:1, oi:0.5, lev:4, skew:0.1, ndf:15, liq:0.3, behav:3 },
+  moderate:     { tvl:5e6, ratio:50, sr:800, vpi:0.005,  execfee:4, oracleconf:10, confmult:0.2, mmr:30, bounty:10, carry:500, vol:2, oi:0.8, lev:5, skew:0.15, ndf:20, liq:0.5, behav:5 },
+  optimistic:   { tvl:20e6, ratio:40, sr:800, vpi:0.0075, execfee:4, oracleconf:10, confmult:0.2, mmr:30, bounty:10, carry:500, vol:3, oi:1.2, lev:6, skew:0.2, ndf:25, liq:0.8, behav:8 },
+  bear:         { tvl:2e6, ratio:60, sr:800, vpi:0.005,  execfee:4, oracleconf:10, confmult:0.2, mmr:30, bounty:10, carry:500, vol:0.5, oi:0.3, lev:3, skew:0.05, ndf:10, liq:1.5, behav:-5 },
+  highVpi:      { tvl:5e6, ratio:50, sr:800, vpi:0.0125, execfee:4, oracleconf:10, confmult:0.2, mmr:30, bounty:10, carry:500, vol:1.5, oi:0.6, lev:5, skew:0.25, ndf:30, liq:0.4, behav:3 },
 };
 
 const MIN_BOUNTY_USD = 1;
@@ -245,6 +255,8 @@ function calc() {
   const srBps     = +document.getElementById('sr').value;
   const k         = +document.getElementById('vpi').value;
   const execBps   = +document.getElementById('execfee').value;
+  const oracleConfBps = +document.getElementById('oracleconf').value;
+  const confMultiplier = +document.getElementById('confmult').value;
   const mmrBps    = +document.getElementById('mmr').value;
   const bountyBps = +document.getElementById('bounty').value;
   const carryBps  = +document.getElementById('carry').value;
@@ -260,8 +272,10 @@ function calc() {
   document.getElementById('v-tvl').textContent = fmt(tvl);
   document.getElementById('v-ratio').textContent = `${(seniorPct*100).toFixed(0)}:${((1-seniorPct)*100).toFixed(0)}`;
   document.getElementById('v-sr').textContent = (srBps / 100).toFixed(1) + '% APY';
-  document.getElementById('v-vpi').textContent = k.toFixed(3);
+  document.getElementById('v-vpi').textContent = k.toFixed(4);
   document.getElementById('v-execfee').textContent = execBps + ' bps';
+  document.getElementById('v-oracleconf').textContent = oracleConfBps.toFixed(1) + ' bps';
+  document.getElementById('v-confmult').textContent = confMultiplier.toFixed(2) + 'x';
   document.getElementById('v-mmr').textContent = mmrBps + ' bps (' + (mmrBps/100).toFixed(2) + '%)';
   document.getElementById('v-bounty').textContent = bountyBps + ' bps';
   document.getElementById('v-carry').textContent = carryBps + ' bps APY';
@@ -277,12 +291,17 @@ function calc() {
   const juniorPrincipal = tvl * (1 - seniorPct);
   const dailyVol = tvl * volMult;
   const annualVol = dailyVol * 365;
+  const annualExecutionNotional = annualVol * 2;
   const avgOI = tvl * oiMult;
   const avgTraderCollateral = avgLev > 0 ? avgOI / avgLev : avgOI;
   const avgLpBackedNotional = Math.max(avgOI - avgTraderCollateral, 0);
 
   // --- Execution fees (to protocol owner, NOT pool) ---
-  const execFeeAnnual = annualVol * execBps * 2 / 10000;
+  const execFeeAnnual = annualExecutionNotional * execBps / 10000;
+
+  // --- Oracle confidence spread (to pool, NOT protocol fee revenue) ---
+  const effectiveConfidenceBps = oracleConfBps * confMultiplier;
+  const oracleConfidenceAnnual = annualExecutionNotional * effectiveConfidenceBps / 10000;
 
   // --- VPI net revenue (to pool) ---
   // Avg VPI charge per $ of toxic flow ≈ k × skewRatio
@@ -308,7 +327,7 @@ function calc() {
   const behavAnnual = tvl * (behavBps / 10000) * 365;
 
   // --- Total house edge (to pool) ---
-  const totalHouseEdge = vpiAnnual + liqSurplusAnnual + carryAnnual + behavAnnual;
+  const totalHouseEdge = oracleConfidenceAnnual + vpiAnnual + liqSurplusAnnual + carryAnnual + behavAnnual;
   const houseEdgeBpsDay = totalHouseEdge / (tvl * 365 / 10000);
 
   // --- Net LP revenue ---
@@ -332,10 +351,13 @@ function calc() {
   const intEl = document.getElementById('intermediates');
   intEl.innerHTML = `<table>
     <tr><td class="row-label">Annual volume</td><td class="right">${fmt(annualVol)}</td></tr>
+    <tr><td class="row-label">Annual open + close notional</td><td class="right">${fmt(annualExecutionNotional)}</td></tr>
     <tr><td class="row-label">Average OI</td><td class="right">${fmt(avgOI)}</td></tr>
     <tr><td class="row-label">Skew notional</td><td class="right">${fmt(skewNotional)}</td></tr>
     <tr><td class="row-label">Avg trader collateral</td><td class="right">${fmt(avgTraderCollateral)}</td></tr>
     <tr><td class="row-label">Avg LP-backed notional</td><td class="right">${fmt(avgLpBackedNotional)}</td></tr>
+    <tr><td class="row-label">Effective confidence shift</td><td class="right">${bps(effectiveConfidenceBps)} per execution</td></tr>
+    <tr><td class="row-label">Annual oracle confidence edge</td><td class="right">${fmt(oracleConfidenceAnnual)}</td></tr>
     <tr><td class="row-label">Annual carry revenue</td><td class="right">${fmt(carryAnnual)}</td></tr>
     <tr><td class="row-label">Annual liquidated notional</td><td class="right">${fmt(annualLiqNotional)}</td></tr>
     <tr><td class="row-label">Avg keeper bounty per event</td><td class="right">${bps(avgKeeperBountyBps)} (min ${fmt(MIN_BOUNTY_USD)})</td></tr>
@@ -346,9 +368,10 @@ function calc() {
   </table>`;
 
   // --- Bar chart ---
-  const allVals = [vpiAnnual, liqSurplusAnnual, carryAnnual, behavAnnual];
+  const allVals = [oracleConfidenceAnnual, vpiAnnual, liqSurplusAnnual, carryAnnual, behavAnnual];
   const maxAbs = Math.max(...allVals.map(Math.abs), 1);
   let bars = '';
+  bars += bar('Oracle confidence edge', oracleConfidenceAnnual, maxAbs);
   bars += bar('VPI net revenue', vpiAnnual, maxAbs);
   bars += bar('LP liquidation retention', liqSurplusAnnual, maxAbs);
   bars += bar('Carry revenue', carryAnnual, maxAbs);
@@ -364,6 +387,7 @@ function calc() {
   let tbody = '';
   tbody += row(`Execution fees (${execBps} bps × 2)`, 'Protocol owner', execFeeAnnual);
   tbody += sep();
+  tbody += row('Oracle confidence edge', 'Pool (LPs)', oracleConfidenceAnnual);
   tbody += row('VPI net revenue', 'Pool (LPs)', vpiAnnual);
   tbody += row('Keeper bounties', 'Keepers', -bountyAnnual);
   tbody += row('LP liquidation retention', 'Pool (LPs)', liqSurplusAnnual);
@@ -402,7 +426,7 @@ function calc() {
   } else if (unfundedSeniorCoupon > 1) {
     noteEl.textContent = 'Junior principal is insufficient to fund the full senior coupon. The shortfall is not carried as future debt.';
   } else {
-    noteEl.textContent = 'Healthy: senior coupon funded, junior earning surplus. Execution fees are separate protocol-owner revenue. Liquidation retention here means only the collateral the pool keeps after trader residual equity and keeper bounty are accounted for.';
+    noteEl.textContent = 'Healthy: senior coupon funded, junior earning surplus. Execution fees are separate protocol-owner revenue. Oracle confidence edge is modeled as adverse execution-price adjustment accruing to LPs. Liquidation retention here means only the collateral the pool keeps after trader residual equity and keeper bounty are accounted for.';
   }
 }
 

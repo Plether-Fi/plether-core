@@ -81,7 +81,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     mapping(uint256 => bool) public fadDayOverrides;
     uint256[] private _fadOverrideDays;
     uint256 public fadMaxStaleness = 3 days;
-    uint256 public fadRunwaySeconds = 3 hours;
+    uint256 public fadRunwaySeconds = 1 hours;
     uint256 public engineMarkStalenessLimit = 60;
     uint256 public executionFeeBps = 4;
     /// @notice One-way VPI surcharge factor for close/reduce execution while the oracle is frozen.

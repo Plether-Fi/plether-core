@@ -23,6 +23,16 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
 import "forge-std/Script.sol";
 
+interface IMintableERC20 is IERC20 {
+
+    function decimals() external view returns (uint8);
+    function mint(
+        address to,
+        uint256 amount
+    ) external;
+
+}
+
 // Curve Twocrypto-NG Factory interface
 interface ITwocryptoFactory {
 
@@ -234,7 +244,7 @@ contract DeployToTest is Script {
     // ==========================================
 
     struct DeployedContracts {
-        MockUSDC usdc;
+        IMintableERC20 usdc;
         address curvePool;
         BasketOracle basketOracle;
         MockYieldAdapter adapter;
@@ -272,9 +282,8 @@ contract DeployToTest is Script {
         address predictedRewardDistributor = vm.computeCreateAddress(deployer, startNonce + _getNonceOffset());
         console.log("Predicted RewardDistributor:", predictedRewardDistributor);
 
-        // Step 1: Deploy MockUSDC
-        deployed.usdc = new MockUSDC();
-        console.log("MockUSDC deployed:", address(deployed.usdc));
+        // Step 1: Deploy or load USDC
+        deployed.usdc = _deployOrLoadUsdc();
 
         // Step 2: Deploy mock Chainlink feeds
         (address[] memory feeds, uint256[] memory quantities, uint256[] memory basePrices) = _deployMockFeeds();
@@ -368,6 +377,11 @@ contract DeployToTest is Script {
     // INTERNAL HELPERS
     // ==========================================
 
+    function _deployOrLoadUsdc() internal virtual returns (IMintableERC20 usdc) {
+        usdc = IMintableERC20(address(new MockUSDC()));
+        console.log("MockUSDC deployed:", address(usdc));
+    }
+
     function _deployMockFeeds()
         internal
         virtual
@@ -403,7 +417,7 @@ contract DeployToTest is Script {
         address usdc,
         address plDxyBear,
         uint256 initialPrice
-    ) internal returns (address pool) {
+    ) internal virtual returns (address pool) {
         pool = ITwocryptoFactory(TWOCRYPTO_FACTORY)
             .deploy_pool(
                 "Curve.fi USDC/plDXY-BEAR",
@@ -627,7 +641,7 @@ contract DeployToTest is Script {
         console.log("========================================");
         console.log("");
         console.log("Infrastructure:");
-        console.log("  MockUSDC:            ", address(d.usdc));
+        console.log("  USDC:                ", address(d.usdc));
         console.log("  Curve Pool:          ", d.curvePool);
         console.log("");
         console.log("Core Contracts:");

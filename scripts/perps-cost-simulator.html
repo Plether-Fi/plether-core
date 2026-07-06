@@ -134,6 +134,16 @@
       <div class="fixed-val">4 bps (hardcoded on-chain)</div>
     </div>
     <div class="field">
+      <label>Oracle confidence <span class="val" id="v-oracleconf"></span></label>
+      <input type="range" id="oracleconf" min="0" max="10" step="0.1" value="10" oninput="calc()">
+      <div class="hint">Accepted Pyth confidence ratio; feeds above 10 bps are rejected on-chain.</div>
+    </div>
+    <div class="field">
+      <label>Adverse confidence multiplier <span class="val" id="v-confmult"></span></label>
+      <input type="range" id="confmult" min="0" max="2" step="0.05" value="0.2" oninput="calc()">
+      <div class="hint">0.20x matches the 2,000 bps default multiplier.</div>
+    </div>
+    <div class="field">
       <label>VPI Factor (k) <span class="val" id="v-vpi"></span></label>
       <input type="range" id="vpi" min="0" max="0.2" step="0.002" value="0.02" oninput="calc()">
     </div>
@@ -200,7 +210,7 @@
 <div class="results">
   <h2>Detailed Breakdown</h2>
   <table>
-    <thead><tr><th>Fee Type</th><th>Amount (USD)</th><th>% of Notional</th></tr></thead>
+    <thead><tr><th>Cost Component</th><th>Amount (USD)</th><th>% of Notional</th></tr></thead>
     <tbody id="tbody-detail"></tbody>
   </table>
 </div>
@@ -212,7 +222,7 @@
   </table>
 </div>
 
-<p class="note">Assumptions: full close at the modeled exit market state. Carry accrues linearly on LP-backed notional (`max(notional - collateral, 0)`). Exit VPI uses the same close-path clamp as the onchain close accounting, so net lifetime VPI cannot go negative on a full round trip.</p>
+<p class="note">Assumptions: full close at the modeled exit market state. Carry accrues linearly on LP-backed notional (`max(notional - collateral, 0)`). Oracle confidence spread models adverse execution-price adjustment as trader cost / LP edge, not protocol fee revenue. Exit VPI uses the same close-path clamp as the onchain close accounting, so net lifetime VPI cannot go negative on a full round trip.</p>
 
 <script>
   const EXEC_FEE_BPS = 4;
@@ -223,11 +233,11 @@
 let currentSide = 'BULL';
 
 const scenarios = {
-  smallRetail:  { side:'BULL', notional:1000,    entry:1.00, leverage:5,  hold:30, depth:5e6, bulloi:2e6,   bearoi:2.5e6, exitbulloi:2.1e6, exitbearoi:2.4e6, vpi:0.02, imr:150, mmr:100, carrybps:500, bountybps:15, maxskew:40 },
-  whale:        { side:'BULL', notional:2000000, entry:1.00, leverage:3,  hold:50, depth:5e6, bulloi:2e6,   bearoi:2.5e6, exitbulloi:2.6e6, exitbearoi:1.8e6, vpi:0.02, imr:150, mmr:100, carrybps:500, bountybps:15, maxskew:40 },
-  highSkew:     { side:'BEAR', notional:50000,   entry:1.00, leverage:10, hold:65, depth:5e6, bulloi:1e6,   bearoi:4e6,   exitbulloi:1.4e6, exitbearoi:3.2e6, vpi:0.02, imr:150, mmr:100, carrybps:500, bountybps:15, maxskew:40 },
-  marketMaker:  { side:'BULL', notional:100000,  entry:1.00, leverage:2,  hold:40, depth:5e6, bulloi:1.5e6, bearoi:3.5e6, exitbulloi:1.8e6, exitbearoi:3.1e6, vpi:0.02, imr:150, mmr:100, carrybps:500, bountybps:15, maxskew:40 },
-  maxLeverage:  { side:'BULL', notional:10000,   entry:1.00, leverage:66, hold:20, depth:5e6, bulloi:2e6,   bearoi:2.5e6, exitbulloi:2.3e6, exitbearoi:2.2e6, vpi:0.02, imr:150, mmr:100, carrybps:500, bountybps:15, maxskew:40 },
+  smallRetail:  { side:'BULL', notional:1000,    entry:1.00, leverage:5,  hold:30, depth:5e6, bulloi:2e6,   bearoi:2.5e6, exitbulloi:2.1e6, exitbearoi:2.4e6, oracleconf:10, confmult:0.2, vpi:0.02, imr:150, mmr:100, carrybps:500, bountybps:15, maxskew:40 },
+  whale:        { side:'BULL', notional:2000000, entry:1.00, leverage:3,  hold:50, depth:5e6, bulloi:2e6,   bearoi:2.5e6, exitbulloi:2.6e6, exitbearoi:1.8e6, oracleconf:10, confmult:0.2, vpi:0.02, imr:150, mmr:100, carrybps:500, bountybps:15, maxskew:40 },
+  highSkew:     { side:'BEAR', notional:50000,   entry:1.00, leverage:10, hold:65, depth:5e6, bulloi:1e6,   bearoi:4e6,   exitbulloi:1.4e6, exitbearoi:3.2e6, oracleconf:10, confmult:0.2, vpi:0.02, imr:150, mmr:100, carrybps:500, bountybps:15, maxskew:40 },
+  marketMaker:  { side:'BULL', notional:100000,  entry:1.00, leverage:2,  hold:40, depth:5e6, bulloi:1.5e6, bearoi:3.5e6, exitbulloi:1.8e6, exitbearoi:3.1e6, oracleconf:10, confmult:0.2, vpi:0.02, imr:150, mmr:100, carrybps:500, bountybps:15, maxskew:40 },
+  maxLeverage:  { side:'BULL', notional:10000,   entry:1.00, leverage:66, hold:20, depth:5e6, bulloi:2e6,   bearoi:2.5e6, exitbulloi:2.3e6, exitbearoi:2.2e6, oracleconf:10, confmult:0.2, vpi:0.02, imr:150, mmr:100, carrybps:500, bountybps:15, maxskew:40 },
 };
 
 function loadScenario(name) {
@@ -320,6 +330,8 @@ function calc() {
   const bearOi       = +document.getElementById('bearoi').value;
   const exitBullOi   = +document.getElementById('exitbulloi').value;
   const exitBearOi   = +document.getElementById('exitbearoi').value;
+  const oracleConfBps = +document.getElementById('oracleconf').value;
+  const confMultiplier = +document.getElementById('confmult').value;
   const k            = +document.getElementById('vpi').value;
   const imrBps       = +document.getElementById('imr').value;
   const mmrBps       = +document.getElementById('mmr').value;
@@ -342,6 +354,8 @@ function calc() {
   document.getElementById('v-bearoi').textContent = fmt(bearOi);
   document.getElementById('v-exitbulloi').textContent = fmt(exitBullOi);
   document.getElementById('v-exitbearoi').textContent = fmt(exitBearOi);
+  document.getElementById('v-oracleconf').textContent = oracleConfBps.toFixed(1) + ' bps';
+  document.getElementById('v-confmult').textContent = confMultiplier.toFixed(2) + 'x';
   document.getElementById('v-vpi').textContent = k.toFixed(3);
   document.getElementById('v-imr').textContent = imrBps + ' bps (' + (imrBps/100).toFixed(1) + '%)';
   document.getElementById('v-mmr').textContent = mmrBps + ' bps (' + (mmrBps/100).toFixed(1) + '%)';
@@ -379,17 +393,23 @@ function calc() {
   const execFeeOpen = notional * EXEC_FEE_BPS / 10000;
   const execFeeClose = notional * EXEC_FEE_BPS / 10000;
 
-  // === 2. VPI (entry + exit, matching close clamp semantics) ===
+  // === 2. Oracle confidence spread (adverse execution price, not protocol fee) ===
+  const effectiveConfidenceBps = oracleConfBps * confMultiplier;
+  const oracleConfidenceOpenCost = notional * effectiveConfidenceBps / 10000;
+  const oracleConfidenceCloseCost = notional * effectiveConfidenceBps / 10000;
+  const oracleConfidenceTotal = oracleConfidenceOpenCost + oracleConfidenceCloseCost;
+
+  // === 3. VPI (entry + exit, matching close clamp semantics) ===
   const vpiOpen = skewCost(postSkew, depth, k) - skewCost(preSkew, depth, k);
   const vpiCloseRaw = skewCost(exitPostSkew, depth, k) - skewCost(exitPreSkew, depth, k);
   const vpiClose = (vpiOpen + vpiCloseRaw < 0) ? -vpiOpen : vpiCloseRaw;
 
-  // === 3. Carry (current on-chain model) ===
+  // === 4. Carry (current on-chain model) ===
   const lpBackedNotional = Math.max(notional - margin, 0);
   const carryCost = lpBackedNotional * (carryBps / 10000) * holdSeconds / SECONDS_PER_YEAR;
 
   // === Total cost (positive = cost to trader) ===
-  const totalCost = execFeeOpen + execFeeClose + vpiOpen + vpiClose + carryCost;
+  const totalCost = execFeeOpen + execFeeClose + oracleConfidenceTotal + vpiOpen + vpiClose + carryCost;
   const totalBps = notional > 0 ? totalCost / notional * 10000 : 0;
   const breakEvenPct = notional > 0 ? totalCost / notional : 0;
 
@@ -431,12 +451,14 @@ function calc() {
   document.getElementById('kpi-liq-desc').textContent = leverage + 'x leverage, ' + mmrBps + ' bps maint margin, ' + leverageValidity;
 
   // === Bar chart ===
-  const costs = [execFeeOpen, execFeeClose, vpiOpen, vpiClose, carryCost];
+  const costs = [execFeeOpen, execFeeClose, oracleConfidenceOpenCost, oracleConfidenceCloseCost, vpiOpen, vpiClose, carryCost];
   const maxAbs = Math.max(...costs.map(Math.abs), 0.01);
 
   let bars = '';
   bars += bar('Exec fee (open)', execFeeOpen, maxAbs);
   bars += bar('Exec fee (close)', execFeeClose, maxAbs);
+  bars += bar('Oracle conf (open)', oracleConfidenceOpenCost, maxAbs);
+  bars += bar('Oracle conf (close)', oracleConfidenceCloseCost, maxAbs);
   bars += bar('VPI (open)', vpiOpen, maxAbs);
   bars += bar('VPI (close)', vpiClose, maxAbs);
   bars += bar('Carry (' + formatHold(holdHours) + ')', carryCost, maxAbs);
@@ -452,9 +474,11 @@ function calc() {
   detail += `<tr><td colspan="3" style="color:var(--muted);font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em;padding-top:8px"><strong>One-time costs</strong></td></tr>`;
   detail += row('Execution fee (open)', execFeeOpen, notional);
   detail += row('Execution fee (close)', execFeeClose, notional);
+  detail += row('Oracle confidence spread (open)', oracleConfidenceOpenCost, notional);
+  detail += row('Oracle confidence spread (close)', oracleConfidenceCloseCost, notional);
   detail += row('VPI (open)', vpiOpen, notional);
   detail += row('VPI (close)', vpiClose, notional);
-  detail += rowBold('Subtotal (one-time)', execFeeOpen + execFeeClose + vpiOpen + vpiClose, notional);
+  detail += rowBold('Subtotal (one-time)', execFeeOpen + execFeeClose + oracleConfidenceTotal + vpiOpen + vpiClose, notional);
   detail += sep();
   detail += `<tr><td colspan="3" style="color:var(--muted);font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em;padding-top:8px"><strong>Recurring costs</strong></td></tr>`;
   detail += row('Carry over ' + formatHold(holdHours), carryCost, notional);
@@ -483,6 +507,11 @@ function calc() {
   inter += intRow('Base carry APY', (carryBps / 100).toFixed(2) + '%');
   inter += intRow('Carry for hold period', fmt(carryCost));
   inter += intRow('Hold duration', formatHold(holdHours) + ' (' + holdHours.toLocaleString() + ' hours)');
+  inter += `<tr><td colspan="2" style="height:6px"></td></tr>`;
+  inter += intRow('Oracle confidence', oracleConfBps.toFixed(1) + ' bps');
+  inter += intRow('Adverse confidence multiplier', confMultiplier.toFixed(2) + 'x');
+  inter += intRow('Effective confidence shift', effectiveConfidenceBps.toFixed(1) + ' bps per execution');
+  inter += intRow('LP confidence edge (round trip)', fmt(oracleConfidenceTotal));
   inter += `<tr><td colspan="2" style="height:6px"></td></tr>`;
   inter += intRow('Open VPI', fmt(vpiOpen));
   inter += intRow('Close VPI (raw)', fmt(vpiCloseRaw));

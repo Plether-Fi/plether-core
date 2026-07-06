@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-NETWORK="${NETWORK:-arbitrum-sepolia}"
+NETWORK="${NETWORK:-sepolia}"
 
 if [ -f .env ]; then
   source .env
@@ -65,45 +65,37 @@ log_onchain_prices() {
 }
 
 case "$NETWORK" in
-  arbitrum-sepolia|arbitrum)
+  sepolia)
     FEED_LABELS=(
-      "EUR/USD"
-      "USD/JPY"
-      "GBP/USD"
       "USD/CAD"
-      "USD/SEK"
       "USD/CHF"
+      "USD/SEK"
     )
     FEED_IDS=(
-      "0xa995d00bb36a63cef7fd2c287dc105fc8f3d93779f062f09551b0af3e81ec30b"
-      "0xef2c98c804ba503c6a707e38be4dfbb16683775f195b091252bf24693042fd52"
-      "0x84c2dde9633d93d1bcad84e7dc41c9d56578b7ec52fabedc1f335d673df0a7c1"
       "0x3112b03a41c910ed446852aacf67118cb1bec67b2cd0b9a214c58cc0eaa2ecca"
-      "0x8ccb376aa871517e807358d4e3cf0bc7fe4950474dbe6c9ffc21ef64e43fc676"
       "0x0b1e3297e69f162877b577b0d6a47a0d63b2392bc8499e6540da4187a63e28f8"
+      "0x8ccb376aa871517e807358d4e3cf0bc7fe4950474dbe6c9ffc21ef64e43fc676"
     )
-    RPC_URL_VAR="ARB_SEPOLIA_RPC_URL"
-    PRIVATE_KEY_VAR="TEST_PRIVATE_KEY"
-    export PYTH_ADDRESS="0x4374e5a8b9C22271E9EB878A2AA31DE97DF15DAF"
+    RPC_URL_VAR="SEPOLIA_RPC_URL"
+    FALLBACK_PRIVATE_KEY_VAR="TEST_PRIVATE_KEY"
+    export PYTH_ADDRESS="0xDd24F84d36BF92C65F92307595335bdFab5Bbd21"
+    ;;
+  mainnet)
+    FEED_LABELS=(
+      "USD/SEK"
+    )
+    FEED_IDS=(
+      "0x8ccb376aa871517e807358d4e3cf0bc7fe4950474dbe6c9ffc21ef64e43fc676"
+    )
+    RPC_URL_VAR="MAINNET_RPC_URL"
+    FALLBACK_PRIVATE_KEY_VAR="PRIVATE_KEY"
+    export PYTH_ADDRESS="0x4305FB66699C3B2702D4d05CF36551390A4c69C6"
     ;;
   *)
-    echo "Unknown network: $NETWORK (expected 'arbitrum-sepolia')" >&2
+    echo "Unknown network: $NETWORK (expected 'sepolia' or 'mainnet')" >&2
     exit 1
     ;;
 esac
-
-if [ -z "${!PRIVATE_KEY_VAR+x}" ]; then
-  echo "Missing env var: $PRIVATE_KEY_VAR" >&2
-  exit 1
-fi
-
-if [ -z "${!RPC_URL_VAR+x}" ]; then
-  echo "Missing env var: $RPC_URL_VAR" >&2
-  exit 1
-fi
-
-export KEEPER_PRIVATE_KEY="${!PRIVATE_KEY_VAR}"
-RPC_URL="${!RPC_URL_VAR}"
 
 HERMES_URL="https://hermes.pyth.network/v2/updates/price/latest"
 
@@ -127,6 +119,24 @@ echo "PYTH_UPDATE_DATA set (${#ENCODED} chars)"
 if [ "${DRY_RUN:-false}" = "true" ]; then
   echo "DRY_RUN=true; skipping broadcast."
   exit 0
+fi
+
+if [ -z "${!RPC_URL_VAR+x}" ]; then
+  echo "Missing env var: $RPC_URL_VAR" >&2
+  exit 1
+fi
+RPC_URL="${!RPC_URL_VAR}"
+
+if [ -z "${KEEPER_PRIVATE_KEY+x}" ]; then
+  fallback_private_key="${!FALLBACK_PRIVATE_KEY_VAR:-}"
+  if [ -n "$fallback_private_key" ]; then
+    export KEEPER_PRIVATE_KEY="$fallback_private_key"
+  fi
+fi
+
+if [ -z "${KEEPER_PRIVATE_KEY+x}" ]; then
+  echo "Missing env var: KEEPER_PRIVATE_KEY (or fallback $FALLBACK_PRIVATE_KEY_VAR)" >&2
+  exit 1
 fi
 
 echo "[$NETWORK] Broadcasting Pyth price update..."
