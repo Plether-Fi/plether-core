@@ -89,10 +89,14 @@ The next Arbitrum Sepolia perps deployment uses these initial defaults:
 | `executionFeeBps` | `4` |
 | `fadRunwaySeconds` | `1 hours` |
 | `pythMaxConfidenceRatioBps` | `10` |
+| `adverseConfidenceMultiplierBps` | `2_000` |
 
 `pythMaxConfidenceRatioBps = 10` rejects a component feed when Pyth's reported confidence interval exceeds
 `0.10%` of that component's price. Pyth confidence is an uncertainty band, so larger values mean less precise
 prices.
+
+`adverseConfidenceMultiplierBps = 2_000` applies `0.2x` of Pyth's confidence interval when shifting execution
+and liquidation prices in the adverse direction.
 
 ## Environment
 

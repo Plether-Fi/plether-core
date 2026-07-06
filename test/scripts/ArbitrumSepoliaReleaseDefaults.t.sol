@@ -78,6 +78,7 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         );
 
         assertEq(oracle.pythMaxConfidenceRatioBps(), 10, "pyth confidence ratio");
+        assertEq(oracle.adverseConfidenceMultiplierBps(), 2000, "adverse confidence multiplier");
     }
 
     function test_BootstrapDefaults_MatchArbitrumSepoliaReleaseSeeds() public {

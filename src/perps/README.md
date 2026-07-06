@@ -455,7 +455,7 @@ Instant controls remain for one-time wiring and fee withdrawal. `OrderRouter` pa
 | Normal execution staleness | 60s | Normal order execution freshness |
 | Order settlement window | 15s | Historical Pyth search window after order commit |
 | Component publish divergence | 5s | Max basket-leg publish-time skew for live settlement |
-| Adverse confidence multiplier | 10,000 (1x) | Confidence interval multiplier applied to execution and liquidation marks |
+| Adverse confidence multiplier | 2,000 (0.2x) | Confidence interval multiplier applied to execution and liquidation marks |
 | Liquidation staleness | 15s | Live-market liquidation freshness |
 | `engineMarkStalenessLimit` | 60s | Engine-side mark freshness |
 | `markStalenessLimit` | 60s | HousePool mark freshness |
