@@ -133,6 +133,64 @@ contract MockTwocryptoPoolTest is Test {
         assertEq(usdc.balanceOf(address(pool)), 1008e6, "pool usdc");
     }
 
+    function test_ExchangeReceiverOverloadMatchesSepoliaCurveAbi() public {
+        address trader = address(0xA11CE);
+        address receiver = address(0xBEEF);
+        usdc.mint(trader, 8e6);
+
+        vm.startPrank(trader);
+        usdc.approve(address(pool), 8e6);
+        (bool ok, bytes memory data) = address(pool)
+            .call(
+                abi.encodeWithSignature("exchange(uint256,uint256,uint256,uint256,address)", 0, 1, 8e6, 10e18, receiver)
+            );
+        vm.stopPrank();
+
+        assertTrue(ok, "5-arg exchange");
+        assertEq(abi.decode(data, (uint256)), 10e18, "bear out");
+        assertEq(bear.balanceOf(receiver), 10e18, "receiver bear");
+    }
+
+    function test_LiquidityReceiverOverloadsMatchSepoliaCurveAbi() public {
+        address receiver = address(0xBEEF);
+        usdc.mint(address(this), 1e6);
+
+        (bool addOk, bytes memory addData) = address(pool)
+            .call(
+                abi.encodeWithSignature(
+                    "add_liquidity(uint256[2],uint256,address)", [uint256(1e6), uint256(0)], 0, receiver
+                )
+            );
+        assertTrue(addOk, "3-arg add_liquidity");
+        assertEq(abi.decode(addData, (uint256)), 1e18, "lp minted");
+        assertEq(pool.balanceOf(receiver), 1e18, "receiver lp");
+
+        vm.startPrank(receiver);
+        (bool removeOneOk, bytes memory removeOneData) = address(pool)
+            .call(
+                abi.encodeWithSignature(
+                    "remove_liquidity_one_coin(uint256,uint256,uint256,address)", 1e18, 0, 1e6, receiver
+                )
+            );
+        vm.stopPrank();
+
+        assertTrue(removeOneOk, "4-arg remove_liquidity_one_coin");
+        assertEq(abi.decode(removeOneData, (uint256)), 1e6, "usdc out");
+        assertEq(usdc.balanceOf(receiver), 1e6, "receiver usdc");
+    }
+
+    function test_SepoliaCurveReadSurfaceIsAvailable() public view {
+        assertEq(pool.coins(0), address(usdc), "coin 0");
+        assertEq(pool.coins(1), address(bear), "coin 1");
+        assertEq(pool.balances(0), 1000e6, "usdc balance");
+        assertEq(pool.balances(1), 1250e18, "bear balance");
+        assertEq(pool.get_dx(0, 1, 10e18), 8e6, "get dx");
+        assertEq(pool.price_scale(), PRICE, "price scale");
+        assertEq(pool.last_prices(), PRICE, "last prices");
+        assertEq(pool.virtual_price(), pool.get_virtual_price(), "virtual price alias");
+        assertTrue(pool.DOMAIN_SEPARATOR() != bytes32(0), "domain separator");
+    }
+
     function test_RemoveLiquidityReturnsProRataReserves() public {
         uint256 lpToBurn = pool.balanceOf(address(this)) / 2;
 
