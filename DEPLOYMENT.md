@@ -224,9 +224,15 @@ forge script script/VerifyDeployment.s.sol --rpc-url $RPC_URL
 
 ### Transfer Ownership to Multisig
 ```bash
-# For each contract
+# Current owner initiates the transfer for each ownership-bearing contract
 cast send <CONTRACT> "transferOwnership(address)" <MULTISIG> --private-key $PRIVATE_KEY
+
+# Confirm the intended multisig is pending
+cast call <CONTRACT> "pendingOwner()(address)"
 ```
+
+The multisig must then execute `acceptOwnership()` on each contract. Verify that `owner()` is the multisig and
+`pendingOwner()` is the zero address before considering the handoff complete.
 
 ### Create Morpho Markets (if needed)
 Markets must exist on Morpho Blue for:

@@ -181,6 +181,8 @@ This is useful if the first bootstrap attempt completes only partially.
 - Test users still need Arbitrum Sepolia ETH from a faucet to submit transactions.
 - The deploy and bootstrap scripts currently assume the broadcaster owns the deployed contracts.
 - The router admin is deployed internally by `OrderRouter`; bootstrap uses `router.admin()` to reach it.
+- All ownership-bearing perps contracts use `Ownable2Step`: the current owner initiates a handoff and the pending
+  owner must call `acceptOwnership()` before authority changes.
 
 ## Recommended Flow
 

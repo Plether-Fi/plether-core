@@ -68,7 +68,7 @@ The owner can act immediately to:
 - pause and unpause `HousePool`,
 - assign the dedicated `pauser` role on `OrderRouterAdmin` and `HousePool`,
 - set the protocol treasury account,
-- transfer ownership.
+- initiate an ownership transfer, which the pending owner must explicitly accept through the `Ownable2Step` flow.
 
 The owner cannot:
 

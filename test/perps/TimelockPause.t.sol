@@ -202,6 +202,36 @@ contract TimelockPauseTest is BasePerpTest {
         engineAdmin.proposeRiskConfig(config);
     }
 
+    function test_CfdEngineAdmin_OwnershipTransferRequiresPendingOwnerAcceptance() public {
+        engineAdmin.transferOwnership(alice);
+
+        assertEq(engineAdmin.owner(), address(this));
+        assertEq(engineAdmin.pendingOwner(), alice);
+
+        ICfdEngineAdminHost.EngineRiskConfig memory config = _engineRiskConfig();
+        engineAdmin.proposeRiskConfig(config);
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, alice));
+        engineAdmin.cancelRiskConfig();
+
+        vm.prank(nonOwner);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
+        engineAdmin.acceptOwnership();
+
+        vm.prank(alice);
+        engineAdmin.acceptOwnership();
+
+        assertEq(engineAdmin.owner(), alice);
+        assertEq(engineAdmin.pendingOwner(), address(0));
+
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, address(this)));
+        engineAdmin.cancelRiskConfig();
+
+        vm.prank(alice);
+        engineAdmin.cancelRiskConfig();
+    }
+
     function test_RePropose_OverwritesPendingAndResetsTimer() public {
         CfdTypes.RiskParams memory first = CfdTypes.RiskParams({
             vpiFactor: 0,
@@ -389,6 +419,36 @@ contract TimelockPauseTest is BasePerpTest {
         vm.prank(nonOwner);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
         routerAdmin.proposeRouterConfig(config);
+    }
+
+    function test_OrderRouterAdmin_OwnershipTransferRequiresPendingOwnerAcceptance() public {
+        routerAdmin.transferOwnership(alice);
+
+        assertEq(routerAdmin.owner(), address(this));
+        assertEq(routerAdmin.pendingOwner(), alice);
+
+        routerAdmin.setPauser(pauser);
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, alice));
+        routerAdmin.setPauser(nonOwner);
+
+        vm.prank(nonOwner);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
+        routerAdmin.acceptOwnership();
+
+        vm.prank(alice);
+        routerAdmin.acceptOwnership();
+
+        assertEq(routerAdmin.owner(), alice);
+        assertEq(routerAdmin.pendingOwner(), address(0));
+
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, address(this)));
+        routerAdmin.setPauser(nonOwner);
+
+        vm.prank(alice);
+        routerAdmin.setPauser(nonOwner);
+        assertEq(routerAdmin.pauser(), nonOwner);
     }
 
     function test_OrderRouter_InvalidPendingOrderLimit_Reverts() public {
