@@ -3,10 +3,11 @@ pragma solidity 0.8.35;
 
 import {IOrderRouterAdminHost} from "./interfaces/IOrderRouterAdminHost.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 
-/// @notice Timelocked owner-controlled admin for OrderRouter queue, bounty, oracle, and pause configuration.
-contract OrderRouterAdmin is Ownable, Pausable {
+/// @notice Timelocked two-step owner-controlled admin for OrderRouter queue, bounty, oracle, and pause configuration.
+contract OrderRouterAdmin is Ownable2Step, Pausable {
 
     uint256 public constant TIMELOCK_DELAY = 48 hours;
     uint256 internal constant MAX_PENDING_ORDERS_LIMIT = 32;

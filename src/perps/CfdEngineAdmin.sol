@@ -5,9 +5,10 @@ import {CfdMath} from "./CfdMath.sol";
 import {CfdTypes} from "./CfdTypes.sol";
 import {ICfdEngineAdminHost} from "./interfaces/ICfdEngineAdminHost.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
-/// @notice Timelocked owner-controlled admin for CfdEngine risk, FAD calendar, and freshness configuration.
-contract CfdEngineAdmin is Ownable {
+/// @notice Timelocked two-step owner-controlled admin for CfdEngine risk, FAD calendar, and freshness configuration.
+contract CfdEngineAdmin is Ownable2Step {
 
     uint256 public constant TIMELOCK_DELAY = 48 hours;
 

@@ -291,6 +291,36 @@ The Sepolia deployment script:
 - Seeds Curve pool and Morpho markets with liquidity
 - Mints 100k MockUSDC to the deployer
 
+#### Arbitrum Sepolia
+
+Deploy the frontend-compatible test stack to Arbitrum Sepolia:
+
+```bash
+# Required environment variables in .env:
+# TEST_PRIVATE_KEY=0x...  (your deployer private key)
+# ARB_SEPOLIA_RPC_URL=https://...
+# PYTH_UPDATE_DATA=0x...  (ABI-encoded bytes[] update payload for the six FX feeds)
+# SPOT_USDC=0x...         (optional existing mintable mock USDC; falls back to PERPS_USDC, then the default shared USDC)
+
+# Dry-run helper: fetches Pyth Hermes updates and exports PYTH_UPDATE_DATA before simulating
+source .env && scripts/deploy-spot-arbitrum-sepolia-dry-run.sh
+
+# Broadcast after setting PYTH_UPDATE_DATA
+source .env && forge script script/DeploySpotArbitrumSepolia.s.sol \
+  --tc DeploySpotArbitrumSepolia \
+  --rpc-url $ARB_SEPOLIA_RPC_URL \
+  --broadcast
+```
+
+The Arbitrum Sepolia deployment script:
+- Uses an existing mintable mock USDC, such as the shared perps `PERPS_USDC`
+- Uses real Arbitrum Sepolia Pyth for all six FX feeds and pushes the supplied `PYTH_UPDATE_DATA`
+- Deploys BasketOracle, MockYieldAdapter, SyntheticSplitter, plDXY-BEAR, plDXY-BULL, staking wrappers, Morpho oracles, staked oracles, routers, RewardDistributor, INVAR, and sINVAR
+- Deploys a local Morpho Blue instance with ZeroRateIrm and creates/seeds the BEAR and BULL markets
+- Deploys `MockTwocryptoPool`, a reserve-backed Curve Twocrypto-NG stand-in for Arbitrum Sepolia because the Sepolia Curve factory is not available there
+- Keeps the mock Curve pool ABI-compatible with the Ethereum Sepolia Curve Twocrypto pool, including receiver overloads such as `exchange(uint256,uint256,uint256,uint256,address)`
+- Seeds the mock Curve pool and Morpho markets with liquidity, then mints 100k mock USDC to the deployer
+
 #### Anvil (Local)
 
 For frontend development and testing without spending real ETH:
