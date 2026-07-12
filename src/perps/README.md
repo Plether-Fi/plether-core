@@ -468,6 +468,17 @@ Instant controls remain for one-time wiring and fee withdrawal. `OrderRouter` pa
 OrderRouter also exposes timelocked admin control over `maxPendingOrders`, `minEngineGas`, and `maxPruneOrdersPerCall`.
 `maxOrderAge` must stay nonzero and cannot exceed one hour, so close-only windows cannot be indefinitely pinned by an old FIFO head.
 
+## Off-Chain Applications and Workers
+
+The product applications and supporting services live in the [`plether-app`](https://github.com/Plether-Fi/plether-app) repository:
+
+- [Frontend application](https://github.com/Plether-Fi/plether-app/tree/master/apps/frontend): provides the trader and LP web interface for reading protocol state and submitting transactions.
+- [Backend API](https://github.com/Plether-Fi/plether-app/tree/master/apps/backend): provides a read-only API for cached market data, account history, Pyth payloads, and other product-facing queries; it does not submit protocol transactions.
+- [Order and liquidation keeper](https://github.com/Plether-Fi/plether-app/blob/master/apps/backend/app/Keeper.hs): monitors pending orders and unhealthy positions, then submits eligible executions and liquidations.
+- [Pyth basket cache worker](https://github.com/Plether-Fi/plether-app/blob/master/apps/backend/app/BasketWorker.hs): fetches current and historical Pyth FX data and stores basket snapshots and update payloads for the API and keeper flows.
+- [On-chain oracle updater](https://github.com/Plether-Fi/plether-app/blob/master/apps/frontend/scripts/perps-oracle-worker.mjs): reads fresh cached Pyth payloads from the backend and submits `updateMarkPrice` transactions.
+- [Perps history indexer](https://github.com/Plether-Fi/plether-app/blob/master/apps/backend/app/PerpsIndexer.hs): indexes confirmed perps contract events into the backend database for historical queries.
+
 ## Further Reading
 
 - [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md): full accounting and reserve model
