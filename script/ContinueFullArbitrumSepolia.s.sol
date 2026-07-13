@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.35;
 
-import {ArbitrumSepoliaTestnetCurvePool, ArbitrumSepoliaZeroRateIrm, IMintableERC20, IMorphoOwner} from "./DeployFullArbitrumSepolia.s.sol";
 import {BullLeverageRouter} from "../src/BullLeverageRouter.sol";
 import {LeverageRouter} from "../src/LeverageRouter.sol";
 import {SyntheticSplitter} from "../src/SyntheticSplitter.sol";
@@ -10,6 +9,12 @@ import {IMorpho, MarketParams} from "../src/interfaces/IMorpho.sol";
 import {BasketOracle} from "../src/oracles/BasketOracle.sol";
 import {MorphoOracle} from "../src/oracles/MorphoOracle.sol";
 import {StakedOracle} from "../src/oracles/StakedOracle.sol";
+import {
+    ArbitrumSepoliaTestnetCurvePool,
+    ArbitrumSepoliaZeroRateIrm,
+    IMintableERC20,
+    IMorphoOwner
+} from "./DeployFullArbitrumSepolia.s.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "forge-std/Script.sol";
 
@@ -107,15 +112,7 @@ contract ContinueFullArbitrumSepolia is Script {
         deployed.leverageRouter =
             new LeverageRouter(deployed.morpho, CURVE_POOL, USDC, PLDXY_BEAR, STAKED_BEAR, bearMarket);
         deployed.bullLeverageRouter = new BullLeverageRouter(
-            deployed.morpho,
-            SPLITTER,
-            CURVE_POOL,
-            USDC,
-            PLDXY_BEAR,
-            PLDXY_BULL,
-            STAKED_BULL,
-            bullMarket,
-            address(0)
+            deployed.morpho, SPLITTER, CURVE_POOL, USDC, PLDXY_BEAR, PLDXY_BULL, STAKED_BULL, bullMarket, address(0)
         );
 
         vm.stopBroadcast();
