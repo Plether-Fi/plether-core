@@ -1,0 +1,127 @@
+{
+  "network": "arbitrum-sepolia",
+  "chainId": 421614,
+  "deployedAt": "2026-07-07",
+  "commit": "46d2588",
+  "scripts": [
+    "script/DeploySpotArbitrumSepolia.s.sol:DeploySpotArbitrumSepolia"
+  ],
+  "deployer": "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B",
+  "treasury": "0xF23232d90Fc5BDAbd4EF94873309447F2e6E45B2",
+  "contracts": {
+    "core": {
+      "SyntheticSplitter": "0x1E34a6D7289C30B81d3520B72A8303c1F0153644",
+      "plDXY-BEAR": "0x2cAE323E3278619f45349676f60C42afD2AEE20D",
+      "plDXY-BULL": "0x82101515f79a796c33b26FE488d2C6356eBCb1e6"
+    },
+    "staking": {
+      "StakedBear": "0x86E6373762c45496DFcEF6De7d47039BF2050A39",
+      "StakedBull": "0x4ca40b328225a64E7bB76af10866e189291D0645"
+    },
+    "oracles": {
+      "BasketOracle": "0xf3af344872A42a9f60b05af5287AeA1a4DD39609",
+      "PythAdapterEUR": "0xF8e3026DA3aadF62BC074ba40488DC461FC9E399",
+      "PythAdapterJPY": "0x1aC018d123bA4BA2c726DbD2A1dFfa532fE54D55",
+      "PythAdapterGBP": "0x5917fadC6D888B447F6aF796BEfB5ddA7Ee37188",
+      "PythAdapterCAD": "0xc8DAeB8b139dfd75e9E7421C8B04E5b82544CBC2",
+      "PythAdapterSEK": "0x87bf20831c2E5C9B0aA29DE53bB42caA35c5bE52",
+      "PythAdapterCHF": "0x646f51c732C1F1446bce82DB1483E9a63A22680c"
+    },
+    "external": {
+      "Pyth": "0x4374e5a8b9C22271E9EB878A2AA31DE97DF15DAF",
+      "PerpsMockUSDC": "0xf1e1B188b87525C51ECe4bae8627ae621D769651"
+    },
+    "mocks": {
+      "MockYieldAdapter": "0x56c4e96780C8c06ccD5Ac2abdaD55D6941558d47"
+    },
+    "fullPackage": {
+      "CurvePool": "0xf9118C7A4E7362C96aED8F08b192d13b84767642",
+      "Morpho": "0xCf40B8ec4156c0253BA269FD0a126719BC5003E9",
+      "ZeroRateIrm": "0x46c08125Fe8918aa178b2d82abcebC4e2F168856",
+      "MorphoOracleBear": "0xf019e0F3726E9a0A48eb032dC0a7ebe7D4D43D76",
+      "MorphoOracleBull": "0x1AB7c958a388E7F4bccA3dAA558d62464eF69317",
+      "StakedOracleBear": "0x50812317bfFD6d46807de2f9a27d0439D82d68ae",
+      "StakedOracleBull": "0x403fFBb97cCC0f785fa7EfA0B6AE4BC92e078fE5",
+      "MorphoMarketBear": "0x115ca64eac1ef93e875cdd87905298ec6b04e1cb6a908424f146c5c2a9fca723",
+      "MorphoMarketBull": "0x4dd5bb19bf3113c9ed911c1d5453d9c9f52bedd241b163f1899a2dc757cbce3e",
+      "ZapRouter": "0xF2A1675ad8b30E112532a3230a05f930898113a5",
+      "LeverageRouter": "0x378A9454AD66F2aEf8d85960C7a276C0B8258A5C",
+      "BullLeverageRouter": "0x7514D79b5060AC265F6B6099a4701bDECd63D6EC",
+      "RewardDistributor": "0xF23232d90Fc5BDAbd4EF94873309447F2e6E45B2",
+      "InvarCoin": "0x95093382B02432edd589bC7Cfc181c5470368674",
+      "StakedInvarCoin": "0x54e5438E52B837609467AE7e0041440766EA01bb",
+      "PythAdapterSEK": "0x3C2F54187b541e3a74D0684F61d895A870736B66"
+    }
+  },
+  "transactions": {
+    "PythAdapterEUR": "0x7930047a9fb7924917e19efc81046a0d5ecff11345cd4f8da20861c1227a5654",
+    "PythAdapterJPY": "0xe957a5aa0143a78eec1c7e1102ea0d87b692c2b88b6a6b8e605d8edd1227f5fa",
+    "PythAdapterGBP": "0xaada33d1a8120ceb3c815483124651cb19b151d5d69e5f905812e07fb6effc33",
+    "PythAdapterCAD": "0x577a8e37a0000580fc653d08411f345374b2965f2e25a62cdf6c8aa57083fdd4",
+    "PythAdapterSEK": "0x58b5c817c7074305456fdf59d10a07d518b3aaedcac37029cd9a3303cf6ee794",
+    "PythAdapterCHF": "0xd5cd36c6355633c2215afeb9c11953a891cdeaef7b53ce2a2270909bc4acd1d6",
+    "PythUpdate": "0x894fa64349d4cb88f60fd0fd54e06328ed9c3bda803227507e427fcc82eff9fd",
+    "BasketOracle": "0x0db4e3d50f47725911646fa6b8c71ce70cb3257aece9bbd249e946eb30c5f601",
+    "MockYieldAdapter": "0xf9d27434fb64f2a2ff9985dd58f1ffc7ab9cfbc44fc839a401b3f536c0125b26",
+    "SyntheticSplitter": "0x980c96bf279d274e798035e135873b7654f98213776427c85b7e5b4b94a1ee38",
+    "CurvePool": "0x7a5216392857df265dd84a602da601888552a030b1ca55a12ed04324ef3b2525",
+    "BasketOracleSetCurvePool": "0x416339235f380941e185fc833b9a16aa2eb5adac432634814c72490e17d1fe3d",
+    "SeedUsdcForPool": "0x8d3597d22041b84b423d18f1e3d2543ad487e435d7af076753e4c5d342439848",
+    "MintPairsForPool": "0x6ee9fb469c800ec2fba229eb4e2083a68f3645c20f6b64f3125ae955afacbdcf",
+    "SeedCurvePool": "0x5e42646a3a938b01fcf5d2d86733af3b8306a5bb152ebadc8bf9f6440719a915",
+    "MorphoOracleBear": "0xd1a55997c5b18cc402cf9e45dbb87417c1454f9f9fe86797ed8b054f5c83ab17",
+    "MorphoOracleBull": "0x5663bc72dd0588fc7a1d6861e6d9339a07f4916d8f3d45b2b8e329e503bd9c5d",
+    "StakedBear": "0x5db574e95d970d6611e600f3b767cd82126c8f31dd5479f649475e7c5468243a",
+    "StakedBull": "0x36e8c0a5c7198bf5e205d56a1f4b4f69844c7b878e57423655a73cb2b39b8f6d",
+    "StakedOracleBear": "0xc07f8fb4d51daa46b055b975113ebc906b3f00871c8492157688f914f45f6970",
+    "StakedOracleBull": "0xd171c6e628867d83f46d97149d0d4124c32b40d8314126f9254afdd8ef25adbb",
+    "InvarCoin": "0x2d58a29498527ff69c36eefc922413e256155645d91bef7e00a15812175bb535",
+    "StakedInvarCoin": "0x346a51e35ea4c853152b3241b3a66c18d9f50c5882ad8df4e49d04bb1172b7c1",
+    "InvarCoinProposeStakedInvarCoin": "0x8f43a1c7629543beae3dbf40fcb22da8a7a04366a9e8640dfe813fc60391a026",
+    "Morpho": "0xecdadf362a4f0a0ad749b01276035d1e0b8a276f3269845ad1a28b537fd81669",
+    "ZeroRateIrm": "0x20b17082c4056a56f1e78191d7afdb31574cfe5a0399cbdac3dbb846fe910c73",
+    "MorphoEnableIrm": "0xc2c8e6c2d76a4d7271f6ead9b34134162befe73940a6b378a29dd53d2b2e5bb2",
+    "MorphoEnableLltv": "0x816ab9f51dfb5d05a12fdcc9dbe5f6aea816448330d2b6e2b170466b66594f0c",
+    "MorphoCreateBearMarket": "0x09e06cd740eeecd1d2749007de1ae52552b9a87fe88dec61a96182d8e4f41f31",
+    "MorphoCreateBullMarket": "0xc6542d7b2e2308018b28d6a4690ad713558dd8236aa3a9348aaeb7254518f33f",
+    "SeedMorphoMarketsUsdc": "0xb78b89b7565343d5eae4d81abf516c9c169a048d55ec9d90f665cb66769cd5e2",
+    "MorphoSupplyBear": "0xd4af01185d494eaabcc195f3b0cbaf48db4595c24af1de83e199108f6c998a1a",
+    "MorphoSupplyBull": "0xab48814b360a37083b9456df10a99fe87255d7bb4b7f592902f1ae3fee65df56",
+    "ZapRouter": "0x2b6434194605eabf3ac72fbbf3e0137211499393ed6c4bf4b80244b0ece9dd7d",
+    "LeverageRouter": "0xc769f2c15d1efe8a0c7ca26e1ddf47ba10d9f813cbc6671acd2e3671d3712938",
+    "BullLeverageRouter": "0x4669166802b5b28b325f3cccc08b9dd3a888082e8b088aa1bb37f7f49c4735b6",
+    "RewardPythAdapterSEK": "0x5cad951dc0128102824d0eacab9667db9d85b0b4d32e029cf832c44c16c82358",
+    "RewardDistributor": "0x763a3385976e754d7bb209d9b22823c42ea5f317ae5c8ff447b87221c7aabd60",
+    "MintUsdcToDeployer": "0x8fd0cb55303d7268543556657a89d566a112dee1872fb620e791917738ef9906"
+  },
+  "arbiscan": {
+    "SyntheticSplitter": "https://sepolia.arbiscan.io/address/0x1E34a6D7289C30B81d3520B72A8303c1F0153644",
+    "plDXY-BEAR": "https://sepolia.arbiscan.io/address/0x2cAE323E3278619f45349676f60C42afD2AEE20D",
+    "plDXY-BULL": "https://sepolia.arbiscan.io/address/0x82101515f79a796c33b26FE488d2C6356eBCb1e6",
+    "PerpsMockUSDC": "https://sepolia.arbiscan.io/address/0xf1e1B188b87525C51ECe4bae8627ae621D769651",
+    "BasketOracle": "https://sepolia.arbiscan.io/address/0xf3af344872A42a9f60b05af5287AeA1a4DD39609",
+    "StakedBear": "https://sepolia.arbiscan.io/address/0x86E6373762c45496DFcEF6De7d47039BF2050A39",
+    "StakedBull": "https://sepolia.arbiscan.io/address/0x4ca40b328225a64E7bB76af10866e189291D0645",
+    "CurvePool": "https://sepolia.arbiscan.io/address/0xf9118C7A4E7362C96aED8F08b192d13b84767642",
+    "Morpho": "https://sepolia.arbiscan.io/address/0xCf40B8ec4156c0253BA269FD0a126719BC5003E9",
+    "ZeroRateIrm": "https://sepolia.arbiscan.io/address/0x46c08125Fe8918aa178b2d82abcebC4e2F168856",
+    "MorphoOracleBear": "https://sepolia.arbiscan.io/address/0xf019e0F3726E9a0A48eb032dC0a7ebe7D4D43D76",
+    "MorphoOracleBull": "https://sepolia.arbiscan.io/address/0x1AB7c958a388E7F4bccA3dAA558d62464eF69317",
+    "StakedOracleBear": "https://sepolia.arbiscan.io/address/0x50812317bfFD6d46807de2f9a27d0439D82d68ae",
+    "StakedOracleBull": "https://sepolia.arbiscan.io/address/0x403fFBb97cCC0f785fa7EfA0B6AE4BC92e078fE5",
+    "ZapRouter": "https://sepolia.arbiscan.io/address/0xF2A1675ad8b30E112532a3230a05f930898113a5",
+    "LeverageRouter": "https://sepolia.arbiscan.io/address/0x378A9454AD66F2aEf8d85960C7a276C0B8258A5C",
+    "BullLeverageRouter": "https://sepolia.arbiscan.io/address/0x7514D79b5060AC265F6B6099a4701bDECd63D6EC",
+    "RewardDistributor": "https://sepolia.arbiscan.io/address/0xF23232d90Fc5BDAbd4EF94873309447F2e6E45B2",
+    "InvarCoin": "https://sepolia.arbiscan.io/address/0x95093382B02432edd589bC7Cfc181c5470368674",
+    "StakedInvarCoin": "https://sepolia.arbiscan.io/address/0x54e5438E52B837609467AE7e0041440766EA01bb"
+  },
+  "notes": [
+    "Spot deployment uses the existing perps DEX MockUSDC instead of deploying a separate mock USDC.",
+    "Full package uses a reserve-backed Arbitrum Sepolia testnet Curve-compatible pool because the canonical Curve factory is not deployed on Arbitrum Sepolia.",
+    "MockTwocryptoPool is ABI-compatible with the Ethereum Sepolia Curve Twocrypto-NG pool selectors used by the frontend.",
+    "Curve pool seeded with 778,763 USDC and 800,000 plDXY-BEAR; each Morpho market seeded with 100,000 USDC.",
+    "RewardDistributor is configured as treasury; staking fallback sends 100% of rewards to treasury.",
+    "sINVAR activation was proposed and remains pending until the timelock completes."
+  ]
+}
