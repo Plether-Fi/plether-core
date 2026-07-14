@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.35;
 
-import {StakedToken} from "../../src/StakedToken.sol";
-import {AggregatorV3Interface} from "../../src/interfaces/AggregatorV3Interface.sol";
-import {IMorpho, MarketParams} from "../../src/interfaces/IMorpho.sol";
-import {MorphoOracle} from "../../src/oracles/MorphoOracle.sol";
-import {StakedOracle} from "../../src/oracles/StakedOracle.sol";
 import {BaseForkTest} from "./BaseForkTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {AggregatorV3Interface} from "@plether/shared/interfaces/AggregatorV3Interface.sol";
+import {IMorpho, MarketParams} from "@plether/shared/interfaces/IMorpho.sol";
+import {MorphoOracle} from "@plether/spot/oracles/MorphoOracle.sol";
+import {StakedOracle} from "@plether/spot/oracles/StakedOracle.sol";
+import {StakedToken} from "@plether/spot/staking/StakedToken.sol";
 
 /// @title MorphoBorrowInvariantFork
 /// @notice Verifies that borrowing against BEAR+BULL collateral never yields more USDC than the mint cost.

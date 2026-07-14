@@ -1,24 +1,24 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
-import {IPyth, PythStructs} from "../../src/interfaces/IPyth.sol";
-import {CfdEngine} from "../../src/perps/CfdEngine.sol";
-import {CfdEngineAdmin} from "../../src/perps/CfdEngineAdmin.sol";
-import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
-import {CfdEnginePlanner} from "../../src/perps/CfdEnginePlanner.sol";
-import {CfdEngineSettlementSidecar} from "../../src/perps/CfdEngineSettlementSidecar.sol";
-import {CfdTypes} from "../../src/perps/CfdTypes.sol";
-import {HousePool} from "../../src/perps/HousePool.sol";
-import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
-import {OrderRouter} from "../../src/perps/OrderRouter.sol";
-import {OrderRouterAdmin} from "../../src/perps/OrderRouterAdmin.sol";
-import {PletherOracle} from "../../src/perps/PletherOracle.sol";
-import {TrancheVault} from "../../src/perps/TrancheVault.sol";
-import {ICfdEngineTypes} from "../../src/perps/interfaces/ICfdEngineTypes.sol";
-import {IOrderRouterAdminHost} from "../../src/perps/interfaces/IOrderRouterAdminHost.sol";
-import {IPletherOracle} from "../../src/perps/interfaces/IPletherOracle.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {CfdEngine} from "@plether/perps/CfdEngine.sol";
+import {CfdEngineAdmin} from "@plether/perps/CfdEngineAdmin.sol";
+import {CfdEngineLens} from "@plether/perps/CfdEngineLens.sol";
+import {CfdEnginePlanner} from "@plether/perps/CfdEnginePlanner.sol";
+import {CfdEngineSettlementSidecar} from "@plether/perps/CfdEngineSettlementSidecar.sol";
+import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {HousePool} from "@plether/perps/HousePool.sol";
+import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
+import {OrderRouter} from "@plether/perps/OrderRouter.sol";
+import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
+import {PletherOracle} from "@plether/perps/PletherOracle.sol";
+import {TrancheVault} from "@plether/perps/TrancheVault.sol";
+import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
+import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
+import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
+import {IPyth, PythStructs} from "@plether/shared/interfaces/IPyth.sol";
 import {Test} from "forge-std/Test.sol";
 
 contract ControllablePyth {

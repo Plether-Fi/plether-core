@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.35;
 
-import {BullLeverageRouter} from "../src/BullLeverageRouter.sol";
-import {LeverageRouter} from "../src/LeverageRouter.sol";
-import {ZapRouter} from "../src/ZapRouter.sol";
-import {IMorpho, MarketParams} from "../src/interfaces/IMorpho.sol";
-import {MorphoOracle} from "../src/oracles/MorphoOracle.sol";
-import {StakedOracle} from "../src/oracles/StakedOracle.sol";
+import {IMorpho, MarketParams} from "@plether/shared/interfaces/IMorpho.sol";
+import {MorphoOracle} from "@plether/spot/oracles/MorphoOracle.sol";
+import {StakedOracle} from "@plether/spot/oracles/StakedOracle.sol";
+import {BullLeverageRouter} from "@plether/spot/routers/BullLeverageRouter.sol";
+import {LeverageRouter} from "@plether/spot/routers/LeverageRouter.sol";
+import {ZapRouter} from "@plether/spot/routers/ZapRouter.sol";
 import "forge-std/Script.sol";
 
 /**

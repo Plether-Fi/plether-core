@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.35;
 
-import {IMorpho, MarketParams} from "../src/interfaces/IMorpho.sol";
-import {IPyth} from "../src/interfaces/IPyth.sol";
-import {PythAdapter} from "../src/oracles/PythAdapter.sol";
 import {DeployToTest} from "./DeployToTest.s.sol";
+import {IMorpho, MarketParams} from "@plether/shared/interfaces/IMorpho.sol";
+import {IPyth} from "@plether/shared/interfaces/IPyth.sol";
+import {PythAdapter} from "@plether/spot/oracles/PythAdapter.sol";
 import "forge-std/console.sol";
 
 /**

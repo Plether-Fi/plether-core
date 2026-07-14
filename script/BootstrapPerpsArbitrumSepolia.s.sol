@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.35;
 
-import {HousePool} from "../src/perps/HousePool.sol";
-import {OrderRouter} from "../src/perps/OrderRouter.sol";
-import {OrderRouterAdmin} from "../src/perps/OrderRouterAdmin.sol";
+import {HousePool} from "@plether/perps/HousePool.sol";
+import {OrderRouter} from "@plether/perps/OrderRouter.sol";
+import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
 import "forge-std/Script.sol";
 
 interface IMintableERC20 {

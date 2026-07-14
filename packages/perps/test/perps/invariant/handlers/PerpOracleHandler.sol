@@ -1,0 +1,163 @@
+// SPDX-License-Identifier: AGPL-3.0
+pragma solidity 0.8.35;
+
+import {CfdEngine} from "@plether/perps/CfdEngine.sol";
+import {CfdEngineAdmin} from "@plether/perps/CfdEngineAdmin.sol";
+import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
+import {OrderRouter} from "@plether/perps/OrderRouter.sol";
+import {ICfdEngineAdminHost} from "@plether/perps/interfaces/ICfdEngineAdminHost.sol";
+import {MockPyth} from "@plether/test-utils/MockPyth.sol";
+import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
+import {Test} from "forge-std/Test.sol";
+
+contract PerpOracleHandler is Test {
+
+    MockUSDC public immutable usdc;
+    MockPyth public immutable mockPyth;
+    CfdEngine public immutable engine;
+    CfdEngineAdmin public immutable engineAdmin;
+    MarginClearinghouse public immutable clearinghouse;
+    OrderRouter public immutable router;
+    address public immutable owner;
+
+    address[2] internal actors;
+
+    constructor(
+        MockUSDC _usdc,
+        MockPyth _mockPyth,
+        CfdEngine _engine,
+        MarginClearinghouse _clearinghouse,
+        OrderRouter _router
+    ) {
+        usdc = _usdc;
+        mockPyth = _mockPyth;
+        engine = _engine;
+        engineAdmin = CfdEngineAdmin(_engine.admin());
+        clearinghouse = _clearinghouse;
+        router = _router;
+        owner = msg.sender;
+
+        actors[0] = address(0x7101);
+        actors[1] = address(0x7102);
+    }
+
+    function seedPositions() external {
+        for (uint256 i = 0; i < actors.length; i++) {
+            _ensureOpenPosition(actors[i]);
+        }
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+    }
+
+    function actorAt(
+        uint256 index
+    ) external view returns (address) {
+        return actors[index];
+    }
+
+    function actorCount() external pure returns (uint256) {
+        return 2;
+    }
+
+    function warpToOracleBoundary(
+        uint256 modeFuzz
+    ) external {
+        uint256 mode = modeFuzz % 7;
+        uint256 target;
+        if (mode == 0) {
+            target = 1_709_607_599; // Fri 20:59:59 UTC
+        } else if (mode == 1) {
+            target = 1_709_611_199; // Fri 21:59:59 UTC
+        } else if (mode == 2) {
+            target = 1_709_611_200; // Fri 22:00:00 UTC
+        } else if (mode == 3) {
+            target = 1_709_697_599; // Sat 21:59:59 UTC
+        } else if (mode == 4) {
+            target = 1_709_694_000; // Sun 21:00:00 UTC
+        } else if (mode == 5) {
+            target = 1_709_697_599; // Sun 21:59:59 UTC
+        } else {
+            target = 1_709_701_200; // Sun 23:00:00 UTC
+        }
+        vm.warp(target);
+    }
+
+    function warpForward(
+        uint256 secondsFuzz
+    ) external {
+        vm.warp(block.timestamp + bound(secondsFuzz, 1, 10 days));
+    }
+
+    function syncMarkNow(
+        uint256 priceFuzz
+    ) external {
+        uint256 price = bound(priceFuzz, 0.5e8, 1.5e8);
+        vm.prank(address(router));
+        engine.updateMarkPrice(price, uint64(block.timestamp));
+    }
+
+    function configureFadDayTomorrow(
+        uint256 runwayFuzz
+    ) external {
+        uint256[] memory timestamps = new uint256[](1);
+        timestamps[0] = ((block.timestamp / 86_400) + 1) * 86_400;
+
+        vm.startPrank(owner);
+        ICfdEngineAdminHost.EngineCalendarConfig memory config;
+        config.fadDayTimestamps = timestamps;
+        config.fadRunwaySeconds = bound(runwayFuzz, 0, 24 hours);
+        engineAdmin.proposeCalendarConfig(config);
+        vm.warp(block.timestamp + 7 days);
+        engineAdmin.finalizeCalendarConfig();
+        vm.stopPrank();
+    }
+
+    function configureFadMaxStaleness(
+        uint256 secondsFuzz
+    ) external {
+        uint256 seconds_ = bound(secondsFuzz, 1 hours, 7 days);
+        vm.startPrank(owner);
+        ICfdEngineAdminHost.EngineFreshnessConfig memory config;
+        config.fadMaxStaleness = seconds_;
+        config.engineMarkStalenessLimit = engine.engineMarkStalenessLimit();
+        engineAdmin.proposeFreshnessConfig(config);
+        vm.warp(block.timestamp + 7 days);
+        engineAdmin.finalizeFreshnessConfig();
+        vm.stopPrank();
+    }
+
+    function ensureActorPosition(
+        uint256 actorIndex
+    ) external {
+        _ensureOpenPosition(actors[actorIndex % actors.length]);
+    }
+
+    function _ensureOpenPosition(
+        address actor
+    ) internal {
+        address account = actor;
+        (uint256 size,,,,,,) = engine.positions(account);
+        if (size > 0) {
+            return;
+        }
+
+        usdc.mint(actor, 25_000e6);
+        uint64 orderId = router.nextCommitId();
+        vm.startPrank(actor);
+        usdc.approve(address(clearinghouse), type(uint256).max);
+        clearinghouse.deposit(account, 25_000e6);
+        router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 10_000e6, 0, false);
+        vm.stopPrank();
+
+        vm.roll(block.number + 1);
+        vm.warp(block.timestamp + 1);
+        mockPyth.setUniquePrice(
+            bytes32(uint256(1)), int64(100_000_000), 0, int32(-8), block.timestamp, block.timestamp - 1
+        );
+        bytes[] memory updateData = new bytes[](1);
+        updateData[0] = abi.encode(uint256(1e8));
+        router.executeOrder{value: mockPyth.mockFee()}(orderId, updateData);
+    }
+
+}

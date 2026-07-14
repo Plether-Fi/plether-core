@@ -3,7 +3,7 @@
 # Usage: ./scripts/mutation-test.sh <ContractName> [start_id] [end_id]
 # Example: ./scripts/mutation-test.sh SyntheticSplitter
 # Example: ./scripts/mutation-test.sh ZapRouter 1 50
-# Example: ./scripts/mutation-test.sh BasketOracle 1 50  (finds src/oracles/BasketOracle.sol)
+# Example: ./scripts/mutation-test.sh BasketOracle 1 50  (finds packages/spot/src/oracles/BasketOracle.sol)
 
 set -e
 
@@ -18,7 +18,7 @@ if [ -z "$CONTRACT_NAME" ]; then
     echo "Examples:"
     echo "  $0 SyntheticSplitter        # Test all mutants"
     echo "  $0 ZapRouter 1 50           # Test mutants 1-50"
-    echo "  $0 BasketOracle             # Finds src/oracles/BasketOracle.sol"
+    echo "  $0 BasketOracle             # Finds packages/spot/src/oracles/BasketOracle.sol"
     echo ""
     echo "Prerequisites:"
     echo "  1. Update gambit.json with target contract"
@@ -29,10 +29,10 @@ fi
 GAMBIT_OUT="gambit_out"
 RESULTS_FILE="$GAMBIT_OUT/mutation_results.csv"
 
-# Find source file (supports subdirectories like src/oracles/)
-ORIGINAL_FILE=$(find src -name "${CONTRACT_NAME}.sol" -type f | head -1)
+# Find a contract in any monorepo package.
+ORIGINAL_FILE=$(find packages -path "*/src/*" -name "${CONTRACT_NAME}.sol" -type f | head -1)
 if [ -z "$ORIGINAL_FILE" ]; then
-    echo "Error: Source file not found: ${CONTRACT_NAME}.sol in src/"
+    echo "Error: Source file not found: ${CONTRACT_NAME}.sol in packages/*/src/"
     exit 1
 fi
 

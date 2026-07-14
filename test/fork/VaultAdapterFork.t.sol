@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.35;
 
-import {SyntheticSplitter} from "../../src/SyntheticSplitter.sol";
-import {VaultAdapter} from "../../src/VaultAdapter.sol";
-import {AggregatorV3Interface} from "../../src/interfaces/AggregatorV3Interface.sol";
-import {IMorpho, MarketParams} from "../../src/interfaces/IMorpho.sol";
-import {BasketOracle} from "../../src/oracles/BasketOracle.sol";
 import {BaseForkTest, MockCurvePoolForOracle} from "./BaseForkTest.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {AggregatorV3Interface} from "@plether/shared/interfaces/AggregatorV3Interface.sol";
+import {IMorpho, MarketParams} from "@plether/shared/interfaces/IMorpho.sol";
+import {VaultAdapter} from "@plether/spot/adapters/VaultAdapter.sol";
+import {SyntheticSplitter} from "@plether/spot/core/SyntheticSplitter.sol";
+import {BasketOracle} from "@plether/spot/oracles/BasketOracle.sol";
 
 interface IMorphoVaultV1 {
 

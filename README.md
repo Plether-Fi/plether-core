@@ -24,24 +24,24 @@ These tokens are always minted and burned in pairs, maintaining a zero-sum relat
 
 | Contract | Description |
 |----------|-------------|
-| [`SyntheticSplitter`](src/SyntheticSplitter.sol) | Central protocol contract. Accepts USDC, mints/burns token pairs. Permissionless `deployToAdapter()` pushes idle USDC to yield. EIP-2612 permit support on mint. |
-| [`SyntheticToken`](src/SyntheticToken.sol) | ERC20 + ERC20FlashMint implementation for plDXY-BEAR and plDXY-BULL |
+| [`SyntheticSplitter`](packages/spot/src/core/SyntheticSplitter.sol) | Central protocol contract. Accepts USDC, mints/burns token pairs. Permissionless `deployToAdapter()` pushes idle USDC to yield. EIP-2612 permit support on mint. |
+| [`SyntheticToken`](packages/spot/src/core/SyntheticToken.sol) | ERC20 + ERC20FlashMint implementation for plDXY-BEAR and plDXY-BULL |
 
 ### Staking Layer
 
 | Contract | Description |
 |----------|-------------|
-| [`StakedToken`](src/StakedToken.sol) | ERC-4626 vault wrapper (splDXY-BEAR, splDXY-BULL) with streaming rewards to prevent reward sniping |
-| [`RewardDistributor`](src/RewardDistributor.sol) | Distributes USDC yield to StakedToken vaults, favoring the underperforming token |
+| [`StakedToken`](packages/spot/src/staking/StakedToken.sol) | ERC-4626 vault wrapper (splDXY-BEAR, splDXY-BULL) with streaming rewards to prevent reward sniping |
+| [`RewardDistributor`](packages/spot/src/staking/RewardDistributor.sol) | Distributes USDC yield to StakedToken vaults, favoring the underperforming token |
 
 ### Oracle Layer
 
 | Contract | Description |
 |----------|-------------|
-| [`BasketOracle`](src/oracles/BasketOracle.sol) | Computes plDXY as weighted basket of 6 price feeds, with bound validation against Curve EMA price |
-| [`PythAdapter`](src/oracles/PythAdapter.sol) | Adapts Pyth Network feeds to Chainlink's AggregatorV3Interface (used for SEK/USD) |
-| [`MorphoOracle`](src/oracles/MorphoOracle.sol) | Adapts BasketOracle to Morpho Blue's oracle scale (24 decimals for USDC/plDXY) |
-| [`StakedOracle`](src/oracles/StakedOracle.sol) | Wraps underlying oracle to price ERC-4626 staked token shares |
+| [`BasketOracle`](packages/spot/src/oracles/BasketOracle.sol) | Computes plDXY as weighted basket of 6 price feeds, with bound validation against Curve EMA price |
+| [`PythAdapter`](packages/spot/src/oracles/PythAdapter.sol) | Adapts Pyth Network feeds to Chainlink's AggregatorV3Interface (used for SEK/USD) |
+| [`MorphoOracle`](packages/spot/src/oracles/MorphoOracle.sol) | Adapts BasketOracle to Morpho Blue's oracle scale (24 decimals for USDC/plDXY) |
+| [`StakedOracle`](packages/spot/src/oracles/StakedOracle.sol) | Wraps underlying oracle to price ERC-4626 staked token shares |
 
 #### BasketOracle Design
 
@@ -74,21 +74,21 @@ Both weights and base prices are permanently fixed and cannot be changed after d
 
 | Contract | Description |
 |----------|-------------|
-| [`ZapRouter`](src/ZapRouter.sol) | Single-sided plDXY-BULL minting and burning using flash mints. Permit support. |
-| [`LeverageRouter`](src/LeverageRouter.sol) | Leveraged plDXY-BEAR positions via Morpho Blue flash loans. Open/close/add/remove collateral. Permit support. |
-| [`BullLeverageRouter`](src/BullLeverageRouter.sol) | Leveraged plDXY-BULL positions via Morpho + plDXY-BEAR flash mints. Open/close/add/remove collateral. Permit support. |
+| [`ZapRouter`](packages/spot/src/routers/ZapRouter.sol) | Single-sided plDXY-BULL minting and burning using flash mints. Permit support. |
+| [`LeverageRouter`](packages/spot/src/routers/LeverageRouter.sol) | Leveraged plDXY-BEAR positions via Morpho Blue flash loans. Open/close/add/remove collateral. Permit support. |
+| [`BullLeverageRouter`](packages/spot/src/routers/BullLeverageRouter.sol) | Leveraged plDXY-BULL positions via Morpho + plDXY-BEAR flash mints. Open/close/add/remove collateral. Permit support. |
 
 ### Yield Adapters (ERC-4626)
 
 | Contract | Description |
 |----------|-------------|
-| [`VaultAdapter`](src/VaultAdapter.sol) | ERC-4626 wrapper for Morpho Vault vault yield. Owner can `claimRewards()` from external distributors (Merkl, URD). |
+| [`VaultAdapter`](packages/spot/src/adapters/VaultAdapter.sol) | ERC-4626 wrapper for Morpho Vault vault yield. Owner can `claimRewards()` from external distributors (Merkl, URD). |
 
 ### InvarCoin (INVAR)
 
 | Contract | Description |
 |----------|-------------|
-| [`InvarCoin`](src/InvarCoin.sol) | Global purchasing power vault backed 50/50 by USDC + plDXY-BEAR via Curve LP |
+| [`InvarCoin`](packages/spot/src/core/InvarCoin.sol) | Global purchasing power vault backed 50/50 by USDC + plDXY-BEAR via Curve LP |
 
 InvarCoin is a passive savings token that maintains exposure to a basket of global currencies. Users deposit USDC, which the vault pairs with plDXY-BEAR through Curve to create a balanced position that hedges against USD weakness.
 
@@ -209,6 +209,25 @@ The protocol operates in three states:
 
 ## Development
 
+### Repository Layout
+
+Production contracts are organized as peer Foundry packages:
+
+| Package | Contents | Direct workspace dependencies |
+|---------|----------|-------------------------------|
+| [`shared`](packages/shared/README.md) | Cross-product interfaces, constants, oracle helpers, and flash-loan base code | None |
+| [`spot`](packages/spot/README.md) | Synthetic tokens, staking, routers, adapters, INVAR, and spot oracles | `shared` |
+| [`options`](packages/options/README.md) | Covered-call vaults, margin engine, option tokens, and settlement oracle | `shared`, spot API |
+| [`perps`](packages/perps/README.md) | Delayed-order perpetuals engine, clearinghouse, router, pool, and lenses | `shared` |
+
+Each product owns its Foundry tests under `packages/<package>/test`. The root Foundry project is a narrow integration
+harness for cross-package compatibility, deployment-script tests, and RPC-backed fork tests. Reusable generic test doubles
+live in `packages/shared/test-support` behind the test-only `@plether/test-utils/` remapping. Workspace imports use stable
+`@plether/<package>/...` remappings instead of relative paths between packages.
+
+Source paths and fully qualified contract names now begin with `packages/<package>/src/`. Existing deployments are
+unchanged, but verification tooling and downstream source imports must use the new paths or the `@plether/*` remappings.
+
 ### Prerequisites
 
 - [Foundry](https://book.getfoundry.sh/getting-started/installation)
@@ -216,16 +235,23 @@ The protocol operates in three states:
 ### Build
 
 ```bash
-forge build
+forge build                         # Build the root integration/script workspace
+make build-packages                 # Build every package independently
+forge build --root packages/spot    # Build one package
 ```
 
 ### Test
 
 ```bash
-forge test              # Run all tests
-forge test -vvv         # Verbose output
-forge coverage          # Generate coverage report
+make test                                      # Run package tests, then root integration tests
+make test-spot                                 # Run one package's tests
+forge test --root packages/options             # Run one package directly
+forge test --no-match-path "test/fork/*"        # Run root integration and script tests
+make coverage-perps                            # Generate coverage for one package
 ```
+
+CI runs each package in a `fail-fast: false` matrix, so a failure in one package does not cancel the others. The root
+integration/script suite, package-scoped coverage, and package-scoped Slither analysis run as separate jobs.
 
 ### Fork Tests
 

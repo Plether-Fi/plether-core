@@ -2,7 +2,7 @@
 
 This document outlines the security assumptions, trust model, known limitations, and emergency procedures for the Plether protocol.
 
-The perps module has its own security model and audit packet. Use [`src/perps/SECURITY.md`](src/perps/SECURITY.md) and [`src/perps/PRE_AUDIT_GUIDE.md`](src/perps/PRE_AUDIT_GUIDE.md) for perps-specific assumptions, order-flow policy, trader claim handling, keeper bounty routing, and LP risk.
+The perps module has its own security model and audit packet. Use [`packages/perps/SECURITY.md`](packages/perps/SECURITY.md) and [`packages/perps/PRE_AUDIT_GUIDE.md`](packages/perps/PRE_AUDIT_GUIDE.md) for perps-specific assumptions, order-flow policy, trader claim handling, keeper bounty routing, and LP risk.
 
 ## Upgradeability
 
@@ -672,9 +672,9 @@ contact@plether.com
 **Report:** [`audits/plether-collaborative-audit-report-2026-05-12.pdf`](audits/plether-collaborative-audit-report-2026-05-12.pdf)
 
 **Scope:**
-- `src/InvarCoin.sol`
-- `src/libraries/OracleLib.sol`
-- `src/StakedToken.sol`
+- `packages/spot/src/core/InvarCoin.sol`
+- `packages/shared/src/libraries/OracleLib.sol`
+- `packages/spot/src/staking/StakedToken.sol`
 
 **Findings:**
 
@@ -701,10 +701,10 @@ contact@plether.com
 **Report:** [`audits/report-cli-cantina-plether-0126.pdf`](audits/report-cli-cantina-plether-0126.pdf)
 
 **Scope:**
-- `src/SyntheticSplitter.sol`
-- `src/SyntheticToken.sol`
-- `src/MorphoAdapter.sol` (since replaced by VaultAdapter)
-- `src/oracles/BasketOracle.sol`
+- `packages/spot/src/core/SyntheticSplitter.sol`
+- `packages/spot/src/core/SyntheticToken.sol`
+- `MorphoAdapter.sol` (removed; replaced by `packages/spot/src/adapters/VaultAdapter.sol`)
+- `packages/spot/src/oracles/BasketOracle.sol`
 
 **Findings:**
 

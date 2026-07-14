@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.35;
 
-import {IMorpho, MarketParams} from "../src/interfaces/IMorpho.sol";
+import {IMorpho, MarketParams} from "@plether/shared/interfaces/IMorpho.sol";
 import "forge-std/Script.sol";
 
 /**

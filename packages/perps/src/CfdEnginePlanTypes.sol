@@ -1,0 +1,249 @@
+// SPDX-License-Identifier: AGPL-3.0
+pragma solidity 0.8.35;
+
+import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
+import {CfdEngineSettlementLib} from "@plether/perps/libraries/CfdEngineSettlementLib.sol";
+import {CloseAccountingLib} from "@plether/perps/libraries/CloseAccountingLib.sol";
+import {LiquidationAccountingLib} from "@plether/perps/libraries/LiquidationAccountingLib.sol";
+import {MarginClearinghouseAccountingLib} from "@plether/perps/libraries/MarginClearinghouseAccountingLib.sol";
+import {OpenAccountingLib} from "@plether/perps/libraries/OpenAccountingLib.sol";
+import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
+
+/// @title CfdEnginePlanTypes
+/// @notice Snapshot and delta structs for the plan→apply architecture.
+///         Plan functions are pure over a RawSnapshot and return typed deltas.
+///         Apply functions consume deltas to perform state mutations and external calls.
+library CfdEnginePlanTypes {
+
+    enum OpenFailurePolicyCategory {
+        None,
+        CommitTimeRejectable,
+        ExecutionTimeUserInvalid,
+        ExecutionTimeProtocolStateInvalidated
+    }
+
+    enum ExecutionFailurePolicyCategory {
+        None,
+        UserInvalid,
+        ProtocolStateInvalidated
+    }
+
+    // ──────────────────────────────────────────────
+    //  SNAPSHOT (input to all plan functions)
+    // ──────────────────────────────────────────────
+
+    struct SideSnapshot {
+        uint256 maxProfitUsdc;
+        uint256 openInterest;
+        uint256 entryNotional;
+        uint256 totalMargin;
+        uint256 borrowBaseUsdc;
+        uint256 carryIndex;
+    }
+
+    struct RawSnapshot {
+        CfdTypes.Position position;
+        address account;
+
+        uint256 currentTimestamp;
+        uint256 lastMarkPrice;
+        uint64 lastMarkTime;
+        uint256 positionBorrowBaseUsdc;
+        uint256 positionLastCarryIndex;
+
+        SideSnapshot bullSide;
+        SideSnapshot bearSide;
+
+        uint256 poolAssetsUsdc;
+        uint256 poolCashUsdc;
+
+        IMarginClearinghouse.AccountUsdcBuckets accountBuckets;
+        IMarginClearinghouse.LockedMarginBuckets lockedBuckets;
+
+        uint64[] marginReservationIds;
+
+        uint256 accumulatedBadDebtUsdc;
+        uint256 unsettledCarryUsdc;
+        uint256 totalTraderClaimBalanceUsdc;
+        uint256 traderClaimBalanceForAccount;
+        bool degradedMode;
+
+        uint256 capPrice;
+        CfdTypes.RiskParams riskParams;
+        uint256 executionFeeBps;
+        bool isFadWindow;
+        bool oracleFrozen;
+        uint256 frozenCloseVpiFactor;
+    }
+
+    struct SolvencyPreview {
+        uint256 effectiveAssetsAfterUsdc;
+        uint256 maxLiabilityAfterUsdc;
+        bool triggersDegradedMode;
+        bool postOpDegradedMode;
+    }
+
+    // ──────────────────────────────────────────────
+    //  OPEN DELTA
+    // ──────────────────────────────────────────────
+
+    enum OpenRevertCode {
+        OK,
+        MUST_CLOSE_OPPOSING,
+        DEGRADED_MODE,
+        POSITION_TOO_SMALL,
+        SKEW_TOO_HIGH,
+        MARGIN_DRAINED_BY_FEES,
+        INSUFFICIENT_INITIAL_MARGIN,
+        SOLVENCY_EXCEEDED
+    }
+
+    struct OpenDelta {
+        bool valid;
+        OpenRevertCode revertCode;
+
+        OpenAccountingLib.OpenState openState;
+
+        CfdTypes.Side posSide;
+        uint256 newPosSize;
+        uint256 newPosEntryPrice;
+        int256 posVpiAccruedDelta;
+        uint256 posMaxProfitIncrease;
+        uint256 positionMarginAfterOpen;
+
+        uint256 sideOiIncrease;
+        int256 sideEntryNotionalDelta;
+        int256 sideEntryCarryContribution;
+        uint256 sideMaxProfitIncrease;
+
+        int256 tradeCostUsdc;
+        uint256 marginDeltaUsdc;
+        int256 netMarginChange;
+        uint256 poolRebatePayoutUsdc;
+
+        uint256 executionFeeUsdc;
+        uint256 pendingCarryUsdc;
+
+        uint256 sideTotalMarginBefore;
+        uint256 sideTotalMarginAfterOpen;
+
+        address account;
+        uint256 sizeDelta;
+        uint256 price;
+    }
+
+    // ──────────────────────────────────────────────
+    //  CLOSE DELTA
+    // ──────────────────────────────────────────────
+
+    enum CloseRevertCode {
+        OK,
+        CLOSE_SIZE_EXCEEDS,
+        DUST_POSITION,
+        PARTIAL_CLOSE_UNDERWATER
+    }
+
+    enum SettlementType {
+        ZERO,
+        GAIN,
+        LOSS
+    }
+
+    struct CloseDelta {
+        bool valid;
+        CloseRevertCode revertCode;
+
+        CloseAccountingLib.CloseState closeState;
+        uint256 postBullOi;
+        uint256 postBearOi;
+
+        uint256 posMarginAfter;
+        uint256 posSizeDelta;
+        uint256 posMaxProfitReduction;
+        int256 posVpiAccruedReduction;
+        bool deletePosition;
+
+        CfdTypes.Side side;
+        uint256 sideOiDecrease;
+        uint256 sideEntryNotionalReduction;
+        uint256 sideMaxProfitReduction;
+
+        uint256 unlockMarginUsdc;
+
+        SettlementType settlementType;
+        uint256 lossUsdc;
+
+        uint256 freshTraderPayoutUsdc;
+        bool freshPayoutIsImmediate;
+        bool freshPayoutCreatesClaim;
+        uint256 existingTraderClaimConsumedUsdc;
+        uint256 existingTraderClaimRemainingUsdc;
+        uint256 traderClaimFeeRecoveryUsdc;
+
+        CfdEngineSettlementLib.CloseSettlementResult lossResult;
+        MarginClearinghouseAccountingLib.SettlementConsumption lossConsumption;
+        uint256 syncMarginQueueAmount;
+
+        uint256 executionFeeUsdc;
+        uint256 protocolFeeTopUpUsdc;
+        uint256 badDebtUsdc;
+        uint256 pendingCarryUsdc;
+
+        uint256 totalMarginBefore;
+        uint256 totalMarginAfterClose;
+
+        SolvencyPreview solvency;
+
+        address account;
+        uint256 sizeDelta;
+        uint256 price;
+        int256 realizedPnlUsdc;
+    }
+
+    // ──────────────────────────────────────────────
+    //  LIQUIDATION DELTA
+    // ──────────────────────────────────────────────
+
+    struct LiquidationDelta {
+        bool liquidatable;
+
+        PositionRiskAccountingLib.PositionRiskState riskState;
+        LiquidationAccountingLib.LiquidationState liquidationState;
+
+        CfdTypes.Side side;
+        uint256 posSize;
+        uint256 posMargin;
+        uint256 posMaxProfit;
+        uint256 posEntryPrice;
+
+        uint256 sideOiDecrease;
+        uint256 sideMaxProfitDecrease;
+        uint256 sideEntryNotionalReduction;
+        uint256 sideTotalMarginReduction;
+
+        uint256 keeperBountyUsdc;
+        uint256 liquidationReachableCollateralUsdc;
+
+        int256 residualUsdc;
+        MarginClearinghouseAccountingLib.LiquidationResidualPlan residualPlan;
+
+        uint256 settlementRetainedUsdc;
+        uint256 freshTraderPayoutUsdc;
+        bool freshPayoutIsImmediate;
+        bool freshPayoutCreatesClaim;
+        uint256 existingTraderClaimConsumedUsdc;
+        uint256 existingTraderClaimRemainingUsdc;
+
+        uint256 syncMarginQueueAmount;
+
+        uint256 badDebtUsdc;
+        uint256 pendingCarryUsdc;
+
+        SolvencyPreview solvency;
+
+        address account;
+        uint256 price;
+    }
+
+}

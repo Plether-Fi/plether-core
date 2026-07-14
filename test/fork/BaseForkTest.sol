@@ -1,23 +1,23 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.35;
 
-import {BullLeverageRouter} from "../../src/BullLeverageRouter.sol";
-import {InvarCoin} from "../../src/InvarCoin.sol";
-import {LeverageRouter} from "../../src/LeverageRouter.sol";
-import {StakedToken} from "../../src/StakedToken.sol";
-import {SyntheticSplitter} from "../../src/SyntheticSplitter.sol";
-import {VaultAdapter} from "../../src/VaultAdapter.sol";
-import {ZapRouter} from "../../src/ZapRouter.sol";
-import {LeverageRouterBase} from "../../src/base/LeverageRouterBase.sol";
-import {AggregatorV3Interface} from "../../src/interfaces/AggregatorV3Interface.sol";
-import {ICurveTwocrypto} from "../../src/interfaces/ICurveTwocrypto.sol";
-import {IMorpho, MarketParams} from "../../src/interfaces/IMorpho.sol";
-import {BasketOracle} from "../../src/oracles/BasketOracle.sol";
-import {MorphoOracle} from "../../src/oracles/MorphoOracle.sol";
-import {StakedOracle} from "../../src/oracles/StakedOracle.sol";
 import {IERC3156FlashBorrower, IERC3156FlashLender} from "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {AggregatorV3Interface} from "@plether/shared/interfaces/AggregatorV3Interface.sol";
+import {IMorpho, MarketParams} from "@plether/shared/interfaces/IMorpho.sol";
+import {VaultAdapter} from "@plether/spot/adapters/VaultAdapter.sol";
+import {LeverageRouterBase} from "@plether/spot/base/LeverageRouterBase.sol";
+import {InvarCoin} from "@plether/spot/core/InvarCoin.sol";
+import {SyntheticSplitter} from "@plether/spot/core/SyntheticSplitter.sol";
+import {ICurveTwocrypto} from "@plether/spot/interfaces/ICurveTwocrypto.sol";
+import {BasketOracle} from "@plether/spot/oracles/BasketOracle.sol";
+import {MorphoOracle} from "@plether/spot/oracles/MorphoOracle.sol";
+import {StakedOracle} from "@plether/spot/oracles/StakedOracle.sol";
+import {BullLeverageRouter} from "@plether/spot/routers/BullLeverageRouter.sol";
+import {LeverageRouter} from "@plether/spot/routers/LeverageRouter.sol";
+import {ZapRouter} from "@plether/spot/routers/ZapRouter.sol";
+import {StakedToken} from "@plether/spot/staking/StakedToken.sol";
 import "forge-std/Test.sol";
 
 // --------------------------------------------------------

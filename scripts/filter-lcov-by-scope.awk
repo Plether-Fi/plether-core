@@ -1,10 +1,10 @@
 function include_path(path) {
-    is_src = path ~ /(^|\/)src\//
-    is_perps = path ~ /(^|\/)src\/perps\//
-    is_options = path ~ /(^|\/)src\/options\//
+    is_spot = path ~ /(^|\/)packages\/spot\/src\//
+    is_perps = path ~ /(^|\/)packages\/perps\/src\//
+    is_options = path ~ /(^|\/)packages\/options\/src\//
 
-    if (scope == "core") {
-        return is_src && !is_perps && !is_options
+    if (scope == "spot" || scope == "core") {
+        return is_spot
     }
     if (scope == "perps") {
         return is_perps

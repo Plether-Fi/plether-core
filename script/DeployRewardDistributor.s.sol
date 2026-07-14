@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.35;
 
-import {RewardDistributor} from "../src/RewardDistributor.sol";
+import {RewardDistributor} from "@plether/spot/staking/RewardDistributor.sol";
 import "forge-std/Script.sol";
 
 /**

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.35;
 
-import {ICurveGauge, ICurveTwocrypto, InvarCoin} from "../../src/InvarCoin.sol";
-import {StakedToken} from "../../src/StakedToken.sol";
-import {AggregatorV3Interface} from "../../src/interfaces/AggregatorV3Interface.sol";
 import {BaseForkTest, ICurveCryptoFactory, ICurvePoolExtended} from "./BaseForkTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {AggregatorV3Interface} from "@plether/shared/interfaces/AggregatorV3Interface.sol";
+import {ICurveGauge, ICurveTwocrypto, InvarCoin} from "@plether/spot/core/InvarCoin.sol";
+import {StakedToken} from "@plether/spot/staking/StakedToken.sol";
 
 contract InvarCoinGaugeForkTest is BaseForkTest {
 

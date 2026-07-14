@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.35;
 
-import {IPyth} from "../src/interfaces/IPyth.sol";
+import {IPyth} from "@plether/shared/interfaces/IPyth.sol";
 import "forge-std/Script.sol";
 
 /**

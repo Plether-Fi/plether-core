@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.35;
 
-import {InvarCoin} from "../src/InvarCoin.sol";
-import {StakedToken} from "../src/StakedToken.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import {InvarCoin} from "@plether/spot/core/InvarCoin.sol";
+import {StakedToken} from "@plether/spot/staking/StakedToken.sol";
 import "forge-std/Script.sol";
 
 interface IMainnetCurvePoolPreflight is IERC20 {

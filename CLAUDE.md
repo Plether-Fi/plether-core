@@ -5,18 +5,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build & Test Commands
 
 ```bash
-forge build              # Compile contracts
-forge test               # Run all tests
-forge test -vvv          # Run tests with verbose output
-forge test --match-test "test_FunctionName"  # Run single test
-forge test --match-path "test/ZapRouter.t.sol"  # Run tests in specific file
-forge fmt                # Format code
-forge fmt --check        # Check formatting (CI enforced)
-forge coverage           # Generate coverage report
-forge snapshot --no-match-path "test/fork/*" --no-match-test "testFuzz_|invariant_"  # Update gas snapshot
+make build-packages      # Compile every package independently
+make test                # Run all package and root integration tests
+make test-spot           # Run one package's tests
+forge test --root packages/spot --match-test "test_FunctionName"  # Run one spot test
+forge test --root packages/spot --match-path "test/ZapRouter.t.sol"  # Run one spot test file
+forge fmt packages test script        # Format all Solidity workspace paths
+forge fmt --check packages test script  # Check formatting (CI enforced)
+make coverage-spot                    # Generate package coverage
+forge snapshot --root packages/spot --no-match-test "testFuzz_|invariant_"  # Update a package gas snapshot
 
 # Fork tests (require MAINNET_RPC_URL in .env)
-(source .env && forge test --match-path test/fork/MainnetForkTest.t.sol --fork-url $MAINNET_RPC_URL -vvv)
+(source .env && forge test --match-path 'test/fork/*.t.sol' --fork-url $MAINNET_RPC_URL -vvv)
 ```
 
 ## Deployment Commands
@@ -151,4 +151,4 @@ Always keep documentation up to date and consistent when making code changes:
 - **Natspec**: Update function/contract comments when behavior changes
 - **README.md**: Update if architecture, usage, or setup instructions change
 - **SECURITY.md**: Update if security model, trust assumptions, or risk factors change
-- **Function references**: Verify any function names in docs exist in the actual contracts (use `grep -r "function funcName" src/`)
+- **Function references**: Verify any function names in docs exist in the actual contracts (use `rg "function funcName" packages/*/src/`)

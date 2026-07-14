@@ -1,6 +1,8 @@
 # Compiler files
 cache/
 out/
+packages/*/cache/
+packages/*/out/
 
 # Ignores development broadcast logs
 !/broadcast
@@ -19,4 +21,5 @@ docs/
 artifacts/
 coverage/
 broadcast/
+packages/*/broadcast/
 node_modules/

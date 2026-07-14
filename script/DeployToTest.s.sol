@@ -1,26 +1,26 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.35;
 
-import {BullLeverageRouter} from "../src/BullLeverageRouter.sol";
-import {InvarCoin} from "../src/InvarCoin.sol";
-import {LeverageRouter} from "../src/LeverageRouter.sol";
-import {RewardDistributor} from "../src/RewardDistributor.sol";
-import {StakedToken} from "../src/StakedToken.sol";
-import {SyntheticSplitter} from "../src/SyntheticSplitter.sol";
-import {SyntheticToken} from "../src/SyntheticToken.sol";
-import {ZapRouter} from "../src/ZapRouter.sol";
-import {AggregatorV3Interface} from "../src/interfaces/AggregatorV3Interface.sol";
-import {ICurvePool} from "../src/interfaces/ICurvePool.sol";
-import {IMorpho, MarketParams} from "../src/interfaces/IMorpho.sol";
-import {IPyth, PythStructs} from "../src/interfaces/IPyth.sol";
-import {BasketOracle} from "../src/oracles/BasketOracle.sol";
-import {MorphoOracle} from "../src/oracles/MorphoOracle.sol";
-import {PythAdapter} from "../src/oracles/PythAdapter.sol";
-import {StakedOracle} from "../src/oracles/StakedOracle.sol";
 import {MockYieldAdapter} from "../test/utils/MockYieldAdapter.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
+import {AggregatorV3Interface} from "@plether/shared/interfaces/AggregatorV3Interface.sol";
+import {ICurvePool} from "@plether/shared/interfaces/ICurvePool.sol";
+import {IMorpho, MarketParams} from "@plether/shared/interfaces/IMorpho.sol";
+import {IPyth, PythStructs} from "@plether/shared/interfaces/IPyth.sol";
+import {InvarCoin} from "@plether/spot/core/InvarCoin.sol";
+import {SyntheticSplitter} from "@plether/spot/core/SyntheticSplitter.sol";
+import {SyntheticToken} from "@plether/spot/core/SyntheticToken.sol";
+import {BasketOracle} from "@plether/spot/oracles/BasketOracle.sol";
+import {MorphoOracle} from "@plether/spot/oracles/MorphoOracle.sol";
+import {PythAdapter} from "@plether/spot/oracles/PythAdapter.sol";
+import {StakedOracle} from "@plether/spot/oracles/StakedOracle.sol";
+import {BullLeverageRouter} from "@plether/spot/routers/BullLeverageRouter.sol";
+import {LeverageRouter} from "@plether/spot/routers/LeverageRouter.sol";
+import {ZapRouter} from "@plether/spot/routers/ZapRouter.sol";
+import {RewardDistributor} from "@plether/spot/staking/RewardDistributor.sol";
+import {StakedToken} from "@plether/spot/staking/StakedToken.sol";
 import "forge-std/Script.sol";
 
 interface IMintableERC20 is IERC20 {

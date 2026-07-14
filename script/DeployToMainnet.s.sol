@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.35;
 
-import {BullLeverageRouter} from "../src/BullLeverageRouter.sol";
-import {LeverageRouter} from "../src/LeverageRouter.sol";
-import {StakedToken} from "../src/StakedToken.sol";
-import {SyntheticSplitter} from "../src/SyntheticSplitter.sol";
-import {SyntheticToken} from "../src/SyntheticToken.sol";
-import {VaultAdapter} from "../src/VaultAdapter.sol";
-import {ZapRouter} from "../src/ZapRouter.sol";
-import {MarketParams} from "../src/interfaces/IMorpho.sol";
-import {IPyth} from "../src/interfaces/IPyth.sol";
-import {BasketOracle} from "../src/oracles/BasketOracle.sol";
-import {MorphoOracle} from "../src/oracles/MorphoOracle.sol";
-import {PythAdapter} from "../src/oracles/PythAdapter.sol";
-import {StakedOracle} from "../src/oracles/StakedOracle.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {MarketParams} from "@plether/shared/interfaces/IMorpho.sol";
+import {IPyth} from "@plether/shared/interfaces/IPyth.sol";
+import {VaultAdapter} from "@plether/spot/adapters/VaultAdapter.sol";
+import {SyntheticSplitter} from "@plether/spot/core/SyntheticSplitter.sol";
+import {SyntheticToken} from "@plether/spot/core/SyntheticToken.sol";
+import {BasketOracle} from "@plether/spot/oracles/BasketOracle.sol";
+import {MorphoOracle} from "@plether/spot/oracles/MorphoOracle.sol";
+import {PythAdapter} from "@plether/spot/oracles/PythAdapter.sol";
+import {StakedOracle} from "@plether/spot/oracles/StakedOracle.sol";
+import {BullLeverageRouter} from "@plether/spot/routers/BullLeverageRouter.sol";
+import {LeverageRouter} from "@plether/spot/routers/LeverageRouter.sol";
+import {ZapRouter} from "@plether/spot/routers/ZapRouter.sol";
+import {StakedToken} from "@plether/spot/staking/StakedToken.sol";
 import "forge-std/Script.sol";
 
 // Curve Twocrypto-NG Factory interface
