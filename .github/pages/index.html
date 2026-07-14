@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Plether Protocol Documentation</title>
+  <style>
+    :root { color-scheme: light dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+    body { margin: 0; background: #111318; color: #e9edf5; }
+    main { width: min(960px, calc(100% - 40px)); margin: 0 auto; padding: 72px 0; }
+    h1 { margin: 0 0 12px; font-size: clamp(2.25rem, 6vw, 4.5rem); letter-spacing: -0.05em; }
+    .lede { max-width: 720px; margin: 0 0 40px; color: #aeb7c7; font-size: 1.15rem; line-height: 1.7; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 16px; }
+    .card { display: block; padding: 24px; border: 1px solid #303745; border-radius: 14px; background: #181c23;
+      color: inherit; text-decoration: none; transition: border-color 120ms ease, transform 120ms ease; }
+    .card:hover { border-color: #7c9cff; transform: translateY(-2px); }
+    .card strong { display: block; margin-bottom: 8px; font-size: 1.2rem; }
+    .card span { color: #aeb7c7; line-height: 1.5; }
+    h2 { margin-top: 48px; }
+    .links { display: flex; flex-wrap: wrap; gap: 12px 20px; padding: 0; list-style: none; }
+    .links a { color: #9db4ff; }
+    footer { margin-top: 56px; color: #7f8999; font-size: 0.9rem; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Plether Protocol</h1>
+    <p class="lede">Package-scoped Solidity reference documentation for the Plether monorepo. Each product is generated
+      and searchable independently from the exact source revision shown below.</p>
+
+    <div class="grid">
+      <a class="card" href="shared/"><strong>Shared</strong><span>Cross-product interfaces, bases, and helpers.</span></a>
+      <a class="card" href="spot/"><strong>Spot</strong><span>Paired synthetics, staking, routing, oracles, and INVAR.</span></a>
+      <a class="card" href="options/"><strong>Options</strong><span>Covered calls, margin, settlement, and DOV vaults.</span></a>
+      <a class="card" href="perps/"><strong>Perps</strong><span>Delayed orders, clearing, LP tranches, and lenses.</span></a>
+    </div>
+
+    <h2>Guides and security models</h2>
+    <ul class="links">
+      <li><a href="__REPOSITORY_URL__/blob/__REVISION__/README.md">Monorepo guide</a></li>
+      <li><a href="__REPOSITORY_URL__/blob/__REVISION__/SECURITY.md">Spot security</a></li>
+      <li><a href="__REPOSITORY_URL__/blob/__REVISION__/packages/spot/OPERATIONS.md">Spot operations</a></li>
+      <li><a href="__REPOSITORY_URL__/blob/__REVISION__/packages/options/README.md#security-model">Options security</a></li>
+      <li><a href="__REPOSITORY_URL__/blob/__REVISION__/packages/perps/SECURITY.md">Perps security</a></li>
+      <li><a href="__REPOSITORY_URL__/blob/__REVISION__/packages/perps/ACCOUNTING_SPEC.md">Perps accounting</a></li>
+      <li><a href="__REPOSITORY_URL__/blob/__REVISION__/test/README.md">Test guide</a></li>
+    </ul>
+
+    <footer>Generated from <a href="__REPOSITORY_URL__/tree/__REVISION__"><code>__REVISION__</code></a>.</footer>
+  </main>
+</body>
+</html>
