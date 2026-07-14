@@ -29,13 +29,15 @@ test-integration:
 
 coverage-spot coverage-options: COVERAGE_FLAGS := --ir-minimum
 coverage-spot coverage-options: COVERAGE_TEST_FLAGS := --no-match-test 'testFuzz_|invariant_'
-coverage-perps: COVERAGE_FLAGS := --ir-minimum
 coverage-perps: COVERAGE_TEST_FLAGS := --no-match-test 'testFuzz_|invariant_|test_H01_UpdateMarkUsesPublishTime|test_GetTraderAccount_Withdrawable(Decreases|Drops)'
 
-$(addprefix coverage-, $(COVERAGE_PACKAGES)):
+coverage-spot coverage-options:
 	FOUNDRY_SRC=packages/$(@:coverage-%=%)/src \
 	FOUNDRY_TEST=packages/$(@:coverage-%=%)/test \
 	FOUNDRY_SCRIPT=integration/src forge coverage $(COVERAGE_FLAGS) $(COVERAGE_TEST_FLAGS)
+
+coverage-perps:
+	bash scripts/run-perps-coverage.sh $(COVERAGE_FLAGS) $(COVERAGE_TEST_FLAGS)
 
 fmt-check:
 	forge fmt --check packages test script

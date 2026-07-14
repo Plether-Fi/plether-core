@@ -3,6 +3,7 @@ cache/
 out/
 packages/*/cache/
 packages/*/out/
+.coverage-perps.*
 
 # Ignores development broadcast logs
 !/broadcast
