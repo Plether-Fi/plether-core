@@ -14,7 +14,9 @@ forge test --root packages/spot --match-path "test/ZapRouter.t.sol"
 forge test --no-match-path "test/fork/*"        # Root compatibility and script tests
 
 # Fork tests (require MAINNET_RPC_URL in .env)
-(source .env && forge test --match-path "test/fork/*" --fork-url $MAINNET_RPC_URL -vvv)
+(source .env && forge test --match-path "test/fork/*" \
+  --no-match-path "test/fork/PythRealUpdateFork.t.sol" \
+  --fork-url "$MAINNET_RPC_URL" -vvv)
 
 # Package gas snapshot (excludes fuzz/invariant)
 forge snapshot --root packages/spot --no-match-test "testFuzz_|invariant_"
@@ -82,9 +84,19 @@ Stateful fuzz tests that verify protocol-wide invariants hold across arbitrary a
 
 Mainnet fork tests against real Curve, Morpho, and Chainlink deployments. Require `MAINNET_RPC_URL` in `.env`.
 
+`PythRealUpdateFork.t.sol` is opt-in because it also needs a current Hermes update fixture. Fetch and load the fixture
+before running that file:
+
+```bash
+source .env
+source <(scripts/fetch-pyth-real-update-fixture.sh)
+forge test --match-path "test/fork/PythRealUpdateFork.t.sol" --fork-url "$MAINNET_RPC_URL" -vvv
+```
+
 | File | Coverage |
 |------|----------|
 | `InvarCoinFork.t.sol` | Real Curve LP deposit/withdraw/harvest |
+| `InvarCoinGaugeFork.t.sol` | Curve gauge staking, rewards, and recovery paths |
 | `InvarCoinManipulationFork.t.sol` | Flash loan and sandwich resistance |
 | `CurveCalcAccuracyFork.t.sol` | Curve calc_token_amount vs actual |
 | `LeverageRouterFork.t.sol` | BEAR + BULL leverage on real Morpho |
@@ -94,13 +106,17 @@ Mainnet fork tests against real Curve, Morpho, and Chainlink deployments. Requir
 | `SlippageReport.t.sol` | Slippage measurement across sizes |
 | `RewardDistributorFork.t.sol` | Yield distribution with real swaps |
 | `BasketOracleFork.t.sol` | Real Chainlink feeds + deviation checks |
+| `PythRealUpdateFork.t.sol` | Opt-in validation against a freshly fetched Hermes update |
 | `VaultAdapterFork.t.sol` | Real Morpho Vault integration |
+| `VaultAdapterV1V2.t.sol` | Adapter compatibility across Morpho Vault versions |
 | `ZapRouterFork.t.sol` | Zap against real Curve pool |
 | `DeployToAdapterFork.t.sol` | Adapter deployment lifecycle |
 | `FullCycleFork.t.sol` | End-to-end mint/stake/leverage/redeem |
 | `YieldIntegrationFork.t.sol` | Yield accrual over time |
 | `PermitFork.t.sol` | EIP-2612 permit on real USDC |
 | `OptionsForkTest.t.sol` | DOV with real oracle settlement |
+| `DOVZapRouterFork.t.sol` | Single-sided DOV entry against forked integrations |
+| `PerpsFork.t.sol` | Perps deployment and external-oracle integration |
 
 ### Shared Utilities
 

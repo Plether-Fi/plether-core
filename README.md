@@ -1,419 +1,161 @@
-# Plether Protocol
+# Plether Protocol Contracts
 
 [![CI](https://github.com/Plether-Fi/plether-core/actions/workflows/ci.yml/badge.svg)](https://github.com/Plether-Fi/plether-core/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/Plether-Fi/plether-core/branch/master/graph/badge.svg)](https://codecov.io/gh/Plether-Fi/plether-core)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Solidity](https://img.shields.io/badge/Solidity-0.8.35-363636?logo=solidity)](https://docs.soliditylang.org/)
 
-Plether is a DeFi protocol for synthetic dollar-denominated tokens with inverse and direct exposure to the US Dollar Index (USDX). Users deposit USDC to mint paired tokens that track USD strength, enabling speculation and hedging on dollar movements.
+Plether is a Solidity monorepo for on-chain products that provide bounded, dollar-directional exposure. Spot, options, and
+perpetuals are peer Foundry packages under `packages/`; product-neutral contracts and test utilities live in `shared`.
 
-## How It Works
+The repository root is deliberately a narrow integration, deployment, and fork-test workspace. Production contracts and
+their unit, fuzz, invariant, and security tests are owned by their package.
 
-The protocol creates two synthetic tokens from USDC collateral:
+## Packages
 
-- **plDXY-BEAR** - Appreciates when USD weakens (USDX falls)
-- **plDXY-BULL** - Appreciates when USD strengthens (USDX rises)
+| Package | Scope | Direct workspace dependencies |
+| --- | --- | --- |
+| [`shared`](packages/shared/README.md) | Cross-product interfaces, oracle/decimal helpers, flash-loan foundations, and generic test support | None |
+| [`spot`](packages/spot/README.md) | Paired plDXY synthetics, staking, leverage routers, yield adapters, Spot oracles, and INVAR | `shared` |
+| [`options`](packages/options/README.md) | Fully collateralized covered calls, margin and settlement, option tokens, and DOV vaults | `shared`, Spot API |
+| [`perps`](packages/perps/README.md) | Delayed-order bounded perpetuals, margin clearing, a tranched LP pool, execution routing, and lenses | `shared` |
 
-These tokens are always minted and burned in pairs, maintaining a zero-sum relationship. When you deposit 100 USDC, you receive equal amounts of both tokens. The combined value of a BEAR + BULL pair always equals the original USDC deposit.
+All package imports use stable aliases:
 
-![How It Works](assets/diagrams/how-it-works.svg)
-
-## Architecture
-
-### Core Contracts
-
-| Contract | Description |
-|----------|-------------|
-| [`SyntheticSplitter`](packages/spot/src/core/SyntheticSplitter.sol) | Central protocol contract. Accepts USDC, mints/burns token pairs. Permissionless `deployToAdapter()` pushes idle USDC to yield. EIP-2612 permit support on mint. |
-| [`SyntheticToken`](packages/spot/src/core/SyntheticToken.sol) | ERC20 + ERC20FlashMint implementation for plDXY-BEAR and plDXY-BULL |
-
-### Staking Layer
-
-| Contract | Description |
-|----------|-------------|
-| [`StakedToken`](packages/spot/src/staking/StakedToken.sol) | ERC-4626 vault wrapper (splDXY-BEAR, splDXY-BULL) with streaming rewards to prevent reward sniping |
-| [`RewardDistributor`](packages/spot/src/staking/RewardDistributor.sol) | Distributes USDC yield to StakedToken vaults, favoring the underperforming token |
-
-### Oracle Layer
-
-| Contract | Description |
-|----------|-------------|
-| [`BasketOracle`](packages/spot/src/oracles/BasketOracle.sol) | Computes plDXY as weighted basket of 6 price feeds, with bound validation against Curve EMA price |
-| [`PythAdapter`](packages/spot/src/oracles/PythAdapter.sol) | Adapts Pyth Network feeds to Chainlink's AggregatorV3Interface (used for SEK/USD) |
-| [`MorphoOracle`](packages/spot/src/oracles/MorphoOracle.sol) | Adapts BasketOracle to Morpho Blue's oracle scale (24 decimals for USDC/plDXY) |
-| [`StakedOracle`](packages/spot/src/oracles/StakedOracle.sol) | Wraps underlying oracle to price ERC-4626 staked token shares |
-
-#### BasketOracle Design
-
-The BasketOracle computes a USDX-like index using **normalized arithmetic weighting** rather than the geometric weighting of the official ICE USDX index:
-
-```
-Price = Σ(Weight_i × Price_i / BasePrice_i)
+```text
+@plether/shared/  -> packages/shared/src/
+@plether/spot/    -> packages/spot/src/
+@plether/options/ -> packages/options/src/
+@plether/perps/   -> packages/perps/src/
 ```
 
-Each currency's contribution is normalized by its base price, ensuring the intended USDX weights are preserved regardless of absolute FX rate scales. Without normalization, low-priced currencies like JPY (\~$0.007) would be nearly ignored compared to EUR (\~$1.08), causing severe weight distortion.
-
-This design enables gas-efficient on-chain computation and eliminates rebalancing requirements, which guarantees protocol solvency.
-
-**Inverse Relationship:** Because the oracle measures the USD value of a foreign currency basket, it moves **inversely** to the real USDX index. When the dollar strengthens, USDX rises but our basket value falls (foreign currencies are worth less in USD terms). This is why plDXY-BEAR appreciates when the basket value rises (dollar weakens).
-
-**Fixed Base Prices and Weights** (immutable, set at deployment based on January 1, 2026 prices):
-
-| Currency | Weight | Base Price (USD) |
-|----------|--------|------------------|
-| EUR | 57.6% | 1.1750 |
-| JPY | 13.6% | 0.00638 |
-| GBP | 11.9% | 1.3448 |
-| CAD | 9.1% | 0.7288 |
-| SEK | 4.2% | 0.1086 |
-| CHF | 3.6% | 1.2610 |
-
-Both weights and base prices are permanently fixed and cannot be changed after deployment.
-
-### Routing Layer
-
-| Contract | Description |
-|----------|-------------|
-| [`ZapRouter`](packages/spot/src/routers/ZapRouter.sol) | Single-sided plDXY-BULL minting and burning using flash mints. Permit support. |
-| [`LeverageRouter`](packages/spot/src/routers/LeverageRouter.sol) | Leveraged plDXY-BEAR positions via Morpho Blue flash loans. Open/close/add/remove collateral. Permit support. |
-| [`BullLeverageRouter`](packages/spot/src/routers/BullLeverageRouter.sol) | Leveraged plDXY-BULL positions via Morpho + plDXY-BEAR flash mints. Open/close/add/remove collateral. Permit support. |
-
-### Yield Adapters (ERC-4626)
-
-| Contract | Description |
-|----------|-------------|
-| [`VaultAdapter`](packages/spot/src/adapters/VaultAdapter.sol) | ERC-4626 wrapper for Morpho Vault vault yield. Owner can `claimRewards()` from external distributors (Merkl, URD). |
-
-### InvarCoin (INVAR)
-
-| Contract | Description |
-|----------|-------------|
-| [`InvarCoin`](packages/spot/src/core/InvarCoin.sol) | Global purchasing power vault backed 50/50 by USDC + plDXY-BEAR via Curve LP |
-
-InvarCoin is a passive savings token that maintains exposure to a basket of global currencies. Users deposit USDC, which the vault pairs with plDXY-BEAR through Curve to create a balanced position that hedges against USD weakness.
-
-**Deposit flow:** USDC in → mint INVAR shares (priced against optimistic NAV to prevent dilution).
-
-![Deposit Flow](assets/diagrams/invar-deposit.svg)
-
-**Withdraw flow:** Burn INVAR → receive USDC from local buffer + JIT Curve LP unwinding. Callers set `minUsdcOut` for slippage protection across the full withdrawal.
-
-![Withdraw Flow](assets/diagrams/invar-withdraw.svg)
-
-**LP deposit:** Advanced path for depositing USDC + BEAR directly into Curve LP.
-
-![LP Deposit Flow](assets/diagrams/invar-lp-deposit.svg)
-
-**LP withdraw:** Balanced exit returning pro-rata USDC + BEAR. `lpWithdraw` intentionally works when paused, serving as the emergency exit.
-
-![LP Withdraw Flow](assets/diagrams/invar-lp-withdraw.svg)
-
-**Yield:** Curve LP trading fees accrue as virtual price growth. Keepers call `harvest()` to mint INVAR proportional to the fee yield and donate it to sINVAR (StakedToken) stakers via a 1-hour streaming window. Only fee yield is captured — price appreciation of the underlying assets is excluded via VP-based cost tracking.
-
-**Operational setup sequence:**
-- Deploy `InvarCoin` and `StakedToken`, then call `proposeStakedInvarCoin(sINVAR)`
-- Wait `STAKED_INVAR_TIMELOCK` (7 days), then call `finalizeStakedInvarCoin()` before relying on harvest/donation flows
-- Propose the reward sink with `proposeGaugeRewardsReceiver(receiver)`
-- Wait `GAUGE_REWARDS_TIMELOCK` (7 days), then call `finalizeGaugeRewardsReceiver()`
-- Mark CRV and any other gauge incentives with `protectRewardToken(token)` so they cannot be swept with `rescueToken()`
-- After claiming rewards, route protected balances only through `sweepGaugeRewards(token)`
-
-**Rebalancing operations:**
-- `sellLpToVault(lpAmount, minUsdcOut)` - permissionless solver sells Curve LP to the vault when the USDC buffer exceeds target
-- `buyLpFromVault(lpAmount, maxUsdcIn)` - permissionless solver buys Curve LP from the vault to restore the USDC buffer
-- `harvest()` - captures LP fee yield and streams to sINVAR stakers
-
-**Safety:**
-- Dual LP pricing: pessimistic (min of EMA, oracle) for withdrawals, optimistic (max) for deposits
-- Oracle/EMA fair-value checks price deposits, solver fills, and redeployments during pool manipulation
-- Virtual shares (1e18/1e6) prevent first-depositor inflation attacks
-- `totalAssets()` is a best-effort NAV view for UX/monitoring; use `totalAssetsValidated()` for strict oracle-validated accounting reads
-- `_harvestSafe()` gracefully skips when Curve VP reads fail; if yield is pending, strict oracle validation is still enforced
-- `setEmergencyMode()` pauses deposits and single-sided withdrawals without discarding LP accounting; `emergencyWithdrawFromCurve()` only zeroes LP tracking after assets are actually recovered
-- `stakedInvarCoin` and `gaugeRewardsReceiver` both use 7-day timelocked propose/finalize flows
-- Protected reward tokens cannot be rescued arbitrarily and must be swept to the configured reward receiver
-- L2 sequencer uptime validation is enforced on state-changing oracle-critical flows (deposit/lpDeposit/harvest/solver fills/redeploy)
-
-## Ecosystem Integrations
-
-### Token Flow
-
-![Token Flow](assets/diagrams/token-flow.svg)
-
-- **Chainlink** - Price feeds for EUR/USD, JPY/USD, GBP/USD, CAD/USD, CHF/USD
-- **Pyth Network** - Price feed for SEK/USD (via PythAdapter)
-- **Curve Finance** - AMM pools for USDC/plDXY-BEAR swaps
-- **Morpho Vault** - Yield generation on idle USDC reserves via VaultAdapter
-
-### Bear Leverage
-
-![Bear Leverage](assets/diagrams/bear-leverage.svg)
-
-Flash loan USDC from Morpho → swap to plDXY-BEAR on Curve → stake → deposit splDXY-BEAR as Morpho collateral.
-
-### Bull Leverage
-
-![Bull Leverage](assets/diagrams/bull-leverage.svg)
-
-Flash loan USDC from Morpho → mint BEAR+BULL pairs → sell BEAR on Curve → stake BULL → deposit splDXY-BULL as Morpho collateral.
-
-Both routers use fee-free Morpho flash loans and a fixed debt model: `debt = principal × (leverage - 1)`.
-
-### Staking & Rewards
-
-![Staking & Rewards](assets/diagrams/staking.svg)
-
-- **StakedToken** - ERC-4626 vaults (splDXY-BEAR, splDXY-BULL) that receive streaming USDC rewards
-- **RewardDistributor** - Permissionless `distributeRewards()` allocates yield from SyntheticSplitter, favoring the underperforming token's stakers to incentivize price convergence
-
-## Protocol Mechanics
-
-### Liquidity Management
-
-The SyntheticSplitter maintains a 10% local buffer of USDC for redemptions. Anyone can call `deployToAdapter()` to push excess USDC to yield adapters, targeting 90% deployment. This generates yield while ensuring liquidity for normal operations.
-
-If adapter liquidity is constrained (e.g., high Morpho utilization), the owner can pause the protocol and use `withdrawFromAdapter()` for gradual extraction as liquidity becomes available.
-
-### Leverage
-
-Users can open leveraged positions through the routers:
-
-1. **LeverageRouter** (Bear): Morpho flash loan USDC → Swap to plDXY-BEAR → Stake → Deposit to Morpho as collateral → Borrow USDC to repay flash loan
-2. **BullLeverageRouter** (Bull): Morpho flash loan USDC → Mint pairs → Sell plDXY-BEAR → Stake plDXY-BULL → Deposit to Morpho → Borrow to repay
-
-Both routers use a fixed debt model: `debt = principal × (leverage - 1)`. For 2x leverage with $100 principal, Morpho debt is always $100.
-
-Morpho Blue provides fee-free flash loans, making leveraged positions more capital-efficient.
-
-After opening, users can adjust positions with `addCollateral()` and `removeCollateral()` without closing.
-
-Both routers include MEV protection via user-defined slippage caps (max 1%). All USDC entry points support EIP-2612 permits for gasless approvals.
-
-### Reward Distribution
-
-The RewardDistributor receives yield from SyntheticSplitter and allocates it to StakedToken vaults based on the price discrepancy between the oracle and Curve EMA:
-
-- **≥2% discrepancy**: 100% to underperforming token stakers
-- **<2% discrepancy**: Quadratic interpolation from 50/50 toward 100/0
-- **0% discrepancy**: 50/50 split
-
-This mechanism incentivizes arbitrageurs to correct price deviations by rewarding stakers of the underpriced token. A 0.1% caller reward incentivizes permissionless distribution.
-
-### Lifecycle States
-
-The protocol operates in three states:
-
-1. **ACTIVE** - Normal operations (mint, burn, swap). If Chainlink and Curve EMA prices diverge >2%, BasketOracle reverts, blocking minting, leverage, and reward distribution until prices converge. Burns and swaps remain available—the 10% liquid buffer ensures users can always exit.
-2. **PAUSED** - Emergency pause (minting and reward distribution blocked, burning allowed so users can exit, gradual adapter withdrawal enabled)
-3. **SETTLED** - End-of-life when plDXY hits CAP price (only redemptions allowed)
-
-## Development
-
-### Repository Layout
-
-Production contracts are organized as peer Foundry packages:
-
-| Package | Contents | Direct workspace dependencies |
-|---------|----------|-------------------------------|
-| [`shared`](packages/shared/README.md) | Cross-product interfaces, constants, oracle helpers, and flash-loan base code | None |
-| [`spot`](packages/spot/README.md) | Synthetic tokens, staking, routers, adapters, INVAR, and spot oracles | `shared` |
-| [`options`](packages/options/README.md) | Covered-call vaults, margin engine, option tokens, and settlement oracle | `shared`, spot API |
-| [`perps`](packages/perps/README.md) | Delayed-order perpetuals engine, clearinghouse, router, pool, and lenses | `shared` |
-
-Each product owns its Foundry tests under `packages/<package>/test`. The root Foundry project is a narrow integration
-harness for cross-package compatibility, deployment-script tests, and RPC-backed fork tests. Reusable generic test doubles
-live in `packages/shared/test-support` behind the test-only `@plether/test-utils/` remapping. Workspace imports use stable
-`@plether/<package>/...` remappings instead of relative paths between packages.
-
-Source paths and fully qualified contract names now begin with `packages/<package>/src/`. Existing deployments are
-unchanged, but verification tooling and downstream source imports must use the new paths or the `@plether/*` remappings.
-
-### Prerequisites
-
-- [Foundry](https://book.getfoundry.sh/getting-started/installation)
+Cross-package relative imports are not allowed. Run `make check-boundaries` to validate the dependency rules.
+
+## Repository Layout
+
+```text
+packages/
+├── shared/       # Product-neutral production code and test support
+├── spot/         # Spot production code and package-owned tests
+├── options/      # Options production code and package-owned tests
+└── perps/        # Perps production code and package-owned tests
+integration/src/  # Minimal root Foundry source directory
+test/             # Cross-package, deployment-script, and RPC fork tests
+script/           # Deployment and operational scripts
+scripts/          # Repository and CI helpers
+```
+
+Package source paths and fully qualified contract names begin with `packages/<package>/src/`. Existing deployments are
+unchanged by the repository layout; verification tooling and downstream source imports must use the package paths or the
+`@plether/*` remappings.
+
+## Getting Started
+
+CI uses Foundry v1.5.1 and Solidity 0.8.35. Clone submodules before building:
+
+```bash
+git submodule update --init --recursive
+make build-packages
+make test
+```
 
 ### Build
 
 ```bash
+make build-packages                 # Build shared, spot, options, and perps independently
+make build-spot                     # Build one package through Make
+forge build --root packages/perps   # Build one package directly
 forge build                         # Build the root integration/script workspace
-make build-packages                 # Build every package independently
-forge build --root packages/spot    # Build one package
 ```
 
 ### Test
 
 ```bash
-make test                                      # Run package tests, then root integration tests
-make test-spot                                 # Run one package's tests
-forge test --root packages/options             # Run one package directly
-forge test --no-match-path "test/fork/*"        # Run root integration and script tests
-make coverage-perps                            # Generate coverage for one package
+make test                           # Run all product packages, then root integration tests
+make test-packages                  # Run spot, options, and perps package tests
+make test-options                   # Run one package
+make test-integration               # Run root tests, excluding RPC-backed fork tests
+forge test --root packages/perps    # Run one package directly
 ```
 
-CI runs each package in a `fail-fast: false` matrix, so a failure in one package does not cancel the others. The root
-integration/script suite, package-scoped coverage, and package-scoped Slither analysis run as separate jobs.
+The shared package currently has no standalone test suite; its code is exercised by the product packages that consume it.
+See the [integration test guide](test/README.md) for package test layout, targeted test commands, fork tests, and shared
+fixtures.
+
+### Coverage, Formatting, and Boundaries
+
+```bash
+make coverage-spot
+make coverage-options
+make coverage-perps
+make fmt-check
+make check-boundaries
+```
 
 ### Fork Tests
 
-Fork tests run against mainnet state using real Chainlink oracles, Curve pools, and Morpho Blue. They require an RPC URL:
+RPC-backed tests cover cross-product behavior against live protocol deployments and require `MAINNET_RPC_URL`:
 
 ```bash
-# Set RPC URL (or add to .env file)
-export MAINNET_RPC_URL=https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY
-
-# Run all fork tests
-forge test --match-path "test/fork/*.sol" --fork-url $MAINNET_RPC_URL -vvv
-
-# Or source from .env
-source .env && forge test --match-path "test/fork/*.sol" --fork-url $MAINNET_RPC_URL -vvv
+(source .env && forge test --match-path "test/fork/*" \
+  --no-match-path "test/fork/PythRealUpdateFork.t.sol" \
+  --fork-url "$MAINNET_RPC_URL" -vvv)
 ```
 
-**Fork test files:**
+The real Pyth update test needs an additional Hermes fixture; see the [integration test guide](test/README.md#fork-tests).
 
-| File | Description |
-|------|-------------|
-| `BaseForkTest.sol` | Shared base contract, constants, and test helpers |
-| `ZapRouterFork.t.sol` | ZapRouter integration with real Curve swaps |
-| `FullCycleFork.t.sol` | Complete mint → yield → burn lifecycle |
-| `LeverageRouterFork.t.sol` | Bear and Bull leverage via real Morpho |
-| `SlippageProtectionFork.t.sol` | MEV protection and slippage scenarios |
-| `LiquidationFork.t.sol` | Interest accrual and liquidation mechanics |
-| `BasketOracleFork.t.sol` | Full 6-feed plDXY basket oracle validation |
-| `RewardDistributorFork.t.sol` | Reward distribution with real oracle prices |
-| `YieldIntegrationFork.t.sol` | E2E yield pipeline: Morpho vault → harvest → distribute → staker share price |
-| `PermitFork.t.sol` | EIP-2612 permit-based deposits |
-| `SlippageReport.t.sol` | Slippage analysis across trade sizes |
+## Continuous Integration
 
-Run a specific fork test file:
-```bash
-source .env && forge test --match-path test/fork/LeverageRouterFork.t.sol --fork-url $MAINNET_RPC_URL -vvv
-```
+CI keeps package failures isolated:
 
-### Testnet Deployment
+- `Package (shared|spot|options|perps)` builds each package independently and runs its owned suites.
+- `Slither (shared|spot|options|perps)` analyzes each package as a separate job and uploads package-scoped SARIF.
+- Spot, options, and perps coverage run as separate jobs with package-scoped LCOV output.
+- The root `build` job checks formatting and dependency boundaries, builds the integration workspace, and runs root tests.
+- Matrix jobs use `fail-fast: false`, so one package failure does not cancel results for the others.
 
-#### Sepolia
+The workflow is defined in [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
-Deploy to Sepolia testnet with a custom Morpho Blue instance (the public Morpho on Sepolia has no enabled IRMs/LLTVs):
+## Documentation
+
+Start with the package that owns the product:
+
+- [Shared contracts](packages/shared/README.md)
+- [Spot protocol](packages/spot/README.md)
+- [Options module](packages/options/README.md)
+- [Perps protocol](packages/perps/README.md)
+- [Perps accounting specification](packages/perps/ACCOUNTING_SPEC.md)
+- [Integration and fork tests](test/README.md)
+
+Generate NatSpec documentation for a package with:
 
 ```bash
-# Required environment variables in .env:
-# TEST_PRIVATE_KEY=0x...  (your deployer private key)
-# SEPOLIA_RPC_URL=https://sepolia.infura.io/v3/YOUR_KEY
-
-# Deploy (43 transactions - may take a few minutes)
-source .env && forge script script/DeployToSepolia.s.sol --tc DeployToSepolia \
-  --rpc-url $SEPOLIA_RPC_URL \
-  --broadcast
-
-# Verify contracts on Etherscan (optional)
-# ETHERSCAN_API_KEY=... in .env
-source .env && forge verify-contract <ADDRESS> <CONTRACT> \
-  --chain sepolia --etherscan-api-key $ETHERSCAN_API_KEY
+FOUNDRY_PROFILE=docs FOUNDRY_SRC=packages/spot/src forge doc --out docs/spot
+FOUNDRY_PROFILE=docs FOUNDRY_SRC=packages/options/src forge doc --out docs/options
+FOUNDRY_PROFILE=docs FOUNDRY_SRC=packages/perps/src forge doc --out docs/perps
 ```
 
-The Sepolia deployment script:
-- Deploys its own Morpho Blue instance with a ZeroRateIrm (0% interest for testnet)
-- Creates all protocol contracts, oracles, and routers
-- Seeds Curve pool and Morpho markets with liquidity
-- Mints 100k MockUSDC to the deployer
+## Deployment
 
-#### Arbitrum Sepolia
+Deployment and operational scripts live in [`script/`](script/). Product-specific starting points are:
 
-Deploy the frontend-compatible test stack to Arbitrum Sepolia:
+- [Spot operations and deployment guide](packages/spot/OPERATIONS.md)
+- [Perps deployment guide](packages/perps/DEPLOYMENT.md)
+- [Options package architecture and operational model](packages/options/README.md)
 
-```bash
-# Required environment variables in .env:
-# TEST_PRIVATE_KEY=0x...  (your deployer private key)
-# ARB_SEPOLIA_RPC_URL=https://...
-# PYTH_UPDATE_DATA=0x...  (ABI-encoded bytes[] update payload for the six FX feeds)
-# SPOT_USDC=0x...         (optional existing mintable mock USDC; falls back to PERPS_USDC, then the default shared USDC)
-
-# Dry-run helper: fetches Pyth Hermes updates and exports PYTH_UPDATE_DATA before simulating
-source .env && scripts/deploy-spot-arbitrum-sepolia-dry-run.sh
-
-# Broadcast after setting PYTH_UPDATE_DATA
-source .env && forge script script/DeploySpotArbitrumSepolia.s.sol \
-  --tc DeploySpotArbitrumSepolia \
-  --rpc-url $ARB_SEPOLIA_RPC_URL \
-  --broadcast
-```
-
-The Arbitrum Sepolia deployment script:
-- Uses an existing mintable mock USDC, such as the shared perps `PERPS_USDC`
-- Uses real Arbitrum Sepolia Pyth for all six FX feeds and pushes the supplied `PYTH_UPDATE_DATA`
-- Deploys BasketOracle, MockYieldAdapter, SyntheticSplitter, plDXY-BEAR, plDXY-BULL, staking wrappers, Morpho oracles, staked oracles, routers, RewardDistributor, INVAR, and sINVAR
-- Deploys a local Morpho Blue instance with ZeroRateIrm and creates/seeds the BEAR and BULL markets
-- Deploys `MockTwocryptoPool`, a reserve-backed Curve Twocrypto-NG stand-in for Arbitrum Sepolia because the Sepolia Curve factory is not available there
-- Keeps the mock Curve pool ABI-compatible with the Ethereum Sepolia Curve Twocrypto pool, including receiver overloads such as `exchange(uint256,uint256,uint256,uint256,address)`
-- Seeds the mock Curve pool and Morpho markets with liquidity, then mints 100k mock USDC to the deployer
-
-#### Anvil (Local)
-
-For frontend development and testing without spending real ETH:
-
-```bash
-# 1. Start local Anvil node forking Ethereum mainnet
-anvil --fork-url $MAINNET_RPC_URL --chain-id 31337
-
-# 2. Deploy all contracts with real Chainlink/Pyth oracles (mints 100k USDC to deployer)
-TEST_PRIVATE_KEY=0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d \
-forge script script/DeployToAnvilFork.s.sol --tc DeployToAnvilFork \
-  --rpc-url http://127.0.0.1:8545 \
-  --broadcast
-
-# 3. (Optional) Simulate yield accrual (1% of adapter assets)
-cast send <MOCK_YIELD_ADAPTER> "generateYield()" \
-  --rpc-url http://127.0.0.1:8545 \
-  --private-key 0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d
-
-# 4. (Optional) Seed Morpho markets for leverage testing
-#    Morpho seeding is built into DeployToTest.s.sol for testnet deploys.
-#    For Anvil fork, create markets manually using cast commands.
-```
-
-The Anvil fork deployment uses real mainnet oracles (Chainlink for EUR/JPY/GBP/CAD/CHF, Pyth for SEK) with prices frozen at the fork block. MockUSDC and MockYieldAdapter are still used for flexible testing.
-
-**Anvil Test Accounts** (pre-funded with 10,000 ETH each):
-
-| Account | Address | Private Key |
-|---------|---------|-------------|
-| #0 | `0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266` | `0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80` |
-| #1 | `0x70997970C51812dc3A010C7d01b50e0d17dc79C8` | `0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d` |
-
-**MetaMask Setup:**
-1. Import a test private key (Settings → Import Account)
-2. Add network: RPC `http://127.0.0.1:8545`, Chain ID `31337`
-
-### Format
-
-```bash
-forge fmt               # Format code
-forge fmt --check       # Check formatting
-```
-
-### Documentation
-
-**[View Reference Documentation](https://plether-fi.github.io/plether-core/)**
-
-Generate HTML documentation locally from NatSpec comments:
-
-```bash
-forge doc               # Generate docs to ./docs
-forge doc --serve       # Serve docs locally at http://localhost:3000
-forge doc --build       # Build static site to ./docs/book
-```
+Always simulate the exact script and deployment scope before broadcasting.
 
 ## Security
 
-- All contracts use OpenZeppelin's battle-tested implementations
-- Reentrancy protection on state-changing functions
-- 7-day timelock for critical governance changes
-- Oracle staleness checks (8–24 hour timeouts depending on context)
-- Oracle bound validation against Curve EMA to prevent price manipulation
-- Flash loan callback validation (initiator + lender checks)
-- Yield adapter uses Morpho Vault vault accounting for yield generation
+Security assumptions are product-specific:
 
-For detailed security assumptions, trust model, and emergency procedures, see [SECURITY.md](SECURITY.md).
+- [Spot and shared integration assumptions](SECURITY.md)
+- [Options security model](packages/options/README.md#security-model)
+- [Perps security model](packages/perps/SECURITY.md)
+- [Perps pre-audit guide](packages/perps/PRE_AUDIT_GUIDE.md)
+
+Some components have undergone external security review, but audit coverage is partial and release-specific. Review the
+security model, audit reports, deployment parameters, and exact bytecode before production use.
 
 ## License
 
@@ -421,4 +163,4 @@ For detailed security assumptions, trust model, and emergency procedures, see [S
 
 ## Disclaimer
 
-This software is provided "as is" without warranty of any kind. Use at your own risk. Some components have undergone external security review, but audit coverage is partial and release-specific. Do not use in production without reviewing [SECURITY.md](SECURITY.md), the audit reports, and the exact deployment scope.
+This software is provided "as is" without warranty of any kind. Use at your own risk.
