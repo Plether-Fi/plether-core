@@ -1,0 +1,318 @@
+// SPDX-License-Identifier: AGPL-3.0
+pragma solidity 0.8.35;
+
+import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
+import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
+import {IOrderRouter} from "@plether/perps/interfaces/IOrderRouter.sol";
+import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
+import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
+
+/// @notice Router-side reservation and queue accounting shared by commit, execution, and liquidation handlers.
+abstract contract OrderReservationAccounting is IOrderRouterAccounting, IOrderRouterErrors {
+
+    struct OrderRecord {
+        CfdTypes.Order core;
+        IOrderRouterAccounting.OrderStatus status;
+        uint256 executionBountyUsdc;
+        uint64 nextGlobalOrderId;
+        uint64 prevGlobalOrderId;
+        uint64 nextAccountOrderId;
+        uint64 prevAccountOrderId;
+        uint64 nextMarginOrderId;
+        uint64 prevMarginOrderId;
+        bool inAccountQueue;
+        bool inMarginQueue;
+    }
+
+    ICfdEngineCore public immutable engine;
+    IMarginClearinghouse internal immutable clearinghouse;
+
+    mapping(uint64 => OrderRecord) internal orderRecords;
+    mapping(address => uint256) public pendingOrderCounts;
+    mapping(address => uint256) public pendingCloseSize;
+    mapping(address => uint64) public accountHeadOrderId;
+    mapping(address => uint64) internal accountTailOrderId;
+    mapping(address => uint64) public marginHeadOrderId;
+    mapping(address => uint64) public marginTailOrderId;
+
+    constructor(
+        address _engine
+    ) {
+        engine = ICfdEngineCore(_engine);
+        clearinghouse = _engine.code.length == 0
+            ? IMarginClearinghouse(address(0))
+            : IMarginClearinghouse(ICfdEngineCore(_engine).clearinghouse());
+    }
+
+    /// @notice Returns aggregate queued reservation attributed to an account across all pending orders.
+    /// @param account Account to inspect
+    /// @return reservation Pending-order count plus committed-margin and bounty reservation totals
+    function getAccountReservations(
+        address account
+    ) public view override returns (IOrderRouterAccounting.AccountReservationView memory reservation) {
+        // Clearinghouse remains the canonical owner of committed-order margin value; this router component composes the view.
+        reservation.committedMarginUsdc =
+        clearinghouse.getAccountReservationSummary(account).activeCommittedOrderMarginUsdc;
+        (reservation.pendingOrderCount, reservation.executionBountyUsdc,,) = _summarizePendingOrders(account);
+    }
+
+    function _summarizePendingOrders(
+        address account
+    )
+        internal
+        view
+        returns (
+            uint256 pendingOrderCount,
+            uint256 executionBountyUsdc,
+            uint256 pendingCloseSize_,
+            bool hasTerminalCloseQueued
+        )
+    {
+        uint64 orderId = accountHeadOrderId[account];
+        while (orderId != 0) {
+            OrderRecord storage record = orderRecords[orderId];
+            CfdTypes.Order memory order = record.core;
+            pendingOrderCount++;
+            executionBountyUsdc += record.executionBountyUsdc;
+            if (order.isClose) {
+                pendingCloseSize_ += order.sizeDelta;
+                hasTerminalCloseQueued = true;
+            }
+            orderId = record.nextAccountOrderId;
+        }
+    }
+
+    /// @notice Returns the current router-maintained margin-reservation order ids for an account.
+    /// @param account Account to inspect
+    /// @return orderIds Pending order ids linked into the account's margin reservation queue
+    function getMarginReservationIds(
+        address account
+    ) public view override returns (uint64[] memory orderIds) {
+        // Router queue links expose reservation traversal order only; remaining reservation value lives in MarginClearinghouse.
+        uint64 cursor = marginHeadOrderId[account];
+        uint256 count;
+        while (cursor != 0) {
+            count++;
+            cursor = orderRecords[cursor].nextMarginOrderId;
+        }
+
+        orderIds = new uint64[](count);
+        cursor = marginHeadOrderId[account];
+        for (uint256 i = 0; i < count; i++) {
+            orderIds[i] = cursor;
+            cursor = orderRecords[cursor].nextMarginOrderId;
+        }
+    }
+
+    function _reserveExecutionBounty(
+        address account,
+        uint64 orderId,
+        uint256 sizeDelta,
+        uint256 executionBountyUsdc,
+        bool isClose
+    ) internal {
+        if (executionBountyUsdc == 0) {
+            return;
+        }
+
+        if (isClose) {
+            _reserveCloseExecutionBounty(account, sizeDelta, executionBountyUsdc);
+        } else {
+            if (clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc < executionBountyUsdc) {
+                revert OrderRouter__InsufficientFreeEquity();
+            }
+            clearinghouse.lockReservedSettlement(account, executionBountyUsdc);
+        }
+        orderRecords[orderId].executionBountyUsdc = executionBountyUsdc;
+    }
+
+    function _reserveCommittedMargin(
+        address account,
+        uint64 orderId,
+        bool isClose,
+        uint256 marginDelta
+    ) internal {
+        if (isClose || marginDelta == 0) {
+            return;
+        }
+        clearinghouse.reserveCommittedOrderMargin(account, orderId, marginDelta);
+        _linkMarginOrder(account, orderId);
+    }
+
+    function _consumeOrderReservation(
+        uint64 orderId,
+        bool success,
+        uint256 executionPrice,
+        uint64 oraclePublishTime
+    ) internal returns (uint256 executionBountyUsdc) {
+        if (success) {
+            return _collectExecutionBounty(orderId, executionPrice, oraclePublishTime);
+        }
+
+        _releaseCommittedMargin(orderId);
+        return _collectExecutionBounty(orderId, executionPrice, oraclePublishTime);
+    }
+
+    function _collectExecutionBounty(
+        uint64 orderId,
+        uint256 executionPrice,
+        uint64 oraclePublishTime
+    ) internal returns (uint256 executionBountyUsdc) {
+        OrderRecord storage record = _orderRecord(orderId);
+        executionBountyUsdc = record.executionBountyUsdc;
+        if (executionBountyUsdc == 0) {
+            return 0;
+        }
+        record.executionBountyUsdc = 0;
+        engine.creditBounty(record.core.account, msg.sender, executionBountyUsdc, executionPrice, oraclePublishTime);
+        return executionBountyUsdc;
+    }
+
+    function _releaseCommittedMargin(
+        uint64 orderId
+    ) internal {
+        clearinghouse.releaseOrderReservationIfActive(orderId);
+    }
+
+    function _linkMarginOrder(
+        address account,
+        uint64 orderId
+    ) internal {
+        OrderRecord storage record = _orderRecord(orderId);
+        if (record.inMarginQueue) {
+            return;
+        }
+
+        uint64 tailOrderId = marginTailOrderId[account];
+        if (tailOrderId == 0) {
+            marginHeadOrderId[account] = orderId;
+            marginTailOrderId[account] = orderId;
+        } else {
+            orderRecords[tailOrderId].nextMarginOrderId = orderId;
+            record.prevMarginOrderId = tailOrderId;
+            marginTailOrderId[account] = orderId;
+        }
+
+        record.inMarginQueue = true;
+    }
+
+    function _linkAccountOrder(
+        address account,
+        uint64 orderId
+    ) internal {
+        OrderRecord storage record = _orderRecord(orderId);
+        if (record.inAccountQueue) {
+            return;
+        }
+
+        uint64 tailOrderId = accountTailOrderId[account];
+        if (tailOrderId == 0) {
+            accountHeadOrderId[account] = orderId;
+            accountTailOrderId[account] = orderId;
+        } else {
+            orderRecords[tailOrderId].nextAccountOrderId = orderId;
+            record.prevAccountOrderId = tailOrderId;
+            accountTailOrderId[account] = orderId;
+        }
+
+        record.inAccountQueue = true;
+    }
+
+    function _unlinkAccountOrder(
+        address account,
+        uint64 orderId
+    ) internal {
+        OrderRecord storage record = _orderRecord(orderId);
+        if (!record.inAccountQueue) {
+            return;
+        }
+
+        uint64 prevOrderId = record.prevAccountOrderId;
+        uint64 nextOrderId = record.nextAccountOrderId;
+        uint64 headOrderId = accountHeadOrderId[account];
+        uint64 tailOrderId = accountTailOrderId[account];
+
+        if (headOrderId == orderId) {
+            accountHeadOrderId[account] = nextOrderId;
+        } else if (prevOrderId != 0) {
+            orderRecords[prevOrderId].nextAccountOrderId = nextOrderId;
+        } else if (tailOrderId != orderId) {
+            revert OrderRouter__AccountQueueCorrupt();
+        }
+
+        if (tailOrderId == orderId) {
+            accountTailOrderId[account] = prevOrderId;
+        } else if (nextOrderId != 0) {
+            orderRecords[nextOrderId].prevAccountOrderId = prevOrderId;
+        } else if (headOrderId != orderId) {
+            revert OrderRouter__AccountQueueCorrupt();
+        }
+
+        record.nextAccountOrderId = 0;
+        record.prevAccountOrderId = 0;
+        record.inAccountQueue = false;
+    }
+
+    function _unlinkMarginOrder(
+        address account,
+        uint64 orderId
+    ) internal {
+        OrderRecord storage record = _orderRecord(orderId);
+        if (!record.inMarginQueue) {
+            return;
+        }
+
+        uint64 prevOrderId = record.prevMarginOrderId;
+        uint64 nextOrderId = record.nextMarginOrderId;
+        uint64 headOrderId = marginHeadOrderId[account];
+        uint64 tailOrderId = marginTailOrderId[account];
+
+        if (headOrderId == orderId) {
+            marginHeadOrderId[account] = nextOrderId;
+        } else if (prevOrderId != 0) {
+            orderRecords[prevOrderId].nextMarginOrderId = nextOrderId;
+        } else if (tailOrderId != orderId) {
+            revert OrderRouter__MarginQueueCorrupt();
+        }
+
+        if (tailOrderId == orderId) {
+            marginTailOrderId[account] = prevOrderId;
+        } else if (nextOrderId != 0) {
+            orderRecords[nextOrderId].prevMarginOrderId = prevOrderId;
+        } else if (headOrderId != orderId) {
+            revert OrderRouter__MarginQueueCorrupt();
+        }
+
+        record.nextMarginOrderId = 0;
+        record.prevMarginOrderId = 0;
+        record.inMarginQueue = false;
+    }
+
+    function _pruneMarginQueue(
+        address account
+    ) internal {
+        uint64 orderId = marginHeadOrderId[account];
+        while (orderId != 0) {
+            uint256 remainingCommittedMarginUsdc = clearinghouse.getOrderReservation(orderId).remainingAmountUsdc;
+            uint64 nextOrderId = orderRecords[orderId].nextMarginOrderId;
+            if (remainingCommittedMarginUsdc == 0) {
+                _unlinkMarginOrder(account, orderId);
+            }
+            orderId = nextOrderId;
+        }
+    }
+
+    function _orderRecord(
+        uint64 orderId
+    ) internal view virtual returns (OrderRecord storage record) {
+        return orderRecords[orderId];
+    }
+
+    function _reserveCloseExecutionBounty(
+        address account,
+        uint256 sizeDelta,
+        uint256 executionBountyUsdc
+    ) internal virtual;
+
+}

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.35;
 
-import {ICurveTwocrypto} from "../../src/InvarCoin.sol";
 import {BaseForkTest} from "./BaseForkTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {ICurveTwocrypto} from "@plether/spot/core/InvarCoin.sol";
 import {Test, console} from "forge-std/Test.sol";
 
 /// @notice Empirical fork tests measuring how often Curve V2's calc_token_amount

@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.35;
 
-import {StakedToken} from "../../src/StakedToken.sol";
-import {DOVZapRouter} from "../../src/options/DOVZapRouter.sol";
-import {MarginEngine} from "../../src/options/MarginEngine.sol";
-import {OptionToken} from "../../src/options/OptionToken.sol";
-import {PletherDOV} from "../../src/options/PletherDOV.sol";
-import {SettlementOracle} from "../../src/oracles/SettlementOracle.sol";
 import {BaseForkTest} from "./BaseForkTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {DOVZapRouter} from "@plether/options/DOVZapRouter.sol";
+import {MarginEngine} from "@plether/options/MarginEngine.sol";
+import {OptionToken} from "@plether/options/OptionToken.sol";
+import {PletherDOV} from "@plether/options/PletherDOV.sol";
+import {SettlementOracle} from "@plether/options/oracles/SettlementOracle.sol";
+import {StakedToken} from "@plether/spot/staking/StakedToken.sol";
 import "forge-std/Test.sol";
 
 contract DOVZapRouterForkTest is BaseForkTest {

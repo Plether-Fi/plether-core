@@ -4,8 +4,8 @@ pragma solidity 0.8.35;
 import {DeploySpotArbitrumSepolia} from "../../script/DeploySpotArbitrumSepolia.s.sol";
 import {IMintableERC20, MockUSDC} from "../../script/DeployToTest.s.sol";
 import {MockTwocryptoPool} from "../../script/mocks/MockTwocryptoPool.s.sol";
-import {InvarCoin} from "../../src/InvarCoin.sol";
 import {MockToken} from "../mocks/MockToken.sol";
+import {InvarCoin} from "@plether/spot/core/InvarCoin.sol";
 import {Test} from "forge-std/Test.sol";
 
 contract MockBasketOracleForSpotScriptTest {

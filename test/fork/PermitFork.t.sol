@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.35;
 
-import {ZapRouter} from "../../src/ZapRouter.sol";
 import {BaseForkTest} from "./BaseForkTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
+import {ZapRouter} from "@plether/spot/routers/ZapRouter.sol";
 import "forge-std/Test.sol";
 
 /// @title Permit Fork Tests

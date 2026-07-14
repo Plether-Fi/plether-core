@@ -3,11 +3,11 @@ pragma solidity 0.8.35;
 
 import {BootstrapPerpsArbitrumSepolia} from "../../script/BootstrapPerpsArbitrumSepolia.s.sol";
 import {DeployPerpsArbitrumSepolia, MockUSDC} from "../../script/DeployPerpsArbitrumSepolia.s.sol";
-import {CfdEngine} from "../../src/perps/CfdEngine.sol";
-import {CfdTypes} from "../../src/perps/CfdTypes.sol";
-import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
-import {PletherOracle} from "../../src/perps/PletherOracle.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
+import {CfdEngine} from "@plether/perps/CfdEngine.sol";
+import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
+import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {Test} from "forge-std/Test.sol";
 
 contract DeployPerpsArbitrumSepoliaHarness is DeployPerpsArbitrumSepolia {

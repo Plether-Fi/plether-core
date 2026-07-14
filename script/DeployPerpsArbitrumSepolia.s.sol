@@ -1,21 +1,21 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.35;
 
-import {CfdEngine} from "../src/perps/CfdEngine.sol";
-import {CfdEngineAccountLens} from "../src/perps/CfdEngineAccountLens.sol";
-import {CfdEngineAdmin} from "../src/perps/CfdEngineAdmin.sol";
-import {CfdEngineLens} from "../src/perps/CfdEngineLens.sol";
-import {CfdEnginePlanner} from "../src/perps/CfdEnginePlanner.sol";
-import {CfdEngineSettlementSidecar} from "../src/perps/CfdEngineSettlementSidecar.sol";
-import {CfdTypes} from "../src/perps/CfdTypes.sol";
-import {HousePool} from "../src/perps/HousePool.sol";
-import {MarginClearinghouse} from "../src/perps/MarginClearinghouse.sol";
-import {OrderRouter} from "../src/perps/OrderRouter.sol";
-import {PerpsPublicLens} from "../src/perps/PerpsPublicLens.sol";
-import {PletherOracle} from "../src/perps/PletherOracle.sol";
-import {TrancheVault} from "../src/perps/TrancheVault.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {CfdEngine} from "@plether/perps/CfdEngine.sol";
+import {CfdEngineAccountLens} from "@plether/perps/CfdEngineAccountLens.sol";
+import {CfdEngineAdmin} from "@plether/perps/CfdEngineAdmin.sol";
+import {CfdEngineLens} from "@plether/perps/CfdEngineLens.sol";
+import {CfdEnginePlanner} from "@plether/perps/CfdEnginePlanner.sol";
+import {CfdEngineSettlementSidecar} from "@plether/perps/CfdEngineSettlementSidecar.sol";
+import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {HousePool} from "@plether/perps/HousePool.sol";
+import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
+import {OrderRouter} from "@plether/perps/OrderRouter.sol";
+import {PerpsPublicLens} from "@plether/perps/PerpsPublicLens.sol";
+import {PletherOracle} from "@plether/perps/PletherOracle.sol";
+import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import "forge-std/Script.sol";
 
 contract DeployPerpsArbitrumSepolia is Script {

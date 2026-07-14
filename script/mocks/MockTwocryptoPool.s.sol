@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.35;
 
-import {ICurvePool} from "../../src/interfaces/ICurvePool.sol";
-import {ICurveTwocrypto} from "../../src/interfaces/ICurveTwocrypto.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {ICurvePool} from "@plether/shared/interfaces/ICurvePool.sol";
+import {ICurveTwocrypto} from "@plether/spot/interfaces/ICurveTwocrypto.sol";
 
 /// @notice Testnet-only Curve twocrypto stand-in for deployment scripts.
 /// @dev Constant-price, reserve-backed pool. The pool address is also the LP token address.

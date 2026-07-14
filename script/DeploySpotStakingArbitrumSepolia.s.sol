@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.35;
 
-import {StakedToken} from "../src/StakedToken.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {StakedToken} from "@plether/spot/staking/StakedToken.sol";
 import "forge-std/Script.sol";
 
 /// @title DeploySpotStakingArbitrumSepolia

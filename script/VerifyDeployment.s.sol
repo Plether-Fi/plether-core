@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.35;
 
-import {StakedToken} from "../src/StakedToken.sol";
-import {SyntheticSplitter} from "../src/SyntheticSplitter.sol";
-import {SyntheticToken} from "../src/SyntheticToken.sol";
-import {ZapRouter} from "../src/ZapRouter.sol";
-import {BasketOracle} from "../src/oracles/BasketOracle.sol";
-import {MorphoOracle} from "../src/oracles/MorphoOracle.sol";
-import {StakedOracle} from "../src/oracles/StakedOracle.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SyntheticSplitter} from "@plether/spot/core/SyntheticSplitter.sol";
+import {SyntheticToken} from "@plether/spot/core/SyntheticToken.sol";
+import {BasketOracle} from "@plether/spot/oracles/BasketOracle.sol";
+import {MorphoOracle} from "@plether/spot/oracles/MorphoOracle.sol";
+import {StakedOracle} from "@plether/spot/oracles/StakedOracle.sol";
+import {ZapRouter} from "@plether/spot/routers/ZapRouter.sol";
+import {StakedToken} from "@plether/spot/staking/StakedToken.sol";
 import "forge-std/Script.sol";
 import "forge-std/console2.sol";
 

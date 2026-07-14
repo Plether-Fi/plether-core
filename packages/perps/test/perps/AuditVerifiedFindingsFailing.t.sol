@@ -1,0 +1,439 @@
+// SPDX-License-Identifier: AGPL-3.0
+pragma solidity 0.8.35;
+
+// Audit-history file: tests prefixed with `obsolete_` preserve superseded findings for context only.
+// They are intentionally not statements about the live carry model or current accounting semantics.
+
+import {BasePerpTest} from "./BasePerpTest.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {CfdEngine} from "@plether/perps/CfdEngine.sol";
+import {CfdEngineAdmin} from "@plether/perps/CfdEngineAdmin.sol";
+import {CfdEngineLens} from "@plether/perps/CfdEngineLens.sol";
+import {CfdEnginePlanner} from "@plether/perps/CfdEnginePlanner.sol";
+import {CfdEngineSettlementSidecar} from "@plether/perps/CfdEngineSettlementSidecar.sol";
+import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {HousePool} from "@plether/perps/HousePool.sol";
+import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
+import {OrderRouter} from "@plether/perps/OrderRouter.sol";
+import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
+import {PletherOracle} from "@plether/perps/PletherOracle.sol";
+import {TrancheVault} from "@plether/perps/TrancheVault.sol";
+import {IOrderRouter} from "@plether/perps/interfaces/IOrderRouter.sol";
+import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
+import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
+import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
+import {MockPyth} from "@plether/test-utils/MockPyth.sol";
+import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
+import {Test} from "forge-std/Test.sol";
+
+contract CooldownBypassReceiver {
+
+    function withdrawAll(
+        TrancheVault vault
+    ) external {
+        uint256 shares = vault.balanceOf(address(this));
+        vault.redeem(shares, address(this), address(this));
+    }
+
+}
+
+contract AuditVerifiedFindingsFailing_F1_LegacySpreadSolvency is BasePerpTest {
+
+    address bullTrader = address(0xCA01);
+    address bearTrader = address(0xDA02);
+
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
+            vpiFactor: 0,
+            maxSkewRatio: 1e18,
+            maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
+            fadMarginBps: 300,
+            baseCarryBps: 500,
+            minBountyUsdc: 5e6,
+            bountyBps: 10
+        });
+    }
+
+    function obsolete_F1_CappedLegacySpreadShouldNetCollectibleReceivablesAgainstLiabilities() public {
+        _fundTrader(bullTrader, 300_000e6);
+        _fundTrader(bearTrader, 100_000e6);
+
+        address bullAccount = bullTrader;
+        address bearAccount = bearTrader;
+
+        _open(bullAccount, CfdTypes.Side.BULL, 200_000e18, 200_000e6, 1e8);
+        _open(bearAccount, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
+
+        vm.warp(block.timestamp + 180 days);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+
+        CfdTypes.Position memory bullPos;
+        CfdTypes.Position memory bearPos;
+        {
+            (uint256 size, uint256 margin, uint256 entryPrice,, CfdTypes.Side side,,) = engine.positions(bullAccount);
+            bullPos = CfdTypes.Position(size, margin, entryPrice, 0, side, 0, 0, 0);
+        }
+        {
+            (uint256 size, uint256 margin, uint256 entryPrice,, CfdTypes.Side side,,) = engine.positions(bearAccount);
+            bearPos = CfdTypes.Position(size, margin, entryPrice, 0, side, 0, 0, 0);
+        }
+
+        int256 bullLegacySpread = 0;
+        int256 bearLegacySpread = 0;
+        assertLt(bullLegacySpread, 0, "Bull side should owe legacy spread in the obsolete skewed-market model");
+        assertGt(bearLegacySpread, 0, "Bear side should be owed legacy spread in the obsolete skewed-market model");
+        assertLt(
+            int256(0),
+            0,
+            "Legacy-spread solvency should include collectible receivables instead of liability-only clipping"
+        );
+        assertGt(
+            uint256(0), 0, "Legacy-spread withdrawal reserve should remain conservative and reserve only liabilities"
+        );
+    }
+
+}
+
+contract AuditVerifiedFindingsFailing_F2_SkewCapBypass is BasePerpTest {
+
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
+            vpiFactor: 0,
+            maxSkewRatio: 0.4e18,
+            maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
+            fadMarginBps: 300,
+            baseCarryBps: 500,
+            minBountyUsdc: 5e6,
+            bountyBps: 10
+        });
+    }
+
+    function test_F2_EmptyMarketShouldStillEnforceMaxSkewRatio() public {
+        address whale = address(0x5E77);
+        address whaleAccount = whale;
+
+        _fundTrader(whale, 100_000e6);
+
+        uint256 depth = pool.totalAssets();
+        vm.expectRevert();
+        _open(whaleAccount, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8, depth);
+    }
+
+}
+
+contract AuditVerifiedFindingsFailing_F2_SkewDoubleCount is BasePerpTest {
+
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
+            vpiFactor: 0,
+            maxSkewRatio: 0.15e18,
+            maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
+            fadMarginBps: 300,
+            baseCarryBps: 500,
+            minBountyUsdc: 5e6,
+            bountyBps: 10
+        });
+    }
+
+    function test_F2_SkewCapShouldUseSinglePostTradeSizeDelta() public {
+        address bearTrader = address(0xBEA2);
+        address bullTrader = address(0xB011);
+
+        address bearAccount = bearTrader;
+        address bullAccount = bullTrader;
+
+        _fundTrader(bearTrader, 60_000e6);
+        _fundTrader(bullTrader, 120_000e6);
+
+        _open(bearAccount, CfdTypes.Side.BEAR, 100_000e18, 20_000e6, 1e8);
+        _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 20_000e6, 1e8);
+
+        _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 20_000e6, 1e8);
+
+        (uint256 bullSize,,,,,,) = engine.positions(bullAccount);
+        assertEq(bullSize, 200_000e18, "Skew cap should evaluate the real post-trade open interest");
+    }
+
+}
+
+contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
+
+    MockUSDC usdc;
+    MockPyth mockPyth;
+    CfdEngine engine;
+    HousePool pool;
+    MarginClearinghouse clearinghouse;
+    TrancheVault seniorVault;
+    TrancheVault juniorVault;
+    OrderRouter router;
+    OrderRouterAdmin routerAdmin;
+
+    bytes32 constant FEED_A = bytes32(uint256(1));
+    bytes32 constant FEED_B = bytes32(uint256(2));
+    uint256 constant CAP_PRICE = 2e8;
+
+    address alice = address(0xA11CE);
+    address keeper = address(0xBEEF);
+
+    receive() external payable {}
+
+    function setUp() public {
+        usdc = new MockUSDC();
+        mockPyth = new MockPyth();
+
+        clearinghouse = new MarginClearinghouse(address(usdc));
+        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams(), 0.005e18);
+        CfdEnginePlanner planner = new CfdEnginePlanner();
+        CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(engine));
+        CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
+        engine.setDependencies(address(planner), address(settlement), address(engineAdmin));
+        pool = new HousePool(address(usdc), address(engine));
+
+        seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");
+        juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
+        pool.setSeniorVault(address(seniorVault));
+        pool.setJuniorVault(address(juniorVault));
+        engine.setPool(address(pool));
+
+        bytes32[] memory feedIds = new bytes32[](2);
+        uint256[] memory weights = new uint256[](2);
+        uint256[] memory bases = new uint256[](2);
+        bool[] memory inversions = new bool[](2);
+        feedIds[0] = FEED_A;
+        feedIds[1] = FEED_B;
+        weights[0] = 0.5e18;
+        weights[1] = 0.5e18;
+        bases[0] = 1e8;
+        bases[1] = 1e8;
+
+        router = new OrderRouter(
+            address(engine),
+            address(new CfdEngineLens(address(engine))),
+            address(pool),
+            address(
+                new PletherOracle(
+                    address(engine), address(pool), address(mockPyth), feedIds, weights, bases, inversions
+                )
+            )
+        );
+        routerAdmin = OrderRouterAdmin(router.admin());
+        engine.setOrderRouter(address(router));
+
+        _bypassAllTimelocks();
+        usdc.mint(address(this), 2000e6);
+        usdc.approve(address(pool), 2000e6);
+        pool.initializeSeedPosition(false, 1000e6, address(this));
+        pool.initializeSeedPosition(true, 1000e6, address(this));
+        pool.activateTrading();
+        _fundJunior(address(this), 1_000_000e6);
+        _fundTrader(alice, 50_000e6);
+
+        vm.deal(alice, 1 ether);
+        vm.deal(keeper, 1 ether);
+    }
+
+    function test_F3_StaleOracleCancellationMustNotPayKeeperUsdc() public {
+        IOrderRouterAdminHost.RouterConfig memory config = IOrderRouterAdminHost.RouterConfig({
+            maxOrderAge: 3600,
+            orderExecutionStalenessLimit: router.orderExecutionStalenessLimit(),
+            liquidationStalenessLimit: router.liquidationStalenessLimit(),
+            pythMaxConfidenceRatioBps: router.pythMaxConfidenceRatioBps(),
+            orderSettlementWindow: router.orderSettlementWindow(),
+            maxComponentPublishTimeDivergence: router.maxComponentPublishTimeDivergence(),
+            adverseConfidenceMultiplierBps: router.adverseConfidenceMultiplierBps(),
+            minOpenNotionalUsdc: router.minOpenNotionalUsdc(),
+            openOrderExecutionBountyBps: router.openOrderExecutionBountyBps(),
+            minOpenOrderExecutionBountyUsdc: router.minOpenOrderExecutionBountyUsdc(),
+            maxOpenOrderExecutionBountyUsdc: router.maxOpenOrderExecutionBountyUsdc(),
+            closeOrderExecutionBountyUsdc: router.closeOrderExecutionBountyUsdc(),
+            maxPendingOrders: router.maxPendingOrders(),
+            minEngineGas: router.minEngineGas(),
+            maxPruneOrdersPerCall: router.maxPruneOrdersPerCall()
+        });
+        routerAdmin.proposeRouterConfig(config);
+        vm.warp(block.timestamp + 48 hours + 1);
+        routerAdmin.finalizeRouterConfig();
+
+        uint256 t0 = 2_000_000_000;
+        vm.warp(t0);
+        vm.roll(100);
+
+        mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), t0 + 61);
+        mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), t0);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
+
+        bytes[] memory updateData = new bytes[](1);
+        updateData[0] = "";
+
+        uint256 keeperUsdcBefore = usdc.balanceOf(keeper);
+
+        vm.warp(t0 + 61);
+        vm.roll(101);
+        vm.prank(keeper);
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
+        router.executeOrder(1, updateData);
+
+        assertEq(
+            usdc.balanceOf(keeper) - keeperUsdcBefore, 0, "Keeper should not collect the reserve on stale oracle input"
+        );
+    }
+
+    function _riskParams() internal pure returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
+            vpiFactor: 0,
+            maxSkewRatio: 0.4e18,
+            maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
+            fadMarginBps: 300,
+            baseCarryBps: 500,
+            minBountyUsdc: 5e6,
+            bountyBps: 10
+        });
+    }
+
+    function _bypassAllTimelocks() internal {
+        clearinghouse.setEngine(address(engine));
+    }
+
+    function _fundJunior(
+        address lp,
+        uint256 amount
+    ) internal {
+        usdc.mint(lp, amount);
+        vm.startPrank(lp);
+        usdc.approve(address(juniorVault), amount);
+        juniorVault.deposit(amount, lp);
+        vm.stopPrank();
+    }
+
+    function _fundTrader(
+        address trader,
+        uint256 amount
+    ) internal {
+        address account = trader;
+        usdc.mint(trader, amount);
+        vm.startPrank(trader);
+        usdc.approve(address(clearinghouse), amount);
+        clearinghouse.deposit(account, amount);
+        vm.stopPrank();
+    }
+
+}
+
+contract AuditVerifiedFindingsFailing_F4_PartialCloseLosses is BasePerpTest {
+
+    address trader = address(0xD00D);
+
+    function test_F4_UnderwaterPartialCloseMustRevertInsteadOfSocializingLosses() public {
+        address account = trader;
+
+        _fundTrader(trader, 10_000e6);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+
+        uint256 depth = pool.totalAssets();
+        vm.expectRevert();
+        _close(account, CfdTypes.Side.BULL, 99_000e18, 110_000_000, depth);
+    }
+
+}
+
+contract AuditVerifiedFindingsFailing_F5_CooldownBypass is BasePerpTest {
+
+    address helper = address(0xB0B);
+
+    function test_F5_ThirdPartyDepositIntoProxyMustStillStartCooldown() public {
+        CooldownBypassReceiver receiver = new CooldownBypassReceiver();
+
+        usdc.mint(helper, 100_000e6);
+        vm.startPrank(helper);
+        usdc.approve(address(juniorVault), 100_000e6);
+        juniorVault.deposit(100_000e6, address(receiver));
+        vm.stopPrank();
+
+        vm.expectRevert();
+        receiver.withdrawAll(juniorVault);
+    }
+
+}
+
+contract AuditVerifiedFindingsFailing_F6_KeeperFeeReserveFreeEquity is BasePerpTest {
+
+    address trader = address(0xA11CE);
+
+    function test_F6_CommitReserveMustNotReduceUsdcBelowLockedMargin() public {
+        address account = trader;
+
+        _fundTrader(trader, 10_000e6);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+
+        uint256 lockedBefore = clearinghouse.lockedMarginUsdc(account);
+        uint256 freeBefore = clearinghouse.getFreeBuyingPowerUsdc(account);
+        uint256 closeBounty = 1e6;
+
+        vm.prank(trader);
+        clearinghouse.withdraw(account, freeBefore - closeBounty);
+
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+
+        assertGe(
+            clearinghouse.balanceUsdc(account),
+            lockedBefore,
+            "Close commits must not strip locked margin to fund keeper reserves"
+        );
+    }
+
+}
+
+contract AuditVerifiedFindingsFailing_F8_LiquidationDegradedMode is BasePerpTest {
+
+    address winner = address(0xAAA1);
+    address loser = address(0xBBB1);
+
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
+            vpiFactor: 0,
+            maxSkewRatio: 1e18,
+            maintMarginBps: 10,
+            initMarginBps: ((10) * 15) / 10,
+            fadMarginBps: 300,
+            baseCarryBps: 500,
+            minBountyUsdc: 5e6,
+            bountyBps: 10
+        });
+    }
+
+    function _initialJuniorDeposit() internal pure override returns (uint256) {
+        return 150_500e6;
+    }
+
+    function test_F8_LiquidationThatCreatesInsolvencyMustLatchDegradedMode() public {
+        address winnerAccount = winner;
+        address loserAccount = loser;
+
+        _fundTrader(winner, 100_000e6);
+        _fundTrader(loser, 2000e6);
+
+        _open(winnerAccount, CfdTypes.Side.BULL, 100_000e18, 100_000e6, 1.5e8);
+        _open(loserAccount, CfdTypes.Side.BEAR, 100_000e18, 2000e6, 0.5e8);
+
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), 20_000e6);
+
+        uint256 depth = pool.totalAssets();
+        vm.prank(address(router));
+        engine.liquidatePosition(loserAccount, 0.1e8, depth, uint64(block.timestamp), address(this));
+
+        assertTrue(
+            engine.degradedMode(),
+            "Liquidations that push effective assets below max liability must latch degraded mode"
+        );
+    }
+
+}

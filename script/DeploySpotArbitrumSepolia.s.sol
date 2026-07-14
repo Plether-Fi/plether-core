@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.35;
 
-import {IPyth} from "../src/interfaces/IPyth.sol";
-import {PythAdapter} from "../src/oracles/PythAdapter.sol";
 import {IMorphoOwner, ZeroRateIrm} from "./DeployToSepolia.s.sol";
 import {DeployToTest, IMintableERC20} from "./DeployToTest.s.sol";
 import {MockTwocryptoPool} from "./mocks/MockTwocryptoPool.s.sol";
+import {IPyth} from "@plether/shared/interfaces/IPyth.sol";
+import {PythAdapter} from "@plether/spot/oracles/PythAdapter.sol";
 import "forge-std/console.sol";
 
 /**

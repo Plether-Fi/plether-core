@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.35;
 
-import {BullLeverageRouter} from "../../src/BullLeverageRouter.sol";
-import {LeverageRouter} from "../../src/LeverageRouter.sol";
-import {StakedToken} from "../../src/StakedToken.sol";
-import {IMorpho, MarketParams} from "../../src/interfaces/IMorpho.sol";
-import {MorphoOracle} from "../../src/oracles/MorphoOracle.sol";
 import {BaseForkTest, MockCurvePoolForOracle} from "./BaseForkTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IMorpho, MarketParams} from "@plether/shared/interfaces/IMorpho.sol";
+import {MorphoOracle} from "@plether/spot/oracles/MorphoOracle.sol";
+import {BullLeverageRouter} from "@plether/spot/routers/BullLeverageRouter.sol";
+import {LeverageRouter} from "@plether/spot/routers/LeverageRouter.sol";
+import {StakedToken} from "@plether/spot/staking/StakedToken.sol";
 import "forge-std/Test.sol";
 
 /// @title LeverageRouter Fork Tests

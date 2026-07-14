@@ -1,25 +1,30 @@
-# Plether Test Suite
+# Plether Integration Test Suite
 
-Multi-layered testing infrastructure using Foundry. 985 tests across unit, fuzz, invariant, and mainnet fork layers.
+Package-owned unit, fuzz, invariant, and security tests live beside their contracts under `packages/*/test`. This root
+directory contains cross-package compatibility, deployment-script, and mainnet fork tests.
 
 ## Running Tests
 
 ```bash
-forge test                    # All tests
-forge test -vvv               # Verbose output
-forge test --match-test "test_FunctionName"      # Single test
-forge test --match-path "test/ZapRouter.t.sol"   # Single file
+make test                                      # Package tests plus root integration tests
+make test-packages                             # Spot, options, and perps tests
+make test-spot                                 # One package
+forge test --root packages/spot --match-test "test_FunctionName"
+forge test --root packages/spot --match-path "test/ZapRouter.t.sol"
+forge test --no-match-path "test/fork/*"        # Root compatibility and script tests
 
 # Fork tests (require MAINNET_RPC_URL in .env)
-(source .env && forge test --match-path "test/fork/*" --fork-url $MAINNET_RPC_URL -vvv)
+(source .env && forge test --match-path "test/fork/*" \
+  --no-match-path "test/fork/PythRealUpdateFork.t.sol" \
+  --fork-url "$MAINNET_RPC_URL" -vvv)
 
-# Gas snapshot (excludes fork/fuzz/invariant)
-forge snapshot --no-match-path "test/fork/*" --no-match-test "testFuzz_|invariant_"
+# Package gas snapshot (excludes fuzz/invariant)
+forge snapshot --root packages/spot --no-match-test "testFuzz_|invariant_"
 ```
 
 ## Test Structure
 
-### Unit Tests (`test/*.t.sol`)
+### Spot Tests (`packages/spot/test/*.t.sol`)
 
 Core contract logic using mock contracts. No network dependency.
 
@@ -47,17 +52,23 @@ Core contract logic using mock contracts. No network dependency.
 | `Integration.t.sol` | Cross-contract flows | 11 |
 | `oracles/PythAdapter.t.sol` | Pyth oracle adapter | 29 |
 
-### Options Tests (`test/options/*.t.sol`)
+### Options Tests (`packages/options/test/options/*.t.sol`)
 
 | File | Contract | Tests |
 |------|----------|-------|
+| `DOVZapRouter.t.sol` | Single-sided DOV entry | 12 |
 | `MarginEngine.t.sol` | Margin accounting | 60 |
-| `PletherDOV.t.sol` | DOV vault | 46 |
+| `PletherDOV.t.sol` | DOV vault | 75 |
 | `SettlementOracle.t.sol` | Option settlement | 22 |
 | `OptionToken.t.sol` | Option ERC20 | 19 |
-| `PletherDOVIntegration.t.sol` | End-to-end DOV | 3 |
+| `PletherDOVIntegration.t.sol` | End-to-end DOV | 7 |
 
-### Invariant Tests (`test/*Invariant.t.sol`)
+### Perps Tests (`packages/perps/test/perps/`)
+
+Perps unit, regression, fuzz, audit-history, and stateful invariant suites are fully package-owned. See the perps package
+[`README.md`](../packages/perps/README.md) and [`PRE_AUDIT_GUIDE.md`](../packages/perps/PRE_AUDIT_GUIDE.md) for the suite map.
+
+### Invariant Tests (`packages/*/test/**/*Invariant.t.sol`)
 
 Stateful fuzz tests that verify protocol-wide invariants hold across arbitrary action sequences.
 
@@ -73,9 +84,19 @@ Stateful fuzz tests that verify protocol-wide invariants hold across arbitrary a
 
 Mainnet fork tests against real Curve, Morpho, and Chainlink deployments. Require `MAINNET_RPC_URL` in `.env`.
 
+`PythRealUpdateFork.t.sol` is opt-in because it also needs a current Hermes update fixture. Fetch and load the fixture
+before running that file:
+
+```bash
+source .env
+source <(scripts/fetch-pyth-real-update-fixture.sh)
+forge test --match-path "test/fork/PythRealUpdateFork.t.sol" --fork-url "$MAINNET_RPC_URL" -vvv
+```
+
 | File | Coverage |
 |------|----------|
 | `InvarCoinFork.t.sol` | Real Curve LP deposit/withdraw/harvest |
+| `InvarCoinGaugeFork.t.sol` | Curve gauge staking, rewards, and recovery paths |
 | `InvarCoinManipulationFork.t.sol` | Flash loan and sandwich resistance |
 | `CurveCalcAccuracyFork.t.sol` | Curve calc_token_amount vs actual |
 | `LeverageRouterFork.t.sol` | BEAR + BULL leverage on real Morpho |
@@ -85,22 +106,25 @@ Mainnet fork tests against real Curve, Morpho, and Chainlink deployments. Requir
 | `SlippageReport.t.sol` | Slippage measurement across sizes |
 | `RewardDistributorFork.t.sol` | Yield distribution with real swaps |
 | `BasketOracleFork.t.sol` | Real Chainlink feeds + deviation checks |
+| `PythRealUpdateFork.t.sol` | Opt-in validation against a freshly fetched Hermes update |
 | `VaultAdapterFork.t.sol` | Real Morpho Vault integration |
+| `VaultAdapterV1V2.t.sol` | Adapter compatibility across Morpho Vault versions |
 | `ZapRouterFork.t.sol` | Zap against real Curve pool |
 | `DeployToAdapterFork.t.sol` | Adapter deployment lifecycle |
 | `FullCycleFork.t.sol` | End-to-end mint/stake/leverage/redeem |
 | `YieldIntegrationFork.t.sol` | Yield accrual over time |
 | `PermitFork.t.sol` | EIP-2612 permit on real USDC |
 | `OptionsForkTest.t.sol` | DOV with real oracle settlement |
+| `DOVZapRouterFork.t.sol` | Single-sided DOV entry against forked integrations |
+| `PerpsFork.t.sol` | Perps deployment and external-oracle integration |
 
-### Shared Utilities (`test/utils/`, `test/fork/BaseForkTest.sol`)
+### Shared Utilities
 
-- `MockYieldAdapter.sol` - No-yield ERC4626 adapter for unit tests
-- `MockAave.sol` - Aave pool mock
-- `MockUSDCPermit.sol` - USDC with EIP-2612 permit
-- `MockOracle.sol` - Configurable Chainlink oracle mock
-- `OptionsMocks.sol` / `OptionsTestSetup.sol` - Options test infrastructure
-- `BaseForkTest.sol` - Shared fork test base with mainnet contract addresses
+- `packages/shared/test-support/` - Product-neutral test doubles exposed as `@plether/test-utils/`
+- `packages/spot/test/{mocks,utils}/` - Spot-specific adapters, pools, and token doubles
+- `packages/options/test/utils/` - Options-specific permit, splitter, and setup fixtures
+- `packages/perps/test/` - Perps base fixtures, debug lens, and invariant handlers
+- `test/fork/BaseForkTest.sol` - Root fork-test base with mainnet contract addresses
 
 ## Test Guidelines
 

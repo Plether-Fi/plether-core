@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.35;
 
-import {AggregatorV3Interface} from "../../src/interfaces/AggregatorV3Interface.sol";
-import {OracleLib} from "../../src/libraries/OracleLib.sol";
-import {SettlementOracle} from "../../src/oracles/SettlementOracle.sol";
+import {SettlementOracle} from "@plether/options/oracles/SettlementOracle.sol";
+import {AggregatorV3Interface} from "@plether/shared/interfaces/AggregatorV3Interface.sol";
+import {OracleLib} from "@plether/shared/libraries/OracleLib.sol";
 import "forge-std/Test.sol";
 
 /// @notice Mock SEK/USD feed (no mainnet Chainlink feed available)

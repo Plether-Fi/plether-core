@@ -1,12 +1,19 @@
 [profile.default]
-src = "src"
+src = "integration/src"
 out = "out"
 libs = ["lib"]
+auto_detect_remappings = false
 
 # Remappings
 remappings = [
+    "@plether/shared/=packages/shared/src/",
+    "@plether/spot/=packages/spot/src/",
+    "@plether/options/=packages/options/src/",
+    "@plether/perps/=packages/perps/src/",
+    "@plether/test-utils/=packages/shared/test-support/",
     "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
     "@morpho-blue/=lib/morpho-blue/src/",
+    "forge-std/=lib/forge-std/src/",
 ]
 
 # Compiler settings
@@ -30,7 +37,7 @@ optimizer = false
 via_ir = true
 
 [profile.ci]
-src = "src"
+src = "integration/src"
 out = "out"
 libs = ["lib"]
 solc = "0.8.35"

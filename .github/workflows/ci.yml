@@ -23,20 +23,24 @@ jobs:
           version: v1.5.1
 
       - name: Check formatting
-        run: forge fmt --check
+        run: forge fmt --check packages test script
+
+      - name: Check package boundaries
+        run: bash scripts/check-package-boundaries.sh
 
       - name: Build
         run: forge build --sizes --skip test
 
-      - name: Run fuzz tests
-        run: forge test -vvv --match-test "testFuzz_|invariant_" --no-match-path "test/fork/*"
+      - name: Run integration and script tests
+        run: forge test --no-match-path "test/fork/*"
 
-      - name: Run tests
-        run: forge test --no-match-path "test/fork/*" --no-match-test "testFuzz_|invariant_"
-
-  coverage-core:
-    name: Coverage (core protocol)
+  package-test:
+    name: Package (${{ matrix.package }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [shared, spot, options, perps]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -47,14 +51,39 @@ jobs:
         with:
           version: v1.5.1
 
-      - name: Prepare coverage scope
-        run: bash scripts/prepare-coverage-scope.sh core
+      - name: Build package
+        run: forge build --sizes --skip test --skip script --root packages/${{ matrix.package }}
+
+      - name: Run package fuzz and invariant tests
+        if: matrix.package != 'shared'
+        run: forge test -vvv --root packages/${{ matrix.package }} --match-test "testFuzz_|invariant_"
+
+      - name: Run package tests
+        if: matrix.package != 'shared'
+        run: forge test --root packages/${{ matrix.package }} --no-match-test "testFuzz_|invariant_"
+
+  coverage-core:
+    name: Coverage (core protocol)
+    runs-on: ubuntu-latest
+    env:
+      FOUNDRY_SRC: packages/spot/src
+      FOUNDRY_TEST: packages/spot/test
+      FOUNDRY_SCRIPT: integration/src
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.5.1
 
       - name: Run coverage
-        run: bash scripts/run-with-heartbeat.sh forge coverage --ir-minimum --report lcov --no-match-test "testFuzz_|invariant_"
+        run: bash scripts/run-with-heartbeat.sh forge coverage --ir-minimum --report lcov --report-file "$GITHUB_WORKSPACE/lcov-core.raw.info" --no-match-test "testFuzz_|invariant_"
 
       - name: Filter coverage report
-        run: awk -v scope=core -f scripts/filter-lcov-by-scope.awk lcov.info > lcov-core.info
+        run: awk -v scope=spot -f scripts/filter-lcov-by-scope.awk lcov-core.raw.info > lcov-core.info
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
@@ -69,6 +98,9 @@ jobs:
   coverage-perps:
     name: Coverage (perps)
     runs-on: ubuntu-latest
+    env:
+      FOUNDRY_SRC: packages/perps/src
+      FOUNDRY_SCRIPT: integration/src
     steps:
       - uses: actions/checkout@v4
         with:
@@ -79,14 +111,11 @@ jobs:
         with:
           version: v1.5.1
 
-      - name: Prepare coverage scope
-        run: bash scripts/prepare-coverage-scope.sh perps
-
       - name: Run coverage
-        run: bash scripts/run-with-heartbeat.sh forge coverage --report lcov --match-path "test/perps/**/*.sol" --no-match-test "testFuzz_|invariant_|test_H01_UpdateMarkUsesPublishTime|test_GetTraderAccount_Withdrawable(Decreases|Drops)"
+        run: bash scripts/run-with-heartbeat.sh bash scripts/run-perps-coverage.sh --report lcov --report-file "$GITHUB_WORKSPACE/lcov-perps.raw.info" --no-match-test "testFuzz_|invariant_|test_H01_UpdateMarkUsesPublishTime|test_GetTraderAccount_Withdrawable(Decreases|Drops)"
 
       - name: Filter coverage report
-        run: awk -v scope=perps -f scripts/filter-lcov-by-scope.awk lcov.info > lcov-perps.info
+        run: awk -v scope=perps -f scripts/filter-lcov-by-scope.awk lcov-perps.raw.info > lcov-perps.info
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
@@ -101,6 +130,10 @@ jobs:
   coverage-options:
     name: Coverage (options)
     runs-on: ubuntu-latest
+    env:
+      FOUNDRY_SRC: packages/options/src
+      FOUNDRY_TEST: packages/options/test
+      FOUNDRY_SCRIPT: integration/src
     steps:
       - uses: actions/checkout@v4
         with:
@@ -111,14 +144,11 @@ jobs:
         with:
           version: v1.5.1
 
-      - name: Prepare coverage scope
-        run: bash scripts/prepare-coverage-scope.sh options
-
       - name: Run coverage
-        run: bash scripts/run-with-heartbeat.sh forge coverage --ir-minimum --report lcov --match-path "test/options/**/*.sol" --no-match-test "testFuzz_|invariant_"
+        run: bash scripts/run-with-heartbeat.sh forge coverage --ir-minimum --report lcov --report-file "$GITHUB_WORKSPACE/lcov-options.raw.info" --no-match-test "testFuzz_|invariant_"
 
       - name: Filter coverage report
-        run: awk -v scope=options -f scripts/filter-lcov-by-scope.awk lcov.info > lcov-options.info
+        run: awk -v scope=options -f scripts/filter-lcov-by-scope.awk lcov-options.raw.info > lcov-options.info
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
@@ -131,7 +161,12 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
 
   slither:
+    name: Slither (${{ matrix.package }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [shared, spot, options, perps]
     permissions:
       contents: read
       security-events: write
@@ -149,10 +184,17 @@ jobs:
         run: pip3 install slither-analyzer
 
       - name: Run Slither
-        run: slither src/ --config-file slither.config.json --sarif results.sarif || true
+        env:
+          FOUNDRY_SRC: packages/${{ matrix.package }}/src
+          FOUNDRY_TEST: integration/src
+          FOUNDRY_SCRIPT: integration/src
+        run: |
+          slither . --config-file slither.config.json --sarif results-${{ matrix.package }}.sarif || true
+          test -s results-${{ matrix.package }}.sarif
 
       - name: Upload SARIF file
         uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
-          sarif_file: results.sarif
+          sarif_file: results-${{ matrix.package }}.sarif
+          category: slither-${{ matrix.package }}
