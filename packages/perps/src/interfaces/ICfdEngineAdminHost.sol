@@ -6,12 +6,12 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 /// @notice Engine host surface called by the timelocked engine admin.
 interface ICfdEngineAdminHost {
 
-    /// @notice Risk parameters, execution fee, and frozen close VPI factor staged by governance.
+    /// @notice Risk parameters, execution fee, and frozen close spread staged by governance.
     struct EngineRiskConfig {
         CfdTypes.RiskParams riskParams;
         uint256 executionFeeBps;
-        /// @notice One-way VPI factor applied only to oracle-frozen close/reduce execution.
-        uint256 frozenCloseVpiFactor;
+        /// @notice Fixed LP-owned spread charged only on oracle-frozen close/reduce notional, in basis points.
+        uint256 frozenCloseSpreadBps;
     }
 
     /// @notice FAD calendar override timestamps and deleverage runway.
@@ -26,7 +26,7 @@ interface ICfdEngineAdminHost {
         uint256 engineMarkStalenessLimit;
     }
 
-    /// @notice Applies finalized risk parameters, execution fee, and frozen close VPI factor.
+    /// @notice Applies finalized risk parameters, execution fee, and frozen close spread.
     /// @param config Risk configuration to apply
     function applyRiskConfig(
         EngineRiskConfig calldata config

@@ -28,8 +28,9 @@ The key rules are:
 2. Unrealized trader losses are not LP assets until they are physically realized.
 3. LP withdrawals are stricter than protocol solvency.
 4. Pending-order reservations are not free trader collateral.
-5. Realized shortfall must become either immediate seizure, trader claim liability, or bad debt.
+5. Realized trading-loss shortfall must become either immediate seizure, trader claim liability, or bad debt; a waived terminal frozen-close spread is an uncollected charge, not trading-loss bad debt.
 6. A valid risk-reducing transition must not revert just to preserve pre-close solvency; the protocol contains the outcome with `degradedMode` instead.
+7. Frozen-close spread value belongs to LPs and must never be credited to protocol treasury.
 
 ## Canonical Quantities
 
@@ -59,6 +60,14 @@ Operational rules:
 - `bearMaxProfit`: worst-case payout to all live BEAR positions at the opposite price extreme
 - `maxLiability = max(bullMaxProfit, bearMaxProfit)`
 - `badDebt`: realized shortfall that could not be covered by reachable account value or available settlement paths
+
+### Frozen-close spread terms
+
+- `frozenSpreadUsdc`: fixed spread assessed on the reduced position notional for a voluntary close/reduce while `oracleFrozen`
+- `frozenSpreadPaidUsdc`: assessed spread actually retained or collected as LP trading revenue
+- `frozenSpreadWaivedUsdc`: uncollectible assessed spread waived to let a terminal full close complete
+
+For a valid close plan, `frozenSpreadUsdc == frozenSpreadPaidUsdc + frozenSpreadWaivedUsdc`. All three values are zero for live and FAD-only closes. Liquidations never assess this spread.
 
 ### Conservative unrealized MtM
 
@@ -378,19 +387,25 @@ Close and liquidation should share the same economic assumptions wherever the qu
 
 ### Close settlement
 
+Every voluntary close uses the normal signed VPI curve and the lifetime rebate clamp. While `oracleFrozen`, the same VPI result is combined with an additional fixed spread on reduced notional. `frozenCloseSpreadBps` defaults to `50` bps (0.50%), is part of the 48-hour timelocked engine risk config, must be nonzero, and is hard-capped at `1,000` bps (10%). The spread is independent of Pyth confidence adjustment and is allocated exclusively to LPs.
+
 When a close realizes a loss:
 
 1. seize what is immediately collectible from reachable trader-owned value,
 2. if this is a full close, same-account committed reservations may also be consumed through the clearinghouse reservation path before bad debt is recorded,
-3. if this is a partial close and the realized loss would invade the backing of the surviving residual position, revert the partial close,
-4. any intentional uncovered shortfall becomes explicit bad debt.
+3. allocate collected close value according to settlement priority, with the frozen-close spread junior to the base close obligation,
+4. if this is a partial close and any obligation remains unsettled, revert the partial close,
+5. if this is a full close, waive any still-uncollectible frozen-close spread rather than converting it into bad debt,
+6. record any remaining uncovered base trading-loss shortfall as explicit bad debt.
 
 Required properties:
 
 - a user must not partially close, externalize realized losses to LPs, and keep a protected residual alive,
 - a user must not shield otherwise reachable settlement by parking it in queued committed margin right before terminal settlement,
 - carry-adjusted close loss must be planned once and consumed live from that same canonical loss amount,
-- preview and live close paths should share one close-accounting kernel.
+- retained, cash-collected, or same-account-claim-recovered frozen spread becomes LP revenue and never treasury margin,
+- assessed spread must equal paid spread plus waived spread,
+- preview and live close paths should share one close-accounting kernel and expose the same assessed/paid/waived result; successful nonzero assessments emit `FrozenCloseSpreadSettled`.
 
 ### Open projection
 
@@ -403,6 +418,7 @@ Required properties:
 - `MarginClearinghouse.balanceUsdc(CfdEngine.protocolTreasury())` reports the configured treasury account balance,
 - only cash-collected fees and free-cash-funded top-ups become treasury margin,
 - uncredited fee amounts are not withdrawable protocol inventory in the simplified treasury-margin model,
+- frozen-close spread is LP-owned trading revenue and never becomes treasury margin,
 - withdrawing treasury margin must not consume `HousePool` cash, trader claims, or LP withdrawal reserves.
 
 ### Liquidation settlement
@@ -427,6 +443,7 @@ Required property:
 - liquidation eligibility, bounty caps, and residual planning must use carry-adjusted equity,
 - negative accrued VPI must reduce liquidation equity before keeper-bounty and residual planning,
 - any bounty paid above positive equity must flow through the normal residual shortfall and bad-debt accounting,
+- liquidation does not assess `frozenCloseSpreadBps`, including while `oracleFrozen`,
 - preview and live liquidation should share the same liquidation-accounting kernel.
 
 ### Three-bucket liquidation residual accounting
@@ -481,13 +498,17 @@ Freshness policy is action-specific.
 
 - in live markets, require fresh oracle data under the close execution rule,
 - stale data is a keeper/oracle failure rather than a user failure,
-- frozen-oracle windows use the dedicated frozen-market policy, including relaxed cross-feed publish-time divergence up to the frozen staleness window.
-- during `oracleFrozen`, close/reduce VPI is a one-way LP-protection surcharge using `frozenCloseVpiFactor`; FAD-only live closes continue to use normal signed VPI and the lifetime rebate clamp.
+- frozen-oracle windows use the dedicated frozen-market policy, including relaxed cross-feed publish-time divergence up to the frozen staleness window,
+- normal signed VPI and the lifetime rebate clamp apply to voluntary close/reduce execution in every regime,
+- during `oracleFrozen` only, voluntary closes also assess the fixed LP-owned `frozenCloseSpreadBps` against reduced notional,
+- live and FAD-only closes assess no frozen-close spread; Pyth adverse-confidence pricing remains a separate mark adjustment,
+- a terminal full close may waive uncollectible spread without creating bad debt, while a partial close must settle the full obligation.
 
 ### Liquidations
 
 - use a stricter live-market freshness rule,
-- may use relaxed FAD/frozen policy only where explicitly intended.
+- may use relaxed FAD/frozen policy only where explicitly intended,
+- do not assess the voluntary frozen-close spread.
 
 ### LP accounting actions
 

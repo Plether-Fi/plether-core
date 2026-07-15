@@ -173,23 +173,14 @@ library CfdEnginePlanLib {
         return postBullUsdc > postBearUsdc ? postBullUsdc - postBearUsdc : postBearUsdc - postBullUsdc;
     }
 
-    function _signedSkewUsdc(
-        uint256 bullOi,
-        uint256 bearOi,
-        uint256 price
-    ) private pure returns (int256 signedSkewUsdc) {
-        uint256 bullUsdc = (bullOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        uint256 bearUsdc = (bearOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        signedSkewUsdc = int256(bullUsdc) - int256(bearUsdc);
-    }
-
-    function _absSignedSkewUsdc(
+    function _skewUsdc(
         uint256 bullOi,
         uint256 bearOi,
         uint256 price
     ) private pure returns (uint256) {
-        int256 signedSkewUsdc = _signedSkewUsdc(bullOi, bearOi, price);
-        return signedSkewUsdc < 0 ? uint256(-signedSkewUsdc) : uint256(signedSkewUsdc);
+        uint256 bullUsdc = (bullOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
+        uint256 bearUsdc = (bearOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
+        return bullUsdc > bearUsdc ? bullUsdc - bearUsdc : bearUsdc - bullUsdc;
     }
 
     function _planTraderClaimConsumption(
@@ -212,7 +203,8 @@ library CfdEnginePlanLib {
 
     function _planCloseTraderClaimConsumption(
         uint256 traderClaimBalanceUsdc,
-        CfdEngineSettlementLib.CloseSettlementResult memory lossResult
+        CfdEngineSettlementLib.CloseSettlementResult memory lossResult,
+        uint256 executionFeeUsdc
     )
         private
         pure
@@ -226,11 +218,13 @@ library CfdEnginePlanLib {
             traderClaimBalanceUsdc < lossResult.shortfallUsdc ? traderClaimBalanceUsdc : lossResult.shortfallUsdc;
         remainingUsdc = traderClaimBalanceUsdc - consumedUsdc;
 
-        uint256 feeShortfallUsdc =
-            lossResult.shortfallUsdc > lossResult.badDebtUsdc ? lossResult.shortfallUsdc - lossResult.badDebtUsdc : 0;
-        feeRecoveredUsdc = consumedUsdc < feeShortfallUsdc ? consumedUsdc : feeShortfallUsdc;
+        uint256 uncollectedExecFeeUsdc =
+            executionFeeUsdc - lossResult.retainedExecFeeUsdc - lossResult.collectedExecFeeUsdc;
+        feeRecoveredUsdc = consumedUsdc < uncollectedExecFeeUsdc ? consumedUsdc : uncollectedExecFeeUsdc;
 
-        uint256 badDebtRecoveredUsdc = consumedUsdc - feeRecoveredUsdc;
+        uint256 recoveryRemainingUsdc = consumedUsdc - feeRecoveredUsdc;
+        uint256 badDebtRecoveredUsdc =
+            recoveryRemainingUsdc < lossResult.badDebtUsdc ? recoveryRemainingUsdc : lossResult.badDebtUsdc;
         badDebtUsdc = lossResult.badDebtUsdc > badDebtRecoveredUsdc ? lossResult.badDebtUsdc - badDebtRecoveredUsdc : 0;
     }
 
@@ -549,6 +543,10 @@ library CfdEnginePlanLib {
             if (delta.revertCode != CfdEnginePlanTypes.CloseRevertCode.OK) {
                 return delta;
             }
+        } else {
+            delta.protocolFeeTopUpUsdc = delta.executionFeeUsdc < availableCashForFreshPayouts
+                ? delta.executionFeeUsdc
+                : availableCashForFreshPayouts;
         }
 
         delta.totalMarginAfterClose = delta.totalMarginBefore
@@ -584,7 +582,7 @@ library CfdEnginePlanLib {
         uint256 postBearOi
     ) private pure returns (CloseAccountingLib.CloseState memory) {
         uint256 preSkewUsdc = _absSkewUsdc(snap.bullSide, snap.bearSide, price);
-        uint256 postSkewUsdc = _absSignedSkewUsdc(postBullOi, postBearOi, price);
+        uint256 postSkewUsdc = _skewUsdc(postBullOi, postBearOi, price);
         return CloseAccountingLib.buildCloseState(
             CloseAccountingLib.CloseInputs({
                 position: pos,
@@ -593,11 +591,9 @@ library CfdEnginePlanLib {
                 capPrice: snap.capPrice,
                 preSkewUsdc: preSkewUsdc,
                 postSkewUsdc: postSkewUsdc,
-                preSignedSkewUsdc: _signedSkewUsdc(snap.bullSide.openInterest, snap.bearSide.openInterest, price),
-                postSignedSkewUsdc: _signedSkewUsdc(postBullOi, postBearOi, price),
                 poolDepthUsdc: snap.poolAssetsUsdc,
                 vpiFactor: snap.riskParams.vpiFactor,
-                frozenCloseVpiFactor: snap.frozenCloseVpiFactor,
+                frozenCloseSpreadBps: snap.frozenCloseSpreadBps,
                 oracleFrozen: snap.oracleFrozen,
                 executionFeeBps: snap.executionFeeBps
             })
@@ -621,7 +617,7 @@ library CfdEnginePlanLib {
         delta.lossConsumption =
             MarginClearinghouseAccountingLib.planTerminalLossConsumption(closeBuckets, remainingMarginUsdc, lossUsdc);
         delta.lossResult = CfdEngineSettlementLib.closeSettlementResult(
-            delta.lossConsumption.totalConsumedUsdc, lossUsdc, executionFeeUsdc
+            delta.lossConsumption.totalConsumedUsdc, lossUsdc, executionFeeUsdc, delta.closeState.frozenSpreadUsdc
         );
         delta.syncMarginQueueAmount = delta.lossConsumption.otherLockedMarginConsumedUsdc;
         (
@@ -629,7 +625,7 @@ library CfdEnginePlanLib {
             delta.existingTraderClaimRemainingUsdc,
             delta.traderClaimFeeRecoveryUsdc,
             delta.badDebtUsdc
-        ) = _planCloseTraderClaimConsumption(snap.traderClaimBalanceForAccount, delta.lossResult);
+        ) = _planCloseTraderClaimConsumption(snap.traderClaimBalanceForAccount, delta.lossResult, executionFeeUsdc);
         delta.executionFeeUsdc = delta.lossResult.collectedExecFeeUsdc + delta.traderClaimFeeRecoveryUsdc
             + delta.lossResult.retainedExecFeeUsdc;
         delta.protocolFeeTopUpUsdc = _closeLossProtocolFeeTopUpUsdc(snap, delta);

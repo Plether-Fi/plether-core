@@ -135,7 +135,7 @@ contract PythRealUpdateForkTest is Test {
         });
 
         clearinghouse = new MarginClearinghouse(USDC);
-        engine = new CfdEngine(USDC, address(clearinghouse), CAP_PRICE, params, 0.005e18);
+        engine = new CfdEngine(USDC, address(clearinghouse), CAP_PRICE, params, 50);
         CfdEnginePlanner planner = new CfdEnginePlanner();
         CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(engine));
         CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));

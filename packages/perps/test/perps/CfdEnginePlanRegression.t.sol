@@ -34,8 +34,8 @@ contract CfdEnginePlanHarness is CfdEngine {
         address clearinghouse,
         uint256 capPrice,
         CfdTypes.RiskParams memory params,
-        uint256 frozenCloseVpiFactor
-    ) CfdEngine(usdc, clearinghouse, capPrice, params, frozenCloseVpiFactor) {}
+        uint256 frozenCloseSpreadBps
+    ) CfdEngine(usdc, clearinghouse, capPrice, params, frozenCloseSpreadBps) {}
 
     function previewOpenPlan(
         CfdTypes.Order memory order,
@@ -96,7 +96,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         clearinghouse = new MarginClearinghouse(address(usdc));
 
         engine = new CfdEnginePlanHarness(
-            address(usdc), address(clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_VPI_FACTOR
+            address(usdc), address(clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_SPREAD_BPS
         );
         planner = new CfdEnginePlanner();
         CfdEngineSettlementSidecar settlementSidecar = new CfdEngineSettlementSidecar(address(engine));
@@ -210,7 +210,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
 
     function test_CloseSettlementResult_FeeOffsetSeparatesRetainedFee() public pure {
         CfdEngineSettlementLib.CloseSettlementResult memory result =
-            CfdEngineSettlementLib.closeSettlementResult(2e6, 2e6, 10e6);
+            CfdEngineSettlementLib.closeSettlementResult(2e6, 2e6, 10e6, 0);
 
         assertEq(result.seizedUsdc, 2e6, "Covered net close debit should be seized");
         assertEq(result.shortfallUsdc, 0, "Covered net close debit should have no shortfall");
@@ -221,7 +221,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
 
     function test_CloseSettlementResult_UnderfundedLossKeepsProtocolFeeSenior() public pure {
         CfdEngineSettlementLib.CloseSettlementResult memory result =
-            CfdEngineSettlementLib.closeSettlementResult(45e6, 50e6, 10e6);
+            CfdEngineSettlementLib.closeSettlementResult(45e6, 50e6, 10e6, 0);
 
         assertEq(result.seizedUsdc, 45e6, "Available close collateral should be seized");
         assertEq(result.shortfallUsdc, 5e6, "Uncovered close debit should remain shortfall");
@@ -232,13 +232,33 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
 
     function test_CloseSettlementResult_DeepShortfallDoesNotTopUpUnpaidFee() public pure {
         CfdEngineSettlementLib.CloseSettlementResult memory result =
-            CfdEngineSettlementLib.closeSettlementResult(5e6, 50e6, 10e6);
+            CfdEngineSettlementLib.closeSettlementResult(5e6, 50e6, 10e6, 0);
 
         assertEq(result.seizedUsdc, 5e6, "Only available close collateral should be seized");
         assertEq(result.shortfallUsdc, 45e6, "Uncovered close debit should remain shortfall");
         assertEq(result.collectedExecFeeUsdc, 5e6, "Cash-collected fee should be bounded by seized cash");
         assertEq(result.retainedExecFeeUsdc, 0, "Missing margin is not retained trader profit");
         assertEq(result.badDebtUsdc, 40e6, "Only the non-fee shortfall should become LP bad debt");
+    }
+
+    function test_CloseSettlementResult_FrozenSpreadIsJuniorToFeeAndBaseDebt() public pure {
+        CfdEngineSettlementLib.CloseSettlementResult memory result =
+            CfdEngineSettlementLib.closeSettlementResult(45e6, 50e6, 10e6, 8e6);
+
+        assertEq(result.seizedUsdc, 45e6, "Available close collateral should be seized");
+        assertEq(result.shortfallUsdc, 5e6, "Only the junior frozen spread should remain uncollected");
+        assertEq(result.collectedExecFeeUsdc, 10e6, "Protocol fee should be senior");
+        assertEq(result.badDebtUsdc, 0, "Base close debt should be paid before the frozen spread");
+    }
+
+    function test_CloseSettlementResult_RetainedSpreadConservesAssessment() public pure {
+        CfdEngineSettlementLib.CloseSettlementResult memory result =
+            CfdEngineSettlementLib.closeSettlementResult(5e6, 5e6, 10e6, 8e6);
+
+        assertEq(result.retainedExecFeeUsdc, 10e6, "Profit offset should retain the full execution fee");
+        assertEq(result.seizedUsdc, 5e6, "Net close debit should collect the residual spread");
+        assertEq(result.shortfallUsdc, 0, "Retained and cash-collected value should settle the full spread");
+        assertEq(result.badDebtUsdc, 0, "Spread accounting should not create base bad debt");
     }
 
     function test_CloseLoss_FeeOffsetTopUpMatchesRetainedTraderProfit() public {
@@ -279,6 +299,40 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             poolAssetsBefore - pool.totalAssets(),
             profitUsdc,
             "Pool should pass through the trader profit it retained against the fee"
+        );
+    }
+
+    function test_OracleFrozenZeroSettlement_CreditsFeeAndRetainsSpreadForLps() public {
+        address account = address(0xFEE000);
+        uint256 size = 5000e18;
+        uint256 openPrice = 100_540_000;
+        uint256 closePrice = 100_000_000;
+
+        vm.warp(1_709_985_600);
+        _fundTrader(account, 200e6);
+        _open(account, CfdTypes.Side.BULL, size, 100e6, openPrice);
+
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, size, closePrice);
+        assertTrue(preview.valid, "Exact-zero frozen close should be valid");
+        assertEq(preview.realizedPnlUsdc, int256(27e6), "Price profit should exactly offset close charges");
+        assertEq(preview.executionFeeUsdc, 2e6, "Close should assess the normal execution fee");
+        assertEq(preview.frozenSpreadUsdc, 25e6, "Close should assess the fixed LP-owned spread");
+        assertEq(preview.freshTraderPayoutUsdc, 0, "Exact-zero settlement should not create a payout");
+        assertEq(preview.seizedCollateralUsdc, 0, "Exact-zero settlement should not seize collateral");
+
+        uint256 treasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 poolAssetsBefore = pool.totalAssets();
+        _close(account, CfdTypes.Side.BULL, size, closePrice);
+
+        assertEq(
+            clearinghouse.balanceUsdc(engine.protocolTreasury()) - treasuryBefore,
+            preview.executionFeeUsdc,
+            "Exact-zero settlement should credit the full execution fee to treasury"
+        );
+        assertEq(
+            poolAssetsBefore - pool.totalAssets(),
+            preview.executionFeeUsdc,
+            "Only the protocol fee should leave LP cash; the frozen spread remains LP-owned"
         );
     }
 

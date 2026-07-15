@@ -109,7 +109,7 @@ abstract contract BasePerpInvariantTest is Test {
     function _deployEngine(
         CfdTypes.RiskParams memory riskParams_
     ) internal returns (CfdEngine deployedEngine) {
-        deployedEngine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, riskParams_, 0.005e18);
+        deployedEngine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, riskParams_, 50);
         CfdEnginePlanner planner = new CfdEnginePlanner();
         CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(deployedEngine));
         CfdEngineAdmin deployedEngineAdmin = new CfdEngineAdmin(address(deployedEngine), address(this));

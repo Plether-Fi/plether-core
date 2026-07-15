@@ -186,7 +186,7 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
         mockPyth = new MockPyth();
 
         clearinghouse = new MarginClearinghouse(address(usdc));
-        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams(), 0.005e18);
+        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams(), 50);
         CfdEnginePlanner planner = new CfdEnginePlanner();
         CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(engine));
         CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));

@@ -97,7 +97,7 @@ abstract contract BasePerpTest is Test {
     /// @dev Monday 2024-03-04 10:00 UTC. Avoids FAD window.
     uint256 constant SETUP_TIMESTAMP = 1_709_532_000;
     uint256 constant CAP_PRICE = 2e8;
-    uint256 constant FROZEN_CLOSE_VPI_FACTOR = 0.005e18;
+    uint256 constant FROZEN_CLOSE_SPREAD_BPS = 50;
     bytes32 internal constant BASE_PYTH_FEED_A = bytes32(uint256(1));
     bytes32 internal constant BASE_PYTH_FEED_B = bytes32(uint256(2));
     address internal constant PROTOCOL_TREASURY_ACCOUNT = address(0xFEE50001);
@@ -521,6 +521,11 @@ abstract contract BasePerpTest is Test {
         assertEq(actual.vpiDeltaUsdc, expected.vpiDeltaUsdc, "Close VPI delta should match");
         assertEq(actual.vpiUsdc, expected.vpiUsdc, "Close VPI should match");
         assertEq(actual.executionFeeUsdc, expected.executionFeeUsdc, "Close execution fee should match");
+        assertEq(actual.frozenSpreadUsdc, expected.frozenSpreadUsdc, "Close assessed frozen spread should match");
+        assertEq(actual.frozenSpreadPaidUsdc, expected.frozenSpreadPaidUsdc, "Close paid frozen spread should match");
+        assertEq(
+            actual.frozenSpreadWaivedUsdc, expected.frozenSpreadWaivedUsdc, "Close waived frozen spread should match"
+        );
         assertEq(actual.freshTraderPayoutUsdc, expected.freshTraderPayoutUsdc, "Close fresh payout should match");
         assertEq(
             actual.existingTraderClaimConsumedUsdc,
@@ -708,7 +713,7 @@ abstract contract BasePerpTest is Test {
             config.riskParams.minBountyUsdc,
             config.riskParams.bountyBps
         ) = engine.riskParams();
-        config.frozenCloseVpiFactor = engine.frozenCloseVpiFactor();
+        config.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
         config.executionFeeBps = engine.executionFeeBps();
     }
 
@@ -727,8 +732,7 @@ abstract contract BasePerpTest is Test {
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = params;
         config.executionFeeBps = engine.executionFeeBps();
-        config.frozenCloseVpiFactor =
-            engine.frozenCloseVpiFactor() > params.vpiFactor ? engine.frozenCloseVpiFactor() : params.vpiFactor;
+        config.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
         engineAdmin.proposeRiskConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
         engineAdmin.finalizeRiskConfig();
@@ -783,9 +787,8 @@ abstract contract BasePerpTest is Test {
     function _deployEngine(
         CfdTypes.RiskParams memory riskParams_
     ) internal returns (CfdEngine deployedEngine) {
-        deployedEngine = new CfdEngine(
-            address(usdc), address(clearinghouse), CAP_PRICE, riskParams_, _frozenCloseVpiFactor(riskParams_)
-        );
+        deployedEngine =
+            new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, riskParams_, _frozenCloseSpreadBps());
         CfdEnginePlanner planner = new CfdEnginePlanner();
         CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(deployedEngine));
         CfdEngineAdmin adminModule = new CfdEngineAdmin(address(deployedEngine), address(this));
@@ -793,10 +796,8 @@ abstract contract BasePerpTest is Test {
         deployedEngine.setProtocolTreasury(PROTOCOL_TREASURY_ACCOUNT);
     }
 
-    function _frozenCloseVpiFactor(
-        CfdTypes.RiskParams memory riskParams_
-    ) internal pure virtual returns (uint256) {
-        return riskParams_.vpiFactor > FROZEN_CLOSE_VPI_FACTOR ? riskParams_.vpiFactor : FROZEN_CLOSE_VPI_FACTOR;
+    function _frozenCloseSpreadBps() internal pure virtual returns (uint256) {
+        return FROZEN_CLOSE_SPREAD_BPS;
     }
 
     function _syncRouterAdmin() internal {

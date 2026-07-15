@@ -12,6 +12,7 @@ interface ICfdEngineTypes {
     error CfdEngine__RouterAlreadySet();
     error CfdEngine__DependenciesAlreadySet();
     error CfdEngine__InvalidSettlementSidecar();
+    error CfdEngine__InvalidAdmin();
     error CfdEngine__ProtocolTreasuryBalanceNotEmpty();
     error CfdEngine__NoTraderClaim();
     error CfdEngine__InsufficientPoolLiquidity();
@@ -140,6 +141,10 @@ interface ICfdEngineTypes {
         bool postOpDegradedMode;
         uint256 effectiveAssetsAfterUsdc;
         uint256 maxLiabilityAfterUsdc;
+        // Append-only fields preserve every pre-existing ABI tuple offset for legacy clients.
+        uint256 frozenSpreadUsdc;
+        uint256 frozenSpreadPaidUsdc;
+        uint256 frozenSpreadWaivedUsdc;
     }
 
     /// @notice Read-only open/increase trade-ticket preview.

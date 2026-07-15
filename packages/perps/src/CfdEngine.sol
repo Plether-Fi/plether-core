@@ -84,8 +84,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     uint256 public fadRunwaySeconds = 1 hours;
     uint256 public engineMarkStalenessLimit = 60;
     uint256 public executionFeeBps = 4;
-    /// @notice One-way VPI surcharge factor for close/reduce execution while the oracle is frozen.
-    uint256 public frozenCloseVpiFactor;
+    uint256 internal constant MAX_FROZEN_CLOSE_SPREAD_BPS = 1000;
+    /// @notice Fixed LP-owned spread charged on oracle-frozen close/reduce notional, in basis points.
+    uint256 public frozenCloseSpreadBps;
 
     event ProtocolTreasuryUpdated(address indexed treasury);
 
@@ -215,13 +216,13 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     /// @param _clearinghouse Margin clearinghouse that custodies trader balances
     /// @param _capPrice Maximum oracle price — positions are clamped here (also determines BULL max profit)
     /// @param _riskParams Initial risk parameters (margin requirements, carry rate, bounty config)
-    /// @param _frozenCloseVpiFactor Initial one-way VPI factor for oracle-frozen close/reduce execution
+    /// @param _frozenCloseSpreadBps Initial fixed LP-owned spread for oracle-frozen close/reduce execution
     constructor(
         address _usdc,
         address _clearinghouse,
         uint256 _capPrice,
         CfdTypes.RiskParams memory _riskParams,
-        uint256 _frozenCloseVpiFactor
+        uint256 _frozenCloseSpreadBps
     ) Ownable(msg.sender) {
         if (_usdc == address(0) || _clearinghouse == address(0)) {
             revert CfdEngine__ZeroAddress();
@@ -247,14 +248,14 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         if (_riskParams.maxSkewRatio > CfdMath.WAD) {
             revert CfdEngine__InvalidRiskParams();
         }
-        if (_frozenCloseVpiFactor < _riskParams.vpiFactor) {
+        if (_frozenCloseSpreadBps == 0 || _frozenCloseSpreadBps > MAX_FROZEN_CLOSE_SPREAD_BPS) {
             revert CfdEngine__InvalidRiskParams();
         }
         USDC = IERC20(_usdc);
         clearinghouse = IMarginClearinghouse(_clearinghouse);
         CAP_PRICE = _capPrice;
         riskParams = _riskParams;
-        frozenCloseVpiFactor = _frozenCloseVpiFactor;
+        frozenCloseSpreadBps = _frozenCloseSpreadBps;
         protocolTreasury = msg.sender;
     }
 
@@ -282,6 +283,16 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
             }
         } catch {
             revert CfdEngine__InvalidSettlementSidecar();
+        }
+        bool adminBound;
+        // Compact staticcall keeps the engine deployable while validating the admin's `engine()` binding.
+        assembly ("memory-safe") {
+            mstore(0, shl(224, 0xc9d4623f))
+            let success := staticcall(gas(), admin_, 0, 4, 0, 32)
+            adminBound := and(and(success, eq(returndatasize(), 32)), eq(mload(0), address()))
+        }
+        if (!adminBound) {
+            revert CfdEngine__InvalidAdmin();
         }
         planner = ICfdEnginePlanner(planner_);
         settlementSidecar = ICfdEngineSettlementSidecar(settlementSidecar_);
@@ -584,19 +595,15 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     /// @notice Applies finalized risk parameters from the timelocked engine admin.
-    /// @param config Risk parameter, execution-fee, and frozen close VPI configuration to apply
+    /// @param config Risk parameter, execution-fee, and frozen close spread configuration to apply
     function applyRiskConfig(
         ICfdEngineAdminHost.EngineRiskConfig calldata config
     ) external onlyAdmin {
-        uint256 executionFeeBps_ = config.executionFeeBps;
-        uint256 frozenCloseVpiFactor_ = config.frozenCloseVpiFactor;
-        if (executionFeeBps_ == 0 || executionFeeBps_ > 10_000 || frozenCloseVpiFactor_ < config.riskParams.vpiFactor) {
-            revert CfdEngine__InvalidRiskParams();
-        }
+        // CfdEngineAdmin is the sole caller and validates the staged configuration before finalization.
         _advanceAllCarryIndexes(block.timestamp);
         riskParams = config.riskParams;
-        executionFeeBps = executionFeeBps_;
-        frozenCloseVpiFactor = frozenCloseVpiFactor_;
+        executionFeeBps = config.executionFeeBps;
+        frozenCloseSpreadBps = config.frozenCloseSpreadBps;
     }
 
     /// @notice Applies finalized FAD calendar overrides from the timelocked engine admin.
@@ -604,9 +611,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     function applyCalendarConfig(
         ICfdEngineAdminHost.EngineCalendarConfig calldata config
     ) external onlyAdmin {
-        if (config.fadRunwaySeconds > 24 hours) {
-            revert CfdEngine__RunwayTooLong();
-        }
         uint256 oldLength = _fadOverrideDays.length;
         for (uint256 i; i < oldLength; i++) {
             uint256 day = _fadOverrideDays[i];
@@ -628,9 +632,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     function applyFreshnessConfig(
         ICfdEngineAdminHost.EngineFreshnessConfig calldata config
     ) external onlyAdmin {
-        if (config.fadMaxStaleness == 0 || config.engineMarkStalenessLimit == 0) {
-            revert CfdEngine__ZeroStaleness();
-        }
         fadMaxStaleness = config.fadMaxStaleness;
         engineMarkStalenessLimit = config.engineMarkStalenessLimit;
     }
@@ -675,8 +676,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
                 pos, price, CAP_PRICE, pendingCarryUsdc, reachableUsdc, effectiveMarginBps
             );
 
-        uint256 initialMarginRequirementUsdc = (riskState.currentNotionalUsdc * effectiveMarginBps) / 10_000;
-        if (riskState.equityUsdc < int256(initialMarginRequirementUsdc) || riskState.liquidatable) {
+        if (riskState.liquidatable) {
             revert CfdEngine__WithdrawBlockedByOpenPosition();
         }
     }
@@ -1013,7 +1013,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         snap.riskParams = riskParams;
         snap.executionFeeBps = executionFeeBps;
         (snap.isFadWindow, snap.oracleFrozen) = _marketStatus();
-        snap.frozenCloseVpiFactor = frozenCloseVpiFactor;
+        snap.frozenCloseSpreadBps = frozenCloseSpreadBps;
     }
 
     function _copySideSnapshot(

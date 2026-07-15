@@ -36,17 +36,19 @@ All perps contracts are non-upgradeable.
 The following parameter families are owner-controlled behind a 48-hour propose/finalize delay.
 Engine risk controls live in `CfdEngineAdmin`, and router risk controls live in `OrderRouterAdmin`, with each deployed admin contract applying finalized values onto its host contract:
 
-`CfdEngine` sidecars (`CfdEnginePlanner`, `CfdEngineSettlementSidecar`, `CfdEngineAdmin`) are now deployed separately and wired once via `setDependencies(...)`. That wiring is owner-only and one-time.
+`CfdEngine` sidecars (`CfdEnginePlanner`, `CfdEngineSettlementSidecar`, `CfdEngineAdmin`) are now deployed separately and wired once via `setDependencies(...)`. That wiring is owner-only and one-time. The engine rejects a settlement sidecar or admin bound to another engine and rejects a no-code admin address; audited `CfdEngineAdmin` bytecode remains a deployment trust assumption.
 
 | Parameter | Contract | Guard |
 |-----------|----------|-------|
-| `EngineRiskConfig` (`riskParams`, `executionFeeBps`, `frozenCloseVpiFactor`) | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 48-hour timelock |
+| `EngineRiskConfig` (`riskParams`, `executionFeeBps`, `frozenCloseSpreadBps`) | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 48-hour timelock |
 | `EngineCalendarConfig` (`fadDayOverrides`, `fadRunwaySeconds`) | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 48-hour timelock |
 | `EngineFreshnessConfig` (`fadMaxStaleness`, `engineMarkStalenessLimit`) | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 48-hour timelock |
 | `seniorRateBps` | `HousePool` | `onlyOwner`, 48-hour timelock |
 | `markStalenessLimit` | `HousePool` | `onlyOwner`, 48-hour timelock |
 | `RouterConfig` (`maxOrderAge`, staleness limits, Pyth confidence ratio, historical settlement window, component publish-time skew, adverse confidence multiplier, bounty limits) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
 | `OracleConfig` (`pletherOracle`) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
+
+The deployed `frozenCloseSpreadBps` default is `50` bps (0.50%). Both construction and timelocked updates reject zero and values above the `1,000` bps (10%) hard cap.
 
 ### One-time wiring
 
@@ -115,6 +117,7 @@ These are the highest-value properties an auditor should expect to hold.
 | Side symmetry | Side-local cached accounting stays consistent with the live position set |
 | Total margin conservation | `sides[BULL].totalMargin + sides[BEAR].totalMargin == sum(pos.margin)` across all live positions |
 | Preview/live parity | Close and liquidation preview math should match live execution semantics |
+| Frozen-spread conservation | For a valid frozen voluntary close, assessed spread equals LP-paid spread plus terminally waived spread; none is credited to protocol treasury |
 
 ### Router and reservation accounting
 
@@ -276,6 +279,15 @@ LP actions intentionally stay live across that split:
 - `FAD` alone keeps ordinary LP pricing,
 - `oracle frozen` keeps tranche withdrawals live and keeps immediate tranche deposits live only when no trader positions are open; pending deposit epochs remain the ordinary entry path. Stale-window LP actions charge fixed surcharges (`25 bps` senior, `75 bps` junior) that remain in the same tranche for incumbent LPs.
 
+Voluntary close pricing follows the same regime boundary but is separate from LP entry/exit fees:
+
+- live and FAD-only close/reduce execution uses normal signed VPI with the lifetime rebate clamp and no frozen-close spread,
+- `oracle frozen` keeps that same signed VPI treatment and adds a fixed spread on reduced notional,
+- the spread is LP-owned and never protocol-treasury revenue,
+- the spread is independent of Pyth adverse-confidence pricing,
+- partial closes must settle the entire obligation, while an uncollectible spread portion on a terminal full close is waived rather than recorded as bad debt,
+- liquidation pricing and settlement are unchanged and do not assess the spread.
+
 This is a deliberate trade-off: preserve close and liquidation liveness during real closures without weakening live-market MEV protections.
 
 ## Accounting And Solvency Security
@@ -318,7 +330,8 @@ Terminal transitions are fail-soft when the HousePool lacks immediate cash.
 
 - profitable closes can leave senior trader claim balances,
 - trader claim balances are beneficiary-balance based rather than FIFO queue based,
-- they remain part of reserve and solvency accounting until paid.
+- they remain part of reserve and solvency accounting until paid,
+- terminal full-close settlement may waive an uncollectible frozen-close spread, but that waived amount is neither a trader claim nor bad debt.
 
 This preserves risk reduction and liquidation liveness under temporary cash shortfall.
 
@@ -400,7 +413,9 @@ This preserves terminal liveness without requiring an unbounded global queue sca
 ### Oracle and market-closure limitations
 
 - frozen-oracle windows prioritize close liveness over live-market-style freshness guarantees,
-- oracle-frozen close/reduce execution applies a one-way VPI surcharge with `frozenCloseVpiFactor`; normal FAD-only live-market closes keep signed VPI behavior,
+- oracle-frozen voluntary close/reduce execution applies normal signed VPI plus a fixed LP-owned notional spread; normal live and FAD-only closes apply signed VPI without that spread,
+- a fixed spread deliberately does not increase with mark staleness inside the permitted frozen window,
+- full-close liveness takes priority over collecting an otherwise uncollectible spread, while partial closes remain all-or-nothing settlement paths,
 - DST and holiday boundaries can create short safe liveness gaps around market reopen,
 - execution remains dependent on fresh keeper infrastructure and oracle publication outside frozen windows.
 
@@ -422,7 +437,8 @@ This preserves terminal liveness without requiring an unbounded global queue sca
 
 - liquidation does not compute a fresh VPI delta, but negative accrued VPI is clawed back into liquidation shortfall,
 - VPI depends on live pool depth,
-- oracle-frozen close/reduce VPI intentionally has no rebate path; it is an LP-protection surcharge for stale-oracle execution, not a market-making incentive,
+- voluntary closes use the same signed VPI curve and lifetime rebate clamp in live, FAD-only, and oracle-frozen regimes,
+- frozen-market stale-price protection is a separate fixed notional spread rather than a modification of VPI or Pyth confidence,
 - the lifetime clamp intentionally zeroes otherwise extractable rebate-only round trips,
 - partial-close VPI release is a bounded linear approximation.
 

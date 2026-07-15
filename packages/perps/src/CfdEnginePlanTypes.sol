@@ -74,7 +74,7 @@ library CfdEnginePlanTypes {
         uint256 executionFeeBps;
         bool isFadWindow;
         bool oracleFrozen;
-        uint256 frozenCloseVpiFactor;
+        uint256 frozenCloseSpreadBps;
     }
 
     struct SolvencyPreview {

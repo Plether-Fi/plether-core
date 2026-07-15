@@ -78,7 +78,7 @@ The next Arbitrum Sepolia perps deployment uses these initial defaults:
 | Parameter | Value |
 | --- | --- |
 | `vpiFactor` | `0.005e18` |
-| `frozenCloseVpiFactor` | `0.005e18` |
+| `frozenCloseSpreadBps` | `50` |
 | `maxSkewRatio` | `0.4e18` |
 | `maintMarginBps` | `30` |
 | `initMarginBps` | `45` |
@@ -90,6 +90,10 @@ The next Arbitrum Sepolia perps deployment uses these initial defaults:
 | `fadRunwaySeconds` | `1 hours` |
 | `pythMaxConfidenceRatioBps` | `10` |
 | `adverseConfidenceMultiplierBps` | `2_000` |
+
+`frozenCloseSpreadBps = 50` charges a fixed 0.50% spread on reduced notional for voluntary close/reduce execution only while `oracleFrozen`. Normal signed VPI and its lifetime rebate clamp remain active, so this spread is separate from both VPI and the Pyth adverse-confidence adjustment. The spread belongs to LPs rather than protocol treasury; it is not charged in live or FAD-only execution and does not apply to liquidations. A terminal full close waives any uncollectible portion instead of adding bad debt, while a partial close must settle its full obligation.
+
+The parameter is part of `CfdEngineAdmin.EngineRiskConfig` and therefore uses the 48-hour propose/finalize timelock. Deployments and updates reject zero and values above `1_000` bps (10%).
 
 `pythMaxConfidenceRatioBps = 10` rejects a component feed when Pyth's reported confidence interval exceeds
 `0.10%` of that component's price. Pyth confidence is an uncertainty band, so larger values mean less precise

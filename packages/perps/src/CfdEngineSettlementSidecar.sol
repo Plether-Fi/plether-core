@@ -117,6 +117,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         CfdTypes.Position calldata currentPosition,
         uint64 publishTime
     ) external onlyEngineHost(host) {
+        (uint256 frozenSpreadPaidUsdc, uint256 nonCashFrozenSpreadPaidUsdc) = _frozenSpreadSettlement(delta);
         host.settlementApplyCarryAndMark(delta.price, publishTime);
         uint256 marginBefore =
             IMarginClearinghouse(host.clearinghouse()).getLockedMarginBuckets(delta.account).positionMarginUsdc;
@@ -135,23 +136,12 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
             if (delta.freshTraderPayoutUsdc > 0) {
                 host.settlementRecordTraderClaim(delta.account, delta.freshTraderPayoutUsdc);
             }
-            if (delta.pendingCarryUsdc > 0) {
-                IHousePool(host.pool())
-                    .recordClaimantInflow(
-                        delta.pendingCarryUsdc,
-                        IHousePool.ClaimantInflowKind.Revenue,
-                        IHousePool.ClaimantInflowCashMode.AlreadyRetained
-                    );
-            }
+            _recordRetainedCloseRevenue(host, delta.pendingCarryUsdc + frozenSpreadPaidUsdc);
         } else if (delta.settlementType == CfdEnginePlanTypes.SettlementType.LOSS) {
             protocolFeeCreditedUsdc = _executeCloseLoss(host, delta);
-        } else if (delta.pendingCarryUsdc > 0) {
-            IHousePool(host.pool())
-                .recordClaimantInflow(
-                    delta.pendingCarryUsdc,
-                    IHousePool.ClaimantInflowKind.Revenue,
-                    IHousePool.ClaimantInflowCashMode.AlreadyRetained
-                );
+            _recordRetainedCloseRevenue(host, nonCashFrozenSpreadPaidUsdc);
+        } else {
+            _recordRetainedCloseRevenue(host, delta.pendingCarryUsdc + frozenSpreadPaidUsdc);
         }
 
         _settleProtocolFeeTopUp(host, protocolFeeCreditedUsdc + delta.protocolFeeTopUpUsdc, protocolFeeCreditedUsdc);
@@ -173,6 +163,40 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
                 })
             );
         }
+
+        if (delta.closeState.frozenSpreadUsdc > 0) {
+            emit FrozenCloseSpreadSettled(
+                delta.account,
+                delta.closeState.frozenSpreadUsdc,
+                frozenSpreadPaidUsdc,
+                delta.closeState.frozenSpreadUsdc - frozenSpreadPaidUsdc
+            );
+        }
+    }
+
+    function _frozenSpreadSettlement(
+        CfdEnginePlanTypes.CloseDelta calldata delta
+    ) private pure returns (uint256 paidUsdc, uint256 nonCashPaidUsdc) {
+        if (delta.settlementType != CfdEnginePlanTypes.SettlementType.LOSS) {
+            return (delta.closeState.frozenSpreadUsdc, delta.closeState.frozenSpreadUsdc);
+        }
+
+        uint256 uncollectedExecFeeUsdc = delta.closeState.executionFeeUsdc - delta.lossResult.retainedExecFeeUsdc
+            - delta.lossResult.collectedExecFeeUsdc;
+        uint256 uncollectedSpreadUsdc =
+            delta.lossResult.shortfallUsdc - uncollectedExecFeeUsdc - delta.lossResult.badDebtUsdc;
+        uint256 claimBadDebtRecoveryUsdc = delta.lossResult.badDebtUsdc - delta.badDebtUsdc;
+        uint256 traderClaimRecoveryUsdc =
+            delta.existingTraderClaimConsumedUsdc - delta.traderClaimFeeRecoveryUsdc - claimBadDebtRecoveryUsdc;
+        paidUsdc = delta.closeState.frozenSpreadUsdc - (uncollectedSpreadUsdc - traderClaimRecoveryUsdc);
+
+        uint256 totalChargesUsdc = delta.closeState.executionFeeUsdc + delta.closeState.frozenSpreadUsdc;
+        uint256 retainedChargesUsdc = totalChargesUsdc > delta.lossUsdc ? totalChargesUsdc - delta.lossUsdc : 0;
+        uint256 retainedAfterExecFeeUsdc = retainedChargesUsdc - delta.lossResult.retainedExecFeeUsdc;
+        uint256 retainedFrozenSpreadUsdc = delta.closeState.frozenSpreadUsdc < retainedAfterExecFeeUsdc
+            ? delta.closeState.frozenSpreadUsdc
+            : retainedAfterExecFeeUsdc;
+        nonCashPaidUsdc = retainedFrozenSpreadUsdc + traderClaimRecoveryUsdc;
     }
 
     function _executeCloseLoss(
@@ -210,6 +234,19 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         if (delta.badDebtUsdc > 0) {
             host.settlementAccumulateBadDebt(delta.badDebtUsdc);
         }
+    }
+
+    function _recordRetainedCloseRevenue(
+        ICfdEngineSettlementHost host,
+        uint256 amountUsdc
+    ) private {
+        if (amountUsdc == 0) {
+            return;
+        }
+        IHousePool(host.pool())
+            .recordClaimantInflow(
+                amountUsdc, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.AlreadyRetained
+            );
     }
 
     /// @notice Applies the live liquidation settlement plan produced by the planner.

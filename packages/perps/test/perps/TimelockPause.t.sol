@@ -48,16 +48,33 @@ contract TimelockPauseTest is BasePerpTest {
     // CfdEngine TIMELOCK TESTS
     // ==========================================
 
-    function test_FrozenCloseVpiFactor_UsesConstructorConfiguredWeekendProtectionValue() public view {
-        assertEq(engine.frozenCloseVpiFactor(), 0.005e18);
+    function test_FrozenCloseSpread_UsesConstructorConfiguredWeekendProtectionValue() public view {
+        assertEq(engine.frozenCloseSpreadBps(), 50);
     }
 
-    function test_CfdEngineConstructor_RevertsWhenFrozenCloseVpiBelowNormalVpi() public {
+    function test_CfdEngineConstructor_RevertsWhenFrozenCloseSpreadIsZero() public {
         CfdTypes.RiskParams memory params = _riskParams();
-        params.vpiFactor = 0.01e18;
 
         vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidRiskParams.selector);
-        new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params, 0.005e18);
+        new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params, 0);
+    }
+
+    function test_CfdEngineConstructor_RevertsWhenFrozenCloseSpreadExceedsMaximum() public {
+        CfdTypes.RiskParams memory params = _riskParams();
+
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidRiskParams.selector);
+        new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params, 1001);
+    }
+
+    function test_CfdEngineConstructor_AcceptsFrozenCloseSpreadBoundsIndependentOfVpiFactor() public {
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.vpiFactor = 1e18;
+
+        CfdEngine minSpreadEngine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params, 1);
+        CfdEngine maxSpreadEngine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params, 1000);
+
+        assertEq(minSpreadEngine.frozenCloseSpreadBps(), 1);
+        assertEq(maxSpreadEngine.frozenCloseSpreadBps(), 1000);
     }
 
     function test_ProposeRiskParams_StoresAndSetsActivationTime() public {
@@ -75,7 +92,7 @@ contract TimelockPauseTest is BasePerpTest {
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = newParams;
         config.executionFeeBps = 7;
-        config.frozenCloseVpiFactor = 0.007e18;
+        config.frozenCloseSpreadBps = 70;
         engineAdmin.proposeRiskConfig(config);
         assertGt(engineAdmin.riskConfigActivationTime(), 0);
     }
@@ -95,7 +112,7 @@ contract TimelockPauseTest is BasePerpTest {
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = newParams;
         config.executionFeeBps = 7;
-        config.frozenCloseVpiFactor = 0.007e18;
+        config.frozenCloseSpreadBps = 70;
         engineAdmin.proposeRiskConfig(config);
 
         vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__TimelockNotReady.selector);
@@ -117,7 +134,7 @@ contract TimelockPauseTest is BasePerpTest {
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = newParams;
         config.executionFeeBps = 7;
-        config.frozenCloseVpiFactor = 0.007e18;
+        config.frozenCloseSpreadBps = 70;
         engineAdmin.proposeRiskConfig(config);
         _warpForward(48 hours + 1);
         engineAdmin.finalizeRiskConfig();
@@ -125,7 +142,7 @@ contract TimelockPauseTest is BasePerpTest {
         (,, uint256 maintMarginBps,,,,,) = engine.riskParams();
         assertEq(maintMarginBps, 200);
         assertEq(engine.executionFeeBps(), 7);
-        assertEq(engine.frozenCloseVpiFactor(), 0.007e18);
+        assertEq(engine.frozenCloseSpreadBps(), 70);
         assertEq(engineAdmin.riskConfigActivationTime(), 0);
     }
 
@@ -134,25 +151,32 @@ contract TimelockPauseTest is BasePerpTest {
         engineAdmin.finalizeRiskConfig();
     }
 
-    function test_ProposeRiskParams_RevertsWhenFrozenCloseVpiBelowNormalVpi() public {
-        CfdTypes.RiskParams memory newParams = CfdTypes.RiskParams({
-            vpiFactor: 0.01e18,
-            maxSkewRatio: 0.5e18,
-            maintMarginBps: 200,
-            initMarginBps: ((200) * 15) / 10,
-            fadMarginBps: 500,
-            baseCarryBps: 500,
-            minBountyUsdc: 10 * 1e6,
-            bountyBps: 20
-        });
-
-        ICfdEngineAdminHost.EngineRiskConfig memory config;
-        config.riskParams = newParams;
-        config.executionFeeBps = engine.executionFeeBps();
-        config.frozenCloseVpiFactor = 0.005e18;
+    function test_ProposeRiskConfig_RevertsWhenFrozenCloseSpreadIsZero() public {
+        ICfdEngineAdminHost.EngineRiskConfig memory config = _engineRiskConfig();
+        config.frozenCloseSpreadBps = 0;
 
         vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__InvalidRiskParams.selector);
         engineAdmin.proposeRiskConfig(config);
+    }
+
+    function test_ProposeRiskConfig_RevertsWhenFrozenCloseSpreadExceedsMaximum() public {
+        ICfdEngineAdminHost.EngineRiskConfig memory config = _engineRiskConfig();
+        config.frozenCloseSpreadBps = 1001;
+
+        vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__InvalidRiskParams.selector);
+        engineAdmin.proposeRiskConfig(config);
+    }
+
+    function test_ProposeRiskConfig_AcceptsFrozenCloseSpreadBoundsIndependentOfVpiFactor() public {
+        ICfdEngineAdminHost.EngineRiskConfig memory config = _engineRiskConfig();
+        config.riskParams.vpiFactor = 1e18;
+        config.frozenCloseSpreadBps = 1;
+        engineAdmin.proposeRiskConfig(config);
+
+        config.frozenCloseSpreadBps = 1000;
+        engineAdmin.proposeRiskConfig(config);
+
+        assertGt(engineAdmin.riskConfigActivationTime(), block.timestamp);
     }
 
     function test_CancelRiskParams_ClearsPending() public {
@@ -170,7 +194,7 @@ contract TimelockPauseTest is BasePerpTest {
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = newParams;
         config.executionFeeBps = engine.executionFeeBps();
-        config.frozenCloseVpiFactor = 0.007e18;
+        config.frozenCloseSpreadBps = 70;
         engineAdmin.proposeRiskConfig(config);
         vm.expectEmit(false, false, false, true);
         emit RiskConfigCancelled();
@@ -196,7 +220,7 @@ contract TimelockPauseTest is BasePerpTest {
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = newParams;
         config.executionFeeBps = engine.executionFeeBps();
-        config.frozenCloseVpiFactor = engine.frozenCloseVpiFactor();
+        config.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
         vm.prank(nonOwner);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
         engineAdmin.proposeRiskConfig(config);
@@ -247,7 +271,7 @@ contract TimelockPauseTest is BasePerpTest {
         ICfdEngineAdminHost.EngineRiskConfig memory firstConfig;
         firstConfig.riskParams = first;
         firstConfig.executionFeeBps = engine.executionFeeBps();
-        firstConfig.frozenCloseVpiFactor = engine.frozenCloseVpiFactor();
+        firstConfig.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
         engineAdmin.proposeRiskConfig(firstConfig);
         uint256 firstActivation = engineAdmin.riskConfigActivationTime();
 
@@ -267,7 +291,7 @@ contract TimelockPauseTest is BasePerpTest {
         ICfdEngineAdminHost.EngineRiskConfig memory secondConfig;
         secondConfig.riskParams = second;
         secondConfig.executionFeeBps = engine.executionFeeBps();
-        secondConfig.frozenCloseVpiFactor = engine.frozenCloseVpiFactor();
+        secondConfig.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
         engineAdmin.proposeRiskConfig(secondConfig);
         uint256 secondActivation = engineAdmin.riskConfigActivationTime();
 
