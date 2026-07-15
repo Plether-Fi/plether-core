@@ -155,7 +155,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         }
 
         snapshot = _snapshotFromBasket(PriceMode.OrderExecution, basket, policy, false);
-        snapshot.price = _clampToCap(_adverseOrderPrice(request, snapshot.price, basket.confidence));
+        snapshot.price = _orderExecutionPrice(request, snapshot.price, basket.confidence, policy.oracleFrozen);
         if (!policy.oracleFrozen && !reusedBasket) {
             nextCache = BatchOrderPriceCache({
                 hasHistoricalBasket: true,
@@ -280,7 +280,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
             return (false, snapshot);
         }
         snapshot = _snapshotFromBasket(PriceMode.OrderExecution, basket, policy, false);
-        snapshot.price = _clampToCap(_adverseOrderPrice(request, snapshot.price, basket.confidence));
+        snapshot.price = _orderExecutionPrice(request, snapshot.price, basket.confidence, policy.oracleFrozen);
         ok = true;
     }
 
@@ -511,6 +511,21 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
 
         bool adverseUp = request.side == CfdTypes.Side.BEAR ? !request.isClose : request.isClose;
         return adverseUp ? price + shift : price > shift ? price - shift : 0;
+    }
+
+    function _orderExecutionPrice(
+        OrderExecutionRequest calldata request,
+        uint256 price,
+        uint256 confidence,
+        bool oracleFrozen
+    ) internal view returns (uint256) {
+        // The fixed frozen-close spread replaces the Pyth adverse-confidence shift for voluntary
+        // close/reduce execution while the oracle is frozen. Confidence-width validation still
+        // applies when the basket is built, and opens (if called directly) retain the adverse shift.
+        if (oracleFrozen && request.isClose) {
+            return price;
+        }
+        return _clampToCap(_adverseOrderPrice(request, price, confidence));
     }
 
     function _adverseLiquidationPrice(

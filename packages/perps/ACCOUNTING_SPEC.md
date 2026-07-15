@@ -387,7 +387,7 @@ Close and liquidation should share the same economic assumptions wherever the qu
 
 ### Close settlement
 
-Every voluntary close uses the normal signed VPI curve and the lifetime rebate clamp. While `oracleFrozen`, the same VPI result is combined with an additional fixed spread on reduced notional. `frozenCloseSpreadBps` defaults to `50` bps (0.50%), is part of the 48-hour timelocked engine risk config, must be nonzero, and is hard-capped at `1,000` bps (10%). The spread is independent of Pyth confidence adjustment and is allocated exclusively to LPs.
+Every voluntary close uses the normal signed VPI curve and the lifetime rebate clamp. While `oracleFrozen`, the same VPI result is combined with a fixed spread on reduced notional. `frozenCloseSpreadBps` defaults to `50` bps (0.50%), is part of the 48-hour timelocked engine risk config, must be nonzero, and is hard-capped at `1,000` bps (10%). For an oracle-frozen voluntary close, the spread replaces the Pyth adverse-confidence price adjustment and is allocated exclusively to LPs; live/FAD-only closes and liquidations retain adverse-confidence pricing.
 
 When a close realizes a loss:
 
@@ -500,8 +500,8 @@ Freshness policy is action-specific.
 - stale data is a keeper/oracle failure rather than a user failure,
 - frozen-oracle windows use the dedicated frozen-market policy, including relaxed cross-feed publish-time divergence up to the frozen staleness window,
 - normal signed VPI and the lifetime rebate clamp apply to voluntary close/reduce execution in every regime,
-- during `oracleFrozen` only, voluntary closes also assess the fixed LP-owned `frozenCloseSpreadBps` against reduced notional,
-- live and FAD-only closes assess no frozen-close spread; Pyth adverse-confidence pricing remains a separate mark adjustment,
+- during `oracleFrozen` only, voluntary closes assess the fixed LP-owned `frozenCloseSpreadBps` against reduced notional instead of applying the Pyth adverse-confidence price shift,
+- live and FAD-only closes retain Pyth adverse-confidence pricing and assess no frozen-close spread,
 - a terminal full close may waive uncollectible spread without creating bad debt, while a partial close must settle the full obligation.
 
 ### Liquidations

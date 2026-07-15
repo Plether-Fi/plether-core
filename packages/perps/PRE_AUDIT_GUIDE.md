@@ -150,7 +150,7 @@ Reachability note:
 - Liveness problem: risk-reducing users and keepers still need an exit path when live oracle updates stop.
 - Chosen tradeoff: opens are blocked, but closes and liquidations may proceed inside explicit frozen/FAD windows.
 - New risk: execution may rely on older marks than the live regime would permit, and the fixed spread does not scale with staleness inside that window.
-- Pricing rule: voluntary closes keep normal signed VPI and the lifetime rebate clamp, then assess the fixed `frozenCloseSpreadBps` against reduced notional only after `oracleFrozen`; Pyth adverse-confidence pricing remains separate.
+- Pricing rule: voluntary closes keep normal signed VPI and the lifetime rebate clamp. During `oracleFrozen`, the fixed `frozenCloseSpreadBps` replaces the Pyth adverse-confidence price shift; live/FAD-only closes and liquidations retain adverse-confidence pricing.
 - Ownership rule: paid spread belongs only to LPs and never credits protocol treasury. `frozenCloseSpreadBps` defaults to `50`, is 48-hour timelocked, must be nonzero, and is capped at `1,000` bps.
 - Liveness rule: partial closes must settle the complete obligation; terminal full closes waive uncollectible spread instead of adding it to bad debt. Liquidations do not assess the spread.
 - Protecting invariant: frozen execution remains close-only, and close preview preserves `frozenSpreadUsdc == frozenSpreadPaidUsdc + frozenSpreadWaivedUsdc`.

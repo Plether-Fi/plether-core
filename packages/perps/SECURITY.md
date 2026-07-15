@@ -168,7 +168,7 @@ Mitigations:
 - distinct staleness thresholds for order execution, liquidation, engine-side guards, and HousePool freshness,
 - shared normalized basket-price construction across execution paths,
 - timelocked rotation of the router's `PletherOracle` address if the Pyth endpoint or basket-feed set must be replaced,
-- conservative basket confidence propagation and side-adverse pricing for execution, equity checks, and liquidation,
+- conservative basket confidence propagation and side-adverse pricing for execution, equity checks, and liquidation, except that oracle-frozen voluntary closes replace the adverse price shift with the fixed frozen-close spread,
 - component publish-time skew limits so a basket cannot mix fresh and stale legs,
 - frozen-oracle regime for close liveness during genuine market closure.
 
@@ -251,7 +251,7 @@ Security properties:
 - live-market execution uses Pyth's unique historical parse over `(commitTime, commitTime + orderSettlementWindow]`, capped at `block.timestamp`, so settlement is bound to the first post-commit tick rather than the keeper's reveal-time tick,
 - the unique historical parse rejects skipped ticks because the parsed update must prove its previous publish time is no later than the order's `commitTime`,
 - batch execution may reuse a parsed historical basket only for later FIFO orders whose `commitTime` is strictly before the cached tick and falls within its proven coverage,
-- basket confidence is included in execution and liquidation prices instead of being treated only as metadata,
+- basket confidence is included in live/FAD execution and all liquidation prices instead of being treated only as metadata; oracle-frozen voluntary closes retain confidence-width validation but replace the adverse price shift with the fixed frozen-close spread,
 - FIFO execution prevents later orders from bypassing earlier ones,
 - partial-close size floors prevent flat-bounty dust closes from occupying global FIFO slots,
 - binding order semantics prevent traders from turning queued intents into free options.
@@ -281,12 +281,11 @@ LP actions intentionally stay live across that split:
 
 Voluntary close pricing follows the same regime boundary but is separate from LP entry/exit fees:
 
-- live and FAD-only close/reduce execution uses normal signed VPI with the lifetime rebate clamp and no frozen-close spread,
-- `oracle frozen` keeps that same signed VPI treatment and adds a fixed spread on reduced notional,
+- live and FAD-only close/reduce execution uses normal signed VPI with the lifetime rebate clamp, retains Pyth adverse-confidence pricing, and assesses no frozen-close spread,
+- `oracle frozen` keeps that same signed VPI treatment, waives the Pyth adverse-confidence price shift for voluntary closes, and assesses a fixed spread on reduced notional instead,
 - the spread is LP-owned and never protocol-treasury revenue,
-- the spread is independent of Pyth adverse-confidence pricing,
 - partial closes must settle the entire obligation, while an uncollectible spread portion on a terminal full close is waived rather than recorded as bad debt,
-- liquidation pricing and settlement are unchanged and do not assess the spread.
+- liquidation pricing and settlement retain adverse-confidence pricing and do not assess the spread.
 
 This is a deliberate trade-off: preserve close and liquidation liveness during real closures without weakening live-market MEV protections.
 
@@ -438,7 +437,7 @@ This preserves terminal liveness without requiring an unbounded global queue sca
 - liquidation does not compute a fresh VPI delta, but negative accrued VPI is clawed back into liquidation shortfall,
 - VPI depends on live pool depth,
 - voluntary closes use the same signed VPI curve and lifetime rebate clamp in live, FAD-only, and oracle-frozen regimes,
-- frozen-market stale-price protection is a separate fixed notional spread rather than a modification of VPI or Pyth confidence,
+- frozen-market stale-price protection is a fixed notional spread that leaves VPI unchanged and replaces, rather than compounds with, the Pyth adverse-confidence price shift for oracle-frozen voluntary closes only,
 - the lifetime clamp intentionally zeroes otherwise extractable rebate-only round trips,
 - partial-close VPI release is a bounded linear approximation.
 

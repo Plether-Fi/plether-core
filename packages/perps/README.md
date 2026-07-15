@@ -131,7 +131,7 @@ The main runtime and read surfaces are:
 2. Submit an open or close intent through `OrderRouter.commitOrder(...)`.
 3. The router records a FIFO order, reserves committed margin, and reserves a keeper execution bounty in `MarginClearinghouse`.
 4. A keeper later calls `executeOrder(...)` or `executeOrderBatch(...)` with Pyth update data.
-5. `OrderRouter` resolves the first valid Pyth tick strictly after the order's `commitTime`, applies conservative confidence-adjusted pricing, validates slippage and queue eligibility, then calls `CfdEngine.processOrderTyped(...)`.
+5. `OrderRouter` resolves the first valid Pyth tick strictly after the order's `commitTime` in live/FAD-only markets, or the validated stored basket under oracle-frozen policy. It applies conservative confidence-adjusted pricing except for oracle-frozen voluntary closes, validates slippage and queue eligibility, then calls `CfdEngine.processOrderTyped(...)`.
 6. `CfdEngine` updates the position, realizes fees and carry, and settles through `MarginClearinghouse` and `HousePool`.
 
 Important details:
@@ -341,7 +341,7 @@ The router is configured with a `PletherOracle` contract. The oracle instance ow
 - `PletherOracle` normalizes each feed to 8 decimals while computing the basket price.
 - The oracle computes the weighted basket price in the same shape as the spot basket oracle.
 - Basket confidence is propagated conservatively by summing weighted component relative confidence, then multiplying by the basket price.
-- Opening and closing orders use the adverse side of the confidence interval for the trader's side: `BULL` opens are priced lower, `BEAR` opens are priced higher, `BULL` closes are priced higher, and `BEAR` closes are priced lower.
+- Opening orders and live/FAD-only closing orders use the adverse side of the confidence interval for the trader's side: `BULL` opens are priced lower, `BEAR` opens are priced higher, `BULL` closes are priced higher, and `BEAR` closes are priced lower. Oracle-frozen voluntary closes instead use the unshifted validated basket price and pay the fixed frozen-close spread.
 - Liquidation checks also use the side-adverse confidence-adjusted mark for the liquidated account.
 - Component publish times must stay within `maxComponentPublishTimeDivergence`; if one basket leg is too far from the others, live opens are blocked rather than mixing fresh and stale components.
 - The minimum `publishTime` across feeds remains the basket publish time passed to the engine; historical order fills can use an older post-commit price without rewinding a newer cached engine mark.
@@ -360,8 +360,8 @@ LP policy follows that split as well:
 
 - `FAD` alone does not change LP entry/exit pricing.
 - Voluntary close/reduce execution keeps the normal signed quadratic VPI curve and lifetime rebate clamp in every oracle regime, so a skew-reducing frozen close can still earn the same bounded negative VPI as a live close.
-- During `oracleFrozen` only, voluntary close/reduce execution also assesses `frozenCloseSpreadBps` on the reduced position notional. The spread is fixed rather than staleness-dependent, belongs entirely to LPs, and never credits the protocol treasury.
-- Live and FAD-only closes do not pay the frozen-close spread. Pyth's adverse-confidence price adjustment remains an independent execution-price guard rather than an input to this spread.
+- During `oracleFrozen` only, voluntary close/reduce execution assesses `frozenCloseSpreadBps` on the reduced position notional instead of applying Pyth's adverse-confidence price shift. The spread is fixed rather than staleness-dependent, belongs entirely to LPs, and never credits the protocol treasury. Pyth confidence-width validation remains active.
+- Live and FAD-only closes retain Pyth's adverse-confidence price adjustment and do not pay the frozen-close spread.
 - A partial close must fully settle the spread together with the rest of its close obligation. If a terminal full close cannot collect the entire spread, the uncollectible portion is waived instead of becoming bad debt, preserving exit liveness.
 - Liquidations do not assess the frozen-close spread and retain their existing settlement rules.
 - `oracleFrozen` keeps LP withdrawals live and keeps immediate LP deposits live only when no trader positions are open; pending deposit epochs remain the ordinary entry path. Senior and junior stale-window actions pay fixed surcharges that compensate incumbent LPs in that same tranche.
@@ -464,7 +464,7 @@ Instant controls remain for one-time wiring and fee withdrawal. `OrderRouter` pa
 | Normal execution staleness | 60s | Normal order execution freshness |
 | Order settlement window | 15s | Historical Pyth search window after order commit |
 | Component publish divergence | 5s | Max basket-leg publish-time skew for live settlement |
-| Adverse confidence multiplier | 2,000 (0.2x) | Confidence interval multiplier applied to execution and liquidation marks |
+| Adverse confidence multiplier | 2,000 (0.2x) | Applied to live/FAD order execution and liquidation marks; waived for oracle-frozen voluntary closes |
 | Liquidation staleness | 15s | Live-market liquidation freshness |
 | `engineMarkStalenessLimit` | 60s | Engine-side mark freshness |
 | `markStalenessLimit` | 60s | HousePool mark freshness |
