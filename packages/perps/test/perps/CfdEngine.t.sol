@@ -103,6 +103,8 @@ contract CfdEnginePlanLibHarness {
             bountyBps: 10
         });
         snap.executionFeeBps = 4;
+        snap.frozenCloseSpreadBps = 1000;
+        snap.oracleFrozen = true;
         return CfdEnginePlanLib.planLiquidation(snap, oraclePrice, 0);
     }
 
@@ -295,6 +297,14 @@ contract CfdEnginePlanLibHarness {
 }
 
 contract CfdEngineTest is BasePerpTest {
+
+    event FrozenCloseSpreadSettled(address indexed account, uint256 assessedUsdc, uint256 paidUsdc, uint256 waivedUsdc);
+    event ClaimantInflowAccounted(
+        address indexed caller,
+        IHousePool.ClaimantInflowKind kind,
+        IHousePool.ClaimantInflowCashMode cashMode,
+        uint256 amountUsdc
+    );
 
     using stdStorage for StdStorage;
 
@@ -1822,7 +1832,7 @@ contract CfdEngineTest is BasePerpTest {
     function test_SettlementSidecar_RevertsWhenEngineCallerPassesDifferentHost() public {
         CfdEngineSettlementSidecar sidecar = CfdEngineSettlementSidecar(address(engine.settlementSidecar()));
         CfdEngine wrongHost =
-            new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_VPI_FACTOR);
+            new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_SPREAD_BPS);
         CfdEnginePlanTypes.OpenDelta memory openDelta;
         CfdEnginePlanTypes.CloseDelta memory closeDelta;
         CfdEnginePlanTypes.LiquidationDelta memory liquidationDelta;
@@ -1848,7 +1858,7 @@ contract CfdEngineTest is BasePerpTest {
 
     function test_SetDependencies_RevertsWhenSettlementSidecarBoundToDifferentEngine() public {
         CfdEngine victim =
-            new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_VPI_FACTOR);
+            new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_SPREAD_BPS);
         CfdEnginePlanner planner = new CfdEnginePlanner();
         CfdEngineSettlementSidecar wrongSidecar = new CfdEngineSettlementSidecar(address(engine));
         CfdEngineAdmin adminModule = new CfdEngineAdmin(address(victim), address(this));
@@ -1859,12 +1869,33 @@ contract CfdEngineTest is BasePerpTest {
 
     function test_SetDependencies_RevertsWhenSettlementSidecarHasNoEngineBinding() public {
         CfdEngine victim =
-            new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_VPI_FACTOR);
+            new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_SPREAD_BPS);
         CfdEnginePlanner planner = new CfdEnginePlanner();
         CfdEngineAdmin adminModule = new CfdEngineAdmin(address(victim), address(this));
 
         vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidSettlementSidecar.selector);
         victim.setDependencies(address(planner), address(0xBEEF), address(adminModule));
+    }
+
+    function test_SetDependencies_RevertsWhenAdminBoundToDifferentEngine() public {
+        CfdEngine victim =
+            new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_SPREAD_BPS);
+        CfdEnginePlanner planner = new CfdEnginePlanner();
+        CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(victim));
+        CfdEngineAdmin wrongAdmin = new CfdEngineAdmin(address(engine), address(this));
+
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidAdmin.selector);
+        victim.setDependencies(address(planner), address(settlement), address(wrongAdmin));
+    }
+
+    function test_SetDependencies_RevertsWhenAdminHasNoCode() public {
+        CfdEngine victim =
+            new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_SPREAD_BPS);
+        CfdEnginePlanner planner = new CfdEnginePlanner();
+        CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(victim));
+
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidAdmin.selector);
+        victim.setDependencies(address(planner), address(settlement), address(0xBEEF));
     }
 
     function test_GetAccountCollateralView_ReturnsCurrentBuckets() public {
@@ -2348,6 +2379,7 @@ contract CfdEngineTest is BasePerpTest {
         assertTrue(preview.valid, "Preview should remain valid when close earns a negative VPI rebate");
         assertLt(preview.vpiDeltaUsdc, 0, "Preview should expose negative VPI as a rebate instead of panicking");
         assertEq(preview.vpiUsdc, 0, "Positive-only VPI charge field should clamp rebates to zero");
+        assertEq(preview.frozenSpreadUsdc, 0, "Live-market close should not assess the frozen spread");
     }
 
     function test_PreviewClose_FadButLiveMarketKeepsSignedVpiRebate() public {
@@ -2366,9 +2398,12 @@ contract CfdEngineTest is BasePerpTest {
         assertTrue(preview.valid, "Live FAD close should be previewable");
         assertLt(preview.vpiDeltaUsdc, 0, "Live FAD should keep normal signed VPI rebate behavior");
         assertEq(preview.vpiUsdc, 0, "Positive-only VPI field should clamp normal rebates to zero");
+        assertEq(preview.frozenSpreadUsdc, 0, "FAD-only close should not assess the frozen spread");
+        assertEq(preview.frozenSpreadPaidUsdc, 0, "FAD-only close should not pay the frozen spread");
+        assertEq(preview.frozenSpreadWaivedUsdc, 0, "FAD-only close should not waive a frozen spread");
     }
 
-    function test_PreviewClose_OracleFrozenSkewHealingClosePaysOneWayVpi() public {
+    function test_PreviewClose_OracleFrozenSkewHealingCloseKeepsSignedVpiAndPaysFixedSpread() public {
         address trader = address(0xAB1312);
         address account = trader;
         _fundTrader(trader, 10_000e6);
@@ -2378,14 +2413,21 @@ contract CfdEngineTest is BasePerpTest {
         vm.warp(1_709_985_600); // Saturday 12:00 UTC: oracle-frozen close-only mode.
         assertTrue(engine.isOracleFrozen(), "Setup should be in oracle-frozen mode");
 
-        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 1e8);
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 0.8e8);
 
         assertTrue(preview.valid, "Frozen close should be previewable");
-        assertGt(preview.vpiDeltaUsdc, 0, "Frozen skew-healing close should pay a one-way surcharge");
-        assertEq(preview.vpiUsdc, uint256(preview.vpiDeltaUsdc), "Positive VPI field should expose the surcharge");
+        assertLt(preview.vpiDeltaUsdc, 0, "Frozen skew-healing close should keep the normal VPI rebate");
+        assertEq(preview.vpiUsdc, 0, "Positive-only VPI field should clamp the signed rebate to zero");
+        assertEq(preview.frozenSpreadUsdc, 400e6, "Frozen close should assess 50 bps of $80,000 notional");
+        assertEq(preview.frozenSpreadPaidUsdc, 400e6, "Funded frozen close should pay the full fixed spread");
+        assertEq(preview.frozenSpreadWaivedUsdc, 0, "Funded frozen close should not waive spread");
+
+        ICfdEngineTypes.ClosePreview memory partialPreview = engineLens.previewClose(account, 25_000e18, 0.8e8);
+        assertTrue(partialPreview.valid, "Funded frozen reduction should be previewable");
+        assertEq(partialPreview.frozenSpreadUsdc, 100e6, "A 25% reduction should assess $100 of fixed spread");
     }
 
-    function test_PreviewClose_OracleFrozenSkewWorseningClosePaysOneWayVpi() public {
+    function test_PreviewClose_OracleFrozenSkewWorseningCloseKeepsSignedVpiAndPaysSameFixedSpread() public {
         address bullTrader = address(0xAB1313);
         address bearTrader = address(0xAB1314);
         _fundTrader(bullTrader, 10_000e6);
@@ -2397,14 +2439,17 @@ contract CfdEngineTest is BasePerpTest {
         vm.warp(1_709_985_600);
         assertTrue(engine.isOracleFrozen(), "Setup should be in oracle-frozen mode");
 
-        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(bullTrader, 100_000e18, 1e8);
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(bullTrader, 100_000e18, 0.8e8);
 
         assertTrue(preview.valid, "Frozen close should be previewable");
-        assertGt(preview.vpiDeltaUsdc, 0, "Frozen skew-worsening close should pay a one-way surcharge");
-        assertEq(preview.vpiUsdc, uint256(preview.vpiDeltaUsdc), "Positive VPI field should expose the surcharge");
+        assertGt(preview.vpiDeltaUsdc, 0, "Frozen skew-worsening close should keep the normal positive VPI charge");
+        assertEq(preview.vpiUsdc, uint256(preview.vpiDeltaUsdc), "Positive VPI field should expose the charge");
+        assertEq(preview.frozenSpreadUsdc, 400e6, "Spread should depend on notional, not skew direction");
+        assertEq(preview.frozenSpreadPaidUsdc, 400e6, "Funded frozen close should pay the same fixed spread");
+        assertEq(preview.frozenSpreadWaivedUsdc, 0, "Funded frozen close should not waive spread");
     }
 
-    function test_PreviewClose_OracleFrozenZeroCrossingClosePaysOneWayVpi() public {
+    function test_PreviewClose_OracleFrozenZeroCrossingCloseUsesNormalCurveAndFixedSpread() public {
         address bullTrader = address(0xAB1315);
         address bearTrader = address(0xAB1316);
         _fundTrader(bullTrader, 20_000e6);
@@ -2416,14 +2461,16 @@ contract CfdEngineTest is BasePerpTest {
         vm.warp(1_709_985_600);
         assertTrue(engine.isOracleFrozen(), "Setup should be in oracle-frozen mode");
 
-        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(bullTrader, 150_000e18, 1e8);
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(bullTrader, 150_000e18, 0.8e8);
 
         assertTrue(preview.valid, "Frozen partial close should be previewable");
-        assertGt(preview.vpiDeltaUsdc, 0, "Frozen zero-crossing close should pay a one-way surcharge");
-        assertEq(preview.vpiUsdc, uint256(preview.vpiDeltaUsdc), "Positive VPI field should expose the surcharge");
+        assertLt(preview.vpiDeltaUsdc, 0, "Zero crossing that reduces absolute skew should keep the normal rebate");
+        assertEq(preview.vpiUsdc, 0, "Positive-only VPI field should clamp the signed rebate to zero");
+        assertEq(preview.frozenSpreadUsdc, 600e6, "Spread should assess 50 bps of $120,000 notional");
+        assertEq(preview.frozenSpreadPaidUsdc, 600e6, "Funded partial close should pay the full spread");
     }
 
-    function test_PreviewClose_OracleFrozenOneWayVpiMatchesLiveClose() public {
+    function test_PreviewClose_OracleFrozenFixedSpreadMatchesLiveCloseAndStaysOutOfTreasury() public {
         address trader = address(0xAB1317);
         address account = trader;
         _fundTrader(trader, 10_000e6);
@@ -2433,13 +2480,166 @@ contract CfdEngineTest is BasePerpTest {
         vm.warp(1_709_985_600);
         assertTrue(engine.isOracleFrozen(), "Setup should be in oracle-frozen mode");
 
-        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 1e8);
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 0.8e8);
         CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(account);
-        _close(account, CfdTypes.Side.BULL, 100_000e18, 1e8);
+        uint256 treasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+
+        _close(account, CfdTypes.Side.BULL, 100_000e18, 0.8e8);
+
         CloseParityObserved memory observed = _observeCloseParity(account, beforeSnapshot);
 
-        assertGt(preview.vpiDeltaUsdc, 0, "Setup should charge frozen one-way VPI");
+        assertLt(preview.vpiDeltaUsdc, 0, "Frozen close should preserve normal signed VPI");
+        assertEq(preview.frozenSpreadUsdc, 400e6, "Preview should assess the configured fixed spread");
+        assertEq(preview.frozenSpreadPaidUsdc, 400e6, "Live funded close should pay the assessed spread");
         _assertClosePreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
+        assertEq(
+            clearinghouse.balanceUsdc(engine.protocolTreasury()) - treasuryBefore,
+            preview.executionFeeUsdc,
+            "Treasury should receive the execution fee but none of the LP-owned frozen spread"
+        );
+    }
+
+    function test_PreviewClose_OracleFrozenFullCloseWaivesOnlyUncollectibleSpread() public {
+        address trader = address(0xAB1318);
+        address account = trader;
+        _fundTrader(trader, 2000e6);
+
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+
+        vm.warp(1_709_985_600);
+        assertTrue(engine.isOracleFrozen(), "Setup should be in oracle-frozen mode");
+
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 1.019e8);
+
+        assertTrue(preview.valid, "Terminal close should remain live when only spread is uncollectible");
+        assertEq(preview.frozenSpreadUsdc, 509_500_000, "Spread should assess 50 bps of $101,900 notional");
+        assertGt(preview.frozenSpreadPaidUsdc, 0, "Reachable collateral should pay part of the spread");
+        assertGt(preview.frozenSpreadWaivedUsdc, 0, "Uncollectible terminal spread should be waived");
+        assertEq(
+            preview.frozenSpreadPaidUsdc + preview.frozenSpreadWaivedUsdc,
+            preview.frozenSpreadUsdc,
+            "Paid and waived spread should conserve the assessment"
+        );
+        assertEq(preview.badDebtUsdc, 0, "Waived spread should not become LP bad debt");
+
+        uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
+        vm.expectEmit(true, false, false, true, address(engine.settlementSidecar()));
+        emit FrozenCloseSpreadSettled(
+            account, preview.frozenSpreadUsdc, preview.frozenSpreadPaidUsdc, preview.frozenSpreadWaivedUsdc
+        );
+        _close(account, CfdTypes.Side.BULL, 100_000e18, 1.019e8);
+
+        (uint256 remainingSize,,,,,,) = engine.positions(account);
+        assertEq(remainingSize, 0, "Full close should complete despite the waived spread");
+        assertEq(engine.accumulatedBadDebtUsdc(), badDebtBefore, "Waived spread should not accumulate bad debt");
+    }
+
+    function test_OracleFrozenFullClose_ClaimRecoveryPaysFeeThenBaseThenSpread() public {
+        address account = address(0xAB131A);
+        uint256 size = 100_000e18;
+        uint256 closePrice = 1.02e8;
+        _fundTrader(account, 2000e6);
+        _open(account, CfdTypes.Side.BULL, size, 2000e6, 1e8);
+
+        vm.warp(1_709_985_600);
+        assertTrue(engine.isOracleFrozen(), "Setup should be in oracle-frozen mode");
+
+        stdstore.target(address(clearinghouse)).sig("balanceUsdc(address)").with_key(account).checked_write(uint256(0));
+
+        ICfdEngineTypes.ClosePreview memory withoutClaim = engineLens.previewClose(account, size, closePrice);
+        uint256 assessedFeeUsdc = _engineExecutionFeeUsdc(size, closePrice);
+        uint256 spreadRecoveryUsdc = withoutClaim.frozenSpreadUsdc / 2;
+
+        assertTrue(withoutClaim.valid, "Terminal close should remain valid without physical collateral");
+        assertGt(withoutClaim.badDebtUsdc, 0, "Setup should leave a base close obligation for claim recovery");
+        assertEq(withoutClaim.executionFeeUsdc, 0, "No physical value should collect the execution fee");
+        assertEq(withoutClaim.frozenSpreadPaidUsdc, 0, "No physical value should collect the spread");
+        assertEq(
+            withoutClaim.frozenSpreadWaivedUsdc,
+            withoutClaim.frozenSpreadUsdc,
+            "Without a claim the entire frozen spread should be waivable"
+        );
+
+        uint256 traderClaimUsdc = assessedFeeUsdc + withoutClaim.badDebtUsdc + spreadRecoveryUsdc;
+        stdstore.target(address(engine)).sig("traderClaimBalanceUsdc(address)").with_key(account)
+            .checked_write(traderClaimUsdc);
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(traderClaimUsdc);
+
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, size, closePrice);
+        assertTrue(preview.valid, "Claim-funded terminal frozen close should be valid");
+        assertEq(
+            preview.existingTraderClaimConsumedUsdc,
+            traderClaimUsdc,
+            "Claim recovery should consume fee, then base loss, then the selected spread portion"
+        );
+        assertEq(preview.existingTraderClaimRemainingUsdc, 0, "Calibrated claim should be fully consumed");
+        assertEq(preview.executionFeeUsdc, assessedFeeUsdc, "Senior execution fee should be fully recovered first");
+        assertEq(preview.badDebtUsdc, 0, "Claim recovery should extinguish the full base close obligation");
+        assertEq(
+            preview.frozenSpreadPaidUsdc,
+            spreadRecoveryUsdc,
+            "Only claim value remaining after fee and base loss should pay the junior spread"
+        );
+        assertEq(
+            preview.frozenSpreadWaivedUsdc,
+            preview.frozenSpreadUsdc - spreadRecoveryUsdc,
+            "Uncovered terminal spread should be waived"
+        );
+        assertEq(
+            preview.frozenSpreadPaidUsdc + preview.frozenSpreadWaivedUsdc,
+            preview.frozenSpreadUsdc,
+            "Paid and waived spread should conserve the assessment"
+        );
+
+        uint256 treasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 poolAssetsBefore = pool.totalAssets();
+        uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
+
+        vm.expectEmit(true, false, false, true, address(pool));
+        emit ClaimantInflowAccounted(
+            address(engine.settlementSidecar()),
+            IHousePool.ClaimantInflowKind.Revenue,
+            IHousePool.ClaimantInflowCashMode.AlreadyRetained,
+            spreadRecoveryUsdc
+        );
+        vm.expectEmit(true, false, false, true, address(engine.settlementSidecar()));
+        emit FrozenCloseSpreadSettled(
+            account, preview.frozenSpreadUsdc, preview.frozenSpreadPaidUsdc, preview.frozenSpreadWaivedUsdc
+        );
+        _close(account, CfdTypes.Side.BULL, size, closePrice);
+
+        assertEq(engine.traderClaimBalanceUsdc(account), 0, "Live close should consume the same-account claim");
+        assertEq(engine.totalTraderClaimBalanceUsdc(), 0, "Live close should clear aggregate claim liability");
+        assertEq(engine.accumulatedBadDebtUsdc(), badDebtBefore, "Recovered base loss should not add bad debt");
+        assertEq(
+            clearinghouse.balanceUsdc(engine.protocolTreasury()) - treasuryBefore,
+            assessedFeeUsdc,
+            "Treasury should receive only the recovered execution fee"
+        );
+        assertEq(
+            poolAssetsBefore - pool.totalAssets(),
+            assessedFeeUsdc,
+            "Claim-recovered spread should stay LP-owned while only the protocol fee leaves pool cash"
+        );
+    }
+
+    function test_PreviewClose_OracleFrozenPartialCloseCannotWaiveSpread() public {
+        address trader = address(0xAB1319);
+        address account = trader;
+        _fundTrader(trader, 2000e6);
+
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+
+        vm.warp(1_709_985_600);
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 50_000e18, 1.019e8);
+
+        assertFalse(preview.valid, "Partial close must not evade an uncollectible frozen spread");
+        assertEq(
+            uint8(preview.invalidReason),
+            uint8(CfdTypes.CloseInvalidReason.PartialCloseUnderwater),
+            "Gross frozen-close shortfall should use the partial-close underwater policy"
+        );
+        assertEq(preview.badDebtUsdc, 0, "Spread-only shortfall should remain distinct from base bad debt");
     }
 
     function test_PreviewClose_UsesPostUnlockFreeSettlementForLosses() public {
@@ -2567,7 +2767,11 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(
             delta.keeperBountyUsdc, 0, "Zero reachable settlement should cap the direct margin-funded bounty at zero"
         );
-        assertEq(delta.residualUsdc, 8e6, "Residual should keep all positive PnL when no bounty is reachable");
+        assertEq(
+            delta.residualUsdc,
+            8e6,
+            "Liquidation residual should keep all positive PnL and ignore the max frozen-close spread"
+        );
         assertEq(delta.settlementRetainedUsdc, 0, "No settlement should remain when none is reachable");
         assertEq(
             delta.existingTraderClaimConsumedUsdc,
@@ -3934,6 +4138,7 @@ contract CfdEngineTest is BasePerpTest {
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = params;
         config.executionFeeBps = engine.executionFeeBps();
+        config.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
         vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__InvalidRiskParams.selector);
         engineAdmin.proposeRiskConfig(config);
     }
@@ -3944,6 +4149,7 @@ contract CfdEngineTest is BasePerpTest {
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = params;
         config.executionFeeBps = engine.executionFeeBps();
+        config.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
         vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__InvalidRiskParams.selector);
         engineAdmin.proposeRiskConfig(config);
     }
@@ -3954,6 +4160,7 @@ contract CfdEngineTest is BasePerpTest {
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = params;
         config.executionFeeBps = engine.executionFeeBps();
+        config.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
         vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__InvalidRiskParams.selector);
         engineAdmin.proposeRiskConfig(config);
     }
@@ -3964,6 +4171,7 @@ contract CfdEngineTest is BasePerpTest {
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = params;
         config.executionFeeBps = engine.executionFeeBps();
+        config.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
         vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__InvalidRiskParams.selector);
         engineAdmin.proposeRiskConfig(config);
     }
@@ -3974,6 +4182,7 @@ contract CfdEngineTest is BasePerpTest {
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = params;
         config.executionFeeBps = engine.executionFeeBps();
+        config.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
         vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__InvalidRiskParams.selector);
         engineAdmin.proposeRiskConfig(config);
     }
@@ -3984,6 +4193,7 @@ contract CfdEngineTest is BasePerpTest {
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = params;
         config.executionFeeBps = engine.executionFeeBps();
+        config.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
         vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__InvalidRiskParams.selector);
         engineAdmin.proposeRiskConfig(config);
     }
@@ -3994,6 +4204,7 @@ contract CfdEngineTest is BasePerpTest {
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = params;
         config.executionFeeBps = engine.executionFeeBps();
+        config.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
         vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__InvalidRiskParams.selector);
         engineAdmin.proposeRiskConfig(config);
     }
@@ -5344,6 +5555,7 @@ contract CfdEngineAuditTest is BasePerpTest {
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = newParams;
         config.executionFeeBps = engine.executionFeeBps();
+        config.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
         engineAdmin.proposeRiskConfig(config);
 
         vm.warp(T_FINALIZE);
@@ -5927,7 +6139,7 @@ contract ProtocolPhaseTest is BasePerpTest {
 
     function test_ConfiguringPhase() public {
         CfdEngine unconfigured =
-            new CfdEngine(address(usdc), address(clearinghouse), 2e8, _riskParams(), FROZEN_CLOSE_VPI_FACTOR);
+            new CfdEngine(address(usdc), address(clearinghouse), 2e8, _riskParams(), FROZEN_CLOSE_SPREAD_BPS);
         PerpsPublicLens unconfiguredLens =
             new PerpsPublicLens(address(engineAccountLens), address(unconfigured), address(router), address(0));
         assertEq(
@@ -6191,7 +6403,7 @@ contract VpiChunkingTest is Test {
         });
 
         clearinghouse = new MarginClearinghouse(address(usdc));
-        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params, 0.005e18);
+        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params, 50);
         CfdEnginePlanner planner = new CfdEnginePlanner();
         CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(engine));
         CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));

@@ -8,6 +8,9 @@ import {ICfdEngineSettlementHost} from "@plether/perps/interfaces/ICfdEngineSett
 /// @notice Externalized settlement executor bound to one CfdEngine host.
 interface ICfdEngineSettlementSidecar {
 
+    /// @notice Records the LP-owned frozen-market spread assessed and settled by a voluntary close/reduce.
+    event FrozenCloseSpreadSettled(address indexed account, uint256 assessedUsdc, uint256 paidUsdc, uint256 waivedUsdc);
+
     /// @notice Returns the engine host authorized to call this sidecar.
     function ENGINE() external view returns (address);
 

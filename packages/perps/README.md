@@ -98,6 +98,8 @@ Preview units match the rest of perps:
 
 For valid previews, `postSize`, `postMarginUsdc`, `postEntryPrice`, `postVpiAccrued`, post-trade health, and liquidation fields are projected from the same planner/accounting logic used by live execution. `hasLiquidationPrice == false` means no liquidation threshold exists inside `[0, CAP_PRICE]`. For BULL positions, `liquidationPrice` is the lowest in-range price that is liquidatable. For BEAR positions, it is the highest in-range price that is liquidatable.
 
+Close previews expose frozen-market pricing separately from VPI. `frozenSpreadUsdc` is the fixed spread assessed on the reduced notional, `frozenSpreadPaidUsdc` is the portion actually retained or collected for LPs, and `frozenSpreadWaivedUsdc` is the uncollectible portion waived on a terminal full close. These values are zero outside `oracleFrozen`, and a valid preview preserves `frozenSpreadUsdc == frozenSpreadPaidUsdc + frozenSpreadWaivedUsdc`. Successful closes with a nonzero assessment emit `FrozenCloseSpreadSettled(account, assessedUsdc, paidUsdc, waivedUsdc)` from `CfdEngineSettlementSidecar`, so the live result is reconstructible from durable logs.
+
 ## Runtime Components
 
 The main runtime and read surfaces are:
@@ -129,7 +131,7 @@ The main runtime and read surfaces are:
 2. Submit an open or close intent through `OrderRouter.commitOrder(...)`.
 3. The router records a FIFO order, reserves committed margin, and reserves a keeper execution bounty in `MarginClearinghouse`.
 4. A keeper later calls `executeOrder(...)` or `executeOrderBatch(...)` with Pyth update data.
-5. `OrderRouter` resolves the first valid Pyth tick strictly after the order's `commitTime`, applies conservative confidence-adjusted pricing, validates slippage and queue eligibility, then calls `CfdEngine.processOrderTyped(...)`.
+5. `OrderRouter` resolves the first valid Pyth tick strictly after the order's `commitTime` in live/FAD-only markets, or the validated stored basket under oracle-frozen policy. It applies conservative confidence-adjusted pricing except for oracle-frozen voluntary closes, validates slippage and queue eligibility, then calls `CfdEngine.processOrderTyped(...)`.
 6. `CfdEngine` updates the position, realizes fees and carry, and settles through `MarginClearinghouse` and `HousePool`.
 
 Important details:
@@ -138,7 +140,7 @@ Important details:
 - Open orders are rejected during degraded mode and close-only windows.
 - Failed orders are finalized from reserved clearinghouse bounty reservation; blocked FIFO heads remain pending.
 - Execution-time user-invalid opens, protocol-state invalidations, and terminal-invalid closes pay the keeper from reservation so FIFO cleanup remains incentive compatible.
-- Close orders can still execute during genuine frozen-oracle windows using the last valid mark subject to the relaxed frozen-market rules.
+- Close orders can still execute during genuine frozen-oracle windows using the last valid mark subject to the relaxed frozen-market rules and the fixed LP-owned frozen-close spread.
 - Close-intent queue validation is account-local and bounded by the per-account pending-order queue.
 
 ### Trader claim balance
@@ -292,7 +294,7 @@ Immediate active-share deposits are only accepted when no trader positions are o
 
 The perps system intentionally splits accounting into separate kernels:
 
-- `CloseAccountingLib`: realized PnL, execution fee, trader settlement, and bad-debt handling for voluntary decreases.
+- `CloseAccountingLib`: realized PnL, signed VPI, execution fee, frozen-close spread, trader settlement, and bad-debt handling for voluntary decreases.
 - `LiquidationAccountingLib`: reachable collateral, keeper bounty, residual payout, and bad debt for forced close.
 - `SolvencyAccountingLib`: effective assets, bounded max liability, withdrawal reserves, and free pool cash.
 - `OrderReservationAccounting`: clearinghouse-reserved execution bounty accounting and margin-queue bookkeeping.
@@ -339,7 +341,7 @@ The router is configured with a `PletherOracle` contract. The oracle instance ow
 - `PletherOracle` normalizes each feed to 8 decimals while computing the basket price.
 - The oracle computes the weighted basket price in the same shape as the spot basket oracle.
 - Basket confidence is propagated conservatively by summing weighted component relative confidence, then multiplying by the basket price.
-- Opening and closing orders use the adverse side of the confidence interval for the trader's side: `BULL` opens are priced lower, `BEAR` opens are priced higher, `BULL` closes are priced higher, and `BEAR` closes are priced lower.
+- Opening orders and live/FAD-only closing orders use the adverse side of the confidence interval for the trader's side: `BULL` opens are priced lower, `BEAR` opens are priced higher, `BULL` closes are priced higher, and `BEAR` closes are priced lower. Oracle-frozen voluntary closes instead use the unshifted validated basket price and pay the fixed frozen-close spread.
 - Liquidation checks also use the side-adverse confidence-adjusted mark for the liquidated account.
 - Component publish times must stay within `maxComponentPublishTimeDivergence`; if one basket leg is too far from the others, live opens are blocked rather than mixing fresh and stale components.
 - The minimum `publishTime` across feeds remains the basket publish time passed to the engine; historical order fills can use an older post-commit price without rewinding a newer cached engine mark.
@@ -357,8 +359,11 @@ The system distinguishes between:
 LP policy follows that split as well:
 
 - `FAD` alone does not change LP entry/exit pricing.
-- `oracleFrozen` close/reduce execution keeps the normal quadratic skew curve but switches to `frozenCloseVpiFactor` and charges a one-way surcharge. It never exposes a negative close VPI rebate during the frozen window, including when the close reduces pool skew.
-- `FAD` alone keeps normal signed close VPI behavior; the surcharge starts only after the oracle is actually frozen.
+- Voluntary close/reduce execution keeps the normal signed quadratic VPI curve and lifetime rebate clamp in every oracle regime, so a skew-reducing frozen close can still earn the same bounded negative VPI as a live close.
+- During `oracleFrozen` only, voluntary close/reduce execution assesses `frozenCloseSpreadBps` on the reduced position notional instead of applying Pyth's adverse-confidence price shift. The spread is fixed rather than staleness-dependent, belongs entirely to LPs, and never credits the protocol treasury. Pyth confidence-width validation remains active.
+- Live and FAD-only closes retain Pyth's adverse-confidence price adjustment and do not pay the frozen-close spread.
+- A partial close must fully settle the spread together with the rest of its close obligation. If a terminal full close cannot collect the entire spread, the uncollectible portion is waived instead of becoming bad debt, preserving exit liveness.
+- Liquidations do not assess the frozen-close spread and retain their existing settlement rules.
 - `oracleFrozen` keeps LP withdrawals live and keeps immediate LP deposits live only when no trader positions are open; pending deposit epochs remain the ordinary entry path. Senior and junior stale-window actions pay fixed surcharges that compensate incumbent LPs in that same tranche.
 
 This preserves close and liquidation liveness during real market closures without turning normal live trading into a free option.
@@ -396,7 +401,7 @@ This is a containment latch, not a pause. The protocol still allows transitions 
 - Residual trader value is preserved when positive.
 - Same-account trader claim balance is not treated as liquidation-reachable collateral; it is only netted once as terminal settlement bookkeeping.
 - Bad debt is socialized to LP capital if losses exceed reachable collateral.
-- Voluntary closes on underwater positions seize what is reachable and let the HousePool absorb the shortfall rather than trapping the user in an impossible state.
+- Voluntary full closes on underwater positions seize what is reachable and let the HousePool absorb genuine trading-loss shortfall rather than trapping the user in an impossible state; an uncollectible frozen-close spread is waived and does not add bad debt.
 
 ### Friday Auto-Deleverage (FAD)
 
@@ -426,7 +431,7 @@ Engine risk controls live on `CfdEngineAdmin`, and router risk controls plus pau
 
 Timelocked surfaces include:
 
-- `CfdEngineAdmin.EngineRiskConfig` -> `CfdEngine.riskParams`, `CfdEngine.executionFeeBps`, `CfdEngine.frozenCloseVpiFactor`
+- `CfdEngineAdmin.EngineRiskConfig` -> `CfdEngine.riskParams`, `CfdEngine.executionFeeBps`, `CfdEngine.frozenCloseSpreadBps`
 - `CfdEngineAdmin.EngineCalendarConfig` -> `CfdEngine.fadDayOverrides`, `CfdEngine.fadRunwaySeconds`
 - `CfdEngineAdmin.EngineFreshnessConfig` -> `CfdEngine.fadMaxStaleness`, `CfdEngine.engineMarkStalenessLimit`
 - `HousePool.seniorRateBps`
@@ -453,13 +458,13 @@ Instant controls remain for one-time wiring and fee withdrawal. `OrderRouter` pa
 | `bountyBps` | 10 (0.10%) | Liquidation bounty rate |
 | `minBountyUsdc` | 1,000,000 ($1) | Liquidation bounty floor |
 | `executionFeeBps` | 4 (0.04%) | Timelocked protocol trading fee |
-| `frozenCloseVpiFactor` | 0.005e18 (0.5%) | One-way close VPI factor during `oracleFrozen` |
+| `frozenCloseSpreadBps` | 50 (0.50%) | Fixed LP-owned spread on voluntary close/reduce notional during `oracleFrozen` |
 | Open execution bounty | 0.01 to 0.20 USDC | Timelocked router reserve bounds |
 | Close execution bounty | 0.20 USDC | Timelocked router reserve amount |
 | Normal execution staleness | 60s | Normal order execution freshness |
 | Order settlement window | 15s | Historical Pyth search window after order commit |
 | Component publish divergence | 5s | Max basket-leg publish-time skew for live settlement |
-| Adverse confidence multiplier | 2,000 (0.2x) | Confidence interval multiplier applied to execution and liquidation marks |
+| Adverse confidence multiplier | 2,000 (0.2x) | Applied to live/FAD order execution and liquidation marks; waived for oracle-frozen voluntary closes |
 | Liquidation staleness | 15s | Live-market liquidation freshness |
 | `engineMarkStalenessLimit` | 60s | Engine-side mark freshness |
 | `markStalenessLimit` | 60s | HousePool mark freshness |
@@ -471,6 +476,8 @@ Instant controls remain for one-time wiring and fee withdrawal. `OrderRouter` pa
 
 OrderRouter also exposes timelocked admin control over `maxPendingOrders`, `minEngineGas`, and `maxPruneOrdersPerCall`.
 `maxOrderAge` must stay nonzero and cannot exceed one hour, so close-only windows cannot be indefinitely pinned by an old FIFO head.
+
+`frozenCloseSpreadBps` is timelocked with the rest of `EngineRiskConfig`, must remain nonzero, and is hard-capped at `1,000` bps (10%).
 
 ## Off-Chain Applications and Workers
 

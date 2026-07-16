@@ -16,8 +16,8 @@ contract DeployPerpsArbitrumSepoliaHarness is DeployPerpsArbitrumSepolia {
         return _riskParams();
     }
 
-    function frozenCloseVpiFactor() external pure returns (uint256) {
-        return FROZEN_CLOSE_VPI_FACTOR;
+    function frozenCloseSpreadBps() external pure returns (uint256) {
+        return FROZEN_CLOSE_SPREAD_BPS;
     }
 
 }
@@ -42,8 +42,7 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         CfdTypes.RiskParams memory params = deployScript.riskParams();
 
         assertEq(params.vpiFactor, 0.005e18, "vpi factor");
-        assertEq(deployScript.frozenCloseVpiFactor(), 0.005e18, "frozen close vpi");
-        assertGe(deployScript.frozenCloseVpiFactor(), params.vpiFactor, "frozen close vpi bound");
+        assertEq(deployScript.frozenCloseSpreadBps(), 50, "frozen close spread");
         assertEq(params.maxSkewRatio, 0.4e18, "max skew");
         assertEq(params.maintMarginBps, 30, "maintenance margin");
         assertEq(params.initMarginBps, 45, "initial margin");
@@ -58,10 +57,11 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         MockUSDC usdc = new MockUSDC();
         MarginClearinghouse clearinghouse = new MarginClearinghouse(address(usdc));
         CfdEngine engine = new CfdEngine(
-            address(usdc), address(clearinghouse), 2e8, deployScript.riskParams(), deployScript.frozenCloseVpiFactor()
+            address(usdc), address(clearinghouse), 2e8, deployScript.riskParams(), deployScript.frozenCloseSpreadBps()
         );
 
         assertEq(engine.executionFeeBps(), 4, "execution fee");
+        assertEq(engine.frozenCloseSpreadBps(), 50, "frozen close spread");
         assertEq(engine.fadRunwaySeconds(), 1 hours, "fad runway");
 
         bytes32[] memory feedIds = new bytes32[](1);

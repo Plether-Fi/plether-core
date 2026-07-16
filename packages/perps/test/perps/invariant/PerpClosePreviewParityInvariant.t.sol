@@ -35,7 +35,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
         usdc = new MockUSDC();
         clearinghouse = new MarginClearinghouse(address(usdc));
 
-        harness = new CfdEngineHarness(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams(), 0.005e18);
+        harness = new CfdEngineHarness(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams(), 50);
         engine = harness;
         engineLens = new CfdEngineLens(address(engine));
 
@@ -285,6 +285,11 @@ contract PerpClosePreviewParityInvariantTest is Test {
         assertEq(actual.vpiDeltaUsdc, expected.vpiDeltaUsdc, "Close VPI delta should match");
         assertEq(actual.vpiUsdc, expected.vpiUsdc, "Close VPI should match");
         assertEq(actual.executionFeeUsdc, expected.executionFeeUsdc, "Close execution fee should match");
+        assertEq(actual.frozenSpreadUsdc, expected.frozenSpreadUsdc, "Close assessed frozen spread should match");
+        assertEq(actual.frozenSpreadPaidUsdc, expected.frozenSpreadPaidUsdc, "Close paid frozen spread should match");
+        assertEq(
+            actual.frozenSpreadWaivedUsdc, expected.frozenSpreadWaivedUsdc, "Close waived frozen spread should match"
+        );
         assertEq(actual.freshTraderPayoutUsdc, expected.freshTraderPayoutUsdc, "Close fresh payout should match");
         assertEq(
             actual.existingTraderClaimConsumedUsdc,

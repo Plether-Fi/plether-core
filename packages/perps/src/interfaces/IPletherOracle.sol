@@ -102,9 +102,11 @@ interface IPletherOracle {
         PriceMode mode
     ) external payable returns (PriceSnapshot memory snapshot);
 
-    /// @notice Applies order-execution update data and returns a strictly post-commit historical execution price.
-    /// @dev The caller supplies only the Pyth fee for this parse; refunds for unavailable historical
-    ///      parses are returned to the caller so the router can keep aggregate fee accounting correct.
+    /// @notice Applies order-execution update data and returns a validated execution price.
+    /// @dev Live/FAD-only execution resolves a strictly post-commit historical price. Oracle-frozen
+    ///      execution uses the validated stored basket under the relaxed frozen-market policy. The caller
+    ///      supplies only the Pyth fee; refunds for unavailable historical parses are returned to the caller
+    ///      so the router can keep aggregate fee accounting correct.
     /// @param refundRecipient Recipient for returned ETH when historical parsing is unavailable
     /// @param pythUpdateData Pyth price update blobs
     /// @param request Order execution price constraints
@@ -212,7 +214,8 @@ interface IPletherOracle {
     /// @notice Returns max allowed publish-time divergence across basket components.
     function maxComponentPublishTimeDivergence() external view returns (uint256);
 
-    /// @notice Returns confidence multiplier used for adverse execution/liquidation pricing.
+    /// @notice Returns the multiplier used for adverse order pricing outside oracle-frozen voluntary closes
+    ///         and for all liquidation pricing.
     function adverseConfidenceMultiplierBps() external view returns (uint256);
 
     /// @notice Returns the engine used for cap, side, and calendar state.

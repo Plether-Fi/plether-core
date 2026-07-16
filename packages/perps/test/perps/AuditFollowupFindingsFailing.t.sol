@@ -396,6 +396,7 @@ contract AuditFollowupFindingsFailing_RiskParamValidation is BasePerpTest {
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = params;
         config.executionFeeBps = engine.executionFeeBps();
+        config.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
         vm.expectRevert();
         engineAdmin.proposeRiskConfig(config);
     }
@@ -406,6 +407,7 @@ contract AuditFollowupFindingsFailing_RiskParamValidation is BasePerpTest {
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = params;
         config.executionFeeBps = engine.executionFeeBps();
+        config.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
         vm.expectRevert();
         engineAdmin.proposeRiskConfig(config);
     }

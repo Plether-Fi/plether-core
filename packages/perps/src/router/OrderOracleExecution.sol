@@ -74,7 +74,8 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
         return pletherOracle.maxComponentPublishTimeDivergence();
     }
 
-    /// @notice Returns confidence multiplier used for adverse execution/liquidation pricing.
+    /// @notice Returns the multiplier used for adverse order pricing outside oracle-frozen voluntary closes
+    ///         and for all liquidation pricing.
     function adverseConfidenceMultiplierBps() public view returns (uint256) {
         return pletherOracle.adverseConfidenceMultiplierBps();
     }

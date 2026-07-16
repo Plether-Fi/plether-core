@@ -212,6 +212,9 @@ contract CfdEngineLens is ICfdEngineLens {
             preview.vpiUsdc = uint256(delta.closeState.vpiDeltaUsdc);
         }
         preview.executionFeeUsdc = delta.executionFeeUsdc;
+        preview.frozenSpreadUsdc = delta.closeState.frozenSpreadUsdc;
+        preview.frozenSpreadPaidUsdc = _frozenSpreadPaidUsdc(delta);
+        preview.frozenSpreadWaivedUsdc = preview.frozenSpreadUsdc - preview.frozenSpreadPaidUsdc;
 
         if (delta.revertCode == CfdEnginePlanTypes.CloseRevertCode.DUST_POSITION) {
             preview.invalidReason = CfdTypes.CloseInvalidReason.DustPosition;
@@ -225,7 +228,7 @@ contract CfdEngineLens is ICfdEngineLens {
         preview.traderClaimBalanceUsdc =
             delta.existingTraderClaimRemainingUsdc + (delta.freshPayoutCreatesClaim ? delta.freshTraderPayoutUsdc : 0);
         if (delta.settlementType == CfdEnginePlanTypes.SettlementType.LOSS) {
-            preview.seizedCollateralUsdc = delta.lossResult.seizedUsdc;
+            preview.seizedCollateralUsdc = delta.lossConsumption.totalConsumedUsdc;
             preview.badDebtUsdc = delta.badDebtUsdc;
         }
 
@@ -239,6 +242,23 @@ contract CfdEngineLens is ICfdEngineLens {
         preview.postOpDegradedMode = delta.solvency.postOpDegradedMode;
         preview.effectiveAssetsAfterUsdc = delta.solvency.effectiveAssetsAfterUsdc;
         preview.maxLiabilityAfterUsdc = delta.solvency.maxLiabilityAfterUsdc;
+    }
+
+    function _frozenSpreadPaidUsdc(
+        CfdEnginePlanTypes.CloseDelta memory delta
+    ) private pure returns (uint256 paidUsdc) {
+        if (delta.settlementType != CfdEnginePlanTypes.SettlementType.LOSS) {
+            return delta.closeState.frozenSpreadUsdc;
+        }
+
+        uint256 uncollectedExecFeeUsdc = delta.closeState.executionFeeUsdc - delta.lossResult.retainedExecFeeUsdc
+            - delta.lossResult.collectedExecFeeUsdc;
+        uint256 uncollectedSpreadUsdc =
+            delta.lossResult.shortfallUsdc - uncollectedExecFeeUsdc - delta.lossResult.badDebtUsdc;
+        uint256 claimBadDebtRecoveryUsdc = delta.lossResult.badDebtUsdc - delta.badDebtUsdc;
+        uint256 claimSpreadRecoveryUsdc =
+            delta.existingTraderClaimConsumedUsdc - delta.traderClaimFeeRecoveryUsdc - claimBadDebtRecoveryUsdc;
+        return delta.closeState.frozenSpreadUsdc - (uncollectedSpreadUsdc - claimSpreadRecoveryUsdc);
     }
 
     function _projectOpenPosition(
@@ -450,7 +470,7 @@ contract CfdEngineLens is ICfdEngineLens {
         snap.executionFeeBps = engineContract.executionFeeBps();
         snap.isFadWindow = engineContract.isFadWindow();
         snap.oracleFrozen = engineContract.isOracleFrozen();
-        snap.frozenCloseVpiFactor = engineContract.frozenCloseVpiFactor();
+        snap.frozenCloseSpreadBps = engineContract.frozenCloseSpreadBps();
         liveMarkAge;
         maxStaleness;
     }

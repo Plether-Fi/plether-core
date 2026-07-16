@@ -116,8 +116,8 @@ Any new helper/sidecar contract that can reach these sets should be treated as s
 | Regime | Entry condition | Allowed actions | Core checks |
 |--------|-----------------|----------------|-------------|
 | Live market | oracle not frozen, mark fresh enough | opens, closes, liquidations | staleness, `block.number > commitBlock`, `commitTime < publishTime <= block.timestamp`, `publishTime >= lastMarkTime` |
-| Friday gap / runway live-close regime | market not frozen but special weekend/runway timing | live rules still apply | same live checks |
-| Frozen / FAD close-only regime | oracle frozen but within allowed stale window | closes and liquidations only | relaxed publish-ordering rule, frozen-window stale limits |
+| FAD-only / runway live-close regime | FAD active, oracle not frozen | live close-only rules | same live checks; signed VPI and no frozen-close spread |
+| Frozen close-only regime | oracle frozen but within allowed stale window | closes and liquidations only | relaxed publish-ordering rule and frozen-window stale limits; voluntary closes use signed VPI plus fixed LP-owned spread, liquidations unchanged |
 | Over-stale frozen regime | oracle frozen beyond allowed stale window | no execution | revert/block |
 | Degraded mode | post-terminal insolvency latch | risk-reducing and protective actions only | opens blocked, protective transitions allowed |
 
@@ -149,8 +149,11 @@ Reachability note:
 
 - Liveness problem: risk-reducing users and keepers still need an exit path when live oracle updates stop.
 - Chosen tradeoff: opens are blocked, but closes and liquidations may proceed inside explicit frozen/FAD windows.
-- New risk: execution may rely on older marks than the live regime would permit.
-- Protecting invariant: frozen execution has its own tighter stale window and remains close-only.
+- New risk: execution may rely on older marks than the live regime would permit, and the fixed spread does not scale with staleness inside that window.
+- Pricing rule: voluntary closes keep normal signed VPI and the lifetime rebate clamp. During `oracleFrozen`, the fixed `frozenCloseSpreadBps` replaces the Pyth adverse-confidence price shift; live/FAD-only closes and liquidations retain adverse-confidence pricing.
+- Ownership rule: paid spread belongs only to LPs and never credits protocol treasury. `frozenCloseSpreadBps` defaults to `50`, is 48-hour timelocked, must be nonzero, and is capped at `1,000` bps.
+- Liveness rule: partial closes must settle the complete obligation; terminal full closes waive uncollectible spread instead of adding it to bad debt. Liquidations do not assess the spread.
+- Protecting invariant: frozen execution remains close-only, and close preview preserves `frozenSpreadUsdc == frozenSpreadPaidUsdc + frozenSpreadWaivedUsdc`.
 
 ### Trader claim balance servicing
 
@@ -194,7 +197,7 @@ Reachability note:
 1. Trader has a live position and commits a close.
 2. Router reserves the close execution bounty in the clearinghouse, using free settlement first when a fresh carry-checkpoint mark exists and otherwise using the bounded active-margin fallback.
 3. Keeper executes the FIFO head under the current oracle regime.
-4. Planner computes canonical close settlement, including fees and pending carry.
+4. Planner computes canonical close settlement, including signed VPI, fees, pending carry, and the fixed LP-owned spread if `oracleFrozen`.
 5. Engine realizes carry and applies the close using the planner's exact loss/gain result.
 6. Clearinghouse unlocks/consumes the relevant trader buckets.
 7. If pool cash is available, the trader receives immediate settlement.
@@ -205,10 +208,19 @@ Reachability note:
 1. Trader commits a reduce-only close.
 2. Router reserves the execution bounty and preserves the residual position path.
 3. Keeper executes.
-4. Planner computes canonical carry-adjusted loss and partial-close remaining margin.
-5. Engine consumes close loss from free settlement, then allowed unlocked margin buckets, then shortfall if needed.
-6. Position remains open with reduced size and updated margin.
-7. LPs receive realized carry/trading inflow; no separate loss recomputation occurs at execution time.
+4. Planner computes canonical carry-adjusted loss, partial-close remaining margin, and the fixed spread if `oracleFrozen`.
+5. Engine plans consumption from free settlement and allowed unlocked margin buckets; any remaining obligation, including frozen spread, rejects the partial close.
+6. Only a fully settled partial close leaves the position open with reduced size and updated margin.
+7. LPs receive realized carry/trading inflow and any frozen spread; no separate loss recomputation occurs at execution time.
+
+### Underfunded frozen full close
+
+1. Trader commits a full close while `oracleFrozen`.
+2. Planner applies normal signed VPI with the lifetime rebate clamp, then assesses the fixed spread on the full reduced notional.
+3. Terminal settlement consumes the account's reachable value and permitted same-account claim value under the close priority rules.
+4. The retained or collected spread is booked as LP revenue; it is never routed to protocol treasury.
+5. Any uncollectible spread is exposed as `frozenSpreadWaivedUsdc` and does not become bad debt.
+6. Genuine uncovered base trading loss remains explicit bad debt, and the full close completes.
 
 ### Liquidation with positive residual
 
@@ -246,6 +258,7 @@ Reachability note:
 5. Bounded queue behavior: cleanup and close-intent projection are account-local.
 6. Reservation conservation: clearinghouse-reserved execution bounty value and admin-held ETH refund claims are each distributed, refunded, forfeited, or left claimable exactly once.
 7. No speculative LP asset inflation: unrealized trader losses are not counted as spendable LP assets.
+8. Frozen-spread conservation: assessed spread equals LP-paid spread plus terminally waived spread; live/FAD-only closes and all liquidations assess zero.
 
 ## Test Map
 

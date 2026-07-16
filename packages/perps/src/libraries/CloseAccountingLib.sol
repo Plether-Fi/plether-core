@@ -11,14 +11,11 @@ library CloseAccountingLib {
         uint256 sizeDelta;
         uint256 oraclePrice;
         uint256 capPrice;
-        // Normal close VPI uses absolute skew. Frozen close VPI also needs signed skew to detect zero-crossings.
         uint256 preSkewUsdc;
         uint256 postSkewUsdc;
-        int256 preSignedSkewUsdc;
-        int256 postSignedSkewUsdc;
         uint256 poolDepthUsdc;
         uint256 vpiFactor;
-        uint256 frozenCloseVpiFactor;
+        uint256 frozenCloseSpreadBps;
         bool oracleFrozen;
         uint256 executionFeeBps;
     }
@@ -32,6 +29,7 @@ library CloseAccountingLib {
         int256 proportionalAccrualUsdc;
         int256 vpiDeltaUsdc;
         uint256 executionFeeUsdc;
+        uint256 frozenSpreadUsdc;
         int256 netSettlementUsdc;
     }
 
@@ -58,30 +56,23 @@ library CloseAccountingLib {
 
         state.proportionalAccrualUsdc =
             (inputs.position.vpiAccrued * int256(inputs.sizeDelta)) / int256(inputs.position.size);
-        if (inputs.oracleFrozen) {
-            state.vpiDeltaUsdc = int256(
-                CfdMath.calculateOneWayVPI(
-                    inputs.preSignedSkewUsdc,
-                    inputs.postSignedSkewUsdc,
-                    inputs.poolDepthUsdc,
-                    inputs.frozenCloseVpiFactor
-                )
-            );
-        } else {
-            state.vpiDeltaUsdc =
-                CfdMath.calculateVPI(inputs.preSkewUsdc, inputs.postSkewUsdc, inputs.poolDepthUsdc, inputs.vpiFactor);
-            // Clamp so lifetime VPI (accrued + delta) never goes negative. Prevents LP sandwich attacks
-            // where an attacker opens at high depth, donates to shrink depth, then closes to extract a
-            // net-negative VPI rebate. Trade-off: market makers who heal skew on both open and close
-            // receive $0 net VPI rebate — they must profit from directional price movement instead.
-            if (state.proportionalAccrualUsdc + state.vpiDeltaUsdc < 0) {
-                state.vpiDeltaUsdc = -state.proportionalAccrualUsdc;
-            }
+        state.vpiDeltaUsdc =
+            CfdMath.calculateVPI(inputs.preSkewUsdc, inputs.postSkewUsdc, inputs.poolDepthUsdc, inputs.vpiFactor);
+        // Clamp so lifetime VPI (accrued + delta) never goes negative. Prevents LP sandwich attacks
+        // where an attacker opens at high depth, donates to shrink depth, then closes to extract a
+        // net-negative VPI rebate. This rule is identical in live and oracle-frozen markets; frozen-market
+        // stale-price risk is priced separately through frozenSpreadUsdc.
+        if (state.proportionalAccrualUsdc + state.vpiDeltaUsdc < 0) {
+            state.vpiDeltaUsdc = -state.proportionalAccrualUsdc;
         }
 
         uint256 notionalUsdc = (inputs.sizeDelta * inputs.oraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
         state.executionFeeUsdc = (notionalUsdc * inputs.executionFeeBps) / 10_000;
-        state.netSettlementUsdc = state.realizedPnlUsdc - state.vpiDeltaUsdc - int256(state.executionFeeUsdc);
+        if (inputs.oracleFrozen) {
+            state.frozenSpreadUsdc = (notionalUsdc * inputs.frozenCloseSpreadBps) / 10_000;
+        }
+        state.netSettlementUsdc =
+            state.realizedPnlUsdc - state.vpiDeltaUsdc - int256(state.executionFeeUsdc + state.frozenSpreadUsdc);
     }
 
 }

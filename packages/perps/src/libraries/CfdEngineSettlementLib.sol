@@ -37,30 +37,40 @@ library CfdEngineSettlementLib {
     function closeSettlementResult(
         uint256 availableUsdc,
         uint256 owedUsdc,
-        uint256 execFeeUsdc
+        uint256 execFeeUsdc,
+        uint256 frozenSpreadUsdc
     ) internal pure returns (CloseSettlementResult memory result) {
         DebtCollectionResult memory collection = collectSettlementDeficit(availableUsdc, owedUsdc);
         result.seizedUsdc = collection.seizedUsdc;
         result.shortfallUsdc = collection.shortfallUsdc;
-        uint256 feeEmbeddedInOwedUsdc = execFeeUsdc < owedUsdc ? execFeeUsdc : owedUsdc;
-        result.retainedExecFeeUsdc = execFeeUsdc - feeEmbeddedInOwedUsdc;
+
+        uint256 totalChargesUsdc = execFeeUsdc + frozenSpreadUsdc;
+        uint256 retainedChargesUsdc = totalChargesUsdc > owedUsdc ? totalChargesUsdc - owedUsdc : 0;
+        result.retainedExecFeeUsdc = execFeeUsdc < retainedChargesUsdc ? execFeeUsdc : retainedChargesUsdc;
+        uint256 retainedAfterExecFeeUsdc = retainedChargesUsdc - result.retainedExecFeeUsdc;
+        uint256 retainedFrozenSpreadUsdc =
+            frozenSpreadUsdc < retainedAfterExecFeeUsdc ? frozenSpreadUsdc : retainedAfterExecFeeUsdc;
+
+        uint256 feeEmbeddedInOwedUsdc = execFeeUsdc - result.retainedExecFeeUsdc;
         result.collectedExecFeeUsdc =
             feeEmbeddedInOwedUsdc < collection.seizedUsdc ? feeEmbeddedInOwedUsdc : collection.seizedUsdc;
-        uint256 uncollectedEmbeddedFeeUsdc = feeEmbeddedInOwedUsdc - result.collectedExecFeeUsdc;
-        result.badDebtUsdc = collection.shortfallUsdc > uncollectedEmbeddedFeeUsdc
-            ? collection.shortfallUsdc - uncollectedEmbeddedFeeUsdc
-            : 0;
+        uint256 spreadEmbeddedInOwedUsdc = frozenSpreadUsdc - retainedFrozenSpreadUsdc;
+        uint256 baseOwedUsdc = owedUsdc - feeEmbeddedInOwedUsdc - spreadEmbeddedInOwedUsdc;
+        uint256 seizedAfterExecFeeUsdc = collection.seizedUsdc - result.collectedExecFeeUsdc;
+        uint256 collectedBaseUsdc = baseOwedUsdc < seizedAfterExecFeeUsdc ? baseOwedUsdc : seizedAfterExecFeeUsdc;
+        result.badDebtUsdc = baseOwedUsdc - collectedBaseUsdc;
     }
 
     function closeSettlementResultForTerminalBuckets(
         IMarginClearinghouse.AccountUsdcBuckets memory buckets,
         uint256 protectedLockedMarginUsdc,
         uint256 owedUsdc,
-        uint256 execFeeUsdc
+        uint256 execFeeUsdc,
+        uint256 frozenSpreadUsdc
     ) internal pure returns (CloseSettlementResult memory result) {
         MarginClearinghouseAccountingLib.SettlementConsumption memory consumption =
             MarginClearinghouseAccountingLib.planTerminalLossConsumption(buckets, protectedLockedMarginUsdc, owedUsdc);
-        result = closeSettlementResult(consumption.totalConsumedUsdc, owedUsdc, execFeeUsdc);
+        result = closeSettlementResult(consumption.totalConsumedUsdc, owedUsdc, execFeeUsdc, frozenSpreadUsdc);
     }
 
     function liquidationSettlementResult(

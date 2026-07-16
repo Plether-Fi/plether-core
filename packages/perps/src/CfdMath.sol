@@ -145,29 +145,4 @@ library CfdMath {
         vpiUsdc = int256(postCost) - int256(preCost);
     }
 
-    /// @notice Calculates a one-way VPI surcharge for frozen close-only windows.
-    /// @dev Uses signed skew and the same quadratic cost curve as normal VPI. Same-sign moves pay
-    ///      the absolute curve delta; zero-crossing moves pay both sides so the result is never a rebate.
-    function calculateOneWayVPI(
-        int256 preSignedSkewUsdc,
-        int256 postSignedSkewUsdc,
-        uint256 depthUsdc,
-        uint256 vpiFactorWad
-    ) internal pure returns (uint256 vpiUsdc) {
-        uint256 preCost = getSkewCost(_abs(preSignedSkewUsdc), depthUsdc, vpiFactorWad);
-        uint256 postCost = getSkewCost(_abs(postSignedSkewUsdc), depthUsdc, vpiFactorWad);
-
-        if ((preSignedSkewUsdc < 0 && postSignedSkewUsdc > 0) || (preSignedSkewUsdc > 0 && postSignedSkewUsdc < 0)) {
-            return preCost + postCost;
-        }
-
-        return preCost > postCost ? preCost - postCost : postCost - preCost;
-    }
-
-    function _abs(
-        int256 value
-    ) private pure returns (uint256) {
-        return value < 0 ? uint256(-value) : uint256(value);
-    }
-
 }

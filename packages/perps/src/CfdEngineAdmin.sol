@@ -11,6 +11,7 @@ import {ICfdEngineAdminHost} from "@plether/perps/interfaces/ICfdEngineAdminHost
 contract CfdEngineAdmin is Ownable2Step {
 
     uint256 public constant TIMELOCK_DELAY = 48 hours;
+    uint256 public constant MAX_FROZEN_CLOSE_SPREAD_BPS = 1000;
 
     ICfdEngineAdminHost public immutable engine;
 
@@ -49,7 +50,7 @@ contract CfdEngineAdmin is Ownable2Step {
         engine = ICfdEngineAdminHost(engine_);
     }
 
-    /// @notice Proposes risk parameters and execution-fee changes behind the timelock.
+    /// @notice Proposes risk parameters, execution-fee, and frozen-close-spread changes behind the timelock.
     /// @param config Risk configuration to validate and stage
     function proposeRiskConfig(
         ICfdEngineAdminHost.EngineRiskConfig calldata config
@@ -58,7 +59,7 @@ contract CfdEngineAdmin is Ownable2Step {
         if (config.executionFeeBps == 0 || config.executionFeeBps > 10_000) {
             revert CfdEngineAdmin__InvalidExecutionFee();
         }
-        if (config.frozenCloseVpiFactor < config.riskParams.vpiFactor) {
+        if (config.frozenCloseSpreadBps == 0 || config.frozenCloseSpreadBps > MAX_FROZEN_CLOSE_SPREAD_BPS) {
             revert CfdEngineAdmin__InvalidRiskParams();
         }
         pendingRiskConfig = config;

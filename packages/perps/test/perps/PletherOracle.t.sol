@@ -17,6 +17,8 @@ contract PletherOracleEngineMock {
     uint256 public engineMarkStalenessLimit = 60;
     address public orderRouter;
     mapping(uint256 => bool) public fadDayOverrides;
+    uint256 internal mockPositionSize;
+    CfdTypes.Side internal mockPositionSide;
 
     function setLastMark(
         uint256 price,
@@ -51,11 +53,19 @@ contract PletherOracleEngineMock {
         fadDayOverrides[dayNumber] = active;
     }
 
+    function setPosition(
+        uint256 size,
+        CfdTypes.Side side
+    ) external {
+        mockPositionSize = size;
+        mockPositionSide = side;
+    }
+
     function positions(
         address
     )
         external
-        pure
+        view
         returns (
             uint256 size,
             uint256 margin,
@@ -66,7 +76,7 @@ contract PletherOracleEngineMock {
             int256 vpiAccrued
         )
     {
-        return (0, 0, 0, 0, CfdTypes.Side.BULL, 0, 0);
+        return (mockPositionSize, 0, 0, 0, mockPositionSide, 0, 0);
     }
 
 }
@@ -258,6 +268,100 @@ contract PletherOracleTest is Test {
         assertEq(snapshot.price, 1e8, "basket price");
     }
 
+    function test_LiveClose_RetainsAdverseConfidenceAdjustment() public {
+        vm.warp(1000);
+        _setHistoricalPricesWithConfidence(100_000_000, 100_000);
+
+        (bool ok, IPletherOracle.PriceSnapshot memory snapshot) =
+            oracle.updateOrderExecutionPrice(address(this), _pythUpdateData(), _orderRequest(CfdTypes.Side.BULL, true));
+
+        assertTrue(ok, "live close should resolve a historical execution price");
+        assertFalse(snapshot.closeOnly, "live execution should not be close-only");
+        assertFalse(snapshot.oracleFrozen, "live execution should not be oracle-frozen");
+        assertEq(snapshot.markPrice, 100_000_000, "mark should retain the unshifted basket price");
+        assertEq(snapshot.price, 100_020_000, "live close should retain the adverse confidence shift");
+    }
+
+    function test_FadOnlyClose_RetainsAdverseConfidenceAdjustment() public {
+        vm.warp(1000);
+        engine.setFadWindow(true);
+        _setHistoricalPricesWithConfidence(100_000_000, 100_000);
+
+        (bool ok, IPletherOracle.PriceSnapshot memory snapshot) =
+            oracle.updateOrderExecutionPrice(address(this), _pythUpdateData(), _orderRequest(CfdTypes.Side.BULL, true));
+
+        assertTrue(ok, "FAD-only close should resolve a historical execution price");
+        assertTrue(snapshot.closeOnly, "FAD execution should be close-only");
+        assertTrue(snapshot.isFadWindow, "setup should use FAD policy");
+        assertFalse(snapshot.oracleFrozen, "FAD runway should not imply oracle freeze");
+        assertEq(snapshot.price, 100_020_000, "FAD-only close should retain the adverse confidence shift");
+    }
+
+    function test_OracleFrozenClose_WaivesAdverseConfidenceAdjustment() public {
+        vm.warp(1000);
+        engine.setFadDayOverride(block.timestamp / 86_400, true);
+        _setLivePricesWithConfidence(100_000_000, 100_000, 990);
+
+        (bool ok, IPletherOracle.PriceSnapshot memory snapshot) =
+            oracle.updateOrderExecutionPrice(address(this), _pythUpdateData(), _orderRequest(CfdTypes.Side.BULL, true));
+
+        assertTrue(ok, "oracle-frozen close should resolve the stored Pyth basket");
+        assertTrue(snapshot.closeOnly, "oracle-frozen execution should be close-only");
+        assertTrue(snapshot.oracleFrozen, "setup should use oracle-frozen policy");
+        assertEq(snapshot.markPrice, 100_000_000, "mark should retain the unshifted basket price");
+        assertEq(snapshot.price, 100_000_000, "oracle-frozen close should waive the adverse confidence shift");
+    }
+
+    function test_OracleFrozenClose_StillRejectsConfidenceTooWide() public {
+        vm.warp(1000);
+        engine.setFadDayOverride(block.timestamp / 86_400, true);
+        _setLivePricesWithConfidence(100_000_000, 100_001, 990);
+
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__ConfidenceTooWide.selector);
+        oracle.updateOrderExecutionPrice(address(this), _pythUpdateData(), _orderRequest(CfdTypes.Side.BULL, true));
+    }
+
+    function test_OracleFrozenBatchClose_WaivesAdverseConfidenceAdjustment() public {
+        vm.warp(1000);
+        engine.setFadDayOverride(block.timestamp / 86_400, true);
+        _setLivePricesWithConfidence(100_000_000, 100_000, 990);
+        IPletherOracle.BatchOrderPriceCache memory cache;
+
+        (bool ok, IPletherOracle.PriceSnapshot memory snapshot, IPletherOracle.BatchOrderPriceCache memory nextCache) = oracle.updateBatchOrderExecutionPrice(
+            address(this), _pythUpdateData(), _orderRequest(CfdTypes.Side.BULL, true), cache
+        );
+
+        assertTrue(ok, "oracle-frozen batch close should resolve the stored Pyth basket");
+        assertTrue(snapshot.oracleFrozen, "setup should use oracle-frozen policy");
+        assertEq(snapshot.price, 100_000_000, "batch close should waive the adverse confidence shift");
+        assertFalse(nextCache.hasHistoricalBasket, "frozen execution should not cache a historical basket");
+    }
+
+    function test_OracleFrozenOpen_RetainsAdverseConfidenceAdjustment() public {
+        vm.warp(1000);
+        engine.setFadDayOverride(block.timestamp / 86_400, true);
+        _setLivePricesWithConfidence(100_000_000, 100_000, 990);
+
+        (bool ok, IPletherOracle.PriceSnapshot memory snapshot) =
+            oracle.updateOrderExecutionPrice(address(this), _pythUpdateData(), _orderRequest(CfdTypes.Side.BULL, false));
+
+        assertTrue(ok, "direct oracle call should still resolve a frozen open price");
+        assertEq(snapshot.price, 99_980_000, "non-close execution should retain the adverse confidence shift");
+    }
+
+    function test_OracleFrozenLiquidation_RetainsAdverseConfidenceAdjustment() public {
+        vm.warp(1000);
+        engine.setFadDayOverride(block.timestamp / 86_400, true);
+        engine.setPosition(1e18, CfdTypes.Side.BULL);
+        _setLivePricesWithConfidence(100_000_000, 100_000, 990);
+
+        IPletherOracle.PriceSnapshot memory snapshot =
+            oracle.updateLiquidationPrice(address(this), _pythUpdateData(), address(0xCAFE));
+
+        assertTrue(snapshot.oracleFrozen, "setup should use oracle-frozen policy");
+        assertEq(snapshot.price, 100_020_000, "liquidation should retain the adverse confidence shift");
+    }
+
     function test_UpdatePrice_RevertsWhenPublishTimePredatesStoredMark() public {
         vm.warp(1000);
         engine.setLastMark(1e8, 995);
@@ -323,6 +427,31 @@ contract PletherOracleTest is Test {
     ) internal {
         pyth.setPrice(FEED_A, price, int32(-8), publishTime);
         pyth.setPrice(FEED_B, price, int32(-8), publishTime);
+    }
+
+    function _setHistoricalPricesWithConfidence(
+        int64 price,
+        uint64 confidence
+    ) internal {
+        pyth.setAllUniquePrices(feedIds, price, confidence, int32(-8), 995, 990);
+    }
+
+    function _setLivePricesWithConfidence(
+        int64 price,
+        uint64 confidence,
+        uint256 publishTime
+    ) internal {
+        pyth.setPrice(FEED_A, price, confidence, int32(-8), publishTime);
+        pyth.setPrice(FEED_B, price, confidence, int32(-8), publishTime);
+    }
+
+    function _orderRequest(
+        CfdTypes.Side side,
+        bool isClose
+    ) internal pure returns (IPletherOracle.OrderExecutionRequest memory request) {
+        request = IPletherOracle.OrderExecutionRequest({
+            commitTime: 990, targetPrice: 0, side: side, isClose: isClose, revertOnHistoricalUnavailable: true
+        });
     }
 
     function _pythUpdateData() internal pure returns (bytes[] memory updateData) {
