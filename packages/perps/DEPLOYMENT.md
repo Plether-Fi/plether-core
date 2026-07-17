@@ -64,9 +64,11 @@ Important:
 
 ## Oracle Configuration
 
-The Arbitrum Sepolia deploy script uses Pyth at:
+The Arbitrum Sepolia deploy script uses Pyth's upgraded contract for new integrations:
 
-- `0x4374e5a8b9C22271E9EB878A2AA31DE97DF15DAF`
+- `0x0B73614636C855Bf23F342F307FB981A3e47f42B`
+
+The keeper must fetch matching upgraded Hermes payloads using a `PYTH_API_KEY`.
 
 The router basket uses 6 FX feeds with DXY weights:
 

@@ -47,6 +47,9 @@ bash -n scripts/bootstrap-perps-arbitrum-sepolia-dry-run.sh
 Copy `.env.example` to `.env` and fill only the reviewed values. Never commit `.env`, RPC credentials, private keys, or
 test-user funding lists.
 
+This release uses Pyth's upgraded Arbitrum Sepolia contract, `0x0B73614636C855Bf23F342F307FB981A3e47f42B`. The keeper
+must use the matching upgraded Hermes endpoint and a `PYTH_API_KEY`; mixing legacy and upgraded update data will fail.
+
 Deploy requires:
 
 ```text
@@ -129,7 +132,7 @@ the readback is approved.
 - [ ] All expected addresses have nonempty bytecode.
 - [ ] Engine dependencies, pool, router, clearinghouse, vaults, oracle, admin contracts, and lenses point to the new stack.
 - [ ] Risk, calendar, oracle, router, and pool values match the manifest.
-- [ ] Pyth is `0x4374e5a8b9C22271E9EB878A2AA31DE97DF15DAF`; all six feed IDs, weights, bases, and inversions match.
+- [ ] Pyth is `0x0B73614636C855Bf23F342F307FB981A3e47f42B`; all six feed IDs, weights, bases, and inversions match.
 - [ ] Both seed positions exist and their receivers are correct.
 - [ ] HousePool and OrderRouterAdmin are unpaused and have the reviewed pauser.
 - [ ] Ownership and any pending `Ownable2Step` handoffs match the signer plan.

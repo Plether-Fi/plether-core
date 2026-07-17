@@ -21,7 +21,7 @@ import "forge-std/Script.sol";
 contract DeployPerpsArbitrumSepolia is Script {
 
     uint256 internal constant ARBITRUM_SEPOLIA_CHAIN_ID = 421_614;
-    address internal constant PYTH = 0x4374e5a8b9C22271E9EB878A2AA31DE97DF15DAF;
+    address internal constant PYTH = 0x0B73614636C855Bf23F342F307FB981A3e47f42B;
     uint256 internal constant CAP_PRICE = 2e8;
     uint256 internal constant FROZEN_CLOSE_SPREAD_BPS = 50;
 

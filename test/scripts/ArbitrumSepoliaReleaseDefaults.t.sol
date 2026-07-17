@@ -20,6 +20,10 @@ contract DeployPerpsArbitrumSepoliaHarness is DeployPerpsArbitrumSepolia {
         return FROZEN_CLOSE_SPREAD_BPS;
     }
 
+    function pyth() external pure returns (address) {
+        return PYTH;
+    }
+
 }
 
 contract BootstrapPerpsArbitrumSepoliaHarness is BootstrapPerpsArbitrumSepolia {
@@ -62,6 +66,7 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         CfdTypes.RiskParams memory params = deployScript.riskParams();
 
         assertEq(params.vpiFactor, 0.005e18, "vpi factor");
+        assertEq(deployScript.pyth(), 0x0B73614636C855Bf23F342F307FB981A3e47f42B, "Pyth");
         assertEq(deployScript.frozenCloseSpreadBps(), 50, "frozen close spread");
         assertEq(params.maxSkewRatio, 0.4e18, "max skew");
         assertEq(params.maintMarginBps, 30, "maintenance margin");
