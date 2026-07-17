@@ -32,9 +32,29 @@ contract BootstrapPerpsArbitrumSepoliaHarness is BootstrapPerpsArbitrumSepolia {
         return DEFAULT_JUNIOR_SEED_USDC;
     }
 
+    function defaultActivateTrading() external pure returns (bool) {
+        return DEFAULT_ACTIVATE_TRADING;
+    }
+
 }
 
 contract ArbitrumSepoliaReleaseDefaultsTest is Test {
+
+    function test_DeployAndBootstrapScripts_RejectWrongChain() public {
+        vm.chainId(1);
+
+        DeployPerpsArbitrumSepolia deployScript = new DeployPerpsArbitrumSepolia();
+        vm.expectRevert(
+            abi.encodeWithSelector(DeployPerpsArbitrumSepolia.DeployPerpsArbitrumSepolia__WrongChain.selector, 1)
+        );
+        deployScript.run();
+
+        BootstrapPerpsArbitrumSepolia bootstrapScript = new BootstrapPerpsArbitrumSepolia();
+        vm.expectRevert(
+            abi.encodeWithSelector(BootstrapPerpsArbitrumSepolia.BootstrapPerpsArbitrumSepolia__WrongChain.selector, 1)
+        );
+        bootstrapScript.run();
+    }
 
     function test_DeployScriptRiskDefaults_MatchArbitrumSepoliaReleaseParams() public {
         DeployPerpsArbitrumSepoliaHarness deployScript = new DeployPerpsArbitrumSepoliaHarness();
@@ -63,6 +83,8 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         assertEq(engine.executionFeeBps(), 4, "execution fee");
         assertEq(engine.frozenCloseSpreadBps(), 50, "frozen close spread");
         assertEq(engine.fadRunwaySeconds(), 1 hours, "fad runway");
+        assertEq(engine.fadMaxStaleness(), 3 days, "fad max staleness");
+        assertEq(engine.engineMarkStalenessLimit(), 60, "engine mark staleness");
 
         bytes32[] memory feedIds = new bytes32[](1);
         feedIds[0] = bytes32(uint256(1));
@@ -81,11 +103,43 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         assertEq(oracle.adverseConfidenceMultiplierBps(), 2000, "adverse confidence multiplier");
     }
 
+    function test_RecurringCalendar_MatchesArbitrumSepoliaReleasePacket() public {
+        DeployPerpsArbitrumSepoliaHarness deployScript = new DeployPerpsArbitrumSepoliaHarness();
+        MockUSDC usdc = new MockUSDC();
+        MarginClearinghouse clearinghouse = new MarginClearinghouse(address(usdc));
+        CfdEngine engine = new CfdEngine(
+            address(usdc), address(clearinghouse), 2e8, deployScript.riskParams(), deployScript.frozenCloseSpreadBps()
+        );
+
+        vm.warp(1_709_933_399); // Friday 21:29:59 UTC
+        assertFalse(engine.isFadWindow(), "FAD must be inactive before the live-oracle shoulder");
+        assertFalse(engine.isOracleFrozen(), "Oracle must be live before the freeze boundary");
+
+        vm.warp(1_709_933_400); // Friday 21:30:00 UTC
+        assertTrue(engine.isFadWindow(), "FAD must begin 30 minutes before freeze");
+        assertFalse(engine.isOracleFrozen(), "Oracle must remain live during the first FAD shoulder");
+
+        vm.warp(1_709_935_200); // Friday 22:00:00 UTC
+        assertTrue(engine.isFadWindow(), "FAD must remain active during freeze");
+        assertTrue(engine.isOracleFrozen(), "Oracle freeze must begin Friday at 22:00 UTC");
+
+        vm.warp(1_710_104_400); // Sunday 21:00:00 UTC
+        assertTrue(engine.isFadWindow(), "FAD must remain active during the second shoulder");
+        assertFalse(engine.isOracleFrozen(), "Oracle freeze must end Sunday at 21:00 UTC");
+
+        vm.warp(1_710_105_300); // Sunday 21:15:00 UTC
+        assertFalse(engine.isFadWindow(), "FAD must end after the 15-minute live-oracle shoulder");
+        assertFalse(engine.isOracleFrozen(), "Oracle must remain live after FAD ends");
+    }
+
     function test_BootstrapDefaults_MatchArbitrumSepoliaReleaseSeeds() public {
         BootstrapPerpsArbitrumSepoliaHarness bootstrapScript = new BootstrapPerpsArbitrumSepoliaHarness();
 
         assertEq(bootstrapScript.defaultSeniorSeedUsdc(), 50_000_000e6, "senior seed");
         assertEq(bootstrapScript.defaultJuniorSeedUsdc(), 50_000_000e6, "junior seed");
+        assertFalse(
+            bootstrapScript.defaultActivateTrading(), "trading activation must require an explicit bootstrap rerun"
+        );
     }
 
 }

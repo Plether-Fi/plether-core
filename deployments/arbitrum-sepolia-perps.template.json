@@ -1,0 +1,149 @@
+{
+  "status": "template",
+  "scope": "perps-only",
+  "network": "arbitrum-sepolia",
+  "chainId": 421614,
+  "deployedAt": null,
+  "commit": null,
+  "scripts": [
+    "script/DeployPerpsArbitrumSepolia.s.sol:DeployPerpsArbitrumSepolia",
+    "script/BootstrapPerpsArbitrumSepolia.s.sol:BootstrapPerpsArbitrumSepolia"
+  ],
+  "deployer": null,
+  "contracts": {
+    "MockUSDC": null,
+    "MarginClearinghouse": null,
+    "CfdEngine": null,
+    "CfdEnginePlanner": null,
+    "CfdEngineSettlementSidecar": null,
+    "CfdEngineAdmin": null,
+    "HousePool": null,
+    "CfdEngineProtocolLens": null,
+    "SeniorVault": null,
+    "JuniorVault": null,
+    "CfdEngineAccountLens": null,
+    "CfdEngineLens": null,
+    "PletherOracle": null,
+    "OrderRouter": null,
+    "OrderRouterAdmin": null,
+    "PerpsPublicLens": null
+  },
+  "external": {
+    "Pyth": "0x4374e5a8b9C22271E9EB878A2AA31DE97DF15DAF"
+  },
+  "configuration": {
+    "capPrice": "200000000",
+    "risk": {
+      "vpiFactor": "5000000000000000",
+      "maxSkewRatio": "400000000000000000",
+      "maintMarginBps": 30,
+      "initMarginBps": 45,
+      "fadMarginBps": 300,
+      "baseCarryBps": 500,
+      "minBountyUsdc": "1000000",
+      "bountyBps": 10,
+      "executionFeeBps": 4,
+      "frozenCloseSpreadBps": 50
+    },
+    "calendarUtc": {
+      "fadStart": "Friday 21:30",
+      "oracleFreezeStart": "Friday 22:00",
+      "oracleFreezeEnd": "Sunday 21:00",
+      "fadEnd": "Sunday 21:15",
+      "fadRunwaySeconds": 3600,
+      "fadMaxStalenessSeconds": 259200,
+      "engineMarkStalenessSeconds": 60
+    },
+    "oracle": {
+      "orderExecutionStalenessSeconds": 60,
+      "liquidationStalenessSeconds": 15,
+      "orderSettlementWindowSeconds": 15,
+      "maxComponentPublishTimeDivergenceSeconds": 5,
+      "pythMaxConfidenceRatioBps": 10,
+      "adverseConfidenceMultiplierBps": 2000,
+      "feeds": [
+        {
+          "symbol": "EUR/USD",
+          "id": "0xa995d00bb36a63cef7fd2c287dc105fc8f3d93779f062f09551b0af3e81ec30b",
+          "weight": "576000000000000000",
+          "basePrice": "117500000",
+          "inverted": false
+        },
+        {
+          "symbol": "USD/JPY",
+          "id": "0xef2c98c804ba503c6a707e38be4dfbb16683775f195b091252bf24693042fd52",
+          "weight": "136000000000000000",
+          "basePrice": "638000",
+          "inverted": true
+        },
+        {
+          "symbol": "GBP/USD",
+          "id": "0x84c2dde9633d93d1bcad84e7dc41c9d56578b7ec52fabedc1f335d673df0a7c1",
+          "weight": "119000000000000000",
+          "basePrice": "134480000",
+          "inverted": false
+        },
+        {
+          "symbol": "USD/CAD",
+          "id": "0x3112b03a41c910ed446852aacf67118cb1bec67b2cd0b9a214c58cc0eaa2ecca",
+          "weight": "91000000000000000",
+          "basePrice": "72880000",
+          "inverted": true
+        },
+        {
+          "symbol": "USD/SEK",
+          "id": "0x8ccb376aa871517e807358d4e3cf0bc7fe4950474dbe6c9ffc21ef64e43fc676",
+          "weight": "42000000000000000",
+          "basePrice": "10860000",
+          "inverted": true
+        },
+        {
+          "symbol": "USD/CHF",
+          "id": "0x0b1e3297e69f162877b577b0d6a47a0d63b2392bc8499e6540da4187a63e28f8",
+          "weight": "36000000000000000",
+          "basePrice": "126100000",
+          "inverted": true
+        }
+      ]
+    },
+    "router": {
+      "maxPendingOrders": 5,
+      "maxOrderAgeSeconds": 60,
+      "minEngineGas": 600000,
+      "maxPruneOrdersPerCall": 64,
+      "minOpenNotionalUsdc": "100000000",
+      "openOrderExecutionBountyBps": 1,
+      "minOpenOrderExecutionBountyUsdc": "10000",
+      "maxOpenOrderExecutionBountyUsdc": "200000",
+      "closeOrderExecutionBountyUsdc": "200000"
+    },
+    "pool": {
+      "seniorRateBps": 800,
+      "markStalenessLimitSeconds": 60,
+      "seniorFrozenLpFeeBps": 25,
+      "juniorFrozenLpFeeBps": 75
+    },
+    "bootstrap": {
+      "seniorSeedUsdc": "50000000000000",
+      "juniorSeedUsdc": "50000000000000",
+      "activateTrading": false,
+      "pauser": null,
+      "seniorSeedReceiver": null,
+      "juniorSeedReceiver": null
+    }
+  },
+  "transactions": {
+    "deploy": [],
+    "bootstrap": [],
+    "activation": []
+  },
+  "verification": {
+    "arbiscan": {},
+    "sourceVerified": false,
+    "wiringVerified": false,
+    "configurationReadBack": false,
+    "ownershipVerified": false,
+    "smokeTestsPassed": false
+  },
+  "notes": []
+}

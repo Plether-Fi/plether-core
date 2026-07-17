@@ -2,7 +2,11 @@
 
 This document provides the complete deployment procedure for the Plether protocol on Ethereum mainnet.
 
-This root guide covers the original synthetic-token, staking, router, oracle, yield-adapter, and INVAR deployment flow. For the perps deployment packet, use [`packages/perps/DEPLOYMENT.md`](packages/perps/DEPLOYMENT.md) alongside [`packages/perps/CANONICAL_ENTRYPOINTS.md`](packages/perps/CANONICAL_ENTRYPOINTS.md).
+This root guide covers the original synthetic-token, staking, router, oracle, yield-adapter, and INVAR deployment flow.
+For Arbitrum Sepolia perps, use the
+[`ARBITRUM_SEPOLIA_DEPLOYMENT_PACKET.md`](packages/perps/ARBITRUM_SEPOLIA_DEPLOYMENT_PACKET.md) release checklist with
+[`packages/perps/DEPLOYMENT.md`](packages/perps/DEPLOYMENT.md) and
+[`packages/perps/CANONICAL_ENTRYPOINTS.md`](packages/perps/CANONICAL_ENTRYPOINTS.md).
 
 ## Prerequisites
 

@@ -20,6 +20,7 @@ import "forge-std/Script.sol";
 
 contract DeployPerpsArbitrumSepolia is Script {
 
+    uint256 internal constant ARBITRUM_SEPOLIA_CHAIN_ID = 421_614;
     address internal constant PYTH = 0x4374e5a8b9C22271E9EB878A2AA31DE97DF15DAF;
     uint256 internal constant CAP_PRICE = 2e8;
     uint256 internal constant FROZEN_CLOSE_SPREAD_BPS = 50;
@@ -63,7 +64,13 @@ contract DeployPerpsArbitrumSepolia is Script {
         PerpsPublicLens publicLens;
     }
 
+    error DeployPerpsArbitrumSepolia__WrongChain(uint256 actualChainId);
+
     function run() external returns (DeployedContracts memory deployed) {
+        if (block.chainid != ARBITRUM_SEPOLIA_CHAIN_ID) {
+            revert DeployPerpsArbitrumSepolia__WrongChain(block.chainid);
+        }
+
         uint256 privateKey = vm.envUint("TEST_PRIVATE_KEY");
         address deployer = vm.addr(privateKey);
 
@@ -199,6 +206,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         console.log("CfdEngineSettlementSidecar:", address(deployed.settlementSidecar));
         console.log("CfdEngineAdmin:", address(deployed.engineAdmin));
         console.log("HousePool:", address(deployed.housePool));
+        console.log("CfdEngineProtocolLens:", address(deployed.housePool.ENGINE_PROTOCOL_LENS()));
         console.log("SeniorVault:", address(deployed.seniorVault));
         console.log("JuniorVault:", address(deployed.juniorVault));
         console.log("CfdEngineAccountLens:", address(deployed.accountLens));

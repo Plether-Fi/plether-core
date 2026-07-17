@@ -140,7 +140,8 @@ FOUNDRY_PROFILE=docs FOUNDRY_SRC=packages/perps/src forge doc --out docs/perps
 Deployment and operational scripts live in [`script/`](script/). Product-specific starting points are:
 
 - [Spot operations and deployment guide](packages/spot/OPERATIONS.md)
-- [Perps deployment guide](packages/perps/DEPLOYMENT.md)
+- [Perps deployment guide](packages/perps/DEPLOYMENT.md) and
+  [Arbitrum Sepolia deployment packet](packages/perps/ARBITRUM_SEPOLIA_DEPLOYMENT_PACKET.md)
 - [Options package architecture and operational model](packages/options/README.md)
 
 Always simulate the exact script and deployment scope before broadcasting.

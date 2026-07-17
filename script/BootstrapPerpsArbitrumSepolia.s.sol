@@ -2,6 +2,7 @@
 pragma solidity 0.8.35;
 
 import {HousePool} from "@plether/perps/HousePool.sol";
+import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
 import "forge-std/Script.sol";
@@ -21,10 +22,20 @@ interface IMintableERC20 {
 
 contract BootstrapPerpsArbitrumSepolia is Script {
 
+    uint256 internal constant ARBITRUM_SEPOLIA_CHAIN_ID = 421_614;
     uint256 internal constant DEFAULT_SENIOR_SEED_USDC = 50_000_000e6;
     uint256 internal constant DEFAULT_JUNIOR_SEED_USDC = 50_000_000e6;
+    bool internal constant DEFAULT_ACTIVATE_TRADING = false;
+
+    error BootstrapPerpsArbitrumSepolia__WrongChain(uint256 actualChainId);
+    error BootstrapPerpsArbitrumSepolia__MissingCode(address target);
+    error BootstrapPerpsArbitrumSepolia__StackMismatch();
 
     function run() external {
+        if (block.chainid != ARBITRUM_SEPOLIA_CHAIN_ID) {
+            revert BootstrapPerpsArbitrumSepolia__WrongChain(block.chainid);
+        }
+
         uint256 privateKey = vm.envUint("TEST_PRIVATE_KEY");
         address deployer = vm.addr(privateKey);
 
@@ -37,7 +48,7 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         uint256 juniorSeedUsdc = vm.envOr("JUNIOR_SEED_USDC", DEFAULT_JUNIOR_SEED_USDC);
         address seniorSeedReceiver = vm.envOr("SENIOR_SEED_RECEIVER", deployer);
         address juniorSeedReceiver = vm.envOr("JUNIOR_SEED_RECEIVER", deployer);
-        bool activateTrading = vm.envOr("ACTIVATE_TRADING", true);
+        bool activateTrading = vm.envOr("ACTIVATE_TRADING", DEFAULT_ACTIVATE_TRADING);
 
         address[] memory testUsers = vm.envOr("TEST_USER_RECIPIENTS", ",", new address[](0));
         uint256[] memory testUserAmounts = vm.envOr("TEST_USER_AMOUNTS", ",", new uint256[](0));
@@ -48,6 +59,7 @@ contract BootstrapPerpsArbitrumSepolia is Script {
 
         HousePool housePool = HousePool(housePoolAddr);
         OrderRouter router = OrderRouter(routerAddr);
+        _validateStack(usdc, housePool, router);
         OrderRouterAdmin routerAdmin = OrderRouterAdmin(router.admin());
 
         console.log("Bootstrapping Plether perps on Arbitrum Sepolia");
@@ -81,6 +93,48 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         console.log("HousePool pauser:", housePool.pauser());
         console.log("Router pauser:", routerAdmin.pauser());
         console.log("Note: this script funds users with mock USDC only; ETH still needs a faucet.");
+    }
+
+    function _validateStack(
+        address usdc,
+        HousePool housePool,
+        OrderRouter router
+    ) internal view {
+        _requireCode(usdc);
+        _requireCode(address(housePool));
+        _requireCode(address(router));
+
+        address engine = address(housePool.ENGINE());
+        address oracle = address(router.pletherOracle());
+        address routerAdmin = router.admin();
+
+        _requireCode(engine);
+        _requireCode(oracle);
+        _requireCode(routerAdmin);
+
+        address clearinghouseAddress = housePool.ENGINE().clearinghouse();
+        _requireCode(clearinghouseAddress);
+
+        MarginClearinghouse clearinghouse = MarginClearinghouse(clearinghouseAddress);
+
+        if (
+            address(housePool.USDC()) != usdc || address(housePool.ENGINE().USDC()) != usdc
+                || clearinghouse.settlementAsset() != usdc || clearinghouse.engine() != engine
+                || housePool.ENGINE().pool() != address(housePool)
+                || housePool.ENGINE().orderRouter() != address(router) || address(router.engine()) != engine
+                || address(router.pletherOracle().engine()) != engine
+                || address(router.pletherOracle().housePool()) != address(housePool)
+        ) {
+            revert BootstrapPerpsArbitrumSepolia__StackMismatch();
+        }
+    }
+
+    function _requireCode(
+        address target
+    ) private view {
+        if (target.code.length == 0) {
+            revert BootstrapPerpsArbitrumSepolia__MissingCode(target);
+        }
     }
 
     function _configurePauser(

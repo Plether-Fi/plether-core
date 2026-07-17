@@ -8,10 +8,17 @@ The current target network is Arbitrum Sepolia with:
 - Pyth as the router oracle source
 - a separate deploy phase and bootstrap phase
 
+Use this guide with the operator
+[`ARBITRUM_SEPOLIA_DEPLOYMENT_PACKET.md`](ARBITRUM_SEPOLIA_DEPLOYMENT_PACKET.md) and the machine-readable
+[`arbitrum-sepolia-perps.template.json`](../../deployments/arbitrum-sepolia-perps.template.json). The packet is the
+release gate; this document describes the scripts and configuration.
+
 ## Scripts
 
 - Deploy script: `script/DeployPerpsArbitrumSepolia.s.sol`
 - Bootstrap script: `script/BootstrapPerpsArbitrumSepolia.s.sol`
+- Deploy simulation helper: `scripts/deploy-perps-arbitrum-sepolia-dry-run.sh`
+- Bootstrap simulation helper: `scripts/bootstrap-perps-arbitrum-sepolia-dry-run.sh`
 
 The deploy script handles contract creation and one-time wiring.
 
@@ -32,13 +39,14 @@ The deploy script creates and wires:
 4. `CfdEnginePlanner`
 5. `CfdEngineSettlementSidecar`
 6. `CfdEngineAdmin`
-7. `HousePool`
+7. `HousePool` (which creates its dedicated `CfdEngineProtocolLens`)
 8. `TrancheVault` senior
 9. `TrancheVault` junior
 10. `CfdEngineAccountLens`
 11. `CfdEngineLens`
-12. `OrderRouter`
-13. `PerpsPublicLens`
+12. `PletherOracle`
+13. `OrderRouter` (which creates its dedicated `OrderRouterAdmin`)
+14. `PerpsPublicLens`
 
 It then performs the required set-once wiring:
 
@@ -71,6 +79,19 @@ The router basket uses 6 FX feeds with DXY weights:
 
 Base prices and weights are currently hardcoded in the script to match the existing perps basket assumptions.
 
+### Recurring Market Calendar
+
+The recurring schedule is compiled into each newly deployed engine and uses UTC:
+
+| Regime | Window | Duration |
+| --- | --- | --- |
+| FAD only, oracle live | Friday 21:30–22:00 | 30 minutes |
+| FAD and oracle frozen | Friday 22:00–Sunday 21:00 | 47 hours |
+| FAD only, oracle live again | Sunday 21:00–21:15 | 15 minutes |
+
+The recurring boundaries are not an admin parameter and cannot be changed on an existing non-proxy deployment. The
+`fadRunwaySeconds` setting applies only before an admin-configured FAD override day.
+
 ### Arbitrum Sepolia Release Parameters
 
 The next Arbitrum Sepolia perps deployment uses these initial defaults:
@@ -88,6 +109,8 @@ The next Arbitrum Sepolia perps deployment uses these initial defaults:
 | `bountyBps` | `10` |
 | `executionFeeBps` | `4` |
 | `fadRunwaySeconds` | `1 hours` |
+| `fadMaxStaleness` | `3 days` |
+| `engineMarkStalenessLimit` | `60 seconds` |
 | `pythMaxConfidenceRatioBps` | `10` |
 | `adverseConfidenceMultiplierBps` | `2_000` |
 
@@ -114,19 +137,27 @@ TEST_PRIVATE_KEY=...
 ARB_SEPOLIA_RPC_URL=...
 ```
 
-Run:
+Start from `.env.example`, keep the release worktree clean, and run the guarded simulation:
 
 ```bash
-source .env && forge script script/DeployPerpsArbitrumSepolia.s.sol:DeployPerpsArbitrumSepolia --rpc-url $ARB_SEPOLIA_RPC_URL --broadcast
+scripts/deploy-perps-arbitrum-sepolia-dry-run.sh
 ```
 
-The script prints the deployed addresses to the console. Save at least:
+After reviewing the simulation, broadcast the exact entrypoint:
 
-- `MockUSDC`
-- `HousePool`
-- `OrderRouter`
+```bash
+set -a
+source .env
+set +a
+forge script script/DeployPerpsArbitrumSepolia.s.sol \
+  --tc DeployPerpsArbitrumSepolia \
+  --rpc-url "$ARB_SEPOLIA_RPC_URL" \
+  --broadcast
+```
 
-These are needed by the bootstrap script.
+The script prints the deployed addresses to the console. Record every created contract and transaction hash in a dated
+copy of the manifest template. `MockUSDC`, `HousePool`, and `OrderRouter` are required inputs to the bootstrap script, but
+recording only those three is not a complete deployment record.
 
 ### Bootstrap
 
@@ -139,6 +170,7 @@ ARB_SEPOLIA_RPC_URL=...
 PERPS_USDC=0x...
 PERPS_HOUSE_POOL=0x...
 PERPS_ORDER_ROUTER=0x...
+ACTIVATE_TRADING=false
 ```
 
 Optional:
@@ -152,8 +184,6 @@ JUNIOR_SEED_USDC=50000000000000
 SENIOR_SEED_RECEIVER=0x...
 JUNIOR_SEED_RECEIVER=0x...
 
-ACTIVATE_TRADING=true
-
 TEST_USER_RECIPIENTS=0xabc...,0xdef...
 TEST_USER_AMOUNTS=1000000000000,500000000000
 ```
@@ -164,11 +194,26 @@ Notes:
 - `50000000000000` means `50_000_000e6`, or 50,000,000 mock USDC.
 - `TEST_USER_RECIPIENTS` and `TEST_USER_AMOUNTS` must have the same length.
 
-Run:
+Use `ACTIVATE_TRADING=false` for the initial seed/bootstrap pass. Run the guarded simulation:
 
 ```bash
-source .env && forge script script/BootstrapPerpsArbitrumSepolia.s.sol:BootstrapPerpsArbitrumSepolia --rpc-url $ARB_SEPOLIA_RPC_URL --broadcast
+scripts/bootstrap-perps-arbitrum-sepolia-dry-run.sh
 ```
+
+After reviewing the simulation, broadcast the exact entrypoint:
+
+```bash
+set -a
+source .env
+set +a
+forge script script/BootstrapPerpsArbitrumSepolia.s.sol \
+  --tc BootstrapPerpsArbitrumSepolia \
+  --rpc-url "$ARB_SEPOLIA_RPC_URL" \
+  --broadcast
+```
+
+Read back the complete deployment before activation. Then set `ACTIVATE_TRADING=true`, rerun the bootstrap simulation,
+and broadcast the idempotent activation rerun only after the readback is approved.
 
 ## Bootstrap Behavior
 
@@ -179,6 +224,21 @@ The bootstrap script is designed to be partial-rerun safe:
 - it skips activation if trading is already active
 
 This is useful if the first bootstrap attempt completes only partially.
+
+## Deployment Record
+
+Before the first simulation, copy `deployments/arbitrum-sepolia-perps.template.json` to a dated release manifest. After
+deployment, replace every null contract address, populate transaction hashes and Arbiscan links, record the full release
+commit and deployer, and update each verification flag from evidence.
+
+The release is incomplete while any expected address is null or any of these remain unverified:
+
+- contract source and constructor inputs
+- set-once wiring
+- risk, calendar, oracle, router, and pool configuration readback
+- ownership and pauser state
+- seed and activation state
+- bounded integration smoke tests
 
 ## Operational Notes
 
@@ -191,9 +251,12 @@ This is useful if the first bootstrap attempt completes only partially.
 
 ## Recommended Flow
 
-1. Run the deploy script.
-2. Record the deployed addresses.
-3. Set bootstrap env vars.
-4. Run the bootstrap script.
-5. Fund any test wallets with Arbitrum Sepolia ETH.
-6. Start integration testing against `PerpsPublicLens`, `MarginClearinghouse`, `OrderRouter`, and `HousePool`.
+1. Freeze a clean release commit and create the dated manifest.
+2. Run and approve the deploy simulation.
+3. Broadcast the deploy phase and record every address and transaction.
+4. Set bootstrap env vars from the new manifest, with `ACTIVATE_TRADING=false`.
+5. Run and approve the bootstrap simulation, then broadcast the seed/bootstrap phase.
+6. Read back wiring, configuration, ownership, pause state, oracle inputs, and seed state.
+7. Set `ACTIVATE_TRADING=true`, simulate again, and broadcast activation.
+8. Fund test wallets with Arbitrum Sepolia ETH and run bounded integration smoke tests.
+9. Complete the manifest, source verification, release notes, and consumer handoff.
