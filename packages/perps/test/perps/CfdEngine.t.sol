@@ -2206,7 +2206,8 @@ contract CfdEngineTest is BasePerpTest {
     function test_MarketCalendar_SundayBoundariesMatchLiveSemantics() public {
         uint256 sundayTwentyFiftyNine = 1_709_499_599;
         uint256 sundayTwentyOne = 1_709_499_600;
-        uint256 sundayTwentyTwo = 1_709_503_200;
+        uint256 sundayTwentyOneFourteenFiftyNine = 1_709_500_499;
+        uint256 sundayTwentyOneFifteen = 1_709_500_500;
 
         vm.warp(sundayTwentyFiftyNine);
         assertTrue(engine.isOracleFrozen(), "Sunday 20:59:59 should still be oracle frozen");
@@ -2216,9 +2217,13 @@ contract CfdEngineTest is BasePerpTest {
         assertFalse(engine.isOracleFrozen(), "Sunday 21:00:00 should unfreeze oracle mode");
         assertTrue(engine.isFadWindow(), "Sunday 21:00:00 should remain in FAD");
 
-        vm.warp(sundayTwentyTwo);
-        assertFalse(engine.isOracleFrozen(), "Sunday 22:00:00 should remain unfrozen");
-        assertFalse(engine.isFadWindow(), "Sunday 22:00:00 should end FAD");
+        vm.warp(sundayTwentyOneFourteenFiftyNine);
+        assertFalse(engine.isOracleFrozen(), "Sunday 21:14:59 should remain unfrozen");
+        assertTrue(engine.isFadWindow(), "Sunday 21:14:59 should remain in FAD");
+
+        vm.warp(sundayTwentyOneFifteen);
+        assertFalse(engine.isOracleFrozen(), "Sunday 21:15:00 should remain unfrozen");
+        assertFalse(engine.isFadWindow(), "Sunday 21:15:00 should end FAD");
     }
 
     function test_PreviewClose_ReturnsClaimAndImmediateSettlementBreakdown() public {
@@ -2389,7 +2394,7 @@ contract CfdEngineTest is BasePerpTest {
 
         _open(account, CfdTypes.Side.BULL, 100_000e18, 4000e6, 1e8);
 
-        vm.warp(1_709_928_000); // Friday 20:00 UTC: FAD, but not oracle-frozen.
+        vm.warp(1_709_934_300); // Friday 21:45 UTC: FAD, but not oracle-frozen.
         assertTrue(engine.isFadWindow(), "Setup should be in FAD");
         assertFalse(engine.isOracleFrozen(), "FAD runway should still be live-market mode");
 

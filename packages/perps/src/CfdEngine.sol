@@ -831,7 +831,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     // ==========================================
 
     /// @notice Returns true during the Friday Afternoon Deleverage (FAD) window
-    ///         (Friday 19:00 UTC → Sunday 22:00 UTC), on admin-configured FAD days,
+    ///         (Friday 21:30 UTC → Sunday 21:15 UTC), on admin-configured FAD days,
     ///         or within fadRunwaySeconds before an admin FAD day (deleverage runway).
     function isFadWindow() public view returns (bool) {
         (bool fadWindow,) = _marketStatus();

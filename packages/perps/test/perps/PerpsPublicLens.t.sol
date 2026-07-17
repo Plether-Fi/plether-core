@@ -252,9 +252,9 @@ contract PerpsPublicLensTest is BasePerpTest {
         assertEq(viewData.frozenLpFeeBps, 25, "Senior tranche view should expose the active frozen LP fee");
     }
 
-    function test_GetJuniorTranche_DoesNotChargeFrozenFeeDuringFadOnlyHour() public {
-        uint256 sunday2130 = 1_710_106_200;
-        vm.warp(sunday2130);
+    function test_GetJuniorTranche_DoesNotChargeFrozenFeeDuringFadOnlyShoulder() public {
+        uint256 sunday2110 = 1_710_105_000;
+        vm.warp(sunday2110);
 
         assertTrue(engine.isFadWindow(), "setup should remain inside FAD");
         assertFalse(engine.isOracleFrozen(), "setup should be after the oracle-frozen window");

@@ -3136,7 +3136,7 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
         vm.warp(block.timestamp + 48 hours);
         routerAdmin.finalizeRouterConfig();
 
-        uint256 fadPublishTime = TEST_FRIDAY_18UTC + 2 hours + 1;
+        uint256 fadPublishTime = TEST_FRIDAY_18UTC + 3 hours + 30 minutes + 1;
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), fadPublishTime);
 
         vm.warp(TEST_FRIDAY_18UTC);
@@ -3150,7 +3150,7 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
         uint256 traderSettlementBefore = clearinghouse.balanceUsdc(aliceAccount);
         (uint256 sizeBefore,,,,,,) = engine.positions(aliceAccount);
 
-        vm.warp(TEST_FRIDAY_18UTC + 2 hours + 1);
+        vm.warp(TEST_FRIDAY_18UTC + 3 hours + 30 minutes + 1);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
 
@@ -3194,7 +3194,7 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
         vm.warp(block.timestamp + 48 hours);
         routerAdmin.finalizeRouterConfig();
 
-        uint256 fadPublishTime = TEST_FRIDAY_18UTC + 2 hours + 1;
+        uint256 fadPublishTime = TEST_FRIDAY_18UTC + 3 hours + 30 minutes + 1;
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), fadPublishTime);
 
         vm.warp(TEST_FRIDAY_18UTC);
@@ -3208,7 +3208,7 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
         uint256 traderSettlementBefore = clearinghouse.balanceUsdc(aliceAccount);
         (uint256 sizeBefore,,,,,,) = engine.positions(aliceAccount);
 
-        vm.warp(TEST_FRIDAY_18UTC + 2 hours + 1);
+        vm.warp(TEST_FRIDAY_18UTC + 3 hours + 30 minutes + 1);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrderBatch(orderId, empty);
@@ -3959,7 +3959,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(block.timestamp + 48 hours);
         routerAdmin.finalizeRouterConfig();
 
-        uint256 fadPublishTime = FRIDAY_18UTC + 2 hours + 1;
+        uint256 fadPublishTime = FRIDAY_18UTC + 3 hours + 30 minutes + 1;
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), fadPublishTime);
 
         vm.warp(FRIDAY_18UTC);
@@ -3972,7 +3972,7 @@ contract FadStalenessTest is BasePerpTest {
         address aliceAccount = alice;
         uint256 traderSettlementBefore = clearinghouse.balanceUsdc(aliceAccount);
         (uint256 sizeBefore,,,,,,) = engine.positions(aliceAccount);
-        vm.warp(FRIDAY_18UTC + 2 hours + 1);
+        vm.warp(FRIDAY_18UTC + 3 hours + 30 minutes + 1);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
 
@@ -4016,7 +4016,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(block.timestamp + 48 hours);
         routerAdmin.finalizeRouterConfig();
 
-        uint256 fadPublishTime = FRIDAY_18UTC + 2 hours + 1;
+        uint256 fadPublishTime = FRIDAY_18UTC + 3 hours + 30 minutes + 1;
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), fadPublishTime);
 
         vm.warp(FRIDAY_18UTC);
@@ -4029,7 +4029,7 @@ contract FadStalenessTest is BasePerpTest {
         address aliceAccount = alice;
         uint256 traderSettlementBefore = clearinghouse.balanceUsdc(aliceAccount);
         (uint256 sizeBefore,,,,,,) = engine.positions(aliceAccount);
-        vm.warp(FRIDAY_18UTC + 2 hours + 1);
+        vm.warp(FRIDAY_18UTC + 3 hours + 30 minutes + 1);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrderBatch(orderId, empty);
@@ -4278,35 +4278,35 @@ contract FadStalenessTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
     }
 
-    function test_FridayGap_MevCheckStillActive() public {
-        uint256 FRIDAY_20UTC = FRIDAY_18UTC + 2 hours;
+    function test_FridayFadOnly_MevCheckStillActive() public {
+        uint256 fridayFadStart = FRIDAY_18UTC + 3 hours + 30 minutes;
 
-        uint256 publishTime = FRIDAY_20UTC - 30 minutes;
+        uint256 publishTime = fridayFadStart - 30 minutes;
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), publishTime);
 
-        vm.warp(FRIDAY_20UTC);
+        vm.warp(fridayFadStart);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
 
-        vm.warp(FRIDAY_20UTC + 30);
+        vm.warp(fridayFadStart + 30);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         router.executeOrder(2, empty);
     }
 
-    function test_FridayGap_FreshPriceStillWorks() public {
-        uint256 FRIDAY_20UTC = FRIDAY_18UTC + 2 hours;
+    function test_FridayFadOnly_FreshPriceStillWorks() public {
+        uint256 fridayFadStart = FRIDAY_18UTC + 3 hours + 30 minutes;
 
-        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), FRIDAY_20UTC + 6);
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), fridayFadStart + 6);
 
-        vm.warp(FRIDAY_20UTC);
+        vm.warp(fridayFadStart);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
 
-        vm.warp(FRIDAY_20UTC + 50);
+        vm.warp(fridayFadStart + 50);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 10);
         router.executeOrder(2, empty);
@@ -4316,34 +4316,34 @@ contract FadStalenessTest is BasePerpTest {
         assertEq(size, 0, "Close with fresh price should succeed during Friday gap");
     }
 
-    function test_FridayGap_OpenStillBlocked() public {
-        uint256 FRIDAY_20UTC = FRIDAY_18UTC + 2 hours;
+    function test_FridayFadOnly_OpenStillBlocked() public {
+        uint256 fridayFadStart = FRIDAY_18UTC + 3 hours + 30 minutes;
 
-        vm.warp(FRIDAY_20UTC);
+        vm.warp(fridayFadStart);
 
         vm.prank(alice);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__CloseOnlyWindow.selector);
         router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
     }
 
-    function test_FridayGap_HistoricalSettlementWindowAllowsDelayedReveal() public {
-        uint256 FRIDAY_20UTC = FRIDAY_18UTC + 2 hours;
+    function test_FridayFadOnly_HistoricalSettlementWindowAllowsDelayedReveal() public {
+        uint256 fridayFadStart = FRIDAY_18UTC + 3 hours + 30 minutes;
 
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         config.maxOrderAge = 300;
-        vm.warp(FRIDAY_20UTC - 48 hours - 1);
+        vm.warp(fridayFadStart - 48 hours - 1);
         routerAdmin.proposeRouterConfig(config);
-        vm.warp(FRIDAY_20UTC);
+        vm.warp(fridayFadStart);
         routerAdmin.finalizeRouterConfig();
 
-        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), FRIDAY_20UTC + 1);
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), fridayFadStart + 1);
 
-        vm.warp(FRIDAY_20UTC);
+        vm.warp(fridayFadStart);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
 
-        vm.warp(FRIDAY_20UTC + 63);
+        vm.warp(fridayFadStart + 63);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(2, empty);
@@ -4353,11 +4353,11 @@ contract FadStalenessTest is BasePerpTest {
         assertEq(size, 0, "Historical settlement should use the post-commit tick inside the settlement window");
     }
 
-    function obsolete_test_FridayGap_LiquidationUsesRouterLiquidationStalenessLimit() public {
-        uint256 FRIDAY_20UTC = FRIDAY_18UTC + 2 hours;
-        mockPyth.setAllPrices(feedIds, int64(86_000_000), int32(-8), FRIDAY_20UTC);
+    function obsolete_test_FridayFadOnly_LiquidationUsesRouterLiquidationStalenessLimit() public {
+        uint256 fridayFadStart = FRIDAY_18UTC + 3 hours + 30 minutes;
+        mockPyth.setAllPrices(feedIds, int64(86_000_000), int32(-8), fridayFadStart);
 
-        vm.warp(FRIDAY_20UTC + 61);
+        vm.warp(fridayFadStart + 61);
         bytes[] memory empty = _pythUpdateData();
         address aliceAccount = alice;
 

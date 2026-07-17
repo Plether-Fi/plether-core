@@ -56,15 +56,15 @@ contract AuditV3Failing_FadStaleness is BasePerpTest {
         _fundTrader(alice, 50_000e6);
         _open(account, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
 
-        // Friday 20:00 UTC: FAD active (starts 19:00) but oracle still live (frozen at 22:00)
-        uint256 fridayEvening = _fridayAt(20);
+        // Friday 21:30 UTC: FAD active but oracle still live until 22:00.
+        uint256 fridayEvening = _fridayAt(21) + 30 minutes;
         vm.warp(fridayEvening);
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(fridayEvening));
 
-        // 1h 59m 59s later: still before the 22:00 oracle freeze boundary.
+        // 29m 59s later: still before the 22:00 oracle freeze boundary.
         // Mark is far beyond the normal 120s limit and should revert.
-        vm.warp(fridayEvening + 2 hours - 1);
+        vm.warp(fridayEvening + 30 minutes - 1);
 
         vm.prank(alice);
         vm.expectRevert(ICfdEngineTypes.CfdEngine__MarkPriceStale.selector);
@@ -76,12 +76,12 @@ contract AuditV3Failing_FadStaleness is BasePerpTest {
         _fundTrader(alice, 50_000e6);
         _open(account, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
 
-        uint256 fridayEvening = _fridayAt(20);
+        uint256 fridayEvening = _fridayAt(21) + 30 minutes;
         vm.warp(fridayEvening);
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(fridayEvening));
 
-        vm.warp(fridayEvening + 2 hours - 1);
+        vm.warp(fridayEvening + 30 minutes - 1);
 
         // LP deposit should revert (stale mark during live markets).
         // But _requireFreshMark uses isFadWindow() -> fadMaxStaleness (3 days).

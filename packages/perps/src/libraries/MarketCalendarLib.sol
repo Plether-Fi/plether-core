@@ -4,7 +4,10 @@ pragma solidity 0.8.35;
 library MarketCalendarLib {
 
     uint256 internal constant SECONDS_PER_DAY = 86_400;
-    uint256 internal constant SECONDS_PER_HOUR = 3600;
+    uint256 internal constant FRIDAY_FAD_START = 21 hours + 30 minutes;
+    uint256 internal constant FRIDAY_ORACLE_FREEZE_START = 22 hours;
+    uint256 internal constant SUNDAY_ORACLE_FREEZE_END = 21 hours;
+    uint256 internal constant SUNDAY_FAD_END = 21 hours + 15 minutes;
 
     function isFadWindow(
         uint256 timestamp,
@@ -12,15 +15,15 @@ library MarketCalendarLib {
         bool tomorrowOverride,
         uint256 fadRunwaySeconds
     ) internal pure returns (bool) {
-        (uint256 dayOfWeek, uint256 hourOfDay) = _dayAndHour(timestamp);
+        (uint256 dayOfWeek, uint256 secondOfDay) = _dayAndSecond(timestamp);
 
-        if (dayOfWeek == 5 && hourOfDay >= 19) {
+        if (dayOfWeek == 5 && secondOfDay >= FRIDAY_FAD_START) {
             return true;
         }
         if (dayOfWeek == 6) {
             return true;
         }
-        if (dayOfWeek == 0 && hourOfDay < 22) {
+        if (dayOfWeek == 0 && secondOfDay < SUNDAY_FAD_END) {
             return true;
         }
         if (todayOverride) {
@@ -41,26 +44,26 @@ library MarketCalendarLib {
         uint256 timestamp,
         bool todayOverride
     ) internal pure returns (bool) {
-        (uint256 dayOfWeek, uint256 hourOfDay) = _dayAndHour(timestamp);
+        (uint256 dayOfWeek, uint256 secondOfDay) = _dayAndSecond(timestamp);
 
-        if (dayOfWeek == 5 && hourOfDay >= 22) {
+        if (dayOfWeek == 5 && secondOfDay >= FRIDAY_ORACLE_FREEZE_START) {
             return true;
         }
         if (dayOfWeek == 6) {
             return true;
         }
-        if (dayOfWeek == 0 && hourOfDay < 21) {
+        if (dayOfWeek == 0 && secondOfDay < SUNDAY_ORACLE_FREEZE_END) {
             return true;
         }
 
         return todayOverride;
     }
 
-    function _dayAndHour(
+    function _dayAndSecond(
         uint256 timestamp
-    ) private pure returns (uint256 dayOfWeek, uint256 hourOfDay) {
+    ) private pure returns (uint256 dayOfWeek, uint256 secondOfDay) {
         dayOfWeek = ((timestamp / SECONDS_PER_DAY) + 4) % 7;
-        hourOfDay = (timestamp % SECONDS_PER_DAY) / SECONDS_PER_HOUR;
+        secondOfDay = timestamp % SECONDS_PER_DAY;
     }
 
 }

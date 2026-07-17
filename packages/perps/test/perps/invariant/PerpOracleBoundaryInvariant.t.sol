@@ -38,7 +38,15 @@ contract PerpOracleBoundaryInvariantTest is BasePerpInvariantTest {
         );
     }
 
-    function invariant_FadWindowMatchesMaintenanceMarginMode() public view {
+    function invariant_FadWindowMatchesBoundaryFormula() public view {
+        assertEq(
+            engine.isFadWindow(),
+            _expectedFadWindow(block.timestamp),
+            "FAD flag must match boundary and override formula"
+        );
+    }
+
+    function invariant_MaintenanceMarginMatchesFadWindow() public view {
         uint256 price = 1e8;
         uint256 size = 10_000e18;
         uint256 maint = _maintenanceMarginUsdc(size, price);
@@ -99,6 +107,30 @@ contract PerpOracleBoundaryInvariantTest is BasePerpInvariantTest {
             return true;
         }
         return engine.fadDayOverrides(timestamp / 86_400);
+    }
+
+    function _expectedFadWindow(
+        uint256 timestamp
+    ) internal view returns (bool) {
+        uint256 dayIndex = timestamp / 86_400;
+        uint256 dayOfWeek = (dayIndex + 4) % 7;
+        uint256 secondOfDay = timestamp % 86_400;
+        if (dayOfWeek == 5 && secondOfDay >= 21 hours + 30 minutes) {
+            return true;
+        }
+        if (dayOfWeek == 6) {
+            return true;
+        }
+        if (dayOfWeek == 0 && secondOfDay < 21 hours + 15 minutes) {
+            return true;
+        }
+        if (engine.fadDayOverrides(dayIndex)) {
+            return true;
+        }
+
+        uint256 runway = engine.fadRunwaySeconds();
+        uint256 secondsUntilTomorrow = 86_400 - secondOfDay;
+        return runway > 0 && secondsUntilTomorrow <= runway && engine.fadDayOverrides(dayIndex + 1);
     }
 
 }

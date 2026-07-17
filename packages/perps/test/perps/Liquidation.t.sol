@@ -11,7 +11,7 @@ contract LiquidationTest is BasePerpTest {
     address keeper = address(0x999);
 
     uint256 constant WEDNESDAY_NOON = 1_729_080_000;
-    uint256 constant FRIDAY_EVENING = 1_729_281_600;
+    uint256 constant FRIDAY_EVENING = 1_729_287_000;
 
     function setUp() public override {
         super.setUp();
@@ -78,7 +78,7 @@ contract LiquidationTest is BasePerpTest {
 
         // Ethical: Alice keeps surplus equity after the keeper bounty and the carry accrued between open and FAD liquidation.
         uint256 chBalance = clearinghouse.balanceUsdc(account);
-        assertApproxEqAbs(chBalance, 1_856_935_243, 1, "Alice keeps surplus equity after ethical liquidation");
+        assertApproxEqAbs(chBalance, 1_856_853_152, 1, "Alice keeps surplus equity after ethical liquidation");
     }
 
     function test_LiquidationOnPriceDrop() public {
@@ -234,25 +234,25 @@ contract LiquidationTest is BasePerpTest {
     }
 
     function test_FadWindow_ExactBoundaries() public {
-        // Friday 18:59:59 UTC → NOT FAD
-        vm.warp(1_729_277_999);
-        assertFalse(engine.isFadWindow(), "Friday 18:59 is not FAD");
+        // Friday 21:29:59 UTC → NOT FAD
+        vm.warp(1_729_286_999);
+        assertFalse(engine.isFadWindow(), "Friday 21:29:59 is not FAD");
 
-        // Friday 19:00:00 UTC → FAD begins
-        vm.warp(1_729_278_000);
-        assertTrue(engine.isFadWindow(), "Friday 19:00 is FAD");
+        // Friday 21:30:00 UTC → FAD begins
+        vm.warp(1_729_287_000);
+        assertTrue(engine.isFadWindow(), "Friday 21:30:00 is FAD");
 
         // Saturday midday → FAD (all Saturday is FAD)
-        vm.warp(1_729_278_000 + 17 hours);
+        vm.warp(1_729_287_000 + 14 hours + 30 minutes);
         assertTrue(engine.isFadWindow(), "Saturday is FAD");
 
-        // Sunday 21:59:59 UTC → still FAD
-        vm.warp(1_729_461_599);
-        assertTrue(engine.isFadWindow(), "Sunday 21:59 is FAD");
+        // Sunday 21:14:59 UTC → still FAD
+        vm.warp(1_729_458_899);
+        assertTrue(engine.isFadWindow(), "Sunday 21:14:59 is FAD");
 
-        // Sunday 22:00:00 UTC → FAD ends
-        vm.warp(1_729_461_600);
-        assertFalse(engine.isFadWindow(), "Sunday 22:00 is not FAD");
+        // Sunday 21:15:00 UTC → FAD ends
+        vm.warp(1_729_458_900);
+        assertFalse(engine.isFadWindow(), "Sunday 21:15:00 is not FAD");
     }
 
 }

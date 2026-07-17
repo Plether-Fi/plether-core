@@ -407,6 +407,15 @@ This is a containment latch, not a pause. The protocol still allows transitions 
 
 The protocol raises margin requirements around FX market closure windows.
 
+The recurring weekend schedule uses a 30-minute live-oracle FAD shoulder before the oracle freezes and a 15-minute
+live-oracle FAD shoulder after it unfreezes:
+
+| Regime | UTC window | Duration |
+|--------|------------|----------|
+| FAD only, oracle live | Friday 21:30–22:00 | 30 minutes |
+| FAD and oracle frozen | Friday 22:00–Sunday 21:00 | 47 hours |
+| FAD only, oracle live again | Sunday 21:00–21:15 | 15 minutes |
+
 | Window | Margin basis | Max leverage |
 |--------|--------------|--------------|
 | Normal | `maintMarginBps = 1%` | 100x |
@@ -470,7 +479,7 @@ Instant controls remain for one-time wiring and fee withdrawal. `OrderRouter` pa
 | `markStalenessLimit` | 60s | HousePool mark freshness |
 | FAD override days | empty | Admin-set calendar override set |
 | `fadMaxStaleness` | 3 days | Frozen-market max staleness |
-| `fadRunwaySeconds` | 3 hours | Admin FAD pre-close runway |
+| `fadRunwaySeconds` | 1 hour | Admin FAD pre-close runway |
 | `seniorRateBps` | 800 (8% APY) | Senior target coupon rate funded from junior NAV |
 | `DEPOSIT_COOLDOWN` | 1 hour | LP anti-flash cooldown |
 

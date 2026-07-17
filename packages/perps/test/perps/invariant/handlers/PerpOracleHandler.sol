@@ -66,19 +66,19 @@ contract PerpOracleHandler is Test {
         uint256 mode = modeFuzz % 7;
         uint256 target;
         if (mode == 0) {
-            target = 1_709_607_599; // Fri 20:59:59 UTC
+            target = 1_709_933_399; // Fri 21:29:59 UTC
         } else if (mode == 1) {
-            target = 1_709_611_199; // Fri 21:59:59 UTC
+            target = 1_709_933_400; // Fri 21:30:00 UTC
         } else if (mode == 2) {
-            target = 1_709_611_200; // Fri 22:00:00 UTC
+            target = 1_709_935_199; // Fri 21:59:59 UTC
         } else if (mode == 3) {
-            target = 1_709_697_599; // Sat 21:59:59 UTC
+            target = 1_709_935_200; // Fri 22:00:00 UTC
         } else if (mode == 4) {
-            target = 1_709_694_000; // Sun 21:00:00 UTC
+            target = 1_710_104_399; // Sun 20:59:59 UTC
         } else if (mode == 5) {
-            target = 1_709_697_599; // Sun 21:59:59 UTC
+            target = 1_710_104_400; // Sun 21:00:00 UTC
         } else {
-            target = 1_709_701_200; // Sun 23:00:00 UTC
+            target = 1_710_105_300; // Sun 21:15:00 UTC
         }
         vm.warp(target);
     }
