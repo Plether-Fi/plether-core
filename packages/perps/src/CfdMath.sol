@@ -5,24 +5,29 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 
 /// @title CfdMath
-/// @notice Pure stateless math library for PnL and price impact
+/// @notice Pure stateless arithmetic for capped PnL, solvency envelopes, and virtual price impact.
 /// @custom:security-contact contact@plether.com
 library CfdMath {
 
+    /// @notice Fixed-point scalar used for 18-decimal ratios.
     uint256 internal constant WAD = 1e18;
+    /// @notice 365-day year used by annualized perps accounting.
     uint256 internal constant SECONDS_PER_YEAR = 31_536_000;
+    /// @notice Divisor converting size (18 decimals) times price (8 decimals) to USDC (6 decimals).
     uint256 internal constant USDC_TO_TOKEN_SCALE = 1e20; // Resolves Size(18)*Price(8) -> USDC(6)
 
     // ==========================================
     // 1. PNL & SOLVENCY MATH
     // ==========================================
 
-    /// @notice Calculates Unrealized PnL strictly bounded by the protocol CAP
-    /// @param pos The position to evaluate
-    /// @param currentOraclePrice Current oracle price (8 decimals)
-    /// @param capPrice Protocol cap price (8 decimals)
-    /// @return isProfit True if the position is in profit
-    /// @return pnlUsdc Absolute PnL value in USDC (6 decimals)
+    /// @notice Calculates unrealized PnL after clamping the oracle price to the protocol cap.
+    /// @dev A zero-size position returns `(false, 0)`. At exactly the entry price, a nonzero position is
+    ///      classified as profitable with zero PnL. Multiplication uses ordinary checked arithmetic.
+    /// @param pos Position to evaluate; size is 18 decimals and entry price is 8 decimals.
+    /// @param currentOraclePrice Current BEAR-leg oracle price (8 decimals).
+    /// @param capPrice Protocol maximum oracle price (8 decimals).
+    /// @return isProfit Whether the price move is favorable to `pos.side` (including equality).
+    /// @return pnlUsdc Absolute PnL in 6-decimal USDC.
     function calculatePnL(
         CfdTypes.Position memory pos,
         uint256 currentOraclePrice,
@@ -50,12 +55,14 @@ library CfdMath {
         pnlUsdc = (pos.size * priceDiff) / USDC_TO_TOKEN_SCALE;
     }
 
-    /// @notice Calculates the absolute maximum payout a trade can ever achieve
-    /// @param size Notional size (18 decimals)
-    /// @param entryPrice Entry oracle price (8 decimals)
-    /// @param side BULL or BEAR
-    /// @param capPrice Protocol cap price (8 decimals)
-    /// @return maxProfitUsdc Maximum possible profit in USDC (6 decimals)
+    /// @notice Calculates the maximum profit available between zero and the protocol price cap.
+    /// @dev BULL uses a zero-price endpoint. BEAR uses `capPrice` and therefore returns zero when the
+    ///      entry price is at or above the cap. A zero-size position also returns zero.
+    /// @param size Notional size in synthetic-token units (18 decimals).
+    /// @param entryPrice Entry oracle price (8 decimals).
+    /// @param side Position direction.
+    /// @param capPrice Protocol maximum oracle price (8 decimals).
+    /// @return maxProfitUsdc Maximum profit in 6-decimal USDC.
     function calculateMaxProfit(
         uint256 size,
         uint256 entryPrice,
@@ -79,7 +86,13 @@ library CfdMath {
 
     /// @notice Conservative upper bound for a side's current gross winning-trader MtM liability.
     /// @dev Uses each position's max-profit envelope so same-side losing positions cannot net down
-    ///      winning positions before their losses are physically realized.
+    ///      winning positions before their losses are physically realized. Returns zero when either
+    ///      `maxProfitUsdc` or `capPrice` is zero and rounds a nonzero result up to whole USDC atoms.
+    /// @param maxProfitUsdc Aggregate maximum-profit envelope for the side (6-decimal USDC).
+    /// @param side Side whose liability envelope is being marked.
+    /// @param price Current oracle price (8 decimals); values above `capPrice` are clamped.
+    /// @param capPrice Protocol maximum oracle price (8 decimals).
+    /// @return Conservative marked liability in 6-decimal USDC.
     function conservativeMtmLiability(
         uint256 maxProfitUsdc,
         CfdTypes.Side side,
@@ -101,11 +114,13 @@ library CfdMath {
     // 2. VIRTUAL PRICE IMPACT (VPI)
     // ==========================================
 
-    /// @notice Calculates the cost of a specific skew state. C(S) = 0.5 * k * (S^2 / D)
-    /// @param skewUsdc The absolute directional imbalance in USDC (6 decimals)
-    /// @param depthUsdc The total free USDC in the House Pool (6 decimals)
-    /// @param vpiFactorWad The 'k' impact parameter (18 decimals)
-    /// @return costUsdc The theoretical cost to reach this skew (6 decimals)
+    /// @notice Calculates the cost of an absolute skew state as `C(S) = 0.5 * k * S^2 / D`.
+    /// @dev Returns zero when skew or depth is zero. Intermediate WAD scaling and ordinary checked
+    ///      multiplication can revert for inputs outside the protocol's supported numeric range.
+    /// @param skewUsdc Absolute directional imbalance in 6-decimal USDC.
+    /// @param depthUsdc House-pool depth in 6-decimal USDC.
+    /// @param vpiFactorWad Impact factor `k` (18-decimal WAD).
+    /// @return costUsdc Theoretical cost of reaching the skew, truncated to 6-decimal USDC.
     function getSkewCost(
         uint256 skewUsdc,
         uint256 depthUsdc,
@@ -132,6 +147,11 @@ library CfdMath {
     /// @notice Calculates the VPI charge/rebate for a trade.
     /// @dev If postCost > preCost, result is positive (Charge Trader).
     ///      If postCost < preCost, result is negative (Rebate Trader / MM Incentive).
+    /// @param preSkewUsdc Absolute directional skew before the trade (6-decimal USDC).
+    /// @param postSkewUsdc Absolute directional skew after the trade (6-decimal USDC).
+    /// @param depthUsdc House-pool depth used for both cost states (6-decimal USDC).
+    /// @param vpiFactorWad Impact factor `k` (18-decimal WAD).
+    /// @return vpiUsdc Signed VPI in 6-decimal USDC: positive is a charge and negative is a rebate.
     function calculateVPI(
         uint256 preSkewUsdc,
         uint256 postSkewUsdc,

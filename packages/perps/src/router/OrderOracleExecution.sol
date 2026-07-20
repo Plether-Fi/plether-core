@@ -10,15 +10,25 @@ import {OracleFreshnessPolicyLib} from "@plether/perps/libraries/OracleFreshness
 import {OrderReservationAccounting} from "@plether/perps/router/OrderReservationAccounting.sol";
 import {IPyth} from "@plether/shared/interfaces/IPyth.sol";
 
-/// @notice Oracle integration helpers and oracle-policy passthrough getters for the router stack.
+/// @title OrderOracleExecution
+/// @notice Integrates the router with Plether's mode-aware Pyth oracle and exposes its active policy settings.
 abstract contract OrderOracleExecution is OrderReservationAccounting {
 
+    /// @notice Execution-policy flags captured with the price used for an order.
+    /// @param oracleFrozen Whether the snapshot used frozen-oracle policy.
+    /// @param isFadWindow Whether the snapshot was produced during the FAD calendar window.
+    /// @param openExecutionCloseOnly Whether the snapshot policy blocks open/increase execution.
     struct RouterExecutionContext {
         bool oracleFrozen;
         bool isFadWindow;
         bool openExecutionCloseOnly;
     }
 
+    /// @notice Normalized subset of an oracle price snapshot consumed by router handlers.
+    /// @param executionPrice Account-adverse or order execution price (8 decimals).
+    /// @param markPrice Neutral basket mark sent to the engine (8 decimals).
+    /// @param oraclePublishTime Basket publish timestamp.
+    /// @param pythFee ETH update fee consumed by the oracle, in wei.
     struct OracleUpdateResult {
         uint256 executionPrice;
         uint256 markPrice;
@@ -26,10 +36,20 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
         uint256 pythFee;
     }
 
+    /// @notice House pool used for execution depth and oracle wiring validation.
     IHousePool internal immutable housePool;
+    /// @notice Engine lens used for commit-time open-order preflight classification.
     ICfdEngineLens internal immutable engineLens;
+    /// @notice Active Plether oracle used for all router price paths.
     IPletherOracle public pletherOracle;
 
+    /// @notice Binds the router oracle layer to its engine, lens, pool, and initial Plether oracle.
+    /// @dev Reverts for a zero engine lens. The oracle is validated for deployed code, nonzero Pyth,
+    ///      and exact engine and HousePool wiring; `_housePool` itself is not independently code-checked.
+    /// @param _engine Engine used for mark updates and oracle identity validation.
+    /// @param _engineLens Engine lens used for open preflight reads.
+    /// @param _housePool House pool used for depth and oracle identity validation.
+    /// @param _pletherOracle Initial Plether oracle contract.
     constructor(
         address _engine,
         address _engineLens,
@@ -45,41 +65,56 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
     }
 
     /// @notice Returns the Pyth contract used by the configured Plether oracle.
+    /// @return Active Pyth integration contract.
     function pyth() public view returns (IPyth) {
         return pletherOracle.pyth();
     }
 
     /// @notice Returns the order-execution staleness limit from the configured Plether oracle.
+    /// @return Maximum accepted price age in seconds.
     function orderExecutionStalenessLimit() public view returns (uint256) {
         return pletherOracle.orderExecutionStalenessLimit();
     }
 
     /// @notice Returns the liquidation staleness limit from the configured Plether oracle.
+    /// @return Maximum accepted liquidation-price age in seconds.
     function liquidationStalenessLimit() public view returns (uint256) {
         return pletherOracle.liquidationStalenessLimit();
     }
 
     /// @notice Returns the max accepted Pyth confidence ratio from the configured Plether oracle.
+    /// @return Maximum confidence-to-price ratio in basis points.
     function pythMaxConfidenceRatioBps() public view returns (uint256) {
         return pletherOracle.pythMaxConfidenceRatioBps();
     }
 
     /// @notice Returns the historical order settlement window from the configured Plether oracle.
+    /// @return Maximum seconds after commit in which the historical execution tick may publish.
     function orderSettlementWindow() public view returns (uint256) {
         return pletherOracle.orderSettlementWindow();
     }
 
     /// @notice Returns max allowed basket component publish-time divergence.
+    /// @return Maximum difference between component publish times in seconds.
     function maxComponentPublishTimeDivergence() public view returns (uint256) {
         return pletherOracle.maxComponentPublishTimeDivergence();
     }
 
     /// @notice Returns the multiplier used for adverse order pricing outside oracle-frozen voluntary closes
     ///         and for all liquidation pricing.
+    /// @return Confidence adjustment multiplier in basis points, where 10,000 is 1x.
     function adverseConfidenceMultiplierBps() public view returns (uint256) {
         return pletherOracle.adverseConfidenceMultiplierBps();
     }
 
+    /// @notice Resolves a single order's execution snapshot, policy context, fee, and current engine mark.
+    /// @dev Requires a usable historical/frozen snapshot and reverts with the router's canonical stale-price error
+    ///      otherwise. The oracle receives only the newly required fee; `pythFeeAlreadySpent` protects aggregate `msg.value`.
+    /// @param pythUpdateData Pyth update blobs supplied by the execution caller.
+    /// @param order Pending order whose post-commit price is requested.
+    /// @param pythFeeAlreadySpent Wei already consumed earlier in the same router call.
+    /// @return update Normalized price, publish time, and newly consumed fee.
+    /// @return executionContext Policy flags captured with the snapshot.
     function _prepareOrderExecutionOracle(
         bytes[] calldata pythUpdateData,
         CfdTypes.Order memory order,
@@ -103,6 +138,17 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
         _updateEngineMarkIfCurrent(update);
     }
 
+    /// @notice Attempts to resolve a batch order price, reusing a compatible historical basket when possible.
+    /// @dev Unlike the single-order path, unavailable history is returned as `ok == false`; `update.pythFee`
+    ///      still reports any fee consumed/refunded by the attempt so batch accounting remains exact.
+    /// @param pythUpdateData Pyth update blobs supplied by the execution caller.
+    /// @param order Current FIFO order.
+    /// @param pythFeeAlreadySpent Wei already consumed by earlier batch iterations.
+    /// @param cache Historical basket cache returned by the previous iteration.
+    /// @return ok Whether a valid execution snapshot was produced.
+    /// @return update Normalized snapshot, or only fee information on failure.
+    /// @return executionContext Policy flags captured with a successful snapshot.
+    /// @return nextCache Cache to pass to the next FIFO order.
     function _tryPrepareBatchOrderExecutionOracle(
         bytes[] calldata pythUpdateData,
         CfdTypes.Order memory order,
@@ -138,6 +184,9 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
         _updateEngineMarkIfCurrent(update);
     }
 
+    /// @notice Applies a mark-refresh update and unconditionally forwards the returned mark to the engine.
+    /// @param pythUpdateData Pyth update blobs; the oracle receives the call's full `msg.value`.
+    /// @return update Normalized refresh snapshot.
     function _prepareMarkRefreshOracle(
         bytes[] calldata pythUpdateData
     ) internal returns (OracleUpdateResult memory update) {
@@ -147,6 +196,10 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
         engine.updateMarkPrice(update.markPrice, update.oraclePublishTime);
     }
 
+    /// @notice Applies an account-adverse liquidation update and advances the engine mark when current.
+    /// @param account Account whose side determines the adverse confidence adjustment.
+    /// @param pythUpdateData Pyth update blobs; the oracle receives the call's full `msg.value`.
+    /// @return update Normalized liquidation snapshot.
     function _prepareLiquidationOracle(
         address account,
         bytes[] calldata pythUpdateData
@@ -157,6 +210,10 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
         _updateEngineMarkIfCurrent(update);
     }
 
+    /// @notice Forwards a generic mode-specific update to the Plether oracle with the call's full ETH value.
+    /// @param pythUpdateData Pyth update blobs.
+    /// @param mode Oracle policy mode to apply.
+    /// @return snapshot Validated oracle snapshot.
     function _updateAndGetOraclePrice(
         bytes[] calldata pythUpdateData,
         IPletherOracle.PriceMode mode
@@ -164,6 +221,8 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
         return pletherOracle.updatePrice{value: msg.value}(msg.sender, pythUpdateData, mode);
     }
 
+    /// @notice Validates and installs a Plether oracle wired to this router's engine and HousePool.
+    /// @param newPletherOracle Candidate deployed oracle address.
     function _setOracleConfig(
         address newPletherOracle
     ) internal {
@@ -195,6 +254,9 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
         pletherOracle = oracle;
     }
 
+    /// @notice Copies the router-relevant fields from a full oracle snapshot.
+    /// @param snapshot Full Plether oracle snapshot.
+    /// @return update Normalized router result.
     function _toOracleUpdateResult(
         IPletherOracle.PriceSnapshot memory snapshot
     ) internal pure returns (OracleUpdateResult memory update) {
@@ -204,6 +266,10 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
         update.pythFee = snapshot.updateFee;
     }
 
+    /// @notice Quotes the Pyth fee and ensures aggregate fee consumption fits within `msg.value`.
+    /// @param pythUpdateData Pyth update blobs to quote.
+    /// @param pythFeeAlreadySpent Wei already consumed in this router call.
+    /// @return pythFee Additional fee required for this update, in wei.
     function _checkedPythFee(
         bytes[] calldata pythUpdateData,
         uint256 pythFeeAlreadySpent
@@ -214,6 +280,10 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
         }
     }
 
+    /// @notice Converts a router order into the oracle's execution request shape.
+    /// @param order Order supplying commit, limit, side, and close metadata.
+    /// @param revertOnHistoricalUnavailable Whether the oracle should revert instead of returning `ok == false`.
+    /// @return request Oracle execution request.
     function _orderExecutionRequest(
         CfdTypes.Order memory order,
         bool revertOnHistoricalUnavailable
@@ -227,6 +297,8 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
         });
     }
 
+    /// @notice Advances the engine mark only when the snapshot is not older than the stored mark.
+    /// @param update Normalized snapshot carrying mark price and publish time.
     function _updateEngineMarkIfCurrent(
         OracleUpdateResult memory update
     ) internal {
@@ -235,6 +307,12 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
         }
     }
 
+    /// @notice Tests whether a cached historical basket is valid for a later batch order's commit window.
+    /// @dev Cache reuse is disabled in frozen-oracle mode and requires `commitTime < publishTime <=
+    ///      commitTime + orderSettlementWindow`, the cache's minimum reusable commit bound, and no future timestamp.
+    /// @param order Later FIFO order to price.
+    /// @param cache Candidate historical basket cache.
+    /// @return Whether the cache satisfies every reuse bound.
     function _canReuseHistoricalBatchBasket(
         CfdTypes.Order memory order,
         IPletherOracle.BatchOrderPriceCache memory cache
@@ -252,6 +330,7 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
         return uint256(cache.publishTime) <= uint256(commitTime) + orderSettlementWindow();
     }
 
+    /// @notice Reverts with the canonical order-execution stale-price error for the current block time.
     function _revertOrderExecutionStale() internal view {
         revert IPletherOracle.PletherOracle__StalePrice(
             IPletherOracle.PriceMode.OrderExecution,
@@ -262,6 +341,9 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
         );
     }
 
+    /// @notice Returns a cap-bounded stored mark for commit checks and expired-order cleanup.
+    /// @dev Substitutes 1e8 when the stored mark is zero, then clamps to `engine.CAP_PRICE()`; a zero cap yields zero.
+    /// @return price Reference price in 8-decimal oracle units.
     function _commitReferencePrice() internal view returns (uint256 price) {
         price = engine.lastMarkPrice();
         if (price == 0) {
@@ -272,6 +354,8 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
         return price > capPrice ? capPrice : price;
     }
 
+    /// @notice Returns whether the stored mark is initialized and fresh enough for open preflight rejection.
+    /// @return True when the mark is nonzero-timestamped and fresh under the current open-order policy.
     function _canUseCommitMarkForOpenPrefilter() internal view returns (bool) {
         uint64 lastMarkTime = engine.lastMarkTime();
         if (lastMarkTime == 0) {
@@ -282,10 +366,14 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
         return !OracleFreshnessPolicyLib.isStale(lastMarkTime, policy.maxStaleness, block.timestamp);
     }
 
+    /// @notice Returns whether the oracle's market-calendar policy is currently frozen.
+    /// @return True when frozen-oracle policy is active.
     function _isOracleFrozen() internal view returns (bool) {
         return pletherOracle.isOracleFrozen();
     }
 
+    /// @notice Returns whether the current open-order execution policy is close-only.
+    /// @return True when new risk-increasing commits are disallowed by oracle policy.
     function _isCloseOnlyWindow() internal view returns (bool) {
         return pletherOracle.getOrderExecutionPolicy(false).closeOnly;
     }

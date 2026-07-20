@@ -15,11 +15,19 @@ import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAc
 
 /// @title CfdEngineAccountLens
 /// @notice Rich per-account diagnostic lens for audits, tests, and operator tooling.
-/// @dev This is intentionally wider than the product-facing `PerpsPublicLens` surface.
+/// @dev This permissionless lens is intentionally wider than the product-facing `PerpsPublicLens` surface. It reads
+///      cached engine and dependency state only: it does not fetch an oracle update, refresh the mark, checkpoint carry,
+///      or mutate account state. Unless stated otherwise, USDC amounts use 6 decimals, prices use 8 decimals, sizes use
+///      18 decimals, basis-point values use a 10,000 denominator, and timestamps are Unix seconds. Dependency reverts
+///      and ABI-decoding failures are propagated.
 contract CfdEngineAccountLens is ICfdEngineAccountLens {
 
+    /// @notice Engine instance permanently inspected by this lens.
     CfdEngine public immutable engineContract;
 
+    /// @notice Binds the lens to one engine instance.
+    /// @dev Performs no zero-address, code-size, or interface validation. An invalid engine or invalid engine dependency
+    ///      can therefore deploy successfully but cause later reads to revert.
     /// @param engine_ Deployed `CfdEngine` instance to inspect.
     constructor(
         address engine_
@@ -27,9 +35,16 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         engineContract = CfdEngine(engine_);
     }
 
-    /// @notice Returns detailed clearinghouse bucket and reachability state for an account.
-    /// @param account Account to inspect
-    /// @return viewData Collateral, reachability, and claim balances for the account
+    /// @notice Returns clearinghouse custody buckets, legacy reachability values, and claims for an account.
+    /// @dev `settlementBalanceUsdc` includes locked value; `lockedMarginUsdc` is the sum of all typed locked buckets;
+    ///      `closeReachableUsdc` is exactly free settlement, not a complete close-settlement bound; and terminal
+    ///      reachability is `max(settlement balance - router execution-bounty reserve, 0)`. Terminal reachability can
+    ///      include locked value released by terminal settlement but excludes trader claims. `accountEquityUsdc` is the
+    ///      clearinghouse settlement balance rather than mark-to-market equity, while free buying power excludes all
+    ///      locked buckets. This function does not project PnL or carry. If no router is configured, it assumes a zero
+    ///      execution-bounty reserve.
+    /// @param account Clearinghouse account to inspect.
+    /// @return viewData Current custody and claim values; every monetary field uses 6-decimal USDC units.
     function getAccountCollateralView(
         address account
     ) external view returns (ICfdEngineTypes.AccountCollateralView memory viewData) {
@@ -55,11 +70,17 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         viewData.traderClaimBalanceUsdc = engineContract.traderClaimBalanceUsdc(account);
     }
 
-    /// @notice Returns the current withdrawable USDC for an account under engine-side guards.
-    /// @dev Open-position withdrawals are limited by free buying power, degraded mode, mark freshness,
-    ///      pending carry, and the post-withdraw initial margin requirement.
-    /// @param account Account to inspect
-    /// @return withdrawableUsdc Free settlement amount currently withdrawable
+    /// @notice Estimates the same-state withdrawal ceiling under the engine's open-position risk policy.
+    /// @dev A flat account returns all current free settlement without degraded-mode or mark-freshness gating. For an
+    ///      open position, the estimate is zero in degraded mode, with no usable cached mark, after the applicable
+    ///      engine/HousePool freshness limit, or when carry-adjusted equity does not exceed the active requirement. The
+    ///      calculation hypothetically consumes stored plus elapsed carry from free settlement and then position margin,
+    ///      and caps remaining free settlement by equity above the stricter of initial margin and the active FAD or
+    ///      maintenance requirement. It does not checkpoint carry. When risk headroom is the binding cap, withdrawing
+    ///      exactly the returned amount leaves equity equal to the requirement, while the live guard requires strict
+    ///      excess; callers should treat this as an upper bound and request less than the returned amount.
+    /// @param account Clearinghouse account to inspect.
+    /// @return withdrawableUsdc Estimated upper bound in 6-decimal USDC units.
     function getWithdrawableUsdc(
         address account
     ) external view returns (uint256 withdrawableUsdc) {
@@ -131,9 +152,12 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         return imrHeadroomUsdc < withdrawableUsdc ? imrHeadroomUsdc : withdrawableUsdc;
     }
 
-    /// @notice Returns a compact accounting split for account custody, reservation, and trader claims.
-    /// @param account Account to inspect
-    /// @return viewData Compact ledger view
+    /// @notice Returns a compact projection of the expanded account ledger snapshot.
+    /// @dev The function still builds the full cached-mark risk snapshot before discarding its position fields. It
+    ///      therefore requires a configured ABI-compatible order router and, when nonzero borrow-base carry must be
+    ///      projected for an open position, a compatible pool.
+    /// @param account Clearinghouse account to inspect.
+    /// @return viewData Custody, router reservation, claim, and pending-order values; monetary fields use 6-decimal USDC.
     function getAccountLedgerView(
         address account
     ) external view returns (AccountLensViewTypes.AccountLedgerView memory viewData) {
@@ -148,15 +172,24 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         viewData.pendingOrderCount = snapshot.pendingOrderCount;
     }
 
-    /// @notice Returns the full account ledger snapshot used by tests and richer read paths.
-    /// @param account Account to inspect
-    /// @return snapshot Full account ledger snapshot
+    /// @notice Returns expanded custody, reservation, and cached-mark terminal-risk state for an account.
+    /// @dev Requires a configured ABI-compatible order router. For an open position, risk uses the cached mark without
+    ///      freshness validation, terminal collateral excluding the execution-bounty reserve, stored plus elapsed carry,
+    ///      and the active FAD or maintenance requirement; initial margin and trader claims are excluded. Unrealized PnL
+    ///      itself excludes carry and VPI, while net equity also subtracts pending carry and any negative-VPI clawback.
+    ///      A flat account still returns raw ledger values but leaves every position and risk field, including net equity,
+    ///      at its zero default. Projecting nonzero borrow-base carry additionally requires a compatible pool.
+    /// @param account Clearinghouse account to inspect.
+    /// @return snapshot Expanded account snapshot; USDC values use 6 decimals, size 18, and entry price 8.
     function getAccountLedgerSnapshot(
         address account
     ) external view returns (AccountLensViewTypes.AccountLedgerSnapshot memory snapshot) {
         return _buildAccountLedgerSnapshot(account);
     }
 
+    /// @notice Builds raw custody fields and, when a position exists, cached-mark terminal risk.
+    /// @param account Clearinghouse account to inspect.
+    /// @return snapshot Expanded account snapshot assembled from engine, clearinghouse, router, and pool state.
     function _buildAccountLedgerSnapshot(
         address account
     ) internal view returns (AccountLensViewTypes.AccountLedgerSnapshot memory snapshot) {
@@ -210,6 +243,11 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         snapshot.liquidatable = riskState.liquidatable;
     }
 
+    /// @notice Computes terminal account risk at the cached mark without a freshness check.
+    /// @param account Account whose stored and elapsed carry is included.
+    /// @param pos Current position.
+    /// @param terminalReachableUsdc Settlement collateral reachable by terminal settlement, in 6-decimal USDC.
+    /// @return state PnL, carry-adjusted equity, notional, active margin requirement, and liquidation flag.
     function _buildSnapshotRiskState(
         address account,
         CfdTypes.Position memory pos,
@@ -228,6 +266,9 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         );
     }
 
+    /// @notice Reconstructs the current position plus its separately stored carry timestamp.
+    /// @param account Account whose position is loaded.
+    /// @return pos Current engine position.
     function _position(
         address account
     ) internal view returns (CfdTypes.Position memory pos) {
@@ -236,6 +277,11 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         (,, pos.lastCarryTimestamp) = engineContract.positionCarryState(account);
     }
 
+    /// @notice Computes indexed carry accrued since the position's last side-index checkpoint.
+    /// @dev This excludes carry already stored in `unsettledCarryUsdc`.
+    /// @param account Account whose carry basis is loaded.
+    /// @param pos Current position, used to select the side index.
+    /// @return Elapsed carry in 6-decimal USDC units.
     function _elapsedCarryUsdc(
         address account,
         CfdTypes.Position memory pos
@@ -254,6 +300,9 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         return PositionRiskAccountingLib.computeIndexedCarryUsdc(borrowBaseUsdc, endIndex - startIndex);
     }
 
+    /// @notice Projects a side's cumulative carry index through the current block timestamp.
+    /// @param side Position side whose stored index is projected.
+    /// @return Current cumulative carry index, scaled by 1e18.
     function _currentSideCarryIndex(
         CfdTypes.Side side
     ) internal view returns (uint256) {
@@ -269,6 +318,8 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         );
     }
 
+    /// @notice Reconstructs the engine's current risk-parameter struct from its public tuple getter.
+    /// @return params Current risk, VPI, carry, margin, and bounty settings.
     function _riskParams() internal view returns (CfdTypes.RiskParams memory params) {
         (
             params.vpiFactor,

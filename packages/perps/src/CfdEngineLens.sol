@@ -14,23 +14,43 @@ import {MarginClearinghouseAccountingLib} from "@plether/perps/libraries/MarginC
 import {OpenAccountingLib} from "@plether/perps/libraries/OpenAccountingLib.sol";
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
 
-/// @notice Read-only planner and liquidation diagnostics for the CFD engine.
+/// @title CfdEngineLens
+/// @notice Permissionless open, close, and liquidation planning diagnostics for one CFD engine.
+/// @dev The lens reads cached protocol state and caller-supplied hypothetical values but does not ingest oracle updates,
+///      validate router/order timing policy, refresh the mark, checkpoint carry, or mutate state. Expected planner
+///      business failures are encoded in preview fields; inconsistent dependencies, malformed inputs, and arithmetic
+///      violations can still revert. Unless stated otherwise, USDC amounts use 6 decimals, prices use 8 decimals, sizes
+///      use 18 decimals, basis-point values use a 10,000 denominator, and timestamps are Unix seconds.
 contract CfdEngineLens is ICfdEngineLens {
 
+    /// @notice Engine instance permanently inspected by this lens.
     CfdEngine public immutable engineContract;
 
+    /// @notice Binds the lens to one engine instance.
+    /// @dev Performs no zero-address, code-size, or interface validation. Invalid bindings can deploy successfully but
+    ///      cause later reads to revert.
+    /// @param engine_ Deployed `CfdEngine` instance to inspect.
     constructor(
         address engine_
     ) {
         engineContract = CfdEngine(engine_);
     }
 
-    /// @inheritdoc ICfdEngineLens
+    /// @notice Returns the engine address inspected by this lens.
+    /// @return The immutable `CfdEngine` address.
     function engine() external view returns (address) {
         return address(engineContract);
     }
 
-    /// @inheritdoc ICfdEngineLens
+    /// @notice Previews a close/decrease using current pool assets as both accounting depth and available cash.
+    /// @dev The oracle price is capped at `CAP_PRICE`. This performs no oracle freshness, publish-time, target-price, or
+    ///      router authorization check. No-position, zero/oversized close, dust remainder, and underwater partial-close
+    ///      failures are reported through `invalidReason`; invalid results can contain economics calculated before the
+    ///      failing check. Frozen-market spread fields distinguish assessed, collectible, and waived amounts.
+    /// @param account Account whose current position is hypothetically reduced.
+    /// @param sizeDelta Position size to close, with 18 decimals.
+    /// @param oraclePrice Candidate close price, with 8 decimals.
+    /// @return preview Close economics, settlement routing, claim/bad-debt effects, and projected solvency.
     function previewClose(
         address account,
         uint256 sizeDelta,
@@ -39,7 +59,19 @@ contract CfdEngineLens is ICfdEngineLens {
         preview = _previewClose(account, sizeDelta, oraclePrice, engineContract.pool().totalAssets());
     }
 
-    /// @inheritdoc ICfdEngineLens
+    /// @notice Previews an open or same-side increase using current pool assets and account state.
+    /// @dev The oracle price is capped at `CAP_PRICE`. This does not validate oracle freshness, order commitment,
+    ///      target-price, or router authorization. `publishTime` is copied into snapshot context and passed to the pure
+    ///      planner, but current planning calculations do not use it. Invalid results expose the typed code/category and
+    ///      only fields populated before the failing check. Projected health and liquidation price are calculated only
+    ///      after a valid plan; liquidation price is an integer threshold within `[0, CAP_PRICE]` when one exists.
+    /// @param account Account that would open or increase a position.
+    /// @param side Resulting position side; an existing opposite-side position produces a typed failure.
+    /// @param sizeDelta Position size increase, with 18 decimals.
+    /// @param marginDelta Margin supplied by the order, in 6-decimal USDC units.
+    /// @param oraclePrice Candidate execution price, with 8 decimals.
+    /// @param publishTime Candidate oracle publish timestamp in Unix seconds; currently nonbinding in the planner.
+    /// @return preview Open economics and projected post-trade position, health, and liquidation threshold.
     function previewOpen(
         address account,
         CfdTypes.Side side,
@@ -51,7 +83,16 @@ contract CfdEngineLens is ICfdEngineLens {
         preview = _previewOpen(account, side, sizeDelta, marginDelta, oraclePrice, publishTime);
     }
 
-    /// @inheritdoc ICfdEngineLens
+    /// @notice Returns the numeric typed business-rule result for the same plan as `previewOpen`.
+    /// @dev Inputs, capping, nonbinding publish-time behavior, and possible dependency/arithmetic reverts match
+    ///      `previewOpen`.
+    /// @param account Account that would open or increase a position.
+    /// @param side Resulting position side.
+    /// @param sizeDelta Position size increase, with 18 decimals.
+    /// @param marginDelta Margin supplied by the order, in 6-decimal USDC units.
+    /// @param oraclePrice Candidate execution price, with 8 decimals.
+    /// @param publishTime Candidate oracle publish timestamp in Unix seconds.
+    /// @return code Numeric value of `CfdEnginePlanTypes.OpenRevertCode`; zero is `OK`.
     function previewOpenRevertCode(
         address account,
         CfdTypes.Side side,
@@ -63,7 +104,16 @@ contract CfdEngineLens is ICfdEngineLens {
         return uint8(_previewOpen(account, side, sizeDelta, marginDelta, oraclePrice, publishTime).invalidReason);
     }
 
-    /// @inheritdoc ICfdEngineLens
+    /// @notice Classifies the same open plan for commit-time and execution-only router failure policy.
+    /// @dev Inputs, capping, nonbinding publish-time behavior, and possible dependency/arithmetic reverts match
+    ///      `previewOpen`. This uses `getOpenFailurePolicyCategory`, not the execution-only classifier.
+    /// @param account Account that would open or increase a position.
+    /// @param side Resulting position side.
+    /// @param sizeDelta Position size increase, with 18 decimals.
+    /// @param marginDelta Margin supplied by the order, in 6-decimal USDC units.
+    /// @param oraclePrice Candidate execution price, with 8 decimals.
+    /// @param publishTime Candidate oracle publish timestamp in Unix seconds.
+    /// @return category Commit-time-rejectable, execution-time user/protocol invalidation, or `None`.
     function previewOpenFailurePolicyCategory(
         address account,
         CfdTypes.Side side,
@@ -75,7 +125,14 @@ contract CfdEngineLens is ICfdEngineLens {
         return _previewOpen(account, side, sizeDelta, marginDelta, oraclePrice, publishTime).failureCategory;
     }
 
-    /// @inheritdoc ICfdEngineLens
+    /// @notice Simulates a close/decrease with caller-supplied hypothetical pool accounting depth and cash.
+    /// @dev Matches `previewClose` except `poolDepthUsdc` replaces current pool assets for VPI, payout affordability,
+    ///      and solvency calculations. Side carry-index projection still uses the live pool's actual `totalAssets`.
+    /// @param account Account whose current position is hypothetically reduced.
+    /// @param sizeDelta Position size to close, with 18 decimals.
+    /// @param oraclePrice Candidate close price, with 8 decimals.
+    /// @param poolDepthUsdc Hypothetical pool assets and cash, in 6-decimal USDC units.
+    /// @return preview Close economics, settlement routing, claim/bad-debt effects, and projected solvency.
     function simulateClose(
         address account,
         uint256 sizeDelta,
@@ -85,7 +142,14 @@ contract CfdEngineLens is ICfdEngineLens {
         preview = _previewClose(account, sizeDelta, oraclePrice, poolDepthUsdc);
     }
 
-    /// @inheritdoc ICfdEngineLens
+    /// @notice Previews full liquidation using current pool assets as both accounting depth and available cash.
+    /// @dev The oracle price is capped at `CAP_PRICE`. The lens hypothetically forfeits the account's router execution-
+    ///      bounty reserve before planning, matching terminal liquidation reachability. It performs no oracle freshness,
+    ///      publish-time, or router authorization validation. An account without a position returns a nonliquidatable
+    ///      preview with only the capped oracle price populated.
+    /// @param account Account whose current position is tested and hypothetically liquidated.
+    /// @param oraclePrice Candidate liquidation price, with 8 decimals.
+    /// @return preview Liquidation eligibility, equity, bounty, settlement, claims, bad debt, and projected solvency.
     function previewLiquidation(
         address account,
         uint256 oraclePrice
@@ -93,7 +157,13 @@ contract CfdEngineLens is ICfdEngineLens {
         preview = _previewLiquidation(account, oraclePrice, engineContract.pool().totalAssets());
     }
 
-    /// @inheritdoc ICfdEngineLens
+    /// @notice Simulates full liquidation with caller-supplied hypothetical pool accounting depth and cash.
+    /// @dev Matches `previewLiquidation` except `poolDepthUsdc` replaces current pool assets for payout-affordability and
+    ///      solvency calculations. Side carry-index projection still uses the live pool's actual `totalAssets`.
+    /// @param account Account whose current position is tested and hypothetically liquidated.
+    /// @param oraclePrice Candidate liquidation price, with 8 decimals.
+    /// @param poolDepthUsdc Hypothetical pool assets and cash, in 6-decimal USDC units.
+    /// @return preview Liquidation eligibility, equity, bounty, settlement, claims, bad debt, and projected solvency.
     function simulateLiquidation(
         address account,
         uint256 oraclePrice,
@@ -102,6 +172,14 @@ contract CfdEngineLens is ICfdEngineLens {
         preview = _previewLiquidation(account, oraclePrice, poolDepthUsdc);
     }
 
+    /// @notice Builds an open plan and, on success, projects post-trade risk and a liquidation threshold.
+    /// @param account Account whose position and collateral seed the plan.
+    /// @param side Requested position side.
+    /// @param sizeDelta Requested size increase, with 18 decimals.
+    /// @param marginDelta Requested margin contribution, in 6-decimal USDC units.
+    /// @param oraclePrice Candidate execution price, with 8 decimals.
+    /// @param publishTime Candidate mark publish timestamp in Unix seconds.
+    /// @return preview Typed open result and projected position/risk fields.
     function _previewOpen(
         address account,
         CfdTypes.Side side,
@@ -169,6 +247,12 @@ contract CfdEngineLens is ICfdEngineLens {
             _findLiquidationPrice(projected, snap.capPrice, reachableCollateralUsdc, maintenanceBps);
     }
 
+    /// @notice Builds a close plan against current account state and supplied hypothetical pool depth.
+    /// @param account Account whose position is reduced.
+    /// @param sizeDelta Requested size reduction, with 18 decimals.
+    /// @param oraclePrice Candidate execution price, with 8 decimals.
+    /// @param poolDepthUsdc Pool assets and cash used by the plan, in 6-decimal USDC units.
+    /// @return preview Typed close result, settlement routing, and projected solvency.
     function _previewClose(
         address account,
         uint256 sizeDelta,
@@ -244,6 +328,9 @@ contract CfdEngineLens is ICfdEngineLens {
         preview.maxLiabilityAfterUsdc = delta.solvency.maxLiabilityAfterUsdc;
     }
 
+    /// @notice Derives the portion of assessed frozen-market spread recovered by settlement and claim netting.
+    /// @param delta Planned close result.
+    /// @return paidUsdc Collectible frozen spread in 6-decimal USDC units.
     function _frozenSpreadPaidUsdc(
         CfdEnginePlanTypes.CloseDelta memory delta
     ) private pure returns (uint256 paidUsdc) {
@@ -261,6 +348,12 @@ contract CfdEngineLens is ICfdEngineLens {
         return delta.closeState.frozenSpreadUsdc - (uncollectedSpreadUsdc - claimSpreadRecoveryUsdc);
     }
 
+    /// @notice Applies an open delta to a memory position for risk simulation.
+    /// @dev Negative trade cost is a pool-funded rebate and is removed from the effective position-margin basis to avoid
+    ///      double counting the rebate in reachable collateral.
+    /// @param current Current position before the hypothetical open.
+    /// @param delta Valid planned open delta.
+    /// @return projected Post-open position used for risk calculations.
     function _projectOpenPosition(
         CfdTypes.Position memory current,
         CfdEnginePlanTypes.OpenDelta memory delta
@@ -275,6 +368,11 @@ contract CfdEngineLens is ICfdEngineLens {
         projected.vpiAccrued = current.vpiAccrued + delta.posVpiAccruedDelta;
     }
 
+    /// @notice Projects generic account collateral after pending-carry realization and open trade cost.
+    /// @param snap Pre-open account snapshot.
+    /// @param pendingCarryUsdc Carry hypothetically realized before the open.
+    /// @param tradeCostUsdc Signed VPI plus fee; positive is a debit and negative a rebate.
+    /// @return reachableCollateralUsdc Projected collateral reachable for position risk.
     function _postOpenReachableCollateral(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         uint256 pendingCarryUsdc,
@@ -291,6 +389,12 @@ contract CfdEngineLens is ICfdEngineLens {
         }
     }
 
+    /// @notice Projects account buckets after fully collectible pending carry.
+    /// @dev If carry is zero, no position exists, or carry has a shortfall, the original buckets are returned. The full
+    ///      planner treats a shortfall as an open failure before projected risk is calculated.
+    /// @param snap Pre-open account and locked-bucket snapshot.
+    /// @param pendingCarryUsdc Carry to collect, in 6-decimal USDC units.
+    /// @return buckets Projected clearinghouse account buckets.
     function _accountBucketsAfterOpenCarryRealization(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         uint256 pendingCarryUsdc
@@ -314,6 +418,11 @@ contract CfdEngineLens is ICfdEngineLens {
         );
     }
 
+    /// @notice Expresses positive equity as a percentage of maintenance requirement.
+    /// @dev Returns zero when equity is nonpositive or the requirement is zero; otherwise it is not capped at 10,000.
+    /// @param equityUsdc Signed projected equity in 6-decimal USDC units.
+    /// @param maintenanceMarginUsdc Projected maintenance requirement in 6-decimal USDC units.
+    /// @return healthBps Equity divided by maintenance margin, using a 10,000 denominator.
     function _healthBps(
         int256 equityUsdc,
         uint256 maintenanceMarginUsdc
@@ -324,6 +433,15 @@ contract CfdEngineLens is ICfdEngineLens {
         return (SafeCast.toUint256(equityUsdc) * 10_000) / maintenanceMarginUsdc;
     }
 
+    /// @notice Finds the integer liquidation boundary within the engine price domain.
+    /// @dev For BULL positions this returns the lowest liquidatable price; for BEAR positions, the highest. If the
+    ///      position is never liquidatable within `[0, capPrice]`, the boolean is false and price is zero.
+    /// @param projected Position whose threshold is searched.
+    /// @param capPrice Inclusive upper price bound, with 8 decimals.
+    /// @param reachableCollateralUsdc Projected generic collateral in 6-decimal USDC units.
+    /// @param maintenanceBps Active maintenance or FAD margin rate.
+    /// @return hasLiquidationPrice Whether a liquidation boundary exists in the searched domain.
+    /// @return liquidationPrice Integer boundary price, with 8 decimals.
     function _findLiquidationPrice(
         CfdTypes.Position memory projected,
         uint256 capPrice,
@@ -374,6 +492,13 @@ contract CfdEngineLens is ICfdEngineLens {
         return (true, lo);
     }
 
+    /// @notice Tests projected position equity at one candidate price.
+    /// @param projected Position to test.
+    /// @param price Candidate price, with 8 decimals.
+    /// @param capPrice Engine price cap, with 8 decimals.
+    /// @param reachableCollateralUsdc Projected collateral in 6-decimal USDC units.
+    /// @param maintenanceBps Active maintenance or FAD margin rate.
+    /// @return Whether equity is at or below the requirement.
     function _isProjectedLiquidatable(
         CfdTypes.Position memory projected,
         uint256 price,
@@ -387,6 +512,11 @@ contract CfdEngineLens is ICfdEngineLens {
         .liquidatable;
     }
 
+    /// @notice Builds liquidation diagnostics using current account state and supplied hypothetical pool depth.
+    /// @param account Account whose position is tested.
+    /// @param oraclePrice Candidate liquidation price, with 8 decimals.
+    /// @param poolDepthUsdc Pool assets and cash used by the plan, in 6-decimal USDC units.
+    /// @return preview Eligibility, settlement routing, claims, bad debt, and projected solvency.
     function _previewLiquidation(
         address account,
         uint256 oraclePrice,
@@ -425,6 +555,16 @@ contract CfdEngineLens is ICfdEngineLens {
         preview.maxLiabilityAfterUsdc = delta.solvency.maxLiabilityAfterUsdc;
     }
 
+    /// @notice Reconstructs planner input from engine and clearinghouse state plus hypothetical depth and mark context.
+    /// @dev `poolDepthUsdc` populates both asset and cash fields. A nonzero stored mark overrides `oraclePrice` in the
+    ///      snapshot's contextual last-mark field, and a zero `publishTime` keeps the stored mark time. The current planner
+    ///      does not enforce freshness from those context fields. Current carry indexes use actual pool assets rather than
+    ///      the hypothetical depth. Margin reservation IDs are not populated by this lens.
+    /// @param account Account whose position, buckets, carry, and claims are loaded.
+    /// @param oraclePrice Candidate mark price, with 8 decimals.
+    /// @param poolDepthUsdc Hypothetical pool assets and cash, in 6-decimal USDC units.
+    /// @param publishTime Candidate mark publish time, or zero to retain the stored time.
+    /// @return snap Raw planner snapshot.
     function _buildRawSnapshot(
         address account,
         uint256 oraclePrice,
@@ -475,6 +615,11 @@ contract CfdEngineLens is ICfdEngineLens {
         maxStaleness;
     }
 
+    /// @notice Adjusts a memory snapshot for execution-bounty value forfeited before liquidation settlement.
+    /// @dev Does nothing without a configured router or a nonzero bounty reserve. The debit and lock release are capped
+    ///      by the corresponding snapshot buckets and no live state is changed.
+    /// @param account Account whose router reservation is queried.
+    /// @param snap Snapshot mutated in memory before liquidation planning.
     function _applyLiquidationPreviewForfeiture(
         address account,
         CfdEnginePlanTypes.RawSnapshot memory snap
@@ -511,6 +656,9 @@ contract CfdEngineLens is ICfdEngineLens {
             : 0;
     }
 
+    /// @notice Reconstructs the current position plus its separately stored carry timestamp.
+    /// @param account Account whose position is loaded.
+    /// @return pos Current engine position.
     function _position(
         address account
     ) internal view returns (CfdTypes.Position memory pos) {
@@ -519,6 +667,10 @@ contract CfdEngineLens is ICfdEngineLens {
         (,, pos.lastCarryTimestamp) = engineContract.positionCarryState(account);
     }
 
+    /// @notice Extends an aggregate side-state tuple with current borrow base and projected carry index.
+    /// @param sideId Side identifier used for carry state.
+    /// @param side Aggregate side state loaded from the engine.
+    /// @return snap Complete planner side snapshot.
     function _sideSnapshot(
         CfdTypes.Side sideId,
         ICfdEngineTypes.SideState memory side
@@ -533,6 +685,10 @@ contract CfdEngineLens is ICfdEngineLens {
         });
     }
 
+    /// @notice Projects a side's cumulative carry index through the current block timestamp.
+    /// @dev Utilization uses the live pool's current `totalAssets`, including during hypothetical-depth simulations.
+    /// @param side Side whose index is projected.
+    /// @return Current cumulative carry index, scaled by 1e18.
     function _currentSideCarryIndex(
         CfdTypes.Side side
     ) internal view returns (uint256) {
@@ -548,6 +704,8 @@ contract CfdEngineLens is ICfdEngineLens {
         );
     }
 
+    /// @notice Reconstructs the engine's current risk-parameter struct from its public tuple getter.
+    /// @return params Current risk, VPI, carry, margin, and bounty settings.
     function _riskParams() internal view returns (CfdTypes.RiskParams memory params) {
         (
             params.vpiFactor,

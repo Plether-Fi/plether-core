@@ -6,17 +6,27 @@ import {IOrderRouter} from "@plether/perps/interfaces/IOrderRouter.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {OrderReservationAccounting} from "@plether/perps/router/OrderReservationAccounting.sol";
 
+/// @title OrderQueueBook
+/// @notice Maintains the router's global FIFO list and derives account positions after applying queued intents.
 abstract contract OrderQueueBook is OrderReservationAccounting {
 
+    /// @notice Minimal position state produced by replaying an account's live queue over its engine position.
+    /// @param exists Whether a nonzero position remains after replay.
+    /// @param side Direction of that position.
+    /// @param size Simulated position size in synthetic-token units (18 decimals).
     struct QueuedPositionView {
         bool exists;
         CfdTypes.Side side;
         uint256 size;
     }
 
+    /// @notice Current head order id of the global execution queue, or zero when the queue is empty.
     uint64 public nextExecuteId = 1;
+    /// @notice Current tail order id of the global execution queue, or zero when the queue is empty.
     uint64 public globalTailOrderId;
 
+    /// @notice Appends an order id to the global doubly linked FIFO queue.
+    /// @param orderId Newly committed order id to append.
     function _linkGlobalOrder(
         uint64 orderId
     ) internal {
@@ -32,6 +42,9 @@ abstract contract OrderQueueBook is OrderReservationAccounting {
         globalTailOrderId = orderId;
     }
 
+    /// @notice Removes an order from the global queue and clears its global pointers.
+    /// @dev Reverts if head, tail, and neighboring pointers reveal a corrupt list.
+    /// @param orderId Live global order id to remove.
     function _unlinkGlobalOrder(
         uint64 orderId
     ) internal {
@@ -61,6 +74,10 @@ abstract contract OrderQueueBook is OrderReservationAccounting {
         record.prevGlobalOrderId = 0;
     }
 
+    /// @notice Loads an order record and requires it to have `Pending` status.
+    /// @param orderId Order id to load.
+    /// @return record Mutable storage reference to the order record.
+    /// @return order In-memory copy of its canonical order payload.
     function _pendingOrder(
         uint64 orderId
     ) internal view returns (OrderRecord storage record, CfdTypes.Order memory order) {
@@ -71,6 +88,12 @@ abstract contract OrderQueueBook is OrderReservationAccounting {
         order = record.core;
     }
 
+    /// @notice Replays an account's queued closes and same-side opens over its current engine position.
+    /// @dev Closes only reduce a simulated position of the same side and floor its size at zero. An open creates
+    ///      a position when none exists and increases only a same-side simulated position; opposite-side opens
+    ///      do not alter this projection because engine/preflight validation handles that invalid transition.
+    /// @param account Account whose engine position and live queue are replayed.
+    /// @return queuedPosition Projected position used to validate a new close commit.
     function _getQueuedPositionView(
         address account
     ) internal view returns (QueuedPositionView memory queuedPosition) {

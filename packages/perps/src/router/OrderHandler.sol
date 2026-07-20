@@ -7,9 +7,14 @@ import {OrderCommitHandler} from "@plether/perps/router/OrderCommitHandler.sol";
 import {OrderExecutionHandler} from "@plether/perps/router/OrderExecutionHandler.sol";
 import {OrderLiquidationHandler} from "@plether/perps/router/OrderLiquidationHandler.sol";
 
-/// @notice Composes the router's internal action handlers behind the external OrderRouter facade.
+/// @title OrderHandler
+/// @notice Composes commit, execution, and liquidation handlers and applies admin-finalized configuration.
 abstract contract OrderHandler is OrderCommitHandler, OrderExecutionHandler, OrderLiquidationHandler {
 
+    /// @notice Applies a complete router and active-oracle policy configuration after admin authentication.
+    /// @dev Time values are seconds, monetary values are 6-decimal USDC, ratios are basis points, gas is
+    ///      unscaled gas units, and count limits are unscaled. The admin validates bounds before forwarding.
+    /// @param config Timelocked configuration finalized by this router's admin.
     function _applyRouterConfig(
         IOrderRouterAdminHost.RouterConfig calldata config
     ) internal {
@@ -35,6 +40,8 @@ abstract contract OrderHandler is OrderCommitHandler, OrderExecutionHandler, Ord
         maxPruneOrdersPerCall = config.maxPruneOrdersPerCall;
     }
 
+    /// @notice Installs an admin-finalized Plether oracle after wiring validation.
+    /// @param config Timelocked oracle-address configuration finalized by this router's admin.
     function _applyOracleConfig(
         IOrderRouterAdminHost.OracleConfig calldata config
     ) internal {

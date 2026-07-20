@@ -28,66 +28,115 @@ import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAc
 import {SolvencyAccountingLib} from "@plether/perps/libraries/SolvencyAccountingLib.sol";
 
 /// @title CfdEngine
-/// @notice The core mathematical ledger for Plether CFDs.
-/// @dev Settles all funds through the MarginClearinghouse and HousePool.
+/// @notice Canonical position ledger and execution coordinator for Plether's capped-price CFDs.
+/// @dev Orders and liquidations enter through the authorized router. Economic deltas are computed by the planner,
+///      then applied through the settlement sidecar while the engine remains the canonical position-state owner.
+///      The clearinghouse custodies trader settlement balances and margin; the HousePool supplies counterparty cash.
+///      Unless stated otherwise, prices use 8 decimals, position sizes use 18 decimals, USDC amounts use 6 decimals,
+///      basis-point values use a 10,000 denominator, and timestamps are Unix seconds.
 /// @custom:security-contact contact@plether.com
 contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, ReentrancyGuardTransient {
 
     using SafeERC20 for IERC20;
 
+    /// @notice Engine-owned fields for an open position.
+    /// @dev Active margin is deliberately excluded: the clearinghouse position-margin bucket is its source of truth.
     struct StoredPosition {
+        /// @notice Synthetic position size, with 18 decimals.
         uint256 size;
+        /// @notice Volume-weighted entry price, with 8 decimals.
         uint256 entryPrice;
+        /// @notice Capped maximum profit envelope, in 6-decimal USDC units.
         uint256 maxProfitUsdc;
+        /// @notice Direction of the position.
         CfdTypes.Side side;
+        /// @notice Unix timestamp of the last position mutation.
         uint64 lastUpdateTime;
+        /// @notice Unix timestamp of the last position carry checkpoint.
         uint64 lastCarryTimestamp;
+        /// @notice Carry basis `max(maxProfitUsdc - activeMarginUsdc, 0)`, in 6-decimal USDC units.
         uint256 borrowBaseUsdc;
+        /// @notice Side carry index stored at the last position carry checkpoint, scaled by 1e18.
         uint256 lastCarryIndex;
+        /// @notice Lifetime signed VPI balance in 6-decimal USDC units; positive is a charge and negative is a rebate.
         int256 vpiAccrued;
     }
 
+    /// @notice Maximum supported oracle price, with 8 decimals; execution and mark-refresh inputs are capped here.
     uint256 public immutable CAP_PRICE;
 
+    /// @notice Settlement token used for margin, fees, carry, recapitalization, and payouts.
     IERC20 public immutable USDC;
+    /// @notice Clearinghouse that custodies trader settlement balances and typed margin buckets.
     IMarginClearinghouse public immutable clearinghouse;
+    /// @notice One-time-configured HousePool that supplies LP counterparty liquidity.
     IHousePool public pool;
+    /// @notice One-time-configured planner used to compute open, close, and liquidation deltas.
     ICfdEnginePlanner public planner;
+    /// @notice One-time-configured sidecar authorized to apply planned settlement mutations.
     ICfdEngineSettlementSidecar public settlementSidecar;
+    /// @notice One-time-configured admin contract authorized to apply finalized engine configuration.
     address public admin;
 
     // ==========================================
     // GLOBAL STATE & SOLVENCY BOUNDS
     // ==========================================
 
+    /// @notice Aggregate position accounting by `CfdTypes.Side` index: `0` is BULL and `1` is BEAR.
+    /// @dev Each entry contains the sum of maximum-profit envelopes, synthetic open interest, raw entry notional, and
+    ///      active position margin for that side. Maximum profit and margin use 6-decimal USDC, open interest uses
+    ///      18 decimals, and raw `size * entryPrice` entry notional uses 26 decimals.
     SideState[2] public sides;
+    /// @notice Most recently accepted cached mark price, with 8 decimals and bounded by `CAP_PRICE` on router paths.
     uint256 public lastMarkPrice;
+    /// @notice Oracle publish timestamp associated with `lastMarkPrice`, in Unix seconds.
     uint64 public lastMarkTime;
+    /// @notice Aggregate carry borrow base by side index (`0` BULL; `1` BEAR), in 6-decimal USDC units.
     uint256[2] public sideBorrowBaseUsdc;
+    /// @notice Cumulative utilization-adjusted carry multiplier by side index (`0` BULL; `1` BEAR), scaled by 1e18.
     uint256[2] public sideCarryIndex;
+    /// @notice Wall-clock Unix timestamp through which each side carry index (`0` BULL; `1` BEAR) has been advanced.
     uint64[2] public sideCarryTimestamp;
 
+    /// @notice Realized settlement shortfall not yet recapitalized, in 6-decimal USDC units.
     uint256 public accumulatedBadDebtUsdc;
+    /// @notice Account carry checkpointed but not yet physically collected, in 6-decimal USDC units.
     mapping(address => uint256) public unsettledCarryUsdc;
+    /// @notice Whether terminal settlement detected insolvency and latched risk-increasing operations off.
     bool public degradedMode;
 
+    /// @notice Current VPI, skew, margin, carry, and liquidation-bounty parameters.
+    /// @dev VPI factor and maximum skew ratio use 1e18 scaling; margin, carry, and bounty rates use basis points;
+    ///      `minBountyUsdc` uses 6-decimal USDC units.
     CfdTypes.RiskParams public riskParams;
     mapping(address => StoredPosition) internal _positions;
+    /// @notice Senior pool payout liability owed to each account, in 6-decimal USDC units.
     mapping(address => uint256) public traderClaimBalanceUsdc;
+    /// @notice Aggregate outstanding trader-claim liability, in 6-decimal USDC units.
     uint256 public totalTraderClaimBalanceUsdc;
+    /// @notice One-time-configured router authorized to reserve bounties and execute orders and liquidations.
     address public orderRouter;
+    /// @notice Clearinghouse account credited with protocol execution fees and forfeited bounties.
     address public protocolTreasury;
 
+    /// @notice Whether a Unix day number is configured as an all-day FAD and oracle-frozen override.
     mapping(uint256 => bool) public fadDayOverrides;
     uint256[] private _fadOverrideDays;
+    /// @notice Maximum accepted mark age during an oracle-frozen window, in seconds.
     uint256 public fadMaxStaleness = 3 days;
+    /// @notice Look-ahead interval before an override day during which FAD restrictions begin, in seconds.
     uint256 public fadRunwaySeconds = 1 hours;
+    /// @notice Engine component of the live cached-mark age limit, in seconds.
+    /// @dev Live checks use this value when the HousePool bound is zero, otherwise the smaller of the two bounds.
     uint256 public engineMarkStalenessLimit = 60;
+    /// @notice Protocol fee charged on executed trade notional, in basis points.
     uint256 public executionFeeBps = 4;
     uint256 internal constant MAX_FROZEN_CLOSE_SPREAD_BPS = 1000;
-    /// @notice Fixed LP-owned spread charged on oracle-frozen close/reduce notional, in basis points.
+    /// @notice Fixed LP-owned spread charged on voluntary oracle-frozen close/reduce notional, in basis points.
     uint256 public frozenCloseSpreadBps;
 
+    /// @notice Emitted when the clearinghouse account designated to receive future protocol fees changes.
+    /// @param treasury New protocol treasury clearinghouse account.
     event ProtocolTreasuryUpdated(address indexed treasury);
 
     function _sideIndex(
@@ -212,11 +261,15 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         }
     }
 
-    /// @param _usdc USDC token used as margin and settlement currency
-    /// @param _clearinghouse Margin clearinghouse that custodies trader balances
-    /// @param _capPrice Maximum oracle price — positions are clamped here (also determines BULL max profit)
-    /// @param _riskParams Initial risk parameters (margin requirements, carry rate, bounty config)
-    /// @param _frozenCloseSpreadBps Initial fixed LP-owned spread for oracle-frozen close/reduce execution
+    /// @notice Initializes the immutable settlement dependencies, price cap, and initial risk configuration.
+    /// @dev The deployer becomes the two-step owner and initial protocol treasury account. The HousePool, router,
+    ///      planner, settlement sidecar, and admin must be wired separately through their one-time setters.
+    /// @param _usdc Settlement token treated by the protocol as USDC with 6 decimals.
+    /// @param _clearinghouse Margin clearinghouse that custodies trader balances and margin buckets.
+    /// @param _capPrice Nonzero maximum supported oracle price, with 8 decimals.
+    /// @param _riskParams Initial risk parameters: VPI/skew fields use 1e18 scaling, rates use basis points, and the
+    ///                    minimum bounty uses 6-decimal USDC units.
+    /// @param _frozenCloseSpreadBps Initial nonzero LP-owned frozen-close spread, in basis points and at most 1,000.
     constructor(
         address _usdc,
         address _clearinghouse,
@@ -259,10 +312,12 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         protocolTreasury = msg.sender;
     }
 
-    /// @notice One-time setter for planner, settlement sidecar, and admin sidecars.
-    /// @param planner_ Planner contract that computes open, close, and liquidation deltas
-    /// @param settlementSidecar_ Settlement sidecar bound to this engine
-    /// @param admin_ Timelocked admin contract authorized to apply engine config
+    /// @notice Atomically configures the planner, settlement sidecar, and engine admin exactly once.
+    /// @dev Callable only by the owner. The sidecar must be contract code whose `ENGINE()` is this engine, and the
+    ///      admin must report this engine from `engine()`. The planner address is stored without an interface probe.
+    /// @param planner_ Planner that computes open, close, and liquidation deltas.
+    /// @param settlementSidecar_ Settlement sidecar bound to this engine.
+    /// @param admin_ Admin authorized to apply finalized configuration and expected to enforce the timelock.
     function setDependencies(
         address planner_,
         address settlementSidecar_,
@@ -299,8 +354,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         admin = admin_;
     }
 
-    /// @notice One-time setter for the HousePool backing all positions
-    /// @param _pool HousePool address that provides counterparty liquidity
+    /// @notice Configures the HousePool backing all positions exactly once.
+    /// @dev Callable only by the owner; this setter does not probe the supplied address for an interface binding.
+    /// @param _pool Nonzero HousePool address that provides counterparty liquidity.
     function setPool(
         address _pool
     ) external onlyOwner {
@@ -313,8 +369,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         pool = IHousePool(_pool);
     }
 
-    /// @notice One-time setter for the authorized OrderRouter
-    /// @param _router Router allowed to process orders and liquidations
+    /// @notice Configures the authorized OrderRouter exactly once.
+    /// @dev Callable only by the owner; this setter does not probe the supplied address for an interface binding.
+    /// @param _router Nonzero router allowed to reserve bounties and process orders and liquidations.
     function setOrderRouter(
         address _router
     ) external onlyOwner {
@@ -328,7 +385,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     /// @notice Updates the clearinghouse account receiving protocol fees.
-    /// @param treasury Clearinghouse account that will receive future protocol fee credits
+    /// @dev Callable only by the owner. For a change, the current treasury must have a zero clearinghouse balance;
+    ///      no existing balance is migrated. Supplying the current treasury is a no-op.
+    /// @param treasury Nonzero clearinghouse account that will receive future protocol fee credits.
     function setProtocolTreasury(
         address treasury
     ) external onlyOwner {
@@ -346,9 +405,11 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         emit ProtocolTreasuryUpdated(treasury);
     }
 
-    /// @notice Transfers forfeited reserved execution-bounty reservation into the protocol treasury account.
-    /// @param sourceAccount Account whose reserved settlement bounty is forfeited
-    /// @param amountUsdc Reserved USDC amount to transfer into the protocol treasury account
+    /// @notice Transfers a forfeited reserved execution bounty into the protocol treasury clearinghouse account.
+    /// @dev Callable only by the router. This reclassifies clearinghouse balances without transferring ERC20 tokens;
+    ///      a zero amount is a no-op. Emits `BountyCredited` for a nonzero transfer.
+    /// @param sourceAccount Account whose reserved settlement bounty is forfeited.
+    /// @param amountUsdc Reserved amount to transfer, in 6-decimal USDC units.
     function absorbReservedExecutionBounty(
         address sourceAccount,
         uint256 amountUsdc
@@ -363,13 +424,15 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     /// @notice Transfers reserved bounty value from a source account into a beneficiary clearinghouse account.
-    /// @dev Realizes carry first when the beneficiary currently has an open position because the
-    ///      clearinghouse settlement credit changes the carry basis.
-    /// @param sourceAccount Account whose reserved settlement bounty funds the credit
-    /// @param beneficiary Account receiving the clearinghouse settlement credit
-    /// @param amountUsdc Reserved USDC amount to transfer
-    /// @param price Fresh mark price used to checkpoint beneficiary carry when needed
-    /// @param publishTime Mark publish timestamp used when checkpointing beneficiary carry
+    /// @dev Callable only by the router. For a beneficiary with an open position, carry is checkpointed before the
+    ///      settlement credit changes reachable collateral; covered carry is physically realized and any uncovered
+    ///      elapsed carry is added to `unsettledCarryUsdc`. A strictly newer mark is capped at `CAP_PRICE` and cached.
+    ///      The engine relies on the router to validate the supplied mark. A zero amount is a complete no-op.
+    /// @param sourceAccount Account whose reserved settlement bounty funds the credit.
+    /// @param beneficiary Account receiving the clearinghouse settlement credit.
+    /// @param amountUsdc Reserved amount to transfer, in 6-decimal USDC units.
+    /// @param price Router-validated mark price used if `publishTime` is newer, with 8 decimals.
+    /// @param publishTime Oracle publish timestamp associated with `price`, in Unix seconds.
     function creditBounty(
         address sourceAccount,
         address beneficiary,
@@ -387,8 +450,11 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     /// @notice Adds isolated margin to an existing open position without changing size.
-    /// @param account Position owner; must be the caller
-    /// @param amount USDC amount to move from free settlement into position margin
+    /// @dev The caller must equal `account`. Collectible accrued carry is realized first and any uncovered amount
+    ///      remains unsettled; then clearinghouse free settlement is locked as active position margin and aggregate
+    ///      side margin and borrow-base accounting are refreshed.
+    /// @param account Position owner and required caller.
+    /// @param amount Nonzero amount to move from free settlement into position margin, in 6-decimal USDC units.
     function addMargin(
         address account,
         uint256 amount
@@ -417,9 +483,10 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         emit MarginAdded(account, amount);
     }
 
-    /// @notice Realizes accrued carry before a user-level clearinghouse balance mutation changes the carry basis.
-    /// @dev Called only by the clearinghouse before user deposits and withdrawals.
-    /// @param account Account whose open-position carry should be realized if a position exists
+    /// @notice Realizes or checkpoints accrued carry when the clearinghouse changes an account's collateral basis.
+    /// @dev Callable only by the configured clearinghouse. The clearinghouse invokes this during deposits and before
+    ///      withdrawals and other basis-changing bucket operations. Accounts without an open position are no-ops.
+    /// @param account Account whose open-position carry should be realized or checkpointed.
     function realizeCarryBeforeMarginChange(
         address account
     ) external nonReentrant {
@@ -436,11 +503,10 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     /// @notice Settles the caller's trader claim balance into the clearinghouse.
-    /// @dev Settlement is gated by aggregate trader-claim coverage. Funds are credited to the clearinghouse
-    ///      first, so beneficiaries access them through the normal account-balance path. Carry is checkpointed
-    ///      before the settlement-basis change using a fresh mark when available; otherwise the cached stored
-    ///      mark is used.
-    /// @param account Claim beneficiary; must be the caller
+    /// @dev The caller must equal `account`. Settlement is all-or-nothing and is available only when HousePool cash
+    ///      covers all outstanding trader claims. Side carry indexes and any open-position indexed carry are
+    ///      checkpointed before the pool payout and clearinghouse credit change their respective carry bases.
+    /// @param account Claim beneficiary and required caller.
     function settleTraderClaim(
         address account
     ) external nonReentrant {
@@ -463,10 +529,14 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         emit TraderClaimSettled(account, claimAmountUsdc);
     }
 
-    /// @notice Reserves the fixed close-order execution bounty against a proportional slice of an open position.
-    /// @param account Account committing the close order
-    /// @param sizeDelta Position size the close order intends to close
-    /// @param amountUsdc Execution bounty amount to reserve
+    /// @notice Reserves a close-order execution bounty from free settlement, then active position margin if needed.
+    /// @dev Callable only by the router. Carry collection is attempted first, with any uncovered amount left unsettled.
+    ///      The post-reservation position must retain sufficient risk backing at a cached mark; a stale mark is
+    ///      accepted for this path. Any margin-backed share reduces aggregate side margin and the position carry
+    ///      borrow base. A zero amount is a complete no-op.
+    /// @param account Account committing the close order.
+    /// @param sizeDelta Intended close size, with 18 decimals; must be nonzero and no greater than position size.
+    /// @param amountUsdc Execution bounty to reserve, in 6-decimal USDC units.
     function reserveCloseOrderExecutionBounty(
         address account,
         uint256 sizeDelta,
@@ -545,8 +615,10 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         }
     }
 
-    /// @notice Reduces accumulated bad debt after governance-confirmed recapitalization
-    /// @param amount USDC amount of bad debt to clear (6 decimals)
+    /// @notice Recapitalizes the HousePool and reduces the engine's accumulated bad-debt balance.
+    /// @dev Callable only by the owner. Side carry indexes are advanced before the pool-asset denominator changes.
+    ///      Transfers USDC from the owner to the HousePool and records it as claimant-owned recapitalization inflow.
+    /// @param amount Nonzero bad debt to clear, in 6-decimal USDC units; cannot exceed the outstanding balance.
     function clearBadDebt(
         uint256 amount
     ) external onlyOwner {
@@ -567,9 +639,11 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     /// @notice Sweeps an arbitrary ERC20 accidentally sent to the engine.
-    /// @param token ERC20 token to transfer
-    /// @param to Recipient of the swept tokens
-    /// @param amount Token amount to sweep
+    /// @dev Callable only by the owner. This can transfer only tokens held by the engine itself, not assets held by
+    ///      the clearinghouse or HousePool.
+    /// @param token Nonzero ERC20 token address to transfer.
+    /// @param to Nonzero recipient of the swept tokens.
+    /// @param amount Amount to sweep, in the token's native decimals.
     function sweepToken(
         address token,
         address to,
@@ -582,6 +656,8 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     /// @notice Clears degraded mode once adjusted solvency has recovered.
+    /// @dev Callable only by the owner. Recovery requires HousePool physical assets net of senior trader claims to
+    ///      cover the larger side's aggregate maximum-profit liability.
     function clearDegradedMode() external onlyOwner {
         if (!degradedMode) {
             revert CfdEngine__NotDegraded();
@@ -595,7 +671,10 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     /// @notice Applies finalized risk parameters from the timelocked engine admin.
-    /// @param config Risk parameter, execution-fee, and frozen close spread configuration to apply
+    /// @dev Callable only by `admin`, which is responsible for validation and timelock enforcement. Carry indexes are
+    ///      advanced before the carry-rate parameter can change.
+    /// @param config Validated configuration: VPI/skew fields use 1e18 scaling, the minimum bounty uses 6-decimal
+    ///               USDC units, and margin, carry, bounty, execution-fee, and spread rates use basis points.
     function applyRiskConfig(
         ICfdEngineAdminHost.EngineRiskConfig calldata config
     ) external onlyAdmin {
@@ -607,7 +686,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     /// @notice Applies finalized FAD calendar overrides from the timelocked engine admin.
-    /// @param config FAD day timestamps and runway configuration to apply
+    /// @dev Callable only by `admin`. Replaces the complete existing override set, normalizes each timestamp to its
+    ///      Unix day number, and ignores duplicate days. The admin is responsible for validation and timelock policy.
+    /// @param config Complete FAD day timestamp set and runway duration in seconds.
     function applyCalendarConfig(
         ICfdEngineAdminHost.EngineCalendarConfig calldata config
     ) external onlyAdmin {
@@ -628,7 +709,8 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     /// @notice Applies finalized mark freshness limits from the timelocked engine admin.
-    /// @param config FAD and live mark-staleness configuration to apply
+    /// @dev Callable only by `admin`, which is responsible for validation and timelock enforcement.
+    /// @param config Oracle-frozen and live cached-mark staleness limits, both in seconds.
     function applyFreshnessConfig(
         ICfdEngineAdminHost.EngineFreshnessConfig calldata config
     ) external onlyAdmin {
@@ -640,8 +722,13 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     // WITHDRAW GUARD (IWithdrawGuard)
     // ==========================================
 
-    /// @notice Reverts if the account has an open position that would be undercollateralized after withdrawal
-    /// @param account Clearinghouse account to check
+    /// @notice Validates that a clearinghouse withdrawal leaves an open position sufficiently collateralized.
+    /// @dev Callable only by the clearinghouse after its provisional balance debit. Accounts without positions pass.
+    ///      Open positions require non-degraded mode and a fresh cached mark. Collectible carry is then realized, any
+    ///      remainder stays in pending carry, and position equity must exceed the stricter of initial margin and the
+    ///      active maintenance/FAD margin requirement. Although stateful, every mutation rolls back if the enclosing
+    ///      withdrawal fails.
+    /// @param account Clearinghouse account whose post-withdrawal state is checked.
     function checkWithdraw(
         address account
     ) external override nonReentrant {
@@ -686,10 +773,13 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     // ==========================================
 
     /// @notice Router-facing order execution entrypoint with typed business-rule failures.
-    /// @param order Queued order being executed by the router
-    /// @param currentOraclePrice Execution oracle price (8 decimals), clamped to CAP_PRICE
-    /// @param poolDepthUsdc HousePool depth used for planning and solvency checks
-    /// @param publishTime Oracle publish timestamp recorded as the latest mark time
+    /// @dev Callable only by the router. Delegates validation and delta construction to `planner`, then delegates
+    ///      clearinghouse, pool, aggregate-side, and position mutations to the settlement sidecar. Expected business
+    ///      invalidations are returned to the router as `CfdEngine__TypedOrderFailure`.
+    /// @param order Queued open/increase or close/reduce order being executed.
+    /// @param currentOraclePrice Execution oracle price, with 8 decimals; planning caps it at `CAP_PRICE`.
+    /// @param poolDepthUsdc Router-supplied HousePool depth used for planning, in 6-decimal USDC units.
+    /// @param publishTime Oracle publish timestamp for the execution mark, in Unix seconds.
     function processOrderTyped(
         CfdTypes.Order memory order,
         uint256 currentOraclePrice,
@@ -830,16 +920,19 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     // LIQUIDATIONS & FAD
     // ==========================================
 
-    /// @notice Returns true during the Friday Afternoon Deleverage (FAD) window
-    ///         (Friday 19:00 UTC → Sunday 22:00 UTC), on admin-configured FAD days,
-    ///         or within fadRunwaySeconds before an admin FAD day (deleverage runway).
+    /// @notice Reports whether Friday Afternoon Deleverage restrictions are currently active.
+    /// @dev The recurring window is Friday 19:00 UTC through Sunday 21:59:59 UTC. FAD is also active throughout an
+    ///      admin-configured override day and during `fadRunwaySeconds` immediately before an override day.
+    /// @return True when the recurring window, an override day, or its configured runway is active.
     function isFadWindow() public view returns (bool) {
         (bool fadWindow,) = _marketStatus();
         return fadWindow;
     }
 
-    /// @notice Returns true only when FX markets are closed and oracle freshness can be relaxed.
-    ///         Distinct from FAD, which starts earlier for deleveraging risk controls.
+    /// @notice Reports whether the engine is in the oracle-frozen regime where freshness policy can be relaxed.
+    /// @dev The recurring window is Friday 22:00 UTC through Sunday 20:59:59 UTC. An admin-configured override freezes
+    ///      its entire day. Unlike FAD, the frozen regime does not include the pre-override runway.
+    /// @return True during the recurring oracle closure or an override day.
     function isOracleFrozen() public view returns (bool) {
         (, bool oracleFrozen) = _marketStatus();
         return oracleFrozen;
@@ -854,15 +947,16 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         oracleFrozen = MarketCalendarLib.isOracleFrozen(timestamp, todayOverride);
     }
 
-    /// @notice Returns the current live position tuple for an account.
-    /// @param account Account to inspect
-    /// @return size Position size (18 decimals)
-    /// @return margin Current active position margin (6 decimals)
-    /// @return entryPrice Average entry price (8 decimals)
-    /// @return maxProfitUsdc Position maximum profit envelope (6 decimals)
-    /// @return side Position side
-    /// @return lastUpdateTime Last position mutation timestamp
-    /// @return vpiAccrued Net VPI accrued on the position
+    /// @notice Returns the canonical current position tuple for an account.
+    /// @dev Margin is read from the clearinghouse position-margin bucket; all other fields are engine-owned.
+    /// @param account Account to inspect.
+    /// @return size Synthetic position size, with 18 decimals.
+    /// @return margin Current active position margin, in 6-decimal USDC units.
+    /// @return entryPrice Volume-weighted entry price, with 8 decimals.
+    /// @return maxProfitUsdc Capped maximum profit envelope, in 6-decimal USDC units.
+    /// @return side Position direction; the default enum value is returned when no position exists.
+    /// @return lastUpdateTime Unix timestamp of the last position mutation.
+    /// @return vpiAccrued Lifetime signed VPI balance in 6-decimal USDC units; positive is a charge.
     function positions(
         address account
     )
@@ -883,10 +977,10 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     /// @notice Returns the carry-index basis stored for an account's current position.
-    /// @param account Account to inspect
-    /// @return borrowBaseUsdc Position borrow base used for carry utilization
-    /// @return lastCarryIndex Side carry index last stored on the position
-    /// @return lastCarryTimestamp Timestamp used for the position's last carry checkpoint
+    /// @param account Account to inspect.
+    /// @return borrowBaseUsdc Position borrow base used for carry utilization, in 6-decimal USDC units.
+    /// @return lastCarryIndex Side carry index stored at the position's last checkpoint, scaled by 1e18.
+    /// @return lastCarryTimestamp Unix timestamp of the position's last carry checkpoint.
     function positionCarryState(
         address account
     ) external view returns (uint256 borrowBaseUsdc, uint256 lastCarryIndex, uint64 lastCarryTimestamp) {
@@ -894,15 +988,16 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         return (pos.borrowBaseUsdc, pos.lastCarryIndex, pos.lastCarryTimestamp);
     }
 
-    /// @notice Liquidates an undercollateralized position.
-    ///         Surplus equity (after bounty) is returned to the user.
-    ///         In bad-debt cases (equity < bounty), all remaining margin is seized by the pool.
-    /// @param account Clearinghouse account that owns the position
-    /// @param currentOraclePrice Pyth oracle price (8 decimals), clamped to CAP_PRICE
-    /// @param poolDepthUsdc HousePool total assets used for post-op solvency checks and payout affordability
-    /// @param publishTime Pyth publish timestamp, stored as lastMarkTime
-    /// @param keeper Keeper that receives any liquidation bounty as clearinghouse credit
-    /// @return keeperBountyUsdc Bounty paid to the liquidation keeper (USDC, 6 decimals)
+    /// @notice Plans and settles liquidation of an undercollateralized position.
+    /// @dev Callable only by the router. The planner accounts for pending carry, reachable collateral, the keeper
+    ///      bounty, any trader residual payout or claim, and bad debt. Settlement removes the position and its side
+    ///      aggregates and may latch degraded mode if effective pool assets no longer cover maximum liability.
+    /// @param account Clearinghouse account that owns the position.
+    /// @param currentOraclePrice Liquidation oracle price, with 8 decimals; planning caps it at `CAP_PRICE`.
+    /// @param poolDepthUsdc Router-supplied HousePool depth used for planning, in 6-decimal USDC units.
+    /// @param publishTime Oracle publish timestamp for the liquidation mark, in Unix seconds.
+    /// @param keeper Clearinghouse account credited with any liquidation bounty.
+    /// @return keeperBountyUsdc Bounty credited to the keeper, in 6-decimal USDC units.
     function liquidatePosition(
         address account,
         uint256 currentOraclePrice,
@@ -1083,7 +1178,10 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         lastMarkTime = newMarkTime;
     }
 
-    /// @notice Permissionlessly advances both side carry indexes to the current timestamp.
+    /// @notice Permissionlessly advances both side carry indexes to the current wall-clock timestamp.
+    /// @dev Accrual uses each side's current borrow base, current HousePool effective assets
+    ///      (`min(raw balance, accountedAssets)`), and `baseCarryBps`.
+    ///      This does not checkpoint a position, collect carry from an account, or update the oracle mark.
     function checkpointCarryIndexes() external {
         _advanceAllCarryIndexes(block.timestamp);
     }
@@ -1129,9 +1227,11 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         return address(pool) == address(0) ? 0 : pool.totalAssets();
     }
 
-    /// @notice Applies a newer mark price and advances carry from the settlement sidecar.
-    /// @param newMarkPrice New mark price (8 decimals)
-    /// @param newMarkTime Oracle publish timestamp for the mark
+    /// @notice Advances side carry indexes and caches a strictly newer planned mark from the settlement sidecar.
+    /// @dev Callable only by the configured settlement sidecar. A mark whose publish time is not strictly newer is a
+    ///      no-op. The sidecar is trusted to supply a planner-capped price; this hook does not clamp it independently.
+    /// @param newMarkPrice Planner-approved mark price, with 8 decimals.
+    /// @param newMarkTime Oracle publish timestamp for the mark, in Unix seconds.
     function settlementApplyCarryAndMark(
         uint256 newMarkPrice,
         uint64 newMarkTime
@@ -1143,9 +1243,10 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     /// @notice Synchronizes aggregate side margin after settlement changes a position margin bucket.
-    /// @param side Side whose aggregate margin should be updated
-    /// @param marginBefore Account position margin before settlement
-    /// @param marginAfter Account position margin after settlement
+    /// @dev Callable only by the configured settlement sidecar. Applies the checked difference between the two values.
+    /// @param side Side whose aggregate margin is updated.
+    /// @param marginBefore Account position margin before settlement, in 6-decimal USDC units.
+    /// @param marginAfter Account position margin after settlement, in 6-decimal USDC units.
     function settlementSyncTotalSideMargin(
         CfdTypes.Side side,
         uint256 marginBefore,
@@ -1155,10 +1256,12 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     /// @notice Applies aggregate side-accounting deltas produced by the settlement sidecar.
-    /// @param side Side whose totals are mutated
-    /// @param maxProfitDelta Signed max-profit envelope delta
-    /// @param openInterestDelta Signed open-interest delta
-    /// @param entryNotionalDelta Signed entry-notional delta
+    /// @dev Callable only by the configured settlement sidecar. Solidity checked arithmetic rejects any negative
+    ///      delta whose magnitude exceeds the corresponding aggregate.
+    /// @param side Side whose totals are mutated.
+    /// @param maxProfitDelta Signed maximum-profit envelope delta, in 6-decimal USDC units.
+    /// @param openInterestDelta Signed synthetic open-interest delta, with 18 decimals.
+    /// @param entryNotionalDelta Signed raw `size * entryPrice` delta, with 26 decimals.
     function settlementApplySideDelta(
         CfdTypes.Side side,
         int256 maxProfitDelta,
@@ -1184,8 +1287,10 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     /// @notice Consumes previously recorded trader-claim balance during settlement.
-    /// @param account Claim account to debit
-    /// @param amountUsdc Claim amount to consume
+    /// @dev Callable only by the configured settlement sidecar. This reduces account and aggregate liabilities but
+    ///      does not itself transfer cash. A zero amount is a no-op; an excessive amount reverts by checked arithmetic.
+    /// @param account Claim account to debit.
+    /// @param amountUsdc Claim liability to consume, in 6-decimal USDC units.
     function settlementConsumeTraderClaim(
         address account,
         uint256 amountUsdc
@@ -1194,8 +1299,11 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     /// @notice Pays or records trader-claim value during settlement.
-    /// @param account Claim beneficiary
-    /// @param amountUsdc Claim amount to pay from fresh cash or record as liability
+    /// @dev Callable only by the configured settlement sidecar. Value is paid immediately through the clearinghouse
+    ///      only from HousePool cash not reserved for existing trader claims; otherwise the full amount is recorded as
+    ///      a new senior trader-claim liability. A zero amount is a no-op.
+    /// @param account Claim beneficiary.
+    /// @param amountUsdc Payout or claim amount, in 6-decimal USDC units.
     function settlementRecordTraderClaim(
         address account,
         uint256 amountUsdc
@@ -1204,7 +1312,8 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     /// @notice Increases accumulated bad debt during settlement.
-    /// @param amountUsdc Bad-debt amount to add
+    /// @dev Callable only by the configured settlement sidecar.
+    /// @param amountUsdc Bad debt to add, in 6-decimal USDC units.
     function settlementAccumulateBadDebt(
         uint256 amountUsdc
     ) external onlySettlementSidecar {
@@ -1212,8 +1321,12 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     /// @notice Writes the post-settlement position state and refreshes side borrow-base accounting.
-    /// @param account Position account to write
-    /// @param position New stored position state from the settlement sidecar
+    /// @dev Callable only by the configured settlement sidecar. Removes the prior side borrow-base contribution,
+    ///      copies engine-owned fields, recomputes borrow base from the current clearinghouse position-margin bucket,
+    ///      stores the current side carry index, and adds the new side contribution. Margin itself is not stored here,
+    ///      and `position.deletePosition` is ignored; deletion uses `settlementDeletePosition`.
+    /// @param account Position account to overwrite.
+    /// @param position New engine-owned position fields supplied by the settlement sidecar.
     function settlementWritePosition(
         address account,
         CfdEngineSettlementTypes.PositionState calldata position
@@ -1236,7 +1349,8 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     /// @notice Deletes an account position and removes its side borrow-base contribution.
-    /// @param account Position account to delete
+    /// @dev Callable only by the configured settlement sidecar. Clearinghouse margin must be settled separately.
+    /// @param account Position account to delete.
     function settlementDeletePosition(
         address account
     ) external onlySettlementSidecar {
@@ -1492,9 +1606,10 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     /// @notice Updates the cached mark price without processing a trade or liquidation.
-    /// @dev This does not itself realize carry; carry realization happens on execution and margin-mutating paths.
-    /// @param price Oracle price (8 decimals), clamped to CAP_PRICE
-    /// @param publishTime Pyth publish timestamp
+    /// @dev Callable only by the router. Reverts for a publish time older than `lastMarkTime`; an equal timestamp is
+    ///      accepted. Advances both side carry indexes before caching the price, but does not collect position carry.
+    /// @param price Oracle price, with 8 decimals; values above `CAP_PRICE` are capped.
+    /// @param publishTime Oracle publish timestamp, in Unix seconds.
     function updateMarkPrice(
         uint256 price,
         uint64 publishTime

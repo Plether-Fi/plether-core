@@ -11,15 +11,21 @@ import {OrderHandler} from "@plether/perps/router/OrderHandler.sol";
 import {OrderRouterBase} from "@plether/perps/router/OrderRouterBase.sol";
 
 /// @title OrderRouter (The MEV Shield)
-/// @notice Manages delayed order commits, MEV protection, and the un-brickable FIFO queue.
-/// @dev Does not custody trader collateral or bounty reserves; queued value remains in MarginClearinghouse.
+/// @notice Queues delayed perps orders and permissionlessly executes them in global FIFO order using Pyth prices.
+/// @dev Does not custody trader collateral or USDC bounty reserves; queued value remains in MarginClearinghouse.
+///      A dedicated `OrderRouterAdmin` deployed by the base contract timelocks configuration and gates new
+///      risk-increasing commits during an emergency pause. Close commits, execution, mark refresh, and
+///      liquidation remain available while that admin is paused.
 /// @custom:security-contact contact@plether.com
 contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, ReentrancyGuardTransient {
 
-    /// @param _engine CfdEngine that processes trades and liquidations
-    /// @param _engineLens CfdEngineLens used for commit-time open validation previews
-    /// @param _housePool HousePool used for depth queries and liquidation bounty payouts
-    /// @param _pletherOracle Deployed perps oracle used for Pyth basket pricing
+    /// @notice Deploys the router and its owner-controlled timelocked admin.
+    /// @dev The admin owner is the constructor caller. Integration addresses are validated by the inherited
+    ///      constructors as described there; the router is not upgradeable.
+    /// @param _engine CfdEngine that processes trades and liquidations.
+    /// @param _engineLens CfdEngineLens used for commit-time open validation previews.
+    /// @param _housePool HousePool used for depth and risk-availability queries.
+    /// @param _pletherOracle Deployed Plether oracle used for Pyth basket pricing.
     constructor(
         address _engine,
         address _engineLens,
@@ -27,13 +33,16 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, Reentra
         address _pletherOracle
     ) OrderRouterBase(_engine, _engineLens, _housePool, _pletherOracle) {}
 
-    /// @notice Submits a trade intent to the FIFO queue.
-    ///         Margin and the order's execution bounty are reserved immediately.
-    /// @param side BULL or BEAR
-    /// @param sizeDelta Position size change (18 decimals)
-    /// @param marginDelta Margin to add or remove (6 decimals, USDC)
-    /// @param targetPrice Slippage limit price (8 decimals, 0 = market order)
-    /// @param isClose True to allow execution even when paused or in FAD close-only mode
+    /// @notice Submits an open/increase or strict reduce-only intent to the delayed global FIFO queue.
+    /// @dev Reserves committed margin and the keeper bounty in the clearinghouse immediately. Opens are
+    ///      blocked while paused, degraded, close-only, or unable to increase pool risk and may be rejected
+    ///      by a fresh-mark preflight. Closes remain committable in those modes but must match and not exceed
+    ///      the position obtained after applying the account's earlier queued orders. The caller is the account.
+    /// @param side Direction to open/increase, or the direction of the queued position being closed.
+    /// @param sizeDelta Position-size change in synthetic-token units (18 decimals); must be nonzero.
+    /// @param marginDelta Margin to reserve for an open/increase (6-decimal USDC); must be zero for a close.
+    /// @param targetPrice Direction-aware slippage limit (8 decimals), or zero for no price limit.
+    /// @param isClose True for a strict position reduction and false for an open/increase.
     function commitOrder(
         CfdTypes.Side side,
         uint256 sizeDelta,
@@ -45,7 +54,9 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, Reentra
     }
 
     /// @notice Prunes spent margin-reservation links for an account's pending-order queue.
-    /// @param account Account whose router-side margin reservation queue should be synchronized
+    /// @dev Callable only by the engine or its current settlement sidecar. This changes router linkage only;
+    ///      the clearinghouse remains the source of truth for reserved value.
+    /// @param account Account whose router-side margin reservation queue should be synchronized.
     function syncMarginQueue(
         address account
     ) external {
@@ -53,21 +64,27 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, Reentra
     }
 
     /// @notice Returns the pending-order view and next account-queue link for an order id.
-    /// @param orderId Order id to inspect
-    /// @return pending Pending order data, or an empty view when the order is not pending
-    /// @return nextAccountOrderId Next order id in the account queue, or zero at the tail
+    /// @dev The returned core fields are populated from the retained order record even after terminal execution;
+    ///      callers should traverse only live account-queue ids when they require pending-only data.
+    /// @param orderId Order id to inspect.
+    /// @return pending Order data plus current clearinghouse margin and router bounty reservation.
+    /// @return nextAccountOrderId Next order id in the live account queue, or zero at the tail.
     function getPendingOrderView(
         uint64 orderId
     ) external view returns (IOrderRouterAccounting.PendingOrderView memory pending, uint64 nextAccountOrderId) {
         return _getPendingOrderView(orderId);
     }
 
-    /// @notice Keeper executes the current global queue head.
-    /// @dev Validates oracle freshness, publish-time ordering, and slippage, then delegates to the
-    ///      engine. Invalid, expired, or out-of-slippage orders are finalized from clearinghouse-reserved
-    ///      execution bounty reservation; the router does not maintain a retry/requeue lane.
-    /// @param orderId Must equal the current global queue head (expired orders are auto-skipped)
-    /// @param pythUpdateData Pyth price update blobs; attach ETH to cover the Pyth fee
+    /// @notice Permissionlessly executes an eligible global queue head and pays its reserved USDC bounty.
+    /// @dev Prunes expired heads up to the requested id before oracle work, subject to the configured prune cap.
+    ///      It then enforces FIFO, post-commit timing outside frozen-oracle mode, staleness, slippage, and a
+    ///      minimum engine-call gas reserve. Expired, slippage-failed, and engine failures other than
+    ///      mark-price-out-of-order—including business-rule rejections and panics—are terminal: committed margin is
+    ///      released and their bounty is still credited to the caller. Mark-price-out-of-order instead reverts
+    ///      nonterminally and leaves the order pending. Excess ETH is refunded, or recorded in the admin contract
+    ///      if the transfer fails. Terminal failures have no retry lane.
+    /// @param orderId Queue-head id to execute, or a later committed id used as the expired-head pruning bound.
+    /// @param pythUpdateData Pyth price update blobs; `msg.value` must cover all Pyth fees used by the call.
     function executeOrder(
         uint64 orderId,
         bytes[] calldata pythUpdateData
@@ -75,11 +92,15 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, Reentra
         _executeOrder(orderId, pythUpdateData);
     }
 
-    /// @notice Executes queued pending orders against strictly post-commit Pyth historical prices.
-    ///         Reuses a parsed historical basket when later FIFO orders are covered by the same tick,
-    ///         aggregates reserved USDC execution bounties, and refunds excess ETH in a single transfer.
-    /// @param maxOrderId Inclusive upper bound on committed order ids the batch may begin processing from
-    /// @param pythUpdateData Pyth price update blobs; attach ETH to cover the Pyth fee
+    /// @notice Permissionlessly processes consecutive FIFO orders through a committed inclusive id bound.
+    /// @dev Uses strictly post-commit historical Pyth prices outside frozen-oracle mode and may reuse a proven
+    ///      basket for later compatible orders. It terminally cleans expired, slippage-failed, and engine failures
+    ///      other than mark-price-out-of-order, but stops at an open blocked by close-only policy, an MEV timing
+    ///      boundary, insufficient gas, the prune cap, or unavailable historical data after prior progress.
+    ///      Mark-price-out-of-order reverts the whole batch and leaves its state unchanged. Reserved USDC bounties
+    ///      accrue to the caller; unused ETH is refunded once or deferred to the admin on transfer failure.
+    /// @param maxOrderId Last committed order id the batch may process; must be at or after the head and below `nextCommitId`.
+    /// @param pythUpdateData Pyth price update blobs; `msg.value` must cover the cumulative Pyth fees used.
     function executeOrderBatch(
         uint64 maxOrderId,
         bytes[] calldata pythUpdateData
@@ -88,8 +109,9 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, Reentra
     }
 
     /// @notice Applies a finalized router risk and queue configuration.
-    /// @dev Callable only by the configured router admin.
-    /// @param config Timelocked router configuration to apply
+    /// @dev Callable only by this router's deployed admin. Also forwards oracle-policy fields to the
+    ///      currently configured Plether oracle.
+    /// @param config Timelocked router, bounty, oracle-policy, gas, and queue configuration to apply.
     function applyRouterConfig(
         IOrderRouterAdminHost.RouterConfig calldata config
     ) external nonReentrant {
@@ -97,28 +119,31 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, Reentra
     }
 
     /// @notice Applies a finalized oracle integration configuration.
-    /// @dev Callable only by the configured router admin.
-    /// @param config Timelocked oracle configuration to apply
+    /// @dev Callable only by this router's deployed admin. The new oracle must be deployed, expose a nonzero
+    ///      Pyth contract, and be wired to this router's engine and HousePool.
+    /// @param config Timelocked oracle-address configuration to apply.
     function applyOracleConfig(
         IOrderRouterAdminHost.OracleConfig calldata config
     ) external nonReentrant {
         _applyOracleConfig(config);
     }
 
-    /// @notice Push a fresh mark price to the engine without processing an order.
-    ///         Required before LP deposits/withdrawals when mark is stale.
-    /// @param pythUpdateData Pyth price update blobs; attach ETH to cover the Pyth fee
+    /// @notice Applies a mark-refresh oracle update and pushes its mark price to the engine.
+    /// @dev Permissionless and available while the router admin is paused. The oracle handles the Pyth fee
+    ///      and refunds unused ETH to the caller.
+    /// @param pythUpdateData Pyth price update blobs; `msg.value` must cover the Pyth update fee.
     function updateMarkPrice(
         bytes[] calldata pythUpdateData
     ) external payable nonReentrant {
         _updateMarkPrice(pythUpdateData);
     }
 
-    /// @notice Keeper-triggered liquidation using the canonical live-market staleness policy.
-    ///         Forfeits any queued-order execution reservation to the HousePool instead of crediting it back to trader settlement,
-    ///         then credits the liquidation keeper directly through the clearinghouse.
-    /// @param account The account to liquidate
-    /// @param pythUpdateData Pyth price update blobs; attach ETH to cover the Pyth fee
+    /// @notice Permissionlessly liquidates an unsafe account using an account-adverse oracle price.
+    /// @dev Available while paused. Before liquidation, all reserved bounties on the account's queued orders
+    ///      are forfeited through the engine. On success every queued order is failed, its committed margin is
+    ///      released, and its queue links are removed. The oracle handles Pyth fees and ETH refunds.
+    /// @param account Canonical account to liquidate.
+    /// @param pythUpdateData Pyth price update blobs; `msg.value` must cover the Pyth update fee.
     function executeLiquidation(
         address account,
         bytes[] calldata pythUpdateData
