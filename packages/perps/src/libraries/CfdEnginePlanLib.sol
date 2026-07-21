@@ -15,11 +15,18 @@ import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAc
 import {SolvencyAccountingLib} from "@plether/perps/libraries/SolvencyAccountingLib.sol";
 
 /// @title CfdEnginePlanLib
-/// @notice Pure plan functions for the CfdEngine plan→apply architecture.
-///         Each function takes a RawSnapshot and returns a typed delta describing all effects.
-///         No storage reads, no external calls — purely deterministic over memory inputs.
+/// @notice Pure accounting and validation plans for the CfdEngine plan-to-apply architecture.
+/// @dev The primary planners consume a caller-built `RawSnapshot` and return typed deltas for a separate settlement
+///      sidecar to apply. No function authenticates snapshots, reads storage, or makes external calls. Unless noted,
+///      USDC uses 6 decimals, prices use 8 decimals, sizes/open interest use 18 decimals, raw entry notional uses
+///      26 decimals, ratios use 1e18 WAD, rates use a 10,000 basis-point denominator, and timestamps use Unix seconds.
 library CfdEnginePlanLib {
 
+    /// @notice Returns the collateral clawback associated with a negative lifetime VPI accrual.
+    /// @dev This parity helper is currently not called by the primary planners; risk-state construction performs the
+    ///      same calculation in `PositionRiskAccountingLib`. Negating `type(int256).min` reverts.
+    /// @param vpiAccrued Signed lifetime VPI; negative values represent trader rebates.
+    /// @return Magnitude of negative VPI, or zero for nonnegative VPI.
     function _liquidationVpiClawbackUsdc(
         int256 vpiAccrued
     ) private pure returns (uint256) {
@@ -30,6 +37,13 @@ library CfdEnginePlanLib {
     //  HELPERS
     // ──────────────────────────────────────────────
 
+    /// @notice Applies a signed net change to position margin and reports whether it would go below zero.
+    /// @dev Exactly zero is not considered drained. Inputs must be within the supported signed range; the explicit
+    ///      unsigned-to-signed conversion otherwise follows Solidity's fixed-width conversion semantics.
+    /// @param marginAfterCarry Position margin after carry realization.
+    /// @param netMarginChange Signed margin change; positive adds margin and negative removes it.
+    /// @return drained Whether the mathematical result is negative.
+    /// @return marginAfter Updated margin, or zero when drained.
     function computeOpenMarginAfter(
         uint256 marginAfterCarry,
         int256 netMarginChange
@@ -41,6 +55,14 @@ library CfdEnginePlanLib {
         return (false, uint256(computedMarginAfterSigned));
     }
 
+    /// @notice Replaces one position's post-carry margin inside its aggregate side-margin total.
+    /// @dev Computes `sideTotalMarginAfterCarry + positionMarginAfterOpen - effectivePositionMarginAfterCarry` using
+    ///      signed intermediates. Callers must maintain a nonnegative aggregate result and values representable as
+    ///      signed 256-bit integers; inconsistent inputs can wrap on explicit conversion to `uint256`.
+    /// @param sideTotalMarginAfterCarry Aggregate selected-side margin after carry realization.
+    /// @param effectivePositionMarginAfterCarry The account position's contribution contained in that aggregate.
+    /// @param positionMarginAfterOpen Replacement contribution after the open/increase.
+    /// @return sideTotalMarginAfterOpen Updated aggregate selected-side margin.
     function computeSideTotalMarginAfterOpen(
         uint256 sideTotalMarginAfterCarry,
         uint256 effectivePositionMarginAfterCarry,
@@ -52,6 +74,11 @@ library CfdEnginePlanLib {
         );
     }
 
+    /// @notice Classifies an open planner result for commit-time and execution-time order policy.
+    /// @dev Opposing-side, too-small, skew, initial-margin, and solvency failures are commit-time rejectable. Degraded
+    ///      mode is an execution-time protocol-state invalidation; fee-drained margin is execution-time user invalid.
+    /// @param code Open planner result code.
+    /// @return Policy category, or `None` for `OK` and unrecognized/default cases.
     function getOpenFailurePolicyCategory(
         CfdEnginePlanTypes.OpenRevertCode code
     ) internal pure returns (CfdEnginePlanTypes.OpenFailurePolicyCategory) {
@@ -76,6 +103,11 @@ library CfdEnginePlanLib {
         return CfdEnginePlanTypes.OpenFailurePolicyCategory.None;
     }
 
+    /// @notice Classifies an open failure discovered during delayed-order execution.
+    /// @dev Degraded mode, skew, and solvency failures are protocol-state invalidations. Every other non-OK open code
+    ///      is classified as user invalid.
+    /// @param code Open planner result code.
+    /// @return Execution failure policy category.
     function getExecutionFailurePolicyCategory(
         CfdEnginePlanTypes.OpenRevertCode code
     ) internal pure returns (CfdEnginePlanTypes.ExecutionFailurePolicyCategory) {
@@ -94,6 +126,10 @@ library CfdEnginePlanLib {
         return CfdEnginePlanTypes.ExecutionFailurePolicyCategory.UserInvalid;
     }
 
+    /// @notice Classifies a close failure discovered during delayed-order execution.
+    /// @dev Every current non-OK close code is user invalid; only `OK` maps to `None`.
+    /// @param code Close planner result code.
+    /// @return Execution failure policy category.
     function getExecutionFailurePolicyCategory(
         CfdEnginePlanTypes.CloseRevertCode code
     ) internal pure returns (CfdEnginePlanTypes.ExecutionFailurePolicyCategory) {
@@ -104,6 +140,11 @@ library CfdEnginePlanLib {
         return CfdEnginePlanTypes.ExecutionFailurePolicyCategory.UserInvalid;
     }
 
+    /// @notice Selects the snapshot for `side` and the snapshot for the opposing side.
+    /// @param snap Complete planner snapshot.
+    /// @param side Side to select.
+    /// @return selected Snapshot for `side`.
+    /// @return opposite Snapshot for the other side.
     function _selectedAndOpposite(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdTypes.Side side
@@ -121,6 +162,10 @@ library CfdEnginePlanLib {
         }
     }
 
+    /// @notice Selects one aggregate side snapshot.
+    /// @param snap Complete planner snapshot.
+    /// @param side Side to select.
+    /// @return selected BULL snapshot for `BULL`, otherwise BEAR snapshot.
     function _selectedSide(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdTypes.Side side
@@ -128,6 +173,11 @@ library CfdEnginePlanLib {
         selected = side == CfdTypes.Side.BULL ? snap.bullSide : snap.bearSide;
     }
 
+    /// @notice Computes all carry currently payable by the snapshot position.
+    /// @dev Starts with checkpointed `unsettledCarryUsdc`. Indexed carry is added only for a nonzero position and borrow
+    ///      base whose selected-side carry index exceeds the position checkpoint. Index conversion rounds down.
+    /// @param snap Position, side-index, borrow-base, and unsettled-carry snapshot.
+    /// @return Pending carry in 6-decimal USDC.
     function _pendingCarryUsdc(
         CfdEnginePlanTypes.RawSnapshot memory snap
     ) private pure returns (uint256) {
@@ -144,6 +194,12 @@ library CfdEnginePlanLib {
         );
     }
 
+    /// @notice Computes absolute directional open-interest skew at a price.
+    /// @dev Each side is independently converted from size to USDC with floor division before taking the difference.
+    /// @param bull BULL aggregate side snapshot.
+    /// @param bear BEAR aggregate side snapshot.
+    /// @param price Price used to value both sides.
+    /// @return Absolute BULL-versus-BEAR skew in 6-decimal USDC.
     function _absSkewUsdc(
         CfdEnginePlanTypes.SideSnapshot memory bull,
         CfdEnginePlanTypes.SideSnapshot memory bear,
@@ -154,6 +210,14 @@ library CfdEnginePlanLib {
         return bullUsdc > bearUsdc ? bullUsdc - bearUsdc : bearUsdc - bullUsdc;
     }
 
+    /// @notice Computes absolute skew after adding an order's size to one side.
+    /// @dev Each post-trade side notional is independently rounded down to USDC before taking the difference.
+    /// @param bull BULL aggregate state before the open.
+    /// @param bear BEAR aggregate state before the open.
+    /// @param side Side receiving the size increase.
+    /// @param sizeDelta Size added to the selected side.
+    /// @param price Price used to value open interest.
+    /// @return Post-open absolute skew in 6-decimal USDC.
     function _postOpenSkewUsdc(
         CfdEnginePlanTypes.SideSnapshot memory bull,
         CfdEnginePlanTypes.SideSnapshot memory bear,
@@ -173,6 +237,12 @@ library CfdEnginePlanLib {
         return postBullUsdc > postBearUsdc ? postBullUsdc - postBearUsdc : postBearUsdc - postBullUsdc;
     }
 
+    /// @notice Computes absolute skew from explicit BULL and BEAR open-interest values.
+    /// @dev Each side is independently rounded down to USDC before taking the difference.
+    /// @param bullOi BULL open interest, with 18 decimals.
+    /// @param bearOi BEAR open interest, with 18 decimals.
+    /// @param price Price used to value both sides, with 8 decimals.
+    /// @return Absolute directional skew in 6-decimal USDC.
     function _skewUsdc(
         uint256 bullOi,
         uint256 bearOi,
@@ -183,6 +253,17 @@ library CfdEnginePlanLib {
         return bullUsdc > bearUsdc ? bullUsdc - bearUsdc : bearUsdc - bullUsdc;
     }
 
+    /// @notice Plans use of an account's existing trader claim against settlement shortfall.
+    /// @dev Normally claim consumption is capped by shortfall and reduces bad debt one-for-one. When
+    ///      `shortfallAlreadyIncludesTraderClaim` is true, the entire claim is marked consumed, the supplied shortfall
+    ///      is left unchanged as bad debt, and no amount remains; this mode assumes upstream shortfall already netted
+    ///      the claim. A zero claim returns zero remaining balance and treats all shortfall as bad debt.
+    /// @param traderClaimBalanceUsdc Existing claim owned by the settling account.
+    /// @param shortfallUsdc Settlement amount not covered by reachable collateral.
+    /// @param shortfallAlreadyIncludesTraderClaim Whether shortfall was computed after incorporating the full claim.
+    /// @return consumedUsdc Existing claim consumed by settlement.
+    /// @return remainingUsdc Existing claim left after settlement.
+    /// @return badDebtUsdc Shortfall classified as bad debt after the selected claim treatment.
     function _planTraderClaimConsumption(
         uint256 traderClaimBalanceUsdc,
         uint256 shortfallUsdc,
@@ -201,6 +282,18 @@ library CfdEnginePlanLib {
         badDebtUsdc = shortfallUsdc - consumedUsdc;
     }
 
+    /// @notice Allocates an existing trader claim against a close-loss shortfall, fee recovery first.
+    /// @dev Claim consumption is capped by `lossResult.shortfallUsdc`. Consumed value first recovers the gross execution
+    ///      fee not already retained or collected, then reduces base-loss bad debt; any remainder corresponds to other
+    ///      non-bad-debt shortfall such as frozen spread. If claim or shortfall is zero, no claim is consumed. The loss
+    ///      result must have been derived from the same gross execution fee so retained plus collected fee cannot exceed it.
+    /// @param traderClaimBalanceUsdc Existing claim owned by the closing account.
+    /// @param lossResult Collateral collection and charge allocation before claim netting.
+    /// @param executionFeeUsdc Gross close execution fee before recovery constraints.
+    /// @return consumedUsdc Existing claim consumed against total shortfall.
+    /// @return remainingUsdc Existing claim remaining after netting.
+    /// @return feeRecoveredUsdc Consumed claim allocated to uncollected execution fee.
+    /// @return badDebtUsdc Base bad debt remaining after claim recovery.
     function _planCloseTraderClaimConsumption(
         uint256 traderClaimBalanceUsdc,
         CfdEngineSettlementLib.CloseSettlementResult memory lossResult,
@@ -232,6 +325,21 @@ library CfdEnginePlanLib {
     //  PLAN OPEN
     // ──────────────────────────────────────────────
 
+    /// @notice Plans an open or same-side increase from a complete engine snapshot.
+    /// @dev Execution price is capped by `snap.capPrice`. For a live position, pending carry is first projected into a
+    ///      memory copy of the snapshot and must be fully collectible; a zero-size position skips that realization even
+    ///      if an inconsistent snapshot supplies unsettled carry. The planner then rejects an opposing live position,
+    ///      degraded mode, a position too small to support the minimum bounty, insufficient clearinghouse funds,
+    ///      post-operation insolvency, insufficient initial margin/equity, or pool-relative skew above the configured
+    ///      maximum. The ratio-based skew check is skipped when pool assets are zero. On a
+    ///      business-rule failure `valid` remains false, `revertCode` identifies the first failed check, and previously
+    ///      populated fields are diagnostic only. VPI, notional, fee, margin, and skew-ratio divisions round down in
+    ///      their respective calculations. `publishTime` is retained for planner-interface parity but is not read.
+    /// @param snap Caller-built position, side, pool, collateral, carry, claim, and risk snapshot.
+    /// @param order Open/increase order; account, side, size, and margin are consumed by this planner.
+    /// @param executionPrice Oracle execution price before the protocol cap.
+    /// @param publishTime Oracle publish timestamp; currently unused by pure planning.
+    /// @return delta Complete open mutation plan or the first typed failure result.
     function planOpen(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdTypes.Order memory order,
@@ -354,6 +462,16 @@ library CfdEnginePlanLib {
         delta.valid = true;
     }
 
+    /// @notice Projects collectible pending carry into a memory snapshot before open validation.
+    /// @dev Does nothing for zero carry or a zero-size position. Carry is collected from free settlement then active
+    ///      position margin; any uncovered amount returns `true` without mutation. On full coverage, the helper debits
+    ///      settlement, active/canonical position margin, and aggregate side margin, credits pool assets and cash by
+    ///      the full carry amount, and rebuilds account buckets. It does not clear carry checkpoint fields because this
+    ///      is only a projection. Snapshot consistency must ensure settlement, position-margin, canonical-margin, and
+    ///      aggregate-side subtractions are all valid.
+    /// @param snap Memory snapshot to mutate in place.
+    /// @param pendingCarryUsdc Carry requested for realization.
+    /// @return hasShortfall Whether eligible free settlement plus active margin cannot cover all carry.
     function _applyPendingCarryRealizationToOpenSnapshot(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         uint256 pendingCarryUsdc
@@ -390,6 +508,15 @@ library CfdEnginePlanLib {
         return false;
     }
 
+    /// @notice Builds risk state for the position projected by a successful open-cost plan.
+    /// @dev Canonical position margin excludes any negative-trade-cost rebate. Reachable collateral is computed from
+    ///      the already carry-adjusted snapshot and then reduced by a positive trade cost or increased by a rebate;
+    ///      it is not otherwise changed for lock reclassification. No pending carry is passed to risk construction:
+    ///      live-position carry was projected earlier, while carry on an inconsistent zero-size snapshot is ignored.
+    ///      The active threshold is FAD margin during the FAD window and maintenance margin otherwise.
+    /// @param snap Carry-adjusted snapshot before applying the new open.
+    /// @param delta Partially built open delta containing resulting position and trade-cost values.
+    /// @return riskState Projected PnL, equity, notional, threshold, and liquidation status.
     function _buildPostOpenRiskState(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdEnginePlanTypes.OpenDelta memory delta
@@ -421,6 +548,17 @@ library CfdEnginePlanLib {
         );
     }
 
+    /// @notice Tests whether a planned open would leave effective pool assets below maximum directional liability.
+    /// @dev The selected side copies are increased by the delta. Current assets use `snap.poolCashUsdc`; the physical
+    ///      asset delta is trade cost net of execution fee, so only VPI enters pool assets. Trader claims and pending
+    ///      payouts are unchanged. This helper returns the strict projected insolvency comparison and does not mutate
+    ///      storage. It does mutate the supplied memory side views (and any memory aliases) while projecting the result.
+    /// @param snap Current pool, claim, degradation, and side-liability snapshot.
+    /// @param side Side receiving the open/increase.
+    /// @param delta Partially built open delta with side and economic changes.
+    /// @param bull BULL side copy after any projected pending-carry realization.
+    /// @param bear BEAR side copy after any projected pending-carry realization.
+    /// @return Whether projected effective assets are strictly below projected maximum liability.
     function _isOpenInsolventAfterPlan(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdTypes.Side side,
@@ -464,6 +602,22 @@ library CfdEnginePlanLib {
     //  PLAN CLOSE
     // ──────────────────────────────────────────────
 
+    /// @notice Plans a full or partial close, including PnL, carry, charges, collection, claims, and solvency.
+    /// @dev Execution price is capped by `snap.capPrice`; the live position side is authoritative and `order.side` is
+    ///      not read. Carry is deducted from the pre-carry close settlement. A positive result creates an immediate
+    ///      payout only when pool cash left after reserving existing aggregate trader claims is sufficient; otherwise
+    ///      it creates a new trader claim. A negative result consumes eligible clearinghouse buckets and then the
+    ///      account's existing claim. The typed failures are oversized close, remaining-margin dust, and any partial
+    ///      close collection shortfall. A valid close may still project degraded mode; solvency is reported rather than
+    ///      rejected. Callers must prevalidate a live position and nonzero close size—zero size against a zero-size
+    ///      position can reach division by zero instead of a typed failure. Close proration, notional, VPI, fee, and
+    ///      spread calculations use integer division with the rounding described by `CloseAccountingLib`.
+    ///      `publishTime` is currently unused.
+    /// @param snap Caller-built position, side, pool, collateral, carry, claim, and risk snapshot.
+    /// @param order Close order; account and size are consumed, while side is taken from `snap.position`.
+    /// @param executionPrice Oracle execution price before the protocol cap.
+    /// @param publishTime Oracle publish timestamp; retained for interface parity and currently unused.
+    /// @return delta Complete close mutation and solvency plan or the first typed failure result.
     function planClose(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdTypes.Order memory order,
@@ -557,6 +711,14 @@ library CfdEnginePlanLib {
         delta.valid = true;
     }
 
+    /// @notice Projects side open interest after removing close size from the selected side.
+    /// @dev Assumes `sizeDelta` does not exceed selected-side open interest. The opposite side is copied unchanged.
+    /// @param snap Aggregate BULL and BEAR side snapshots.
+    /// @param side Side whose open interest is reduced.
+    /// @param sizeDelta Position size being closed.
+    /// @return totalMarginBefore Aggregate margin of the selected side before the close.
+    /// @return postBullOi Projected BULL open interest.
+    /// @return postBearOi Projected BEAR open interest.
     function _closeOpenInterest(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdTypes.Side side,
@@ -573,6 +735,16 @@ library CfdEnginePlanLib {
         postBearOi = side == CfdTypes.Side.BEAR ? selectedOiAfter : oppositeOi;
     }
 
+    /// @notice Builds detailed close economics from projected post-close open interest.
+    /// @dev Pre- and post-close skew are valued at `price`. The delegated close calculation prorates margin,
+    ///      max-profit, and lifetime VPI, clamps lifetime close VPI from becoming negative, and calculates fees/spread.
+    /// @param snap Current side, pool-depth, cap, frozen-market, fee, and risk snapshot.
+    /// @param pos Position being reduced.
+    /// @param sizeDelta Size being closed.
+    /// @param price Capped execution price.
+    /// @param postBullOi Projected BULL open interest.
+    /// @param postBearOi Projected BEAR open interest.
+    /// @return Detailed close state before pending carry and collateral collection.
     function _buildCloseState(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdTypes.Position memory pos,
@@ -600,6 +772,21 @@ library CfdEnginePlanLib {
         );
     }
 
+    /// @notice Adds clearinghouse collection, existing-claim netting, recognized fees, and bad debt to a close loss.
+    /// @dev Remaining position margin is protected from collection. `marginToFreeUsdc` has already been removed from
+    ///      active margin in the settlement-bucket projection. Full closes may consume committed-order margin, while
+    ///      partial closes protect it. Existing claims recover uncollected execution fee first and base bad debt second.
+    ///      The recognized execution-fee field is replaced by retained, collateral-collected, and claim-recovered fee.
+    ///      Any collection shortfall makes a close with nonzero remaining margin `PARTIAL_CLOSE_UNDERWATER`, including
+    ///      shortfall attributable only to charges.
+    /// @param snap Account collateral, lock, pool-cash, and claim snapshot.
+    /// @param delta Partially built close delta to enrich and return.
+    /// @param marginToFreeUsdc Pro-rata margin released by the closed size.
+    /// @param remainingMarginUsdc Position margin protected for the remaining position.
+    /// @param executionFeeUsdc Gross execution fee before collection constraints.
+    /// @param includeOtherLockedMargin Whether terminal collection may consume committed-order margin.
+    /// @param lossUsdc Magnitude of carry-adjusted negative close settlement.
+    /// @return Updated close delta with collection, claim, fee, top-up, and failure values.
     function _applyCloseLossSettlement(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdEnginePlanTypes.CloseDelta memory delta,
@@ -637,6 +824,14 @@ library CfdEnginePlanLib {
         return delta;
     }
 
+    /// @notice Computes post-close effective assets, maximum liability, and degraded-mode transition.
+    /// @dev Maximum liability removes the close's pro-rata max-profit envelope. Physical assets include seized
+    ///      collateral and subtract collected/top-up protocol fee plus any immediate payout. A deferred fresh payout
+    ///      instead increases trader claims; consumed existing claims reduce them. No pending payout is separately
+    ///      supplied because immediate and deferred treatment is already encoded in those deltas.
+    /// @param snap Pre-close pool, side-liability, trader-claim, and degraded-mode snapshot.
+    /// @param delta Planned close economics and settlement allocation.
+    /// @return sp Projected effective assets, liability, and degradation flags.
     function _computeCloseSolvency(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdEnginePlanTypes.CloseDelta memory delta
@@ -671,6 +866,14 @@ library CfdEnginePlanLib {
         sp.postOpDegradedMode = result.postOpDegradedMode;
     }
 
+    /// @notice Caps the pool-cash top-up used to credit recognized close fees not collected directly as fee.
+    /// @dev The uncredited amount is recognized `delta.executionFeeUsdc` minus collateral already identified as
+    ///      collected execution fee. Available cash is measured after adding seized collateral, removing that direct
+    ///      fee, and reserving aggregate trader claims after this account's claim consumption. The result is the lesser
+    ///      of uncredited fee and unreserved cash.
+    /// @param snap Pre-close pool cash and aggregate trader claims.
+    /// @param delta Close-loss result after claim recovery and recognized-fee replacement.
+    /// @return topUpUsdc Additional pool cash available for protocol fee credit.
     function _closeLossProtocolFeeTopUpUsdc(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdEnginePlanTypes.CloseDelta memory delta
@@ -688,6 +891,11 @@ library CfdEnginePlanLib {
         return uncreditedFeeUsdc < freeCashUsdc ? uncreditedFeeUsdc : freeCashUsdc;
     }
 
+    /// @notice Computes the signed physical-pool-asset change caused by planned close settlement.
+    /// @dev Adds seized collateral and subtracts directly collected execution fee, protocol fee top-up, and only an
+    ///      immediate fresh trader payout. A payout represented by a trader claim does not remove physical assets here.
+    /// @param delta Planned close settlement values.
+    /// @return Signed physical asset delta in 6-decimal USDC.
     function _closePoolPhysicalAssetsDelta(
         CfdEnginePlanTypes.CloseDelta memory delta
     ) private pure returns (int256) {
@@ -696,6 +904,15 @@ library CfdEnginePlanLib {
             - int256(delta.freshPayoutIsImmediate ? delta.freshTraderPayoutUsdc : 0);
     }
 
+    /// @notice Builds the effective clearinghouse buckets eligible for close-loss collection.
+    /// @dev Released pro-rata margin is removed from active position margin with a zero floor. Reserved settlement is
+    ///      always removed from effective balance. When `includeOtherLockedMargin` is true, committed-order margin
+    ///      remains classified and reachable after free/active collateral; otherwise it is also excluded from the
+    ///      effective balance by the partial-close bucket builder.
+    /// @param snap Account settlement and typed locked-margin snapshot.
+    /// @param marginToFreeUsdc Position margin released before loss collection.
+    /// @param includeOtherLockedMargin Whether committed-order margin may remain reachable.
+    /// @return Effective account buckets for terminal loss planning.
     function _buildCloseSettlementBuckets(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         uint256 marginToFreeUsdc,
@@ -723,6 +940,18 @@ library CfdEnginePlanLib {
     //  PLAN LIQUIDATION
     // ──────────────────────────────────────────────
 
+    /// @notice Plans eligibility and full settlement for liquidating a snapshot position.
+    /// @dev Execution price is capped by `snap.capPrice`. A zero-size position returns a nonliquidatable delta after
+    ///      populating account and price. Otherwise equity deducts pending carry and negative lifetime-VPI clawback and
+    ///      uses all terminal settlement balance as reachable collateral. The liquidation threshold uses FAD margin in
+    ///      the FAD window and normal maintenance margin otherwise, with equality liquidatable. A nonliquidatable
+    ///      result stops after risk diagnostics; a liquidatable result removes the entire position, plans bounty and
+    ///      residual settlement, and previews solvency. Notional, margin requirement, and rate-based bounty calculations
+    ///      round down. `publishTime` is retained for interface parity but is not read.
+    /// @param snap Caller-built position, side, pool, collateral, carry, claim, and risk snapshot.
+    /// @param executionPrice Oracle liquidation price before the protocol cap.
+    /// @param publishTime Oracle publish timestamp; currently unused by pure planning.
+    /// @return delta Liquidation eligibility diagnostics and, when eligible, full settlement and solvency plan.
     function planLiquidation(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         uint256 executionPrice,
@@ -762,6 +991,20 @@ library CfdEnginePlanLib {
         delta.solvency = _computeLiquidationSolvency(snap, delta, pos);
     }
 
+    /// @notice Adds keeper bounty, full-position removal, residual settlement, claim netting, and payout routing.
+    /// @dev Bounty is the maximum of the notional rate and minimum bounty, capped by terminal reachable collateral.
+    ///      Residual equity is risk equity minus bounty. Positive residual retains existing account settlement first,
+    ///      then creates a fresh payout; negative residual seizes post-bounty settlement. When pre-bounty equity is
+    ///      nonnegative but below bounty, the resulting bounty subsidy is removed from reported liquidation bad debt.
+    ///      Remaining bad debt consumes this account's existing trader claim. A fresh payout is immediate only when
+    ///      pool cash, after reserving aggregate claims net of consumed account claims, can pay it in full.
+    /// @param snap Account, pool cash, claims, risk parameters, and aggregate side snapshot.
+    /// @param delta Liquidatable delta containing precomputed risk state.
+    /// @param pos Entire position being liquidated.
+    /// @param price Capped liquidation price.
+    /// @param settlementReachableUsdc Terminal account settlement reachable before bounty.
+    /// @param maintMarginBps Active maintenance or FAD rate used for liquidation state.
+    /// @return Updated liquidation delta containing all position, bounty, residual, claim, and payout effects.
     function _applyLiquidationSettlement(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdEnginePlanTypes.LiquidationDelta memory delta,
@@ -819,6 +1062,14 @@ library CfdEnginePlanLib {
         return delta;
     }
 
+    /// @notice Computes post-liquidation effective assets, maximum liability, and degraded-mode transition.
+    /// @dev The entire position max-profit envelope is removed from its side. Physical assets gain settlement seized
+    ///      after bounty and lose only an immediate fresh payout; the keeper bounty is an internal account transfer and
+    ///      is excluded. Deferred payout increases trader claims, while existing claim consumption decreases them.
+    /// @param snap Pre-liquidation pool, side-liability, claims, and degraded-mode snapshot.
+    /// @param delta Planned liquidation settlement and payout routing.
+    /// @param pos Position whose maximum-profit liability is removed.
+    /// @return sp Projected effective assets, liability, and degradation flags.
     function _computeLiquidationSolvency(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdEnginePlanTypes.LiquidationDelta memory delta,

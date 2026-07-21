@@ -7,9 +7,17 @@ import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAcco
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {OrderValidation} from "@plether/perps/router/OrderValidation.sol";
 
-/// @notice External-order execution entry handling for single and batch keeper execution.
+/// @title OrderExecutionHandler
+/// @notice Coordinates oracle fees, FIFO traversal, terminal cleanup, and ETH refunds for keeper execution calls.
 abstract contract OrderExecutionHandler is OrderValidation {
 
+    /// @notice Processes one requested FIFO order after bounded pre-oracle expiry pruning.
+    /// @dev If pruning empties the queue, passes the target, or makes progress without landing on the requested
+    ///      target as the new head, it refunds all ETH and returns. Otherwise it prices the initial live head,
+    ///      cleans stale preceding orders, enforces that the target resolves to the current head, and may pay a
+    ///      second oracle fee if the priced head changed. Unused ETH is refunded or deferred.
+    /// @param orderId Head order to execute, or later id used as the expiry-pruning bound.
+    /// @param pythUpdateData Pyth update blobs shared by oracle attempts in this call.
     function _executeOrder(
         uint64 orderId,
         bytes[] calldata pythUpdateData
@@ -48,6 +56,13 @@ abstract contract OrderExecutionHandler is OrderValidation {
         _sendEth(msg.sender, msg.value - pythFeeTotal);
     }
 
+    /// @notice Processes consecutive FIFO orders up to a committed inclusive id and policy/gas/prune boundary.
+    /// @dev Reuses compatible historical oracle caches, aggregates Pyth fees, and terminally clears expiry, slippage,
+    ///      and engine failures other than mark-price-out-of-order. That error reverts the batch nonterminally.
+    ///      Unavailable history reverts when no earlier batch step made progress; after an execution or expiry cleanup
+    ///      it stops and preserves the blocked order. One refund/defer attempt follows.
+    /// @param maxOrderId Inclusive last committed order id the loop may process.
+    /// @param pythUpdateData Pyth update blobs shared by all batch oracle attempts.
     function _executeOrderBatch(
         uint64 maxOrderId,
         bytes[] calldata pythUpdateData
@@ -125,12 +140,18 @@ abstract contract OrderExecutionHandler is OrderValidation {
         _sendEth(msg.sender, msg.value - pythFeeTotal);
     }
 
+    /// @notice Applies a mark-refresh oracle update and forwards it to the engine.
+    /// @param pythUpdateData Pyth update blobs supplied by the caller.
     function _updateMarkPrice(
         bytes[] calldata pythUpdateData
     ) internal {
         _prepareMarkRefreshOracle(pythUpdateData);
     }
 
+    /// @notice Sends an ETH refund or credits it in the admin contract when the recipient rejects the transfer.
+    /// @dev A zero amount is a no-op. The fallback admin credit is funded with the same ETH amount and may revert.
+    /// @param to Refund recipient.
+    /// @param amount Amount to return in wei.
     function _sendEth(
         address to,
         uint256 amount

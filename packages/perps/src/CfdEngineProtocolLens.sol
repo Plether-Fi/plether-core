@@ -13,11 +13,18 @@ import {SolvencyAccountingLib} from "@plether/perps/libraries/SolvencyAccounting
 
 /// @title CfdEngineProtocolLens
 /// @notice Rich protocol-accounting lens for audits, tests, and HousePool integration.
-/// @dev Exposes conservative solvency and liability views rather than product-level summaries.
+/// @dev This permissionless, read-only lens exposes conservative solvency and liability views rather than product-level
+///      summaries. It reads cached state and never refreshes a mark or mutates the engine. Unless stated otherwise,
+///      monetary fields use 6-decimal USDC, prices use 8 decimals, and timestamps/durations use seconds. Dependency
+///      reverts and ABI-decoding failures are propagated.
 contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
 
+    /// @notice Engine instance permanently inspected by this lens.
     CfdEngine public immutable engineContract;
 
+    /// @notice Binds the lens to one engine instance.
+    /// @dev Performs no zero-address, code-size, or interface validation. Invalid bindings can deploy successfully but
+    ///      cause later reads to revert.
     /// @param engine_ Deployed `CfdEngine` instance to inspect.
     constructor(
         address engine_
@@ -25,8 +32,14 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         engineContract = CfdEngine(engine_);
     }
 
-    /// @notice Returns the canonical protocol-accounting snapshot used by diagnostics and audits.
-    /// @return snapshot Protocol-level accounting, liability, and solvency values
+    /// @notice Returns the canonical protocol accounting and solvency snapshot.
+    /// @dev Maximum liability is the larger side maximum-profit envelope. Withdrawal reserve is that liability plus all
+    ///      trader claims; free USDC is pool assets above the reserve; and effective solvency assets are pool assets net
+    ///      of trader claims. The separately reported net physical assets subtract the protocol-treasury clearinghouse
+    ///      balance, but that subtraction is not applied to `effectiveSolvencyAssetsUsdc`. Accumulated bad debt is
+    ///      reported diagnostically and likewise is not subtracted by this snapshot. `hasLiveLiability` follows nonzero
+    ///      side maximum-profit envelopes rather than raw open interest.
+    /// @return snapshot Protocol-level accounting, liability, claim, and degraded-mode values in 6-decimal USDC units.
     function getProtocolAccountingSnapshot()
         external
         view
@@ -35,10 +48,16 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         return _buildProtocolAccountingSnapshot();
     }
 
-    /// @notice Builds the HousePool accounting snapshot against a caller-supplied freshness limit.
-    /// @dev This packages the engine-side values HousePool needs for reconcile and withdrawal logic.
-    /// @param markStalenessLimit Pool-configured live mark staleness limit
-    /// @return snapshot Engine input values consumed by HousePool accounting
+    /// @notice Builds the engine-side snapshot consumed by HousePool accounting.
+    /// @dev Physical assets are current pool `totalAssets`; net physical assets subtract the protocol-treasury
+    ///      clearinghouse balance with saturation. Maximum liability is the larger side maximum-profit envelope.
+    ///      Withdrawal-only unrealized MtM liability uses both side envelopes at the cached mark and is zero before the
+    ///      first mark. Deposit MtM and supplemental reserve are deliberately zero. Open-position status follows side
+    ///      open interest, while mark-freshness gating follows side maximum-profit liability. When gating is required,
+    ///      frozen-market policy uses `fadMaxStaleness`; live policy uses the tighter nonzero engine/pool limit. This
+    ///      function selects a limit but does not itself test the cached mark's age.
+    /// @param markStalenessLimit HousePool live-mark age limit in seconds; zero delegates to the engine limit.
+    /// @return snapshot Engine inputs for HousePool reconcile, deposit, and withdrawal calculations.
     function getHousePoolInputSnapshot(
         uint256 markStalenessLimit
     ) external view returns (HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot) {
@@ -77,8 +96,8 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         }
     }
 
-    /// @notice Returns the current HousePool status flags sourced from engine runtime state.
-    /// @return snapshot Current engine mark time and runtime mode flags
+    /// @notice Returns cached-mark time and current runtime mode flags used by HousePool.
+    /// @return snapshot Latest mark publish time plus oracle-frozen and degraded-mode flags.
     function getHousePoolStatusSnapshot()
         external
         view
@@ -89,6 +108,9 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         snapshot.degradedMode = engineContract.degradedMode();
     }
 
+    /// @notice Computes conservative withdrawal-only MtM liability at the cached engine mark.
+    /// @dev Returns zero until a mark timestamp has been established, then sums the two side liability envelopes.
+    /// @return Conservative current MtM liability in 6-decimal USDC units.
     function _getVaultMtmLiability() internal view returns (uint256) {
         if (engineContract.lastMarkTime() == 0) {
             return 0;
@@ -102,6 +124,8 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
             + CfdMath.conservativeMtmLiability(bearState.maxProfitUsdc, CfdTypes.Side.BEAR, price, capPrice);
     }
 
+    /// @notice Assembles protocol accounting from pool, clearinghouse, side, claim, and engine status state.
+    /// @return snapshot Canonical diagnostic accounting snapshot.
     function _buildProtocolAccountingSnapshot()
         internal
         view
@@ -131,6 +155,8 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         snapshot.hasLiveLiability = bullState.maxProfitUsdc + bearState.maxProfitUsdc > 0;
     }
 
+    /// @notice Builds solvency from pool assets, maximum side liability, and aggregate trader claims.
+    /// @return Current solvency state; protocol treasury and accumulated bad debt are not separate deductions.
     function _buildAdjustedSolvencyState() internal view returns (SolvencyAccountingLib.SolvencyState memory) {
         return SolvencyAccountingLib.buildSolvencyState(
             engineContract.pool().totalAssets(),
@@ -141,6 +167,10 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         );
     }
 
+    /// @notice Reconstructs one aggregate side-state tuple from the engine getter.
+    /// @param side Side to inspect.
+    /// @return state Maximum profit and aggregate margin in 6-decimal USDC, open interest with 18 decimals, and raw
+    ///         `size * entryPrice` notional with 26 decimals.
     function _sideState(
         CfdTypes.Side side
     ) internal view returns (ICfdEngineTypes.SideState memory state) {
@@ -148,6 +178,8 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
             engineContract.sides(uint8(side));
     }
 
+    /// @notice Reconstructs the engine's current risk-parameter struct from its public tuple getter.
+    /// @return params Current risk, VPI, carry, margin, and bounty settings.
     function _riskParams() internal view returns (CfdTypes.RiskParams memory params) {
         (
             params.vpiFactor,

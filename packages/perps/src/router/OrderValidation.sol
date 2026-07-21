@@ -10,11 +10,16 @@ import {OrderValidationLib} from "@plether/perps/libraries/OrderValidationLib.so
 import {OrderBountyAccounting} from "@plether/perps/router/OrderBountyAccounting.sol";
 import {DecimalConstants} from "@plether/shared/libraries/DecimalConstants.sol";
 
-/// @notice Validation and preflight checks for delayed-order commits and execution bounds.
+/// @title OrderValidation
+/// @notice Applies protocol-state gates, close projection checks, open preflight, and batch bounds.
 abstract contract OrderValidation is OrderBountyAccounting {
 
+    /// @notice Next order id assigned by a successful commit; starts at one.
     uint64 public nextCommitId = 1;
 
+    /// @notice Requires the protocol to permit a new risk-increasing commit.
+    /// @dev Checks, in order: router-admin pause, engine degraded mode, oracle close-only policy, and HousePool
+    ///      risk availability. A pool that has not completed seed lifecycle gets its dedicated error.
     function _validateOpenCommitAllowed() internal view {
         if (OrderRouterAdmin(admin).paused()) {
             revert Pausable.EnforcedPause();
@@ -33,6 +38,10 @@ abstract contract OrderValidation is OrderBountyAccounting {
         }
     }
 
+    /// @notice Requires nonzero size and zero margin on a strict close.
+    /// @param sizeDelta Requested position-size change (18 decimals).
+    /// @param marginDelta Requested open margin (6-decimal USDC).
+    /// @param isClose Whether the order is a strict close.
     function _validateBaseCommit(
         uint256 sizeDelta,
         uint256 marginDelta,
@@ -41,6 +50,13 @@ abstract contract OrderValidation is OrderBountyAccounting {
         OrderValidationLib.validateBaseCommit(sizeDelta, marginDelta, isClose);
     }
 
+    /// @notice Validates a close against the account's queue-projected position and returns its fixed bounty.
+    /// @dev Side must match and size cannot exceed the projected position. A partial close smaller than both
+    ///      the projected position and the engine bounty-floor size is rejected; a full close remains permitted.
+    /// @param account Account submitting the close.
+    /// @param side Direction of the position to reduce.
+    /// @param sizeDelta Requested close size (18 decimals).
+    /// @return Configured fixed close bounty (6-decimal USDC).
     function _validatedCloseExecutionBountyUsdc(
         address account,
         CfdTypes.Side side,
@@ -57,6 +73,14 @@ abstract contract OrderValidation is OrderBountyAccounting {
         return closeOrderExecutionBountyUsdc;
     }
 
+    /// @notice Enforces minimum open notional, optionally rejects predictable engine failures, and quotes bounty.
+    /// @dev The cap-bounded stored mark (or 1e8 fallback) supplies commit notional. Engine preview rejection is
+    ///      used only when that mark has a nonzero timestamp and is fresh under the active open policy.
+    /// @param account Account submitting the open/increase.
+    /// @param side Requested direction.
+    /// @param sizeDelta Requested size increase (18 decimals).
+    /// @param marginDelta Margin to reserve (6-decimal USDC).
+    /// @return Floor/cap-bounded open bounty (6-decimal USDC).
     function _validatedOpenExecutionBountyUsdc(
         address account,
         CfdTypes.Side side,
@@ -82,6 +106,8 @@ abstract contract OrderValidation is OrderBountyAccounting {
         return _quoteOpenOrderExecutionBountyUsdc(sizeDelta, commitPrice);
     }
 
+    /// @notice Requires a nonempty queue and a committed inclusive batch bound at or after the head.
+    /// @param maxOrderId Inclusive last order id a batch may process.
     function _validateBatchBounds(
         uint64 maxOrderId
     ) internal view {

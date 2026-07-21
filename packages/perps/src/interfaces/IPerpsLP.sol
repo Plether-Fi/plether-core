@@ -4,5 +4,7 @@ pragma solidity 0.8.35;
 import {IPerpsLPActions} from "@plether/perps/interfaces/IPerpsLPActions.sol";
 import {IPerpsLPViews} from "@plether/perps/interfaces/IPerpsLPViews.sol";
 
-/// @notice Combined LP-facing surface for the simplified perps product API.
+/// @notice Logical aggregate of tranche-vault action hooks and product-facing LP read selectors.
+/// @dev The live action and read selectors are split between HousePool and PerpsPublicLens respectively; consumers
+///      should not assume one deployed contract implements this complete composite interface.
 interface IPerpsLP is IPerpsLPActions, IPerpsLPViews {}

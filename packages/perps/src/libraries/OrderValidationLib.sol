@@ -7,6 +7,10 @@ import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.s
 /// @notice Pure validation helpers for delayed-order router checks.
 library OrderValidationLib {
 
+    /// @notice Validates size and margin constraints common to order commits.
+    /// @param sizeDelta Requested position-size delta (18 decimals).
+    /// @param marginDelta Requested nonnegative margin amount (6 decimals).
+    /// @param isClose Whether the order is a close/reduce order.
     function validateBaseCommit(
         uint256 sizeDelta,
         uint256 marginDelta,
@@ -20,6 +24,12 @@ library OrderValidationLib {
         }
     }
 
+    /// @notice Validates a close order against the router's queued-position projection.
+    /// @param positionExists Whether the router's queued-position projection currently exists.
+    /// @param queuedSize Projected position size after earlier queued orders (18 decimals).
+    /// @param queuedSide Projected position side after earlier queued orders.
+    /// @param requestedSide Side supplied by the close request.
+    /// @param sizeDelta Requested reduction in position size (18 decimals).
     function validateCloseCommit(
         bool positionExists,
         uint256 queuedSize,
@@ -38,6 +48,11 @@ library OrderValidationLib {
         }
     }
 
+    /// @notice Validates an inclusive global-queue endpoint for batch execution.
+    /// @param maxOrderId Last order identifier the batch may attempt.
+    /// @param nextExecuteId Current global queue-head candidate. It starts at one before the first commit and becomes
+    ///        zero only after a previously populated queue drains.
+    /// @param nextCommitId Next identifier that will be assigned to a newly committed order.
     function validateBatchBounds(
         uint64 maxOrderId,
         uint64 nextExecuteId,
@@ -54,6 +69,12 @@ library OrderValidationLib {
         }
     }
 
+    /// @notice Checks execution price against the order's directional target-price boundary.
+    /// @dev A zero target disables the check. Close BULL accepts prices at or below the target; close BEAR accepts
+    ///      prices at or above it. Open BULL uses the opposite comparison, as does open BEAR.
+    /// @param order Order whose side, close flag, and target price define the boundary.
+    /// @param executionPrice Proposed execution price (8 decimals).
+    /// @return Whether the proposed price satisfies the order boundary.
     function checkSlippage(
         CfdTypes.Order memory order,
         uint256 executionPrice

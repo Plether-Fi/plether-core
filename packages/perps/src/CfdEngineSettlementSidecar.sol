@@ -12,22 +12,31 @@ import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAcco
 import {CashPriorityLib} from "@plether/perps/libraries/CashPriorityLib.sol";
 
 /// @title CfdEngineSettlementSidecar
-/// @notice Externalized settlement executor for `CfdEngine` close and liquidation flows.
+/// @notice Externalized settlement executor for `CfdEngine` open, close, and liquidation flows.
 /// @dev `CfdEngine` remains the storage owner and grants this sidecar access only through narrow
-///      settlement-host hooks. The sidecar does not own independent protocol state.
+///      settlement-host hooks. The sidecar does not own independent protocol state and does not validate planner deltas;
+///      the bound engine must supply a valid delta derived from matching live state. Unless stated otherwise, USDC
+///      amounts use 6 decimals, prices use 8 decimals, sizes use 18 decimals, and timestamps are Unix seconds.
 contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
 
+    /// @notice Sole engine address authorized to call settlement entrypoints and to be supplied as `host`.
     address public immutable ENGINE;
 
+    /// @notice Thrown when the caller or supplied settlement host is not exactly `ENGINE`.
     error CfdEngineSettlementSidecar__Unauthorized();
 
-    /// @param engine_ Engine host authorized to call this sidecar
+    /// @notice Binds the stateless sidecar to one engine settlement host.
+    /// @dev Performs no zero-address, code-size, or interface validation. Binding to an invalid address can deploy but
+    ///      leaves settlement unusable or causes later host calls to revert.
+    /// @param engine_ Engine host authorized to call this sidecar.
     constructor(
         address engine_
     ) {
         ENGINE = engine_;
     }
 
+    /// @notice Restricts an entrypoint to the bound engine passed as both caller and host.
+    /// @param host Host argument whose address must equal `ENGINE`.
     modifier onlyEngineHost(
         ICfdEngineSettlementHost host
     ) {
@@ -38,12 +47,17 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
     }
 
     /// @notice Applies the live open/increase settlement plan produced by the planner.
-    /// @dev Realizes carry, fee, and pool-flow side effects through the settlement host while keeping
-    ///      the engine as the canonical state owner.
-    /// @param host Engine settlement host owning the storage mutation
-    /// @param delta Planned open/increase settlement delta
-    /// @param currentPosition Current position loaded by the engine before settlement
-    /// @param publishTime Oracle publish timestamp for the execution mark
+    /// @dev Callable only by `ENGINE`, which must also be passed as `host`. The host is responsible for supplying a valid
+    ///      delta consistent with `currentPosition`; this function does not inspect `delta.valid` or recompute the plan.
+    ///      It advances global carry/mark state when the publish time is newer, funds any VPI rebate from the pool,
+    ///      applies clearinghouse open costs and margin changes, records collected LP revenue, updates aggregate side
+    ///      margin/open interest/entry notional/max-profit state, funds collectible protocol fees from unreserved pool
+    ///      cash, and writes the position with `block.timestamp` as its update/carry time. Existing-position carry is
+    ///      realized by the engine before invoking the sidecar.
+    /// @param host Bound engine settlement host that owns canonical storage.
+    /// @param delta Valid planned open/increase delta; prices are 8 decimals, size 18, and USDC fields 6.
+    /// @param currentPosition Position loaded by the engine immediately before settlement.
+    /// @param publishTime Oracle publish timestamp proposed for the execution mark.
     function executeOpen(
         ICfdEngineSettlementHost host,
         CfdEnginePlanTypes.OpenDelta calldata delta,
@@ -106,11 +120,16 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
     }
 
     /// @notice Applies the live close/decrease settlement plan produced by the planner.
-    /// @dev Can record trader claims, bad debt, and realized carry depending on the close result.
-    /// @param host Engine settlement host owning the storage mutation
-    /// @param delta Planned close/decrease settlement delta
-    /// @param currentPosition Current position loaded by the engine before settlement
-    /// @param publishTime Oracle publish timestamp for the execution mark
+    /// @dev Callable only by `ENGINE`, which must also be passed as `host`. The host must supply a valid delta consistent
+    ///      with `currentPosition`; this function does not inspect `delta.valid` or recompute it. It advances carry/mark
+    ///      state, updates aggregate side accounting, unlocks proportional margin, pays or records trader gains, consumes
+    ///      eligible collateral and claims for losses, records LP revenue and bad debt, funds collectible protocol fees
+    ///      from unreserved pool cash, and writes or deletes the position. When a frozen spread was assessed it emits
+    ///      `FrozenCloseSpreadSettled` with assessed, recovered, and waived USDC.
+    /// @param host Bound engine settlement host that owns canonical storage.
+    /// @param delta Valid planned close/decrease delta; prices are 8 decimals, size 18, and USDC fields 6.
+    /// @param currentPosition Position loaded by the engine immediately before settlement.
+    /// @param publishTime Oracle publish timestamp proposed for the execution mark.
     function executeClose(
         ICfdEngineSettlementHost host,
         CfdEnginePlanTypes.CloseDelta calldata delta,
@@ -174,6 +193,10 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         }
     }
 
+    /// @notice Splits assessed frozen spread into total recovered and non-cash LP-revenue portions.
+    /// @param delta Planned close delta.
+    /// @return paidUsdc Spread recovered from retained value, collateral, or existing-claim netting.
+    /// @return nonCashPaidUsdc Recovered spread not already included in cash seizure inflow.
     function _frozenSpreadSettlement(
         CfdEnginePlanTypes.CloseDelta calldata delta
     ) private pure returns (uint256 paidUsdc, uint256 nonCashPaidUsdc) {
@@ -199,6 +222,10 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         nonCashPaidUsdc = retainedFrozenSpreadUsdc + traderClaimRecoveryUsdc;
     }
 
+    /// @notice Executes clearinghouse, router, claim, pool, and bad-debt mutations for a loss close.
+    /// @param host Bound engine settlement host.
+    /// @param delta Valid loss-close plan.
+    /// @return protocolFeeCreditedUsdc Protocol fee funded directly from seized clearinghouse cash.
     function _executeCloseLoss(
         ICfdEngineSettlementHost host,
         CfdEnginePlanTypes.CloseDelta calldata delta
@@ -236,6 +263,9 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         }
     }
 
+    /// @notice Records nonzero LP revenue whose cash is already retained in pool accounting.
+    /// @param host Bound engine settlement host.
+    /// @param amountUsdc Revenue to record, in 6-decimal USDC units.
     function _recordRetainedCloseRevenue(
         ICfdEngineSettlementHost host,
         uint256 amountUsdc
@@ -250,11 +280,17 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
     }
 
     /// @notice Applies the live liquidation settlement plan produced by the planner.
-    /// @param host Engine settlement host owning the storage mutation
-    /// @param delta Planned liquidation settlement delta
-    /// @param publishTime Oracle publish timestamp for the liquidation mark
-    /// @param keeper Keeper credited with any liquidation bounty
-    /// @return keeperBountyUsdc Liquidation bounty owed to the keeper after the state transition.
+    /// @dev Callable only by `ENGINE`, which must also be passed as `host`. The host must supply a liquidatable delta
+    ///      consistent with live state; this function neither checks `delta.liquidatable` nor recomputes the plan. It
+    ///      advances carry/mark state, removes all side exposure and margin, applies the clearinghouse terminal-settlement
+    ///      plan, credits the keeper bounty, records seized pool inflow, synchronizes consumed order reservations, nets
+    ///      existing claims, pays or records fresh trader value, records applicable carry revenue and bad debt, and
+    ///      deletes the position.
+    /// @param host Bound engine settlement host that owns canonical storage.
+    /// @param delta Valid planned full-liquidation delta; prices are 8 decimals, size 18, and USDC fields 6.
+    /// @param publishTime Oracle publish timestamp proposed for the liquidation mark.
+    /// @param keeper Clearinghouse account credited with the planned bounty.
+    /// @return keeperBountyUsdc Planned bounty forwarded to clearinghouse settlement, in 6-decimal USDC units.
     function executeLiquidation(
         ICfdEngineSettlementHost host,
         CfdEnginePlanTypes.LiquidationDelta calldata delta,
@@ -315,6 +351,12 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         host.settlementDeletePosition(delta.account);
     }
 
+    /// @notice Funds an uncredited protocol fee from pool cash not reserved for outstanding trader claims.
+    /// @dev The top-up is capped by both the requested shortfall and current free pool cash, then paid to the clearinghouse
+    ///      and credited to the host's protocol-treasury account.
+    /// @param host Bound engine settlement host.
+    /// @param amountUsdc Total protocol-fee amount intended to be credited.
+    /// @param clearinghouseCreditedUsdc Portion already credited from clearinghouse cash collection.
     function _settleProtocolFeeTopUp(
         ICfdEngineSettlementHost host,
         uint256 amountUsdc,

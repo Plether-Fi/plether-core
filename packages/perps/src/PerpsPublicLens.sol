@@ -20,11 +20,19 @@ import {PerpsViewTypes} from "@plether/perps/interfaces/PerpsViewTypes.sol";
 ///      accounting lenses used by tests, audits, and operator tooling.
 contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
 
+    /// @notice Rich account lens used to derive trader equity, position, and withdrawal views.
     ICfdEngineAccountLens public immutable ACCOUNT_LENS;
+    /// @notice Core engine used for mark, risk, lifecycle, and position status.
     ICfdEngineCore public immutable ENGINE;
+    /// @notice Delayed-order router accounting surface used for pending reservations and orders.
     IOrderRouterAccounting public immutable ORDER_ROUTER;
+    /// @notice House pool used for tranche and LP lifecycle views.
     HousePool public immutable HOUSE_POOL;
 
+    /// @notice Configures the backing read surfaces used by this facade.
+    /// @dev Addresses are stored without validation. Trader/order reads do not dereference `HOUSE_POOL`, and
+    ///      protocol-status reads explicitly guard a zero `housePool_`; tranche and LP-status functions require
+    ///      a deployed HousePool.
     /// @param accountLens_ Rich account lens used to derive compact trader views.
     /// @param engine_ Core engine used for runtime status and risk params.
     /// @param orderRouter_ Router accounting surface used for pending-order summaries.
@@ -41,9 +49,11 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
         HOUSE_POOL = HousePool(housePool_);
     }
 
-    /// @notice Returns the compact trader account summary for a canonical perps account.
-    /// @param account Account to inspect
-    /// @return viewData Trader account summary
+    /// @notice Returns equity, withdrawal capacity, pending reservations, and position risk for an account.
+    /// @dev For an open position, negative net equity is floored at zero; without a position, clearinghouse
+    ///      account equity is returned. Monetary fields use 6-decimal USDC units.
+    /// @param account Canonical perps account to inspect.
+    /// @return viewData Trader account summary derived from the account lens and router.
     function getTraderAccount(
         address account
     ) external view returns (PerpsViewTypes.TraderAccountView memory viewData) {
@@ -62,9 +72,11 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
         viewData.liquidatable = position.liquidatable;
     }
 
-    /// @notice Returns the compact current-position view for an account.
-    /// @param account Account to inspect
-    /// @return viewData Position summary
+    /// @notice Returns the live position and its current maintenance requirement for an account.
+    /// @dev Returns a zeroed view when no position exists. Position size uses 18 decimals, prices use
+    ///      8 decimals, and margin, PnL, and maintenance requirement use 6-decimal USDC.
+    /// @param account Canonical perps account to inspect.
+    /// @return viewData Position summary at the engine's current stored mark and calendar state.
     function getPosition(
         address account
     ) external view returns (PerpsViewTypes.PositionView memory viewData) {
@@ -73,9 +85,11 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
 
     /// @notice Returns all currently pending orders for an account.
     /// @dev The public surface only returns pending orders because executed and failed orders are not
-    ///      part of the compact product-facing queue summary.
-    /// @param account Account to inspect
-    /// @return pending Pending orders in account queue order
+    ///      part of the compact product-facing queue summary. Size uses 18 decimals; margin uses signed
+    ///      6-decimal USDC and acceptable price uses 8 decimals. The traversal relies on the router's
+    ///      pending count and account-linked FIFO queue being consistent.
+    /// @param account Canonical perps account to inspect.
+    /// @return pending Pending orders in account FIFO order.
     function getPendingOrders(
         address account
     ) external view returns (PerpsViewTypes.PendingOrderView[] memory pending) {
@@ -99,8 +113,9 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
         }
     }
 
-    /// @notice Returns whether the account's current live position is liquidatable.
-    /// @param account Account to inspect
+    /// @notice Returns whether the account's current live position is liquidatable at the stored mark.
+    /// @param account Canonical perps account to inspect.
+    /// @return True only when the account lens reports an existing liquidatable position.
     function isLiquidatable(
         address account
     ) external view returns (bool) {
@@ -108,19 +123,24 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
     }
 
     /// @notice Returns the compact senior tranche view.
-    /// @return viewData Senior tranche balances, shares, and availability
+    /// @dev Asset and withdrawal amounts use 6-decimal USDC. For nonzero supply, `sharePrice` is the raw
+    ///      `(totalAssets * 1e18) / totalSupply` quotient and does not normalize differing asset/share decimals.
+    /// @return viewData Senior tranche balances, shares, fee, and current deposit/withdrawal availability.
     function getSeniorTranche() external view returns (PerpsViewTypes.TrancheView memory viewData) {
         return _getTrancheView(HOUSE_POOL.seniorVault(), true);
     }
 
     /// @notice Returns the compact junior tranche view.
-    /// @return viewData Junior tranche balances, shares, and availability
+    /// @dev Asset and withdrawal amounts use 6-decimal USDC. For nonzero supply, `sharePrice` is the raw
+    ///      `(totalAssets * 1e18) / totalSupply` quotient and does not normalize differing asset/share decimals.
+    /// @return viewData Junior tranche balances, shares, fee, and current deposit/withdrawal availability.
     function getJuniorTranche() external view returns (PerpsViewTypes.TrancheView memory viewData) {
         return _getTrancheView(HOUSE_POOL.juniorVault(), false);
     }
 
     /// @notice Returns high-level LP status flags.
-    /// @return viewData Deposit, withdrawal, and lifecycle status flags
+    /// @dev `lastMarkTime` is a Unix timestamp. Oracle freshness is the pool liquidity view's `markFresh` flag.
+    /// @return viewData Trading, withdrawal, mark freshness, and oracle-frozen status.
     function getLpStatus() external view returns (PerpsViewTypes.LpStatusView memory viewData) {
         viewData.tradingActive = HOUSE_POOL.isTradingActive();
         viewData.withdrawalLive = HOUSE_POOL.isWithdrawalLive();
@@ -132,11 +152,17 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
     }
 
     /// @notice Returns high-level protocol runtime status flags.
-    /// @return viewData Protocol phase, oracle, and degraded-mode status
+    /// @dev Prices use 8 decimals and `lastMarkTime` is a Unix timestamp. When `HOUSE_POOL` is zero,
+    ///      `tradingActive` and `withdrawalLive` remain false.
+    /// @return viewData Protocol phase, stored mark, oracle, FAD, trading, and withdrawal status.
     function getProtocolStatus() external view returns (PerpsViewTypes.ProtocolStatusView memory viewData) {
         return _getProtocolStatusView();
     }
 
+    /// @notice Builds the position view and applies the FAD maintenance ratio when the FAD window is active.
+    /// @dev Maintenance notional is marked at `ENGINE.lastMarkPrice()` and integer division rounds down.
+    /// @param account Canonical perps account to inspect.
+    /// @return viewData Zeroed for no position; otherwise the current compact position view.
     function _getPositionView(
         address account
     ) internal view returns (PerpsViewTypes.PositionView memory viewData) {
@@ -167,6 +193,12 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
         viewData.maintenanceMarginUsdc = (notionalUsdc * requiredBps) / 10_000;
     }
 
+    /// @notice Builds a tranche view from its ERC-4626 vault and pool-level withdrawal constraints.
+    /// @dev Returns a zeroed view for a zero vault address. An empty vault reports a nominal `1e18`; otherwise the
+    ///      raw `(totalAssets * 1e18) / totalSupply` quotient is returned without decimal normalization.
+    /// @param vault ERC-4626 tranche vault to inspect.
+    /// @param isSenior True for the senior tranche and false for the junior tranche.
+    /// @return viewData Compact tranche view.
     function _getTrancheView(
         address vault,
         bool isSenior
@@ -187,6 +219,8 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
         viewData.oracleFrozen = HOUSE_POOL.isOracleFrozen();
     }
 
+    /// @notice Builds the compact protocol lifecycle and oracle-status view.
+    /// @return viewData Protocol status, with pool flags left false when no pool was configured.
     function _getProtocolStatusView() internal view returns (PerpsViewTypes.ProtocolStatusView memory viewData) {
         viewData.phase = _getProtocolPhase();
         viewData.lastMarkPrice = ENGINE.lastMarkPrice();
@@ -199,6 +233,10 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
         }
     }
 
+    /// @notice Derives the public protocol phase from engine wiring, degraded mode, and pool risk availability.
+    /// @dev An unwired engine or a pool that cannot increase risk is reported as `Configuring`; degraded mode
+    ///      takes precedence once the engine has both a pool and router.
+    /// @return Numeric value of `ICfdEngine.ProtocolPhase`.
     function _getProtocolPhase() internal view returns (uint8) {
         address enginePool = ENGINE.pool();
         if (enginePool == address(0) || ENGINE.orderRouter() == address(0)) {
