@@ -62,6 +62,7 @@ In practice, the compact public API is:
   - `OrderRouter.executeOrder(uint64,bytes[])`
   - `OrderRouter.executeOrderBatch(uint64,bytes[])`
   - `OrderRouter.executeLiquidation(address,bytes[])`
+  - `OrderRouter.executeLiquidationBatch(address[],bytes[])`
 - LPs:
   - `HousePool.depositSenior(uint256)` / `HousePool.withdrawSenior(uint256,address)`
   - `HousePool.depositJunior(uint256)` / `HousePool.withdrawJunior(uint256,address)`

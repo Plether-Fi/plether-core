@@ -407,6 +407,10 @@ Liquidation performs bounded account-local cleanup of that account's pending ord
 
 This preserves terminal liveness without requiring an unbounded global queue scan.
 
+Batch liquidation validates and pays for one shared Pyth snapshot, updates the neutral mark once, and isolates each
+account in its own rollback frame. Solvent and positionless accounts are skipped without losing prior successes, while
+the returned cursor leaves any low-gas or empty-revert item unattempted so a keeper can resume safely.
+
 ## Known Limitations
 
 ### Oracle and market-closure limitations

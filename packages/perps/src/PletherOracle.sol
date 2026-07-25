@@ -251,6 +251,33 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         ok = true;
     }
 
+    /// @notice Pays for one Pyth update and returns liquidation prices reusable across many accounts.
+    /// @dev Uses the same freshness, confidence, publish-time, mark-ordering, adverse-shift, and cap semantics as
+    ///      `updateLiquidationPrice`, but computes both side-specific prices without reading any account position.
+    ///      The function does not update the engine mark. Excess ETH is refunded to `refundRecipient` or deferred.
+    /// @param refundRecipient Recipient of `msg.value` remaining after the Pyth fee
+    /// @param pythUpdateData Nonempty Pyth update payloads passed to `updatePriceFeeds`
+    /// @return snapshot BULL-adverse, BEAR-adverse, and neutral prices with the shared publish time and update fee
+    function updateLiquidationBatchPrice(
+        address refundRecipient,
+        bytes[] calldata pythUpdateData
+    ) external payable override nonReentrant returns (LiquidationBatchSnapshot memory snapshot) {
+        (PriceSnapshot memory neutralSnapshot, uint256 confidence) = _updateLiquidationSnapshot(pythUpdateData);
+        uint256 shift = _liquidationConfidenceShift(confidence);
+        snapshot = LiquidationBatchSnapshot({
+            bullPrice: _clampToCap(
+                _directionalLiquidationPriceFromShift(CfdTypes.Side.BULL, neutralSnapshot.price, shift)
+            ),
+            bearPrice: _clampToCap(
+                _directionalLiquidationPriceFromShift(CfdTypes.Side.BEAR, neutralSnapshot.price, shift)
+            ),
+            markPrice: neutralSnapshot.markPrice,
+            publishTime: neutralSnapshot.publishTime,
+            updateFee: neutralSnapshot.updateFee
+        });
+        _refundExcess(refundRecipient, neutralSnapshot.updateFee);
+    }
+
     /// @notice Pays for a Pyth update and returns a validated price adverse to the liquidated account's position.
     /// @dev Uses liquidation freshness policy and the minimum component publish time, rejects an out-of-order basket,
     ///      shifts the price upward for a BULL position and downward for a BEAR position by the configured fraction of
@@ -265,15 +292,10 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         bytes[] calldata pythUpdateData,
         address account
     ) external payable override nonReentrant returns (PriceSnapshot memory snapshot) {
-        uint256 pythFee = _updatePythPrice(pythUpdateData);
-        PolicySnapshot memory policy = _policyForMode(PriceMode.Liquidation);
-        BasketPrice memory basket = _computeLiveBasketPrice(
-            PriceMode.Liquidation, policy.maxStaleness, _policyPublishTimeDivergence(PriceMode.Liquidation, policy)
-        );
-        snapshot = _snapshotFromBasket(PriceMode.Liquidation, basket, policy, true);
-        snapshot.price = _clampToCap(_adverseLiquidationPrice(account, snapshot.price, basket.confidence));
-        snapshot.updateFee = pythFee;
-        _refundExcess(refundRecipient, pythFee);
+        uint256 confidence;
+        (snapshot, confidence) = _updateLiquidationSnapshot(pythUpdateData);
+        snapshot.price = _clampToCap(_adverseLiquidationPrice(account, snapshot.price, confidence));
+        _refundExcess(refundRecipient, snapshot.updateFee);
     }
 
     /// @notice Returns the validated current basket snapshot for a policy mode without updating Pyth.
@@ -382,6 +404,19 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         snapshot = _getLatestPriceSnapshot(mode);
         snapshot.updateFee = pythFee;
         _refundExcess(refundRecipient, pythFee);
+    }
+
+    function _updateLiquidationSnapshot(
+        bytes[] calldata pythUpdateData
+    ) internal returns (PriceSnapshot memory snapshot, uint256 confidence) {
+        uint256 pythFee = _updatePythPrice(pythUpdateData);
+        PolicySnapshot memory policy = _policyForMode(PriceMode.Liquidation);
+        BasketPrice memory basket = _computeLiveBasketPrice(
+            PriceMode.Liquidation, policy.maxStaleness, _policyPublishTimeDivergence(PriceMode.Liquidation, policy)
+        );
+        snapshot = _snapshotFromBasket(PriceMode.Liquidation, basket, policy, true);
+        snapshot.updateFee = pythFee;
+        confidence = basket.confidence;
     }
 
     function _updateOrderExecutionPrice(
@@ -650,7 +685,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         uint256 price,
         uint256 confidence
     ) internal view returns (uint256) {
-        uint256 shift = (confidence * adverseConfidenceMultiplierBps) / 10_000;
+        uint256 shift = _liquidationConfidenceShift(confidence);
         if (shift == 0) {
             return price;
         }
@@ -659,6 +694,20 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         if (size == 0) {
             return price;
         }
+        return _directionalLiquidationPriceFromShift(side, price, shift);
+    }
+
+    function _liquidationConfidenceShift(
+        uint256 confidence
+    ) internal view returns (uint256) {
+        return (confidence * adverseConfidenceMultiplierBps) / 10_000;
+    }
+
+    function _directionalLiquidationPriceFromShift(
+        CfdTypes.Side side,
+        uint256 price,
+        uint256 shift
+    ) internal pure returns (uint256) {
         return side == CfdTypes.Side.BULL ? price + shift : price > shift ? price - shift : 0;
     }
 

@@ -47,6 +47,20 @@ interface IPletherOracle {
         bool isFadWindow;
     }
 
+    /// @notice Validated liquidation prices shared by a batch of accounts.
+    /// @param bullPrice Price adverse to a BULL position, in 8-decimal units.
+    /// @param bearPrice Price adverse to a BEAR position, in 8-decimal units.
+    /// @param markPrice Neutral capped basket price, in 8-decimal units.
+    /// @param publishTime Earliest component publish time as a Unix timestamp.
+    /// @param updateFee Pyth fee paid for the shared update, in wei.
+    struct LiquidationBatchSnapshot {
+        uint256 bullPrice;
+        uint256 bearPrice;
+        uint256 markPrice;
+        uint64 publishTime;
+        uint256 updateFee;
+    }
+
     /// @notice Oracle and stored-mark constraints selected for one action under current calendar state.
     /// @param closeOnly Whether the regime prohibits opens and increases.
     /// @param requireStoredMark Whether the action requires a nonzero cached engine mark.
@@ -238,6 +252,18 @@ interface IPletherOracle {
         OrderExecutionRequest calldata request,
         BatchOrderPriceCache calldata cache
     ) external payable returns (bool ok, PriceSnapshot memory snapshot, BatchOrderPriceCache memory nextCache);
+
+    /// @notice Applies one liquidation update and returns prices reusable across many accounts.
+    /// @dev Performs one normal Pyth update, validates the current basket under liquidation policy and against the
+    ///      engine's cached-mark time, then computes both possible side-adverse prices from the same aggregate
+    ///      confidence. The engine mark is not updated; excess ETH is refunded or deferred.
+    /// @param refundRecipient Recipient for any ETH left after paying Pyth fees.
+    /// @param pythUpdateData Nonempty Pyth update payloads.
+    /// @return snapshot BULL-adverse, BEAR-adverse, and neutral prices with the shared publish time and update fee.
+    function updateLiquidationBatchPrice(
+        address refundRecipient,
+        bytes[] calldata pythUpdateData
+    ) external payable returns (LiquidationBatchSnapshot memory snapshot);
 
     /// @notice Applies liquidation update data and returns a price adverse to the liquidated account.
     /// @dev Performs a normal Pyth update, validates the current basket under liquidation policy and against the engine's
