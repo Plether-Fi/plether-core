@@ -331,7 +331,8 @@ library CfdEnginePlanLib {
     ///      if an inconsistent snapshot supplies unsettled carry. The planner then rejects an opposing live position,
     ///      degraded mode, a position too small to support the minimum bounty, insufficient clearinghouse funds,
     ///      post-operation insolvency, insufficient initial margin/equity, or pool-relative skew above the configured
-    ///      maximum. The ratio-based skew check is skipped when pool assets are zero. On a
+    ///      maximum that does not strictly reduce the pre-open absolute skew. The ratio-based skew check is skipped
+    ///      when pool assets are zero. On a
     ///      business-rule failure `valid` remains false, `revertCode` identifies the first failed check, and previously
     ///      populated fields are diagnostic only. VPI, notional, fee, margin, and skew-ratio divisions round down in
     ///      their respective calculations. `publishTime` is retained for planner-interface parity but is not read.
@@ -454,6 +455,7 @@ library CfdEnginePlanLib {
         if (
             effectiveSnap.poolAssetsUsdc > 0
                 && ((postSkewUsdc * CfdMath.WAD) / effectiveSnap.poolAssetsUsdc) > effectiveSnap.riskParams.maxSkewRatio
+                && postSkewUsdc >= preSkewUsdc
         ) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH;
             return delta;

@@ -1816,6 +1816,67 @@ contract OrderRouterPythTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8, false);
     }
 
+    /// @dev Bucket: spec. Source: ACCOUNTING_SPEC "Open projection" requires a strict absolute-skew reduction to
+    ///      remain admissible above the configured cap, with preview, commit, and execution sharing that policy.
+    function test_AboveCapSkewReduction_PreviewCommitAndExecutionSucceed() public {
+        address bullTrader = address(0xB011);
+        address healingBearTrader = address(0xBEA1);
+        address equalSkewBearTrader = address(0xBEA2);
+        _fundTrader(bullTrader, 50_000e6);
+        _fundTrader(healingBearTrader, 20_000e6);
+        _fundTrader(equalSkewBearTrader, 30_000e6);
+        _open(bullTrader, CfdTypes.Side.BULL, 300_000e18, 30_000e6, 1e8);
+
+        uint256 targetPoolAssetsUsdc = 700_000e6;
+        uint256 poolAssetsBeforeDrainUsdc = pool.totalAssets();
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolAssetsBeforeDrainUsdc - targetPoolAssetsUsdc);
+
+        uint256 poolAssetsUsdc = pool.totalAssets();
+        uint256 maxSkewUsdc = (poolAssetsUsdc * 0.4e18) / 1e18;
+        uint256 preSkewUsdc = 300_000e6;
+        uint256 healingSize = 10_000e18;
+        uint256 postHealingSkewUsdc = preSkewUsdc - 10_000e6;
+        assertEq(poolAssetsUsdc, targetPoolAssetsUsdc, "Setup should establish the intended skew denominator");
+        assertGt(preSkewUsdc, maxSkewUsdc, "Setup should begin above the configured skew cap");
+        assertGt(postHealingSkewUsdc, maxSkewUsdc, "The healing order should remain above the skew cap");
+
+        CfdEngineLens previewLens = new CfdEngineLens(address(engine));
+        ICfdEngineTypes.OpenPreview memory equalSkewPreview = previewLens.previewOpen(
+            equalSkewBearTrader, CfdTypes.Side.BEAR, 600_000e18, 20_000e6, 1e8, uint64(block.timestamp)
+        );
+        assertFalse(equalSkewPreview.valid, "An above-cap order with unchanged absolute skew should remain invalid");
+        assertEq(
+            uint8(equalSkewPreview.invalidReason),
+            uint8(CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH),
+            "The strict reduction boundary should reject equal absolute skew"
+        );
+
+        ICfdEngineTypes.OpenPreview memory healingPreview = previewLens.previewOpen(
+            healingBearTrader, CfdTypes.Side.BEAR, healingSize, 1000e6, 1e8, uint64(block.timestamp)
+        );
+        assertTrue(healingPreview.valid, "Preview should admit an incremental skew reduction above the cap");
+
+        vm.prank(healingBearTrader);
+        router.commitOrder(CfdTypes.Side.BEAR, healingSize, 1000e6, 1e8, false);
+        assertEq(router.pendingOrderCounts(healingBearTrader), 1, "Skew-reducing order should pass commit validation");
+
+        vm.warp(block.timestamp + 6);
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 7);
+        bytes[] memory updateData = _pythUpdateData();
+        vm.roll(block.number + 1);
+        router.executeOrder(1, updateData);
+
+        (uint256 liveSize,,,, CfdTypes.Side liveSide,,) = engine.positions(healingBearTrader);
+        assertEq(liveSize, healingSize, "Skew-reducing order should execute");
+        assertEq(uint8(liveSide), uint8(CfdTypes.Side.BEAR), "Executed position should use the healing side");
+        assertEq(
+            _sideOpenInterest(CfdTypes.Side.BULL) - _sideOpenInterest(CfdTypes.Side.BEAR),
+            postHealingSkewUsdc * 1e12,
+            "Execution should leave the expected reduced open-interest skew"
+        );
+    }
+
     function test_CommitOrder_RevertsOnPredictableSolvencyInvalidation() public {
         address bearTrader = address(0xC333);
         address bearAccount = bearTrader;
