@@ -40,8 +40,8 @@ interface ICfdEngineCore is ICfdEngineTypes {
 
     /// @notice Returns the engine's active position-risk, VPI, carry, and liquidation-bounty parameters.
     /// @return vpiFactor VPI impact factor, scaled by 1e18
-    /// @return maxSkewRatio Maximum side skew divided by pool depth for opens that do not strictly reduce absolute
-    ///         skew, scaled by 1e18
+    /// @return maxSkewRatio Maximum side skew divided by pool depth. Opens may remain above it only while strictly
+    ///         reducing an existing imbalance without making the order side heavier, scaled by 1e18
     /// @return maintMarginBps Normal maintenance-margin ratio in basis points
     /// @return initMarginBps Initial-margin ratio in basis points
     /// @return fadMarginBps Maintenance-margin ratio during FAD in basis points

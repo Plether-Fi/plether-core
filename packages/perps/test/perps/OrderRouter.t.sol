@@ -1816,15 +1816,15 @@ contract OrderRouterPythTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8, false);
     }
 
-    /// @dev Bucket: spec. Source: ACCOUNTING_SPEC "Open projection" requires a strict absolute-skew reduction to
-    ///      remain admissible above the configured cap, with preview, commit, and execution sharing that policy.
+    /// @dev Bucket: spec. Source: ACCOUNTING_SPEC "Open projection" permits above-cap recovery only while the order
+    ///      side remains lighter; crossing balance may reach the cap but must not rebuild an above-cap imbalance.
     function test_AboveCapSkewReduction_PreviewCommitAndExecutionSucceed() public {
         address bullTrader = address(0xB011);
         address healingBearTrader = address(0xBEA1);
-        address equalSkewBearTrader = address(0xBEA2);
+        address crossingBearTrader = address(0xBEA2);
         _fundTrader(bullTrader, 50_000e6);
         _fundTrader(healingBearTrader, 20_000e6);
-        _fundTrader(equalSkewBearTrader, 30_000e6);
+        _fundTrader(crossingBearTrader, 30_000e6);
         _open(bullTrader, CfdTypes.Side.BULL, 300_000e18, 30_000e6, 1e8);
 
         uint256 targetPoolAssetsUsdc = 700_000e6;
@@ -1842,8 +1842,26 @@ contract OrderRouterPythTest is BasePerpTest {
         assertGt(postHealingSkewUsdc, maxSkewUsdc, "The healing order should remain above the skew cap");
 
         CfdEngineLens previewLens = new CfdEngineLens(address(engine));
+        ICfdEngineTypes.OpenPreview memory atCrossingCapPreview = previewLens.previewOpen(
+            crossingBearTrader, CfdTypes.Side.BEAR, 580_000e18, 20_000e6, 1e8, uint64(block.timestamp)
+        );
+        assertTrue(atCrossingCapPreview.valid, "Crossing balance may end exactly at the cap");
+
+        ICfdEngineTypes.OpenPreview memory crossingAboveCapPreview = previewLens.previewOpen(
+            crossingBearTrader, CfdTypes.Side.BEAR, 590_000e18, 20_000e6, 1e8, uint64(block.timestamp)
+        );
+        assertFalse(
+            crossingAboveCapPreview.valid,
+            "A smaller absolute skew must still be rejected after crossing into a new above-cap imbalance"
+        );
+        assertEq(
+            uint8(crossingAboveCapPreview.invalidReason),
+            uint8(CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH),
+            "The order-side cap should reject an above-cap crossing overshoot"
+        );
+
         ICfdEngineTypes.OpenPreview memory equalSkewPreview = previewLens.previewOpen(
-            equalSkewBearTrader, CfdTypes.Side.BEAR, 600_000e18, 20_000e6, 1e8, uint64(block.timestamp)
+            crossingBearTrader, CfdTypes.Side.BEAR, 600_000e18, 20_000e6, 1e8, uint64(block.timestamp)
         );
         assertFalse(equalSkewPreview.valid, "An above-cap order with unchanged absolute skew should remain invalid");
         assertEq(
