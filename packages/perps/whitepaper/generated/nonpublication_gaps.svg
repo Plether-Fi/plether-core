@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="460" viewBox="0 0 960 460" role="img" aria-labelledby="title desc">
+<title id="title">Largest ECB nonpublication-gap changes</title>
+<desc id="desc">Ten largest absolute normalized basket moves across observation gaps of at least three calendar days.</desc>
+<style>
+text{font-family:'Times New Roman',Times,serif;fill:#111111}
+.axis{stroke:#444444;stroke-width:1}
+.grid{stroke:#dddddd;stroke-width:1}
+.label{font-size:12px}
+.small{font-size:10px;fill:#555555}
+.title{font-size:18px;font-weight:700}
+</style>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="72" y="29" class="title">Largest reference-rate changes across 3+ day gaps</text>
+<line x1="104" y1="342.00" x2="926" y2="342.00" class="grid"/>
+<text x="94" y="346.00" text-anchor="end" class="label">0</text>
+<line x1="104" y1="268.52" x2="926" y2="268.52" class="grid"/>
+<text x="94" y="272.52" text-anchor="end" class="label">50</text>
+<line x1="104" y1="195.04" x2="926" y2="195.04" class="grid"/>
+<text x="94" y="199.04" text-anchor="end" class="label">100</text>
+<line x1="104" y1="121.55" x2="926" y2="121.55" class="grid"/>
+<text x="94" y="125.55" text-anchor="end" class="label">150</text>
+<line x1="104" y1="48.07" x2="926" y2="48.07" class="grid"/>
+<text x="94" y="52.07" text-anchor="end" class="label">200</text>
+<rect x="119.62" y="54.00" width="50.96" height="288.00" fill="#555555" stroke="#222222" stroke-width="0.5"/>
+<text x="145.10" y="47.00" text-anchor="middle" class="small">+196</text>
+<text x="145.10" y="357" text-anchor="end" transform="rotate(-50 145.10 357)" class="small">2023-01-06 to 2023-01-09</text>
+<rect x="201.82" y="105.80" width="50.96" height="236.20" fill="#bbbbbb" stroke="#222222" stroke-width="0.5"/>
+<text x="227.30" y="98.80" text-anchor="middle" class="small">-161</text>
+<text x="227.30" y="357" text-anchor="end" transform="rotate(-50 227.30 357)" class="small">2023-02-03 to 2023-02-06</text>
+<rect x="284.02" y="109.31" width="50.96" height="232.69" fill="#555555" stroke="#222222" stroke-width="0.5"/>
+<text x="309.50" y="102.31" text-anchor="middle" class="small">+158</text>
+<text x="309.50" y="357" text-anchor="end" transform="rotate(-50 309.50 357)" class="small">2024-08-02 to 2024-08-05</text>
+<rect x="366.22" y="126.68" width="50.96" height="215.32" fill="#555555" stroke="#222222" stroke-width="0.5"/>
+<text x="391.70" y="119.68" text-anchor="middle" class="small">+147</text>
+<text x="391.70" y="357" text-anchor="end" transform="rotate(-50 391.70 357)" class="small">2016-06-03 to 2016-06-06</text>
+<rect x="448.42" y="136.81" width="50.96" height="205.19" fill="#555555" stroke="#222222" stroke-width="0.5"/>
+<text x="473.90" y="129.81" text-anchor="middle" class="small">+140</text>
+<text x="473.90" y="357" text-anchor="end" transform="rotate(-50 473.90 357)" class="small">2022-10-21 to 2022-10-24</text>
+<rect x="530.62" y="138.40" width="50.96" height="203.60" fill="#555555" stroke="#222222" stroke-width="0.5"/>
+<text x="556.10" y="131.40" text-anchor="middle" class="small">+139</text>
+<text x="556.10" y="357" text-anchor="end" transform="rotate(-50 556.10 357)" class="small">2023-03-10 to 2023-03-13</text>
+<rect x="612.82" y="138.48" width="50.96" height="203.52" fill="#555555" stroke="#222222" stroke-width="0.5"/>
+<text x="638.30" y="131.48" text-anchor="middle" class="small">+138</text>
+<text x="638.30" y="357" text-anchor="end" transform="rotate(-50 638.30 357)" class="small">2025-08-01 to 2025-08-04</text>
+<rect x="695.02" y="146.18" width="50.96" height="195.82" fill="#bbbbbb" stroke="#222222" stroke-width="0.5"/>
+<text x="720.50" y="139.18" text-anchor="middle" class="small">-133</text>
+<text x="720.50" y="357" text-anchor="end" transform="rotate(-50 720.50 357)" class="small">2024-02-02 to 2024-02-05</text>
+<rect x="777.22" y="158.59" width="50.96" height="183.41" fill="#bbbbbb" stroke="#222222" stroke-width="0.5"/>
+<text x="802.70" y="151.59" text-anchor="middle" class="small">-125</text>
+<text x="802.70" y="357" text-anchor="end" transform="rotate(-50 802.70 357)" class="small">2025-05-09 to 2025-05-12</text>
+<rect x="859.42" y="162.52" width="50.96" height="179.48" fill="#bbbbbb" stroke="#222222" stroke-width="0.5"/>
+<text x="884.90" y="155.52" text-anchor="middle" class="small">-122</text>
+<text x="884.90" y="357" text-anchor="end" transform="rotate(-50 884.90 357)" class="small">2016-08-26 to 2016-08-29</text>
+<line x1="104" y1="342" x2="926" y2="342" class="axis"/>
+<text x="104" y="448" class="small">Basis points; dark grey = basket rose, light grey = basket fell. These are reference-fix changes, not executable weekend gaps.</text>
+</svg>

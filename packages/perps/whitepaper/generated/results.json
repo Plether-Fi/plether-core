@@ -1,0 +1,1403 @@
+{
+  "basket": {
+    "base_usd_prices": {
+      "CAD": 0.7288,
+      "CHF": 1.261,
+      "EUR": 1.175,
+      "GBP": 1.3448,
+      "JPY": 0.00638,
+      "SEK": 0.1086
+    },
+    "last": {
+      "date": "2026-06-30",
+      "value": 0.9694729959228992
+    },
+    "max_forward_reserve_utilization": {
+      "long": {
+        "endpoint_reserve_per_unit": 1.0402652664523226,
+        "entry_date": "2016-12-20",
+        "entry_price": 0.9597347335476772,
+        "exit_date": "2018-02-15",
+        "exit_price": 1.1167548970362444,
+        "price_profit_per_unit": 0.15702016348856718,
+        "reserve_utilization": 0.15094242646787795,
+        "side": "LONG"
+      },
+      "short": {
+        "endpoint_reserve_per_unit": 1.1167548970362444,
+        "entry_date": "2018-02-15",
+        "entry_price": 1.1167548970362444,
+        "exit_date": "2022-09-28",
+        "exit_price": 0.863572894921236,
+        "price_profit_per_unit": 0.2531820021150084,
+        "reserve_utilization": 0.22671223809891325,
+        "side": "SHORT"
+      }
+    },
+    "maximum": {
+      "date": "2018-02-15",
+      "value": 1.1167548970362444
+    },
+    "maximum_drawdown": {
+      "from": "2018-02-15",
+      "from_basket": 1.1167548970362444,
+      "return": -0.22671223809891328,
+      "to": "2022-09-28",
+      "to_basket": 0.863572894921236
+    },
+    "mean": 1.0069943410731785,
+    "minimum": {
+      "date": "2022-09-28",
+      "value": 0.863572894921236
+    },
+    "observed_maximum_as_fraction_of_cap": 0.5583774485181222,
+    "protocol_cap": 2.0,
+    "weights": {
+      "CAD": 0.091,
+      "CHF": 0.036,
+      "EUR": 0.576,
+      "GBP": 0.119,
+      "JPY": 0.136,
+      "SEK": 0.042
+    }
+  },
+  "data": {
+    "complete_observations": 2685,
+    "end_date": "2026-06-30",
+    "expected_sha256_at_publication": "45a8b4e376c3f518c6687335ba849d087cb34906e1bfa6217e0305e0223b4eca",
+    "limitation": "Daily information-only reference rates are a research proxy, not Pyth execution ticks or tradable weekend close/reopen prices.",
+    "method": "ECB currency-per-EUR rates are crossed through USD, then passed through Plether's normalized linear weights and deployment bases.",
+    "raw_sha256": "45a8b4e376c3f518c6687335ba849d087cb34906e1bfa6217e0305e0223b4eca",
+    "source": "ECB Data Portal, EXR daily reference rates",
+    "start_date": "2016-01-04",
+    "url": "https://data-api.ecb.europa.eu/service/data/EXR/D.USD+JPY+GBP+CAD+SEK+CHF.EUR.SP00.A?startPeriod=2016-01-01&endPeriod=2026-06-30&format=csvdata"
+  },
+  "fixed_examples": {
+    "claim_creation": {
+      "cash_available_after_claim_reservation_usd": 3000000.0,
+      "claim_created_usd": 5000000.0,
+      "immediate_payout_usd": 0.0,
+      "new_profitable_close_usd": 5000000,
+      "physical_assets_usd": 18000000,
+      "preexisting_trader_claims_usd": 15000000,
+      "result": "The full 5m close credit becomes a new trader claim because fresh payouts are all-or-nothing."
+    },
+    "conservation_identities": {
+      "frozen_spread_assessed_equals_paid_plus_waived": true,
+      "liquidation_reachable_equals_bounty_retained_plus_seized": true,
+      "underwater_close_owed_equals_seized_plus_shortfall": true
+    },
+    "frozen_terminal_close": {
+      "base_price_loss_usd": 2000,
+      "current_notional_usd": 2000000,
+      "execution_fee_usd": 800,
+      "frozen_spread_assessed_usd": 10000,
+      "frozen_spread_bps": 50,
+      "frozen_spread_paid_usd": 2200.0,
+      "frozen_spread_waived_usd": 7800.0,
+      "reachable_collateral_usd": 5000,
+      "settlement": {
+        "bad_debt_usdc": 0,
+        "collected_exec_fee_usdc": 800000000,
+        "retained_exec_fee_usdc": 0,
+        "seized_usdc": 5000000000,
+        "shortfall_usdc": 7800000000
+      }
+    },
+    "liquidation": {
+      "bounty_bps": 10,
+      "current_notional_usd": 2000000,
+      "maintenance_margin_bps": 100,
+      "pre_bounty_equity_usd": 15000,
+      "reachable_collateral_usd": 30000,
+      "settlement": {
+        "bad_debt_usdc": 0,
+        "fresh_trader_payout_usdc": 0,
+        "residual_usdc": 13000000000,
+        "settlement_retained_usdc": 13000000000,
+        "settlement_seized_usdc": 15000000000
+      },
+      "state": {
+        "equity_usdc": 15000000000,
+        "keeper_bounty_usdc": 2000000000,
+        "maintenance_margin_usdc": 20000000000,
+        "reachable_collateral_usdc": 30000000000
+      }
+    },
+    "solvency_boundary": {
+      "effective_assets_usdc": 55000000000000,
+      "free_withdrawable_usdc": 0,
+      "max_liability_usdc": 55000000000000,
+      "physical_assets_usdc": 60000000000000,
+      "trader_claims_usdc": 5000000000000,
+      "withdrawal_reserved_usdc": 60000000000000
+    },
+    "underwater_full_close": {
+      "base_price_loss_usd": 800000,
+      "closed_notional_usd": 10800000,
+      "execution_fee_bps": 4,
+      "execution_fee_usd": 4320,
+      "qualification": "Execution fee is collected first; remaining seizure covers base loss. Frozen spread is zero.",
+      "reachable_collateral_usd": 300000,
+      "settlement": {
+        "bad_debt_usdc": 504320000000,
+        "collected_exec_fee_usdc": 4320000000,
+        "retained_exec_fee_usdc": 0,
+        "seized_usdc": 300000000000,
+        "shortfall_usdc": 504320000000
+      }
+    },
+    "vpi": {
+      "charge_usd": 20000.0,
+      "depth_usd": 100000000,
+      "factor": 0.005,
+      "post_skew_usd": 30000000,
+      "pre_skew_usd": 10000000
+    }
+  },
+  "historical_replays": {
+    "cap_sensitivity_momentum_80_20": [
+      {
+        "cap": 1.25,
+        "result": {
+          "assumptions": {
+            "account_collateral_scope": "Each position uses a unique synthetic account whose terminal reachable collateral is its posted position margin; no extra free or committed cross-margin collateral is supplied.",
+            "base_carry_bps_at_full_utilization": 500,
+            "cap": 1.25,
+            "claim_service_behavior": "All beneficiaries call on the first strictly later ECB observation where physical cash covers aggregate claims.",
+            "cohort_admission": "Paired LONG/SHORT allocations are scaled on an integer 1e18 grid until endpoint solvency and the final hard-skew ratio pass. The paired legs are assumed to be interleaved; this is not a transaction-level order/VPI simulation.",
+            "daily_settlement_priority": "liquidations_first",
+            "degraded_clear_behavior": "Owner clears the latch at the first observed genuinely restored state; clearing is not automatic in production.",
+            "end_of_sample_behavior": "Every remaining position is forcibly full-closed at the last ECB observation in the configured within-class account order.",
+            "execution_fee_bps": 4,
+            "frozen_spread_bps": 0,
+            "holding_calendar_days": 63,
+            "initial_margin_bps": 150,
+            "initial_pool_usd": 100000000,
+            "initial_senior_share": 0.5,
+            "liquidation_bounty_bps": 10,
+            "maintenance_calendar_policy": "The replay holds maintenance at 1% and does not switch to the 3% FAD basis around closure windows.",
+            "maintenance_margin_bps": 100,
+            "max_skew_ratio": 0.4,
+            "minimum_liquidation_bounty_usd": 1.0,
+            "momentum_side_share": 0.8,
+            "monthly_cohort_target_entry_notional_usd": 90000000,
+            "oracle_confidence_adjustment": 0,
+            "senior_rate_bps": 800,
+            "signal_execution_lag_observations": 1,
+            "signal_lookback_observations": 20,
+            "source_marks": "ECB daily information-only reference rates",
+            "vpi_factor": 0,
+            "waterfall_cadence": "The 8% senior coupon is checkpointed once per observed calendar interval. The realized-cash overlay applies each cash/claim transition; a separate shadow view reconciles once at each observation to cash minus claims minus conservative MtM. Production reconciliation occurs on protocol actions, not on an automatic daily clock.",
+            "within_class_account_order": "fifo"
+          },
+          "book": {
+            "admitted_cohorts": 92,
+            "admitted_long_notional_usd": 2678197371.259088,
+            "admitted_notional_usd": 5601458073.329757,
+            "admitted_short_notional_usd": 2923260702.070669,
+            "capacity_bound_cohorts": 1,
+            "degraded_rejections": 0,
+            "maximum_capped_aggregate_borrow_to_assets": 0.9389146480047466,
+            "maximum_endpoint_reserve_utilization": 0.7289716582576431,
+            "maximum_long_borrow_utilization": 0.2422,
+            "maximum_post_admission_skew_ratio": 0.4,
+            "maximum_short_borrow_utilization": 0.718,
+            "no_admissible_scale_rejections": 33,
+            "opened_positions": 184,
+            "post_admission_assertions": 92,
+            "rejected_cohorts": 33,
+            "scaled_cohorts": 86,
+            "skew_bound_cohorts": 86,
+            "target_notional_requested_usd": 11250000000.0,
+            "time_weighted_capped_aggregate_borrow_to_assets": 0.19871378783877222,
+            "time_weighted_endpoint_reserve_utilization": 0.19427583946147914,
+            "time_weighted_long_borrow_utilization": 0.04127701209889521,
+            "time_weighted_short_borrow_utilization": 0.15738584955286716
+          },
+          "carry": {
+            "assessed_usd": 4144526.781495,
+            "conservatively_realized_usd": 4117143.221891,
+            "realization_ratio": 0.9933928380614487
+          },
+          "claims": {
+            "created_count": 0,
+            "created_usd": 0.0,
+            "ending_usd": 0.0,
+            "maximum_outstanding_usd": 0.0,
+            "settled_duration_days_max": null,
+            "settled_duration_days_mean": null,
+            "settled_usd": 0.0,
+            "unresolved_age_days_max": null,
+            "unresolved_count": 0
+          },
+          "containment": {
+            "assumed_owner_clears": 0,
+            "degraded_mode_triggers": 0,
+            "ending_degraded": false
+          },
+          "daily_conservative_reconciliation": {
+            "ending_high_water_mark_usd": 96952741.554019,
+            "ending_junior_principal_usd": 173717.015307,
+            "ending_senior_principal_usd": 96952741.554019,
+            "ending_waterfall_principal_usd": 97126458.569326,
+            "junior_impairment_events": 814,
+            "maximum_conservative_mtm_usd": 38058702.2218,
+            "minimum_distributable_value_usd": 64260435.037189,
+            "minimum_junior_principal_usd": 0.0,
+            "minimum_senior_principal_usd": 50000000.0,
+            "senior_coupon_transferred_usd": 46952741.554019,
+            "senior_impairment_events": 268,
+            "valuation_basis": "Once per ECB observation after scheduled replay actions: max(cash - claims - conservative MtM, 0), with the 8% senior coupon checkpointed over each observed interval."
+          },
+          "ending_balance_sheet": {
+            "bad_debt_telemetry_usd": 903977.98914,
+            "daily_conservative_waterfall_principal_usd": 97126458.569326,
+            "lp_economic_equity_usd": 97126458.569326,
+            "physical_cash_usd": 97126458.569326,
+            "trader_claims_usd": 0.0,
+            "waterfall_principal_usd": 97126458.569326
+          },
+          "settlement": {
+            "bad_debt_usd": 903977.98914,
+            "execution_fees_credited_usd": 2708049.283101,
+            "forced_final_closes": 1,
+            "immediate_payouts_usd": 36112053.092167,
+            "keeper_bounties_usd": 4439131.40958,
+            "liquidations": 143,
+            "liquidations_after_3_plus_day_gap": 33,
+            "scheduled_closes": 40
+          },
+          "tranches": {
+            "ending_high_water_mark_usd": 100084348.031136,
+            "ending_junior_principal_usd": 0.0,
+            "ending_senior_principal_usd": 97126458.569326,
+            "junior_impairment_events": 32,
+            "loss_event_count": 40,
+            "loss_event_usd_maximum": 3452029.559126,
+            "loss_event_usd_median": 621747.2757825,
+            "loss_event_usd_p95": 3072691.337089,
+            "minimum_junior_principal_usd": 0.0,
+            "minimum_senior_principal_usd": 50000000.0,
+            "senior_coupon_transferred_usd": 50084348.031136,
+            "senior_impairment_events": 9,
+            "valuation_basis": "Realized HousePool cash minus trader claims only; this overlay does not subtract conservative MtM and is not production share-NAV reconciliation."
+          }
+        }
+      },
+      {
+        "cap": 1.5,
+        "result": {
+          "assumptions": {
+            "account_collateral_scope": "Each position uses a unique synthetic account whose terminal reachable collateral is its posted position margin; no extra free or committed cross-margin collateral is supplied.",
+            "base_carry_bps_at_full_utilization": 500,
+            "cap": 1.5,
+            "claim_service_behavior": "All beneficiaries call on the first strictly later ECB observation where physical cash covers aggregate claims.",
+            "cohort_admission": "Paired LONG/SHORT allocations are scaled on an integer 1e18 grid until endpoint solvency and the final hard-skew ratio pass. The paired legs are assumed to be interleaved; this is not a transaction-level order/VPI simulation.",
+            "daily_settlement_priority": "liquidations_first",
+            "degraded_clear_behavior": "Owner clears the latch at the first observed genuinely restored state; clearing is not automatic in production.",
+            "end_of_sample_behavior": "Every remaining position is forcibly full-closed at the last ECB observation in the configured within-class account order.",
+            "execution_fee_bps": 4,
+            "frozen_spread_bps": 0,
+            "holding_calendar_days": 63,
+            "initial_margin_bps": 150,
+            "initial_pool_usd": 100000000,
+            "initial_senior_share": 0.5,
+            "liquidation_bounty_bps": 10,
+            "maintenance_calendar_policy": "The replay holds maintenance at 1% and does not switch to the 3% FAD basis around closure windows.",
+            "maintenance_margin_bps": 100,
+            "max_skew_ratio": 0.4,
+            "minimum_liquidation_bounty_usd": 1.0,
+            "momentum_side_share": 0.8,
+            "monthly_cohort_target_entry_notional_usd": 90000000,
+            "oracle_confidence_adjustment": 0,
+            "senior_rate_bps": 800,
+            "signal_execution_lag_observations": 1,
+            "signal_lookback_observations": 20,
+            "source_marks": "ECB daily information-only reference rates",
+            "vpi_factor": 0,
+            "waterfall_cadence": "The 8% senior coupon is checkpointed once per observed calendar interval. The realized-cash overlay applies each cash/claim transition; a separate shadow view reconciles once at each observation to cash minus claims minus conservative MtM. Production reconciliation occurs on protocol actions, not on an automatic daily clock.",
+            "within_class_account_order": "fifo"
+          },
+          "book": {
+            "admitted_cohorts": 92,
+            "admitted_long_notional_usd": 2673483489.863874,
+            "admitted_notional_usd": 5590816982.660302,
+            "admitted_short_notional_usd": 2917333492.796428,
+            "capacity_bound_cohorts": 1,
+            "degraded_rejections": 0,
+            "maximum_capped_aggregate_borrow_to_assets": 1.0,
+            "maximum_endpoint_reserve_utilization": 0.7291068937620677,
+            "maximum_long_borrow_utilization": 0.4355,
+            "maximum_post_admission_skew_ratio": 0.4,
+            "maximum_short_borrow_utilization": 0.7181,
+            "no_admissible_scale_rejections": 33,
+            "opened_positions": 184,
+            "post_admission_assertions": 92,
+            "rejected_cohorts": 33,
+            "scaled_cohorts": 86,
+            "skew_bound_cohorts": 86,
+            "target_notional_requested_usd": 11250000000.0,
+            "time_weighted_capped_aggregate_borrow_to_assets": 0.2408506298015053,
+            "time_weighted_endpoint_reserve_utilization": 0.23134945262110387,
+            "time_weighted_long_borrow_utilization": 0.08345639137296136,
+            "time_weighted_short_borrow_utilization": 0.1574097843240399
+          },
+          "carry": {
+            "assessed_usd": 4908559.015612,
+            "conservatively_realized_usd": 4878713.171409,
+            "realization_ratio": 0.9939196321959106
+          },
+          "claims": {
+            "created_count": 0,
+            "created_usd": 0.0,
+            "ending_usd": 0.0,
+            "maximum_outstanding_usd": 0.0,
+            "settled_duration_days_max": null,
+            "settled_duration_days_mean": null,
+            "settled_usd": 0.0,
+            "unresolved_age_days_max": null,
+            "unresolved_count": 0
+          },
+          "containment": {
+            "assumed_owner_clears": 0,
+            "degraded_mode_triggers": 0,
+            "ending_degraded": false
+          },
+          "daily_conservative_reconciliation": {
+            "ending_high_water_mark_usd": 94516668.791163,
+            "ending_junior_principal_usd": 2606691.478584,
+            "ending_senior_principal_usd": 94516668.791163,
+            "ending_waterfall_principal_usd": 97123360.269747,
+            "junior_impairment_events": 758,
+            "maximum_conservative_mtm_usd": 55737454.956209,
+            "minimum_distributable_value_usd": 46291302.815984,
+            "minimum_junior_principal_usd": 0.0,
+            "minimum_senior_principal_usd": 46291302.815984,
+            "senior_coupon_transferred_usd": 44516668.791163,
+            "senior_impairment_events": 324,
+            "valuation_basis": "Once per ECB observation after scheduled replay actions: max(cash - claims - conservative MtM, 0), with the 8% senior coupon checkpointed over each observed interval."
+          },
+          "ending_balance_sheet": {
+            "bad_debt_telemetry_usd": 905095.962449,
+            "daily_conservative_waterfall_principal_usd": 97123360.269747,
+            "lp_economic_equity_usd": 97123360.269747,
+            "physical_cash_usd": 97123360.269747,
+            "trader_claims_usd": 0.0,
+            "waterfall_principal_usd": 97123360.269747
+          },
+          "settlement": {
+            "bad_debt_usd": 905095.962449,
+            "execution_fees_credited_usd": 2703030.470115,
+            "forced_final_closes": 1,
+            "immediate_payouts_usd": 35583909.227153,
+            "keeper_bounties_usd": 4431150.195146,
+            "liquidations": 143,
+            "liquidations_after_3_plus_day_gap": 35,
+            "scheduled_closes": 40
+          },
+          "tranches": {
+            "ending_high_water_mark_usd": 100084348.031136,
+            "ending_junior_principal_usd": 0.0,
+            "ending_senior_principal_usd": 97123360.269747,
+            "junior_impairment_events": 32,
+            "loss_event_count": 40,
+            "loss_event_usd_maximum": 3453109.380599,
+            "loss_event_usd_median": 618391.4680240001,
+            "loss_event_usd_p95": 2963604.050164,
+            "minimum_junior_principal_usd": 0.0,
+            "minimum_senior_principal_usd": 50000000.0,
+            "senior_coupon_transferred_usd": 50084348.031136,
+            "senior_impairment_events": 9,
+            "valuation_basis": "Realized HousePool cash minus trader claims only; this overlay does not subtract conservative MtM and is not production share-NAV reconciliation."
+          }
+        }
+      },
+      {
+        "cap": 2.0,
+        "result": {
+          "assumptions": {
+            "account_collateral_scope": "Each position uses a unique synthetic account whose terminal reachable collateral is its posted position margin; no extra free or committed cross-margin collateral is supplied.",
+            "base_carry_bps_at_full_utilization": 500,
+            "cap": 2.0,
+            "claim_service_behavior": "All beneficiaries call on the first strictly later ECB observation where physical cash covers aggregate claims.",
+            "cohort_admission": "Paired LONG/SHORT allocations are scaled on an integer 1e18 grid until endpoint solvency and the final hard-skew ratio pass. The paired legs are assumed to be interleaved; this is not a transaction-level order/VPI simulation.",
+            "daily_settlement_priority": "liquidations_first",
+            "degraded_clear_behavior": "Owner clears the latch at the first observed genuinely restored state; clearing is not automatic in production.",
+            "end_of_sample_behavior": "Every remaining position is forcibly full-closed at the last ECB observation in the configured within-class account order.",
+            "execution_fee_bps": 4,
+            "frozen_spread_bps": 0,
+            "holding_calendar_days": 63,
+            "initial_margin_bps": 150,
+            "initial_pool_usd": 100000000,
+            "initial_senior_share": 0.5,
+            "liquidation_bounty_bps": 10,
+            "maintenance_calendar_policy": "The replay holds maintenance at 1% and does not switch to the 3% FAD basis around closure windows.",
+            "maintenance_margin_bps": 100,
+            "max_skew_ratio": 0.4,
+            "minimum_liquidation_bounty_usd": 1.0,
+            "momentum_side_share": 0.8,
+            "monthly_cohort_target_entry_notional_usd": 90000000,
+            "oracle_confidence_adjustment": 0,
+            "senior_rate_bps": 800,
+            "signal_execution_lag_observations": 1,
+            "signal_lookback_observations": 20,
+            "source_marks": "ECB daily information-only reference rates",
+            "vpi_factor": 0,
+            "waterfall_cadence": "The 8% senior coupon is checkpointed once per observed calendar interval. The realized-cash overlay applies each cash/claim transition; a separate shadow view reconciles once at each observation to cash minus claims minus conservative MtM. Production reconciliation occurs on protocol actions, not on an automatic daily clock.",
+            "within_class_account_order": "fifo"
+          },
+          "book": {
+            "admitted_cohorts": 93,
+            "admitted_long_notional_usd": 2768152474.163589,
+            "admitted_notional_usd": 5758524301.812657,
+            "admitted_short_notional_usd": 2990371827.649068,
+            "capacity_bound_cohorts": 2,
+            "degraded_rejections": 0,
+            "maximum_capped_aggregate_borrow_to_assets": 1.0,
+            "maximum_endpoint_reserve_utilization": 0.8178461829827506,
+            "maximum_long_borrow_utilization": 0.8073,
+            "maximum_post_admission_skew_ratio": 0.4,
+            "maximum_short_borrow_utilization": 0.7269,
+            "no_admissible_scale_rejections": 32,
+            "opened_positions": 186,
+            "post_admission_assertions": 93,
+            "rejected_cohorts": 32,
+            "scaled_cohorts": 85,
+            "skew_bound_cohorts": 85,
+            "target_notional_requested_usd": 11250000000.0,
+            "time_weighted_capped_aggregate_borrow_to_assets": 0.32498052176152165,
+            "time_weighted_endpoint_reserve_utilization": 0.3095270476754472,
+            "time_weighted_long_borrow_utilization": 0.16793150973172075,
+            "time_weighted_short_borrow_utilization": 0.15801415044713327
+          },
+          "carry": {
+            "assessed_usd": 8100043.030068,
+            "conservatively_realized_usd": 8060398.661089,
+            "realization_ratio": 0.9951056594598526
+          },
+          "claims": {
+            "created_count": 0,
+            "created_usd": 0.0,
+            "ending_usd": 0.0,
+            "maximum_outstanding_usd": 0.0,
+            "settled_duration_days_max": null,
+            "settled_duration_days_mean": null,
+            "settled_usd": 0.0,
+            "unresolved_age_days_max": null,
+            "unresolved_count": 0
+          },
+          "containment": {
+            "assumed_owner_clears": 0,
+            "degraded_mode_triggers": 0,
+            "ending_degraded": false
+          },
+          "daily_conservative_reconciliation": {
+            "ending_high_water_mark_usd": 92776515.424775,
+            "ending_junior_principal_usd": 7040059.606446,
+            "ending_senior_principal_usd": 92776515.424775,
+            "ending_waterfall_principal_usd": 99816575.031221,
+            "junior_impairment_events": 735,
+            "maximum_conservative_mtm_usd": 78367586.523548,
+            "minimum_distributable_value_usd": 22944244.841019,
+            "minimum_junior_principal_usd": 0.0,
+            "minimum_senior_principal_usd": 22944244.841019,
+            "senior_coupon_transferred_usd": 42776515.424775,
+            "senior_impairment_events": 368,
+            "valuation_basis": "Once per ECB observation after scheduled replay actions: max(cash - claims - conservative MtM, 0), with the 8% senior coupon checkpointed over each observed interval."
+          },
+          "ending_balance_sheet": {
+            "bad_debt_telemetry_usd": 919285.273342,
+            "daily_conservative_waterfall_principal_usd": 99816575.031221,
+            "lp_economic_equity_usd": 99816575.031221,
+            "physical_cash_usd": 99816575.031221,
+            "trader_claims_usd": 0.0,
+            "waterfall_principal_usd": 99816575.031221
+          },
+          "settlement": {
+            "bad_debt_usd": 919285.273342,
+            "execution_fees_credited_usd": 2775817.759971,
+            "forced_final_closes": 1,
+            "immediate_payouts_usd": 33847622.238114,
+            "keeper_bounties_usd": 4585653.968701,
+            "liquidations": 145,
+            "liquidations_after_3_plus_day_gap": 38,
+            "scheduled_closes": 40
+          },
+          "tranches": {
+            "ending_high_water_mark_usd": 102046014.840099,
+            "ending_junior_principal_usd": 0.0,
+            "ending_senior_principal_usd": 99816575.031221,
+            "junior_impairment_events": 32,
+            "loss_event_count": 40,
+            "loss_event_usd_maximum": 3457586.967616,
+            "loss_event_usd_median": 590613.8131035,
+            "loss_event_usd_p95": 2549400.603063,
+            "minimum_junior_principal_usd": 0.0,
+            "minimum_senior_principal_usd": 50000000.0,
+            "senior_coupon_transferred_usd": 52046014.840099,
+            "senior_impairment_events": 8,
+            "valuation_basis": "Realized HousePool cash minus trader claims only; this overlay does not subtract conservative MtM and is not production share-NAV reconciliation."
+          }
+        }
+      },
+      {
+        "cap": 2.5,
+        "result": {
+          "assumptions": {
+            "account_collateral_scope": "Each position uses a unique synthetic account whose terminal reachable collateral is its posted position margin; no extra free or committed cross-margin collateral is supplied.",
+            "base_carry_bps_at_full_utilization": 500,
+            "cap": 2.5,
+            "claim_service_behavior": "All beneficiaries call on the first strictly later ECB observation where physical cash covers aggregate claims.",
+            "cohort_admission": "Paired LONG/SHORT allocations are scaled on an integer 1e18 grid until endpoint solvency and the final hard-skew ratio pass. The paired legs are assumed to be interleaved; this is not a transaction-level order/VPI simulation.",
+            "daily_settlement_priority": "liquidations_first",
+            "degraded_clear_behavior": "Owner clears the latch at the first observed genuinely restored state; clearing is not automatic in production.",
+            "end_of_sample_behavior": "Every remaining position is forcibly full-closed at the last ECB observation in the configured within-class account order.",
+            "execution_fee_bps": 4,
+            "frozen_spread_bps": 0,
+            "holding_calendar_days": 63,
+            "initial_margin_bps": 150,
+            "initial_pool_usd": 100000000,
+            "initial_senior_share": 0.5,
+            "liquidation_bounty_bps": 10,
+            "maintenance_calendar_policy": "The replay holds maintenance at 1% and does not switch to the 3% FAD basis around closure windows.",
+            "maintenance_margin_bps": 100,
+            "max_skew_ratio": 0.4,
+            "minimum_liquidation_bounty_usd": 1.0,
+            "momentum_side_share": 0.8,
+            "monthly_cohort_target_entry_notional_usd": 90000000,
+            "oracle_confidence_adjustment": 0,
+            "senior_rate_bps": 800,
+            "signal_execution_lag_observations": 1,
+            "signal_lookback_observations": 20,
+            "source_marks": "ECB daily information-only reference rates",
+            "vpi_factor": 0,
+            "waterfall_cadence": "The 8% senior coupon is checkpointed once per observed calendar interval. The realized-cash overlay applies each cash/claim transition; a separate shadow view reconciles once at each observation to cash minus claims minus conservative MtM. Production reconciliation occurs on protocol actions, not on an automatic daily clock.",
+            "within_class_account_order": "fifo"
+          },
+          "book": {
+            "admitted_cohorts": 94,
+            "admitted_long_notional_usd": 2863076909.144792,
+            "admitted_notional_usd": 5890918931.921318,
+            "admitted_short_notional_usd": 3027842022.776526,
+            "capacity_bound_cohorts": 39,
+            "degraded_rejections": 2,
+            "maximum_capped_aggregate_borrow_to_assets": 1.0,
+            "maximum_endpoint_reserve_utilization": 1.0112323021084382,
+            "maximum_long_borrow_utilization": 1.0,
+            "maximum_post_admission_skew_ratio": 0.4,
+            "maximum_short_borrow_utilization": 0.7241,
+            "no_admissible_scale_rejections": 29,
+            "opened_positions": 188,
+            "post_admission_assertions": 94,
+            "rejected_cohorts": 31,
+            "scaled_cohorts": 91,
+            "skew_bound_cohorts": 87,
+            "target_notional_requested_usd": 11250000000.0,
+            "time_weighted_capped_aggregate_borrow_to_assets": 0.38925864620888945,
+            "time_weighted_endpoint_reserve_utilization": 0.37162312849485274,
+            "time_weighted_long_borrow_utilization": 0.23762827459231906,
+            "time_weighted_short_borrow_utilization": 0.15484547606522975
+          },
+          "carry": {
+            "assessed_usd": 12551117.722455,
+            "conservatively_realized_usd": 12495095.292971,
+            "realization_ratio": 0.9955364589255846
+          },
+          "claims": {
+            "created_count": 0,
+            "created_usd": 0.0,
+            "ending_usd": 0.0,
+            "maximum_outstanding_usd": 0.0,
+            "settled_duration_days_max": null,
+            "settled_duration_days_mean": null,
+            "settled_usd": 0.0,
+            "unresolved_age_days_max": null,
+            "unresolved_count": 0
+          },
+          "containment": {
+            "assumed_owner_clears": 2,
+            "degraded_mode_triggers": 2,
+            "ending_degraded": false
+          },
+          "daily_conservative_reconciliation": {
+            "ending_high_water_mark_usd": 92775993.581314,
+            "ending_junior_principal_usd": 14266800.607275,
+            "ending_senior_principal_usd": 92775993.581314,
+            "ending_waterfall_principal_usd": 107042794.188589,
+            "junior_impairment_events": 729,
+            "maximum_conservative_mtm_usd": 86835027.050705,
+            "minimum_distributable_value_usd": 15752691.520001,
+            "minimum_junior_principal_usd": 0.0,
+            "minimum_senior_principal_usd": 15752691.520001,
+            "senior_coupon_transferred_usd": 42775993.581314,
+            "senior_impairment_events": 371,
+            "valuation_basis": "Once per ECB observation after scheduled replay actions: max(cash - claims - conservative MtM, 0), with the 8% senior coupon checkpointed over each observed interval."
+          },
+          "ending_balance_sheet": {
+            "bad_debt_telemetry_usd": 949495.420825,
+            "daily_conservative_waterfall_principal_usd": 107042794.188589,
+            "lp_economic_equity_usd": 107042794.188589,
+            "physical_cash_usd": 107042794.188589,
+            "trader_claims_usd": 0.0,
+            "waterfall_principal_usd": 107042794.188589
+          },
+          "settlement": {
+            "bad_debt_usd": 949495.420825,
+            "execution_fees_credited_usd": 2792814.646007,
+            "forced_final_closes": 1,
+            "immediate_payouts_usd": 29259489.195984,
+            "keeper_bounties_usd": 4805810.730801,
+            "liquidations": 150,
+            "liquidations_after_3_plus_day_gap": 37,
+            "scheduled_closes": 37
+          },
+          "tranches": {
+            "ending_high_water_mark_usd": 108243003.001049,
+            "ending_junior_principal_usd": 0.0,
+            "ending_senior_principal_usd": 107042794.188589,
+            "junior_impairment_events": 33,
+            "loss_event_count": 37,
+            "loss_event_usd_maximum": 3464931.55762,
+            "loss_event_usd_median": 528983.494493,
+            "loss_event_usd_p95": 2568578.480093,
+            "minimum_junior_principal_usd": 0.0,
+            "minimum_senior_principal_usd": 50000000.0,
+            "senior_coupon_transferred_usd": 58243003.001049,
+            "senior_impairment_events": 5,
+            "valuation_basis": "Realized HousePool cash minus trader claims only; this overlay does not subtract conservative MtM and is not production share-NAV reconciliation."
+          }
+        }
+      },
+      {
+        "cap": 3.0,
+        "result": {
+          "assumptions": {
+            "account_collateral_scope": "Each position uses a unique synthetic account whose terminal reachable collateral is its posted position margin; no extra free or committed cross-margin collateral is supplied.",
+            "base_carry_bps_at_full_utilization": 500,
+            "cap": 3.0,
+            "claim_service_behavior": "All beneficiaries call on the first strictly later ECB observation where physical cash covers aggregate claims.",
+            "cohort_admission": "Paired LONG/SHORT allocations are scaled on an integer 1e18 grid until endpoint solvency and the final hard-skew ratio pass. The paired legs are assumed to be interleaved; this is not a transaction-level order/VPI simulation.",
+            "daily_settlement_priority": "liquidations_first",
+            "degraded_clear_behavior": "Owner clears the latch at the first observed genuinely restored state; clearing is not automatic in production.",
+            "end_of_sample_behavior": "Every remaining position is forcibly full-closed at the last ECB observation in the configured within-class account order.",
+            "execution_fee_bps": 4,
+            "frozen_spread_bps": 0,
+            "holding_calendar_days": 63,
+            "initial_margin_bps": 150,
+            "initial_pool_usd": 100000000,
+            "initial_senior_share": 0.5,
+            "liquidation_bounty_bps": 10,
+            "maintenance_calendar_policy": "The replay holds maintenance at 1% and does not switch to the 3% FAD basis around closure windows.",
+            "maintenance_margin_bps": 100,
+            "max_skew_ratio": 0.4,
+            "minimum_liquidation_bounty_usd": 1.0,
+            "momentum_side_share": 0.8,
+            "monthly_cohort_target_entry_notional_usd": 90000000,
+            "oracle_confidence_adjustment": 0,
+            "senior_rate_bps": 800,
+            "signal_execution_lag_observations": 1,
+            "signal_lookback_observations": 20,
+            "source_marks": "ECB daily information-only reference rates",
+            "vpi_factor": 0,
+            "waterfall_cadence": "The 8% senior coupon is checkpointed once per observed calendar interval. The realized-cash overlay applies each cash/claim transition; a separate shadow view reconciles once at each observation to cash minus claims minus conservative MtM. Production reconciliation occurs on protocol actions, not on an automatic daily clock.",
+            "within_class_account_order": "fifo"
+          },
+          "book": {
+            "admitted_cohorts": 95,
+            "admitted_long_notional_usd": 2793965259.001671,
+            "admitted_notional_usd": 5702453312.707196,
+            "admitted_short_notional_usd": 2908488053.705525,
+            "capacity_bound_cohorts": 50,
+            "degraded_rejections": 2,
+            "maximum_capped_aggregate_borrow_to_assets": 1.0,
+            "maximum_endpoint_reserve_utilization": 1.011399619084933,
+            "maximum_long_borrow_utilization": 1.0,
+            "maximum_post_admission_skew_ratio": 0.4,
+            "maximum_short_borrow_utilization": 0.7003,
+            "no_admissible_scale_rejections": 28,
+            "opened_positions": 190,
+            "post_admission_assertions": 95,
+            "rejected_cohorts": 30,
+            "scaled_cohorts": 94,
+            "skew_bound_cohorts": 62,
+            "target_notional_requested_usd": 11250000000.0,
+            "time_weighted_capped_aggregate_borrow_to_assets": 0.4253680103494587,
+            "time_weighted_endpoint_reserve_utilization": 0.4075055592379314,
+            "time_weighted_long_borrow_utilization": 0.2788267490794308,
+            "time_weighted_short_borrow_utilization": 0.15236175697001664
+          },
+          "carry": {
+            "assessed_usd": 16054930.073016,
+            "conservatively_realized_usd": 15849527.504811,
+            "realization_ratio": 0.987206262047181
+          },
+          "claims": {
+            "created_count": 0,
+            "created_usd": 0.0,
+            "ending_usd": 0.0,
+            "maximum_outstanding_usd": 0.0,
+            "settled_duration_days_max": null,
+            "settled_duration_days_mean": null,
+            "settled_usd": 0.0,
+            "unresolved_age_days_max": null,
+            "unresolved_count": 0
+          },
+          "containment": {
+            "assumed_owner_clears": 4,
+            "degraded_mode_triggers": 4,
+            "ending_degraded": false
+          },
+          "daily_conservative_reconciliation": {
+            "ending_high_water_mark_usd": 90785418.270933,
+            "ending_junior_principal_usd": 19473790.905177,
+            "ending_senior_principal_usd": 90785418.270933,
+            "ending_waterfall_principal_usd": 110259209.17611,
+            "junior_impairment_events": 697,
+            "maximum_conservative_mtm_usd": 83239005.933565,
+            "minimum_distributable_value_usd": 27343915.543367,
+            "minimum_junior_principal_usd": 0.0,
+            "minimum_senior_principal_usd": 27343915.543367,
+            "senior_coupon_transferred_usd": 40785418.270933,
+            "senior_impairment_events": 413,
+            "valuation_basis": "Once per ECB observation after scheduled replay actions: max(cash - claims - conservative MtM, 0), with the 8% senior coupon checkpointed over each observed interval."
+          },
+          "ending_balance_sheet": {
+            "bad_debt_telemetry_usd": 1022912.390217,
+            "daily_conservative_waterfall_principal_usd": 110259209.17611,
+            "lp_economic_equity_usd": 110259209.17611,
+            "physical_cash_usd": 110259209.17611,
+            "trader_claims_usd": 0.0,
+            "waterfall_principal_usd": 110259209.17611
+          },
+          "settlement": {
+            "bad_debt_usd": 1022912.390217,
+            "execution_fees_credited_usd": 2696817.334844,
+            "forced_final_closes": 1,
+            "immediate_payouts_usd": 25405134.490962,
+            "keeper_bounties_usd": 4667612.903894,
+            "liquidations": 152,
+            "liquidations_after_3_plus_day_gap": 37,
+            "scheduled_closes": 37
+          },
+          "tranches": {
+            "ending_high_water_mark_usd": 111495444.097922,
+            "ending_junior_principal_usd": 0.0,
+            "ending_senior_principal_usd": 110259209.17611,
+            "junior_impairment_events": 33,
+            "loss_event_count": 36,
+            "loss_event_usd_maximum": 3475645.39992,
+            "loss_event_usd_median": 422862.3122955,
+            "loss_event_usd_p95": 2491682.989256,
+            "minimum_junior_principal_usd": 0.0,
+            "minimum_senior_principal_usd": 50000000.0,
+            "senior_coupon_transferred_usd": 61495444.097922,
+            "senior_impairment_events": 3,
+            "valuation_basis": "Realized HousePool cash minus trader claims only; this overlay does not subtract conservative MtM and is not production share-NAV reconciliation."
+          }
+        }
+      }
+    ],
+    "methodology": "Deterministic monthly cohort replay using quantized prices, rational/integer admission scaling, and exact integer accounting kernels over daily ECB fixes. Signals are lagged one fix, the 40% final-skew wall is enforced on paired cohorts, and both a realized-cash waterfall overlay and a daily conservative-MtM reconcile shadow are reported. This is a stylized scenario model, not a Pyth tick or transaction replay.",
+    "ordering_sensitivity_momentum_80_20": [
+      {
+        "account_order": "fifo",
+        "admitted_notional_usd": 5758524301.812657,
+        "bad_debt_usd": 919285.273342,
+        "cash_overlay_minimum_senior_usd": 50000000.0,
+        "daily_conservative_minimum_senior_usd": 22944244.841019,
+        "ending_lp_equity_usd": 99816575.031221,
+        "liquidations": 145,
+        "maximum_claims_usd": 0.0,
+        "scheduled_closes": 40,
+        "settlement_priority": "liquidations_first"
+      },
+      {
+        "account_order": "fifo",
+        "admitted_notional_usd": 5758524301.812657,
+        "bad_debt_usd": 919285.273342,
+        "cash_overlay_minimum_senior_usd": 50000000.0,
+        "daily_conservative_minimum_senior_usd": 22944244.841019,
+        "ending_lp_equity_usd": 99816575.031221,
+        "liquidations": 145,
+        "maximum_claims_usd": 0.0,
+        "scheduled_closes": 40,
+        "settlement_priority": "scheduled_closes_first"
+      },
+      {
+        "account_order": "reverse",
+        "admitted_notional_usd": 5758524301.812657,
+        "bad_debt_usd": 919285.273342,
+        "cash_overlay_minimum_senior_usd": 50000000.0,
+        "daily_conservative_minimum_senior_usd": 22944244.841019,
+        "ending_lp_equity_usd": 99816575.031221,
+        "liquidations": 145,
+        "maximum_claims_usd": 0.0,
+        "scheduled_closes": 40,
+        "settlement_priority": "liquidations_first"
+      },
+      {
+        "account_order": "reverse",
+        "admitted_notional_usd": 5758524301.812657,
+        "bad_debt_usd": 919285.273342,
+        "cash_overlay_minimum_senior_usd": 50000000.0,
+        "daily_conservative_minimum_senior_usd": 22944244.841019,
+        "ending_lp_equity_usd": 99816575.031221,
+        "liquidations": 145,
+        "maximum_claims_usd": 0.0,
+        "scheduled_closes": 40,
+        "settlement_priority": "scheduled_closes_first"
+      }
+    ],
+    "scenarios": {
+      "balanced_50_50": {
+        "assumptions": {
+          "account_collateral_scope": "Each position uses a unique synthetic account whose terminal reachable collateral is its posted position margin; no extra free or committed cross-margin collateral is supplied.",
+          "base_carry_bps_at_full_utilization": 500,
+          "cap": 2.0,
+          "claim_service_behavior": "All beneficiaries call on the first strictly later ECB observation where physical cash covers aggregate claims.",
+          "cohort_admission": "Paired LONG/SHORT allocations are scaled on an integer 1e18 grid until endpoint solvency and the final hard-skew ratio pass. The paired legs are assumed to be interleaved; this is not a transaction-level order/VPI simulation.",
+          "daily_settlement_priority": "liquidations_first",
+          "degraded_clear_behavior": "Owner clears the latch at the first observed genuinely restored state; clearing is not automatic in production.",
+          "end_of_sample_behavior": "Every remaining position is forcibly full-closed at the last ECB observation in the configured within-class account order.",
+          "execution_fee_bps": 4,
+          "frozen_spread_bps": 0,
+          "holding_calendar_days": 63,
+          "initial_margin_bps": 150,
+          "initial_pool_usd": 100000000,
+          "initial_senior_share": 0.5,
+          "liquidation_bounty_bps": 10,
+          "maintenance_calendar_policy": "The replay holds maintenance at 1% and does not switch to the 3% FAD basis around closure windows.",
+          "maintenance_margin_bps": 100,
+          "max_skew_ratio": 0.4,
+          "minimum_liquidation_bounty_usd": 1.0,
+          "momentum_side_share": 0.5,
+          "monthly_cohort_target_entry_notional_usd": 90000000,
+          "oracle_confidence_adjustment": 0,
+          "senior_rate_bps": 800,
+          "signal_execution_lag_observations": 1,
+          "signal_lookback_observations": 20,
+          "source_marks": "ECB daily information-only reference rates",
+          "vpi_factor": 0,
+          "waterfall_cadence": "The 8% senior coupon is checkpointed once per observed calendar interval. The realized-cash overlay applies each cash/claim transition; a separate shadow view reconciles once at each observation to cash minus claims minus conservative MtM. Production reconciliation occurs on protocol actions, not on an automatic daily clock.",
+          "within_class_account_order": "fifo"
+        },
+        "book": {
+          "admitted_cohorts": 64,
+          "admitted_long_notional_usd": 2880000000.0,
+          "admitted_notional_usd": 5760000000.0,
+          "admitted_short_notional_usd": 2880000000.0,
+          "capacity_bound_cohorts": 0,
+          "degraded_rejections": 0,
+          "maximum_capped_aggregate_borrow_to_assets": 0.9975042662080614,
+          "maximum_endpoint_reserve_utilization": 0.5663400365998417,
+          "maximum_long_borrow_utilization": 0.5596,
+          "maximum_post_admission_skew_ratio": 0.0,
+          "maximum_short_borrow_utilization": 0.4518,
+          "no_admissible_scale_rejections": 61,
+          "opened_positions": 128,
+          "post_admission_assertions": 64,
+          "rejected_cohorts": 61,
+          "scaled_cohorts": 0,
+          "skew_bound_cohorts": 0,
+          "target_notional_requested_usd": 11250000000.0,
+          "time_weighted_capped_aggregate_borrow_to_assets": 0.32682583117665387,
+          "time_weighted_endpoint_reserve_utilization": 0.30208824561651015,
+          "time_weighted_long_borrow_utilization": 0.15640599684376505,
+          "time_weighted_short_borrow_utilization": 0.1703863492898466
+        },
+        "carry": {
+          "assessed_usd": 7600356.058508,
+          "conservatively_realized_usd": 7530509.352536,
+          "realization_ratio": 0.9908100744972583
+        },
+        "claims": {
+          "created_count": 0,
+          "created_usd": 0.0,
+          "ending_usd": 0.0,
+          "maximum_outstanding_usd": 0.0,
+          "settled_duration_days_max": null,
+          "settled_duration_days_mean": null,
+          "settled_usd": 0.0,
+          "unresolved_age_days_max": null,
+          "unresolved_count": 0
+        },
+        "containment": {
+          "assumed_owner_clears": 0,
+          "degraded_mode_triggers": 0,
+          "ending_degraded": false
+        },
+        "daily_conservative_reconciliation": {
+          "ending_high_water_mark_usd": 90709352.579764,
+          "ending_junior_principal_usd": 12783278.037317,
+          "ending_senior_principal_usd": 90709352.579764,
+          "ending_waterfall_principal_usd": 103492630.617081,
+          "junior_impairment_events": 579,
+          "maximum_conservative_mtm_usd": 50424044.85,
+          "minimum_distributable_value_usd": 50813481.369793,
+          "minimum_junior_principal_usd": 0.0,
+          "minimum_senior_principal_usd": 50000000.0,
+          "senior_coupon_transferred_usd": 40709352.579764,
+          "senior_impairment_events": 402,
+          "valuation_basis": "Once per ECB observation after scheduled replay actions: max(cash - claims - conservative MtM, 0), with the 8% senior coupon checkpointed over each observed interval."
+        },
+        "ending_balance_sheet": {
+          "bad_debt_telemetry_usd": 990885.352092,
+          "daily_conservative_waterfall_principal_usd": 103492630.617081,
+          "lp_economic_equity_usd": 103492630.617081,
+          "physical_cash_usd": 103492630.617081,
+          "trader_claims_usd": 0.0,
+          "waterfall_principal_usd": 103492630.617081
+        },
+        "settlement": {
+          "bad_debt_usd": 990885.352092,
+          "execution_fees_credited_usd": 2807799.718007,
+          "forced_final_closes": 1,
+          "immediate_payouts_usd": 30646949.036061,
+          "keeper_bounties_usd": 4498377.540609,
+          "liquidations": 100,
+          "liquidations_after_3_plus_day_gap": 25,
+          "scheduled_closes": 27
+        },
+        "tranches": {
+          "ending_high_water_mark_usd": 104446921.409782,
+          "ending_junior_principal_usd": 0.0,
+          "ending_senior_principal_usd": 103492630.617081,
+          "junior_impairment_events": 23,
+          "loss_event_count": 27,
+          "loss_event_usd_maximum": 2610952.161527,
+          "loss_event_usd_median": 1002040.860771,
+          "loss_event_usd_p95": 2439072.499812,
+          "minimum_junior_principal_usd": 0.0,
+          "minimum_senior_principal_usd": 50000000.0,
+          "senior_coupon_transferred_usd": 54446921.409782,
+          "senior_impairment_events": 4,
+          "valuation_basis": "Realized HousePool cash minus trader claims only; this overlay does not subtract conservative MtM and is not production share-NAV reconciliation."
+        }
+      },
+      "momentum_100_0": {
+        "assumptions": {
+          "account_collateral_scope": "Each position uses a unique synthetic account whose terminal reachable collateral is its posted position margin; no extra free or committed cross-margin collateral is supplied.",
+          "base_carry_bps_at_full_utilization": 500,
+          "cap": 2.0,
+          "claim_service_behavior": "All beneficiaries call on the first strictly later ECB observation where physical cash covers aggregate claims.",
+          "cohort_admission": "Paired LONG/SHORT allocations are scaled on an integer 1e18 grid until endpoint solvency and the final hard-skew ratio pass. The paired legs are assumed to be interleaved; this is not a transaction-level order/VPI simulation.",
+          "daily_settlement_priority": "liquidations_first",
+          "degraded_clear_behavior": "Owner clears the latch at the first observed genuinely restored state; clearing is not automatic in production.",
+          "end_of_sample_behavior": "Every remaining position is forcibly full-closed at the last ECB observation in the configured within-class account order.",
+          "execution_fee_bps": 4,
+          "frozen_spread_bps": 0,
+          "holding_calendar_days": 63,
+          "initial_margin_bps": 150,
+          "initial_pool_usd": 100000000,
+          "initial_senior_share": 0.5,
+          "liquidation_bounty_bps": 10,
+          "maintenance_calendar_policy": "The replay holds maintenance at 1% and does not switch to the 3% FAD basis around closure windows.",
+          "maintenance_margin_bps": 100,
+          "max_skew_ratio": 0.4,
+          "minimum_liquidation_bounty_usd": 1.0,
+          "momentum_side_share": 1.0,
+          "monthly_cohort_target_entry_notional_usd": 90000000,
+          "oracle_confidence_adjustment": 0,
+          "senior_rate_bps": 800,
+          "signal_execution_lag_observations": 1,
+          "signal_lookback_observations": 20,
+          "source_marks": "ECB daily information-only reference rates",
+          "vpi_factor": 0,
+          "waterfall_cadence": "The 8% senior coupon is checkpointed once per observed calendar interval. The realized-cash overlay applies each cash/claim transition; a separate shadow view reconciles once at each observation to cash minus claims minus conservative MtM. Production reconciliation occurs on protocol actions, not on an automatic daily clock.",
+          "within_class_account_order": "fifo"
+        },
+        "book": {
+          "admitted_cohorts": 105,
+          "admitted_long_notional_usd": 1883559162.022024,
+          "admitted_notional_usd": 3904494951.148475,
+          "admitted_short_notional_usd": 2020935789.126451,
+          "capacity_bound_cohorts": 19,
+          "degraded_rejections": 0,
+          "maximum_capped_aggregate_borrow_to_assets": 1.0,
+          "maximum_endpoint_reserve_utilization": 0.9280536681676901,
+          "maximum_long_borrow_utilization": 0.9161,
+          "maximum_post_admission_skew_ratio": 0.4,
+          "maximum_short_borrow_utilization": 0.8143,
+          "no_admissible_scale_rejections": 20,
+          "opened_positions": 105,
+          "post_admission_assertions": 105,
+          "rejected_cohorts": 20,
+          "scaled_cohorts": 105,
+          "skew_bound_cohorts": 105,
+          "target_notional_requested_usd": 11250000000.0,
+          "time_weighted_capped_aggregate_borrow_to_assets": 0.21937480406408913,
+          "time_weighted_endpoint_reserve_utilization": 0.22204183198715086,
+          "time_weighted_long_borrow_utilization": 0.11155176223040499,
+          "time_weighted_short_borrow_utilization": 0.10837864281956841
+        },
+        "carry": {
+          "assessed_usd": 5339967.783446,
+          "conservatively_realized_usd": 5319227.155586,
+          "realization_ratio": 0.9961159638595019
+        },
+        "claims": {
+          "created_count": 0,
+          "created_usd": 0.0,
+          "ending_usd": 0.0,
+          "maximum_outstanding_usd": 0.0,
+          "settled_duration_days_max": null,
+          "settled_duration_days_mean": null,
+          "settled_usd": 0.0,
+          "unresolved_age_days_max": null,
+          "unresolved_count": 0
+        },
+        "containment": {
+          "assumed_owner_clears": 0,
+          "degraded_mode_triggers": 0,
+          "ending_degraded": false
+        },
+        "daily_conservative_reconciliation": {
+          "ending_high_water_mark_usd": 96530204.797677,
+          "ending_junior_principal_usd": 2665672.017985,
+          "ending_senior_principal_usd": 96530204.797677,
+          "ending_waterfall_principal_usd": 99195876.815662,
+          "junior_impairment_events": 497,
+          "maximum_conservative_mtm_usd": 66417628.100394,
+          "minimum_distributable_value_usd": 36853888.427166,
+          "minimum_junior_principal_usd": 0.0,
+          "minimum_senior_principal_usd": 36853888.427166,
+          "senior_coupon_transferred_usd": 46530204.797677,
+          "senior_impairment_events": 308,
+          "valuation_basis": "Once per ECB observation after scheduled replay actions: max(cash - claims - conservative MtM, 0), with the 8% senior coupon checkpointed over each observed interval."
+        },
+        "ending_balance_sheet": {
+          "bad_debt_telemetry_usd": 653516.020055,
+          "daily_conservative_waterfall_principal_usd": 99195876.815662,
+          "lp_economic_equity_usd": 99195876.815662,
+          "physical_cash_usd": 99195876.815662,
+          "trader_claims_usd": 0.0,
+          "waterfall_principal_usd": 99195876.815662
+        },
+        "settlement": {
+          "bad_debt_usd": 653516.020055,
+          "execution_fees_credited_usd": 1871043.016191,
+          "forced_final_closes": 1,
+          "immediate_payouts_usd": 23607008.461685,
+          "keeper_bounties_usd": 3138921.509417,
+          "liquidations": 87,
+          "liquidations_after_3_plus_day_gap": 18,
+          "scheduled_closes": 17
+        },
+        "tranches": {
+          "ending_high_water_mark_usd": 100565871.797725,
+          "ending_junior_principal_usd": 0.0,
+          "ending_senior_principal_usd": 99195876.815662,
+          "junior_impairment_events": 15,
+          "loss_event_count": 18,
+          "loss_event_usd_maximum": 2791068.573469,
+          "loss_event_usd_median": 1335459.9734645,
+          "loss_event_usd_p95": 2791068.573469,
+          "minimum_junior_principal_usd": 0.0,
+          "minimum_senior_principal_usd": 50000000.0,
+          "senior_coupon_transferred_usd": 50565871.797725,
+          "senior_impairment_events": 3,
+          "valuation_basis": "Realized HousePool cash minus trader claims only; this overlay does not subtract conservative MtM and is not production share-NAV reconciliation."
+        }
+      },
+      "momentum_80_20": {
+        "assumptions": {
+          "account_collateral_scope": "Each position uses a unique synthetic account whose terminal reachable collateral is its posted position margin; no extra free or committed cross-margin collateral is supplied.",
+          "base_carry_bps_at_full_utilization": 500,
+          "cap": 2.0,
+          "claim_service_behavior": "All beneficiaries call on the first strictly later ECB observation where physical cash covers aggregate claims.",
+          "cohort_admission": "Paired LONG/SHORT allocations are scaled on an integer 1e18 grid until endpoint solvency and the final hard-skew ratio pass. The paired legs are assumed to be interleaved; this is not a transaction-level order/VPI simulation.",
+          "daily_settlement_priority": "liquidations_first",
+          "degraded_clear_behavior": "Owner clears the latch at the first observed genuinely restored state; clearing is not automatic in production.",
+          "end_of_sample_behavior": "Every remaining position is forcibly full-closed at the last ECB observation in the configured within-class account order.",
+          "execution_fee_bps": 4,
+          "frozen_spread_bps": 0,
+          "holding_calendar_days": 63,
+          "initial_margin_bps": 150,
+          "initial_pool_usd": 100000000,
+          "initial_senior_share": 0.5,
+          "liquidation_bounty_bps": 10,
+          "maintenance_calendar_policy": "The replay holds maintenance at 1% and does not switch to the 3% FAD basis around closure windows.",
+          "maintenance_margin_bps": 100,
+          "max_skew_ratio": 0.4,
+          "minimum_liquidation_bounty_usd": 1.0,
+          "momentum_side_share": 0.8,
+          "monthly_cohort_target_entry_notional_usd": 90000000,
+          "oracle_confidence_adjustment": 0,
+          "senior_rate_bps": 800,
+          "signal_execution_lag_observations": 1,
+          "signal_lookback_observations": 20,
+          "source_marks": "ECB daily information-only reference rates",
+          "vpi_factor": 0,
+          "waterfall_cadence": "The 8% senior coupon is checkpointed once per observed calendar interval. The realized-cash overlay applies each cash/claim transition; a separate shadow view reconciles once at each observation to cash minus claims minus conservative MtM. Production reconciliation occurs on protocol actions, not on an automatic daily clock.",
+          "within_class_account_order": "fifo"
+        },
+        "book": {
+          "admitted_cohorts": 93,
+          "admitted_long_notional_usd": 2768152474.163589,
+          "admitted_notional_usd": 5758524301.812657,
+          "admitted_short_notional_usd": 2990371827.649068,
+          "capacity_bound_cohorts": 2,
+          "degraded_rejections": 0,
+          "maximum_capped_aggregate_borrow_to_assets": 1.0,
+          "maximum_endpoint_reserve_utilization": 0.8178461829827506,
+          "maximum_long_borrow_utilization": 0.8073,
+          "maximum_post_admission_skew_ratio": 0.4,
+          "maximum_short_borrow_utilization": 0.7269,
+          "no_admissible_scale_rejections": 32,
+          "opened_positions": 186,
+          "post_admission_assertions": 93,
+          "rejected_cohorts": 32,
+          "scaled_cohorts": 85,
+          "skew_bound_cohorts": 85,
+          "target_notional_requested_usd": 11250000000.0,
+          "time_weighted_capped_aggregate_borrow_to_assets": 0.32498052176152165,
+          "time_weighted_endpoint_reserve_utilization": 0.3095270476754472,
+          "time_weighted_long_borrow_utilization": 0.16793150973172075,
+          "time_weighted_short_borrow_utilization": 0.15801415044713327
+        },
+        "carry": {
+          "assessed_usd": 8100043.030068,
+          "conservatively_realized_usd": 8060398.661089,
+          "realization_ratio": 0.9951056594598526
+        },
+        "claims": {
+          "created_count": 0,
+          "created_usd": 0.0,
+          "ending_usd": 0.0,
+          "maximum_outstanding_usd": 0.0,
+          "settled_duration_days_max": null,
+          "settled_duration_days_mean": null,
+          "settled_usd": 0.0,
+          "unresolved_age_days_max": null,
+          "unresolved_count": 0
+        },
+        "containment": {
+          "assumed_owner_clears": 0,
+          "degraded_mode_triggers": 0,
+          "ending_degraded": false
+        },
+        "daily_conservative_reconciliation": {
+          "ending_high_water_mark_usd": 92776515.424775,
+          "ending_junior_principal_usd": 7040059.606446,
+          "ending_senior_principal_usd": 92776515.424775,
+          "ending_waterfall_principal_usd": 99816575.031221,
+          "junior_impairment_events": 735,
+          "maximum_conservative_mtm_usd": 78367586.523548,
+          "minimum_distributable_value_usd": 22944244.841019,
+          "minimum_junior_principal_usd": 0.0,
+          "minimum_senior_principal_usd": 22944244.841019,
+          "senior_coupon_transferred_usd": 42776515.424775,
+          "senior_impairment_events": 368,
+          "valuation_basis": "Once per ECB observation after scheduled replay actions: max(cash - claims - conservative MtM, 0), with the 8% senior coupon checkpointed over each observed interval."
+        },
+        "ending_balance_sheet": {
+          "bad_debt_telemetry_usd": 919285.273342,
+          "daily_conservative_waterfall_principal_usd": 99816575.031221,
+          "lp_economic_equity_usd": 99816575.031221,
+          "physical_cash_usd": 99816575.031221,
+          "trader_claims_usd": 0.0,
+          "waterfall_principal_usd": 99816575.031221
+        },
+        "settlement": {
+          "bad_debt_usd": 919285.273342,
+          "execution_fees_credited_usd": 2775817.759971,
+          "forced_final_closes": 1,
+          "immediate_payouts_usd": 33847622.238114,
+          "keeper_bounties_usd": 4585653.968701,
+          "liquidations": 145,
+          "liquidations_after_3_plus_day_gap": 38,
+          "scheduled_closes": 40
+        },
+        "tranches": {
+          "ending_high_water_mark_usd": 102046014.840099,
+          "ending_junior_principal_usd": 0.0,
+          "ending_senior_principal_usd": 99816575.031221,
+          "junior_impairment_events": 32,
+          "loss_event_count": 40,
+          "loss_event_usd_maximum": 3457586.967616,
+          "loss_event_usd_median": 590613.8131035,
+          "loss_event_usd_p95": 2549400.603063,
+          "minimum_junior_principal_usd": 0.0,
+          "minimum_senior_principal_usd": 50000000.0,
+          "senior_coupon_transferred_usd": 52046014.840099,
+          "senior_impairment_events": 8,
+          "valuation_basis": "Realized HousePool cash minus trader claims only; this overlay does not subtract conservative MtM and is not production share-NAV reconciliation."
+        }
+      }
+    }
+  },
+  "intervals": {
+    "all": {
+      "count": 2684,
+      "maximum_absolute_return": 0.03583676111188461,
+      "maximum_interval": {
+        "calendar_days": 1,
+        "from": "2022-11-10",
+        "from_basket": 0.891307142699631,
+        "return": 0.03583676111188461,
+        "to": "2022-11-11",
+        "to_basket": 0.923248703849874
+      },
+      "mean_absolute_return": 0.0030474198822396403,
+      "median_absolute_return": 0.0022666897009645526,
+      "p95_absolute_return": 0.008303398893870773,
+      "p99_absolute_return": 0.013610224465707477
+    },
+    "friday_to_monday": {
+      "count": 523,
+      "maximum_absolute_return": 0.019596720033301818,
+      "maximum_interval": {
+        "calendar_days": 3,
+        "from": "2023-01-06",
+        "from_basket": 0.936087494871378,
+        "return": 0.019596720033301818,
+        "to": "2023-01-09",
+        "to_basket": 0.9544317394350472
+      },
+      "mean_absolute_return": 0.0032062489104524934,
+      "median_absolute_return": 0.002461217072299293,
+      "p95_absolute_return": 0.009033116139868347,
+      "p99_absolute_return": 0.013853606107412597
+    },
+    "move_threshold_counts": {
+      "counts": {
+        "100": {
+          "all_observation_intervals": 79,
+          "friday_monday_intervals": 20,
+          "nonpublication_gaps": 22
+        },
+        "150": {
+          "all_observation_intervals": 18,
+          "friday_monday_intervals": 3,
+          "nonpublication_gaps": 3
+        },
+        "300": {
+          "all_observation_intervals": 1,
+          "friday_monday_intervals": 0,
+          "nonpublication_gaps": 0
+        }
+      },
+      "definition": "Count of absolute reference-rate changes greater than the stated threshold; this is not a liquidation test and ignores starting equity, intraday liquidation, fees, carry, VPI, confidence adjustments, and other collateral."
+    },
+    "nonpublication_gaps_at_least_3_days": {
+      "count": 550,
+      "maximum_absolute_return": 0.019596720033301818,
+      "maximum_interval": {
+        "calendar_days": 3,
+        "from": "2023-01-06",
+        "from_basket": 0.936087494871378,
+        "return": 0.019596720033301818,
+        "to": "2023-01-09",
+        "to_basket": 0.9544317394350472
+      },
+      "mean_absolute_return": 0.003214303243788423,
+      "median_absolute_return": 0.0024528170025669427,
+      "p95_absolute_return": 0.00921069149792686,
+      "p99_absolute_return": 0.013853606107412597
+    }
+  },
+  "model_version": "1.3.0",
+  "stylized_cap_sensitivity": {
+    "assumptions": {
+      "entry_price": 1.0,
+      "long_size_units": 50000000,
+      "pool_assets_usd": 100000000,
+      "short_size_units": 30000000
+    },
+    "results": [
+      {
+        "cap": 1.1,
+        "long_endpoint_liability_usd": 5000000.0,
+        "max_liability_usd": 30000000.0,
+        "pool_reserve_utilization": 0.3,
+        "short_endpoint_liability_usd": 30000000.0
+      },
+      {
+        "cap": 1.25,
+        "long_endpoint_liability_usd": 12500000.0,
+        "max_liability_usd": 30000000.0,
+        "pool_reserve_utilization": 0.3,
+        "short_endpoint_liability_usd": 30000000.0
+      },
+      {
+        "cap": 1.5,
+        "long_endpoint_liability_usd": 25000000.0,
+        "max_liability_usd": 30000000.0,
+        "pool_reserve_utilization": 0.3,
+        "short_endpoint_liability_usd": 30000000.0
+      },
+      {
+        "cap": 1.75,
+        "long_endpoint_liability_usd": 37500000.0,
+        "max_liability_usd": 37500000.0,
+        "pool_reserve_utilization": 0.375,
+        "short_endpoint_liability_usd": 30000000.0
+      },
+      {
+        "cap": 2.0,
+        "long_endpoint_liability_usd": 50000000.0,
+        "max_liability_usd": 50000000.0,
+        "pool_reserve_utilization": 0.5,
+        "short_endpoint_liability_usd": 30000000.0
+      },
+      {
+        "cap": 2.5,
+        "long_endpoint_liability_usd": 75000000.0,
+        "max_liability_usd": 75000000.0,
+        "pool_reserve_utilization": 0.75,
+        "short_endpoint_liability_usd": 30000000.0
+      },
+      {
+        "cap": 3.0,
+        "long_endpoint_liability_usd": 100000000.0,
+        "max_liability_usd": 100000000.0,
+        "pool_reserve_utilization": 1.0,
+        "short_endpoint_liability_usd": 30000000.0
+      }
+    ]
+  },
+  "stylized_carry": {
+    "assumptions": {
+      "base_carry_bps_at_full_utilization": 500,
+      "long_margin_usd": 2500000,
+      "long_max_profit_usd": 25000000,
+      "pool_assets_usd": 100000000,
+      "short_margin_usd": 4000000,
+      "short_max_profit_usd": 40000000
+    },
+    "long": {
+      "annualized_rate_bps": 112,
+      "borrow_base_usd": 22500000.0,
+      "economic_annualized_rate_bps": 112.5,
+      "one_year_carry_usd": 253125.0,
+      "utilization_bps": 2250
+    },
+    "short": {
+      "annualized_rate_bps": 180,
+      "borrow_base_usd": 36000000.0,
+      "economic_annualized_rate_bps": 180.0,
+      "one_year_carry_usd": 648000.0,
+      "utilization_bps": 3600
+    }
+  },
+  "stylized_waterfall": {
+    "after_60m_stress": {
+      "junior_principal_usdc": 0,
+      "senior_high_water_mark_usdc": 50000000000000,
+      "senior_principal_usdc": 40000000000000
+    },
+    "after_maximum_observed_friday_monday_stress": {
+      "junior_principal_usdc": 48040327996670,
+      "senior_high_water_mark_usdc": 50000000000000,
+      "senior_principal_usdc": 50000000000000
+    },
+    "initial": {
+      "junior_principal_usdc": 50000000000000,
+      "senior_high_water_mark_usdc": 50000000000000,
+      "senior_principal_usdc": 50000000000000
+    },
+    "maximum_observed_friday_monday_price_pnl_stress_usd": 1959672.00333,
+    "qualification": "Assumes a fully utilized one-sided book, instantaneous price-PnL settlement, no trader margin recovery, and no fees or carry."
+  }
+}
