@@ -131,7 +131,8 @@ contract PythRealUpdateForkTest is Test {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000
         });
 
         clearinghouse = new MarginClearinghouse(USDC);

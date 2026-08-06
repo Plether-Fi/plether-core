@@ -65,6 +65,7 @@ contract LiquidationTest is BasePerpTest {
 
         // Keeper liquidates. $3k required but only ~$2k margin → liquidatable.
         uint256 keeperSettlementBefore = _settlementBalance(keeper);
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 1e8);
 
         vm.startPrank(keeper);
         router.executeLiquidation(account, _mockPythUpdateData());
@@ -74,9 +75,11 @@ contract LiquidationTest is BasePerpTest {
         assertEq(size, 0, "Position should be wiped");
 
         uint256 bounty = _settlementBalance(keeper) - keeperSettlementBefore;
-        assertEq(bounty, 100 * 1e6, "Keeper should receive $100 USDC bounty (0.10% of $100k)");
+        assertEq(preview.liquidationChargeUsdc, 100 * 1e6, "Liquidation should retain the 10 bps total charge");
+        assertEq(bounty, 50 * 1e6, "Keeper should receive 5 bps of the $100k notional");
+        assertEq(preview.lpLiquidationFeeUsdc, 50 * 1e6, "LPs should receive the other 5 bps");
 
-        // Ethical: Alice keeps surplus equity after the keeper bounty and the carry accrued between open and FAD liquidation.
+        // Ethical: Alice keeps surplus equity after the total charge and carry accrued between open and FAD liquidation.
         uint256 chBalance = clearinghouse.balanceUsdc(account);
         assertApproxEqAbs(chBalance, 1_856_935_243, 1, "Alice keeps surplus equity after ethical liquidation");
     }
@@ -174,7 +177,8 @@ contract LiquidationTest is BasePerpTest {
                 fadMarginBps: 300,
                 baseCarryBps: 500,
                 minBountyUsdc: 1 * 1e6,
-                bountyBps: 10
+                bountyBps: 10,
+                keeperShareBps: 5000
             })
         );
 
@@ -206,7 +210,7 @@ contract LiquidationTest is BasePerpTest {
         assertGe(_settlementBalance(keeper), keeperSettlementBefore, "Keeper gets bounty from remaining margin");
     }
 
-    function test_KeeperBounty_PaidFromVault() public {
+    function test_LiquidationCharge_SplitsEquallyBetweenKeeperAndLps() public {
         vm.warp(WEDNESDAY_NOON);
 
         vm.prank(alice);
@@ -218,6 +222,7 @@ contract LiquidationTest is BasePerpTest {
         uint256 poolBefore = usdc.balanceOf(address(pool));
         uint256 chBefore = clearinghouse.balanceUsdc(account);
         uint256 keeperSettlementBefore = _settlementBalance(keeper);
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 1.015e8);
 
         bytes[] memory pythData = new bytes[](1);
         pythData[0] = abi.encode(1.015e8);
@@ -230,7 +235,65 @@ contract LiquidationTest is BasePerpTest {
         uint256 poolAfter = usdc.balanceOf(address(pool));
 
         uint256 userSeized = chBefore - chAfter;
-        assertEq(poolAfter, poolBefore + userSeized - bounty, "Pool intermediates: receives seized margin, pays bounty");
+        assertEq(bounty, preview.keeperBountyUsdc, "Keeper should receive the previewed half of the charge");
+        assertEq(
+            preview.keeperBountyUsdc,
+            preview.lpLiquidationFeeUsdc,
+            "Even-micro liquidation charge should split exactly 50/50"
+        );
+        assertEq(
+            preview.liquidationChargeUsdc,
+            preview.keeperBountyUsdc + preview.lpLiquidationFeeUsdc,
+            "Keeper and LP shares should conserve the total charge"
+        );
+        assertEq(
+            poolAfter,
+            poolBefore + userSeized - bounty,
+            "Pool should receive every account debit except the keeper-owned half"
+        );
+    }
+
+    function test_LiquidationCharge_UsesConfiguredKeeperShare() public {
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.keeperShareBps = 2500;
+        _setRiskParams(params);
+
+        vm.warp(WEDNESDAY_NOON);
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
+        router.executeOrder(1, _mockPythUpdateData());
+        _withdrawFreeUsdc(alice, 0);
+
+        address account = alice;
+        uint256 poolBefore = usdc.balanceOf(address(pool));
+        uint256 chBefore = clearinghouse.balanceUsdc(account);
+        uint256 keeperSettlementBefore = _settlementBalance(keeper);
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 1.015e8);
+
+        bytes[] memory pythData = new bytes[](1);
+        pythData[0] = abi.encode(1.015e8);
+        vm.prank(keeper);
+        router.executeLiquidation(account, pythData);
+
+        uint256 bounty = _settlementBalance(keeper) - keeperSettlementBefore;
+        uint256 chAfter = clearinghouse.balanceUsdc(account);
+        uint256 poolAfter = usdc.balanceOf(address(pool));
+        uint256 userSeized = chBefore - chAfter;
+
+        assertEq(preview.liquidationChargeUsdc, 101_500_000, "Total charge should remain 10 bps");
+        assertEq(preview.keeperBountyUsdc, 25_375_000, "Keeper should receive 25% of the charge");
+        assertEq(preview.lpLiquidationFeeUsdc, 76_125_000, "LPs should receive 75% of the charge");
+        assertEq(bounty, preview.keeperBountyUsdc, "Live keeper credit should match the configured preview share");
+        assertEq(
+            preview.liquidationChargeUsdc,
+            preview.keeperBountyUsdc + preview.lpLiquidationFeeUsdc,
+            "Configured shares should conserve the total charge"
+        );
+        assertEq(
+            poolAfter,
+            poolBefore + userSeized - bounty,
+            "Pool should receive every account debit except the configured keeper share"
+        );
     }
 
     function test_FadWindow_ExactBoundaries() public {

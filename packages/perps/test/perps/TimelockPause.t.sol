@@ -77,6 +77,52 @@ contract TimelockPauseTest is BasePerpTest {
         assertEq(maxSpreadEngine.frozenCloseSpreadBps(), 1000);
     }
 
+    function test_CfdEngineConstructor_RevertsWhenKeeperShareExceedsBpsDenominator() public {
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.keeperShareBps = 10_001;
+
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidRiskParams.selector);
+        new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params, 50);
+    }
+
+    function test_KeeperShare_ChangesOnlyAfterRiskConfigTimelock() public {
+        ICfdEngineAdminHost.EngineRiskConfig memory config = _engineRiskConfig();
+        assertEq(config.riskParams.keeperShareBps, 5000, "Default keeper share should be 50%");
+        config.riskParams.keeperShareBps = 2500;
+
+        engineAdmin.proposeRiskConfig(config);
+        (,,,,,,,, uint256 keeperShareBefore) = engine.riskParams();
+        assertEq(keeperShareBefore, 5000, "Proposal must not change the live keeper share");
+
+        vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__TimelockNotReady.selector);
+        engineAdmin.finalizeRiskConfig();
+
+        _warpForward(48 hours + 1);
+        engineAdmin.finalizeRiskConfig();
+
+        (,,,,,,,, uint256 keeperShareAfter) = engine.riskParams();
+        assertEq(keeperShareAfter, 2500, "Finalization should apply the configured keeper share");
+    }
+
+    function test_ProposeRiskConfig_RevertsWhenKeeperShareExceedsBpsDenominator() public {
+        ICfdEngineAdminHost.EngineRiskConfig memory config = _engineRiskConfig();
+        config.riskParams.keeperShareBps = 10_001;
+
+        vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__InvalidRiskParams.selector);
+        engineAdmin.proposeRiskConfig(config);
+    }
+
+    function test_ProposeRiskConfig_AcceptsKeeperShareEndpoints() public {
+        ICfdEngineAdminHost.EngineRiskConfig memory config = _engineRiskConfig();
+        config.riskParams.keeperShareBps = 0;
+        engineAdmin.proposeRiskConfig(config);
+
+        config.riskParams.keeperShareBps = 10_000;
+        engineAdmin.proposeRiskConfig(config);
+
+        assertGt(engineAdmin.riskConfigActivationTime(), block.timestamp);
+    }
+
     function test_ProposeRiskParams_StoresAndSetsActivationTime() public {
         CfdTypes.RiskParams memory newParams = CfdTypes.RiskParams({
             vpiFactor: 0.001e18,
@@ -86,7 +132,8 @@ contract TimelockPauseTest is BasePerpTest {
             fadMarginBps: 500,
             baseCarryBps: 500,
             minBountyUsdc: 10 * 1e6,
-            bountyBps: 20
+            bountyBps: 20,
+            keeperShareBps: 5000
         });
 
         ICfdEngineAdminHost.EngineRiskConfig memory config;
@@ -106,7 +153,8 @@ contract TimelockPauseTest is BasePerpTest {
             fadMarginBps: 500,
             baseCarryBps: 500,
             minBountyUsdc: 10 * 1e6,
-            bountyBps: 20
+            bountyBps: 20,
+            keeperShareBps: 5000
         });
 
         ICfdEngineAdminHost.EngineRiskConfig memory config;
@@ -128,7 +176,8 @@ contract TimelockPauseTest is BasePerpTest {
             fadMarginBps: 500,
             baseCarryBps: 500,
             minBountyUsdc: 10 * 1e6,
-            bountyBps: 20
+            bountyBps: 20,
+            keeperShareBps: 5000
         });
 
         ICfdEngineAdminHost.EngineRiskConfig memory config;
@@ -139,7 +188,7 @@ contract TimelockPauseTest is BasePerpTest {
         _warpForward(48 hours + 1);
         engineAdmin.finalizeRiskConfig();
 
-        (,, uint256 maintMarginBps,,,,,) = engine.riskParams();
+        (,, uint256 maintMarginBps,,,,,,) = engine.riskParams();
         assertEq(maintMarginBps, 200);
         assertEq(engine.executionFeeBps(), 7);
         assertEq(engine.frozenCloseSpreadBps(), 70);
@@ -188,7 +237,8 @@ contract TimelockPauseTest is BasePerpTest {
             fadMarginBps: 500,
             baseCarryBps: 500,
             minBountyUsdc: 10 * 1e6,
-            bountyBps: 20
+            bountyBps: 20,
+            keeperShareBps: 5000
         });
 
         ICfdEngineAdminHost.EngineRiskConfig memory config;
@@ -214,7 +264,8 @@ contract TimelockPauseTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000
         });
 
         ICfdEngineAdminHost.EngineRiskConfig memory config;
@@ -265,7 +316,8 @@ contract TimelockPauseTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000
         });
 
         ICfdEngineAdminHost.EngineRiskConfig memory firstConfig;
@@ -285,7 +337,8 @@ contract TimelockPauseTest is BasePerpTest {
             fadMarginBps: 500,
             baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000
         });
 
         ICfdEngineAdminHost.EngineRiskConfig memory secondConfig;

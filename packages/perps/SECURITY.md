@@ -396,7 +396,10 @@ Trade-off:
 ### Reachability and bounty bounds
 
 - liquidation accounting is constrained by actually reachable collateral,
-- keeper bounty is proportional with a floor, capped by reachable value, and may explicitly subsidize low-equity liquidations,
+- the proportional liquidation charge has a floor, is capped by reachable value, and may explicitly subsidize
+  low-equity liquidations,
+- the collected charge is conserved across a bounded, timelocked split: the keeper receives
+  `floor(charge * keeperShareBps / 10_000)` and LPs receive the remainder as claimant revenue,
 - residual trader value is preserved when positive,
 - same-account trader claim balance does not support liquidation reachability and is only netted once against terminal shortfall,
 - remaining deficit becomes bad debt socialized to LP capital.

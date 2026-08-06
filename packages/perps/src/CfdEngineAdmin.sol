@@ -95,9 +95,10 @@ contract CfdEngineAdmin is Ownable2Step {
     /// @dev Callable only by the current owner. Replaces any pending risk proposal and resets its delay. Maintenance
     ///      margin must be nonzero; initial margin must be at least maintenance; FAD margin must be at least maintenance;
     ///      initial and FAD margin may not exceed 10,000 bps; annual base carry may not exceed 100,000 bps; minimum
-    ///      bounty and bounty bps must be nonzero; and max skew may not exceed 1e18. There is no admin-side upper bound
-    ///      on `vpiFactor` or `bountyBps`, and FAD margin need not be at least initial margin. The open/close execution
-    ///      fee must be 1..10,000 bps and the oracle-frozen close spread must be 1..1,000 bps.
+    ///      liquidation charge and charge bps must be nonzero; keeper share may not exceed 10,000 bps; and max skew may
+    ///      not exceed 1e18. There is no admin-side upper bound on `vpiFactor` or `bountyBps`, and FAD margin need not be
+    ///      at least initial margin. The open/close execution fee must be 1..10,000 bps and the oracle-frozen close
+    ///      spread must be 1..1,000 bps.
     /// @param config Complete risk configuration to validate and stage.
     function proposeRiskConfig(
         ICfdEngineAdminHost.EngineRiskConfig calldata config
@@ -254,6 +255,9 @@ contract CfdEngineAdmin is Ownable2Step {
             revert CfdEngineAdmin__InvalidRiskParams();
         }
         if (riskParams_.minBountyUsdc == 0 || riskParams_.bountyBps == 0) {
+            revert CfdEngineAdmin__InvalidRiskParams();
+        }
+        if (riskParams_.keeperShareBps > 10_000) {
             revert CfdEngineAdmin__InvalidRiskParams();
         }
         if (riskParams_.maxSkewRatio > CfdMath.WAD) {

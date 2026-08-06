@@ -418,7 +418,8 @@ contract AuditConfirmedFindingsFailing_LegacySpreadReserve is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 5e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5_000
         });
     }
 
@@ -502,7 +503,8 @@ contract AuditConfirmedFindingsFailing_EntryNotionalRounding is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5_000
         });
     }
 
@@ -568,7 +570,8 @@ contract AuditConfirmedFindingsFailing_OpenSkewCap is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 5e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5_000
         });
     }
 

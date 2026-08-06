@@ -61,15 +61,16 @@ library MarginClearinghouseAccountingLib {
         bool insufficientPositionMargin;
     }
 
-    /// @notice Planned account disposition after removing a liquidated position and paying a keeper bounty.
-    /// @param keeperBountyUsdc Requested bounty debited from the liquidated account.
+    /// @notice Planned account disposition after removing a liquidated position and reserving its total charge.
+    /// @param liquidationChargeUsdc Total keeper-and-LP charge reserved from the liquidated account.
     /// @param settlementRetainedUsdc Existing settlement left in the account toward positive residual equity.
-    /// @param settlementSeizedUsdc Existing settlement transferred away after bounty and retained equity.
+    /// @param settlementSeizedUsdc Existing settlement transferred away after the charge reserve and retained equity;
+    ///        the LP-owned charge is added by the liquidation planner before live settlement.
     /// @param freshTraderPayoutUsdc New value required to satisfy positive residual equity.
     /// @param badDebtUsdc Magnitude of negative residual equity; seizure is not subtracted from this field.
     /// @param mutation Settlement debit and locked-margin consumption required to apply the plan.
     struct LiquidationResidualPlan {
-        uint256 keeperBountyUsdc;
+        uint256 liquidationChargeUsdc;
         uint256 settlementRetainedUsdc;
         uint256 settlementSeizedUsdc;
         uint256 freshTraderPayoutUsdc;
@@ -302,7 +303,7 @@ library MarginClearinghouseAccountingLib {
         mutation.otherLockedMarginUnlockedUsdc = consumption.otherLockedMarginConsumedUsdc;
     }
 
-    /// @notice Plans liquidation residual settlement without a keeper bounty.
+    /// @notice Plans liquidation residual settlement without a liquidation charge.
     /// @param buckets Terminal account bucket snapshot.
     /// @param residualUsdc Signed post-liquidation equity; positive is owed to the trader and negative is bad debt.
     /// @return plan Retention, seizure, fresh-payout, bad-debt, and bucket-mutation plan.
@@ -313,39 +314,40 @@ library MarginClearinghouseAccountingLib {
         return planLiquidationResidual(buckets, residualUsdc, 0);
     }
 
-    /// @notice Plans terminal account settlement for residual equity after reserving a keeper bounty.
-    /// @dev The bounty is subtracted from reachable settlement with a zero floor. For nonnegative residual equity,
+    /// @notice Plans terminal account settlement for residual equity after reserving a total liquidation charge.
+    /// @dev The charge is subtracted from reachable settlement with a zero floor. For nonnegative residual equity,
     ///      remaining settlement is retained up to the residual, excess is seized, and any deficit is a fresh payout.
-    ///      For negative residual equity, all post-bounty reachable settlement is seized and the full residual magnitude
+    ///      For negative residual equity, all post-charge reachable settlement is seized and the full residual magnitude
     ///      is reported as bad debt. The mutation always unlocks/declassifies the full active-position margin, while
     ///      other locked margin is consumed only for the debit beyond free settlement plus active margin. Canonical
-    ///      callers cap the bounty to terminal reachable settlement; otherwise `mutation.settlementDebitUsdc` can
+    ///      callers cap the charge to terminal reachable settlement; otherwise `mutation.settlementDebitUsdc` can
     ///      exceed the balance. `type(int256).min` cannot be negated and reverts on the negative-residual path.
     /// @param buckets Terminal account bucket snapshot.
     /// @param residualUsdc Signed equity remaining after PnL, carry, VPI, and liquidation economics.
-    /// @param keeperBountyUsdc Keeper bounty to debit before retaining or seizing residual settlement.
+    /// @param liquidationChargeUsdc Total keeper-and-LP charge to debit before retaining or seizing residual settlement.
     /// @return plan Retention, seizure, payout, bad-debt, and clearinghouse mutation values.
     function planLiquidationResidual(
         IMarginClearinghouse.AccountUsdcBuckets memory buckets,
         int256 residualUsdc,
-        uint256 keeperBountyUsdc
+        uint256 liquidationChargeUsdc
     ) internal pure returns (LiquidationResidualPlan memory plan) {
         uint256 reachableUsdc = getTerminalReachableUsdc(buckets);
-        plan.keeperBountyUsdc = keeperBountyUsdc;
-        uint256 reachableAfterBountyUsdc = reachableUsdc > keeperBountyUsdc ? reachableUsdc - keeperBountyUsdc : 0;
+        plan.liquidationChargeUsdc = liquidationChargeUsdc;
+        uint256 reachableAfterChargeUsdc =
+            reachableUsdc > liquidationChargeUsdc ? reachableUsdc - liquidationChargeUsdc : 0;
 
         if (residualUsdc >= 0) {
             plan.settlementRetainedUsdc =
-                reachableAfterBountyUsdc > uint256(residualUsdc) ? uint256(residualUsdc) : reachableAfterBountyUsdc;
-            plan.settlementSeizedUsdc = reachableAfterBountyUsdc - plan.settlementRetainedUsdc;
+                reachableAfterChargeUsdc > uint256(residualUsdc) ? uint256(residualUsdc) : reachableAfterChargeUsdc;
+            plan.settlementSeizedUsdc = reachableAfterChargeUsdc - plan.settlementRetainedUsdc;
             plan.freshTraderPayoutUsdc = uint256(residualUsdc) - plan.settlementRetainedUsdc;
         } else {
             plan.settlementRetainedUsdc = 0;
-            plan.settlementSeizedUsdc = reachableAfterBountyUsdc;
+            plan.settlementSeizedUsdc = reachableAfterChargeUsdc;
             plan.badDebtUsdc = uint256(-residualUsdc);
         }
 
-        plan.mutation.settlementDebitUsdc = plan.settlementSeizedUsdc + keeperBountyUsdc;
+        plan.mutation.settlementDebitUsdc = plan.settlementSeizedUsdc + liquidationChargeUsdc;
         uint256 freeSettlementUsdc = buckets.freeSettlementUsdc;
         uint256 positionMarginUsdc = buckets.activePositionMarginUsdc;
         plan.mutation.positionMarginUnlockedUsdc = positionMarginUsdc;

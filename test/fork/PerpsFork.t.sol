@@ -114,7 +114,8 @@ contract PerpsForkTest is Test {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000
         });
 
         clearinghouse = new MarginClearinghouse(USDC);
@@ -277,7 +278,8 @@ contract PerpsForkTest is Test {
             uint256 fadMarginBps,
             uint256 baseCarryBps,
             uint256 minBountyUsdc,
-            uint256 bountyBps
+            uint256 bountyBps,
+            uint256 keeperShareBps
         ) = engine.riskParams();
         return CfdTypes.RiskParams({
             vpiFactor: vpiFactor,
@@ -287,7 +289,8 @@ contract PerpsForkTest is Test {
             fadMarginBps: fadMarginBps,
             baseCarryBps: baseCarryBps,
             minBountyUsdc: minBountyUsdc,
-            bountyBps: bountyBps
+            bountyBps: bountyBps,
+            keeperShareBps: keeperShareBps
         });
     }
 
@@ -301,7 +304,7 @@ contract PerpsForkTest is Test {
         uint256 aliceUsdcBefore = IERC20(USDC).balanceOf(alice);
         uint256 poolBefore = IERC20(USDC).balanceOf(address(pool));
         uint256 clearinghouseBefore = IERC20(USDC).balanceOf(address(clearinghouse));
-        uint256 keeperBefore = IERC20(USDC).balanceOf(keeper);
+        uint256 keeperBefore = clearinghouse.balanceUsdc(keeper);
 
         // Open BULL $50k at $1.00
         this._commitAndExecute(alice, CfdTypes.Side.BULL, 50_000e18, 5000e6, 1e8, int64(100_000_000), false);
@@ -481,8 +484,12 @@ contract PerpsForkTest is Test {
         (size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 0, "Position should be liquidated");
 
-        uint256 keeperGain = IERC20(USDC).balanceOf(keeper) - keeperBefore;
-        assertGe(keeperGain, _getRiskParams().minBountyUsdc, "Keeper should get at least min bounty");
+        uint256 keeperGain = clearinghouse.balanceUsdc(keeper) - keeperBefore;
+        CfdTypes.RiskParams memory params = _getRiskParams();
+        uint256 minimumKeeperShare = (params.minBountyUsdc * params.keeperShareBps) / 10_000;
+        assertGe(
+            keeperGain, minimumKeeperShare, "Keeper should get at least the configured share of the minimum charge"
+        );
 
         // USDC conservation: pool + clearinghouse + keeper == before totals
         uint256 totalAfter = IERC20(USDC).balanceOf(address(pool)) + IERC20(USDC).balanceOf(address(clearinghouse))

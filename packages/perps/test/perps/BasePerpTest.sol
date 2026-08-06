@@ -206,7 +206,8 @@ abstract contract BasePerpTest is Test {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000
         });
     }
 
@@ -633,7 +634,9 @@ abstract contract BasePerpTest is Test {
         assertEq(actual.equityUsdc, expected.equityUsdc, "Liquidation equity should match");
         assertEq(actual.pnlUsdc, expected.pnlUsdc, "Liquidation pnl should match");
         assertEq(actual.reachableCollateralUsdc, expected.reachableCollateralUsdc, "Reachable collateral should match");
+        assertEq(actual.liquidationChargeUsdc, expected.liquidationChargeUsdc, "Liquidation charge should match");
         assertEq(actual.keeperBountyUsdc, expected.keeperBountyUsdc, "Keeper bounty should match");
+        assertEq(actual.lpLiquidationFeeUsdc, expected.lpLiquidationFeeUsdc, "LP liquidation fee should match");
         assertEq(actual.seizedCollateralUsdc, expected.seizedCollateralUsdc, "Seized collateral should match");
         assertEq(actual.settlementRetainedUsdc, expected.settlementRetainedUsdc, "Settlement retained should match");
         assertEq(actual.freshTraderPayoutUsdc, expected.freshTraderPayoutUsdc, "Fresh trader payout should match");
@@ -711,7 +714,8 @@ abstract contract BasePerpTest is Test {
             config.riskParams.fadMarginBps,
             config.riskParams.baseCarryBps,
             config.riskParams.minBountyUsdc,
-            config.riskParams.bountyBps
+            config.riskParams.bountyBps,
+            config.riskParams.keeperShareBps
         ) = engine.riskParams();
         config.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
         config.executionFeeBps = engine.executionFeeBps();
@@ -846,7 +850,7 @@ abstract contract BasePerpTest is Test {
         uint256 size,
         uint256 price
     ) internal view returns (uint256) {
-        (,, uint256 maintMarginBps,, uint256 fadMarginBps,,,) = engine.riskParams();
+        (,, uint256 maintMarginBps,, uint256 fadMarginBps,,,,) = engine.riskParams();
         uint256 requiredBps = engine.isFadWindow() ? fadMarginBps : maintMarginBps;
         uint256 notionalUsdc = (size * price) / 1e20;
         return (notionalUsdc * requiredBps) / 10_000;
@@ -993,7 +997,7 @@ abstract contract BasePerpTest is Test {
         CfdTypes.Side side
     ) internal view returns (uint256 index) {
         uint256 sideIndex = uint256(side);
-        (,,,,, uint256 baseCarryBps,,) = engine.riskParams();
+        (,,,,, uint256 baseCarryBps,,,) = engine.riskParams();
         index = PositionRiskAccountingLib.computeCurrentCarryIndex(
             engine.sideCarryIndex(sideIndex),
             engine.sideCarryTimestamp(sideIndex),

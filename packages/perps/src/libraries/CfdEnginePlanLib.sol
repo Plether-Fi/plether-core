@@ -945,9 +945,9 @@ library CfdEnginePlanLib {
     ///      populating account and price. Otherwise equity deducts pending carry and negative lifetime-VPI clawback and
     ///      uses all terminal settlement balance as reachable collateral. The liquidation threshold uses FAD margin in
     ///      the FAD window and normal maintenance margin otherwise, with equality liquidatable. A nonliquidatable
-    ///      result stops after risk diagnostics; a liquidatable result removes the entire position, plans bounty and
-    ///      residual settlement, and previews solvency. Notional, margin requirement, and rate-based bounty calculations
-    ///      round down. `publishTime` is retained for interface parity but is not read.
+    ///      result stops after risk diagnostics; a liquidatable result removes the entire position, plans the split
+    ///      charge and residual settlement, and previews solvency. Notional, margin requirement, and rate-based charge
+    ///      calculations round down. `publishTime` is retained for interface parity but is not read.
     /// @param snap Caller-built position, side, pool, collateral, carry, claim, and risk snapshot.
     /// @param executionPrice Oracle liquidation price before the protocol cap.
     /// @param publishTime Oracle publish timestamp; currently unused by pure planning.
@@ -991,20 +991,22 @@ library CfdEnginePlanLib {
         delta.solvency = _computeLiquidationSolvency(snap, delta, pos);
     }
 
-    /// @notice Adds keeper bounty, full-position removal, residual settlement, claim netting, and payout routing.
-    /// @dev Bounty is the maximum of the notional rate and minimum bounty, capped by terminal reachable collateral.
-    ///      Residual equity is risk equity minus bounty. Positive residual retains existing account settlement first,
-    ///      then creates a fresh payout; negative residual seizes post-bounty settlement. When pre-bounty equity is
-    ///      nonnegative but below bounty, the resulting bounty subsidy is removed from reported liquidation bad debt.
+    /// @notice Adds the keeper/LP charge split, full-position removal, residual settlement, claim netting, and payout routing.
+    /// @dev The total charge is the maximum of the notional rate and minimum, capped by terminal reachable collateral,
+    ///      then split using `keeperShareBps`; LPs get the remainder. Residual equity is risk equity
+    ///      minus the total charge. Positive residual retains existing account settlement first, then creates a fresh
+    ///      payout; negative residual seizes post-charge settlement. When pre-charge equity is nonnegative but below the
+    ///      total charge, the resulting charge subsidy is removed from reported liquidation bad debt.
     ///      Remaining bad debt consumes this account's existing trader claim. A fresh payout is immediate only when
-    ///      pool cash, after reserving aggregate claims net of consumed account claims, can pay it in full.
+    ///      pool cash plus settlement seized earlier in live execution, after reserving aggregate claims net of consumed
+    ///      account claims, can pay it in full.
     /// @param snap Account, pool cash, claims, risk parameters, and aggregate side snapshot.
     /// @param delta Liquidatable delta containing precomputed risk state.
     /// @param pos Entire position being liquidated.
     /// @param price Capped liquidation price.
-    /// @param settlementReachableUsdc Terminal account settlement reachable before bounty.
+    /// @param settlementReachableUsdc Terminal account settlement reachable before the liquidation charge.
     /// @param maintMarginBps Active maintenance or FAD rate used for liquidation state.
-    /// @return Updated liquidation delta containing all position, bounty, residual, claim, and payout effects.
+    /// @return Updated liquidation delta containing all position, charge-split, residual, claim, and payout effects.
     function _applyLiquidationSettlement(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdEnginePlanTypes.LiquidationDelta memory delta,
@@ -1023,26 +1025,31 @@ library CfdEnginePlanLib {
             maintMarginBps,
             snap.riskParams.minBountyUsdc,
             snap.riskParams.bountyBps,
+            snap.riskParams.keeperShareBps,
             CfdMath.USDC_TO_TOKEN_SCALE
         );
+        delta.liquidationChargeUsdc = delta.liquidationState.liquidationChargeUsdc;
         delta.keeperBountyUsdc = delta.liquidationState.keeperBountyUsdc;
+        delta.lpLiquidationFeeUsdc = delta.liquidationState.lpLiquidationFeeUsdc;
 
         delta.sideOiDecrease = pos.size;
         delta.sideMaxProfitDecrease = pos.maxProfitUsdc;
         delta.sideEntryNotionalReduction = pos.size * pos.entryPrice;
         delta.sideTotalMarginReduction = pos.margin;
 
-        delta.residualUsdc = liquidationEquityUsdc - int256(delta.keeperBountyUsdc);
+        delta.residualUsdc = liquidationEquityUsdc - int256(delta.liquidationChargeUsdc);
         delta.residualPlan = MarginClearinghouseAccountingLib.planLiquidationResidual(
-            snap.accountBuckets, delta.residualUsdc, delta.keeperBountyUsdc
+            snap.accountBuckets, delta.residualUsdc, delta.liquidationChargeUsdc
         );
+        delta.settlementSeizedUsdc = delta.residualPlan.settlementSeizedUsdc + delta.lpLiquidationFeeUsdc;
         delta.settlementRetainedUsdc = delta.residualPlan.settlementRetainedUsdc;
         uint256 liquidationBadDebtUsdc = delta.residualPlan.badDebtUsdc;
         if (liquidationEquityUsdc >= 0) {
             uint256 equityUsdc = uint256(liquidationEquityUsdc);
-            uint256 keeperSubsidyUsdc = delta.keeperBountyUsdc > equityUsdc ? delta.keeperBountyUsdc - equityUsdc : 0;
+            uint256 chargeSubsidyUsdc =
+                delta.liquidationChargeUsdc > equityUsdc ? delta.liquidationChargeUsdc - equityUsdc : 0;
             liquidationBadDebtUsdc =
-                liquidationBadDebtUsdc > keeperSubsidyUsdc ? liquidationBadDebtUsdc - keeperSubsidyUsdc : 0;
+                liquidationBadDebtUsdc > chargeSubsidyUsdc ? liquidationBadDebtUsdc - chargeSubsidyUsdc : 0;
         }
         (delta.existingTraderClaimConsumedUsdc, delta.existingTraderClaimRemainingUsdc, delta.badDebtUsdc) =
             _planTraderClaimConsumption(snap.traderClaimBalanceForAccount, liquidationBadDebtUsdc, false);
@@ -1052,8 +1059,9 @@ library CfdEnginePlanLib {
             delta.freshTraderPayoutUsdc = delta.residualPlan.freshTraderPayoutUsdc;
             uint256 traderClaimAfterConsumption =
                 snap.totalTraderClaimBalanceUsdc - delta.existingTraderClaimConsumedUsdc;
+            uint256 poolCashBeforeFreshPayout = snap.poolCashUsdc + delta.settlementSeizedUsdc;
             delta.freshPayoutIsImmediate = CashPriorityLib.reserveFreshPayouts(
-                    snap.poolCashUsdc, traderClaimAfterConsumption
+                    poolCashBeforeFreshPayout, traderClaimAfterConsumption
                 )
                 .freeCashUsdc >= delta.freshTraderPayoutUsdc;
             delta.freshPayoutCreatesClaim = !delta.freshPayoutIsImmediate;
@@ -1063,9 +1071,10 @@ library CfdEnginePlanLib {
     }
 
     /// @notice Computes post-liquidation effective assets, maximum liability, and degraded-mode transition.
-    /// @dev The entire position max-profit envelope is removed from its side. Physical assets gain settlement seized
-    ///      after bounty and lose only an immediate fresh payout; the keeper bounty is an internal account transfer and
-    ///      is excluded. Deferred payout increases trader claims, while existing claim consumption decreases them.
+    /// @dev The entire position max-profit envelope is removed from its side. Physical assets gain total settlement
+    ///      transferred to the pool, including the LP fee, and lose only an immediate fresh payout; the keeper bounty is
+    ///      an internal account transfer and is excluded. Deferred payout increases trader claims, while existing claim
+    ///      consumption decreases them.
     /// @param snap Pre-liquidation pool, side-liability, claims, and degraded-mode snapshot.
     /// @param delta Planned liquidation settlement and payout routing.
     /// @param pos Position whose maximum-profit liability is removed.
@@ -1085,8 +1094,8 @@ library CfdEnginePlanLib {
             snap.totalTraderClaimBalanceUsdc
         );
 
-        int256 physicalAssetsDelta = int256(delta.residualPlan.settlementSeizedUsdc)
-            - int256(delta.freshPayoutIsImmediate ? delta.freshTraderPayoutUsdc : 0);
+        int256 physicalAssetsDelta =
+            int256(delta.settlementSeizedUsdc) - int256(delta.freshPayoutIsImmediate ? delta.freshTraderPayoutUsdc : 0);
 
         SolvencyAccountingLib.PreviewResult memory result = SolvencyAccountingLib.previewPostOpSolvency(
             currentState,

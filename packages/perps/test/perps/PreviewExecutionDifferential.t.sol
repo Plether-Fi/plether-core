@@ -647,6 +647,61 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         );
     }
 
+    function test_PreviewLiquidation_IncludesIncomingSeizureWhenRoutingFreshPayout() public {
+        address trader = address(0xC10C);
+        address account = trader;
+        uint256 liquidationPrice = 99_500_000;
+
+        vm.warp(1_729_277_999); // Friday 18:59:59 UTC, immediately before the FAD window.
+        _fundTrader(trader, 200e6);
+        _open(account, CfdTypes.Side.BULL, 10_000e18, 200e6, 1e8);
+        vm.warp(1_729_278_000); // Friday 19:00:00 UTC, when the higher FAD margin becomes active.
+
+        uint256 targetPoolCash = 48e6;
+        uint256 poolCash = usdc.balanceOf(address(pool));
+        assertGt(poolCash, targetPoolCash, "Setup should have enough pool cash to create the boundary");
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolCash - targetPoolCash);
+
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, liquidationPrice);
+        assertTrue(preview.liquidatable, "FAD margin should make the profitable position liquidatable");
+        assertGt(preview.freshTraderPayoutUsdc, 0, "Setup should produce a fresh trader payout");
+        assertGt(preview.seizedCollateralUsdc, 0, "Setup should transfer the LP fee to the pool");
+        assertLt(targetPoolCash, preview.freshTraderPayoutUsdc, "Pre-seizure cash should be insufficient");
+        assertGe(
+            targetPoolCash + preview.seizedCollateralUsdc,
+            preview.freshTraderPayoutUsdc,
+            "Incoming seizure should make the fresh payout serviceable"
+        );
+        assertEq(
+            preview.immediatePayoutUsdc,
+            preview.freshTraderPayoutUsdc,
+            "Preview should include incoming seizure before routing the fresh payout"
+        );
+        assertEq(preview.traderClaimBalanceUsdc, 0, "Preview should not create a serviceable trader claim");
+
+        IMarginClearinghouse.AccountUsdcBuckets memory bucketsBefore = clearinghouse.getAccountUsdcBuckets(account);
+        uint256 traderClaimBefore = engine.traderClaimBalanceUsdc(account);
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(liquidationPrice);
+
+        vm.prank(KEEPER);
+        router.executeLiquidation(account, priceData);
+
+        IMarginClearinghouse.AccountUsdcBuckets memory bucketsAfter = clearinghouse.getAccountUsdcBuckets(account);
+        assertEq(
+            bucketsAfter.settlementBalanceUsdc,
+            bucketsBefore.settlementBalanceUsdc + preview.immediatePayoutUsdc - preview.seizedCollateralUsdc
+                - preview.keeperBountyUsdc,
+            "Previewed immediate payout should match the live settlement mutation"
+        );
+        assertEq(
+            engine.traderClaimBalanceUsdc(account) - traderClaimBefore,
+            preview.traderClaimBalanceUsdc,
+            "Previewed trader claim should match live routing at the seizure boundary"
+        );
+    }
+
     function test_PreviewLiquidation_MatchesLiveExecution_WithQueuedExecutionReservationOutsideReachability() public {
         address trader = address(0xC104);
         address account = trader;

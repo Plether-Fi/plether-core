@@ -21,7 +21,8 @@ contract PlanApplyRegressionTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 5e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5_000
         });
     }
 

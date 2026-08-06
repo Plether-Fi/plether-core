@@ -54,7 +54,8 @@ contract OrderRouterTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5_000
         });
     }
 
@@ -1417,7 +1418,8 @@ contract OrderRouterPythTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5_000
         });
     }
 
@@ -3060,7 +3062,8 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5_000
         });
     }
 
@@ -3449,7 +3452,8 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
-            bountyBps: 9
+            bountyBps: 9,
+            keeperShareBps: 5_000
         });
     }
 
@@ -3809,7 +3813,8 @@ contract FadStalenessTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5_000
         });
     }
 
@@ -4612,7 +4617,8 @@ contract OrderRouterAuditTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5_000
         });
     }
 
@@ -4736,7 +4742,8 @@ contract StaleOrderExpiryTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5_000
         });
     }
 
@@ -4993,7 +5000,8 @@ contract MarkPriceStalenessTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5_000
         });
     }
 
@@ -5106,7 +5114,8 @@ contract StalenessGriefTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5_000
         });
     }
 
@@ -5242,7 +5251,8 @@ contract VpiImrBypassTest is Test {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5_000
         });
 
         clearinghouse = new MarginClearinghouse(address(usdc));
@@ -5499,7 +5509,8 @@ contract KeeperFeeRefundTest is Test {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5_000
         });
 
         clearinghouse = new MarginClearinghouse(address(usdc));
@@ -5868,7 +5879,8 @@ contract WeekendArbitrageTest is Test {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5_000
         });
 
         clearinghouse = new MarginClearinghouse(address(usdc));

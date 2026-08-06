@@ -80,8 +80,9 @@ library CfdTypes {
     /// @param initMarginBps Initial-margin ratio for opens and increases in basis points.
     /// @param fadMarginBps Maintenance-margin ratio used during the FAD window in basis points.
     /// @param baseCarryBps Annualized base carry rate applied to LP-backed notional in basis points.
-    /// @param minBountyUsdc Minimum liquidation bounty and position-margin floor in 6-decimal USDC.
-    /// @param bountyBps Variable liquidation bounty rate applied to notional in basis points.
+    /// @param minBountyUsdc Minimum total liquidation charge and position-margin floor in 6-decimal USDC.
+    /// @param bountyBps Variable total liquidation-charge rate applied to notional in basis points.
+    /// @param keeperShareBps Keeper share of the collected liquidation charge in basis points; LPs receive the remainder.
     struct RiskParams {
         uint256 vpiFactor; // [18 dec WAD] Impact severity 'k'
         uint256 maxSkewRatio; // [18 dec WAD] Hard cliff e.g., 40% (0.40e18)
@@ -89,8 +90,9 @@ library CfdTypes {
         uint256 initMarginBps; // e.g., 150 (1.5%)
         uint256 fadMarginBps; // e.g., 300 (3%)
         uint256 baseCarryBps; // e.g., 500 (5% annualized carry on LP-backed notional)
-        uint256 minBountyUsdc; // e.g., 1_000_000 ($1 USDC floor)
-        uint256 bountyBps; // e.g., 10 (0.10% of Notional Size)
+        uint256 minBountyUsdc; // e.g., 1_000_000 ($1 USDC total charge floor)
+        uint256 bountyBps; // e.g., 10 (0.10% of notional total charge)
+        uint256 keeperShareBps; // e.g., 5_000 (50% of the collected charge)
     }
 
 }

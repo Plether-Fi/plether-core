@@ -21,7 +21,8 @@ contract CfdMathFuzzTest is Test {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5_000
         });
     }
 
