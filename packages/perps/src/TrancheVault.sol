@@ -107,10 +107,17 @@ contract TrancheVault is ERC4626 {
     /// @notice A delayed deposit was requested while the pool's tranche-deposit gates were closed.
     error TrancheVault__DepositsUnavailable();
 
+    /// @notice A delayed deposit request exceeds the tranche's currently available asset capacity.
+    /// @param receiver Pending-deposit owner for whom capacity was queried.
+    /// @param assets Requested underlying asset amount.
+    /// @param maxAssets Maximum underlying asset amount currently accepted.
+    error TrancheVault__ExceededMaxRequestDeposit(address receiver, uint256 assets, uint256 maxAssets);
+
     /// @notice A delayed-deposit epoch was finalized before its activation timestamp.
     error TrancheVault__DepositEpochNotActive();
 
-    /// @notice Cancellation was attempted at or after activation without finalization-blocking senior impairment.
+    /// @notice Cancellation was attempted after activation while neither impairment nor invalid senior reservations
+    ///         blocked finalization.
     error TrancheVault__DepositEpochAlreadyActive();
 
     /// @notice An operation requiring an unfinalized deposit epoch was attempted after finalization.
@@ -244,10 +251,11 @@ contract TrancheVault is ERC4626 {
 
     /// @notice Escrows assets for a delayed deposit assigned to the current epoch plus the activation delay.
     /// @dev Requires a nonterminal tranche, the pool's active seed/trading lifecycle and delayed-deposit gate, a
-    ///      nonzero receiver, and at least the pool minimum. Transfers assets from the caller into this vault without
-    ///      minting shares or changing a cooldown. `receiver` owns the resulting pending balance and is the only
-    ///      account that can cancel or claim it. A third party may fund a receiver only while that receiver has no
-    ///      active vault shares.
+    ///      nonzero receiver, at least the pool minimum, and enough current tranche capacity. Senior requests reserve
+    ///      their gross asset amount in `POOL` before tokens move. Transfers assets from the caller into this vault
+    ///      without minting shares or changing a cooldown. `receiver` owns the resulting pending balance and is the
+    ///      only account that can cancel or claim it. A third party may fund a receiver only while that receiver has
+    ///      no active vault shares.
     /// @param assets Underlying asset amount to escrow, in USDC units.
     /// @param receiver Account that owns and may later cancel or claim the pending deposit.
     /// @return epochId Activation epoch assigned to the request.
@@ -257,6 +265,9 @@ contract TrancheVault is ERC4626 {
     ) public returns (uint256 epochId) {
         _requireRequestDepositPreflight(assets, receiver);
 
+        if (IS_SENIOR) {
+            POOL.reserveSeniorDeposit(assets);
+        }
         epochId = currentDepositEpoch() + DEPOSIT_ACTIVATION_EPOCH_DELAY;
         IERC20(asset()).safeTransferFrom(msg.sender, address(this), assets);
         depositEpochs[epochId].assets += assets;
@@ -265,16 +276,21 @@ contract TrancheVault is ERC4626 {
     }
 
     /// @notice Cancels the caller's pending deposit and refunds its escrowed assets.
-    /// @dev Cancellation is available before activation. At or after activation it remains available only when the
-    ///      pool reports that senior impairment would block finalization. The epoch must not have been finalized.
+    /// @dev Cancellation is available before activation. At or after activation it remains available when senior
+    ///      impairment would block finalization or, for the senior vault, when the aggregate reservation book no
+    ///      longer fits the active governed limits. Cancelling a senior request releases its pool reservation before
+    ///      refunding escrowed assets. The epoch must not have been finalized.
     /// @param epochId Epoch containing the caller's pending deposit.
     /// @return assets Underlying asset amount returned to the caller, in USDC units.
     function cancelPendingDeposit(
         uint256 epochId
     ) public returns (uint256 assets) {
         bool activeEpoch = block.timestamp >= depositEpochStart(epochId);
-        if (activeEpoch && !POOL.isSeniorImpairedAfterPendingDepositReconcile()) {
-            revert TrancheVault__DepositEpochAlreadyActive();
+        if (activeEpoch) {
+            bool reservationsWithinLimits = !IS_SENIOR || POOL.areSeniorDepositReservationsWithinLimits();
+            if (!POOL.isSeniorImpairedAfterPendingDepositReconcile() && reservationsWithinLimits) {
+                revert TrancheVault__DepositEpochAlreadyActive();
+            }
         }
         DepositEpoch storage epoch = depositEpochs[epochId];
         if (epoch.finalized) {
@@ -287,6 +303,9 @@ contract TrancheVault is ERC4626 {
 
         pendingDepositAssets[msg.sender][epochId] = 0;
         epoch.assets -= assets;
+        if (IS_SENIOR) {
+            POOL.releaseSeniorDepositReservation(assets);
+        }
         IERC20(asset()).safeTransfer(msg.sender, assets);
         emit DepositRequestCancelled(msg.sender, epochId, assets);
     }
@@ -294,7 +313,8 @@ contract TrancheVault is ERC4626 {
     /// @notice Permissionlessly prices a matured deposit epoch and deposits its assets into the house pool.
     /// @dev Prices the full batch at the current deposit-side NAV, including any active frozen-oracle LP fee. The
     ///      aggregate assets are moved into `POOL`, and the resulting shares are minted to this vault as claimant
-    ///      escrow. Pool deposit gates and reconciliation checks still apply at finalization time.
+    ///      escrow. Senior finalization atomically consumes the batch's pre-existing pool reservation. Pool deposit
+    ///      gates, governed senior limits, and reconciliation checks still apply at finalization time.
     /// @param epochId Activated, nonempty epoch to finalize.
     /// @return shares Vault shares minted to this vault for later claimant distribution.
     function finalizeDepositEpoch(
@@ -321,7 +341,7 @@ contract TrancheVault is ERC4626 {
 
         IERC20(asset()).forceApprove(address(POOL), assets);
         if (IS_SENIOR) {
-            POOL.depositSenior(assets);
+            POOL.depositReservedSenior(assets);
         } else {
             POOL.depositJunior(assets);
         }
@@ -387,6 +407,10 @@ contract TrancheVault is ERC4626 {
         _requireMinimumDeposit(assets);
         uint256 feeBps = _frozenLpFeeBps();
         if (feeBps > 0) {
+            uint256 maxAssets = maxDeposit(receiver);
+            if (assets > maxAssets) {
+                revert ERC4626ExceededMaxDeposit(receiver, assets, maxAssets);
+            }
             uint256 shares = previewDeposit(assets);
             _deposit(msg.sender, receiver, assets, shares);
             return shares;
@@ -412,13 +436,18 @@ contract TrancheVault is ERC4626 {
         if (!POOL.canAcceptInstantTrancheDeposits(IS_SENIOR)) {
             revert ERC4626ExceededMaxMint(receiver, shares, 0);
         }
-        _requireMinimumDeposit(previewMint(shares));
         uint256 feeBps = _frozenLpFeeBps();
         if (feeBps > 0) {
+            uint256 maxShares = maxMint(receiver);
+            if (shares > maxShares) {
+                revert ERC4626ExceededMaxMint(receiver, shares, maxShares);
+            }
             uint256 assets = previewMint(shares);
+            _requireMinimumDeposit(assets);
             _deposit(msg.sender, receiver, assets, shares);
             return assets;
         }
+        _requireMinimumDeposit(previewMint(shares));
         return super.mint(shares, receiver);
     }
 
@@ -451,46 +480,61 @@ contract TrancheVault is ERC4626 {
         return _previewFrozenMintAssets(shares, feeBps);
     }
 
-    /// @notice Returns the maximum immediate asset deposit allowed by the current global pool gates.
+    /// @notice Returns the maximum immediate asset deposit allowed by the current pool gates and capacity.
     /// @dev Returns zero when the tranche is terminally wiped or the pool blocks instant deposits because of lifecycle,
-    ///      pause, open-position, mark-freshness, pending-bootstrap, or senior-impairment state. Receiver-specific
-    ///      third-party funding restrictions and the minimum deposit are enforced by `deposit`, not by this view.
+    ///      pause, open-position, mark-freshness, pending-bootstrap, or senior-impairment state. For senior, returns
+    ///      the finite gross-asset capacity remaining under governed exposure/share limits and existing reservations;
+    ///      junior retains the default ERC-4626 maximum. Receiver-specific third-party funding restrictions and the
+    ///      minimum deposit are enforced by `deposit`, not by this view.
     /// @param receiver Account that would receive shares; currently does not change the global cap.
     /// @return Maximum underlying asset amount accepted, in USDC units.
     function maxDeposit(
         address receiver
     ) public view override returns (uint256) {
-        receiver;
         if (!_canInstantDepositNow()) {
             return 0;
+        }
+        if (IS_SENIOR) {
+            return _seniorDepositCapacity();
         }
         return super.maxDeposit(receiver);
     }
 
-    /// @notice Returns the maximum immediate share mint allowed by the current global pool gates.
-    /// @dev Returns zero under the same global gates as `maxDeposit`. In frozen-oracle mode, returns the finite share
-    ///      cap for which fee-adjusted mint pricing remains defined. Receiver-specific third-party funding restrictions
-    ///      and the minimum deposit are enforced by `mint`, not by this view.
+    /// @notice Returns the maximum immediate share mint allowed by the current pool gates and capacity.
+    /// @dev Returns zero under the same global gates as `maxDeposit`. For senior, exactly converts the remaining gross
+    ///      asset capacity into shares under normal or frozen entry pricing. In frozen-oracle mode, the result is also
+    ///      capped where fee-adjusted mint pricing ceases to be defined, and returns zero when share granularity makes
+    ///      the largest capacity-bounded quote smaller than the minimum deposit. Receiver-specific third-party funding
+    ///      restrictions are enforced by `mint`, not by this view.
     /// @param receiver Account that would receive shares; currently does not change the global cap.
     /// @return Maximum vault-share amount accepted.
     function maxMint(
         address receiver
     ) public view override returns (uint256) {
-        receiver;
         if (!_canInstantDepositNow()) {
             return 0;
         }
         uint256 feeBps = _frozenLpFeeBps();
+        if (IS_SENIOR) {
+            uint256 maxShares = _maxMintSharesForAssetCapacity(_seniorDepositCapacity(), feeBps);
+            if (maxShares == 0) {
+                return 0;
+            }
+            uint256 requiredAssets =
+                feeBps == 0 ? _previewMintAssets(maxShares) : _previewFrozenMintAssets(maxShares, feeBps);
+            return requiredAssets < POOL.minTrancheDepositUsdc() ? 0 : maxShares;
+        }
         if (feeBps > 0) {
             return _maxFrozenMintShares(feeBps);
         }
         return super.maxMint(receiver);
     }
 
-    /// @notice Returns the maximum delayed-deposit request allowed by the current global pool gates.
+    /// @notice Returns the maximum delayed-deposit request allowed by the current pool gates and capacity.
     /// @dev Returns zero when the tranche is terminally wiped or delayed deposits are globally unavailable;
-    ///      otherwise returns `type(uint256).max`. Receiver validity, third-party funding restrictions, and the
-    ///      minimum deposit are enforced by `requestDeposit`, not by this view.
+    ///      otherwise senior returns its finite gross-asset capacity net of existing reservations, while junior returns
+    ///      `type(uint256).max`. Receiver validity and third-party funding restrictions are enforced by
+    ///      `requestDeposit`; senior requests are explicitly checked against this maximum before reservation.
     /// @param receiver Account that would own the pending deposit; currently does not change the global cap.
     /// @return Maximum underlying asset amount that may be requested, in USDC units.
     function maxRequestDeposit(
@@ -499,6 +543,9 @@ contract TrancheVault is ERC4626 {
         receiver;
         if (!_canDepositNow()) {
             return 0;
+        }
+        if (IS_SENIOR) {
+            return _seniorDepositCapacity();
         }
         return type(uint256).max;
     }
@@ -773,6 +820,10 @@ contract TrancheVault is ERC4626 {
         if (msg.sender != receiver && balanceOf(receiver) != 0) {
             revert TrancheVault__ThirdPartyDepositForExistingHolder();
         }
+        uint256 maxAssets = maxRequestDeposit(receiver);
+        if (assets > maxAssets) {
+            revert TrancheVault__ExceededMaxRequestDeposit(receiver, assets, maxAssets);
+        }
     }
 
     function _requireWithdrawPreflight(
@@ -835,6 +886,13 @@ contract TrancheVault is ERC4626 {
 
     function _frozenLpFeeBps() internal view returns (uint256) {
         return POOL.frozenLpFeeBps(IS_SENIOR);
+    }
+
+    function _seniorDepositCapacity() internal view returns (uint256 capacity) {
+        capacity = POOL.getSeniorDepositCapacity();
+        if (capacity < POOL.minTrancheDepositUsdc()) {
+            return 0;
+        }
     }
 
     function _applyFee(
@@ -930,19 +988,220 @@ contract TrancheVault is ERC4626 {
         }
         uint256 adjustedShares = totalSupply() + 10 ** _decimalsOffset();
         uint256 adjustedAssets = _depositPricingAssets() + 1;
-        uint256 denominator = ((10_000 - feeBps) * adjustedShares) - (feeBps * shares);
-        return Math.mulDiv(10_000 * shares, adjustedAssets, denominator, Math.Rounding.Ceil);
+        (bool adjustedSharesProductFits, uint256 adjustedSharesProduct) = Math.tryMul(10_000 - feeBps, adjustedShares);
+        (bool feeSharesProductFits, uint256 feeSharesProduct) = Math.tryMul(feeBps, shares);
+        (bool grossSharesProductFits, uint256 grossSharesProduct) = Math.tryMul(10_000, shares);
+        if (
+            adjustedSharesProductFits && feeSharesProductFits && grossSharesProductFits
+                && adjustedSharesProduct > feeSharesProduct
+        ) {
+            uint256 denominator = adjustedSharesProduct - feeSharesProduct;
+            (uint256 productHigh,) = Math.mul512(grossSharesProduct, adjustedAssets);
+            if (productHigh >= denominator) {
+                return type(uint256).max;
+            }
+            uint256 assets = Math.mulDiv(grossSharesProduct, adjustedAssets, denominator, Math.Rounding.Floor);
+            if (mulmod(grossSharesProduct, adjustedAssets, denominator) == 0) {
+                return assets;
+            }
+            return assets == type(uint256).max ? assets : assets + 1;
+        }
+        return _minimumFrozenMintAssets(shares, feeBps, adjustedShares, adjustedAssets);
+    }
+
+    function _maxMintSharesForAssetCapacity(
+        uint256 assetCapacity,
+        uint256 feeBps
+    ) internal view returns (uint256) {
+        if (assetCapacity == 0) {
+            return 0;
+        }
+        if (assetCapacity == type(uint256).max) {
+            return feeBps == 0 ? type(uint256).max : _maxFrozenMintShares(feeBps);
+        }
+
+        uint256 adjustedShares = totalSupply() + 10 ** _decimalsOffset();
+        uint256 adjustedAssets = _depositPricingAssets() + 1;
+        if (feeBps == 0) {
+            (uint256 normalProductHigh,) = Math.mul512(assetCapacity, adjustedShares);
+            if (normalProductHigh >= adjustedAssets) {
+                return type(uint256).max;
+            }
+            return Math.mulDiv(assetCapacity, adjustedShares, adjustedAssets, Math.Rounding.Floor);
+        }
+
+        uint256 feeAdjustedBps = 10_000 - feeBps;
+        uint256 feeLimitShares = _maxFrozenMintShares(feeBps);
+        (uint256 denominatorHigh, uint256 denominator) = _add512Products(10_000, adjustedAssets, feeBps, assetCapacity);
+        if (denominatorHigh != 0) {
+            return
+                _maximumFrozenMintSharesForAssets(assetCapacity, feeBps, adjustedShares, adjustedAssets, feeLimitShares);
+        }
+        // Exactly evaluate floor(assetCapacity * adjustedShares * feeAdjustedBps / denominator) without
+        // prematurely flooring the first multiplication/division pair.
+        (uint256 frozenProductHigh,) = Math.mul512(assetCapacity, adjustedShares);
+        if (frozenProductHigh >= denominator) {
+            return feeLimitShares;
+        }
+        uint256 quotient = Math.mulDiv(assetCapacity, adjustedShares, denominator, Math.Rounding.Floor);
+        uint256 remainder = mulmod(assetCapacity, adjustedShares, denominator);
+        if (quotient > feeLimitShares / feeAdjustedBps) {
+            return feeLimitShares;
+        }
+        uint256 capacityShares = quotient * feeAdjustedBps;
+        uint256 fractionalShares = Math.mulDiv(remainder, feeAdjustedBps, denominator, Math.Rounding.Floor);
+        if (fractionalShares >= feeLimitShares - capacityShares) {
+            return feeLimitShares;
+        }
+        return capacityShares + fractionalShares;
     }
 
     function _maxFrozenMintShares(
         uint256 feeBps
     ) internal view returns (uint256) {
         uint256 adjustedShares = totalSupply() + 10 ** _decimalsOffset();
-        uint256 quotient = Math.mulDiv(adjustedShares, 10_000 - feeBps, feeBps, Math.Rounding.Floor);
-        if (mulmod(adjustedShares, 10_000 - feeBps, feeBps) == 0) {
+        uint256 feeAdjustedBps = 10_000 - feeBps;
+        if (feeAdjustedBps > feeBps) {
+            uint256 maxSafeAdjustedShares = Math.mulDiv(type(uint256).max, feeBps, feeAdjustedBps);
+            if (adjustedShares > maxSafeAdjustedShares) {
+                return type(uint256).max;
+            }
+        }
+        uint256 quotient = Math.mulDiv(adjustedShares, feeAdjustedBps, feeBps, Math.Rounding.Floor);
+        if (mulmod(adjustedShares, feeAdjustedBps, feeBps) == 0) {
             return quotient == 0 ? 0 : quotient - 1;
         }
         return quotient;
+    }
+
+    function _minimumFrozenMintAssets(
+        uint256 shares,
+        uint256 feeBps,
+        uint256 adjustedShares,
+        uint256 adjustedAssets
+    ) private pure returns (uint256) {
+        uint256 high = type(uint256).max;
+        if (!_frozenMintFits(shares, high, feeBps, adjustedShares, adjustedAssets)) {
+            return high;
+        }
+        uint256 low;
+        while (low < high) {
+            uint256 midpoint = low + ((high - low) / 2);
+            if (_frozenMintFits(shares, midpoint, feeBps, adjustedShares, adjustedAssets)) {
+                high = midpoint;
+            } else {
+                low = midpoint + 1;
+            }
+        }
+        return low;
+    }
+
+    function _maximumFrozenMintSharesForAssets(
+        uint256 assets,
+        uint256 feeBps,
+        uint256 adjustedShares,
+        uint256 adjustedAssets,
+        uint256 upperBound
+    ) private pure returns (uint256) {
+        uint256 low;
+        uint256 high = upperBound;
+        while (low < high) {
+            uint256 midpoint = low + ((high - low) / 2) + 1;
+            if (_frozenMintFits(midpoint, assets, feeBps, adjustedShares, adjustedAssets)) {
+                low = midpoint;
+            } else {
+                high = midpoint - 1;
+            }
+        }
+        return low;
+    }
+
+    function _frozenMintFits(
+        uint256 shares,
+        uint256 assets,
+        uint256 feeBps,
+        uint256 adjustedShares,
+        uint256 adjustedAssets
+    ) private pure returns (bool) {
+        (uint256 rightHigh, uint256 rightMiddle, uint256 rightLow) = _mul768(assets, 10_000 - feeBps, adjustedShares);
+        (uint256 feeHigh, uint256 feeMiddle, uint256 feeLow) = _mul768(assets, feeBps, shares);
+        if (_compare768(rightHigh, rightMiddle, rightLow, feeHigh, feeMiddle, feeLow) < 0) {
+            return false;
+        }
+        (rightHigh, rightMiddle, rightLow) = _subtract768(rightHigh, rightMiddle, rightLow, feeHigh, feeMiddle, feeLow);
+        (uint256 costHigh, uint256 costMiddle, uint256 costLow) = _mul768(10_000, shares, adjustedAssets);
+        return _compare768(costHigh, costMiddle, costLow, rightHigh, rightMiddle, rightLow) <= 0;
+    }
+
+    function _mul768(
+        uint256 x,
+        uint256 y,
+        uint256 z
+    ) private pure returns (uint256 high, uint256 middle, uint256 low) {
+        (uint256 xyHigh, uint256 xyLow) = Math.mul512(x, y);
+        (uint256 lowHigh, uint256 lowLow) = Math.mul512(xyLow, z);
+        (uint256 highHigh, uint256 highLow) = Math.mul512(xyHigh, z);
+        unchecked {
+            middle = lowHigh + highLow;
+            high = highHigh + (middle < lowHigh ? 1 : 0);
+        }
+        low = lowLow;
+    }
+
+    function _add512Products(
+        uint256 x,
+        uint256 y,
+        uint256 a,
+        uint256 b
+    ) private pure returns (uint256 high, uint256 low) {
+        (uint256 xyHigh, uint256 xyLow) = Math.mul512(x, y);
+        (uint256 abHigh, uint256 abLow) = Math.mul512(a, b);
+        unchecked {
+            low = xyLow + abLow;
+            high = xyHigh + abHigh + (low < xyLow ? 1 : 0);
+        }
+    }
+
+    function _subtract768(
+        uint256 xHigh,
+        uint256 xMiddle,
+        uint256 xLow,
+        uint256 yHigh,
+        uint256 yMiddle,
+        uint256 yLow
+    ) private pure returns (uint256 high, uint256 middle, uint256 low) {
+        unchecked {
+            low = xLow - yLow;
+            uint256 lowBorrow = xLow < yLow ? 1 : 0;
+            middle = xMiddle - yMiddle;
+            uint256 middleBorrow = xMiddle < yMiddle ? 1 : 0;
+            uint256 middleBeforeBorrow = middle;
+            middle -= lowBorrow;
+            if (middleBeforeBorrow < lowBorrow) {
+                middleBorrow = 1;
+            }
+            high = xHigh - yHigh - middleBorrow;
+        }
+    }
+
+    function _compare768(
+        uint256 xHigh,
+        uint256 xMiddle,
+        uint256 xLow,
+        uint256 yHigh,
+        uint256 yMiddle,
+        uint256 yLow
+    ) private pure returns (int256) {
+        if (xHigh != yHigh) {
+            return xHigh < yHigh ? int256(-1) : int256(1);
+        }
+        if (xMiddle != yMiddle) {
+            return xMiddle < yMiddle ? int256(-1) : int256(1);
+        }
+        if (xLow == yLow) {
+            return 0;
+        }
+        return xLow < yLow ? int256(-1) : int256(1);
     }
 
 }
