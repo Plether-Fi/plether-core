@@ -1605,11 +1605,11 @@ contract OrderRouterPythTest is BasePerpTest {
         );
     }
 
-    function test_PythConfidenceTooWide_RevertsExecution() public {
+    function test_BasketConfidenceTooWide_RevertsExecution() public {
         vm.warp(SETUP_TIMESTAMP);
 
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
-        config.pythMaxConfidenceRatioBps = 100;
+        config.basketMaxConfidenceRatioBps = 100;
         routerAdmin.proposeRouterConfig(config);
         vm.warp(SETUP_TIMESTAMP + 48 hours + 1);
         routerAdmin.finalizeRouterConfig();
@@ -1629,28 +1629,29 @@ contract OrderRouterPythTest is BasePerpTest {
 
         vm.warp(uint256(pending.commitTime) + 1);
         vm.roll(block.number + 1);
-        vm.expectPartialRevert(IPletherOracle.PletherOracle__ConfidenceTooWide.selector);
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__BasketConfidenceTooWide.selector);
         router.executeOrder(1, _pythUpdateData());
     }
 
-    function test_PythConfidenceWithinThreshold_AllowsExecution() public {
+    function test_BasketConfidenceWithinThreshold_AllowsExecution() public {
         vm.warp(1000);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
-        config.pythMaxConfidenceRatioBps = 100;
+        config.basketMaxConfidenceRatioBps = 100;
         routerAdmin.proposeRouterConfig(config);
         vm.warp(1000 + 48 hours + 1);
         routerAdmin.finalizeRouterConfig();
+        assertEq(router.basketMaxConfidenceRatioBps(), 100, "timelocked basket confidence limit");
 
         mockPyth.setAllPrices(feedIds, int64(100_000_000), uint64(500_000), int32(-8), 1006);
 
         vm.roll(block.number + 1);
         router.executeOrder(1, _pythUpdateData());
 
-        assertEq(router.nextExecuteId(), 0, "Execution should succeed when all Pyth confidences are within threshold");
+        assertEq(router.nextExecuteId(), 0, "Execution should succeed when basket confidence is within threshold");
     }
 
     function test_Slippage_CancelsGracefully() public {
@@ -5544,7 +5545,7 @@ contract KeeperFeeRefundTest is Test {
             maxOrderAge: 300,
             orderExecutionStalenessLimit: router.orderExecutionStalenessLimit(),
             liquidationStalenessLimit: router.liquidationStalenessLimit(),
-            pythMaxConfidenceRatioBps: router.pythMaxConfidenceRatioBps(),
+            basketMaxConfidenceRatioBps: router.basketMaxConfidenceRatioBps(),
             orderSettlementWindow: router.orderSettlementWindow(),
             maxComponentPublishTimeDivergence: router.maxComponentPublishTimeDivergence(),
             adverseConfidenceMultiplierBps: router.adverseConfidenceMultiplierBps(),

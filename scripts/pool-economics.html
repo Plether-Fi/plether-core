@@ -57,7 +57,7 @@
 <body>
 
 <h1>Plether Perps — Pool Economics Model</h1>
-<p class="subtitle">Interactive model for HousePool tranche returns using the current carry/VPI/oracle-confidence/liquidation design. Execution fees remain separate protocol revenue.</p>
+<p class="subtitle">Interactive model for HousePool tranche returns using the current carry/VPI/basket-confidence/liquidation design. Execution fees remain separate protocol revenue.</p>
 
 <div class="scenario-bar">
   <button onclick="loadScenario('conservative')">Conservative</button>
@@ -98,9 +98,9 @@
       <div class="hint">Release value 4 bps. Charged on notional at open + close</div>
     </div>
     <div class="field">
-      <label>Oracle confidence <span class="val" id="v-oracleconf"></span></label>
+      <label>Basket oracle confidence <span class="val" id="v-oracleconf"></span></label>
       <input type="range" id="oracleconf" min="0" max="10" step="0.1" value="10" oninput="calc()">
-      <div class="hint">Accepted Pyth confidence ratio; feeds above 10 bps are rejected on-chain</div>
+      <div class="hint">Weighted pre-cap basket confidence ratio; the aggregate is capped at 10 bps on-chain, with no separate per-feed ceiling</div>
     </div>
     <div class="field">
       <label>Adverse confidence multiplier <span class="val" id="v-confmult"></span></label>
@@ -299,7 +299,7 @@ function calc() {
   // --- Execution fees (to protocol owner, NOT pool) ---
   const execFeeAnnual = annualExecutionNotional * execBps / 10000;
 
-  // --- Oracle confidence spread (to pool, NOT protocol fee revenue) ---
+  // --- Basket confidence spread (to pool, NOT protocol fee revenue) ---
   const effectiveConfidenceBps = oracleConfBps * confMultiplier;
   const oracleConfidenceAnnual = annualExecutionNotional * effectiveConfidenceBps / 10000;
 
@@ -357,7 +357,7 @@ function calc() {
     <tr><td class="row-label">Avg trader collateral</td><td class="right">${fmt(avgTraderCollateral)}</td></tr>
     <tr><td class="row-label">Avg LP-backed notional</td><td class="right">${fmt(avgLpBackedNotional)}</td></tr>
     <tr><td class="row-label">Effective confidence shift</td><td class="right">${bps(effectiveConfidenceBps)} per execution</td></tr>
-    <tr><td class="row-label">Annual oracle confidence edge</td><td class="right">${fmt(oracleConfidenceAnnual)}</td></tr>
+    <tr><td class="row-label">Annual basket confidence edge</td><td class="right">${fmt(oracleConfidenceAnnual)}</td></tr>
     <tr><td class="row-label">Annual carry revenue</td><td class="right">${fmt(carryAnnual)}</td></tr>
     <tr><td class="row-label">Annual liquidated notional</td><td class="right">${fmt(annualLiqNotional)}</td></tr>
     <tr><td class="row-label">Avg keeper bounty per event</td><td class="right">${bps(avgKeeperBountyBps)} (min ${fmt(MIN_BOUNTY_USD)})</td></tr>
@@ -371,7 +371,7 @@ function calc() {
   const allVals = [oracleConfidenceAnnual, vpiAnnual, liqSurplusAnnual, carryAnnual, behavAnnual];
   const maxAbs = Math.max(...allVals.map(Math.abs), 1);
   let bars = '';
-  bars += bar('Oracle confidence edge', oracleConfidenceAnnual, maxAbs);
+  bars += bar('Basket confidence edge', oracleConfidenceAnnual, maxAbs);
   bars += bar('VPI net revenue', vpiAnnual, maxAbs);
   bars += bar('LP liquidation retention', liqSurplusAnnual, maxAbs);
   bars += bar('Carry revenue', carryAnnual, maxAbs);
@@ -387,7 +387,7 @@ function calc() {
   let tbody = '';
   tbody += row(`Execution fees (${execBps} bps × 2)`, 'Protocol owner', execFeeAnnual);
   tbody += sep();
-  tbody += row('Oracle confidence edge', 'Pool (LPs)', oracleConfidenceAnnual);
+  tbody += row('Basket confidence edge', 'Pool (LPs)', oracleConfidenceAnnual);
   tbody += row('VPI net revenue', 'Pool (LPs)', vpiAnnual);
   tbody += row('Keeper bounties', 'Keepers', -bountyAnnual);
   tbody += row('LP liquidation retention', 'Pool (LPs)', liqSurplusAnnual);
@@ -426,7 +426,7 @@ function calc() {
   } else if (unfundedSeniorCoupon > 1) {
     noteEl.textContent = 'Junior principal is insufficient to fund the full senior coupon. The shortfall is not carried as future debt.';
   } else {
-    noteEl.textContent = 'Healthy: senior coupon funded, junior earning surplus. Execution fees are separate protocol-owner revenue. Oracle confidence edge is modeled as adverse execution-price adjustment accruing to LPs. Liquidation retention here means only the collateral the pool keeps after trader residual equity and keeper bounty are accounted for.';
+    noteEl.textContent = 'Healthy: senior coupon funded, junior earning surplus. Execution fees are separate protocol-owner revenue. Basket confidence edge is modeled as adverse execution-price adjustment accruing to LPs. Liquidation retention here means only the collateral the pool keeps after trader residual equity and keeper bounty are accounted for.';
   }
 }
 

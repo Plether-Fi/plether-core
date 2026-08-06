@@ -88,20 +88,28 @@ The next Arbitrum Sepolia perps deployment uses these initial defaults:
 | `bountyBps` | `10` |
 | `executionFeeBps` | `4` |
 | `fadRunwaySeconds` | `1 hours` |
-| `pythMaxConfidenceRatioBps` | `10` |
+| `basketMaxConfidenceRatioBps` | `10` |
 | `adverseConfidenceMultiplierBps` | `2_000` |
 
 `frozenCloseSpreadBps = 50` charges a fixed 0.50% spread on reduced notional for voluntary close/reduce execution only while `oracleFrozen`. Normal signed VPI and its lifetime rebate clamp remain active. For oracle-frozen voluntary closes, the spread replaces rather than compounds with the Pyth adverse-confidence adjustment; live/FAD-only closes and liquidations retain that adjustment. The spread belongs to LPs rather than protocol treasury and does not apply to liquidations. A terminal full close waives any uncollectible portion instead of adding bad debt, while a partial close must settle its full obligation.
 
 The parameter is part of `CfdEngineAdmin.EngineRiskConfig` and therefore uses the 48-hour propose/finalize timelock. Deployments and updates reject zero and values above `1_000` bps (10%).
 
-`pythMaxConfidenceRatioBps = 10` rejects a component feed when Pyth's reported confidence interval exceeds
-`0.10%` of that component's price. Pyth confidence is an uncertainty band, so larger values mean less precise
-prices.
+`basketMaxConfidenceRatioBps = 10` accepts the neutral, pre-cap basket only when its weighted aggregate Pyth
+confidence is at most `0.10%` of its price:
+
+```text
+basketConfidence * 10_000 <= basketPrice * basketMaxConfidenceRatioBps
+```
+
+Each component contributes its normalized basket value multiplied by its raw confidence-to-price ratio, with
+the contribution floored before summation. Equality passes. There is no separate per-component confidence
+ceiling, so a wide low-weight feed can remain usable when its weighted uncertainty keeps the full basket within
+the configured limit. Positive-price, staleness, and component publish-time-divergence checks remain per feed.
 
 `adverseConfidenceMultiplierBps = 2_000` applies `0.2x` of Pyth's confidence interval when shifting live/FAD
 order execution and all liquidation prices in the adverse direction. Oracle-frozen voluntary closes bypass the
-shift and use `frozenCloseSpreadBps` instead; confidence-width validation remains active.
+shift and use `frozenCloseSpreadBps` instead; aggregate basket confidence-width validation remains active.
 
 ## Environment
 

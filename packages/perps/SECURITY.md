@@ -45,7 +45,7 @@ Engine risk controls live in `CfdEngineAdmin`, and router risk controls live in 
 | `EngineFreshnessConfig` (`fadMaxStaleness`, `engineMarkStalenessLimit`) | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 48-hour timelock |
 | `seniorRateBps` | `HousePool` | `onlyOwner`, 48-hour timelock |
 | `markStalenessLimit` | `HousePool` | `onlyOwner`, 48-hour timelock |
-| `RouterConfig` (`maxOrderAge`, staleness limits, Pyth confidence ratio, historical settlement window, component publish-time skew, adverse confidence multiplier, bounty limits) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
+| `RouterConfig` (`maxOrderAge`, staleness limits, basket confidence ratio, historical settlement window, component publish-time skew, adverse confidence multiplier, bounty limits) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
 | `OracleConfig` (`pletherOracle`) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
 
 The deployed `frozenCloseSpreadBps` default is `50` bps (0.50%). Both construction and timelocked updates reject zero and values above the `1,000` bps (10%) hard cap.
@@ -168,7 +168,7 @@ Mitigations:
 - distinct staleness thresholds for order execution, liquidation, engine-side guards, and HousePool freshness,
 - shared normalized basket-price construction across execution paths,
 - timelocked rotation of the router's `PletherOracle` address if the Pyth endpoint or basket-feed set must be replaced,
-- conservative basket confidence propagation and side-adverse pricing for execution, equity checks, and liquidation, except that oracle-frozen voluntary closes replace the adverse price shift with the fixed frozen-close spread,
+- conservative weighted basket confidence propagation, a timelocked aggregate pre-cap confidence limit, and side-adverse pricing for execution, equity checks, and liquidation, except that oracle-frozen voluntary closes replace the adverse price shift with the fixed frozen-close spread,
 - component publish-time skew limits so a basket cannot mix fresh and stale legs,
 - frozen-oracle regime for close liveness during genuine market closure.
 
@@ -178,6 +178,7 @@ Risks:
 - unavailable historical update data can delay live order execution until a keeper supplies the commit-window tick or the order expires,
 - frozen-market execution is intentionally liveness-first for risk reduction,
 - exponent normalization truncates on scale-down,
+- the basket-only confidence gate deliberately favors liveness over an individual-feed hard ceiling: a low-weight component with a wide confidence interval can pass when its weighted contribution keeps aggregate basket confidence within the configured limit,
 - all live execution still depends on external oracle availability.
 
 ### USDC
@@ -251,7 +252,8 @@ Security properties:
 - live-market execution uses Pyth's unique historical parse over `(commitTime, commitTime + orderSettlementWindow]`, capped at `block.timestamp`, so settlement is bound to the first post-commit tick rather than the keeper's reveal-time tick,
 - the unique historical parse rejects skipped ticks because the parsed update must prove its previous publish time is no later than the order's `commitTime`,
 - batch execution may reuse a parsed historical basket only for later FIFO orders whose `commitTime` is strictly before the cached tick and falls within its proven coverage,
-- basket confidence is included in live/FAD execution and all liquidation prices instead of being treated only as metadata; oracle-frozen voluntary closes retain confidence-width validation but replace the adverse price shift with the fixed frozen-close spread,
+- the neutral pre-cap basket is accepted only when `basketConfidence * 10_000 <= basketPrice * basketMaxConfidenceRatioBps`; equality passes, each weighted component contribution is floored before summation, and no independent component-confidence ceiling applies,
+- aggregate basket confidence is included in live/FAD execution and all liquidation prices instead of being treated only as metadata; oracle-frozen voluntary closes retain aggregate confidence-width validation but replace the adverse price shift with the fixed frozen-close spread,
 - FIFO execution prevents later orders from bypassing earlier ones,
 - partial-close size floors prevent flat-bounty dust closes from occupying global FIFO slots,
 - binding order semantics prevent traders from turning queued intents into free options.

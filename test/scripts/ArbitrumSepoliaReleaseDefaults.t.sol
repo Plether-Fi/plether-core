@@ -77,7 +77,7 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
             address(engine), address(0xBEEF), address(pyth), feedIds, quantities, basePrices, inversions
         );
 
-        assertEq(oracle.pythMaxConfidenceRatioBps(), 10, "pyth confidence ratio");
+        assertEq(oracle.basketMaxConfidenceRatioBps(), 10, "basket confidence ratio");
         assertEq(oracle.adverseConfidenceMultiplierBps(), 2000, "adverse confidence multiplier");
     }
 
