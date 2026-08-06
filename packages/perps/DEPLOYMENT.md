@@ -103,6 +103,24 @@ prices.
 order execution and all liquidation prices in the adverse direction. Oracle-frozen voluntary closes bypass the
 shift and use `frozenCloseSpreadBps` instead; confidence-width validation remains active.
 
+### FX Market Calendar
+
+The oracle-frozen regime follows Pyth's recurring FX market boundary at 17:00 New York time. The contracts calculate
+the US daylight-saving transition on-chain, so the boundary is 21:00 UTC during daylight time and 22:00 UTC during
+standard time. FAD begins 30 minutes before Friday close and ends 15 minutes after Sunday open. On the spring and fall
+transition weekends, Friday and Sunday intentionally use different UTC offsets.
+
+`CfdEngine` delegates this deterministic classification to the deployed `CfdEnginePlanner` sidecar to remain below
+the EIP-170 runtime-size limit, and `PletherOracle` reads the engine's canonical frozen status. Deploy the engine,
+planner, and oracle from the same build; mixing calendar versions can split execution and risk policy.
+
+Before every deployment:
+
+1. Run `forge test --root packages/perps --match-contract MarketCalendarLibTest`.
+2. Run `forge test --root packages/perps --match-contract PerpOracleBoundaryInvariantTest`.
+3. Confirm the frontend countdown uses the same New York-time rule instead of fixed UTC constants.
+4. Configure governance UTC-day overrides for known FX holidays or provider-specific schedule changes.
+
 ## Environment
 
 ### Deploy

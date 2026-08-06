@@ -318,8 +318,9 @@ interface IPletherOracle {
     ) external view returns (uint256 pythFee);
 
     /// @notice Returns whether the market calendar allows frozen-oracle policy.
-    /// @dev The recurring window is Friday 22:00 UTC through Sunday 20:59:59 UTC. An engine override freezes its entire
-    ///      UTC day; the FAD runway does not extend this window.
+    /// @dev The recurring window follows Pyth FX hours from Friday 17:00 New York time through Sunday 16:59:59 New York
+    ///      time, including US daylight-saving transitions. An engine override freezes its entire UTC day; the FAD
+    ///      runway does not extend this window.
     /// @return Whether frozen-oracle policy is active at the current timestamp.
     function isOracleFrozen() external view returns (bool);
 

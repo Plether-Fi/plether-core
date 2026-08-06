@@ -8,7 +8,7 @@ import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 contract FrozenLpFeePolicyTest is BasePerpTest {
 
     uint256 internal constant SATURDAY_FROZEN = 1_710_021_600;
-    uint256 internal constant SUNDAY_FAD_ONLY = 1_710_106_200;
+    uint256 internal constant SUNDAY_FAD_ONLY = 1_710_105_000;
 
     function _enterFrozenWindow() internal {
         vm.warp(SATURDAY_FROZEN);
@@ -355,7 +355,7 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         vm.stopPrank();
     }
 
-    function test_FadOnlyHour_DoesNotActivateFrozenFee() public {
+    function test_FadOnlyShoulder_DoesNotActivateFrozenFee() public {
         vm.warp(SUNDAY_FAD_ONLY);
 
         assertTrue(engine.isFadWindow(), "setup should remain inside FAD");
