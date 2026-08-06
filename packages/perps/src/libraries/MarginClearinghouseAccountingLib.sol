@@ -62,7 +62,7 @@ library MarginClearinghouseAccountingLib {
     }
 
     /// @notice Planned account disposition after removing a liquidated position and reserving its total charge.
-    /// @param liquidationChargeUsdc Total keeper-and-LP charge reserved from the liquidated account.
+    /// @param liquidationChargeUsdc Total keeper, protocol, and LP charge reserved from the liquidated account.
     /// @param settlementRetainedUsdc Existing settlement left in the account toward positive residual equity.
     /// @param settlementSeizedUsdc Existing settlement transferred away after the charge reserve and retained equity;
     ///        the LP-owned charge is added by the liquidation planner before live settlement.
@@ -324,7 +324,7 @@ library MarginClearinghouseAccountingLib {
     ///      exceed the balance. `type(int256).min` cannot be negated and reverts on the negative-residual path.
     /// @param buckets Terminal account bucket snapshot.
     /// @param residualUsdc Signed equity remaining after PnL, carry, VPI, and liquidation economics.
-    /// @param liquidationChargeUsdc Total keeper-and-LP charge to debit before retaining or seizing residual settlement.
+    /// @param liquidationChargeUsdc Total keeper, protocol, and LP charge debited before residual settlement.
     /// @return plan Retention, seizure, payout, bad-debt, and clearinghouse mutation values.
     function planLiquidationResidual(
         IMarginClearinghouse.AccountUsdcBuckets memory buckets,

@@ -416,7 +416,7 @@ Required properties:
 
 - protocol fee withdrawal is a standard `MarginClearinghouse` withdrawal from the configured treasury account,
 - `MarginClearinghouse.balanceUsdc(CfdEngine.protocolTreasury())` reports the configured treasury account balance,
-- only cash-collected fees and free-cash-funded top-ups become treasury margin,
+- only cash-collected execution or liquidation fees and free-cash-funded top-ups become treasury margin,
 - uncredited fee amounts are not withdrawable protocol inventory in the simplified treasury-margin model,
 - frozen-close spread is LP-owned trading revenue and never becomes treasury margin,
 - withdrawing treasury margin must not consume `HousePool` cash, trader claims, or LP withdrawal reserves.
@@ -426,8 +426,9 @@ Required properties:
 Liquidation must:
 
 1. seize reachable account value,
-2. split the capped liquidation charge using the configured `keeperShareBps`, crediting the keeper share through
-   clearinghouse settlement and transferring the LP remainder to `HousePool` claimant revenue,
+2. allocate the capped liquidation charge using the configured `keeperShareBps` and `protocolShareBps`, crediting the
+   keeper and protocol-treasury shares through clearinghouse settlement and transferring the exact LP remainder to
+   `HousePool` claimant revenue,
 3. preserve residual trader value when positive,
 4. realize remaining shortfall as bad debt,
 5. delete the position,
@@ -437,7 +438,11 @@ Liquidation-charge rule:
 
 - assess the configured `bountyBps` rate and `minBountyUsdc` floor as one total charge,
 - cap the total charge by physically reachable liquidation collateral,
-- allocate `floor(totalCharge * keeperShareBps / 10_000)` to the keeper and the remainder to LPs,
+- require `keeperShareBps + protocolShareBps <= 10_000`,
+- set `keeperAllocation = floor(totalCharge * keeperShareBps / 10_000)` and credit it to the keeper,
+- set `protocolAllocation = floor(totalCharge * protocolShareBps / 10_000)` and credit it to the protocol treasury,
+- allocate `totalCharge - keeperAllocation - protocolAllocation` to LPs so all rounding remainder belongs to LPs and
+  the three destinations conserve the collected charge exactly,
 - allow the total charge to exceed positive equity as an explicit liquidation subsidy,
 - never cap by stale notions of notional or margin alone.
 

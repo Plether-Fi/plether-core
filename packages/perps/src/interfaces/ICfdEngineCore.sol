@@ -48,6 +48,7 @@ interface ICfdEngineCore is ICfdEngineTypes {
     /// @return minBountyUsdc Minimum total liquidation charge and position-margin floor in USDC
     /// @return bountyBps Variable total liquidation-charge rate in basis points
     /// @return keeperShareBps Keeper share of the collected liquidation charge in basis points
+    /// @return protocolShareBps Protocol-treasury share of the collected liquidation charge in basis points
     function riskParams()
         external
         view
@@ -60,7 +61,8 @@ interface ICfdEngineCore is ICfdEngineTypes {
             uint256 baseCarryBps,
             uint256 minBountyUsdc,
             uint256 bountyBps,
-            uint256 keeperShareBps
+            uint256 keeperShareBps,
+            uint256 protocolShareBps
         );
 
     /// @notice Fixed LP-owned spread charged on oracle-frozen close/reduce notional, in basis points.

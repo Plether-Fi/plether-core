@@ -48,6 +48,7 @@ contract LiquidationAccountingLibHarness {
         uint256 minBountyUsdc,
         uint256 bountyBps,
         uint256 keeperShareBps,
+        uint256 protocolShareBps,
         uint256 tokenScale
     ) external pure returns (LiquidationAccountingLib.LiquidationState memory) {
         return LiquidationAccountingLib.buildLiquidationState(
@@ -59,6 +60,7 @@ contract LiquidationAccountingLibHarness {
             minBountyUsdc,
             bountyBps,
             keeperShareBps,
+            protocolShareBps,
             tokenScale
         );
     }
@@ -110,7 +112,8 @@ contract CfdEnginePlanLibHarness {
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
             bountyBps: 10,
-            keeperShareBps: 5000
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
         snap.executionFeeBps = 4;
         snap.frozenCloseSpreadBps = 1000;
@@ -166,7 +169,8 @@ contract CfdEnginePlanLibHarness {
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
             bountyBps: 10,
-            keeperShareBps: 5000
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
         uint256 carryTimeDelta = currentTimestamp > lastCarryTimestamp ? currentTimestamp - lastCarryTimestamp : 0;
         snap.positionBorrowBaseUsdc = maxProfitUsdc;
@@ -222,7 +226,8 @@ contract CfdEnginePlanLibHarness {
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
             bountyBps: 10,
-            keeperShareBps: 5000
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
         snap.executionFeeBps = 4;
         return CfdEnginePlanLib.planLiquidation(snap, oraclePrice, 0);
@@ -283,7 +288,8 @@ contract CfdEnginePlanLibHarness {
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
             bountyBps: 10,
-            keeperShareBps: 5000
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
         snap.executionFeeBps = 4;
         snap.poolAssetsUsdc = 1_000_000e6;
@@ -383,7 +389,8 @@ contract CfdEngineTest is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
             bountyBps: 10,
-            keeperShareBps: 5000
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -463,7 +470,7 @@ contract CfdEngineTest is BasePerpTest {
         params.initMarginBps = 400;
         _setRiskParams(params);
 
-        (,,, uint256 initMarginBps,,,,,) = engine.riskParams();
+        (,,, uint256 initMarginBps,,,,,,) = engine.riskParams();
         assertEq(initMarginBps, 400, "Setup must finalize the explicit init margin config");
 
         vm.prank(address(router));
@@ -2769,11 +2776,12 @@ contract CfdEngineTest is BasePerpTest {
         assertTrue(preview.liquidatable);
         assertEq(preview.liquidationChargeUsdc, 10_100_000, "Total charge should retain the configured 10 bps");
         assertEq(preview.keeperBountyUsdc, 5_050_000, "Keeper should receive exactly half the charge");
+        assertEq(preview.protocolLiquidationFeeUsdc, 0, "Protocol fee should default to zero");
         assertEq(preview.lpLiquidationFeeUsdc, 5_050_000, "LPs should receive exactly half the charge");
         assertEq(
-            preview.keeperBountyUsdc + preview.lpLiquidationFeeUsdc,
+            preview.keeperBountyUsdc + preview.protocolLiquidationFeeUsdc + preview.lpLiquidationFeeUsdc,
             preview.liquidationChargeUsdc,
-            "Liquidation charge split should conserve value"
+            "Liquidation charge allocation should conserve value"
         );
         assertLe(preview.liquidationChargeUsdc, uint256(preview.equityUsdc));
     }
@@ -2935,7 +2943,7 @@ contract CfdEngineTest is BasePerpTest {
     function test_LiquidationState_UsesFullReachableCollateralForUnderwaterChargeCap() public {
         LiquidationAccountingLibHarness harness = new LiquidationAccountingLibHarness();
         LiquidationAccountingLib.LiquidationState memory state =
-            harness.build(10_000e18, 100_000_000, 125e6, -145e6, 100, 1e6, 900, 5000, 1e20);
+            harness.build(10_000e18, 100_000_000, 125e6, -145e6, 100, 1e6, 900, 5000, 0, 1e20);
 
         assertLt(state.equityUsdc, 0, "Setup must make the account underwater");
         assertEq(state.reachableCollateralUsdc, 125e6, "Liquidation state should use full reachable collateral");
@@ -2954,20 +2962,27 @@ contract CfdEngineTest is BasePerpTest {
             state.liquidationChargeUsdc / 2,
             "Keeper should receive only half of the capped charge"
         );
+        assertEq(state.protocolLiquidationFeeUsdc, 0, "Protocol liquidation fee should default to zero");
         assertEq(
             state.lpLiquidationFeeUsdc,
-            state.liquidationChargeUsdc - state.keeperBountyUsdc,
+            state.liquidationChargeUsdc - state.keeperBountyUsdc - state.protocolLiquidationFeeUsdc,
             "LPs should receive the other half of the capped charge"
         );
     }
 
-    function test_LiquidationState_OddMicroRemainderBelongsToLps() public {
+    function test_LiquidationState_ShareRoundingRemainderBelongsToLps() public {
         LiquidationAccountingLibHarness harness = new LiquidationAccountingLibHarness();
-        LiquidationAccountingLib.LiquidationState memory state = harness.build(0, 0, 9, 0, 100, 9, 10, 3333, 1);
+        LiquidationAccountingLib.LiquidationState memory state = harness.build(0, 0, 9, 0, 100, 9, 10, 3333, 2222, 1);
 
         assertEq(state.liquidationChargeUsdc, 9, "Reachable minimum charge should be collected in full");
         assertEq(state.keeperBountyUsdc, 2, "Configured keeper share should round down");
-        assertEq(state.lpLiquidationFeeUsdc, 7, "LP share should receive the remaining charge");
+        assertEq(state.protocolLiquidationFeeUsdc, 1, "Configured protocol share should round down");
+        assertEq(state.lpLiquidationFeeUsdc, 6, "LP share should receive both rounding remainders");
+        assertEq(
+            state.liquidationChargeUsdc,
+            state.keeperBountyUsdc + state.protocolLiquidationFeeUsdc + state.lpLiquidationFeeUsdc,
+            "All three allocations should conserve the total charge"
+        );
     }
 
     function testFuzz_PlanLiquidation_PositiveResidualPreservesTraderClaimAndUsesOnlyPhysicalReachability(
@@ -3254,6 +3269,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(interfacePreview.reachableCollateralUsdc, contractPreview.reachableCollateralUsdc);
         assertEq(interfacePreview.liquidationChargeUsdc, contractPreview.liquidationChargeUsdc);
         assertEq(interfacePreview.keeperBountyUsdc, contractPreview.keeperBountyUsdc);
+        assertEq(interfacePreview.protocolLiquidationFeeUsdc, contractPreview.protocolLiquidationFeeUsdc);
         assertEq(interfacePreview.lpLiquidationFeeUsdc, contractPreview.lpLiquidationFeeUsdc);
         assertEq(interfacePreview.seizedCollateralUsdc, contractPreview.seizedCollateralUsdc);
         assertEq(interfacePreview.immediatePayoutUsdc, contractPreview.immediatePayoutUsdc);
@@ -3366,6 +3382,12 @@ contract CfdEngineTest is BasePerpTest {
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory afterSnapshot =
             engineProtocolLens.getProtocolAccountingSnapshot();
 
+        assertGe(
+            observed.protocolLiquidationFeeUsdc,
+            reservationBefore.executionBountyUsdc,
+            "Treasury inflow should include the forfeited execution reservation"
+        );
+        observed.protocolLiquidationFeeUsdc -= reservationBefore.executionBountyUsdc;
         _assertLiquidationPreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
 
         assertEq(
@@ -3380,8 +3402,8 @@ contract CfdEngineTest is BasePerpTest {
         );
         assertEq(
             afterSnapshot.protocolTreasuryBalanceUsdc - beforeSnapshot.protocol.protocolTreasuryBalanceUsdc,
-            reservationBefore.executionBountyUsdc,
-            "Live liquidation should book the same forfeited reservation preview assumes as protocol fees"
+            reservationBefore.executionBountyUsdc + preview.protocolLiquidationFeeUsdc,
+            "Live liquidation should book forfeited reservations and the configured protocol liquidation fee"
         );
         assertEq(
             observed.effectiveAssetsAfterUsdc,
@@ -3799,7 +3821,8 @@ contract CfdEngineTest is BasePerpTest {
 
         uint256 bearMaxProfit = _sideMaxProfit(CfdTypes.Side.BEAR);
         uint256 targetAssets = bearMaxProfit + clearinghouse.balanceUsdc(engine.protocolTreasury())
-            + preDrainPreview.keeperBountyUsdc - preDrainPreview.seizedCollateralUsdc - 1;
+            + preDrainPreview.keeperBountyUsdc + preDrainPreview.protocolLiquidationFeeUsdc
+            - preDrainPreview.seizedCollateralUsdc - 1;
         uint256 currentAssets = pool.totalAssets();
         assertGt(currentAssets, targetAssets, "Test setup must be able to drain the pool into the degraded-mode gap");
 
@@ -4141,7 +4164,8 @@ contract CfdEngineTest is BasePerpTest {
                 baseCarryBps: 500,
                 minBountyUsdc: 1 * 1e6,
                 bountyBps: 10,
-                keeperShareBps: 5000
+                keeperShareBps: 5000,
+                protocolShareBps: 0
             })
         );
 
@@ -4365,7 +4389,8 @@ contract CfdEngineTest is BasePerpTest {
                 baseCarryBps: 500,
                 minBountyUsdc: 1 * 1e6,
                 bountyBps: 10,
-                keeperShareBps: 5000
+                keeperShareBps: 5000,
+                protocolShareBps: 0
             })
         );
 
@@ -4705,7 +4730,8 @@ contract CfdEngineTest is BasePerpTest {
                 baseCarryBps: 500,
                 minBountyUsdc: 1 * 1e6,
                 bountyBps: 100,
-                keeperShareBps: 5000
+                keeperShareBps: 5000,
+                protocolShareBps: 0
             })
         );
 
@@ -4740,9 +4766,9 @@ contract CfdEngineTest is BasePerpTest {
         );
         assertEq(bounty, preview.keeperBountyUsdc, "Live keeper credit should match the previewed half");
         assertEq(
-            preview.keeperBountyUsdc + preview.lpLiquidationFeeUsdc,
+            preview.keeperBountyUsdc + preview.protocolLiquidationFeeUsdc + preview.lpLiquidationFeeUsdc,
             posMargin,
-            "Keeper and LP shares should conserve the capped charge"
+            "Keeper, protocol, and LP shares should conserve the capped charge"
         );
     }
 
@@ -4990,7 +5016,7 @@ contract CfdEngineTest is BasePerpTest {
         params.initMarginBps = 300;
         _setRiskParams(params);
 
-        (,,, uint256 initMarginBps,,,,,) = engine.riskParams();
+        (,,, uint256 initMarginBps,,,,,,) = engine.riskParams();
         assertEq(initMarginBps, 300, "Setup must finalize the explicit init margin config");
 
         vm.prank(address(router));
@@ -5224,7 +5250,8 @@ contract CfdEngineCarryRegressionTest is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
             bountyBps: 10,
-            keeperShareBps: 5000
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -5341,7 +5368,8 @@ contract CfdEngineAuditTest is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
             bountyBps: 10,
-            keeperShareBps: 5000
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -5610,7 +5638,8 @@ contract CfdEngineAuditTest is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
             bountyBps: 10,
-            keeperShareBps: 5000
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = newParams;
@@ -5714,7 +5743,8 @@ contract MarginCappedMtmTest is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
             bountyBps: 10,
-            keeperShareBps: 5000
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -5895,7 +5925,8 @@ contract PhantomExecFeeTest is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
             bountyBps: 10,
-            keeperShareBps: 5000
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -5964,7 +5995,8 @@ contract CarryModelFreeUsdcTest is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
             bountyBps: 10,
-            keeperShareBps: 5000
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -6050,7 +6082,8 @@ contract DegradedModeLifecycleTest is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
             bountyBps: 10,
-            keeperShareBps: 5000
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -6163,7 +6196,8 @@ contract ProtocolPhaseTest is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
             bountyBps: 10,
-            keeperShareBps: 5000
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -6266,7 +6300,8 @@ contract VpiDepthTest is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
             bountyBps: 10,
-            keeperShareBps: 5000
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -6466,7 +6501,8 @@ contract VpiChunkingTest is Test {
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
             bountyBps: 10,
-            keeperShareBps: 5000
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
 
         clearinghouse = new MarginClearinghouse(address(usdc));
@@ -6651,7 +6687,8 @@ contract SolvencySnapshotRegressionTest is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
             bountyBps: 10,
-            keeperShareBps: 5000
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 

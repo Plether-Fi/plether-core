@@ -65,6 +65,7 @@ contract LiquidationTest is BasePerpTest {
 
         // Keeper liquidates. $3k required but only ~$2k margin → liquidatable.
         uint256 keeperSettlementBefore = _settlementBalance(keeper);
+        uint256 protocolTreasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 1e8);
 
         vm.startPrank(keeper);
@@ -77,6 +78,12 @@ contract LiquidationTest is BasePerpTest {
         uint256 bounty = _settlementBalance(keeper) - keeperSettlementBefore;
         assertEq(preview.liquidationChargeUsdc, 100 * 1e6, "Liquidation should retain the 10 bps total charge");
         assertEq(bounty, 50 * 1e6, "Keeper should receive 5 bps of the $100k notional");
+        assertEq(preview.protocolLiquidationFeeUsdc, 0, "Protocol liquidation fee should default to zero");
+        assertEq(
+            clearinghouse.balanceUsdc(engine.protocolTreasury()),
+            protocolTreasuryBefore,
+            "Default liquidation should not credit the protocol treasury"
+        );
         assertEq(preview.lpLiquidationFeeUsdc, 50 * 1e6, "LPs should receive the other 5 bps");
 
         // Ethical: Alice keeps surplus equity after the total charge and carry accrued between open and FAD liquidation.
@@ -111,12 +118,12 @@ contract LiquidationTest is BasePerpTest {
         (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Position should be wiped");
 
-        // Ethical: user should retain equity - bounty
+        // Ethical: user should retain equity minus the total liquidation charge.
         // PnL = -$1500, Margin = $1960 (after 4 bps fee), Equity = $460
-        // Bounty ~ 0.10% * $101.5k = $101.50, above the $5 floor.
+        // Total charge ~ 0.10% * $101.5k = $101.50, above the $5 floor.
         // Residual = $460 - $101.50 = $358.50
         uint256 chBalance = clearinghouse.balanceUsdc(account);
-        assertApproxEqAbs(chBalance, 358_500_000, 1, "Alice retains equity net of keeper bounty");
+        assertApproxEqAbs(chBalance, 358_500_000, 1, "Alice retains equity net of the total liquidation charge");
     }
 
     function test_SolventPosition_RevertsLiquidation() public {
@@ -150,7 +157,7 @@ contract LiquidationTest is BasePerpTest {
 
         // BULL loses when price rises. At $1.06:
         // PnL = 6000 * $0.06 = -$360. equity = posMargin - $360 < 0 → liquidatable.
-        // Bounty capped at posMargin (pool never pays more than it recovers).
+        // Total charge is capped at reachable collateral (the pool never pays more than it recovers).
         bytes[] memory pythData = new bytes[](1);
         pythData[0] = abi.encode(1.06e8);
 
@@ -160,7 +167,7 @@ contract LiquidationTest is BasePerpTest {
         router.executeLiquidation(account, pythData);
         uint256 bounty = _settlementBalance(keeper) - keeperSettlementBefore;
 
-        // Proportional bounty (0.10% of ~$6360 = ~$6.36) stays below posMargin, so the cap does not bind.
+        // Proportional charge (0.10% of ~$6360 = ~$6.36) stays below posMargin, so the cap does not bind.
         assertGt(bounty, 0, "Keeper still incentivized on negative-equity liquidation");
         assertLe(bounty, posMargin, "Bounty never exceeds margin pool can seize");
         assertGe(usdc.balanceOf(address(pool)), poolBefore, "Pool never pays more than it seizes");
@@ -178,7 +185,8 @@ contract LiquidationTest is BasePerpTest {
                 baseCarryBps: 500,
                 minBountyUsdc: 1 * 1e6,
                 bountyBps: 10,
-                keeperShareBps: 5000
+                keeperShareBps: 5000,
+                protocolShareBps: 0
             })
         );
 
@@ -222,6 +230,7 @@ contract LiquidationTest is BasePerpTest {
         uint256 poolBefore = usdc.balanceOf(address(pool));
         uint256 chBefore = clearinghouse.balanceUsdc(account);
         uint256 keeperSettlementBefore = _settlementBalance(keeper);
+        uint256 protocolTreasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 1.015e8);
 
         bytes[] memory pythData = new bytes[](1);
@@ -233,9 +242,11 @@ contract LiquidationTest is BasePerpTest {
         uint256 bounty = _settlementBalance(keeper) - keeperSettlementBefore;
         uint256 chAfter = clearinghouse.balanceUsdc(account);
         uint256 poolAfter = usdc.balanceOf(address(pool));
+        uint256 protocolFee = clearinghouse.balanceUsdc(engine.protocolTreasury()) - protocolTreasuryBefore;
 
         uint256 userSeized = chBefore - chAfter;
         assertEq(bounty, preview.keeperBountyUsdc, "Keeper should receive the previewed half of the charge");
+        assertEq(protocolFee, 0, "Protocol liquidation fee should default to zero");
         assertEq(
             preview.keeperBountyUsdc,
             preview.lpLiquidationFeeUsdc,
@@ -243,19 +254,20 @@ contract LiquidationTest is BasePerpTest {
         );
         assertEq(
             preview.liquidationChargeUsdc,
-            preview.keeperBountyUsdc + preview.lpLiquidationFeeUsdc,
-            "Keeper and LP shares should conserve the total charge"
+            preview.keeperBountyUsdc + preview.protocolLiquidationFeeUsdc + preview.lpLiquidationFeeUsdc,
+            "Keeper, protocol, and LP shares should conserve the total charge"
         );
         assertEq(
             poolAfter,
-            poolBefore + userSeized - bounty,
-            "Pool should receive every account debit except the keeper-owned half"
+            poolBefore + userSeized - bounty - protocolFee,
+            "Pool should receive every account debit except keeper and protocol allocations"
         );
     }
 
-    function test_LiquidationCharge_UsesConfiguredKeeperShare() public {
+    function test_LiquidationCharge_UsesConfiguredKeeperAndProtocolShares() public {
         CfdTypes.RiskParams memory params = _riskParams();
         params.keeperShareBps = 2500;
+        params.protocolShareBps = 2500;
         _setRiskParams(params);
 
         vm.warp(WEDNESDAY_NOON);
@@ -268,6 +280,7 @@ contract LiquidationTest is BasePerpTest {
         uint256 poolBefore = usdc.balanceOf(address(pool));
         uint256 chBefore = clearinghouse.balanceUsdc(account);
         uint256 keeperSettlementBefore = _settlementBalance(keeper);
+        uint256 protocolTreasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 1.015e8);
 
         bytes[] memory pythData = new bytes[](1);
@@ -279,20 +292,23 @@ contract LiquidationTest is BasePerpTest {
         uint256 chAfter = clearinghouse.balanceUsdc(account);
         uint256 poolAfter = usdc.balanceOf(address(pool));
         uint256 userSeized = chBefore - chAfter;
+        uint256 protocolFee = clearinghouse.balanceUsdc(engine.protocolTreasury()) - protocolTreasuryBefore;
 
         assertEq(preview.liquidationChargeUsdc, 101_500_000, "Total charge should remain 10 bps");
         assertEq(preview.keeperBountyUsdc, 25_375_000, "Keeper should receive 25% of the charge");
-        assertEq(preview.lpLiquidationFeeUsdc, 76_125_000, "LPs should receive 75% of the charge");
+        assertEq(preview.protocolLiquidationFeeUsdc, 25_375_000, "Protocol should receive 25% of the charge");
+        assertEq(preview.lpLiquidationFeeUsdc, 50_750_000, "LPs should receive 50% of the charge");
         assertEq(bounty, preview.keeperBountyUsdc, "Live keeper credit should match the configured preview share");
+        assertEq(protocolFee, preview.protocolLiquidationFeeUsdc, "Live treasury credit should match the preview");
         assertEq(
             preview.liquidationChargeUsdc,
-            preview.keeperBountyUsdc + preview.lpLiquidationFeeUsdc,
-            "Configured shares should conserve the total charge"
+            preview.keeperBountyUsdc + preview.protocolLiquidationFeeUsdc + preview.lpLiquidationFeeUsdc,
+            "Configured allocations should conserve the total charge"
         );
         assertEq(
             poolAfter,
-            poolBefore + userSeized - bounty,
-            "Pool should receive every account debit except the configured keeper share"
+            poolBefore + userSeized - bounty - protocolFee,
+            "Pool should receive every account debit except configured keeper and protocol shares"
         );
     }
 

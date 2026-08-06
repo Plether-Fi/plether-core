@@ -356,6 +356,7 @@ library CfdEnginePlanTypes {
     /// @param sideTotalMarginReduction Diagnostic 6-decimal USDC margin reduction; current apply uses `posMargin` instead.
     /// @param liquidationChargeUsdc Total configured liquidation charge collected from the account.
     /// @param keeperBountyUsdc Configured keeper share credited through clearinghouse settlement.
+    /// @param protocolLiquidationFeeUsdc Configured protocol share credited to the treasury clearinghouse account.
     /// @param lpLiquidationFeeUsdc Remaining LP share transferred to the HousePool.
     /// @param liquidationReachableCollateralUsdc Terminal account settlement reachable before the charge and settlement.
     /// @param residualUsdc Signed 6-decimal USDC liquidation equity remaining after the total charge.
@@ -393,6 +394,7 @@ library CfdEnginePlanTypes {
 
         uint256 liquidationChargeUsdc;
         uint256 keeperBountyUsdc;
+        uint256 protocolLiquidationFeeUsdc;
         uint256 lpLiquidationFeeUsdc;
         uint256 liquidationReachableCollateralUsdc;
 

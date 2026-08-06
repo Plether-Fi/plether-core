@@ -711,8 +711,9 @@ contract MarginClearinghouseTest is Test {
             positionMarginUnlockedUsdc: 600 * 1e6,
             otherLockedMarginUnlockedUsdc: 100 * 1e6
         });
-        uint256 seizedUsdc =
-            clearinghouse.applyLiquidationSettlementPlan(aliceAccount, reservationIds, plan, engine, address(0), 0);
+        uint256 seizedUsdc = clearinghouse.applyLiquidationSettlementPlan(
+            aliceAccount, reservationIds, plan, engine, address(0), 0, address(0), 0
+        );
         vm.stopPrank();
 
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceAccount);
@@ -835,7 +836,9 @@ contract MarginClearinghouseTest is Test {
             otherLockedMarginUnlockedUsdc: 100 * 1e6
         });
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__IncompleteReservationCoverage.selector);
-        clearinghouse.applyLiquidationSettlementPlan(aliceAccount, reservationIds, plan, engine, address(0), 0);
+        clearinghouse.applyLiquidationSettlementPlan(
+            aliceAccount, reservationIds, plan, engine, address(0), 0, address(0), 0
+        );
         vm.stopPrank();
     }
 
@@ -1055,7 +1058,7 @@ contract MarginClearinghouseTest is Test {
 
         vm.prank(engine);
         uint256 seizedUsdc = clearinghouse.applyLiquidationSettlementPlan(
-            aliceAccount, reservationIds, settlementPlan, engine, address(0), 0
+            aliceAccount, reservationIds, settlementPlan, engine, address(0), 0, address(0), 0
         );
 
         IMarginClearinghouse.AccountUsdcBuckets memory bucketsAfter = clearinghouse.getAccountUsdcBuckets(aliceAccount);
@@ -1080,6 +1083,39 @@ contract MarginClearinghouseTest is Test {
         clearinghouse.deposit(aliceAccount, 0);
     }
 
+    function test_ApplyLiquidationSettlementPlan_RoutesKeeperProtocolAndPoolAllocations() public {
+        address keeper = address(0xB0A7);
+        address protocolTreasury = address(0xFEE5);
+        address poolRecipient = address(0x5001);
+
+        vm.prank(alice);
+        clearinghouse.deposit(aliceAccount, 1000 * 1e6);
+
+        uint64[] memory reservationIds = new uint64[](0);
+        IMarginClearinghouse.LiquidationSettlementPlan memory plan =
+            IMarginClearinghouse.LiquidationSettlementPlan({
+                settlementRetainedUsdc: 250 * 1e6,
+                settlementSeizedUsdc: 600 * 1e6,
+                freshTraderPayoutUsdc: 0,
+                badDebtUsdc: 0,
+                positionMarginUnlockedUsdc: 0,
+                otherLockedMarginUnlockedUsdc: 0
+            });
+
+        vm.prank(engine);
+        uint256 seizedUsdc = clearinghouse.applyLiquidationSettlementPlan(
+            aliceAccount, reservationIds, plan, poolRecipient, keeper, 100 * 1e6, protocolTreasury, 50 * 1e6
+        );
+
+        assertEq(seizedUsdc, 600 * 1e6, "Only the pool allocation should be returned as seized cash");
+        assertEq(clearinghouse.balanceUsdc(aliceAccount), 250 * 1e6, "Source debit should include all allocations");
+        assertEq(clearinghouse.balanceUsdc(keeper), 100 * 1e6, "Keeper should receive its internal credit");
+        assertEq(
+            clearinghouse.balanceUsdc(protocolTreasury), 50 * 1e6, "Protocol treasury should receive its internal credit"
+        );
+        assertEq(usdc.balanceOf(poolRecipient), 600 * 1e6, "Only the pool allocation should leave clearinghouse custody");
+    }
+
 }
 
 contract MarginClearinghouseAuditTest is BasePerpTest {
@@ -1097,7 +1133,8 @@ contract MarginClearinghouseAuditTest is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 10,
-            keeperShareBps: 5_000
+            keeperShareBps: 5_000,
+            protocolShareBps: 0
         });
     }
 
@@ -1227,7 +1264,8 @@ contract NonUsdcCollateralTest is Test {
             baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 10,
-            keeperShareBps: 5_000
+            keeperShareBps: 5_000,
+            protocolShareBps: 0
         });
 
         clearinghouse = new MarginClearinghouse(address(usdc));

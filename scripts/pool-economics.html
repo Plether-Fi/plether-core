@@ -57,7 +57,7 @@
 <body>
 
 <h1>Plether Perps — Pool Economics Model</h1>
-<p class="subtitle">Interactive model for HousePool tranche returns using the current carry/VPI/oracle-confidence/liquidation design. Execution fees remain separate protocol revenue.</p>
+<p class="subtitle">Interactive model for HousePool tranche returns using the current carry/VPI/oracle-confidence/liquidation design. Execution fees and the configured protocol share of liquidation charges remain separate protocol revenue.</p>
 
 <div class="scenario-bar">
   <button onclick="loadScenario('conservative')">Conservative</button>
@@ -119,8 +119,13 @@
     </div>
     <div class="field">
       <label>Keeper Share <span class="val" id="v-keepershare"></span></label>
-      <input type="range" id="keepershare" min="0" max="10000" step="250" value="5000" oninput="calc()">
-      <div class="hint">keeperShareBps — release value 5,000; timelocked range 0–10,000</div>
+      <input type="range" id="keepershare" min="0" max="10000" step="250" value="5000" oninput="updateLiquidationShares('keepershare')">
+      <div class="hint">keeperShareBps — release value 5,000; 48h timelocked</div>
+    </div>
+    <div class="field">
+      <label>Protocol Share <span class="val" id="v-protocolshare"></span></label>
+      <input type="range" id="protocolshare" min="0" max="10000" step="250" value="0" oninput="updateLiquidationShares('protocolshare')">
+      <div class="hint">protocolShareBps — release value 0; 48h timelocked; keeper + protocol must be at most 10,000</div>
     </div>
     <div class="field">
       <label>Base carry <span class="val" id="v-carry"></span></label>
@@ -157,7 +162,7 @@
     <div class="field">
       <label>Daily liquidation rate (% of OI) <span class="val" id="v-liq"></span></label>
       <input type="range" id="liq" min="0" max="5" step="0.1" value="0.5" oninput="calc()">
-      <div class="hint">The configured LP remainder of the liquidation charge is included in LP revenue here.</div>
+      <div class="hint">The exact LP remainder, including on-chain division dust, is included in LP revenue here.</div>
     </div>
     <div class="field">
       <label>Behavioral edge (bps/day on TVL) <span class="val" id="v-behav"></span></label>
@@ -206,11 +211,11 @@
 
 <script>
 const scenarios = {
-  conservative: { tvl:1e6, ratio:50, sr:800, vpi:0.0025, execfee:4, oracleconf:10, confmult:0.2, mmr:30, bounty:10, keepershare:5000, carry:500, vol:1, oi:0.5, lev:4, skew:0.1, ndf:15, liq:0.3, behav:3 },
-  moderate:     { tvl:5e6, ratio:50, sr:800, vpi:0.005,  execfee:4, oracleconf:10, confmult:0.2, mmr:30, bounty:10, keepershare:5000, carry:500, vol:2, oi:0.8, lev:5, skew:0.15, ndf:20, liq:0.5, behav:5 },
-  optimistic:   { tvl:20e6, ratio:40, sr:800, vpi:0.0075, execfee:4, oracleconf:10, confmult:0.2, mmr:30, bounty:10, keepershare:5000, carry:500, vol:3, oi:1.2, lev:6, skew:0.2, ndf:25, liq:0.8, behav:8 },
-  bear:         { tvl:2e6, ratio:60, sr:800, vpi:0.005,  execfee:4, oracleconf:10, confmult:0.2, mmr:30, bounty:10, keepershare:5000, carry:500, vol:0.5, oi:0.3, lev:3, skew:0.05, ndf:10, liq:1.5, behav:-5 },
-  highVpi:      { tvl:5e6, ratio:50, sr:800, vpi:0.0125, execfee:4, oracleconf:10, confmult:0.2, mmr:30, bounty:10, keepershare:5000, carry:500, vol:1.5, oi:0.6, lev:5, skew:0.25, ndf:30, liq:0.4, behav:3 },
+  conservative: { tvl:1e6, ratio:50, sr:800, vpi:0.0025, execfee:4, oracleconf:10, confmult:0.2, mmr:30, bounty:10, keepershare:5000, protocolshare:0, carry:500, vol:1, oi:0.5, lev:4, skew:0.1, ndf:15, liq:0.3, behav:3 },
+  moderate:     { tvl:5e6, ratio:50, sr:800, vpi:0.005,  execfee:4, oracleconf:10, confmult:0.2, mmr:30, bounty:10, keepershare:5000, protocolshare:0, carry:500, vol:2, oi:0.8, lev:5, skew:0.15, ndf:20, liq:0.5, behav:5 },
+  optimistic:   { tvl:20e6, ratio:40, sr:800, vpi:0.0075, execfee:4, oracleconf:10, confmult:0.2, mmr:30, bounty:10, keepershare:5000, protocolshare:0, carry:500, vol:3, oi:1.2, lev:6, skew:0.2, ndf:25, liq:0.8, behav:8 },
+  bear:         { tvl:2e6, ratio:60, sr:800, vpi:0.005,  execfee:4, oracleconf:10, confmult:0.2, mmr:30, bounty:10, keepershare:5000, protocolshare:0, carry:500, vol:0.5, oi:0.3, lev:3, skew:0.05, ndf:10, liq:1.5, behav:-5 },
+  highVpi:      { tvl:5e6, ratio:50, sr:800, vpi:0.0125, execfee:4, oracleconf:10, confmult:0.2, mmr:30, bounty:10, keepershare:5000, protocolshare:0, carry:500, vol:1.5, oi:0.6, lev:5, skew:0.25, ndf:30, liq:0.4, behav:3 },
 };
 
 const MIN_BOUNTY_USD = 1;
@@ -220,6 +225,17 @@ function loadScenario(name) {
   for (const [k, v] of Object.entries(s)) document.getElementById(k).value = v;
   document.querySelectorAll('.scenario-bar button').forEach(b => b.classList.remove('active'));
   event.target.classList.add('active');
+  calc();
+}
+
+function updateLiquidationShares(changedId) {
+  const keeperEl = document.getElementById('keepershare');
+  const protocolEl = document.getElementById('protocolshare');
+  const changedEl = changedId === 'keepershare' ? keeperEl : protocolEl;
+  const otherEl = changedId === 'keepershare' ? protocolEl : keeperEl;
+  if (+keeperEl.value + +protocolEl.value > 10_000) {
+    otherEl.value = Math.max(10_000 - +changedEl.value, 0);
+  }
   calc();
 }
 
@@ -265,6 +281,7 @@ function calc() {
   const mmrBps    = +document.getElementById('mmr').value;
   const bountyBps = +document.getElementById('bounty').value;
   const keeperShareBps = +document.getElementById('keepershare').value;
+  const protocolShareBps = +document.getElementById('protocolshare').value;
   const carryBps  = +document.getElementById('carry').value;
   const volMult   = +document.getElementById('vol').value;
   const oiMult    = +document.getElementById('oi').value;
@@ -285,6 +302,7 @@ function calc() {
   document.getElementById('v-mmr').textContent = mmrBps + ' bps (' + (mmrBps/100).toFixed(2) + '%)';
   document.getElementById('v-bounty').textContent = bountyBps + ' bps';
   document.getElementById('v-keepershare').textContent = keeperShareBps.toLocaleString() + ' bps (' + (keeperShareBps/100).toFixed(2) + '%)';
+  document.getElementById('v-protocolshare').textContent = protocolShareBps.toLocaleString() + ' bps (' + (protocolShareBps/100).toFixed(2) + '%)';
   document.getElementById('v-carry').textContent = carryBps + ' bps APY';
   document.getElementById('v-vol').textContent = volMult.toFixed(1) + 'x';
   document.getElementById('v-oi').textContent = oiMult.toFixed(1) + 'x';
@@ -321,14 +339,16 @@ function calc() {
   const skewNotional = avgOI * skewRatio;
   const dailyLiqNotional = avgOI * liqPct;
 
-  // --- Liquidation-charge split + LP liquidation retention ---
-  // Simplified: only the configured keeper share of the total charge leaves LP economics.
+  // --- Liquidation-charge allocation + LP liquidation retention ---
+  // Simplified: the configured keeper and protocol shares of the total charge leave LP economics.
   const annualLiqNotional = dailyLiqNotional * 365;
   const avgLiquidationChargeBps = Math.max(bountyBps, (MIN_BOUNTY_USD / Math.max(avgOI, 1)) * 10000);
   const avgKeeperBountyBps = avgLiquidationChargeBps * keeperShareBps / 10_000;
-  const avgLpLiquidationFeeBps = avgLiquidationChargeBps - avgKeeperBountyBps;
-  const bountyAnnual = annualLiqNotional * avgKeeperBountyBps / 10000;
-  const liqRetentionBps = Math.max(mmrBps - avgKeeperBountyBps, 0);
+  const avgProtocolLiquidationFeeBps = avgLiquidationChargeBps * protocolShareBps / 10_000;
+  const avgLpLiquidationFeeBps = avgLiquidationChargeBps - avgKeeperBountyBps - avgProtocolLiquidationFeeBps;
+  const keeperBountyAnnual = annualLiqNotional * avgKeeperBountyBps / 10000;
+  const protocolLiquidationFeeAnnual = annualLiqNotional * avgProtocolLiquidationFeeBps / 10000;
+  const liqRetentionBps = Math.max(mmrBps - avgKeeperBountyBps - avgProtocolLiquidationFeeBps, 0);
   const liqSurplusAnnual = annualLiqNotional * liqRetentionBps / 10000;
 
   // --- Behavioral edge ---
@@ -370,6 +390,7 @@ function calc() {
     <tr><td class="row-label">Annual liquidated notional</td><td class="right">${fmt(annualLiqNotional)}</td></tr>
     <tr><td class="row-label">Avg total liquidation charge</td><td class="right">${bps(avgLiquidationChargeBps)} (min ${fmt(MIN_BOUNTY_USD)})</td></tr>
     <tr><td class="row-label">Avg keeper share per event</td><td class="right">${bps(avgKeeperBountyBps)}</td></tr>
+    <tr><td class="row-label">Avg protocol share per event</td><td class="right">${bps(avgProtocolLiquidationFeeBps)}</td></tr>
     <tr><td class="row-label">Avg LP fee share per event</td><td class="right">${bps(avgLpLiquidationFeeBps)}</td></tr>
     <tr><td class="row-label">LP liquidation retention per event</td><td class="right">${bps(liqRetentionBps)}</td></tr>
     <tr><td class="row-label">Max leverage (1/MMR)</td><td class="right">${(10000/mmrBps).toFixed(0)}x</td></tr>
@@ -396,10 +417,11 @@ function calc() {
   // --- Revenue table ---
   let tbody = '';
   tbody += row(`Execution fees (${execBps} bps × 2)`, 'Protocol owner', execFeeAnnual);
+  tbody += row('Configured protocol share of liquidation charge', 'Protocol owner', protocolLiquidationFeeAnnual);
+  tbody += row('Configured keeper share of liquidation charge', 'Keepers', keeperBountyAnnual);
   tbody += sep();
   tbody += row('Oracle confidence edge', 'Pool (LPs)', oracleConfidenceAnnual);
   tbody += row('VPI net revenue', 'Pool (LPs)', vpiAnnual);
-  tbody += row('Configured keeper share of liquidation charge', 'Keepers', -bountyAnnual);
   tbody += row('LP liquidation retention', 'Pool (LPs)', liqSurplusAnnual);
   tbody += row('Carry revenue', 'Pool (LPs)', carryAnnual);
   tbody += row('Behavioral / directional edge', 'Pool (LPs)', behavAnnual);
@@ -436,7 +458,7 @@ function calc() {
   } else if (unfundedSeniorCoupon > 1) {
     noteEl.textContent = 'Junior principal is insufficient to fund the full senior coupon. The shortfall is not carried as future debt.';
   } else {
-    noteEl.textContent = 'Healthy: senior coupon funded, junior earning surplus. Execution fees are separate protocol-owner revenue. Oracle confidence edge is modeled as adverse execution-price adjustment accruing to LPs. Liquidation retention includes the configured LP remainder of the total liquidation charge.';
+    noteEl.textContent = 'Healthy: senior coupon funded, junior earning surplus. Execution fees and the configured liquidation protocol share are separate protocol-owner revenue. Oracle confidence edge is modeled as adverse execution-price adjustment accruing to LPs. Liquidation retention includes the exact LP remainder after keeper and protocol allocations.';
   }
 }
 

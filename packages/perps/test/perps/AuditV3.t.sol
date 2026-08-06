@@ -50,7 +50,8 @@ contract AuditV3_C01_FIFODeadlockTest is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 5e6,
             bountyBps: 10,
-            keeperShareBps: 5_000
+            keeperShareBps: 5_000,
+            protocolShareBps: 0
         });
     }
 
@@ -213,7 +214,8 @@ contract AuditV3_C03_AsymmetricStalenessTest is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 5e6,
             bountyBps: 10,
-            keeperShareBps: 5_000
+            keeperShareBps: 5_000,
+            protocolShareBps: 0
         });
     }
 
@@ -444,7 +446,8 @@ contract AuditV3_H02_JuniorWipeoutDilutionTest is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 5e6,
             bountyBps: 10,
-            keeperShareBps: 5_000
+            keeperShareBps: 5_000,
+            protocolShareBps: 0
         });
     }
 

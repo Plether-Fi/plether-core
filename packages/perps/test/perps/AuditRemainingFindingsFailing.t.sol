@@ -289,7 +289,8 @@ contract AuditRemainingFindingsFailing_CarryPathDependence is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 10,
-            keeperShareBps: 5_000
+            keeperShareBps: 5_000,
+            protocolShareBps: 0
         });
     }
 

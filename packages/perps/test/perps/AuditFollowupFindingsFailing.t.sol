@@ -47,7 +47,8 @@ contract AuditFollowupFindingsFailing_CloseSolvency is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 5e6,
             bountyBps: 10,
-            keeperShareBps: 5000
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -192,7 +193,8 @@ contract AuditFollowupFindingsFailing_LiquidationBounty is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
             bountyBps: 1000,
-            keeperShareBps: 5000
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -240,7 +242,8 @@ contract AuditFollowupFindingsFailing_LegacySpreadReserve is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 5e6,
             bountyBps: 10,
-            keeperShareBps: 5000
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 

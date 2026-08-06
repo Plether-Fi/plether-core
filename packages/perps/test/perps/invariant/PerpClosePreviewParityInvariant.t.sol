@@ -86,7 +86,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
 
     function invariant_ValidPartialCloseNeverLeavesDustPosition() public view {
         uint256 oraclePrice = _previewOraclePrice();
-        (,,,,,, uint256 minBountyUsdc,,) = engine.riskParams();
+        (,,,,,, uint256 minBountyUsdc,,,) = engine.riskParams();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
@@ -128,7 +128,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
     function invariant_PreviewClose_EqualsSimulateCloseAtCanonicalDepth() public view {
         uint256 oraclePrice = _previewOraclePrice();
         uint256 canonicalDepth = housePool.totalAssets();
-        (,,,,,, uint256 minBountyUsdc,,) = engine.riskParams();
+        (,,,,,, uint256 minBountyUsdc,,,) = engine.riskParams();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
@@ -162,7 +162,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
 
     function invariant_ValidPartialCloseWithCarryAccrualImpliesHousePoolCanPay() public view {
         uint256 oraclePrice = _previewOraclePrice();
-        (,,,,,, uint256 minBountyUsdc,,) = engine.riskParams();
+        (,,,,,, uint256 minBountyUsdc,,,) = engine.riskParams();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
@@ -183,7 +183,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
 
     function invariant_PartialCloseInvalidOnlyForNewCodes() public view {
         uint256 oraclePrice = _previewOraclePrice();
-        (,,,,,, uint256 minBountyUsdc,,) = engine.riskParams();
+        (,,,,,, uint256 minBountyUsdc,,,) = engine.riskParams();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
@@ -221,7 +221,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
     function invariant_ImmediateOrTraderClaimSplitMatchesAdjustedCash() public view {
         uint256 oraclePrice = _previewOraclePrice();
         uint256 poolDepthUsdc = housePool.totalAssets();
-        (,,,,,, uint256 minBountyUsdc,,) = engine.riskParams();
+        (,,,,,, uint256 minBountyUsdc,,,) = engine.riskParams();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
@@ -345,7 +345,8 @@ contract PerpClosePreviewParityInvariantTest is Test {
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
             bountyBps: 9,
-            keeperShareBps: 5000
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 

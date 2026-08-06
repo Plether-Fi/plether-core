@@ -496,6 +496,11 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
     function testFuzz_PreviewLiquidation_MatchesLiveExecution_LiquidVault(
         uint256 liquidationPriceFuzz
     ) public {
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.keeperShareBps = 2500;
+        params.protocolShareBps = 2500;
+        _setRiskParams(params);
+
         address trader = address(0xC102);
         address account = trader;
         uint256 liquidationPrice = bound(liquidationPriceFuzz, 101_000_000, 120_000_000);
@@ -511,6 +516,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         vm.assume(preview.liquidatable);
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(KEEPER);
+        uint256 protocolTreasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
         uint256 traderClaimBefore = engine.traderClaimBalanceUsdc(account);
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
         IMarginClearinghouse.AccountUsdcBuckets memory bucketsBefore = clearinghouse.getAccountUsdcBuckets(account);
@@ -526,7 +532,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         assertEq(
             bucketsAfter.settlementBalanceUsdc,
             bucketsBefore.settlementBalanceUsdc + preview.immediatePayoutUsdc - preview.seizedCollateralUsdc
-                - preview.keeperBountyUsdc,
+                - preview.keeperBountyUsdc - preview.protocolLiquidationFeeUsdc,
             "Liquidation preview should match the live settlement-balance mutation"
         );
         assertEq(bucketsAfter.activePositionMarginUsdc, 0, "Liquidation should clear the live position-margin bucket");
@@ -535,6 +541,11 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             clearinghouse.balanceUsdc(KEEPER) - keeperSettlementBefore,
             preview.keeperBountyUsdc,
             "Liquidation preview keeper bounty should match live clearinghouse credit"
+        );
+        assertEq(
+            clearinghouse.balanceUsdc(engine.protocolTreasury()) - protocolTreasuryBefore,
+            preview.protocolLiquidationFeeUsdc,
+            "Liquidation preview protocol fee should match live treasury credit"
         );
         assertEq(
             engine.traderClaimBalanceUsdc(account) - traderClaimBefore,
@@ -601,7 +612,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         assertEq(
             bucketsAfter.settlementBalanceUsdc,
             bucketsBefore.settlementBalanceUsdc + preview.immediatePayoutUsdc - preview.seizedCollateralUsdc
-                - preview.keeperBountyUsdc,
+                - preview.keeperBountyUsdc - preview.protocolLiquidationFeeUsdc,
             "Illiquid liquidation preview should match the live settlement-balance mutation"
         );
         assertEq(bucketsAfter.activePositionMarginUsdc, 0, "Illiquid liquidation should clear the live position margin");
@@ -648,6 +659,11 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
     }
 
     function test_PreviewLiquidation_IncludesIncomingSeizureWhenRoutingFreshPayout() public {
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.keeperShareBps = 2500;
+        params.protocolShareBps = 2500;
+        _setRiskParams(params);
+
         address trader = address(0xC10C);
         address account = trader;
         uint256 liquidationPrice = 99_500_000;
@@ -682,6 +698,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
 
         IMarginClearinghouse.AccountUsdcBuckets memory bucketsBefore = clearinghouse.getAccountUsdcBuckets(account);
         uint256 traderClaimBefore = engine.traderClaimBalanceUsdc(account);
+        uint256 protocolTreasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(liquidationPrice);
 
@@ -692,8 +709,13 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         assertEq(
             bucketsAfter.settlementBalanceUsdc,
             bucketsBefore.settlementBalanceUsdc + preview.immediatePayoutUsdc - preview.seizedCollateralUsdc
-                - preview.keeperBountyUsdc,
+                - preview.keeperBountyUsdc - preview.protocolLiquidationFeeUsdc,
             "Previewed immediate payout should match the live settlement mutation"
+        );
+        assertEq(
+            clearinghouse.balanceUsdc(engine.protocolTreasury()) - protocolTreasuryBefore,
+            preview.protocolLiquidationFeeUsdc,
+            "Previewed protocol fee should match the live treasury credit"
         );
         assertEq(
             engine.traderClaimBalanceUsdc(account) - traderClaimBefore,

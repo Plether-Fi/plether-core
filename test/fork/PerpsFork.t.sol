@@ -115,7 +115,8 @@ contract PerpsForkTest is Test {
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
             bountyBps: 10,
-            keeperShareBps: 5000
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
 
         clearinghouse = new MarginClearinghouse(USDC);
@@ -279,7 +280,8 @@ contract PerpsForkTest is Test {
             uint256 baseCarryBps,
             uint256 minBountyUsdc,
             uint256 bountyBps,
-            uint256 keeperShareBps
+            uint256 keeperShareBps,
+            uint256 protocolShareBps
         ) = engine.riskParams();
         return CfdTypes.RiskParams({
             vpiFactor: vpiFactor,
@@ -290,7 +292,8 @@ contract PerpsForkTest is Test {
             baseCarryBps: baseCarryBps,
             minBountyUsdc: minBountyUsdc,
             bountyBps: bountyBps,
-            keeperShareBps: keeperShareBps
+            keeperShareBps: keeperShareBps,
+            protocolShareBps: protocolShareBps
         });
     }
 

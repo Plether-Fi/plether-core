@@ -109,7 +109,7 @@ Any new helper/sidecar contract that can reach these sets should be treated as s
 | Bounty type | Source of funds | Custody while pending | Success path | Illiquid path | Terminal failure path |
 |-------------|-----------------|-----------------------|--------------|---------------|-----------------------|
 | Order execution bounty | Trader free settlement, then bounded close fallback from active position margin | `MarginClearinghouse` reserved settlement bucket plus router order record | clearinghouse credit for the keeper | n/a | terminal close failures pay the keeper; other failure handling follows the typed policy |
-| Liquidation charge | Liquidated account reachable collateral, capped by canonical liquidation value and carry-adjusted equity | planned in engine, then split by the liquidation settlement path | 50% keeper clearinghouse credit; 50% HousePool claimant revenue | n/a | n/a |
+| Liquidation charge | Liquidated account reachable collateral, capped by canonical liquidation value and carry-adjusted equity | planned in engine, then allocated by the liquidation settlement path | Default: 50% keeper clearinghouse credit; 0% protocol-treasury clearinghouse credit; exact 50% remainder to HousePool claimant revenue | n/a | n/a |
 
 ### Oracle regime table
 
@@ -133,7 +133,7 @@ Any new helper/sidecar contract that can reach these sets should be treated as s
 | Trader claim balance | Trader senior claim on pool liquidity | `CfdEngine.traderClaimBalanceUsdc` | engine create/service | no | yes, as senior liability | yes | yes |
 | Keeper bounty credit | Keeper margin credit | `MarginClearinghouse.balanceUsdc(keeper)` | engine/clearinghouse bounty settlement | no | no pool liability | no | no |
 | Unsettled carry | Protocol-recorded carry debt on an account | `CfdEngine.unsettledCarryUsdc[account]` | engine carry-checkpoint paths | no | yes, as carry drag on account equity | no | no |
-| Treasury protocol fees | Protocol/treasury | Treasury account in `MarginClearinghouse`; `MarginClearinghouse.balanceUsdc(CfdEngine.protocolTreasury())` reports that balance | cash-collected settlement fee routing, settlement top-ups, treasury clearinghouse withdraw | no | yes, as clearinghouse-custodied protocol margin | no | no |
+| Treasury protocol fees | Protocol/treasury | Treasury account in `MarginClearinghouse`; `MarginClearinghouse.balanceUsdc(CfdEngine.protocolTreasury())` reports that balance | cash-collected execution and liquidation fee routing, settlement top-ups, treasury clearinghouse withdraw | no | yes, as clearinghouse-custodied protocol margin | no | no |
 | Accumulated bad debt | Protocol loss / LP impairment | `CfdEngine.accumulatedBadDebtUsdc` | engine realization, bad debt clear path | n/a | yes, as realized deficit | yes | yes |
 | Canonical pool assets | LP/protocol backing | `HousePool.totalAssets()` and accounting ledger | pool deposit/withdraw/accounting hooks | base physical solvency cash | yes | yes | yes |
 | Excess assets | no owner until admitted | `HousePool.excessAssets()` | pool account/sweep paths | no | no | no | no |
@@ -165,11 +165,13 @@ Reachability note:
 ### Clearinghouse liquidation-charge servicing
 
 - Liveness problem: liquidation should not fail solely because immediate pool cash is unavailable.
-- Chosen tradeoff: the total charge settles from liquidated account margin through the clearinghouse, with half credited
-  to the keeper according to `keeperShareBps` and the remainder transferred to LP claimant revenue.
+- Chosen tradeoff: the total charge settles from liquidated account margin through the clearinghouse, with independently
+  rounded-down shares credited to the keeper and protocol treasury according to `keeperShareBps` and
+  `protocolShareBps`; the exact remainder is transferred to LP claimant revenue.
 - New risk: liquidation rewardability and LP fee collection depend on the liquidated account's reachable collateral.
-- Protecting invariant: the total charge is capped by reachable collateral; its two shares conserve the collected
-  amount and do not consume pre-existing pool cash.
+- Protecting invariant: the total charge is capped by reachable collateral; the configured shares sum to at most
+  `10_000` bps, and the keeper, protocol, and LP allocations conserve the collected amount without consuming
+  pre-existing pool cash. The default allocation is 50% keeper, 0% protocol, and 50% LP.
 
 ### Bounded queue cleanup
 
@@ -229,8 +231,9 @@ Reachability note:
 1. Keeper calls liquidation on an under-maintenance account.
 2. Planner computes carry-adjusted liquidation equity using only physically reachable collateral.
 3. Total liquidation charge is capped by physically reachable collateral, not by the positive-equity sign boundary.
-4. Terminal residual plan seizes reachable collateral, credits the configured share to the keeper, routes the remainder
-   to LPs, and computes any fresh trader payout or explicit subsidy shortfall.
+4. Terminal residual plan seizes reachable collateral, credits the configured shares to the keeper and protocol
+   treasury, routes the exact rounding remainder to LPs, and computes any fresh trader payout or explicit subsidy
+   shortfall.
 5. Existing trader claim balance is not treated as reachable collateral; it remains only as a senior claim unless negative residual netting consumes it.
 6. If cash is available, fresh payout is immediate; otherwise it becomes a trader claim.
 7. Position is removed and queue cleanup runs on the liquidated account's local pending-order queue only.
@@ -239,7 +242,8 @@ Reachability note:
 
 1. Keeper calls liquidation on an account whose reachable collateral cannot cover losses.
 2. Planner computes carry-adjusted negative equity.
-3. Total liquidation charge is capped by reachable collateral and split using the configured keeper share.
+3. Total liquidation charge is capped by reachable collateral and allocated using the configured keeper and protocol
+   shares, with LPs receiving the exact remainder.
 4. Terminal residual plan consumes all physically reachable collateral.
 5. Existing same-account trader claim balance is netted exactly once against remaining terminal shortfall.
 6. Any leftover deficit becomes realized bad debt.

@@ -539,6 +539,7 @@ contract CfdEngineLens is ICfdEngineLens {
         preview.equityUsdc = delta.liquidationState.equityUsdc;
         preview.liquidationChargeUsdc = delta.liquidationChargeUsdc;
         preview.keeperBountyUsdc = delta.keeperBountyUsdc;
+        preview.protocolLiquidationFeeUsdc = delta.protocolLiquidationFeeUsdc;
         preview.lpLiquidationFeeUsdc = delta.lpLiquidationFeeUsdc;
         preview.seizedCollateralUsdc = delta.settlementSeizedUsdc;
         preview.settlementRetainedUsdc = delta.settlementRetainedUsdc;
@@ -695,7 +696,7 @@ contract CfdEngineLens is ICfdEngineLens {
         CfdTypes.Side side
     ) internal view returns (uint256) {
         uint256 sideIndex = uint256(side);
-        (,,,,, uint256 baseCarryBps,,,) = engineContract.riskParams();
+        (,,,,, uint256 baseCarryBps,,,,) = engineContract.riskParams();
         return PositionRiskAccountingLib.computeCurrentCarryIndex(
             engineContract.sideCarryIndex(sideIndex),
             engineContract.sideCarryTimestamp(sideIndex),
@@ -718,7 +719,8 @@ contract CfdEngineLens is ICfdEngineLens {
             params.baseCarryBps,
             params.minBountyUsdc,
             params.bountyBps,
-            params.keeperShareBps
+            params.keeperShareBps,
+            params.protocolShareBps
         ) = engineContract.riskParams();
     }
 

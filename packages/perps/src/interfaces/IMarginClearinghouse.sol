@@ -381,14 +381,16 @@ interface IMarginClearinghouse {
 
     /// @notice Applies a pre-planned liquidation settlement mutation while preserving reserved settlement.
     /// @dev Callable only by the engine or settlement sidecar. Consumes the exact planned locked amounts, debits the
-    ///      seized value plus keeper bounty, transfers seized USDC to `recipient`, and credits the bounty internally.
-    ///      Other economic fields in `plan` are informational to this clearinghouse call.
+    ///      seized value plus keeper and protocol allocations, transfers seized USDC to `recipient`, and credits both
+    ///      internal allocations. Other economic fields in `plan` are informational to this clearinghouse call.
     /// @param account Liquidated account
     /// @param reservationOrderIds Active ids allowed to cover committed-order margin consumption
     /// @param plan Engine-planned liquidation amounts, all in USDC
     /// @param recipient External pool recipient of `plan.settlementSeizedUsdc`
     /// @param keeper Clearinghouse account credited with the bounty
     /// @param keeperBountyUsdc Bounty debited from `account` and credited to `keeper`, in USDC
+    /// @param protocolFeeAccount Clearinghouse account credited with the liquidation protocol fee
+    /// @param protocolFeeUsdc Protocol fee debited from `account` and credited internally, in USDC
     /// @return seizedUsdc Amount transferred to `recipient` in USDC
     function applyLiquidationSettlementPlan(
         address account,
@@ -396,7 +398,9 @@ interface IMarginClearinghouse {
         LiquidationSettlementPlan calldata plan,
         address recipient,
         address keeper,
-        uint256 keeperBountyUsdc
+        uint256 keeperBountyUsdc,
+        address protocolFeeAccount,
+        uint256 protocolFeeUsdc
     ) external returns (uint256 seizedUsdc);
 
     /// @notice Transfers already-reserved settlement from one account to another without moving tokens.

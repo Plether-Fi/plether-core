@@ -398,8 +398,10 @@ Trade-off:
 - liquidation accounting is constrained by actually reachable collateral,
 - the proportional liquidation charge has a floor, is capped by reachable value, and may explicitly subsidize
   low-equity liquidations,
-- the collected charge is conserved across a bounded, timelocked split: the keeper receives
-  `floor(charge * keeperShareBps / 10_000)` and LPs receive the remainder as claimant revenue,
+- the collected charge is conserved across a bounded, timelocked allocation where
+  `keeperShareBps + protocolShareBps <= 10_000`: the keeper and protocol treasury each receive their independently
+  rounded-down configured shares as clearinghouse credit, and LPs receive the exact remainder, including rounding dust,
+  as claimant revenue,
 - residual trader value is preserved when positive,
 - same-account trader claim balance does not support liquidation reachability and is only netted once against terminal shortfall,
 - remaining deficit becomes bad debt socialized to LP capital.

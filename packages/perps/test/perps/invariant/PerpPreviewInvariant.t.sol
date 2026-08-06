@@ -24,7 +24,8 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
             bountyBps: 9,
-            keeperShareBps: 5_000
+            keeperShareBps: 5_000,
+            protocolShareBps: 0
         });
     }
 
@@ -296,6 +297,11 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
         assertEq(actual.reachableCollateralUsdc, expected.reachableCollateralUsdc, "Reachable collateral should match");
         assertEq(actual.liquidationChargeUsdc, expected.liquidationChargeUsdc, "Liquidation charge should match");
         assertEq(actual.keeperBountyUsdc, expected.keeperBountyUsdc, "Keeper bounty should match");
+        assertEq(
+            actual.protocolLiquidationFeeUsdc,
+            expected.protocolLiquidationFeeUsdc,
+            "Protocol liquidation fee should match"
+        );
         assertEq(actual.lpLiquidationFeeUsdc, expected.lpLiquidationFeeUsdc, "LP liquidation fee should match");
         assertEq(actual.seizedCollateralUsdc, expected.seizedCollateralUsdc, "Seized collateral should match");
         assertEq(actual.settlementRetainedUsdc, expected.settlementRetainedUsdc, "Settlement retained should match");

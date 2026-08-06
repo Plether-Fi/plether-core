@@ -55,7 +55,8 @@ contract OrderRouterTest is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
             bountyBps: 10,
-            keeperShareBps: 5_000
+            keeperShareBps: 5_000,
+            protocolShareBps: 0
         });
     }
 
@@ -1419,7 +1420,8 @@ contract OrderRouterPythTest is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
             bountyBps: 10,
-            keeperShareBps: 5_000
+            keeperShareBps: 5_000,
+            protocolShareBps: 0
         });
     }
 
@@ -3063,7 +3065,8 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
             bountyBps: 10,
-            keeperShareBps: 5_000
+            keeperShareBps: 5_000,
+            protocolShareBps: 0
         });
     }
 
@@ -3453,7 +3456,8 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
             bountyBps: 9,
-            keeperShareBps: 5_000
+            keeperShareBps: 5_000,
+            protocolShareBps: 0
         });
     }
 
@@ -3814,7 +3818,8 @@ contract FadStalenessTest is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
             bountyBps: 10,
-            keeperShareBps: 5_000
+            keeperShareBps: 5_000,
+            protocolShareBps: 0
         });
     }
 
@@ -4618,7 +4623,8 @@ contract OrderRouterAuditTest is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
             bountyBps: 10,
-            keeperShareBps: 5_000
+            keeperShareBps: 5_000,
+            protocolShareBps: 0
         });
     }
 
@@ -4743,7 +4749,8 @@ contract StaleOrderExpiryTest is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
             bountyBps: 10,
-            keeperShareBps: 5_000
+            keeperShareBps: 5_000,
+            protocolShareBps: 0
         });
     }
 
@@ -5001,7 +5008,8 @@ contract MarkPriceStalenessTest is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
             bountyBps: 10,
-            keeperShareBps: 5_000
+            keeperShareBps: 5_000,
+            protocolShareBps: 0
         });
     }
 
@@ -5115,7 +5123,8 @@ contract StalenessGriefTest is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
             bountyBps: 10,
-            keeperShareBps: 5_000
+            keeperShareBps: 5_000,
+            protocolShareBps: 0
         });
     }
 
@@ -5252,7 +5261,8 @@ contract VpiImrBypassTest is Test {
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
             bountyBps: 10,
-            keeperShareBps: 5_000
+            keeperShareBps: 5_000,
+            protocolShareBps: 0
         });
 
         clearinghouse = new MarginClearinghouse(address(usdc));
@@ -5510,7 +5520,8 @@ contract KeeperFeeRefundTest is Test {
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
             bountyBps: 10,
-            keeperShareBps: 5_000
+            keeperShareBps: 5_000,
+            protocolShareBps: 0
         });
 
         clearinghouse = new MarginClearinghouse(address(usdc));
@@ -5880,7 +5891,8 @@ contract WeekendArbitrageTest is Test {
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
             bountyBps: 10,
-            keeperShareBps: 5_000
+            keeperShareBps: 5_000,
+            protocolShareBps: 0
         });
 
         clearinghouse = new MarginClearinghouse(address(usdc));

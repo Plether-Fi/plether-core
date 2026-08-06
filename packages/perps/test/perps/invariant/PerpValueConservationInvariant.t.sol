@@ -356,7 +356,7 @@ contract PerpValueConservationHandler is Test {
         CfdTypes.Side side
     ) internal view returns (uint256 index) {
         uint256 sideIndex = uint256(side);
-        (,,,,, uint256 baseCarryBps,,,) = engine.riskParams();
+        (,,,,, uint256 baseCarryBps,,,,) = engine.riskParams();
         index = PositionRiskAccountingLib.computeCurrentCarryIndex(
             engine.sideCarryIndex(sideIndex),
             engine.sideCarryTimestamp(sideIndex),
@@ -383,7 +383,8 @@ contract PerpValueConservationInvariantTest is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
             bountyBps: 10,
-            keeperShareBps: 5000
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 

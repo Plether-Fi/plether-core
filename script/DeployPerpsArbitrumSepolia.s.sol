@@ -145,7 +145,8 @@ contract DeployPerpsArbitrumSepolia is Script {
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
             bountyBps: 10,
-            keeperShareBps: 5000
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 

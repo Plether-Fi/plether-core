@@ -50,7 +50,8 @@ The stack is deployed, wired, verified on Arbiscan, bootstrapped, and trading is
 | `baseCarryBps` | `500` | Preserves the existing carry baseline for skew/carry behavior testing. |
 | `minBountyUsdc` | `1e6` | Keeps the minimum total liquidation charge at `1` mock USDC. |
 | `bountyBps` | `10` | Preserves the 10 bps total liquidation charge. |
-| `keeperShareBps` | `5_000` | Sends 50% of the collected charge to keepers and the remainder to LPs by default. |
+| `keeperShareBps` | `5_000` | Sends 50% of the collected charge to keepers by default. |
+| `protocolShareBps` | `0` | Disables protocol liquidation-fee revenue by default, leaving the remaining 50% to LPs. |
 | `executionFeeBps` | `4` | Unchanged protocol execution fee. |
 | `fadRunwaySeconds` | `1 hours` | Provides a short close-only runway before configured FAD days without over-constraining testnet order flow. |
 | `pythMaxConfidenceRatioBps` | `10` | Rejects component feeds whose Pyth confidence exceeds `0.10%` of price; appropriate because major FX feeds should usually be tight. |

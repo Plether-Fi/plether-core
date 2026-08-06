@@ -399,7 +399,8 @@ interface ICfdEngineTypes {
     /// @param reachableCollateralUsdc Account collateral reachable for terminal settlement before the liquidation charge.
     /// @param liquidationChargeUsdc Total liquidation charge collected from the account.
     /// @param keeperBountyUsdc Configured keeper share of the liquidation charge.
-    /// @param lpLiquidationFeeUsdc Remaining LP share of the liquidation charge.
+    /// @param protocolLiquidationFeeUsdc Configured protocol-treasury share of the liquidation charge.
+    /// @param lpLiquidationFeeUsdc Remaining LP share after keeper and protocol allocations.
     /// @param seizedCollateralUsdc Total settlement value transferred from the account to the pool, including the LP fee.
     /// @param settlementRetainedUsdc Existing account settlement left with the trader toward positive residual equity.
     /// @param freshTraderPayoutUsdc New surplus value owed to the trader after liquidation.
@@ -420,6 +421,7 @@ interface ICfdEngineTypes {
         uint256 reachableCollateralUsdc;
         uint256 liquidationChargeUsdc;
         uint256 keeperBountyUsdc;
+        uint256 protocolLiquidationFeeUsdc;
         uint256 lpLiquidationFeeUsdc;
         uint256 seizedCollateralUsdc;
         uint256 settlementRetainedUsdc;
