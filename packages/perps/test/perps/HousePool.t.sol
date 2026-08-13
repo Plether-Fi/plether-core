@@ -1781,6 +1781,16 @@ contract HousePoolSeedLifecycleGateTest is BasePerpTest {
     function test_InitializeJuniorSeed_CheckpointsPreExistingSeniorCouponWithoutChargingSeed() public {
         uint256 seniorSeed = 100_000e6;
         uint256 juniorSeed = 50_000e6;
+
+        // A small assigned junior position supplies the ratio backing required to exercise a senior-first bootstrap
+        // without setting the junior seed flag. Its full value is consumed by the pre-seed coupon backlog below.
+        uint256 juniorCapacityBacking = 11e6;
+        usdc.mint(address(pool), juniorCapacityBacking);
+        pool.accountExcess();
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        pool.assignUnassignedAssets(false, address(this));
+
         usdc.mint(address(this), seniorSeed);
         usdc.approve(address(pool), seniorSeed);
         pool.initializeSeedPosition(true, seniorSeed, address(this));
@@ -1791,7 +1801,10 @@ contract HousePoolSeedLifecycleGateTest is BasePerpTest {
         usdc.approve(address(pool), juniorSeed);
         pool.initializeSeedPosition(false, juniorSeed, address(this));
 
-        assertEq(pool.seniorPrincipal(), seniorSeed, "Junior seed should not pay pre-existing senior coupon time");
+        uint256 seniorBeforeJuniorSeed = seniorSeed + juniorCapacityBacking;
+        assertEq(
+            pool.seniorPrincipal(), seniorBeforeJuniorSeed, "Junior seed should not pay pre-existing senior coupon time"
+        );
         assertEq(pool.juniorPrincipal(), juniorSeed, "Junior seed should enter at face value");
         assertEq(
             pool.lastSeniorCouponCheckpointTime(),
@@ -1803,8 +1816,12 @@ contract HousePoolSeedLifecycleGateTest is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        uint256 expectedCoupon = (seniorSeed * 800 * uint256(1 days)) / (10_000 * uint256(365 days));
-        assertEq(pool.seniorPrincipal(), seniorSeed + expectedCoupon, "Only post-junior-seed coupon should be paid");
+        uint256 expectedCoupon = (seniorBeforeJuniorSeed * 800 * uint256(1 days)) / (10_000 * uint256(365 days));
+        assertEq(
+            pool.seniorPrincipal(),
+            seniorBeforeJuniorSeed + expectedCoupon,
+            "Only post-junior-seed coupon should be paid"
+        );
         assertEq(pool.juniorPrincipal(), juniorSeed - expectedCoupon, "Junior should only fund post-entry coupon time");
     }
 
@@ -2071,8 +2088,8 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         uint256 seniorSeedAssets = 1000e6;
         usdc.mint(address(this), juniorSeedAssets + seniorSeedAssets);
         usdc.approve(address(pool), juniorSeedAssets + seniorSeedAssets);
-        pool.initializeSeedPosition(true, seniorSeedAssets, address(this));
         pool.initializeSeedPosition(false, juniorSeedAssets, address(this));
+        pool.initializeSeedPosition(true, seniorSeedAssets, address(this));
         pool.activateTrading();
         usdc.burn(address(pool), pool.totalAssets());
         vm.prank(address(juniorVault));
@@ -2249,12 +2266,14 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
     }
 
     function helper_RecordRecapitalizationInflow_RestoresSeededSeniorBeforeFallbackAccounting() public {
-        uint256 seedAssets = 100_000e6;
-        usdc.mint(address(this), seedAssets);
-        usdc.approve(address(pool), seedAssets);
-        pool.initializeSeedPosition(true, seedAssets, address(this));
+        uint256 seniorSeedAssets = 100_000e6;
+        uint256 juniorSeedAssets = 100_000e6;
+        usdc.mint(address(this), seniorSeedAssets + juniorSeedAssets);
+        usdc.approve(address(pool), seniorSeedAssets + juniorSeedAssets);
+        pool.initializeSeedPosition(false, juniorSeedAssets, address(this));
+        pool.initializeSeedPosition(true, seniorSeedAssets, address(this));
         vm.prank(address(pool));
-        usdc.transfer(address(0xdead), 40_000e6);
+        usdc.transfer(address(0xdead), juniorSeedAssets + 40_000e6);
         vm.prank(address(juniorVault));
         pool.reconcile();
         assertEq(pool.seniorPrincipal(), 60_000e6);
@@ -2273,8 +2292,9 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
 
     function helper_RecordRecapitalizationInflow_SeedsSeniorWhenNoPrincipalButSeedSharesExist() public {
         uint256 seedAssets = 50_000e6;
-        usdc.mint(address(this), seedAssets);
-        usdc.approve(address(pool), seedAssets);
+        usdc.mint(address(this), 2 * seedAssets);
+        usdc.approve(address(pool), 2 * seedAssets);
+        pool.initializeSeedPosition(false, seedAssets, address(this));
         pool.initializeSeedPosition(true, seedAssets, address(this));
         usdc.burn(address(pool), pool.totalAssets());
         vm.prank(address(juniorVault));
@@ -2297,8 +2317,9 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
 
     function helper_GetPendingTrancheState_ProjectedRecapitalizationDoesNotDoubleReserveCreditedSeniorAssets() public {
         uint256 seedAssets = 50_000e6;
-        usdc.mint(address(this), seedAssets);
-        usdc.approve(address(pool), seedAssets);
+        usdc.mint(address(this), 2 * seedAssets);
+        usdc.approve(address(pool), 2 * seedAssets);
+        pool.initializeSeedPosition(false, seedAssets, address(this));
         pool.initializeSeedPosition(true, seedAssets, address(this));
         usdc.burn(address(pool), pool.totalAssets());
         vm.prank(address(juniorVault));
@@ -2353,8 +2374,8 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         uint256 seniorSeedAssets = 1000e6;
         usdc.mint(address(this), juniorSeedAssets + seniorSeedAssets);
         usdc.approve(address(pool), juniorSeedAssets + seniorSeedAssets);
-        pool.initializeSeedPosition(true, seniorSeedAssets, address(this));
         pool.initializeSeedPosition(false, juniorSeedAssets, address(this));
+        pool.initializeSeedPosition(true, seniorSeedAssets, address(this));
         pool.activateTrading();
         usdc.burn(address(pool), pool.totalAssets());
         vm.prank(address(juniorVault));
@@ -2422,11 +2443,10 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
 
     function helper_RecordTradingRevenueInflow_RestoresSeededSeniorBeforeJuniorWhenBothAreZero() public {
         usdc.mint(address(this), 30_000e6);
-        usdc.approve(address(pool), 30_000e6);
-        pool.initializeSeedPosition(true, 30_000e6, address(this));
         usdc.mint(address(this), 10_000e6);
-        usdc.approve(address(pool), 10_000e6);
+        usdc.approve(address(pool), 40_000e6);
         pool.initializeSeedPosition(false, 10_000e6, address(this));
+        pool.initializeSeedPosition(true, 30_000e6, address(this));
         usdc.burn(address(pool), pool.totalAssets());
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -2447,11 +2467,10 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
 
     function test_RecordImplicitTradingRevenue_RestoresSeededSeniorBeforeJuniorWhenBothAreZero() public {
         usdc.mint(address(this), 30_000e6);
-        usdc.approve(address(pool), 30_000e6);
-        pool.initializeSeedPosition(true, 30_000e6, address(this));
         usdc.mint(address(this), 10_000e6);
-        usdc.approve(address(pool), 10_000e6);
+        usdc.approve(address(pool), 40_000e6);
         pool.initializeSeedPosition(false, 10_000e6, address(this));
+        pool.initializeSeedPosition(true, 30_000e6, address(this));
         usdc.burn(address(pool), pool.totalAssets());
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -2515,9 +2534,10 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
 
     function helper_InitializeSeedPosition_CheckpointsSeniorCouponBeforePrincipalMutation() public {
         uint256 staleTime = block.timestamp + 30 days;
+        usdc.mint(address(this), 200_000e6);
+        usdc.approve(address(pool), 200_000e6);
+        pool.initializeSeedPosition(false, 100_000e6, address(this));
         vm.warp(staleTime);
-        usdc.mint(address(this), 100_000e6);
-        usdc.approve(address(pool), 100_000e6);
         pool.initializeSeedPosition(true, 100_000e6, address(this));
         assertEq(pool.lastSeniorCouponCheckpointTime(), block.timestamp);
         vm.prank(address(juniorVault));
@@ -2635,17 +2655,36 @@ contract HousePoolSeededBaseSetupTest is BasePerpTest {
             recapAmount, IHousePool.ClaimantInflowKind.Recapitalization, IHousePool.ClaimantInflowCashMode.CashArrived
         );
 
-        assertTrue(
-            pool.canAcceptTrancheDeposits(true),
-            "Senior deposits should reopen when pending recap fully clears the projected HWM"
+        assertFalse(
+            pool.isSeniorImpairedAfterPendingDepositReconcile(),
+            "Pending recap should fully clear projected senior impairment"
         );
 
         address dave = address(0x444);
+        assertEq(pool.getSeniorDepositCapacity(), 0, "Senior capacity should remain zero without junior backing");
+        assertEq(seniorVault.maxDeposit(dave), 0, "Senior maxDeposit should remain zero without junior backing");
+        assertEq(seniorVault.maxMint(dave), 0, "Senior maxMint should remain zero without junior backing");
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        uint256 juniorBacking = 1e6;
+        usdc.mint(address(pool), juniorBacking);
+        vm.prank(address(engine));
+        pool.recordClaimantInflow(
+            juniorBacking, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.CashArrived
+        );
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        assertEq(pool.juniorPrincipal(), juniorBacking, "Junior revenue should supply ratio backing");
+        assertTrue(pool.canAcceptTrancheDeposits(true), "Senior deposits should reopen with junior backing");
+
         usdc.mint(dave, 1000e6);
         vm.startPrank(dave);
         usdc.approve(address(seniorVault), 1000e6);
-        assertGt(seniorVault.maxDeposit(dave), 0, "ERC4626 maxDeposit should use the projected recapitalized HWM");
-        assertGt(seniorVault.maxMint(dave), 0, "ERC4626 maxMint should use the projected recapitalized HWM");
+        assertGe(seniorVault.maxDeposit(dave), 1000e6, "ERC4626 maxDeposit should include supported capacity");
+        assertGt(seniorVault.maxMint(dave), 0, "ERC4626 maxMint should reopen with junior backing");
         uint256 shares = seniorVault.deposit(1000e6, dave);
         vm.stopPrank();
 

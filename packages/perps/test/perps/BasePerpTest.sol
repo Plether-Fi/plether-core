@@ -98,6 +98,8 @@ abstract contract BasePerpTest is Test {
     uint256 constant SETUP_TIMESTAMP = 1_709_532_000;
     uint256 constant CAP_PRICE = 2e8;
     uint256 constant FROZEN_CLOSE_SPREAD_BPS = 50;
+    uint256 internal constant TEST_MAX_SENIOR_EXPOSURE_USDC = type(uint256).max - 1;
+    uint256 internal constant TEST_MAX_SENIOR_SHARE_BPS = 9999;
     bytes32 internal constant BASE_PYTH_FEED_A = bytes32(uint256(1));
     bytes32 internal constant BASE_PYTH_FEED_B = bytes32(uint256(2));
     address internal constant PROTOCOL_TREASURY_ACCOUNT = address(0xFEE50001);
@@ -172,6 +174,14 @@ abstract contract BasePerpTest is Test {
 
     function _bypassAllTimelocks() internal {
         clearinghouse.setEngine(address(engine));
+
+        IHousePool.PoolConfig memory config = _currentPoolConfig();
+        config.maxSeniorExposureUsdc = TEST_MAX_SENIOR_EXPOSURE_USDC;
+        config.maxSeniorShareBps = TEST_MAX_SENIOR_SHARE_BPS;
+        pool.proposePoolConfig(config);
+        vm.warp(pool.poolConfigActivationTime());
+        pool.finalizePoolConfig();
+
         vm.warp(SETUP_TIMESTAMP);
     }
 
@@ -358,8 +368,22 @@ abstract contract BasePerpTest is Test {
             seniorRateBps: pool.seniorRateBps(),
             markStalenessLimit: pool.markStalenessLimit(),
             seniorFrozenLpFeeBps: pool.seniorFrozenLpFeeBps(),
-            juniorFrozenLpFeeBps: pool.juniorFrozenLpFeeBps()
+            juniorFrozenLpFeeBps: pool.juniorFrozenLpFeeBps(),
+            maxSeniorExposureUsdc: pool.maxSeniorExposureUsdc(),
+            maxSeniorShareBps: pool.maxSeniorShareBps()
         });
+    }
+
+    function _setSeniorCapacity(
+        uint256 maxSeniorExposureUsdc,
+        uint256 maxSeniorShareBps
+    ) internal {
+        IHousePool.PoolConfig memory config = _currentPoolConfig();
+        config.maxSeniorExposureUsdc = maxSeniorExposureUsdc;
+        config.maxSeniorShareBps = maxSeniorShareBps;
+        pool.proposePoolConfig(config);
+        vm.warp(pool.poolConfigActivationTime());
+        pool.finalizePoolConfig();
     }
 
     // --- Trading helpers ---

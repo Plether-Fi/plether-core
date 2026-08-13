@@ -57,6 +57,8 @@ Before trusting a test as a source of truth, ask:
 | `MarginClearinghouse` reservation paths | `engine`, `orderRouter` | router can reserve/release queued margin and execution-bounty buckets, but cannot perform broad settlement |
 | `HousePool.payOut` / `recordProtocolInflow` | `engine`, `settlementSidecar` | payout/inflow authority is intentionally narrow |
 | `HousePool.recordClaimantInflow` | `engine`, `settlementSidecar` | claimant-owned revenue/recap routing only |
+| `HousePool.depositSenior` / senior reservation hooks | configured `seniorVault` only | direct LPs and the junior vault cannot admit, reserve, release, or finalize senior capital |
+| Other `HousePool` tranche mutation hooks | configured tranche vaults only | end users enter through `TrancheVault`; pool hooks are integration capabilities |
 
 Any new helper/sidecar contract that can reach these sets should be treated as security-critical and explicitly access-controlled.
 
@@ -281,6 +283,7 @@ Use the suites below as the highest-signal audit companions.
 | LP reserve / withdrawals | `packages/perps/test/perps/MarginClearinghouse.t.sol`, `packages/perps/test/perps/CfdEngine.t.sol`, `packages/perps/test/perps/HousePool.t.sol` |
 | HousePool snapshot parity | `packages/perps/test/perps/HousePoolSnapshotParity.t.sol`, `packages/perps/test/perps/PerpsReadParity.t.sol` |
 | HousePool lifecycle / cooldown | `packages/perps/test/perps/invariant/PerpHousePoolLifecycleInvariant.t.sol` |
+| Governed senior capacity / delayed reservations | `packages/perps/test/perps/SeniorCapacity.t.sol`, `packages/perps/test/perps/FrozenLpFeePolicy.t.sol`, `packages/perps/test/perps/invariant/GovernedSeniorCapacityInvariant.t.sol` |
 | Router policy matrix | `packages/perps/test/perps/OrderRouterPolicyMatrix.t.sol` |
 | Stale-mark / reconcile behavior | `packages/perps/test/perps/HousePool.t.sol`, `packages/perps/test/perps/CfdEngine.t.sol`, `packages/perps/test/perps/AuditV2.t.sol`, `packages/perps/test/perps/AuditV3.t.sol` |
 | Audit-history regressions | `packages/perps/test/perps/AuditCurrentFindingsVerification.t.sol`, `packages/perps/test/perps/AuditFindings.t.sol`, `packages/perps/test/perps/AuditV2.t.sol`, `packages/perps/test/perps/AuditV3.t.sol` |

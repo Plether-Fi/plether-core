@@ -16,6 +16,7 @@ import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
+import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {IPyth, PythStructs} from "@plether/shared/interfaces/IPyth.sol";
@@ -149,7 +150,18 @@ contract PerpsForkTest is Test {
 
         uint256 t0 = block.timestamp;
         clearinghouse.setEngine(address(engine));
+        pool.proposePoolConfig(
+            IHousePool.PoolConfig({
+                seniorRateBps: pool.seniorRateBps(),
+                markStalenessLimit: pool.markStalenessLimit(),
+                seniorFrozenLpFeeBps: pool.seniorFrozenLpFeeBps(),
+                juniorFrozenLpFeeBps: pool.juniorFrozenLpFeeBps(),
+                maxSeniorExposureUsdc: type(uint256).max - 1,
+                maxSeniorShareBps: 9999
+            })
+        );
         vm.warp(t0 + 144 hours + 3);
+        pool.finalizePoolConfig();
 
         deal(USDC, address(this), 2000e6);
         IERC20(USDC).approve(address(pool), 2000e6);

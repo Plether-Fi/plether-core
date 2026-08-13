@@ -97,6 +97,15 @@ This directory contains stateful Foundry invariant suites for the perps system.
   - Verifies configurable execution and liquidation staleness limits remain
     positive
 
+- `GovernedSeniorCapacityInvariant.t.sol`
+  - Fuzzes immediate senior and junior deposits, delayed senior request/cancel/
+    finalize/claim transitions, and both tranche withdrawals across multiple actors
+  - Verifies every successful senior admission or finalization leaves active plus
+    reserved exposure within both governed limits
+  - Verifies successful junior withdrawals preserve the active senior-share covenant
+  - Reconciles the pool reservation counter with unfinalized epoch assets and checks
+    vault escrow plus per-user pending-asset accounting
+
 ## Coverage boundaries
 
 The stateful suites are high-signal conformance checks, not a complete proof of
@@ -109,8 +118,10 @@ the accounting specification.
   oracle-frozen voluntary close with a nonzero frozen spread. Dedicated
   frozen-close tests cover assessed/paid/waived allocation.
 - `PerpHousePoolLifecycleInvariant.t.sol` covers the active vault lifecycle,
-  seed floors, cooldowns, caps, and excess accounting. It does not cover the
-  pending-deposit epoch request/finalize/claim state machine.
+  seed floors, cooldowns, caps, and excess accounting. The separate
+  `GovernedSeniorCapacityInvariant.t.sol` covers the bounded pending senior
+  request/cancel/finalize/claim state machine and reservation conservation; it
+  does not model every possible epoch or governance transition.
 - Degraded transition flags and post-operation balances are checked by
   `PerpPreviewInvariant.t.sol`; preview/live degraded settlement parity is
   additionally exercised by `PerpExplicitAccountingInvariant.t.sol`.

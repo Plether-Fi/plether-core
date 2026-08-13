@@ -6388,6 +6388,20 @@ contract VpiChunkingTest is Test {
     uint256 constant CAP_PRICE = 2e8;
     uint256 constant DEPTH = 5_000_000 * 1e6;
 
+    function _configureBroadSeniorCapacity() internal {
+        IHousePool.PoolConfig memory config = IHousePool.PoolConfig({
+            seniorRateBps: pool.seniorRateBps(),
+            markStalenessLimit: pool.markStalenessLimit(),
+            seniorFrozenLpFeeBps: pool.seniorFrozenLpFeeBps(),
+            juniorFrozenLpFeeBps: pool.juniorFrozenLpFeeBps(),
+            maxSeniorExposureUsdc: type(uint256).max - 1,
+            maxSeniorShareBps: 9999
+        });
+        pool.proposePoolConfig(config);
+        vm.warp(pool.poolConfigActivationTime());
+        pool.finalizePoolConfig();
+    }
+
     function setUp() public {
         usdc = new VpiMockUSDC6();
 
@@ -6418,6 +6432,7 @@ contract VpiChunkingTest is Test {
         engine.setOrderRouter(address(this));
 
         clearinghouse.setEngine(address(engine));
+        _configureBroadSeniorCapacity();
         vm.warp(1_709_532_000);
 
         usdc.mint(address(this), 2000e6);

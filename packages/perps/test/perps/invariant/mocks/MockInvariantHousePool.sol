@@ -106,11 +106,43 @@ contract MockInvariantHousePool is IHousePool {
         return 0;
     }
 
+    function maxSeniorExposureUsdc() external pure returns (uint256) {
+        return type(uint256).max;
+    }
+
+    function maxSeniorShareBps() external pure returns (uint256) {
+        return 10_000;
+    }
+
+    function getSeniorDepositCapacity() external pure returns (uint256) {
+        return type(uint256).max;
+    }
+
+    function reservedSeniorDepositAssetsUsdc() external pure returns (uint256) {
+        return 0;
+    }
+
+    function areSeniorDepositReservationsWithinLimits() external pure returns (bool) {
+        return true;
+    }
+
     function unassignedAssets() external pure returns (uint256) {
         return 0;
     }
 
     function depositSenior(
+        uint256
+    ) external pure {}
+
+    function reserveSeniorDeposit(
+        uint256
+    ) external pure {}
+
+    function releaseSeniorDepositReservation(
+        uint256
+    ) external pure {}
+
+    function depositReservedSenior(
         uint256
     ) external pure {}
 

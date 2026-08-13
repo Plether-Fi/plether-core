@@ -154,7 +154,10 @@ Deposit/mint pricing definition:
 
 - start from the same physical assets, trader-claim liabilities, claimant buckets, recapitalizations, and revenue state,
 - immediate active-share tranche deposits are disabled while any trader position is open,
-- ordinary LP entry remains available through pending deposit epochs: assets are funded up front, cancellation is allowed only before the activation epoch begins, and shares are minted only after permissionless finalization fixes the epoch price,
+- ordinary LP entry remains available through pending deposit epochs: assets are funded up front, cancellation is
+  unconditional before activation and, after activation, reopens when senior impairment blocks finalization or a
+  senior reservation book no longer fits its governed limits; shares are minted only after permissionless
+  finalization fixes the epoch price,
 - matured epochs are expected to be finalized promptly by permissionless keepers or finalizers; if finalization is delayed, the epoch can still be finalized before a later close or liquidation realizes trader losses into pool cash, which is an accepted residual MEV risk of the current ordering model,
 - do not subtract unrealized MtM liability unless it comes from an exact, non-manipulable deposit-side model,
 - realized pool losses still lower deposit NAV,
@@ -175,6 +178,56 @@ Required consequences:
 - `unassignedAssets > 0` blocks immediate and pending tranche deposits,
 - a wiped tranche cannot be silently revived by a normal ERC-4626 deposit,
 - seeded ownership continuity is preferred over governance re-assignment.
+
+### 3.1 Senior exposure admission limits
+
+Let:
+
+- `S` be projected senior principal after the conservative reconcile used by senior admission,
+- `H` be the projected senior high-water mark,
+- `J` be projected junior principal,
+- `R` be gross USDC reserved by all unfinalized senior deposit requests,
+- `E = max(S, H)` be active protected senior exposure,
+- `C = E + R` be counted senior admission exposure,
+- `A = maxSeniorExposureUsdc`, and
+- `B = maxSeniorShareBps`, where finalized governance requires `A` to be finite and `B < 10_000`.
+
+New senior exposure is admissible only while both conditions hold after the action:
+
+```text
+C <= A
+C * 10_000 <= B * (C + J)
+```
+
+Equivalently, before a new deposit and for nonzero `B`, ratio headroom is bounded by
+`floor(J * B / (10_000 - B)) - C`, saturated at zero. The active senior capacity is the smaller absolute and ratio
+headroom. A zero `B` permits no positive senior exposure. Raw cash, unassigned assets, trader balances, and pending
+junior deposits do not count as junior subordination.
+
+Rules:
+
+- an immediate senior deposit consumes current capacity by its gross USDC amount; frozen-window share fees do not
+  reduce the exposure added to `HousePool`,
+- a pending senior request adds its gross assets to `R`, preventing parallel epochs from overbooking the same capacity,
+- finalization revalidates the complete reservation book against current accounting and the active limits before it
+  atomically releases the reservation and adds the same gross amount to active senior principal,
+- reservations are provisional rather than grandfathered: if a governance reduction, coupon, loss, or junior-capital
+  change makes the book invalid, post-activation cancellation is enabled so owners can recover escrowed assets,
+- a voluntary junior withdrawal `w` must additionally preserve
+  `E * 10_000 <= B * (E + J - w)` using active protected exposure only; reservations do not lock junior liquidity, so
+  a permitted junior withdrawal may instead invalidate provisional reservations and make them refundable,
+- senior withdrawals and junior deposits improve capacity and may cure an overage,
+- governance reductions are prospective for active claims: existing senior shares are not burned, repriced, or forced
+  out, while new senior capacity remains zero until the state returns within both limits.
+
+The limits are admission controls, not alternate waterfall arithmetic. Junior-funded coupon, junior-first loss,
+revenue restoration, and privileged recapitalization continue under their ordinary priority rules even if they create
+or deepen a passive overage. In particular, claimant recapitalization recorded through
+`recordClaimantInflow(amount, Recapitalization, cashMode)` may restore an existing protected senior entitlement above
+a reduced limit; it mints no new senior LP shares. Assigning ownerless `unassignedAssets` to senior or creating a
+senior seed does create new senior shares and goes through the same admission checks. Constructor-neutral limits make
+those checks permissive during bootstrap, but trading activation requires finite active limits and a compliant seeded
+capital structure; once those finite limits are active, later senior assignment and seeding are directly bounded.
 
 ### 4. Trader reachability / terminal settlement view
 
