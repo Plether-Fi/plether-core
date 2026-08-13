@@ -5113,8 +5113,7 @@ contract MarkPriceStalenessTest is BasePerpTest {
         );
         engine.setOrderRouter(address(router));
 
-        clearinghouse.setEngine(address(engine));
-        vm.warp(SETUP_TIMESTAMP);
+        _bypassAllTimelocks();
         _bootstrapSeededLifecycle();
     }
 
@@ -5226,8 +5225,7 @@ contract StalenessGriefTest is BasePerpTest {
         );
         engine.setOrderRouter(address(router));
 
-        clearinghouse.setEngine(address(engine));
-        vm.warp(SETUP_TIMESTAMP);
+        _bypassAllTimelocks();
         _bootstrapSeededLifecycle();
     }
 
@@ -5300,6 +5298,20 @@ contract VpiImrBypassTest is Test {
         vm.warp(block.timestamp + 48 hours + 1);
     }
 
+    function _configureBroadSeniorCapacity() internal {
+        IHousePool.PoolConfig memory config = IHousePool.PoolConfig({
+            seniorRateBps: pool.seniorRateBps(),
+            markStalenessLimit: pool.markStalenessLimit(),
+            seniorFrozenLpFeeBps: pool.seniorFrozenLpFeeBps(),
+            juniorFrozenLpFeeBps: pool.juniorFrozenLpFeeBps(),
+            maxSeniorExposureUsdc: type(uint256).max - 1,
+            maxSeniorShareBps: 9999
+        });
+        pool.proposePoolConfig(config);
+        _warpPastTimelock();
+        pool.finalizePoolConfig();
+    }
+
     function _bootstrapSeededLifecycle() internal {
         uint256 seedAmount = 1000e6;
         usdc.mint(address(this), seedAmount * 2);
@@ -5362,7 +5374,7 @@ contract VpiImrBypassTest is Test {
         routerAdmin = OrderRouterAdmin(router.admin());
         engine.setOrderRouter(address(router));
 
-        _warpPastTimelock();
+        _configureBroadSeniorCapacity();
         clearinghouse.setEngine(address(engine));
         _bootstrapSeededLifecycle();
     }
@@ -5557,6 +5569,20 @@ contract KeeperFeeRefundTest is Test {
         vm.warp(block.timestamp + 48 hours + 1);
     }
 
+    function _configureBroadSeniorCapacity() internal {
+        IHousePool.PoolConfig memory config = IHousePool.PoolConfig({
+            seniorRateBps: pool.seniorRateBps(),
+            markStalenessLimit: pool.markStalenessLimit(),
+            seniorFrozenLpFeeBps: pool.seniorFrozenLpFeeBps(),
+            juniorFrozenLpFeeBps: pool.juniorFrozenLpFeeBps(),
+            maxSeniorExposureUsdc: type(uint256).max - 1,
+            maxSeniorShareBps: 9999
+        });
+        pool.proposePoolConfig(config);
+        _warpPastTimelock();
+        pool.finalizePoolConfig();
+    }
+
     function _bootstrapSeededLifecycle() internal {
         uint256 seedAmount = 1000e6;
         usdc.mint(address(this), seedAmount * 2);
@@ -5618,7 +5644,7 @@ contract KeeperFeeRefundTest is Test {
         routerAdmin = OrderRouterAdmin(router.admin());
         engine.setOrderRouter(address(router));
 
-        _warpPastTimelock();
+        _configureBroadSeniorCapacity();
         IOrderRouterAdminHost.RouterConfig memory config = IOrderRouterAdminHost.RouterConfig({
             maxOrderAge: 300,
             orderExecutionStalenessLimit: router.orderExecutionStalenessLimit(),
@@ -5902,6 +5928,20 @@ contract WeekendArbitrageTest is Test {
         vm.warp(block.timestamp + 48 hours + 1);
     }
 
+    function _configureBroadSeniorCapacity() internal {
+        IHousePool.PoolConfig memory config = IHousePool.PoolConfig({
+            seniorRateBps: pool.seniorRateBps(),
+            markStalenessLimit: pool.markStalenessLimit(),
+            seniorFrozenLpFeeBps: pool.seniorFrozenLpFeeBps(),
+            juniorFrozenLpFeeBps: pool.juniorFrozenLpFeeBps(),
+            maxSeniorExposureUsdc: type(uint256).max - 1,
+            maxSeniorShareBps: 9999
+        });
+        pool.proposePoolConfig(config);
+        _warpPastTimelock();
+        pool.finalizePoolConfig();
+    }
+
     function _bootstrapSeededLifecycle() internal {
         uint256 seedAmount = 1000e6;
         usdc.mint(address(this), seedAmount * 2);
@@ -5982,7 +6022,7 @@ contract WeekendArbitrageTest is Test {
         );
         engine.setOrderRouter(address(router));
 
-        _warpPastTimelock();
+        _configureBroadSeniorCapacity();
         clearinghouse.setEngine(address(engine));
         _bootstrapSeededLifecycle();
     }

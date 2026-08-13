@@ -56,6 +56,18 @@ The stack is deployed, wired, verified on Arbiscan, bootstrapped, and trading is
 | Senior seed | `50_000_000e6` | Provides deep senior-side mock liquidity for integration and stress testing. |
 | Junior seed | `50_000_000e6` | Provides symmetric junior-side mock liquidity and keeps pool accounting balanced at launch. |
 
+### Senior-limit compatibility note
+
+This historical deployment predates the governed `maxSeniorExposureUsdc` and `maxSeniorShareBps` controls. Its
+symmetric seed values describe the launch allocation but are not an on-chain 50% covenant. New deployments must use
+the updated two-run bootstrap flow: explicitly propose finite values through the 48-hour `HousePool` timelock, rerun
+to finalize them, and only then initialize junior followed by senior and activate trading. The addresses above are
+non-upgradeable and do not acquire these controls retroactively.
+
+The `proposePoolConfig` tuple selector, `PoolConfigProposed` event topic, and public `pendingPoolConfig()` return shape
+all changed with the two new fields. This repository has no tracked generated bindings, so downstream frontend,
+admin, and indexer consumers must regenerate/version their ABIs and retain the historical event topic for old stacks.
+
 ## Oracle Notes
 
 `pythMaxConfidenceRatioBps = 10` means the oracle accepts a component price only when:

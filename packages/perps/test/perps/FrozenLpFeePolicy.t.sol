@@ -213,15 +213,32 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         _fundJunior(address(0xAAA9), 500_000e6);
         _enterFrozenWindow();
 
+        uint256 capacity = pool.getSeniorDepositCapacity();
         uint256 maxShares = seniorVault.maxMint(lp);
+        uint256 maxAssets = seniorVault.previewMint(maxShares);
+        uint256 nextAssets = seniorVault.previewMint(maxShares + 1);
+
+        uint256 feeBps = pool.frozenLpFeeBps(true);
+        uint256 adjustedShares = seniorVault.totalSupply() + 10 ** (seniorVault.decimals() - usdc.decimals());
+        uint256 feeAsymptoteNumerator = adjustedShares * (10_000 - feeBps);
+        uint256 feeAsymptoteShares = feeAsymptoteNumerator / feeBps;
+        if (feeAsymptoteNumerator % feeBps == 0) {
+            feeAsymptoteShares -= 1;
+        }
 
         assertGt(maxShares, 0, "Frozen maxMint should allow bounded minting");
-        assertLt(maxShares, type(uint256).max, "Frozen maxMint should expose the finite fee asymptote");
-        assertLt(seniorVault.previewMint(maxShares), type(uint256).max, "maxMint amount should remain previewable");
-        assertEq(
-            seniorVault.previewMint(maxShares + 1),
+        assertLe(maxShares, feeAsymptoteShares, "Frozen maxMint should remain bounded by the finite fee asymptote");
+        assertLe(maxAssets, capacity, "Frozen maxMint should fit the remaining gross senior capacity");
+        assertGt(nextAssets, capacity, "One share past frozen maxMint should exceed gross senior capacity");
+        assertLt(
+            seniorVault.previewMint(feeAsymptoteShares),
             type(uint256).max,
-            "Preview past maxMint should not underflow the frozen-fee denominator"
+            "The final share at the frozen-fee asymptote should remain previewable"
+        );
+        assertEq(
+            seniorVault.previewMint(feeAsymptoteShares + 1),
+            type(uint256).max,
+            "Preview past the frozen-fee asymptote should not underflow the pricing denominator"
         );
     }
 

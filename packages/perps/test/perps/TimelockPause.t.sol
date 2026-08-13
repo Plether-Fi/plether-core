@@ -378,12 +378,16 @@ contract TimelockPauseTest is BasePerpTest {
             uint256 pendingSeniorRate,
             uint256 pendingMarkStaleness,
             uint256 pendingSeniorFrozenFee,
-            uint256 pendingJuniorFrozenFee
+            uint256 pendingJuniorFrozenFee,
+            uint256 pendingMaxSeniorExposure,
+            uint256 pendingMaxSeniorShareBps
         ) = pool.pendingPoolConfig();
         assertEq(pendingSeniorRate, 0);
         assertEq(pendingMarkStaleness, 0);
         assertEq(pendingSeniorFrozenFee, 0);
         assertEq(pendingJuniorFrozenFee, 0);
+        assertEq(pendingMaxSeniorExposure, 0);
+        assertEq(pendingMaxSeniorShareBps, 0);
     }
 
     function test_ProposePoolConfig_RevertsForInvalidFrozenLpFees() public {

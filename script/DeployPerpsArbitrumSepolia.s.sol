@@ -130,9 +130,8 @@ contract DeployPerpsArbitrumSepolia is Script {
         vm.stopBroadcast();
 
         _logDeployment(deployed);
-        console.log(
-            "Trading remains inactive until seed positions are initialized and HousePool.activateTrading() is called."
-        );
+        console.log("Trading remains inactive until finite senior limits complete their HousePool timelock,");
+        console.log("junior and senior seed positions are initialized, and HousePool.activateTrading() is called.");
     }
 
     function _riskParams() internal pure returns (CfdTypes.RiskParams memory) {

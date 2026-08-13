@@ -6,6 +6,7 @@ import {DeployPerpsArbitrumSepolia, MockUSDC} from "../../script/DeployPerpsArbi
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {HousePool} from "@plether/perps/HousePool.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {Test} from "forge-std/Test.sol";
@@ -30,6 +31,27 @@ contract BootstrapPerpsArbitrumSepoliaHarness is BootstrapPerpsArbitrumSepolia {
 
     function defaultJuniorSeedUsdc() external pure returns (uint256) {
         return DEFAULT_JUNIOR_SEED_USDC;
+    }
+
+    function validateSeniorLimits(
+        uint256 maxSeniorExposureUsdc,
+        uint256 maxSeniorShareBps
+    ) external pure {
+        _validateSeniorLimits(maxSeniorExposureUsdc, maxSeniorShareBps);
+    }
+
+    function deployConfigTestPool(
+        address usdc
+    ) external returns (HousePool) {
+        return new HousePool(usdc, address(0xE11E));
+    }
+
+    function configureSeniorLimits(
+        HousePool housePool,
+        uint256 maxSeniorExposureUsdc,
+        uint256 maxSeniorShareBps
+    ) external returns (bool) {
+        return _configureSeniorLimits(housePool, maxSeniorExposureUsdc, maxSeniorShareBps);
     }
 
 }
@@ -86,6 +108,45 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
 
         assertEq(bootstrapScript.defaultSeniorSeedUsdc(), 50_000_000e6, "senior seed");
         assertEq(bootstrapScript.defaultJuniorSeedUsdc(), 50_000_000e6, "junior seed");
+    }
+
+    function test_BootstrapRequiresFiniteExplicitSeniorLimits() public {
+        BootstrapPerpsArbitrumSepoliaHarness bootstrapScript = new BootstrapPerpsArbitrumSepoliaHarness();
+
+        bootstrapScript.validateSeniorLimits(100_000_000e6, 5000);
+        bootstrapScript.validateSeniorLimits(0, 0);
+
+        vm.expectRevert(bytes("MAX_SENIOR_EXPOSURE_USDC must be finite"));
+        bootstrapScript.validateSeniorLimits(type(uint256).max, 5000);
+
+        vm.expectRevert(bytes("MAX_SENIOR_SHARE_BPS must be below 10000"));
+        bootstrapScript.validateSeniorLimits(100_000_000e6, 10_000);
+    }
+
+    function test_BootstrapSeniorLimitsUseTwoRunProposalAndFinalizeFlow() public {
+        BootstrapPerpsArbitrumSepoliaHarness bootstrapScript = new BootstrapPerpsArbitrumSepoliaHarness();
+        MockUSDC usdc = new MockUSDC();
+        HousePool pool = bootstrapScript.deployConfigTestPool(address(usdc));
+        uint256 maxExposure = 100_000_000e6;
+        uint256 maxShareBps = 6000;
+
+        assertFalse(bootstrapScript.configureSeniorLimits(pool, maxExposure, maxShareBps));
+        uint256 activationTime = pool.poolConfigActivationTime();
+        assertEq(activationTime, block.timestamp + pool.TIMELOCK_DELAY());
+        (,,,, uint256 pendingMaxExposure, uint256 pendingMaxShareBps) = pool.pendingPoolConfig();
+        assertEq(pendingMaxExposure, maxExposure);
+        assertEq(pendingMaxShareBps, maxShareBps);
+
+        assertFalse(bootstrapScript.configureSeniorLimits(pool, maxExposure, maxShareBps));
+        assertEq(pool.poolConfigActivationTime(), activationTime, "matching rerun must not restart the timelock");
+
+        vm.warp(activationTime);
+        assertTrue(bootstrapScript.configureSeniorLimits(pool, maxExposure, maxShareBps));
+        assertEq(pool.poolConfigActivationTime(), 0);
+        assertEq(pool.maxSeniorExposureUsdc(), maxExposure);
+        assertEq(pool.maxSeniorShareBps(), maxShareBps);
+
+        assertTrue(bootstrapScript.configureSeniorLimits(pool, maxExposure, maxShareBps));
     }
 
 }
