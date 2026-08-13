@@ -2,7 +2,6 @@
 pragma solidity 0.8.35;
 
 import {BasePerpTest} from "../BasePerpTest.sol";
-import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
@@ -11,6 +10,7 @@ import {Test} from "forge-std/Test.sol";
 contract GovernedSeniorCapacityHandler is Test {
 
     uint256 internal constant BPS = 10_000;
+    uint256 internal constant SECONDS_PER_YEAR = 365 days;
     uint256 internal constant MIN_DEPOSIT_USDC = 1e6;
     uint256 internal constant MAX_ACTION_ASSETS_USDC = 25_000e6;
     uint256 internal constant MAX_TRACKED_EPOCHS = 8;
@@ -253,8 +253,67 @@ contract GovernedSeniorCapacityHandler is Test {
 
     function _recordSuccessfulSeniorAdmission() internal {
         successfulSeniorAdmissions += 1;
-        if (!pool.areSeniorDepositReservationsWithinLimits()) {
+        if (!_seniorCommitmentsWithinIndependentLimits()) {
             seniorAdmissionViolation = true;
+        }
+    }
+
+    /// @dev Independent capacity oracle for the invariant. It deliberately does not call the pool's capacity
+    ///      predicate, pending-state views, or capacity/accounting libraries. This handler cannot create positions,
+    ///      claimant buckets, unassigned assets, or governance changes, so elapsed senior coupon is its only pending
+    ///      reconcile transition.
+    function _seniorCommitmentsWithinIndependentLimits() internal view returns (bool) {
+        (uint256 projectedSenior, uint256 projectedJunior, uint256 projectedHighWaterMark) =
+            _projectStoredWaterfallAfterCoupon();
+        uint256 projectedExposure = projectedSenior > projectedHighWaterMark ? projectedSenior : projectedHighWaterMark;
+        uint256 reservations = pool.reservedSeniorDepositAssetsUsdc();
+
+        if (reservations > type(uint256).max - projectedExposure) {
+            return false;
+        }
+        uint256 committedExposure = projectedExposure + reservations;
+        if (committedExposure > pool.maxSeniorExposureUsdc()) {
+            return false;
+        }
+
+        return _withinRatio(committedExposure, projectedJunior);
+    }
+
+    /// @dev Reproduces coupon transfer from raw stored state using quotient/remainder arithmetic rather than the
+    ///      production waterfall implementation. Paid coupon restores an impaired senior claim first; any remainder
+    ///      raises senior principal and its high-water mark in lockstep.
+    function _projectStoredWaterfallAfterCoupon()
+        internal
+        view
+        returns (uint256 seniorPrincipal, uint256 juniorPrincipal, uint256 seniorHighWaterMark)
+    {
+        seniorPrincipal = pool.seniorPrincipal();
+        juniorPrincipal = pool.juniorPrincipal();
+        seniorHighWaterMark = pool.seniorHighWaterMark();
+
+        uint256 checkpoint = pool.lastSeniorCouponCheckpointTime();
+        uint256 elapsed = block.timestamp > checkpoint ? block.timestamp - checkpoint : 0;
+        if (elapsed == 0 || seniorPrincipal == 0 || juniorVault.totalSupply() == 0) {
+            return (seniorPrincipal, juniorPrincipal, seniorHighWaterMark);
+        }
+
+        uint256 denominator = BPS * SECONDS_PER_YEAR;
+        uint256 rateElapsed = pool.seniorRateBps() * elapsed;
+        uint256 couponDue = (seniorPrincipal / denominator) * rateElapsed
+            + ((seniorPrincipal % denominator) * rateElapsed) / denominator;
+        uint256 couponPaid = couponDue < juniorPrincipal ? couponDue : juniorPrincipal;
+        juniorPrincipal -= couponPaid;
+
+        uint256 remaining = couponPaid;
+        if (seniorPrincipal < seniorHighWaterMark) {
+            uint256 impairment = seniorHighWaterMark - seniorPrincipal;
+            uint256 restored = remaining < impairment ? remaining : impairment;
+            seniorPrincipal += restored;
+            remaining -= restored;
+        }
+        if (remaining > 0) {
+            seniorPrincipal += remaining;
+            seniorHighWaterMark += remaining;
         }
     }
 
@@ -262,11 +321,12 @@ contract GovernedSeniorCapacityHandler is Test {
         uint256 principal = pool.seniorPrincipal();
         uint256 highWaterMark = pool.seniorHighWaterMark();
         uint256 exposure = principal > highWaterMark ? principal : highWaterMark;
-        return _withinRatio(exposure);
+        return _withinRatio(exposure, pool.juniorPrincipal());
     }
 
     function _withinRatio(
-        uint256 exposure
+        uint256 exposure,
+        uint256 juniorPrincipal
     ) internal view returns (bool) {
         uint256 maxShareBps = pool.maxSeniorShareBps();
         if (maxShareBps >= BPS) {
@@ -275,8 +335,32 @@ contract GovernedSeniorCapacityHandler is Test {
         if (maxShareBps == 0) {
             return exposure == 0;
         }
-        uint256 ratioLimit = Math.mulDiv(pool.juniorPrincipal(), maxShareBps, BPS - maxShareBps);
+        uint256 ratioLimit = _independentSaturatingMulDiv(juniorPrincipal, maxShareBps, BPS - maxShareBps);
         return exposure <= ratioLimit;
+    }
+
+    /// @dev Computes `floor(x * y / denominator)` by quotient/remainder decomposition and saturates at uint256 max.
+    ///      This is intentionally structurally different from the production full-precision mulDiv implementation.
+    ///      Here `y` and `denominator` are basis-point values, so the remainder product cannot overflow.
+    function _independentSaturatingMulDiv(
+        uint256 x,
+        uint256 y,
+        uint256 denominator
+    ) internal pure returns (uint256) {
+        if (x == 0 || y == 0) {
+            return 0;
+        }
+
+        uint256 wholeMultiplier = x / denominator;
+        if (wholeMultiplier > type(uint256).max / y) {
+            return type(uint256).max;
+        }
+        uint256 whole = wholeMultiplier * y;
+        uint256 remainderTerm = ((x % denominator) * y) / denominator;
+        if (remainderTerm > type(uint256).max - whole) {
+            return type(uint256).max;
+        }
+        return whole + remainderTerm;
     }
 
     function _findTrackedEpoch(
@@ -295,6 +379,10 @@ contract GovernedSeniorCapacityInvariantTest is BasePerpTest {
 
     GovernedSeniorCapacityHandler internal handler;
 
+    uint256 internal constant SMOKE_SENIOR_DEPOSIT_USDC = 1e6;
+    uint256 internal constant SMOKE_JUNIOR_DEPOSIT_USDC = 2e6;
+    uint256 internal constant SMOKE_JUNIOR_WITHDRAW_USDC = 1e6;
+
     function _initialJuniorDeposit() internal pure override returns (uint256) {
         return 0;
     }
@@ -304,6 +392,13 @@ contract GovernedSeniorCapacityInvariantTest is BasePerpTest {
         _setSeniorCapacity(100_000e6, 7500);
 
         handler = new GovernedSeniorCapacityHandler(usdc, pool, seniorVault, juniorVault);
+
+        // Make the postcondition counters non-vacuous in every invariant campaign. The fuzzer retains the full
+        // selector set below and continues exploring additional transitions from this valid, exercised state.
+        handler.depositSenior(0, SMOKE_SENIOR_DEPOSIT_USDC);
+        handler.depositJunior(0, SMOKE_JUNIOR_DEPOSIT_USDC);
+        vm.warp(block.timestamp + juniorVault.DEPOSIT_COOLDOWN());
+        handler.withdrawJunior(0, SMOKE_JUNIOR_WITHDRAW_USDC);
 
         bytes4[] memory selectors = new bytes4[](9);
         selectors[0] = handler.depositSenior.selector;
@@ -321,6 +416,7 @@ contract GovernedSeniorCapacityInvariantTest is BasePerpTest {
     }
 
     function invariant_SuccessfulSeniorAdmissionsPreserveCapacityLimits() public view {
+        assertGt(handler.successfulSeniorAdmissions(), 0, "campaign must exercise a successful senior admission");
         assertFalse(
             handler.seniorAdmissionViolation(),
             "successful senior admission or finalization must leave active exposure plus reservations within limits"
@@ -328,6 +424,7 @@ contract GovernedSeniorCapacityInvariantTest is BasePerpTest {
     }
 
     function invariant_SuccessfulJuniorWithdrawalsPreserveActiveSeniorRatio() public view {
+        assertGt(handler.successfulJuniorWithdrawals(), 0, "campaign must exercise a successful junior withdrawal");
         assertFalse(
             handler.juniorWithdrawalViolation(),
             "successful junior withdrawal must leave active protected senior exposure within the share limit"

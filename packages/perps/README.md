@@ -76,8 +76,9 @@ In practice, the compact public API is:
   - permissionless delayed-batch processing: `TrancheVault.finalizeDepositEpoch(uint256)`
 - Readers:
   - `PerpsPublicLens`
-  - `HousePool.getSeniorDepositCapacity()`, `reservedSeniorDepositAssetsUsdc()`, and
-    `areSeniorDepositReservationsWithinLimits()` for capacity-specific integration state
+  - the read-only `IHousePool` capacity getters exposed by `HousePool`:
+    `getSeniorDepositCapacity()`, `reservedSeniorDepositAssetsUsdc()`, and
+    `areSeniorDepositReservationsWithinLimits()`
   - `CfdEngineLens.previewOpen(...)` / `previewClose(...)` for trade-ticket simulations using caller-supplied oracle prices
 
 The simplified public interfaces live in `packages/perps/src/interfaces/`:
@@ -93,6 +94,10 @@ The simplified public interfaces live in `packages/perps/src/interfaces/`:
 - `PerpsViewTypes.sol`
 
 The wider engine, clearinghouse, router, and house-pool interfaces still exist for tests, admin tooling, and deep accounting inspection, but they are not the recommended product integration surface.
+The three capacity getters above are the deliberate direct-read exception. The tranche-mutation hooks declared by
+`IHousePool` / `IPerpsLPActions`, including senior deposit reservation, release, and reserved finalization, are
+integration plumbing authorized only to the configured tranche vaults; LP applications must perform actions through
+the relevant `TrancheVault`.
 
 ### Trade-ticket previews
 
@@ -223,10 +228,14 @@ where `R` is the gross USDC reserved by all pending senior deposits. The absolut
 the share test compares it with projected junior principal. Raw pool cash, unassigned assets, and trader balances are
 not junior subordination.
 
+The constructor starts with neutral bootstrap sentinels: unlimited absolute exposure (`type(uint256).max`) and a 100%
+senior share (`10,000` bps). Governance cannot propose those values: a finalized operational configuration must use a
+finite absolute limit and a share limit below `10,000` bps. Either limit may be zero to close senior admission.
+
 - Immediate senior deposits and new pending senior requests may use only the smaller absolute and ratio headrooms.
 - A pending senior request reserves gross-asset headroom. Finalization revalidates the complete reservation book under
   the then-active limits; if a cap reduction or accounting change makes it invalid, affected owners may cancel after
-  activation and recover their escrowed USDC rather than remain locked.
+  epoch activation and recover their escrowed USDC rather than remain locked.
 - Junior withdrawals preserve the configured senior share using active `E` only, in addition to the ordinary cash and
   senior-priority withdrawal firewall. Reservations do not lock junior liquidity; a permitted junior withdrawal may
   instead invalidate the provisional reservation book and unlock refunds.
@@ -248,11 +257,15 @@ not junior subordination.
 
 - Trading does not become live until finite senior limits are finalized, both tranche seed positions exist within
   those limits, and the owner activates trading.
-- Activation rejects the constructor's uncapped senior-limit defaults and requires the seeded protected exposure and
-  junior capital to satisfy both active limits.
+- Activation rejects the constructor's neutral senior-limit defaults, requires both permanent seed positions, and
+  requires projected protected senior exposure plus any accepted senior reservations to satisfy both active limits
+  against projected junior principal.
 - Risk-increasing order commits and ordinary tranche deposits stay blocked during the seed lifecycle.
 - `TrancheVault.maxDeposit()` / `maxMint()` return zero while lifecycle, stale-mark, deposit-pause, open-position, senior-impairment, pending-bootstrap-assignment, or senior-cap gates block immediate active-share deposits. Senior views report finite residual capacity when entry is open.
-- `TrancheVault.requestDeposit()` keeps ordinary LP entry available through pending deposit epochs; requests are funded up front and reserve senior capacity when applicable. They normally become non-cancellable at activation, except that a senior reservation book invalidated by current limits or accounting remains refundable.
+- `TrancheVault.requestDeposit()` keeps ordinary LP entry available through pending deposit epochs; requests are funded
+  up front and reserve senior capacity when applicable. Cancellation is unconditional before the request's epoch
+  activates. At or after epoch activation it is available only when projected senior impairment blocks finalization
+  (for either tranche), or when the senior vault's aggregate reservation book no longer fits the active limits.
 - During `oracleFrozen`, `TrancheVault.maxMint()` returns the finite share cap implied by the active frozen-entry fee rather than the default unbounded ERC4626 value.
 - `TrancheVault.maxWithdraw()` / `maxRedeem()` enforce cooldown plus pool-level withdrawal availability.
 
@@ -329,11 +342,11 @@ This keeps LP withdrawal limits conservative. Incoming deposits are priced from 
 Immediate active-share deposits are only accepted when no trader positions are open. While positions are open,
 ordinary LP entry moves through pending deposit epochs: the user funds the request up front, waits at least one full
 epoch, and later receives the batch-priced shares after permissionless finalization. Cancellation is unconditional
-before activation. After activation it reopens when senior impairment blocks finalization or, for senior requests,
-when the aggregate reservation book no longer fits the active governed limits. This avoids pricing instantly active
-new LP shares against an incomplete unrealized-loss model: the engine's O(1) side aggregates can conservatively bound
-winner liabilities, but they cannot compute exact collateral-capped loser receivables without per-position
-accounting.
+before the request's epoch activates. At or after epoch activation it is available when senior impairment blocks
+finalization or, for senior requests, when the aggregate reservation book no longer fits the active governed limits.
+This avoids pricing instantly active new LP shares against an incomplete unrealized-loss model: the engine's O(1) side
+aggregates can conservatively bound winner liabilities, but they cannot compute exact collateral-capped loser
+receivables without per-position accounting.
 
 ### Accounting domains
 
@@ -479,12 +492,16 @@ Timelocked surfaces include:
 - `CfdEngineAdmin.EngineRiskConfig` -> `CfdEngine.riskParams`, `CfdEngine.executionFeeBps`, `CfdEngine.frozenCloseSpreadBps`
 - `CfdEngineAdmin.EngineCalendarConfig` -> `CfdEngine.fadDayOverrides`, `CfdEngine.fadRunwaySeconds`
 - `CfdEngineAdmin.EngineFreshnessConfig` -> `CfdEngine.fadMaxStaleness`, `CfdEngine.engineMarkStalenessLimit`
-- `HousePool.PoolConfig` -> coupon rate, mark-staleness limit, frozen LP fees, `maxSeniorExposureUsdc`, and
-  `maxSeniorShareBps`
+- `HousePool.PoolConfig` -> one six-field proposal containing `seniorRateBps`, `markStalenessLimit`,
+  `seniorFrozenLpFeeBps`, `juniorFrozenLpFeeBps`, `maxSeniorExposureUsdc`, and `maxSeniorShareBps`
 - `OrderRouterAdmin` -> `OrderRouter.RouterConfig`
 - `OrderRouterAdmin` -> `OrderRouter.OracleConfig` for the configured `PletherOracle` address
 
 Instant controls remain for one-time wiring and fee withdrawal. `OrderRouter` pause/unpause is now owner-gated on `OrderRouterAdmin` rather than the router itself.
+
+Each valid `PoolConfig` proposal supplies all six fields, replaces any earlier pending proposal, and restarts the
+48-hour timelock. Finalization atomically replaces the entire active configuration, so a proposal intended to change
+only one field must repeat the desired active values for the other five.
 
 ### Pause behavior
 
@@ -520,6 +537,9 @@ Instant controls remain for one-time wiring and fee withdrawal. `OrderRouter` pa
 | `maxSeniorExposureUsdc` | Timelocked, finite | Absolute counted-admission limit (`E +` pending senior reservations) |
 | `maxSeniorShareBps` | Timelocked, <10,000 | Maximum counted senior admission share; active `E` also governs junior withdrawals |
 | `DEPOSIT_COOLDOWN` | 1 hour | LP anti-flash cooldown |
+
+The two senior-capacity rows describe the required post-timelock operating configuration. Fresh deployments initially
+use the neutral constructor sentinels `type(uint256).max` and `10,000` bps, which cannot pass trading activation.
 
 OrderRouter also exposes timelocked admin control over `maxPendingOrders`, `minEngineGas`, and `maxPruneOrdersPerCall`.
 `maxOrderAge` must stay nonzero and cannot exceed one hour, so close-only windows cannot be indefinitely pinned by an old FIFO head.
