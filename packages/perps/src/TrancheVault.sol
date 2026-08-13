@@ -55,6 +55,13 @@ contract TrancheVault is ERC4626 {
         bool finalized;
     }
 
+    /// @dev Three-limb unsigned integer used to keep full-precision mint calculations off the EVM stack.
+    struct Uint768 {
+        uint256 high;
+        uint256 middle;
+        uint256 low;
+    }
+
     /// @notice Cooldown anchor timestamp for each share owner, in Unix seconds.
     /// @dev The timestamp is propagated to recipients of ordinary transfers when it would tighten their cooldown.
     mapping(address => uint256) public lastDepositTime;
@@ -1084,7 +1091,7 @@ contract TrancheVault is ERC4626 {
         if (!_frozenMintFits(shares, high, feeBps, adjustedShares, adjustedAssets)) {
             return high;
         }
-        uint256 low;
+        uint256 low = 0;
         while (low < high) {
             uint256 midpoint = low + ((high - low) / 2);
             if (_frozenMintFits(shares, midpoint, feeBps, adjustedShares, adjustedAssets)) {
@@ -1103,7 +1110,7 @@ contract TrancheVault is ERC4626 {
         uint256 adjustedAssets,
         uint256 upperBound
     ) private pure returns (uint256) {
-        uint256 low;
+        uint256 low = 0;
         uint256 high = upperBound;
         while (low < high) {
             uint256 midpoint = low + ((high - low) / 2) + 1;
@@ -1123,14 +1130,23 @@ contract TrancheVault is ERC4626 {
         uint256 adjustedShares,
         uint256 adjustedAssets
     ) private pure returns (bool) {
-        (uint256 rightHigh, uint256 rightMiddle, uint256 rightLow) = _mul768(assets, 10_000 - feeBps, adjustedShares);
-        (uint256 feeHigh, uint256 feeMiddle, uint256 feeLow) = _mul768(assets, feeBps, shares);
-        if (_compare768(rightHigh, rightMiddle, rightLow, feeHigh, feeMiddle, feeLow) < 0) {
+        Uint768 memory right = _mul768Value(assets, 10_000 - feeBps, adjustedShares);
+        Uint768 memory fee = _mul768Value(assets, feeBps, shares);
+        if (_compare768(right.high, right.middle, right.low, fee.high, fee.middle, fee.low) < 0) {
             return false;
         }
-        (rightHigh, rightMiddle, rightLow) = _subtract768(rightHigh, rightMiddle, rightLow, feeHigh, feeMiddle, feeLow);
-        (uint256 costHigh, uint256 costMiddle, uint256 costLow) = _mul768(10_000, shares, adjustedAssets);
-        return _compare768(costHigh, costMiddle, costLow, rightHigh, rightMiddle, rightLow) <= 0;
+        (right.high, right.middle, right.low) =
+            _subtract768(right.high, right.middle, right.low, fee.high, fee.middle, fee.low);
+        Uint768 memory cost = _mul768Value(10_000, shares, adjustedAssets);
+        return _compare768(cost.high, cost.middle, cost.low, right.high, right.middle, right.low) <= 0;
+    }
+
+    function _mul768Value(
+        uint256 x,
+        uint256 y,
+        uint256 z
+    ) private pure returns (Uint768 memory value) {
+        (value.high, value.middle, value.low) = _mul768(x, y, z);
     }
 
     function _mul768(
