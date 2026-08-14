@@ -22,6 +22,7 @@ import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {ClaimEngineViewTypes} from "@plether/perps/interfaces/ClaimEngineViewTypes.sol";
 import {HousePoolEngineViewTypes} from "@plether/perps/interfaces/HousePoolEngineViewTypes.sol";
 import {ICfdEngineAdminHost} from "@plether/perps/interfaces/ICfdEngineAdminHost.sol";
+import {ICfdEngineRiskParamsView} from "@plether/perps/interfaces/ICfdEngineRiskParamsView.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
@@ -746,18 +747,7 @@ abstract contract BasePerpTest is Test {
     // --- Governance helpers ---
 
     function _engineRiskConfig() internal view returns (ICfdEngineAdminHost.EngineRiskConfig memory config) {
-        (
-            config.riskParams.vpiFactor,
-            config.riskParams.maxSkewRatio,
-            config.riskParams.maintMarginBps,
-            config.riskParams.initMarginBps,
-            config.riskParams.fadMarginBps,
-            config.riskParams.baseCarryBps,
-            config.riskParams.minBountyUsdc,
-            config.riskParams.bountyBps,
-            config.riskParams.keeperShareBps,
-            config.riskParams.protocolShareBps
-        ) = engine.riskParams();
+        config.riskParams = ICfdEngineRiskParamsView(address(engine)).riskParams();
         config.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
         config.executionFeeBps = engine.executionFeeBps();
     }

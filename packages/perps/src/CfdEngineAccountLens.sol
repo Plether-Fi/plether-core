@@ -5,6 +5,7 @@ import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {AccountLensViewTypes} from "@plether/perps/interfaces/AccountLensViewTypes.sol";
 import {ICfdEngineAccountLens} from "@plether/perps/interfaces/ICfdEngineAccountLens.sol";
+import {ICfdEngineRiskParamsView} from "@plether/perps/interfaces/ICfdEngineRiskParamsView.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
@@ -321,18 +322,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
     /// @notice Reconstructs the engine's current risk-parameter struct from its public tuple getter.
     /// @return params Current risk, VPI, carry, margin, and bounty settings.
     function _riskParams() internal view returns (CfdTypes.RiskParams memory params) {
-        (
-            params.vpiFactor,
-            params.maxSkewRatio,
-            params.maintMarginBps,
-            params.initMarginBps,
-            params.fadMarginBps,
-            params.baseCarryBps,
-            params.minBountyUsdc,
-            params.bountyBps,
-            params.keeperShareBps,
-            params.protocolShareBps
-        ) = engineContract.riskParams();
+        params = ICfdEngineRiskParamsView(address(engineContract)).riskParams();
     }
 
 }

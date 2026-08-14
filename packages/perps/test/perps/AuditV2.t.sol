@@ -39,7 +39,7 @@ contract AuditV2_C01_WithdrawGuardTest is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 5e6,
             bountyBps: 10,
-            keeperShareBps: 5_000,
+            keeperShareBps: 5000,
             protocolShareBps: 0
         });
     }
@@ -103,7 +103,7 @@ contract AuditV2_C02_ReconcileTimeConsumptionTest is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 5e6,
             bountyBps: 10,
-            keeperShareBps: 5_000,
+            keeperShareBps: 5000,
             protocolShareBps: 0
         });
     }
@@ -186,7 +186,7 @@ contract AuditV2_C03_OracleFrozenCloseTest is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 5e6,
             bountyBps: 10,
-            keeperShareBps: 5_000,
+            keeperShareBps: 5000,
             protocolShareBps: 0
         });
     }
@@ -400,7 +400,7 @@ contract AuditV2_M01_VPIRebateIMRTest is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 5e6,
             bountyBps: 10,
-            keeperShareBps: 5_000,
+            keeperShareBps: 5000,
             protocolShareBps: 0
         });
     }

@@ -29,7 +29,7 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 5e6,
             bountyBps: 10,
-            keeperShareBps: 5_000,
+            keeperShareBps: 5000,
             protocolShareBps: 0
         });
     }
@@ -150,7 +150,7 @@ contract AuditLatestFindingsFailing_VPI is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 5e6,
             bountyBps: 10,
-            keeperShareBps: 5_000,
+            keeperShareBps: 5000,
             protocolShareBps: 0
         });
     }

@@ -75,8 +75,7 @@ library LiquidationAccountingLib {
         state.liquidationChargeUsdc = liquidationChargeUsdc;
         state.keeperBountyUsdc = Math.mulDiv(liquidationChargeUsdc, keeperShareBps, 10_000);
         state.protocolLiquidationFeeUsdc = Math.mulDiv(liquidationChargeUsdc, protocolShareBps, 10_000);
-        state.lpLiquidationFeeUsdc =
-            liquidationChargeUsdc - state.keeperBountyUsdc - state.protocolLiquidationFeeUsdc;
+        state.lpLiquidationFeeUsdc = liquidationChargeUsdc - state.keeperBountyUsdc - state.protocolLiquidationFeeUsdc;
     }
 
     /// @notice Converts liquidation equity net of the total charge into seizure, payout, or bad-debt settlement.

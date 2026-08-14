@@ -943,14 +943,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         uint256 protocolFeeUsdc
     ) external onlyOperator returns (uint256 seizedUsdc) {
         return _applyLiquidationSettlementPlan(
-            account,
-            reservationOrderIds,
-            plan,
-            recipient,
-            keeper,
-            keeperBountyUsdc,
-            protocolFeeAccount,
-            protocolFeeUsdc
+            account, reservationOrderIds, plan, recipient, keeper, keeperBountyUsdc, protocolFeeAccount, protocolFeeUsdc
         );
     }
 

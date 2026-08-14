@@ -24,7 +24,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
             bountyBps: 9,
-            keeperShareBps: 5_000,
+            keeperShareBps: 5000,
             protocolShareBps: 0
         });
     }

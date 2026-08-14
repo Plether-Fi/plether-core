@@ -1092,15 +1092,14 @@ contract MarginClearinghouseTest is Test {
         clearinghouse.deposit(aliceAccount, 1000 * 1e6);
 
         uint64[] memory reservationIds = new uint64[](0);
-        IMarginClearinghouse.LiquidationSettlementPlan memory plan =
-            IMarginClearinghouse.LiquidationSettlementPlan({
-                settlementRetainedUsdc: 250 * 1e6,
-                settlementSeizedUsdc: 600 * 1e6,
-                freshTraderPayoutUsdc: 0,
-                badDebtUsdc: 0,
-                positionMarginUnlockedUsdc: 0,
-                otherLockedMarginUnlockedUsdc: 0
-            });
+        IMarginClearinghouse.LiquidationSettlementPlan memory plan = IMarginClearinghouse.LiquidationSettlementPlan({
+            settlementRetainedUsdc: 250 * 1e6,
+            settlementSeizedUsdc: 600 * 1e6,
+            freshTraderPayoutUsdc: 0,
+            badDebtUsdc: 0,
+            positionMarginUnlockedUsdc: 0,
+            otherLockedMarginUnlockedUsdc: 0
+        });
 
         vm.prank(engine);
         uint256 seizedUsdc = clearinghouse.applyLiquidationSettlementPlan(
@@ -1111,9 +1110,13 @@ contract MarginClearinghouseTest is Test {
         assertEq(clearinghouse.balanceUsdc(aliceAccount), 250 * 1e6, "Source debit should include all allocations");
         assertEq(clearinghouse.balanceUsdc(keeper), 100 * 1e6, "Keeper should receive its internal credit");
         assertEq(
-            clearinghouse.balanceUsdc(protocolTreasury), 50 * 1e6, "Protocol treasury should receive its internal credit"
+            clearinghouse.balanceUsdc(protocolTreasury),
+            50 * 1e6,
+            "Protocol treasury should receive its internal credit"
         );
-        assertEq(usdc.balanceOf(poolRecipient), 600 * 1e6, "Only the pool allocation should leave clearinghouse custody");
+        assertEq(
+            usdc.balanceOf(poolRecipient), 600 * 1e6, "Only the pool allocation should leave clearinghouse custody"
+        );
     }
 
 }
@@ -1133,7 +1136,7 @@ contract MarginClearinghouseAuditTest is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 10,
-            keeperShareBps: 5_000,
+            keeperShareBps: 5000,
             protocolShareBps: 0
         });
     }
@@ -1264,7 +1267,7 @@ contract NonUsdcCollateralTest is Test {
             baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 10,
-            keeperShareBps: 5_000,
+            keeperShareBps: 5000,
             protocolShareBps: 0
         });
 
