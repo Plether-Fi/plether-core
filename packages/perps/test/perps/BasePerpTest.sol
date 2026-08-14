@@ -58,6 +58,7 @@ abstract contract BasePerpTest is Test {
         uint256 settlementUsdc;
         uint256 traderClaimBalanceUsdc;
         uint256 keeperSettlementUsdc;
+        uint256 protocolTreasurySettlementUsdc;
     }
 
     struct LiquidationParityObserved {
@@ -65,6 +66,7 @@ abstract contract BasePerpTest is Test {
         uint256 traderClaimBalanceUsdc;
         uint256 badDebtUsdc;
         uint256 keeperSettlementUsdc;
+        uint256 protocolLiquidationFeeUsdc;
         uint256 remainingSize;
         bool degradedMode;
         uint256 effectiveAssetsAfterUsdc;
@@ -216,7 +218,9 @@ abstract contract BasePerpTest is Test {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -583,6 +587,7 @@ abstract contract BasePerpTest is Test {
         snapshot.settlementUsdc = clearinghouse.balanceUsdc(account);
         snapshot.traderClaimBalanceUsdc = engine.traderClaimBalanceUsdc(account);
         snapshot.keeperSettlementUsdc = clearinghouse.balanceUsdc(keeper);
+        snapshot.protocolTreasurySettlementUsdc = clearinghouse.balanceUsdc(engine.protocolTreasury());
     }
 
     function _observeLiquidationParity(
@@ -602,6 +607,8 @@ abstract contract BasePerpTest is Test {
         observed.keeperSettlementUsdc = keeperSettlementAfter > beforeSnapshot.keeperSettlementUsdc
             ? keeperSettlementAfter - beforeSnapshot.keeperSettlementUsdc
             : 0;
+        observed.protocolLiquidationFeeUsdc =
+            clearinghouse.balanceUsdc(engine.protocolTreasury()) - beforeSnapshot.protocolTreasurySettlementUsdc;
         observed.degradedMode = engine.degradedMode();
         observed.effectiveAssetsAfterUsdc = afterSnapshot.effectiveSolvencyAssetsUsdc;
         observed.maxLiabilityAfterUsdc = afterSnapshot.maxLiabilityUsdc;
@@ -627,6 +634,11 @@ abstract contract BasePerpTest is Test {
             observed.keeperSettlementUsdc,
             preview.keeperBountyUsdc,
             "Keeper bounty settlement should match liquidation preview"
+        );
+        assertEq(
+            observed.protocolLiquidationFeeUsdc,
+            preview.protocolLiquidationFeeUsdc,
+            "Protocol treasury credit should match liquidation preview"
         );
         assertEq(observed.remainingSize, 0, "Liquidation parity helper expects the position to be fully removed");
         assertEq(
@@ -657,7 +669,14 @@ abstract contract BasePerpTest is Test {
         assertEq(actual.equityUsdc, expected.equityUsdc, "Liquidation equity should match");
         assertEq(actual.pnlUsdc, expected.pnlUsdc, "Liquidation pnl should match");
         assertEq(actual.reachableCollateralUsdc, expected.reachableCollateralUsdc, "Reachable collateral should match");
+        assertEq(actual.liquidationChargeUsdc, expected.liquidationChargeUsdc, "Liquidation charge should match");
         assertEq(actual.keeperBountyUsdc, expected.keeperBountyUsdc, "Keeper bounty should match");
+        assertEq(
+            actual.protocolLiquidationFeeUsdc,
+            expected.protocolLiquidationFeeUsdc,
+            "Protocol liquidation fee should match"
+        );
+        assertEq(actual.lpLiquidationFeeUsdc, expected.lpLiquidationFeeUsdc, "LP liquidation fee should match");
         assertEq(actual.seizedCollateralUsdc, expected.seizedCollateralUsdc, "Seized collateral should match");
         assertEq(actual.settlementRetainedUsdc, expected.settlementRetainedUsdc, "Settlement retained should match");
         assertEq(actual.freshTraderPayoutUsdc, expected.freshTraderPayoutUsdc, "Fresh trader payout should match");
@@ -735,7 +754,9 @@ abstract contract BasePerpTest is Test {
             config.riskParams.fadMarginBps,
             config.riskParams.baseCarryBps,
             config.riskParams.minBountyUsdc,
-            config.riskParams.bountyBps
+            config.riskParams.bountyBps,
+            config.riskParams.keeperShareBps,
+            config.riskParams.protocolShareBps
         ) = engine.riskParams();
         config.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
         config.executionFeeBps = engine.executionFeeBps();
@@ -870,7 +891,7 @@ abstract contract BasePerpTest is Test {
         uint256 size,
         uint256 price
     ) internal view returns (uint256) {
-        (,, uint256 maintMarginBps,, uint256 fadMarginBps,,,) = engine.riskParams();
+        (,, uint256 maintMarginBps,, uint256 fadMarginBps,,,,,) = engine.riskParams();
         uint256 requiredBps = engine.isFadWindow() ? fadMarginBps : maintMarginBps;
         uint256 notionalUsdc = (size * price) / 1e20;
         return (notionalUsdc * requiredBps) / 10_000;
@@ -1017,7 +1038,7 @@ abstract contract BasePerpTest is Test {
         CfdTypes.Side side
     ) internal view returns (uint256 index) {
         uint256 sideIndex = uint256(side);
-        (,,,,, uint256 baseCarryBps,,) = engine.riskParams();
+        (,,,,, uint256 baseCarryBps,,,,) = engine.riskParams();
         index = PositionRiskAccountingLib.computeCurrentCarryIndex(
             engine.sideCarryIndex(sideIndex),
             engine.sideCarryTimestamp(sideIndex),

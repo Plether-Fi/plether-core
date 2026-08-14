@@ -283,9 +283,9 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
     /// @dev Callable only by `ENGINE`, which must also be passed as `host`. The host must supply a liquidatable delta
     ///      consistent with live state; this function neither checks `delta.liquidatable` nor recomputes the plan. It
     ///      advances carry/mark state, removes all side exposure and margin, applies the clearinghouse terminal-settlement
-    ///      plan, credits the keeper bounty, records seized pool inflow, synchronizes consumed order reservations, nets
-    ///      existing claims, pays or records fresh trader value, records applicable carry revenue and bad debt, and
-    ///      deletes the position.
+    ///      plan, credits the configured keeper and protocol shares, transfers the LP remainder to the pool, records
+    ///      seized pool inflow, synchronizes consumed order reservations, nets existing claims, pays or records fresh
+    ///      trader value, records applicable carry revenue and bad debt, and deletes the position.
     /// @param host Bound engine settlement host that owns canonical storage.
     /// @param delta Valid planned full-liquidation delta; prices are 8 decimals, size 18, and USDC fields 6.
     /// @param publishTime Oracle publish timestamp proposed for the liquidation mark.
@@ -312,7 +312,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         IMarginClearinghouse.LiquidationSettlementPlan memory settlementPlan =
             IMarginClearinghouse.LiquidationSettlementPlan({
                 settlementRetainedUsdc: delta.settlementRetainedUsdc,
-                settlementSeizedUsdc: delta.residualPlan.settlementSeizedUsdc,
+                settlementSeizedUsdc: delta.settlementSeizedUsdc,
                 freshTraderPayoutUsdc: delta.freshTraderPayoutUsdc,
                 badDebtUsdc: delta.badDebtUsdc,
                 positionMarginUnlockedUsdc: delta.residualPlan.mutation.positionMarginUnlockedUsdc,
@@ -320,7 +320,14 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
             });
         uint256 seizedUsdc = IMarginClearinghouse(host.clearinghouse())
             .applyLiquidationSettlementPlan(
-                delta.account, reservationOrderIds, settlementPlan, host.pool(), keeper, delta.keeperBountyUsdc
+                delta.account,
+                reservationOrderIds,
+                settlementPlan,
+                host.pool(),
+                keeper,
+                delta.keeperBountyUsdc,
+                host.protocolTreasury(),
+                delta.protocolLiquidationFeeUsdc
             );
         if (seizedUsdc > 0) {
             IHousePool(host.pool())

@@ -87,7 +87,9 @@ The next Arbitrum Sepolia perps deployment uses these initial defaults:
 | `fadMarginBps` | `300` |
 | `baseCarryBps` | `500` |
 | `minBountyUsdc` | `1e6` |
-| `bountyBps` | `10` |
+| `bountyBps` | `10` total liquidation-charge rate |
+| `keeperShareBps` | `5_000` (50% of collected charge to keeper) |
+| `protocolShareBps` | `0` (protocol liquidation fee disabled; remaining 50% goes to LPs) |
 | `executionFeeBps` | `4` |
 | `fadRunwaySeconds` | `1 hours` |
 | `pythMaxConfidenceRatioBps` | `10` |
@@ -97,7 +99,9 @@ The next Arbitrum Sepolia perps deployment uses these initial defaults:
 
 `frozenCloseSpreadBps = 50` charges a fixed 0.50% spread on reduced notional for voluntary close/reduce execution only while `oracleFrozen`. Normal signed VPI and its lifetime rebate clamp remain active. For oracle-frozen voluntary closes, the spread replaces rather than compounds with the Pyth adverse-confidence adjustment; live/FAD-only closes and liquidations retain that adjustment. The spread belongs to LPs rather than protocol treasury and does not apply to liquidations. A terminal full close waives any uncollectible portion instead of adding bad debt, while a partial close must settle its full obligation.
 
-The parameter is part of `CfdEngineAdmin.EngineRiskConfig` and therefore uses the 48-hour propose/finalize timelock. Deployments and updates reject zero and values above `1_000` bps (10%).
+`frozenCloseSpreadBps` is part of `CfdEngineAdmin.EngineRiskConfig` and therefore uses the 48-hour propose/finalize timelock. Deployments and updates reject zero and values above `1_000` bps (10%). `keeperShareBps` and `protocolShareBps` use the same timelock; both may be zero, but their sum must not exceed `10_000`. Each configured allocation rounds down and LPs receive the exact liquidation-charge remainder.
+
+Adding `protocolShareBps` makes `RiskParams` a ten-field struct and changes its storage layout and tuple ABI. Deploy the engine, admin, router, and lenses from the same build on a fresh testnet deployment; do not mix these contracts with an older eight- or nine-field `riskParams()` deployment.
 
 `pythMaxConfidenceRatioBps = 10` rejects a component feed when Pyth's reported confidence interval exceeds
 `0.10%` of that component's price. Pyth confidence is an uncertainty band, so larger values mean less precise

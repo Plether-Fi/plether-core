@@ -175,7 +175,11 @@ Order and liquidation bounties are margin transfers inside `MarginClearinghouse`
 
 - Open and close order bounties are reserved from trader margin at commit time.
 - Successful execution credits the keeper's clearinghouse settlement balance from the reservation.
-- Liquidation bounties are capped by liquidation-reachable collateral and credited directly to the keeper.
+- The configured liquidation charge is capped by liquidation-reachable collateral, then allocated using timelocked
+  `keeperShareBps` and `protocolShareBps` values whose sum cannot exceed `10_000`.
+- The rounded-down keeper and protocol shares are credited directly inside `MarginClearinghouse`; the protocol share
+  goes to `protocolTreasury`, while the exact remainder, including division dust, is transferred to `HousePool` as
+  claimant-owned LP revenue.
 
 Protocol fees settle into the treasury clearinghouse account only when they are cash-collected from trader settlement or when remaining free `HousePool` cash can fund a top-up after senior trader claims and immediate trader payouts. The simplified custody model does not create protocol-fee receivables; uncredited fee portions stay in pool backing rather than becoming withdrawable treasury margin.
 
@@ -353,7 +357,7 @@ receivables without per-position accounting.
 The perps system intentionally splits accounting into separate kernels:
 
 - `CloseAccountingLib`: realized PnL, signed VPI, execution fee, frozen-close spread, trader settlement, and bad-debt handling for voluntary decreases.
-- `LiquidationAccountingLib`: reachable collateral, keeper bounty, residual payout, and bad debt for forced close.
+- `LiquidationAccountingLib`: reachable collateral, keeper/protocol/LP charge allocation, residual payout, and bad debt for forced close.
 - `SolvencyAccountingLib`: effective assets, bounded max liability, withdrawal reserves, and free pool cash.
 - `OrderReservationAccounting`: clearinghouse-reserved execution bounty accounting and margin-queue bookkeeping.
 - `OrderRouterBase` / `OrderCommitHandler` / `OrderExecutionHandler` / `OrderExecutionSettlement` / `OrderLiquidationHandler` / `OrderBountyAccounting` / `OrderValidation`: shared router state, delayed-order lifecycle handling, terminal execution settlement, liquidation flow, bounty accounting, and preflight validation.
@@ -454,7 +458,8 @@ This is a containment latch, not a pause. The protocol still allows transitions 
 
 - Liquidations are proportional and bounded by actually reachable collateral.
 - Liquidations are designed to avoid price-impact-driven cascades: positions settle against an external bounded oracle mark, not forced selling into an AMM or order book, so one liquidation does not mechanically move the execution price for the next. Large oracle moves can still make many positions independently liquidatable.
-- The keeper bounty is proportional with a floor.
+- The total liquidation charge is proportional with a floor and is allocated using the configured keeper and protocol
+  shares; LPs receive the exact remainder after both rounded-down allocations.
 - Liquidation does not compute a fresh VPI delta, but any negative accrued VPI rebate debt is clawed back before residual/bad-debt planning.
 - Residual trader value is preserved when positive.
 - Same-account trader claim balance is not treated as liquidation-reachable collateral; it is only netted once as terminal settlement bookkeeping.
@@ -517,8 +522,10 @@ only one field must repeat the desired active values for the other five.
 | `initMarginBps` | 150 (1.5%) | Initial margin requirement |
 | `fadMarginBps` | 300 (3%) | FAD margin requirement |
 | `baseCarryBps` | 500 (5%) | Annualized carry on LP-backed notional |
-| `bountyBps` | 10 (0.10%) | Liquidation bounty rate |
-| `minBountyUsdc` | 1,000,000 ($1) | Liquidation bounty floor |
+| `bountyBps` | 10 (0.10%) | Total liquidation-charge rate |
+| `minBountyUsdc` | 1,000,000 ($1) | Total liquidation-charge floor |
+| `keeperShareBps` | 5,000 (50%) | Keeper share of the collected liquidation charge |
+| `protocolShareBps` | 0 (0%) | Protocol-treasury share of the collected charge; LPs receive the remainder after both shares |
 | `executionFeeBps` | 4 (0.04%) | Timelocked protocol trading fee |
 | `frozenCloseSpreadBps` | 50 (0.50%) | Fixed LP-owned spread on voluntary close/reduce notional during `oracleFrozen` |
 | Open execution bounty | 0.01 to 0.20 USDC | Timelocked router reserve bounds |
@@ -545,6 +552,10 @@ OrderRouter also exposes timelocked admin control over `maxPendingOrders`, `minE
 `maxOrderAge` must stay nonzero and cannot exceed one hour, so close-only windows cannot be indefinitely pinned by an old FIFO head.
 
 `frozenCloseSpreadBps` is timelocked with the rest of `EngineRiskConfig`, must remain nonzero, and is hard-capped at `1,000` bps (10%).
+
+`keeperShareBps` and `protocolShareBps` are also timelocked with `EngineRiskConfig`. Each allocation rounds down, their
+sum must not exceed `10_000`, and LPs receive the exact charge remainder. The defaults are `5_000` keeper, `0` protocol,
+and therefore `5_000` LP.
 
 ## Off-Chain Applications and Workers
 

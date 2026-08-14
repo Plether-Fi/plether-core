@@ -32,6 +32,7 @@ contract PerpExplicitAccountingHandler is Test {
         uint256 traderClaimBalanceUsdc;
         uint256 badDebtUsdc;
         uint256 keeperBountyUsdc;
+        uint256 protocolLiquidationFeeUsdc;
         uint256 remainingSize;
         bool degradedMode;
         uint256 effectiveAssetsAfterUsdc;
@@ -143,6 +144,7 @@ contract PerpExplicitAccountingHandler is Test {
             if (preview.liquidatable) {
                 uint256 settlementBefore = clearinghouse.balanceUsdc(BULL_TRADER);
                 uint256 keeperBefore = clearinghouse.balanceUsdc(KEEPER);
+                uint256 protocolTreasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
                 uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
                 bool degradedBefore = engine.degradedMode();
 
@@ -152,7 +154,13 @@ contract PerpExplicitAccountingHandler is Test {
                     mismatchCode = 1;
                 } else {
                     LiquidationObserved memory observed = _observeLiquidation(
-                        BULL_TRADER, KEEPER, settlementBefore, keeperBefore, badDebtBefore, degradedBefore
+                        BULL_TRADER,
+                        KEEPER,
+                        settlementBefore,
+                        keeperBefore,
+                        protocolTreasuryBefore,
+                        badDebtBefore,
+                        degradedBefore
                     );
                     (mismatch, mismatchCode, expected, actual) = _liquidationMismatch(preview, observed, degradedBefore);
                 }
@@ -240,6 +248,7 @@ contract PerpExplicitAccountingHandler is Test {
         address keeper,
         uint256 settlementBefore,
         uint256 keeperBefore,
+        uint256 protocolTreasuryBefore,
         uint256 badDebtBefore,
         bool
     ) internal view returns (LiquidationObserved memory observed) {
@@ -252,6 +261,9 @@ contract PerpExplicitAccountingHandler is Test {
         observed.badDebtUsdc = afterSnapshot.accumulatedBadDebtUsdc - badDebtBefore;
         uint256 keeperAfter = clearinghouse.balanceUsdc(keeper);
         observed.keeperBountyUsdc = keeperAfter > keeperBefore ? keeperAfter - keeperBefore : 0;
+        observed.protocolLiquidationFeeUsdc = afterSnapshot.protocolTreasuryBalanceUsdc > protocolTreasuryBefore
+            ? afterSnapshot.protocolTreasuryBalanceUsdc - protocolTreasuryBefore
+            : 0;
         observed.degradedMode = engine.degradedMode();
         observed.effectiveAssetsAfterUsdc = afterSnapshot.effectiveSolvencyAssetsUsdc;
         observed.maxLiabilityAfterUsdc = afterSnapshot.maxLiabilityUsdc;
@@ -307,18 +319,21 @@ contract PerpExplicitAccountingHandler is Test {
         if (observed.keeperBountyUsdc != preview.keeperBountyUsdc) {
             return (true, 5, preview.keeperBountyUsdc, observed.keeperBountyUsdc);
         }
+        if (observed.protocolLiquidationFeeUsdc != preview.protocolLiquidationFeeUsdc) {
+            return (true, 6, preview.protocolLiquidationFeeUsdc, observed.protocolLiquidationFeeUsdc);
+        }
         if (observed.remainingSize != 0) {
-            return (true, 6, 0, observed.remainingSize);
+            return (true, 7, 0, observed.remainingSize);
         }
         bool expectedDegraded = degradedBefore || preview.triggersDegradedMode;
         if (observed.degradedMode != expectedDegraded) {
-            return (true, 7, expectedDegraded ? 1 : 0, observed.degradedMode ? 1 : 0);
+            return (true, 8, expectedDegraded ? 1 : 0, observed.degradedMode ? 1 : 0);
         }
         if (observed.effectiveAssetsAfterUsdc != preview.effectiveAssetsAfterUsdc) {
-            return (true, 8, preview.effectiveAssetsAfterUsdc, observed.effectiveAssetsAfterUsdc);
+            return (true, 9, preview.effectiveAssetsAfterUsdc, observed.effectiveAssetsAfterUsdc);
         }
         if (observed.maxLiabilityAfterUsdc != preview.maxLiabilityAfterUsdc) {
-            return (true, 9, preview.maxLiabilityAfterUsdc, observed.maxLiabilityAfterUsdc);
+            return (true, 10, preview.maxLiabilityAfterUsdc, observed.maxLiabilityAfterUsdc);
         }
         return (false, 0, 0, 0);
     }
@@ -469,6 +484,12 @@ contract PerpExplicitAccountingHandler is Test {
 contract PerpExplicitAccountingInvariantTest is BasePerpTest {
 
     PerpExplicitAccountingHandler internal handler;
+
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory params) {
+        params = super._riskParams();
+        params.keeperShareBps = 2500;
+        params.protocolShareBps = 2500;
+    }
 
     function setUp() public override {
         super.setUp();

@@ -469,7 +469,7 @@ Required properties:
 
 - protocol fee withdrawal is a standard `MarginClearinghouse` withdrawal from the configured treasury account,
 - `MarginClearinghouse.balanceUsdc(CfdEngine.protocolTreasury())` reports the configured treasury account balance,
-- only cash-collected fees and free-cash-funded top-ups become treasury margin,
+- only cash-collected execution or liquidation fees and free-cash-funded top-ups become treasury margin,
 - uncredited fee amounts are not withdrawable protocol inventory in the simplified treasury-margin model,
 - frozen-close spread is LP-owned trading revenue and never becomes treasury margin,
 - withdrawing treasury margin must not consume `HousePool` cash, trader claims, or LP withdrawal reserves.
@@ -479,23 +479,31 @@ Required properties:
 Liquidation must:
 
 1. seize reachable account value,
-2. pay the keeper bounty immediately or credit the keeper through clearinghouse settlement according to available cash,
+2. allocate the capped liquidation charge using the configured `keeperShareBps` and `protocolShareBps`, crediting the
+   keeper and protocol-treasury shares through clearinghouse settlement and transferring the exact LP remainder to
+   `HousePool` claimant revenue,
 3. preserve residual trader value when positive,
 4. realize remaining shortfall as bad debt,
 5. delete the position,
 6. re-evaluate degraded-mode containment.
 
-Keeper bounty rule:
+Liquidation-charge rule:
 
-- cap by physically reachable liquidation collateral,
-- allow the bounty to exceed positive equity as an explicit liquidation subsidy,
+- assess the configured `bountyBps` rate and `minBountyUsdc` floor as one total charge,
+- cap the total charge by physically reachable liquidation collateral,
+- require `keeperShareBps + protocolShareBps <= 10_000`,
+- set `keeperAllocation = floor(totalCharge * keeperShareBps / 10_000)` and credit it to the keeper,
+- set `protocolAllocation = floor(totalCharge * protocolShareBps / 10_000)` and credit it to the protocol treasury,
+- allocate `totalCharge - keeperAllocation - protocolAllocation` to LPs so all rounding remainder belongs to LPs and
+  the three destinations conserve the collected charge exactly,
+- allow the total charge to exceed positive equity as an explicit liquidation subsidy,
 - never cap by stale notions of notional or margin alone.
 
 Required property:
 
-- liquidation eligibility, bounty caps, and residual planning must use carry-adjusted equity,
-- negative accrued VPI must reduce liquidation equity before keeper-bounty and residual planning,
-- any bounty paid above positive equity must flow through the normal residual shortfall and bad-debt accounting,
+- liquidation eligibility, charge caps, and residual planning must use carry-adjusted equity,
+- negative accrued VPI must reduce liquidation equity before charge and residual planning,
+- any charge assessed above positive equity must flow through the normal residual shortfall and bad-debt accounting,
 - liquidation does not assess `frozenCloseSpreadBps`, including while `oracleFrozen`,
 - preview and live liquidation should share the same liquidation-accounting kernel.
 

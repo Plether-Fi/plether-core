@@ -149,7 +149,7 @@ contract CfdEngineLens is ICfdEngineLens {
     ///      preview with only the capped oracle price populated.
     /// @param account Account whose current position is tested and hypothetically liquidated.
     /// @param oraclePrice Candidate liquidation price, with 8 decimals.
-    /// @return preview Liquidation eligibility, equity, bounty, settlement, claims, bad debt, and projected solvency.
+    /// @return preview Liquidation eligibility, equity, charge split, settlement, claims, bad debt, and projected solvency.
     function previewLiquidation(
         address account,
         uint256 oraclePrice
@@ -163,7 +163,7 @@ contract CfdEngineLens is ICfdEngineLens {
     /// @param account Account whose current position is tested and hypothetically liquidated.
     /// @param oraclePrice Candidate liquidation price, with 8 decimals.
     /// @param poolDepthUsdc Hypothetical pool assets and cash, in 6-decimal USDC units.
-    /// @return preview Liquidation eligibility, equity, bounty, settlement, claims, bad debt, and projected solvency.
+    /// @return preview Liquidation eligibility, equity, charge split, settlement, claims, bad debt, and projected solvency.
     function simulateLiquidation(
         address account,
         uint256 oraclePrice,
@@ -537,8 +537,11 @@ contract CfdEngineLens is ICfdEngineLens {
         preview.reachableCollateralUsdc = delta.liquidationReachableCollateralUsdc;
         preview.pnlUsdc = delta.riskState.unrealizedPnlUsdc;
         preview.equityUsdc = delta.liquidationState.equityUsdc;
+        preview.liquidationChargeUsdc = delta.liquidationChargeUsdc;
         preview.keeperBountyUsdc = delta.keeperBountyUsdc;
-        preview.seizedCollateralUsdc = delta.residualPlan.settlementSeizedUsdc;
+        preview.protocolLiquidationFeeUsdc = delta.protocolLiquidationFeeUsdc;
+        preview.lpLiquidationFeeUsdc = delta.lpLiquidationFeeUsdc;
+        preview.seizedCollateralUsdc = delta.settlementSeizedUsdc;
         preview.settlementRetainedUsdc = delta.settlementRetainedUsdc;
         preview.freshTraderPayoutUsdc = delta.freshTraderPayoutUsdc;
         preview.existingTraderClaimConsumedUsdc = delta.existingTraderClaimConsumedUsdc;
@@ -693,7 +696,7 @@ contract CfdEngineLens is ICfdEngineLens {
         CfdTypes.Side side
     ) internal view returns (uint256) {
         uint256 sideIndex = uint256(side);
-        (,,,,, uint256 baseCarryBps,,) = engineContract.riskParams();
+        (,,,,, uint256 baseCarryBps,,,,) = engineContract.riskParams();
         return PositionRiskAccountingLib.computeCurrentCarryIndex(
             engineContract.sideCarryIndex(sideIndex),
             engineContract.sideCarryTimestamp(sideIndex),
@@ -715,7 +718,9 @@ contract CfdEngineLens is ICfdEngineLens {
             params.fadMarginBps,
             params.baseCarryBps,
             params.minBountyUsdc,
-            params.bountyBps
+            params.bountyBps,
+            params.keeperShareBps,
+            params.protocolShareBps
         ) = engineContract.riskParams();
     }
 

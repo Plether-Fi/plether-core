@@ -202,7 +202,9 @@ contract AuditV3Failing_SeniorImpairment is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 5e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5_000,
+            protocolShareBps: 0
         });
     }
 

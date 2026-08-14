@@ -437,7 +437,9 @@ contract AuditFixRegressionConservativePendingDepositImpairmentTest is BasePerpT
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5_000,
+            protocolShareBps: 0
         });
     }
 

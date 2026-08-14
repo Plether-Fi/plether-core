@@ -189,7 +189,9 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
             params.fadMarginBps,
             params.baseCarryBps,
             params.minBountyUsdc,
-            params.bountyBps
+            params.bountyBps,
+            params.keeperShareBps,
+            params.protocolShareBps
         ) = engineContract.riskParams();
     }
 

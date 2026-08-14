@@ -105,9 +105,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     /// @notice Whether terminal settlement detected insolvency and latched risk-increasing operations off.
     bool public degradedMode;
 
-    /// @notice Current VPI, skew, margin, carry, and liquidation-bounty parameters.
-    /// @dev VPI factor and maximum skew ratio use 1e18 scaling; margin, carry, and bounty rates use basis points;
-    ///      `minBountyUsdc` uses 6-decimal USDC units.
+    /// @notice Current VPI, skew, margin, carry, and liquidation-charge parameters.
+    /// @dev VPI factor and maximum skew ratio use 1e18 scaling; margin, carry, liquidation-charge, keeper-share, and
+    ///      protocol-share rates use basis points; `minBountyUsdc` uses 6-decimal USDC units.
     CfdTypes.RiskParams public riskParams;
     mapping(address => StoredPosition) internal _positions;
     /// @notice Senior pool payout liability owed to each account, in 6-decimal USDC units.
@@ -296,6 +296,12 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
             revert CfdEngine__InvalidRiskParams();
         }
         if (_riskParams.minBountyUsdc == 0 || _riskParams.bountyBps == 0) {
+            revert CfdEngine__InvalidRiskParams();
+        }
+        if (
+            _riskParams.keeperShareBps > 10_000
+                || _riskParams.protocolShareBps > 10_000 - _riskParams.keeperShareBps
+        ) {
             revert CfdEngine__InvalidRiskParams();
         }
         if (_riskParams.maxSkewRatio > CfdMath.WAD) {

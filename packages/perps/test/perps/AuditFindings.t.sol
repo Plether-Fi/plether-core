@@ -42,7 +42,9 @@ contract AuditC01_HwmInflation is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 5e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5_000,
+            protocolShareBps: 0
         });
     }
 
@@ -276,7 +278,9 @@ contract AuditC05_ImpairedDeposit is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 5e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5_000,
+            protocolShareBps: 0
         });
     }
 
