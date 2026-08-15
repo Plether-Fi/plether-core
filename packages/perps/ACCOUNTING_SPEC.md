@@ -463,6 +463,8 @@ Required properties:
 ### Open projection
 
 - skew-reducing rebates must count as reachable collateral for projected IMR checks,
+- post-trade skew above the configured cap is allowed only while the open strictly reduces the existing imbalance
+  without making the order side heavier; unchanged or worsening skew and above-cap sign flips remain invalid,
 - open preview and execution should not reject a trade solely because the planner omitted a rebate that the live settlement would credit.
 
 ### Treasury fee withdrawals

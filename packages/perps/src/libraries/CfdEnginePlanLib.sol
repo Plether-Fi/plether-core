@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdMath} from "@plether/perps/CfdMath.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
@@ -210,21 +211,22 @@ library CfdEnginePlanLib {
         return bullUsdc > bearUsdc ? bullUsdc - bearUsdc : bearUsdc - bullUsdc;
     }
 
-    /// @notice Computes absolute skew after adding an order's size to one side.
+    /// @notice Computes skew state after adding an order's size to one side.
     /// @dev Each post-trade side notional is independently rounded down to USDC before taking the difference.
     /// @param bull BULL aggregate state before the open.
     /// @param bear BEAR aggregate state before the open.
     /// @param side Side receiving the size increase.
     /// @param sizeDelta Size added to the selected side.
     /// @param price Price used to value open interest.
-    /// @return Post-open absolute skew in 6-decimal USDC.
+    /// @return postSkewUsdc Post-open absolute skew in 6-decimal USDC.
+    /// @return orderSideIsPostOpenHeavy Whether the side receiving the open is heavier after the trade.
     function _postOpenSkewUsdc(
         CfdEnginePlanTypes.SideSnapshot memory bull,
         CfdEnginePlanTypes.SideSnapshot memory bear,
         CfdTypes.Side side,
         uint256 sizeDelta,
         uint256 price
-    ) private pure returns (uint256) {
+    ) private pure returns (uint256 postSkewUsdc, bool orderSideIsPostOpenHeavy) {
         uint256 bullOi = bull.openInterest;
         uint256 bearOi = bear.openInterest;
         if (side == CfdTypes.Side.BULL) {
@@ -234,7 +236,9 @@ library CfdEnginePlanLib {
         }
         uint256 postBullUsdc = (bullOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
         uint256 postBearUsdc = (bearOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        return postBullUsdc > postBearUsdc ? postBullUsdc - postBearUsdc : postBearUsdc - postBullUsdc;
+        postSkewUsdc = postBullUsdc > postBearUsdc ? postBullUsdc - postBearUsdc : postBearUsdc - postBullUsdc;
+        orderSideIsPostOpenHeavy =
+            side == CfdTypes.Side.BULL ? postBullUsdc > postBearUsdc : postBearUsdc > postBullUsdc;
     }
 
     /// @notice Computes absolute skew from explicit BULL and BEAR open-interest values.
@@ -331,9 +335,10 @@ library CfdEnginePlanLib {
     ///      if an inconsistent snapshot supplies unsettled carry. The planner then rejects an opposing live position,
     ///      degraded mode, a position too small to support the minimum bounty, insufficient clearinghouse funds,
     ///      post-operation insolvency, insufficient initial margin/equity, or pool-relative skew above the configured
-    ///      maximum. The ratio-based skew check is skipped when pool assets are zero. On a
+    ///      maximum unless the order strictly reduces an existing imbalance without making its side the heavier side.
+    ///      The skew-cap check is skipped when pool assets are zero. On a
     ///      business-rule failure `valid` remains false, `revertCode` identifies the first failed check, and previously
-    ///      populated fields are diagnostic only. VPI, notional, fee, margin, and skew-ratio divisions round down in
+    ///      populated fields are diagnostic only. VPI, notional, fee, margin, and skew-cap divisions round down in
     ///      their respective calculations. `publishTime` is retained for planner-interface parity but is not read.
     /// @param snap Caller-built position, side, pool, collateral, carry, claim, and risk snapshot.
     /// @param order Open/increase order; account, side, size, and margin are consumed by this planner.
@@ -375,7 +380,8 @@ library CfdEnginePlanLib {
         delta.sideTotalMarginBefore = order.side == CfdTypes.Side.BULL ? bull.totalMargin : bear.totalMargin;
 
         uint256 preSkewUsdc = _absSkewUsdc(bull, bear, price);
-        uint256 postSkewUsdc = _postOpenSkewUsdc(bull, bear, order.side, order.sizeDelta, price);
+        (uint256 postSkewUsdc, bool orderSideIsPostOpenHeavy) =
+            _postOpenSkewUsdc(bull, bear, order.side, order.sizeDelta, price);
 
         OpenAccountingLib.OpenState memory openState = OpenAccountingLib.buildOpenState(
             OpenAccountingLib.OpenInputs({
@@ -451,12 +457,13 @@ library CfdEnginePlanLib {
             return delta;
         }
 
-        if (
-            effectiveSnap.poolAssetsUsdc > 0
-                && ((postSkewUsdc * CfdMath.WAD) / effectiveSnap.poolAssetsUsdc) > effectiveSnap.riskParams.maxSkewRatio
-        ) {
-            delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH;
-            return delta;
+        if (effectiveSnap.poolAssetsUsdc > 0) {
+            uint256 maxSkewUsdc =
+                Math.mulDiv(effectiveSnap.poolAssetsUsdc, effectiveSnap.riskParams.maxSkewRatio, CfdMath.WAD);
+            if (postSkewUsdc > maxSkewUsdc && (postSkewUsdc >= preSkewUsdc || orderSideIsPostOpenHeavy)) {
+                delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH;
+                return delta;
+            }
         }
 
         delta.valid = true;

@@ -75,7 +75,9 @@ library CfdTypes {
 
     /// @notice Global risk parameters used by position, VPI, carry, margin, and liquidation accounting.
     /// @param vpiFactor VPI impact factor `k` (18-decimal WAD).
-    /// @param maxSkewRatio Maximum directional skew divided by pool depth (18-decimal WAD).
+    /// @param maxSkewRatio Maximum directional skew divided by pool depth. An open may remain above this threshold
+    ///        only while strictly reducing an existing imbalance without making the order side heavier (18-decimal
+    ///        WAD).
     /// @param maintMarginBps Normal maintenance-margin ratio in basis points.
     /// @param initMarginBps Initial-margin ratio for opens and increases in basis points.
     /// @param fadMarginBps Maintenance-margin ratio used during the FAD window in basis points.
@@ -87,7 +89,7 @@ library CfdTypes {
     ///        the remainder after both configured shares.
     struct RiskParams {
         uint256 vpiFactor; // [18 dec WAD] Impact severity 'k'
-        uint256 maxSkewRatio; // [18 dec WAD] Hard cliff e.g., 40% (0.40e18)
+        uint256 maxSkewRatio; // [18 dec WAD] Recovery-aware open cliff e.g., 40% (0.40e18)
         uint256 maintMarginBps; // e.g., 100 (1%)
         uint256 initMarginBps; // e.g., 150 (1.5%)
         uint256 fadMarginBps; // e.g., 300 (3%)
