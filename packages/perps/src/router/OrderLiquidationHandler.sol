@@ -11,13 +11,17 @@ import {OrderValidation} from "@plether/perps/router/OrderValidation.sol";
 /// @notice Prices and executes account liquidation, forfeits queued bounties, and clears the account's live orders.
 abstract contract OrderLiquidationHandler is OrderValidation {
 
-    /// @notice Hard account bound for one liquidation batch.
+    /// @notice Hard candidate-list bound; transaction gas can stop a batch before all 256 accounts are attempted.
     uint256 internal constant MAX_LIQUIDATION_BATCH_ACCOUNTS = 256;
-    /// @notice Gas added above the configured engine minimum for router-side dispatch and bounty accounting.
+    /// @notice Fixed item budget above `minEngineGas` for router dispatch and account-level bounty accounting.
+    /// @dev This is a call cap, not prepaid consumption: unused self-call gas returns to the outer batch frame.
     uint256 internal constant LIQUIDATION_BATCH_ROUTER_GAS = 200_000;
-    /// @notice Additional cleanup budget for each live account order.
+    /// @notice Item budget for each live order's bounty scan plus terminal reservation and queue cleanup.
     uint256 internal constant LIQUIDATION_BATCH_GAS_PER_ORDER = 150_000;
     /// @notice Gas retained by the batch frame for failure classification, events, and a clean return.
+    /// @dev At the configured maxima (`minEngineGas <= 5m`, pending orders <= 32), `itemGas` is at most 10m.
+    ///      Its EIP-150 forwarding headroom is below 159k, leaving more than 91k of this tail for call setup while
+    ///      preserving the outer frame's ability to catch an item failure and return the resume cursor.
     uint256 internal constant LIQUIDATION_BATCH_TAIL_GAS = 250_000;
 
     /// @notice Liquidates an account with an adverse oracle snapshot and current HousePool depth.
@@ -38,7 +42,9 @@ abstract contract OrderLiquidationHandler is OrderValidation {
     /// @dev Every account is dispatched through an external self-call so a caught revert restores that account's
     ///      bounty-forfeiture, engine, clearinghouse, pool, and queue mutations without reverting earlier successes.
     ///      The function stops before dispatch when it cannot preserve both a useful item budget and the batch gas tail.
+    ///      Each item receives `minEngineGas + 200k + (pendingOrderCount * 150k)` as a maximum; unused gas is returned.
     ///      An empty-data item revert is conservatively treated as possible out-of-gas and leaves its index unattempted.
+    ///      To resume, the keeper submits the suffix beginning at the returned index with a fresh oracle update.
     /// @param accounts Candidate accounts to liquidate.
     /// @param pythUpdateData Pyth update blobs funded once by the call's `msg.value`.
     /// @param keeper Original external caller credited with successful liquidation bounties.

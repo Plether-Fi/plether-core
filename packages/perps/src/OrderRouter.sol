@@ -156,7 +156,9 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, Reentra
     ///      liquidation settlement, and order cleanup execute in an independently caught rollback frame. Accounts with
     ///      no position or a solvent position are skipped. Unexpected account-local failures are reported and do not
     ///      revert earlier successes. Processing stops before the router's reserved gas tail is consumed; an empty
-    ///      item revert is treated as possible out-of-gas and leaves that item unattempted.
+    ///      item revert is treated as possible out-of-gas and leaves that item unattempted. The 256-account limit bounds
+    ///      candidates, not successful executions per transaction; resume by submitting `accounts[nextIndex:]` with a
+    ///      fresh Pyth update.
     /// @param accounts Candidate accounts, in keeper-selected processing order.
     /// @param pythUpdateData Pyth price update blobs; `msg.value` funds one shared update.
     /// @return nextIndex First unattempted account index, or `accounts.length` when every account was attempted.

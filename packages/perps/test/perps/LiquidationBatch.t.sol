@@ -5,6 +5,7 @@ import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
+import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 import {IPerpsKeeper} from "@plether/perps/interfaces/IPerpsKeeper.sol";
 import {Vm} from "forge-std/Vm.sol";
@@ -158,6 +159,78 @@ contract LiquidationBatchTest is BasePerpTest {
         );
     }
 
+    function test_Batch_MaxPendingOrdersLiquidatesWithinItemGasBudget() public {
+        uint256 maxPendingOrders = 32;
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.maxPendingOrders = maxPendingOrders;
+        _setRouterConfig(config);
+
+        address account = address(0xBA7C0032);
+        _fundTrader(account, 270e6);
+        _open(account, CfdTypes.Side.BULL, 10_000e18, 200e6, NEUTRAL_PRICE);
+
+        uint64 firstOrderId = router.nextCommitId();
+        vm.startPrank(account);
+        for (uint256 i = 0; i < maxPendingOrders; i++) {
+            router.commitOrder(CfdTypes.Side.BULL, 100e18, 2e6, type(uint256).max, false);
+        }
+        vm.stopPrank();
+
+        IOrderRouterAccounting.AccountReservationView memory reservationBefore = router.getAccountReservations(account);
+        assertEq(reservationBefore.pendingOrderCount, maxPendingOrders, "setup must reach the configured order cap");
+        assertEq(reservationBefore.committedMarginUsdc, 64e6, "setup must reserve every order's committed margin");
+        assertGt(reservationBefore.executionBountyUsdc, 0, "setup must reserve execution bounties");
+
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, LIQUIDATION_PRICE);
+        assertTrue(preview.liquidatable, "maximum-order setup account must be liquidatable");
+
+        address[] memory accounts = new address[](1);
+        accounts[0] = account;
+        bytes[] memory updateData = _mockPythUpdateData(LIQUIDATION_PRICE);
+        uint256 treasuryBefore = _settlementBalance(engine.protocolTreasury());
+        uint256 keeperBefore = _settlementBalance(KEEPER);
+        uint256 pythCallsBefore = baseMockPyth.updatePriceFeedsCallCount();
+
+        vm.prank(KEEPER);
+        uint256 nextIndex = IPerpsKeeper(address(router)).executeLiquidationBatch(accounts, updateData);
+
+        assertEq(nextIndex, 1, "maximum-order item must complete within its calculated gas cap");
+        assertEq(_positionSize(account), 0, "maximum-order account must liquidate");
+        assertEq(router.pendingOrderCounts(account), 0, "all live orders must be removed");
+        assertEq(router.accountHeadOrderId(account), 0, "account queue head must be clear");
+
+        IOrderRouterAccounting.AccountReservationView memory reservationAfter = router.getAccountReservations(account);
+        assertEq(reservationAfter.committedMarginUsdc, 0, "committed margin reservation must be clear");
+        assertEq(reservationAfter.executionBountyUsdc, 0, "execution bounty reservation must be clear");
+        assertEq(reservationAfter.pendingOrderCount, 0, "pending order reservation count must be clear");
+
+        for (uint256 i = 0; i < maxPendingOrders; i++) {
+            uint64 orderId = firstOrderId + uint64(i);
+            assertEq(
+                uint256(_orderRecord(orderId).status),
+                uint256(IOrderRouterAccounting.OrderStatus.Failed),
+                "every queued order must terminally fail"
+            );
+            assertEq(_remainingCommittedMargin(orderId), 0, "every committed margin reservation must be released");
+            assertEq(_orderRecord(orderId).executionBountyUsdc, 0, "every execution bounty must be cleared");
+        }
+        assertEq(
+            _settlementBalance(engine.protocolTreasury()) - treasuryBefore,
+            reservationBefore.executionBountyUsdc,
+            "all queued bounties must be forfeited to protocol treasury"
+        );
+        assertEq(
+            _settlementBalance(KEEPER) - keeperBefore,
+            preview.keeperBountyUsdc,
+            "keeper must receive the liquidation bounty"
+        );
+        assertEq(
+            baseMockPyth.updatePriceFeedsCallCount() - pythCallsBefore,
+            1,
+            "maximum-order liquidation must still share one Pyth update"
+        );
+    }
+
     function test_Batch_UnexpectedPerAccountRevertDoesNotRollBackLaterSuccess() public {
         address failingAccount = address(0xBA7CFA11);
         address succeedingAccount = address(0xBA7C600D);
@@ -198,19 +271,26 @@ contract LiquidationBatchTest is BasePerpTest {
         );
     }
 
-    function test_Batch_EmptyItemRevertKeepsCurrentCursorAndLaterAccountUnattempted() public {
+    function test_Batch_EmptyItemRevertPreservesEarlierSuccessAndReturnsCurrentCursor() public {
+        address firstAccount = address(0xBA7CE000);
         address failingAccount = address(0xBA7CE001);
         address laterAccount = address(0xBA7CE002);
+        _fundAndOpenThinBull(firstAccount);
         _fundAndOpenThinBull(failingAccount);
         _fundAndOpenThinBull(laterAccount);
+
+        ICfdEngineTypes.LiquidationPreview memory firstPreview =
+            engineLens.previewLiquidation(firstAccount, LIQUIDATION_PRICE);
+        assertTrue(firstPreview.liquidatable, "first setup account must be liquidatable");
 
         vm.mockCallRevert(
             address(engine), abi.encodeWithSelector(engine.liquidatePosition.selector, failingAccount), bytes("")
         );
 
-        address[] memory accounts = new address[](2);
-        accounts[0] = failingAccount;
-        accounts[1] = laterAccount;
+        address[] memory accounts = new address[](3);
+        accounts[0] = firstAccount;
+        accounts[1] = failingAccount;
+        accounts[2] = laterAccount;
         bytes[] memory updateData = _mockPythUpdateData(LIQUIDATION_PRICE);
         uint256 keeperSettlementBefore = _settlementBalance(KEEPER);
         uint256 pythCallsBefore = baseMockPyth.updatePriceFeedsCallCount();
@@ -218,10 +298,15 @@ contract LiquidationBatchTest is BasePerpTest {
         vm.prank(KEEPER);
         uint256 nextIndex = IPerpsKeeper(address(router)).executeLiquidationBatch(accounts, updateData);
 
-        assertEq(nextIndex, 0, "empty revert may be OOG and must leave the current index unattempted");
+        assertEq(nextIndex, 1, "empty revert may be OOG and must leave the current index unattempted");
+        assertEq(_positionSize(firstAccount), 0, "success before an empty revert must remain committed");
         assertEq(_positionSize(failingAccount), 10_000e18, "empty-revert account state must roll back");
         assertEq(_positionSize(laterAccount), 10_000e18, "later account must remain unattempted");
-        assertEq(_settlementBalance(KEEPER), keeperSettlementBefore, "unattempted batch must pay no bounty");
+        assertEq(
+            _settlementBalance(KEEPER) - keeperSettlementBefore,
+            firstPreview.keeperBountyUsdc,
+            "only the earlier successful item may pay a bounty"
+        );
         assertEq(
             baseMockPyth.updatePriceFeedsCallCount() - pythCallsBefore,
             1,
