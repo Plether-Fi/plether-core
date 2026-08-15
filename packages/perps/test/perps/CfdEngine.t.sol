@@ -47,10 +47,21 @@ contract LiquidationAccountingLibHarness {
         uint256 maintMarginBps,
         uint256 minBountyUsdc,
         uint256 bountyBps,
+        uint256 keeperShareBps,
+        uint256 protocolShareBps,
         uint256 tokenScale
     ) external pure returns (LiquidationAccountingLib.LiquidationState memory) {
         return LiquidationAccountingLib.buildLiquidationState(
-            size, oraclePrice, reachableCollateralUsdc, equityUsdc, maintMarginBps, minBountyUsdc, bountyBps, tokenScale
+            size,
+            oraclePrice,
+            reachableCollateralUsdc,
+            equityUsdc,
+            maintMarginBps,
+            minBountyUsdc,
+            bountyBps,
+            keeperShareBps,
+            protocolShareBps,
+            tokenScale
         );
     }
 
@@ -100,7 +111,9 @@ contract CfdEnginePlanLibHarness {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
         snap.executionFeeBps = 4;
         snap.frozenCloseSpreadBps = 1000;
@@ -155,7 +168,9 @@ contract CfdEnginePlanLibHarness {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
         uint256 carryTimeDelta = currentTimestamp > lastCarryTimestamp ? currentTimestamp - lastCarryTimestamp : 0;
         snap.positionBorrowBaseUsdc = maxProfitUsdc;
@@ -210,7 +225,9 @@ contract CfdEnginePlanLibHarness {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
         snap.executionFeeBps = 4;
         return CfdEnginePlanLib.planLiquidation(snap, oraclePrice, 0);
@@ -270,7 +287,9 @@ contract CfdEnginePlanLibHarness {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
         snap.executionFeeBps = 4;
         snap.poolAssetsUsdc = 1_000_000e6;
@@ -369,7 +388,9 @@ contract CfdEngineTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -449,7 +470,7 @@ contract CfdEngineTest is BasePerpTest {
         params.initMarginBps = 400;
         _setRiskParams(params);
 
-        (,,, uint256 initMarginBps,,,,) = engine.riskParams();
+        (,,, uint256 initMarginBps,,,,,,) = engine.riskParams();
         assertEq(initMarginBps, 400, "Setup must finalize the explicit init margin config");
 
         vm.prank(address(router));
@@ -2210,15 +2231,45 @@ contract CfdEngineTest is BasePerpTest {
 
         vm.warp(sundayTwentyFiftyNine);
         assertTrue(engine.isOracleFrozen(), "Sunday 20:59:59 should still be oracle frozen");
+        assertEq(pletherOracle.isOracleFrozen(), engine.isOracleFrozen(), "Oracle and engine calendar should agree");
         assertTrue(engine.isFadWindow(), "Sunday 20:59:59 should still be FAD");
 
         vm.warp(sundayTwentyOne);
         assertFalse(engine.isOracleFrozen(), "Sunday 21:00:00 should unfreeze oracle mode");
+        assertEq(pletherOracle.isOracleFrozen(), engine.isOracleFrozen(), "Oracle and engine calendar should agree");
         assertTrue(engine.isFadWindow(), "Sunday 21:00:00 should remain in FAD");
 
         vm.warp(sundayTwentyTwo);
         assertFalse(engine.isOracleFrozen(), "Sunday 22:00:00 should remain unfrozen");
+        assertEq(pletherOracle.isOracleFrozen(), engine.isOracleFrozen(), "Oracle and engine calendar should agree");
         assertFalse(engine.isFadWindow(), "Sunday 22:00:00 should end FAD");
+    }
+
+    function test_MarketCalendar_FridayBoundariesMatchLiveSemantics() public {
+        uint256 fridayBeforeFad = 1_729_277_999;
+        uint256 fridayFadStart = 1_729_278_000;
+        uint256 fridayBeforeFreeze = fridayFadStart + 3 hours - 1;
+        uint256 fridayFreezeStart = fridayFadStart + 3 hours;
+
+        vm.warp(fridayBeforeFad);
+        assertFalse(engine.isFadWindow(), "Friday 18:59:59 should be live");
+        assertFalse(engine.isOracleFrozen(), "Friday 18:59:59 should not be oracle frozen");
+        assertEq(pletherOracle.isOracleFrozen(), engine.isOracleFrozen(), "Oracle and engine calendar should agree");
+
+        vm.warp(fridayFadStart);
+        assertTrue(engine.isFadWindow(), "Friday 19:00:00 should start FAD");
+        assertFalse(engine.isOracleFrozen(), "Friday 19:00:00 should not be oracle frozen");
+        assertEq(pletherOracle.isOracleFrozen(), engine.isOracleFrozen(), "Oracle and engine calendar should agree");
+
+        vm.warp(fridayBeforeFreeze);
+        assertTrue(engine.isFadWindow(), "Friday 21:59:59 should remain in FAD");
+        assertFalse(engine.isOracleFrozen(), "Friday 21:59:59 should not be oracle frozen");
+        assertEq(pletherOracle.isOracleFrozen(), engine.isOracleFrozen(), "Oracle and engine calendar should agree");
+
+        vm.warp(fridayFreezeStart);
+        assertTrue(engine.isFadWindow(), "Friday 22:00:00 should remain in FAD");
+        assertTrue(engine.isOracleFrozen(), "Friday 22:00:00 should start oracle-frozen mode");
+        assertEq(pletherOracle.isOracleFrozen(), engine.isOracleFrozen(), "Oracle and engine calendar should agree");
     }
 
     function test_PreviewClose_ReturnsClaimAndImmediateSettlementBreakdown() public {
@@ -2742,7 +2793,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(overCapPreview.badDebtUsdc, cappedPreview.badDebtUsdc, "Preview bad debt should clamp to CAP_PRICE");
     }
 
-    function test_PreviewLiquidation_ReturnsBountyAndLiquidatableFlag() public {
+    function test_PreviewLiquidation_ReturnsChargeSplitAndLiquidatableFlag() public {
         address trader = address(0xAB14);
         address account = trader;
         _fundTrader(trader, 300e6);
@@ -2753,8 +2804,16 @@ contract CfdEngineTest is BasePerpTest {
 
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 101_000_000);
         assertTrue(preview.liquidatable);
-        assertEq(preview.keeperBountyUsdc, 10_100_000);
-        assertLe(preview.keeperBountyUsdc, uint256(preview.equityUsdc));
+        assertEq(preview.liquidationChargeUsdc, 10_100_000, "Total charge should retain the configured 10 bps");
+        assertEq(preview.keeperBountyUsdc, 5_050_000, "Keeper should receive exactly half the charge");
+        assertEq(preview.protocolLiquidationFeeUsdc, 0, "Protocol fee should default to zero");
+        assertEq(preview.lpLiquidationFeeUsdc, 5_050_000, "LPs should receive exactly half the charge");
+        assertEq(
+            preview.keeperBountyUsdc + preview.protocolLiquidationFeeUsdc + preview.lpLiquidationFeeUsdc,
+            preview.liquidationChargeUsdc,
+            "Liquidation charge allocation should conserve value"
+        );
+        assertLe(preview.liquidationChargeUsdc, uint256(preview.equityUsdc));
     }
 
     function test_PlanLiquidation_PositiveResidualAboveTraderClaimDoesNotUnderflow() public {
@@ -2911,10 +2970,10 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(sizeAfter, 0, "Close should execute instead of reverting when carry flips the trade into a loss");
     }
 
-    function test_LiquidationState_UsesFullReachableCollateralForUnderwaterBountyCap() public {
+    function test_LiquidationState_UsesFullReachableCollateralForUnderwaterChargeCap() public {
         LiquidationAccountingLibHarness harness = new LiquidationAccountingLibHarness();
         LiquidationAccountingLib.LiquidationState memory state =
-            harness.build(10_000e18, 100_000_000, 125e6, -145e6, 100, 1e6, 900, 1e20);
+            harness.build(10_000e18, 100_000_000, 125e6, -145e6, 100, 1e6, 900, 5000, 0, 1e20);
 
         assertLt(state.equityUsdc, 0, "Setup must make the account underwater");
         assertEq(state.reachableCollateralUsdc, 125e6, "Liquidation state should use full reachable collateral");
@@ -2924,9 +2983,35 @@ contract CfdEngineTest is BasePerpTest {
             "Keeper bounty should be allowed to exceed active position margin when more collateral is reachable"
         );
         assertLe(
-            state.keeperBountyUsdc,
+            state.liquidationChargeUsdc,
             state.reachableCollateralUsdc,
-            "Keeper bounty should still cap at reachable collateral"
+            "Total liquidation charge should still cap at reachable collateral"
+        );
+        assertEq(
+            state.keeperBountyUsdc,
+            state.liquidationChargeUsdc / 2,
+            "Keeper should receive only half of the capped charge"
+        );
+        assertEq(state.protocolLiquidationFeeUsdc, 0, "Protocol liquidation fee should default to zero");
+        assertEq(
+            state.lpLiquidationFeeUsdc,
+            state.liquidationChargeUsdc - state.keeperBountyUsdc - state.protocolLiquidationFeeUsdc,
+            "LPs should receive the other half of the capped charge"
+        );
+    }
+
+    function test_LiquidationState_ShareRoundingRemainderBelongsToLps() public {
+        LiquidationAccountingLibHarness harness = new LiquidationAccountingLibHarness();
+        LiquidationAccountingLib.LiquidationState memory state = harness.build(0, 0, 9, 0, 100, 9, 10, 3333, 2222, 1);
+
+        assertEq(state.liquidationChargeUsdc, 9, "Reachable minimum charge should be collected in full");
+        assertEq(state.keeperBountyUsdc, 2, "Configured keeper share should round down");
+        assertEq(state.protocolLiquidationFeeUsdc, 1, "Configured protocol share should round down");
+        assertEq(state.lpLiquidationFeeUsdc, 6, "LP share should receive both rounding remainders");
+        assertEq(
+            state.liquidationChargeUsdc,
+            state.keeperBountyUsdc + state.protocolLiquidationFeeUsdc + state.lpLiquidationFeeUsdc,
+            "All three allocations should conserve the total charge"
         );
     }
 
@@ -2984,9 +3069,10 @@ contract CfdEngineTest is BasePerpTest {
         uint256 expectedShortfallUsdc = delta.residualPlan.badDebtUsdc;
         if (delta.liquidationState.equityUsdc >= 0) {
             uint256 equityUsdc = uint256(delta.liquidationState.equityUsdc);
-            uint256 keeperSubsidyUsdc = delta.keeperBountyUsdc > equityUsdc ? delta.keeperBountyUsdc - equityUsdc : 0;
+            uint256 chargeSubsidyUsdc =
+                delta.liquidationChargeUsdc > equityUsdc ? delta.liquidationChargeUsdc - equityUsdc : 0;
             expectedShortfallUsdc =
-                expectedShortfallUsdc > keeperSubsidyUsdc ? expectedShortfallUsdc - keeperSubsidyUsdc : 0;
+                expectedShortfallUsdc > chargeSubsidyUsdc ? expectedShortfallUsdc - chargeSubsidyUsdc : 0;
         }
         uint256 expectedConsumed =
             traderClaimBalanceUsdc < expectedShortfallUsdc ? traderClaimBalanceUsdc : expectedShortfallUsdc;
@@ -3211,7 +3297,10 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(interfacePreview.equityUsdc, contractPreview.equityUsdc);
         assertEq(interfacePreview.pnlUsdc, contractPreview.pnlUsdc);
         assertEq(interfacePreview.reachableCollateralUsdc, contractPreview.reachableCollateralUsdc);
+        assertEq(interfacePreview.liquidationChargeUsdc, contractPreview.liquidationChargeUsdc);
         assertEq(interfacePreview.keeperBountyUsdc, contractPreview.keeperBountyUsdc);
+        assertEq(interfacePreview.protocolLiquidationFeeUsdc, contractPreview.protocolLiquidationFeeUsdc);
+        assertEq(interfacePreview.lpLiquidationFeeUsdc, contractPreview.lpLiquidationFeeUsdc);
         assertEq(interfacePreview.seizedCollateralUsdc, contractPreview.seizedCollateralUsdc);
         assertEq(interfacePreview.immediatePayoutUsdc, contractPreview.immediatePayoutUsdc);
         assertEq(interfacePreview.traderClaimBalanceUsdc, contractPreview.traderClaimBalanceUsdc);
@@ -3323,6 +3412,12 @@ contract CfdEngineTest is BasePerpTest {
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory afterSnapshot =
             engineProtocolLens.getProtocolAccountingSnapshot();
 
+        assertGe(
+            observed.protocolLiquidationFeeUsdc,
+            reservationBefore.executionBountyUsdc,
+            "Treasury inflow should include the forfeited execution reservation"
+        );
+        observed.protocolLiquidationFeeUsdc -= reservationBefore.executionBountyUsdc;
         _assertLiquidationPreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
 
         assertEq(
@@ -3337,8 +3432,8 @@ contract CfdEngineTest is BasePerpTest {
         );
         assertEq(
             afterSnapshot.protocolTreasuryBalanceUsdc - beforeSnapshot.protocol.protocolTreasuryBalanceUsdc,
-            reservationBefore.executionBountyUsdc,
-            "Live liquidation should book the same forfeited reservation preview assumes as protocol fees"
+            reservationBefore.executionBountyUsdc + preview.protocolLiquidationFeeUsdc,
+            "Live liquidation should book forfeited reservations and the configured protocol liquidation fee"
         );
         assertEq(
             observed.effectiveAssetsAfterUsdc,
@@ -3416,8 +3511,8 @@ contract CfdEngineTest is BasePerpTest {
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(bearAccount, 50_000_000);
         assertTrue(preview.liquidatable, "Setup must produce a liquidatable position even after trader claim credit");
 
-        int256 terminalResidual =
-            int256(settlementReachableBefore + traderClaimBefore) + preview.pnlUsdc - int256(preview.keeperBountyUsdc);
+        int256 terminalResidual = int256(settlementReachableBefore + traderClaimBefore) + preview.pnlUsdc
+            - int256(preview.liquidationChargeUsdc);
 
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
         bytes[] memory priceData = new bytes[](1);
@@ -3756,7 +3851,8 @@ contract CfdEngineTest is BasePerpTest {
 
         uint256 bearMaxProfit = _sideMaxProfit(CfdTypes.Side.BEAR);
         uint256 targetAssets = bearMaxProfit + clearinghouse.balanceUsdc(engine.protocolTreasury())
-            + preDrainPreview.keeperBountyUsdc - preDrainPreview.seizedCollateralUsdc - 1;
+            + preDrainPreview.keeperBountyUsdc + preDrainPreview.protocolLiquidationFeeUsdc
+            - preDrainPreview.seizedCollateralUsdc - 1;
         uint256 currentAssets = pool.totalAssets();
         assertGt(currentAssets, targetAssets, "Test setup must be able to drain the pool into the degraded-mode gap");
 
@@ -4097,7 +4193,9 @@ contract CfdEngineTest is BasePerpTest {
                 fadMarginBps: 500,
                 baseCarryBps: 500,
                 minBountyUsdc: 1 * 1e6,
-                bountyBps: 10
+                bountyBps: 10,
+                keeperShareBps: 5000,
+                protocolShareBps: 0
             })
         );
 
@@ -4320,7 +4418,9 @@ contract CfdEngineTest is BasePerpTest {
                 fadMarginBps: 300,
                 baseCarryBps: 500,
                 minBountyUsdc: 1 * 1e6,
-                bountyBps: 10
+                bountyBps: 10,
+                keeperShareBps: 5000,
+                protocolShareBps: 0
             })
         );
 
@@ -4644,7 +4744,7 @@ contract CfdEngineTest is BasePerpTest {
         engine.liquidatePosition(account, 1e8, 1_000_000 * 1e6, uint64(block.timestamp), address(this));
     }
 
-    function test_LiquidationBounty_UsesReachableCollateralSubsidyCap() public {
+    function test_LiquidationCharge_UsesReachableCollateralSubsidyCap() public {
         uint256 poolDepth = 1_000_000 * 1e6;
         address account = address(uint160(1234));
         address trader = account;
@@ -4659,7 +4759,9 @@ contract CfdEngineTest is BasePerpTest {
                 fadMarginBps: 10,
                 baseCarryBps: 500,
                 minBountyUsdc: 1 * 1e6,
-                bountyBps: 100
+                bountyBps: 100,
+                keeperShareBps: 5000,
+                protocolShareBps: 0
             })
         );
 
@@ -4682,11 +4784,22 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(trader);
         clearinghouse.withdraw(account, 194 * 1e6);
 
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 100_500_000);
         vm.prank(address(router));
         uint256 bounty =
             engine.liquidatePosition(account, 100_500_000, poolDepth, uint64(block.timestamp), address(this));
 
-        assertEq(bounty, posMargin, "Keeper bounty subsidy should be bounded by physically reachable collateral");
+        assertEq(
+            preview.liquidationChargeUsdc,
+            posMargin,
+            "Total liquidation charge should be bounded by physically reachable collateral"
+        );
+        assertEq(bounty, preview.keeperBountyUsdc, "Live keeper credit should match the previewed half");
+        assertEq(
+            preview.keeperBountyUsdc + preview.protocolLiquidationFeeUsdc + preview.lpLiquidationFeeUsdc,
+            posMargin,
+            "Keeper, protocol, and LP shares should conserve the capped charge"
+        );
     }
 
     function test_ClearBadDebt_ReducesOutstandingDebt() public {
@@ -4933,7 +5046,7 @@ contract CfdEngineTest is BasePerpTest {
         params.initMarginBps = 300;
         _setRiskParams(params);
 
-        (,,, uint256 initMarginBps,,,,) = engine.riskParams();
+        (,,, uint256 initMarginBps,,,,,,) = engine.riskParams();
         assertEq(initMarginBps, 300, "Setup must finalize the explicit init margin config");
 
         vm.prank(address(router));
@@ -5166,7 +5279,9 @@ contract CfdEngineCarryRegressionTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -5282,7 +5397,9 @@ contract CfdEngineAuditTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -5550,7 +5667,9 @@ contract CfdEngineAuditTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = newParams;
@@ -5653,7 +5772,9 @@ contract MarginCappedMtmTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -5833,7 +5954,9 @@ contract PhantomExecFeeTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -5901,7 +6024,9 @@ contract CarryModelFreeUsdcTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -5986,7 +6111,9 @@ contract DegradedModeLifecycleTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -6098,7 +6225,9 @@ contract ProtocolPhaseTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -6200,7 +6329,9 @@ contract VpiDepthTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -6388,6 +6519,20 @@ contract VpiChunkingTest is Test {
     uint256 constant CAP_PRICE = 2e8;
     uint256 constant DEPTH = 5_000_000 * 1e6;
 
+    function _configureBroadSeniorCapacity() internal {
+        IHousePool.PoolConfig memory config = IHousePool.PoolConfig({
+            seniorRateBps: pool.seniorRateBps(),
+            markStalenessLimit: pool.markStalenessLimit(),
+            seniorFrozenLpFeeBps: pool.seniorFrozenLpFeeBps(),
+            juniorFrozenLpFeeBps: pool.juniorFrozenLpFeeBps(),
+            maxSeniorExposureUsdc: type(uint256).max - 1,
+            maxSeniorShareBps: 9999
+        });
+        pool.proposePoolConfig(config);
+        vm.warp(pool.poolConfigActivationTime());
+        pool.finalizePoolConfig();
+    }
+
     function setUp() public {
         usdc = new VpiMockUSDC6();
 
@@ -6399,7 +6544,9 @@ contract VpiChunkingTest is Test {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
 
         clearinghouse = new MarginClearinghouse(address(usdc));
@@ -6418,6 +6565,7 @@ contract VpiChunkingTest is Test {
         engine.setOrderRouter(address(this));
 
         clearinghouse.setEngine(address(engine));
+        _configureBroadSeniorCapacity();
         vm.warp(1_709_532_000);
 
         usdc.mint(address(this), 2000e6);
@@ -6583,7 +6731,9 @@ contract SolvencySnapshotRegressionTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 

@@ -2,6 +2,7 @@
 pragma solidity 0.8.35;
 
 import {HousePoolAccountingLib} from "@plether/perps/libraries/HousePoolAccountingLib.sol";
+import {HousePoolSeniorCapacityLib} from "@plether/perps/libraries/HousePoolSeniorCapacityLib.sol";
 
 /// @title HousePoolWithdrawalPreviewLib
 /// @notice Pure helpers for applying reservations and computing senior/junior withdrawal caps.
@@ -36,18 +37,26 @@ library HousePoolWithdrawalPreviewLib {
         return freeUsdc < seniorPrincipal ? freeUsdc : seniorPrincipal;
     }
 
-    /// @notice Caps junior withdrawals to cash remaining after reserving senior principal.
+    /// @notice Caps junior withdrawals by cash priority and the governed senior-share covenant.
     /// @param freeUsdc Cash remaining after senior protocol reservations (6 decimals).
     /// @param seniorPrincipal Current senior principal senior to junior withdrawals (6 decimals).
     /// @param juniorPrincipal Current junior principal (6 decimals).
+    /// @param seniorHighWaterMark Protected senior entitlement (6 decimals).
+    /// @param maxSeniorShareBps Governed maximum active senior share of tranche capital.
     /// @return Maximum junior withdrawal (6 decimals).
     function juniorWithdrawCap(
         uint256 freeUsdc,
         uint256 seniorPrincipal,
-        uint256 juniorPrincipal
+        uint256 juniorPrincipal,
+        uint256 seniorHighWaterMark,
+        uint256 maxSeniorShareBps
     ) internal pure returns (uint256) {
         uint256 subordinated = freeUsdc > seniorPrincipal ? freeUsdc - seniorPrincipal : 0;
-        return subordinated < juniorPrincipal ? subordinated : juniorPrincipal;
+        uint256 liquidityCap = subordinated < juniorPrincipal ? subordinated : juniorPrincipal;
+        uint256 ratioCap = HousePoolSeniorCapacityLib.juniorWithdrawalRatioCap(
+            seniorPrincipal, seniorHighWaterMark, juniorPrincipal, maxSeniorShareBps
+        );
+        return liquidityCap < ratioCap ? liquidityCap : ratioCap;
     }
 
 }

@@ -211,6 +211,11 @@ contract PerpsReadParityTest is BasePerpTest {
     }
 
     function test_LiquidationPreviewMatchesLive() public {
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.keeperShareBps = 2500;
+        params.protocolShareBps = 2500;
+        _setRiskParams(params);
+
         address trader = address(0xAA12);
         address account = trader;
         address keeper = address(0xAA13);

@@ -283,9 +283,9 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
     /// @dev Callable only by `ENGINE`, which must also be passed as `host`. The host must supply a liquidatable delta
     ///      consistent with live state; this function neither checks `delta.liquidatable` nor recomputes the plan. It
     ///      advances carry/mark state, removes all side exposure and margin, applies the clearinghouse terminal-settlement
-    ///      plan, credits the keeper bounty, records seized pool inflow, synchronizes consumed order reservations, nets
-    ///      existing claims, pays or records fresh trader value, records applicable carry revenue and bad debt, and
-    ///      deletes the position.
+    ///      plan, credits the configured keeper and protocol shares, transfers the LP remainder to the pool, records
+    ///      seized pool inflow, synchronizes consumed order reservations, nets existing claims, pays or records fresh
+    ///      trader value, records applicable carry revenue and bad debt, and deletes the position.
     /// @param host Bound engine settlement host that owns canonical storage.
     /// @param delta Valid planned full-liquidation delta; prices are 8 decimals, size 18, and USDC fields 6.
     /// @param publishTime Oracle publish timestamp proposed for the liquidation mark.
@@ -307,21 +307,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         host.settlementSyncTotalSideMargin(delta.side, delta.posMargin, 0);
 
         keeperBountyUsdc = delta.keeperBountyUsdc;
-        uint64[] memory reservationOrderIds =
-            IOrderRouterAccounting(host.orderRouter()).getMarginReservationIds(delta.account);
-        IMarginClearinghouse.LiquidationSettlementPlan memory settlementPlan =
-            IMarginClearinghouse.LiquidationSettlementPlan({
-                settlementRetainedUsdc: delta.settlementRetainedUsdc,
-                settlementSeizedUsdc: delta.residualPlan.settlementSeizedUsdc,
-                freshTraderPayoutUsdc: delta.freshTraderPayoutUsdc,
-                badDebtUsdc: delta.badDebtUsdc,
-                positionMarginUnlockedUsdc: delta.residualPlan.mutation.positionMarginUnlockedUsdc,
-                otherLockedMarginUnlockedUsdc: delta.residualPlan.mutation.otherLockedMarginUnlockedUsdc
-            });
-        uint256 seizedUsdc = IMarginClearinghouse(host.clearinghouse())
-            .applyLiquidationSettlementPlan(
-                delta.account, reservationOrderIds, settlementPlan, host.pool(), keeper, delta.keeperBountyUsdc
-            );
+        uint256 seizedUsdc = _applyLiquidationSettlementPlan(host, delta, keeper);
         if (seizedUsdc > 0) {
             IHousePool(host.pool())
                 .recordClaimantInflow(
@@ -349,6 +335,40 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
             host.settlementAccumulateBadDebt(delta.badDebtUsdc);
         }
         host.settlementDeletePosition(delta.account);
+    }
+
+    /// @notice Applies the clearinghouse mutation for a planned liquidation.
+    /// @param host Bound engine settlement host.
+    /// @param delta Valid planned full-liquidation delta.
+    /// @param keeper Clearinghouse account credited with the planned bounty.
+    /// @return seizedUsdc Amount transferred to the pool by the clearinghouse, in 6-decimal USDC units.
+    function _applyLiquidationSettlementPlan(
+        ICfdEngineSettlementHost host,
+        CfdEnginePlanTypes.LiquidationDelta calldata delta,
+        address keeper
+    ) private returns (uint256 seizedUsdc) {
+        uint64[] memory reservationOrderIds =
+            IOrderRouterAccounting(host.orderRouter()).getMarginReservationIds(delta.account);
+        IMarginClearinghouse.LiquidationSettlementPlan memory settlementPlan =
+            IMarginClearinghouse.LiquidationSettlementPlan({
+                settlementRetainedUsdc: delta.settlementRetainedUsdc,
+                settlementSeizedUsdc: delta.settlementSeizedUsdc,
+                freshTraderPayoutUsdc: delta.freshTraderPayoutUsdc,
+                badDebtUsdc: delta.badDebtUsdc,
+                positionMarginUnlockedUsdc: delta.residualPlan.mutation.positionMarginUnlockedUsdc,
+                otherLockedMarginUnlockedUsdc: delta.residualPlan.mutation.otherLockedMarginUnlockedUsdc
+            });
+        seizedUsdc = IMarginClearinghouse(host.clearinghouse())
+            .applyLiquidationSettlementPlan(
+                delta.account,
+                reservationOrderIds,
+                settlementPlan,
+                host.pool(),
+                keeper,
+                delta.keeperBountyUsdc,
+                host.protocolTreasury(),
+                delta.protocolLiquidationFeeUsdc
+            );
     }
 
     /// @notice Funds an uncredited protocol fee from pool cash not reserved for outstanding trader claims.

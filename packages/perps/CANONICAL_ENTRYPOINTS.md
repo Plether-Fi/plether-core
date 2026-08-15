@@ -23,16 +23,21 @@ Do not use the wide clearinghouse reservation API or detailed accounting lenses 
 
 ## LPs
 
-- Senior actions: `HousePool.depositSenior(uint256)` and `HousePool.withdrawSenior(uint256,address)`
-- Junior actions: `HousePool.depositJunior(uint256)` and `HousePool.withdrawJunior(uint256,address)`
+- Senior and junior user actions go through the configured `TrancheVault`: `deposit`, `mint`, `requestDeposit`,
+  `cancelPendingDeposit`, `claimDepositShares`, `withdraw`, and `redeem`
+- Delayed-batch finalization: permissionless `TrancheVault.finalizeDepositEpoch(uint256)`
 - Compact reads: `PerpsPublicLens`
+- Capacity-specific reads: `HousePool.getSeniorDepositCapacity()`, `reservedSeniorDepositAssetsUsdc()`, and
+  `areSeniorDepositReservationsWithinLimits()`; these intentionally are not added to the compact liquidity lens
 
 Use these interfaces:
 
-- `IPerpsLPActions`
 - `IPerpsLPViews`
 
-Treat bootstrap, seed-lifecycle, and other tranche setup mechanics as admin/setup concerns rather than the standard LP surface.
+`IPerpsLPActions` describes configured-vault-to-`HousePool` mutation hooks. It is not a direct user surface:
+`depositSenior`, `reserveSeniorDeposit`, `releaseSeniorDepositReservation`, and `depositReservedSenior` authorize only
+the configured senior vault. Treat bootstrap, seed-lifecycle, and other tranche setup mechanics as admin/setup
+concerns rather than the standard LP surface.
 
 ## Keepers
 

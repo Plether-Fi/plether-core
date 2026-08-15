@@ -19,13 +19,11 @@ import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {IWithdrawGuard} from "@plether/perps/interfaces/IWithdrawGuard.sol";
-import {CashPriorityLib} from "@plether/perps/libraries/CashPriorityLib.sol";
 import {CfdEngineSnapshotsLib} from "@plether/perps/libraries/CfdEngineSnapshotsLib.sol";
 import {MarginClearinghouseAccountingLib} from "@plether/perps/libraries/MarginClearinghouseAccountingLib.sol";
 import {MarketCalendarLib} from "@plether/perps/libraries/MarketCalendarLib.sol";
 import {OracleFreshnessPolicyLib} from "@plether/perps/libraries/OracleFreshnessPolicyLib.sol";
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
-import {SolvencyAccountingLib} from "@plether/perps/libraries/SolvencyAccountingLib.sol";
 
 /// @title CfdEngine
 /// @notice Canonical position ledger and execution coordinator for Plether's capped-price CFDs.
@@ -105,10 +103,10 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     /// @notice Whether terminal settlement detected insolvency and latched risk-increasing operations off.
     bool public degradedMode;
 
-    /// @notice Current VPI, skew, margin, carry, and liquidation-bounty parameters.
-    /// @dev VPI factor and maximum skew ratio use 1e18 scaling; margin, carry, and bounty rates use basis points;
-    ///      `minBountyUsdc` uses 6-decimal USDC units.
-    CfdTypes.RiskParams public riskParams;
+    /// @notice Current VPI, skew, margin, carry, and liquidation-charge parameters.
+    /// @dev VPI factor and maximum skew ratio use 1e18 scaling; margin, carry, liquidation-charge, keeper-share, and
+    ///      protocol-share rates use basis points; `minBountyUsdc` uses 6-decimal USDC units.
+    CfdTypes.RiskParams internal _activeRiskParams;
     mapping(address => StoredPosition) internal _positions;
     /// @notice Senior pool payout liability owed to each account, in 6-decimal USDC units.
     mapping(address => uint256) public traderClaimBalanceUsdc;
@@ -200,12 +198,11 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         uint256 amount,
         address account
     ) internal returns (uint256 claimAmountUsdc) {
-        claimAmountUsdc =
-            CashPriorityLib.availableCashForClaimService(pool.totalAssets(), totalTraderClaimBalanceUsdc, amount);
-        if (claimAmountUsdc == 0) {
+        if (amount == 0 || pool.totalAssets() < totalTraderClaimBalanceUsdc) {
             revert CfdEngine__InsufficientPoolLiquidity();
         }
 
+        claimAmountUsdc = amount;
         pool.payOut(address(clearinghouse), claimAmountUsdc);
         clearinghouse.settleUsdc(account, int256(claimAmountUsdc));
     }
@@ -298,6 +295,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         if (_riskParams.minBountyUsdc == 0 || _riskParams.bountyBps == 0) {
             revert CfdEngine__InvalidRiskParams();
         }
+        if (_riskParams.keeperShareBps > 10_000 || _riskParams.protocolShareBps > 10_000 - _riskParams.keeperShareBps) {
+            revert CfdEngine__InvalidRiskParams();
+        }
         if (_riskParams.maxSkewRatio > CfdMath.WAD) {
             revert CfdEngine__InvalidRiskParams();
         }
@@ -307,7 +307,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         USDC = IERC20(_usdc);
         clearinghouse = IMarginClearinghouse(_clearinghouse);
         CAP_PRICE = _capPrice;
-        riskParams = _riskParams;
+        _activeRiskParams = _riskParams;
         frozenCloseSpreadBps = _frozenCloseSpreadBps;
         protocolTreasury = msg.sender;
     }
@@ -680,7 +680,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     ) external onlyAdmin {
         // CfdEngineAdmin is the sole caller and validates the staged configuration before finalization.
         _advanceAllCarryIndexes(block.timestamp);
-        riskParams = config.riskParams;
+        _activeRiskParams = config.riskParams;
         executionFeeBps = config.executionFeeBps;
         frozenCloseSpreadBps = config.frozenCloseSpreadBps;
     }
@@ -755,9 +755,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         pos = _loadPosition(account);
         reachableUsdc = _genericReachableCollateralUsdc(account);
         uint256 pendingCarryUsdc = _totalPendingCarryUsdc(account, pos, block.timestamp);
-        uint256 currentMarginBps = isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps;
+        uint256 currentMarginBps = isFadWindow() ? _activeRiskParams.fadMarginBps : _activeRiskParams.maintMarginBps;
         uint256 effectiveMarginBps =
-            riskParams.initMarginBps > currentMarginBps ? riskParams.initMarginBps : currentMarginBps;
+            _activeRiskParams.initMarginBps > currentMarginBps ? _activeRiskParams.initMarginBps : currentMarginBps;
         PositionRiskAccountingLib.PositionRiskState memory riskState =
             PositionRiskAccountingLib.buildPositionRiskStateWithCarry(
                 pos, price, CAP_PRICE, pendingCarryUsdc, reachableUsdc, effectiveMarginBps
@@ -831,8 +831,10 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     function _positionBorrowBase(
         uint256 maxProfitUsdc,
         uint256 marginUsdc
-    ) internal pure returns (uint256) {
-        return PositionRiskAccountingLib.computeBorrowBaseUsdc(maxProfitUsdc, marginUsdc);
+    ) internal pure returns (uint256 borrowBaseUsdc) {
+        assembly ("memory-safe") {
+            if gt(maxProfitUsdc, marginUsdc) { borrowBaseUsdc := sub(maxProfitUsdc, marginUsdc) }
+        }
     }
 
     function _applySideBorrowBaseDelta(
@@ -905,15 +907,15 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     function _canPayFreshPoolPayout(
         uint256 amountUsdc
     ) internal view returns (bool) {
-        return amountUsdc <= _freshPoolReservation().freeCashUsdc;
+        return amountUsdc <= _availableCashForFreshPoolPayouts();
     }
 
-    function _availableCashForFreshPoolPayouts() internal view returns (uint256) {
-        return _freshPoolReservation().freeCashUsdc;
-    }
-
-    function _freshPoolReservation() internal view returns (CashPriorityLib.SeniorCashReservation memory reservation) {
-        return CashPriorityLib.reserveFreshPayouts(pool.totalAssets(), totalTraderClaimBalanceUsdc);
+    function _availableCashForFreshPoolPayouts() internal view returns (uint256 availableCashUsdc) {
+        uint256 physicalAssetsUsdc = pool.totalAssets();
+        uint256 claimsUsdc = totalTraderClaimBalanceUsdc;
+        assembly ("memory-safe") {
+            if gt(physicalAssetsUsdc, claimsUsdc) { availableCashUsdc := sub(physicalAssetsUsdc, claimsUsdc) }
+        }
     }
 
     // ==========================================
@@ -941,10 +943,10 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     function _marketStatus() internal view returns (bool fadWindow, bool oracleFrozen) {
         uint256 timestamp = block.timestamp;
         uint256 today = timestamp / 86_400;
-        bool todayOverride = fadDayOverrides[today];
-        fadWindow =
-            MarketCalendarLib.isFadWindow(timestamp, todayOverride, fadDayOverrides[today + 1], fadRunwaySeconds);
-        oracleFrozen = MarketCalendarLib.isOracleFrozen(timestamp, todayOverride);
+        (fadWindow, oracleFrozen) = MarketCalendarLib.marketStatus(timestamp, fadDayOverrides[today]);
+        if (!fadWindow && fadRunwaySeconds > 0 && fadDayOverrides[today + 1]) {
+            fadWindow = MarketCalendarLib.isFadRunway(timestamp, fadRunwaySeconds);
+        }
     }
 
     /// @notice Returns the canonical current position tuple for an account.
@@ -986,6 +988,35 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     ) external view returns (uint256 borrowBaseUsdc, uint256 lastCarryIndex, uint64 lastCarryTimestamp) {
         StoredPosition storage pos = _positions[account];
         return (pos.borrowBaseUsdc, pos.lastCarryIndex, pos.lastCarryTimestamp);
+    }
+
+    /// @notice Returns the engine's active position-risk, VPI, carry, and liquidation-charge parameters.
+    function riskParams()
+        external
+        view
+        returns (
+            uint256 vpiFactor,
+            uint256 maxSkewRatio,
+            uint256 maintMarginBps,
+            uint256 initMarginBps,
+            uint256 fadMarginBps,
+            uint256 baseCarryBps,
+            uint256 minBountyUsdc,
+            uint256 bountyBps,
+            uint256 keeperShareBps,
+            uint256 protocolShareBps
+        )
+    {
+        // The public struct getter otherwise emits ten separately unrolled loads. Keeping its exact ABI while
+        // iterating over the struct's contiguous full-slot fields materially reduces engine runtime bytecode.
+        assembly ("memory-safe") {
+            let result := mload(0x40)
+            let riskParamsSlot := _activeRiskParams.slot
+            for { let offset := 0 } lt(offset, 0x140) { offset := add(offset, 0x20) } {
+                mstore(add(result, offset), sload(add(riskParamsSlot, shr(5, offset))))
+            }
+            return(result, 0x140)
+        }
     }
 
     /// @notice Plans and settles liquidation of an undercollateralized position.
@@ -1036,24 +1067,21 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     function _assertPostSolvency() internal view {
-        SolvencyAccountingLib.SolvencyState memory state = _buildAdjustedSolvencyState();
-        if (SolvencyAccountingLib.isInsolvent(state)) {
+        uint256 effectiveAssetsUsdc = _availableCashForFreshPoolPayouts();
+        uint256 claimsUsdc = totalTraderClaimBalanceUsdc;
+        uint256 maxLiabilityUsdc = _getWithdrawalReservedUsdc() - claimsUsdc;
+        if (effectiveAssetsUsdc < maxLiabilityUsdc) {
             revert CfdEngine__PostOpSolvencyBreach();
         }
     }
 
     function _maxLiability() internal view returns (uint256) {
         (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
-        return SolvencyAccountingLib.getMaxLiability(bullState.maxProfitUsdc, bearState.maxProfitUsdc);
+        return bullState.maxProfitUsdc > bearState.maxProfitUsdc ? bullState.maxProfitUsdc : bearState.maxProfitUsdc;
     }
 
     function _getWithdrawalReservedUsdc() internal view returns (uint256 reservedUsdc) {
-        return _buildAdjustedSolvencyState().withdrawalReservedUsdc;
-    }
-
-    function _buildAdjustedSolvencyState() internal view returns (SolvencyAccountingLib.SolvencyState memory) {
-        return
-            SolvencyAccountingLib.buildSolvencyState(pool.totalAssets(), _maxLiability(), totalTraderClaimBalanceUsdc);
+        return _maxLiability() + totalTraderClaimBalanceUsdc;
     }
 
     function _buildAdjustedSolvencySnapshot()
@@ -1061,11 +1089,13 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         view
         returns (CfdEngineSnapshotsLib.SolvencySnapshot memory snapshot)
     {
-        SolvencyAccountingLib.SolvencyState memory state = _buildAdjustedSolvencyState();
-        snapshot.physicalAssets = state.physicalAssetsUsdc;
-        snapshot.netPhysicalAssets = state.netPhysicalAssetsUsdc;
-        snapshot.maxLiability = state.maxLiabilityUsdc;
-        snapshot.effectiveSolvencyAssets = state.effectiveAssetsUsdc;
+        snapshot.physicalAssets = pool.totalAssets();
+        snapshot.netPhysicalAssets = snapshot.physicalAssets;
+        uint256 claimsUsdc = totalTraderClaimBalanceUsdc;
+        snapshot.maxLiability = _getWithdrawalReservedUsdc() - claimsUsdc;
+        if (snapshot.physicalAssets > claimsUsdc) {
+            snapshot.effectiveSolvencyAssets = snapshot.physicalAssets - claimsUsdc;
+        }
     }
 
     // ==========================================
@@ -1105,7 +1135,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         snap.degradedMode = degradedMode;
 
         snap.capPrice = CAP_PRICE;
-        snap.riskParams = riskParams;
+        snap.riskParams = _activeRiskParams;
         snap.executionFeeBps = executionFeeBps;
         (snap.isFadWindow, snap.oracleFrozen) = _marketStatus();
         snap.frozenCloseSpreadBps = frozenCloseSpreadBps;
@@ -1219,7 +1249,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
             timestampNow,
             sideBorrowBaseUsdc[sideIndex],
             poolAssetsUsdc,
-            riskParams.baseCarryBps
+            _activeRiskParams.baseCarryBps
         );
     }
 
@@ -1416,12 +1446,16 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         if (degradedMode) {
             return;
         }
-        SolvencyAccountingLib.SolvencyState memory state = _buildAdjustedSolvencyState();
-        uint256 effectiveAssetsAfter =
-            SolvencyAccountingLib.effectiveAssetsAfterPendingPayout(state, pendingPoolPayoutUsdc);
-        if (effectiveAssetsAfter < state.maxLiabilityUsdc) {
+        uint256 effectiveAssetsAfter = _availableCashForFreshPoolPayouts();
+        if (effectiveAssetsAfter > pendingPoolPayoutUsdc) {
+            effectiveAssetsAfter -= pendingPoolPayoutUsdc;
+        } else {
+            effectiveAssetsAfter = 0;
+        }
+        uint256 maxLiabilityUsdc = _getWithdrawalReservedUsdc() - totalTraderClaimBalanceUsdc;
+        if (effectiveAssetsAfter < maxLiabilityUsdc) {
             degradedMode = true;
-            emit DegradedModeEntered(effectiveAssetsAfter, state.maxLiabilityUsdc, account);
+            emit DegradedModeEntered(effectiveAssetsAfter, maxLiabilityUsdc, account);
         }
     }
 
@@ -1501,7 +1535,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
                 CAP_PRICE,
                 pendingCarryUsdc,
                 postReservationReachableUsdc,
-                isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps
+                isFadWindow() ? _activeRiskParams.fadMarginBps : _activeRiskParams.maintMarginBps
             );
 
         if (riskState.liquidatable && (!isFullClose || marginBackedBountyUsdc > 0)) {

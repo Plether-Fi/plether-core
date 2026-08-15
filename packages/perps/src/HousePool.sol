@@ -19,6 +19,7 @@ import {HousePoolPendingLivePlanLib} from "@plether/perps/libraries/HousePoolPen
 import {HousePoolPendingPreviewLib} from "@plether/perps/libraries/HousePoolPendingPreviewLib.sol";
 import {HousePoolReconcilePlanLib} from "@plether/perps/libraries/HousePoolReconcilePlanLib.sol";
 import {HousePoolSeedLifecycleLib} from "@plether/perps/libraries/HousePoolSeedLifecycleLib.sol";
+import {HousePoolSeniorCapacityLib} from "@plether/perps/libraries/HousePoolSeniorCapacityLib.sol";
 import {HousePoolTrancheGateLib} from "@plether/perps/libraries/HousePoolTrancheGateLib.sol";
 import {HousePoolWaterfallAccountingLib} from "@plether/perps/libraries/HousePoolWaterfallAccountingLib.sol";
 import {HousePoolWithdrawalPreviewLib} from "@plether/perps/libraries/HousePoolWithdrawalPreviewLib.sol";
@@ -87,6 +88,8 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
     uint256 public pendingRecapitalizationUsdc;
     /// @notice Unsettled claimant trading revenue reserved from withdrawals (6-decimal USDC).
     uint256 public pendingTradingRevenueUsdc;
+    /// @notice Accepted senior delayed-deposit assets not yet cancelled or finalized (6-decimal USDC).
+    uint256 public override reservedSeniorDepositAssetsUsdc;
 
     /// @notice Deployment time or Unix timestamp of the most recent mark-fresh waterfall reconcile.
     uint256 public lastReconcileTime;
@@ -109,8 +112,9 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
     uint256 public constant TIMELOCK_DELAY = 48 hours;
 
     /// @notice Most recently proposed pool configuration awaiting finalization.
-    /// @dev Rate and fee fields use basis points; `markStalenessLimit` uses seconds. Consult
-    ///      `poolConfigActivationTime` to distinguish an active proposal from the zero-value default getter.
+    /// @dev Rate, fee, and share fields use basis points; `markStalenessLimit` uses seconds and maximum senior
+    ///      exposure uses 6-decimal USDC. Consult `poolConfigActivationTime` to distinguish an active proposal from
+    ///      the zero-value default getter.
     PoolConfig public pendingPoolConfig;
     /// @notice Earliest Unix timestamp at which the pending configuration may be finalized, or zero if none.
     uint256 public poolConfigActivationTime;
@@ -129,9 +133,17 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
         _;
     }
 
+    modifier onlySeniorVault() {
+        if (msg.sender != seniorVault) {
+            revert HousePool__NotSeniorVault();
+        }
+        _;
+    }
+
     /// @notice Deploys a pool and its dedicated engine-accounting lens with the default pool configuration.
     /// @dev Makes the deployer owner, initializes both reconcile clocks, and configures an 8% annual senior
-    ///      target rate, a 60-second live mark limit, and 25/75-bps senior/junior frozen-oracle LP fees.
+    ///      target rate, a 60-second live mark limit, and 25/75-bps senior/junior frozen-oracle LP fees. Senior
+    ///      capacity starts at neutral unbounded sentinels that governance must replace before trading activation.
     ///      Deployment neither initializes tranche vaults nor activates trading.
     /// @param _usdc USDC token address used as 6-decimal collateral
     /// @param _engine CfdEngine that manages positions, liabilities, and PnL
@@ -145,7 +157,12 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
         lastReconcileTime = block.timestamp;
         lastSeniorCouponCheckpointTime = block.timestamp;
         poolConfig = PoolConfig({
-            seniorRateBps: 800, markStalenessLimit: 60, seniorFrozenLpFeeBps: 25, juniorFrozenLpFeeBps: 75
+            seniorRateBps: 800,
+            markStalenessLimit: 60,
+            seniorFrozenLpFeeBps: 25,
+            juniorFrozenLpFeeBps: 75,
+            maxSeniorExposureUsdc: type(uint256).max,
+            maxSeniorShareBps: 10_000
         });
     }
 
@@ -186,9 +203,10 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
     /// @notice Propose a new pool config, subject to a 48h timelock.
     /// @dev Only the owner may call. A valid proposal supersedes any existing proposal and restarts the timelock.
     ///      The annual senior rate is capped at 10,000 bps, mark staleness must be nonzero, and each frozen LP
-    ///      fee is capped by `MAX_FROZEN_LP_FEE_BPS`.
-    /// @param newConfig Pool configuration to validate and stage; fee and rate fields are in basis points and
-    ///        `markStalenessLimit` is in seconds
+    ///      fee is capped by `MAX_FROZEN_LP_FEE_BPS`. Senior-capacity proposals must replace both constructor-only
+    ///      unbounded sentinels; zero limits are permitted to close senior admission.
+    /// @param newConfig Pool configuration to validate and stage; fee, rate, and share fields are in basis points,
+    ///        `markStalenessLimit` is in seconds, and maximum senior exposure is in 6-decimal USDC
     function proposePoolConfig(
         PoolConfig calldata newConfig
     ) external onlyOwner {
@@ -200,6 +218,8 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
             newConfig.markStalenessLimit,
             newConfig.seniorFrozenLpFeeBps,
             newConfig.juniorFrozenLpFeeBps,
+            newConfig.maxSeniorExposureUsdc,
+            newConfig.maxSeniorShareBps,
             poolConfigActivationTime
         );
     }
@@ -236,6 +256,12 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
                 || nextConfig.juniorFrozenLpFeeBps != currentConfig.juniorFrozenLpFeeBps
         ) {
             emit FrozenLpFeesUpdated(nextConfig.seniorFrozenLpFeeBps, nextConfig.juniorFrozenLpFeeBps);
+        }
+        if (
+            nextConfig.maxSeniorExposureUsdc != currentConfig.maxSeniorExposureUsdc
+                || nextConfig.maxSeniorShareBps != currentConfig.maxSeniorShareBps
+        ) {
+            emit SeniorCapacityUpdated(nextConfig.maxSeniorExposureUsdc, nextConfig.maxSeniorShareBps);
         }
         emit PoolConfigFinalized();
     }
@@ -307,7 +333,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
     /// @notice Returns whether a delayed deposit request may be accepted for a tranche.
     /// @dev Requires the ordinary lifecycle to be active, deposits to be unpaused, any required mark to satisfy the
     ///      applicable freshness policy, no live or projected unassigned assets, and no projected senior impairment.
-    ///      The current gate is symmetric across both tranches, so `isSenior` does not change the result.
+    ///      Senior requests additionally require at least one minimum deposit of remaining governed capacity.
     /// @param isSenior True for senior tranche, false for junior tranche
     /// @return True when the shared delayed-deposit gate is open
     function canAcceptTrancheDeposits(
@@ -318,7 +344,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
 
     /// @notice Returns whether an immediate ERC4626 deposit may be accepted for a tranche.
     /// @dev Applies the delayed-deposit gate and additionally requires that the engine report no open positions.
-    ///      The current tranche gate is otherwise symmetric across senior and junior.
+    ///      Senior deposits additionally require at least one minimum deposit of remaining governed capacity.
     /// @param isSenior True for senior tranche, false for junior tranche
     /// @return True when an immediate deposit is currently permitted
     function canAcceptInstantTrancheDeposits(
@@ -328,7 +354,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
     }
 
     function _canAcceptTrancheDeposits(
-        bool,
+        bool isSenior,
         bool requireNoOpenPositions
     ) internal view returns (bool) {
         (
@@ -339,7 +365,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
             return false;
         }
         HousePoolContext memory ctx = _buildHousePoolContext(accountingSnapshot, statusSnapshot);
-        return HousePoolTrancheGateLib.trancheDepositsAllowed(
+        bool commonGateOpen = HousePoolTrancheGateLib.trancheDepositsAllowed(
             canAcceptOrdinaryDeposits(),
             paused(),
             unassignedAssets,
@@ -348,6 +374,10 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
             ctx.pendingState.waterfall.seniorPrincipal,
             ctx.pendingState.waterfall.seniorHighWaterMark
         );
+        if (!commonGateOpen) {
+            return false;
+        }
+        return !isSenior || _seniorDepositCapacity(ctx.pendingState.waterfall) >= MIN_TRANCHE_DEPOSIT_USDC;
     }
 
     /// @notice Returns whether the seed and trading lifecycle allows new trader risk.
@@ -358,11 +388,18 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
     }
 
     /// @notice Enables live trading after both tranche seed positions are initialized.
-    /// @dev Only the owner may call. Sets `isTradingActive` and emits `TradingActivated`; it does not itself
-    ///      validate liquidity or oracle freshness. Repeated calls leave the flag set and emit the event again.
+    /// @dev Only the owner may call. Requires finite governed senior limits and compliant seeded protected exposure.
+    ///      It does not itself validate oracle freshness. Repeated calls leave the flag set and emit the event again.
     function activateTrading() external onlyOwner {
         if (!HousePoolSeedLifecycleLib.tradingActivationReady(seniorSeedInitialized, juniorSeedInitialized)) {
             revert HousePool__TradingActivationNotReady();
+        }
+        if (poolConfig.maxSeniorExposureUsdc == type(uint256).max || poolConfig.maxSeniorShareBps >= 10_000) {
+            revert HousePool__SeniorCapacityNotConfigured();
+        }
+        HousePoolContext memory ctx = _buildCurrentHousePoolContext();
+        if (!_seniorCommitmentsWithinLimits(ctx.pendingState.waterfall)) {
+            revert HousePool__ExceedsSeniorDepositCapacity();
         }
         isTradingActive = true;
         emit TradingActivated();
@@ -511,6 +548,9 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
         if (amount == 0) {
             revert HousePool__NoUnassignedAssets();
         }
+        if (toSenior) {
+            _requireSeniorDepositCapacity(amount, _getWaterfallState());
+        }
 
         address targetVault = toSenior ? seniorVault : juniorVault;
         if (targetVault == address(0)) {
@@ -565,7 +605,11 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
             revert HousePool__SeedAlreadyInitialized();
         }
 
-        _requireBootstrapOracleLive(_getHousePoolStatusSnapshot());
+        HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot = _getHousePoolStatusSnapshot();
+        _requireBootstrapOracleLive(statusSnapshot);
+        if (toSenior) {
+            _reconcile(_getHousePoolInputSnapshot());
+        }
 
         uint256 shares = ITrancheVaultBootstrap(targetVault).previewDeposit(amount);
         if (shares == 0) {
@@ -573,16 +617,18 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
         }
 
         _checkpointEngineCarryIndexes();
+        _checkpointSeniorCouponBeforePrincipalMutation();
+        if (toSenior) {
+            _requireSeniorDepositCapacity(amount, _getWaterfallState());
+        }
         USDC.safeTransferFrom(msg.sender, address(this), amount);
 
         accountedAssets += amount;
         if (toSenior) {
-            _checkpointSeniorCouponBeforePrincipalMutation();
             seniorPrincipal += amount;
             seniorHighWaterMark += amount;
             seniorSeedInitialized = true;
         } else {
-            _checkpointSeniorCouponBeforePrincipalMutation();
             juniorPrincipal += amount;
             juniorSeedInitialized = true;
         }
@@ -598,35 +644,58 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
     /// @notice Deposits USDC into the senior tranche and raises its protected high-water mark.
     /// @dev Only a configured tranche vault may call. Requires at least `MIN_TRANCHE_DEPOSIT_USDC`, an unpaused
     ///      pool, satisfaction of the applicable mark-freshness policy, no pending unassigned-asset bootstrap,
-    ///      and unimpaired senior principal after reconciliation. Checkpoints engine carry, pulls USDC from the
-    ///      calling vault, and increases both canonical assets and senior principal.
+    ///      and unimpaired senior principal after reconciliation. Enforces the governed capacity, checkpoints engine
+    ///      carry, pulls USDC from the calling vault, and increases both canonical assets and senior principal.
     /// @param amount USDC to deposit (6 decimals)
     function depositSenior(
         uint256 amount
-    ) external override(IHousePool, IPerpsLPActions) onlyVault whenNotPaused {
-        _requireMinimumTrancheDeposit(amount);
-        (
-            HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
-            HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
-        ) = _getHousePoolSnapshots();
-        _reconcile(accountingSnapshot);
-        _requireFreshMark(accountingSnapshot, statusSnapshot);
-        _requireNoPendingBootstrap();
-        if (seniorPrincipal < seniorHighWaterMark) {
-            revert HousePool__SeniorImpaired();
-        }
+    ) external override(IHousePool, IPerpsLPActions) onlySeniorVault whenNotPaused {
+        _prepareSeniorDeposit(amount);
         _checkpointEngineCarryIndexes();
-        USDC.safeTransferFrom(msg.sender, address(this), amount);
-        accountedAssets += amount;
-        if (seniorPrincipal == 0) {
-            _checkpointSeniorCouponBeforePrincipalMutation();
-            seniorHighWaterMark = amount;
-            seniorPrincipal = amount;
-            return;
+        _requireSeniorDepositCapacity(amount, _getWaterfallState());
+        _executeSeniorDeposit(amount);
+    }
+
+    /// @notice Reserves governed capacity for a delayed senior deposit request.
+    /// @dev Uses the same conservative pending accounting projection as final admission. The exact configured senior
+    ///      vault is the only authorized caller.
+    function reserveSeniorDeposit(
+        uint256 amount
+    ) external override(IHousePool, IPerpsLPActions) onlySeniorVault whenNotPaused {
+        _requireMinimumTrancheDeposit(amount);
+        HousePoolContext memory ctx = _buildCurrentHousePoolContext();
+        _requireSeniorDepositCapacity(amount, ctx.pendingState.waterfall);
+        reservedSeniorDepositAssetsUsdc += amount;
+    }
+
+    /// @notice Releases capacity after a delayed senior deposit request is cancelled.
+    /// @dev Deliberately remains callable while deposits are paused so escrowed funds retain an exit path.
+    function releaseSeniorDepositReservation(
+        uint256 amount
+    ) external override(IHousePool, IPerpsLPActions) onlySeniorVault {
+        if (amount > reservedSeniorDepositAssetsUsdc) {
+            revert HousePool__InsufficientSeniorDepositReservation();
         }
-        _checkpointSeniorCouponBeforePrincipalMutation();
-        seniorHighWaterMark += amount;
-        seniorPrincipal += amount;
+        reservedSeniorDepositAssetsUsdc -= amount;
+    }
+
+    /// @notice Deposits a matured senior batch while consuming its previously accepted reservation.
+    /// @dev Revalidates the entire reservation book after conservative reconciliation. Governance or accounting can
+    ///      therefore invalidate pending reservations, which remain releasable through cancellation rather than being
+    ///      grandfathered into the tranche.
+    function depositReservedSenior(
+        uint256 amount
+    ) external override(IHousePool, IPerpsLPActions) onlySeniorVault whenNotPaused {
+        if (amount > reservedSeniorDepositAssetsUsdc) {
+            revert HousePool__InsufficientSeniorDepositReservation();
+        }
+        _prepareSeniorDeposit(amount);
+        _checkpointEngineCarryIndexes();
+        if (!_seniorCommitmentsWithinLimits(_getWaterfallState())) {
+            revert HousePool__SeniorDepositReservationsExceedLimits();
+        }
+        _executeSeniorDeposit(amount);
+        reservedSeniorDepositAssetsUsdc -= amount;
     }
 
     /// @notice Withdraws USDC from the senior tranche and scales its high-water mark proportionally.
@@ -691,9 +760,10 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
 
     /// @notice Withdraws USDC from the junior tranche, limited to free USDC above senior's claim.
     /// @dev Only a configured tranche vault may call. Reconciles first, requires withdrawals to be outside
-    ///      degraded mode and satisfy the applicable mark-freshness policy, and preserves enough free liquidity
-    ///      to cover current senior principal. Checkpoints engine carry, decreases canonical assets and junior
-    ///      principal, and transfers USDC to `receiver`.
+    ///      degraded mode and satisfy the applicable mark-freshness policy, preserves enough free liquidity to cover
+    ///      current senior principal, and preserves the governed active senior-share covenant. Pending senior
+    ///      reservations remain refundable and do not constrain this withdrawal. Checkpoints engine carry, decreases
+    ///      canonical assets and junior principal, and transfers USDC to `receiver`.
     /// @param amount USDC to withdraw (6 decimals)
     /// @param receiver Address to receive USDC
     function withdrawJunior(
@@ -741,13 +811,16 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
 
     /// @notice Returns the current stored junior principal that pool liquidity permits withdrawing.
     /// @dev Returns zero when withdrawals are not live and otherwise reserves current senior principal ahead of
-    ///      junior. Does not preview pending reconciliation; use `getPendingTrancheState()` for that purpose.
-    /// @return Withdrawable junior USDC, capped by residual free USDC and `juniorPrincipal` (6 decimals)
+    ///      junior while preserving the active protected-senior share covenant. Pending deposit reservations are
+    ///      refundable and therefore do not constrain junior withdrawal. Does not preview pending reconciliation.
+    /// @return Withdrawable junior USDC, capped by residual free USDC, principal, and senior-share policy
     function getMaxJuniorWithdraw() public view returns (uint256) {
         if (!_withdrawalsLive(_getHousePoolInputSnapshot(), _getHousePoolStatusSnapshot())) {
             return 0;
         }
-        return HousePoolWithdrawalPreviewLib.juniorWithdrawCap(getFreeUSDC(), seniorPrincipal, juniorPrincipal);
+        return HousePoolWithdrawalPreviewLib.juniorWithdrawCap(
+            getFreeUSDC(), seniorPrincipal, juniorPrincipal, seniorHighWaterMark, poolConfig.maxSeniorShareBps
+        );
     }
 
     /// @notice Returns tranche principals and withdrawal caps as if reconcile ran right now.
@@ -784,7 +857,11 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
         maxSeniorWithdrawUsdc =
             HousePoolWithdrawalPreviewLib.seniorWithdrawCap(withdrawalSnapshot.freeUsdc, seniorPrincipalUsdc);
         maxJuniorWithdrawUsdc = HousePoolWithdrawalPreviewLib.juniorWithdrawCap(
-            withdrawalSnapshot.freeUsdc, seniorPrincipalUsdc, juniorPrincipalUsdc
+            withdrawalSnapshot.freeUsdc,
+            seniorPrincipalUsdc,
+            juniorPrincipalUsdc,
+            ctx.pendingState.waterfall.seniorHighWaterMark,
+            poolConfig.maxSeniorShareBps
         );
     }
 
@@ -833,6 +910,31 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
     /// @return Pool mark staleness limit in seconds
     function markStalenessLimit() public view returns (uint256) {
         return poolConfig.markStalenessLimit;
+    }
+
+    /// @notice Returns the governed protected senior-exposure ceiling.
+    function maxSeniorExposureUsdc() public view returns (uint256) {
+        return poolConfig.maxSeniorExposureUsdc;
+    }
+
+    /// @notice Returns the governed maximum senior share of committed tranche capital.
+    function maxSeniorShareBps() public view returns (uint256) {
+        return poolConfig.maxSeniorShareBps;
+    }
+
+    /// @notice Returns additional senior admission capacity after conservative pending reconciliation.
+    /// @dev Accepted reservations consume capacity. Residual capacity below the ordinary 1-USDC minimum is reported
+    ///      as zero so vault maximum-entry views cannot quote an amount that execution rejects.
+    function getSeniorDepositCapacity() public view override returns (uint256) {
+        HousePoolContext memory ctx = _buildCurrentHousePoolContext();
+        uint256 capacity = _seniorDepositCapacity(ctx.pendingState.waterfall);
+        return capacity >= MIN_TRANCHE_DEPOSIT_USDC ? capacity : 0;
+    }
+
+    /// @notice Returns whether projected protected exposure plus every accepted reservation fits active limits.
+    function areSeniorDepositReservationsWithinLimits() public view override returns (bool) {
+        HousePoolContext memory ctx = _buildCurrentHousePoolContext();
+        return _seniorCommitmentsWithinLimits(ctx.pendingState.waterfall);
     }
 
     /// @notice Returns the configured senior LP fee for oracle-frozen entry and exit.
@@ -942,6 +1044,73 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
         if (amount < MIN_TRANCHE_DEPOSIT_USDC) {
             revert HousePool__DepositTooSmall();
         }
+    }
+
+    function _prepareSeniorDeposit(
+        uint256 amount
+    ) internal {
+        _requireMinimumTrancheDeposit(amount);
+        (
+            HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
+            HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
+        ) = _getHousePoolSnapshots();
+        _reconcile(accountingSnapshot);
+        _requireFreshMark(accountingSnapshot, statusSnapshot);
+        _requireNoPendingBootstrap();
+        if (seniorPrincipal < seniorHighWaterMark) {
+            revert HousePool__SeniorImpaired();
+        }
+    }
+
+    function _executeSeniorDeposit(
+        uint256 amount
+    ) internal {
+        USDC.safeTransferFrom(msg.sender, address(this), amount);
+        accountedAssets += amount;
+        if (seniorPrincipal == 0) {
+            _checkpointSeniorCouponBeforePrincipalMutation();
+            seniorHighWaterMark = amount;
+            seniorPrincipal = amount;
+            return;
+        }
+        _checkpointSeniorCouponBeforePrincipalMutation();
+        seniorHighWaterMark += amount;
+        seniorPrincipal += amount;
+    }
+
+    function _requireSeniorDepositCapacity(
+        uint256 amount,
+        HousePoolWaterfallAccountingLib.WaterfallState memory state
+    ) internal view {
+        if (amount > _seniorDepositCapacity(state)) {
+            revert HousePool__ExceedsSeniorDepositCapacity();
+        }
+    }
+
+    function _seniorDepositCapacity(
+        HousePoolWaterfallAccountingLib.WaterfallState memory state
+    ) internal view returns (uint256) {
+        return HousePoolSeniorCapacityLib.depositCapacity(
+            state.seniorPrincipal,
+            state.seniorHighWaterMark,
+            state.juniorPrincipal,
+            reservedSeniorDepositAssetsUsdc,
+            poolConfig.maxSeniorExposureUsdc,
+            poolConfig.maxSeniorShareBps
+        );
+    }
+
+    function _seniorCommitmentsWithinLimits(
+        HousePoolWaterfallAccountingLib.WaterfallState memory state
+    ) internal view returns (bool) {
+        return HousePoolSeniorCapacityLib.commitmentsWithinLimits(
+            state.seniorPrincipal,
+            state.seniorHighWaterMark,
+            state.juniorPrincipal,
+            reservedSeniorDepositAssetsUsdc,
+            poolConfig.maxSeniorExposureUsdc,
+            poolConfig.maxSeniorShareBps
+        );
     }
 
     function _checkpointEngineCarryIndexes() internal {
@@ -1121,6 +1290,12 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
         if (config.seniorFrozenLpFeeBps > MAX_FROZEN_LP_FEE_BPS || config.juniorFrozenLpFeeBps > MAX_FROZEN_LP_FEE_BPS)
         {
             revert HousePool__InvalidFrozenLpFee();
+        }
+        if (config.maxSeniorExposureUsdc == type(uint256).max) {
+            revert HousePool__InvalidMaxSeniorExposure();
+        }
+        if (config.maxSeniorShareBps >= 10_000) {
+            revert HousePool__InvalidMaxSeniorShareBps();
         }
     }
 
