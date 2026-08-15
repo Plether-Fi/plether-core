@@ -257,10 +257,7 @@ contract CfdEngineAdmin is Ownable2Step {
         if (riskParams_.minBountyUsdc == 0 || riskParams_.bountyBps == 0) {
             revert CfdEngineAdmin__InvalidRiskParams();
         }
-        if (
-            riskParams_.keeperShareBps > 10_000
-                || riskParams_.protocolShareBps > 10_000 - riskParams_.keeperShareBps
-        ) {
+        if (riskParams_.keeperShareBps > 10_000 || riskParams_.protocolShareBps > 10_000 - riskParams_.keeperShareBps) {
             revert CfdEngineAdmin__InvalidRiskParams();
         }
         if (riskParams_.maxSkewRatio > CfdMath.WAD) {

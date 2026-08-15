@@ -64,7 +64,7 @@ contract HousePoolTest is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 10,
-            keeperShareBps: 5_000,
+            keeperShareBps: 5000,
             protocolShareBps: 0
         });
     }
@@ -1610,7 +1610,7 @@ contract HousePoolTest is BasePerpTest {
                 baseCarryBps: 500,
                 minBountyUsdc: 5 * 1e6,
                 bountyBps: 10,
-                keeperShareBps: 5_000,
+                keeperShareBps: 5000,
                 protocolShareBps: 0
             })
         );
@@ -1648,7 +1648,7 @@ contract HousePoolTest is BasePerpTest {
                 baseCarryBps: 500,
                 minBountyUsdc: 5 * 1e6,
                 bountyBps: 10,
-                keeperShareBps: 5_000,
+                keeperShareBps: 5000,
                 protocolShareBps: 0
             })
         );
@@ -1690,7 +1690,7 @@ contract HousePoolTest is BasePerpTest {
                 baseCarryBps: 500,
                 minBountyUsdc: 5 * 1e6,
                 bountyBps: 10,
-                keeperShareBps: 5_000,
+                keeperShareBps: 5000,
                 protocolShareBps: 0
             })
         );
@@ -2036,7 +2036,7 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 10,
-            keeperShareBps: 5_000,
+            keeperShareBps: 5000,
             protocolShareBps: 0
         });
     }
@@ -2722,7 +2722,7 @@ contract HousePoolAuditTest is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 10,
-            keeperShareBps: 5_000,
+            keeperShareBps: 5000,
             protocolShareBps: 0
         });
     }

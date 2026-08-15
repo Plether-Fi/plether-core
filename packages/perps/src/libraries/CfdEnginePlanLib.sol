@@ -1015,20 +1015,10 @@ library CfdEnginePlanLib {
         uint256 settlementReachableUsdc,
         uint256 maintMarginBps
     ) private pure returns (CfdEnginePlanTypes.LiquidationDelta memory) {
-        int256 liquidationEquityUsdc = delta.riskState.equityUsdc;
-
-        delta.liquidationState = LiquidationAccountingLib.buildLiquidationState(
-            pos.size,
-            price,
-            settlementReachableUsdc,
-            liquidationEquityUsdc,
-            maintMarginBps,
-            snap.riskParams.minBountyUsdc,
-            snap.riskParams.bountyBps,
-            snap.riskParams.keeperShareBps,
-            snap.riskParams.protocolShareBps,
-            CfdMath.USDC_TO_TOKEN_SCALE
+        delta.liquidationState = _buildLiquidationState(
+            snap.riskParams, pos.size, price, settlementReachableUsdc, delta.riskState.equityUsdc, maintMarginBps
         );
+        int256 liquidationEquityUsdc = delta.riskState.equityUsdc;
         delta.liquidationChargeUsdc = delta.liquidationState.liquidationChargeUsdc;
         delta.keeperBountyUsdc = delta.liquidationState.keeperBountyUsdc;
         delta.protocolLiquidationFeeUsdc = delta.liquidationState.protocolLiquidationFeeUsdc;
@@ -1070,6 +1060,28 @@ library CfdEnginePlanLib {
         }
 
         return delta;
+    }
+
+    function _buildLiquidationState(
+        CfdTypes.RiskParams memory riskParams,
+        uint256 size,
+        uint256 price,
+        uint256 settlementReachableUsdc,
+        int256 liquidationEquityUsdc,
+        uint256 maintMarginBps
+    ) private pure returns (LiquidationAccountingLib.LiquidationState memory) {
+        return LiquidationAccountingLib.buildLiquidationState(
+            size,
+            price,
+            settlementReachableUsdc,
+            liquidationEquityUsdc,
+            maintMarginBps,
+            riskParams.minBountyUsdc,
+            riskParams.bountyBps,
+            riskParams.keeperShareBps,
+            riskParams.protocolShareBps,
+            CfdMath.USDC_TO_TOKEN_SCALE
+        );
     }
 
     /// @notice Computes post-liquidation effective assets, maximum liability, and degraded-mode transition.

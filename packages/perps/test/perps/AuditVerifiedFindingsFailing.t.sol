@@ -53,7 +53,7 @@ contract AuditVerifiedFindingsFailing_F1_LegacySpreadSolvency is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 5e6,
             bountyBps: 10,
-            keeperShareBps: 5_000,
+            keeperShareBps: 5000,
             protocolShareBps: 0
         });
     }
@@ -111,7 +111,7 @@ contract AuditVerifiedFindingsFailing_F2_SkewCapBypass is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 5e6,
             bountyBps: 10,
-            keeperShareBps: 5_000,
+            keeperShareBps: 5000,
             protocolShareBps: 0
         });
     }
@@ -141,7 +141,7 @@ contract AuditVerifiedFindingsFailing_F2_SkewDoubleCount is BasePerpTest {
             baseCarryBps: 500,
             minBountyUsdc: 5e6,
             bountyBps: 10,
-            keeperShareBps: 5_000,
+            keeperShareBps: 5000,
             protocolShareBps: 0
         });
     }
@@ -301,7 +301,7 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
             baseCarryBps: 500,
             minBountyUsdc: 5e6,
             bountyBps: 10,
-            keeperShareBps: 5_000,
+            keeperShareBps: 5000,
             protocolShareBps: 0
         });
     }
@@ -428,7 +428,7 @@ contract AuditVerifiedFindingsFailing_F8_LiquidationDegradedMode is BasePerpTest
             baseCarryBps: 500,
             minBountyUsdc: 5e6,
             bountyBps: 10,
-            keeperShareBps: 5_000,
+            keeperShareBps: 5000,
             protocolShareBps: 0
         });
     }
