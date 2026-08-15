@@ -21,6 +21,7 @@ import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAcco
 import {IWithdrawGuard} from "@plether/perps/interfaces/IWithdrawGuard.sol";
 import {CfdEngineSnapshotsLib} from "@plether/perps/libraries/CfdEngineSnapshotsLib.sol";
 import {MarginClearinghouseAccountingLib} from "@plether/perps/libraries/MarginClearinghouseAccountingLib.sol";
+import {MarketCalendarLib} from "@plether/perps/libraries/MarketCalendarLib.sol";
 import {OracleFreshnessPolicyLib} from "@plether/perps/libraries/OracleFreshnessPolicyLib.sol";
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
 
@@ -942,19 +943,10 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     function _marketStatus() internal view returns (bool fadWindow, bool oracleFrozen) {
         uint256 timestamp = block.timestamp;
         uint256 today = timestamp / 86_400;
-        uint256 secondsIntoDay = timestamp % 86_400;
-        uint256 dayOfWeek = (today + 4) % 7;
-        bool todayOverride = fadDayOverrides[today];
-        bool isSaturday = dayOfWeek == 6;
-
-        fadWindow = todayOverride || isSaturday || (dayOfWeek == 5 && secondsIntoDay >= 19 hours)
-            || (dayOfWeek == 0 && secondsIntoDay < 22 hours);
+        (fadWindow, oracleFrozen) = MarketCalendarLib.marketStatus(timestamp, fadDayOverrides[today]);
         if (!fadWindow && fadRunwaySeconds > 0 && fadDayOverrides[today + 1]) {
-            fadWindow = 86_400 - secondsIntoDay <= fadRunwaySeconds;
+            fadWindow = MarketCalendarLib.isFadRunway(timestamp, fadRunwaySeconds);
         }
-
-        oracleFrozen = todayOverride || isSaturday || (dayOfWeek == 5 && secondsIntoDay >= 22 hours)
-            || (dayOfWeek == 0 && secondsIntoDay < 21 hours);
     }
 
     /// @notice Returns the canonical current position tuple for an account.

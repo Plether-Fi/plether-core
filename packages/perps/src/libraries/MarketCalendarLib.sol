@@ -7,8 +7,41 @@ library MarketCalendarLib {
 
     /// @dev Number of seconds in a UTC day.
     uint256 internal constant SECONDS_PER_DAY = 86_400;
-    /// @dev Number of seconds in an hour.
-    uint256 internal constant SECONDS_PER_HOUR = 3600;
+
+    /// @notice Classifies the recurring and current-day governance-configured risk-control windows at a timestamp.
+    /// @dev This is the canonical implementation of the recurring calendar. FAD runs Friday 19:00 UTC through Sunday
+    ///      21:59:59 UTC, while oracle-frozen mode runs Friday 22:00 UTC through Sunday 20:59:59 UTC. An override
+    ///      activates both controls for its entire UTC day.
+    /// @param timestamp Timestamp to classify.
+    /// @param todayOverride Whether the timestamp's UTC day is an admin-configured override day.
+    /// @return fadWindow Whether FAD controls are active.
+    /// @return oracleFrozen Whether frozen-oracle policy is active.
+    function marketStatus(
+        uint256 timestamp,
+        bool todayOverride
+    ) internal pure returns (bool fadWindow, bool oracleFrozen) {
+        uint256 today = timestamp / SECONDS_PER_DAY;
+        uint256 secondsIntoDay = timestamp % SECONDS_PER_DAY;
+        uint256 dayOfWeek = (today + 4) % 7;
+        bool isSaturday = dayOfWeek == 6;
+
+        fadWindow = todayOverride || isSaturday || (dayOfWeek == 5 && secondsIntoDay >= 19 hours)
+            || (dayOfWeek == 0 && secondsIntoDay < 22 hours);
+
+        oracleFrozen = todayOverride || isSaturday || (dayOfWeek == 5 && secondsIntoDay >= 22 hours)
+            || (dayOfWeek == 0 && secondsIntoDay < 21 hours);
+    }
+
+    /// @notice Returns whether a timestamp falls within the configured lead time before its next UTC day.
+    /// @param timestamp Timestamp to classify.
+    /// @param fadRunwaySeconds Configured lead time before the following override day, in seconds.
+    /// @return Whether FAD runway controls are active at the timestamp.
+    function isFadRunway(
+        uint256 timestamp,
+        uint256 fadRunwaySeconds
+    ) internal pure returns (bool) {
+        return fadRunwaySeconds > 0 && SECONDS_PER_DAY - (timestamp % SECONDS_PER_DAY) <= fadRunwaySeconds;
+    }
 
     /// @notice Returns whether Friday Afternoon Deleverage controls are active at a timestamp.
     /// @dev The recurring window is Friday 19:00 UTC through Sunday 21:59:59 UTC. A configured override activates
@@ -24,29 +57,8 @@ library MarketCalendarLib {
         bool tomorrowOverride,
         uint256 fadRunwaySeconds
     ) internal pure returns (bool) {
-        (uint256 dayOfWeek, uint256 hourOfDay) = _dayAndHour(timestamp);
-
-        if (dayOfWeek == 5 && hourOfDay >= 19) {
-            return true;
-        }
-        if (dayOfWeek == 6) {
-            return true;
-        }
-        if (dayOfWeek == 0 && hourOfDay < 22) {
-            return true;
-        }
-        if (todayOverride) {
-            return true;
-        }
-
-        if (fadRunwaySeconds > 0) {
-            uint256 secondsUntilTomorrow = SECONDS_PER_DAY - (timestamp % SECONDS_PER_DAY);
-            if (secondsUntilTomorrow <= fadRunwaySeconds && tomorrowOverride) {
-                return true;
-            }
-        }
-
-        return false;
+        (bool fadWindow,) = marketStatus(timestamp, todayOverride);
+        return fadWindow || (tomorrowOverride && isFadRunway(timestamp, fadRunwaySeconds));
     }
 
     /// @notice Returns whether the calendar permits operation with a frozen oracle at a timestamp.
@@ -59,30 +71,8 @@ library MarketCalendarLib {
         uint256 timestamp,
         bool todayOverride
     ) internal pure returns (bool) {
-        (uint256 dayOfWeek, uint256 hourOfDay) = _dayAndHour(timestamp);
-
-        if (dayOfWeek == 5 && hourOfDay >= 22) {
-            return true;
-        }
-        if (dayOfWeek == 6) {
-            return true;
-        }
-        if (dayOfWeek == 0 && hourOfDay < 21) {
-            return true;
-        }
-
-        return todayOverride;
-    }
-
-    /// @notice Converts a Unix timestamp to Sunday-based UTC weekday and zero-based hour.
-    /// @param timestamp Unix timestamp to convert.
-    /// @return dayOfWeek UTC weekday where Sunday is 0, Friday is 5, and Saturday is 6.
-    /// @return hourOfDay UTC hour in the range 0 through 23.
-    function _dayAndHour(
-        uint256 timestamp
-    ) private pure returns (uint256 dayOfWeek, uint256 hourOfDay) {
-        dayOfWeek = ((timestamp / SECONDS_PER_DAY) + 4) % 7;
-        hourOfDay = (timestamp % SECONDS_PER_DAY) / SECONDS_PER_HOUR;
+        (, bool oracleFrozen) = marketStatus(timestamp, todayOverride);
+        return oracleFrozen;
     }
 
 }
