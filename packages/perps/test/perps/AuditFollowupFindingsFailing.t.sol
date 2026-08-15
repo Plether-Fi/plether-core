@@ -46,7 +46,9 @@ contract AuditFollowupFindingsFailing_CloseSolvency is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 5e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -190,7 +192,9 @@ contract AuditFollowupFindingsFailing_LiquidationBounty is BasePerpTest {
             fadMarginBps: 1000,
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
-            bountyBps: 1000
+            bountyBps: 1000,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -212,7 +216,12 @@ contract AuditFollowupFindingsFailing_LiquidationBounty is BasePerpTest {
         vm.stopPrank();
 
         assertGt(bounty, 0, "Keeper bounty should stay positive for a still-positive-equity liquidation");
-        assertGe(bounty, 5e6, "Keeper bounty subsidy should avoid a near-zero positive-equity cliff");
+        uint256 minimumKeeperShare = (5e6 * _riskParams().keeperShareBps) / 10_000;
+        assertGe(
+            bounty,
+            minimumKeeperShare,
+            "Keeper's configured share of the subsidy should avoid a near-zero positive-equity cliff"
+        );
     }
 
 }
@@ -232,7 +241,9 @@ contract AuditFollowupFindingsFailing_LegacySpreadReserve is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 5e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 

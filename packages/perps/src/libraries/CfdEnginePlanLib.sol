@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdMath} from "@plether/perps/CfdMath.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
@@ -210,21 +211,22 @@ library CfdEnginePlanLib {
         return bullUsdc > bearUsdc ? bullUsdc - bearUsdc : bearUsdc - bullUsdc;
     }
 
-    /// @notice Computes absolute skew after adding an order's size to one side.
+    /// @notice Computes skew state after adding an order's size to one side.
     /// @dev Each post-trade side notional is independently rounded down to USDC before taking the difference.
     /// @param bull BULL aggregate state before the open.
     /// @param bear BEAR aggregate state before the open.
     /// @param side Side receiving the size increase.
     /// @param sizeDelta Size added to the selected side.
     /// @param price Price used to value open interest.
-    /// @return Post-open absolute skew in 6-decimal USDC.
+    /// @return postSkewUsdc Post-open absolute skew in 6-decimal USDC.
+    /// @return orderSideIsPostOpenHeavy Whether the side receiving the open is heavier after the trade.
     function _postOpenSkewUsdc(
         CfdEnginePlanTypes.SideSnapshot memory bull,
         CfdEnginePlanTypes.SideSnapshot memory bear,
         CfdTypes.Side side,
         uint256 sizeDelta,
         uint256 price
-    ) private pure returns (uint256) {
+    ) private pure returns (uint256 postSkewUsdc, bool orderSideIsPostOpenHeavy) {
         uint256 bullOi = bull.openInterest;
         uint256 bearOi = bear.openInterest;
         if (side == CfdTypes.Side.BULL) {
@@ -234,7 +236,9 @@ library CfdEnginePlanLib {
         }
         uint256 postBullUsdc = (bullOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
         uint256 postBearUsdc = (bearOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        return postBullUsdc > postBearUsdc ? postBullUsdc - postBearUsdc : postBearUsdc - postBullUsdc;
+        postSkewUsdc = postBullUsdc > postBearUsdc ? postBullUsdc - postBearUsdc : postBearUsdc - postBullUsdc;
+        orderSideIsPostOpenHeavy =
+            side == CfdTypes.Side.BULL ? postBullUsdc > postBearUsdc : postBearUsdc > postBullUsdc;
     }
 
     /// @notice Computes absolute skew from explicit BULL and BEAR open-interest values.
@@ -331,9 +335,10 @@ library CfdEnginePlanLib {
     ///      if an inconsistent snapshot supplies unsettled carry. The planner then rejects an opposing live position,
     ///      degraded mode, a position too small to support the minimum bounty, insufficient clearinghouse funds,
     ///      post-operation insolvency, insufficient initial margin/equity, or pool-relative skew above the configured
-    ///      maximum. The ratio-based skew check is skipped when pool assets are zero. On a
+    ///      maximum unless the order strictly reduces an existing imbalance without making its side the heavier side.
+    ///      The skew-cap check is skipped when pool assets are zero. On a
     ///      business-rule failure `valid` remains false, `revertCode` identifies the first failed check, and previously
-    ///      populated fields are diagnostic only. VPI, notional, fee, margin, and skew-ratio divisions round down in
+    ///      populated fields are diagnostic only. VPI, notional, fee, margin, and skew-cap divisions round down in
     ///      their respective calculations. `publishTime` is retained for planner-interface parity but is not read.
     /// @param snap Caller-built position, side, pool, collateral, carry, claim, and risk snapshot.
     /// @param order Open/increase order; account, side, size, and margin are consumed by this planner.
@@ -375,7 +380,8 @@ library CfdEnginePlanLib {
         delta.sideTotalMarginBefore = order.side == CfdTypes.Side.BULL ? bull.totalMargin : bear.totalMargin;
 
         uint256 preSkewUsdc = _absSkewUsdc(bull, bear, price);
-        uint256 postSkewUsdc = _postOpenSkewUsdc(bull, bear, order.side, order.sizeDelta, price);
+        (uint256 postSkewUsdc, bool orderSideIsPostOpenHeavy) =
+            _postOpenSkewUsdc(bull, bear, order.side, order.sizeDelta, price);
 
         OpenAccountingLib.OpenState memory openState = OpenAccountingLib.buildOpenState(
             OpenAccountingLib.OpenInputs({
@@ -451,12 +457,13 @@ library CfdEnginePlanLib {
             return delta;
         }
 
-        if (
-            effectiveSnap.poolAssetsUsdc > 0
-                && ((postSkewUsdc * CfdMath.WAD) / effectiveSnap.poolAssetsUsdc) > effectiveSnap.riskParams.maxSkewRatio
-        ) {
-            delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH;
-            return delta;
+        if (effectiveSnap.poolAssetsUsdc > 0) {
+            uint256 maxSkewUsdc =
+                Math.mulDiv(effectiveSnap.poolAssetsUsdc, effectiveSnap.riskParams.maxSkewRatio, CfdMath.WAD);
+            if (postSkewUsdc > maxSkewUsdc && (postSkewUsdc >= preSkewUsdc || orderSideIsPostOpenHeavy)) {
+                delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH;
+                return delta;
+            }
         }
 
         delta.valid = true;
@@ -945,9 +952,9 @@ library CfdEnginePlanLib {
     ///      populating account and price. Otherwise equity deducts pending carry and negative lifetime-VPI clawback and
     ///      uses all terminal settlement balance as reachable collateral. The liquidation threshold uses FAD margin in
     ///      the FAD window and normal maintenance margin otherwise, with equality liquidatable. A nonliquidatable
-    ///      result stops after risk diagnostics; a liquidatable result removes the entire position, plans bounty and
-    ///      residual settlement, and previews solvency. Notional, margin requirement, and rate-based bounty calculations
-    ///      round down. `publishTime` is retained for interface parity but is not read.
+    ///      result stops after risk diagnostics; a liquidatable result removes the entire position, plans the split
+    ///      charge and residual settlement, and previews solvency. Notional, margin requirement, and rate-based charge
+    ///      calculations round down. `publishTime` is retained for interface parity but is not read.
     /// @param snap Caller-built position, side, pool, collateral, carry, claim, and risk snapshot.
     /// @param executionPrice Oracle liquidation price before the protocol cap.
     /// @param publishTime Oracle publish timestamp; currently unused by pure planning.
@@ -991,20 +998,22 @@ library CfdEnginePlanLib {
         delta.solvency = _computeLiquidationSolvency(snap, delta, pos);
     }
 
-    /// @notice Adds keeper bounty, full-position removal, residual settlement, claim netting, and payout routing.
-    /// @dev Bounty is the maximum of the notional rate and minimum bounty, capped by terminal reachable collateral.
-    ///      Residual equity is risk equity minus bounty. Positive residual retains existing account settlement first,
-    ///      then creates a fresh payout; negative residual seizes post-bounty settlement. When pre-bounty equity is
-    ///      nonnegative but below bounty, the resulting bounty subsidy is removed from reported liquidation bad debt.
+    /// @notice Adds the keeper/protocol/LP charge allocation, position removal, residual settlement, and payout routing.
+    /// @dev The total charge is the maximum of the notional rate and minimum, capped by terminal reachable collateral,
+    ///      then allocated using `keeperShareBps` and `protocolShareBps`; LPs get the remainder. Residual equity is risk
+    ///      equity minus the total charge. Positive residual retains existing account settlement first, then creates a
+    ///      fresh payout; negative residual seizes post-charge settlement. When pre-charge equity is nonnegative but
+    ///      below the total charge, the resulting charge subsidy is removed from reported liquidation bad debt.
     ///      Remaining bad debt consumes this account's existing trader claim. A fresh payout is immediate only when
-    ///      pool cash, after reserving aggregate claims net of consumed account claims, can pay it in full.
+    ///      pool cash plus settlement seized earlier in live execution, after reserving aggregate claims net of consumed
+    ///      account claims, can pay it in full.
     /// @param snap Account, pool cash, claims, risk parameters, and aggregate side snapshot.
     /// @param delta Liquidatable delta containing precomputed risk state.
     /// @param pos Entire position being liquidated.
     /// @param price Capped liquidation price.
-    /// @param settlementReachableUsdc Terminal account settlement reachable before bounty.
+    /// @param settlementReachableUsdc Terminal account settlement reachable before the liquidation charge.
     /// @param maintMarginBps Active maintenance or FAD rate used for liquidation state.
-    /// @return Updated liquidation delta containing all position, bounty, residual, claim, and payout effects.
+    /// @return Updated liquidation delta containing all position, charge-split, residual, claim, and payout effects.
     function _applyLiquidationSettlement(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdEnginePlanTypes.LiquidationDelta memory delta,
@@ -1013,36 +1022,33 @@ library CfdEnginePlanLib {
         uint256 settlementReachableUsdc,
         uint256 maintMarginBps
     ) private pure returns (CfdEnginePlanTypes.LiquidationDelta memory) {
-        int256 liquidationEquityUsdc = delta.riskState.equityUsdc;
-
-        delta.liquidationState = LiquidationAccountingLib.buildLiquidationState(
-            pos.size,
-            price,
-            settlementReachableUsdc,
-            liquidationEquityUsdc,
-            maintMarginBps,
-            snap.riskParams.minBountyUsdc,
-            snap.riskParams.bountyBps,
-            CfdMath.USDC_TO_TOKEN_SCALE
+        delta.liquidationState = _buildLiquidationState(
+            snap.riskParams, pos.size, price, settlementReachableUsdc, delta.riskState.equityUsdc, maintMarginBps
         );
+        int256 liquidationEquityUsdc = delta.riskState.equityUsdc;
+        delta.liquidationChargeUsdc = delta.liquidationState.liquidationChargeUsdc;
         delta.keeperBountyUsdc = delta.liquidationState.keeperBountyUsdc;
+        delta.protocolLiquidationFeeUsdc = delta.liquidationState.protocolLiquidationFeeUsdc;
+        delta.lpLiquidationFeeUsdc = delta.liquidationState.lpLiquidationFeeUsdc;
 
         delta.sideOiDecrease = pos.size;
         delta.sideMaxProfitDecrease = pos.maxProfitUsdc;
         delta.sideEntryNotionalReduction = pos.size * pos.entryPrice;
         delta.sideTotalMarginReduction = pos.margin;
 
-        delta.residualUsdc = liquidationEquityUsdc - int256(delta.keeperBountyUsdc);
+        delta.residualUsdc = liquidationEquityUsdc - int256(delta.liquidationChargeUsdc);
         delta.residualPlan = MarginClearinghouseAccountingLib.planLiquidationResidual(
-            snap.accountBuckets, delta.residualUsdc, delta.keeperBountyUsdc
+            snap.accountBuckets, delta.residualUsdc, delta.liquidationChargeUsdc
         );
+        delta.settlementSeizedUsdc = delta.residualPlan.settlementSeizedUsdc + delta.lpLiquidationFeeUsdc;
         delta.settlementRetainedUsdc = delta.residualPlan.settlementRetainedUsdc;
         uint256 liquidationBadDebtUsdc = delta.residualPlan.badDebtUsdc;
         if (liquidationEquityUsdc >= 0) {
             uint256 equityUsdc = uint256(liquidationEquityUsdc);
-            uint256 keeperSubsidyUsdc = delta.keeperBountyUsdc > equityUsdc ? delta.keeperBountyUsdc - equityUsdc : 0;
+            uint256 chargeSubsidyUsdc =
+                delta.liquidationChargeUsdc > equityUsdc ? delta.liquidationChargeUsdc - equityUsdc : 0;
             liquidationBadDebtUsdc =
-                liquidationBadDebtUsdc > keeperSubsidyUsdc ? liquidationBadDebtUsdc - keeperSubsidyUsdc : 0;
+                liquidationBadDebtUsdc > chargeSubsidyUsdc ? liquidationBadDebtUsdc - chargeSubsidyUsdc : 0;
         }
         (delta.existingTraderClaimConsumedUsdc, delta.existingTraderClaimRemainingUsdc, delta.badDebtUsdc) =
             _planTraderClaimConsumption(snap.traderClaimBalanceForAccount, liquidationBadDebtUsdc, false);
@@ -1052,8 +1058,9 @@ library CfdEnginePlanLib {
             delta.freshTraderPayoutUsdc = delta.residualPlan.freshTraderPayoutUsdc;
             uint256 traderClaimAfterConsumption =
                 snap.totalTraderClaimBalanceUsdc - delta.existingTraderClaimConsumedUsdc;
+            uint256 poolCashBeforeFreshPayout = snap.poolCashUsdc + delta.settlementSeizedUsdc;
             delta.freshPayoutIsImmediate = CashPriorityLib.reserveFreshPayouts(
-                    snap.poolCashUsdc, traderClaimAfterConsumption
+                    poolCashBeforeFreshPayout, traderClaimAfterConsumption
                 )
                 .freeCashUsdc >= delta.freshTraderPayoutUsdc;
             delta.freshPayoutCreatesClaim = !delta.freshPayoutIsImmediate;
@@ -1062,10 +1069,33 @@ library CfdEnginePlanLib {
         return delta;
     }
 
+    function _buildLiquidationState(
+        CfdTypes.RiskParams memory riskParams,
+        uint256 size,
+        uint256 price,
+        uint256 settlementReachableUsdc,
+        int256 liquidationEquityUsdc,
+        uint256 maintMarginBps
+    ) private pure returns (LiquidationAccountingLib.LiquidationState memory) {
+        return LiquidationAccountingLib.buildLiquidationState(
+            size,
+            price,
+            settlementReachableUsdc,
+            liquidationEquityUsdc,
+            maintMarginBps,
+            riskParams.minBountyUsdc,
+            riskParams.bountyBps,
+            riskParams.keeperShareBps,
+            riskParams.protocolShareBps,
+            CfdMath.USDC_TO_TOKEN_SCALE
+        );
+    }
+
     /// @notice Computes post-liquidation effective assets, maximum liability, and degraded-mode transition.
-    /// @dev The entire position max-profit envelope is removed from its side. Physical assets gain settlement seized
-    ///      after bounty and lose only an immediate fresh payout; the keeper bounty is an internal account transfer and
-    ///      is excluded. Deferred payout increases trader claims, while existing claim consumption decreases them.
+    /// @dev The entire position max-profit envelope is removed from its side. Physical assets gain total settlement
+    ///      transferred to the pool, including the LP fee, and lose only an immediate fresh payout; keeper and protocol
+    ///      allocations are internal account transfers and are excluded. Deferred payout increases trader claims, while
+    ///      existing claim consumption decreases them.
     /// @param snap Pre-liquidation pool, side-liability, claims, and degraded-mode snapshot.
     /// @param delta Planned liquidation settlement and payout routing.
     /// @param pos Position whose maximum-profit liability is removed.
@@ -1085,8 +1115,8 @@ library CfdEnginePlanLib {
             snap.totalTraderClaimBalanceUsdc
         );
 
-        int256 physicalAssetsDelta = int256(delta.residualPlan.settlementSeizedUsdc)
-            - int256(delta.freshPayoutIsImmediate ? delta.freshTraderPayoutUsdc : 0);
+        int256 physicalAssetsDelta =
+            int256(delta.settlementSeizedUsdc) - int256(delta.freshPayoutIsImmediate ? delta.freshTraderPayoutUsdc : 0);
 
         SolvencyAccountingLib.PreviewResult memory result = SolvencyAccountingLib.previewPostOpSolvency(
             currentState,

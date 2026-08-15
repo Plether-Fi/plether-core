@@ -66,6 +66,88 @@ This directory contains stateful Foundry invariant suites for the perps system.
   - Fuzzes failed full-close execution, neutral MTM LP deposits/withdrawals, timed carry checkpoints, and recapitalization/revenue reconciliation
   - Verifies active margin, LP share value, historical carry, and pending claimant revenue cannot move owners without an intended settlement path
 
+- `PerpClosePreviewParityInvariant.t.sol`
+  - Catches drift between close previews and canonical-depth simulations
+  - Verifies valid partial closes do not leave dust margin
+  - Restricts partial-close invalidity to the documented dust and underwater cases
+  - Verifies the immediate-payout versus trader-claim split uses adjusted pool cash
+  - Note: the currently named carry-accrual invariant performs no time warp or
+    carry assertion; timed carry conservation is covered by
+    `PerpValueConservationInvariant.t.sol`
+
+- `PerpExplicitAccountingInvariant.t.sol`
+  - Exercises preview/live parity for successful closes and liquidations against
+    the full deployed accounting stack
+  - Verifies paired Long/Short round trips conserve LP, trader, and protocol value
+  - Verifies the same round trips conserve physical protocol cash
+
+- `PerpHousePoolLifecycleInvariant.t.sol`
+  - Catches seed-lifecycle, vault-cap, cooldown, and raw/canonical asset drift
+  - Verifies trading and ordinary deposits cannot activate before both tranche
+    seeds exist
+  - Verifies seed floors, withdrawal caps, and share-transfer cooldown
+    propagation
+  - Verifies raw assets split into canonical assets plus excess
+
+- `PerpOraclePathInvariant.t.sol`
+  - Catches state drift across successful and rejected mark-refresh paths
+  - Verifies the stored mark equals the last successful capped oracle update
+  - Verifies failed ETH refunds remain beneficiary-claimable rather than
+    becoming router-admin custody
+  - Verifies configurable execution and liquidation staleness limits remain
+    positive
+
+- `GovernedSeniorCapacityInvariant.t.sol`
+  - Fuzzes immediate senior and junior deposits, delayed senior request/cancel/
+    finalize/claim transitions, and both tranche withdrawals across multiple actors
+  - Verifies every successful senior admission or finalization leaves active plus
+    reserved exposure within both governed limits
+  - Verifies successful junior withdrawals preserve the active senior-share covenant
+  - Reconciles the pool reservation counter with unfinalized epoch assets and checks
+    vault escrow plus per-user pending-asset accounting
+
+## Coverage boundaries
+
+The stateful suites are high-signal conformance checks, not a complete proof of
+the accounting specification.
+
+- The current invariant harnesses use a zero VPI factor. Unit, fuzz, differential,
+  and matrix tests cover nonzero VPI arithmetic and lifetime clamps, but the
+  stateful invariant family does not yet exercise nonzero VPI.
+- The stateful invariant family does not currently drive a successful
+  oracle-frozen voluntary close with a nonzero frozen spread. Dedicated
+  frozen-close tests cover assessed/paid/waived allocation.
+- `PerpHousePoolLifecycleInvariant.t.sol` covers the active vault lifecycle,
+  seed floors, cooldowns, caps, and excess accounting. The separate
+  `GovernedSeniorCapacityInvariant.t.sol` covers the bounded pending senior
+  request/cancel/finalize/claim state machine and reservation conservation; it
+  does not model every possible epoch or governance transition.
+- Degraded transition flags and post-operation balances are checked by
+  `PerpPreviewInvariant.t.sol`; preview/live degraded settlement parity is
+  additionally exercised by `PerpExplicitAccountingInvariant.t.sol`.
+- The stateful suites align protocol accounting views and withdrawal-reserve
+  composition, but they do not prove the asymptotic complexity of endpoint
+  aggregation or independently prove every projected admission branch.
+- The complete senior/junior waterfall - junior-first loss, senior high-water
+  restoration, coupon ratcheting, and recapitalization priority - is covered by
+  direct `HousePool.t.sol` tests rather than a dedicated stateful invariant.
+- FIFO structure and reservation ownership are statefully checked. Binding
+  order-field immutability and the first unique strictly post-commit historical
+  Pyth tick are covered by direct `OrderRouter.t.sol` tests, not a dedicated
+  invariant.
+- Timed carry ownership is statefully checked, while utilization-rate arithmetic
+  and simultaneous carry on both sides remain direct-test/model properties.
+- Oracle/FAD boundary invariants do not span the complete two-axis authorization
+  matrix formed by the oracle/calendar state and the degraded-mode latch.
+- Bad-debt exhaustion, failed full-close value safety, and preview/live terminal
+  parity are statefully exercised. No single invariant quantifies over every
+  valid insolvent terminal path and every risk-increasing entry point.
+- One-shot PnL/max-profit arithmetic is unit- and fuzz-tested. The invariant
+  family does not currently assert that a floor-rounded weighted entry after
+  repeated position increases remains bounded by the sum of separately
+  floor-rounded stored maximum-profit additions; a one-micro-USDC
+  counterexample is documented in the white paper.
+
 ## Harness Pieces
 
 - `BasePerpInvariantTest.sol`
@@ -91,4 +173,8 @@ forge test --match-contract PerpMultiAccountInvariantTest
 forge test --match-contract PerpFeeFlowInvariantTest
 forge test --match-contract PerpEconomicConservationInvariantTest
 forge test --match-contract PerpValueConservationInvariantTest
+forge test --match-contract PerpClosePreviewParityInvariantTest
+forge test --match-contract PerpExplicitAccountingInvariantTest
+forge test --match-contract PerpHousePoolLifecycleInvariantTest
+forge test --match-contract PerpOraclePathInvariantTest
 ```

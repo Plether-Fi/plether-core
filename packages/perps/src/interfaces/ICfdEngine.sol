@@ -89,9 +89,10 @@ interface ICfdEngine is ICfdEngineTypes {
         uint64 publishTime
     ) external;
 
-    /// @notice Liquidates an undercollateralized position, returns keeper bounty in USDC
+    /// @notice Liquidates an undercollateralized position and returns the keeper's charge allocation in USDC.
     /// @dev Callable only by the configured router. Deletes the full position, settles collateral and any surplus or
-    ///      bad debt, credits the keeper internally, and can latch degraded mode after a post-operation shortfall.
+    ///      bad debt, credits keeper and protocol allocations internally, and can latch degraded mode after a
+    ///      post-operation shortfall.
     /// @param account          Account holding the position to liquidate
     /// @param currentOraclePrice Mark price from the oracle (8 decimals)
     /// @param poolDepthUsdc     HousePool effective total assets used for planning and settlement checks (6 decimals)

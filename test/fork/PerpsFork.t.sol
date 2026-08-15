@@ -16,6 +16,7 @@ import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
+import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {IPyth, PythStructs} from "@plether/shared/interfaces/IPyth.sol";
@@ -114,7 +115,9 @@ contract PerpsForkTest is Test {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
 
         clearinghouse = new MarginClearinghouse(USDC);
@@ -149,7 +152,18 @@ contract PerpsForkTest is Test {
 
         uint256 t0 = block.timestamp;
         clearinghouse.setEngine(address(engine));
+        pool.proposePoolConfig(
+            IHousePool.PoolConfig({
+                seniorRateBps: pool.seniorRateBps(),
+                markStalenessLimit: pool.markStalenessLimit(),
+                seniorFrozenLpFeeBps: pool.seniorFrozenLpFeeBps(),
+                juniorFrozenLpFeeBps: pool.juniorFrozenLpFeeBps(),
+                maxSeniorExposureUsdc: type(uint256).max - 1,
+                maxSeniorShareBps: 9999
+            })
+        );
         vm.warp(t0 + 144 hours + 3);
+        pool.finalizePoolConfig();
 
         deal(USDC, address(this), 2000e6);
         IERC20(USDC).approve(address(pool), 2000e6);
@@ -277,7 +291,9 @@ contract PerpsForkTest is Test {
             uint256 fadMarginBps,
             uint256 baseCarryBps,
             uint256 minBountyUsdc,
-            uint256 bountyBps
+            uint256 bountyBps,
+            uint256 keeperShareBps,
+            uint256 protocolShareBps
         ) = engine.riskParams();
         return CfdTypes.RiskParams({
             vpiFactor: vpiFactor,
@@ -287,7 +303,9 @@ contract PerpsForkTest is Test {
             fadMarginBps: fadMarginBps,
             baseCarryBps: baseCarryBps,
             minBountyUsdc: minBountyUsdc,
-            bountyBps: bountyBps
+            bountyBps: bountyBps,
+            keeperShareBps: keeperShareBps,
+            protocolShareBps: protocolShareBps
         });
     }
 
@@ -301,7 +319,7 @@ contract PerpsForkTest is Test {
         uint256 aliceUsdcBefore = IERC20(USDC).balanceOf(alice);
         uint256 poolBefore = IERC20(USDC).balanceOf(address(pool));
         uint256 clearinghouseBefore = IERC20(USDC).balanceOf(address(clearinghouse));
-        uint256 keeperBefore = IERC20(USDC).balanceOf(keeper);
+        uint256 keeperBefore = clearinghouse.balanceUsdc(keeper);
 
         // Open BULL $50k at $1.00
         this._commitAndExecute(alice, CfdTypes.Side.BULL, 50_000e18, 5000e6, 1e8, int64(100_000_000), false);
@@ -481,8 +499,12 @@ contract PerpsForkTest is Test {
         (size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 0, "Position should be liquidated");
 
-        uint256 keeperGain = IERC20(USDC).balanceOf(keeper) - keeperBefore;
-        assertGe(keeperGain, _getRiskParams().minBountyUsdc, "Keeper should get at least min bounty");
+        uint256 keeperGain = clearinghouse.balanceUsdc(keeper) - keeperBefore;
+        CfdTypes.RiskParams memory params = _getRiskParams();
+        uint256 minimumKeeperShare = (params.minBountyUsdc * params.keeperShareBps) / 10_000;
+        assertGe(
+            keeperGain, minimumKeeperShare, "Keeper should get at least the configured share of the minimum charge"
+        );
 
         // USDC conservation: pool + clearinghouse + keeper == before totals
         uint256 totalAfter = IERC20(USDC).balanceOf(address(pool)) + IERC20(USDC).balanceOf(address(clearinghouse))

@@ -54,7 +54,9 @@ contract OrderRouterTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -1417,7 +1419,9 @@ contract OrderRouterPythTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -1814,6 +1818,93 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.prank(alice);
         vm.expectRevert();
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8, false);
+    }
+
+    function _assertAboveCapPreviewPolicy(
+        address healingBearTrader,
+        address crossingBearTrader,
+        uint256 healingSize
+    ) internal {
+        CfdEngineLens previewLens = new CfdEngineLens(address(engine));
+        ICfdEngineTypes.OpenPreview memory preview = previewLens.previewOpen(
+            crossingBearTrader, CfdTypes.Side.BEAR, 580_000e18, 20_000e6, 1e8, uint64(block.timestamp)
+        );
+        assertTrue(preview.valid, "Crossing balance may end exactly at the cap");
+
+        preview = previewLens.previewOpen(
+            crossingBearTrader, CfdTypes.Side.BEAR, 590_000e18, 20_000e6, 1e8, uint64(block.timestamp)
+        );
+        assertFalse(
+            preview.valid,
+            "A smaller absolute skew must still be rejected after crossing into a new above-cap imbalance"
+        );
+        assertEq(
+            uint8(preview.invalidReason),
+            uint8(CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH),
+            "The order-side cap should reject an above-cap crossing overshoot"
+        );
+
+        preview = previewLens.previewOpen(
+            crossingBearTrader, CfdTypes.Side.BEAR, 600_000e18, 20_000e6, 1e8, uint64(block.timestamp)
+        );
+        assertFalse(preview.valid, "An above-cap order with unchanged absolute skew should remain invalid");
+        assertEq(
+            uint8(preview.invalidReason),
+            uint8(CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH),
+            "The strict reduction boundary should reject equal absolute skew"
+        );
+
+        preview = previewLens.previewOpen(
+            healingBearTrader, CfdTypes.Side.BEAR, healingSize, 1000e6, 1e8, uint64(block.timestamp)
+        );
+        assertTrue(preview.valid, "Preview should admit an incremental skew reduction above the cap");
+    }
+
+    /// @dev Bucket: spec. Source: ACCOUNTING_SPEC "Open projection" permits above-cap recovery only while the order
+    ///      side remains lighter; crossing balance may reach the cap but must not rebuild an above-cap imbalance.
+    function test_AboveCapSkewReduction_PreviewCommitAndExecutionSucceed() public {
+        address bullTrader = address(0xB011);
+        address healingBearTrader = address(0xBEA1);
+        address crossingBearTrader = address(0xBEA2);
+        _fundTrader(bullTrader, 50_000e6);
+        _fundTrader(healingBearTrader, 20_000e6);
+        _fundTrader(crossingBearTrader, 30_000e6);
+        _open(bullTrader, CfdTypes.Side.BULL, 300_000e18, 30_000e6, 1e8);
+
+        uint256 targetPoolAssetsUsdc = 700_000e6;
+        uint256 poolAssetsBeforeDrainUsdc = pool.totalAssets();
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolAssetsBeforeDrainUsdc - targetPoolAssetsUsdc);
+
+        uint256 poolAssetsUsdc = pool.totalAssets();
+        uint256 maxSkewUsdc = (poolAssetsUsdc * 0.4e18) / 1e18;
+        uint256 preSkewUsdc = 300_000e6;
+        uint256 healingSize = 10_000e18;
+        uint256 postHealingSkewUsdc = preSkewUsdc - 10_000e6;
+        assertEq(poolAssetsUsdc, targetPoolAssetsUsdc, "Setup should establish the intended skew denominator");
+        assertGt(preSkewUsdc, maxSkewUsdc, "Setup should begin above the configured skew cap");
+        assertGt(postHealingSkewUsdc, maxSkewUsdc, "The healing order should remain above the skew cap");
+
+        _assertAboveCapPreviewPolicy(healingBearTrader, crossingBearTrader, healingSize);
+
+        vm.prank(healingBearTrader);
+        router.commitOrder(CfdTypes.Side.BEAR, healingSize, 1000e6, 1e8, false);
+        assertEq(router.pendingOrderCounts(healingBearTrader), 1, "Skew-reducing order should pass commit validation");
+
+        vm.warp(block.timestamp + 6);
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 7);
+        bytes[] memory updateData = _pythUpdateData();
+        vm.roll(block.number + 1);
+        router.executeOrder(1, updateData);
+
+        (uint256 liveSize,,,, CfdTypes.Side liveSide,,) = engine.positions(healingBearTrader);
+        assertEq(liveSize, healingSize, "Skew-reducing order should execute");
+        assertEq(uint8(liveSide), uint8(CfdTypes.Side.BEAR), "Executed position should use the healing side");
+        assertEq(
+            _sideOpenInterest(CfdTypes.Side.BULL) - _sideOpenInterest(CfdTypes.Side.BEAR),
+            postHealingSkewUsdc * 1e12,
+            "Execution should leave the expected reduced open-interest skew"
+        );
     }
 
     function test_CommitOrder_RevertsOnPredictableSolvencyInvalidation() public {
@@ -3060,7 +3151,9 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -3449,7 +3542,9 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
-            bountyBps: 9
+            bountyBps: 9,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -3809,7 +3904,9 @@ contract FadStalenessTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -4612,7 +4709,9 @@ contract OrderRouterAuditTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -4736,7 +4835,9 @@ contract StaleOrderExpiryTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -4993,7 +5094,9 @@ contract MarkPriceStalenessTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -5034,8 +5137,7 @@ contract MarkPriceStalenessTest is BasePerpTest {
         );
         engine.setOrderRouter(address(router));
 
-        clearinghouse.setEngine(address(engine));
-        vm.warp(SETUP_TIMESTAMP);
+        _bypassAllTimelocks();
         _bootstrapSeededLifecycle();
     }
 
@@ -5106,7 +5208,9 @@ contract StalenessGriefTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -5147,8 +5251,7 @@ contract StalenessGriefTest is BasePerpTest {
         );
         engine.setOrderRouter(address(router));
 
-        clearinghouse.setEngine(address(engine));
-        vm.warp(SETUP_TIMESTAMP);
+        _bypassAllTimelocks();
         _bootstrapSeededLifecycle();
     }
 
@@ -5221,6 +5324,20 @@ contract VpiImrBypassTest is Test {
         vm.warp(block.timestamp + 48 hours + 1);
     }
 
+    function _configureBroadSeniorCapacity() internal {
+        IHousePool.PoolConfig memory config = IHousePool.PoolConfig({
+            seniorRateBps: pool.seniorRateBps(),
+            markStalenessLimit: pool.markStalenessLimit(),
+            seniorFrozenLpFeeBps: pool.seniorFrozenLpFeeBps(),
+            juniorFrozenLpFeeBps: pool.juniorFrozenLpFeeBps(),
+            maxSeniorExposureUsdc: type(uint256).max - 1,
+            maxSeniorShareBps: 9999
+        });
+        pool.proposePoolConfig(config);
+        _warpPastTimelock();
+        pool.finalizePoolConfig();
+    }
+
     function _bootstrapSeededLifecycle() internal {
         uint256 seedAmount = 1000e6;
         usdc.mint(address(this), seedAmount * 2);
@@ -5242,7 +5359,9 @@ contract VpiImrBypassTest is Test {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
 
         clearinghouse = new MarginClearinghouse(address(usdc));
@@ -5283,7 +5402,7 @@ contract VpiImrBypassTest is Test {
         routerAdmin = OrderRouterAdmin(router.admin());
         engine.setOrderRouter(address(router));
 
-        _warpPastTimelock();
+        _configureBroadSeniorCapacity();
         clearinghouse.setEngine(address(engine));
         _bootstrapSeededLifecycle();
     }
@@ -5478,6 +5597,20 @@ contract KeeperFeeRefundTest is Test {
         vm.warp(block.timestamp + 48 hours + 1);
     }
 
+    function _configureBroadSeniorCapacity() internal {
+        IHousePool.PoolConfig memory config = IHousePool.PoolConfig({
+            seniorRateBps: pool.seniorRateBps(),
+            markStalenessLimit: pool.markStalenessLimit(),
+            seniorFrozenLpFeeBps: pool.seniorFrozenLpFeeBps(),
+            juniorFrozenLpFeeBps: pool.juniorFrozenLpFeeBps(),
+            maxSeniorExposureUsdc: type(uint256).max - 1,
+            maxSeniorShareBps: 9999
+        });
+        pool.proposePoolConfig(config);
+        _warpPastTimelock();
+        pool.finalizePoolConfig();
+    }
+
     function _bootstrapSeededLifecycle() internal {
         uint256 seedAmount = 1000e6;
         usdc.mint(address(this), seedAmount * 2);
@@ -5499,7 +5632,9 @@ contract KeeperFeeRefundTest is Test {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
 
         clearinghouse = new MarginClearinghouse(address(usdc));
@@ -5539,7 +5674,7 @@ contract KeeperFeeRefundTest is Test {
         routerAdmin = OrderRouterAdmin(router.admin());
         engine.setOrderRouter(address(router));
 
-        _warpPastTimelock();
+        _configureBroadSeniorCapacity();
         IOrderRouterAdminHost.RouterConfig memory config = IOrderRouterAdminHost.RouterConfig({
             maxOrderAge: 300,
             orderExecutionStalenessLimit: router.orderExecutionStalenessLimit(),
@@ -5823,6 +5958,20 @@ contract WeekendArbitrageTest is Test {
         vm.warp(block.timestamp + 48 hours + 1);
     }
 
+    function _configureBroadSeniorCapacity() internal {
+        IHousePool.PoolConfig memory config = IHousePool.PoolConfig({
+            seniorRateBps: pool.seniorRateBps(),
+            markStalenessLimit: pool.markStalenessLimit(),
+            seniorFrozenLpFeeBps: pool.seniorFrozenLpFeeBps(),
+            juniorFrozenLpFeeBps: pool.juniorFrozenLpFeeBps(),
+            maxSeniorExposureUsdc: type(uint256).max - 1,
+            maxSeniorShareBps: 9999
+        });
+        pool.proposePoolConfig(config);
+        _warpPastTimelock();
+        pool.finalizePoolConfig();
+    }
+
     function _bootstrapSeededLifecycle() internal {
         uint256 seedAmount = 1000e6;
         usdc.mint(address(this), seedAmount * 2);
@@ -5868,7 +6017,9 @@ contract WeekendArbitrageTest is Test {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
 
         clearinghouse = new MarginClearinghouse(address(usdc));
@@ -5903,7 +6054,7 @@ contract WeekendArbitrageTest is Test {
         );
         engine.setOrderRouter(address(router));
 
-        _warpPastTimelock();
+        _configureBroadSeniorCapacity();
         clearinghouse.setEngine(address(engine));
         _bootstrapSeededLifecycle();
     }

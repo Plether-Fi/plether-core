@@ -45,6 +45,7 @@ Engine risk controls live in `CfdEngineAdmin`, and router risk controls live in 
 | `EngineFreshnessConfig` (`fadMaxStaleness`, `engineMarkStalenessLimit`) | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 48-hour timelock |
 | `seniorRateBps` | `HousePool` | `onlyOwner`, 48-hour timelock |
 | `markStalenessLimit` | `HousePool` | `onlyOwner`, 48-hour timelock |
+| `maxSeniorExposureUsdc`, `maxSeniorShareBps` | `HousePool` | `onlyOwner`, 48-hour timelock; finalized values must be finite and below 100%, respectively |
 | `RouterConfig` (`maxOrderAge`, staleness limits, Pyth confidence ratio, historical settlement window, component publish-time skew, adverse confidence multiplier, bounty limits) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
 | `OracleConfig` (`pletherOracle`) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
 
@@ -137,6 +138,8 @@ These are the highest-value properties an auditor should expect to hold.
 | Canonical asset boundary | Pool depth is based on `min(rawAssets, accountedAssets)`, not raw token balance alone |
 | Conservative MtM | Unrealized trader losses do not count as instantly withdrawable LP assets |
 | High-water-mark protection | Senior impairment must be restored before junior extracts surplus |
+| Bounded new senior exposure | Counted admission exposure (`E + R`) cannot exceed the smaller absolute and senior-share headrooms |
+| Junior covenant | A voluntary junior withdrawal cannot leave active protected exposure (`E`, excluding `R`) above the configured share of senior-plus-junior claimant capital |
 | Shared accounting inputs | Reconcile, withdrawal limits, and LP status views consume the same canonical engine snapshots |
 
 ### Coverage map
@@ -302,7 +305,13 @@ That means:
 - same-side loser debt cannot net down live winner liability before settlement,
 - but the protocol avoids phantom-profit withdrawal bugs.
 
-Deposit pricing uses an unrealized-MtM-neutral NAV instead of the conservative withdrawal NAV. Immediate active-share deposits are disabled while any trader position is open, while ordinary LP entry uses pending deposit epochs: assets are funded up front, cancellation is allowed only before the activation epoch begins, and shares are minted only after permissionless finalization fixes the batch price. This avoids letting attackers mint new LP shares at a discount created only by conservative phantom liabilities, and avoids the opposite toxic-flow case where incoming LPs buy immediately before an under-collateralized trader loss is realized. Realized losses still impair deposit pricing.
+Deposit pricing uses an unrealized-MtM-neutral NAV instead of the conservative withdrawal NAV. Immediate active-share
+deposits are disabled while any trader position is open, while ordinary LP entry uses pending deposit epochs: assets
+are funded up front, cancellation is unconditional before activation and reopens after activation when senior
+impairment blocks finalization or a senior reservation book is invalid, and shares are minted only after
+permissionless finalization fixes the batch price. This avoids letting attackers mint new LP shares at a discount
+created only by conservative phantom liabilities, and avoids the opposite toxic-flow case where incoming LPs buy
+immediately before an under-collateralized trader loss is realized. Realized losses still impair deposit pricing.
 
 Accepted residual risk: a matured, unfinalized deposit epoch can be finalized before a later transaction that realizes a large trader loss into pool cash. The depositor's assets were already committed through the activation delay and cannot be cancelled after activation in normal conditions, but finalization timing is still permissionless and can be priority-gas ordered ahead of a liquidation or close. The deployed protocol relies on permissionless keepers/finalizers to promptly finalize matured epochs; this is a fixed pre-deployment design trade-off, not a governance-adjustable safety valve.
 
@@ -359,11 +368,12 @@ Security purpose:
 - raw-balance shortfalls reduce effective backing immediately,
 - all LP accounting works from a controlled economic boundary.
 
-### Seed lifecycle gate
+### Seed and senior-capacity lifecycle gate
 
-The protocol blocks normal live operation until both tranche seeds exist and trading is explicitly activated.
+The protocol blocks normal live operation until governance finalizes a finite absolute senior limit and a senior-share
+limit below 100%, both tranche seeds exist within those limits, and trading is explicitly activated.
 
-This prevents partially initialized live state and ambiguous ownership of early revenue flows.
+This prevents partially initialized or uncapped live state and ambiguous ownership of early revenue flows.
 
 ### Freshness-gated LP actions
 
@@ -382,6 +392,31 @@ Senior coupon is funded from existing junior NAV and capped by available junior 
 
 This removes unpaid senior-coupon debt queues while making the cost of the fixed senior product explicit for junior LPs.
 
+### Senior exposure limits and passive overage
+
+Active protected senior exposure is `E = max(projected senior principal, projected senior high-water mark)`. Counted
+admission exposure is `C = E + R`, where `R` is the gross USDC reserved in unfinalized senior deposit epochs. The
+absolute and share admission tests use `C`, while the junior-withdrawal covenant deliberately uses active `E` only.
+Governance sets both an absolute USDC limit and a maximum share of senior-plus-junior claimant capital. The high-water
+term prevents an impaired principal balance from falsely reopening capacity while its restoration entitlement remains.
+
+Senior deposit reservations are provisional. They consume quoted headroom when requested, but the whole outstanding
+reservation book is checked again at finalization. If a timelocked cap reduction or later accounting change makes the
+book invalid, finalization remains blocked and post-activation cancellation is unlocked so depositors can recover the
+escrowed USDC. Junior withdrawals do not lock against `R`, so a permitted withdrawal can also invalidate the
+provisional book and make it refundable. Integrators must not present a request-time quote as guaranteed finalization.
+
+The covenant also limits voluntary junior withdrawals; using active `E` and explicitly excluding pending reservations,
+the pool retains enough projected junior principal that the configured senior share still holds after the withdrawal.
+This is an LP-liquidity restriction, not an extra source of cash or a guarantee that losses cannot impair senior.
+
+Coupon, loss allocation, revenue restoration, and privileged claimant recapitalization remain higher-priority
+accounting rules. They may passively move the pool above a configured limit, but the protocol does not haircut active
+senior shares, suppress coupon already payable from junior, or misroute loss to force compliance. Instead, new senior
+capacity closes until senior withdrawals, junior deposits, or subsequent revenue cure the state. The engine-authorized
+`recordClaimantInflow(..., Recapitalization, ...)` path is deliberately exempt when restoring protected senior claims;
+it cannot mint new senior LP shares, and excess value continues through the canonical claimant/unassigned routing.
+
 ## Liquidation Security
 
 ### Full liquidation only
@@ -396,7 +431,12 @@ Trade-off:
 ### Reachability and bounty bounds
 
 - liquidation accounting is constrained by actually reachable collateral,
-- keeper bounty is proportional with a floor, capped by reachable value, and may explicitly subsidize low-equity liquidations,
+- the proportional liquidation charge has a floor, is capped by reachable value, and may explicitly subsidize
+  low-equity liquidations,
+- the collected charge is conserved across a bounded, timelocked allocation where
+  `keeperShareBps + protocolShareBps <= 10_000`: the keeper and protocol treasury each receive their independently
+  rounded-down configured shares as clearinghouse credit, and LPs receive the exact remainder, including rounding dust,
+  as claimant revenue,
 - residual trader value is preserved when positive,
 - same-account trader claim balance does not support liquidation reachability and is only netted once against terminal shortfall,
 - remaining deficit becomes bad debt socialized to LP capital.
@@ -433,6 +473,10 @@ This preserves terminal liveness without requiring an unbounded global queue sca
 - conservative MtM can temporarily understate junior value,
 - `oracleFrozen` keeps LP withdrawals live under fixed tranche-local frozen fees rather than a separate stale-action gate; immediate active-share deposits still require zero open trader positions,
 - senior coupon payments are capped by available junior principal,
+- governance can prospectively reduce senior limits below live exposure, closing new senior entry and potentially
+  reducing junior withdrawal capacity until the covenant is cured; it cannot force existing senior capital out,
+- pending senior reservations are not grandfathered against later cap or accounting changes, but become refundable if
+  they no longer fit at finalization,
 - deposit cooldown can be griefed only by economically irrational donation-style top-ups.
 
 ### VPI limitations

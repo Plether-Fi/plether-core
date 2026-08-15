@@ -13,6 +13,7 @@ import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
+import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {IPyth, PythStructs} from "@plether/shared/interfaces/IPyth.sol";
 import {Test} from "forge-std/Test.sol";
@@ -131,7 +132,9 @@ contract PythRealUpdateForkTest is Test {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
 
         clearinghouse = new MarginClearinghouse(USDC);
@@ -165,6 +168,20 @@ contract PythRealUpdateForkTest is Test {
 
         engine.setOrderRouter(address(router));
         clearinghouse.setEngine(address(engine));
+
+        pool.proposePoolConfig(
+            IHousePool.PoolConfig({
+                seniorRateBps: pool.seniorRateBps(),
+                markStalenessLimit: pool.markStalenessLimit(),
+                seniorFrozenLpFeeBps: pool.seniorFrozenLpFeeBps(),
+                juniorFrozenLpFeeBps: pool.juniorFrozenLpFeeBps(),
+                maxSeniorExposureUsdc: type(uint256).max - 1,
+                maxSeniorShareBps: 9999
+            })
+        );
+        vm.warp(pool.poolConfigActivationTime());
+        pool.finalizePoolConfig();
+        vm.warp(setupTime);
 
         deal(USDC, address(this), 2000e6);
         IERC20(USDC).approve(address(pool), 2000e6);
