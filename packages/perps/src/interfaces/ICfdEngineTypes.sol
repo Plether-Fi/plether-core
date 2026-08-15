@@ -396,9 +396,12 @@ interface ICfdEngineTypes {
     /// @param oraclePrice Price used by the simulation, with 8 decimals.
     /// @param equityUsdc Signed liquidation equity after price PnL, carry, and VPI adjustments.
     /// @param pnlUsdc Signed price PnL before carry and VPI.
-    /// @param reachableCollateralUsdc Account collateral reachable after modeled bounty forfeiture.
-    /// @param keeperBountyUsdc Keeper bounty owed by the liquidation.
-    /// @param seizedCollateralUsdc Settlement value transferred from the account to the pool.
+    /// @param reachableCollateralUsdc Account collateral reachable for terminal settlement before the liquidation charge.
+    /// @param liquidationChargeUsdc Total liquidation charge collected from the account.
+    /// @param keeperBountyUsdc Configured keeper share of the liquidation charge.
+    /// @param protocolLiquidationFeeUsdc Configured protocol-treasury share of the liquidation charge.
+    /// @param lpLiquidationFeeUsdc Remaining LP share after keeper and protocol allocations.
+    /// @param seizedCollateralUsdc Total settlement value transferred from the account to the pool, including the LP fee.
     /// @param settlementRetainedUsdc Existing account settlement left with the trader toward positive residual equity.
     /// @param freshTraderPayoutUsdc New surplus value owed to the trader after liquidation.
     /// @param existingTraderClaimConsumedUsdc Existing claim value netted into liquidation settlement.
@@ -416,7 +419,10 @@ interface ICfdEngineTypes {
         int256 equityUsdc;
         int256 pnlUsdc;
         uint256 reachableCollateralUsdc;
+        uint256 liquidationChargeUsdc;
         uint256 keeperBountyUsdc;
+        uint256 protocolLiquidationFeeUsdc;
+        uint256 lpLiquidationFeeUsdc;
         uint256 seizedCollateralUsdc;
         uint256 settlementRetainedUsdc;
         uint256 freshTraderPayoutUsdc;

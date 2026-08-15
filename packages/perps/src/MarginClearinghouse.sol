@@ -918,17 +918,19 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         );
     }
 
-    /// @notice Applies an engine-planned liquidation bucket mutation, seizure, and keeper-bounty credit.
+    /// @notice Applies an engine-planned liquidation bucket mutation, seizure, and fee-allocation credits.
     /// @dev Callable only by the engine or its reported settlement sidecar. The clearinghouse consumes exactly the
     ///      plan's position/other locked-margin amounts, using `reservationOrderIds` to account for committed margin.
-    ///      It debits `plan.settlementSeizedUsdc + keeperBountyUsdc`, transfers the seized amount to `recipient`, and
-    ///      credits the bounty to `keeper` internally. Other plan fields are informational and are not applied here.
+    ///      It debits the seized amount plus keeper and protocol allocations, transfers the seized amount to `recipient`,
+    ///      and credits the keeper and protocol accounts internally. Other plan fields are informational here.
     /// @param account Liquidated account
     /// @param reservationOrderIds Active reservation ids allowed to cover committed-order margin consumption
     /// @param plan Liquidation settlement plan whose amounts use six-decimal USDC units
     /// @param recipient External recipient of `plan.settlementSeizedUsdc`; required when that amount is nonzero
     /// @param keeper Clearinghouse account credited with the bounty; required when the bounty is nonzero
     /// @param keeperBountyUsdc Bounty debited from `account` and credited to `keeper`, in six-decimal USDC units
+    /// @param protocolFeeAccount Clearinghouse account credited with the liquidation protocol fee
+    /// @param protocolFeeUsdc Protocol fee debited from `account` and credited internally, in six-decimal USDC units
     /// @return seizedUsdc Amount transferred to `recipient` in six-decimal USDC units
     function applyLiquidationSettlementPlan(
         address account,
@@ -936,9 +938,13 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         IMarginClearinghouse.LiquidationSettlementPlan calldata plan,
         address recipient,
         address keeper,
-        uint256 keeperBountyUsdc
+        uint256 keeperBountyUsdc,
+        address protocolFeeAccount,
+        uint256 protocolFeeUsdc
     ) external onlyOperator returns (uint256 seizedUsdc) {
-        return _applyLiquidationSettlementPlan(account, reservationOrderIds, plan, recipient, keeper, keeperBountyUsdc);
+        return _applyLiquidationSettlementPlan(
+            account, reservationOrderIds, plan, recipient, keeper, keeperBountyUsdc, protocolFeeAccount, protocolFeeUsdc
+        );
     }
 
     function _applyLiquidationSettlementPlan(
@@ -947,7 +953,9 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         IMarginClearinghouse.LiquidationSettlementPlan calldata plan,
         address recipient,
         address keeper,
-        uint256 keeperBountyUsdc
+        uint256 keeperBountyUsdc,
+        address protocolFeeAccount,
+        uint256 protocolFeeUsdc
     ) internal returns (uint256 seizedUsdc) {
         seizedUsdc = plan.settlementSeizedUsdc;
 
@@ -958,7 +966,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
             _consumeOtherLockedMarginViaReservations(account, reservationOrderIds, plan.otherLockedMarginUnlockedUsdc);
         }
 
-        uint256 settlementDebitUsdc = seizedUsdc + keeperBountyUsdc;
+        uint256 settlementDebitUsdc = seizedUsdc + keeperBountyUsdc + protocolFeeUsdc;
         if (settlementDebitUsdc > 0) {
             if (settlementBalances[account] < settlementDebitUsdc) {
                 revert MarginClearinghouse__InsufficientAssetToSeize();
@@ -978,6 +986,13 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
             }
             settlementBalances[keeper] += keeperBountyUsdc;
             emit ReservedSettlementTransferred(account, keeper, keeperBountyUsdc);
+        }
+        if (protocolFeeUsdc > 0) {
+            if (protocolFeeAccount == address(0)) {
+                revert MarginClearinghouse__ZeroAddress();
+            }
+            settlementBalances[protocolFeeAccount] += protocolFeeUsdc;
+            emit AssetSeized(account, settlementAsset, protocolFeeUsdc, protocolFeeAccount);
         }
     }
 

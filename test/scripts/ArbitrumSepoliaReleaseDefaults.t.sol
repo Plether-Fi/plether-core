@@ -72,6 +72,8 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         assertEq(params.baseCarryBps, 500, "base carry");
         assertEq(params.minBountyUsdc, 1e6, "min bounty");
         assertEq(params.bountyBps, 10, "bounty bps");
+        assertEq(params.keeperShareBps, 5000, "keeper share bps");
+        assertEq(params.protocolShareBps, 0, "protocol share bps");
     }
 
     function test_CoreDefaultConfigs_MatchArbitrumSepoliaReleaseParams() public {

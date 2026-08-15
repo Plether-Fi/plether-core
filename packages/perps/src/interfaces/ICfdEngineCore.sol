@@ -38,7 +38,7 @@ interface ICfdEngineCore is ICfdEngineTypes {
     /// @return Cached engine mark price, or zero before the first mark
     function lastMarkPrice() external view returns (uint256);
 
-    /// @notice Returns the engine's active position-risk, VPI, carry, and liquidation-bounty parameters.
+    /// @notice Returns the engine's active position-risk, VPI, carry, and liquidation-charge parameters.
     /// @return vpiFactor VPI impact factor, scaled by 1e18
     /// @return maxSkewRatio Maximum side skew divided by pool depth. Opens may remain above it only while strictly
     ///         reducing an existing imbalance without making the order side heavier, scaled by 1e18
@@ -46,8 +46,10 @@ interface ICfdEngineCore is ICfdEngineTypes {
     /// @return initMarginBps Initial-margin ratio in basis points
     /// @return fadMarginBps Maintenance-margin ratio during FAD in basis points
     /// @return baseCarryBps Annualized base carry rate in basis points
-    /// @return minBountyUsdc Minimum liquidation bounty and position-margin floor in USDC
-    /// @return bountyBps Variable liquidation-bounty rate in basis points
+    /// @return minBountyUsdc Minimum total liquidation charge and position-margin floor in USDC
+    /// @return bountyBps Variable total liquidation-charge rate in basis points
+    /// @return keeperShareBps Keeper share of the collected liquidation charge in basis points
+    /// @return protocolShareBps Protocol-treasury share of the collected liquidation charge in basis points
     function riskParams()
         external
         view
@@ -59,7 +61,9 @@ interface ICfdEngineCore is ICfdEngineTypes {
             uint256 fadMarginBps,
             uint256 baseCarryBps,
             uint256 minBountyUsdc,
-            uint256 bountyBps
+            uint256 bountyBps,
+            uint256 keeperShareBps,
+            uint256 protocolShareBps
         );
 
     /// @notice Fixed LP-owned spread charged on oracle-frozen close/reduce notional, in basis points.

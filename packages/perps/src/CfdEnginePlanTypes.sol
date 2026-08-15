@@ -147,7 +147,7 @@ library CfdEnginePlanTypes {
         MUST_CLOSE_OPPOSING,
         /// @notice New exposure is disabled because the engine is in degraded mode.
         DEGRADED_MODE,
-        /// @notice Resulting notional cannot support the configured minimum liquidation bounty.
+        /// @notice Resulting notional cannot support the configured minimum liquidation charge.
         POSITION_TOO_SMALL,
         /// @notice Post-trade side skew exceeds the configured pool-relative limit.
         SKEW_TOO_HIGH,
@@ -344,7 +344,7 @@ library CfdEnginePlanTypes {
     /// @dev When `liquidatable` is false, only pre-check diagnostic fields are authoritative.
     /// @param liquidatable Whether equity is at or below the active maintenance/FAD requirement.
     /// @param riskState Price PnL, carry-adjusted equity, notional, margin requirement, and liquidation test.
-    /// @param liquidationState Liquidation equity and keeper-bounty calculation.
+    /// @param liquidationState Liquidation equity and total-charge split calculation.
     /// @param side Side of the position being liquidated.
     /// @param posSize Full position size removed, with 18 decimals.
     /// @param posMargin Canonical position margin before liquidation, in 6-decimal USDC.
@@ -354,11 +354,15 @@ library CfdEnginePlanTypes {
     /// @param sideMaxProfitDecrease Reduction in aggregate side maximum-profit envelope, in 6-decimal USDC.
     /// @param sideEntryNotionalReduction Reduction in raw side `size * entryPrice`, with 26 decimals.
     /// @param sideTotalMarginReduction Diagnostic 6-decimal USDC margin reduction; current apply uses `posMargin` instead.
-    /// @param keeperBountyUsdc Bounty credited to the keeper through clearinghouse settlement.
-    /// @param liquidationReachableCollateralUsdc Terminal account settlement reachable before keeper bounty and settlement.
-    /// @param residualUsdc Signed 6-decimal USDC liquidation equity remaining after the keeper bounty.
-    /// @param residualPlan Clearinghouse mutation plan whose nested bad debt is the raw negative residual before keeper-
+    /// @param liquidationChargeUsdc Total configured liquidation charge collected from the account.
+    /// @param keeperBountyUsdc Configured keeper share credited through clearinghouse settlement.
+    /// @param protocolLiquidationFeeUsdc Configured protocol share credited to the treasury clearinghouse account.
+    /// @param lpLiquidationFeeUsdc Remaining LP share transferred to the HousePool.
+    /// @param liquidationReachableCollateralUsdc Terminal account settlement reachable before the charge and settlement.
+    /// @param residualUsdc Signed 6-decimal USDC liquidation equity remaining after the total charge.
+    /// @param residualPlan Clearinghouse mutation plan whose nested bad debt is the raw negative residual before charge-
     ///        subsidy adjustment and existing-claim recovery; final recognized debt is `badDebtUsdc`.
+    /// @param settlementSeizedUsdc Total existing account settlement transferred to the HousePool, including the LP fee.
     /// @param settlementRetainedUsdc Existing account settlement retained to satisfy positive residual equity.
     /// @param freshTraderPayoutUsdc Positive residual equity not already present in retained settlement.
     /// @param freshPayoutIsImmediate Whether current unreserved pool cash can service the fresh payout.
@@ -388,12 +392,16 @@ library CfdEnginePlanTypes {
         uint256 sideEntryNotionalReduction;
         uint256 sideTotalMarginReduction;
 
+        uint256 liquidationChargeUsdc;
         uint256 keeperBountyUsdc;
+        uint256 protocolLiquidationFeeUsdc;
+        uint256 lpLiquidationFeeUsdc;
         uint256 liquidationReachableCollateralUsdc;
 
         int256 residualUsdc;
         MarginClearinghouseAccountingLib.LiquidationResidualPlan residualPlan;
 
+        uint256 settlementSeizedUsdc;
         uint256 settlementRetainedUsdc;
         uint256 freshTraderPayoutUsdc;
         bool freshPayoutIsImmediate;
