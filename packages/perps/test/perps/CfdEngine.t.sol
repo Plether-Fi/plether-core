@@ -2225,9 +2225,10 @@ contract CfdEngineTest is BasePerpTest {
     }
 
     function test_MarketCalendar_SundayBoundariesMatchLiveSemantics() public {
-        uint256 sundayTwentyFiftyNine = 1_709_499_599;
-        uint256 sundayTwentyOne = 1_709_499_600;
-        uint256 sundayTwentyTwo = 1_709_503_200;
+        uint256 sundayTwentyFiftyNine = 1_710_104_399;
+        uint256 sundayTwentyOne = 1_710_104_400;
+        uint256 sundayTwentyOneFourteenFiftyNine = 1_710_105_299;
+        uint256 sundayTwentyOneFifteen = 1_710_105_300;
 
         vm.warp(sundayTwentyFiftyNine);
         assertTrue(engine.isOracleFrozen(), "Sunday 20:59:59 should still be oracle frozen");
@@ -2239,36 +2240,41 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(pletherOracle.isOracleFrozen(), engine.isOracleFrozen(), "Oracle and engine calendar should agree");
         assertTrue(engine.isFadWindow(), "Sunday 21:00:00 should remain in FAD");
 
-        vm.warp(sundayTwentyTwo);
-        assertFalse(engine.isOracleFrozen(), "Sunday 22:00:00 should remain unfrozen");
+        vm.warp(sundayTwentyOneFourteenFiftyNine);
+        assertFalse(engine.isOracleFrozen(), "Sunday 21:14:59 should remain unfrozen");
         assertEq(pletherOracle.isOracleFrozen(), engine.isOracleFrozen(), "Oracle and engine calendar should agree");
-        assertFalse(engine.isFadWindow(), "Sunday 22:00:00 should end FAD");
+        assertTrue(engine.isFadWindow(), "Sunday 21:14:59 should remain in FAD");
+
+        vm.warp(sundayTwentyOneFifteen);
+        assertFalse(engine.isOracleFrozen(), "Sunday 21:15:00 should remain unfrozen");
+        assertEq(pletherOracle.isOracleFrozen(), engine.isOracleFrozen(), "Oracle and engine calendar should agree");
+        assertFalse(engine.isFadWindow(), "Sunday 21:15:00 should end FAD");
     }
 
     function test_MarketCalendar_FridayBoundariesMatchLiveSemantics() public {
-        uint256 fridayBeforeFad = 1_729_277_999;
-        uint256 fridayFadStart = 1_729_278_000;
-        uint256 fridayBeforeFreeze = fridayFadStart + 3 hours - 1;
-        uint256 fridayFreezeStart = fridayFadStart + 3 hours;
+        uint256 fridayBeforeFad = 1_729_283_399;
+        uint256 fridayFadStart = 1_729_283_400;
+        uint256 fridayBeforeFreeze = fridayFadStart + 30 minutes - 1;
+        uint256 fridayFreezeStart = fridayFadStart + 30 minutes;
 
         vm.warp(fridayBeforeFad);
-        assertFalse(engine.isFadWindow(), "Friday 18:59:59 should be live");
-        assertFalse(engine.isOracleFrozen(), "Friday 18:59:59 should not be oracle frozen");
+        assertFalse(engine.isFadWindow(), "Friday 20:29:59 should be live");
+        assertFalse(engine.isOracleFrozen(), "Friday 20:29:59 should not be oracle frozen");
         assertEq(pletherOracle.isOracleFrozen(), engine.isOracleFrozen(), "Oracle and engine calendar should agree");
 
         vm.warp(fridayFadStart);
-        assertTrue(engine.isFadWindow(), "Friday 19:00:00 should start FAD");
-        assertFalse(engine.isOracleFrozen(), "Friday 19:00:00 should not be oracle frozen");
+        assertTrue(engine.isFadWindow(), "Friday 20:30:00 should start FAD");
+        assertFalse(engine.isOracleFrozen(), "Friday 20:30:00 should not be oracle frozen");
         assertEq(pletherOracle.isOracleFrozen(), engine.isOracleFrozen(), "Oracle and engine calendar should agree");
 
         vm.warp(fridayBeforeFreeze);
-        assertTrue(engine.isFadWindow(), "Friday 21:59:59 should remain in FAD");
-        assertFalse(engine.isOracleFrozen(), "Friday 21:59:59 should not be oracle frozen");
+        assertTrue(engine.isFadWindow(), "Friday 20:59:59 should remain in FAD");
+        assertFalse(engine.isOracleFrozen(), "Friday 20:59:59 should not be oracle frozen");
         assertEq(pletherOracle.isOracleFrozen(), engine.isOracleFrozen(), "Oracle and engine calendar should agree");
 
         vm.warp(fridayFreezeStart);
-        assertTrue(engine.isFadWindow(), "Friday 22:00:00 should remain in FAD");
-        assertTrue(engine.isOracleFrozen(), "Friday 22:00:00 should start oracle-frozen mode");
+        assertTrue(engine.isFadWindow(), "Friday 21:00:00 should remain in FAD");
+        assertTrue(engine.isOracleFrozen(), "Friday 21:00:00 should start oracle-frozen mode");
         assertEq(pletherOracle.isOracleFrozen(), engine.isOracleFrozen(), "Oracle and engine calendar should agree");
     }
 
@@ -2440,7 +2446,7 @@ contract CfdEngineTest is BasePerpTest {
 
         _open(account, CfdTypes.Side.BULL, 100_000e18, 4000e6, 1e8);
 
-        vm.warp(1_709_928_000); // Friday 20:00 UTC: FAD, but not oracle-frozen.
+        vm.warp(1_709_934_300); // Friday 21:45 UTC: FAD, but not oracle-frozen.
         assertTrue(engine.isFadWindow(), "Setup should be in FAD");
         assertFalse(engine.isOracleFrozen(), "FAD runway should still be live-market mode");
 

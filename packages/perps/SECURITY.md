@@ -455,7 +455,10 @@ This preserves terminal liveness without requiring an unbounded global queue sca
 - oracle-frozen voluntary close/reduce execution applies normal signed VPI plus a fixed LP-owned notional spread; normal live and FAD-only closes apply signed VPI without that spread,
 - a fixed spread deliberately does not increase with mark staleness inside the permitted frozen window,
 - full-close liveness takes priority over collecting an otherwise uncollectible spread, while partial closes remain all-or-nothing settlement paths,
-- DST and holiday boundaries can create short safe liveness gaps around market reopen,
+- the recurring FX calendar follows New York daylight-saving transitions on-chain; unscheduled provider closures and
+  holiday hours still require governance-configured UTC-day overrides,
+- the current post-2007 US daylight-saving rule is compiled into the planner; a future legal or provider schedule
+  change at an intraday boundary requires a coordinated engine/planner/oracle deployment,
 - execution remains dependent on fresh keeper infrastructure and oracle publication outside frozen windows.
 
 ### Router and keeper limitations

@@ -5,6 +5,7 @@ import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {ICfdEnginePlanner} from "@plether/perps/interfaces/ICfdEnginePlanner.sol";
 import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
+import {MarketCalendarLib} from "@plether/perps/libraries/MarketCalendarLib.sol";
 
 /// @title CfdEnginePlanner
 /// @notice Stateless external wrapper around the deterministic CFD engine planning library.
@@ -12,6 +13,18 @@ import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
 ///      must supply a canonical, internally consistent snapshot and order. Unless stated otherwise, USDC amounts use
 ///      6 decimals, prices use 8 decimals, sizes use 18 decimals, and timestamps are Unix seconds.
 contract CfdEnginePlanner is ICfdEnginePlanner {
+
+    /// @notice Classifies the recurring and governance-override market-calendar regimes.
+    /// @dev Keeps the New York daylight-saving calculation in this stateless sidecar so the canonical engine remains
+    ///      below the EIP-170 runtime bytecode limit. All inputs are supplied by the engine from canonical state.
+    function marketCalendarStatus(
+        uint256 timestamp,
+        bool todayOverride,
+        bool tomorrowOverride,
+        uint256 fadRunwaySeconds
+    ) external pure returns (bool fadWindow, bool oracleFrozen) {
+        return MarketCalendarLib.marketStatus(timestamp, todayOverride, tomorrowOverride, fadRunwaySeconds);
+    }
 
     /// @notice Applies a signed open-cost change to position margin after pending carry.
     /// @dev Returns `(true, 0)` only when a negative change is strictly greater than available margin. Exact depletion

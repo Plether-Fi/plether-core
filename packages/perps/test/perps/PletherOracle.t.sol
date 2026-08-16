@@ -53,6 +53,10 @@ contract PletherOracleEngineMock {
         fadDayOverrides[dayNumber] = active;
     }
 
+    function isOracleFrozen() external view returns (bool) {
+        return fadDayOverrides[block.timestamp / 86_400];
+    }
+
     function setPosition(
         uint256 size,
         CfdTypes.Side side

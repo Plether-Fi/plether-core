@@ -470,6 +470,19 @@ This is a containment latch, not a pause. The protocol still allows transitions 
 
 The protocol raises margin requirements around FX market closure windows.
 
+The recurring calendar follows Pyth's 17:00 New York FX close/open and calculates US daylight-saving transitions
+on-chain. FAD provides a 30-minute live-oracle shoulder before Friday's close and a 15-minute live-oracle shoulder
+after Sunday's open:
+
+| Regime | New York time | UTC during daylight time | UTC during standard time |
+|--------|---------------|--------------------------|--------------------------|
+| FAD only, oracle live | Friday 16:30–17:00 | Friday 20:30–21:00 | Friday 21:30–22:00 |
+| FAD and oracle frozen | Friday 17:00–Sunday 17:00 | Friday 21:00–Sunday 21:00 | Friday 22:00–Sunday 22:00 |
+| FAD only, oracle live again | Sunday 17:00–17:15 | Sunday 21:00–21:15 | Sunday 22:00–22:15 |
+
+Friday and Sunday can use different UTC offsets on the weekends when daylight saving starts or ends. Governance
+override days and their optional runway remain keyed to UTC days.
+
 | Window | Margin basis | Max leverage |
 |--------|--------------|--------------|
 | Normal | `maintMarginBps = 1%` | 100x |

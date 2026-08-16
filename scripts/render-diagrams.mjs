@@ -275,9 +275,11 @@ const perpsReservationLifecycle = `graph TD
 ${smClasses}`;
 
 const perpsOracleRegimes = `graph TD
-    N([Normal]) -->|Fri 19:00 UTC or admin runway| F([FAD Close-Only])
-    F -->|Fri 22:00 UTC or admin holiday| Z([Frozen Oracle])
-    Z -->|Sun 21:00 UTC or holiday end| N
+    N([Normal]) -->|Fri 16:30 New York or admin runway| F([FAD Close-Only])
+    F -->|Fri 17:00 New York or admin holiday| Z([Frozen Oracle])
+    Z -->|Sun 17:00 New York| F
+    F -->|Sun 17:15 New York| N
+    Z -.->|admin holiday end| N
 
     N --> N1[opens allowed]
     N1 --> N2[staleness: normal]

@@ -668,10 +668,10 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         address account = trader;
         uint256 liquidationPrice = 99_500_000;
 
-        vm.warp(1_729_277_999); // Friday 18:59:59 UTC, immediately before the FAD window.
+        vm.warp(1_729_283_399); // Friday 20:29:59 UTC, immediately before the daylight-time FAD window.
         _fundTrader(trader, 200e6);
         _open(account, CfdTypes.Side.BULL, 10_000e18, 200e6, 1e8);
-        vm.warp(1_729_278_000); // Friday 19:00:00 UTC, when the higher FAD margin becomes active.
+        vm.warp(1_729_283_400); // Friday 20:30:00 UTC, when the higher FAD margin becomes active.
 
         uint256 targetPoolCash = 48e6;
         uint256 poolCash = usdc.balanceOf(address(pool));

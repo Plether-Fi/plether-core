@@ -21,7 +21,6 @@ import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAcco
 import {IWithdrawGuard} from "@plether/perps/interfaces/IWithdrawGuard.sol";
 import {CfdEngineSnapshotsLib} from "@plether/perps/libraries/CfdEngineSnapshotsLib.sol";
 import {MarginClearinghouseAccountingLib} from "@plether/perps/libraries/MarginClearinghouseAccountingLib.sol";
-import {MarketCalendarLib} from "@plether/perps/libraries/MarketCalendarLib.sol";
 import {OracleFreshnessPolicyLib} from "@plether/perps/libraries/OracleFreshnessPolicyLib.sol";
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
 
@@ -923,8 +922,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     // ==========================================
 
     /// @notice Reports whether Friday Afternoon Deleverage restrictions are currently active.
-    /// @dev The recurring window is Friday 19:00 UTC through Sunday 21:59:59 UTC. FAD is also active throughout an
-    ///      admin-configured override day and during `fadRunwaySeconds` immediately before an override day.
+    /// @dev The recurring window starts 30 minutes before Friday's 17:00 New York FX close and ends 15 minutes after
+    ///      Sunday's 17:00 New York FX open. FAD is also active throughout an admin-configured override day and during
+    ///      `fadRunwaySeconds` immediately before an override day.
     /// @return True when the recurring window, an override day, or its configured runway is active.
     function isFadWindow() public view returns (bool) {
         (bool fadWindow,) = _marketStatus();
@@ -932,8 +932,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     /// @notice Reports whether the engine is in the oracle-frozen regime where freshness policy can be relaxed.
-    /// @dev The recurring window is Friday 22:00 UTC through Sunday 20:59:59 UTC. An admin-configured override freezes
-    ///      its entire day. Unlike FAD, the frozen regime does not include the pre-override runway.
+    /// @dev The recurring window is Friday 17:00 New York time through Sunday 16:59:59 New York time, following the
+    ///      US daylight-saving transition. An admin-configured override freezes its entire UTC day. Unlike FAD, the
+    ///      frozen regime does not include the pre-override runway.
     /// @return True during the recurring oracle closure or an override day.
     function isOracleFrozen() public view returns (bool) {
         (, bool oracleFrozen) = _marketStatus();
@@ -941,12 +942,15 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     function _marketStatus() internal view returns (bool fadWindow, bool oracleFrozen) {
+        if (address(planner) == address(0)) {
+            return (false, false);
+        }
         uint256 timestamp = block.timestamp;
         uint256 today = timestamp / 86_400;
-        (fadWindow, oracleFrozen) = MarketCalendarLib.marketStatus(timestamp, fadDayOverrides[today]);
-        if (!fadWindow && fadRunwaySeconds > 0 && fadDayOverrides[today + 1]) {
-            fadWindow = MarketCalendarLib.isFadRunway(timestamp, fadRunwaySeconds);
-        }
+        return
+            planner.marketCalendarStatus(
+                timestamp, fadDayOverrides[today], fadDayOverrides[today + 1], fadRunwaySeconds
+            );
     }
 
     /// @notice Returns the canonical current position tuple for an account.
