@@ -577,6 +577,14 @@ contract TimelockPauseTest is BasePerpTest {
         routerAdmin.proposeRouterConfig(config);
     }
 
+    function test_OrderRouter_InvalidBasketConfidenceRatio_Reverts() public {
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.basketMaxConfidenceRatioBps = 10_001;
+
+        vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__InvalidConfidenceRatio.selector);
+        routerAdmin.proposeRouterConfig(config);
+    }
+
     function test_OrderRouter_InvalidMaxOrderAge_Reverts() public {
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         config.maxOrderAge = 0;

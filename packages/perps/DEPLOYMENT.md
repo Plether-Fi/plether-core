@@ -92,7 +92,7 @@ The next Arbitrum Sepolia perps deployment uses these initial defaults:
 | `protocolShareBps` | `0` (protocol liquidation fee disabled; remaining 50% goes to LPs) |
 | `executionFeeBps` | `4` |
 | `fadRunwaySeconds` | `1 hours` |
-| `pythMaxConfidenceRatioBps` | `10` |
+| `basketMaxConfidenceRatioBps` | `10` |
 | `adverseConfidenceMultiplierBps` | `2_000` |
 | `maxSeniorExposureUsdc` | Operator-supplied finite USDC amount |
 | `maxSeniorShareBps` | Operator-supplied value below `10_000` |
@@ -103,13 +103,21 @@ The next Arbitrum Sepolia perps deployment uses these initial defaults:
 
 Adding `protocolShareBps` makes `RiskParams` a ten-field struct and changes its storage layout and tuple ABI. Deploy the engine, admin, router, and lenses from the same build on a fresh testnet deployment; do not mix these contracts with an older eight- or nine-field `riskParams()` deployment.
 
-`pythMaxConfidenceRatioBps = 10` rejects a component feed when Pyth's reported confidence interval exceeds
-`0.10%` of that component's price. Pyth confidence is an uncertainty band, so larger values mean less precise
-prices.
+`basketMaxConfidenceRatioBps = 10` accepts the neutral, pre-cap basket only when its weighted aggregate Pyth
+confidence is at most `0.10%` of its price:
+
+```text
+basketConfidence * 10_000 <= basketPrice * basketMaxConfidenceRatioBps
+```
+
+Each component contributes its normalized basket value multiplied by its raw confidence-to-price ratio, with
+the contribution floored before summation. Equality passes. There is no separate per-component confidence
+ceiling, so a wide low-weight feed can remain usable when its weighted uncertainty keeps the full basket within
+the configured limit. Positive-price, staleness, and component publish-time-divergence checks remain per feed.
 
 `adverseConfidenceMultiplierBps = 2_000` applies `0.2x` of Pyth's confidence interval when shifting live/FAD
 order execution and all liquidation prices in the adverse direction. Oracle-frozen voluntary closes bypass the
-shift and use `frozenCloseSpreadBps` instead; confidence-width validation remains active.
+shift and use `frozenCloseSpreadBps` instead; aggregate basket confidence-width validation remains active.
 
 ### FX Market Calendar
 

@@ -66,14 +66,14 @@ interface IPletherOracle {
     /// @notice Complete mutable oracle-policy configuration.
     /// @param orderExecutionStalenessLimit Maximum live order-execution and mark-refresh component age, in seconds.
     /// @param liquidationStalenessLimit Maximum live liquidation component age, in seconds.
-    /// @param pythMaxConfidenceRatioBps Maximum accepted per-feed confidence-to-price ratio, in basis points.
+    /// @param basketMaxConfidenceRatioBps Maximum accepted aggregate basket confidence-to-price ratio, in basis points.
     /// @param orderSettlementWindow Post-commit window for a unique historical execution tick, in seconds.
     /// @param maxComponentPublishTimeDivergence Maximum component-time divergence for a historical basket, in seconds.
     /// @param adverseConfidenceMultiplierBps Basis-point multiplier applied to aggregate confidence for adverse pricing.
     struct OracleConfig {
         uint256 orderExecutionStalenessLimit;
         uint256 liquidationStalenessLimit;
-        uint256 pythMaxConfidenceRatioBps;
+        uint256 basketMaxConfidenceRatioBps;
         uint256 orderSettlementWindow;
         uint256 maxComponentPublishTimeDivergence;
         uint256 adverseConfidenceMultiplierBps;
@@ -157,12 +157,14 @@ interface IPletherOracle {
     /// @param feedId Failing Pyth feed id, or zero for an internal normalization failure.
     /// @param price Raw signed Pyth price.
     error PletherOracle__InvalidPrice(bytes32 feedId, int64 price);
-    /// @notice Thrown when a component confidence-to-price ratio exceeds its configured limit.
-    /// @param feedId Failing Pyth feed id.
-    /// @param confidence Raw unsigned Pyth confidence interval.
-    /// @param price Raw signed Pyth price.
-    /// @param maxConfidenceBps Maximum permitted confidence ratio in basis points.
-    error PletherOracle__ConfidenceTooWide(bytes32 feedId, uint64 confidence, int64 price, uint256 maxConfidenceBps);
+    /// @notice Thrown when the aggregate basket confidence-to-price ratio exceeds its configured limit.
+    /// @param mode Action policy under which validation failed.
+    /// @param basketConfidence Aggregate weighted confidence in 8-decimal basket-price units.
+    /// @param basketPrice Aggregate weighted basket price in 8-decimal units.
+    /// @param maxConfidenceBps Maximum permitted basket confidence ratio in basis points.
+    error PletherOracle__BasketConfidenceTooWide(
+        PriceMode mode, uint256 basketConfidence, uint256 basketPrice, uint256 maxConfidenceBps
+    );
     /// @notice Thrown when basket component publish times are too far apart.
     /// @param mode Action policy under which validation failed.
     /// @param minPublishTime Earliest component publish time.
@@ -334,9 +336,9 @@ interface IPletherOracle {
     /// @return Configured live maximum liquidation component age in seconds.
     function liquidationStalenessLimit() external view returns (uint256);
 
-    /// @notice Returns the max accepted Pyth confidence ratio in basis points.
-    /// @return Maximum confidence-to-price ratio in basis points.
-    function pythMaxConfidenceRatioBps() external view returns (uint256);
+    /// @notice Returns the max accepted aggregate basket confidence ratio in basis points.
+    /// @return Maximum basket confidence-to-price ratio in basis points.
+    function basketMaxConfidenceRatioBps() external view returns (uint256);
 
     /// @notice Returns the post-commit settlement window for historical order execution.
     /// @return Historical execution window in seconds.

@@ -13,7 +13,7 @@ import {DecimalConstants} from "@plether/shared/libraries/DecimalConstants.sol";
 /// @title PletherOracle
 /// @notice Builds the Plether perps basket from Pyth feeds under action-specific freshness and execution policies.
 /// @dev Basket prices and confidence amounts use 8 decimals. This contract pays for submitted Pyth updates, validates
-///      feed price/confidence/freshness and component timing, applies side-adverse confidence shifts where required,
+///      feed prices/freshness, aggregate confidence, and component timing; applies side-adverse confidence shifts,
 ///      and caps returned prices at the engine's `CAP_PRICE`. Feed ids, weights, bases, inversion flags, the engine,
 ///      the HousePool, and Pyth endpoint cannot be changed after deployment; policy limits can be changed only by the
 ///      engine-reported order router. State-changing execution should consume the snapshot returned by the applicable
@@ -64,8 +64,8 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
     ///      instead uses the engine's `fadMaxStaleness` for age validation.
     uint256 public override liquidationStalenessLimit = 15;
 
-    /// @notice Maximum accepted per-feed confidence-to-price ratio, in basis points.
-    uint256 public override pythMaxConfidenceRatioBps = 10;
+    /// @notice Maximum accepted aggregate basket confidence-to-price ratio, in basis points.
+    uint256 public override basketMaxConfidenceRatioBps = 10;
 
     /// @notice Post-commit window searched for a unique historical order-execution tick, in seconds.
     uint256 public override orderSettlementWindow = 15;
@@ -276,9 +276,10 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
     }
 
     /// @notice Returns the validated current basket snapshot for a policy mode without updating Pyth.
-    /// @dev Reads Pyth's unsafe current prices, then enforces per-component age, confidence width, component publish-time
-    ///      divergence, and ordering against the engine's last mark time. Price and mark price are neutral basket values
-    ///      capped at `CAP_PRICE`; `updateFee` is zero. This view may revert when current feed state is invalid or stale.
+    /// @dev Reads Pyth's unsafe current prices, then enforces per-component age, aggregate basket confidence width,
+    ///      component publish-time divergence, and ordering against the engine's last mark time. Price and mark price are
+    ///      neutral basket values capped at `CAP_PRICE`; `updateFee` is zero. This view may revert when current feed state
+    ///      is invalid or stale.
     /// @param mode Policy selecting freshness and component-divergence limits
     /// @return snapshot Current 8-decimal price/mark, earliest publish time, zero fee, and policy metadata
     function getLatestPrice(
@@ -345,7 +346,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         }
         orderExecutionStalenessLimit = config.orderExecutionStalenessLimit;
         liquidationStalenessLimit = config.liquidationStalenessLimit;
-        pythMaxConfidenceRatioBps = config.pythMaxConfidenceRatioBps;
+        basketMaxConfidenceRatioBps = config.basketMaxConfidenceRatioBps;
         orderSettlementWindow = config.orderSettlementWindow;
         maxComponentPublishTimeDivergence = config.maxComponentPublishTimeDivergence;
         adverseConfidenceMultiplierBps = config.adverseConfidenceMultiplierBps;
@@ -568,10 +569,6 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
             if (p.price <= 0) {
                 revert PletherOracle__InvalidPrice(feedId, p.price);
             }
-            if (uint256(uint64(p.conf)) * 10_000 > uint256(uint64(p.price)) * pythMaxConfidenceRatioBps) {
-                revert PletherOracle__ConfidenceTooWide(feedId, p.conf, p.price, pythMaxConfidenceRatioBps);
-            }
-
             uint256 norm = inversions[i] ? _invertPythPrice(p.price, p.expo) : _normalizePythPrice(p.price, p.expo);
             uint256 weightedPrice = (norm * quantities[i]) / (basePrices[i] * DecimalConstants.CHAINLINK_TO_TOKEN_SCALE);
             basket.price += weightedPrice;
@@ -591,6 +588,11 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
 
         if (basket.price == 0) {
             revert PletherOracle__ZeroBasketPrice();
+        }
+        if (basket.confidence * 10_000 > basket.price * basketMaxConfidenceRatioBps) {
+            revert PletherOracle__BasketConfidenceTooWide(
+                mode, basket.confidence, basket.price, basketMaxConfidenceRatioBps
+            );
         }
         basket.publishTime = uint64(minPublishTime);
     }
@@ -637,7 +639,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         bool oracleFrozen
     ) internal view returns (uint256) {
         // The fixed frozen-close spread replaces the Pyth adverse-confidence shift for voluntary
-        // close/reduce execution while the oracle is frozen. Confidence-width validation still
+        // close/reduce execution while the oracle is frozen. Basket confidence-width validation still
         // applies when the basket is built, and opens (if called directly) retain the adverse shift.
         if (oracleFrozen && request.isClose) {
             return price;
