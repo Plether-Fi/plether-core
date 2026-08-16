@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="430" viewBox="0 0 1200 430" role="img" aria-labelledby="title desc">
+<title id="title">Historical cohort replay summary</title>
+<desc id="desc">Ending LP equity, conservatively realized carry, and cap-sensitive reserve utilization in the stylized ECB replay.</desc>
+<style>
+text{font-family:'Times New Roman',Times,serif;fill:#111111}
+.axis{stroke:#444444;stroke-width:1}
+.grid{stroke:#dddddd;stroke-width:1}
+.label{font-size:12px}
+.small{font-size:10px;fill:#555555}
+.title{font-size:18px;font-weight:700}
+</style>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="50" y="30" class="title">Stylized historical replay: capital, carry, and cap sensitivity</text>
+<text x="55" y="58" class="label" font-weight="700">Ending LP economic equity ($m)</text>
+<line x1="55" y1="323.00" x2="375" y2="323.00" class="grid"/>
+<text x="48" y="327.00" text-anchor="end" class="small">0</text>
+<line x1="55" y1="261.75" x2="375" y2="261.75" class="grid"/>
+<text x="48" y="265.75" text-anchor="end" class="small">31</text>
+<line x1="55" y1="200.50" x2="375" y2="200.50" class="grid"/>
+<text x="48" y="204.50" text-anchor="end" class="small">62</text>
+<line x1="55" y1="139.25" x2="375" y2="139.25" class="grid"/>
+<text x="48" y="143.25" text-anchor="end" class="small">94</text>
+<line x1="55" y1="78.00" x2="375" y2="78.00" class="grid"/>
+<text x="48" y="82.00" text-anchor="end" class="small">125</text>
+<line x1="55" y1="127.00" x2="375" y2="127.00" stroke="#666666" stroke-width="1.2" stroke-dasharray="5 4"/>
+<rect x="80.60" y="120.15" width="55.47" height="202.85" fill="#333333" stroke="#222222" stroke-width="0.5"/>
+<text x="108.33" y="113.15" text-anchor="middle" class="small">103.5</text>
+<text x="108.33" y="341" text-anchor="middle" class="small">Balanced</text>
+<rect x="187.27" y="127.36" width="55.47" height="195.64" fill="#777777" stroke="#222222" stroke-width="0.5"/>
+<text x="215.00" y="120.36" text-anchor="middle" class="small">99.8</text>
+<text x="215.00" y="341" text-anchor="middle" class="small">Momentum 80/20</text>
+<rect x="293.93" y="128.58" width="55.47" height="194.42" fill="#B0B0B0" stroke="#222222" stroke-width="0.5"/>
+<text x="321.67" y="121.58" text-anchor="middle" class="small">99.2</text>
+<text x="321.67" y="341" text-anchor="middle" class="small">Momentum 100/0</text>
+<text x="430" y="58" class="label" font-weight="700">Conservatively realized carry ($m)</text>
+<line x1="430" y1="323.00" x2="750" y2="323.00" class="grid"/>
+<text x="423" y="327.00" text-anchor="end" class="small">0</text>
+<line x1="430" y1="261.75" x2="750" y2="261.75" class="grid"/>
+<text x="423" y="265.75" text-anchor="end" class="small">6</text>
+<line x1="430" y1="200.50" x2="750" y2="200.50" class="grid"/>
+<text x="423" y="204.50" text-anchor="end" class="small">12</text>
+<line x1="430" y1="139.25" x2="750" y2="139.25" class="grid"/>
+<text x="423" y="143.25" text-anchor="end" class="small">19</text>
+<line x1="430" y1="78.00" x2="750" y2="78.00" class="grid"/>
+<text x="423" y="82.00" text-anchor="end" class="small">25</text>
+<rect x="455.60" y="249.20" width="55.47" height="73.80" fill="#333333" stroke="#222222" stroke-width="0.5"/>
+<text x="483.33" y="242.20" text-anchor="middle" class="small">7.5</text>
+<text x="483.33" y="341" text-anchor="middle" class="small">Balanced</text>
+<rect x="562.27" y="244.01" width="55.47" height="78.99" fill="#777777" stroke="#222222" stroke-width="0.5"/>
+<text x="590.00" y="237.01" text-anchor="middle" class="small">8.1</text>
+<text x="590.00" y="341" text-anchor="middle" class="small">Momentum 80/20</text>
+<rect x="668.93" y="270.87" width="55.47" height="52.13" fill="#B0B0B0" stroke="#222222" stroke-width="0.5"/>
+<text x="696.67" y="263.87" text-anchor="middle" class="small">5.3</text>
+<text x="696.67" y="341" text-anchor="middle" class="small">Momentum 100/0</text>
+<text x="805" y="58" class="label" font-weight="700">Time-weighted endpoint reserve utilization</text>
+<line x1="805" y1="323.00" x2="1125" y2="323.00" class="grid"/>
+<text x="798" y="327.00" text-anchor="end" class="small">0%</text>
+<line x1="805" y1="261.75" x2="1125" y2="261.75" class="grid"/>
+<text x="798" y="265.75" text-anchor="end" class="small">15%</text>
+<line x1="805" y1="200.50" x2="1125" y2="200.50" class="grid"/>
+<text x="798" y="204.50" text-anchor="end" class="small">30%</text>
+<line x1="805" y1="139.25" x2="1125" y2="139.25" class="grid"/>
+<text x="798" y="143.25" text-anchor="end" class="small">45%</text>
+<line x1="805" y1="78.00" x2="1125" y2="78.00" class="grid"/>
+<text x="798" y="82.00" text-anchor="end" class="small">60%</text>
+<circle cx="805.00" cy="243.67" r="4" fill="#111111"/>
+<text x="805.00" y="235.67" text-anchor="middle" class="small">19.4%</text>
+<text x="805.00" y="341" text-anchor="middle" class="small">C=1.25</text>
+<circle cx="850.71" cy="228.53" r="4" fill="#111111"/>
+<text x="850.71" y="220.53" text-anchor="middle" class="small">23.1%</text>
+<text x="850.71" y="341" text-anchor="middle" class="small">C=1.5</text>
+<circle cx="942.14" cy="196.61" r="4" fill="#111111"/>
+<text x="942.14" y="188.61" text-anchor="middle" class="small">31.0%</text>
+<text x="942.14" y="341" text-anchor="middle" class="small">C=2</text>
+<circle cx="1033.57" cy="171.25" r="4" fill="#111111"/>
+<text x="1033.57" y="163.25" text-anchor="middle" class="small">37.2%</text>
+<text x="1033.57" y="341" text-anchor="middle" class="small">C=2.5</text>
+<circle cx="1125.00" cy="156.60" r="4" fill="#111111"/>
+<text x="1125.00" y="148.60" text-anchor="middle" class="small">40.8%</text>
+<text x="1125.00" y="341" text-anchor="middle" class="small">C=3</text>
+<polyline points="805.00,243.67 850.71,228.53 942.14,196.61 1033.57,171.25 1125.00,156.60" fill="none" stroke="#111111" stroke-width="2"/>
+<text x="55" y="394" class="small">Monthly 63-day cohorts; $100m initial pool; 1.5% initial / 1% maintenance margin; 5% full-utilization carry; ECB daily fixes.</text>
+<text x="55" y="412" class="small">Scenario evidence only: VPI, Pyth confidence, frozen execution, intraday paths, and keeper latency are held outside the replay.</text>
+</svg>

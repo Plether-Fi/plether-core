@@ -155,7 +155,9 @@ contract AuditHousePoolViewFindingsFailing_ProjectedLegacySpreadViews is BasePer
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -191,7 +193,9 @@ contract AuditHousePoolViewFindingsFailing_WithdrawalCapLiveness is BasePerpTest
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 

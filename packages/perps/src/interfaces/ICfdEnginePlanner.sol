@@ -10,6 +10,21 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 ///      8 decimals, position sizes use 18 decimals, and timestamps are Unix seconds.
 interface ICfdEnginePlanner {
 
+    /// @notice Classifies the recurring and governance-override market-calendar regimes.
+    /// @dev The recurring schedule follows the 17:00 New York FX boundary and its US daylight-saving transitions.
+    /// @param timestamp Unix timestamp to classify
+    /// @param todayOverride Whether the current UTC day is an all-day FAD and frozen-oracle override
+    /// @param tomorrowOverride Whether the following UTC day is an all-day override
+    /// @param fadRunwaySeconds FAD look-ahead interval before an overridden following day
+    /// @return fadWindow Whether FAD controls are active
+    /// @return oracleFrozen Whether frozen-oracle policy is active
+    function marketCalendarStatus(
+        uint256 timestamp,
+        bool todayOverride,
+        bool tomorrowOverride,
+        uint256 fadRunwaySeconds
+    ) external pure returns (bool fadWindow, bool oracleFrozen);
+
     /// @notice Applies a signed margin change to post-carry margin and reports whether it drains the position.
     /// @dev Exact depletion returns `(false, 0)`; only a mathematically negative result reports `drained`.
     ///      Meaningful inputs require `marginAfterCarry <= type(int256).max`; larger values reinterpret as negative on

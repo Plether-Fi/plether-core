@@ -125,6 +125,8 @@ Start with the package that owns the product:
 - [Options module](packages/options/README.md)
 - [Perps protocol](packages/perps/README.md)
 - [Perps accounting specification](packages/perps/ACCOUNTING_SPEC.md)
+- [Perps bounded-credit white paper](packages/perps/WHITEPAPER.md)
+- [Perps bounded-credit white paper (PDF)](output/pdf/plether-perps-bounded-credit-whitepaper.pdf)
 - [Integration and fork tests](test/README.md)
 
 Generate NatSpec documentation for a package with:

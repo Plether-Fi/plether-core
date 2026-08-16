@@ -15,6 +15,7 @@ import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {ICfdEngine} from "@plether/perps/interfaces/ICfdEngine.sol";
+import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IPyth, PythStructs} from "@plether/shared/interfaces/IPyth.sol";
 import "forge-std/Test.sol";
 
@@ -135,7 +136,9 @@ contract GasProfileTest is Test {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 5e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
 
         clearinghouse = new MarginClearinghouse(usdc);
@@ -170,7 +173,17 @@ contract GasProfileTest is Test {
 
         uint256 t0 = block.timestamp;
         clearinghouse.setEngine(address(engine));
+        IHousePool.PoolConfig memory poolConfig = IHousePool.PoolConfig({
+            seniorRateBps: pool.seniorRateBps(),
+            markStalenessLimit: pool.markStalenessLimit(),
+            seniorFrozenLpFeeBps: pool.seniorFrozenLpFeeBps(),
+            juniorFrozenLpFeeBps: pool.juniorFrozenLpFeeBps(),
+            maxSeniorExposureUsdc: type(uint256).max - 1,
+            maxSeniorShareBps: 9999
+        });
+        pool.proposePoolConfig(poolConfig);
         vm.warp(t0 + 144 hours + 3);
+        pool.finalizePoolConfig();
 
         uint256 seedAmount = 1000e6;
         _mintUsdc(address(this), seedAmount * 2);

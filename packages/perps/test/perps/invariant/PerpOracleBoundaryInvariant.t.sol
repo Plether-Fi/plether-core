@@ -38,7 +38,15 @@ contract PerpOracleBoundaryInvariantTest is BasePerpInvariantTest {
         );
     }
 
-    function invariant_FadWindowMatchesMaintenanceMarginMode() public view {
+    function invariant_FadWindowMatchesBoundaryFormula() public view {
+        assertEq(
+            engine.isFadWindow(),
+            _expectedFadWindow(block.timestamp),
+            "FAD flag must match boundary and override formula"
+        );
+    }
+
+    function invariant_MaintenanceMarginMatchesFadWindow() public view {
         uint256 price = 1e8;
         uint256 size = 10_000e18;
         uint256 maint = _maintenanceMarginUsdc(size, price);
@@ -88,17 +96,84 @@ contract PerpOracleBoundaryInvariantTest is BasePerpInvariantTest {
         uint256 timestamp
     ) internal view returns (bool) {
         uint256 dayOfWeek = ((timestamp / 86_400) + 4) % 7;
-        uint256 hourOfDay = (timestamp % 86_400) / 3600;
-        if (dayOfWeek == 5 && hourOfDay >= 22) {
+        uint256 secondOfDay = timestamp % 86_400;
+        uint256 marketBoundary = _expectedMarketBoundary(timestamp, dayOfWeek);
+        if (dayOfWeek == 5 && secondOfDay >= marketBoundary) {
             return true;
         }
         if (dayOfWeek == 6) {
             return true;
         }
-        if (dayOfWeek == 0 && hourOfDay < 21) {
+        if (dayOfWeek == 0 && secondOfDay < marketBoundary) {
             return true;
         }
         return engine.fadDayOverrides(timestamp / 86_400);
+    }
+
+    function _expectedFadWindow(
+        uint256 timestamp
+    ) internal view returns (bool) {
+        uint256 dayIndex = timestamp / 86_400;
+        uint256 dayOfWeek = (dayIndex + 4) % 7;
+        uint256 secondOfDay = timestamp % 86_400;
+        uint256 marketBoundary = _expectedMarketBoundary(timestamp, dayOfWeek);
+        if (dayOfWeek == 5 && secondOfDay >= marketBoundary - 30 minutes) {
+            return true;
+        }
+        if (dayOfWeek == 6) {
+            return true;
+        }
+        if (dayOfWeek == 0 && secondOfDay < marketBoundary + 15 minutes) {
+            return true;
+        }
+        if (engine.fadDayOverrides(dayIndex)) {
+            return true;
+        }
+
+        uint256 runway = engine.fadRunwaySeconds();
+        uint256 secondsUntilTomorrow = 86_400 - secondOfDay;
+        return runway > 0 && secondsUntilTomorrow <= runway && engine.fadDayOverrides(dayIndex + 1);
+    }
+
+    function _expectedMarketBoundary(
+        uint256 timestamp,
+        uint256 dayOfWeek
+    ) internal pure returns (uint256) {
+        return _expectedNewYorkDst(timestamp, dayOfWeek) ? 21 hours : 22 hours;
+    }
+
+    function _expectedNewYorkDst(
+        uint256 timestamp,
+        uint256 dayOfWeek
+    ) internal pure returns (bool) {
+        (uint256 month, uint256 dayOfMonth) = _monthAndDay(timestamp / 86_400);
+        if (month > 3 && month < 11) {
+            return true;
+        }
+        if (month < 3 || month > 11) {
+            return false;
+        }
+
+        uint256 firstDayOfMonth = (dayOfWeek + 7 - ((dayOfMonth - 1) % 7)) % 7;
+        uint256 firstSunday = firstDayOfMonth == 0 ? 1 : 8 - firstDayOfMonth;
+        if (month == 3) {
+            uint256 secondSunday = firstSunday + 7;
+            return dayOfMonth > secondSunday || (dayOfMonth == secondSunday && timestamp % 86_400 >= 7 hours);
+        }
+        return dayOfMonth < firstSunday || (dayOfMonth == firstSunday && timestamp % 86_400 < 6 hours);
+    }
+
+    function _monthAndDay(
+        uint256 daysSinceEpoch
+    ) internal pure returns (uint256 month, uint256 dayOfMonth) {
+        uint256 shiftedDays = daysSinceEpoch + 719_468;
+        uint256 era = shiftedDays / 146_097;
+        uint256 dayOfEra = shiftedDays - era * 146_097;
+        uint256 yearOfEra = (dayOfEra - dayOfEra / 1460 + dayOfEra / 36_524 - dayOfEra / 146_096) / 365;
+        uint256 dayOfYear = dayOfEra - (365 * yearOfEra + yearOfEra / 4 - yearOfEra / 100);
+        uint256 monthPrime = (5 * dayOfYear + 2) / 153;
+        dayOfMonth = dayOfYear - (153 * monthPrime + 2) / 5 + 1;
+        month = monthPrime < 10 ? monthPrime + 3 : monthPrime - 9;
     }
 
 }

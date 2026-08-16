@@ -42,7 +42,9 @@ contract AuditC01_HwmInflation is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 5e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -229,7 +231,7 @@ contract AuditC04_StaleOracleMtmBypass is BasePerpTest {
         uint256 seniorBeforeStale = pool.seniorPrincipal();
         uint256 reconcileBeforeStale = pool.lastReconcileTime();
 
-        // Make mark stale (warp 2 days to Friday 06:00, before FAD window starts at 19:00)
+        // Make the mark stale while remaining before Friday's New York-time FAD shoulder.
         _warpForward(2 days);
 
         vm.prank(address(juniorVault));
@@ -276,7 +278,9 @@ contract AuditC05_ImpairedDeposit is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 5e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 

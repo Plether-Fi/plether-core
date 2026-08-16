@@ -63,22 +63,40 @@ contract PerpOracleHandler is Test {
     function warpToOracleBoundary(
         uint256 modeFuzz
     ) external {
-        uint256 mode = modeFuzz % 7;
+        uint256 mode = modeFuzz % 16;
         uint256 target;
         if (mode == 0) {
-            target = 1_709_607_599; // Fri 20:59:59 UTC
+            target = 1_772_832_599; // Spring Friday 21:29:59 UTC: before standard-time FAD
         } else if (mode == 1) {
-            target = 1_709_611_199; // Fri 21:59:59 UTC
+            target = 1_772_832_600; // Spring Friday 21:30:00 UTC: standard-time FAD starts
         } else if (mode == 2) {
-            target = 1_709_611_200; // Fri 22:00:00 UTC
+            target = 1_772_834_399; // Spring Friday 21:59:59 UTC: before standard-time freeze
         } else if (mode == 3) {
-            target = 1_709_697_599; // Sat 21:59:59 UTC
+            target = 1_772_834_400; // Spring Friday 22:00:00 UTC: standard-time freeze starts
         } else if (mode == 4) {
-            target = 1_709_694_000; // Sun 21:00:00 UTC
+            target = 1_773_003_599; // Spring Sunday 20:59:59 UTC: daylight-time freeze active
         } else if (mode == 5) {
-            target = 1_709_697_599; // Sun 21:59:59 UTC
+            target = 1_773_003_600; // Spring Sunday 21:00:00 UTC: daylight-time freeze ends
+        } else if (mode == 6) {
+            target = 1_773_004_499; // Spring Sunday 21:14:59 UTC: FAD shoulder active
+        } else if (mode == 7) {
+            target = 1_773_004_500; // Spring Sunday 21:15:00 UTC: FAD shoulder ends
+        } else if (mode == 8) {
+            target = 1_793_392_199; // Fall Friday 20:29:59 UTC: before daylight-time FAD
+        } else if (mode == 9) {
+            target = 1_793_392_200; // Fall Friday 20:30:00 UTC: daylight-time FAD starts
+        } else if (mode == 10) {
+            target = 1_793_393_999; // Fall Friday 20:59:59 UTC: before daylight-time freeze
+        } else if (mode == 11) {
+            target = 1_793_394_000; // Fall Friday 21:00:00 UTC: daylight-time freeze starts
+        } else if (mode == 12) {
+            target = 1_793_570_399; // Fall Sunday 21:59:59 UTC: standard-time freeze active
+        } else if (mode == 13) {
+            target = 1_793_570_400; // Fall Sunday 22:00:00 UTC: standard-time freeze ends
+        } else if (mode == 14) {
+            target = 1_793_571_299; // Fall Sunday 22:14:59 UTC: FAD shoulder active
         } else {
-            target = 1_709_701_200; // Sun 23:00:00 UTC
+            target = 1_793_571_300; // Fall Sunday 22:15:00 UTC: FAD shoulder ends
         }
         vm.warp(target);
     }

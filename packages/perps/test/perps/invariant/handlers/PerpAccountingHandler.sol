@@ -691,11 +691,8 @@ contract PerpAccountingHandler is Test {
         }
 
         uint256 age = block.timestamp > lastMarkTime ? block.timestamp - lastMarkTime : 0;
-        uint256 maxStaleness = engine.isOracleFrozen() || engine.isFadWindow()
-            ? router.liquidationStalenessLimit() > engine.fadMaxStaleness()
-                ? router.liquidationStalenessLimit()
-                : engine.fadMaxStaleness()
-            : router.orderExecutionStalenessLimit();
+        uint256 maxStaleness =
+            engine.isOracleFrozen() ? engine.fadMaxStaleness() : router.orderExecutionStalenessLimit();
         return age <= maxStaleness;
     }
 

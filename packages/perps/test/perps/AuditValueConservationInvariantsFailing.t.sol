@@ -21,7 +21,9 @@ contract AuditValueConservationInvariant_FullCloseBounty is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -74,7 +76,9 @@ contract AuditValueConservationInvariant_MtmDepositPricing is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -112,7 +116,9 @@ contract AuditValueConservationInvariant_CarryTiming is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 

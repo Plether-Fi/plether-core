@@ -6,7 +6,15 @@ This package depends only on `shared` and third-party libraries. Build it indepe
 `forge build --root packages/perps` and test it with `forge test --root packages/perps`. Its package-owned tests live under
 `packages/perps/test/perps/`.
 
-Traders post USDC margin, submit delayed orders through `OrderRouter`, and take `BULL` or `BEAR` exposure against a tranched USDC `HousePool`. LP capital sits behind senior and junior tranche vaults. The system is designed so worst-case trader liability is bounded at entry because the market price is capped:
+For the formal market-design argument, common-mark liability theorem and
+counterexample, empirical FX-basket analysis, and reproducible reference model,
+read [`WHITEPAPER.md`](WHITEPAPER.md) or the
+[publication PDF](../../output/pdf/plether-perps-bounded-credit-whitepaper.pdf).
+
+Traders post USDC margin, submit delayed orders through `OrderRouter`, and take
+Long or Short exposure against a tranched USDC `HousePool`. LP capital sits
+behind senior and junior tranche vaults. The system is designed so worst-case
+trader liability is bounded at entry because the market price is capped:
 
 ```text
 0 <= markPrice <= CAP_PRICE
@@ -20,8 +28,8 @@ If you want the accounting model first, read [`ACCOUNTING_SPEC.md`](ACCOUNTING_S
 
 - There is one bounded directional market.
 - The mark is the Plether basket price, not a raw DXY index print.
-- `BEAR` profits when the basket price rises.
-- `BULL` profits when the basket price falls.
+- Long profits when the basket price rises.
+- Short profits when the basket price falls.
 - Payouts are bounded because the mark is clamped to `CAP_PRICE`.
 
 ### Who does what
@@ -63,10 +71,14 @@ In practice, the compact public API is:
   - `OrderRouter.executeOrderBatch(uint64,bytes[])`
   - `OrderRouter.executeLiquidation(address,bytes[])`
 - LPs:
-  - `HousePool.depositSenior(uint256)` / `HousePool.withdrawSenior(uint256,address)`
-  - `HousePool.depositJunior(uint256)` / `HousePool.withdrawJunior(uint256,address)`
+  - the configured senior or junior `TrancheVault`: `deposit`, `mint`, `requestDeposit`, `cancelPendingDeposit`,
+    `claimDepositShares`, `withdraw`, and `redeem`
+  - permissionless delayed-batch processing: `TrancheVault.finalizeDepositEpoch(uint256)`
 - Readers:
   - `PerpsPublicLens`
+  - the read-only `IHousePool` capacity getters exposed by `HousePool`:
+    `getSeniorDepositCapacity()`, `reservedSeniorDepositAssetsUsdc()`, and
+    `areSeniorDepositReservationsWithinLimits()`
   - `CfdEngineLens.previewOpen(...)` / `previewClose(...)` for trade-ticket simulations using caller-supplied oracle prices
 
 The simplified public interfaces live in `packages/perps/src/interfaces/`:
@@ -75,13 +87,17 @@ The simplified public interfaces live in `packages/perps/src/interfaces/`:
 - `IPerpsTraderActions.sol`
 - `IPerpsTraderViews.sol`
 - `ICfdEngineLens.sol` for `previewOpen(...)` / `previewClose(...)` trade-ticket previews
-- `IPerpsLPActions.sol`
+- `IPerpsLPActions.sol` for configured-vault-to-pool integration hooks, not direct LP calls
 - `IPerpsLPViews.sol`
 - `IPerpsKeeper.sol`
 - `IProtocolViews.sol`
 - `PerpsViewTypes.sol`
 
 The wider engine, clearinghouse, router, and house-pool interfaces still exist for tests, admin tooling, and deep accounting inspection, but they are not the recommended product integration surface.
+The three capacity getters above are the deliberate direct-read exception. The tranche-mutation hooks declared by
+`IHousePool` / `IPerpsLPActions`, including senior deposit reservation, release, and reserved finalization, are
+integration plumbing authorized only to the configured tranche vaults; LP applications must perform actions through
+the relevant `TrancheVault`.
 
 ### Trade-ticket previews
 
@@ -96,7 +112,7 @@ Preview units match the rest of perps:
 
 `executionPrice` is clamped to `CAP_PRICE`. `valid`, `invalidReason`, and `failureCategory` are authoritative for whether the order would pass planner validation. For invalid previews, numeric economics or post-trade fields may be zero or partial depending on where planning stopped.
 
-For valid previews, `postSize`, `postMarginUsdc`, `postEntryPrice`, `postVpiAccrued`, post-trade health, and liquidation fields are projected from the same planner/accounting logic used by live execution. `hasLiquidationPrice == false` means no liquidation threshold exists inside `[0, CAP_PRICE]`. For BULL positions, `liquidationPrice` is the lowest in-range price that is liquidatable. For BEAR positions, it is the highest in-range price that is liquidatable.
+For valid previews, `postSize`, `postMarginUsdc`, `postEntryPrice`, `postVpiAccrued`, post-trade health, and liquidation fields are projected from the same planner/accounting logic used by live execution. `hasLiquidationPrice == false` means no liquidation threshold exists inside `[0, CAP_PRICE]`. For Long positions, `liquidationPrice` is the highest price in the low-price liquidatable region. For Short positions, it is the lowest price in the high-price liquidatable region.
 
 Close previews expose frozen-market pricing separately from VPI. `frozenSpreadUsdc` is the fixed spread assessed on the reduced notional, `frozenSpreadPaidUsdc` is the portion actually retained or collected for LPs, and `frozenSpreadWaivedUsdc` is the uncollectible portion waived on a terminal full close. These values are zero outside `oracleFrozen`, and a valid preview preserves `frozenSpreadUsdc == frozenSpreadPaidUsdc + frozenSpreadWaivedUsdc`. Successful closes with a nonzero assessment emit `FrozenCloseSpreadSettled(account, assessedUsdc, paidUsdc, waivedUsdc)` from `CfdEngineSettlementSidecar`, so the live result is reconstructible from durable logs.
 
@@ -159,7 +175,11 @@ Order and liquidation bounties are margin transfers inside `MarginClearinghouse`
 
 - Open and close order bounties are reserved from trader margin at commit time.
 - Successful execution credits the keeper's clearinghouse settlement balance from the reservation.
-- Liquidation bounties are capped by liquidation-reachable collateral and credited directly to the keeper.
+- The configured liquidation charge is capped by liquidation-reachable collateral, then allocated using timelocked
+  `keeperShareBps` and `protocolShareBps` values whose sum cannot exceed `10_000`.
+- The rounded-down keeper and protocol shares are credited directly inside `MarginClearinghouse`; the protocol share
+  goes to `protocolTreasury`, while the exact remainder, including division dust, is transferred to `HousePool` as
+  claimant-owned LP revenue.
 
 Protocol fees settle into the treasury clearinghouse account only when they are cash-collected from trader settlement or when remaining free `HousePool` cash can fund a top-up after senior trader claims and immediate trader payouts. The simplified custody model does not create protocol-fee receivables; uncredited fee portions stay in pool backing rather than becoming withdrawable treasury margin.
 
@@ -203,6 +223,34 @@ Operationally:
 - The mark increases additively on deposits, scales proportionally on withdrawals, and resets cleanly after wipeout plus recapitalization.
 - Ordinary deposits into both tranches remain blocked while senior is impaired; recovery capital must arrive through explicit recapitalization or realized pool revenue.
 
+### Senior capacity covenant
+
+Governance configures a finite `maxSeniorExposureUsdc` and a `maxSeniorShareBps` below 100% through the 48-hour
+`HousePool` timelock. Active protected exposure is
+`E = max(projected senior principal, projected senior high-water mark)`. Counted admission exposure is `C = E + R`,
+where `R` is the gross USDC reserved by all pending senior deposits. The absolute and share admission tests use `C`;
+the share test compares it with projected junior principal. Raw pool cash, unassigned assets, and trader balances are
+not junior subordination.
+
+The constructor starts with neutral bootstrap sentinels: unlimited absolute exposure (`type(uint256).max`) and a 100%
+senior share (`10,000` bps). Governance cannot propose those values: a finalized operational configuration must use a
+finite absolute limit and a share limit below `10,000` bps. Either limit may be zero to close senior admission.
+
+- Immediate senior deposits and new pending senior requests may use only the smaller absolute and ratio headrooms.
+- A pending senior request reserves gross-asset headroom. Finalization revalidates the complete reservation book under
+  the then-active limits; if a cap reduction or accounting change makes it invalid, affected owners may cancel after
+  epoch activation and recover their escrowed USDC rather than remain locked.
+- Junior withdrawals preserve the configured senior share using active `E` only, in addition to the ordinary cash and
+  senior-priority withdrawal firewall. Reservations do not lock junior liquidity; a permitted junior withdrawal may
+  instead invalidate the provisional reservation book and unlock refunds.
+- Coupon transfers, waterfall losses, revenue restoration, and privileged claimant recapitalization are not clipped to
+  manufacture compliance. They may create a passive overage, which closes new senior capacity without haircutting or
+  forcibly withdrawing existing senior claims. Recapitalization routed through
+  `recordClaimantInflow(..., Recapitalization, ...)` may therefore restore protected senior claims above a newly
+  reduced cap; it does not mint new senior LP shares.
+- Senior withdrawals and junior deposits can cure an overage. Governance limit reductions are prospective for active
+  senior shares, but unfinalized reservations must either fit the active limits at finalization or be refunded.
+
 ### Reachability domains
 
 - Generic collateral reachability excludes queued committed-order and reserved-settlement buckets.
@@ -211,10 +259,17 @@ Operationally:
 
 ### Bootstrap and withdrawal gates
 
-- Trading does not become live until both tranche seed positions exist and the owner activates trading.
+- Trading does not become live until finite senior limits are finalized, both tranche seed positions exist within
+  those limits, and the owner activates trading.
+- Activation rejects the constructor's neutral senior-limit defaults, requires both permanent seed positions, and
+  requires projected protected senior exposure plus any accepted senior reservations to satisfy both active limits
+  against projected junior principal.
 - Risk-increasing order commits and ordinary tranche deposits stay blocked during the seed lifecycle.
-- `TrancheVault.maxDeposit()` / `maxMint()` return zero while lifecycle, stale-mark, deposit-pause, open-position, senior-impairment, or pending-bootstrap-assignment gates block immediate active-share deposits.
-- `TrancheVault.requestDeposit()` keeps ordinary LP entry available through pending deposit epochs; requests are funded up front, become non-cancellable at their activation epoch, and mint shares only after permissionless epoch finalization fixes the batch price.
+- `TrancheVault.maxDeposit()` / `maxMint()` return zero while lifecycle, stale-mark, deposit-pause, open-position, senior-impairment, pending-bootstrap-assignment, or senior-cap gates block immediate active-share deposits. Senior views report finite residual capacity when entry is open.
+- `TrancheVault.requestDeposit()` keeps ordinary LP entry available through pending deposit epochs; requests are funded
+  up front and reserve senior capacity when applicable. Cancellation is unconditional before the request's epoch
+  activates. At or after epoch activation it is available only when projected senior impairment blocks finalization
+  (for either tranche), or when the senior vault's aggregate reservation book no longer fits the active limits.
 - During `oracleFrozen`, `TrancheVault.maxMint()` returns the finite share cap implied by the active frozen-entry fee rather than the default unbounded ERC4626 value.
 - `TrancheVault.maxWithdraw()` / `maxRedeem()` enforce cooldown plus pool-level withdrawal availability.
 
@@ -257,7 +312,7 @@ Carry behavior:
 - Accrues continuously by wall-clock time.
 - Continues accruing even during stale or frozen oracle windows.
 - Is assessed per position on a stored borrow base, not on a checkpoint-time mark price.
-- Both `BULL` and `BEAR` positions can accrue carry at the same time if both sides have nonzero borrow base.
+- Both Long and Short positions can accrue carry at the same time if both sides have nonzero borrow base.
 - Can be checkpointed into `unsettledCarryUsdc` when a basis-changing settlement credit occurs before physical collection is possible.
 - Is realized before margin, pool-asset, or risk-parameter mutations change the carry base/rate denominator.
 - On deposit, realized carry may be collected from post-deposit settlement in the same transaction.
@@ -288,14 +343,21 @@ LP accounting intentionally refuses to count unrealized trader losses as present
 - Realized losses increase physical pool cash only when settlement actually happens.
 
 This keeps LP withdrawal limits conservative. Incoming deposits are priced from a separate unrealized-MtM-neutral NAV so conservative phantom liabilities cannot become a discount for new shares, while realized pool losses still lower deposit pricing.
-Immediate active-share deposits are only accepted when no trader positions are open. While positions are open, ordinary LP entry moves through pending deposit epochs: the user funds the request up front, waits at least one full epoch, loses cancellation rights once the activation epoch begins, and later receives the batch-priced shares after permissionless finalization. This avoids pricing instantly active new LP shares against an incomplete unrealized-loss model: the engine's O(1) side aggregates can conservatively bound winner liabilities, but they cannot compute exact collateral-capped loser receivables without per-position accounting.
+Immediate active-share deposits are only accepted when no trader positions are open. While positions are open,
+ordinary LP entry moves through pending deposit epochs: the user funds the request up front, waits at least one full
+epoch, and later receives the batch-priced shares after permissionless finalization. Cancellation is unconditional
+before the request's epoch activates. At or after epoch activation it is available when senior impairment blocks
+finalization or, for senior requests, when the aggregate reservation book no longer fits the active governed limits.
+This avoids pricing instantly active new LP shares against an incomplete unrealized-loss model: the engine's O(1) side
+aggregates can conservatively bound winner liabilities, but they cannot compute exact collateral-capped loser
+receivables without per-position accounting.
 
 ### Accounting domains
 
 The perps system intentionally splits accounting into separate kernels:
 
 - `CloseAccountingLib`: realized PnL, signed VPI, execution fee, frozen-close spread, trader settlement, and bad-debt handling for voluntary decreases.
-- `LiquidationAccountingLib`: reachable collateral, keeper bounty, residual payout, and bad debt for forced close.
+- `LiquidationAccountingLib`: reachable collateral, keeper/protocol/LP charge allocation, residual payout, and bad debt for forced close.
 - `SolvencyAccountingLib`: effective assets, bounded max liability, withdrawal reserves, and free pool cash.
 - `OrderReservationAccounting`: clearinghouse-reserved execution bounty accounting and margin-queue bookkeeping.
 - `OrderRouterBase` / `OrderCommitHandler` / `OrderExecutionHandler` / `OrderExecutionSettlement` / `OrderLiquidationHandler` / `OrderBountyAccounting` / `OrderValidation`: shared router state, delayed-order lifecycle handling, terminal execution settlement, liquidation flow, bounty accounting, and preflight validation.
@@ -397,7 +459,8 @@ This is a containment latch, not a pause. The protocol still allows transitions 
 
 - Liquidations are proportional and bounded by actually reachable collateral.
 - Liquidations are designed to avoid price-impact-driven cascades: positions settle against an external bounded oracle mark, not forced selling into an AMM or order book, so one liquidation does not mechanically move the execution price for the next. Large oracle moves can still make many positions independently liquidatable.
-- The keeper bounty is proportional with a floor.
+- The total liquidation charge is proportional with a floor and is allocated using the configured keeper and protocol
+  shares; LPs receive the exact remainder after both rounded-down allocations.
 - Liquidation does not compute a fresh VPI delta, but any negative accrued VPI rebate debt is clawed back before residual/bad-debt planning.
 - Residual trader value is preserved when positive.
 - Same-account trader claim balance is not treated as liquidation-reachable collateral; it is only netted once as terminal settlement bookkeeping.
@@ -407,6 +470,19 @@ This is a containment latch, not a pause. The protocol still allows transitions 
 ### Friday Auto-Deleverage (FAD)
 
 The protocol raises margin requirements around FX market closure windows.
+
+The recurring calendar follows Pyth's 17:00 New York FX close/open and calculates US daylight-saving transitions
+on-chain. FAD provides a 30-minute live-oracle shoulder before Friday's close and a 15-minute live-oracle shoulder
+after Sunday's open:
+
+| Regime | New York time | UTC during daylight time | UTC during standard time |
+|--------|---------------|--------------------------|--------------------------|
+| FAD only, oracle live | Friday 16:30–17:00 | Friday 20:30–21:00 | Friday 21:30–22:00 |
+| FAD and oracle frozen | Friday 17:00–Sunday 17:00 | Friday 21:00–Sunday 21:00 | Friday 22:00–Sunday 22:00 |
+| FAD only, oracle live again | Sunday 17:00–17:15 | Sunday 21:00–21:15 | Sunday 22:00–22:15 |
+
+Friday and Sunday can use different UTC offsets on the weekends when daylight saving starts or ends. Governance
+override days and their optional runway remain keyed to UTC days.
 
 | Window | Margin basis | Max leverage |
 |--------|--------------|--------------|
@@ -421,7 +497,7 @@ The important runtime invariants are:
 
 - each account holds at most one live directional position,
 - side-local cached accounting stays consistent with the live position set and never overstates bounded payoff or margin state,
-- `sides[BULL].totalMargin + sides[BEAR].totalMargin == sum(pos.margin)` across live positions,
+- the sum of Long-side and Short-side `totalMargin` equals `sum(pos.margin)` across live positions,
 - commit-time open preview must not admit orders the router can already classify as commit-time rejectable, and close/liquidation preview math must match live accounting semantics,
 - clearinghouse USDC execution-bounty reservations and admin-custodied ETH refund claims are each conserved across their respective lifecycle transitions.
 
@@ -435,12 +511,16 @@ Timelocked surfaces include:
 - `CfdEngineAdmin.EngineRiskConfig` -> `CfdEngine.riskParams`, `CfdEngine.executionFeeBps`, `CfdEngine.frozenCloseSpreadBps`
 - `CfdEngineAdmin.EngineCalendarConfig` -> `CfdEngine.fadDayOverrides`, `CfdEngine.fadRunwaySeconds`
 - `CfdEngineAdmin.EngineFreshnessConfig` -> `CfdEngine.fadMaxStaleness`, `CfdEngine.engineMarkStalenessLimit`
-- `HousePool.seniorRateBps`
-- `HousePool.markStalenessLimit`
+- `HousePool.PoolConfig` -> one six-field proposal containing `seniorRateBps`, `markStalenessLimit`,
+  `seniorFrozenLpFeeBps`, `juniorFrozenLpFeeBps`, `maxSeniorExposureUsdc`, and `maxSeniorShareBps`
 - `OrderRouterAdmin` -> `OrderRouter.RouterConfig`
 - `OrderRouterAdmin` -> `OrderRouter.OracleConfig` for the configured `PletherOracle` address
 
 Instant controls remain for one-time wiring and fee withdrawal. `OrderRouter` pause/unpause is now owner-gated on `OrderRouterAdmin` rather than the router itself.
+
+Each valid `PoolConfig` proposal supplies all six fields, replaces any earlier pending proposal, and restarts the
+48-hour timelock. Finalization atomically replaces the entire active configuration, so a proposal intended to change
+only one field must repeat the desired active values for the other five.
 
 ### Pause behavior
 
@@ -456,8 +536,10 @@ Instant controls remain for one-time wiring and fee withdrawal. `OrderRouter` pa
 | `initMarginBps` | 150 (1.5%) | Initial margin requirement |
 | `fadMarginBps` | 300 (3%) | FAD margin requirement |
 | `baseCarryBps` | 500 (5%) | Annualized carry on LP-backed notional |
-| `bountyBps` | 10 (0.10%) | Liquidation bounty rate |
-| `minBountyUsdc` | 1,000,000 ($1) | Liquidation bounty floor |
+| `bountyBps` | 10 (0.10%) | Total liquidation-charge rate |
+| `minBountyUsdc` | 1,000,000 ($1) | Total liquidation-charge floor |
+| `keeperShareBps` | 5,000 (50%) | Keeper share of the collected liquidation charge |
+| `protocolShareBps` | 0 (0%) | Protocol-treasury share of the collected charge; LPs receive the remainder after both shares |
 | `executionFeeBps` | 4 (0.04%) | Timelocked protocol trading fee |
 | `frozenCloseSpreadBps` | 50 (0.50%) | Fixed LP-owned spread on voluntary close/reduce notional during `oracleFrozen` |
 | Open execution bounty | 0.01 to 0.20 USDC | Timelocked router reserve bounds |
@@ -474,12 +556,21 @@ Instant controls remain for one-time wiring and fee withdrawal. `OrderRouter` pa
 | `fadMaxStaleness` | 3 days | Frozen-market max staleness |
 | `fadRunwaySeconds` | 3 hours | Admin FAD pre-close runway |
 | `seniorRateBps` | 800 (8% APY) | Senior target coupon rate funded from junior NAV |
+| `maxSeniorExposureUsdc` | Timelocked, finite | Absolute counted-admission limit (`E +` pending senior reservations) |
+| `maxSeniorShareBps` | Timelocked, <10,000 | Maximum counted senior admission share; active `E` also governs junior withdrawals |
 | `DEPOSIT_COOLDOWN` | 1 hour | LP anti-flash cooldown |
+
+The two senior-capacity rows describe the required post-timelock operating configuration. Fresh deployments initially
+use the neutral constructor sentinels `type(uint256).max` and `10,000` bps, which cannot pass trading activation.
 
 OrderRouter also exposes timelocked admin control over `maxPendingOrders`, `minEngineGas`, and `maxPruneOrdersPerCall`.
 `maxOrderAge` must stay nonzero and cannot exceed one hour, so close-only windows cannot be indefinitely pinned by an old FIFO head.
 
 `frozenCloseSpreadBps` is timelocked with the rest of `EngineRiskConfig`, must remain nonzero, and is hard-capped at `1,000` bps (10%).
+
+`keeperShareBps` and `protocolShareBps` are also timelocked with `EngineRiskConfig`. Each allocation rounds down, their
+sum must not exceed `10_000`, and LPs receive the exact charge remainder. The defaults are `5_000` keeper, `0` protocol,
+and therefore `5_000` LP.
 
 ## Off-Chain Applications and Workers
 

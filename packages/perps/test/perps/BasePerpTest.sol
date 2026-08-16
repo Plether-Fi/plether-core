@@ -22,6 +22,7 @@ import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {ClaimEngineViewTypes} from "@plether/perps/interfaces/ClaimEngineViewTypes.sol";
 import {HousePoolEngineViewTypes} from "@plether/perps/interfaces/HousePoolEngineViewTypes.sol";
 import {ICfdEngineAdminHost} from "@plether/perps/interfaces/ICfdEngineAdminHost.sol";
+import {ICfdEngineRiskParamsView} from "@plether/perps/interfaces/ICfdEngineRiskParamsView.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
@@ -58,6 +59,7 @@ abstract contract BasePerpTest is Test {
         uint256 settlementUsdc;
         uint256 traderClaimBalanceUsdc;
         uint256 keeperSettlementUsdc;
+        uint256 protocolTreasurySettlementUsdc;
     }
 
     struct LiquidationParityObserved {
@@ -65,6 +67,7 @@ abstract contract BasePerpTest is Test {
         uint256 traderClaimBalanceUsdc;
         uint256 badDebtUsdc;
         uint256 keeperSettlementUsdc;
+        uint256 protocolLiquidationFeeUsdc;
         uint256 remainingSize;
         bool degradedMode;
         uint256 effectiveAssetsAfterUsdc;
@@ -98,6 +101,8 @@ abstract contract BasePerpTest is Test {
     uint256 constant SETUP_TIMESTAMP = 1_709_532_000;
     uint256 constant CAP_PRICE = 2e8;
     uint256 constant FROZEN_CLOSE_SPREAD_BPS = 50;
+    uint256 internal constant TEST_MAX_SENIOR_EXPOSURE_USDC = type(uint256).max - 1;
+    uint256 internal constant TEST_MAX_SENIOR_SHARE_BPS = 9999;
     bytes32 internal constant BASE_PYTH_FEED_A = bytes32(uint256(1));
     bytes32 internal constant BASE_PYTH_FEED_B = bytes32(uint256(2));
     address internal constant PROTOCOL_TREASURY_ACCOUNT = address(0xFEE50001);
@@ -172,6 +177,14 @@ abstract contract BasePerpTest is Test {
 
     function _bypassAllTimelocks() internal {
         clearinghouse.setEngine(address(engine));
+
+        IHousePool.PoolConfig memory config = _currentPoolConfig();
+        config.maxSeniorExposureUsdc = TEST_MAX_SENIOR_EXPOSURE_USDC;
+        config.maxSeniorShareBps = TEST_MAX_SENIOR_SHARE_BPS;
+        pool.proposePoolConfig(config);
+        vm.warp(pool.poolConfigActivationTime());
+        pool.finalizePoolConfig();
+
         vm.warp(SETUP_TIMESTAMP);
     }
 
@@ -206,7 +219,9 @@ abstract contract BasePerpTest is Test {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -358,8 +373,22 @@ abstract contract BasePerpTest is Test {
             seniorRateBps: pool.seniorRateBps(),
             markStalenessLimit: pool.markStalenessLimit(),
             seniorFrozenLpFeeBps: pool.seniorFrozenLpFeeBps(),
-            juniorFrozenLpFeeBps: pool.juniorFrozenLpFeeBps()
+            juniorFrozenLpFeeBps: pool.juniorFrozenLpFeeBps(),
+            maxSeniorExposureUsdc: pool.maxSeniorExposureUsdc(),
+            maxSeniorShareBps: pool.maxSeniorShareBps()
         });
+    }
+
+    function _setSeniorCapacity(
+        uint256 maxSeniorExposureUsdc,
+        uint256 maxSeniorShareBps
+    ) internal {
+        IHousePool.PoolConfig memory config = _currentPoolConfig();
+        config.maxSeniorExposureUsdc = maxSeniorExposureUsdc;
+        config.maxSeniorShareBps = maxSeniorShareBps;
+        pool.proposePoolConfig(config);
+        vm.warp(pool.poolConfigActivationTime());
+        pool.finalizePoolConfig();
     }
 
     // --- Trading helpers ---
@@ -559,6 +588,7 @@ abstract contract BasePerpTest is Test {
         snapshot.settlementUsdc = clearinghouse.balanceUsdc(account);
         snapshot.traderClaimBalanceUsdc = engine.traderClaimBalanceUsdc(account);
         snapshot.keeperSettlementUsdc = clearinghouse.balanceUsdc(keeper);
+        snapshot.protocolTreasurySettlementUsdc = clearinghouse.balanceUsdc(engine.protocolTreasury());
     }
 
     function _observeLiquidationParity(
@@ -578,6 +608,8 @@ abstract contract BasePerpTest is Test {
         observed.keeperSettlementUsdc = keeperSettlementAfter > beforeSnapshot.keeperSettlementUsdc
             ? keeperSettlementAfter - beforeSnapshot.keeperSettlementUsdc
             : 0;
+        observed.protocolLiquidationFeeUsdc =
+            clearinghouse.balanceUsdc(engine.protocolTreasury()) - beforeSnapshot.protocolTreasurySettlementUsdc;
         observed.degradedMode = engine.degradedMode();
         observed.effectiveAssetsAfterUsdc = afterSnapshot.effectiveSolvencyAssetsUsdc;
         observed.maxLiabilityAfterUsdc = afterSnapshot.maxLiabilityUsdc;
@@ -603,6 +635,11 @@ abstract contract BasePerpTest is Test {
             observed.keeperSettlementUsdc,
             preview.keeperBountyUsdc,
             "Keeper bounty settlement should match liquidation preview"
+        );
+        assertEq(
+            observed.protocolLiquidationFeeUsdc,
+            preview.protocolLiquidationFeeUsdc,
+            "Protocol treasury credit should match liquidation preview"
         );
         assertEq(observed.remainingSize, 0, "Liquidation parity helper expects the position to be fully removed");
         assertEq(
@@ -633,7 +670,14 @@ abstract contract BasePerpTest is Test {
         assertEq(actual.equityUsdc, expected.equityUsdc, "Liquidation equity should match");
         assertEq(actual.pnlUsdc, expected.pnlUsdc, "Liquidation pnl should match");
         assertEq(actual.reachableCollateralUsdc, expected.reachableCollateralUsdc, "Reachable collateral should match");
+        assertEq(actual.liquidationChargeUsdc, expected.liquidationChargeUsdc, "Liquidation charge should match");
         assertEq(actual.keeperBountyUsdc, expected.keeperBountyUsdc, "Keeper bounty should match");
+        assertEq(
+            actual.protocolLiquidationFeeUsdc,
+            expected.protocolLiquidationFeeUsdc,
+            "Protocol liquidation fee should match"
+        );
+        assertEq(actual.lpLiquidationFeeUsdc, expected.lpLiquidationFeeUsdc, "LP liquidation fee should match");
         assertEq(actual.seizedCollateralUsdc, expected.seizedCollateralUsdc, "Seized collateral should match");
         assertEq(actual.settlementRetainedUsdc, expected.settlementRetainedUsdc, "Settlement retained should match");
         assertEq(actual.freshTraderPayoutUsdc, expected.freshTraderPayoutUsdc, "Fresh trader payout should match");
@@ -703,16 +747,7 @@ abstract contract BasePerpTest is Test {
     // --- Governance helpers ---
 
     function _engineRiskConfig() internal view returns (ICfdEngineAdminHost.EngineRiskConfig memory config) {
-        (
-            config.riskParams.vpiFactor,
-            config.riskParams.maxSkewRatio,
-            config.riskParams.maintMarginBps,
-            config.riskParams.initMarginBps,
-            config.riskParams.fadMarginBps,
-            config.riskParams.baseCarryBps,
-            config.riskParams.minBountyUsdc,
-            config.riskParams.bountyBps
-        ) = engine.riskParams();
+        config.riskParams = ICfdEngineRiskParamsView(address(engine)).riskParams();
         config.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
         config.executionFeeBps = engine.executionFeeBps();
     }
@@ -846,7 +881,7 @@ abstract contract BasePerpTest is Test {
         uint256 size,
         uint256 price
     ) internal view returns (uint256) {
-        (,, uint256 maintMarginBps,, uint256 fadMarginBps,,,) = engine.riskParams();
+        (,, uint256 maintMarginBps,, uint256 fadMarginBps,,,,,) = engine.riskParams();
         uint256 requiredBps = engine.isFadWindow() ? fadMarginBps : maintMarginBps;
         uint256 notionalUsdc = (size * price) / 1e20;
         return (notionalUsdc * requiredBps) / 10_000;
@@ -993,7 +1028,7 @@ abstract contract BasePerpTest is Test {
         CfdTypes.Side side
     ) internal view returns (uint256 index) {
         uint256 sideIndex = uint256(side);
-        (,,,,, uint256 baseCarryBps,,) = engine.riskParams();
+        (,,,,, uint256 baseCarryBps,,,,) = engine.riskParams();
         index = PositionRiskAccountingLib.computeCurrentCarryIndex(
             engine.sideCarryIndex(sideIndex),
             engine.sideCarryTimestamp(sideIndex),

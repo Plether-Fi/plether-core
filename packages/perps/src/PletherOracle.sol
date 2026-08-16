@@ -6,7 +6,6 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
-import {MarketCalendarLib} from "@plether/perps/libraries/MarketCalendarLib.sol";
 import {OracleFreshnessPolicyLib} from "@plether/perps/libraries/OracleFreshnessPolicyLib.sol";
 import {IPyth, PythStructs} from "@plether/shared/interfaces/IPyth.sol";
 import {DecimalConstants} from "@plether/shared/libraries/DecimalConstants.sol";
@@ -279,8 +278,8 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
     /// @notice Returns the validated current basket snapshot for a policy mode without updating Pyth.
     /// @dev Reads Pyth's unsafe current prices, then enforces per-component age, aggregate basket confidence width,
     ///      component publish-time divergence, and ordering against the engine's last mark time. Price and mark price are
-    ///      neutral basket values
-    ///      capped at `CAP_PRICE`; `updateFee` is zero. This view may revert when current feed state is invalid or stale.
+    ///      neutral basket values capped at `CAP_PRICE`; `updateFee` is zero. This view may revert when current feed state
+    ///      is invalid or stale.
     /// @param mode Policy selecting freshness and component-divergence limits
     /// @return snapshot Current 8-decimal price/mark, earliest publish time, zero fee, and policy metadata
     function getLatestPrice(
@@ -367,11 +366,12 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
     }
 
     /// @notice Returns whether the market calendar currently enables frozen-oracle policy.
-    /// @dev Uses `block.timestamp` and the engine's override for the current UTC day. The normal frozen interval is
-    ///      Friday at 22:00 UTC until Sunday at 21:00 UTC (exclusive); a current-day override freezes the full day.
+    /// @dev Delegates to the engine's canonical calendar status. The normal frozen interval follows Pyth FX hours from
+    ///      Friday 17:00 New York time until Sunday 17:00 New York time (exclusive), including US daylight-saving
+    ///      transitions; a current-day override freezes the full UTC day.
     /// @return Whether frozen-oracle policy is active at the current timestamp
     function isOracleFrozen() public view override returns (bool) {
-        return MarketCalendarLib.isOracleFrozen(block.timestamp, engine.fadDayOverrides(block.timestamp / 86_400));
+        return engine.isOracleFrozen();
     }
 
     function _updateAndGetSnapshot(

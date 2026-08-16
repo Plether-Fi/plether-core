@@ -7,6 +7,7 @@ import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {ICfdEngineLens} from "@plether/perps/interfaces/ICfdEngineLens.sol";
 import {ICfdEnginePlanner} from "@plether/perps/interfaces/ICfdEnginePlanner.sol";
+import {ICfdEngineRiskParamsView} from "@plether/perps/interfaces/ICfdEngineRiskParamsView.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
@@ -149,7 +150,7 @@ contract CfdEngineLens is ICfdEngineLens {
     ///      preview with only the capped oracle price populated.
     /// @param account Account whose current position is tested and hypothetically liquidated.
     /// @param oraclePrice Candidate liquidation price, with 8 decimals.
-    /// @return preview Liquidation eligibility, equity, bounty, settlement, claims, bad debt, and projected solvency.
+    /// @return preview Liquidation eligibility, equity, charge split, settlement, claims, bad debt, and projected solvency.
     function previewLiquidation(
         address account,
         uint256 oraclePrice
@@ -163,7 +164,7 @@ contract CfdEngineLens is ICfdEngineLens {
     /// @param account Account whose current position is tested and hypothetically liquidated.
     /// @param oraclePrice Candidate liquidation price, with 8 decimals.
     /// @param poolDepthUsdc Hypothetical pool assets and cash, in 6-decimal USDC units.
-    /// @return preview Liquidation eligibility, equity, bounty, settlement, claims, bad debt, and projected solvency.
+    /// @return preview Liquidation eligibility, equity, charge split, settlement, claims, bad debt, and projected solvency.
     function simulateLiquidation(
         address account,
         uint256 oraclePrice,
@@ -537,8 +538,11 @@ contract CfdEngineLens is ICfdEngineLens {
         preview.reachableCollateralUsdc = delta.liquidationReachableCollateralUsdc;
         preview.pnlUsdc = delta.riskState.unrealizedPnlUsdc;
         preview.equityUsdc = delta.liquidationState.equityUsdc;
+        preview.liquidationChargeUsdc = delta.liquidationChargeUsdc;
         preview.keeperBountyUsdc = delta.keeperBountyUsdc;
-        preview.seizedCollateralUsdc = delta.residualPlan.settlementSeizedUsdc;
+        preview.protocolLiquidationFeeUsdc = delta.protocolLiquidationFeeUsdc;
+        preview.lpLiquidationFeeUsdc = delta.lpLiquidationFeeUsdc;
+        preview.seizedCollateralUsdc = delta.settlementSeizedUsdc;
         preview.settlementRetainedUsdc = delta.settlementRetainedUsdc;
         preview.freshTraderPayoutUsdc = delta.freshTraderPayoutUsdc;
         preview.existingTraderClaimConsumedUsdc = delta.existingTraderClaimConsumedUsdc;
@@ -693,7 +697,7 @@ contract CfdEngineLens is ICfdEngineLens {
         CfdTypes.Side side
     ) internal view returns (uint256) {
         uint256 sideIndex = uint256(side);
-        (,,,,, uint256 baseCarryBps,,) = engineContract.riskParams();
+        (,,,,, uint256 baseCarryBps,,,,) = engineContract.riskParams();
         return PositionRiskAccountingLib.computeCurrentCarryIndex(
             engineContract.sideCarryIndex(sideIndex),
             engineContract.sideCarryTimestamp(sideIndex),
@@ -707,16 +711,7 @@ contract CfdEngineLens is ICfdEngineLens {
     /// @notice Reconstructs the engine's current risk-parameter struct from its public tuple getter.
     /// @return params Current risk, VPI, carry, margin, and bounty settings.
     function _riskParams() internal view returns (CfdTypes.RiskParams memory params) {
-        (
-            params.vpiFactor,
-            params.maxSkewRatio,
-            params.maintMarginBps,
-            params.initMarginBps,
-            params.fadMarginBps,
-            params.baseCarryBps,
-            params.minBountyUsdc,
-            params.bountyBps
-        ) = engineContract.riskParams();
+        params = ICfdEngineRiskParamsView(address(engineContract)).riskParams();
     }
 
 }
