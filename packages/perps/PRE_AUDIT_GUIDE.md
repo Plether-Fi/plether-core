@@ -18,6 +18,7 @@ If reviewing quickly, focus on these questions in order:
 2. Does the path move value only across the intended custody domains?
 3. Does the path use the correct oracle regime and failure policy for the current market state?
 4. Does the path preserve bounded queue behavior and trader-claim seniority?
+5. Does every position/pledge/claim mutation atomically install the matching `TerminalNavBookV2` curve?
 
 ## Test Taxonomy
 
@@ -52,6 +53,7 @@ Before trusting a test as a source of truth, ask:
 | Contract | Privileged caller set | Notes |
 |----------|------------------------|-------|
 | `CfdEngine` settlement host hooks | `settlementSidecar` only | settlement sidecar itself is engine-gated |
+| `TerminalNavBookV2.setCurve` / `removeCurve` | immutable bound `CfdEngine` only | hash-authenticated mutation; no owner, repair, or migration path |
 | `CfdEngine.processOrderTyped` / `liquidatePosition` / fee bookkeeping | `orderRouter` only | router is the external execution boundary |
 | `MarginClearinghouse` operator paths | `engine`, `settlementSidecar` | broad settlement mutations only |
 | `MarginClearinghouse` reservation paths | `engine`, `orderRouter` | router can reserve/release queued margin and execution-bounty buckets, but cannot perform broad settlement |
@@ -112,8 +114,8 @@ Any new helper/sidecar contract that can reach these sets should be treated as s
 
 | Bounty type | Source of funds | Custody while pending | Success path | Illiquid path | Terminal failure path |
 |-------------|-----------------|-----------------------|--------------|---------------|-----------------------|
-| Order execution bounty | Trader free settlement, then bounded close fallback from active position margin | `MarginClearinghouse` reserved settlement bucket plus router order record | clearinghouse credit for the keeper | n/a | terminal close failures pay the keeper; other failure handling follows the typed policy |
-| Liquidation charge | Liquidated account reachable collateral, capped by canonical liquidation value and carry-adjusted equity | planned in engine, then allocated by the liquidation settlement path | Default: 50% keeper clearinghouse credit; 0% protocol-treasury clearinghouse credit; exact 50% remainder to HousePool claimant revenue | n/a | n/a |
+| Order execution bounty | Eligible trader free settlement; never active PnL pledge | `MarginClearinghouse` reserved settlement bucket plus router order record | clearinghouse credit for the keeper | n/a | terminal close failures pay the keeper; other failure handling follows the typed policy |
+| Liquidation charge | Dedicated liquidation-charge reserve, capped by the canonical planned charge | clearinghouse liquidation reserve | Default: 50% keeper clearinghouse credit; 0% protocol-treasury clearinghouse credit; exact 50% remainder to HousePool claimant revenue | n/a | n/a |
 
 ### Oracle regime table
 
@@ -130,15 +132,17 @@ Any new helper/sidecar contract that can reach these sets should be treated as s
 | Quantity | Economic owner | Storage/source of truth | Mutators | Counts as reachable collateral? | Counts toward solvency? | Counts toward LP withdrawal reserve? | Counts toward tranche reconcile? |
 |----------|----------------|-------------------------|----------|---------------------------------|-------------------------|-------------------------------------|----------------------------------|
 | Free settlement | Trader | `MarginClearinghouse.balanceUsdc(account)` | clearinghouse deposit/withdraw, engine settle/seize | yes, action-dependent | yes, via action-specific view | no | no |
-| Active position margin | Trader until terminal settlement outcome | clearinghouse locked bucket + engine position mirror | engine open/close/liquidation, bounded router close-bounty sourcing | yes for terminal paths, no for ordinary withdraw | yes, via risk/equity view | no | no |
-| Other locked margin | Trader, but reserved to queued intents until an explicit terminal path unlocks it | clearinghouse reservations | router commit/release/consume | no for ordinary close reachability; only available where terminal settlement explicitly unlocks/consumes it | indirectly and only through explicit terminal settlement plans | no | no |
+| PnL pledge / active position margin | Trader until exact price settlement | `pnlPledgeUsdc` + engine position mirror | engine/settlement-sidecar open, close, liquidation, claim service | yes only for the account's price-loss cap and health | yes, via risk/equity view | no | yes, only through the capped terminal curve |
+| Other locked margin | Trader, reserved to typed non-price obligations | clearinghouse typed reserves | router and engine/sidecar typed reservation paths | only for its matching action; never generic price-loss reachability | no direct pool asset | no | no |
 | Committed order margin | Trader but reserved to one order | clearinghouse reservation keyed by `orderId` | router commit/execute/fail | no | no | no | no |
 | Execution bounty reserve | Trader-funded keeper reserve | `MarginClearinghouse` reserved settlement bucket + router order record | router commit/distribute/forfeit through engine/clearinghouse | no | no | no | no |
-| Trader claim balance | Trader senior claim on pool liquidity | `CfdEngine.traderClaimBalanceUsdc` | engine create/service | no | yes, as senior liability | yes | yes |
+| Liquidation-charge reserve | Trader, dedicated to the active position charge | `MarginClearinghouse.liquidationReserveUsdc` | engine/settlement sidecar | liquidation charge only | no separate pool asset | no | no |
+| VPI rebate reserve | Trader, dedicated to `max(-vpiAccrued, 0)` | protected sub-balance of clearinghouse action reserve | engine/settlement sidecar | matching VPI clawback only; excluded from price-risk collateral, with underfunding treated as independent delinquency | no separate pool asset | no | no |
+| Trader claim balance | Trader senior claim on pool liquidity | `CfdEngine.traderClaimBalanceUsdc` | engine create/service | same-account price-risk health and one-time price-loss netting only; never cash/action collateral | yes, as senior liability | yes | yes |
 | Keeper bounty credit | Keeper margin credit | `MarginClearinghouse.balanceUsdc(keeper)` | engine/clearinghouse bounty settlement | no | no pool liability | no | no |
-| Unsettled carry | Protocol-recorded carry debt on an account | `CfdEngine.unsettledCarryUsdc[account]` | engine carry-checkpoint paths | no | yes, as carry drag on account equity | no | no |
+| Unsettled carry | Protocol-recorded carry obligation on an account | `CfdEngine.unsettledCarryUsdc[account]` | engine carry-checkpoint paths | eligible free settlement only; never PnL pledge or claim | only the remainder uncovered after projected free-settlement collection affects health | no | no |
 | Treasury protocol fees | Protocol/treasury | Treasury account in `MarginClearinghouse`; `MarginClearinghouse.balanceUsdc(CfdEngine.protocolTreasury())` reports that balance | cash-collected execution and liquidation fee routing, settlement top-ups, treasury clearinghouse withdraw | no | yes, as clearinghouse-custodied protocol margin | no | no |
-| Accumulated bad debt | Protocol loss / LP impairment | `CfdEngine.accumulatedBadDebtUsdc` | engine realization, bad debt clear path | n/a | yes, as realized deficit | yes | yes |
+| Signed terminal price delta | LP marked ownership adjustment | `TerminalNavBookV2` queried through the authenticated Engine snapshot | Engine-only atomic curve set/remove | n/a | not the endpoint admission reserve | cannot fund cash redemption | yes, identically for deposit activation and redemption pricing |
 | Canonical pool assets | LP/protocol backing | `HousePool.totalAssets()` and accounting ledger | synchronized LP activation/funding plus accounting hooks | base physical solvency cash | yes | yes | yes |
 | Pending LP deposit assets | Request controller | USDC in `TrancheVault` request escrow plus per-controller/per-epoch accounting | request, eligible cancellation, or pool-authorized activation | no | no | no | no, until activated |
 | Activated LP deposit shares | Request controller | Shares in `TrancheVault` claim escrow plus claimable epoch accounting | `HousePool.settleLpEpoch()`, then controller/operator claim | no | no separate asset claim | no | yes, through outstanding share supply |
@@ -147,9 +151,14 @@ Any new helper/sidecar contract that can reach these sets should be treated as s
 | Excess assets | no owner until admitted | `HousePool.excessAssets()` | pool account/sweep paths | no | no | no | no |
 
 Reachability note:
-- Generic reachability excludes `CommittedOrder` and `ReservedSettlement` buckets.
-- Terminal reachability may include those buckets, but only where the close/liquidation settlement plan explicitly consumes or unlocks them.
-- Carry, withdraw checks, margin-basis changes, and non-terminal open/modify risk paths must use the generic basis.
+- Price-loss reachability is exactly same-account nettable claim plus PnL pledge, capped by the terminal curve.
+- `CommittedOrder`, execution-bounty, liquidation-charge, VPI, and generic action reserves cannot enlarge that price cap.
+- Each typed reserve may be consumed only for its matching obligation; bounded liquidation cleanup may separately forfeit abandoned order bounties.
+- Negative lifetime VPI must be fully covered by its dedicated reserve. Underfunding independently blocks withdrawal
+  and makes the account liquidatable; overfunding never increases price collateral.
+- Carry checks first project collection from eligible free settlement. A fully covered amount does not worsen exact
+  price-risk health; any uncovered remainder blocks withdrawal and makes the position liquidatable. PnL pledge plus
+  same-account claim cannot offset it.
 
 ## Liveness vs Safety Choices
 
@@ -160,7 +169,7 @@ Reachability note:
 - New risk: execution may rely on older marks than the live regime would permit, and the fixed spread does not scale with staleness inside that window.
 - Pricing rule: voluntary closes keep normal signed VPI and the lifetime rebate clamp. During `oracleFrozen`, the fixed `frozenCloseSpreadBps` replaces the Pyth adverse-confidence price shift; live/FAD-only closes and liquidations retain adverse-confidence pricing.
 - Ownership rule: paid spread belongs only to LPs and never credits protocol treasury. `frozenCloseSpreadBps` defaults to `50`, is 48-hour timelocked, must be nonzero, and is capped at `1,000` bps.
-- Liveness rule: partial closes must settle the complete obligation; terminal full closes waive uncollectible spread instead of adding it to bad debt. Liquidations do not assess the spread.
+- Liveness rule: partial closes must fully settle separate action charges, including frozen spread, but price loss above the account cap is written off. Terminal full closes may waive an uncollectible action remainder. Neither creates a protocol liability or terminal deficit. Liquidations do not assess the spread.
 - Protecting invariant: frozen execution remains close-only, and close preview preserves `frozenSpreadUsdc == frozenSpreadPaidUsdc + frozenSpreadWaivedUsdc`.
 
 ### Trader claim balance servicing
@@ -183,14 +192,21 @@ Reachability note:
   reconciled funding of matured exits. A no-progress pass reverts so permissionless callers cannot retain reconcile or
   carry checkpoints without advancing a queue.
 
+### Exact symmetric Terminal NAV
+
+- Ownership problem: entry and exit share pricing must not apply different marked-liability assumptions.
+- Chosen rule: both use `physicalAssets - totalTraderClaims + terminalLpPriceDelta`, with the signed delta computed from whole lots, exact entry cost, and account-capped collectible loss.
+- Liquidity separation: a positive marked receivable affects share ownership but cannot fund redemption cash before collection; endpoint max liability remains the withdrawal/admission reserve.
+- Protecting invariant: a current terminal deficit blocks deposit activation, and every position/pledge/claim transition synchronizes the account curve atomically.
+
 ### Clearinghouse liquidation-charge servicing
 
 - Liveness problem: liquidation should not fail solely because immediate pool cash is unavailable.
-- Chosen tradeoff: the total charge settles from liquidated account margin through the clearinghouse, with independently
+- Chosen tradeoff: the total charge settles from the dedicated liquidation reserve through the clearinghouse, with independently
   rounded-down shares credited to the keeper and protocol treasury according to `keeperShareBps` and
   `protocolShareBps`; the exact remainder is transferred to LP claimant revenue.
-- New risk: liquidation rewardability and LP fee collection depend on the liquidated account's reachable collateral.
-- Protecting invariant: the total charge is capped by reachable collateral; the configured shares sum to at most
+- New risk: liquidation rewardability and LP fee collection depend on correct reserve funding and maintenance.
+- Protecting invariant: the total charge is capped by the dedicated reserve; the configured shares sum to at most
   `10_000` bps, and the keeper, protocol, and LP allocations conserve the collected amount without consuming
   pre-existing pool cash. The default allocation is 50% keeper, 0% protocol, and 50% LP.
 
@@ -220,7 +236,7 @@ Reachability note:
 ### Profitable close with immediate payout
 
 1. Trader has a live position and commits a close.
-2. Router reserves the close execution bounty in the clearinghouse, using free settlement first when a fresh carry-checkpoint mark exists and otherwise using the bounded active-margin fallback.
+2. Router reserves the close execution bounty from eligible free settlement without reclassifying PnL pledge.
 3. Keeper executes the FIFO head under the current oracle regime.
 4. Planner computes canonical close settlement, including signed VPI, fees, pending carry, and the fixed LP-owned spread if `oracleFrozen`.
 5. Engine realizes carry and applies the close using the planner's exact loss/gain result.
@@ -233,42 +249,42 @@ Reachability note:
 1. Trader commits a reduce-only close.
 2. Router reserves the execution bounty and preserves the residual position path.
 3. Keeper executes.
-4. Planner computes canonical carry-adjusted loss, partial-close remaining margin, and the fixed spread if `oracleFrozen`.
-5. Engine plans consumption from free settlement and allowed unlocked margin buckets; any remaining obligation, including frozen spread, rejects the partial close.
-6. Only a fully settled partial close leaves the position open with reduced size and updated margin.
-7. LPs receive realized carry/trading inflow and any frozen spread; no separate loss recomputation occurs at execution time.
+4. Planner allocates exact entry cost to the closed lots, nets same-account claim, consumes PnL pledge up to the pre-close cap, and reports any excess price loss as a diagnostic write-off.
+5. Carry, VPI, execution fee, and any frozen spread use the separate action path; an uncollectible action remainder rejects the partial close, but uncollateralized price loss does not.
+6. Engine retains any PnL pledge required to conserve the residual marked curve and atomically installs the remaining lots, entry cost, and collectible cap.
+7. LPs receive only physically collected price/action inflow; the write-off creates no asset, claim, or deficit.
 
 ### Underfunded frozen full close
 
 1. Trader commits a full close while `oracleFrozen`.
 2. Planner applies normal signed VPI with the lifetime rebate clamp, then assesses the fixed spread on the full reduced notional.
-3. Terminal settlement consumes the account's reachable value and permitted same-account claim value under the close priority rules.
+3. Terminal price settlement consumes same-account claim plus PnL pledge up to the account cap; action charges use gain withholding, protected VPI reserve, spendable action reserve, and eligible free settlement.
 4. The retained or collected spread is booked as LP revenue; it is never routed to protocol treasury.
-5. Any uncollectible spread is exposed as `frozenSpreadWaivedUsdc` and does not become bad debt.
-6. Genuine uncovered base trading loss remains explicit bad debt, and the full close completes.
+5. Any uncollectible spread is exposed as `frozenSpreadWaivedUsdc` and creates no protocol liability or terminal deficit.
+6. Price loss above the precommitted cap is emitted as `PriceLossWrittenOff`, creates no debt accumulator, and the full close removes the account curve.
 
 ### Liquidation with positive residual
 
 1. Keeper calls liquidation on an under-maintenance account.
-2. Planner computes carry-adjusted liquidation equity using only physically reachable collateral.
-3. Total liquidation charge is capped by physically reachable collateral, not by the positive-equity sign boundary.
-4. Terminal residual plan seizes reachable collateral, credits the configured shares to the keeper and protocol
+2. Planner computes exact price PnL, carry/action obligations, and health from typed account buckets.
+3. Total liquidation charge is capped by the dedicated liquidation reserve.
+4. Settlement credits the configured reserve shares to the keeper and protocol
    treasury, routes the exact rounding remainder to LPs, and computes any fresh trader payout or explicit subsidy
    shortfall.
-5. Existing trader claim balance is not treated as reachable collateral; it remains only as a senior claim unless negative residual netting consumes it.
+5. Existing same-account trader claim is not generic collateral; it may net exactly once against that account's price loss.
 6. If cash is available, fresh payout is immediate; otherwise it becomes a trader claim.
 7. Position is removed and queue cleanup runs on the liquidated account's local pending-order queue only.
 
-### Liquidation with bad debt and trader claim netting
+### Liquidation with price-loss write-off and trader-claim netting
 
-1. Keeper calls liquidation on an account whose reachable collateral cannot cover losses.
-2. Planner computes carry-adjusted negative equity.
-3. Total liquidation charge is capped by reachable collateral and allocated using the configured keeper and protocol
+1. Keeper calls liquidation on an account whose claim plus PnL pledge cannot cover exact marked price loss.
+2. Planner computes the collectible price amount and the diagnostic excess separately from carry/action charges.
+3. Total liquidation charge is capped by its dedicated reserve and allocated using the configured keeper and protocol
    shares, with LPs receiving the exact remainder.
-4. Terminal residual plan consumes all physically reachable collateral.
-5. Existing same-account trader claim balance is netted exactly once against remaining terminal shortfall.
-6. Any leftover deficit becomes realized bad debt.
-7. `degradedMode` may latch if post-op solvency falls below the required boundary.
+4. Existing same-account trader claim is netted exactly once, then PnL pledge is transferred to HousePool.
+5. Price loss above that cap emits `PriceLossWrittenOff` and creates neither protocol debt nor LP deficit.
+6. The VPI reserve and other action sources settle only their typed obligations; an uncollectible terminal action remainder is waived.
+7. The position and terminal curve are removed, and `degradedMode` may latch only from the actual post-op physical solvency state.
 
 ## Read-Surface Canonicality
 
@@ -282,11 +298,13 @@ Reachability note:
 1. Preview/live parity: canonical close and liquidation planner outputs should match live settlement semantics.
 2. Physical-first solvency: physical cash and mathematical claims are distinct objects.
 3. Trader-claim seniority: trader claim balances remain senior until settled.
-4. Carry-aware risk: pending carry reduces relevant equity before realization on guard and risk checks.
+4. Carry isolation: project pending carry from eligible free settlement first; only an uncovered remainder blocks
+   withdrawal or makes the position liquidatable, and exact price-risk backing cannot offset it.
 5. Bounded queue behavior: cleanup and close-intent projection are account-local.
 6. Reservation conservation: clearinghouse-reserved execution bounty value and admin-held ETH refund claims are each distributed, refunded, forfeited, or left claimable exactly once.
-7. No speculative LP asset inflation: unrealized trader losses are not counted as spendable LP assets.
+7. Exact symmetric NAV: deposits and redemptions use the same signed terminal delta; marked trader losses count only to the account cap and never as spendable withdrawal cash.
 8. Frozen-spread conservation: assessed spread equals LP-paid spread plus terminally waived spread; live/FAD-only closes and all liquidations assess zero.
+9. Terminal-curve parity: every account curve matches live lots, exact entry cost, side, and `pnlPledge + nettable claim` cap after every successful transition.
 
 ## Test Map
 
@@ -308,6 +326,7 @@ Use the suites below as the highest-signal audit companions.
 | Open/close/liquidation preview parity | `packages/perps/test/perps/invariant/PerpPreviewInvariant.t.sol`, `packages/perps/test/perps/invariant/PerpClosePreviewParityInvariant.t.sol`, `packages/perps/test/perps/PreviewExecutionDifferential.t.sol` |
 | LP reserve / withdrawals | `packages/perps/test/perps/MarginClearinghouse.t.sol`, `packages/perps/test/perps/CfdEngine.t.sol`, `packages/perps/test/perps/HousePool.t.sol` |
 | HousePool snapshot parity | `packages/perps/test/perps/HousePoolSnapshotParity.t.sol`, `packages/perps/test/perps/PerpsReadParity.t.sol` |
+| Exact terminal NAV / close conservation | `packages/perps/test/perps/TerminalNavBookV2.t.sol`, `packages/perps/test/perps/TerminalNavCloseConservation.t.sol`, `packages/perps/test/perps/TerminalNavIntegrationSecurity.t.sol` |
 | HousePool lifecycle / cooldown | `packages/perps/test/perps/invariant/PerpHousePoolLifecycleInvariant.t.sol` |
 | Governed senior capacity / delayed reservations | `packages/perps/test/perps/SeniorCapacity.t.sol`, `packages/perps/test/perps/FrozenLpFeePolicy.t.sol`, `packages/perps/test/perps/invariant/GovernedSeniorCapacityInvariant.t.sol` |
 | Router policy matrix | `packages/perps/test/perps/OrderRouterPolicyMatrix.t.sol` |

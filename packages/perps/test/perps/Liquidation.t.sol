@@ -46,7 +46,7 @@ contract LiquidationTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
 
         router.executeOrder(1, _mockPythUpdateData());
-        _withdrawFreeUsdc(alice, 0);
+        _withdrawFreeUsdc(alice, 10e6);
 
         address account = alice;
 
@@ -88,7 +88,12 @@ contract LiquidationTest is BasePerpTest {
 
         // Ethical: Alice keeps surplus equity after the total charge and carry accrued between open and FAD liquidation.
         uint256 chBalance = clearinghouse.balanceUsdc(account);
-        assertApproxEqAbs(chBalance, 1_856_907_879, 1, "Alice keeps surplus equity after ethical liquidation");
+        assertApproxEqAbs(
+            chBalance,
+            preview.settlementRetainedUsdc,
+            20,
+            "Live retained equity should match preview up to execution-time carry"
+        );
     }
 
     function test_LiquidationOnPriceDrop() public {
@@ -120,10 +125,10 @@ contract LiquidationTest is BasePerpTest {
 
         // Ethical: user should retain equity minus the total liquidation charge.
         // PnL = -$1500, Margin = $1960 (after 4 bps fee), Equity = $460
-        // Total charge ~ 0.10% * $101.5k = $101.50, above the $5 floor.
-        // Residual = $460 - $101.50 = $358.50
+        // The dedicated liquidation reserve was fixed at $100 from the opening notional.
+        // Residual = $460 - $100 = $360.
         uint256 chBalance = clearinghouse.balanceUsdc(account);
-        assertApproxEqAbs(chBalance, 358_500_000, 1, "Alice retains equity net of the total liquidation charge");
+        assertApproxEqAbs(chBalance, 360_000_000, 1, "Alice retains equity net of the reserved liquidation charge");
     }
 
     function test_SolventPosition_RevertsLiquidation() public {
@@ -133,7 +138,7 @@ contract LiquidationTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 50_000 * 1e18, 2000 * 1e6, 1e8, false);
 
         router.executeOrder(1, _mockPythUpdateData());
-        _withdrawFreeUsdc(alice, 0);
+        _withdrawFreeUsdc(alice, 1e6);
 
         address account = alice;
 
@@ -294,10 +299,10 @@ contract LiquidationTest is BasePerpTest {
         uint256 userSeized = chBefore - chAfter;
         uint256 protocolFee = clearinghouse.balanceUsdc(engine.protocolTreasury()) - protocolTreasuryBefore;
 
-        assertEq(preview.liquidationChargeUsdc, 101_500_000, "Total charge should remain 10 bps");
-        assertEq(preview.keeperBountyUsdc, 25_375_000, "Keeper should receive 25% of the charge");
-        assertEq(preview.protocolLiquidationFeeUsdc, 25_375_000, "Protocol should receive 25% of the charge");
-        assertEq(preview.lpLiquidationFeeUsdc, 50_750_000, "LPs should receive 50% of the charge");
+        assertEq(preview.liquidationChargeUsdc, 100_000_000, "Charge must stay capped by the opening reserve");
+        assertEq(preview.keeperBountyUsdc, 25_000_000, "Keeper should receive 25% of the charge");
+        assertEq(preview.protocolLiquidationFeeUsdc, 25_000_000, "Protocol should receive 25% of the charge");
+        assertEq(preview.lpLiquidationFeeUsdc, 50_000_000, "LPs should receive 50% of the charge");
         assertEq(bounty, preview.keeperBountyUsdc, "Live keeper credit should match the configured preview share");
         assertEq(protocolFee, preview.protocolLiquidationFeeUsdc, "Live treasury credit should match the preview");
         assertEq(

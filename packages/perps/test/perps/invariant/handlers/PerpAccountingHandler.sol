@@ -38,18 +38,17 @@ contract PerpAccountingHandler is Test {
         uint256 afterTerminalReachableUsdc;
     }
 
-    struct BadDebtTraderClaimEvent {
+    struct PriceLossTraderClaimEvent {
         bool active;
         address account;
-        uint256 badDebtAfterUsdc;
-        uint256 allowedTraderClaimAfterUsdc;
+        uint256 legacyDebtDiagnosticUsdc;
+        uint256 expectedTraderClaimAfterUsdc;
     }
 
     struct TerminalResidualEvent {
         bool active;
         address account;
-        uint256 badDebtBeforeUsdc;
-        uint256 expectedBadDebtDeltaUsdc;
+        uint256 legacyDebtDiagnosticUsdc;
         uint256 expectedFinalResidualUsdc;
         uint256 traderWalletBeforeUsdc;
         bool walletPayoutExpected;
@@ -78,12 +77,11 @@ contract PerpAccountingHandler is Test {
         address account;
         bool isClose;
         bool terminalClose;
+        bool terminalPriceLoss;
         uint256 traderClaimBalanceUsdc;
-        uint256 allowedTraderClaimAfterUsdc;
-        uint256 expectedBadDebtDeltaUsdc;
+        uint256 legacyDebtDiagnosticUsdc;
         uint256 expectedFinalResidualUsdc;
         uint256 traderWalletBeforeUsdc;
-        uint256 badDebtBefore;
     }
 
     MockUSDC public immutable usdc;
@@ -110,7 +108,7 @@ contract PerpAccountingHandler is Test {
     mapping(uint64 => uint256) internal ghostReservationReleased;
     mapping(address => ReachabilityTransition) internal reachabilityTransitions;
 
-    BadDebtTraderClaimEvent internal lastBadDebtTraderClaimEvent;
+    PriceLossTraderClaimEvent internal lastPriceLossTraderClaimEvent;
     TerminalResidualEvent internal lastTerminalResidualEvent;
     OpenCommitAttempt internal lastOpenCommitAttempt;
     WithdrawParityAttempt internal lastWithdrawParityAttempt;
@@ -171,7 +169,7 @@ contract PerpAccountingHandler is Test {
         uint256 actorIndex,
         uint256 amountFuzz
     ) external {
-        _clearLastBadDebtTraderClaimEvent();
+        _clearLastPriceLossTraderClaimEvent();
         _clearTerminalReservationSet();
         address actor = actors[actorIndex % actors.length];
         if (_isLiquidated(actor)) {
@@ -191,7 +189,7 @@ contract PerpAccountingHandler is Test {
         uint256 actorIndex,
         uint256 amountFuzz
     ) external {
-        _clearLastBadDebtTraderClaimEvent();
+        _clearLastPriceLossTraderClaimEvent();
         _clearTerminalReservationSet();
         address actor = actors[actorIndex % actors.length];
         if (_isLiquidated(actor)) {
@@ -236,7 +234,7 @@ contract PerpAccountingHandler is Test {
         uint256 marginDeltaFuzz,
         uint256 targetPriceFuzz
     ) external {
-        _clearLastBadDebtTraderClaimEvent();
+        _clearLastPriceLossTraderClaimEvent();
         _clearTerminalReservationSet();
         address actor = actors[actorIndex % actors.length];
         if (_isLiquidated(actor)) {
@@ -277,7 +275,7 @@ contract PerpAccountingHandler is Test {
     function warpForward(
         uint256 secondsFuzz
     ) external {
-        _clearLastBadDebtTraderClaimEvent();
+        _clearLastPriceLossTraderClaimEvent();
         _clearTerminalReservationSet();
         vm.warp(block.timestamp + bound(secondsFuzz, 1, 7 days));
     }
@@ -285,7 +283,7 @@ contract PerpAccountingHandler is Test {
     function syncMarkNow(
         uint256 priceFuzz
     ) external {
-        _clearLastBadDebtTraderClaimEvent();
+        _clearLastPriceLossTraderClaimEvent();
         _clearTerminalReservationSet();
         uint256 price = bound(priceFuzz, 0.5e8, 1.5e8);
         vm.prank(address(router));
@@ -296,7 +294,7 @@ contract PerpAccountingHandler is Test {
         uint256 actorIndex,
         uint256 targetPriceFuzz
     ) external {
-        _clearLastBadDebtTraderClaimEvent();
+        _clearLastPriceLossTraderClaimEvent();
         _clearTerminalReservationSet();
         address actor = actors[actorIndex % actors.length];
         if (_isLiquidated(actor)) {
@@ -321,7 +319,7 @@ contract PerpAccountingHandler is Test {
     function executeNextOrderBatch(
         uint256 batchSizeFuzz
     ) external {
-        _clearLastBadDebtTraderClaimEvent();
+        _clearLastPriceLossTraderClaimEvent();
         _clearTerminalReservationSet();
         uint64 nextExecuteId = router.nextExecuteId();
         if (nextExecuteId >= router.nextCommitId()) {
@@ -338,7 +336,7 @@ contract PerpAccountingHandler is Test {
     }
 
     function executeNextOrderModelled() external {
-        _clearLastBadDebtTraderClaimEvent();
+        _clearLastPriceLossTraderClaimEvent();
         _clearTerminalReservationSet();
         uint64 orderId = router.nextExecuteId();
         if (orderId >= router.nextCommitId()) {
@@ -347,7 +345,6 @@ contract PerpAccountingHandler is Test {
 
         ModelledOrderPreview memory model = _modelOrderPreview(orderId);
         uint256[4] memory committedBefore = _snapshotTrackedCommittedMargin();
-        model.badDebtBefore = engine.accumulatedBadDebtUsdc();
         if (_tryExecuteOrder(orderId)) {
             _afterModelledOrderExecution(orderId, committedBefore, model);
         }
@@ -367,13 +364,10 @@ contract PerpAccountingHandler is Test {
                 engineLens.previewClose(model.account, orderRecord.core.sizeDelta, orderRecord.core.targetPrice);
             if (preview.valid) {
                 model.traderClaimBalanceUsdc = preview.traderClaimBalanceUsdc;
-                model.allowedTraderClaimAfterUsdc = preview.traderClaimBalanceUsdc
-                    > preview.existingTraderClaimRemainingUsdc
-                    ? preview.traderClaimBalanceUsdc - preview.existingTraderClaimRemainingUsdc
-                    : 0;
                 if (preview.remainingSize == 0) {
                     model.terminalClose = true;
-                    model.expectedBadDebtDeltaUsdc = preview.badDebtUsdc;
+                    model.terminalPriceLoss = preview.realizedPnlUsdc < 0;
+                    model.legacyDebtDiagnosticUsdc = preview.badDebtUsdc;
                     uint256 grossResidualUsdc = beforeSnapshot.settlementBalanceUsdc + preview.immediatePayoutUsdc
                         + preview.traderClaimBalanceUsdc;
                     model.expectedFinalResidualUsdc = grossResidualUsdc > preview.seizedCollateralUsdc
@@ -394,15 +388,15 @@ contract PerpAccountingHandler is Test {
             ghost.increaseTraderClaim(model.account, model.traderClaimBalanceUsdc);
         }
         _syncGhostTraderClaim(model.account);
-        uint256 badDebtAfter = engine.accumulatedBadDebtUsdc();
-        if (model.isClose && badDebtAfter > model.badDebtBefore) {
-            _recordBadDebtTraderClaimEvent(model.account, badDebtAfter, model.allowedTraderClaimAfterUsdc);
+        if (model.terminalPriceLoss) {
+            _recordPriceLossTraderClaimEvent(
+                model.account, model.legacyDebtDiagnosticUsdc, model.traderClaimBalanceUsdc
+            );
         }
         if (model.terminalClose) {
             _recordTerminalResidualEvent(
                 model.account,
-                model.badDebtBefore,
-                model.expectedBadDebtDeltaUsdc,
+                model.legacyDebtDiagnosticUsdc,
                 model.expectedFinalResidualUsdc,
                 model.traderWalletBeforeUsdc,
                 false
@@ -425,7 +419,7 @@ contract PerpAccountingHandler is Test {
         uint256 actorIndex,
         uint256 priceFuzz
     ) external {
-        _clearLastBadDebtTraderClaimEvent();
+        _clearLastPriceLossTraderClaimEvent();
         address actor = actors[actorIndex % actors.length];
         if (_isLiquidated(actor)) {
             return;
@@ -442,45 +436,41 @@ contract PerpAccountingHandler is Test {
         priceData[0] = abi.encode(price);
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, price);
         uint256 traderClaimBalanceUsdc = preview.traderClaimBalanceUsdc;
-        uint256 allowedTraderClaimAfterUsdc = preview.traderClaimBalanceUsdc > preview.existingTraderClaimRemainingUsdc
-            ? preview.traderClaimBalanceUsdc - preview.existingTraderClaimRemainingUsdc
-            : 0;
         uint256 traderWalletBeforeUsdc = usdc.balanceOf(actor);
         uint256 expectedFinalResidualUsdc =
             preview.settlementRetainedUsdc + preview.immediatePayoutUsdc + preview.traderClaimBalanceUsdc;
         uint256 committedBefore = _trackedCommittedMargin(account);
         _recordTerminalReservationSet(account);
-        uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
 
         try router.executeLiquidation(account, priceData) {
-            _recordLiquidationSuccess(account, actor);
+            _recordLiquidationSuccess(account, actor, preview.badDebtUsdc);
             ghostSuccessfulLiquidations++;
             _reconcileCommittedMarginAfterLiquidation(account, committedBefore);
             if (traderClaimBalanceUsdc > 0) {
                 ghost.increaseTraderClaim(account, traderClaimBalanceUsdc);
             }
             _syncGhostTraderClaim(account);
-            uint256 badDebtAfter = engine.accumulatedBadDebtUsdc();
-            if (badDebtAfter > badDebtBefore) {
-                _recordBadDebtTraderClaimEvent(account, badDebtAfter, allowedTraderClaimAfterUsdc);
+            if (preview.pnlUsdc < 0) {
+                _recordPriceLossTraderClaimEvent(account, preview.badDebtUsdc, preview.traderClaimBalanceUsdc);
             }
             _recordTerminalResidualEvent(
-                account, badDebtBefore, preview.badDebtUsdc, expectedFinalResidualUsdc, traderWalletBeforeUsdc, true
+                account, preview.badDebtUsdc, expectedFinalResidualUsdc, traderWalletBeforeUsdc, true
             );
         } catch {}
     }
 
     function _recordLiquidationSuccess(
         address account,
-        address actor
+        address actor,
+        uint256 legacyDebtDiagnosticUsdc
     ) internal {
-        ghost.recordLiquidation(account, usdc.balanceOf(actor), engine.accumulatedBadDebtUsdc());
+        ghost.recordLiquidation(account, usdc.balanceOf(actor), legacyDebtDiagnosticUsdc);
     }
 
     function createTraderClaim(
         uint256 actorIndex
     ) external {
-        _clearLastBadDebtTraderClaimEvent();
+        _clearLastPriceLossTraderClaimEvent();
         address actor = actors[actorIndex % actors.length];
         if (_isLiquidated(actor)) {
             return;
@@ -553,7 +543,7 @@ contract PerpAccountingHandler is Test {
     function settleTraderClaim(
         uint256 actorIndex
     ) external {
-        _clearLastBadDebtTraderClaimEvent();
+        _clearLastPriceLossTraderClaimEvent();
         _clearTerminalReservationSet();
         address actor = actors[actorIndex % actors.length];
         address account = _account(actor);
@@ -571,7 +561,7 @@ contract PerpAccountingHandler is Test {
     function fundHousePool(
         uint256 amountFuzz
     ) external {
-        _clearLastBadDebtTraderClaimEvent();
+        _clearLastPriceLossTraderClaimEvent();
         _clearTerminalReservationSet();
         uint256 amount = bound(amountFuzz, 1000e6, 250_000e6);
         housePool.seedAssets(amount);
@@ -581,7 +571,7 @@ contract PerpAccountingHandler is Test {
     function setPoolAssets(
         uint256 amountFuzz
     ) external {
-        _clearLastBadDebtTraderClaimEvent();
+        _clearLastPriceLossTraderClaimEvent();
         _clearTerminalReservationSet();
         housePool.setAssets(bound(amountFuzz, 0, 1_000_000_000e6));
     }
@@ -589,13 +579,13 @@ contract PerpAccountingHandler is Test {
     function drainHousePool(
         uint256 floorFuzz
     ) external {
-        _clearLastBadDebtTraderClaimEvent();
+        _clearLastPriceLossTraderClaimEvent();
         _clearTerminalReservationSet();
         housePool.setAssets(bound(floorFuzz, 0, 100e6));
     }
 
-    function lastBadDebtTraderClaimEventSnapshot() external view returns (BadDebtTraderClaimEvent memory) {
-        return lastBadDebtTraderClaimEvent;
+    function lastPriceLossTraderClaimEventSnapshot() external view returns (PriceLossTraderClaimEvent memory) {
+        return lastPriceLossTraderClaimEvent;
     }
 
     function lastTerminalResidualEventSnapshot() external view returns (TerminalResidualEvent memory) {
@@ -658,8 +648,8 @@ contract PerpAccountingHandler is Test {
         return ghost.traderClaimSnapshot(account);
     }
 
-    function _clearLastBadDebtTraderClaimEvent() internal {
-        delete lastBadDebtTraderClaimEvent;
+    function _clearLastPriceLossTraderClaimEvent() internal {
+        delete lastPriceLossTraderClaimEvent;
         delete lastTerminalResidualEvent;
     }
 
@@ -696,23 +686,22 @@ contract PerpAccountingHandler is Test {
         return age <= maxStaleness;
     }
 
-    function _recordBadDebtTraderClaimEvent(
+    function _recordPriceLossTraderClaimEvent(
         address account,
-        uint256 badDebtAfterUsdc,
-        uint256 allowedTraderClaimAfterUsdc
+        uint256 legacyDebtDiagnosticUsdc,
+        uint256 expectedTraderClaimAfterUsdc
     ) internal {
-        lastBadDebtTraderClaimEvent = BadDebtTraderClaimEvent({
+        lastPriceLossTraderClaimEvent = PriceLossTraderClaimEvent({
             active: true,
             account: account,
-            badDebtAfterUsdc: badDebtAfterUsdc,
-            allowedTraderClaimAfterUsdc: allowedTraderClaimAfterUsdc
+            legacyDebtDiagnosticUsdc: legacyDebtDiagnosticUsdc,
+            expectedTraderClaimAfterUsdc: expectedTraderClaimAfterUsdc
         });
     }
 
     function _recordTerminalResidualEvent(
         address account,
-        uint256 badDebtBeforeUsdc,
-        uint256 expectedBadDebtDeltaUsdc,
+        uint256 legacyDebtDiagnosticUsdc,
         uint256 expectedFinalResidualUsdc,
         uint256 traderWalletBeforeUsdc,
         bool walletPayoutExpected
@@ -720,8 +709,7 @@ contract PerpAccountingHandler is Test {
         lastTerminalResidualEvent = TerminalResidualEvent({
             active: true,
             account: account,
-            badDebtBeforeUsdc: badDebtBeforeUsdc,
-            expectedBadDebtDeltaUsdc: expectedBadDebtDeltaUsdc,
+            legacyDebtDiagnosticUsdc: legacyDebtDiagnosticUsdc,
             expectedFinalResidualUsdc: expectedFinalResidualUsdc,
             traderWalletBeforeUsdc: traderWalletBeforeUsdc,
             walletPayoutExpected: walletPayoutExpected
@@ -1006,8 +994,8 @@ contract PerpAccountingHandler is Test {
             action: action,
             beforeCloseReachableUsdc: beforeSnapshot.closeReachableUsdc,
             afterCloseReachableUsdc: afterSnapshot.closeReachableUsdc,
-            beforeTerminalReachableUsdc: beforeSnapshot.terminalReachableUsdc,
-            afterTerminalReachableUsdc: afterSnapshot.terminalReachableUsdc
+            beforeTerminalReachableUsdc: beforeSnapshot.liquidationReachableSettlementUsdc,
+            afterTerminalReachableUsdc: afterSnapshot.liquidationReachableSettlementUsdc
         });
     }
 

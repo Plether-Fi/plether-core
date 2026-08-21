@@ -21,15 +21,19 @@ library PerpsViewTypes {
 
     /// @notice Compact custody, reservation, and risk summary for one trader account.
     /// @dev All monetary fields use USDC's 6 decimals.
-    /// @param equityUsdc Cached-mark live-position equity excluding trader claims and without a freshness check,
-    ///        floored at zero; equals raw settlement equity when flat.
-    /// @param withdrawableUsdc Same-state withdrawal estimate from the account lens. When risk headroom binds, the
-    ///        live guard requires equity to remain strictly above the requirement, so the exact quoted boundary may
-    ///        need to be reduced by one atomic USDC unit.
+    /// @param equityUsdc Cached-mark exact price-risk equity: PnL pledge plus same-account claim plus exact price PnL.
+    ///        Carry and VPI are excluded. Uncovered carry or an underfunded negative-VPI reserve independently sets
+    ///        `liquidatable` and withdrawal capacity to zero. This field is floored at zero and equals raw settlement
+    ///        equity when flat.
+    /// @param withdrawableUsdc Same-state withdrawal estimate from the account lens. Uncovered carry or an underfunded
+    ///        negative-VPI reserve makes this zero. When price-risk headroom binds, the live guard requires equity to
+    ///        remain strictly above the requirement, so the exact quoted boundary may need to be reduced by one atomic
+    ///        USDC unit.
     /// @param pendingOrderMarginUsdc Margin committed to pending open or increase orders.
     /// @param pendingExecutionBountyUsdc Clearinghouse-custodied settlement attributed to execution bounties.
     /// @param hasOpenPosition Whether the account currently has a nonzero position.
-    /// @param liquidatable Cached-mark diagnostic using FAD margin in FAD, or maintenance margin otherwise; mark
+    /// @param liquidatable Cached-mark diagnostic that is true for an exact price-risk maintenance breach, carry left
+    ///        uncovered after projected free-settlement collection, or an underfunded negative-VPI reserve; mark
     ///        freshness is not validated by this view.
     struct TraderAccountView {
         uint256 equityUsdc;
@@ -49,8 +53,8 @@ library PerpsViewTypes {
     /// @param marginUsdc Canonical position-margin bucket backing the position.
     /// @param unrealizedPnlUsdc Mark-to-market PnL at the cached engine mark, excluding pending carry and VPI.
     /// @param maintenanceMarginUsdc Margin required at the current mark under the active calendar regime.
-    /// @param liquidatable Cached-mark diagnostic using FAD margin in FAD, or maintenance margin otherwise; mark
-    ///        freshness is not validated by this view.
+    /// @param liquidatable Cached-mark diagnostic that is true for an exact price-risk maintenance breach or any carry
+    ///        left uncovered after projected free-settlement collection; mark freshness is not validated by this view.
     struct PositionView {
         bool exists;
         CfdTypes.Side side;

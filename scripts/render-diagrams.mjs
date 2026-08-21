@@ -309,7 +309,8 @@ const perpsLpWithdrawalAvailability = `graph TD
     G3 -->|No| B3([Blocked: stale mark])
     G3 -->|Yes| SNAP[Build withdrawal snapshot]
     SNAP --> RES[Reserved USDC]
-    RES --> RES2[max liability + carry reserve + trader claims + protocol fees]
+    RES --> RES2[max directional liability + trader claims + supplemental reserve]
+    RES2 -.- RESN>excludes carry and VPI reserves plus protocol fees]
     RES2 --> FREE[Free USDC]
     FREE --> FREE2[net physical assets minus reserved USDC]
     FREE2 --> CAP[Cap by tranche priority]
@@ -318,6 +319,7 @@ const perpsLpWithdrawalAvailability = `graph TD
 
     class U state
     class SNAP,RES,RES2,FREE,FREE2,CAP,CAP2 action
+    class RESN note
     class OUT success
     class B1,B2,B3 hardfail
 ${smClasses}`;
@@ -328,21 +330,23 @@ const perpsInternalArchitecture = `graph TD
     OR -->|Validated order intent| EN[CfdEngine]
     EN -->|Settle, seize, classify liabilities| MC
     EN -->|Account protocol, revenue, recap inflows| HP[HousePool]
+    EN -->|Only writer; reads exact book state + terminal LP delta| TNB[TerminalNavBookV2]
     HP -->|Mint / burn shares| TV[TrancheVaults]
     HP -->|Record unpaid trader payouts| TC[Trader Claim Balances]
     HP -->|Segregate non-LP fees| PF(Protocol Fees)
     HP -->|Hold exceptional ownership gap| UA(Unassigned / Excess Assets)
 
-    MC -.- MCN>Trader domain: free settlement, live position margin, committed order margin]
+    MC -.- MCN>Trader domain: free settlement, P+C price collateral, typed action reserves including VPI]
     OR -.- ORN>Queue domain: clearinghouse-reserved execution-bounty reservations]
     EN -.- ENN>Ledger domain: close, liquidation, solvency, withdrawal accounting]
-    HP -.- HPN>Pool domain: accounted assets, tranche waterfall, fee segregation]
+    TNB -.- TNBN>Exact position curves; no independent writers]
+    HP -.- HPN>Pool domain: accounting + waterfall; reads terminal NAV from Engine snapshot via protocol lens]
 
     class U user
-    class MC,OR,EN,HP,TV contract
+    class MC,OR,EN,TNB,HP,TV contract
     class PF,UA token
     class TC external
-    class MCN,ORN,ENN,HPN desc
+    class MCN,ORN,ENN,TNBN,HPN desc
 ${classes}`;
 
 mkdirSync(outDir, { recursive: true });

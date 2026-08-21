@@ -109,10 +109,12 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
 
             ICfdEngineTypes.LiquidationPreview memory liquidationPreview =
                 engineLens.previewLiquidation(account, oraclePrice);
+            AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
+                engineAccountLens.getAccountLedgerSnapshot(account);
             assertEq(
                 liquidationPreview.reachableCollateralUsdc,
-                _terminalReachableUsdc(account),
-                "Liquidation preview reachable collateral mismatch"
+                snapshot.terminalPriceCollectibleCapUsdc + clearinghouse.vpiRebateReserveUsdc(account),
+                "Liquidation preview must use the exact price cap plus only the dedicated VPI reserve"
             );
         }
     }
@@ -132,13 +134,13 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
                 engineLens.previewLiquidation(account, oraclePrice);
             assertEq(
                 liquidationPreview.reachableCollateralUsdc,
-                snapshot.terminalReachableUsdc,
-                "Liquidation preview reachable collateral must match snapshot reachability"
+                snapshot.terminalPriceCollectibleCapUsdc + clearinghouse.vpiRebateReserveUsdc(account),
+                "Liquidation preview must remain isolated to the exact price cap and dedicated VPI reserve"
             );
-            assertLt(
-                liquidationPreview.reachableCollateralUsdc,
-                snapshot.settlementBalanceUsdc + snapshot.executionBountyReserveUsdc,
-                "Liquidation preview must exclude reserved execution bounty from reachable collateral"
+            assertEq(
+                snapshot.liquidationReachableSettlementUsdc,
+                snapshot.settlementBalanceUsdc - snapshot.executionBountyReserveUsdc,
+                "Account liquidation custody must exclude the reserved execution bounty"
             );
         }
     }

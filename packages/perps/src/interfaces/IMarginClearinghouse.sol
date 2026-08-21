@@ -40,6 +40,8 @@ interface IMarginClearinghouse {
     error MarginClearinghouse__InsufficientBucketMargin();
     /// @notice A reservation amount cannot be represented by the reservation ledger's `uint96` fields.
     error MarginClearinghouse__AmountOverflow();
+    /// @notice Planned action-reserve consumption does not match the currently spendable reserve after queued bounties.
+    error MarginClearinghouse__ActionReserveMismatch();
 
     /// @notice Canonical locked-margin bucket whose balance is being classified or mutated.
     enum MarginBucket {
@@ -48,14 +50,34 @@ interface IMarginClearinghouse {
         /// @notice Margin committed to queued open/increase orders.
         CommittedOrder,
         /// @notice Settlement explicitly reserved for execution bounties or other protected settlement.
-        ReservedSettlement
+        ReservedSettlement,
+        /// @notice Dedicated keeper/protocol liquidation-charge reserve, isolated from price PnL.
+        LiquidationReserve
     }
 
-    /// @notice Typed locked-margin split for one clearinghouse account.
+    /// @notice Canonical V2 ownership split for one account's settlement custody.
+    /// @dev Every locked bucket is a classification within `settlementBalanceUsdc`, not an additional asset.
+    ///      Legacy `positionMarginUsdc`, `committedOrderMarginUsdc`, and `reservedSettlementUsdc` getters map to
+    ///      `pnlPledgeUsdc`, `orderMarginUsdc`, and `actionReserveUsdc`, respectively.
+    struct PnlIsolationBuckets {
+        uint256 settlementBalanceUsdc;
+        uint256 pnlPledgeUsdc;
+        uint256 liquidationReserveUsdc;
+        uint256 orderMarginUsdc;
+        uint256 actionReserveUsdc;
+        /// @notice Mandatory negative-lifetime-VPI floor contained inside `actionReserveUsdc` (not additive).
+        uint256 vpiRebateReserveUsdc;
+        uint256 totalLockedUsdc;
+        uint256 freeSettlementUsdc;
+    }
+
+    /// @notice Legacy three-field locked-margin split for one clearinghouse account.
+    /// @dev Prefer `PnlIsolationBuckets` for the canonical four-bucket view. The legacy named fields omit liquidation
+    ///      reserve, while `totalLockedMarginUsdc` still includes it so free-equity calculations remain conservative.
     /// @param positionMarginUsdc Margin backing the active position.
     /// @param committedOrderMarginUsdc Aggregate margin backing active order reservations.
     /// @param reservedSettlementUsdc Settlement protected from generic order and position release paths.
-    /// @param totalLockedMarginUsdc Sum of the three typed buckets.
+    /// @param totalLockedMarginUsdc Sum of PnL pledge, liquidation reserve, order margin, and action reserve.
     struct LockedMarginBuckets {
         uint256 positionMarginUsdc;
         uint256 committedOrderMarginUsdc;
@@ -107,7 +129,7 @@ interface IMarginClearinghouse {
     /// @param settlementBalanceUsdc Total internal settlement balance, including all locked value.
     /// @param totalLockedMarginUsdc Sum of all typed locked-margin buckets.
     /// @param activePositionMarginUsdc Active-position custody bucket.
-    /// @param otherLockedMarginUsdc Sum of committed-order and reserved-settlement buckets.
+    /// @param otherLockedMarginUsdc Sum of liquidation reserve, committed-order, and reserved-settlement buckets.
     /// @param freeSettlementUsdc Settlement balance above total locked margin, floored at zero.
     struct AccountUsdcBuckets {
         uint256 settlementBalanceUsdc;
@@ -119,12 +141,12 @@ interface IMarginClearinghouse {
 
     /// @notice Engine-planned bucket mutation for liquidation settlement.
     /// @dev All fields use 6-decimal USDC. The clearinghouse applies the unlock, debit, transfer, and bounty amounts;
-    ///      `settlementRetainedUsdc`, `freshTraderPayoutUsdc`, and `badDebtUsdc` describe engine-side economics.
+    ///      `settlementRetainedUsdc`, `freshTraderPayoutUsdc`, and `badDebtUsdc` describe engine-side diagnostics.
     /// @param settlementRetainedUsdc Existing account settlement left in place toward positive residual equity;
     ///        informational to the clearinghouse mutation.
     /// @param settlementSeizedUsdc Settlement debited from the account and transferred to the pool recipient.
     /// @param freshTraderPayoutUsdc New surplus owed to the trader after liquidation.
-    /// @param badDebtUsdc Uncovered liquidation loss recorded by the engine.
+    /// @param badDebtUsdc Compatibility diagnostic for uncollectible price loss; the clearinghouse does not store debt.
     /// @param positionMarginUnlockedUsdc Active-position margin to consume or release.
     /// @param otherLockedMarginUnlockedUsdc Committed-order margin to consume through supplied reservation ids.
     struct LiquidationSettlementPlan {
@@ -144,7 +166,7 @@ interface IMarginClearinghouse {
         address account
     ) external view returns (uint256);
 
-    /// @notice Returns total locked margin across the position, committed-order, and reserved-settlement buckets.
+    /// @notice Returns total locked margin across all four canonical isolation buckets.
     /// @param account Account to inspect
     /// @return Total locked margin in USDC
     function lockedMarginUsdc(
@@ -153,10 +175,40 @@ interface IMarginClearinghouse {
 
     /// @notice Returns the typed locked-margin buckets for an account.
     /// @param account Account to inspect
-    /// @return buckets Position, committed-order, reserved-settlement, and total locked buckets in USDC
+    /// @return buckets Legacy named fields plus a total that also includes the omitted liquidation reserve
     function getLockedMarginBuckets(
         address account
     ) external view returns (LockedMarginBuckets memory buckets);
+
+    /// @notice Returns the canonical PnL-isolated settlement split.
+    function getPnlIsolationBuckets(
+        address account
+    ) external view returns (PnlIsolationBuckets memory buckets);
+
+    /// @notice Trader-owned collateral explicitly pledged to position price PnL.
+    function pnlPledgeUsdc(
+        address account
+    ) external view returns (uint256);
+
+    /// @notice Settlement reserved exclusively for keeper/protocol liquidation charges.
+    function liquidationReserveUsdc(
+        address account
+    ) external view returns (uint256);
+
+    /// @notice Pending-order margin excluded from live-position price PnL.
+    function orderMarginUsdc(
+        address account
+    ) external view returns (uint256);
+
+    /// @notice Settlement reserved for action charges and execution bounties, never position price PnL.
+    function actionReserveUsdc(
+        address account
+    ) external view returns (uint256);
+
+    /// @notice Nonwithdrawable negative-lifetime-VPI backing contained inside the action-reserve bucket.
+    function vpiRebateReserveUsdc(
+        address account
+    ) external view returns (uint256);
 
     /// @notice Returns the reservation record for a specific order id.
     /// @param orderId Order reservation id to inspect
@@ -252,6 +304,12 @@ interface IMarginClearinghouse {
         uint256 amountUsdc
     ) external returns (uint256 consumedUsdc);
 
+    /// @notice Atomically promotes exact pending-order margin into live-position PnL pledge.
+    function promoteOrderReservationToPnlPledge(
+        uint64 orderId,
+        uint256 amountUsdc
+    ) external;
+
     /// @notice Consumes active order reservations for an account in FIFO reservation order.
     /// @dev Callable only by the engine or settlement sidecar. The configured router supplies the id order; inactive
     ///      records are skipped, no tokens move, and the returned amount can be below the request.
@@ -314,6 +372,106 @@ interface IMarginClearinghouse {
         uint256 amountUsdc
     ) external;
 
+    /// @notice Credits newly arrived settlement and atomically classifies it as PnL pledge.
+    /// @dev Used when a live-position trader claim is paid into clearinghouse custody. The caller is responsible for
+    ///      ensuring the corresponding settlement tokens have already arrived.
+    function creditPnlPledge(
+        address account,
+        uint256 amountUsdc
+    ) external;
+
+    /// @notice Locks free settlement into the liquidation-charge reserve.
+    function lockLiquidationReserve(
+        address account,
+        uint256 amountUsdc
+    ) external;
+
+    /// @notice Releases liquidation reserve back to free settlement without moving tokens.
+    function releaseLiquidationReserve(
+        address account,
+        uint256 amountUsdc
+    ) external;
+
+    /// @notice Reclassifies existing PnL pledge as liquidation reserve without changing total locked settlement.
+    function reclassifyPnlPledgeToLiquidationReserve(
+        address account,
+        uint256 amountUsdc
+    ) external;
+
+    /// @notice Reclassifies liquidation reserve as PnL pledge without changing total locked settlement.
+    function reclassifyLiquidationReserveToPnlPledge(
+        address account,
+        uint256 amountUsdc
+    ) external;
+
+    /// @notice Locks free settlement into the action-charge reserve.
+    function lockActionReserve(
+        address account,
+        uint256 amountUsdc
+    ) external;
+
+    /// @notice Releases action reserve back to free settlement without moving tokens.
+    function releaseActionReserve(
+        address account,
+        uint256 amountUsdc
+    ) external;
+
+    /// @notice Transfers action-reserved settlement to a clearinghouse recipient.
+    function consumeActionReserve(
+        address account,
+        address recipient,
+        uint256 amountUsdc
+    ) external;
+
+    /// @notice Locks free settlement into both action reserve and its mandatory negative-VPI sub-ledger.
+    function lockVpiRebateReserve(
+        address account,
+        uint256 amountUsdc
+    ) external;
+
+    /// @notice Reclassifies newly added PnL pledge into the negative-VPI action-reserve sub-ledger.
+    function reclassifyPnlPledgeToVpiRebateReserve(
+        address account,
+        uint256 amountUsdc
+    ) external;
+
+    /// @notice Releases no-longer-required negative-VPI backing to free settlement.
+    function releaseVpiRebateReserve(
+        address account,
+        uint256 amountUsdc
+    ) external;
+
+    /// @notice Debits negative-VPI backing and transfers the recovered cash to the LP pool.
+    function consumeVpiRebateReserve(
+        address account,
+        address recipient,
+        uint256 amountUsdc
+    ) external;
+
+    /// @notice Collects an action charge from spendable action reserve, free settlement, then committed order margin.
+    /// @dev PnL pledge, liquidation reserve, negative-VPI backing, and pending execution bounties are never reachable.
+    ///      Both expected-source arguments must exactly match the split implied by current state; this makes a stale or
+    ///      incorrect settlement plan revert. Committed margin is consumed through the router-reported FIFO reservation
+    ///      ledger. Collection is capped by eligible value, so callers may treat the remainder as waived.
+    /// @param account Account paying the charge
+    /// @param chargeUsdc Maximum action charge to collect
+    /// @param actionReserveConsumedUsdc Exact spendable action reserve the settlement plan expects to consume
+    /// @param actionCommittedMarginConsumedUsdc Exact committed order margin the plan expects to consume after free
+    /// @param recipient External recipient of the non-protocol portion
+    /// @param protocolTreasury Clearinghouse account credited with the protocol portion; zero disables the credit
+    /// @param protocolFeeUsdc Requested protocol portion, capped by the amount collected
+    /// @return collectedUsdc Action reserve plus free settlement actually collected
+    /// @return protocolFeeCreditedUsdc Collected amount credited internally to `protocolTreasury`
+    function consumeActionCharge(
+        address account,
+        uint256 chargeUsdc,
+        uint256 actionReserveConsumedUsdc,
+        uint256 actionCommittedMarginConsumedUsdc,
+        address recipient,
+        address protocolTreasury,
+        uint256 protocolFeeUsdc
+    ) external returns (uint256 collectedUsdc, uint256 protocolFeeCreditedUsdc);
+
     /// @notice Applies an open/increase trade cost and routes any cash-collected protocol fee to a treasury account.
     /// @dev Callable only by the engine or settlement sidecar. Positive cost debits settlement; negative cost credits
     ///      a rebate. The non-fee debit is transferred to `recipient`, while the fee portion remains in clearinghouse
@@ -335,15 +493,14 @@ interface IMarginClearinghouse {
         uint256 protocolFeeUsdc
     ) external returns (int256 netMarginChangeUsdc, uint256 protocolFeeCreditedUsdc);
 
-    /// @notice Consumes a realized settlement loss from free settlement plus the active position margin bucket.
+    /// @notice Consumes a non-price settlement charge from free settlement only.
     /// @dev Callable only by the engine or settlement sidecar. The legacy `lockedPositionMarginUsdc` argument is
-    ///      ignored; canonical stored buckets determine consumption. Committed and reserved buckets remain protected,
-    ///      and collected tokens are transferred to `recipient`.
+    ///      ignored. PnL pledge and every reserve bucket remain protected; any uncovered amount is waived.
     /// @param account Account paying the loss
     /// @param lockedPositionMarginUsdc Deprecated ABI parameter ignored by the implementation
     /// @param lossUsdc Maximum loss to collect in USDC
     /// @param recipient External recipient of collected USDC
-    /// @return marginConsumedUsdc Active position margin consumed in USDC
+    /// @return marginConsumedUsdc Always zero under PnL-isolated accounting
     /// @return freeSettlementConsumedUsdc Free settlement consumed in USDC
     /// @return uncoveredUsdc Requested loss left uncovered in USDC
     function consumeSettlementLoss(
@@ -353,21 +510,29 @@ interface IMarginClearinghouse {
         address recipient
     ) external returns (uint256 marginConsumedUsdc, uint256 freeSettlementConsumedUsdc, uint256 uncoveredUsdc);
 
-    /// @notice Consumes close-path losses and routes any cash-collected protocol fee to a treasury account.
-    /// @dev Callable only by the engine or settlement sidecar. Reserved settlement is always protected. When
-    ///      `includeOtherLockedMargin` is true, committed margin can be consumed only through the supplied active ids.
-    ///      The fee portion remains in custody as a treasury credit and the remainder is transferred to `recipient`.
+    /// @notice Collects terminal position price loss from PnL pledge only.
+    /// @dev Free settlement and every reserve bucket are excluded so settlement matches the NAV book's collateral cap.
+    function consumePnlPledgeLoss(
+        address account,
+        uint256 priceLossUsdc,
+        address recipient
+    ) external returns (uint256 consumedUsdc, uint256 shortfallUsdc);
+
+    /// @notice Legacy partial-close entrypoint that collects price loss from PnL pledge only.
+    /// @dev `reservationOrderIds`, `includeOtherLockedMargin`, and `protocolFeeAccount` are ignored. A nonzero protocol
+    ///      fee reverts because action fees must use `consumeActionCharge`. `protectedLockedMarginUsdc` preserves the
+    ///      residual position's pledge, so callers must collect before unlocking unused closed-lot pledge.
     /// @param account Account paying the close loss
-    /// @param reservationOrderIds Active reservation ids allowed to cover committed-order margin consumption
+    /// @param reservationOrderIds Deprecated and ignored
     /// @param lossUsdc Maximum loss to collect in USDC
     /// @param protectedLockedMarginUsdc Active position margin that must remain protected, in USDC
-    /// @param includeOtherLockedMargin Whether committed-order margin may be consumed; reserved settlement never is
-    /// @param recipient External recipient of the collected debit after any internal fee credit
-    /// @param protocolFeeAccount Clearinghouse account receiving the fee credit; zero disables the credit
-    /// @param protocolFeeUsdc Requested protocol-fee portion of the loss, in USDC
-    /// @return seizedUsdc Total settlement debit collected, including any internally credited fee, in USDC
+    /// @param includeOtherLockedMargin Deprecated and ignored
+    /// @param recipient External recipient of collected price-loss cash
+    /// @param protocolFeeAccount Deprecated and ignored
+    /// @param protocolFeeUsdc Must be zero
+    /// @return seizedUsdc PnL pledge collected and transferred, in USDC
     /// @return shortfallUsdc Requested loss left uncovered in USDC
-    /// @return protocolFeeCreditedUsdc Portion of `seizedUsdc` credited internally to the treasury, in USDC
+    /// @return protocolFeeCreditedUsdc Always zero
     function consumeCloseLoss(
         address account,
         uint64[] calldata reservationOrderIds,
@@ -379,10 +544,9 @@ interface IMarginClearinghouse {
         uint256 protocolFeeUsdc
     ) external returns (uint256 seizedUsdc, uint256 shortfallUsdc, uint256 protocolFeeCreditedUsdc);
 
-    /// @notice Applies a pre-planned liquidation settlement mutation while preserving reserved settlement.
-    /// @dev Callable only by the engine or settlement sidecar. Consumes the exact planned locked amounts, debits the
-    ///      seized value plus keeper and protocol allocations, transfers seized USDC to `recipient`, and credits both
-    ///      internal allocations. Other economic fields in `plan` are informational to this clearinghouse call.
+    /// @notice Applies isolated full-liquidation price-PnL and charge settlement.
+    /// @dev Price seizure consumes PnL pledge only. Keeper, protocol, and LP liquidation fees consume liquidation
+    ///      reserve only. Order margin, action reserve, and free settlement are never charge or price-loss sources.
     /// @param account Liquidated account
     /// @param reservationOrderIds Active ids allowed to cover committed-order margin consumption
     /// @param plan Engine-planned liquidation amounts, all in USDC
@@ -391,6 +555,7 @@ interface IMarginClearinghouse {
     /// @param keeperBountyUsdc Bounty debited from `account` and credited to `keeper`, in USDC
     /// @param protocolFeeAccount Clearinghouse account credited with the liquidation protocol fee
     /// @param protocolFeeUsdc Protocol fee debited from `account` and credited internally, in USDC
+    /// @param lpLiquidationFeeUsdc LP fee included in `plan.settlementSeizedUsdc`, in USDC
     /// @return seizedUsdc Amount transferred to `recipient` in USDC
     function applyLiquidationSettlementPlan(
         address account,
@@ -400,7 +565,8 @@ interface IMarginClearinghouse {
         address keeper,
         uint256 keeperBountyUsdc,
         address protocolFeeAccount,
-        uint256 protocolFeeUsdc
+        uint256 protocolFeeUsdc,
+        uint256 lpLiquidationFeeUsdc
     ) external returns (uint256 seizedUsdc);
 
     /// @notice Transfers already-reserved settlement from one account to another without moving tokens.
@@ -415,8 +581,10 @@ interface IMarginClearinghouse {
         uint256 amount
     ) external;
 
-    /// @notice Reserves free-settlement USDC for a close-order execution bounty with carry checkpointing.
-    /// @dev Callable only by the engine's atomic fresh close-bounty path. No tokens move.
+    /// @notice Reserves free-settlement USDC for a fresh close-order execution bounty after engine checkpointing.
+    /// @dev Callable only by the engine or its bound settlement sidecar on the atomic fresh close-bounty path. This
+    ///      hook does not call back into the engine because carry was already checkpointed in the active accounting
+    ///      mutation. No tokens move.
     /// @param account Account whose free settlement should be reserved
     /// @param amount USDC amount to reserve
     function reserveCloseExecutionBountyFromSettlement(
@@ -425,7 +593,8 @@ interface IMarginClearinghouse {
     ) external;
 
     /// @notice Reserves free-settlement USDC for a stale close-order execution bounty without checkpointing carry.
-    /// @dev Callable only by the engine's bounded stale close-bounty path. No tokens move.
+    /// @dev Callable only by the engine or its bound settlement sidecar on the bounded stale close-bounty path. No
+    ///      tokens move.
     /// @param account Account whose free settlement should be reserved
     /// @param amount USDC amount to reserve
     function reserveStaleCloseExecutionBountyFromSettlement(
@@ -433,21 +602,19 @@ interface IMarginClearinghouse {
         uint256 amount
     ) external;
 
-    /// @notice Reclassifies active position margin into reserved settlement for a close-order execution bounty.
-    /// @dev Callable only by the engine. A nonzero call checkpoints carry. Total locked margin, settlement balance,
-    ///      and token custody are unchanged.
-    /// @param account Account whose position margin should be reserved
-    /// @param amount USDC amount to reserve
+    /// @notice Retired position-margin close-bounty selector retained as an explicit reverting tombstone.
+    /// @dev V2 close bounties must be backed exclusively by free settlement; every call reverts.
+    /// @param account Ignored legacy account argument
+    /// @param amount Ignored legacy amount argument
     function reserveCloseExecutionBountyFromPositionMargin(
         address account,
         uint256 amount
     ) external;
 
-    /// @notice Reserves active position margin for a stale close-order execution bounty without checkpointing carry.
-    /// @dev Callable only by the engine's bounded stale close-bounty path. Reclassifies position margin as reserved
-    ///      settlement without changing total locked margin, settlement balance, or token custody.
-    /// @param account Account whose position margin should be reserved
-    /// @param amount USDC amount to reserve
+    /// @notice Retired stale position-margin close-bounty selector retained as an explicit reverting tombstone.
+    /// @dev V2 stale close bounties must also be backed exclusively by free settlement; every call reverts.
+    /// @param account Ignored legacy account argument
+    /// @param amount Ignored legacy amount argument
     function reserveStaleCloseExecutionBountyFromPositionMargin(
         address account,
         uint256 amount

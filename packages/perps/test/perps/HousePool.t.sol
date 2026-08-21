@@ -36,7 +36,7 @@ abstract contract HousePoolAsyncTestBase is BasePerpTest {
     function _refreshMarkForAsyncSettlement() internal {
         uint256 markPrice = engine.lastMarkPrice();
         vm.prank(address(router));
-        engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
+        engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(vm.getBlockTimestamp()));
     }
 
     function _settleAsyncRequest(
@@ -149,6 +149,83 @@ contract HousePoolTest is HousePoolAsyncTestBase {
         engine.updateMarkPrice(1e8, uint64(saturdayFrozen - 12 hours));
 
         vm.warp(saturdayFrozen);
+    }
+
+    function test_MaxDeposit_ZeroWhileOracleFrozen() public {
+        assertTrue(pool.canAcceptTrancheDeposits(false), "setup should permit live junior entry");
+
+        _enterFrozenWindow();
+
+        assertFalse(pool.canAcceptTrancheDeposits(false), "frozen-oracle entry must fail closed");
+        assertEq(juniorVault.maxRequestDeposit(address(this)), 0, "frozen-oracle request capacity must be zero");
+    }
+
+    function test_CurrentTerminalDeficitBlocksEntryBeforeStoredCheckpointUpdates() public {
+        uint256 deficit = 123e6;
+        _setTotalTraderClaim(pool.totalAssets() + deficit);
+
+        assertEq(pool.terminalDeficitUsdc(), 0, "stored deficit should remain the prior reconciled checkpoint");
+        assertEq(
+            pool.getPoolLiquidityView().currentTerminalDeficitUsdc,
+            deficit,
+            "current view must derive the live terminal deficit"
+        );
+        assertFalse(pool.canAcceptTrancheDeposits(false), "live terminal deficit must block junior entry");
+        assertEq(juniorVault.maxRequestDeposit(address(this)), 0, "deficit must zero request capacity");
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.terminalDeficitUsdc(), deficit, "fresh reconcile must persist the explicit deficit");
+    }
+
+    function test_DegradedModeBlocksNewEntryAndQueuedActivation() public {
+        assertTrue(pool.canAcceptTrancheDeposits(false), "setup should permit live junior entry");
+
+        uint256 depositAssets = 10_000e6;
+        uint256 requestId = _requestAsyncDeposit(juniorVault, carol, depositAssets);
+        stdstore.target(address(engine)).sig("degradedMode()").checked_write(true);
+
+        assertFalse(pool.canAcceptTrancheDeposits(false), "degraded mode must close the request gate");
+        assertEq(juniorVault.maxRequestDeposit(carol), 0, "degraded mode must expose zero request capacity");
+
+        vm.warp(pool.lpEpochStart(requestId));
+        vm.expectRevert(IHousePool.HousePool__DegradedMode.selector);
+        pool.settleLpEpoch();
+
+        (uint256 epochAssets, uint256 epochShares,,, bool finalized) = juniorVault.depositEpochs(requestId);
+        assertEq(epochAssets, depositAssets, "blocked activation must preserve the deposit escrow");
+        assertEq(epochShares, 0, "blocked activation must not mint shares");
+        assertFalse(finalized, "blocked activation must leave the epoch pending");
+    }
+
+    function test_PreWipeQueuedJuniorDeposit_DefersAtZeroNavAndRemainsCancellable() public {
+        _fundJunior(bob, 100_000e6);
+        _finishAsyncCooldown(juniorVault, bob);
+
+        uint256 depositAssets = 10_000e6;
+        uint256 depositRequestId = _requestAsyncDeposit(juniorVault, carol, depositAssets);
+        uint256 redeemRequestId = _requestAsyncRedeem(juniorVault, bob, juniorVault.balanceOf(bob) / 10);
+        assertLe(redeemRequestId, depositRequestId, "redeem progress must mature no later than the deposit");
+
+        usdc.burn(address(pool), pool.juniorPrincipal());
+        vm.warp(pool.lpEpochStart(depositRequestId));
+
+        IHousePool.LpEpochSettlementResult memory result = pool.settleLpEpoch();
+        assertEq(pool.juniorPrincipal(), 0, "settlement reconcile should recognize the Junior wipe");
+        assertTrue(result.entriesDeferred, "zero-NAV Junior entry must remain deferred");
+        assertEq(result.juniorDepositAssets, 0, "deferred entry must not move escrowed assets into the pool");
+        assertEq(result.juniorDepositShares, 0, "deferred entry must not mint restart shares");
+        assertFalse(pool.canAcceptTrancheDeposits(false), "wiped Junior must remain closed to fresh entry");
+
+        (uint256 epochAssets, uint256 epochShares,,, bool finalized) = juniorVault.depositEpochs(depositRequestId);
+        assertEq(epochAssets, depositAssets, "queued deposit assets must remain intact");
+        assertEq(epochShares, 0, "deferred epoch must not receive shares");
+        assertFalse(finalized, "zero-NAV epoch must not finalize");
+
+        vm.prank(carol);
+        uint256 refundedAssets = juniorVault.cancelPendingDeposit(depositRequestId, carol, carol);
+        assertEq(refundedAssets, depositAssets, "wiped-tranche depositor must recover full escrow");
+        assertEq(usdc.balanceOf(carol), depositAssets, "cancelled assets must return to the depositor");
     }
 
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
@@ -2134,6 +2211,21 @@ contract HousePoolUnseededBootstrapTest is HousePoolAsyncTestBase {
         pool.initializeSeedPosition(true, seedAssets, address(this));
     }
 
+    function test_EmptyTerminalBookWithoutMark_AllowsSeedBootstrap() public {
+        assertEq(engine.lastMarkTime(), 0, "setup must not manufacture a mark");
+        ICfdEngineTypes.TerminalNavSnapshot memory terminalSnapshot = engine.terminalNavSnapshot();
+        assertFalse(terminalSnapshot.hasOpenPositions, "empty book must report no exposure");
+        assertEq(terminalSnapshot.terminalLpPriceDeltaUsdc, 0, "empty terminal delta must be zero");
+
+        uint256 seedAssets = 1000e6;
+        usdc.mint(address(this), seedAssets * 2);
+        usdc.approve(address(pool), seedAssets * 2);
+        pool.initializeSeedPosition(false, seedAssets, address(this));
+        pool.initializeSeedPosition(true, seedAssets, address(this));
+
+        assertTrue(pool.isSeedLifecycleComplete(), "missing mark must not block empty-book seed bootstrap");
+    }
+
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
@@ -2879,8 +2971,8 @@ contract HousePoolAuditTest is HousePoolAsyncTestBase {
         assertGt(_unrealizedTraderPnl(), 0, "Traders should have positive unrealized PnL");
     }
 
-    // Regression: H-01 + C-03 — unrealized trader losses must not inflate junior principal
-    function test_MtM_TraderLossDoesNotInflateJuniorPrincipal() public {
+    // Exact terminal NAV recognizes only the account-local loss collateral that LPs can actually collect.
+    function test_TerminalNav_CollectibleTraderLossIncreasesJuniorPrincipal() public {
         _fundJunior(bob, 500_000e6);
         _fundTrader(alice, 50_000e6);
         _fundTrader(carol, 50_000e6);
@@ -2896,8 +2988,40 @@ contract HousePoolAuditTest is HousePoolAsyncTestBase {
 
         uint256 juniorAfter = pool.juniorPrincipal();
 
-        assertLe(juniorAfter, juniorBefore, "C-03 fix: unrealized trader losses must not inflate junior principal");
+        assertGt(juniorAfter, juniorBefore, "collectible terminal value must accrue to Junior");
+        assertGt(_terminalLpPriceDelta(), 0, "LP terminal delta should be positive for collectible trader loss");
         assertLt(_unrealizedTraderPnl(), 0, "Traders should have negative unrealized PnL");
+    }
+
+    function test_TerminalNav_OpenPnlUsesSameJuniorEntryAndExitPricing() public {
+        _fundJunior(bob, 500_000e6);
+        _fundTrader(alice, 50_000e6);
+        _open(alice, CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8);
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(1.1e8, uint64(block.timestamp));
+        assertLt(_terminalLpPriceDelta(), 0, "setup requires a live trader-profit liability");
+
+        (, uint256 withdrawalJuniorNav,,) = pool.getPendingTrancheState();
+        (, uint256 depositJuniorNav) = pool.getPendingDepositTrancheState();
+        assertEq(depositJuniorNav, withdrawalJuniorNav, "entry and exit must project one exact Junior NAV");
+
+        uint256 depositAssets = 25_000e6;
+        uint256 requestId = _requestAsyncDeposit(juniorVault, carol, depositAssets);
+        vm.warp(pool.lpEpochStart(requestId));
+        _refreshMarkForAsyncSettlement();
+
+        (, withdrawalJuniorNav,,) = pool.getPendingTrancheState();
+        (, depositJuniorNav) = pool.getPendingDepositTrancheState();
+        assertEq(depositJuniorNav, withdrawalJuniorNav, "settlement-time entry and exit NAV must match");
+        uint256 expectedShares =
+            juniorVault.quoteDepositFromState(depositAssets, withdrawalJuniorNav, juniorVault.totalSupply(), 0);
+
+        pool.settleLpEpoch();
+        (uint256 epochAssets, uint256 epochShares,,, bool finalized) = juniorVault.depositEpochs(requestId);
+        assertTrue(finalized, "mature exact-NAV deposit should finalize");
+        assertEq(epochAssets, depositAssets, "settled epoch asset basis mismatch");
+        assertEq(epochShares, expectedShares, "actual mint must use the same NAV exposed to redemptions");
     }
 
     // Regression: H-01 — MtM zeroes after all positions closed
@@ -3093,8 +3217,8 @@ contract HousePoolAuditTest is HousePoolAsyncTestBase {
         assertGe(totalClaimed + pendingFees, poolBalance, "All pool cash must be accounted for with zero open interest");
     }
 
-    // Regression: C-02 — legacy negative spread must not inflate junior principal
-    function test_LegacyNegativeSpreadDoesNotInflateJuniorPrincipal() public {
+    // Regression: C-02 — legacy negative spread must not inflate junior beyond separately realized carry
+    function test_LegacyNegativeSpreadDoesNotInflateJuniorBeyondRealizedCarry() public {
         CfdTypes.RiskParams memory params = _riskParams();
         _setRiskParams(params);
 
@@ -3109,17 +3233,33 @@ contract HousePoolAuditTest is HousePoolAsyncTestBase {
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
         vm.warp(block.timestamp + 30);
 
+        uint256 accountedAssetsBeforeClose = pool.accountedAssets();
         _close(carol, CfdTypes.Side.BULL, 100_000e18, 1e8);
+        uint256 realizedCarryUsdc = pool.accountedAssets() - accountedAssetsBeforeClose;
 
-        int256 unrealizedLegacySpread = int256(0);
-        assertEq(unrealizedLegacySpread, 0, "Carry model should not report legacy side spread state");
+        ICfdEngineTypes.TerminalNavSnapshot memory terminalSnapshot = engine.terminalNavSnapshot();
+        assertEq(terminalSnapshot.terminalLpPriceDeltaUsdc, 0, "remaining position has no terminal price PnL");
+        assertGt(realizedCarryUsdc, 0, "close should separately realize elapsed carry into the pool");
 
+        uint256 seniorBefore = pool.seniorPrincipal();
         uint256 juniorBefore = pool.juniorPrincipal();
         vm.prank(address(juniorVault));
         pool.reconcile();
+        uint256 seniorAfter = pool.seniorPrincipal();
         uint256 juniorAfter = pool.juniorPrincipal();
 
-        assertLe(juniorAfter, juniorBefore, "conservative: junior must not increase from legacy side spread debt");
+        uint256 fundedSeniorCouponUsdc = seniorAfter - seniorBefore;
+        uint256 juniorCarryRevenueUsdc = juniorAfter - juniorBefore;
+        assertEq(
+            fundedSeniorCouponUsdc + juniorCarryRevenueUsdc,
+            realizedCarryUsdc,
+            "realized carry must account for the full claimant increase"
+        );
+        assertEq(
+            juniorAfter,
+            juniorBefore + realizedCarryUsdc - fundedSeniorCouponUsdc,
+            "legacy spread state must not add junior value beyond realized carry after senior coupon"
+        );
     }
 
     // Regression: H-04 — fees withdrawable at high utilization

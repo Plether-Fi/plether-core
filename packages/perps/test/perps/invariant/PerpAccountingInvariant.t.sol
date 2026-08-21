@@ -99,19 +99,23 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function invariant_BadDebtOnlyAppearsAfterAccountReservationExhaustion() public view {
-        uint256 currentBadDebt = engine.accumulatedBadDebtUsdc();
+    function invariant_LiquidationPriceTailsRemainDiagnosticAfterReservationExhaustion() public view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
             PerpGhostLedger.LiquidationSnapshot memory snapshot = handler.liquidationSnapshot(account);
-            if (!snapshot.liquidated || currentBadDebt <= snapshot.badDebtUsdc) {
+            if (!snapshot.liquidated) {
                 continue;
             }
 
             assertEq(
+                snapshot.legacyDebtDiagnosticUsdc,
+                0,
+                "Liquidation price tails must remain diagnostic writeoffs, never protocol debt"
+            );
+            assertEq(
                 handler.accountExecutionBountyReserve(account),
                 0,
-                "Bad debt growth cannot coexist with same-account execution bounty reserves"
+                "Terminal liquidation must exhaust same-account execution bounty reservations"
             );
         }
     }

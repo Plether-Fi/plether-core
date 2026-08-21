@@ -12,7 +12,7 @@ library OpenAccountingLib {
 
     /// @notice Inputs needed to value an open or same-side position increase.
     /// @param currentSize Existing position size, or zero for a new position.
-    /// @param currentEntryPrice Existing volume-weighted entry price; ignored when `currentSize` is zero.
+    /// @param currentEntryCostUsdcAtoms Exact existing entry cost in 6-decimal USDC atoms.
     /// @param side Side of the new or increased position.
     /// @param sizeDelta Size added by the order.
     /// @param price Execution and margin-reference price.
@@ -24,7 +24,7 @@ library OpenAccountingLib {
     /// @param riskParams VPI factor, initial/maintenance margin rates, and minimum bounty.
     struct OpenInputs {
         uint256 currentSize;
-        uint256 currentEntryPrice;
+        uint256 currentEntryCostUsdcAtoms;
         CfdTypes.Side side;
         uint256 sizeDelta;
         uint256 price;
@@ -38,8 +38,9 @@ library OpenAccountingLib {
 
     /// @notice Calculated economic and risk state for an open or increase.
     /// @param addedMaxProfitUsdc Maximum-profit liability added by `sizeDelta` at the execution price.
-    /// @param oldEntryNotional Existing raw `currentSize * currentEntryPrice`, with 26-decimal precision.
-    /// @param newEntryPrice Resulting size-weighted entry price, rounded down to 8 decimals.
+    /// @param oldEntryNotional Existing exact entry cost scaled by `1e20`, with 26-decimal precision.
+    /// @param newEntryPrice Display-only average entry price, rounded down to 8 decimals.
+    /// @param newEntryCostUsdcAtoms Exact resulting entry cost in 6-decimal USDC atoms.
     /// @param newSize Resulting position size.
     /// @param newEntryNotional Raw `newSize * newEntryPrice`; may omit weighted-average division dust.
     /// @param postSkewUsdc Caller-supplied post-trade skew copied into the result.
@@ -54,6 +55,7 @@ library OpenAccountingLib {
         uint256 addedMaxProfitUsdc;
         uint256 oldEntryNotional;
         uint256 newEntryPrice;
+        uint256 newEntryCostUsdcAtoms;
         uint256 newSize;
         uint256 newEntryNotional;
         uint256 postSkewUsdc;
@@ -63,6 +65,7 @@ library OpenAccountingLib {
         int256 tradeCostUsdc;
         uint256 maintenanceMarginUsdc;
         uint256 initialMarginRequirementUsdc;
+        uint256 liquidationReserveTargetUsdc;
     }
 
     /// @notice Builds entry, economic-cost, and risk-requirement state for an open or increase.
@@ -75,51 +78,33 @@ library OpenAccountingLib {
     function buildOpenState(
         OpenInputs memory inputs
     ) internal pure returns (OpenState memory state) {
+        uint256 addedLots = CfdMath.sizeToLots(inputs.sizeDelta);
+        uint256 currentLots = CfdMath.sizeToLots(inputs.currentSize);
+        uint256 addedEntryCostUsdcAtoms = addedLots * inputs.price;
         state.addedMaxProfitUsdc =
-            CfdMath.calculateMaxProfit(inputs.sizeDelta, inputs.price, inputs.side, inputs.capPrice);
-        state.oldEntryNotional = inputs.currentSize * inputs.currentEntryPrice;
-
-        if (inputs.currentSize == 0) {
-            state.newEntryPrice = inputs.price;
-        } else {
-            uint256 totalValue = state.oldEntryNotional + (inputs.sizeDelta * inputs.price);
-            state.newEntryPrice = totalValue / (inputs.currentSize + inputs.sizeDelta);
-        }
-
+            CfdMath.calculateExactMaxProfit(addedLots, addedEntryCostUsdcAtoms, inputs.side, inputs.capPrice);
+        state.oldEntryNotional = inputs.currentEntryCostUsdcAtoms * CfdMath.USDC_TO_TOKEN_SCALE;
         state.newSize = inputs.currentSize + inputs.sizeDelta;
-        state.newEntryNotional = state.newSize * state.newEntryPrice;
+        state.newEntryCostUsdcAtoms = inputs.currentEntryCostUsdcAtoms + addedEntryCostUsdcAtoms;
+        uint256 newLots = currentLots + addedLots;
+        state.newEntryPrice = newLots == 0 ? inputs.price : state.newEntryCostUsdcAtoms / newLots;
+        state.newEntryNotional = state.newEntryCostUsdcAtoms * CfdMath.USDC_TO_TOKEN_SCALE;
         state.postSkewUsdc = inputs.postSkewUsdc;
 
         state.vpiUsdc = CfdMath.calculateVPI(
             inputs.preSkewUsdc, inputs.postSkewUsdc, inputs.poolDepthUsdc, inputs.riskParams.vpiFactor
         );
-        state.notionalUsdc = (inputs.sizeDelta * inputs.price) / CfdMath.USDC_TO_TOKEN_SCALE;
+        state.notionalUsdc = addedEntryCostUsdcAtoms;
         state.executionFeeUsdc = (state.notionalUsdc * inputs.executionFeeBps) / 10_000;
         state.tradeCostUsdc = state.vpiUsdc + int256(state.executionFeeUsdc);
-        state.maintenanceMarginUsdc =
-            (((state.newSize * inputs.price) / CfdMath.USDC_TO_TOKEN_SCALE) * inputs.riskParams.maintMarginBps) / 10_000;
-        state.initialMarginRequirementUsdc =
-            (((state.newSize * inputs.price) / CfdMath.USDC_TO_TOKEN_SCALE) * inputs.riskParams.initMarginBps) / 10_000;
+        state.maintenanceMarginUsdc = ((newLots * inputs.price) * inputs.riskParams.maintMarginBps) / 10_000;
+        state.initialMarginRequirementUsdc = ((newLots * inputs.price) * inputs.riskParams.initMarginBps) / 10_000;
         if (state.initialMarginRequirementUsdc < inputs.riskParams.minBountyUsdc) {
             state.initialMarginRequirementUsdc = inputs.riskParams.minBountyUsdc;
         }
-    }
-
-    /// @notice Removes a negative trade-cost rebate from custody margin to obtain canonical economic margin.
-    /// @dev The clearinghouse's open-cost plan credits and locks a rebate. Risk accounting must not count that
-    ///      pool-funded rebate as trader-provided margin, so `-tradeCostUsdc` is subtracted with a zero floor. Positive
-    ///      or zero trade costs leave `marginUsdc` unchanged. `type(int256).min` cannot be negated and reverts.
-    /// @param marginUsdc Clearinghouse position margin after the open-cost mutation.
-    /// @param tradeCostUsdc Signed VPI plus execution fee; negative values are rebates.
-    /// @return effectiveMarginUsdc Canonical risk margin after excluding any rebate, floored at zero.
-    function effectiveMarginAfterTradeCost(
-        uint256 marginUsdc,
-        int256 tradeCostUsdc
-    ) internal pure returns (uint256 effectiveMarginUsdc) {
-        effectiveMarginUsdc = marginUsdc;
-        if (tradeCostUsdc < 0) {
-            uint256 rebateUsdc = uint256(-tradeCostUsdc);
-            effectiveMarginUsdc = effectiveMarginUsdc > rebateUsdc ? effectiveMarginUsdc - rebateUsdc : 0;
+        state.liquidationReserveTargetUsdc = (newLots * inputs.price * inputs.riskParams.bountyBps) / 10_000;
+        if (state.liquidationReserveTargetUsdc < inputs.riskParams.minBountyUsdc) {
+            state.liquidationReserveTargetUsdc = inputs.riskParams.minBountyUsdc;
         }
     }
 

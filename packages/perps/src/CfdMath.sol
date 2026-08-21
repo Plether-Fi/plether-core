@@ -16,6 +16,20 @@ library CfdMath {
     /// @notice Divisor converting size (18 decimals) times price (8 decimals) to USDC (6 decimals).
     uint256 internal constant USDC_TO_TOKEN_SCALE = 1e20; // Resolves Size(18)*Price(8) -> USDC(6)
 
+    /// @notice Converts a quantum-aligned position size into whole 100-token lots.
+    /// @dev Reverts when `size` is not exactly representable in the canonical lot size.
+    function sizeToLots(
+        uint256 size
+    ) internal pure returns (uint256 lots) {
+        if (size % CfdTypes.SIZE_QUANTUM != 0) {
+            revert CfdMath__InvalidSizeQuantum();
+        }
+        lots = size / CfdTypes.SIZE_QUANTUM;
+    }
+
+    /// @notice Thrown when a position size is not divisible by the canonical 100-token quantum.
+    error CfdMath__InvalidSizeQuantum();
+
     // ==========================================
     // 1. PNL & SOLVENCY MATH
     // ==========================================
@@ -53,6 +67,61 @@ library CfdMath {
 
         // size(18) * priceDiff(8) / 1e20 = USDC(6)
         pnlUsdc = (pos.size * priceDiff) / USDC_TO_TOKEN_SCALE;
+    }
+
+    /// @notice Calculates exact capped price PnL from canonical lots and entry cost.
+    /// @dev `entryCostUsdcAtoms` is the sum of `addedLots * executionPrice` and therefore already uses 6-decimal
+    ///      USDC atoms. No average-entry-price rounding is involved. Equality is classified as profit for parity with
+    ///      `calculatePnL`.
+    /// @param lots Position size in canonical 100-token lots.
+    /// @param entryCostUsdcAtoms Exact entry cost in 6-decimal USDC atoms.
+    /// @param side Position direction.
+    /// @param currentOraclePrice Current BEAR-leg oracle price, with 8 decimals.
+    /// @param capPrice Protocol maximum oracle price, with 8 decimals.
+    /// @return isProfit Whether the marked price move is favorable, including equality.
+    /// @return pnlUsdc Absolute exact PnL in 6-decimal USDC atoms.
+    function calculateExactPnl(
+        uint256 lots,
+        uint256 entryCostUsdcAtoms,
+        CfdTypes.Side side,
+        uint256 currentOraclePrice,
+        uint256 capPrice
+    ) internal pure returns (bool isProfit, uint256 pnlUsdc) {
+        if (lots == 0) {
+            return (false, 0);
+        }
+
+        uint256 price = currentOraclePrice > capPrice ? capPrice : currentOraclePrice;
+        uint256 exitValueUsdcAtoms = lots * price;
+        if (side == CfdTypes.Side.BULL) {
+            isProfit = entryCostUsdcAtoms >= exitValueUsdcAtoms;
+        } else {
+            isProfit = exitValueUsdcAtoms >= entryCostUsdcAtoms;
+        }
+        pnlUsdc = isProfit
+            ? (side == CfdTypes.Side.BULL
+                    ? entryCostUsdcAtoms - exitValueUsdcAtoms
+                    : exitValueUsdcAtoms - entryCostUsdcAtoms)
+            : (side == CfdTypes.Side.BULL
+                    ? exitValueUsdcAtoms - entryCostUsdcAtoms
+                    : entryCostUsdcAtoms - exitValueUsdcAtoms);
+    }
+
+    /// @notice Returns the exact endpoint profit envelope for a lot-based position.
+    function calculateExactMaxProfit(
+        uint256 lots,
+        uint256 entryCostUsdcAtoms,
+        CfdTypes.Side side,
+        uint256 capPrice
+    ) internal pure returns (uint256) {
+        if (lots == 0) {
+            return 0;
+        }
+        if (side == CfdTypes.Side.BULL) {
+            return entryCostUsdcAtoms;
+        }
+        uint256 capValueUsdcAtoms = lots * capPrice;
+        return capValueUsdcAtoms > entryCostUsdcAtoms ? capValueUsdcAtoms - entryCostUsdcAtoms : 0;
     }
 
     /// @notice Calculates the maximum profit available between zero and the protocol price cap.

@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.35;
 
+import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
+import {ITerminalNavBookV2} from "@plether/perps/interfaces/ITerminalNavBookV2.sol";
 import "forge-std/Script.sol";
 
 interface IMintableERC20 {
@@ -78,6 +80,7 @@ contract BootstrapPerpsArbitrumSepolia is Script {
 
         _validateSeniorLimits(maxSeniorExposureUsdc, maxSeniorShareBps);
         _verifyAsyncVaultPair(housePool, usdc);
+        _verifyTerminalNavBook(housePool);
 
         console.log("Bootstrapping Plether perps on Arbitrum Sepolia");
         console.log("Deployer:", deployer);
@@ -124,6 +127,19 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         console.log("Maximum LP epochs per settlement phase:", housePool.MAX_LP_EPOCHS_PER_PHASE());
         console.log("Current LP epoch:", housePool.currentLpEpoch());
         console.log("Note: this script funds users with mock USDC only; ETH still needs a faucet.");
+    }
+
+    /// @dev Refuses to seed or activate a stack whose exact terminal-NAV book is absent or misbound.
+    function _verifyTerminalNavBook(
+        HousePool housePool
+    ) internal view {
+        CfdEngine engine = CfdEngine(address(housePool.ENGINE()));
+        ITerminalNavBookV2 book = engine.terminalNavBook();
+        require(address(book) != address(0), "TerminalNavBookV2 is not wired");
+        require(address(book).code.length > 0, "TerminalNavBookV2 has no code");
+        require(book.ENGINE() == address(engine), "TerminalNavBookV2 engine mismatch");
+        require(book.CAP_PRICE() == uint32(engine.CAP_PRICE()), "TerminalNavBookV2 cap mismatch");
+        require(book.SIZE_QUANTUM() == 1e20, "TerminalNavBookV2 quantum mismatch");
     }
 
     /// @dev Checks all immutable/set-once LP wiring before any governance proposal, seed mint, or activation occurs.

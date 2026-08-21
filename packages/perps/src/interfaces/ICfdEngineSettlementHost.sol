@@ -39,6 +39,12 @@ interface ICfdEngineSettlementHost {
         uint64 newMarkTime
     ) external;
 
+    /// @notice Realizes as much pending carry as eligible account settlement can cover.
+    /// @dev Used by bound account-action sidecar flows while the Engine owns the outer terminal-book mutation guard.
+    function settlementRealizeCarry(
+        address account
+    ) external;
+
     /// @notice Synchronizes aggregate side margin after settlement changes a position margin bucket.
     /// @dev Adds or subtracts the exact difference; inconsistent inputs can underflow and revert.
     /// @param side Side whose aggregate margin should be updated
@@ -80,13 +86,8 @@ interface ICfdEngineSettlementHost {
     /// @param amountUsdc Fresh payout amount to pay or record in USDC
     function settlementRecordTraderClaim(
         address account,
-        uint256 amountUsdc
-    ) external;
-
-    /// @notice Increases accumulated bad debt during settlement.
-    /// @param amountUsdc Bad-debt amount to add in USDC
-    function settlementAccumulateBadDebt(
-        uint256 amountUsdc
+        uint256 amountUsdc,
+        bool positionRemainsOpen
     ) external;
 
     /// @notice Writes the post-settlement position state.

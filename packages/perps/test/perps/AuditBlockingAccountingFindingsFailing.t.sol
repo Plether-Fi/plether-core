@@ -18,12 +18,14 @@ import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {PerpsPublicLens} from "@plether/perps/PerpsPublicLens.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
+import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
+import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
 import {CfdEngineSnapshotsLib} from "@plether/perps/libraries/CfdEngineSnapshotsLib.sol";
 import {MarginClearinghouseAccountingLib} from "@plether/perps/libraries/MarginClearinghouseAccountingLib.sol";
@@ -128,6 +130,8 @@ contract AuditBlockingAccountingFindingsFailing_SolvencyTiming is BasePerpTest {
         CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
         engine.setDependencies(address(planner), address(settlementSidecar), address(engineAdmin));
         _syncEngineAdmin();
+        terminalNavBook = new TerminalNavBookV2(address(engine), uint32(CAP_PRICE));
+        engine.setTerminalNavBook(address(terminalNavBook));
         engineAccountLens = new CfdEngineAccountLens(address(engine));
         engineLens = new CfdEngineLens(address(engine));
         engineProtocolLens = new CfdEngineProtocolLens(address(engine));
@@ -248,7 +252,7 @@ contract AuditBlockingAccountingFindingsFailing_PartialCloseWithCommittedMargin 
         assertEq(sizeAfter, 50_000e18, "Partial close should leave half the position");
     }
 
-    function test_H1_PartialCloseLossMustNotConsumeQueuedCommittedMargin() public {
+    function test_H1_PartialCloseLossLeavesQueuedCommittedMarginUntouched() public {
         address account = trader;
         address counterAccount = counterparty;
 
@@ -262,14 +266,28 @@ contract AuditBlockingAccountingFindingsFailing_PartialCloseWithCommittedMargin 
 
         uint256 committedBefore = _remainingCommittedMargin(1);
         assertEq(committedBefore, 4000e6, "Committed margin should match order margin delta");
+        uint256 pnlPledgeBefore = clearinghouse.pnlPledgeUsdc(account);
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 50_000e18, 1.08e8);
 
-        assertFalse(preview.valid, "Preview should reject a partial close that would need queued committed margin");
+        assertTrue(preview.valid, "Dedicated price collateral should fund the partial-close loss");
+        assertEq(preview.realizedPnlUsdc, -4000e6, "Fixture should realize a four-thousand USDC price loss");
         assertEq(
-            uint8(preview.invalidReason),
-            uint8(CfdTypes.CloseInvalidReason.PartialCloseUnderwater),
-            "Preview should use the underwater partial-close invalid reason"
+            preview.remainingMargin,
+            pnlPledgeBefore / 2,
+            "The retained half-position should keep its proportional dedicated PnL pledge"
+        );
+        assertEq(preview.badDebtUsdc, 0, "Any price-loss tail beyond the close slice's cap is a writeoff, not debt");
+
+        _close(account, CfdTypes.Side.BULL, 50_000e18, 1.08e8);
+
+        (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(account);
+        assertEq(sizeAfter, preview.remainingSize, "Live partial close should match the accepted preview");
+        assertEq(marginAfter, preview.remainingMargin, "Live PnL pledge should match the accepted preview");
+        assertEq(
+            _remainingCommittedMargin(1),
+            committedBefore,
+            "Exact price settlement must not consume a queued order's committed margin"
         );
     }
 
@@ -320,23 +338,19 @@ contract AuditBlockingAccountingFindingsFailing_ReservedBounty is BasePerpTest {
         );
     }
 
-    function test_H2_FullyUtilizedTraderCanSubmitCloseOrderAgainstPositionMargin() public {
+    function test_H2_FullyUtilizedTraderCannotFundCloseOrderFromPositionMargin() public {
         (address account,) = _setupFullyUtilized();
 
         (, uint256 marginBefore,,,,,) = engine.positions(account);
 
         vm.prank(trader);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
 
         (, uint256 marginAfter,,,,,) = engine.positions(account);
-        assertEq(
-            _executionBountyReserve(1), 200_000, "Close order should still reservation the configured keeper bounty"
-        );
-        assertEq(
-            marginAfter,
-            marginBefore - 200_000,
-            "Fully utilized close should source the configured bounty from position margin"
-        );
+        assertEq(marginAfter, marginBefore, "Rejected close order must preserve the account's PnL pledge");
+        assertEq(router.pendingOrderCounts(account), 0, "Rejected close order must not enter the FIFO queue");
+        assertEq(router.nextCommitId(), 1, "Rejected close order must not consume an order id");
     }
 
     function test_H2_HeadCloseOrderMustBeEconomicallyBackedAtCommit() public {

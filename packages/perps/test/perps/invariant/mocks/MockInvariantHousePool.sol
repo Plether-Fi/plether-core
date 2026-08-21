@@ -140,6 +140,10 @@ contract MockInvariantHousePool is IHousePool {
         return 0;
     }
 
+    function terminalDeficitUsdc() external pure returns (uint256) {
+        return 0;
+    }
+
     function depositSenior(
         uint256
     ) external pure {}

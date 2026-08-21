@@ -7,11 +7,13 @@ pragma solidity 0.8.35;
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {CfdEngineLens} from "@plether/perps/CfdEngineLens.sol";
+import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
+import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {ICfdEngineAdminHost} from "@plether/perps/interfaces/ICfdEngineAdminHost.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
@@ -41,6 +43,8 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = _deployEngine(_riskParams());
         _syncEngineAdmin();
+        terminalNavBook = new TerminalNavBookV2(address(engine), uint32(CAP_PRICE));
+        engine.setTerminalNavBook(address(terminalNavBook));
         pool = new HousePool(address(usdc), address(engine));
 
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");
@@ -210,6 +214,8 @@ contract AuditConfirmedFindingsFailing_OutOfOrderMarkCancellation is BasePerpTes
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = _deployEngine(_riskParams());
         _syncEngineAdmin();
+        terminalNavBook = new TerminalNavBookV2(address(engine), uint32(CAP_PRICE));
+        engine.setTerminalNavBook(address(terminalNavBook));
         pool = new HousePool(address(usdc), address(engine));
 
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");
@@ -519,7 +525,7 @@ contract AuditConfirmedFindingsFailing_EntryNotionalRounding is BasePerpTest {
         });
     }
 
-    function test_H2_ScalingLargePositionWithDustIncreaseUsesResultingNotionalFloor() public {
+    function test_H2_ScalingLargePositionRejectsSubLotIncreaseWithoutChangingExactBasis() public {
         address account = address(uint160(1));
         _fundTrader(account, 10_000e6);
 
@@ -541,6 +547,19 @@ contract AuditConfirmedFindingsFailing_EntryNotionalRounding is BasePerpTest {
             uint64(block.timestamp)
         );
 
+        (uint256 sizeBefore,, uint256 entryPriceBefore,,,,) = engine.positions(account);
+        uint256 entryCostBefore = engine.positionEntryCostUsdcAtoms(account);
+        uint256 sideEntryNotionalBefore = _sideEntryNotional(CfdTypes.Side.BULL);
+        uint256 poolDepth = pool.totalAssets();
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ICfdEngineTypes.CfdEngine__TypedOrderFailure.selector,
+                CfdEnginePlanTypes.ExecutionFailurePolicyCategory.UserInvalid,
+                uint8(CfdEnginePlanTypes.OpenRevertCode.INVALID_SIZE_QUANTUM),
+                false
+            )
+        );
         engine.processOrderTyped(
             CfdTypes.Order({
                 account: account,
@@ -554,18 +573,26 @@ contract AuditConfirmedFindingsFailing_EntryNotionalRounding is BasePerpTest {
                 isClose: false
             }),
             150_000_000,
-            pool.totalAssets(),
+            poolDepth,
             uint64(block.timestamp)
         );
         vm.stopPrank();
 
         (uint256 size,, uint256 entryPrice,,,,) = engine.positions(account);
-        assertEq(size, 1000e18 + 1, "Same-side dust increase should grow an already-valid live position");
+        assertEq(size, sizeBefore, "Rejected sub-lot increase must not change position size");
+        assertEq(entryPrice, entryPriceBefore, "Rejected sub-lot increase must not change entry price");
+        assertEq(
+            engine.positionEntryCostUsdcAtoms(account),
+            entryCostBefore,
+            "Rejected sub-lot increase must not change exact entry-cost atoms"
+        );
         assertEq(
             _sideEntryNotional(CfdTypes.Side.BULL),
-            size * entryPrice,
-            "Side entry notional must stay aligned with the resulting live position"
+            sideEntryNotionalBefore,
+            "Rejected sub-lot increase must not change aggregate entry notional"
         );
+        assertEq(sideEntryNotionalBefore, size * entryPrice, "Whole-lot aggregate basis must remain exact");
+        _assertTerminalCurveMatchesEngine(account);
     }
 
 }
@@ -616,10 +643,29 @@ contract AuditConfirmedFindingsFailing_KeeperReserveLiquidation is BasePerpTest 
         address account = trader;
         _fundTrader(trader, 200e6);
 
-        _open(account, CfdTypes.Side.BULL, 10_000e18, 160e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 10_000e18, 175e6, 1e8);
+
+        uint256 pledgeBefore = clearinghouse.pnlPledgeUsdc(account);
+        uint256 liquidationReserveBefore = clearinghouse.liquidationReserveUsdc(account);
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 0, true);
+
+        assertEq(
+            clearinghouse.pnlPledgeUsdc(account),
+            pledgeBefore,
+            "Close execution bounty must not be carved from price-risk pledge"
+        );
+        assertEq(
+            clearinghouse.liquidationReserveUsdc(account),
+            liquidationReserveBefore,
+            "Close execution bounty must not be carved from the liquidation reserve"
+        );
+        assertEq(_executionBountyReserve(1), 200_000, "Close execution bounty must remain separately reserved");
+
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 100_530_000);
+        assertFalse(preview.liquidatable, "Separately reserved close bounty must not make price risk liquidatable");
+        assertEq(preview.equityUsdc, int256(108e6), "Preview must use only the unchanged PnL pledge plus price PnL");
 
         uint256 poolDepth = pool.totalAssets();
         vm.prank(address(router));

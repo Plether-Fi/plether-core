@@ -4,6 +4,7 @@ pragma solidity 0.8.35;
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {HousePoolEngineViewTypes} from "@plether/perps/interfaces/HousePoolEngineViewTypes.sol";
+import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {ProtocolLensViewTypes} from "@plether/perps/interfaces/ProtocolLensViewTypes.sol";
 
@@ -12,6 +13,7 @@ contract HousePoolSnapshotParityTest is BasePerpTest {
     function test_HousePoolInputSnapshotMirrorsProtocolSnapshot() public {
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory inputSnapshot =
             engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
+        ICfdEngineTypes.TerminalNavSnapshot memory terminalSnapshot = engine.terminalNavSnapshot();
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory protocolSnapshot =
             engineProtocolLens.getProtocolAccountingSnapshot();
 
@@ -34,6 +36,21 @@ contract HousePoolSnapshotParityTest is BasePerpTest {
             inputSnapshot.traderClaimBalanceUsdc,
             protocolSnapshot.totalTraderClaimBalanceUsdc,
             "HousePool input trader claim balance should match protocol snapshot"
+        );
+        assertEq(
+            inputSnapshot.terminalLpPriceDeltaUsdc,
+            terminalSnapshot.terminalLpPriceDeltaUsdc,
+            "HousePool input must preserve the Engine terminal delta"
+        );
+        assertEq(
+            inputSnapshot.terminalNavBookVersion,
+            terminalSnapshot.bookVersion,
+            "HousePool input must preserve the terminal-book version"
+        );
+        assertEq(
+            inputSnapshot.hasOpenPositions,
+            terminalSnapshot.hasOpenPositions,
+            "HousePool position flag must come from the authenticated terminal snapshot"
         );
     }
 

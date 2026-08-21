@@ -24,13 +24,14 @@ integer/rational admission scaling. Paired legs are assumed to be interleaved,
 so this is not a transaction-level order simulation. LP capital is static:
 the scenarios include no LP deposits, withdrawals, or recapitalizations.
 
-The replay reports two tranche views. The realized-cash overlay applies
-cash/claim changes and observed-interval coupon checkpoints. The separate daily
-shadow reconciliation subtracts the production conservative-MtM kernel, but its
-once-per-observation cadence is a research convention rather than an automatic
-production clock. The replay performs one additional shadow reconciliation at
-the final fix after forced end-of-sample closes. Settlement-order alternatives
-and the forced close are recorded in `results.json`.
+The replay reports two non-production tranche views. The realized-cash overlay
+applies cash/claim changes and observed-interval coupon checkpoints. The
+separate daily shadow subtracts the legacy conservative side-envelope stress;
+it predates the exact account-capped `TerminalNavBookV2` kernel and must not be
+read as production LP share NAV. Its once-per-observation cadence is also a
+research convention. The replay performs one additional shadow reconciliation
+at the final fix after forced end-of-sample closes. Settlement-order
+alternatives and the forced close are recorded in `results.json`.
 
 ## Reproduce
 

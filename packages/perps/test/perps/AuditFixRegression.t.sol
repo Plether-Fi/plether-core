@@ -9,7 +9,7 @@ import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 
 contract AuditFixRegressionTest is BasePerpTest {
 
-    function test_DepositPricingUsesDepositMtmInsteadOfConservativeMtmDiscount() public {
+    function test_DepositPricingMatchesWithdrawalNavForDeltaNeutralExposure() public {
         uint256 revenueUsdc = 500_000e6;
         usdc.mint(address(pool), revenueUsdc);
         vm.prank(address(engine));
@@ -18,8 +18,6 @@ contract AuditFixRegressionTest is BasePerpTest {
         );
 
         uint256 depositUsdc = 300_000e6;
-        uint256 sharesBeforePhantomMtm = juniorVault.estimateDepositShares(depositUsdc);
-
         address bull = address(0xB011);
         address bear = address(0xBEA2);
         uint256 size = 400_000e18;
@@ -28,22 +26,25 @@ contract AuditFixRegressionTest is BasePerpTest {
         _open(bull, CfdTypes.Side.BULL, size, 20_000e6, 1e8);
         _open(bear, CfdTypes.Side.BEAR, size, 20_000e6, 1e8);
 
-        (uint256 depositSeniorAssets, uint256 depositJuniorAssets) = pool.getPendingDepositTrancheState();
-        depositSeniorAssets;
-        uint256 conservativeJuniorAssets = juniorVault.totalAssets();
+        (, uint256 depositJuniorAssets) = pool.getPendingDepositTrancheState();
+        uint256 withdrawalJuniorAssets = juniorVault.totalAssets();
 
-        assertGt(depositJuniorAssets, conservativeJuniorAssets, "deposit NAV must ignore phantom conservative MTM");
-        assertApproxEqAbs(
+        assertEq(
+            depositJuniorAssets,
+            withdrawalJuniorAssets,
+            "entry and exit must use the same terminal NAV for delta-neutral exposure"
+        );
+        assertEq(
             juniorVault.estimateDepositShares(depositUsdc),
-            sharesBeforePhantomMtm,
-            2,
-            "delta-neutral phantom MTM must not discount new deposits"
+            juniorVault.quoteDepositFromState(depositUsdc, withdrawalJuniorAssets, juniorVault.totalSupply(), 0),
+            "deposit quote must use the shared terminal NAV"
         );
     }
 
-    function test_DepositPricingIgnoresOneSidedUnrealizedProfitAfterPriceMove() public {
+    function test_DepositPricingMatchesWithdrawalNavAfterUnrealizedProfit() public {
         uint256 depositUsdc = 300_000e6;
         uint256 sharesBeforeMtm = juniorVault.estimateDepositShares(depositUsdc);
+        uint256 juniorAssetsBeforeMtm = juniorVault.totalAssets();
 
         address bull = address(0xB012);
         address bear = address(0xBEA3);
@@ -56,16 +57,28 @@ contract AuditFixRegressionTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(120_000_000, uint64(block.timestamp));
 
-        (uint256 depositSeniorAssets, uint256 depositJuniorAssets) = pool.getPendingDepositTrancheState();
-        depositSeniorAssets;
-        uint256 conservativeJuniorAssets = juniorVault.totalAssets();
+        (, uint256 depositJuniorAssets) = pool.getPendingDepositTrancheState();
+        uint256 withdrawalJuniorAssets = juniorVault.totalAssets();
 
-        assertGt(depositJuniorAssets, conservativeJuniorAssets, "deposit NAV must ignore unrealized trader PnL");
-        assertApproxEqAbs(
+        assertEq(
+            depositJuniorAssets,
+            withdrawalJuniorAssets,
+            "entry and exit must use the same terminal NAV after unrealized trader profit"
+        );
+        assertLt(
+            withdrawalJuniorAssets,
+            juniorAssetsBeforeMtm,
+            "unrealized trader profit must reduce the shared junior terminal NAV"
+        );
+        assertGt(
             juniorVault.estimateDepositShares(depositUsdc),
             sharesBeforeMtm,
-            2,
-            "one-sided unrealized profit must not discount new deposits"
+            "new deposits must receive more shares at the same impaired NAV used for exits"
+        );
+        assertEq(
+            juniorVault.estimateDepositShares(depositUsdc),
+            juniorVault.quoteDepositFromState(depositUsdc, withdrawalJuniorAssets, juniorVault.totalSupply(), 0),
+            "deposit quote must use the shared terminal NAV"
         );
     }
 
@@ -463,7 +476,7 @@ contract AuditFixRegressionConservativePendingDepositImpairmentTest is BasePerpT
         return 0;
     }
 
-    function test_ActivePendingDepositCanCancelWhenConservativeMtmImpairsSenior() public {
+    function test_ActivePendingDepositCanCancelWhenSymmetricNavImpairsSenior() public {
         address pendingLp = address(0xCAFE3);
         address trader = address(0xBEA4);
         uint256 depositUsdc = 50e6;
@@ -483,10 +496,10 @@ contract AuditFixRegressionConservativePendingDepositImpairmentTest is BasePerpT
         engine.updateMarkPrice(CAP_PRICE, uint64(activationTime));
 
         (uint256 depositSeniorAssets,) = pool.getPendingDepositTrancheState();
-        assertGe(
+        assertLt(
             depositSeniorAssets,
             pool.seniorHighWaterMark(),
-            "deposit-neutral view should not see the conservative MTM impairment"
+            "symmetric entry and exit NAV must expose the same terminal-price impairment"
         );
         assertTrue(
             pool.isSeniorImpairedAfterPendingDepositReconcile(),

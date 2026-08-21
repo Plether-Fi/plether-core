@@ -385,18 +385,19 @@ contract AuditH03_DustPosition is BasePerpTest {
 
     address alice = address(0x111);
 
-    function test_H03_PartialCloseAllowsResidualDustPosition() public {
+    function test_H03_PartialCloseLeavesLiquidatableExactWholeLotResidual() public {
         _fundTrader(alice, 50_000 * 1e6);
         address aliceAccount = alice;
 
         // Open 50k tokens at $1.00: notional = $50k
-        // IMR = max(1.5% * $50k, $5) = $750. Use $800 margin.
-        // execFee = 6bps * $50k = $30. pos.margin = $800 - $30 = $770
+        // IMR = max(1.5% * $50k, $5) = $750. The supplied margin also funds the
+        // dedicated $50 liquidation reserve and the $20 execution fee.
         uint256 posSize = 50_000 * 1e18;
-        _open(aliceAccount, CfdTypes.Side.BULL, posSize, 800 * 1e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.BULL, posSize, 825 * 1e6, 1e8);
 
-        // Close 99.5%: currently leaves a small residual position rather than reverting.
-        uint256 closeSize = (posSize * 995) / 1000;
+        // Closing every lot but one is quantum-valid. V2 permits the exact residual and
+        // preserves its dedicated liquidation reserve so it can still be liquidated.
+        uint256 closeSize = posSize - CfdTypes.SIZE_QUANTUM;
         uint256 depth = pool.totalAssets();
         vm.prank(address(router));
         engine.processOrderTyped(
@@ -417,8 +418,24 @@ contract AuditH03_DustPosition is BasePerpTest {
         );
 
         (uint256 remainingSize, uint256 remainingMargin,,,,,) = engine.positions(aliceAccount);
-        assertEq(remainingSize, posSize - closeSize, "Partial close should leave only the dust residual size");
-        assertLt(remainingMargin, 5e6, "Residual dust margin should remain economically tiny after the partial close");
+        assertEq(remainingSize, CfdTypes.SIZE_QUANTUM, "Partial close must leave one canonical whole lot");
+        assertLt(remainingMargin, 5e6, "Fixture must retain a small but exact residual pledge");
+        assertEq(
+            clearinghouse.liquidationReserveUsdc(aliceAccount),
+            _riskParams().minBountyUsdc,
+            "Residual lot must retain the configured minimum liquidation reserve"
+        );
+        _assertTerminalCurveMatchesEngine(aliceAccount);
+
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(aliceAccount, 101_000_000);
+        assertTrue(preview.liquidatable, "An adverse exact price must make the residual lot liquidatable");
+
+        depth = pool.totalAssets();
+        vm.prank(address(router));
+        engine.liquidatePosition(aliceAccount, 101_000_000, depth, uint64(block.timestamp), address(this));
+        (remainingSize,,,,,,) = engine.positions(aliceAccount);
+        assertEq(remainingSize, 0, "Liquidation must clear the exact residual lot");
+        _assertTerminalCurveMatchesEngine(aliceAccount);
     }
 
 }

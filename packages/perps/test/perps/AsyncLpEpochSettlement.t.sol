@@ -280,9 +280,10 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         assertLe(result.seniorFundedAssets, preEntryFreeUsdc, "entry escrow must not expand the frozen exit budget");
         assertLe(preEntryFreeUsdc - result.seniorFundedAssets, 1, "sole Senior head should consume its cash budget");
         assertLt(result.seniorFundedAssets, 200_000e6, "same-call deposit would otherwise materially increase fill");
-        assertTrue(result.entriesDeferred, "open exposure should keep the entry behind the ordinary-deposit gate");
-        assertEq(result.juniorDepositAssets, 0, "deferred entry must not be pulled into the pool");
-        assertEq(_pendingDeposit(juniorVault, depositId, BOB), 200_000e6, "escrowed entry must remain pending");
+        assertFalse(result.entriesDeferred, "zero-PnL exposure alone must not defer symmetric-NAV entry");
+        assertEq(result.juniorDepositAssets, 200_000e6, "safe entry must activate after withdrawal budgets freeze");
+        assertEq(_pendingDeposit(juniorVault, depositId, BOB), 0);
+        assertEq(_claimableDeposit(juniorVault, depositId, BOB), 200_000e6);
     }
 
     function test_LiquidityOnlySeniorBacklogStillAllowsSameCallJuniorEntry() public {
@@ -342,23 +343,34 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         assertLe(pool.seniorPrincipal(), pool.juniorPrincipal(), "the final 50% Senior-share covenant must hold");
     }
 
-    function test_SeniorHwmScalesByFundedAssetsOverPrincipal() public {
-        uint256 seniorShares = _fundOne(seniorVault, ALICE, 100_000e6);
+    function test_ImpairedSeniorFrozenExitScalesHwmByFundedShares() public {
+        (uint256 seniorShares,) = _fundPair(ALICE, 100_000e6, BOB, 100_000e6);
+
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), 150_000e6);
+        vm.warp(SATURDAY_FROZEN);
+        _refreshMark();
+        assertTrue(engine.isOracleFrozen(), "setup must charge the nonzero frozen Senior exit fee");
+        vm.prank(address(seniorVault));
+        pool.reconcile();
+        assertLt(pool.seniorPrincipal(), pool.seniorHighWaterMark(), "setup must impair Senior below its HWM");
+
         uint256 requestId = _requestRedeem(seniorVault, ALICE, seniorShares / 2, ALICE, ALICE);
         _warpToEpoch(requestId);
         _refreshMark();
-
-        vm.prank(address(seniorVault));
-        pool.reconcile();
         uint256 principalBefore = pool.seniorPrincipal();
         uint256 hwmBefore = pool.seniorHighWaterMark();
+        uint256 supplyBefore = seniorVault.totalSupply();
 
         IHousePool.LpEpochSettlementResult memory result = pool.settleLpEpoch();
-        uint256 expectedHwm = (hwmBefore * (principalBefore - result.seniorFundedAssets)) / principalBefore;
+        uint256 expectedHwm = hwmBefore - (hwmBefore * result.seniorFundedShares) / supplyBefore;
+        uint256 noFeeAssets = (principalBefore * result.seniorFundedShares) / supplyBefore;
 
         assertGt(result.seniorFundedAssets, 0);
+        assertEq(result.seniorFundedShares, seniorShares / 2);
+        assertLt(result.seniorFundedAssets, noFeeAssets, "the frozen exit fee must reduce assets, not HWM ownership");
         assertEq(pool.seniorPrincipal(), principalBefore - result.seniorFundedAssets);
-        assertEq(pool.seniorHighWaterMark(), expectedHwm, "HWM must scale with paid assets, not requested shares");
+        assertEq(pool.seniorHighWaterMark(), expectedHwm, "HWM must burn by funded-share ownership");
     }
 
     function test_PartialFundingAccumulatesAcrossClaims() public {
@@ -460,83 +472,46 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         assertEq(_pendingDeposit(juniorVault, depositId, CAROL), 25_000e6);
     }
 
-    function test_FrozenFeeCumulativeDepositPricingIsSplitNeutral() public {
-        uint256 firstAssets = 100_000e6;
-        uint256 secondAssets = 100_000e6;
-
+    function test_FrozenWindowRejectsNewDepositRequests() public {
+        uint256 assets = 100_000e6;
         vm.warp(SATURDAY_FROZEN);
-        assertTrue(engine.isOracleFrozen(), "setup must use the frozen-oracle fee");
-        uint256 firstRequestId = _requestDeposit(juniorVault, ALICE, firstAssets);
-
-        _warpToEpoch(pool.currentLpEpoch() + 1);
-        uint256 secondRequestId = _requestDeposit(juniorVault, BOB, secondAssets);
-        assertGt(secondRequestId, firstRequestId, "requests must occupy distinct FIFO epochs");
-
-        _warpToEpoch(secondRequestId);
         _refreshMark();
-        assertTrue(engine.isOracleFrozen(), "both matured epochs must settle under the frozen fee");
+        assertTrue(engine.isOracleFrozen(), "setup must use a frozen-oracle window");
+        assertEq(juniorVault.maxRequestDeposit(ALICE), 0, "frozen entry capacity must be zero");
 
-        (, uint256 pricingAssets) = pool.getPendingDepositTrancheState();
-        uint256 pricingSupply = juniorVault.totalSupply();
-        uint256 feeBps = pool.frozenLpFeeBps(false);
-        uint256 totalAcceptedAssets = firstAssets + secondAssets;
-        uint256 expectedAggregateShares =
-            juniorVault.quoteDepositFromState(totalAcceptedAssets, pricingAssets, pricingSupply, feeBps);
-        uint256 independentlyQuotedShares = juniorVault.quoteDepositFromState(
-            firstAssets, pricingAssets, pricingSupply, feeBps
-        ) + juniorVault.quoteDepositFromState(secondAssets, pricingAssets, pricingSupply, feeBps);
-        assertGt(
-            independentlyQuotedShares,
-            expectedAggregateShares,
-            "independent frozen quotes must expose the split-gain regression"
-        );
-
-        IHousePool.LpEpochSettlementResult memory result = pool.settleLpEpoch();
-
-        assertEq(result.juniorDepositAssets, totalAcceptedAssets);
-        assertEq(result.juniorDepositShares, expectedAggregateShares, "phase mint must equal one aggregate quote");
-        assertLt(
-            result.juniorDepositShares, independentlyQuotedShares, "epoch splitting must not increase total shares"
-        );
-        assertEq(juniorVault.totalSupply(), pricingSupply + expectedAggregateShares);
-        (, uint256 firstEpochShares,,,) = juniorVault.depositEpochs(firstRequestId);
-        (, uint256 secondEpochShares,,,) = juniorVault.depositEpochs(secondRequestId);
-        assertEq(firstEpochShares + secondEpochShares, expectedAggregateShares, "epoch deltas must telescope exactly");
+        usdc.mint(ALICE, assets);
+        vm.startPrank(ALICE);
+        usdc.approve(address(juniorVault), assets);
+        vm.expectRevert(TrancheVault.TrancheVault__DepositsUnavailable.selector);
+        _async(juniorVault).requestDeposit(assets, ALICE, ALICE);
+        vm.stopPrank();
     }
 
-    function test_NonPositiveCumulativeDepositMarginalIsRefunded() public {
-        uint256 firstAssets = 1_985_003_950_000_000;
-        uint256 secondAssets = 1_000_001;
+    function test_PreFrozenQueuedDepositDefersUntilOracleLive() public {
+        uint256 juniorShares = _fundOne(juniorVault, CAROL, 50_000e6);
+        uint256 assets = 25_000e6;
+        uint256 depositId = _requestDeposit(juniorVault, ALICE, assets);
+        _warpToEpoch(pool.currentLpEpoch() + 1);
+        uint256 redeemId = _requestRedeem(juniorVault, CAROL, juniorShares / 2, CAROL, CAROL);
+        assertEq(depositId, redeemId, "exit and pre-frozen entry must mature together");
 
         vm.warp(SATURDAY_FROZEN);
-        assertTrue(engine.isOracleFrozen(), "setup must use the frozen-oracle fee");
-        uint256 firstRequestId = _requestDeposit(juniorVault, ALICE, firstAssets);
-
-        _warpToEpoch(pool.currentLpEpoch() + 1);
-        uint256 secondRequestId = _requestDeposit(juniorVault, BOB, secondAssets);
-        assertGt(secondRequestId, firstRequestId, "requests must occupy distinct FIFO epochs");
-
-        _warpToEpoch(secondRequestId);
         _refreshMark();
+        assertTrue(engine.isOracleFrozen(), "setup must settle while oracle-frozen");
+        IHousePool.LpEpochSettlementResult memory frozenResult = pool.settleLpEpoch();
+        assertGt(frozenResult.juniorFundedAssets, 0, "frozen mode must still fund the matured exit");
+        assertEq(frozenResult.juniorDepositAssets, 0, "frozen mode must not activate queued entry capital");
+        assertTrue(frozenResult.entriesDeferred);
+        assertEq(_pendingDeposit(juniorVault, depositId, ALICE), assets);
 
-        (, uint256 pricingAssets) = pool.getPendingDepositTrancheState();
-        uint256 pricingSupply = juniorVault.totalSupply();
-        uint256 feeBps = pool.frozenLpFeeBps(false);
-        uint256 firstQuote = juniorVault.quoteDepositFromState(firstAssets, pricingAssets, pricingSupply, feeBps);
-        uint256 cumulativeQuote =
-            juniorVault.quoteDepositFromState(firstAssets + secondAssets, pricingAssets, pricingSupply, feeBps);
-        assertLt(cumulativeQuote, firstQuote, "rounding setup must produce a negative discrete marginal quote");
-
-        IHousePool.LpEpochSettlementResult memory result = pool.settleLpEpoch();
-
-        assertEq(result.juniorDepositAssets, firstAssets, "nonpositive marginal assets must not enter the pool");
-        assertEq(result.juniorDepositShares, firstQuote, "the accepted epoch must retain its frozen quote");
-        assertEq(_pendingDeposit(juniorVault, secondRequestId, BOB), 0);
-        assertEq(
-            _async(juniorVault).refundableDepositRequest(secondRequestId, BOB),
-            secondAssets,
-            "the nonpositive marginal epoch must become refundable"
-        );
+        vm.warp(SATURDAY_FROZEN + 48 hours);
+        _refreshMark();
+        assertFalse(engine.isOracleFrozen(), "entry must resume only after the frozen window closes");
+        IHousePool.LpEpochSettlementResult memory liveResult = pool.settleLpEpoch();
+        assertEq(liveResult.juniorDepositAssets, assets);
+        assertFalse(liveResult.entriesDeferred);
+        assertEq(_pendingDeposit(juniorVault, depositId, ALICE), 0);
+        assertEq(_claimableDeposit(juniorVault, depositId, ALICE), assets);
     }
 
     function _fundPair(

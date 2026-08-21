@@ -11,7 +11,7 @@ interface IHousePool {
     enum ClaimantInflowKind {
         /// @notice Trading, carry, or spread revenue owned by tranche claimants.
         Revenue,
-        /// @notice Owner-funded value intended to recapitalize realized protocol bad debt.
+        /// @notice Owner-funded value routed as claimant equity restoration without minting LP shares.
         Recapitalization
     }
 
@@ -33,6 +33,7 @@ interface IHousePool {
     /// @param seniorPrincipalUsdc Stored value attributed to senior tranche claimants.
     /// @param juniorPrincipalUsdc Stored value attributed to junior tranche claimants.
     /// @param seniorHighWaterMarkUsdc Protected senior entitlement restored before revenue reaches junior claimants.
+    /// @param currentTerminalDeficitUsdc Deficit derived from the current engine terminal-NAV snapshot.
     /// @param markFresh Whether the cached mark satisfies the currently applicable HousePool freshness policy.
     /// @param oracleFrozen Whether the engine reports recurring or override-driven frozen-oracle policy.
     /// @param degradedMode Whether the engine's adjusted-insolvency latch is active.
@@ -45,6 +46,7 @@ interface IHousePool {
         uint256 seniorPrincipalUsdc;
         uint256 juniorPrincipalUsdc;
         uint256 seniorHighWaterMarkUsdc;
+        uint256 currentTerminalDeficitUsdc;
         bool markFresh;
         bool oracleFrozen;
         bool degradedMode;
@@ -53,8 +55,8 @@ interface IHousePool {
     /// @notice Governed senior coupon, live-mark, frozen-oracle LP fee, and senior-capacity configuration.
     /// @param seniorRateBps Annualized simple senior target coupon rate in basis points.
     /// @param markStalenessLimit HousePool component of the live cached-mark age limit, in seconds.
-    /// @param seniorFrozenLpFeeBps Senior vault entry/exit fee while the oracle is frozen, in basis points.
-    /// @param juniorFrozenLpFeeBps Junior vault entry/exit fee while the oracle is frozen, in basis points.
+    /// @param seniorFrozenLpFeeBps Senior vault exit fee while the oracle is frozen, in basis points.
+    /// @param juniorFrozenLpFeeBps Junior vault exit fee while the oracle is frozen, in basis points.
     /// @param maxSeniorExposureUsdc Maximum protected senior exposure, including accepted reservations, in USDC.
     /// @param maxSeniorShareBps Maximum senior share of committed tranche capital, in basis points.
     struct PoolConfig {
@@ -260,6 +262,10 @@ interface IHousePool {
     /// @return Lesser of raw pool USDC and the canonical accounted-asset ledger
     function totalAssets() external view returns (uint256);
 
+    /// @notice Returns the terminal deficit persisted by the most recent mark-fresh reconcile.
+    /// @return Last reconciled terminal deficit in 6-decimal USDC
+    function terminalDeficitUsdc() external view returns (uint256);
+
     /// @notice Returns the current id of the coordinator's shared LP epoch.
     /// @return Current Unix timestamp divided by the shared LP epoch duration
     function currentLpEpoch() external view returns (uint256);
@@ -456,8 +462,8 @@ interface IHousePool {
         );
 
     /// @notice Read-only tranche principals for deposit pricing.
-    /// @dev Projects the deposit-side reconcile, which intentionally excludes conservative unrealized trader MtM while
-    ///      retaining realized losses. Trader claims, coupon accrual, and settleable claimant routing remain included.
+    /// @dev Projects the same signed terminal-NAV reconcile used by withdrawals, including trader claims, terminal
+    ///      price value, coupon accrual, realized value, and settleable claimant routing.
     ///      Fully asynchronous vaults use this state for indicative request estimates and coordinator-time epoch quotes;
     ///      it does not enable or quote an immediate ERC-4626 entry.
     /// @return seniorPrincipalUsdc Simulated senior principal after reconcile (6 decimals)
@@ -468,7 +474,7 @@ interface IHousePool {
         returns (uint256 seniorPrincipalUsdc, uint256 juniorPrincipalUsdc);
 
     /// @notice Whether pending deposit finalization would hit the senior impairment gate after reconcile.
-    /// @dev Uses the standard conservative reconcile snapshot, including withdrawal-side unrealized MtM.
+    /// @dev Uses the canonical signed terminal-NAV reconcile snapshot shared by entry and exit pricing.
     /// @return Whether projected senior principal is below its projected high-water mark
     function isSeniorImpairedAfterPendingDepositReconcile() external view returns (bool);
 

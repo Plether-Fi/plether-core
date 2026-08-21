@@ -9,6 +9,7 @@ import {HousePool} from "@plether/perps/HousePool.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
+import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
@@ -64,12 +65,21 @@ contract AuditRemainingFindingsFailing is BasePerpTest {
     function test_H2_LiquidationMustRespectFreeUsdcCollateral() public {
         address account = alice;
         _fundTrader(alice, 1000e6);
-        _open(account, CfdTypes.Side.BULL, 20_000e18, 312e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 20_000e18, 330e6, 1e8);
+        assertEq(clearinghouse.pnlPledgeUsdc(account), 302e6, "Fixture must fund the exact protected price pledge");
+        assertEq(
+            clearinghouse.liquidationReserveUsdc(account), 20e6, "Fixture must separately fund the liquidation reserve"
+        );
+        assertEq(_freeSettlementUsdc(account), 670e6, "Fixture must retain free settlement outside price collateral");
+
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 100_500_000);
+        assertFalse(preview.liquidatable, "Exact P+C price equity must remain just above maintenance");
+        assertEq(preview.equityUsdc, int256(202e6), "Free settlement must not be folded into exact price equity");
         uint256 poolDepth = pool.totalAssets();
 
         vm.prank(address(router));
         vm.expectRevert(ICfdEngineTypes.CfdEngine__PositionIsSolvent.selector);
-        engine.liquidatePosition(account, 99_500_000, poolDepth, uint64(block.timestamp), address(this));
+        engine.liquidatePosition(account, 100_500_000, poolDepth, uint64(block.timestamp), address(this));
     }
 
     function test_H3_RouterCannotTransferReservedSettlement() public {
@@ -108,6 +118,8 @@ contract AuditRemainingFindingsFailing_MevDrift is BasePerpTest {
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = _deployEngine(_riskParams());
         _syncEngineAdmin();
+        terminalNavBook = new TerminalNavBookV2(address(engine), uint32(CAP_PRICE));
+        engine.setTerminalNavBook(address(terminalNavBook));
         pool = new HousePool(address(usdc), address(engine));
 
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");
@@ -185,6 +197,8 @@ contract AuditRemainingFindingsFailing_StaleOracleExecution is BasePerpTest {
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = _deployEngine(_riskParams());
         _syncEngineAdmin();
+        terminalNavBook = new TerminalNavBookV2(address(engine), uint32(CAP_PRICE));
+        engine.setTerminalNavBook(address(terminalNavBook));
         pool = new HousePool(address(usdc), address(engine));
 
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");

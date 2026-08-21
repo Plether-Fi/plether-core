@@ -5,34 +5,40 @@ import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
+import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 
 contract AuditRemainingCoverageFindingsFailing_ReservationShielding is BasePerpTest {
 
     address trader = address(0xC10A);
 
-    function test_C1_FullCloseMustConsumeQueuedCommittedMarginBeforeBadDebt() public {
+    function test_C1_FullCloseMustConsumeQueuedCommittedMarginBeforeWaivingActionCharge() public {
         address account = trader;
         _fundTrader(trader, 10_000e6);
 
         _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
 
+        uint64 queuedOrderId = router.nextCommitId();
+        uint256 committedMarginUsdc = _freeSettlementUsdc(account) - 200_000;
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 7900e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, committedMarginUsdc, type(uint256).max, false);
 
-        _close(account, CfdTypes.Side.BULL, 100_000e18, 103_000_000);
+        uint256 committedBefore = router.getAccountReservations(account).committedMarginUsdc;
+        assertEq(_freeSettlementUsdc(account), 0, "Setup must shelter all non-bounty free settlement in the queue");
+        vm.warp(block.timestamp + 365 days);
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 1e8);
+        assertTrue(preview.valid, "Full close should collect terminal carry from queued committed margin");
+        assertEq(preview.realizedPnlUsdc, 0, "Setup must isolate action charges from price PnL");
+        assertEq(preview.badDebtUsdc, 0, "Action-charge collection must never create protocol debt");
+
+        _close(account, CfdTypes.Side.BULL, 100_000e18, 1e8);
 
         assertLt(
-            clearinghouse.lockedMarginUsdc(account),
-            7900e6,
-            "Full close should consume queued committed margin before socializing shortfall"
+            router.getAccountReservations(account).committedMarginUsdc,
+            committedBefore,
+            "Full close should consume queued committed margin before waiving terminal carry"
         );
-        assertEq(_executionBountyReserve(1), 200_000, "Queued execution bounty should remain reserved");
-        assertEq(
-            engine.accumulatedBadDebtUsdc(),
-            0,
-            "Full close should not realize bad debt while queued committed margin remains"
-        );
+        assertEq(_executionBountyReserve(queuedOrderId), 200_000, "Queued execution bounty should remain reserved");
         assertEq(
             router.pendingOrderCounts(account),
             1,
@@ -40,32 +46,36 @@ contract AuditRemainingCoverageFindingsFailing_ReservationShielding is BasePerpT
         );
     }
 
-    function test_H1_LiquidationMustConsumeQueuedCommittedMarginBeforeBadDebt() public {
+    function test_H1_LiquidationMustConsumeQueuedCommittedMarginBeforeWaivingActionCharge() public {
         address account = trader;
         _fundTrader(trader, 10_000e6);
 
         _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
 
+        uint64 queuedOrderId = router.nextCommitId();
+        uint256 committedMarginUsdc = _freeSettlementUsdc(account) - 200_000;
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 7900e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, committedMarginUsdc, type(uint256).max, false);
 
+        uint256 committedBefore = router.getAccountReservations(account).committedMarginUsdc;
+        assertEq(_freeSettlementUsdc(account), 0, "Setup must shelter all non-bounty free settlement in the queue");
+        vm.warp(block.timestamp + 365 days);
         uint256 depth = pool.totalAssets();
-        vm.startPrank(address(router));
-        engine.liquidatePosition(account, 110_000_000, depth, uint64(block.timestamp), address(this));
-        vm.stopPrank();
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 1e8);
+        assertTrue(preview.liquidatable, "Accrued carry should make the position liquidatable");
+        assertEq(preview.pnlUsdc, 0, "Setup must isolate liquidation action charges from price PnL");
+        assertEq(preview.badDebtUsdc, 0, "Liquidation action-charge collection must never create protocol debt");
+
+        vm.prank(address(router));
+        engine.liquidatePosition(account, 1e8, depth, uint64(block.timestamp), address(this));
 
         (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Liquidation should still clear the live insolvent position");
-        assertEq(_executionBountyReserve(1), 200_000, "Queued execution bounty should remain reserved");
+        assertEq(_executionBountyReserve(queuedOrderId), 200_000, "Queued execution bounty should remain reserved");
         assertLt(
-            clearinghouse.lockedMarginUsdc(account),
-            7900e6,
-            "Liquidation should consume queued committed margin before bad debt"
-        );
-        assertLt(
-            engine.accumulatedBadDebtUsdc(),
-            7900e6,
-            "Liquidation bad debt should be limited to the true residual after queued committed margin is consumed"
+            router.getAccountReservations(account).committedMarginUsdc,
+            committedBefore,
+            "Liquidation should consume queued committed margin before waiving terminal carry"
         );
     }
 
@@ -93,23 +103,27 @@ contract AuditRemainingCoverageFindingsFailing_LiquidationBounty is BasePerpTest
         address account = trader;
 
         _fundTrader(trader, 100e6);
-        _open(account, CfdTypes.Side.BULL, 100e18, 6e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, CfdTypes.SIZE_QUANTUM, 12e6, 1e8);
 
+        uint256 freeSettlementUsdc = _freeSettlementUsdc(account);
         vm.prank(trader);
-        clearinghouse.withdraw(account, 94e6);
+        clearinghouse.withdraw(account, freeSettlementUsdc);
 
-        vm.startPrank(address(router));
         vm.warp(1_709_971_200);
-        uint256 bounty =
-            engine.liquidatePosition(account, 101_000_000, pool.totalAssets(), uint64(block.timestamp), address(this));
-        vm.stopPrank();
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 101_000_000);
+        uint256 liquidationReserveBefore = clearinghouse.liquidationReserveUsdc(account);
+        assertTrue(preview.liquidatable, "FAD maintenance must make the positive-equity fixture liquidatable");
 
-        assertGt(bounty, 0, "Keeper bounty should stay positive for a still-positive-equity liquidation");
-        uint256 minimumKeeperShare = (5e6 * _riskParams().keeperShareBps) / 10_000;
-        assertGe(
+        uint256 poolDepth = pool.totalAssets();
+        vm.prank(address(router));
+        uint256 bounty =
+            engine.liquidatePosition(account, 101_000_000, poolDepth, uint64(block.timestamp), address(this));
+
+        assertEq(bounty, preview.keeperBountyUsdc, "Execution must match the dedicated-reserve preview");
+        assertEq(
             bounty,
-            minimumKeeperShare,
-            "Keeper's configured share of the subsidy should avoid a near-zero positive-equity cliff"
+            (liquidationReserveBefore * _riskParams().keeperShareBps) / 10_000,
+            "Keeper must receive its configured share of the dedicated liquidation reserve"
         );
     }
 

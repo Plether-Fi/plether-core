@@ -15,6 +15,7 @@ import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {PerpsPublicLens} from "@plether/perps/PerpsPublicLens.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
+import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import "forge-std/Script.sol";
 
@@ -38,7 +39,7 @@ interface IAsyncTrancheVaultDeploymentView {
 contract DeployPerpsArbitrumSepolia is Script {
 
     address internal constant PYTH = 0x4374e5a8b9C22271E9EB878A2AA31DE97DF15DAF;
-    uint256 internal constant CAP_PRICE = 2e8;
+    uint32 internal constant CAP_PRICE = 2e8;
     uint256 internal constant FROZEN_CLOSE_SPREAD_BPS = 50;
 
     bytes4 internal constant ERC165_INTERFACE_ID = 0x01ffc9a7;
@@ -73,6 +74,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         MockUSDC usdc;
         MarginClearinghouse clearinghouse;
         CfdEngine engine;
+        TerminalNavBookV2 terminalNavBook;
         CfdEnginePlanner planner;
         CfdEngineSettlementSidecar settlementSidecar;
         CfdEngineAdmin engineAdmin;
@@ -102,6 +104,8 @@ contract DeployPerpsArbitrumSepolia is Script {
         deployed.engine = new CfdEngine(
             address(deployed.usdc), address(deployed.clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_SPREAD_BPS
         );
+        deployed.terminalNavBook = new TerminalNavBookV2(address(deployed.engine), CAP_PRICE);
+        deployed.engine.setTerminalNavBook(address(deployed.terminalNavBook));
 
         deployed.planner = new CfdEnginePlanner();
         deployed.settlementSidecar = new CfdEngineSettlementSidecar(address(deployed.engine));
@@ -265,6 +269,8 @@ contract DeployPerpsArbitrumSepolia is Script {
         console.log("MockUSDC:", address(deployed.usdc));
         console.log("MarginClearinghouse:", address(deployed.clearinghouse));
         console.log("CfdEngine:", address(deployed.engine));
+        console.log("TerminalNavBookV2:", address(deployed.terminalNavBook));
+        console.log("PositionSizeQuantum:", deployed.terminalNavBook.SIZE_QUANTUM());
         console.log("FrozenCloseSpreadBps:", deployed.engine.frozenCloseSpreadBps());
         console.log("FadRunwaySeconds:", deployed.engine.fadRunwaySeconds());
         console.log("CfdEnginePlanner:", address(deployed.planner));
