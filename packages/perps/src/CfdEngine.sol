@@ -577,7 +577,8 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     /// @notice Settles the caller's trader claim balance into the clearinghouse.
     /// @dev The caller must equal `account`. Settlement is all-or-nothing and is available only when HousePool cash
     ///      covers all outstanding trader claims. Side carry indexes and any open-position indexed carry are
-    ///      checkpointed before the pool payout and clearinghouse credit change their respective carry bases.
+    ///      checkpointed before the pool payout and clearinghouse credit change their respective carry bases. When a
+    ///      live-position claim becomes PnL pledge, aggregate side margin and borrow-base accounting are refreshed.
     /// @param account Claim beneficiary and required caller.
     function settleTraderClaim(
         address account
@@ -594,7 +595,14 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         if (amount == 0) {
             revert CfdEngine__NoTraderClaim();
         }
+        uint256 marginBefore = pos.lots > 0 ? _positionMarginBucketUsdc(account) : 0;
         uint256 claimAmountUsdc = _settleTraderClaimBalance(amount, account, pos.lots > 0);
+
+        if (pos.lots > 0) {
+            uint256 marginAfter = _positionMarginBucketUsdc(account);
+            _syncTotalSideMargin(pos.side, marginBefore, marginAfter);
+            _syncPositionBorrowBaseToMargin(pos, marginAfter);
+        }
 
         traderClaimBalanceUsdc[account] -= claimAmountUsdc;
         totalTraderClaimBalanceUsdc -= claimAmountUsdc;

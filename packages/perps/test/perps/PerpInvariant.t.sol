@@ -72,7 +72,7 @@ contract PerpHandler is Test {
         address account = trader;
 
         priceFuzz = bound(priceFuzz, 0.5e8, 1.5e8);
-        sizeFuzz = bound(sizeFuzz, 1000e18, 100_000e18);
+        sizeFuzz = bound(sizeFuzz, 10, 1000) * CfdTypes.SIZE_QUANTUM;
         marginFuzz = bound(marginFuzz, 100e6, 10_000e6);
 
         CfdTypes.Side side = sideRaw % 2 == 0 ? CfdTypes.Side.BULL : CfdTypes.Side.BEAR;
@@ -88,8 +88,7 @@ contract PerpHandler is Test {
         vm.prank(trader);
         router.commitOrder(side, sizeFuzz, marginFuzz, priceFuzz, false);
 
-        bytes[] memory empty = new bytes[](0);
-        router.executeOrder(commitId, empty);
+        router.executeOrder(commitId, _nextBlockPriceData(priceFuzz));
 
         ghost_tradeCount++;
     }
@@ -112,8 +111,7 @@ contract PerpHandler is Test {
         vm.prank(trader);
         router.commitOrder(side, size, 0, priceFuzz, true);
 
-        bytes[] memory empty = new bytes[](0);
-        router.executeOrder(commitId, empty);
+        router.executeOrder(commitId, _nextBlockPriceData(priceFuzz));
     }
 
     function liquidate(
@@ -239,6 +237,15 @@ contract PerpHandler is Test {
         engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
     }
 
+    function _nextBlockPriceData(
+        uint256 price
+    ) internal returns (bytes[] memory priceData) {
+        vm.roll(block.number + 1);
+        vm.warp(block.timestamp + 1);
+        priceData = new bytes[](1);
+        priceData[0] = abi.encode(price);
+    }
+
     function _hasSettleableJuniorLpWork() internal view returns (bool) {
         uint256 cutoffEpoch = pool.currentLpEpoch();
         (, uint256 redeemShares) = juniorVault.getMaturedRedeemHead(cutoffEpoch);
@@ -344,16 +351,21 @@ contract PerpInvariantTest is BasePerpTest {
     function invariant_NoNegativePrincipal() public {
         vm.prank(address(juniorVault));
         pool.reconcile();
-        uint256 claimed = pool.seniorPrincipal() + pool.juniorPrincipal();
-        uint256 bal = pool.totalAssets();
-        int256 traderPnl = _unrealizedTraderPnl();
-        uint256 effectivePool;
-        if (traderPnl >= 0) {
-            effectivePool = bal;
-        } else {
-            effectivePool = bal + uint256(-traderPnl);
+        if (pool.lastReconcileTime() != block.timestamp) {
+            return;
         }
-        assertLe(claimed, effectivePool, "Claimed equity cannot exceed MtM-adjusted pool value");
+
+        uint256 claimed = pool.seniorPrincipal() + pool.juniorPrincipal();
+        uint256 terminalAssets = pool.totalAssets();
+        ICfdEngineTypes.TerminalNavSnapshot memory terminal = engine.terminalNavSnapshot();
+        uint256 terminalLiabilities = terminal.totalTraderClaimsUsdc;
+        if (terminal.terminalLpPriceDeltaUsdc >= 0) {
+            terminalAssets += uint256(terminal.terminalLpPriceDeltaUsdc);
+        } else {
+            terminalLiabilities += uint256(-(terminal.terminalLpPriceDeltaUsdc + 1)) + 1;
+        }
+        uint256 terminalEquity = terminalAssets > terminalLiabilities ? terminalAssets - terminalLiabilities : 0;
+        assertLe(claimed, terminalEquity, "Freshly reconciled principal cannot exceed exact terminal LP equity");
     }
 
     function invariant_FeesWithinClearinghouseTreasury() public view {
@@ -403,31 +415,22 @@ contract PerpInvariantTest is BasePerpTest {
     }
 
     function invariant_PendingKeeperReservesBackedByClearinghouseReservations() public view {
-        uint256 pendingKeeperReserves;
-        uint256 reservedSettlementUsdc;
-        uint64 nextCommitId = router.nextCommitId();
-
-        for (uint64 orderId = 1; orderId < nextCommitId; orderId++) {
-            OrderRouter.OrderRecord memory record = _orderRecord(orderId);
-            if (record.core.account == address(0) || record.core.sizeDelta == 0) {
-                continue;
-            }
-            pendingKeeperReserves += record.executionBountyUsdc;
-        }
-        for (uint256 i = 0; i < 3; i++) {
-            reservedSettlementUsdc += clearinghouse.getLockedMarginBuckets(handler.traders(i)).reservedSettlementUsdc;
-        }
-
         assertEq(usdc.balanceOf(address(router)), 0, "Router must not custody queued keeper reserves");
-        assertEq(
-            reservedSettlementUsdc,
-            pendingKeeperReserves,
-            "Queued keeper reserves must stay backed by clearinghouse reserved settlement"
-        );
+        for (uint256 i = 0; i < 3; i++) {
+            address account = handler.traders(i);
+            uint256 protectedActionReserveUsdc =
+                clearinghouse.vpiRebateReserveUsdc(account) + _pendingExecutionBountyUsdc(account);
+            assertEq(
+                clearinghouse.actionReserveUsdc(account),
+                protectedActionReserveUsdc,
+                "Action reserve must exactly back negative VPI and pending keeper bounties"
+            );
+        }
     }
 
     function invariant_ClearinghouseBalanceMatchesTrackedAccounts() public view {
-        uint256 trackedBalances = clearinghouse.balanceUsdc(address(handler));
+        uint256 trackedBalances =
+            clearinghouse.balanceUsdc(address(handler)) + clearinghouse.balanceUsdc(engine.protocolTreasury());
         for (uint256 i = 0; i < 3; i++) {
             address account = handler.traders(i);
             trackedBalances += clearinghouse.balanceUsdc(account);
@@ -525,12 +528,13 @@ contract PerpInvariantTest is BasePerpTest {
         for (uint256 i = 0; i < 3; i++) {
             address trader = handler.traders(i);
             address account = trader;
-            (uint256 size,, uint256 entryPrice,, CfdTypes.Side side,,) = engine.positions(account);
+            (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(account);
             if (size > 0) {
+                uint256 exactEntryNotional = engine.positionEntryCostUsdcAtoms(account) * CfdMath.USDC_TO_TOKEN_SCALE;
                 if (side == CfdTypes.Side.BULL) {
-                    sumBullNotional += size * entryPrice;
+                    sumBullNotional += exactEntryNotional;
                 } else {
-                    sumBearNotional += size * entryPrice;
+                    sumBearNotional += exactEntryNotional;
                 }
             }
         }
@@ -588,34 +592,18 @@ contract PerpInvariantTest is BasePerpTest {
         );
     }
 
-    function invariant_LivePositionsRemainLargeEnoughForLiquidationEconomics() public view {
-        (,,,,,, uint256 minBountyUsdc, uint256 bountyBps,,) = engine.riskParams();
-        uint256 oraclePrice = engine.lastMarkPrice();
-        if (oraclePrice == 0) {
-            oraclePrice = 1e8;
-        }
-
+    function invariant_LivePositionsRetainMinimumLiquidationReserve() public view {
+        (,,,,,, uint256 minBountyUsdc,,,) = engine.riskParams();
         for (uint256 i = 0; i < 3; i++) {
             address account = handler.traders(i);
-            PerpsViewTypes.PositionView memory positionView = _publicPosition(account);
-            if (!positionView.exists) {
+            (uint256 size,,,,,,) = engine.positions(account);
+            if (size == 0) {
                 continue;
             }
-
-            if (positionView.liquidatable) {
-                continue;
-            }
-
-            uint256 notionalUsdc = (positionView.size * oraclePrice) / 1e20;
             assertGe(
-                notionalUsdc * bountyBps,
-                minBountyUsdc * 10_000,
-                "Live positions must stay above the minimum liquidation bounty threshold"
-            );
-            assertGe(
-                positionView.marginUsdc,
+                clearinghouse.liquidationReserveUsdc(account),
                 minBountyUsdc,
-                "Live positions must not degrade into dust margin below the bounty floor"
+                "Every live position must retain the dedicated minimum liquidation reserve"
             );
         }
     }
@@ -750,6 +738,21 @@ contract PerpInvariantTest is BasePerpTest {
         }
     }
 
+    function _pendingExecutionBountyUsdc(
+        address account
+    ) private view returns (uint256 pendingExecutionBountyUsdc) {
+        uint64 nextCommitId = router.nextCommitId();
+        for (uint64 orderId = 1; orderId < nextCommitId; orderId++) {
+            OrderRouter.OrderRecord memory record = _orderRecord(orderId);
+            if (
+                record.status == IOrderRouterAccounting.OrderStatus.Pending && record.core.account == account
+                    && record.core.sizeDelta != 0
+            ) {
+                pendingExecutionBountyUsdc += record.executionBountyUsdc;
+            }
+        }
+    }
+
 }
 
 contract AdversarialPerpHandler is Test {
@@ -851,7 +854,7 @@ contract AdversarialPerpHandler is Test {
     ) external {
         address actor = actors[actorIdx % actors.length];
         address account = _account(actor);
-        uint256 size = bound(sizeFuzz, 1000e18, 25_000e18);
+        uint256 size = bound(sizeFuzz, 10, 250) * CfdTypes.SIZE_QUANTUM;
         uint256 margin = bound(marginFuzz, 200e6, 5000e6);
 
         if (clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc < margin + 1e6) {
@@ -1162,25 +1165,7 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
     }
 
     function invariant_AdversarialReservationStaysBacked() public view {
-        uint256 pendingKeeperReserves;
-        uint256 reservedSettlementUsdc;
-        for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
-            OrderRouter.OrderRecord memory record = _orderRecord(orderId);
-            if (record.core.account == address(0) || record.core.sizeDelta == 0) {
-                continue;
-            }
-            pendingKeeperReserves += record.executionBountyUsdc;
-        }
-        for (uint256 i = 0; i < 4; i++) {
-            reservedSettlementUsdc += clearinghouse.getLockedMarginBuckets(handler.actors(i)).reservedSettlementUsdc;
-        }
-
-        assertEq(usdc.balanceOf(address(router)), 0, "Router must not custody adversarial keeper reserves");
-        assertEq(
-            reservedSettlementUsdc,
-            pendingKeeperReserves,
-            "Adversarial queue keeper reserves must remain fully backed by clearinghouse reservations"
-        );
+        _assertActionReserveBacking();
     }
 
     function invariant_AdversarialBatchProcessingRemainsLive() public view {
@@ -1263,25 +1248,7 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
     }
 
     function invariant_AdversarialClearinghouseReservesOnlyPendingKeeperReserves() public view {
-        uint256 pendingKeeperReserves;
-        uint256 reservedSettlementUsdc;
-        for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
-            OrderRouter.OrderRecord memory record = _orderRecord(orderId);
-            if (record.core.account == address(0) || record.core.sizeDelta == 0) {
-                continue;
-            }
-            pendingKeeperReserves += record.executionBountyUsdc;
-        }
-        for (uint256 i = 0; i < 4; i++) {
-            reservedSettlementUsdc += clearinghouse.getLockedMarginBuckets(handler.actors(i)).reservedSettlementUsdc;
-        }
-
-        assertEq(usdc.balanceOf(address(router)), 0, "Router must not custody pending keeper reserves");
-        assertEq(
-            reservedSettlementUsdc,
-            pendingKeeperReserves,
-            "Clearinghouse reservations must equal pending keeper reserves during adversarial flows"
-        );
+        _assertActionReserveBacking();
     }
 
     function invariant_AdversarialQueuedKeeperReserveNeverReturnsToTraderCollateral() public view {
@@ -1289,6 +1256,35 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
             address account = handler.actors(i);
             IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(account);
             assertEq(buckets.freeSettlementUsdc + buckets.totalLockedMarginUsdc, buckets.settlementBalanceUsdc);
+        }
+    }
+
+    function _assertActionReserveBacking() private view {
+        assertEq(usdc.balanceOf(address(router)), 0, "Router must not custody adversarial keeper reserves");
+        for (uint256 i = 0; i < 4; i++) {
+            address account = handler.actors(i);
+            uint256 protectedActionReserveUsdc =
+                clearinghouse.vpiRebateReserveUsdc(account) + _pendingExecutionBountyUsdc(account);
+            assertEq(
+                clearinghouse.actionReserveUsdc(account),
+                protectedActionReserveUsdc,
+                "Action reserve must exactly back negative VPI and pending keeper bounties"
+            );
+        }
+    }
+
+    function _pendingExecutionBountyUsdc(
+        address account
+    ) private view returns (uint256 pendingExecutionBountyUsdc) {
+        uint64 nextCommitId = router.nextCommitId();
+        for (uint64 orderId = 1; orderId < nextCommitId; orderId++) {
+            OrderRouter.OrderRecord memory record = _orderRecord(orderId);
+            if (
+                record.status == IOrderRouterAccounting.OrderStatus.Pending && record.core.account == account
+                    && record.core.sizeDelta != 0
+            ) {
+                pendingExecutionBountyUsdc += record.executionBountyUsdc;
+            }
         }
     }
 

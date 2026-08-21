@@ -153,6 +153,66 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
         _assertSameCurve(deferredCurve, settledCurve, "claim consumption must preserve terminal accounting continuity");
     }
 
+    function test_LiveClaimSettlementSynchronizesMarginAndBorrowCachesAndAllowsClose() public {
+        uint256 settledClaimUsdc = _settleDeferredClaimOnLivePosition();
+
+        (uint256 remainingSize,, uint256 remainingEntryPrice, uint256 remainingMaxProfitUsdc,,,) =
+            engine.positions(TRADER);
+        uint256 livePledgeUsdc = clearinghouse.pnlPledgeUsdc(TRADER);
+        uint256 expectedBorrowBaseUsdc =
+            remainingMaxProfitUsdc > livePledgeUsdc ? remainingMaxProfitUsdc - livePledgeUsdc : 0;
+        (uint256 positionBorrowBaseUsdc,,) = engine.positionCarryState(TRADER);
+
+        assertGt(settledClaimUsdc, 0, "setup must service a nonzero deferred claim");
+        assertEq(remainingSize, HALF_POSITION_SIZE, "claim settlement must leave the live position open");
+        assertEq(remainingEntryPrice, ENTRY_PRICE, "claim settlement must not change the remaining entry price");
+        assertEq(
+            _sideTotalMargin(CfdTypes.Side.BULL),
+            livePledgeUsdc,
+            "side total margin must include claim value converted into live PnL pledge"
+        );
+        assertEq(
+            positionBorrowBaseUsdc,
+            expectedBorrowBaseUsdc,
+            "position borrow base must be recomputed from the increased live PnL pledge"
+        );
+        assertEq(
+            engine.sideBorrowBaseUsdc(uint256(CfdTypes.Side.BULL)),
+            expectedBorrowBaseUsdc,
+            "single-position side borrow base must match its recomputed position borrow base"
+        );
+
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(TRADER, remainingSize, MARK_PRICE);
+        assertTrue(preview.valid, "cache-synchronized live position must remain closable");
+        _close(TRADER, CfdTypes.Side.BULL, remainingSize, MARK_PRICE);
+
+        (uint256 sizeAfter,,,,,,) = engine.positions(TRADER);
+        assertEq(sizeAfter, 0, "full close after claim settlement must remove the position");
+        assertEq(_sideTotalMargin(CfdTypes.Side.BULL), 0, "full close must clear side margin");
+        assertEq(engine.sideBorrowBaseUsdc(uint256(CfdTypes.Side.BULL)), 0, "full close must clear side borrow base");
+    }
+
+    function test_LiveClaimSettlementSynchronizesCachesAndAllowsLiquidation() public {
+        _settleDeferredClaimOnLivePosition();
+
+        uint256 liquidationPrice = CAP_PRICE;
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(TRADER, liquidationPrice);
+        assertTrue(preview.liquidatable, "setup must make the post-settlement live position liquidatable at the cap");
+
+        uint256 poolDepthUsdc = pool.totalAssets();
+        vm.prank(address(router));
+        engine.liquidatePosition(TRADER, liquidationPrice, poolDepthUsdc, uint64(block.timestamp), address(this));
+
+        (uint256 sizeAfter,,,,,,) = engine.positions(TRADER);
+        assertEq(sizeAfter, 0, "liquidation after claim settlement must remove the position");
+        assertEq(_sideTotalMargin(CfdTypes.Side.BULL), 0, "liquidation must clear side margin without underflow");
+        assertEq(
+            engine.sideBorrowBaseUsdc(uint256(CfdTypes.Side.BULL)),
+            0,
+            "liquidation must clear side borrow base without underflow"
+        );
+    }
+
     function test_JuniorDepositAndRedeemUseIdenticalSignedNavWithLiveUnrealizedPnl() public {
         _finishJuniorCooldown(address(this));
         _openWinningBullPosition();
@@ -256,6 +316,27 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
     function _openWinningBullPosition() private {
         _fundTrader(TRADER, 60_000e6);
         _open(TRADER, CfdTypes.Side.BULL, POSITION_SIZE, 40_000e6, ENTRY_PRICE);
+    }
+
+    function _settleDeferredClaimOnLivePosition() private returns (uint256 claimAmountUsdc) {
+        _openWinningBullPosition();
+        _refreshMark(MARK_PRICE);
+
+        uint256 removedPoolCash = usdc.balanceOf(address(pool));
+        usdc.burn(address(pool), removedPoolCash);
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(TRADER, HALF_POSITION_SIZE, MARK_PRICE);
+        assertTrue(preview.valid, "illiquid partial-close setup must be valid");
+        assertGt(preview.freshTraderPayoutUsdc, 0, "setup must create a fresh trader entitlement");
+        assertEq(preview.immediatePayoutUsdc, 0, "empty pool must defer the fresh payout");
+
+        _close(TRADER, CfdTypes.Side.BULL, HALF_POSITION_SIZE, MARK_PRICE);
+        claimAmountUsdc = engine.traderClaimBalanceUsdc(TRADER);
+        assertEq(claimAmountUsdc, preview.freshTraderPayoutUsdc, "fresh payout must become the deferred claim");
+
+        usdc.mint(address(pool), removedPoolCash);
+        vm.prank(TRADER);
+        engine.settleTraderClaim(TRADER);
+        assertEq(engine.traderClaimBalanceUsdc(TRADER), 0, "claim settlement must consume the deferred liability");
     }
 
     function _refreshMark(

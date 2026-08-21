@@ -94,12 +94,12 @@ contract PerpExplicitAccountingHandler is Test {
         uint256 expected;
         uint256 actual;
 
-        uint256 size = bound(sizeFuzz, 20_000e18, 300_000e18);
+        uint256 size = bound(sizeFuzz, 200, 3000) * CfdTypes.SIZE_QUANTUM;
         uint256 margin = _boundedHealthyMargin(size, marginFuzz);
         uint256 closePrice = bound(closePriceFuzz, 0.6e8, 1.4e8);
 
         if (_openPair(size, margin, 1e8)) {
-            uint256 closeSize = bound(closeSizeFuzz, 1, size);
+            uint256 closeSize = bound(closeSizeFuzz, 1, size / CfdTypes.SIZE_QUANTUM) * CfdTypes.SIZE_QUANTUM;
             ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(BULL_TRADER, closeSize, closePrice);
             if (preview.valid) {
                 uint256 settlementBefore = clearinghouse.balanceUsdc(BULL_TRADER);
@@ -135,7 +135,7 @@ contract PerpExplicitAccountingHandler is Test {
         uint256 expected;
         uint256 actual;
 
-        uint256 size = bound(sizeFuzz, 20_000e18, 300_000e18);
+        uint256 size = bound(sizeFuzz, 200, 3000) * CfdTypes.SIZE_QUANTUM;
         uint256 margin = _initialishMargin(size);
         uint256 liquidationPrice = bound(liquidationPriceFuzz, 1.05e8, 1.8e8);
 
@@ -182,7 +182,7 @@ contract PerpExplicitAccountingHandler is Test {
         uint256 expected;
         uint256 actual;
 
-        uint256 size = bound(sizeFuzz, 20_000e18, 250_000e18);
+        uint256 size = bound(sizeFuzz, 200, 2500) * CfdTypes.SIZE_QUANTUM;
         uint256 margin = _boundedHealthyMargin(size, marginFuzz);
         uint256 closePrice = bound(closePriceFuzz, 0.7e8, 1.3e8);
 

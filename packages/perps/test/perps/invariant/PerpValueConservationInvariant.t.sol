@@ -113,7 +113,7 @@ contract PerpValueConservationHandler is Test {
         bool violation;
         uint256 profit;
 
-        uint256 size = bound(sizeFuzz, 50_000e18, 300_000e18);
+        uint256 size = bound(sizeFuzz, 500, 3000) * CfdTypes.SIZE_QUANTUM;
         uint256 depositAssets = bound(depositFuzz, 10_000e6, 300_000e6);
 
         _fundTrader(BULL_TRADER, 50_000e6);

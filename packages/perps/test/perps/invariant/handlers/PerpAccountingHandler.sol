@@ -242,7 +242,7 @@ contract PerpAccountingHandler is Test {
         }
 
         uint256 targetPrice = bound(targetPriceFuzz, 0.5e8, 1.5e8);
-        uint256 sizeDelta = bound(sizeFuzz, 1000e18, 100_000e18);
+        uint256 sizeDelta = bound(sizeFuzz, 10, 1000) * CfdTypes.SIZE_QUANTUM;
         uint256 marginDelta = bound(marginDeltaFuzz, 0, 50_000e6);
         uint256 neededUsdc = marginDelta + 2e6;
         _ensureFreeSettlement(actor, neededUsdc);
