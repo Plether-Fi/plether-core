@@ -5,7 +5,6 @@ pragma solidity 0.8.35;
 // They are intentionally not statements about the live carry model or current accounting semantics.
 
 import {BasePerpTest} from "./BasePerpTest.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
@@ -13,24 +12,7 @@ import {ICfdEngineAdminHost} from "@plether/perps/interfaces/ICfdEngineAdminHost
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 
-contract TrancheCooldownBypassReceiver {
-
-    function approveAsset(
-        TrancheVault vault,
-        uint256 amount
-    ) external {
-        IERC20(vault.asset()).approve(address(vault), amount);
-    }
-
-    function withdrawMax(
-        TrancheVault vault,
-        address receiver
-    ) external {
-        uint256 assets = vault.maxWithdraw(address(this));
-        vault.withdraw(assets, receiver, address(this));
-    }
-
-}
+contract TrancheCooldownBypassReceiver {}
 
 contract AuditFollowupFindingsFailing_CloseSolvency is BasePerpTest {
 
@@ -328,8 +310,17 @@ contract AuditFollowupFindingsFailing_TrancheComposability is BasePerpTest {
         usdc.mint(helper, 4999e6);
         vm.startPrank(helper);
         usdc.approve(address(juniorVault), 4999e6);
+        uint256 requestId = juniorVault.requestDeposit(4999e6, helper);
+        vm.stopPrank();
+
+        vm.warp(juniorVault.depositEpochStart(requestId));
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        pool.settleLpEpoch();
+
+        vm.startPrank(helper);
         vm.expectRevert(TrancheVault.TrancheVault__ThirdPartyDepositForExistingHolder.selector);
-        juniorVault.deposit(4999e6, alice);
+        juniorVault.claimDeposit(requestId, 4999e6, alice, helper);
         vm.stopPrank();
     }
 
@@ -344,19 +335,24 @@ contract AuditFollowupFindingsFailing_TrancheCooldownBypass is BasePerpTest {
         address receiverAddr = address(receiver);
 
         uint256 minimumDeposit = pool.minTrancheDepositUsdc();
-        usdc.mint(receiverAddr, minimumDeposit);
-        vm.prank(receiverAddr);
-        receiver.approveAsset(juniorVault, minimumDeposit);
-        vm.prank(receiverAddr);
-        juniorVault.deposit(minimumDeposit, receiverAddr);
+        _fundJunior(receiverAddr, minimumDeposit);
 
         vm.warp(block.timestamp + 1 hours + 1);
 
         usdc.mint(attacker, 10_000e6);
         vm.startPrank(attacker);
         usdc.approve(address(juniorVault), 10_000e6);
+        uint256 requestId = juniorVault.requestDeposit(10_000e6, attacker);
+        vm.stopPrank();
+
+        vm.warp(juniorVault.depositEpochStart(requestId));
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        pool.settleLpEpoch();
+
+        vm.startPrank(attacker);
         vm.expectRevert(TrancheVault.TrancheVault__ThirdPartyDepositForExistingHolder.selector);
-        juniorVault.deposit(10_000e6, receiverAddr);
+        juniorVault.claimDeposit(requestId, 10_000e6, receiverAddr, attacker);
         vm.stopPrank();
     }
 

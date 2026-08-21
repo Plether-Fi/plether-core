@@ -412,6 +412,43 @@ contract CfdEngineTest is BasePerpTest {
         }
     }
 
+    function _settleJuniorDepositFromBalance(
+        address owner,
+        uint256 assets
+    ) internal returns (uint256 shares) {
+        vm.prank(owner);
+        uint256 requestId = juniorVault.requestDeposit(assets, owner, owner);
+
+        vm.warp(pool.lpEpochStart(requestId));
+        uint256 markPrice = engine.lastMarkPrice();
+        vm.prank(address(router));
+        engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
+        pool.settleLpEpoch();
+
+        uint256 claimableAssets = juniorVault.claimableDepositRequest(requestId, owner);
+        vm.prank(owner);
+        shares = juniorVault.claimDeposit(requestId, claimableAssets, owner, owner);
+    }
+
+    function _settleJuniorWithdrawal(
+        address owner,
+        uint256 assets
+    ) internal returns (uint256 claimedAssets) {
+        uint256 shares = juniorVault.estimateWithdrawShares(assets);
+        vm.prank(owner);
+        uint256 requestId = juniorVault.requestRedeem(shares, owner, owner);
+
+        vm.warp(pool.lpEpochStart(requestId));
+        uint256 markPrice = engine.lastMarkPrice();
+        vm.prank(address(router));
+        engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
+        pool.settleLpEpoch();
+
+        uint256 claimableShares = juniorVault.claimableRedeemRequest(requestId, owner);
+        vm.prank(owner);
+        claimedAssets = juniorVault.claimRedeem(requestId, claimableShares, owner, owner);
+    }
+
     function test_OpenPosition_SolvencyCheck() public {
         address account = address(uint160(1));
         _fundTrader(account, 20_000 * 1e6);
@@ -447,14 +484,14 @@ contract CfdEngineTest is BasePerpTest {
 
         // Withdraw LP to reduce pool to $50k — solvency check should fail
         vm.warp(block.timestamp + 1 hours); // past deposit cooldown
-        juniorVault.withdraw(950_000 * 1e6, address(this), address(this));
+        uint256 withdrawnAssets = _settleJuniorWithdrawal(address(this), 950_000 * 1e6);
         vm.expectRevert(abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__TypedOrderFailure.selector, 2, 7, false));
         vm.prank(address(router));
         engine.processOrderTyped(order, 1e8, 0, uint64(block.timestamp));
 
         // Re-deposit to allow the trade
-        usdc.approve(address(juniorVault), 950_000 * 1e6);
-        juniorVault.deposit(950_000 * 1e6, address(this));
+        usdc.approve(address(juniorVault), withdrawnAssets);
+        _settleJuniorDepositFromBalance(address(this), withdrawnAssets);
 
         vm.prank(address(router));
         engine.processOrderTyped(order, 1e8, 200_000 * 1e6, uint64(block.timestamp));
@@ -4581,7 +4618,7 @@ contract CfdEngineTest is BasePerpTest {
 
     function test_H9_SolvencyDeadlock_CloseAllowedDuringInsolvency() public {
         vm.warp(block.timestamp + 1 hours);
-        juniorVault.withdraw(800_000 * 1e6, address(this), address(this));
+        _settleJuniorWithdrawal(address(this), 800_000 * 1e6);
 
         uint256 poolDepth = 200_000 * 1e6;
         address aliceAccount = address(uint160(1));
@@ -5973,11 +6010,7 @@ contract PhantomExecFeeTest is BasePerpTest {
     // Regression: phantom exec fee
     function test_PhantomExecFee_DoesNotOverCreditTreasuryMargin() public {
         uint256 lpDeposit = 1_000_000e6;
-        usdc.mint(bob, lpDeposit);
-        vm.startPrank(bob);
-        usdc.approve(address(juniorVault), lpDeposit);
-        juniorVault.deposit(lpDeposit, bob);
-        vm.stopPrank();
+        _fundJunior(bob, lpDeposit);
 
         uint256 margin = 1002e6;
         usdc.mint(alice, margin);
@@ -6042,11 +6075,7 @@ contract CarryModelFreeUsdcTest is BasePerpTest {
 
     // Regression: legacy negative spread receivables
     function helper_GetFreeUSDC_CarryModelBaseline() public {
-        usdc.mint(bob, 1_000_000e6);
-        vm.startPrank(bob);
-        usdc.approve(address(juniorVault), 1_000_000e6);
-        juniorVault.deposit(1_000_000e6, bob);
-        vm.stopPrank();
+        _fundJunior(bob, 1_000_000e6);
 
         uint256 margin = 100_001e6;
         usdc.mint(alice, margin);
@@ -6171,7 +6200,13 @@ contract DegradedModeLifecycleTest is BasePerpTest {
         vm.expectRevert(ICfdEngineTypes.CfdEngine__StillInsolvent.selector);
         engine.clearDegradedMode();
 
-        _fundJuniorDelayed(address(this), 500_000e6);
+        usdc.mint(address(pool), 500_000e6);
+        vm.prank(address(engine));
+        pool.recordClaimantInflow(
+            500_000e6, IHousePool.ClaimantInflowKind.Recapitalization, IHousePool.ClaimantInflowCashMode.CashArrived
+        );
+        vm.prank(address(juniorVault));
+        pool.reconcile();
         engine.clearDegradedMode();
 
         assertFalse(engine.degradedMode(), "Owner should clear degraded mode after recapitalization");
@@ -6182,9 +6217,11 @@ contract DegradedModeLifecycleTest is BasePerpTest {
         assertTrue(engine.degradedMode(), "Setup must latch degraded mode");
 
         vm.warp(block.timestamp + 1 hours + 1);
-        vm.prank(address(juniorVault));
+        uint256 requestedShares = juniorVault.estimateWithdrawShares(1e6);
+        uint256 requestId = juniorVault.requestRedeem(requestedShares, address(this), address(this));
+        vm.warp(pool.lpEpochStart(requestId));
         vm.expectRevert(IHousePool.HousePool__DegradedMode.selector);
-        pool.withdrawJunior(1e6, address(this));
+        pool.settleLpEpoch();
     }
 
     function test_DegradedMode_AllowsAddMarginToExistingPosition() public {
@@ -6246,7 +6283,7 @@ contract ProtocolPhaseTest is BasePerpTest {
 
         PerpsViewTypes.ProtocolStatusView memory status = _publicProtocolStatus();
         assertEq(uint8(status.phase), uint8(ICfdEngine.ProtocolPhase.Active));
-        assertEq(status.lastMarkPrice, 0);
+        assertEq(status.lastMarkPrice, 1e8, "Async LP setup should establish the mark used for epoch settlement");
 
         address bullAccount = bullTrader;
         address bearAccount = bearTrader;
@@ -6262,7 +6299,13 @@ contract ProtocolPhaseTest is BasePerpTest {
             "Insolvency-revealing close should latch Degraded"
         );
 
-        _fundJuniorDelayed(address(this), 500_000e6);
+        usdc.mint(address(pool), 500_000e6);
+        vm.prank(address(engine));
+        pool.recordClaimantInflow(
+            500_000e6, IHousePool.ClaimantInflowKind.Recapitalization, IHousePool.ClaimantInflowCashMode.CashArrived
+        );
+        vm.prank(address(juniorVault));
+        pool.reconcile();
         engine.clearDegradedMode();
 
         assertEq(
@@ -6345,6 +6388,42 @@ contract VpiDepthTest is BasePerpTest {
         return 0;
     }
 
+    function _settleAvailableJuniorWithdrawal(
+        address owner
+    ) internal returns (uint256 claimedAssets) {
+        uint256 maxShares = juniorVault.maxRequestRedeem(owner);
+        if (maxShares == 0) {
+            return 0;
+        }
+
+        uint256 ownerAssets = juniorVault.estimateRedeemAssets(maxShares);
+        (,,, uint256 maxJuniorWithdrawUsdc) = pool.getPendingTrancheState();
+        uint256 targetAssets = ownerAssets < maxJuniorWithdrawUsdc ? ownerAssets : maxJuniorWithdrawUsdc;
+        if (targetAssets == 0) {
+            return 0;
+        }
+
+        uint256 requestedShares = juniorVault.estimateWithdrawShares(targetAssets);
+        if (requestedShares > maxShares) {
+            requestedShares = maxShares;
+        }
+        vm.prank(owner);
+        uint256 requestId = juniorVault.requestRedeem(requestedShares, owner, owner);
+
+        vm.warp(pool.lpEpochStart(requestId));
+        uint256 markPrice = engine.lastMarkPrice();
+        vm.prank(address(router));
+        engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
+        pool.settleLpEpoch();
+
+        uint256 claimableShares = juniorVault.claimableRedeemRequest(requestId, owner);
+        if (claimableShares == 0) {
+            return 0;
+        }
+        vm.prank(owner);
+        claimedAssets = juniorVault.claimRedeem(requestId, claimableShares, owner, owner);
+    }
+
     // Regression: C-02a
     function test_MinorityVpiRebateCannotExceedPaidCharges() public {
         _fundJunior(bob, 1_000_000 * 1e6);
@@ -6402,12 +6481,7 @@ contract VpiDepthTest is BasePerpTest {
         bytes[] memory freshPrice = new bytes[](1);
         freshPrice[0] = abi.encode(uint256(1e8));
         router.updateMarkPrice(freshPrice);
-        vm.startPrank(bob);
-        uint256 withdrawable = juniorVault.maxWithdraw(bob);
-        if (withdrawable > 0) {
-            juniorVault.withdraw(withdrawable, bob, bob);
-        }
-        vm.stopPrank();
+        _settleAvailableJuniorWithdrawal(bob);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 110_000 * 1e18, 0, 0, true);
@@ -6442,10 +6516,7 @@ contract VpiDepthTest is BasePerpTest {
         freshPrice[0] = abi.encode(uint256(1e8));
         router.updateMarkPrice(freshPrice);
 
-        vm.startPrank(deepLp);
-        uint256 juniorWithdrawable = juniorVault.maxWithdraw(deepLp);
-        juniorVault.withdraw(juniorWithdrawable, deepLp, deepLp);
-        vm.stopPrank();
+        _settleAvailableJuniorWithdrawal(deepLp);
 
         uint256 smallDepth = pool.totalAssets();
         assertLt(smallDepth, largeDepth, "LP withdrawal should shrink live pool depth");
@@ -6582,7 +6653,12 @@ contract VpiChunkingTest is Test {
 
         usdc.mint(address(this), 10_000_000 * 1e6);
         usdc.approve(address(juniorVault), type(uint256).max);
-        juniorVault.deposit(5_000_000 * 1e6, address(this));
+        uint256 requestId = juniorVault.requestDeposit(5_000_000 * 1e6, address(this), address(this));
+        vm.warp(pool.lpEpochStart(requestId));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        pool.settleLpEpoch();
+        uint256 claimableAssets = juniorVault.claimableDepositRequest(requestId, address(this));
+        juniorVault.claimDeposit(requestId, claimableAssets, address(this), address(this));
     }
 
     function _deposit(

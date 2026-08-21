@@ -4,12 +4,13 @@ pragma solidity 0.8.35;
 /// @notice Pool-facing bootstrap hooks implemented by tranche vaults.
 interface ITrancheVaultBootstrap {
 
-    /// @notice Previews shares minted for an asset amount under current vault pricing.
-    /// @dev Uses the HousePool's simulated deposit-side reconcile state, deducts the active frozen-oracle LP fee when
-    ///      applicable, and rounds down according to ERC4626 deposit-preview semantics.
-    /// @param assets USDC asset amount to preview (6 decimals)
+    /// @notice Quotes bootstrap shares for an asset amount under current vault pricing.
+    /// @dev Dedicated bootstrap hook because an asynchronous ERC-7540 vault's public `previewDeposit` must revert. Uses
+    ///      the HousePool's simulated deposit-side reconcile state and rounds down according to fee-free deposit
+    ///      conversion semantics. Bootstrap callers separately require the oracle not to be frozen.
+    /// @param assets USDC asset amount to quote (6 decimals)
     /// @return shares Vault-share amount that would be minted
-    function previewDeposit(
+    function quoteBootstrapDeposit(
         uint256 assets
     ) external view returns (uint256 shares);
 

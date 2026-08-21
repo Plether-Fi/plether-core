@@ -156,11 +156,16 @@ contract AuditRemainingCoverageFindingsFailing_DustQueueEconomics is BasePerpTes
 
     address trader = address(0xD057);
 
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory params) {
+        params = super._riskParams();
+        params.minBountyUsdc = 100_000;
+    }
+
     function test_H3_DustOrdersMustReserveMinimumKeeperReserve() public {
-        _fundTrader(trader, 2e6);
+        _fundTrader(trader, 3e6);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 100e18, 1e6, 0, false);
+        router.commitOrder(CfdTypes.Side.BULL, 100e18, 2e6, 0, false);
 
         address account = trader;
         IOrderRouterAccounting.AccountReservationView memory reservation = router.getAccountReservations(account);
@@ -186,8 +191,17 @@ contract AuditRemainingCoverageFindingsFailing_TrancheCooldownDocs is BasePerpTe
         usdc.mint(attacker, 5000e6);
         vm.startPrank(attacker);
         usdc.approve(address(juniorVault), 5000e6);
+        uint256 requestId = juniorVault.requestDeposit(5000e6, attacker);
+        vm.stopPrank();
+
+        vm.warp(juniorVault.depositEpochStart(requestId));
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        pool.settleLpEpoch();
+
+        vm.startPrank(attacker);
         vm.expectRevert(TrancheVault.TrancheVault__ThirdPartyDepositForExistingHolder.selector);
-        juniorVault.deposit(5000e6, alice);
+        juniorVault.claimDeposit(requestId, 5000e6, alice, attacker);
         vm.stopPrank();
     }
 

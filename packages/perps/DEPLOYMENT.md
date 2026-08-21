@@ -23,6 +23,11 @@ The bootstrap script handles operator actions after deploy:
 - minting mock USDC to test users
 - activating trading
 
+LP deposits and redemptions share the vaults' deterministic one-hour epoch clock. After bootstrap, any account may
+clear matured epochs through `HousePool.settleLpEpoch()`; no privileged keeper role is required. Each call
+examines at most 16 nonempty epochs in each tranche phase and must be repeated when older backlog remains. A call that
+cannot advance any queue item reverts without retaining reconcile or carry-checkpoint side effects.
+
 ## Deployment Shape
 
 The deploy script creates and wires:
@@ -55,6 +60,13 @@ Important:
 - `HousePool` remains inactive after deployment.
 - Trading does not go live until a finite capacity configuration completes its 48-hour timelock, both seed positions
   exist within those limits, and `activateTrading()` is called.
+- Both configured vaults must report the same pool binding, and the pool must expose the expected shared epoch clock
+  and per-phase bound. Deployment verification must reject a mixed old/new vault pair because direct legacy
+  finalization would bypass synchronized Senior/Junior ordering.
+- Deploy and bootstrap verification require each vault to report itself from `share()`, map its configured asset back
+  to itself through the ERC-7575 share lookup, and advertise ERC-165 plus the ERC-7540 operator (`0xe3bc4e65`),
+  async-deposit (`0xce3bbe50`), async-redeem (`0x620ee8e4`), ERC-7575 vault (`0x2f0a18c5`), and ERC-7575 share-token
+  (`0xf815c03d`) interface ids.
 
 ## Oracle Configuration
 
@@ -226,8 +238,13 @@ This is useful if the first bootstrap attempt completes only partially.
 
 ## Operational Notes
 
-- Perps contracts are non-upgradeable. Existing deployments do not gain these capacity controls; production rollout
-  requires a coordinated replacement stack. Migrating assets between stacks is explicitly outside this change.
+- Perps contracts are non-upgradeable. Synchronized async LP settlement therefore requires a coordinated replacement
+  stack; an existing `HousePool` cannot replace its set-once vaults and an existing engine cannot replace its pool.
+- Before a production cutover, stop new risk and LP requests on the old stack, resolve every pending deposit epoch and
+  Senior reservation, service or close old trader state, and wind down or explicitly migrate old LP shares. The
+  deployment scripts do not import old share balances, pending requests, or claim escrow.
+- Never wire one replacement vault to an old pool or one old vault to a replacement pool. Deploy and verify the engine,
+  pool, both vaults, router/oracle, and lenses as a single versioned unit.
 - The bootstrap script only mints mock USDC. It does not fund users with ETH.
 - Test users still need Arbitrum Sepolia ETH from a faucet to submit transactions.
 - The deploy and bootstrap scripts currently assume the broadcaster owns the deployed contracts.
@@ -245,3 +262,5 @@ This is useful if the first bootstrap attempt completes only partially.
 6. Rerun the same bootstrap command to finalize, seed junior then senior, and activate trading.
 7. Fund any test wallets with Arbitrum Sepolia ETH.
 8. Start integration testing against `PerpsPublicLens`, `MarginClearinghouse`, `OrderRouter`, and `HousePool`.
+9. Submit deposit and redemption requests on both vaults, advance to a matured epoch, call
+   `HousePool.settleLpEpoch()`, and verify that funded claims can be pulled independently.

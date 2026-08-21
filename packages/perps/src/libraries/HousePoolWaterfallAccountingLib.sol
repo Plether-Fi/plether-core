@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+
 /// @title HousePoolWaterfallAccountingLib
 /// @notice Pure senior/junior principal accounting for coupon, revenue, loss, and senior withdrawal events.
 /// @dev Principal and coupon values use 6-decimal USDC, rates use basis points, and elapsed time uses seconds.
@@ -118,7 +120,8 @@ library HousePoolWaterfallAccountingLib {
     ) internal pure returns (WaterfallState memory nextState) {
         nextState = state;
         uint256 remaining = state.seniorPrincipal - withdrawAmountUsdc;
-        nextState.seniorHighWaterMark = state.seniorHighWaterMark * remaining / state.seniorPrincipal;
+        nextState.seniorHighWaterMark =
+            Math.mulDiv(state.seniorHighWaterMark, remaining, state.seniorPrincipal, Math.Rounding.Floor);
         nextState.seniorPrincipal = remaining;
     }
 

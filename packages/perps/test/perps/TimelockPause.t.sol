@@ -3,7 +3,6 @@ pragma solidity 0.8.35;
 
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdEngineAdmin} from "@plether/perps/CfdEngineAdmin.sol";
@@ -12,6 +11,7 @@ import {HousePool} from "@plether/perps/HousePool.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
+import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {ICfdEngineAdminHost} from "@plether/perps/interfaces/ICfdEngineAdminHost.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
@@ -753,9 +753,9 @@ contract TimelockPauseTest is BasePerpTest {
         usdc.mint(alice, 10_000 * 1e6);
         vm.startPrank(alice);
         usdc.approve(address(seniorVault), 10_000 * 1e6);
-        assertEq(seniorVault.maxDeposit(alice), 0, "paused pool should zero senior maxDeposit");
-        vm.expectRevert(abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, alice, 10_000 * 1e6, 0));
-        seniorVault.deposit(10_000 * 1e6, alice);
+        assertEq(seniorVault.maxRequestDeposit(alice), 0, "paused pool should zero senior request capacity");
+        vm.expectRevert(TrancheVault.TrancheVault__DepositsUnavailable.selector);
+        seniorVault.requestDeposit(10_000 * 1e6, alice, alice);
         vm.stopPrank();
     }
 
@@ -765,9 +765,9 @@ contract TimelockPauseTest is BasePerpTest {
         usdc.mint(alice, 10_000 * 1e6);
         vm.startPrank(alice);
         usdc.approve(address(juniorVault), 10_000 * 1e6);
-        assertEq(juniorVault.maxDeposit(alice), 0, "paused pool should zero junior maxDeposit");
-        vm.expectRevert(abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, alice, 10_000 * 1e6, 0));
-        juniorVault.deposit(10_000 * 1e6, alice);
+        assertEq(juniorVault.maxRequestDeposit(alice), 0, "paused pool should zero junior request capacity");
+        vm.expectRevert(TrancheVault.TrancheVault__DepositsUnavailable.selector);
+        juniorVault.requestDeposit(10_000 * 1e6, alice, alice);
         vm.stopPrank();
     }
 
@@ -775,20 +775,14 @@ contract TimelockPauseTest is BasePerpTest {
         _warpForward(1 hours);
         pool.pause();
 
-        uint256 maxW = seniorVault.maxWithdraw(address(this));
-        if (maxW > 0) {
-            seniorVault.withdraw(maxW, address(this), address(this));
-        }
+        _withdrawTrancheWhileHousePoolPaused(seniorVault);
     }
 
     function test_WithdrawJunior_WorksWhenHousePoolPaused() public {
         _warpForward(1 hours);
         pool.pause();
 
-        uint256 maxW = juniorVault.maxWithdraw(address(this));
-        if (maxW > 0) {
-            juniorVault.withdraw(maxW, address(this), address(this));
-        }
+        _withdrawTrancheWhileHousePoolPaused(juniorVault);
     }
 
     function test_HousePool_Pause_OnlyOwner() public {
@@ -821,16 +815,63 @@ contract TimelockPauseTest is BasePerpTest {
         usdc.mint(alice, 10_000 * 1e6);
         vm.startPrank(alice);
         usdc.approve(address(juniorVault), 10_000 * 1e6);
-        assertEq(juniorVault.maxDeposit(alice), 0, "paused pool should zero junior maxDeposit");
-        vm.expectRevert(abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, alice, 10_000 * 1e6, 0));
-        juniorVault.deposit(10_000 * 1e6, alice);
+        assertEq(juniorVault.maxRequestDeposit(alice), 0, "paused pool should zero junior request capacity");
+        vm.expectRevert(TrancheVault.TrancheVault__DepositsUnavailable.selector);
+        juniorVault.requestDeposit(10_000 * 1e6, alice, alice);
         vm.stopPrank();
 
         pool.unpause();
 
         vm.prank(alice);
-        juniorVault.deposit(10_000 * 1e6, alice);
+        uint256 requestId = juniorVault.requestDeposit(10_000 * 1e6, alice, alice);
+        _settleLpEpochAt(requestId);
+
+        uint256 claimableAssets = juniorVault.claimableDepositRequest(requestId, alice);
+        assertEq(claimableAssets, 10_000 * 1e6, "unpaused deposit request should become claimable");
+        vm.prank(alice);
+        juniorVault.deposit(claimableAssets, alice);
         assertGt(juniorVault.balanceOf(alice), 0);
+    }
+
+    function _withdrawTrancheWhileHousePoolPaused(
+        TrancheVault vault
+    ) internal {
+        uint256 requestCapacity = vault.maxRequestRedeem(address(this));
+        assertGt(requestCapacity, 0, "paused pool should retain redeem request capacity");
+
+        uint256 requestedShares = requestCapacity / 10;
+        uint256 requestId = vault.requestRedeem(requestedShares, address(this), address(this));
+        assertEq(vault.maxWithdraw(address(this)), 0, "withdraw limit should remain zero before settlement");
+
+        _settleLpEpochAt(requestId);
+
+        uint256 claimableAssets = vault.claimableRedeemAssets(requestId, address(this));
+        assertGt(claimableAssets, 0, "paused settlement should fund the redeem request");
+        assertEq(
+            vault.maxWithdraw(address(this)), claimableAssets, "funded assets should remain claimable while paused"
+        );
+
+        uint256 balanceBefore = usdc.balanceOf(address(this));
+        uint256 consumedShares = vault.withdraw(claimableAssets, address(this), address(this));
+        assertEq(consumedShares, requestedShares, "withdraw claim should consume the requested shares");
+        assertEq(
+            usdc.balanceOf(address(this)),
+            balanceBefore + claimableAssets,
+            "withdraw claim should pay assets while the pool is paused"
+        );
+    }
+
+    function _settleLpEpochAt(
+        uint256 epochId
+    ) internal {
+        uint256 activationTime = pool.lpEpochStart(epochId);
+        if (block.timestamp < activationTime) {
+            vm.warp(activationTime);
+        }
+        uint256 markPrice = engine.lastMarkPrice();
+        vm.prank(address(router));
+        engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
+        pool.settleLpEpoch();
     }
 
 }

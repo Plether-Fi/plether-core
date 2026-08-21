@@ -103,6 +103,67 @@ library PerpsViewTypes {
         bool oracleFrozen;
     }
 
+    /// @notice Synchronized queue heads and runtime gates for one tranche.
+    /// @param vault Configured Senior or Junior tranche vault.
+    /// @param currentEpoch Current shared HousePool LP epoch.
+    /// @param cutoffEpoch Latest epoch eligible for the next settlement call.
+    /// @param depositHeadEpoch Oldest matured deposit epoch, or zero when none is visible.
+    /// @param depositHeadAssets Assets in the matured deposit head, with 6-decimal USDC units.
+    /// @param redeemHeadEpoch Oldest matured redemption epoch, or zero when none is visible.
+    /// @param redeemHeadShares Unfunded shares in the matured redemption head.
+    /// @param depositBacklog Whether matured deposit work is visible to settlement.
+    /// @param redeemBacklog Whether matured redemption work is visible to settlement.
+    /// @param settlementLive Whether runtime gates permit new redemption funding.
+    /// @param poolPaused Whether HousePool pause currently defers deposit activation.
+    struct TrancheQueueView {
+        address vault;
+        uint256 currentEpoch;
+        uint256 cutoffEpoch;
+        uint256 depositHeadEpoch;
+        uint256 depositHeadAssets;
+        uint256 redeemHeadEpoch;
+        uint256 redeemHeadShares;
+        bool depositBacklog;
+        bool redeemBacklog;
+        bool settlementLive;
+        bool poolPaused;
+    }
+
+    /// @notice Controller state for one deposit/redemption request id on one tranche.
+    /// @dev Pending estimates are indicative current-price views, while claimable and refundable fields report exact
+    ///      request accounting.
+    /// @param vault Configured Senior or Junior tranche vault.
+    /// @param requestId Shared LP epoch used as the asynchronous request id.
+    /// @param controller Account that controls the request.
+    /// @param pendingDepositAssets Requested assets that have not become claimable, with 6-decimal USDC units.
+    /// @param pendingDepositSharesEstimate Indicative shares for the pending deposit assets at current pricing.
+    /// @param claimableDepositAssets Finalized deposit contribution basis available to claim, in USDC units.
+    /// @param claimableDepositShares Finalized vault shares available to claim.
+    /// @param pendingRedeemShares Requested shares that have not become claimable or refundable.
+    /// @param pendingRedeemAssetsEstimate Indicative assets for the pending redemption shares, in USDC units.
+    /// @param claimableRedeemShares Funded redemption shares available to claim.
+    /// @param claimableRedeemAssets Exact funded USDC available to claim.
+    /// @param refundableDepositAssets Rejected deposit assets available to recover through cancellation, in USDC units.
+    /// @param refundableRedeemShares Unburned redemption shares available to reclaim from request escrow.
+    /// @param redeemRefundPending Whether the controller must acknowledge a terminal redemption refund; this can be
+    ///        true even when its pro-rata refundable share amount rounded to zero.
+    struct LpRequestStateView {
+        address vault;
+        uint256 requestId;
+        address controller;
+        uint256 pendingDepositAssets;
+        uint256 pendingDepositSharesEstimate;
+        uint256 claimableDepositAssets;
+        uint256 claimableDepositShares;
+        uint256 pendingRedeemShares;
+        uint256 pendingRedeemAssetsEstimate;
+        uint256 claimableRedeemShares;
+        uint256 claimableRedeemAssets;
+        uint256 refundableDepositAssets;
+        uint256 refundableRedeemShares;
+        bool redeemRefundPending;
+    }
+
     /// @notice High-level LP lifecycle and oracle status.
     /// @param tradingActive Whether the pool has completed bootstrap and activated trading.
     /// @param withdrawalLive Whether degraded-mode and mark-freshness gates permit pool-level withdrawals; this does

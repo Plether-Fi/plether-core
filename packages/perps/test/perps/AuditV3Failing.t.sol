@@ -3,7 +3,6 @@ pragma solidity 0.8.35;
 
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
@@ -86,12 +85,13 @@ contract AuditV3Failing_FadStaleness is BasePerpTest {
         // LP deposit should revert (stale mark during live markets).
         // But _requireFreshMark uses isFadWindow() -> fadMaxStaleness (3 days).
         address lp = address(0x1111);
-        usdc.mint(lp, 1000e6);
+        uint256 depositAmount = pool.minTrancheDepositUsdc();
+        usdc.mint(lp, depositAmount);
         vm.startPrank(lp);
-        usdc.approve(address(juniorVault), 1000e6);
-        assertEq(juniorVault.maxDeposit(lp), 0, "stale mark should zero junior maxDeposit during live FAD");
-        vm.expectRevert(abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, lp, 1000e6, 0));
-        juniorVault.deposit(1000e6, lp);
+        usdc.approve(address(juniorVault), depositAmount);
+        assertEq(juniorVault.maxRequestDeposit(lp), 0, "stale mark should zero junior request capacity");
+        vm.expectRevert(TrancheVault.TrancheVault__DepositsUnavailable.selector);
+        juniorVault.requestDeposit(depositAmount, lp);
         vm.stopPrank();
     }
 
@@ -154,7 +154,7 @@ contract AuditV3Failing_JuniorWipeout is BasePerpTest {
         vm.startPrank(lp);
         usdc.approve(address(juniorVault), 50_000e6);
         vm.expectRevert(TrancheVault.TrancheVault__TerminallyWiped.selector);
-        juniorVault.deposit(50_000e6, lp);
+        juniorVault.requestDeposit(50_000e6, lp);
         vm.stopPrank();
     }
 
@@ -235,7 +235,7 @@ contract AuditV3Failing_SeniorImpairment is BasePerpTest {
         vm.startPrank(lp);
         usdc.approve(address(seniorVault), 1_000_000e6);
         vm.expectRevert(TrancheVault.TrancheVault__TerminallyWiped.selector);
-        seniorVault.deposit(1_000_000e6, lp);
+        seniorVault.requestDeposit(1_000_000e6, lp);
         vm.stopPrank();
     }
 

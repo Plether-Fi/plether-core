@@ -2,8 +2,11 @@
 pragma solidity 0.8.35;
 
 import {BasePerpTest} from "../BasePerpTest.sol";
+import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
+import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
+import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {Test} from "forge-std/Test.sol";
 
@@ -16,7 +19,9 @@ contract GovernedSeniorCapacityHandler is Test {
     uint256 internal constant MAX_TRACKED_EPOCHS = 8;
 
     MockUSDC public immutable usdc;
+    CfdEngine public immutable engine;
     HousePool public immutable pool;
+    OrderRouter public immutable router;
     TrancheVault public immutable seniorVault;
     TrancheVault public immutable juniorVault;
 
@@ -31,12 +36,16 @@ contract GovernedSeniorCapacityHandler is Test {
 
     constructor(
         MockUSDC _usdc,
+        CfdEngine _engine,
         HousePool _pool,
+        OrderRouter _router,
         TrancheVault _seniorVault,
         TrancheVault _juniorVault
     ) {
         usdc = _usdc;
+        engine = _engine;
         pool = _pool;
+        router = _router;
         seniorVault = _seniorVault;
         juniorVault = _juniorVault;
 
@@ -62,192 +71,330 @@ contract GovernedSeniorCapacityHandler is Test {
         return trackedEpochIds[index];
     }
 
-    function depositSenior(
-        uint256 actorIndex,
-        uint256 assetsFuzz
-    ) external {
-        address actor = actors[actorIndex % actors.length];
-        uint256 maxAssets = seniorVault.maxDeposit(actor);
-        uint256 upper = maxAssets < MAX_ACTION_ASSETS_USDC ? maxAssets : MAX_ACTION_ASSETS_USDC;
-        if (upper < MIN_DEPOSIT_USDC) {
-            return;
-        }
-
-        uint256 assets = bound(assetsFuzz, MIN_DEPOSIT_USDC, upper);
-        usdc.mint(actor, assets);
-        vm.startPrank(actor);
-        usdc.approve(address(seniorVault), assets);
-        seniorVault.deposit(assets, actor);
-        vm.stopPrank();
-
-        _recordSuccessfulSeniorAdmission();
-    }
-
-    function depositJunior(
-        uint256 actorIndex,
-        uint256 assetsFuzz
-    ) external {
-        address actor = actors[actorIndex % actors.length];
-        uint256 maxAssets = juniorVault.maxDeposit(actor);
-        uint256 upper = maxAssets < MAX_ACTION_ASSETS_USDC ? maxAssets : MAX_ACTION_ASSETS_USDC;
-        if (upper < MIN_DEPOSIT_USDC) {
-            return;
-        }
-
-        uint256 assets = bound(assetsFuzz, MIN_DEPOSIT_USDC, upper);
-        usdc.mint(actor, assets);
-        vm.startPrank(actor);
-        usdc.approve(address(juniorVault), assets);
-        juniorVault.deposit(assets, actor);
-        vm.stopPrank();
-    }
-
     function requestSeniorDeposit(
         uint256 actorIndex,
         uint256 assetsFuzz
     ) external {
-        address actor = actors[actorIndex % actors.length];
-        uint256 epochId = seniorVault.currentDepositEpoch() + seniorVault.DEPOSIT_ACTIVATION_EPOCH_DELAY();
-        (bool tracked,) = _findTrackedEpoch(epochId);
-        if (!tracked && trackedEpochCount == MAX_TRACKED_EPOCHS) {
-            return;
-        }
-
-        uint256 maxAssets = seniorVault.maxRequestDeposit(actor);
-        uint256 upper = maxAssets < MAX_ACTION_ASSETS_USDC ? maxAssets : MAX_ACTION_ASSETS_USDC;
-        if (upper < MIN_DEPOSIT_USDC) {
-            return;
-        }
-
-        uint256 assets = bound(assetsFuzz, MIN_DEPOSIT_USDC, upper);
-        usdc.mint(actor, assets);
-        vm.startPrank(actor);
-        usdc.approve(address(seniorVault), assets);
-        uint256 requestedEpochId = seniorVault.requestDeposit(assets, actor);
-        vm.stopPrank();
-
-        if (!tracked) {
-            trackedEpochIds[trackedEpochCount] = requestedEpochId;
-            trackedEpochCount += 1;
-        }
-        _recordSuccessfulSeniorAdmission();
+        _requestDeposit(seniorVault, actorIndex, assetsFuzz, true);
     }
 
-    function cancelSeniorBeforeActivation(
+    function requestJuniorDeposit(
+        uint256 actorIndex,
+        uint256 assetsFuzz
+    ) external {
+        _requestDeposit(juniorVault, actorIndex, assetsFuzz, false);
+    }
+
+    function cancelSeniorDeposit(
         uint256 epochIndex,
         uint256 actorIndex
     ) external {
-        if (trackedEpochCount == 0) {
-            return;
-        }
-        uint256 epochId = trackedEpochIds[epochIndex % trackedEpochCount];
-        if (block.timestamp >= seniorVault.depositEpochStart(epochId)) {
-            return;
-        }
-
-        address actor = actors[actorIndex % actors.length];
-        if (seniorVault.pendingDepositAssets(actor, epochId) == 0) {
-            return;
-        }
-
-        vm.prank(actor);
-        seniorVault.cancelPendingDeposit(epochId);
+        _cancelDeposit(seniorVault, epochIndex, actorIndex);
     }
 
-    function finalizeSeniorEpoch(
-        uint256 epochIndex
+    function cancelJuniorDeposit(
+        uint256 epochIndex,
+        uint256 actorIndex
     ) external {
-        if (trackedEpochCount == 0) {
-            return;
-        }
-        uint256 epochId = trackedEpochIds[epochIndex % trackedEpochCount];
-        if (block.timestamp < seniorVault.depositEpochStart(epochId)) {
-            return;
-        }
+        _cancelDeposit(juniorVault, epochIndex, actorIndex);
+    }
 
-        (uint256 assets,,,, bool finalized) = seniorVault.depositEpochs(epochId);
-        if (assets == 0 || finalized) {
+    function settleLpEpoch() external {
+        _refreshMark();
+        if (!_hasSettleableMaturedWork()) {
             return;
         }
-
-        try seniorVault.finalizeDepositEpoch(epochId) returns (uint256) {
+        IHousePool.LpEpochSettlementResult memory result = pool.settleLpEpoch();
+        if (result.seniorDepositAssets != 0) {
             _recordSuccessfulSeniorAdmission();
-        } catch {}
+        }
+        if (result.juniorFundedAssets != 0) {
+            successfulJuniorWithdrawals += 1;
+            if (!_activeSeniorRatioWithinLimit()) {
+                juniorWithdrawalViolation = true;
+            }
+        }
     }
 
     function claimSeniorDeposit(
         uint256 epochIndex,
         uint256 actorIndex
     ) external {
-        if (trackedEpochCount == 0) {
-            return;
-        }
-        uint256 epochId = trackedEpochIds[epochIndex % trackedEpochCount];
-        (,,,, bool finalized) = seniorVault.depositEpochs(epochId);
-        if (!finalized) {
-            return;
-        }
-
-        address actor = actors[actorIndex % actors.length];
-        if (seniorVault.pendingDepositAssets(actor, epochId) == 0) {
-            return;
-        }
-
-        vm.prank(actor);
-        try seniorVault.claimDepositShares(epochId) returns (uint256) {} catch {}
+        _claimDeposit(seniorVault, epochIndex, actorIndex);
     }
 
-    function withdrawSenior(
-        uint256 actorIndex,
-        uint256 assetsFuzz
+    function claimJuniorDeposit(
+        uint256 epochIndex,
+        uint256 actorIndex
     ) external {
-        address actor = actors[actorIndex % actors.length];
-        uint256 maxAssets = seniorVault.maxWithdraw(actor);
-        if (maxAssets == 0) {
-            return;
-        }
-
-        uint256 upper = maxAssets < MAX_ACTION_ASSETS_USDC ? maxAssets : MAX_ACTION_ASSETS_USDC;
-        uint256 lower = upper >= MIN_DEPOSIT_USDC ? MIN_DEPOSIT_USDC : upper;
-        uint256 assets = bound(assetsFuzz, lower, upper);
-        vm.prank(actor);
-        try seniorVault.withdraw(assets, actor, actor) returns (uint256) {} catch {}
+        _claimDeposit(juniorVault, epochIndex, actorIndex);
     }
 
-    function withdrawJunior(
+    function requestSeniorRedeem(
         uint256 actorIndex,
-        uint256 assetsFuzz
+        uint256 sharesFuzz
     ) external {
-        address actor = actors[actorIndex % actors.length];
-        uint256 maxAssets = juniorVault.maxWithdraw(actor);
-        if (maxAssets == 0) {
-            return;
-        }
+        _requestRedeem(seniorVault, actorIndex, sharesFuzz);
+    }
 
-        uint256 upper = maxAssets < MAX_ACTION_ASSETS_USDC ? maxAssets : MAX_ACTION_ASSETS_USDC;
-        uint256 lower = upper >= MIN_DEPOSIT_USDC ? MIN_DEPOSIT_USDC : upper;
-        uint256 assets = bound(assetsFuzz, lower, upper);
-        vm.prank(actor);
-        try juniorVault.withdraw(assets, actor, actor) returns (uint256) {
-            successfulJuniorWithdrawals += 1;
-            if (!_activeSeniorRatioWithinLimit()) {
-                juniorWithdrawalViolation = true;
-            }
-        } catch {}
+    function requestJuniorRedeem(
+        uint256 actorIndex,
+        uint256 sharesFuzz
+    ) external {
+        _requestRedeem(juniorVault, actorIndex, sharesFuzz);
+    }
+
+    function cancelSeniorRedeem(
+        uint256 epochIndex,
+        uint256 actorIndex
+    ) external {
+        _cancelRedeem(seniorVault, epochIndex, actorIndex);
+    }
+
+    function cancelJuniorRedeem(
+        uint256 epochIndex,
+        uint256 actorIndex
+    ) external {
+        _cancelRedeem(juniorVault, epochIndex, actorIndex);
+    }
+
+    function claimSeniorRedeem(
+        uint256 epochIndex,
+        uint256 actorIndex
+    ) external {
+        _claimRedeem(seniorVault, epochIndex, actorIndex);
+    }
+
+    function claimJuniorRedeem(
+        uint256 epochIndex,
+        uint256 actorIndex
+    ) external {
+        _claimRedeem(juniorVault, epochIndex, actorIndex);
+    }
+
+    function claimSeniorRedeemRefund(
+        uint256 epochIndex,
+        uint256 actorIndex
+    ) external {
+        _claimRedeemRefund(seniorVault, epochIndex, actorIndex);
+    }
+
+    function claimJuniorRedeemRefund(
+        uint256 epochIndex,
+        uint256 actorIndex
+    ) external {
+        _claimRedeemRefund(juniorVault, epochIndex, actorIndex);
     }
 
     function warpForward(
         uint256 secondsFuzz
     ) external {
         vm.warp(block.timestamp + bound(secondsFuzz, 1, 90 minutes));
+        _refreshMark();
     }
 
-    function unfinalizedEpochAssets() public view returns (uint256 assets) {
+    function reservedSeniorEpochAssets() public view returns (uint256 assets) {
         for (uint256 i = 0; i < trackedEpochCount; ++i) {
-            (uint256 epochAssets,,,, bool finalized) = seniorVault.depositEpochs(trackedEpochIds[i]);
-            if (!finalized) {
+            uint256 epochId = trackedEpochIds[i];
+            (uint256 epochAssets,,,, bool finalized) = seniorVault.depositEpochs(epochId);
+            (,,, bool rejected) = seniorVault.depositEpochQueueState(epochId);
+            if (!finalized && !rejected) {
                 assets += epochAssets;
             }
+        }
+    }
+
+    function _requestDeposit(
+        TrancheVault vault,
+        uint256 actorIndex,
+        uint256 assetsFuzz,
+        bool isSenior
+    ) internal {
+        _refreshMark();
+        uint256 expectedEpochId = vault.currentLpEpoch() + vault.DEPOSIT_ACTIVATION_EPOCH_DELAY();
+        if (!_canTrackEpoch(expectedEpochId)) {
+            return;
+        }
+
+        address actor = actors[actorIndex % actors.length];
+        uint256 maxAssets = vault.maxRequestDeposit(actor);
+        uint256 upper = maxAssets < MAX_ACTION_ASSETS_USDC ? maxAssets : MAX_ACTION_ASSETS_USDC;
+        if (upper < MIN_DEPOSIT_USDC) {
+            return;
+        }
+
+        uint256 assets = bound(assetsFuzz, MIN_DEPOSIT_USDC, upper);
+        usdc.mint(actor, assets);
+        vm.startPrank(actor);
+        usdc.approve(address(vault), assets);
+        uint256 requestId = vault.requestDeposit(assets, actor, actor);
+        vm.stopPrank();
+
+        assertEq(requestId, expectedEpochId, "deposit request must use the synchronized LP epoch");
+        _trackEpoch(requestId);
+        if (isSenior) {
+            _recordSuccessfulSeniorAdmission();
+        }
+    }
+
+    function _cancelDeposit(
+        TrancheVault vault,
+        uint256 epochIndex,
+        uint256 actorIndex
+    ) internal {
+        if (trackedEpochCount == 0) {
+            return;
+        }
+        uint256 epochId = trackedEpochIds[epochIndex % trackedEpochCount];
+        address actor = actors[actorIndex % actors.length];
+        uint256 refundable = vault.refundableDepositRequest(epochId, actor);
+        uint256 pending = vault.pendingDepositRequest(epochId, actor);
+        if (refundable == 0 && (pending == 0 || vault.currentLpEpoch() >= epochId)) {
+            return;
+        }
+
+        vm.prank(actor);
+        vault.cancelPendingDeposit(epochId, actor, actor);
+    }
+
+    function _claimDeposit(
+        TrancheVault vault,
+        uint256 epochIndex,
+        uint256 actorIndex
+    ) internal {
+        if (trackedEpochCount == 0) {
+            return;
+        }
+        uint256 epochId = trackedEpochIds[epochIndex % trackedEpochCount];
+        address actor = actors[actorIndex % actors.length];
+        uint256 assets = vault.claimableDepositRequest(epochId, actor);
+        if (assets == 0) {
+            return;
+        }
+
+        vm.prank(actor);
+        vault.claimDeposit(epochId, assets, actor, actor);
+    }
+
+    function _requestRedeem(
+        TrancheVault vault,
+        uint256 actorIndex,
+        uint256 sharesFuzz
+    ) internal {
+        _refreshMark();
+        uint256 expectedEpochId = vault.currentLpEpoch() + vault.REDEEM_ACTIVATION_EPOCH_DELAY();
+        if (!_canTrackEpoch(expectedEpochId)) {
+            return;
+        }
+
+        address actor = actors[actorIndex % actors.length];
+        uint256 maxShares = vault.maxRequestRedeem(actor);
+        if (maxShares == 0) {
+            return;
+        }
+        uint256 shares = bound(sharesFuzz, 1, maxShares);
+        if (vault.estimateRedeemAssets(shares) < MIN_DEPOSIT_USDC && shares < maxShares) {
+            shares = maxShares;
+        }
+
+        vm.prank(actor);
+        uint256 requestId = vault.requestRedeem(shares, actor, actor);
+        assertEq(requestId, expectedEpochId, "redeem request must use the synchronized LP epoch");
+        _trackEpoch(requestId);
+    }
+
+    function _cancelRedeem(
+        TrancheVault vault,
+        uint256 epochIndex,
+        uint256 actorIndex
+    ) internal {
+        if (trackedEpochCount == 0) {
+            return;
+        }
+        uint256 epochId = trackedEpochIds[epochIndex % trackedEpochCount];
+        if (vault.currentLpEpoch() >= epochId) {
+            return;
+        }
+        address actor = actors[actorIndex % actors.length];
+        if (vault.pendingRedeemRequest(epochId, actor) == 0) {
+            return;
+        }
+
+        vm.prank(actor);
+        vault.cancelRedeemRequest(epochId, actor, actor);
+    }
+
+    function _claimRedeem(
+        TrancheVault vault,
+        uint256 epochIndex,
+        uint256 actorIndex
+    ) internal {
+        if (trackedEpochCount == 0) {
+            return;
+        }
+        uint256 epochId = trackedEpochIds[epochIndex % trackedEpochCount];
+        address actor = actors[actorIndex % actors.length];
+        uint256 shares = vault.claimableRedeemRequest(epochId, actor);
+        if (shares == 0) {
+            return;
+        }
+
+        vm.prank(actor);
+        vault.claimRedeem(epochId, shares, actor, actor);
+    }
+
+    function _claimRedeemRefund(
+        TrancheVault vault,
+        uint256 epochIndex,
+        uint256 actorIndex
+    ) internal {
+        if (trackedEpochCount == 0) {
+            return;
+        }
+        uint256 epochId = trackedEpochIds[epochIndex % trackedEpochCount];
+        address actor = actors[actorIndex % actors.length];
+        if (!vault.redeemRefundPending(epochId, actor)) {
+            return;
+        }
+
+        vm.prank(actor);
+        vault.claimRedeemRefund(epochId, actor, actor);
+    }
+
+    function _refreshMark() internal {
+        uint256 markPrice = engine.lastMarkPrice();
+        vm.prank(address(router));
+        engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
+    }
+
+    function _hasSettleableMaturedWork() internal view returns (bool) {
+        uint256 cutoffEpoch = pool.currentLpEpoch();
+        (, uint256 seniorRedeemShares) = seniorVault.getMaturedRedeemHead(cutoffEpoch);
+        (, uint256 juniorRedeemShares) = juniorVault.getMaturedRedeemHead(cutoffEpoch);
+        if ((seniorRedeemShares != 0 || juniorRedeemShares != 0) && pool.getFreeUSDC() != 0) {
+            return true;
+        }
+
+        (, uint256 seniorDepositAssets) = seniorVault.getMaturedDepositHead(cutoffEpoch);
+        (, uint256 juniorDepositAssets) = juniorVault.getMaturedDepositHead(cutoffEpoch);
+        return (seniorDepositAssets != 0 || juniorDepositAssets != 0) && !pool.paused()
+            && pool.canAcceptTrancheDeposits(false);
+    }
+
+    function _canTrackEpoch(
+        uint256 epochId
+    ) internal view returns (bool) {
+        (bool tracked,) = _findTrackedEpoch(epochId);
+        return tracked || trackedEpochCount < MAX_TRACKED_EPOCHS;
+    }
+
+    function _trackEpoch(
+        uint256 epochId
+    ) internal {
+        (bool tracked,) = _findTrackedEpoch(epochId);
+        if (!tracked) {
+            trackedEpochIds[trackedEpochCount] = epochId;
+            trackedEpochCount += 1;
         }
     }
 
@@ -381,7 +528,7 @@ contract GovernedSeniorCapacityInvariantTest is BasePerpTest {
 
     uint256 internal constant SMOKE_SENIOR_DEPOSIT_USDC = 1e6;
     uint256 internal constant SMOKE_JUNIOR_DEPOSIT_USDC = 2e6;
-    uint256 internal constant SMOKE_JUNIOR_WITHDRAW_USDC = 1e6;
+    uint256 internal constant SMOKE_REDEEM_SHARES_FUZZ = 1e6;
 
     function _initialJuniorDeposit() internal pure override returns (uint256) {
         return 0;
@@ -391,25 +538,43 @@ contract GovernedSeniorCapacityInvariantTest is BasePerpTest {
         super.setUp();
         _setSeniorCapacity(100_000e6, 7500);
 
-        handler = new GovernedSeniorCapacityHandler(usdc, pool, seniorVault, juniorVault);
+        handler = new GovernedSeniorCapacityHandler(usdc, engine, pool, router, seniorVault, juniorVault);
 
         // Make the postcondition counters non-vacuous in every invariant campaign. The fuzzer retains the full
         // selector set below and continues exploring additional transitions from this valid, exercised state.
-        handler.depositSenior(0, SMOKE_SENIOR_DEPOSIT_USDC);
-        handler.depositJunior(0, SMOKE_JUNIOR_DEPOSIT_USDC);
-        vm.warp(block.timestamp + juniorVault.DEPOSIT_COOLDOWN());
-        handler.withdrawJunior(0, SMOKE_JUNIOR_WITHDRAW_USDC);
+        handler.requestSeniorDeposit(0, SMOKE_SENIOR_DEPOSIT_USDC);
+        handler.requestJuniorDeposit(0, SMOKE_JUNIOR_DEPOSIT_USDC);
+        uint256 depositEpochId = handler.trackedEpochIdAt(0);
+        vm.warp(pool.lpEpochStart(depositEpochId));
+        handler.settleLpEpoch();
+        handler.claimSeniorDeposit(0, 0);
+        handler.claimJuniorDeposit(0, 0);
 
-        bytes4[] memory selectors = new bytes4[](9);
-        selectors[0] = handler.depositSenior.selector;
-        selectors[1] = handler.depositJunior.selector;
-        selectors[2] = handler.requestSeniorDeposit.selector;
-        selectors[3] = handler.cancelSeniorBeforeActivation.selector;
-        selectors[4] = handler.finalizeSeniorEpoch.selector;
+        vm.warp(block.timestamp + juniorVault.DEPOSIT_COOLDOWN());
+        handler.requestJuniorRedeem(0, SMOKE_REDEEM_SHARES_FUZZ);
+        uint256 redeemEpochIndex = handler.trackedEpochCount() - 1;
+        uint256 redeemEpochId = handler.trackedEpochIdAt(redeemEpochIndex);
+        vm.warp(pool.lpEpochStart(redeemEpochId));
+        handler.settleLpEpoch();
+        handler.claimJuniorRedeem(redeemEpochIndex, 0);
+
+        bytes4[] memory selectors = new bytes4[](16);
+        selectors[0] = handler.requestSeniorDeposit.selector;
+        selectors[1] = handler.requestJuniorDeposit.selector;
+        selectors[2] = handler.cancelSeniorDeposit.selector;
+        selectors[3] = handler.cancelJuniorDeposit.selector;
+        selectors[4] = handler.settleLpEpoch.selector;
         selectors[5] = handler.claimSeniorDeposit.selector;
-        selectors[6] = handler.withdrawSenior.selector;
-        selectors[7] = handler.withdrawJunior.selector;
-        selectors[8] = handler.warpForward.selector;
+        selectors[6] = handler.claimJuniorDeposit.selector;
+        selectors[7] = handler.requestSeniorRedeem.selector;
+        selectors[8] = handler.requestJuniorRedeem.selector;
+        selectors[9] = handler.cancelSeniorRedeem.selector;
+        selectors[10] = handler.cancelJuniorRedeem.selector;
+        selectors[11] = handler.claimSeniorRedeem.selector;
+        selectors[12] = handler.claimJuniorRedeem.selector;
+        selectors[13] = handler.claimSeniorRedeemRefund.selector;
+        selectors[14] = handler.claimJuniorRedeemRefund.selector;
+        selectors[15] = handler.warpForward.selector;
 
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
         targetContract(address(handler));
@@ -431,34 +596,60 @@ contract GovernedSeniorCapacityInvariantTest is BasePerpTest {
         );
     }
 
-    function invariant_ReservationCounterMatchesUnfinalizedSeniorEpochAssets() public view {
+    function invariant_ReservationCounterMatchesReservedSeniorEpochAssets() public view {
         assertEq(
             pool.reservedSeniorDepositAssetsUsdc(),
-            handler.unfinalizedEpochAssets(),
-            "pool reservation counter must equal aggregate unfinalized senior epoch assets"
+            handler.reservedSeniorEpochAssets(),
+            "pool reservation counter must equal aggregate pending, non-rejected senior epoch assets"
         );
     }
 
-    function invariant_SeniorEscrowMatchesUnfinalizedEpochAccounting() public view {
-        uint256 expectedEscrowAssets = handler.unfinalizedEpochAssets();
-        assertEq(
-            usdc.balanceOf(address(seniorVault)),
-            expectedEscrowAssets,
-            "senior vault USDC escrow must equal aggregate unfinalized epoch assets"
-        );
+    function invariant_VaultCustodyMatchesAsyncEscrowLedgers() public view {
+        _assertVaultCustody(seniorVault);
+        _assertVaultCustody(juniorVault);
+    }
 
+    function invariant_DepositEpochsMatchControllerAccounting() public view {
+        _assertDepositEpochAccounting(seniorVault);
+        _assertDepositEpochAccounting(juniorVault);
+    }
+
+    function _assertVaultCustody(
+        TrancheVault vault
+    ) internal view {
+        assertEq(
+            usdc.balanceOf(address(vault)),
+            vault.pendingDepositEscrowAssets() + vault.withdrawalEscrowAssets(),
+            "vault USDC custody must equal pending deposit plus funded withdrawal escrow"
+        );
+        assertEq(
+            vault.balanceOf(address(vault)),
+            vault.pendingRedeemEscrowShares() + vault.depositClaimEscrowShares(),
+            "vault share custody must equal pending redeem plus finalized deposit claim escrow"
+        );
+    }
+
+    function _assertDepositEpochAccounting(
+        TrancheVault vault
+    ) internal view {
         for (uint256 i = 0; i < handler.trackedEpochCount(); ++i) {
             uint256 epochId = handler.trackedEpochIdAt(i);
-            (uint256 epochAssets,,,, bool finalized) = seniorVault.depositEpochs(epochId);
-            if (finalized) {
-                continue;
-            }
+            (uint256 epochAssets,, uint256 claimedAssets,, bool finalized) = vault.depositEpochs(epochId);
+            (,,, bool rejected) = vault.depositEpochQueueState(epochId);
 
-            uint256 pendingAssets;
+            uint256 controllerAssets;
             for (uint256 j = 0; j < handler.actorCount(); ++j) {
-                pendingAssets += seniorVault.pendingDepositAssets(handler.actorAt(j), epochId);
+                address actor = handler.actorAt(j);
+                if (finalized) {
+                    controllerAssets += vault.claimableDepositRequest(epochId, actor);
+                } else if (rejected) {
+                    controllerAssets += vault.refundableDepositRequest(epochId, actor);
+                } else {
+                    controllerAssets += vault.pendingDepositRequest(epochId, actor);
+                }
             }
-            assertEq(pendingAssets, epochAssets, "unfinalized epoch assets must equal tracked depositor balances");
+            uint256 expectedAssets = finalized ? epochAssets - claimedAssets : epochAssets;
+            assertEq(controllerAssets, expectedAssets, "epoch assets must equal tracked controller accounting");
         }
     }
 

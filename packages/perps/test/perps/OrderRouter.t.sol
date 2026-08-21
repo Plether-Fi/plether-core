@@ -82,11 +82,7 @@ contract OrderRouterTest is BasePerpTest {
         pool.initializeSeedPosition(true, seedAmount, address(this));
         pool.activateTrading();
 
-        usdc.mint(bob, 1_000_000 * 1e6);
-        vm.startPrank(bob);
-        usdc.approve(address(juniorVault), type(uint256).max);
-        juniorVault.deposit(1_000_000 * 1e6, bob);
-        vm.stopPrank();
+        _fundJunior(bob, 1_000_000 * 1e6);
 
         usdc.mint(alice, 10_000 * 1e6);
         vm.startPrank(alice);
@@ -96,14 +92,41 @@ contract OrderRouterTest is BasePerpTest {
         vm.stopPrank();
     }
 
+    function _maxRequestableJuniorAssets(
+        address owner
+    ) internal view returns (uint256 assets) {
+        uint256 ownerShares = juniorVault.maxRequestRedeem(owner);
+        uint256 ownerAssets = juniorVault.estimateRedeemAssets(ownerShares);
+        (,,, uint256 maxJuniorWithdrawUsdc) = pool.getPendingTrancheState();
+        assets = ownerAssets < maxJuniorWithdrawUsdc ? ownerAssets : maxJuniorWithdrawUsdc;
+    }
+
+    function _settleJuniorWithdrawal(
+        address owner,
+        uint256 assets
+    ) internal returns (uint256 claimedAssets) {
+        uint256 shares = juniorVault.estimateWithdrawShares(assets);
+        vm.prank(owner);
+        uint256 requestId = juniorVault.requestRedeem(shares, owner, owner);
+
+        vm.warp(pool.lpEpochStart(requestId));
+        uint256 markPrice = engine.lastMarkPrice();
+        vm.prank(address(router));
+        engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
+        pool.settleLpEpoch();
+
+        uint256 claimableShares = juniorVault.claimableRedeemRequest(requestId, owner);
+        vm.prank(owner);
+        claimedAssets = juniorVault.claimRedeem(requestId, claimableShares, owner, owner);
+    }
+
     function test_UnbrickableQueue_OnEngineRevert() public {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 50_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         vm.warp(block.timestamp + 1 hours);
-        uint256 bobMaxWithdraw = juniorVault.maxWithdraw(bob);
-        vm.prank(bob);
-        juniorVault.withdraw(bobMaxWithdraw, bob, bob);
+        uint256 bobMaxWithdraw = _maxRequestableJuniorAssets(bob);
+        _settleJuniorWithdrawal(bob, bobMaxWithdraw);
 
         bytes[] memory emptyPayload = _mockPythUpdateData();
         vm.roll(block.number + 1);
@@ -146,8 +169,13 @@ contract OrderRouterTest is BasePerpTest {
         assertLt(freeUsdc, 953_000 * 1e6, "Free USDC bounded above");
 
         (,, uint256 maxSeniorWithdrawUsdc, uint256 maxJuniorWithdrawUsdc) = pool.getPendingTrancheState();
-        uint256 bobMaxWithdraw = juniorVault.maxWithdraw(bob);
-        assertEq(maxSeniorWithdrawUsdc + maxJuniorWithdrawUsdc, freeUsdc, "free USDC should split across tranches");
+        uint256 bobMaxWithdraw = _maxRequestableJuniorAssets(bob);
+        assertLe(maxSeniorWithdrawUsdc, freeUsdc, "senior request capacity must remain cash-backed");
+        assertEq(
+            maxJuniorWithdrawUsdc,
+            freeUsdc,
+            "without a senior redemption backlog, junior request capacity may use the full free-cash budget"
+        );
         assertEq(
             bobMaxWithdraw,
             maxJuniorWithdrawUsdc,
@@ -1425,6 +1453,24 @@ contract OrderRouterPythTest is BasePerpTest {
         });
     }
 
+    function _fundSetupJuniorWithoutMarkUpdate(
+        address lp,
+        uint256 amount
+    ) internal {
+        usdc.mint(lp, amount);
+        vm.startPrank(lp);
+        usdc.approve(address(juniorVault), amount);
+        uint256 requestId = juniorVault.requestDeposit(amount, lp, lp);
+        vm.stopPrank();
+
+        vm.warp(pool.lpEpochStart(requestId));
+        pool.settleLpEpoch();
+
+        uint256 claimableAssets = juniorVault.claimableDepositRequest(requestId, lp);
+        vm.prank(lp);
+        juniorVault.claimDeposit(requestId, claimableAssets, lp, lp);
+    }
+
     function setUp() public override {
         usdc = new MockUSDC();
         mockPyth = new MockPyth();
@@ -1469,11 +1515,7 @@ contract OrderRouterPythTest is BasePerpTest {
         pool.initializeSeedPosition(true, seedAmount, address(this));
         pool.activateTrading();
 
-        usdc.mint(bob, 1_000_000 * 1e6);
-        vm.startPrank(bob);
-        usdc.approve(address(juniorVault), type(uint256).max);
-        juniorVault.deposit(1_000_000 * 1e6, bob);
-        vm.stopPrank();
+        _fundSetupJuniorWithoutMarkUpdate(bob, 1_000_000 * 1e6);
 
         usdc.mint(alice, 10_000 * 1e6);
         vm.startPrank(alice);
@@ -3157,6 +3199,24 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
         });
     }
 
+    function _fundSetupJuniorWithoutMarkUpdate(
+        address lp,
+        uint256 amount
+    ) internal {
+        usdc.mint(lp, amount);
+        vm.startPrank(lp);
+        usdc.approve(address(juniorVault), amount);
+        uint256 requestId = juniorVault.requestDeposit(amount, lp, lp);
+        vm.stopPrank();
+
+        vm.warp(pool.lpEpochStart(requestId));
+        pool.settleLpEpoch();
+
+        uint256 claimableAssets = juniorVault.claimableDepositRequest(requestId, lp);
+        vm.prank(lp);
+        juniorVault.claimDeposit(requestId, claimableAssets, lp, lp);
+    }
+
     function setUp() public override {
         usdc = new MockUSDC();
         mockPyth = new MockPyth();
@@ -3201,11 +3261,7 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
         pool.initializeSeedPosition(true, seedAmount, address(this));
         pool.activateTrading();
 
-        usdc.mint(bob, 1_000_000 * 1e6);
-        vm.startPrank(bob);
-        usdc.approve(address(juniorVault), type(uint256).max);
-        juniorVault.deposit(1_000_000 * 1e6, bob);
-        vm.stopPrank();
+        _fundSetupJuniorWithoutMarkUpdate(bob, 1_000_000 * 1e6);
 
         usdc.mint(alice, 10_000 * 1e6);
         vm.startPrank(alice);
@@ -3948,11 +4004,7 @@ contract FadStalenessTest is BasePerpTest {
         _bypassAllTimelocks();
         _bootstrapSeededLifecycle();
 
-        usdc.mint(bob, 1_000_000 * 1e6);
-        vm.startPrank(bob);
-        usdc.approve(address(juniorVault), type(uint256).max);
-        juniorVault.deposit(1_000_000 * 1e6, bob);
-        vm.stopPrank();
+        _fundJunior(bob, 1_000_000 * 1e6);
 
         usdc.mint(alice, 10_000 * 1e6);
         vm.startPrank(alice);
@@ -5414,8 +5466,18 @@ contract VpiImrBypassTest is Test {
         usdc.mint(lp, amount);
         vm.startPrank(lp);
         usdc.approve(address(juniorVault), amount);
-        juniorVault.deposit(amount, lp);
+        uint256 requestId = juniorVault.requestDeposit(amount, lp, lp);
         vm.stopPrank();
+
+        vm.warp(pool.lpEpochStart(requestId));
+        uint256 markPrice = engine.lastMarkPrice();
+        vm.prank(address(router));
+        engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
+        pool.settleLpEpoch();
+
+        uint256 claimableAssets = juniorVault.claimableDepositRequest(requestId, lp);
+        vm.prank(lp);
+        juniorVault.claimDeposit(requestId, claimableAssets, lp, lp);
     }
 
     function _fundTrader(
@@ -5593,6 +5655,27 @@ contract KeeperFeeRefundTest is Test {
         updateData[0] = abi.encode(uint256(1e8));
     }
 
+    function _fundJunior(
+        address lp,
+        uint256 amount
+    ) internal {
+        usdc.mint(lp, amount);
+        vm.startPrank(lp);
+        usdc.approve(address(juniorVault), amount);
+        uint256 requestId = juniorVault.requestDeposit(amount, lp, lp);
+        vm.stopPrank();
+
+        vm.warp(pool.lpEpochStart(requestId));
+        uint256 markPrice = engine.lastMarkPrice();
+        vm.prank(address(router));
+        engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
+        pool.settleLpEpoch();
+
+        uint256 claimableAssets = juniorVault.claimableDepositRequest(requestId, lp);
+        vm.prank(lp);
+        juniorVault.claimDeposit(requestId, claimableAssets, lp, lp);
+    }
+
     function _warpPastTimelock() internal {
         vm.warp(block.timestamp + 48 hours + 1);
     }
@@ -5698,11 +5781,7 @@ contract KeeperFeeRefundTest is Test {
         routerAdmin.finalizeRouterConfig();
         _bootstrapSeededLifecycle();
 
-        usdc.mint(bob, 1_000_000e6);
-        vm.startPrank(bob);
-        usdc.approve(address(juniorVault), 1_000_000e6);
-        juniorVault.deposit(1_000_000e6, bob);
-        vm.stopPrank();
+        _fundJunior(bob, 1_000_000e6);
     }
 
     // Regression: H-01 — fee refunded to user on failure
@@ -5792,11 +5871,7 @@ contract KeeperFeeRefundTest is Test {
 
     // Regression: H-01 — open slippage failure forfeits the bounty instead of refunding it.
     function test_OpenSlippageFailForfeitsBountyToProtocol() public {
-        usdc.mint(bob, 1_000_000e6);
-        vm.startPrank(bob);
-        usdc.approve(address(juniorVault), 1_000_000e6);
-        juniorVault.deposit(1_000_000e6, bob);
-        vm.stopPrank();
+        _fundJunior(bob, 1_000_000e6);
 
         address account = alice;
         usdc.mint(alice, 50_000e6);
@@ -5824,11 +5899,7 @@ contract KeeperFeeRefundTest is Test {
     }
 
     function test_FIFOCleanupImpossibleHeadOrderHasEconomicCleanupIncentive() public {
-        usdc.mint(bob, 1_000_000e6);
-        vm.startPrank(bob);
-        usdc.approve(address(juniorVault), 1_000_000e6);
-        juniorVault.deposit(1_000_000e6, bob);
-        vm.stopPrank();
+        _fundJunior(bob, 1_000_000e6);
 
         address account = alice;
         usdc.mint(alice, 50_000e6);
@@ -5988,8 +6059,18 @@ contract WeekendArbitrageTest is Test {
         usdc.mint(lp, amount);
         vm.startPrank(lp);
         usdc.approve(address(juniorVault), amount);
-        juniorVault.deposit(amount, lp);
+        uint256 requestId = juniorVault.requestDeposit(amount, lp, lp);
         vm.stopPrank();
+
+        vm.warp(pool.lpEpochStart(requestId));
+        uint256 markPrice = engine.lastMarkPrice();
+        vm.prank(address(router));
+        engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
+        pool.settleLpEpoch();
+
+        uint256 claimableAssets = juniorVault.claimableDepositRequest(requestId, lp);
+        vm.prank(lp);
+        juniorVault.claimDeposit(requestId, claimableAssets, lp, lp);
     }
 
     function _fundTrader(

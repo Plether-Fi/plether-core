@@ -141,30 +141,113 @@ contract PerpHandler is Test {
     function depositLP(
         uint256 amountFuzz
     ) external {
-        amountFuzz = bound(amountFuzz, 1000e6, 100_000e6);
+        uint256 maxAssets = juniorVault.maxRequestDeposit(lp);
+        if (maxAssets < 1000e6) {
+            return;
+        }
+        uint256 upperBound = maxAssets < 100_000e6 ? maxAssets : 100_000e6;
+        uint256 assets = bound(amountFuzz, 1000e6, upperBound);
 
-        usdc.mint(lp, amountFuzz);
+        usdc.mint(lp, assets);
         vm.startPrank(lp);
-        usdc.approve(address(juniorVault), amountFuzz);
-        juniorVault.deposit(amountFuzz, lp);
+        usdc.approve(address(juniorVault), assets);
+        juniorVault.requestDeposit(assets, lp, lp);
         vm.stopPrank();
 
-        ghost_totalLpDeposited += amountFuzz;
+        ghost_totalLpDeposited += assets;
     }
 
     function withdrawLP(
         uint256 amountFuzz
     ) external {
-        uint256 maxW = juniorVault.maxWithdraw(lp);
-        if (maxW == 0) {
+        uint256 maxShares = juniorVault.maxRequestRedeem(lp);
+        if (maxShares == 0) {
             return;
         }
 
-        amountFuzz = bound(amountFuzz, 1e6, maxW);
+        uint256 shares = bound(amountFuzz, 1, maxShares);
+        if (juniorVault.estimateRedeemAssets(shares) < pool.minTrancheDepositUsdc() && shares < maxShares) {
+            shares = maxShares;
+        }
 
         vm.prank(lp);
-        juniorVault.withdraw(amountFuzz, lp, lp);
-        ghost_totalLpWithdrawn += amountFuzz;
+        juniorVault.requestRedeem(shares, lp, lp);
+    }
+
+    function advanceLpEpoch(
+        uint8 epochsFuzz
+    ) external {
+        uint256 epochs = bound(uint256(epochsFuzz), 1, 3);
+        vm.warp(pool.lpEpochStart(pool.currentLpEpoch() + epochs));
+    }
+
+    function refreshLpMark() external {
+        _refreshLpMark();
+    }
+
+    function settleLpEpoch() external {
+        if (engine.degradedMode()) {
+            return;
+        }
+        _refreshLpMark();
+        if (!_hasSettleableJuniorLpWork()) {
+            return;
+        }
+        pool.settleLpEpoch();
+    }
+
+    function claimLpDeposit() external {
+        uint256 requestId = juniorVault.controllerDepositHead(lp);
+        if (requestId == 0) {
+            return;
+        }
+
+        uint256 claimableAssets = juniorVault.claimableDepositRequest(requestId, lp);
+        if (claimableAssets != 0) {
+            vm.prank(lp);
+            juniorVault.claimDeposit(requestId, claimableAssets, lp, lp);
+            return;
+        }
+
+        if (juniorVault.refundableDepositRequest(requestId, lp) != 0) {
+            vm.prank(lp);
+            juniorVault.cancelPendingDeposit(requestId, lp, lp);
+        }
+    }
+
+    function claimLpWithdrawal() external {
+        uint256 requestId = juniorVault.controllerRedeemHead(lp);
+        if (requestId == 0) {
+            return;
+        }
+
+        uint256 claimableShares = juniorVault.claimableRedeemRequest(requestId, lp);
+        if (claimableShares != 0) {
+            vm.prank(lp);
+            ghost_totalLpWithdrawn += juniorVault.claimRedeem(requestId, claimableShares, lp, lp);
+        }
+
+        if (juniorVault.redeemRefundPending(requestId, lp)) {
+            vm.prank(lp);
+            juniorVault.claimRedeemRefund(requestId, lp, lp);
+        }
+    }
+
+    function _refreshLpMark() internal {
+        uint256 markPrice = engine.lastMarkPrice();
+        vm.prank(address(router));
+        engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
+    }
+
+    function _hasSettleableJuniorLpWork() internal view returns (bool) {
+        uint256 cutoffEpoch = pool.currentLpEpoch();
+        (, uint256 redeemShares) = juniorVault.getMaturedRedeemHead(cutoffEpoch);
+        if (redeemShares != 0 && pool.getFreeUSDC() != 0) {
+            return true;
+        }
+
+        (, uint256 depositAssets) = juniorVault.getMaturedDepositHead(cutoffEpoch);
+        return depositAssets != 0 && !pool.paused() && pool.canAcceptTrancheDeposits(false);
     }
 
 }
@@ -364,8 +447,9 @@ contract PerpInvariantTest is BasePerpTest {
             actorBalances += usdc.balanceOf(handler.traders(i));
         }
 
-        uint256 contractBalances =
-            usdc.balanceOf(address(pool)) + usdc.balanceOf(address(router)) + usdc.balanceOf(address(clearinghouse));
+        uint256 contractBalances = usdc.balanceOf(address(pool)) + usdc.balanceOf(address(router))
+            + usdc.balanceOf(address(clearinghouse)) + usdc.balanceOf(address(seniorVault))
+            + usdc.balanceOf(address(juniorVault));
 
         uint256 expectedSupply = usdc.totalSupply();
         assertEq(
@@ -738,11 +822,15 @@ contract AdversarialPerpHandler is Test {
 
     function _seedLp(
         uint256 amount
-    ) internal {
+    ) internal returns (uint256 requestId) {
+        if (juniorVault.maxRequestDeposit(lp) < amount) {
+            return 0;
+        }
+
         usdc.mint(lp, amount);
         vm.startPrank(lp);
         usdc.approve(address(juniorVault), type(uint256).max);
-        juniorVault.deposit(amount, lp);
+        requestId = juniorVault.requestDeposit(amount, lp, lp);
         vm.stopPrank();
     }
 
@@ -831,7 +919,83 @@ contract AdversarialPerpHandler is Test {
         uint256 amountFuzz
     ) external {
         uint256 amount = bound(amountFuzz, 1000e6, 100_000e6);
-        _seedLp(amount);
+        uint256 requestId = _seedLp(amount);
+        if (requestId == 0) {
+            return;
+        }
+
+        uint256 maturity = pool.lpEpochStart(requestId);
+        if (block.timestamp < maturity) {
+            vm.warp(maturity);
+        }
+        _settleLpEpoch();
+        _claimLpDeposit();
+    }
+
+    function advanceLpEpoch(
+        uint8 epochsFuzz
+    ) external {
+        uint256 epochs = bound(uint256(epochsFuzz), 1, 3);
+        vm.warp(pool.lpEpochStart(pool.currentLpEpoch() + epochs));
+    }
+
+    function refreshLpMark() external {
+        _refreshLpMark();
+    }
+
+    function settleLpEpoch() external {
+        _settleLpEpoch();
+    }
+
+    function claimLpDeposit() external {
+        _claimLpDeposit();
+    }
+
+    function _settleLpEpoch() internal {
+        if (engine.degradedMode()) {
+            return;
+        }
+        _refreshLpMark();
+        if (!_hasSettleableJuniorLpWork()) {
+            return;
+        }
+        pool.settleLpEpoch();
+    }
+
+    function _claimLpDeposit() internal {
+        uint256 requestId = juniorVault.controllerDepositHead(lp);
+        if (requestId == 0) {
+            return;
+        }
+
+        uint256 claimableAssets = juniorVault.claimableDepositRequest(requestId, lp);
+        if (claimableAssets != 0) {
+            vm.prank(lp);
+            juniorVault.claimDeposit(requestId, claimableAssets, lp, lp);
+            return;
+        }
+
+        if (juniorVault.refundableDepositRequest(requestId, lp) != 0) {
+            vm.prank(lp);
+            juniorVault.cancelPendingDeposit(requestId, lp, lp);
+        }
+    }
+
+    function _refreshLpMark() internal {
+        uint256 markPrice = engine.lastMarkPrice();
+        vm.prank(address(router));
+        engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
+    }
+
+    function _hasSettleableJuniorLpWork() internal view returns (bool) {
+        uint256 cutoffEpoch = pool.currentLpEpoch();
+        (, uint256 redeemShares) = juniorVault.getMaturedRedeemHead(cutoffEpoch);
+        if (redeemShares != 0 && pool.getFreeUSDC() != 0) {
+            return true;
+        }
+
+        (, uint256 depositAssets) = juniorVault.getMaturedDepositHead(cutoffEpoch);
+        return depositAssets != 0 && !pool.paused() && pool.canAcceptTrancheDeposits(false);
     }
 
     function processBatch(
