@@ -5892,7 +5892,7 @@ contract CfdEngineAuditTest is BasePerpTest {
             maxOrderAge: router.maxOrderAge(),
             orderExecutionStalenessLimit: router.orderExecutionStalenessLimit(),
             liquidationStalenessLimit: router.liquidationStalenessLimit(),
-            pythMaxConfidenceRatioBps: router.pythMaxConfidenceRatioBps(),
+            basketMaxConfidenceRatioBps: router.basketMaxConfidenceRatioBps(),
             orderSettlementWindow: router.orderSettlementWindow(),
             maxComponentPublishTimeDivergence: router.maxComponentPublishTimeDivergence(),
             adverseConfidenceMultiplierBps: router.adverseConfidenceMultiplierBps(),

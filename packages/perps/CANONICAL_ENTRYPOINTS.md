@@ -58,7 +58,8 @@ seed-lifecycle, and other tranche setup mechanics as admin/setup concerns rather
 
 - Order execution: `OrderRouter.executeOrder(uint64,bytes[])`
 - Batch execution: `OrderRouter.executeOrderBatch(uint64,bytes[])`
-- Liquidation: `OrderRouter.executeLiquidation(bytes32,bytes[])`
+- Liquidation: `OrderRouter.executeLiquidation(address,bytes[])`
+- Batch liquidation: `OrderRouter.executeLiquidationBatch(address[],bytes[])`
 - LP epoch clearing: `HousePool.settleLpEpoch()`
 
 Use this interface:

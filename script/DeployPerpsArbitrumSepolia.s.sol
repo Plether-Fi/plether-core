@@ -286,7 +286,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         console.log("CfdEngineLens:", address(deployed.engineLens));
         console.log("OrderRouter:", address(deployed.router));
         console.log("PletherOracle:", deployed.pletherOracle);
-        console.log("PythMaxConfidenceRatioBps:", PletherOracle(deployed.pletherOracle).pythMaxConfidenceRatioBps());
+        console.log("BasketMaxConfidenceRatioBps:", PletherOracle(deployed.pletherOracle).basketMaxConfidenceRatioBps());
         console.log("OrderRouterAdmin:", deployed.routerAdmin);
         console.log("PerpsPublicLens:", address(deployed.publicLens));
         console.log("Owner:", deployed.engineAdmin.owner());

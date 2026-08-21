@@ -17,6 +17,7 @@ contract MockPyth {
     mapping(bytes32 => MockPrice) public uniquePrices;
     mapping(bytes32 => bool) public hasUniquePrice;
     uint256 public mockFee;
+    uint256 public updatePriceFeedsCallCount;
     uint256 public parseUniqueCallCount;
     bytes32[] internal registeredFeedIds;
     mapping(bytes32 => bool) internal registeredFeedId;
@@ -117,6 +118,7 @@ contract MockPyth {
     function updatePriceFeeds(
         bytes[] calldata updateData
     ) external payable {
+        updatePriceFeedsCallCount++;
         if (updateData.length == 0 || updateData[0].length != 32) {
             return;
         }
