@@ -70,6 +70,7 @@ In practice, the compact public API is:
   - `OrderRouter.executeOrder(uint64,bytes[])`
   - `OrderRouter.executeOrderBatch(uint64,bytes[])`
   - `OrderRouter.executeLiquidation(address,bytes[])`
+  - `OrderRouter.executeLiquidationBatch(address[],bytes[])`
 - LPs:
   - the configured senior or junior `TrancheVault`: `deposit`, `mint`, `requestDeposit`, `cancelPendingDeposit`,
     `claimDepositShares`, `withdraw`, and `redeem`

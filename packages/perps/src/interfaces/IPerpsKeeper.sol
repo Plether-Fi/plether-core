@@ -43,4 +43,18 @@ interface IPerpsKeeper {
         bytes[] calldata pythUpdateData
     ) external payable;
 
+    /// @notice Attempts up to 256 account liquidations using one shared Pyth update and neutral mark refresh.
+    /// @dev Each account executes in an independent rollback frame. No-position and solvent accounts are skipped, while
+    ///      unexpected account-local failures are reported without reverting earlier successes. The original caller
+    ///      receives each successful engine-planned bounty. Low gas or an empty item revert leaves the returned index
+    ///      unattempted. The limit bounds candidates rather than guaranteed executions in one transaction; resume by
+    ///      submitting the suffix at `nextIndex` with a fresh Pyth update.
+    /// @param accounts Candidate accounts, in keeper-selected processing order.
+    /// @param pythUpdateData Pyth price update blobs; `msg.value` funds one shared update.
+    /// @return nextIndex First unattempted account index, or `accounts.length` when every account was attempted.
+    function executeLiquidationBatch(
+        address[] calldata accounts,
+        bytes[] calldata pythUpdateData
+    ) external payable returns (uint256 nextIndex);
+
 }
