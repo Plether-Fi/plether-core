@@ -101,6 +101,44 @@ contract SeniorCapacityTest is BasePerpTest {
         vm.stopPrank();
     }
 
+    function _requestRedeem(
+        TrancheVault vault,
+        address lp,
+        uint256 shares
+    ) internal returns (uint256 epochId) {
+        vm.prank(lp);
+        epochId = vault.requestRedeem(shares, lp, lp);
+    }
+
+    function _settleAt(
+        uint256 epochId
+    ) internal returns (IHousePool.LpEpochSettlementResult memory result) {
+        _warpToEpoch(epochId);
+        _refreshMark();
+        result = pool.settleLpEpoch();
+    }
+
+    function _warpToEpoch(
+        uint256 epochId
+    ) internal {
+        uint256 activationTime = pool.lpEpochStart(epochId);
+        if (block.timestamp < activationTime) {
+            vm.warp(activationTime);
+        }
+    }
+
+    /// @dev Exact-boundary cases neutralize carry because the +2 epoch request delay intentionally reprices capacity.
+    function _disableSeniorCoupon() internal {
+        IHousePool.PoolConfig memory config = _currentPoolConfig();
+        config.seniorRateBps = 0;
+        pool.proposePoolConfig(config);
+        vm.warp(pool.poolConfigActivationTime());
+        _refreshMark();
+        pool.finalizePoolConfig();
+        vm.prank(address(seniorVault));
+        pool.reconcile();
+    }
+
     function _assertSeniorHooksReject(
         address caller
     ) internal {
@@ -112,8 +150,6 @@ contract SeniorCapacityTest is BasePerpTest {
         pool.reserveSeniorDeposit(amount);
         vm.expectRevert(IHousePool.HousePool__NotSeniorVault.selector);
         pool.releaseSeniorDepositReservation(amount);
-        vm.expectRevert(IHousePool.HousePool__NotSeniorVault.selector);
-        pool.depositReservedSenior(amount);
         vm.stopPrank();
     }
 
@@ -166,26 +202,35 @@ contract SeniorCapacityTest is BasePerpTest {
     function test_AbsoluteCap_ExactBoundarySucceedsAndNextDollarIsRejected() public {
         uint256 absoluteCap = 2000e6;
         _configureAndReconcile(absoluteCap, 9999);
+        _disableSeniorCoupon();
 
         uint256 capacity = pool.getSeniorDepositCapacity();
         assertEq(capacity, absoluteCap - _protectedSenior());
-        assertEq(seniorVault.maxDeposit(ALICE), capacity);
+        assertEq(seniorVault.maxDeposit(ALICE), 0, "maxDeposit is claim capacity before an async request settles");
         assertEq(seniorVault.maxRequestDeposit(ALICE), capacity);
 
-        usdc.mint(ALICE, capacity + 1e6);
-        vm.startPrank(ALICE);
-        usdc.approve(address(seniorVault), type(uint256).max);
-        seniorVault.deposit(capacity, ALICE);
+        uint256 epochId = _requestSenior(ALICE, capacity);
 
         assertEq(pool.getSeniorDepositCapacity(), 0);
-        vm.expectRevert(abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, ALICE, 1e6, uint256(0)));
-        seniorVault.deposit(1e6, ALICE);
+        usdc.mint(BOB, 1e6);
+        vm.startPrank(BOB);
+        usdc.approve(address(seniorVault), 1e6);
+        vm.expectRevert(TrancheVault.TrancheVault__DepositsUnavailable.selector);
+        seniorVault.requestDeposit(1e6, BOB);
         vm.stopPrank();
+
+        IHousePool.LpEpochSettlementResult memory result = _settleAt(epochId);
+        assertEq(result.seniorDepositAssets, capacity);
+        uint256 claimableAssets = seniorVault.claimableDepositRequest(epochId, ALICE);
+        vm.prank(ALICE);
+        assertGt(seniorVault.claimDeposit(epochId, claimableAssets, ALICE, ALICE), 0);
+        assertEq(pool.getSeniorDepositCapacity(), 0);
     }
 
     function test_RatioCap_ExactBoundaryUsesJuniorCapital() public {
         _fundJunior(ALICE, 2000e6);
         _configureAndReconcile(10_000e6, 5000);
+        _disableSeniorCoupon();
 
         uint256 protectedSeniorBefore = _protectedSenior();
         uint256 juniorBefore = pool.juniorPrincipal();
@@ -255,7 +300,7 @@ contract SeniorCapacityTest is BasePerpTest {
         stdstore.target(address(pool)).sig("accountedAssets()").checked_write(desiredAssets);
 
         assertEq(pool.getSeniorDepositCapacity(), 200e6, "capacity must subtract protected HWM exposure");
-        assertEq(seniorVault.maxDeposit(ALICE), 0, "impaired senior remains closed despite residual capacity");
+        assertEq(seniorVault.maxRequestDeposit(ALICE), 0, "impaired senior remains closed despite residual capacity");
     }
 
     function test_ReservationConsumesCapacityAndCancellationRestoresRefundAndCapacity() public {
@@ -266,15 +311,17 @@ contract SeniorCapacityTest is BasePerpTest {
 
         assertEq(pool.reservedSeniorDepositAssetsUsdc(), reservedAssets);
         assertEq(pool.getSeniorDepositCapacity(), initialCapacity - reservedAssets);
-        uint256 directCapacity = seniorVault.maxDeposit(BOB);
+        uint256 directCapacity = seniorVault.maxRequestDeposit(BOB);
 
         usdc.mint(BOB, directCapacity + 1);
         vm.startPrank(BOB);
         usdc.approve(address(seniorVault), type(uint256).max);
         vm.expectRevert(
-            abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, BOB, directCapacity + 1, directCapacity)
+            abi.encodeWithSelector(
+                TrancheVault.TrancheVault__ExceededMaxRequestDeposit.selector, BOB, directCapacity + 1, directCapacity
+            )
         );
-        seniorVault.deposit(directCapacity + 1, BOB);
+        seniorVault.requestDeposit(directCapacity + 1, BOB);
         vm.stopPrank();
 
         vm.prank(ALICE);
@@ -325,9 +372,8 @@ contract SeniorCapacityTest is BasePerpTest {
         (epochAssets,,,,) = seniorVault.depositEpochs(epochId);
         assertEq(epochAssets, bobAssets + carolAssets);
 
-        vm.warp(seniorVault.depositEpochStart(epochId));
-        _refreshMark();
-        seniorVault.finalizeDepositEpoch(epochId);
+        IHousePool.LpEpochSettlementResult memory result = _settleAt(epochId);
+        assertEq(result.seniorDepositAssets, bobAssets + carolAssets);
         assertEq(pool.reservedSeniorDepositAssetsUsdc(), 0);
 
         vm.prank(BOB);
@@ -350,16 +396,13 @@ contract SeniorCapacityTest is BasePerpTest {
 
         assertEq(pool.reservedSeniorDepositAssetsUsdc(), 0);
 
-        uint256 minimumDeposit = pool.minTrancheDepositUsdc();
         vm.startPrank(address(seniorVault));
         vm.expectRevert(IHousePool.HousePool__InsufficientSeniorDepositReservation.selector);
         pool.releaseSeniorDepositReservation(1);
-        vm.expectRevert(IHousePool.HousePool__InsufficientSeniorDepositReservation.selector);
-        pool.depositReservedSenior(minimumDeposit);
         vm.stopPrank();
     }
 
-    function test_DirectDepositCannotStealCapacityFromReservationAndReservedFinalizationSucceeds() public {
+    function test_CompetingRequestCannotStealCapacityAndSharedSettlementSucceeds() public {
         _configureAndReconcile(1300e6, 9999);
         uint256 reservedAssets = 50e6;
         uint256 epochId = _requestSenior(ALICE, reservedAssets);
@@ -367,13 +410,11 @@ contract SeniorCapacityTest is BasePerpTest {
         uint256 directCapacity = pool.getSeniorDepositCapacity();
         _fundSenior(BOB, directCapacity - 2e6);
 
-        vm.warp(seniorVault.depositEpochStart(epochId));
-        _refreshMark();
-        uint256 finalizedShares = seniorVault.finalizeDepositEpoch(epochId);
+        (uint256 epochAssets, uint256 finalizedShares,,, bool finalized) = seniorVault.depositEpochs(epochId);
 
         assertGt(finalizedShares, 0);
+        assertEq(epochAssets, reservedAssets + directCapacity - 2e6);
         assertEq(pool.reservedSeniorDepositAssetsUsdc(), 0);
-        (,,,, bool finalized) = seniorVault.depositEpochs(epochId);
         assertTrue(finalized);
     }
 
@@ -387,8 +428,9 @@ contract SeniorCapacityTest is BasePerpTest {
         assertFalse(pool.areSeniorDepositReservationsWithinLimits());
 
         _refreshMark();
-        vm.expectRevert(IHousePool.HousePool__SeniorDepositReservationsExceedLimits.selector);
-        seniorVault.finalizeDepositEpoch(epochId);
+        vm.expectRevert(IHousePool.HousePool__NoLpEpochProgress.selector);
+        pool.settleLpEpoch();
+        assertEq(seniorVault.pendingDepositRequest(epochId, ALICE), reservedAssets);
 
         vm.prank(ALICE);
         assertEq(seniorVault.cancelPendingDeposit(epochId), reservedAssets);
@@ -405,14 +447,15 @@ contract SeniorCapacityTest is BasePerpTest {
         assertFalse(pool.areSeniorDepositReservationsWithinLimits());
 
         _refreshMark();
-        vm.expectRevert(IHousePool.HousePool__SeniorDepositReservationsExceedLimits.selector);
-        seniorVault.finalizeDepositEpoch(epochId);
+        vm.expectRevert(IHousePool.HousePool__NoLpEpochProgress.selector);
+        pool.settleLpEpoch();
         assertEq(pool.reservedSeniorDepositAssetsUsdc(), 100e6);
 
         _fundJunior(BOB, 200e6);
         assertTrue(pool.areSeniorDepositReservationsWithinLimits());
 
-        uint256 finalizedShares = seniorVault.finalizeDepositEpoch(epochId);
+        (, uint256 finalizedShares,,, bool finalized) = seniorVault.depositEpochs(epochId);
+        assertTrue(finalized, "junior-first shared settlement must restore capacity before senior entry");
         assertGt(finalizedShares, 0);
         assertEq(pool.reservedSeniorDepositAssetsUsdc(), 0);
     }
@@ -432,10 +475,11 @@ contract SeniorCapacityTest is BasePerpTest {
         assertGt(pool.seniorHighWaterMark(), pool.seniorPrincipal());
         assertFalse(pool.areSeniorDepositReservationsWithinLimits());
 
-        vm.warp(seniorVault.depositEpochStart(epochId));
+        _warpToEpoch(epochId);
         _refreshMark();
-        vm.expectRevert(IHousePool.HousePool__SeniorImpaired.selector);
-        seniorVault.finalizeDepositEpoch(epochId);
+        vm.expectRevert(IHousePool.HousePool__NoLpEpochProgress.selector);
+        pool.settleLpEpoch();
+        assertEq(seniorVault.pendingDepositRequest(epochId, ALICE), reservedAssets);
 
         vm.prank(ALICE);
         assertEq(seniorVault.cancelPendingDeposit(epochId), reservedAssets);
@@ -445,21 +489,30 @@ contract SeniorCapacityTest is BasePerpTest {
     function test_JuniorCanWithdrawToActiveRatioBoundaryAndInvalidateReservation() public {
         _fundJunior(ALICE, 2000e6);
         _configureAndReconcile(10_000e6, 5000);
-        uint256 epochId = _requestSenior(BOB, 1000e6);
+        uint256 seniorEpochId = _requestSenior(BOB, 1000e6);
 
-        uint256 ownerAssets = juniorVault.previewRedeem(juniorVault.balanceOf(ALICE));
-        uint256 maxJuniorWithdraw = juniorVault.maxWithdraw(ALICE);
+        uint256 aliceShares = juniorVault.balanceOf(ALICE);
+        uint256 ownerAssets = juniorVault.estimateRedeemAssets(aliceShares);
+        uint256 maxJuniorWithdraw = pool.getMaxJuniorWithdraw();
         assertGt(maxJuniorWithdraw, 0);
         assertLt(maxJuniorWithdraw, ownerAssets, "ratio covenant should retain junior subordination");
+
+        uint256 redeemEpochId = _requestRedeem(juniorVault, ALICE, aliceShares);
+        IHousePool.LpEpochSettlementResult memory result = _settleAt(redeemEpochId);
+        uint256 claimableShares = juniorVault.claimableRedeemRequest(redeemEpochId, ALICE);
+        uint256 claimableAssets = juniorVault.claimableRedeemAssets(redeemEpochId, ALICE);
+        assertGt(claimableShares, 0);
+        assertGt(claimableAssets, 0);
+        assertLe(result.juniorFundedAssets, maxJuniorWithdraw);
 
         vm.startPrank(ALICE);
         vm.expectRevert(
             abi.encodeWithSelector(
-                ERC4626.ERC4626ExceededMaxWithdraw.selector, ALICE, maxJuniorWithdraw + 1, maxJuniorWithdraw
+                ERC4626.ERC4626ExceededMaxRedeem.selector, ALICE, claimableShares + 1, claimableShares
             )
         );
-        juniorVault.withdraw(maxJuniorWithdraw + 1, ALICE, ALICE);
-        juniorVault.withdraw(maxJuniorWithdraw, ALICE, ALICE);
+        juniorVault.claimRedeem(redeemEpochId, claimableShares + 1, ALICE, ALICE);
+        assertEq(juniorVault.claimRedeem(redeemEpochId, claimableShares, ALICE, ALICE), claimableAssets);
         vm.stopPrank();
 
         assertLe(_protectedSenior(), pool.juniorPrincipal() + 1, "active 50% covenant must remain intact");
@@ -468,35 +521,48 @@ contract SeniorCapacityTest is BasePerpTest {
             "provisional reservation may become invalid after a covenant-safe junior withdrawal"
         );
 
-        vm.warp(seniorVault.depositEpochStart(epochId));
+        _warpToEpoch(seniorEpochId);
         _refreshMark();
-        vm.expectRevert(IHousePool.HousePool__SeniorDepositReservationsExceedLimits.selector);
-        seniorVault.finalizeDepositEpoch(epochId);
+        vm.expectRevert(IHousePool.HousePool__NoLpEpochProgress.selector);
+        pool.settleLpEpoch();
 
         vm.prank(BOB);
-        seniorVault.cancelPendingDeposit(epochId);
+        seniorVault.cancelPendingDeposit(seniorEpochId);
         assertEq(pool.reservedSeniorDepositAssetsUsdc(), 0);
     }
 
     function test_JuniorWithdrawalRatioUsesHighWaterMarkWhenSeniorIsImpaired() public {
         _configureAndReconcile(10_000e6, 5000);
+        _disableSeniorCoupon();
+
+        _fundJunior(ALICE, 2000e6);
 
         uint256 desiredAssets = 2800e6;
-        usdc.mint(address(pool), desiredAssets - pool.totalAssets());
+        uint256 rawAssetsBefore = pool.rawAssets();
+        if (rawAssetsBefore > desiredAssets) {
+            usdc.burn(address(pool), rawAssetsBefore - desiredAssets);
+        } else {
+            usdc.mint(address(pool), desiredAssets - rawAssetsBefore);
+        }
         stdstore.target(address(pool)).sig("seniorPrincipal()").checked_write(uint256(800e6));
         stdstore.target(address(pool)).sig("juniorPrincipal()").checked_write(uint256(2000e6));
         stdstore.target(address(pool)).sig("seniorHighWaterMark()").checked_write(uint256(1000e6));
         stdstore.target(address(pool)).sig("accountedAssets()").checked_write(desiredAssets);
+        vm.warp(juniorVault.lastDepositTime(ALICE) + juniorVault.DEPOSIT_COOLDOWN());
         _refreshMark();
 
         assertEq(pool.getMaxJuniorWithdraw(), 1000e6, "ratio must retain junior backing for H rather than lower S");
-        vm.startPrank(address(juniorVault));
-        vm.expectRevert(IHousePool.HousePool__ExceedsMaxJuniorWithdraw.selector);
-        pool.withdrawJunior(1000e6 + 1, BOB);
-        pool.withdrawJunior(1000e6, BOB);
-        vm.stopPrank();
+        uint256 redeemEpochId = _requestRedeem(juniorVault, ALICE, juniorVault.balanceOf(ALICE));
+        IHousePool.LpEpochSettlementResult memory result = _settleAt(redeemEpochId);
+        assertLe(result.juniorFundedAssets, 1000e6);
+        assertGe(result.juniorFundedAssets, 1000e6 - 1, "inverse budget math should reach the HWM boundary");
 
-        assertEq(pool.juniorPrincipal(), 1000e6);
+        uint256 claimableShares = juniorVault.claimableRedeemRequest(redeemEpochId, ALICE);
+        vm.prank(ALICE);
+        uint256 claimedAssets = juniorVault.claimRedeem(redeemEpochId, claimableShares, ALICE, ALICE);
+        assertEq(claimedAssets, result.juniorFundedAssets);
+
+        assertEq(pool.juniorPrincipal(), 2000e6 - result.juniorFundedAssets);
         assertEq(pool.seniorHighWaterMark(), 1000e6);
     }
 
@@ -506,12 +572,16 @@ contract SeniorCapacityTest is BasePerpTest {
         _refreshMark();
 
         assertGt(_protectedSenior(), 0);
-        assertEq(juniorVault.maxWithdraw(ALICE), 0, "p=0 must retain all junior capital while E>0");
-        vm.prank(ALICE);
-        vm.expectRevert(
-            abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxWithdraw.selector, ALICE, uint256(1e6), uint256(0))
-        );
-        juniorVault.withdraw(1e6, ALICE, ALICE);
+        uint256 aliceShares = juniorVault.balanceOf(ALICE);
+        uint256 redeemEpochId = _requestRedeem(juniorVault, ALICE, aliceShares);
+        _warpToEpoch(redeemEpochId);
+        _refreshMark();
+        vm.expectRevert(IHousePool.HousePool__NoLpEpochProgress.selector);
+        pool.settleLpEpoch();
+
+        assertEq(juniorVault.maxWithdraw(ALICE), 0);
+        assertEq(juniorVault.claimableRedeemRequest(redeemEpochId, ALICE), 0);
+        assertEq(juniorVault.pendingRedeemRequest(redeemEpochId, ALICE), aliceShares);
     }
 
     function test_PassiveCouponOverageDoesNotRevertAccountingAndClosesNewSeniorEntry() public {
@@ -526,7 +596,7 @@ contract SeniorCapacityTest is BasePerpTest {
 
         assertGt(_protectedSenior(), absoluteCap, "coupon should passively move active exposure over the cap");
         assertEq(pool.getSeniorDepositCapacity(), 0);
-        assertEq(seniorVault.maxDeposit(ALICE), 0);
+        assertEq(seniorVault.maxRequestDeposit(ALICE), 0);
     }
 
     function test_LossOverageDoesNotBlockRevenueRestorationOrMintShares() public {
@@ -623,67 +693,66 @@ contract SeniorCapacityTest is BasePerpTest {
 
     function test_MaxMintIsExactAtNormalCapacityBoundary() public {
         _configureAndReconcile(1200e6, 9999);
+        _disableSeniorCoupon();
         uint256 capacity = pool.getSeniorDepositCapacity();
-        uint256 maxShares = seniorVault.maxMint(ALICE);
-        uint256 quotedAssets = seniorVault.previewMint(maxShares);
+        uint256 estimatedShares = seniorVault.estimateDepositShares(capacity);
+        uint256 quotedAssets = seniorVault.estimateMintAssets(estimatedShares);
 
-        assertGt(maxShares, 0);
+        assertEq(seniorVault.maxMint(ALICE), 0, "maxMint is zero until an async request becomes claimable");
+        assertGt(estimatedShares, 0);
         assertLe(quotedAssets, capacity);
-        assertGt(seniorVault.previewMint(maxShares + 1), capacity);
+        assertGt(seniorVault.estimateMintAssets(estimatedShares + 1), capacity);
 
-        usdc.mint(ALICE, quotedAssets);
+        uint256 epochId = _requestSenior(ALICE, capacity);
+        IHousePool.LpEpochSettlementResult memory result = _settleAt(epochId);
+        assertEq(result.seniorDepositAssets, capacity);
+        uint256 maxShares = seniorVault.maxMint(ALICE);
+        assertEq(maxShares, seniorVault.claimableDepositShares(epochId, ALICE));
+
         vm.startPrank(ALICE);
-        usdc.approve(address(seniorVault), quotedAssets);
         vm.expectRevert(
             abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxMint.selector, ALICE, maxShares + 1, maxShares)
         );
         seniorVault.mint(maxShares + 1, ALICE);
-        assertEq(seniorVault.mint(maxShares, ALICE), quotedAssets);
+        assertEq(seniorVault.mint(maxShares, ALICE), capacity);
         vm.stopPrank();
     }
 
-    function test_MaxMintIsExactAtFrozenGrossCapacityBoundary() public {
+    function test_FrozenAdmissionReportsZeroDespiteGrossSeniorCapacity() public {
         _configureAndReconcile(1200e6, 9999);
+        _disableSeniorCoupon();
         vm.warp(SATURDAY_FROZEN);
         assertTrue(engine.isOracleFrozen());
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(SATURDAY_FROZEN - 3 hours));
 
         uint256 capacity = pool.getSeniorDepositCapacity();
-        uint256 maxShares = seniorVault.maxMint(ALICE);
-        uint256 quotedAssets = seniorVault.previewMint(maxShares);
+        uint256 estimatedShares = seniorVault.estimateDepositShares(capacity);
+        uint256 quotedAssets = seniorVault.estimateMintAssets(estimatedShares);
 
-        assertEq(seniorVault.maxDeposit(ALICE), capacity, "frozen maxDeposit should expose gross capacity");
-        assertGt(maxShares, 0);
+        assertGt(capacity, 0, "economic senior capacity remains available after the oracle reopens");
+        assertEq(seniorVault.maxRequestDeposit(ALICE), 0, "frozen-oracle admission must be closed");
+        assertEq(seniorVault.maxDeposit(ALICE), 0, "claim limit remains zero before settlement");
+        assertEq(seniorVault.maxMint(ALICE), 0, "no frozen-oracle request can become claimable");
+        assertGt(estimatedShares, 0);
         assertLe(quotedAssets, capacity);
-        assertGt(seniorVault.previewMint(maxShares + 1), capacity);
-
-        usdc.mint(ALICE, quotedAssets);
-        vm.startPrank(ALICE);
-        usdc.approve(address(seniorVault), quotedAssets);
-        vm.expectRevert(
-            abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxMint.selector, ALICE, maxShares + 1, maxShares)
-        );
-        seniorVault.mint(maxShares + 1, ALICE);
-        assertEq(seniorVault.mint(maxShares, ALICE), quotedAssets);
-        vm.stopPrank();
     }
 
-    function test_FrozenDepositRejectsGrossAssetsAboveSeniorCapacity() public {
+    function test_FrozenDepositRejectsBeforeApplyingGrossSeniorCapacity() public {
         _configureAndReconcile(1200e6, 9999);
         vm.warp(SATURDAY_FROZEN);
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(SATURDAY_FROZEN - 3 hours));
 
-        uint256 capacity = seniorVault.maxDeposit(ALICE);
+        uint256 capacity = pool.getSeniorDepositCapacity();
         uint256 oversizedAssets = capacity + 1;
+        assertGt(capacity, 0);
+        assertEq(seniorVault.maxRequestDeposit(ALICE), 0);
         usdc.mint(ALICE, oversizedAssets);
         vm.startPrank(ALICE);
         usdc.approve(address(seniorVault), oversizedAssets);
-        vm.expectRevert(
-            abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, ALICE, oversizedAssets, capacity)
-        );
-        seniorVault.deposit(oversizedAssets, ALICE);
+        vm.expectRevert(TrancheVault.TrancheVault__DepositsUnavailable.selector);
+        seniorVault.requestDeposit(oversizedAssets, ALICE);
         vm.stopPrank();
     }
 
@@ -707,6 +776,7 @@ contract SeniorCapacityTest is BasePerpTest {
     }
 
     function test_MaxMintReturnsZeroWhenCoarseSharesCannotMeetMinimum() public {
+        _disableSeniorCoupon();
         uint256 adjustedShares = seniorVault.totalSupply() + 1000;
         uint256 targetSeniorPrincipal = (adjustedShares * 3) / 2 - 1;
         uint256 capacity = 1e6;
@@ -721,10 +791,17 @@ contract SeniorCapacityTest is BasePerpTest {
 
         uint256 rawCapacityShares = seniorVault.convertToShares(capacity);
         assertGt(rawCapacityShares, 0);
-        assertLt(seniorVault.previewMint(rawCapacityShares), pool.minTrancheDepositUsdc());
-        assertGt(seniorVault.previewMint(rawCapacityShares + 1), capacity);
-        assertEq(seniorVault.maxDeposit(ALICE), capacity);
-        assertEq(seniorVault.maxMint(ALICE), 0, "maxMint must not quote an unexecutable sub-minimum mint");
+        assertLt(seniorVault.estimateMintAssets(rawCapacityShares), pool.minTrancheDepositUsdc());
+        assertGt(seniorVault.estimateMintAssets(rawCapacityShares + 1), capacity);
+        assertEq(seniorVault.maxRequestDeposit(ALICE), capacity);
+        assertEq(seniorVault.maxMint(ALICE), 0, "maxMint is a claim limit, not an admission quote");
+
+        uint256 epochId = _requestSenior(ALICE, capacity);
+        IHousePool.LpEpochSettlementResult memory result = _settleAt(epochId);
+        assertEq(result.seniorDepositAssets, capacity, "asset-denominated async request remains executable");
+        uint256 claimableAssets = seniorVault.claimableDepositRequest(epochId, ALICE);
+        vm.prank(ALICE);
+        assertGt(seniorVault.claimDeposit(epochId, claimableAssets, ALICE, ALICE), 0);
     }
 
 }

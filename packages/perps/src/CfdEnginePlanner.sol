@@ -6,11 +6,12 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {ICfdEnginePlanner} from "@plether/perps/interfaces/ICfdEnginePlanner.sol";
 import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
 import {MarketCalendarLib} from "@plether/perps/libraries/MarketCalendarLib.sol";
+import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
 
 /// @title CfdEnginePlanner
 /// @notice Stateless external wrapper around the deterministic CFD engine planning library.
 /// @dev The planner performs no storage reads, authorization, oracle verification, or input authentication. Callers
-///      must supply a canonical, internally consistent snapshot and order. Unless stated otherwise, USDC amounts use
+///      must supply canonical, internally consistent snapshots and orders. Unless stated otherwise, USDC amounts use
 ///      6 decimals, prices use 8 decimals, sizes use 18 decimals, and timestamps are Unix seconds.
 contract CfdEnginePlanner is ICfdEnginePlanner {
 
@@ -40,6 +41,59 @@ contract CfdEnginePlanner is ICfdEnginePlanner {
         int256 netMarginChange
     ) external pure returns (bool drained, uint256 marginAfter) {
         return CfdEnginePlanLib.computeOpenMarginAfter(marginAfterCarry, netMarginChange);
+    }
+
+    /// @inheritdoc ICfdEnginePlanner
+    function computeCurrentCarryIndex(
+        uint256 storedIndex,
+        uint64 previousTimestamp,
+        uint256 currentTimestamp,
+        uint256 borrowBaseUsdc,
+        uint256 poolAssetsUsdc,
+        uint256 baseCarryBps
+    ) external pure returns (uint256 index) {
+        return PositionRiskAccountingLib.computeCurrentCarryIndex(
+            storedIndex, previousTimestamp, currentTimestamp, borrowBaseUsdc, poolAssetsUsdc, baseCarryBps
+        );
+    }
+
+    /// @inheritdoc ICfdEnginePlanner
+    function computeIndexedCarryUsdc(
+        uint256 borrowBaseUsdc,
+        uint256 carryIndexDelta
+    ) external pure returns (uint256 carryUsdc) {
+        return PositionRiskAccountingLib.computeIndexedCarryUsdc(borrowBaseUsdc, carryIndexDelta);
+    }
+
+    /// @inheritdoc ICfdEnginePlanner
+    function isExactPositionLiquidatableWithCarry(
+        CfdTypes.Position memory pos,
+        uint256 entryCostUsdcAtoms,
+        uint256 price,
+        uint256 capPrice,
+        uint256 pendingCarryUsdc,
+        uint256 reachableCollateralUsdc,
+        uint256 requiredBps
+    ) external pure returns (bool liquidatable) {
+        return PositionRiskAccountingLib.buildExactPositionRiskStateWithCarry(
+            pos, entryCostUsdcAtoms, price, capPrice, pendingCarryUsdc, reachableCollateralUsdc, requiredBps
+        )
+        .liquidatable;
+    }
+
+    /// @inheritdoc ICfdEnginePlanner
+    function isExactPriceRiskLiquidatable(
+        CfdTypes.Position memory pos,
+        uint256 entryCostUsdcAtoms,
+        uint256 price,
+        uint256 capPrice,
+        uint256 priceCollateralUsdc,
+        uint256 requiredBps
+    ) external pure returns (bool liquidatable) {
+        return PositionRiskAccountingLib.buildExactPriceRiskState(
+            pos, entryCostUsdcAtoms, price, capPrice, priceCollateralUsdc, requiredBps
+        )
+        .liquidatable;
     }
 
     /// @notice Plans an open or same-side increase without reading or mutating protocol state.

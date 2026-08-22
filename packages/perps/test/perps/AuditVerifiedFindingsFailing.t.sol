@@ -17,6 +17,7 @@ import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
+import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IOrderRouter} from "@plether/perps/interfaces/IOrderRouter.sol";
@@ -29,11 +30,18 @@ import {Test} from "forge-std/Test.sol";
 
 contract CooldownBypassReceiver {
 
-    function withdrawAll(
+    function claimDeposit(
+        TrancheVault vault,
+        uint256 requestId
+    ) external {
+        uint256 assets = vault.claimableDepositRequest(requestId, address(this));
+        vault.claimDeposit(requestId, assets, address(this), address(this));
+    }
+
+    function requestRedeemAll(
         TrancheVault vault
     ) external {
-        uint256 shares = vault.balanceOf(address(this));
-        vault.redeem(shares, address(this), address(this));
+        vault.requestRedeem(vault.balanceOf(address(this)), address(this), address(this));
     }
 
 }
@@ -198,6 +206,8 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
         CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(engine));
         CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
         engine.setDependencies(address(planner), address(settlement), address(engineAdmin));
+        TerminalNavBookV2 terminalNavBook = new TerminalNavBookV2(address(engine), uint32(CAP_PRICE));
+        engine.setTerminalNavBook(address(terminalNavBook));
         pool = new HousePool(address(usdc), address(engine));
 
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");
@@ -330,8 +340,16 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
         usdc.mint(lp, amount);
         vm.startPrank(lp);
         usdc.approve(address(juniorVault), amount);
-        juniorVault.deposit(amount, lp);
+        uint256 requestId = juniorVault.requestDeposit(amount, lp);
         vm.stopPrank();
+
+        vm.warp(juniorVault.depositEpochStart(requestId));
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        pool.settleLpEpoch();
+        uint256 claimableAssets = juniorVault.claimableDepositRequest(requestId, lp);
+        vm.prank(lp);
+        juniorVault.claimDeposit(requestId, claimableAssets, lp, lp);
     }
 
     function _fundTrader(
@@ -375,11 +393,17 @@ contract AuditVerifiedFindingsFailing_F5_CooldownBypass is BasePerpTest {
         usdc.mint(helper, 100_000e6);
         vm.startPrank(helper);
         usdc.approve(address(juniorVault), 100_000e6);
-        juniorVault.deposit(100_000e6, address(receiver));
+        uint256 requestId = juniorVault.requestDeposit(100_000e6, address(receiver), helper);
         vm.stopPrank();
 
-        vm.expectRevert();
-        receiver.withdrawAll(juniorVault);
+        vm.warp(juniorVault.depositEpochStart(requestId));
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        pool.settleLpEpoch();
+        receiver.claimDeposit(juniorVault, requestId);
+
+        vm.expectRevert(TrancheVault.TrancheVault__DepositCooldown.selector);
+        receiver.requestRedeemAll(juniorVault);
     }
 
 }

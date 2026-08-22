@@ -56,20 +56,20 @@ This directory contains stateful Foundry invariant suites for the perps system.
   - Verifies the expanded account ledger snapshot fully subsumes compact, collateral, and position views
   - Verifies per-account settlement buckets reconcile with clearinghouse storage
   - Verifies the canonical protocol accounting snapshot stays aligned with accessors and house-pool snapshots
-  - Verifies house-pool input/status snapshots stay aligned with HousePool assets, fees, trader claim liabilities, and engine status
-  - Verifies withdrawal reserves include liabilities, fees, and trader claim obligations
-  - Verifies tracked bad debt only remains after reachable tracked account value is exhausted
+  - Verifies house-pool input/status snapshots stay aligned with physical assets, exact terminal NAV, trader claim liabilities, and engine status
+  - Verifies withdrawal reserves use maximum directional liability, trader claims, and the supplemental slot
+  - Verifies terminal price loss never exceeds same-account claim plus PnL-pledge collection; any excess is a diagnostic write-off rather than protocol debt or terminal deficit
   - Verifies ghost-tracked trader claims match engine storage and totals
 
 - `PerpValueConservationInvariant.t.sol`
   - Catches adversarial value-category transitions in the full perps stack
-  - Fuzzes failed full-close execution, neutral MTM LP deposits/withdrawals, timed carry checkpoints, and recapitalization/revenue reconciliation
+  - Fuzzes terminal close execution, signed terminal-NAV LP pricing, timed carry checkpoints, and recapitalization/revenue reconciliation
   - Verifies active margin, LP share value, historical carry, and pending claimant revenue cannot move owners without an intended settlement path
 
 - `PerpClosePreviewParityInvariant.t.sol`
   - Catches drift between close previews and canonical-depth simulations
-  - Verifies valid partial closes do not leave dust margin
-  - Restricts partial-close invalidity to the documented dust and underwater cases
+  - Verifies valid partial closes conserve exact entry cost, PnL pledge, and residual terminal curves
+  - Restricts partial-close invalidity to documented shape and separate action-charge failures; price loss above the account cap is write-off eligible
   - Verifies the immediate-payout versus trader-claim split uses adjusted pool cash
   - Note: the currently named carry-accrual invariant performs no time warp or
     carry assertion; timed carry conservation is covered by
@@ -139,14 +139,15 @@ the accounting specification.
   and simultaneous carry on both sides remain direct-test/model properties.
 - Oracle/FAD boundary invariants do not span the complete two-axis authorization
   matrix formed by the oracle/calendar state and the degraded-mode latch.
-- Bad-debt exhaustion, failed full-close value safety, and preview/live terminal
+- Account-capped price collection, failed full-close value safety, and preview/live terminal
   parity are statefully exercised. No single invariant quantifies over every
   valid insolvent terminal path and every risk-increasing entry point.
-- One-shot PnL/max-profit arithmetic is unit- and fuzz-tested. The invariant
-  family does not currently assert that a floor-rounded weighted entry after
-  repeated position increases remains bounded by the sum of separately
-  floor-rounded stored maximum-profit additions; a one-micro-USDC
-  counterexample is documented in the white paper.
+- Whole-lot PnL/max-profit arithmetic and exact entry-cost conservation are
+  unit- and fuzz-tested. `TerminalNavBookV2.t.sol`,
+  `TerminalNavCloseConservation.t.sol`, and
+  `TerminalNavIntegrationSecurity.t.sol` provide the focused book, split-close,
+  and symmetric-pricing evidence; no long-running invariant yet reproduces the
+  complete radix accumulator independently.
 
 ## Harness Pieces
 

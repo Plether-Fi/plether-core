@@ -113,7 +113,7 @@ contract PerpValueConservationHandler is Test {
         bool violation;
         uint256 profit;
 
-        uint256 size = bound(sizeFuzz, 50_000e18, 300_000e18);
+        uint256 size = bound(sizeFuzz, 500, 3000) * CfdTypes.SIZE_QUANTUM;
         uint256 depositAssets = bound(depositFuzz, 10_000e6, 300_000e6);
 
         _fundTrader(BULL_TRADER, 50_000e6);
@@ -126,24 +126,47 @@ contract PerpValueConservationHandler is Test {
             usdc.mint(JUNIOR_ATTACKER, depositAssets);
             vm.startPrank(JUNIOR_ATTACKER);
             usdc.approve(address(juniorVault), depositAssets);
-            (bool deposited, bytes memory depositReturn) =
-                address(juniorVault).call(abi.encodeCall(juniorVault.deposit, (depositAssets, JUNIOR_ATTACKER)));
+            uint256 depositRequestId = juniorVault.requestDeposit(depositAssets, JUNIOR_ATTACKER, JUNIOR_ATTACKER);
             vm.stopPrank();
 
-            if (deposited) {
-                uint256 shares = abi.decode(depositReturn, (uint256));
-                _close(BULL_TRADER, CfdTypes.Side.BULL, size, 1e8);
-                _close(BEAR_TRADER, CfdTypes.Side.BEAR, size, 1e8);
+            vm.warp(juniorVault.depositEpochStart(depositRequestId));
+            _refreshMark();
+            pool.settleLpEpoch();
 
-                vm.warp(block.timestamp + 1 hours + 1);
+            uint256 claimableDepositAssets = juniorVault.claimableDepositRequest(depositRequestId, JUNIOR_ATTACKER);
+            vm.prank(JUNIOR_ATTACKER);
+            uint256 shares =
+                juniorVault.claimDeposit(depositRequestId, claimableDepositAssets, JUNIOR_ATTACKER, JUNIOR_ATTACKER);
+
+            uint256 poolAssetsBeforeCloses = pool.totalAssets();
+            _close(BULL_TRADER, CfdTypes.Side.BULL, size, 1e8);
+            _close(BEAR_TRADER, CfdTypes.Side.BEAR, size, 1e8);
+            uint256 poolAssetsAfterCloses = pool.totalAssets();
+            uint256 contemporaneousPoolInflow =
+                poolAssetsAfterCloses > poolAssetsBeforeCloses ? poolAssetsAfterCloses - poolAssetsBeforeCloses : 0;
+
+            uint256 cooldownEnd = juniorVault.lastDepositTime(JUNIOR_ATTACKER) + juniorVault.DEPOSIT_COOLDOWN();
+            if (block.timestamp < cooldownEnd) {
+                vm.warp(cooldownEnd);
+            }
+            vm.prank(JUNIOR_ATTACKER);
+            uint256 redeemRequestId = juniorVault.requestRedeem(shares, JUNIOR_ATTACKER, JUNIOR_ATTACKER);
+
+            vm.warp(juniorVault.depositEpochStart(redeemRequestId));
+            _refreshMark();
+            pool.settleLpEpoch();
+
+            uint256 claimableRedeemShares = juniorVault.claimableRedeemRequest(redeemRequestId, JUNIOR_ATTACKER);
+            if (claimableRedeemShares == shares) {
                 vm.prank(JUNIOR_ATTACKER);
-                (bool redeemed,) = address(juniorVault)
-                    .call(abi.encodeCall(juniorVault.redeem, (shares, JUNIOR_ATTACKER, JUNIOR_ATTACKER)));
-                if (redeemed) {
-                    uint256 finalBalance = usdc.balanceOf(JUNIOR_ATTACKER);
-                    violation = finalBalance > depositAssets;
-                    profit = violation ? finalBalance - depositAssets : 0;
-                }
+                juniorVault.claimRedeem(redeemRequestId, shares, JUNIOR_ATTACKER, JUNIOR_ATTACKER);
+                uint256 finalBalance = usdc.balanceOf(JUNIOR_ATTACKER);
+                // Neutral positions may still pay ordinary close/carry revenue into the pool while the async
+                // request matures. That revenue is legitimate LP yield; only extraction beyond the attacker's
+                // contribution plus all contemporaneous pool inflow can have come from legacy claimant capital.
+                uint256 maximumConservedBalance = depositAssets + contemporaneousPoolInflow;
+                violation = finalBalance > maximumConservedBalance;
+                profit = violation ? finalBalance - maximumConservedBalance : 0;
             }
         }
 
@@ -365,6 +388,12 @@ contract PerpValueConservationHandler is Test {
             pool.totalAssets(),
             baseCarryBps
         );
+    }
+
+    function _refreshMark() internal {
+        uint256 markPrice = engine.lastMarkPrice();
+        vm.prank(address(router));
+        engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
     }
 
 }

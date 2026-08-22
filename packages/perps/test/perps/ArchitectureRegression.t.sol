@@ -5,6 +5,7 @@ import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
+import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 
 contract ArchitectureRegression_ReservationShielding is BasePerpTest {
 
@@ -155,7 +156,7 @@ contract ArchitectureRegression_QueueEconomics is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BEAR, 100_001e18, 0, 0, true);
     }
 
-    function test_FullyMarginedCloseCommit_MustStayLiveByUsingPositionMarginBounty() public {
+    function test_FullyMarginedCloseCommit_MustNotConsumePnlPledgeForBounty() public {
         address aliceAccount = alice;
         address bobAccount = bob;
         _fundTrader(alice, 5000e6);
@@ -167,14 +168,17 @@ contract ArchitectureRegression_QueueEconomics is BasePerpTest {
         (, uint256 marginBefore,,,,,) = engine.positions(aliceAccount);
 
         vm.prank(alice);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
 
         (, uint256 marginAfter,,,,,) = engine.positions(aliceAccount);
+        assertEq(marginAfter, marginBefore, "rejected close bounty must preserve PnL pledge");
+        assertEq(router.pendingOrderCounts(aliceAccount), 0, "rejected close must not enter the FIFO queue");
+        assertEq(router.nextCommitId(), 1, "rejected close must not consume an order id");
         assertEq(
-            marginAfter, marginBefore - 200_000, "close commit should source the configured bounty from active margin"
-        );
-        assertEq(
-            _executionBountyReserve(1), 200_000, "close commit must still reservation the configured keeper bounty"
+            clearinghouse.getLockedMarginBuckets(aliceAccount).reservedSettlementUsdc,
+            0,
+            "rejected close must not create an action reserve"
         );
     }
 

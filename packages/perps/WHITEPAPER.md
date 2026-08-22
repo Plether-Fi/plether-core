@@ -26,7 +26,9 @@ common-mark liability envelope computed from two side aggregates. Plether
 combines that envelope with a USDC balance sheet that distinguishes physical
 cash from mathematical claims, a senior/junior LP capital stack, delayed
 historical-oracle execution, utilization-priced LP capital, and fail-soft
-terminal settlement.
+terminal settlement. LP entry and exit use one exact signed mark-to-close
+adjustment: an Engine-maintained terminal book aggregates account-local price
+PnL from whole lots, exact entry cost, and collectible collateral caps.
 
 The bound is useful but narrower than a blanket solvency guarantee. It limits
 gross positive **price PnL at one common mark**. It does not fully reserve every
@@ -78,8 +80,8 @@ The answer developed here has five parts:
 
 1. Bound the reference-price domain so price-PnL liability is finite.
 2. Admit new risk against a constant-time endpoint envelope.
-3. Keep physical cash, trader claims, reserved custody, bad debt, and LP equity
-   as separate accounting objects.
+3. Keep physical cash, trader claims, reserved custody, terminal deficits, and
+   LP equity as separate accounting objects.
 4. Price directional concentration and the use of LP capital separately.
 5. Preserve terminal settlement liveness even when it exposes a balance-sheet
    deficit.
@@ -103,6 +105,7 @@ The design contribution is the combination:
 
 - a capped price-PnL instrument;
 - endpoint-derived, constant-time side liabilities;
+- exact symmetric LP share pricing from an account-capped terminal NAV book;
 - physical-first LP and solvency accounting;
 - a senior/junior underwriting waterfall;
 - LP-capital carry paid independently by both sides;
@@ -222,22 +225,23 @@ maximum-profit totals. A new position adds either \(q e\) or \(q(C-e)\) to one
 side. Computing \(L_{\max}\) therefore requires two aggregate reads and one
 comparison, independent of account count.
 
-These equations are real-valued. For a one-shot position, Solidity floors both
-maximum profit and price PnL to six-decimal USDC atoms, and the corresponding
-integer endpoint comparison is monotone. Position increases require more care:
-the stored position entry is a floor-rounded weighted average, while stored
-maximum profit is the sum of separately floor-rounded additions. Those two
-rounding paths need not preserve an exact implementation-level inequality.
+The implementation fixes position size to whole 100-token lots. With an
+eight-decimal price, one lot times one price is already an exact six-decimal
+USDC atom quantity. For each account the Engine therefore stores the lot count
+and exact entry cost
 
-A concrete Long vector makes the boundary visible. Increase one position by 100
-tokens at 0.90000000 and another 100 tokens at 0.90000001 with \(C=2\). The
-floor-rounded weighted entry is 0.90000000; the two stored maximum-profit
-additions total 219,999,999 USDC atoms, while endpoint PnL computed from the
-combined position is 220,000,000 atoms. The real-valued theorem remains true,
-but the stored aggregate undershoots by one micro-USDC in this example. Claims
-about implementation admission therefore require explicit rounding headroom or
-an invariant over multi-increase positions; one-shot max-profit tests are not
-sufficient.
+\[
+E_i=\sum_j \ell_{i,j}p_{i,j},
+\]
+
+rather than reconstructing economic basis from a rounded average entry price.
+The average remains a display field only. Opens add exact endpoint profit,
+while a partial close assigns a proportional floor of entry cost to the closed
+lots and leaves every remainder atom on the surviving position. Exact entry
+cost and endpoint liability are consequently conserved across increases and
+partial closes. The earlier weighted-average dust counterexample is excluded by
+the canonical lot boundary; non-quantized open, increase, and close intents are
+rejected before entering the router queue.
 
 ### 2.3 What the envelope does not prove
 
@@ -265,9 +269,9 @@ boundary of the accounting primitive:
 
 Likewise, an individual **cash settlement** is not capped solely by its stored
 maximum price profit. A skew-reducing close can receive a negative VPI amount,
-although the lifetime VPI clamp prevents a position from extracting more VPI
-rebate than its prior positive VPI accrual. The price-PnL envelope and the
-all-in settlement equation must not be conflated.
+while a position can also carry a negative lifetime VPI balance only when its
+gross clawback target is held in a dedicated reserve. The price-PnL envelope,
+VPI reserve, and all-in settlement equation must not be conflated.
 
 ---
 
@@ -292,11 +296,11 @@ trader can owe value that has not entered HousePool custody.
 | Order reservation | Margin committed to one queued order | Clearinghouse reservation keyed by order ID |
 | Keeper reserve | Trader-funded order-execution bounty | Clearinghouse reserved-settlement bucket |
 | Trader claims \(K\) | Senior pool obligations from deferred payouts | Engine beneficiary balances |
-| Bad debt \(B\) | Uncollectible realized trader obligation | Engine bad-debt telemetry |
-| Unrealized trader gain | Mark-dependent contingent LP obligation before close | Position view; not yet a cash claim |
-| Unrealized trader loss | Mark-dependent contingent trader receivable before close | Position view; never spendable pool cash |
+| Terminal deficit | Negative terminal LP equity at the authenticated mark | Engine/HousePool snapshot; blocks deposit activation |
+| Unrealized trader gain | Exact marked LP obligation before close | Account terminal curve; not yet a cash claim |
+| Unrealized trader loss | Account-capped marked LP receivable before close | Account terminal curve; never spendable pool cash |
 | LP principals | Senior and junior claimant allocations | HousePool waterfall state |
-| LP accounting equity | Residual physical backing after trader obligations and the selected reconciliation liability | HousePool reconciliation view, allocated by the waterfall |
+| LP accounting equity | Physical backing net of claims plus the exact signed terminal price delta | HousePool reconciliation view, allocated by the waterfall |
 | Treasury fees | Cash-realized protocol inventory | Treasury clearinghouse account |
 
 An unsolicited transfer to HousePool does not automatically increase economic
@@ -304,19 +308,21 @@ depth. Conversely, a raw-balance shortfall reduces physical backing immediately.
 This `min(raw, accounted)` boundary prevents a donation from silently changing
 solvency, VPI depth, or share value before the transfer has an assigned owner.
 
-Bad debt is not a speculative receivable added to assets. Its economic effect is
-already visible in the cash that failed to arrive; the separate counter records
-the realized shortfall and the amount required for an explicit recapitalization
-to clear it.
+Terminal NAV V2 has no accumulated-debt ledger or owner repayment selector.
+An unpaid trader payout remains explicit as a senior trader claim. Independently
+negative terminal LP equity is exposed as terminal deficit and blocks deposit
+activation. Price loss above an account's collectible cap was never included as
+an LP receivable and is emitted only as diagnostic write-off telemetry; a
+terminally uncollectible action-charge remainder is waived.
 
-The same asymmetry applies before realization. An unrealized trader gain is a
-contingent liability in the relevant risk or reconciliation view. An unrealized
-trader loss is not USDC, not a HousePool asset, and not LP equity. LP accounting
-equity is the residual physical backing after the applicable trader obligations
-and conservative reconciliation liability; senior and junior principal then
-allocate that claimant value through the waterfall. These categories must not
-be collapsed merely because an off-chain dashboard can net them into one
-number.
+Marked ownership is sign-symmetric even though cash availability is not. An
+unrealized trader gain reduces LP share NAV. An unrealized trader loss increases
+that same NAV only up to value collectible from the losing account's dedicated
+PnL pledge and nettable same-account claim. The receivable remains non-cash and
+cannot fund a redemption until settlement collects it. Senior and junior
+principal allocate the resulting terminal equity through the waterfall. These
+categories must not be collapsed merely because an off-chain dashboard can net
+them into one number.
 
 ### 3.2 Four views for four questions
 
@@ -324,7 +330,7 @@ number.
 | --- | --- | --- |
 | Risk admission | May the protocol accept more price risk? | Post-operation physical assets net of trader claims versus \(L_{\max}\) |
 | LP withdrawal | How much physical USDC may leave now? | Physical assets less endpoint liability, trader claims, and explicit reserves |
-| Tranche reconciliation | What value backs tranche principals? | Physical cash less claims and the selected conservative MtM liability |
+| Tranche reconciliation and share pricing | What marked ownership backs tranche shares? | Physical assets less claims plus the exact signed account-capped terminal price delta |
 | Terminal reachability | What trader-owned value can this close or liquidation actually consume? | Explicit clearinghouse buckets and permitted terminal reservation paths |
 
 The views share source data but answer different questions. Reusing a less
@@ -414,43 +420,70 @@ the risk balance is exactly at its chosen solvency boundary. Withdrawal reserves
 equal all $60 million and LP free cash is zero. "Solvent" and "withdrawable" are
 therefore not synonyms.
 
-### 3.5 Conservative mark-to-market for LPs
+### 3.5 Exact symmetric terminal NAV
 
-Incoming cash and outgoing cash require different valuation safeguards.
-Plether's withdrawal/reconciliation estimate uses side envelopes:
+Share pricing asks an ownership question, not a cash-withdrawal question. It
+therefore uses the same exact mark-to-close adjustment for incoming and outgoing
+LPs while retaining the endpoint envelope of Section 3.4 for physical redemption
+funding.
+
+For account \(i\), let \(\ell_i\) be its number of 100-token lots, \(E_i\) its
+exact entry cost in USDC atoms, and \(k_i\) its effective collectible cap: the
+smaller of its dedicated PnL pledge plus nettable same-account claim and its
+maximum possible price loss inside \([0,C]\). With the protocol's BULL side
+profiting as the oracle price falls and BEAR profiting as it rises, the LP-side
+terminal price delta is
 
 \[
-M_{\mathrm{SHORT}}(p)
-=L_{\mathrm{SHORT}}\frac{C-p}{C},
+\delta_i(p)=
+\begin{cases}
+\min(\ell_i p-E_i,k_i), & \text{BULL},\\
+\min(E_i-\ell_i p,k_i), & \text{BEAR}.
+\end{cases}
+\]
+
+A negative value is marked value owed by LPs to that trader. A positive value
+is a trader loss recognized for LP ownership only to the extent the same
+account can pay it. Carry, VPI, fees, frozen spreads, liquidation reserves,
+order margin, and action reserves are separate realized-settlement quantities
+and are excluded from this curve.
+
+`TerminalNavBookV2` maintains
+
+\[
+\Delta_{\mathrm{terminal}}(p)=\sum_i\delta_i(p)
+\]
+
+without iterating active accounts. Each account contributes a piecewise-affine
+curve with at most one cap breakpoint. A fixed-depth radix-16 prefix tree over
+the 32-bit price domain aggregates its base coefficient and breakpoint event,
+so reads and mutations are bounded independently of account count. Only the
+immutably bound Engine can set or remove a curve. Domain-separated curve hashes
+authenticate replacement, and a monotonic book version exposes every effective
+mutation.
+
+At the Engine's authenticated cached mark, the common share-pricing snapshot is
+
+\[
+T=A-K+\Delta_{\mathrm{terminal}}(p),
 \qquad
-M_{\mathrm{LONG}}(p)
-=L_{\mathrm{LONG}}\frac{p}{C},
+D_{\mathrm{reconcile}}=\max(T,0),
+\qquad
+D_{\mathrm{deficit}}=\max(-T,0),
 \]
 
-rounded upward in implementation. The selected conservative MtM liability is
+before any additional explicit claimant or unassigned-asset adjustments. The
+Engine updates position lots, exact entry cost, pledge/claim state, and the
+account curve atomically; HousePool separately enforces mark-age and frozen
+market policy before LP actions.
 
-\[
-M(p)=M_{\mathrm{SHORT}}(p)+M_{\mathrm{LONG}}(p).
-\]
-
-This can over-reserve because it does not know each entry distribution, but it
-does not net same-side losing accounts against winners before their losses have
-become cash. Reconciliation distributable value begins from
-
-\[
-D_{\mathrm{reconcile}}
-=\max(A-K-M(p),0),
-\]
-
-then subtracts pending claimant and unassigned buckets as applicable.
-
-Deposit pricing deliberately uses an MtM adjustment of zero rather than offer
-new LPs a discount created by a conservative phantom liability. Immediate
-active-share deposits are blocked whenever positions are open. New LP capital
-instead enters a pending epoch and receives shares only when a later,
-permissionless finalization fixes the batch price. This is an explicit
-acknowledgement that the engine's constant-time side aggregates cannot compute
-an exact, collateral-capped loser receivable for deposit pricing.
+Both deposit activation and redemption share pricing use this one signed
+snapshot. A new entrant therefore receives the same discount for inherited
+marked trader-profit liabilities borne by an exiting LP, and receives credit
+only for collectible trader losses. Positive marked receivables still do not
+increase the physical cash available to fund redemptions. A current terminal
+deficit blocks deposit activation rather than minting ownership into negative
+equity.
 
 ### 3.6 Conservation is category-specific
 
@@ -465,8 +498,9 @@ transfer, stablecoin rebase, or token failure:
 
 That token identity is necessary but incomplete. A settlement can replace a
 cash payout with a non-cash trader claim, consume an existing claim against a
-loss, record a failed receivable as bad debt, or waive a frozen spread. Those
-items change entitlement or telemetry without minting physical USDC.
+price loss, write off price loss that was never recognized beyond the account's
+collectible cap, or waive an uncollectible terminal action charge. Those items
+change entitlement or telemetry without minting physical USDC.
 
 ### Proposition 4 - Transition-level conservation of value categories
 
@@ -479,10 +513,12 @@ liquidation:
 2. a deferred fresh payout increases trader claims by exactly the unpaid
    payout and causes no contemporaneous HousePool cash debit;
 3. claim consumption reduces the same beneficiary liability and offsets only
-   the planner-designated fee, base-loss, or spread shortfall;
-4. bad debt records uncovered realized base loss but is not added to physical
-   assets or LP receivables; and
-5. for a frozen voluntary close,
+   that account's exact realized price loss;
+4. price loss above the precommitted collectible cap is emitted as a diagnostic
+   write-off and creates no asset, claim, deficit, or protocol debt;
+5. every surviving account curve equals its remaining lots, entry cost, and
+   post-settlement collectible cap; and
+6. for a frozen voluntary close,
 
    \[
    \mathrm{spread}_{\mathrm{assessed}}
@@ -490,13 +526,16 @@ liquidation:
    +\mathrm{spread}_{\mathrm{waived}}.
    \]
 
-**Proof sketch.** The GAIN branch either transfers the complete fresh payout or
-creates an equal claim; it never does both. The LOSS branch first partitions
-seized collateral into execution fee, base settlement, and frozen spread, then
-partitions remaining shortfall into claim recovery, base bad debt, and waived
-spread. Liquidation partitions reachable collateral after bounty into retained
-trader settlement and pool seizure, with any positive deficit routed through
-the same cash-or-claim rule. Each branch is a disjoint exhaustive partition.
+**Proof sketch.** The price-GAIN branch either transfers the complete fresh
+payout or creates an equal claim; it never does both. The price-LOSS branch
+partitions exact realized loss into same-account claim consumption, PnL-pledge
+seizure, and an explicit amount above the cap that was absent from pre-close LP
+NAV. Carry, VPI, execution fees, frozen spread, and liquidation charges use
+separate action and liquidation reserves; a terminally uncollectible action
+remainder is waived rather than recast as price debt. The apply path then
+installs the residual curve or removes the full-close curve atomically.
+Liquidation separately partitions its dedicated charge reserve among keeper,
+protocol, and LP recipients. Each branch is a disjoint exhaustive partition.
 The proposition proves ledger conservation conditional on correct planning and
 application; it does not prove that the resulting claims are liquid or that the
 pool remains solvent.
@@ -556,41 +595,63 @@ restores senior to its high-water mark and the remaining $15 million establishes
 junior principal. The resulting state is \(S=60\), \(J=15\), \(H=60\), all in
 millions of USDC.
 
-### 4.3 Deposit epochs are an accounting control
+### 4.3 Synchronized LP epochs are an accounting and liquidity control
 
-Each tranche supports immediate ERC-4626 entry only when the active-book and
-freshness gates allow exact-enough pricing. Otherwise a user:
+Ordinary entry and exit are fully asynchronous. Both tranches share a one-hour
+clock and one permissionless HousePool coordinator. A deposit request targets
+the current epoch plus two, while a redemption request targets the current
+epoch plus one. One bounded settlement transaction then:
 
-1. funds a future deposit request;
-2. receives an activation epoch two one-hour epochs ahead;
-3. may cancel only before that activation epoch begins;
-4. waits for permissionless epoch finalization to fix aggregate shares; and
-5. claims the allocated shares.
+1. reconciles HousePool accounting and fixes one execution-time signed
+   terminal-NAV and waterfall snapshot;
+2. funds matured senior redemption demand before any junior redemption demand;
+3. funds junior demand only from remaining free liquidity and subordinated
+   capital capacity;
+4. finalizes matured junior deposits and then matured senior deposits from the
+   same signed accounting snapshot; and
+5. leaves funded assets or shares in vault escrow for later user claims.
 
-This resembles the pending-to-claimable lifecycle standardized for asynchronous
-vaults in ERC-7540 [9], although Plether's exact interfaces and epoch rules are
-protocol-specific.
+Redemption priority is demand-based: dormant senior NAV does not reserve cash
+from junior claimants, but any newly matured senior request moves ahead of an
+older unfunded junior remainder. Incoming deposits never expand the withdrawal
+budget captured for the same settlement call. Deposit cancellation is
+unconditional before activation and follows the documented impairment/capacity
+policy after activation; redemption cancellation is available only before
+maturity while the request is wholly unfunded. Funded claims remain callable
+independently of later settlement, pause, or oracle liveness.
+If no queued epoch can advance, settlement reverts and rolls back its reconcile
+and carry checkpoints; this prevents permissionless no-op calls from changing
+time-based accounting.
 
-The delayed path prevents an instantaneous entrant from buying active shares
-against a deposit NAV that counts loser receivables the engine cannot compute
-exactly from side aggregates. It introduces its own residual risk: if a mature
-epoch is not promptly finalized, a finalizer can priority-order finalization
-ahead of a later close or liquidation that realizes a large trader loss into
-pool cash. The assets are already committed and normally non-cancellable, but
-the batch share price can still be fixed before that loss is reflected. The
-protocol documents this residual ordering/MEV exposure rather than claiming the
-epoch fully eliminates it.
+This implements the pending-to-claimable lifecycle standardized for
+asynchronous vaults in ERC-7540 [9], with protocol-specific shared request ids,
+terminal refund states, and bounded queue rules.
+
+The delay separates request funding from activation; it is not a substitute for
+exact valuation. At settlement, both deposit activation and redemption pricing
+consume the current signed TerminalNavBookV2 adjustment. A close or liquidation
+that converts marked price PnL into physical cash, a trader claim, or an
+explicit write-off also replaces or removes the account curve in the same
+transition. Finalizing before or after that transition therefore cannot select
+the retired deposit-only valuation: each valid snapshot applies one economic
+state to both LP directions.
+
+Epochs do not remove ordinary timing and liveness risk. There is no auction or
+user-specified share-price limit, so a matured request is priced at the valid
+snapshot when a permissionless caller actually settles it. Until activation,
+deposit assets remain in request escrow under the cancellation policy rather
+than silently becoming active LP capital.
 
 ### 4.4 Frozen-market LP operations
 
-When the oracle is genuinely frozen, permitted LP entry and exit use the
-stale-price policy plus a tranche-local surcharge. Reference defaults are 25
-basis points for senior and 75 basis points for junior. Deposit mints fewer net
-shares for gross assets, mint grosses up the required assets, and
-withdraw/redeem pays fewer net assets against the gross tranche claim. The fee
-remains in the same tranche and does not become protocol revenue. Immediate
-entry remains available only when no positions are open; pending epochs are the
-normal path otherwise.
+When the oracle is genuinely frozen, new deposit requests are unavailable and
+queued deposits remain escrowed rather than activating against a frozen mark.
+Eligible exits remain live under a tranche-local surcharge. Reference defaults
+are 25 basis points for senior and 75 basis points for junior. At synchronized
+settlement, redemptions pay fewer net assets against the gross tranche claim.
+The fee remains in the same tranche and does not become protocol revenue.
+Preview methods revert for these asynchronous flows; explicit exit estimate
+views expose nonbinding current quotes.
 
 ### 4.5 Recapitalization and ownership routing
 
@@ -603,10 +664,7 @@ normal path otherwise.
 - **Revenue already retained:** cash is already physical in HousePool and only
   its ownership is being assigned, so accounted assets must not increase twice;
 - **Excess admission:** governance explicitly admits an unsolicited raw-token
-  surplus into canonical assets; and
-- **Bad-debt clearing:** fresh recapitalization may clear matching bad-debt
-  telemetry, but writing down the counter without cash does not repair the
-  balance sheet.
+  surplus into canonical assets.
 
 Revenue restores impaired senior principal to its high-water mark before junior
 participates. Recapitalization can restore claimant value and solvency capacity,
@@ -661,10 +719,25 @@ that algebraic cancellation. Changing depth between trades breaks the
 fixed-potential assumption, and the position lifetime clamp can truncate close
 rebates. Partial-close VPI release is a bounded linear approximation rather than
 a fresh exact curve evaluation. Liquidation computes no fresh VPI delta, though
-negative accrued VPI is included in the liquidation shortfall. Integrated skew
-pricing has clear prior art in Synthetix and Perennial [14,18]; the relevant
-Plether contribution is how this pricing interacts with the bounded balance
-sheet and lifetime accounting.
+negative accrued VPI is included in its action-charge settlement.
+
+The gross target \(\max(-\mathrm{VPI}_{\mathrm{accrued}},0)\) is held as a
+dedicated nonwithdrawable sub-balance of action reserve. An open or increase
+that makes the target larger must fund it immediately or fail. Generic action
+collection cannot cross the combined floor protecting execution bounties and
+this VPI reserve. VPI does not add to or subtract from P+C price-risk equity:
+reserve value above the target never adds price collateral, while reserve value
+below the target is an independent delinquency that blocks withdrawal and makes
+the account liquidatable. A close or liquidation consumes the reserve when the
+clawback is realized and releases only value no longer required by the surviving
+target. A new close-time action rebate still comes only from pool cash free of
+existing trader claims; an unfunded remainder is waived rather than claim-backed.
+The reserve is excluded from the terminal price curve, so LPs cannot withdraw it
+as marked equity before the matching position obligation settles.
+
+Integrated skew pricing has clear prior art in Synthetix and Perennial [14,18];
+the relevant Plether contribution is how this pricing interacts with the
+bounded balance sheet and lifetime accounting.
 
 **Example.** With \(D=\$100\) million, \(k=0.005\), and skew moving from
 $10 million to $30 million:
@@ -727,12 +800,16 @@ displayed basis-point rate.
 This is capital rent, not a transfer from the heavier side to the lighter side.
 Both Long and Short can pay simultaneously because both can reserve LP balance
 sheet capacity simultaneously. Carry continues during stale and frozen oracle
-windows and is deducted from account equity. Before a mutation changes its
-basis or rate denominator, elapsed carry is checkpointed. The protocol collects
-it physically when that is safe; otherwise the amount remains in the
-account-specific `unsettledCarryUsdc` bucket for later collection. A checkpoint
-therefore preserves accrued history without pretending every checkpoint is an
-immediate cash realization.
+windows. Health checks first project it against eligible free settlement. A
+fully funded carry obligation therefore does not reduce the separate exact
+price-risk health basis; any uncovered remainder blocks withdrawal and
+independently makes the account liquidatable. PnL pledge plus same-account claim
+backs only exact price risk and cannot offset that remainder. Before a mutation
+changes its basis or rate denominator, elapsed carry is checkpointed. The
+protocol collects it physically when that is safe; otherwise the amount remains
+in the account-specific `unsettledCarryUsdc` bucket for later collection. A
+checkpoint therefore preserves accrued history without pretending every
+checkpoint is an immediate cash realization.
 
 **Example.** Let pool assets be $100 million and the full-utilization base rate
 be 5%:
@@ -849,11 +926,11 @@ Administrators may add expected FX-holiday dates.
 ### 6.4 Keeper economics and queue liveness
 
 Keeper rewards are reserved from trader clearinghouse value, not drawn from
-HousePool. Open orders use free settlement. Close orders first use free
-settlement and may use a tightly bounded amount of active position margin when
-the stale-mark liveness policy permits it. Execution-time user failures and
-specified protocol-state invalidations pay the keeper so an invalid FIFO head
-can be removed.
+HousePool. Open and close orders use free settlement. Close commitment may
+checkpoint carry first, but it never reclassifies PnL pledge to fund a bounty,
+including on the stale-mark path. Execution-time user failures and specified
+protocol-state invalidations pay the keeper so an invalid FIFO head can be
+removed.
 
 Binding orders reduce the ability to treat a queue position as a free option,
 but they remove user cancellation after an order has entered the queue. The
@@ -867,8 +944,10 @@ compensating controls.
 ## 7. Settlement and failure containment
 
 The protocol prioritizes completing valid **terminal** risk-reducing transitions
-over preserving the appearance of pre-transition solvency. An underfunded
-partial close still reverts.
+over preserving the appearance of pre-transition solvency. A partial close may
+write off price loss above its precommitted collectible cap, but it still
+reverts if a separate action charge must be collected in full or if the
+surviving position and terminal curve cannot remain consistent.
 
 ### 7.1 Profitable close
 
@@ -908,65 +987,64 @@ liveness; it does not provide immediate liquidity.
 
 ### 7.2 Losing partial and full closes
 
-For a losing close, settlement consumes explicitly reachable trader-owned
-value. Generic paths exclude queued committed-order margin and
-clearinghouse-reserved execution-bounty value. Terminal full closes and
-liquidations may explicitly unlock and consume same-account committed-order
-margin so a user cannot shelter value immediately before settlement. The
-execution-bounty reserve remains separately owned and is paid, refunded, or
-forfeited only through its order-lifecycle path; it is not an unrelated
-close-loss asset.
+For a losing close, the exact entry cost allocated to the closed lots determines
+price loss. Settlement nets a same-account trader claim first and then consumes
+the dedicated PnL pledge. It does not treat order margin, liquidation reserve,
+execution-bounty reserve, or generic action reserve as additional price-loss
+backing. Any price loss beyond the pre-close account cap is a diagnostic
+write-off because LP NAV never counted it as receivable.
 
-A partial close must satisfy the full obligation. Otherwise it reverts, because
-letting the account externalize loss while retaining a residual position would
-protect remaining risk at LP expense.
+A partial close is therefore not blocked merely because uncapped price loss
+exceeds collectible value. Instead it must:
 
-A full close instead:
+1. consume the exact claim and pledge amounts selected by the planner;
+2. retain any pledge required to make the residual curve conserve the pre-close
+   terminal value;
+3. collect required carry, VPI, execution-fee, and frozen-spread action charges
+   in full; and
+4. atomically replace the account curve with the remaining lots, entry cost,
+   and collectible cap.
 
-1. seizes reachable value;
-2. allocates collected value according to fee/base-loss/spread priority;
-3. consumes an existing same-account trader claim where permitted;
-4. records any uncovered base trading loss as bad debt;
-5. waives only an uncollectible frozen voluntary-close spread; and
-6. deletes the position.
+A full close follows the same separated price channel, may waive a terminally
+uncollectible action-charge remainder, and removes the curve. Price loss above
+the cap never creates protocol debt or a terminal deficit.
 
-**Underwater full-close example.** A Short position closes $10.8 million of
-notional at the reference 4-basis-point execution fee, so it owes a $4,320 fee
-in addition to an $800,000 price loss. Reachable collateral is $300,000. The fee
-is collected first, the remaining $295,680 covers base loss, and $504,320
-becomes bad debt. The full close completes. The same shortfall on a partial
-close would reject the transition.
+**Underwater close example.** Suppose an exact closed-lot basis produces an
+$800,000 trader price loss while the account has no nettable claim and only
+$300,000 of PnL pledge. LP NAV immediately before the close includes a $300,000
+marked receivable, not $800,000. Settlement transfers $300,000 to HousePool,
+emits a $500,000 price-loss write-off, and removes or replaces the account curve.
+The recognized terminal value is conserved. Execution fee, carry, VPI, and any
+frozen spread are assessed through their separate action-charge path.
 
 ### 7.3 Liquidation
 
-Liquidation eligibility uses equity after price PnL, pending carry, and the
-clawback associated with negative lifetime VPI. A liquidation is a
-full-position terminal transition; there is no partial-liquidation recovery
-path for an oversized account. Liquidation then:
+Liquidation eligibility uses exact P+C price-risk health. Negative lifetime VPI
+is a separate typed obligation: reserve backing below its gross target is an
+independent liquidation condition, while excess reserve never adds price
+collateral. Carry is likewise isolated: eligible free settlement covers pending
+carry first, while any uncovered carry independently makes the account
+liquidatable and cannot be offset by PnL pledge or claim. A liquidation is a
+full-position terminal transition; there is no partial-liquidation recovery path
+for an oversized account. Liquidation then:
 
-1. seizes physically reachable account value;
-2. pays a keeper bounty capped by reachable collateral;
-3. preserves positive residual trader value;
-4. converts a cash-short positive residual into a trader claim;
-5. records uncovered negative residual as bad debt;
-6. removes the position and account-local pending order state; and
-7. evaluates degraded mode.
+1. consumes exact price loss from same-account claim and PnL pledge and writes
+   off only the excess;
+2. assesses the capped liquidation charge against its dedicated reserve and
+   allocates the configured keeper and protocol shares plus the exact LP
+   remainder;
+3. settles carry and the negative lifetime-VPI clawback through their separate
+   action path, waiving any terminally uncollectible remainder;
+4. preserves a positive fresh trader payout as cash or a senior trader claim;
+5. removes the position, terminal curve, and bounded account-local pending
+   order state; and
+6. evaluates degraded mode.
 
-**Liquidation example.** A $2 million current notional has $30,000 of terminal
-reachable collateral and $15,000 of carry-adjusted equity. At the 1%
-maintenance basis its requirement is $20,000, so equality-or-below policy makes
-it liquidatable. The 10-basis-point bounty is $2,000. Post-bounty residual
-equity is $13,000 and reachable collateral after bounty is $28,000. Settlement
-therefore:
-
-- credits $2,000 to the keeper;
-- retains $13,000 for the trader;
-- seizes $15,000 for HousePool;
-- creates no fresh payout or claim; and
-- records no bad debt.
-
-The physical partition is exact: $30,000 reachable equals $2,000 bounty plus
-$13,000 retained plus $15,000 seized.
+**Liquidation allocation example.** If the capped liquidation charge is $2,000
+and its dedicated reserve contains $2,000, the keeper and protocol allocations
+round down from that amount and LPs receive the exact remainder. Price PnL is
+settled independently against the account's claim and PnL pledge; an uncovered
+price-loss tail neither reduces the $2,000 allocation nor creates protocol debt.
 
 Because liquidation settles against an external oracle mark, one liquidation
 does not mechanically trade through an AMM curve and move the next account's
@@ -1009,7 +1087,8 @@ priority order:
 - $2,000 pays the entire base price loss;
 - $2,200 pays part of the LP-owned frozen spread;
 - $7,800 of spread is waived; and
-- bad debt is zero because all base loss was collected.
+- no protocol liability or terminal deficit is created because all base loss
+  was collected.
 
 The full close completes and
 \(\$10{,}000=\$2{,}200+\$7{,}800\). A partial close with the same shortfall
@@ -1059,12 +1138,15 @@ recommended as transaction prices [7]. The study is therefore a transparent
 macro-price proxy, not a replay of Pyth ticks. The descriptive statistics do not
 model confidence width, intraday paths, keeper latency, or tradable
 Friday-close/Monday-open quotes. Section 8.4 adds a stateful daily-fix scenario
-replay with integer PnL, admission, carry, fees, liquidation, claims, bad debt,
-and two explicitly different tranche views: a realized-cash overlay and a
-conservative-MtM reconciliation shadow after each observation's ordinary
-actions, plus one final reconciliation after forced end-of-sample closes. It
-still holds VPI, oracle confidence, frozen execution, slippage rejection,
-pending epochs, and intraday keeper behavior outside the experiment.
+replay with integer PnL, admission, carry, fees, liquidation, claims, and legacy
+uncovered-loss telemetry,
+and two explicitly non-production tranche overlays: a realized-cash view and a
+conservative side-envelope stress after each observation's ordinary actions,
+plus one final reconciliation after forced end-of-sample closes. The replay
+predates the exact account-capped TerminalNavBookV2 kernel and does not estimate
+production LP share prices. It also holds VPI, oracle confidence, frozen
+execution, slippage rejection, pending epochs, and intraday keeper behavior
+outside the experiment.
 
 ![Plether basket history](whitepaper/generated/basket_history.svg)
 
@@ -1152,6 +1234,13 @@ paired cohort is an aggregate research allocation whose legs are assumed to be
 interleaved; the model checks final skew but does not simulate transaction-level
 intermediate skew, VPI, or queue execution.
 
+The historical model labels uncollectible price loss as uncovered-loss telemetry.
+That label is not current Terminal NAV V2 settlement semantics: production caps
+the marked receivable by same-account claim plus PnL pledge and emits any excess
+as `PriceLossWrittenOff` without creating protocol debt or an LP deficit. The
+reported telemetry below is retained only to reproduce the published research
+run.
+
 After price and parameter ratios are quantized, cohort scaling and every
 accounting transition use integer arithmetic. A post-construction assertion
 rechecks endpoint solvency and skew for every admitted cohort; there is no
@@ -1173,7 +1262,7 @@ trader account rather than HousePool.
 | Liquidations after a 3+ day gap | 25 | 38 | 18 |
 | Carry assessed | $7.600m | $8.100m | $5.340m |
 | Carry conservatively realized | $7.531m | $8.060m | $5.319m |
-| Bad-debt telemetry | $0.991m | $0.919m | $0.654m |
+| Legacy loss telemetry | $0.991m | $0.919m | $0.654m |
 | Trader claims created | $0 | $0 | $0 |
 | Ending LP economic equity | $103.493m | $99.817m | $99.196m |
 
@@ -1195,8 +1284,9 @@ sometimes overstating the loss realized at a delayed daily mark.
 Ordering sensitivity did not change this daily-grid 80/20 result. All four
 combinations of liquidation-first versus scheduled-close-first and ascending
 versus descending account order produced 145 liquidations, 40 scheduled closes,
-$0.919 million of bad debt, zero claims, $99.817 million of ending LP equity,
-and a $22.944 million minimum senior principal in the conservative shadow.
+$0.919 million of legacy uncovered-loss telemetry, zero claims, $99.817 million of ending LP equity,
+and a $22.944 million minimum senior principal in the legacy side-envelope
+stress shadow.
 That equality is a result of these observations and event dates, not a theorem
 that settlement ordering is immaterial.
 
@@ -1233,7 +1323,7 @@ analyzed without side composition.
 Re-running the stateful 80/20 scenario changes both admitted size and the carry
 base:
 
-| Cap | Cumulative admitted notional | Time-weighted reserve utilization | Realized carry | Ending LP equity | Bad debt |
+| Cap | Cumulative admitted notional | Time-weighted reserve utilization | Realized carry | Ending LP equity | Legacy loss telemetry |
 | ---: | ---: | ---: | ---: | ---: | ---: |
 | 1.25 | $5.601bn | 19.43% | $4.117m | $97.126m | $0.904m |
 | 1.50 | $5.591bn | 23.13% | $4.879m | $97.123m | $0.905m |
@@ -1272,8 +1362,8 @@ payout vector executes the same kernel and creates a $5m claim:
 Tranche results require a valuation convention. The first view below is a
 **realized-cash overlay**: it applies each change in physical cash minus claims
 through the waterfall and checkpoints the 8% senior coupon over each observed
-interval. It does not subtract unrealized conservative MtM and therefore is not
-the production share-NAV view.
+interval. It omits the signed terminal price delta and therefore is not the
+production share-NAV view.
 
 | Realized-cash overlay metric | Balanced 50/50 | Momentum 80/20 | Momentum 100/0 |
 | --- | ---: | ---: | ---: |
@@ -1290,33 +1380,37 @@ same category as a trading loss. Losses can still impair senior relative to its
 coupon-ratcheted high-water mark even when its absolute principal never falls
 below the initial $50 million.
 
-The second view is a **daily conservative reconciliation shadow**. After each
-ECB observation's actions, it computes
+The second view is a **daily conservative side-envelope stress shadow** retained
+from the original empirical study. After each ECB observation's actions, it
+computes
 
 \[
 D_{\mathrm{shadow}}
 =\max(A-K-M(p),0)
 \]
 
-and reconciles the coupon-adjusted waterfall to that value. This uses the
-production conservative-MtM kernel, but its automatic once-per-observation
-cadence is a research convention: production reconciliation occurs on protocol
-actions and includes additional pending claimant and unassigned buckets. The
+and reconciles the coupon-adjusted waterfall to that value. This is not the
+production kernel: \(M(p)\) is the retired side-aggregate envelope and ignores
+both account entry distributions and collectible caps. The current protocol
+instead uses \(\Delta_{\mathrm{terminal}}(p)\) from Section 3.5. The legacy
+shadow remains useful only as an intentionally conservative sensitivity view.
+Its automatic once-per-observation cadence is also a research convention; the
 replay performs one additional reconciliation at the final fix after forcibly
 closing every remaining position.
 
-| Conservative shadow metric | Balanced 50/50 | Momentum 80/20 | Momentum 100/0 |
+| Legacy side-envelope stress metric | Balanced 50/50 | Momentum 80/20 | Momentum 100/0 |
 | --- | ---: | ---: | ---: |
-| Maximum conservative MtM | $50.424m | $78.368m | $66.418m |
+| Maximum side-envelope stress | $50.424m | $78.368m | $66.418m |
 | Minimum distributable value | $50.813m | $22.944m | $36.854m |
 | Minimum junior principal | $0 | $0 | $0 |
 | Minimum senior principal | $50.000m | $22.944m | $36.854m |
 
 The shadow view reverses any inference that the replay proves senior safety. In
-the directional scenarios, the conservative valuation can materially impair
-senior even though realized HousePool cash remains near $100 million. The
-difference is the physical-first accounting distinction in Section 3, not a
-contradiction between two equity numbers.
+the directional scenarios, this deliberately conservative stress can materially
+impair senior even though realized HousePool cash remains near $100 million.
+Because it is not the exact account-capped production NAV, it does not quantify
+current Senior or Junior share value; it demonstrates sensitivity to valuation
+assumptions.
 
 As a separate counterfactual gross price-PnL stress with the skew gate disabled,
 applying the largest observed Friday-to-Monday change to a fully utilized
@@ -1339,9 +1433,9 @@ The empirical results support five modest conclusions:
 4. Claim formation is state- and sequence-dependent; its absence in these
    historical scenarios is evidence about the scenarios, not a protocol
    guarantee.
-5. Realized-cash and conservative-MtM tranche views can diverge sharply; senior
-   protection depends on valuation and reconciliation timing as well as the
-   realized loss path.
+5. Realized cash and the legacy side-envelope stress can diverge sharply; the
+   replay does not substitute for an account-level TerminalNavBookV2 simulation
+   of production share NAV.
 
 The dataset does not establish future loss probabilities, protocol
 profitability, safe leverage, or an optimal cap.
@@ -1357,7 +1451,7 @@ profitability, safe leverage, or an optimal cap.
 | Price domain | Generally unbounded | Generally unbounded | Generally unbounded | Contractually capped \([0,C]\) |
 | Recurring payment | Long-short funding | Funding and/or curve economics | Funding/borrow fees | LP-capital carry; both sides can pay |
 | Concentration price | Book spread/depth | Curve slippage | OI impact/funding | Quadratic VPI plus hard skew limit |
-| LP NAV treatment | Not applicable or insurance fund | Protocol-specific | Often includes trader PnL | Physical-first; no unrealized loser receivable |
+| LP NAV treatment | Not applicable or insurance fund | Protocol-specific | Often includes trader PnL | Physical-first; exact signed account-capped terminal PnL, with marked receivables kept non-cash |
 | Tail backstop | Insurance/social loss/ADL | Protocol-specific | OI caps, reserves, ADL | Endpoint admission, claims, degraded mode, recapitalization |
 | Liquidation feedback | Book execution can move price | Curve trade can move price | Oracle-settled | Oracle-settled |
 
@@ -1430,9 +1524,10 @@ Plether mitigates but does not eliminate these risks through:
 ### 10.3 Economic and accounting limits
 
 - **Sequential settlement:** \(L_{\max}\) is not a pathwise reserve.
-- **Integer aggregation:** multi-increase weighted-entry rounding can make
-  stored maximum-profit aggregates undershoot endpoint PnL by dust unless the
-  implementation provisions headroom.
+- **Lot lattice:** exact entry-cost and terminal-book arithmetic relies on every
+  open, increase, and close being a whole 100-token lot; changing the price
+  decimals or quantum invalidates the USDC-atom identity and requires a new
+  deployment.
 - **Cap selection:** a tighter cap lowers some liabilities but changes the
   economic instrument and may not reduce the dominant side.
 - **Capital efficiency:** historical moves can use only a small fraction of the
@@ -1444,12 +1539,18 @@ Plether mitigates but does not eliminate these risks through:
 - **Carry governance:** the rate curve is parameterized, not a market-clearing
   theorem.
 - **Claims:** claims preserve exit-state liveness, not immediate redemption.
-- **Bad debt:** an uncollectible trader obligation remains an economic loss even
-  when no speculative receivable was booked.
+- **Price-loss tails:** loss above the account's precommitted collectible cap is
+  written off rather than converted into LP equity, deficit, trader claim, or
+  protocol debt; correctness depends on keeping that cap synchronized with pledge and
+  nettable claim state.
 - **Tranches:** junior subordination redistributes loss; it does not reduce total
   loss.
-- **Deposit epochs:** delayed pricing reduces one valuation problem but retains
-  finalization-order risk.
+- **Terminal NAV:** exactness depends on atomic synchronization among position
+  lots, entry cost, PnL pledge, same-account claims, and each account curve;
+  deployment therefore binds one empty book to one Engine with no repair path.
+- **Deposit epochs:** synchronized pricing removes the entry/exit NAV mismatch,
+  but permissionless finalization still has timing and liveness risk because
+  requests have neither an auction nor a user-specified share-price limit.
 - **Frozen spreads:** a fixed spread does not scale with staleness inside the
   permitted window.
 - **Frozen execution precision:** frozen-oracle exits deliberately sacrifice
@@ -1492,14 +1593,16 @@ future external method added to them must be reviewed as core custody code.
 ## 11. Verification strategy
 
 The white paper's Python model independently reproduces selected integer kernels
-for PnL, maximum profit, conservative MtM, VPI, carry indexes, cash-priority
-payouts, close-loss allocation, liquidation, solvency, and the tranche
-waterfall. It tests Proposition 1 over real-valued books and one-shot
-stored-integer positions, separately reproduces the multi-increase rounding
-counterexample, executes the conservation vectors, includes the
-sequential-close counterexample, and runs the historical cohort scenarios. It
-is not a second implementation of the complete router, oracle, clearinghouse,
-or epoch state machines.
+for PnL, maximum profit, the legacy conservative side-envelope stress, VPI,
+carry indexes, cash-priority payouts, close-loss allocation, liquidation,
+solvency, and the tranche waterfall. It tests Proposition 1 over real-valued
+books and one-shot stored-integer positions, reproduces the historical
+non-quantized multi-increase rounding counterexample that motivated exact lots,
+executes the conservation vectors, includes the sequential-close counterexample,
+and runs the historical cohort scenarios. It does not implement the account
+curves or radix accumulator of TerminalNavBookV2 and is not a second
+implementation of the complete router, oracle, clearinghouse, or epoch state
+machines.
 
 The direct Solidity unit, fuzz, matrix, and differential suites remain the
 highest-signal evidence for individual arithmetic kernels. Stateful evidence
@@ -1508,14 +1611,15 @@ guide:
 
 | Claimed property | Invariant evidence or explicit gap |
 | --- | --- |
-| Capped PnL and endpoint arithmetic | Full-path conservation in `PerpExplicitAccountingInvariant.t.sol`; the real-valued theorem and one-shot integer arithmetic are direct/model tested, but multi-increase weighted-entry rounding is an explicit gap |
+| Capped PnL and endpoint arithmetic | Full-path conservation in `PerpExplicitAccountingInvariant.t.sol`; direct exact-lot arithmetic and close-conservation tests cover increases and partial closes, while non-quantized intents are rejected at router and Engine boundaries |
 | Constant-time endpoint aggregation and admission arithmetic | Companion model and direct arithmetic/open-planning tests; no stateful invariant proves computational complexity |
+| Exact account-capped terminal NAV and symmetric LP pricing | `TerminalNavBookV2.t.sol`, `TerminalNavCloseConservation.t.sol`, `TerminalNavIntegrationSecurity.t.sol`, `HousePool.t.sol`, and synchronized epoch integration tests; the Python replay does not reproduce the radix book |
 | Protocol accounting-view alignment | `PerpPreviewInvariant.t.sol`, `PerpEconomicConservationInvariant.t.sol` |
 | Withdrawal-reserve composition | `PerpEconomicConservationInvariant.t.sol`; Proposition 3 is the algebraic snapshot result |
 | Preview/live close and liquidation parity | `PerpExplicitAccountingInvariant.t.sol`, `PerpClosePreviewParityInvariant.t.sol`, `PerpPreviewInvariant.t.sol` |
 | Physical and ownership-category conservation | `PerpEconomicConservationInvariant.t.sol`, `PerpValueConservationInvariant.t.sol`, `PerpExplicitAccountingInvariant.t.sol` |
 | Trader-claim totals, isolation, and cash gating | `PerpTraderClaimInvariant.t.sol`, `PerpMultiAccountInvariant.t.sol`, `PerpEconomicConservationInvariant.t.sol` |
-| Bad-debt exhaustion and failed-full-close value safety | `PerpEconomicConservationInvariant.t.sol`, `PerpValueConservationInvariant.t.sol`; close/liquidation cleanup and preview parity also use `PerpAccountingInvariant.t.sol` and `PerpExplicitAccountingInvariant.t.sol` |
+| Account-capped price collection, write-off isolation, and failed-full-close value safety | `TerminalNavCloseConservation.t.sol`, `TerminalNavIntegrationSecurity.t.sol`, `PerpEconomicConservationInvariant.t.sol`, and `PerpValueConservationInvariant.t.sol`; close/liquidation cleanup and preview parity also use `PerpAccountingInvariant.t.sol` and `PerpExplicitAccountingInvariant.t.sol` |
 | Universal terminal completion and new-risk blocking | Direct close/liquidation and degraded-mode policy tests; no stateful invariant spans every valid insolvent terminal path and every new-risk entry point |
 | Degraded transition and preview/live parity | `PerpPreviewInvariant.t.sol`, `PerpExplicitAccountingInvariant.t.sol` |
 | Carry history and ownership | `PerpValueConservationInvariant.t.sol`; utilization/rate arithmetic and simultaneous two-side carry are direct/model tests, not statefully invariant-tested |
@@ -1527,7 +1631,7 @@ guide:
 | Binding order fields and first unique post-commit tick | Direct `OrderRouter.t.sol` tests; no dedicated stateful invariant covers intent immutability or strict historical-tick uniqueness |
 | Active tranche lifecycle, cooldowns, and excess | `PerpHousePoolLifecycleInvariant.t.sol`, `PerpValueConservationInvariant.t.sol` |
 | Junior-first loss, high-water restoration, coupon ratchet, and recapitalization priority | Direct `HousePool.t.sol` tests plus companion-model vectors; no dedicated stateful waterfall invariant at this revision |
-| Pending-deposit epochs | No stateful invariant coverage at this revision; dedicated epoch lifecycle tests are required |
+| Synchronized LP deposit/redemption epochs | Dedicated coordinator, FIFO, allocation-dust, plateau-liveness, and exact inverse-rounding integration/fuzz tests; no long-running stateful invariant yet spans both queue directions |
 | Account isolation | `PerpMultiAccountInvariant.t.sol` |
 | Fee custody | `PerpFeeFlowInvariant.t.sol` |
 
@@ -1571,25 +1675,30 @@ when normal settlement assumptions fail.
 | Symbol | Definition |
 | --- | --- |
 | \(A\) | Canonical physical HousePool assets |
-| \(B\) | Accumulated realized bad debt |
 | \(C\) | Immutable protocol price cap |
 | \(D\) | Pool depth used by VPI |
+| \(E_i\) | Exact entry cost of account \(i\), in USDC atoms |
 | \(e_i\) | Position entry price |
 | \(G(p)\) | Gross positive price PnL at common mark \(p\) |
 | \(H\) | Senior high-water mark |
 | \(J\) | Junior principal |
 | \(K\) | Aggregate trader-claim liability |
+| \(k_i\) | Effective collectible price-loss cap of account \(i\) |
+| \(\ell_i\) | Number of canonical 100-token lots in account \(i\) |
 | \(L_i^{\max}\) | Position maximum price profit |
 | \(L_{\mathrm{LONG}}\) | Long endpoint liability at \(p=C\) |
 | \(L_{\mathrm{SHORT}}\) | Short endpoint liability at \(p=0\) |
 | \(L_{\max}\) | Larger side endpoint liability |
-| \(M(p)\) | Conservative LP reconciliation MtM liability |
+| \(M(p)\) | Legacy side-envelope stress used only in the empirical replay |
 | \(m_i\) | Position margin |
 | \(p\) | Capped basket mark |
 | \(q_i\) | Position size |
 | \(S\) | Absolute directional skew, or senior principal where stated |
+| \(T\) | Signed terminal LP equity before the tranche waterfall |
 | \(u_s\) | LP borrow-base utilization for side \(s\) |
 | \(w_j\) | Basket component weight |
+| \(\delta_i(p)\) | Account \(i\)'s signed LP-side terminal price delta |
+| \(\Delta_{\mathrm{terminal}}(p)\) | Exact aggregate signed terminal price delta |
 
 ## Appendix B. Reproduction
 

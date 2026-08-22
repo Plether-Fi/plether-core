@@ -14,6 +14,72 @@ import {IPerpsTraderViews} from "@plether/perps/interfaces/IPerpsTraderViews.sol
 import {IProtocolViews} from "@plether/perps/interfaces/IProtocolViews.sol";
 import {PerpsViewTypes} from "@plether/perps/interfaces/PerpsViewTypes.sol";
 
+/// @dev Lightweight asynchronous-vault read surface used only by this lens.
+interface IAsyncTrancheVaultLensView {
+
+    function getMaturedDepositHead(
+        uint256 cutoffEpoch
+    ) external view returns (uint256 epochId, uint256 assets);
+
+    function getMaturedRedeemHead(
+        uint256 cutoffEpoch
+    ) external view returns (uint256 epochId, uint256 remainingShares);
+
+    function pendingDepositRequest(
+        uint256 requestId,
+        address controller
+    ) external view returns (uint256 assets);
+
+    function claimableDepositRequest(
+        uint256 requestId,
+        address controller
+    ) external view returns (uint256 assets);
+
+    function estimateDepositShares(
+        uint256 assets
+    ) external view returns (uint256 shares);
+
+    function claimableDepositShares(
+        uint256 requestId,
+        address controller
+    ) external view returns (uint256 shares);
+
+    function refundableDepositRequest(
+        uint256 requestId,
+        address controller
+    ) external view returns (uint256 assets);
+
+    function pendingRedeemRequest(
+        uint256 requestId,
+        address controller
+    ) external view returns (uint256 shares);
+
+    function claimableRedeemRequest(
+        uint256 requestId,
+        address controller
+    ) external view returns (uint256 shares);
+
+    function estimateRedeemAssets(
+        uint256 shares
+    ) external view returns (uint256 assets);
+
+    function claimableRedeemAssets(
+        uint256 requestId,
+        address controller
+    ) external view returns (uint256 assets);
+
+    function refundableRedeemRequest(
+        uint256 requestId,
+        address controller
+    ) external view returns (uint256 shares);
+
+    function redeemRefundPending(
+        uint256 requestId,
+        address controller
+    ) external view returns (bool pending);
+
+}
+
 /// @title PerpsPublicLens
 /// @notice Compact read facade for the simplified product-facing perps surface.
 /// @dev This intentionally presents a narrower, easier-to-consume view than the rich engine and
@@ -50,7 +116,11 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
     }
 
     /// @notice Returns equity, withdrawal capacity, pending reservations, and position risk for an account.
-    /// @dev For an open position, negative net equity is floored at zero; without a position, clearinghouse
+    /// @dev For an open position, exact price-risk equity is PnL pledge plus same-account claim plus exact price PnL.
+    ///      Carry is projected from eligible free settlement first; an uncovered remainder independently marks the
+    ///      account liquidatable rather than debiting price equity. Negative VPI is independently required to have full
+    ///      dedicated-reserve backing; an underfunded floor also marks the account liquidatable, while excess reserve
+    ///      never adds price collateral. Negative net equity is floored at zero. Without a position, clearinghouse
     ///      account equity is returned. Monetary fields use 6-decimal USDC units.
     /// @param account Canonical perps account to inspect.
     /// @return viewData Trader account summary derived from the account lens and router.
@@ -113,7 +183,7 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
         }
     }
 
-    /// @notice Returns whether the account's current live position is liquidatable at the stored mark.
+    /// @notice Returns whether exact price risk breaches maintenance or projected carry remains uncovered at the stored mark.
     /// @param account Canonical perps account to inspect.
     /// @return True only when the account lens reports an existing liquidatable position.
     function isLiquidatable(
@@ -123,24 +193,30 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
     }
 
     /// @notice Returns the compact senior tranche view.
-    /// @dev Asset and withdrawal amounts use 6-decimal USDC. For nonzero supply, `sharePrice` is the raw
-    ///      `(totalAssets * 1e18) / totalSupply` quotient and does not normalize differing asset/share decimals.
-    /// @return viewData Senior tranche balances, shares, fee, and current deposit/withdrawal availability.
+    /// @dev Asset amounts use 6-decimal USDC. `maxWithdrawUsdc` is the pool's current capacity for a synchronized
+    ///      Senior redemption-funding phase, not an amount that a holder can withdraw synchronously.
+    ///      For nonzero supply, `sharePrice` is the raw `(totalAssets * 1e18) / totalSupply` quotient and does not
+    ///      normalize differing asset/share decimals.
+    /// @return viewData Senior tranche balances, shares, fee, request availability, and settlement availability.
     function getSeniorTranche() external view returns (PerpsViewTypes.TrancheView memory viewData) {
         return _getTrancheView(HOUSE_POOL.seniorVault(), true);
     }
 
     /// @notice Returns the compact junior tranche view.
-    /// @dev Asset and withdrawal amounts use 6-decimal USDC. For nonzero supply, `sharePrice` is the raw
-    ///      `(totalAssets * 1e18) / totalSupply` quotient and does not normalize differing asset/share decimals.
-    /// @return viewData Junior tranche balances, shares, fee, and current deposit/withdrawal availability.
+    /// @dev Asset amounts use 6-decimal USDC. `maxWithdrawUsdc` is the pool's current synchronized Junior-funding
+    ///      capacity after the matured-Senior-priority gate, not an amount that a holder can withdraw synchronously.
+    ///      For nonzero supply, `sharePrice` is the raw `(totalAssets * 1e18) / totalSupply` quotient and does not
+    ///      normalize differing asset/share decimals.
+    /// @return viewData Junior tranche balances, shares, fee, request availability, and settlement availability.
     function getJuniorTranche() external view returns (PerpsViewTypes.TrancheView memory viewData) {
         return _getTrancheView(HOUSE_POOL.juniorVault(), false);
     }
 
     /// @notice Returns high-level LP status flags.
     /// @dev `lastMarkTime` is a Unix timestamp. Oracle freshness is the pool liquidity view's `markFresh` flag.
-    /// @return viewData Trading, withdrawal, mark freshness, and oracle-frozen status.
+    ///      The retained `withdrawalLive` field means new queued-redemption funding is live; escrowed claims do not
+    ///      depend on it.
+    /// @return viewData Trading, redemption-funding, mark freshness, and oracle-frozen status.
     function getLpStatus() external view returns (PerpsViewTypes.LpStatusView memory viewData) {
         viewData.tradingActive = HOUSE_POOL.isTradingActive();
         viewData.withdrawalLive = HOUSE_POOL.isWithdrawalLive();
@@ -151,16 +227,90 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
         viewData.oracleFresh = HOUSE_POOL.getPoolLiquidityView().markFresh;
     }
 
+    /// @notice Returns the matured deposit and redemption heads visible to the next synchronized settlement.
+    /// @dev `cutoffEpoch` currently equals `currentEpoch`; requests target a future shared epoch, and become eligible
+    ///      when that epoch reaches this cutoff. `settlementLive` concerns new redemption funding. Pool pause does not
+    ///      disable that funding, but it defers deposit activation; already-funded claims depend on neither flag.
+    /// @param isSenior True for the Senior queue and false for the Junior queue.
+    /// @return viewData Queue heads, backlog flags, shared epoch, and pool runtime gates.
+    function getTrancheQueues(
+        bool isSenior
+    ) external view returns (PerpsViewTypes.TrancheQueueView memory viewData) {
+        if (address(HOUSE_POOL) == address(0)) {
+            return viewData;
+        }
+
+        viewData.vault = isSenior ? HOUSE_POOL.seniorVault() : HOUSE_POOL.juniorVault();
+        viewData.currentEpoch = HOUSE_POOL.currentLpEpoch();
+        viewData.cutoffEpoch = viewData.currentEpoch;
+        viewData.settlementLive = HOUSE_POOL.isWithdrawalLive();
+        viewData.poolPaused = HOUSE_POOL.paused();
+        if (viewData.vault == address(0)) {
+            return viewData;
+        }
+
+        IAsyncTrancheVaultLensView vault = IAsyncTrancheVaultLensView(viewData.vault);
+        (viewData.depositHeadEpoch, viewData.depositHeadAssets) = vault.getMaturedDepositHead(viewData.cutoffEpoch);
+        (viewData.redeemHeadEpoch, viewData.redeemHeadShares) = vault.getMaturedRedeemHead(viewData.cutoffEpoch);
+        viewData.depositBacklog = viewData.depositHeadAssets != 0;
+        viewData.redeemBacklog = viewData.redeemHeadShares != 0;
+    }
+
+    /// @notice Returns one controller's pending and claimable deposit/redemption state for a shared request epoch.
+    /// @dev Pending share/asset fields are current estimates because their settlement rate is not fixed. Claimable and
+    ///      refundable fields are exact request accounting. A rejected deposit leaves Pending and becomes refundable
+    ///      until the controller or its operator cancels it and pulls the escrowed assets.
+    /// @param isSenior True for the Senior vault and false for the Junior vault.
+    /// @param requestId Shared LP epoch used as the asynchronous request id.
+    /// @param controller Account that controls the request and may authorize operators.
+    /// @return viewData Pending estimates and exact claimable balances for both async directions.
+    function getLpRequestState(
+        bool isSenior,
+        uint256 requestId,
+        address controller
+    ) external view returns (PerpsViewTypes.LpRequestStateView memory viewData) {
+        viewData.requestId = requestId;
+        viewData.controller = controller;
+        if (address(HOUSE_POOL) == address(0)) {
+            return viewData;
+        }
+
+        viewData.vault = isSenior ? HOUSE_POOL.seniorVault() : HOUSE_POOL.juniorVault();
+        if (viewData.vault == address(0)) {
+            return viewData;
+        }
+
+        IAsyncTrancheVaultLensView vault = IAsyncTrancheVaultLensView(viewData.vault);
+        viewData.pendingDepositAssets = vault.pendingDepositRequest(requestId, controller);
+        if (viewData.pendingDepositAssets != 0) {
+            viewData.pendingDepositSharesEstimate = vault.estimateDepositShares(viewData.pendingDepositAssets);
+        }
+        viewData.claimableDepositAssets = vault.claimableDepositRequest(requestId, controller);
+        viewData.claimableDepositShares = vault.claimableDepositShares(requestId, controller);
+        viewData.refundableDepositAssets = vault.refundableDepositRequest(requestId, controller);
+
+        viewData.pendingRedeemShares = vault.pendingRedeemRequest(requestId, controller);
+        if (viewData.pendingRedeemShares != 0) {
+            viewData.pendingRedeemAssetsEstimate = vault.estimateRedeemAssets(viewData.pendingRedeemShares);
+        }
+        viewData.claimableRedeemShares = vault.claimableRedeemRequest(requestId, controller);
+        viewData.claimableRedeemAssets = vault.claimableRedeemAssets(requestId, controller);
+        viewData.refundableRedeemShares = vault.refundableRedeemRequest(requestId, controller);
+        viewData.redeemRefundPending = vault.redeemRefundPending(requestId, controller);
+    }
+
     /// @notice Returns high-level protocol runtime status flags.
     /// @dev Prices use 8 decimals and `lastMarkTime` is a Unix timestamp. When `HOUSE_POOL` is zero,
-    ///      `tradingActive` and `withdrawalLive` remain false.
-    /// @return viewData Protocol phase, stored mark, oracle, FAD, trading, and withdrawal status.
+    ///      `tradingActive` and `withdrawalLive` remain false. `withdrawalLive` describes new LP claim funding, not
+    ///      claims already held in vault escrow.
+    /// @return viewData Protocol phase, stored mark, oracle, FAD, trading, and redemption-funding status.
     function getProtocolStatus() external view returns (PerpsViewTypes.ProtocolStatusView memory viewData) {
         return _getProtocolStatusView();
     }
 
     /// @notice Builds the position view and applies the FAD maintenance ratio when the FAD window is active.
-    /// @dev Maintenance notional is marked at `ENGINE.lastMarkPrice()` and integer division rounds down.
+    /// @dev Maintenance notional is marked at `ENGINE.lastMarkPrice()` and integer division rounds down. Carry is first
+    ///      projected against eligible free settlement; any uncovered remainder independently sets `liquidatable`.
     /// @param account Canonical perps account to inspect.
     /// @return viewData Zeroed for no position; otherwise the current compact position view.
     function _getPositionView(
@@ -193,12 +343,14 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
         viewData.maintenanceMarginUsdc = (notionalUsdc * requiredBps) / 10_000;
     }
 
-    /// @notice Builds a tranche view from its ERC-4626 vault and pool-level withdrawal constraints.
+    /// @notice Builds a tranche view from its ERC-4626 vault and pool-level asynchronous-entry/exit constraints.
     /// @dev Returns a zeroed view for a zero vault address. An empty vault reports a nominal `1e18`; otherwise the
     ///      raw `(totalAssets * 1e18) / totalSupply` quotient is returned without decimal normalization.
     /// @param vault ERC-4626 tranche vault to inspect.
     /// @param isSenior True for the senior tranche and false for the junior tranche.
-    /// @return viewData Compact tranche view.
+    /// @return viewData Compact tranche view. The legacy `maxWithdrawUsdc` field is retained for ABI stability but is
+    ///         reinterpreted as the current queue-funding capacity; `withdrawEnabled` reports whether new funding can
+    ///         settle and does not gate claims already backed by vault escrow.
     function _getTrancheView(
         address vault,
         bool isSenior

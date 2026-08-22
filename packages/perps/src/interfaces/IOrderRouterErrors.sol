@@ -16,6 +16,8 @@ interface IOrderRouterErrors {
 
     /// @notice An order commit supplied a zero position-size delta.
     error OrderRouter__ZeroSize();
+    /// @notice An order size is not an exact multiple of the canonical 100-token position lot.
+    error OrderRouter__InvalidSizeQuantum();
     /// @notice A commit failed a compact economic or planner-derived validation rule.
     /// @param code Numeric validation code; current code `11` denotes a below-minimum notional or close-size floor.
     error OrderRouter__CommitValidation(uint8 code);
@@ -82,7 +84,7 @@ interface IOrderRouterErrors {
     error OrderRouter__SideMismatch();
     /// @notice A close commit would reduce more than the position remaining after earlier queued orders.
     error OrderRouter__SizeExceedsQueued();
-    /// @notice Free settlement or proportional active margin cannot back the requested margin or execution bounty.
+    /// @notice Free settlement cannot back the requested margin or execution bounty.
     error OrderRouter__InsufficientFreeEquity();
     /// @notice Committing another order would exceed the per-account pending-order limit.
     error OrderRouter__TooManyPendingOrders();

@@ -77,7 +77,6 @@ library CfdEnginePlanTypes {
     /// @param accountBuckets Aggregate clearinghouse custody buckets for `account`.
     /// @param lockedBuckets Typed clearinghouse margin buckets for `account`.
     /// @param marginReservationIds Reserved legacy context; canonical builders leave it empty and plans do not read it.
-    /// @param accumulatedBadDebtUsdc Protocol bad debt at snapshot time; diagnostic context not read by current plans.
     /// @param unsettledCarryUsdc Carry already checkpointed but not yet realized for `account`.
     /// @param totalTraderClaimBalanceUsdc Aggregate outstanding trader-claim liability.
     /// @param traderClaimBalanceForAccount Outstanding trader claim owned by `account`.
@@ -90,6 +89,7 @@ library CfdEnginePlanTypes {
     /// @param frozenCloseSpreadBps Spread charged on oracle-frozen close notional, in basis points.
     struct RawSnapshot {
         CfdTypes.Position position;
+        uint256 positionEntryCostUsdcAtoms;
         address account;
 
         uint256 currentTimestamp;
@@ -106,10 +106,13 @@ library CfdEnginePlanTypes {
 
         IMarginClearinghouse.AccountUsdcBuckets accountBuckets;
         IMarginClearinghouse.LockedMarginBuckets lockedBuckets;
+        uint256 liquidationReserveUsdc;
+        uint256 actionReserveUsdc;
+        uint256 vpiRebateReserveUsdc;
+        uint256 protectedExecutionBountyUsdc;
 
         uint64[] marginReservationIds;
 
-        uint256 accumulatedBadDebtUsdc;
         uint256 unsettledCarryUsdc;
         uint256 totalTraderClaimBalanceUsdc;
         uint256 traderClaimBalanceForAccount;
@@ -156,7 +159,13 @@ library CfdEnginePlanTypes {
         /// @notice Post-trade position margin or equity fails the initial-margin and liquidation checks.
         INSUFFICIENT_INITIAL_MARGIN,
         /// @notice Projected effective solvency assets fall below the maximum liability envelope.
-        SOLVENCY_EXCEEDED
+        SOLVENCY_EXCEEDED,
+        /// @notice Requested size is not divisible by the canonical 100-token position quantum.
+        INVALID_SIZE_QUANTUM,
+        /// @notice Order-supplied margin cannot fund the position's required dedicated liquidation reserve.
+        LIQUIDATION_RESERVE_UNFUNDED,
+        /// @notice Rebate cash plus newly supplied pledge cannot fully back the resulting negative lifetime VPI.
+        VPI_REBATE_RESERVE_UNFUNDED
     }
 
     /// @notice Planned open/increase result and all values needed by the settlement sidecar.
@@ -176,7 +185,7 @@ library CfdEnginePlanTypes {
     /// @param sideMaxProfitIncrease Increase in the aggregate side maximum-profit envelope, in 6-decimal USDC.
     /// @param tradeCostUsdc Signed VPI plus execution fee; positive debits the account and negative rebates it.
     /// @param marginDeltaUsdc Order margin supplied for the open/increase.
-    /// @param netMarginChange Signed 6-decimal USDC `marginDeltaUsdc - tradeCostUsdc` position-margin change.
+    /// @param netMarginChange Exact signed change in PnL pledge after action cost and liquidation-reserve carve-out.
     /// @param poolRebatePayoutUsdc Pool-funded cash needed when `tradeCostUsdc` is negative.
     /// @param executionFeeUsdc Execution fee included in `tradeCostUsdc`.
     /// @param pendingCarryUsdc Total checkpointed and indexed carry to realize before opening.
@@ -194,9 +203,12 @@ library CfdEnginePlanTypes {
         CfdTypes.Side posSide;
         uint256 newPosSize;
         uint256 newPosEntryPrice;
+        uint256 newPosEntryCostUsdcAtoms;
         int256 posVpiAccruedDelta;
         uint256 posMaxProfitIncrease;
         uint256 positionMarginAfterOpen;
+        uint256 liquidationReserveBeforeUsdc;
+        uint256 liquidationReserveAfterUsdc;
 
         uint256 sideOiIncrease;
         int256 sideEntryNotionalDelta;
@@ -210,6 +222,10 @@ library CfdEnginePlanTypes {
 
         uint256 executionFeeUsdc;
         uint256 pendingCarryUsdc;
+
+        uint256 vpiRebateReserveBeforeUsdc;
+        uint256 vpiRebateReserveAfterUsdc;
+        uint256 vpiRebateReserveFromPledgeUsdc;
 
         uint256 sideTotalMarginBefore;
         uint256 sideTotalMarginAfterOpen;
@@ -231,8 +247,12 @@ library CfdEnginePlanTypes {
         CLOSE_SIZE_EXCEEDS,
         /// @notice A partial close would leave less margin than the configured minimum bounty.
         DUST_POSITION,
-        /// @notice A partial close has an uncollectible loss while position margin must remain locked.
-        PARTIAL_CLOSE_UNDERWATER
+        /// @notice Requested close size is not divisible by the canonical 100-token position quantum.
+        INVALID_SIZE_QUANTUM,
+        /// @notice A partial close cannot collect every assessed action charge without touching protected collateral.
+        PARTIAL_ACTION_CHARGE_UNCOLLECTIBLE,
+        /// @notice Dedicated reserve does not fully back the position's negative lifetime-VPI obligation.
+        VPI_REBATE_RESERVE_UNDERFUNDED
     }
 
     /// @notice Sign of the close settlement after realized PnL, VPI, fees, spread, and pending carry.
@@ -270,13 +290,13 @@ library CfdEnginePlanTypes {
     /// @param existingTraderClaimConsumedUsdc `LOSS`-only existing claim value netted against collection shortfall.
     /// @param existingTraderClaimRemainingUsdc `LOSS`-only account claim remaining after netting; otherwise default zero.
     /// @param traderClaimFeeRecoveryUsdc `LOSS`-only consumed claim allocated to an uncollected execution fee.
-    /// @param lossResult `LOSS`-only seized collateral, fee collection, shortfall, and pre-netting bad-debt breakdown.
+    /// @param lossResult `LOSS`-only seized collateral, fee collection, shortfall, and pre-netting write-off breakdown.
     /// @param lossConsumption `LOSS`-only clearinghouse buckets consumed to collect the close loss.
     /// @param syncMarginQueueAmount `LOSS`-only other locked margin consumed; nonzero requests router queue sync.
     /// @param executionFeeUsdc Fee included in close economics; for a loss it is limited to retained, collected, and
     ///        claim-recovered amounts.
     /// @param protocolFeeTopUpUsdc Additional unreserved pool cash planned for the protocol treasury fee credit.
-    /// @param badDebtUsdc Loss still uncovered after collateral and existing-claim netting.
+    /// @param badDebtUsdc Compatibility diagnostic for price loss above claim-plus-pledge collection; never stored debt.
     /// @param pendingCarryUsdc Total checkpointed and indexed carry included in close settlement.
     /// @param totalMarginBefore Aggregate selected-side position margin before the close, in 6-decimal USDC.
     /// @param totalMarginAfterClose Projected aggregate selected-side margin after the close, in 6-decimal USDC.
@@ -295,6 +315,9 @@ library CfdEnginePlanTypes {
 
         uint256 posMarginAfter;
         uint256 posSizeDelta;
+        uint256 posEntryPriceAfter;
+        uint256 posEntryCostAfterUsdcAtoms;
+        uint256 liquidationReserveReleaseUsdc;
         uint256 posMaxProfitReduction;
         int256 posVpiAccruedReduction;
         bool deletePosition;
@@ -308,6 +331,30 @@ library CfdEnginePlanTypes {
 
         SettlementType settlementType;
         uint256 lossUsdc;
+
+        uint256 priceGainUsdc;
+        uint256 priceLossUsdc;
+        uint256 pricePnlClaimConsumedUsdc;
+        uint256 pricePnlPledgeConsumedUsdc;
+        uint256 priceLossWrittenOffUsdc;
+
+        uint256 actionChargeAssessedUsdc;
+        uint256 actionChargeWithheldUsdc;
+        uint256 actionChargeToCollectUsdc;
+        uint256 actionReserveConsumedUsdc;
+        uint256 actionCommittedMarginConsumedUsdc;
+        uint256 actionChargeCollectedUsdc;
+        uint256 actionChargeWaivedUsdc;
+        uint256 actionProtocolFeeCreditedUsdc;
+        uint256 vpiRebateReserveBeforeUsdc;
+        uint256 vpiRebateReserveAfterUsdc;
+        uint256 vpiRebateReserveConsumedUsdc;
+        uint256 actionRebateUsdc;
+        uint256 pricePayoutUsdc;
+        bool pricePayoutIsImmediate;
+        bool pricePayoutCreatesClaim;
+        uint256 actionRebatePaidUsdc;
+        uint256 actionRebateWaivedUsdc;
 
         uint256 freshTraderPayoutUsdc;
         bool freshPayoutIsImmediate;
@@ -342,8 +389,8 @@ library CfdEnginePlanTypes {
 
     /// @notice Planned full-position liquidation and all values needed by the settlement sidecar.
     /// @dev When `liquidatable` is false, only pre-check diagnostic fields are authoritative.
-    /// @param liquidatable Whether equity is at or below the active maintenance/FAD requirement.
-    /// @param riskState Price PnL, carry-adjusted equity, notional, margin requirement, and liquidation test.
+    /// @param liquidatable Whether P+C price equity breaches the active requirement or an independent delinquency applies.
+    /// @param riskState Exact price PnL, P+C equity, notional, margin requirement, and price-risk liquidation test.
     /// @param liquidationState Liquidation equity and total-charge split calculation.
     /// @param side Side of the position being liquidated.
     /// @param posSize Full position size removed, with 18 decimals.
@@ -360,18 +407,18 @@ library CfdEnginePlanTypes {
     /// @param lpLiquidationFeeUsdc Remaining LP share transferred to the HousePool.
     /// @param liquidationReachableCollateralUsdc Terminal account settlement reachable before the charge and settlement.
     /// @param residualUsdc Signed 6-decimal USDC liquidation equity remaining after the total charge.
-    /// @param residualPlan Clearinghouse mutation plan whose nested bad debt is the raw negative residual before charge-
-    ///        subsidy adjustment and existing-claim recovery; final recognized debt is `badDebtUsdc`.
+    /// @param residualPlan Clearinghouse mutation plan whose nested compatibility field reports the raw negative
+    ///        residual before charge-subsidy adjustment and existing-claim recovery; no value is accumulated as debt.
     /// @param settlementSeizedUsdc Total existing account settlement transferred to the HousePool, including the LP fee.
     /// @param settlementRetainedUsdc Existing account settlement retained to satisfy positive residual equity.
     /// @param freshTraderPayoutUsdc Positive residual equity not already present in retained settlement.
     /// @param freshPayoutIsImmediate Whether current unreserved pool cash can service the fresh payout.
     /// @param freshPayoutCreatesClaim Whether the fresh payout is expected to remain a trader-claim liability.
-    /// @param existingTraderClaimConsumedUsdc Existing claim value netted against liquidation bad debt.
+    /// @param existingTraderClaimConsumedUsdc Existing claim value netted once against exact liquidation price loss.
     /// @param existingTraderClaimRemainingUsdc Account claim balance remaining after planned netting.
     /// @param syncMarginQueueAmount Other locked margin unlocked; a nonzero value requests router queue sync.
-    /// @param badDebtUsdc Liquidation loss still uncovered after existing-claim netting.
-    /// @param pendingCarryUsdc Total checkpointed and indexed carry included in liquidation equity.
+    /// @param badDebtUsdc Compatibility diagnostic for price loss above claim-plus-pledge collection; never stored debt.
+    /// @param pendingCarryUsdc Total checkpointed and indexed carry handled through the independent action path.
     /// @param solvency Projected post-liquidation solvency and degraded-mode flags.
     /// @param account Account copied from the snapshot and liquidated during settlement.
     /// @param price Liquidation price capped at `RawSnapshot.capPrice`, with 8 decimals.
@@ -386,6 +433,7 @@ library CfdEnginePlanTypes {
         uint256 posMargin;
         uint256 posMaxProfit;
         uint256 posEntryPrice;
+        uint256 posEntryCostUsdcAtoms;
 
         uint256 sideOiDecrease;
         uint256 sideMaxProfitDecrease;
@@ -397,6 +445,23 @@ library CfdEnginePlanTypes {
         uint256 protocolLiquidationFeeUsdc;
         uint256 lpLiquidationFeeUsdc;
         uint256 liquidationReachableCollateralUsdc;
+
+        uint256 priceGainUsdc;
+        uint256 priceLossUsdc;
+        uint256 pricePnlClaimConsumedUsdc;
+        uint256 pricePnlPledgeConsumedUsdc;
+        uint256 priceLossWrittenOffUsdc;
+
+        uint256 actionChargeAssessedUsdc;
+        uint256 actionChargeWithheldUsdc;
+        uint256 actionChargeToCollectUsdc;
+        uint256 actionReserveConsumedUsdc;
+        uint256 actionCommittedMarginConsumedUsdc;
+        uint256 actionChargeCollectedUsdc;
+        uint256 actionChargeWaivedUsdc;
+        uint256 vpiRebateReserveBeforeUsdc;
+        uint256 vpiRebateReserveAfterUsdc;
+        uint256 vpiRebateReserveConsumedUsdc;
 
         int256 residualUsdc;
         MarginClearinghouseAccountingLib.LiquidationResidualPlan residualPlan;

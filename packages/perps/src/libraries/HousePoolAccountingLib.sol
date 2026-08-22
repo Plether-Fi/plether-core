@@ -21,18 +21,12 @@ library HousePoolAccountingLib {
         uint256 freeUsdc;
     }
 
-    /// @notice Pool assets distributable to tranche claims after trader claims and the selected MtM liability.
-    /// @param physicalAssets Canonical physical pool assets.
-    /// @param traderClaimLiabilities Outstanding trader-claim liability senior to LP claims.
-    /// @param cashAfterTraderClaimLiabilities Physical assets net of trader claims, floored at zero.
-    /// @param mtm Selected mark-to-market liability for this reconciliation context.
-    /// @param distributable Cash after trader claims and MtM liability, floored at zero.
+    /// @notice Pool assets distributable to tranche claims after trader claims and the canonical terminal delta.
+    /// @param distributable Terminal LP equity after trader claims and the signed delta, floored at zero.
+    /// @param deficit Trader claims and terminal payables above physical assets and terminal receivables.
     struct ReconcileSnapshot {
-        uint256 physicalAssets;
-        uint256 traderClaimLiabilities;
-        uint256 cashAfterTraderClaimLiabilities;
-        uint256 mtm;
         uint256 distributable;
+        uint256 deficit;
     }
 
     /// @notice Mark-freshness rule extracted from an engine accounting snapshot.
@@ -59,43 +53,27 @@ library HousePoolAccountingLib {
             snapshot.physicalAssets > snapshot.reserved ? snapshot.physicalAssets - snapshot.reserved : 0;
     }
 
-    /// @notice Builds a reconciliation snapshot using the conservative withdrawal-side unrealized MtM liability.
+    /// @notice Builds the single canonical terminal-NAV snapshot shared by LP entry and exit pricing.
     /// @param engineSnapshot Engine accounting inputs.
-    /// @return snapshot Physical cash remaining after trader claims and `unrealizedMtmLiabilityUsdc`.
+    /// @return snapshot Terminal LP equity and explicit deficit after claims and the signed terminal delta.
     function buildReconcileSnapshot(
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory engineSnapshot
     ) internal pure returns (ReconcileSnapshot memory snapshot) {
-        return _buildReconcileSnapshot(engineSnapshot, engineSnapshot.unrealizedMtmLiabilityUsdc);
-    }
+        uint256 terminalAssets = engineSnapshot.physicalAssetsUsdc;
+        uint256 terminalLiabilities = engineSnapshot.traderClaimBalanceUsdc;
+        int256 terminalDelta = engineSnapshot.terminalLpPriceDeltaUsdc;
+        if (terminalDelta >= 0) {
+            terminalAssets += uint256(terminalDelta);
+        } else {
+            // This form also handles `type(int256).min` without negating it directly.
+            terminalLiabilities += uint256(-(terminalDelta + 1)) + 1;
+        }
 
-    /// @notice Builds a reconciliation snapshot using the deposit-pricing MtM liability.
-    /// @param engineSnapshot Engine accounting inputs.
-    /// @return snapshot Physical cash remaining after trader claims and `depositMtmLiabilityUsdc`.
-    function buildDepositReconcileSnapshot(
-        HousePoolEngineViewTypes.HousePoolInputSnapshot memory engineSnapshot
-    ) internal pure returns (ReconcileSnapshot memory snapshot) {
-        return _buildReconcileSnapshot(engineSnapshot, engineSnapshot.depositMtmLiabilityUsdc);
-    }
-
-    /// @notice Builds reconciliation accounting against an explicitly selected MtM liability.
-    /// @dev Each subtraction saturates at zero. The helper does not use `netPhysicalAssetsUsdc`, max liability, or
-    ///      supplemental reservations from the engine snapshot.
-    /// @param engineSnapshot Engine accounting inputs supplying physical assets and trader claims.
-    /// @param mtmLiabilityUsdc Mark-to-market liability to reserve after trader claims.
-    /// @return snapshot Reconciliation accounting values in 6-decimal USDC.
-    function _buildReconcileSnapshot(
-        HousePoolEngineViewTypes.HousePoolInputSnapshot memory engineSnapshot,
-        uint256 mtmLiabilityUsdc
-    ) private pure returns (ReconcileSnapshot memory snapshot) {
-        snapshot.physicalAssets = engineSnapshot.physicalAssetsUsdc;
-        snapshot.traderClaimLiabilities = engineSnapshot.traderClaimBalanceUsdc;
-        snapshot.cashAfterTraderClaimLiabilities = engineSnapshot.physicalAssetsUsdc > snapshot.traderClaimLiabilities
-            ? engineSnapshot.physicalAssetsUsdc - snapshot.traderClaimLiabilities
-            : 0;
-        snapshot.mtm = mtmLiabilityUsdc;
-        snapshot.distributable = snapshot.cashAfterTraderClaimLiabilities > snapshot.mtm
-            ? snapshot.cashAfterTraderClaimLiabilities - snapshot.mtm
-            : 0;
+        if (terminalAssets >= terminalLiabilities) {
+            snapshot.distributable = terminalAssets - terminalLiabilities;
+        } else {
+            snapshot.deficit = terminalLiabilities - terminalAssets;
+        }
     }
 
     /// @notice Extracts whether mark freshness is required and, if so, its permitted age.

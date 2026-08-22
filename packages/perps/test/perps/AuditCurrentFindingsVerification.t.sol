@@ -10,6 +10,7 @@ import {HousePool} from "@plether/perps/HousePool.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
+import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
@@ -21,7 +22,7 @@ contract AuditCurrentFindingsFailing is BasePerpTest {
     address alice = address(0xA11CE);
     address bob = address(0xB0B);
 
-    function test_C3_RealizedBadDebtShouldNotBeDoubleCounted() public {
+    function test_C3_DiagnosticPriceWriteoffShouldNotBeDoubleCounted() public {
         address winner = address(0xAAA1);
         address loser = address(0xBBB1);
         address winnerAccount = winner;
@@ -36,11 +37,22 @@ contract AuditCurrentFindingsFailing is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(loserAccount, 1e8);
+        uint256 priceLossUsdc = uint256(-preview.pnlUsdc);
+        uint256 collectibleCapUsdc =
+            engineAccountLens.getAccountLedgerSnapshot(loserAccount).terminalPriceCollectibleCapUsdc;
+        assertGt(priceLossUsdc, collectibleCapUsdc, "Setup must contain an uncollectible terminal price tail");
+        assertEq(preview.badDebtUsdc, 0, "V2 price tails are diagnostic writeoffs, not protocol debt");
+
         uint256 depth = pool.totalAssets();
         vm.prank(address(router));
         engine.liquidatePosition(loserAccount, 1e8, depth, uint64(block.timestamp), address(this));
 
-        assertEq(_poolMtmAdjustment(), 75_000e6, "MtM should use the conservative post-liquidation envelope");
+        assertEq(
+            _poolMtmAdjustment(),
+            50_000e6,
+            "Exact terminal NAV should retain only the surviving winner liability after the loser's writeoff"
+        );
     }
 
     function test_H1_UpdateMarkPriceMustRejectOlderPublishTime() public {
@@ -91,19 +103,32 @@ contract AuditCurrentFindingsFailing_BountyCap is BasePerpTest {
         address trader = ACCOUNT_ID;
         _fundTrader(trader, 100e6);
 
-        _open(ACCOUNT_ID, CfdTypes.Side.BULL, 100e18, 6e6, 1e8);
+        _open(ACCOUNT_ID, CfdTypes.Side.BULL, CfdTypes.SIZE_QUANTUM, 12e6, 1e8);
 
+        uint256 freeSettlementUsdc = _freeSettlementUsdc(ACCOUNT_ID);
         vm.prank(trader);
-        clearinghouse.withdraw(ACCOUNT_ID, 94e6);
+        clearinghouse.withdraw(ACCOUNT_ID, freeSettlementUsdc);
 
         vm.warp(1_709_971_200); // Saturday during FAD
         uint256 depth = pool.totalAssets();
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(ACCOUNT_ID, 1.01e8);
+        uint256 liquidationReserveBefore = clearinghouse.liquidationReserveUsdc(ACCOUNT_ID);
+        assertTrue(preview.liquidatable, "FAD maintenance must make the positive-equity fixture liquidatable");
+        assertEq(
+            preview.liquidationChargeUsdc,
+            liquidationReserveBefore,
+            "Liquidation charge must be capped by the dedicated reserve"
+        );
 
         vm.prank(address(router));
         uint256 bounty = engine.liquidatePosition(ACCOUNT_ID, 1.01e8, depth, uint64(block.timestamp), address(this));
 
-        assertEq(bounty, preview.keeperBountyUsdc, "Keeper bounty should use the explicit subsidy model");
+        assertEq(bounty, preview.keeperBountyUsdc, "Keeper bounty must match the dedicated-reserve preview");
+        assertEq(
+            bounty,
+            (liquidationReserveBefore * _riskParams().keeperShareBps) / 10_000,
+            "Keeper must receive only its configured share of the funded liquidation reserve"
+        );
     }
 
 }
@@ -139,7 +164,7 @@ contract AuditCurrentFindingsVerifiedInvalid is BasePerpTest {
         vm.startPrank(recapLp);
         usdc.approve(address(seniorVault), type(uint256).max);
         vm.expectRevert(TrancheVault.TrancheVault__TerminallyWiped.selector);
-        seniorVault.deposit(10_000e6, recapLp);
+        seniorVault.requestDeposit(10_000e6, recapLp);
         vm.stopPrank();
     }
 
@@ -162,6 +187,8 @@ contract AuditCurrentFindingsVerifiedInvalid_Mev is BasePerpTest {
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = _deployEngine(_riskParams());
         _syncEngineAdmin();
+        terminalNavBook = new TerminalNavBookV2(address(engine), uint32(CAP_PRICE));
+        engine.setTerminalNavBook(address(terminalNavBook));
         pool = new HousePool(address(usdc), address(engine));
 
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");
@@ -258,8 +285,8 @@ contract AuditCurrentFindingsVerifiedInvalid_RebateIlliquidity is BasePerpTest {
         );
         assertEq(
             code,
-            uint8(CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES),
-            "rebate-drained opens should surface the fee-drain typed failure before execution"
+            uint8(CfdEnginePlanTypes.OpenRevertCode.VPI_REBATE_RESERVE_UNFUNDED),
+            "rebate-bearing opens must surface their independent VPI-reserve funding failure"
         );
     }
 

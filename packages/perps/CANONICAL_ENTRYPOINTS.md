@@ -9,7 +9,10 @@ For audit review that needs policy tables and read-surface canonicality in one p
 - Margin actions: `MarginClearinghouse.depositMargin(uint256)` and `MarginClearinghouse.withdrawMargin(uint256)`
 - Trade actions: `OrderRouter.commitOrder(CfdTypes.Side side, uint256 sizeDelta, uint256 marginDelta, uint256 targetPrice, bool isClose)`
 - Trader claim settlement: `CfdEngine.settleTraderClaim(address account)` for the account owner
-- Compact reads: `PerpsPublicLens`
+- Compact reads: `PerpsPublicLens`; use `getTrancheQueues(bool)` for matured heads/backlog and
+  `getLpRequestState(bool,uint256,address)` for controller-specific pending/claimable balances. The legacy
+  `TrancheView.maxWithdrawUsdc` field now means current pool-level queue-funding capacity, not synchronous holder
+  withdrawal capacity.
 - Trade-ticket previews: `CfdEngineLens.previewOpen(...)` and `CfdEngineLens.previewClose(...)`
 
 Use these interfaces:
@@ -23,9 +26,19 @@ Do not use the wide clearinghouse reservation API or detailed accounting lenses 
 
 ## LPs
 
-- Senior and junior user actions go through the configured `TrancheVault`: `deposit`, `mint`, `requestDeposit`,
-  `cancelPendingDeposit`, `claimDepositShares`, `withdraw`, and `redeem`
-- Delayed-batch finalization: permissionless `TrancheVault.finalizeDepositEpoch(uint256)`
+- Senior and Junior entry is asynchronous through the configured `TrancheVault`: request assets with
+  `requestDeposit(assets, controller, owner)`, inspect pending/claimable state, and use ERC-4626 `deposit` or `mint`
+  only to claim an activated request.
+- LP exits are asynchronous. A holder calls `requestRedeem(shares, controller, owner)`; funded requests are exposed by
+  `pendingRedeemRequest` / `claimableRedeemRequest` and claimed through ERC-4626 `redeem` or `withdraw`.
+- A share-delivering claim, redemption cancellation, or redemption refund may target the controller or an account with
+  no existing vault shares. This prevents unsolicited dust from resetting another holder's whole-balance cooldown;
+  `maxDeposit(controller)` and `maxMint(controller)` remain receiver-independent controller limits.
+- Epoch clearing is permissionless only through `HousePool.settleLpEpoch()`. It reconciles once, processes
+  matured Senior withdrawal demand before Junior demand, then finalizes Junior deposits before Senior deposits. If
+  bounded Senior processing stops with an eligible head remaining, the call must stop before Junior. Direct per-vault
+  deposit finalization and direct pool withdrawal hooks are not product entrypoints. A pass that advances no queue item
+  reverts, rolling back its reconcile and carry checkpoints.
 - Compact reads: `PerpsPublicLens`
 - Capacity-specific reads: `HousePool.getSeniorDepositCapacity()`, `reservedSeniorDepositAssetsUsdc()`, and
   `areSeniorDepositReservationsWithinLimits()`; these intentionally are not added to the compact liquidity lens
@@ -33,11 +46,13 @@ Do not use the wide clearinghouse reservation API or detailed accounting lenses 
 Use these interfaces:
 
 - `IPerpsLPViews`
+- `IAsyncTrancheVault`
+- `IERC7540` and `IERC7575` for standard-compatible integrations
 
-`IPerpsLPActions` describes configured-vault-to-`HousePool` mutation hooks. It is not a direct user surface:
-`depositSenior`, `reserveSeniorDeposit`, `releaseSeniorDepositReservation`, and `depositReservedSenior` authorize only
-the configured senior vault. Treat bootstrap, seed-lifecycle, and other tranche setup mechanics as admin/setup
-concerns rather than the standard LP surface.
+`IPerpsLPActions` describes configured-vault-to-`HousePool` mutation hooks. It is not a direct user surface. Senior
+reservation/release hooks authorize only the configured vaults. Epoch withdrawal
+funding and delayed-deposit activation are coordinated by `HousePool.settleLpEpoch()`. Treat bootstrap,
+seed-lifecycle, and other tranche setup mechanics as admin/setup concerns rather than the standard LP surface.
 
 ## Keepers
 
@@ -45,6 +60,7 @@ concerns rather than the standard LP surface.
 - Batch execution: `OrderRouter.executeOrderBatch(uint64,bytes[])`
 - Liquidation: `OrderRouter.executeLiquidation(address,bytes[])`
 - Batch liquidation: `OrderRouter.executeLiquidationBatch(address[],bytes[])`
+- LP epoch clearing: `HousePool.settleLpEpoch()`
 
 Use this interface:
 

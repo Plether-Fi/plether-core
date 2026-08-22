@@ -23,6 +23,11 @@ The bootstrap script handles operator actions after deploy:
 - minting mock USDC to test users
 - activating trading
 
+LP deposits and redemptions share the vaults' deterministic one-hour epoch clock. After bootstrap, any account may
+clear matured epochs through `HousePool.settleLpEpoch()`; no privileged keeper role is required. Each call
+examines at most 16 nonempty epochs in each tranche phase and must be repeated when older backlog remains. A call that
+cannot advance any queue item reverts without retaining reconcile or carry-checkpoint side effects.
+
 ## Deployment Shape
 
 The deploy script creates and wires:
@@ -30,20 +35,22 @@ The deploy script creates and wires:
 1. `MockUSDC`
 2. `MarginClearinghouse`
 3. `CfdEngine`
-4. `CfdEnginePlanner`
-5. `CfdEngineSettlementSidecar`
-6. `CfdEngineAdmin`
-7. `HousePool`
-8. `TrancheVault` senior
-9. `TrancheVault` junior
-10. `CfdEngineAccountLens`
-11. `CfdEngineLens`
-12. `OrderRouter`
-13. `PerpsPublicLens`
+4. `TerminalNavBookV2`
+5. `CfdEnginePlanner`
+6. `CfdEngineSettlementSidecar`
+7. `CfdEngineAdmin`
+8. `HousePool`
+9. `TrancheVault` senior
+10. `TrancheVault` junior
+11. `CfdEngineAccountLens`
+12. `CfdEngineLens`
+13. `OrderRouter`
+14. `PerpsPublicLens`
 
 It then performs the required set-once wiring:
 
 - `CfdEngine.setDependencies(...)`
+- `CfdEngine.setTerminalNavBook(...)`
 - `HousePool.setSeniorVault(...)`
 - `HousePool.setJuniorVault(...)`
 - `CfdEngine.setPool(...)`
@@ -53,8 +60,18 @@ It then performs the required set-once wiring:
 Important:
 
 - `HousePool` remains inactive after deployment.
+- `TerminalNavBookV2` must be deployed empty, immutable-bound to the new Engine, and wired before any position
+  exposure. `CfdEngine.setTerminalNavBook(...)` validates matching Engine, `CAP_PRICE`, `SIZE_QUANTUM = 1e20`, and
+  zero book version/totals before accepting it once.
 - Trading does not go live until a finite capacity configuration completes its 48-hour timelock, both seed positions
   exist within those limits, and `activateTrading()` is called.
+- Both configured vaults must report the same pool binding, and the pool must expose the expected shared epoch clock
+  and per-phase bound. Deployment verification must reject a mixed old/new vault pair because direct legacy
+  finalization would bypass synchronized Senior/Junior ordering.
+- Deploy and bootstrap verification require each vault to report itself from `share()`, map its configured asset back
+  to itself through the ERC-7575 share lookup, and advertise ERC-165 plus the ERC-7540 operator (`0xe3bc4e65`),
+  async-deposit (`0xce3bbe50`), async-redeem (`0x620ee8e4`), ERC-7575 vault (`0x2f0a18c5`), and ERC-7575 share-token
+  (`0xf815c03d`) interface ids.
 
 ## Oracle Configuration
 
@@ -91,17 +108,23 @@ The next Arbitrum Sepolia perps deployment uses these initial defaults:
 | `keeperShareBps` | `5_000` (50% of collected charge to keeper) |
 | `protocolShareBps` | `0` (protocol liquidation fee disabled; remaining 50% goes to LPs) |
 | `executionFeeBps` | `4` |
+| `positionSizeQuantum` | `1e20` raw units (100 synthetic tokens) |
 | `fadRunwaySeconds` | `1 hours` |
 | `basketMaxConfidenceRatioBps` | `10` |
 | `adverseConfidenceMultiplierBps` | `2_000` |
 | `maxSeniorExposureUsdc` | Operator-supplied finite USDC amount |
 | `maxSeniorShareBps` | Operator-supplied value below `10_000` |
 
-`frozenCloseSpreadBps = 50` charges a fixed 0.50% spread on reduced notional for voluntary close/reduce execution only while `oracleFrozen`. Normal signed VPI and its lifetime rebate clamp remain active. For oracle-frozen voluntary closes, the spread replaces rather than compounds with the Pyth adverse-confidence adjustment; live/FAD-only closes and liquidations retain that adjustment. The spread belongs to LPs rather than protocol treasury and does not apply to liquidations. A terminal full close waives any uncollectible portion instead of adding bad debt, while a partial close must settle its full obligation.
+`frozenCloseSpreadBps = 50` charges a fixed 0.50% spread on reduced notional for voluntary close/reduce execution only while `oracleFrozen`. Normal signed VPI and its lifetime rebate clamp remain active. For oracle-frozen voluntary closes, the spread replaces rather than compounds with the Pyth adverse-confidence adjustment; live/FAD-only closes and liquidations retain that adjustment. The spread belongs to LPs rather than protocol treasury and does not apply to liquidations. A terminal full close waives any uncollectible portion without creating a protocol liability or terminal deficit, while a partial close must settle this separate spread obligation in full. Price loss beyond the terminal collectible cap is a diagnostic write-off and does not block the partial close.
 
 `frozenCloseSpreadBps` is part of `CfdEngineAdmin.EngineRiskConfig` and therefore uses the 48-hour propose/finalize timelock. Deployments and updates reject zero and values above `1_000` bps (10%). `keeperShareBps` and `protocolShareBps` use the same timelock; both may be zero, but their sum must not exceed `10_000`. Each configured allocation rounds down and LPs receive the exact liquidation-charge remainder.
 
-Adding `protocolShareBps` makes `RiskParams` a ten-field struct and changes its storage layout and tuple ABI. Deploy the engine, admin, router, and lenses from the same build on a fresh testnet deployment; do not mix these contracts with an older eight- or nine-field `riskParams()` deployment.
+Terminal NAV V2 changes position storage, clearinghouse bucket semantics, Engine and HousePool snapshot ABIs, and
+share-pricing economics. Deploy the Engine, book, clearinghouse, pool, vaults, router, sidecars, oracle, and lenses from
+the same build on a fresh testnet deployment. There is no backward-compatibility or in-place migration path, and no V2
+contract may be wired to an older stack. This build also includes the dedicated VPI rebate sub-reserve and its planner,
+sidecar, lens, and clearinghouse ABI fields; mixing contracts across that boundary can make a live negative VPI balance
+under-backed and must be rejected. The `RiskParams` tuple remains a ten-field ABI.
 
 `basketMaxConfidenceRatioBps = 10` accepts the neutral, pre-cap basket only when its weighted aggregate Pyth
 confidence is at most `0.10%` of its price:
@@ -157,6 +180,8 @@ source .env && forge script script/DeployPerpsArbitrumSepolia.s.sol:DeployPerpsA
 The script prints the deployed addresses to the console. Save at least:
 
 - `MockUSDC`
+- `CfdEngine`
+- `TerminalNavBookV2`
 - `HousePool`
 - `OrderRouter`
 
@@ -227,6 +252,10 @@ The configuration, seed, and activation phases of the bootstrap script are desig
 - it skips a seed if that side is already initialized
 - it skips activation if trading is already active
 
+Before proposing limits, seeding, or activation, bootstrap derives the Engine from `HousePool.ENGINE()` and verifies
+that a code-bearing `TerminalNavBookV2` is wired with matching Engine, cap, and 100-token quantum. A partial or
+misbound V2 stack fails closed.
+
 Test-user funding is intentionally not idempotent: each ready-state rerun mints the configured amounts again. Remove
 the test-user recipient/amount inputs after the intended funding run.
 
@@ -234,8 +263,15 @@ This is useful if the first bootstrap attempt completes only partially.
 
 ## Operational Notes
 
-- Perps contracts are non-upgradeable. Existing deployments do not gain these capacity controls; production rollout
-  requires a coordinated replacement stack. Migrating assets between stacks is explicitly outside this change.
+- Perps contracts are non-upgradeable. Synchronized async LP settlement therefore requires a coordinated replacement
+  stack; an existing `HousePool` cannot replace its set-once vaults and an existing engine cannot replace its pool.
+- This Terminal NAV V2 rollout is testnet-only and deliberately has no compatibility or migration path. Deploy a fresh
+  complete stack and leave the old instance untouched; importing old positions, shares, pending requests, or claim
+  escrow is out of scope.
+- Never wire one replacement vault to an old pool or one old vault to a replacement pool. Deploy and verify the engine,
+  terminal NAV book, clearinghouse, pool, both vaults, router/oracle, sidecars, and lenses as a single versioned unit.
+- `TerminalNavBookV2` has no owner repair or import function. Do not activate trading unless its Engine binding,
+  price cap, size quantum, and empty initial state were verified by the deploy transaction.
 - The bootstrap script only mints mock USDC. It does not fund users with ETH.
 - Test users still need Arbitrum Sepolia ETH from a faucet to submit transactions.
 - The deploy and bootstrap scripts currently assume the broadcaster owns the deployed contracts.
@@ -253,3 +289,5 @@ This is useful if the first bootstrap attempt completes only partially.
 6. Rerun the same bootstrap command to finalize, seed junior then senior, and activate trading.
 7. Fund any test wallets with Arbitrum Sepolia ETH.
 8. Start integration testing against `PerpsPublicLens`, `MarginClearinghouse`, `OrderRouter`, and `HousePool`.
+9. Submit deposit and redemption requests on both vaults, advance to a matured epoch, call
+   `HousePool.settleLpEpoch()`, and verify that funded claims can be pulled independently.

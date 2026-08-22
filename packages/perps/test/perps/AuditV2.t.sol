@@ -3,7 +3,6 @@ pragma solidity 0.8.35;
 
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import {CfdEngineLens} from "@plether/perps/CfdEngineLens.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
@@ -11,6 +10,7 @@ import {HousePool} from "@plether/perps/HousePool.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
+import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
@@ -123,8 +123,8 @@ contract AuditV2_C02_ReconcileTimeConsumptionTest is BasePerpTest {
 
         uint256 seniorBefore = pool.seniorPrincipal();
 
-        // Capture base timestamp before any warps (block.timestamp is cached per frame)
-        uint256 baseTs = SETUP_TIMESTAMP + 48 hours + 1;
+        // Capture the runtime timestamp after asynchronous setup has advanced the shared LP clock.
+        uint256 baseTs = block.timestamp;
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(baseTs));
@@ -202,6 +202,8 @@ contract AuditV2_C03_OracleFrozenCloseTest is BasePerpTest {
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = _deployEngine(_riskParams());
         _syncEngineAdmin();
+        terminalNavBook = new TerminalNavBookV2(address(engine), uint32(CAP_PRICE));
+        engine.setTerminalNavBook(address(terminalNavBook));
         pool = new HousePool(address(usdc), address(engine));
 
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");
@@ -305,9 +307,9 @@ contract AuditV2_H01_DepositStaleMark is BasePerpTest {
         vm.startPrank(attacker);
         usdc.approve(address(seniorVault), 100_000e6);
 
-        assertEq(seniorVault.maxDeposit(attacker), 0, "stale mark should zero senior maxDeposit");
-        vm.expectRevert(abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, attacker, 100_000e6, 0));
-        seniorVault.deposit(100_000e6, attacker);
+        assertEq(seniorVault.maxRequestDeposit(attacker), 0, "stale mark should zero senior request capacity");
+        vm.expectRevert(TrancheVault.TrancheVault__DepositsUnavailable.selector);
+        seniorVault.requestDeposit(100_000e6, attacker);
         vm.stopPrank();
     }
 
@@ -327,9 +329,9 @@ contract AuditV2_H01_DepositStaleMark is BasePerpTest {
         vm.startPrank(attacker);
         usdc.approve(address(juniorVault), 100_000e6);
 
-        assertEq(juniorVault.maxDeposit(attacker), 0, "stale mark should zero junior maxDeposit");
-        vm.expectRevert(abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, attacker, 100_000e6, 0));
-        juniorVault.deposit(100_000e6, attacker);
+        assertEq(juniorVault.maxRequestDeposit(attacker), 0, "stale mark should zero junior request capacity");
+        vm.expectRevert(TrancheVault.TrancheVault__DepositsUnavailable.selector);
+        juniorVault.requestDeposit(100_000e6, attacker);
         vm.stopPrank();
     }
 
@@ -367,16 +369,22 @@ contract AuditV2_H02_WeekendWithdrawalDoS is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, fridayPublishTime);
 
+        uint256 withdrawAmount = 50_000e6;
+        uint256 redeemShares = juniorVault.estimateWithdrawShares(withdrawAmount);
+        vm.prank(bob);
+        uint256 requestId = juniorVault.requestRedeem(redeemShares, bob, bob);
+
         uint256 saturdayNoon = FRIDAY_AFTER_CLOSE + 14 hours;
         vm.warp(saturdayNoon);
 
-        uint256 withdrawAmount = 50_000e6;
-
-        // Should succeed during FAD but reverts with MarkPriceStale
+        // The coordinated async exit remains live during the FAD window.
+        pool.settleLpEpoch();
+        uint256 claimableShares = juniorVault.claimableRedeemRequest(requestId, bob);
         vm.prank(bob);
-        juniorVault.withdraw(withdrawAmount, bob, bob);
+        uint256 withdrawnAssets = juniorVault.claimRedeem(requestId, claimableShares, bob, bob);
 
-        assertGt(usdc.balanceOf(bob), 0, "H-02: LP withdrawal must work during FAD window");
+        assertGt(withdrawnAssets, 0, "H-02: LP withdrawal must work during FAD window");
+        assertEq(usdc.balanceOf(bob), withdrawnAssets, "funded FAD exit should remain independently claimable");
     }
 
 }

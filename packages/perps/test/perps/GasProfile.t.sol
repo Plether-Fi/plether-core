@@ -13,6 +13,7 @@ import {HousePool} from "@plether/perps/HousePool.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
+import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {ICfdEngine} from "@plether/perps/interfaces/ICfdEngine.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
@@ -147,6 +148,8 @@ contract GasProfileTest is Test {
         CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(engine));
         CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
         engine.setDependencies(address(planner), address(settlement), address(engineAdmin));
+        TerminalNavBookV2 terminalNavBook = new TerminalNavBookV2(address(engine), uint32(CAP_PRICE));
+        engine.setTerminalNavBook(address(terminalNavBook));
         engineAccountLens = new CfdEngineAccountLens(address(engine));
         engineLens = new CfdEngineLens(address(engine));
         pool = new HousePool(usdc, address(engine));
@@ -192,11 +195,7 @@ contract GasProfileTest is Test {
         pool.initializeSeedPosition(true, seedAmount, address(this));
         pool.activateTrading();
 
-        _mintUsdc(lp, 1_000_000e6);
-        vm.startPrank(lp);
-        IERC20(usdc).approve(address(juniorVault), type(uint256).max);
-        juniorVault.deposit(1_000_000e6, lp);
-        vm.stopPrank();
+        _fundTrancheAsync(juniorVault, lp, 1_000_000e6);
     }
 
     // ==========================================
@@ -428,60 +427,58 @@ contract GasProfileTest is Test {
         emit log_named_uint("12_clearinghouse_withdraw", gas);
     }
 
-    // --- 13. juniorVault.deposit ---
-    function test_gas_13_juniorVault_deposit() public {
+    // --- 13. juniorVault.requestDeposit ---
+    function test_gas_13_juniorVault_requestDeposit() public {
         _mintUsdc(lp2, 100_000e6);
         vm.startPrank(lp2);
         IERC20(usdc).approve(address(juniorVault), type(uint256).max);
 
         uint256 g0 = gasleft();
-        juniorVault.deposit(100_000e6, lp2);
+        juniorVault.requestDeposit(100_000e6, lp2, lp2);
         uint256 gas = g0 - gasleft();
         vm.stopPrank();
-        emit log_named_uint("13_juniorVault_deposit", gas);
+        emit log_named_uint("13_juniorVault_requestDeposit", gas);
     }
 
-    // --- 14. juniorVault.withdraw ---
-    function test_gas_14_juniorVault_withdraw() public {
-        _mintUsdc(lp2, 100_000e6);
-        vm.startPrank(lp2);
-        IERC20(usdc).approve(address(juniorVault), type(uint256).max);
-        juniorVault.deposit(100_000e6, lp2);
+    // --- 14. juniorVault.requestRedeem ---
+    function test_gas_14_juniorVault_requestRedeem() public {
+        uint256 fundedShares = _fundTrancheAsync(juniorVault, lp2, 100_000e6);
         vm.warp(block.timestamp + 2 hours);
+        uint256 requestedShares = juniorVault.estimateWithdrawShares(50_000e6);
+        assertLe(requestedShares, fundedShares, "junior redeem setup exceeds funded shares");
 
+        vm.prank(lp2);
         uint256 g0 = gasleft();
-        juniorVault.withdraw(50_000e6, lp2, lp2);
+        juniorVault.requestRedeem(requestedShares, lp2, lp2);
         uint256 gas = g0 - gasleft();
-        vm.stopPrank();
-        emit log_named_uint("14_juniorVault_withdraw", gas);
+        emit log_named_uint("14_juniorVault_requestRedeem", gas);
     }
 
-    // --- 15. seniorVault.deposit ---
-    function test_gas_15_seniorVault_deposit() public {
+    // --- 15. seniorVault.requestDeposit ---
+    function test_gas_15_seniorVault_requestDeposit() public {
         _mintUsdc(lp2, 500_000e6);
         vm.startPrank(lp2);
         IERC20(usdc).approve(address(seniorVault), type(uint256).max);
 
         uint256 g0 = gasleft();
-        seniorVault.deposit(500_000e6, lp2);
+        seniorVault.requestDeposit(500_000e6, lp2, lp2);
         uint256 gas = g0 - gasleft();
         vm.stopPrank();
-        emit log_named_uint("15_seniorVault_deposit", gas);
+        emit log_named_uint("15_seniorVault_requestDeposit", gas);
     }
 
-    // --- 16. seniorVault.withdraw ---
-    function test_gas_16_seniorVault_withdraw() public {
-        _mintUsdc(lp2, 500_000e6);
-        vm.startPrank(lp2);
-        IERC20(usdc).approve(address(seniorVault), type(uint256).max);
-        seniorVault.deposit(500_000e6, lp2);
+    // --- 16. seniorVault.requestRedeem ---
+    function test_gas_16_seniorVault_requestRedeem() public {
+        uint256 fundedShares = _fundTrancheAsync(seniorVault, lp2, 500_000e6);
         vm.warp(block.timestamp + 2 hours);
+        uint256 requestedShares = seniorVault.estimateWithdrawShares(200_000e6);
+        assertLe(requestedShares, fundedShares, "senior redeem setup exceeds funded shares");
 
+        vm.prank(lp2);
         uint256 g0 = gasleft();
-        seniorVault.withdraw(200_000e6, lp2, lp2);
+        seniorVault.requestRedeem(requestedShares, lp2, lp2);
         uint256 gas = g0 - gasleft();
-        vm.stopPrank();
-        emit log_named_uint("16_seniorVault_withdraw", gas);
+        emit log_named_uint("16_seniorVault_requestRedeem", gas);
     }
 
     // --- 17. previewClose ---
@@ -523,11 +520,7 @@ contract GasProfileTest is Test {
     // --- 20. getPoolLiquidityView ---
     function test_gas_20_getPoolLiquidityView() public {
         // Add some state: positions + both tranches
-        _mintUsdc(lp2, 500_000e6);
-        vm.startPrank(lp2);
-        IERC20(usdc).approve(address(seniorVault), type(uint256).max);
-        seniorVault.deposit(500_000e6, lp2);
-        vm.stopPrank();
+        _fundTrancheAsync(seniorVault, lp2, 500_000e6);
 
         _depositToClearinghouse(alice, 10_000e6);
         _openPosition(alice, CfdTypes.Side.BULL, 50_000e18, 5000e6, 1e8);
@@ -552,11 +545,7 @@ contract GasProfileTest is Test {
         uint256 n
     ) internal {
         // Seed pool with enough liquidity for all positions
-        _mintUsdc(lp, n * 100_000e6);
-        vm.startPrank(lp);
-        IERC20(usdc).approve(address(juniorVault), type(uint256).max);
-        juniorVault.deposit(n * 100_000e6, lp);
-        vm.stopPrank();
+        _fundTrancheAsync(juniorVault, lp, n * 100_000e6);
 
         uint256 ts = block.timestamp;
 
@@ -584,6 +573,37 @@ contract GasProfileTest is Test {
     // ==========================================
     // HELPERS
     // ==========================================
+
+    function _fundTrancheAsync(
+        TrancheVault vault,
+        address provider,
+        uint256 assets
+    ) internal returns (uint256 shares) {
+        _mintUsdc(provider, assets);
+        vm.startPrank(provider);
+        IERC20(usdc).approve(address(vault), assets);
+        uint256 requestId = vault.requestDeposit(assets, provider, provider);
+        vm.stopPrank();
+
+        uint256 activationTime = vault.depositEpochStart(requestId);
+        if (block.timestamp < activationTime) {
+            vm.warp(activationTime);
+        }
+        _refreshMark();
+        pool.settleLpEpoch();
+
+        uint256 claimableAssets = vault.claimableDepositRequest(requestId, provider);
+        assertEq(claimableAssets, assets, "async tranche funding did not finalize");
+        vm.prank(provider);
+        shares = vault.claimDeposit(requestId, claimableAssets, provider, provider);
+        assertGt(shares, 0, "async tranche funding produced no shares");
+    }
+
+    function _refreshMark() internal {
+        uint256 markPrice = engine.lastMarkPrice();
+        vm.prank(address(router));
+        engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
+    }
 
     function _mintUsdc(
         address to,

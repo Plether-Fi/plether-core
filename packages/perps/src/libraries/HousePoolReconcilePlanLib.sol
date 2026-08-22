@@ -37,7 +37,7 @@ library HousePoolReconcilePlanLib {
     ///      the pending-revenue routing rules. Otherwise the waterfall is reconciled against distributable value net of
     ///      unassigned assets. Subtractions saturate at zero; coupon arithmetic rounds down.
     /// @param state Current waterfall principal, unassigned assets, and senior/junior share supplies.
-    /// @param snapshot Current physical-asset, trader-claim, MtM, and distributable accounting snapshot.
+    /// @param snapshot Current physical-asset, trader-claim, signed terminal-delta, and distributable snapshot.
     /// @param pendingBucketAssets Settleable pending claimant assets already represented in `snapshot.distributable` and
     ///        therefore reserved from ordinary waterfall reconciliation.
     /// @param seniorRateBps Annualized senior coupon rate in basis points.

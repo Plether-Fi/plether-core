@@ -207,4 +207,46 @@ library PositionRiskAccountingLib {
         state.liquidatable = state.equityUsdc <= int256(state.maintenanceMarginUsdc);
     }
 
+    /// @notice Builds position equity using exact lot-based entry cost and a separate pending-carry debit.
+    /// @dev This is the canonical V2 risk path. The legacy builder remains available for read-only compatibility
+    ///      surfaces that have not been supplied an exact entry-cost field.
+    function buildExactPositionRiskStateWithCarry(
+        CfdTypes.Position memory pos,
+        uint256 entryCostUsdcAtoms,
+        uint256 price,
+        uint256 capPrice,
+        uint256 pendingCarryUsdc,
+        uint256 reachableCollateralUsdc,
+        uint256 requiredBps
+    ) internal pure returns (PositionRiskState memory state) {
+        uint256 lots = CfdMath.sizeToLots(pos.size);
+        (bool isProfit, uint256 pnlAbs) = CfdMath.calculateExactPnl(lots, entryCostUsdcAtoms, pos.side, price, capPrice);
+        state.unrealizedPnlUsdc = isProfit ? int256(pnlAbs) : -int256(pnlAbs);
+        state.equityUsdc = int256(reachableCollateralUsdc) - int256(pendingCarryUsdc)
+            - int256(_vpiClawbackUsdc(pos.vpiAccrued)) + state.unrealizedPnlUsdc;
+        state.currentNotionalUsdc = lots * (price > capPrice ? capPrice : price);
+        state.maintenanceMarginUsdc = (state.currentNotionalUsdc * requiredBps) / 10_000;
+        state.liquidatable = state.equityUsdc <= int256(state.maintenanceMarginUsdc);
+    }
+
+    /// @notice Builds canonical V2 price-risk equity without mixing action charges into PnL backing.
+    /// @dev Equity is exactly `pnlPledge + same-account nettable claim + exact price PnL`. Carry and VPI are action
+    ///      economics settled from their own eligible sources and therefore cannot reduce the terminal collectible cap.
+    function buildExactPriceRiskState(
+        CfdTypes.Position memory pos,
+        uint256 entryCostUsdcAtoms,
+        uint256 price,
+        uint256 capPrice,
+        uint256 priceCollateralUsdc,
+        uint256 requiredBps
+    ) internal pure returns (PositionRiskState memory state) {
+        uint256 lots = CfdMath.sizeToLots(pos.size);
+        (bool isProfit, uint256 pnlAbs) = CfdMath.calculateExactPnl(lots, entryCostUsdcAtoms, pos.side, price, capPrice);
+        state.unrealizedPnlUsdc = isProfit ? int256(pnlAbs) : -int256(pnlAbs);
+        state.equityUsdc = int256(priceCollateralUsdc) + state.unrealizedPnlUsdc;
+        state.currentNotionalUsdc = lots * (price > capPrice ? capPrice : price);
+        state.maintenanceMarginUsdc = (state.currentNotionalUsdc * requiredBps) / 10_000;
+        state.liquidatable = state.equityUsdc <= int256(state.maintenanceMarginUsdc);
+    }
+
 }

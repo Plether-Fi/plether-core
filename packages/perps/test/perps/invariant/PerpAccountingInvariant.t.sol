@@ -13,6 +13,8 @@ import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAcco
 
 contract PerpAccountingInvariantTest is BasePerpInvariantTest {
 
+    uint256 internal constant ORDER_EXECUTION_REACHABILITY_ATTEMPT_THRESHOLD = 32;
+
     PerpAccountingHandler internal handler;
 
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
@@ -99,19 +101,23 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function invariant_BadDebtOnlyAppearsAfterAccountReservationExhaustion() public view {
-        uint256 currentBadDebt = engine.accumulatedBadDebtUsdc();
+    function invariant_LiquidationPriceTailsRemainDiagnosticAfterReservationExhaustion() public view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
             PerpGhostLedger.LiquidationSnapshot memory snapshot = handler.liquidationSnapshot(account);
-            if (!snapshot.liquidated || currentBadDebt <= snapshot.badDebtUsdc) {
+            if (!snapshot.liquidated) {
                 continue;
             }
 
             assertEq(
+                snapshot.legacyDebtDiagnosticUsdc,
+                0,
+                "Liquidation price tails must remain diagnostic writeoffs, never protocol debt"
+            );
+            assertEq(
                 handler.accountExecutionBountyReserve(account),
                 0,
-                "Bad debt growth cannot coexist with same-account execution bounty reserves"
+                "Terminal liquidation must exhaust same-account execution bounty reservations"
             );
         }
     }
@@ -358,6 +364,16 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         assertLe(router.nextExecuteId(), router.nextCommitId(), "nextExecuteId must not exceed nextCommitId");
     }
 
+    function invariant_OrderExecutionPathRemainsReachable() public view {
+        uint256 attempts = handler.ghostOrderExecutionAttemptCount();
+        uint256 executedOrders = handler.ghostExecutedOrderCount();
+        if (attempts < ORDER_EXECUTION_REACHABILITY_ATTEMPT_THRESHOLD) {
+            return;
+        }
+
+        assertGt(executedOrders, 0, "Order execution must become reachable after repeated valid attempts");
+    }
+
     function invariant_PendingQueueCountsStayConsistent() public view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
@@ -399,7 +415,13 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
                     "Margin queue may only contain pending orders"
                 );
                 assertTrue(record.inMarginQueue, "Margin queue traversal must only include in-queue orders");
-                assertGt(_remainingCommittedMargin(current), 0, "Margin queue orders must retain committed margin");
+                assertFalse(record.core.isClose, "Margin queue may only contain open orders");
+                assertGt(record.core.marginDelta, 0, "Margin queue orders must originate with committed margin");
+                assertLe(
+                    _remainingCommittedMargin(current),
+                    record.core.marginDelta,
+                    "Remaining committed margin cannot exceed the order's original reservation"
+                );
                 assertEq(record.prevMarginOrderId, previous, "Margin prev pointer must match traversal");
                 if (previous != 0) {
                     assertGt(current, previous, "Margin queue must preserve FIFO commit order");

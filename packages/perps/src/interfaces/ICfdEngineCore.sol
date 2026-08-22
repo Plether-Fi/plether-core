@@ -84,9 +84,8 @@ interface ICfdEngineCore is ICfdEngineTypes {
         uint64 publishTime
     ) external;
 
-    /// @notice Reserves the fixed close-order execution bounty against a proportional slice of an open position.
-    /// @dev Callable only by the configured router. Realizes carry first, reserves free settlement then position
-    ///      margin, and rejects reservations that would leave the proportional position slice under-backed.
+    /// @notice Reserves the fixed close-order execution bounty exclusively from free settlement.
+    /// @dev Callable only by the configured router. Realizes carry first; PnL pledge and every reserve stay protected.
     /// @param account Account committing the close order
     /// @param sizeDelta Position size the close order intends to close
     /// @param amountUsdc Execution bounty amount to reserve
@@ -224,6 +223,12 @@ interface ICfdEngineCore is ICfdEngineTypes {
             uint64 lastUpdateTime,
             int256 vpiAccrued
         );
+
+    /// @notice Returns the exact remaining entry basis used by lot-based PnL settlement.
+    /// @dev The average entry price in `positions` is display-only and may omit division dust.
+    function positionEntryCostUsdcAtoms(
+        address account
+    ) external view returns (uint256);
 
     /// @notice True when a close or liquidation has latched degraded mode after revealing adjusted insolvency.
     /// @return Whether risk-increasing actions are disabled by the insolvency latch

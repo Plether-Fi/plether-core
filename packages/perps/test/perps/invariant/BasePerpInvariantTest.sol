@@ -17,6 +17,7 @@ import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
 import {PerpsPublicLens} from "@plether/perps/PerpsPublicLens.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
+import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {ClaimEngineViewTypes} from "@plether/perps/interfaces/ClaimEngineViewTypes.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {PerpsViewTypes} from "@plether/perps/interfaces/PerpsViewTypes.sol";
@@ -116,6 +117,8 @@ abstract contract BasePerpInvariantTest is Test {
         CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(deployedEngine));
         CfdEngineAdmin deployedEngineAdmin = new CfdEngineAdmin(address(deployedEngine), address(this));
         deployedEngine.setDependencies(address(planner), address(settlement), address(deployedEngineAdmin));
+        TerminalNavBookV2 terminalNavBook = new TerminalNavBookV2(address(deployedEngine), uint32(CAP_PRICE));
+        deployedEngine.setTerminalNavBook(address(terminalNavBook));
     }
 
     function _syncRouterAdmin() internal {

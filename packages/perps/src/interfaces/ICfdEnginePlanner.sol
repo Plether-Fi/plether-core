@@ -38,6 +38,43 @@ interface ICfdEnginePlanner {
         int256 netMarginChange
     ) external pure returns (bool drained, uint256 marginAfter);
 
+    /// @notice Projects a side carry index from utilization and elapsed time.
+    function computeCurrentCarryIndex(
+        uint256 storedIndex,
+        uint64 previousTimestamp,
+        uint256 currentTimestamp,
+        uint256 borrowBaseUsdc,
+        uint256 poolAssetsUsdc,
+        uint256 baseCarryBps
+    ) external pure returns (uint256 index);
+
+    /// @notice Converts a carry-index delta into 6-decimal USDC carry.
+    function computeIndexedCarryUsdc(
+        uint256 borrowBaseUsdc,
+        uint256 carryIndexDelta
+    ) external pure returns (uint256 carryUsdc);
+
+    /// @notice Returns the exact lot-based liquidation test after carry and lifetime VPI.
+    function isExactPositionLiquidatableWithCarry(
+        CfdTypes.Position memory pos,
+        uint256 entryCostUsdcAtoms,
+        uint256 price,
+        uint256 capPrice,
+        uint256 pendingCarryUsdc,
+        uint256 reachableCollateralUsdc,
+        uint256 requiredBps
+    ) external pure returns (bool liquidatable);
+
+    /// @notice Returns the exact lot-based price-risk liquidation test used for close-bounty reservations.
+    function isExactPriceRiskLiquidatable(
+        CfdTypes.Position memory pos,
+        uint256 entryCostUsdcAtoms,
+        uint256 price,
+        uint256 capPrice,
+        uint256 priceCollateralUsdc,
+        uint256 requiredBps
+    ) external pure returns (bool liquidatable);
+
     /// @notice Plans an open or increase order from a raw engine snapshot.
     /// @dev Caps the execution price at `snap.capPrice`. Expected business failures are encoded in the returned delta;
     ///      arithmetic violations or inconsistent inputs can still revert. `publishTime` is currently unused.

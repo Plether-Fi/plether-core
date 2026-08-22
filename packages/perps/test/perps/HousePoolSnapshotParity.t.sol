@@ -4,6 +4,7 @@ pragma solidity 0.8.35;
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {HousePoolEngineViewTypes} from "@plether/perps/interfaces/HousePoolEngineViewTypes.sol";
+import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {ProtocolLensViewTypes} from "@plether/perps/interfaces/ProtocolLensViewTypes.sol";
 
@@ -12,6 +13,7 @@ contract HousePoolSnapshotParityTest is BasePerpTest {
     function test_HousePoolInputSnapshotMirrorsProtocolSnapshot() public {
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory inputSnapshot =
             engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
+        ICfdEngineTypes.TerminalNavSnapshot memory terminalSnapshot = engine.terminalNavSnapshot();
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory protocolSnapshot =
             engineProtocolLens.getProtocolAccountingSnapshot();
 
@@ -34,6 +36,21 @@ contract HousePoolSnapshotParityTest is BasePerpTest {
             inputSnapshot.traderClaimBalanceUsdc,
             protocolSnapshot.totalTraderClaimBalanceUsdc,
             "HousePool input trader claim balance should match protocol snapshot"
+        );
+        assertEq(
+            inputSnapshot.terminalLpPriceDeltaUsdc,
+            terminalSnapshot.terminalLpPriceDeltaUsdc,
+            "HousePool input must preserve the Engine terminal delta"
+        );
+        assertEq(
+            inputSnapshot.terminalNavBookVersion,
+            terminalSnapshot.bookVersion,
+            "HousePool input must preserve the terminal-book version"
+        );
+        assertEq(
+            inputSnapshot.hasOpenPositions,
+            terminalSnapshot.hasOpenPositions,
+            "HousePool position flag must come from the authenticated terminal snapshot"
         );
     }
 
@@ -74,6 +91,9 @@ contract HousePoolSnapshotParityTest is BasePerpTest {
     }
 
     function test_PendingTrancheStateMatchesSeededZeroClaimReconcileOutcome() public {
+        uint256 seniorRestorationTarget = pool.seniorHighWaterMark();
+        uint256 restorationRevenue = 35_000e6;
+
         usdc.burn(address(pool), pool.totalAssets());
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -83,10 +103,10 @@ contract HousePoolSnapshotParityTest is BasePerpTest {
         assertGt(seniorVault.totalSupply(), 0, "Setup should preserve seeded senior ownership");
         assertGt(juniorVault.totalSupply(), 0, "Setup should preserve seeded junior ownership");
 
-        usdc.mint(address(pool), 35_000e6);
+        usdc.mint(address(pool), restorationRevenue);
         vm.prank(address(engine));
         pool.recordClaimantInflow(
-            35_000e6, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.CashArrived
+            restorationRevenue, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.CashArrived
         );
 
         (uint256 pendingSenior, uint256 pendingJunior, uint256 pendingSeniorWithdraw, uint256 pendingJuniorWithdraw) =
@@ -97,8 +117,16 @@ contract HousePoolSnapshotParityTest is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        assertEq(pendingSenior, 1000e6, "Pending state should restore seeded senior before junior in zero-claim states");
-        assertEq(pendingJunior, 34_000e6, "Pending state should route only residual revenue to seeded junior");
+        assertEq(
+            pendingSenior,
+            seniorRestorationTarget,
+            "Pending state should restore the seeded senior HWM before junior in zero-claim states"
+        );
+        assertEq(
+            pendingJunior,
+            restorationRevenue - seniorRestorationTarget,
+            "Pending state should route only residual revenue to seeded junior"
+        );
         assertEq(
             pool.seniorPrincipal(), pendingSenior, "Pending senior principal should match post-reconcile principal"
         );
