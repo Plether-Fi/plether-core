@@ -134,9 +134,9 @@
       <div class="fixed-val">4 bps (hardcoded on-chain)</div>
     </div>
     <div class="field">
-      <label>Oracle confidence <span class="val" id="v-oracleconf"></span></label>
+      <label>Basket oracle confidence <span class="val" id="v-oracleconf"></span></label>
       <input type="range" id="oracleconf" min="0" max="10" step="0.1" value="10" oninput="calc()">
-      <div class="hint">Accepted Pyth confidence ratio; feeds above 10 bps are rejected on-chain.</div>
+      <div class="hint">Weighted pre-cap basket confidence ratio; the aggregate is capped at 10 bps on-chain, with no separate per-feed ceiling.</div>
     </div>
     <div class="field">
       <label>Adverse confidence multiplier <span class="val" id="v-confmult"></span></label>
@@ -232,7 +232,7 @@
   </table>
 </div>
 
-<p class="note">Assumptions: full close at the modeled exit market state. Carry accrues linearly on LP-backed notional (`max(notional - collateral, 0)`). Oracle confidence spread models adverse execution-price adjustment as trader cost / LP edge, not protocol fee revenue. Exit VPI uses the same close-path clamp as the onchain close accounting, so net lifetime VPI cannot go negative on a full round trip. The potential liquidation charge is shown separately and is conserved across keeper, protocol-treasury, and LP allocations; it is not added to a successful voluntary-close cost.</p>
+<p class="note">Assumptions: full close at the modeled exit market state. Carry accrues linearly on LP-backed notional (`max(notional - collateral, 0)`). Basket confidence spread models adverse execution-price adjustment as trader cost / LP edge, not protocol fee revenue. Exit VPI uses the same close-path clamp as the onchain close accounting, so net lifetime VPI cannot go negative on a full round trip. The potential liquidation charge is shown separately and is conserved across keeper, protocol-treasury, and LP allocations; it is not added to a successful voluntary-close cost.</p>
 
 <script>
   const EXEC_FEE_BPS = 4;
@@ -418,7 +418,7 @@ function calc() {
   const execFeeOpen = notional * EXEC_FEE_BPS / 10000;
   const execFeeClose = notional * EXEC_FEE_BPS / 10000;
 
-  // === 2. Oracle confidence spread (adverse execution price, not protocol fee) ===
+  // === 2. Basket confidence spread (adverse execution price, not protocol fee) ===
   const effectiveConfidenceBps = oracleConfBps * confMultiplier;
   const oracleConfidenceOpenCost = notional * effectiveConfidenceBps / 10000;
   const oracleConfidenceCloseCost = notional * effectiveConfidenceBps / 10000;
@@ -506,8 +506,8 @@ function calc() {
   detail += `<tr><td colspan="3" style="color:var(--muted);font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em;padding-top:8px"><strong>One-time costs</strong></td></tr>`;
   detail += row('Execution fee (open)', execFeeOpen, notional);
   detail += row('Execution fee (close)', execFeeClose, notional);
-  detail += row('Oracle confidence spread (open)', oracleConfidenceOpenCost, notional);
-  detail += row('Oracle confidence spread (close)', oracleConfidenceCloseCost, notional);
+  detail += row('Basket confidence spread (open)', oracleConfidenceOpenCost, notional);
+  detail += row('Basket confidence spread (close)', oracleConfidenceCloseCost, notional);
   detail += row('VPI (open)', vpiOpen, notional);
   detail += row('VPI (close)', vpiClose, notional);
   detail += rowBold('Subtotal (one-time)', execFeeOpen + execFeeClose + oracleConfidenceTotal + vpiOpen + vpiClose, notional);
@@ -540,7 +540,7 @@ function calc() {
   inter += intRow('Carry for hold period', fmt(carryCost));
   inter += intRow('Hold duration', formatHold(holdHours) + ' (' + holdHours.toLocaleString() + ' hours)');
   inter += `<tr><td colspan="2" style="height:6px"></td></tr>`;
-  inter += intRow('Oracle confidence', oracleConfBps.toFixed(1) + ' bps');
+  inter += intRow('Basket confidence', oracleConfBps.toFixed(1) + ' bps');
   inter += intRow('Adverse confidence multiplier', confMultiplier.toFixed(2) + 'x');
   inter += intRow('Effective confidence shift', effectiveConfidenceBps.toFixed(1) + ' bps per execution');
   inter += intRow('LP confidence edge (round trip)', fmt(oracleConfidenceTotal));

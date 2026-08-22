@@ -47,6 +47,20 @@ interface IPletherOracle {
         bool isFadWindow;
     }
 
+    /// @notice Validated liquidation prices shared by a batch of accounts.
+    /// @param bullPrice Price adverse to a BULL position, in 8-decimal units.
+    /// @param bearPrice Price adverse to a BEAR position, in 8-decimal units.
+    /// @param markPrice Neutral capped basket price, in 8-decimal units.
+    /// @param publishTime Earliest component publish time as a Unix timestamp.
+    /// @param updateFee Pyth fee paid for the shared update, in wei.
+    struct LiquidationBatchSnapshot {
+        uint256 bullPrice;
+        uint256 bearPrice;
+        uint256 markPrice;
+        uint64 publishTime;
+        uint256 updateFee;
+    }
+
     /// @notice Oracle and stored-mark constraints selected for one action under current calendar state.
     /// @param closeOnly Whether the regime prohibits opens and increases.
     /// @param requireStoredMark Whether the action requires a nonzero cached engine mark.
@@ -66,14 +80,14 @@ interface IPletherOracle {
     /// @notice Complete mutable oracle-policy configuration.
     /// @param orderExecutionStalenessLimit Maximum live order-execution and mark-refresh component age, in seconds.
     /// @param liquidationStalenessLimit Maximum live liquidation component age, in seconds.
-    /// @param pythMaxConfidenceRatioBps Maximum accepted per-feed confidence-to-price ratio, in basis points.
+    /// @param basketMaxConfidenceRatioBps Maximum accepted aggregate basket confidence-to-price ratio, in basis points.
     /// @param orderSettlementWindow Post-commit window for a unique historical execution tick, in seconds.
     /// @param maxComponentPublishTimeDivergence Maximum component-time divergence for a historical basket, in seconds.
     /// @param adverseConfidenceMultiplierBps Basis-point multiplier applied to aggregate confidence for adverse pricing.
     struct OracleConfig {
         uint256 orderExecutionStalenessLimit;
         uint256 liquidationStalenessLimit;
-        uint256 pythMaxConfidenceRatioBps;
+        uint256 basketMaxConfidenceRatioBps;
         uint256 orderSettlementWindow;
         uint256 maxComponentPublishTimeDivergence;
         uint256 adverseConfidenceMultiplierBps;
@@ -157,12 +171,14 @@ interface IPletherOracle {
     /// @param feedId Failing Pyth feed id, or zero for an internal normalization failure.
     /// @param price Raw signed Pyth price.
     error PletherOracle__InvalidPrice(bytes32 feedId, int64 price);
-    /// @notice Thrown when a component confidence-to-price ratio exceeds its configured limit.
-    /// @param feedId Failing Pyth feed id.
-    /// @param confidence Raw unsigned Pyth confidence interval.
-    /// @param price Raw signed Pyth price.
-    /// @param maxConfidenceBps Maximum permitted confidence ratio in basis points.
-    error PletherOracle__ConfidenceTooWide(bytes32 feedId, uint64 confidence, int64 price, uint256 maxConfidenceBps);
+    /// @notice Thrown when the aggregate basket confidence-to-price ratio exceeds its configured limit.
+    /// @param mode Action policy under which validation failed.
+    /// @param basketConfidence Aggregate weighted confidence in 8-decimal basket-price units.
+    /// @param basketPrice Aggregate weighted basket price in 8-decimal units.
+    /// @param maxConfidenceBps Maximum permitted basket confidence ratio in basis points.
+    error PletherOracle__BasketConfidenceTooWide(
+        PriceMode mode, uint256 basketConfidence, uint256 basketPrice, uint256 maxConfidenceBps
+    );
     /// @notice Thrown when basket component publish times are too far apart.
     /// @param mode Action policy under which validation failed.
     /// @param minPublishTime Earliest component publish time.
@@ -238,6 +254,18 @@ interface IPletherOracle {
         OrderExecutionRequest calldata request,
         BatchOrderPriceCache calldata cache
     ) external payable returns (bool ok, PriceSnapshot memory snapshot, BatchOrderPriceCache memory nextCache);
+
+    /// @notice Applies one liquidation update and returns prices reusable across many accounts.
+    /// @dev Performs one normal Pyth update, validates the current basket under liquidation policy and against the
+    ///      engine's cached-mark time, then computes both possible side-adverse prices from the same aggregate
+    ///      confidence. The engine mark is not updated; excess ETH is refunded or deferred.
+    /// @param refundRecipient Recipient for any ETH left after paying Pyth fees.
+    /// @param pythUpdateData Nonempty Pyth update payloads.
+    /// @return snapshot BULL-adverse, BEAR-adverse, and neutral prices with the shared publish time and update fee.
+    function updateLiquidationBatchPrice(
+        address refundRecipient,
+        bytes[] calldata pythUpdateData
+    ) external payable returns (LiquidationBatchSnapshot memory snapshot);
 
     /// @notice Applies liquidation update data and returns a price adverse to the liquidated account.
     /// @dev Performs a normal Pyth update, validates the current basket under liquidation policy and against the engine's
@@ -334,9 +362,9 @@ interface IPletherOracle {
     /// @return Configured live maximum liquidation component age in seconds.
     function liquidationStalenessLimit() external view returns (uint256);
 
-    /// @notice Returns the max accepted Pyth confidence ratio in basis points.
-    /// @return Maximum confidence-to-price ratio in basis points.
-    function pythMaxConfidenceRatioBps() external view returns (uint256);
+    /// @notice Returns the max accepted aggregate basket confidence ratio in basis points.
+    /// @return Maximum basket confidence-to-price ratio in basis points.
+    function basketMaxConfidenceRatioBps() external view returns (uint256);
 
     /// @notice Returns the post-commit settlement window for historical order execution.
     /// @return Historical execution window in seconds.

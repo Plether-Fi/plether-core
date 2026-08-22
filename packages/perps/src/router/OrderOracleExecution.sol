@@ -82,10 +82,10 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
         return pletherOracle.liquidationStalenessLimit();
     }
 
-    /// @notice Returns the max accepted Pyth confidence ratio from the configured Plether oracle.
-    /// @return Maximum confidence-to-price ratio in basis points.
-    function pythMaxConfidenceRatioBps() public view returns (uint256) {
-        return pletherOracle.pythMaxConfidenceRatioBps();
+    /// @notice Returns the max accepted aggregate basket confidence ratio from the configured Plether oracle.
+    /// @return Maximum basket confidence-to-price ratio in basis points.
+    function basketMaxConfidenceRatioBps() public view returns (uint256) {
+        return pletherOracle.basketMaxConfidenceRatioBps();
     }
 
     /// @notice Returns the historical order settlement window from the configured Plether oracle.

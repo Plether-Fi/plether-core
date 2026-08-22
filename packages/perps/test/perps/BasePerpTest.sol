@@ -798,7 +798,7 @@ abstract contract BasePerpTest is Test {
         config.maxOrderAge = router.maxOrderAge();
         config.orderExecutionStalenessLimit = router.orderExecutionStalenessLimit();
         config.liquidationStalenessLimit = router.liquidationStalenessLimit();
-        config.pythMaxConfidenceRatioBps = router.pythMaxConfidenceRatioBps();
+        config.basketMaxConfidenceRatioBps = router.basketMaxConfidenceRatioBps();
         config.orderSettlementWindow = router.orderSettlementWindow();
         config.maxComponentPublishTimeDivergence = router.maxComponentPublishTimeDivergence();
         config.adverseConfidenceMultiplierBps = router.adverseConfidenceMultiplierBps();

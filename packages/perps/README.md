@@ -70,6 +70,7 @@ In practice, the compact public API is:
   - `OrderRouter.executeOrder(uint64,bytes[])`
   - `OrderRouter.executeOrderBatch(uint64,bytes[])`
   - `OrderRouter.executeLiquidation(address,bytes[])`
+  - `OrderRouter.executeLiquidationBatch(address[],bytes[])`
 - LPs:
   - the configured Senior or Junior `TrancheVault`: asynchronous `requestDeposit` / `requestRedeem`, request
     cancellation and status views, and funded-request claims through `deposit` / `mint` or `withdraw` / `redeem`
@@ -435,8 +436,9 @@ The router is configured with a `PletherOracle` contract. The oracle instance ow
 
 - `PletherOracle` normalizes each feed to 8 decimals while computing the basket price.
 - The oracle computes the weighted basket price in the same shape as the spot basket oracle.
-- Basket confidence is propagated conservatively by summing weighted component relative confidence, then multiplying by the basket price.
-- Opening orders and live/FAD-only closing orders use the adverse side of the confidence interval for the trader's side: Long opens are priced higher and Long closes lower; Short opens are priced lower and Short closes higher. Oracle-frozen voluntary closes instead use the unshifted validated basket price and pay the fixed frozen-close spread.
+- Basket confidence is propagated conservatively by summing each normalized component contribution multiplied by that feed's confidence-to-price ratio, with each contribution floored independently.
+- The neutral, pre-cap basket is accepted when `basketConfidence * 10_000 <= basketPrice * basketMaxConfidenceRatioBps`. The initial `basketMaxConfidenceRatioBps` is `10` (0.10%), equality passes, and there is no separate per-component confidence ceiling.
+- Opening orders and live/FAD-only closing orders use the adverse side of the confidence interval for the trader's side: `BULL` opens are priced lower, `BEAR` opens are priced higher, `BULL` closes are priced higher, and `BEAR` closes are priced lower. Oracle-frozen voluntary closes instead use the unshifted validated basket price and pay the fixed frozen-close spread.
 - Liquidation checks also use the side-adverse confidence-adjusted mark for the liquidated account.
 - Component publish times must stay within `maxComponentPublishTimeDivergence`; if one basket leg is too far from the others, live opens are blocked rather than mixing fresh and stale components.
 - The minimum `publishTime` across feeds remains the basket publish time passed to the engine; historical order fills can use an older post-commit price without rewinding a newer cached engine mark.
@@ -455,7 +457,7 @@ LP policy follows that split as well:
 
 - `FAD` alone does not change LP entry/exit pricing.
 - Voluntary close/reduce execution keeps the normal signed quadratic VPI curve and lifetime rebate clamp in every oracle regime, so a skew-reducing frozen close can still earn the same bounded negative VPI as a live close.
-- During `oracleFrozen` only, voluntary close/reduce execution assesses `frozenCloseSpreadBps` on the reduced position notional instead of applying Pyth's adverse-confidence price shift. The spread is fixed rather than staleness-dependent, belongs entirely to LPs, and never credits the protocol treasury. Pyth confidence-width validation remains active.
+- During `oracleFrozen` only, voluntary close/reduce execution assesses `frozenCloseSpreadBps` on the reduced position notional instead of applying Pyth's adverse-confidence price shift. The spread is fixed rather than staleness-dependent, belongs entirely to LPs, and never credits the protocol treasury. Aggregate basket confidence-width validation remains active.
 - Live and FAD-only closes retain Pyth's adverse-confidence price adjustment and do not pay the frozen-close spread.
 - A partial close must fully settle the spread together with the rest of its close obligation. If a terminal full close cannot collect the entire spread, the uncollectible portion is waived instead of becoming bad debt, preserving exit liveness.
 - Liquidations do not assess the frozen-close spread and retain their existing settlement rules.
@@ -582,6 +584,7 @@ only one field must repeat the desired active values for the other five.
 | Normal execution staleness | 60s | Normal order execution freshness |
 | Order settlement window | 15s | Historical Pyth search window after order commit |
 | Component publish divergence | 5s | Max basket-leg publish-time skew for live settlement |
+| `basketMaxConfidenceRatioBps` | 10 (0.10%) | Maximum weighted aggregate confidence relative to the neutral pre-cap basket price |
 | Adverse confidence multiplier | 2,000 (0.2x) | Applied to live/FAD order execution and liquidation marks; waived for oracle-frozen voluntary closes |
 | Liquidation staleness | 15s | Live-market liquidation freshness |
 | `engineMarkStalenessLimit` | 60s | Engine-side mark freshness |
