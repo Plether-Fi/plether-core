@@ -111,10 +111,16 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
                 engineLens.previewLiquidation(account, oraclePrice);
             AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
                 engineAccountLens.getAccountLedgerSnapshot(account);
+            uint256 priceRiskCollateralUsdc = snapshot.activePositionMarginUsdc + snapshot.traderClaimBalanceUsdc;
             assertEq(
                 liquidationPreview.reachableCollateralUsdc,
-                snapshot.terminalPriceCollectibleCapUsdc + clearinghouse.vpiRebateReserveUsdc(account),
-                "Liquidation preview must use the exact price cap plus only the dedicated VPI reserve"
+                priceRiskCollateralUsdc + clearinghouse.vpiRebateReserveUsdc(account),
+                "Liquidation preview must use PnL pledge, same-account claim, and the dedicated VPI reserve"
+            );
+            assertLe(
+                snapshot.terminalPriceCollectibleCapUsdc,
+                priceRiskCollateralUsdc,
+                "Endpoint-clipped price collectible cap must not exceed full P+C risk collateral"
             );
         }
     }
@@ -132,10 +138,11 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
 
             ICfdEngineTypes.LiquidationPreview memory liquidationPreview =
                 engineLens.previewLiquidation(account, oraclePrice);
+            uint256 priceRiskCollateralUsdc = snapshot.activePositionMarginUsdc + snapshot.traderClaimBalanceUsdc;
             assertEq(
                 liquidationPreview.reachableCollateralUsdc,
-                snapshot.terminalPriceCollectibleCapUsdc + clearinghouse.vpiRebateReserveUsdc(account),
-                "Liquidation preview must remain isolated to the exact price cap and dedicated VPI reserve"
+                priceRiskCollateralUsdc + clearinghouse.vpiRebateReserveUsdc(account),
+                "Liquidation preview must remain isolated to pledge, same-account claim, and VPI reserve"
             );
             assertEq(
                 snapshot.liquidationReachableSettlementUsdc,

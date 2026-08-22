@@ -139,13 +139,25 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         }
 
         withdrawableUsdc = buckets.freeSettlementUsdc;
+        if (!_isWithdrawablePositionHealthy(account, pos, buckets.activePositionMarginUsdc, price)) {
+            return 0;
+        }
+        return withdrawableUsdc;
+    }
+
+    function _isWithdrawablePositionHealthy(
+        address account,
+        CfdTypes.Position memory pos,
+        uint256 activePositionMarginUsdc,
+        uint256 price
+    ) private view returns (bool) {
         CfdTypes.RiskParams memory params = _riskParams();
         uint256 currentMarginBps = engineContract.isFadWindow() ? params.fadMarginBps : params.maintMarginBps;
         uint256 effectiveMarginBps = params.initMarginBps > currentMarginBps ? params.initMarginBps : currentMarginBps;
         if (engineContract.clearinghouse().vpiRebateReserveUsdc(account) < _negativeVpiReserveTarget(pos.vpiAccrued)) {
-            return 0;
+            return false;
         }
-        uint256 riskCollateralUsdc = buckets.activePositionMarginUsdc + engineContract.traderClaimBalanceUsdc(account);
+        uint256 riskCollateralUsdc = activePositionMarginUsdc + engineContract.traderClaimBalanceUsdc(account);
         PositionRiskAccountingLib.PositionRiskState memory riskState = PositionRiskAccountingLib.buildExactPriceRiskState(
             pos,
             engineContract.positionEntryCostUsdcAtoms(account),
@@ -154,11 +166,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
             riskCollateralUsdc,
             effectiveMarginBps
         );
-
-        if (riskState.liquidatable) {
-            return 0;
-        }
-        return withdrawableUsdc;
+        return !riskState.liquidatable;
     }
 
     /// @notice Returns a compact projection of the expanded account ledger snapshot.

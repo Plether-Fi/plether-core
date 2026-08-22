@@ -12,7 +12,7 @@ library AccountLensViewTypes {
     /// @param settlementBalanceUsdc Total clearinghouse settlement balance, including encumbered settlement.
     /// @param freeSettlementUsdc Settlement balance not assigned to a typed locked-margin bucket.
     /// @param activePositionMarginUsdc Locked margin backing the account's live position.
-    /// @param otherLockedMarginUsdc Locked committed-order and reserved-settlement margin.
+    /// @param otherLockedMarginUsdc Locked liquidation-reserve, committed-order, and reserved-settlement margin.
     /// @param executionBountyReserveUsdc Clearinghouse-custodied settlement attributed to router execution bounties.
     /// @param committedMarginUsdc Margin committed through the router to pending open or increase orders.
     /// @param traderClaimBalanceUsdc Unpaid trader value recorded as a protocol claim.
@@ -34,7 +34,7 @@ library AccountLensViewTypes {
     /// @param settlementBalanceUsdc Total clearinghouse settlement balance, including encumbered settlement.
     /// @param freeSettlementUsdc Settlement balance not assigned to a typed locked-margin bucket.
     /// @param activePositionMarginUsdc Locked margin backing the account's live position.
-    /// @param otherLockedMarginUsdc Locked committed-order and reserved-settlement margin.
+    /// @param otherLockedMarginUsdc Locked liquidation-reserve, committed-order, and reserved-settlement margin.
     /// @param positionMarginBucketUsdc Canonical clearinghouse position-margin bucket.
     /// @param committedOrderMarginBucketUsdc Canonical clearinghouse pending-order margin bucket.
     /// @param reservedSettlementBucketUsdc Canonical clearinghouse reserved-settlement bucket.

@@ -35,20 +35,16 @@ contract PerpTraderClaimInvariantTest is BasePerpInvariantTest {
     function invariant_TraderClaimStatusMatchesEngineAndHousePoolLiquidity() public view {
         uint256 totalTraderClaimBalanceUsdc;
         uint256 poolAssets = housePool.totalAssets();
-        uint256 totalTraderClaimBalanceUsdc_ = engine.totalTraderClaimBalanceUsdc();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
             ClaimEngineViewTypes.TraderClaimStatus memory status = _traderClaimStatus(account, address(handler));
             uint256 traderClaimBalanceUsdc = engine.traderClaimBalanceUsdc(account);
-            uint256 expectedTraderClaimServiceableNow = CashPriorityLib.availableCashForClaimService(
-                poolAssets, totalTraderClaimBalanceUsdc_, traderClaimBalanceUsdc
-            );
 
             assertEq(status.traderClaimBalanceUsdc, traderClaimBalanceUsdc, "Trader claim status amount mismatch");
             assertEq(
                 status.traderClaimServiceableNow,
-                traderClaimBalanceUsdc > 0 && expectedTraderClaimServiceableNow > 0,
+                traderClaimBalanceUsdc > 0 && poolAssets > 0,
                 "Trader claim serviceability mismatch"
             );
 
@@ -93,21 +89,27 @@ contract PerpTraderClaimInvariantTest is BasePerpInvariantTest {
                 continue;
             }
 
-            uint256 totalPayoutUsdc = preview.immediatePayoutUsdc + preview.traderClaimBalanceUsdc;
-            if (totalPayoutUsdc == 0) {
+            uint256 freshTraderClaimUsdc = preview.traderClaimBalanceUsdc > preview.existingTraderClaimRemainingUsdc
+                ? preview.traderClaimBalanceUsdc - preview.existingTraderClaimRemainingUsdc
+                : 0;
+            uint256 totalFreshPayoutUsdc = preview.immediatePayoutUsdc + freshTraderClaimUsdc;
+            if (totalFreshPayoutUsdc == 0) {
                 continue;
             }
 
             assertEq(
                 preview.immediatePayoutUsdc == 0,
-                preview.traderClaimBalanceUsdc > 0,
+                freshTraderClaimUsdc > 0,
                 "Close preview must choose immediate or trader claim"
+            );
+            assertEq(
+                totalFreshPayoutUsdc, preview.freshTraderPayoutUsdc, "Close preview fresh payout split must reconcile"
             );
             uint256 freeCashForFreshPayouts =
                 CashPriorityLib.reserveFreshPayouts(housePool.totalAssets(), engine.totalTraderClaimBalanceUsdc())
             .freeCashUsdc;
-            if (freeCashForFreshPayouts >= totalPayoutUsdc) {
-                assertEq(preview.traderClaimBalanceUsdc, 0, "Close preview must not defer when HousePool is liquid");
+            if (freeCashForFreshPayouts >= totalFreshPayoutUsdc) {
+                assertEq(freshTraderClaimUsdc, 0, "Close preview must not defer when HousePool is liquid");
             } else {
                 assertEq(preview.immediatePayoutUsdc, 0, "Close preview must fully defer when HousePool is illiquid");
             }

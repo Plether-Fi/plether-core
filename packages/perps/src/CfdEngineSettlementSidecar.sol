@@ -165,18 +165,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         snap.currentTimestamp = block.timestamp;
         snap.lastMarkPrice = engine.lastMarkPrice();
         snap.lastMarkTime = engine.lastMarkTime();
-        (
-            snap.riskParams.vpiFactor,
-            snap.riskParams.maxSkewRatio,
-            snap.riskParams.maintMarginBps,
-            snap.riskParams.initMarginBps,
-            snap.riskParams.fadMarginBps,
-            snap.riskParams.baseCarryBps,
-            snap.riskParams.minBountyUsdc,
-            snap.riskParams.bountyBps,
-            snap.riskParams.keeperShareBps,
-            snap.riskParams.protocolShareBps
-        ) = engine.riskParams();
+        snap.riskParams = _loadRiskParams(engine);
 
         snap.bullSide = _sideSnapshot(engine, CfdTypes.Side.BULL, poolDepthUsdc, snap.riskParams.baseCarryBps);
         snap.bearSide = _sideSnapshot(engine, CfdTypes.Side.BEAR, poolDepthUsdc, snap.riskParams.baseCarryBps);
@@ -205,6 +194,23 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         snap.isFadWindow = engine.isFadWindow();
         snap.oracleFrozen = engine.isOracleFrozen();
         snap.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
+    }
+
+    function _loadRiskParams(
+        ICfdEngineAccountActionView engine
+    ) private view returns (CfdTypes.RiskParams memory params) {
+        (
+            params.vpiFactor,
+            params.maxSkewRatio,
+            params.maintMarginBps,
+            params.initMarginBps,
+            params.fadMarginBps,
+            params.baseCarryBps,
+            params.minBountyUsdc,
+            params.bountyBps,
+            params.keeperShareBps,
+            params.protocolShareBps
+        ) = engine.riskParams();
     }
 
     function _sideSnapshot(
@@ -247,7 +253,16 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         }
 
         host.settlementRealizeCarry(account);
-        pos = _loadPosition(engine, account);
+        _requireWithdrawPositionHealthy(engine, host, account, price);
+    }
+
+    function _requireWithdrawPositionHealthy(
+        ICfdEngineAccountActionView engine,
+        ICfdEngineSettlementHost host,
+        address account,
+        uint256 price
+    ) private view {
+        CfdTypes.Position memory pos = _loadPosition(engine, account);
         if (engine.unsettledCarryUsdc(account) != 0) {
             revert ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition();
         }
@@ -311,26 +326,35 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
 
         if (!isFullClose) {
             pos.margin = positionMarginUsdc;
-            (,, uint256 maintMarginBps,, uint256 fadMarginBps,,,,,) = engine.riskParams();
-            uint256 requiredBps = engine.isFadWindow() ? fadMarginBps : maintMarginBps;
-            bool liquidatable = ICfdEnginePlanner(engine.planner())
-                .isExactPriceRiskLiquidatable(
-                    pos,
-                    engine.positionEntryCostUsdcAtoms(account),
-                    price,
-                    engine.CAP_PRICE(),
-                    positionMarginUsdc + engine.traderClaimBalanceUsdc(account),
-                    requiredBps
-                );
-            if (liquidatable) {
-                revert ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking();
-            }
+            _requirePartialCloseBountyHealthy(engine, account, pos, price);
         }
 
         if (priceFresh) {
             clearinghouse.reserveCloseExecutionBountyFromSettlement(account, amountUsdc);
         } else {
             clearinghouse.reserveStaleCloseExecutionBountyFromSettlement(account, amountUsdc);
+        }
+    }
+
+    function _requirePartialCloseBountyHealthy(
+        ICfdEngineAccountActionView engine,
+        address account,
+        CfdTypes.Position memory pos,
+        uint256 price
+    ) private view {
+        (,, uint256 maintMarginBps,, uint256 fadMarginBps,,,,,) = engine.riskParams();
+        uint256 requiredBps = engine.isFadWindow() ? fadMarginBps : maintMarginBps;
+        bool liquidatable = ICfdEnginePlanner(engine.planner())
+            .isExactPriceRiskLiquidatable(
+                pos,
+                engine.positionEntryCostUsdcAtoms(account),
+                price,
+                engine.CAP_PRICE(),
+                pos.margin + engine.traderClaimBalanceUsdc(account),
+                requiredBps
+            );
+        if (liquidatable) {
+            revert ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking();
         }
     }
 

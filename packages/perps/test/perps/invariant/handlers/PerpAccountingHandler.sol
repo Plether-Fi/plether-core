@@ -18,6 +18,7 @@ import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghou
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {Test} from "forge-std/Test.sol";
+import {Vm} from "forge-std/Vm.sol";
 
 contract PerpAccountingHandler is Test {
 
@@ -29,6 +30,8 @@ contract PerpAccountingHandler is Test {
     uint8 internal constant REACHABILITY_ACTION_NONE = 0;
     uint8 internal constant REACHABILITY_ACTION_DEPOSIT = 1;
     uint8 internal constant REACHABILITY_ACTION_WITHDRAW = 2;
+    bytes32 internal constant ACTION_CHARGE_SETTLED_TOPIC =
+        keccak256("ActionChargeSettled(address,uint256,uint256,uint256)");
 
     struct ReachabilityTransition {
         uint8 action;
@@ -81,6 +84,7 @@ contract PerpAccountingHandler is Test {
         uint256 traderClaimBalanceUsdc;
         uint256 legacyDebtDiagnosticUsdc;
         uint256 expectedFinalResidualUsdc;
+        uint256 priceGainUsdc;
         uint256 traderWalletBeforeUsdc;
     }
 
@@ -99,10 +103,13 @@ contract PerpAccountingHandler is Test {
     uint256 public ghostTotalTraderMinted;
     uint256 public ghostTotalHousePoolMinted;
     uint256 public ghostSuccessfulLiquidations;
+    uint256 public ghostOrderExecutionAttemptCount;
+    uint256 public ghostExecutedOrderCount;
 
     mapping(uint64 => address) internal ghostOrderOwner;
     mapping(uint64 => uint256) internal ghostOrderCommittedMargin;
     mapping(uint64 => uint8) internal ghostOrderState;
+    mapping(uint64 => bool) internal ghostExecutedOrderCounted;
     mapping(uint64 => uint256) internal ghostReservationOriginal;
     mapping(uint64 => uint256) internal ghostReservationConsumed;
     mapping(uint64 => uint256) internal ghostReservationReleased;
@@ -317,21 +324,26 @@ contract PerpAccountingHandler is Test {
     }
 
     function executeNextOrderBatch(
-        uint256 batchSizeFuzz
+        uint256 batchLengthFuzz
     ) external {
         _clearLastPriceLossTraderClaimEvent();
         _clearTerminalReservationSet();
         uint64 nextExecuteId = router.nextExecuteId();
-        if (nextExecuteId >= router.nextCommitId()) {
+        uint64 nextCommitId = router.nextCommitId();
+        if (nextExecuteId == 0 || nextExecuteId >= nextCommitId) {
             return;
         }
 
-        uint64 batchSize = uint64(bound(batchSizeFuzz, 1, 4));
-        bytes[] memory empty;
+        uint64 pendingCount = nextCommitId - nextExecuteId;
+        uint64 maxBatchLength = pendingCount > 4 ? 4 : pendingCount;
+        uint64 batchLength = uint64(bound(batchLengthFuzz, 1, maxBatchLength));
+        uint64 maxOrderId = nextExecuteId + batchLength - 1;
+        bytes[] memory priceData = _nextBlockPriceData(_executionPriceForOrder(nextExecuteId));
         uint64 startExecuteId = nextExecuteId;
         uint256[4] memory committedBefore = _snapshotTrackedCommittedMargin();
-        try router.executeOrderBatch(batchSize, empty) {
-            _reconcileCommittedMarginAfterProcessedOrders(committedBefore, startExecuteId, router.nextExecuteId());
+        _recordOrderExecutionAttempt();
+        try router.executeOrderBatch(maxOrderId, priceData) {
+            _reconcileCommittedMarginAfterProcessedOrders(committedBefore, startExecuteId, router.nextExecuteId(), true);
         } catch {}
     }
 
@@ -339,19 +351,30 @@ contract PerpAccountingHandler is Test {
         _clearLastPriceLossTraderClaimEvent();
         _clearTerminalReservationSet();
         uint64 orderId = router.nextExecuteId();
-        if (orderId >= router.nextCommitId()) {
+        if (orderId == 0 || orderId >= router.nextCommitId()) {
             return;
         }
 
-        ModelledOrderPreview memory model = _modelOrderPreview(orderId);
+        uint256 executionPrice = _executionPriceForOrder(orderId);
+        bytes[] memory priceData = _nextBlockPriceData(executionPrice);
+        ModelledOrderPreview memory model = _modelOrderPreview(orderId, executionPrice);
         uint256[4] memory committedBefore = _snapshotTrackedCommittedMargin();
-        if (_tryExecuteOrder(orderId)) {
+        (bool processed, bool executed, uint256 actionChargeCollectedUsdc) = _tryExecuteOrder(orderId, priceData, model);
+        if (executed) {
+            if (model.terminalClose) {
+                model.expectedFinalResidualUsdc = model.expectedFinalResidualUsdc > actionChargeCollectedUsdc
+                    ? model.expectedFinalResidualUsdc - actionChargeCollectedUsdc
+                    : 0;
+            }
             _afterModelledOrderExecution(orderId, committedBefore, model);
+        } else if (processed) {
+            _reconcileCommittedMarginAfterProcessedOrders(committedBefore, orderId, router.nextExecuteId(), false);
         }
     }
 
     function _modelOrderPreview(
-        uint64 orderId
+        uint64 orderId,
+        uint256 executionPrice
     ) internal view returns (ModelledOrderPreview memory model) {
         OrderRouter.OrderRecord memory orderRecord = _orderRecord(orderId);
         model.account = orderRecord.core.account;
@@ -361,18 +384,19 @@ contract PerpAccountingHandler is Test {
         model.traderWalletBeforeUsdc = usdc.balanceOf(model.account);
         if (model.isClose && orderRecord.core.marginDelta == 0) {
             ICfdEngineTypes.ClosePreview memory preview =
-                engineLens.previewClose(model.account, orderRecord.core.sizeDelta, orderRecord.core.targetPrice);
+                engineLens.previewClose(model.account, orderRecord.core.sizeDelta, executionPrice);
             if (preview.valid) {
                 model.traderClaimBalanceUsdc = preview.traderClaimBalanceUsdc;
                 if (preview.remainingSize == 0) {
                     model.terminalClose = true;
                     model.terminalPriceLoss = preview.realizedPnlUsdc < 0;
+                    model.priceGainUsdc = preview.realizedPnlUsdc > 0 ? uint256(preview.realizedPnlUsdc) : 0;
                     model.legacyDebtDiagnosticUsdc = preview.badDebtUsdc;
                     uint256 grossResidualUsdc = beforeSnapshot.settlementBalanceUsdc + preview.immediatePayoutUsdc
                         + preview.traderClaimBalanceUsdc;
-                    model.expectedFinalResidualUsdc = grossResidualUsdc > preview.seizedCollateralUsdc
-                        ? grossResidualUsdc - preview.seizedCollateralUsdc
-                        : 0;
+                    uint256 terminalDebitUsdc = preview.seizedCollateralUsdc + orderRecord.executionBountyUsdc;
+                    model.expectedFinalResidualUsdc =
+                        grossResidualUsdc > terminalDebitUsdc ? grossResidualUsdc - terminalDebitUsdc : 0;
                 }
             }
         }
@@ -383,7 +407,7 @@ contract PerpAccountingHandler is Test {
         uint256[4] memory committedBefore,
         ModelledOrderPreview memory model
     ) internal {
-        _reconcileCommittedMarginAfterProcessedOrders(committedBefore, orderId, router.nextExecuteId());
+        _reconcileCommittedMarginAfterProcessedOrders(committedBefore, orderId, router.nextExecuteId(), false);
         if (model.traderClaimBalanceUsdc > 0) {
             ghost.increaseTraderClaim(model.account, model.traderClaimBalanceUsdc);
         }
@@ -405,13 +429,50 @@ contract PerpAccountingHandler is Test {
     }
 
     function _tryExecuteOrder(
-        uint64 orderId
-    ) internal returns (bool) {
-        bytes[] memory empty;
-        try router.executeOrder(orderId, empty) {
-            return true;
+        uint64 orderId,
+        bytes[] memory priceData,
+        ModelledOrderPreview memory model
+    ) internal returns (bool processed, bool executed, uint256 actionChargeCollectedUsdc) {
+        _recordOrderExecutionAttempt();
+        if (model.terminalClose) {
+            vm.recordLogs();
+        }
+        try router.executeOrder(orderId, priceData) {
+            OrderRouter.OrderRecord memory record = _orderRecord(orderId);
+            executed = uint8(record.status) == uint8(IOrderRouterAccounting.OrderStatus.Executed);
+            processed = executed || uint8(record.status) == uint8(IOrderRouterAccounting.OrderStatus.Failed);
+
+            if (model.terminalClose) {
+                Vm.Log[] memory logs = vm.getRecordedLogs();
+                if (executed) {
+                    actionChargeCollectedUsdc = _terminalCloseActionChargeCollected(model, logs);
+                }
+            }
+            return (processed, executed, actionChargeCollectedUsdc);
         } catch {
-            return false;
+            if (model.terminalClose) {
+                vm.getRecordedLogs();
+            }
+            return (false, false, 0);
+        }
+    }
+
+    function _terminalCloseActionChargeCollected(
+        ModelledOrderPreview memory model,
+        Vm.Log[] memory logs
+    ) internal view returns (uint256 collectedUsdc) {
+        for (uint256 i = 0; i < logs.length; ++i) {
+            if (
+                logs[i].emitter != address(engine.settlementSidecar()) || logs[i].topics.length < 2
+                    || logs[i].topics[0] != ACTION_CHARGE_SETTLED_TOPIC
+                    || address(uint160(uint256(logs[i].topics[1]))) != model.account
+            ) {
+                continue;
+            }
+
+            (uint256 assessedUsdc, uint256 recoveredUsdc,) = abi.decode(logs[i].data, (uint256, uint256, uint256));
+            uint256 withheldUsdc = model.priceGainUsdc < assessedUsdc ? model.priceGainUsdc : assessedUsdc;
+            return recoveredUsdc - withheldUsdc;
         }
     }
 
@@ -432,13 +493,11 @@ contract PerpAccountingHandler is Test {
         }
 
         uint256 price = bound(priceFuzz, 0.3e8, 1.8e8);
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(price);
+        bytes[] memory priceData = _nextBlockPriceData(price);
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, price);
         uint256 traderClaimBalanceUsdc = preview.traderClaimBalanceUsdc;
         uint256 traderWalletBeforeUsdc = usdc.balanceOf(actor);
-        uint256 expectedFinalResidualUsdc =
-            preview.settlementRetainedUsdc + preview.immediatePayoutUsdc + preview.traderClaimBalanceUsdc;
+        uint256 expectedFinalResidualUsdc = preview.settlementRetainedUsdc + preview.traderClaimBalanceUsdc;
         uint256 committedBefore = _trackedCommittedMargin(account);
         _recordTerminalReservationSet(account);
 
@@ -454,7 +513,7 @@ contract PerpAccountingHandler is Test {
                 _recordPriceLossTraderClaimEvent(account, preview.badDebtUsdc, preview.traderClaimBalanceUsdc);
             }
             _recordTerminalResidualEvent(
-                account, preview.badDebtUsdc, expectedFinalResidualUsdc, traderWalletBeforeUsdc, true
+                account, preview.badDebtUsdc, expectedFinalResidualUsdc, traderWalletBeforeUsdc, false
             );
         } catch {}
     }
@@ -492,13 +551,13 @@ contract PerpAccountingHandler is Test {
                 return;
             }
 
-            bytes[] memory openPriceData = new bytes[](1);
-            openPriceData[0] = abi.encode(uint256(1e8));
+            bytes[] memory openPriceData = _nextBlockPriceData(1e8);
             uint64 startExecuteId = router.nextExecuteId();
             uint256[4] memory openCommittedBefore = _snapshotTrackedCommittedMargin();
+            _recordOrderExecutionAttempt();
             try router.executeOrderBatch(openOrderId, openPriceData) {
                 _reconcileCommittedMarginAfterProcessedOrders(
-                    openCommittedBefore, startExecuteId, router.nextExecuteId()
+                    openCommittedBefore, startExecuteId, router.nextExecuteId(), true
                 );
             } catch {
                 return;
@@ -511,10 +570,8 @@ contract PerpAccountingHandler is Test {
         }
 
         housePool.setAssets(0);
-        uint256 closeOraclePrice = side == CfdTypes.Side.BULL ? uint256(15e7) : uint256(5e7);
+        uint256 closeOraclePrice = side == CfdTypes.Side.BULL ? uint256(5e7) : uint256(15e7);
 
-        ICfdEngineTypes.ClosePreview memory closePreview = engineLens.previewClose(account, size, closeOraclePrice);
-        uint256 traderClaimBalanceUsdc = closePreview.traderClaimBalanceUsdc;
         _recordTerminalReservationSet(account);
 
         uint64 closeOrderId = router.nextCommitId();
@@ -525,18 +582,14 @@ contract PerpAccountingHandler is Test {
             return;
         }
 
-        bytes[] memory closePriceData = new bytes[](1);
-        closePriceData[0] = abi.encode(closeOraclePrice);
+        bytes[] memory closePriceData = _nextBlockPriceData(closeOraclePrice);
         uint64 closeStartExecuteId = router.nextExecuteId();
         uint256[4] memory closeCommittedBefore = _snapshotTrackedCommittedMargin();
+        _recordOrderExecutionAttempt();
         try router.executeOrderBatch(closeOrderId, closePriceData) {
             _reconcileCommittedMarginAfterProcessedOrders(
-                closeCommittedBefore, closeStartExecuteId, router.nextExecuteId()
+                closeCommittedBefore, closeStartExecuteId, router.nextExecuteId(), true
             );
-            if (traderClaimBalanceUsdc > 0) {
-                ghost.increaseTraderClaim(account, traderClaimBalanceUsdc);
-            }
-            _syncGhostTraderClaim(account);
         } catch {}
     }
 
@@ -906,7 +959,6 @@ contract PerpAccountingHandler is Test {
             if (
                 ghostOrderOwner[orderId] == account
                     && uint8(record.status) == uint8(IOrderRouterAccounting.OrderStatus.Pending) && record.inMarginQueue
-                    && _remainingCommittedMargin(orderId) > 0
             ) {
                 count++;
             }
@@ -1026,6 +1078,14 @@ contract PerpAccountingHandler is Test {
 
         ghostOrderCommittedMargin[orderId] = 0;
         ghostOrderState[orderId] = terminalState;
+        if (terminalState == GHOST_ORDER_EXECUTED && !ghostExecutedOrderCounted[orderId]) {
+            ghostExecutedOrderCounted[orderId] = true;
+            ghostExecutedOrderCount++;
+        }
+    }
+
+    function _recordOrderExecutionAttempt() internal {
+        ghostOrderExecutionAttemptCount++;
     }
 
     function _consumeCommittedMarginFromAccount(
@@ -1056,7 +1116,8 @@ contract PerpAccountingHandler is Test {
     function _reconcileCommittedMarginAfterProcessedOrders(
         uint256[4] memory committedBefore,
         uint64 startExecuteId,
-        uint64 endExecuteId
+        uint64 endExecuteId,
+        bool syncProcessedClaims
     ) internal {
         uint256[4] memory releasedByProcessedOrders;
         uint64 upperBound = endExecuteId == 0 ? router.nextCommitId() : endExecuteId;
@@ -1074,6 +1135,9 @@ contract PerpAccountingHandler is Test {
 
                 uint8 terminalState = _ghostTerminalStateForOrder(orderId);
                 _finalizeGhostOrder(orderId, terminalState);
+                if (syncProcessedClaims && account != address(0)) {
+                    _syncGhostTraderClaim(account);
+                }
             }
         }
 
@@ -1120,6 +1184,22 @@ contract PerpAccountingHandler is Test {
         address account
     ) internal view returns (uint256) {
         return router.getAccountReservations(account).committedMarginUsdc;
+    }
+
+    function _executionPriceForOrder(
+        uint64 orderId
+    ) internal view returns (uint256) {
+        uint256 targetPrice = _orderRecord(orderId).core.targetPrice;
+        return targetPrice == 0 ? _commitReferencePrice() : targetPrice;
+    }
+
+    function _nextBlockPriceData(
+        uint256 price
+    ) internal returns (bytes[] memory priceData) {
+        vm.roll(block.number + 1);
+        vm.warp(block.timestamp + 1);
+        priceData = new bytes[](1);
+        priceData[0] = abi.encode(price);
     }
 
     function _ghostTerminalStateForOrder(

@@ -771,6 +771,8 @@ contract AdversarialPerpHandler is Test {
 
     uint256 public ghost_batchAttempts;
     uint256 public ghost_batchAdvances;
+    uint256 public ghost_batchExecutedOrders;
+    uint256 public ghost_executedOrders;
     uint256 public ghost_starvationEvents;
     uint256 public ghost_failSoftLiquidations;
     uint256 public ghost_lastRetryableSlippageBatch;
@@ -867,9 +869,9 @@ contract AdversarialPerpHandler is Test {
         vm.prank(actor);
         router.commitOrder(side, size, margin, 1e8, false);
 
-        vm.roll(block.number + 1);
-        bytes[] memory empty = new bytes[](0);
-        try router.executeOrder(commitId, empty) {} catch {}
+        uint64 beforeExecute = router.nextExecuteId();
+        try router.executeOrder(commitId, _nextBlockPriceData(1e8)) {} catch {}
+        _recordExecutedOrders(beforeExecute, router.nextExecuteId());
     }
 
     function spamInvalidOrders(
@@ -1008,8 +1010,8 @@ contract AdversarialPerpHandler is Test {
         address actor = actors[ghost_batchAttempts % actors.length];
         address account = _account(actor);
 
-        if (clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc < 205e6) {
-            _seedTrader(actor, 500e6);
+        if (clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc < 2005e6) {
+            _seedTrader(actor, 2500e6);
         }
 
         CfdTypes.Side side = CfdTypes.Side.BULL;
@@ -1019,19 +1021,20 @@ contract AdversarialPerpHandler is Test {
         }
 
         vm.prank(actor);
-        router.commitOrder(side, 1000e18, 200e6, 1e8, false);
+        router.commitOrder(side, 10_000e18, 2000e6, 1e8, false);
 
         uint256 pending = _countPendingOrders();
-        uint256 maxOrders = bound(maxOrdersFuzz, pending, pending);
+        uint256 batchSize = bound(maxOrdersFuzz, 1, pending);
         uint256 oraclePrice = bound(oraclePriceFuzz, 99_000_000, 101_000_000);
 
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(oraclePrice);
-
         ghost_batchAttempts++;
-        vm.roll(block.number + 1);
-
         uint64 beforeExecute = router.nextExecuteId();
+        uint64 lastCommittedOrderId = router.nextCommitId() - 1;
+        uint256 candidateMaxOrderId = uint256(beforeExecute) + batchSize - 1;
+        uint64 maxOrderId =
+            candidateMaxOrderId < lastCommittedOrderId ? uint64(candidateMaxOrderId) : lastCommittedOrderId;
+        bytes[] memory priceData = _nextBlockPriceData(oraclePrice);
+
         bool retryableSlippageAtHead;
         if (beforeExecute < router.nextCommitId()) {
             OrderRouter.OrderRecord memory headRecord = _orderRecord(beforeExecute);
@@ -1043,8 +1046,9 @@ contract AdversarialPerpHandler is Test {
                 }
             }
         }
-        try router.executeOrderBatch(uint64(maxOrders), priceData) {} catch {}
+        try router.executeOrderBatch(maxOrderId, priceData) {} catch {}
         uint64 afterExecute = router.nextExecuteId();
+        ghost_batchExecutedOrders += _recordExecutedOrders(beforeExecute, afterExecute);
 
         if (retryableSlippageAtHead) {
             OrderRouter.OrderRecord memory postRecord = _orderRecord(ghost_lastRetryableSlippageOrderId);
@@ -1057,7 +1061,7 @@ contract AdversarialPerpHandler is Test {
             }
         }
 
-        if (afterExecute > beforeExecute) {
+        if (afterExecute != beforeExecute) {
             ghost_batchAdvances++;
         }
     }
@@ -1089,6 +1093,28 @@ contract AdversarialPerpHandler is Test {
         }
     }
 
+    function _recordExecutedOrders(
+        uint64 beforeExecute,
+        uint64 afterExecute
+    ) internal returns (uint256 executedOrders) {
+        uint64 upperBound = afterExecute == 0 ? router.nextCommitId() : afterExecute;
+        for (uint64 orderId = beforeExecute; orderId < upperBound; orderId++) {
+            if (_orderRecord(orderId).status == IOrderRouterAccounting.OrderStatus.Executed) {
+                ghost_executedOrders++;
+                executedOrders++;
+            }
+        }
+    }
+
+    function _nextBlockPriceData(
+        uint256 price
+    ) internal returns (bytes[] memory priceData) {
+        vm.roll(block.number + 1);
+        vm.warp(block.timestamp + 1);
+        priceData = new bytes[](1);
+        priceData[0] = abi.encode(price);
+    }
+
     function _orderRecord(
         uint64 orderId
     ) internal view returns (OrderRouter.OrderRecord memory record) {
@@ -1107,17 +1133,13 @@ contract AdversarialPerpHandler is Test {
         }
 
         uint256 oraclePrice = bound(priceFuzz, 80_000_000, 125_000_000);
-        uint256 poolDepth = pool.totalAssets();
+        bytes[] memory priceData = _nextBlockPriceData(oraclePrice);
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, oraclePrice);
         if (!preview.liquidatable || preview.keeperBountyUsdc == 0) {
             return;
         }
 
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(oraclePrice);
-
         vm.mockCallRevert(address(pool), abi.encodeWithSelector(pool.payOut.selector), bytes("pool illiquid"));
-        vm.roll(block.number + 1);
 
         try router.executeLiquidation(account, priceData) {
             ghost_failSoftLiquidations++;
@@ -1172,6 +1194,10 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         uint64 nextExecuteId = router.nextExecuteId();
         uint64 nextCommitId = router.nextCommitId();
         assertLe(nextExecuteId, nextCommitId, "Queue pointers must remain ordered");
+        if (handler.ghost_batchAttempts() >= 32) {
+            assertGt(handler.ghost_batchAdvances(), 0, "Repeated valid batch attempts must advance the queue");
+            assertGt(handler.ghost_batchExecutedOrders(), 0, "Adversarial batch generation must reach engine execution");
+        }
     }
 
     function invariant_AdversarialViewsStayConsistent() public view {

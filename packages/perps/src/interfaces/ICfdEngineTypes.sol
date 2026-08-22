@@ -212,9 +212,9 @@ interface ICfdEngineTypes {
     ///      collateral. `closeReachableUsdc` is the legacy free-settlement value. Liquidation reachability may include
     ///      locked value that liquidation can release; the terminal price collectible cap is a separate exact domain.
     /// @param settlementBalanceUsdc Total clearinghouse settlement balance, including locked buckets.
-    /// @param lockedMarginUsdc Sum of active-position, committed-order, and reserved-settlement buckets.
+    /// @param lockedMarginUsdc Sum of active-position, liquidation-reserve, committed-order, and reserved-settlement buckets.
     /// @param activePositionMarginUsdc Clearinghouse custody bucket backing the live position.
-    /// @param otherLockedMarginUsdc Sum of committed-order and reserved-settlement buckets.
+    /// @param otherLockedMarginUsdc Sum of liquidation-reserve, committed-order, and reserved-settlement buckets.
     /// @param freeSettlementUsdc Settlement balance not assigned to any locked bucket.
     /// @param closeReachableUsdc Legacy close reachability value, exactly equal to `freeSettlementUsdc`.
     /// @param liquidationReachableSettlementUsdc Settlement balance available to liquidation after excluding
