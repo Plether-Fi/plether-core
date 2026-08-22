@@ -20,10 +20,33 @@ interface IMintableERC20 {
 
 }
 
+/// @dev Minimal compatibility surface used to reject an old or partially upgraded tranche pair before bootstrap.
+interface IAsyncTrancheVaultBootstrapView {
+
+    function POOL() external view returns (address);
+    function IS_SENIOR() external view returns (bool);
+    function asset() external view returns (address);
+    function share() external view returns (address);
+    function vault(
+        address asset_
+    ) external view returns (address);
+    function supportsInterface(
+        bytes4 interfaceId
+    ) external view returns (bool);
+
+}
+
 contract BootstrapPerpsArbitrumSepolia is Script {
 
     uint256 internal constant DEFAULT_SENIOR_SEED_USDC = 50_000_000e6;
     uint256 internal constant DEFAULT_JUNIOR_SEED_USDC = 50_000_000e6;
+
+    bytes4 internal constant ERC165_INTERFACE_ID = 0x01ffc9a7;
+    bytes4 internal constant ERC7540_OPERATOR_INTERFACE_ID = 0xe3bc4e65;
+    bytes4 internal constant ERC7575_INTERFACE_ID = 0x2f0a18c5;
+    bytes4 internal constant ERC7575_SHARE_INTERFACE_ID = 0xf815c03d;
+    bytes4 internal constant ERC7540_DEPOSIT_INTERFACE_ID = 0xce3bbe50;
+    bytes4 internal constant ERC7540_REDEEM_INTERFACE_ID = 0x620ee8e4;
 
     function run() external {
         uint256 privateKey = vm.envUint("TEST_PRIVATE_KEY");
@@ -54,6 +77,7 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         OrderRouterAdmin routerAdmin = OrderRouterAdmin(router.admin());
 
         _validateSeniorLimits(maxSeniorExposureUsdc, maxSeniorShareBps);
+        _verifyAsyncVaultPair(housePool, usdc);
 
         console.log("Bootstrapping Plether perps on Arbitrum Sepolia");
         console.log("Deployer:", deployer);
@@ -96,7 +120,55 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         console.log("Router pauser:", routerAdmin.pauser());
         console.log("Maximum senior exposure (USDC units):", housePool.maxSeniorExposureUsdc());
         console.log("Maximum senior share (bps):", housePool.maxSeniorShareBps());
+        console.log("LP epoch duration:", housePool.LP_EPOCH_DURATION());
+        console.log("Maximum LP epochs per settlement phase:", housePool.MAX_LP_EPOCHS_PER_PHASE());
+        console.log("Current LP epoch:", housePool.currentLpEpoch());
         console.log("Note: this script funds users with mock USDC only; ETH still needs a faucet.");
+    }
+
+    /// @dev Checks all immutable/set-once LP wiring before any governance proposal, seed mint, or activation occurs.
+    function _verifyAsyncVaultPair(
+        HousePool housePool,
+        address usdc
+    ) internal view {
+        require(address(housePool.USDC()) == usdc, "PERPS_USDC does not match HousePool");
+        require(housePool.LP_EPOCH_DURATION() == 1 hours, "Unexpected LP epoch duration");
+        require(housePool.MAX_LP_EPOCHS_PER_PHASE() == 16, "Unexpected LP epoch bound");
+
+        uint256 currentEpoch = housePool.currentLpEpoch();
+        require(currentEpoch == block.timestamp / housePool.LP_EPOCH_DURATION(), "Invalid current LP epoch");
+        require(
+            housePool.lpEpochStart(currentEpoch) == currentEpoch * housePool.LP_EPOCH_DURATION(),
+            "Invalid LP epoch start"
+        );
+
+        address seniorVault = housePool.seniorVault();
+        address juniorVault = housePool.juniorVault();
+        require(seniorVault != address(0) && juniorVault != address(0), "HousePool vault pair is incomplete");
+        require(seniorVault != juniorVault, "HousePool vault pair is duplicated");
+        _verifyAsyncVault(seniorVault, address(housePool), usdc, true);
+        _verifyAsyncVault(juniorVault, address(housePool), usdc, false);
+    }
+
+    function _verifyAsyncVault(
+        address vault,
+        address housePool,
+        address usdc,
+        bool isSenior
+    ) internal view {
+        IAsyncTrancheVaultBootstrapView candidate = IAsyncTrancheVaultBootstrapView(vault);
+        require(candidate.POOL() == housePool, "TrancheVault pool mismatch");
+        require(candidate.IS_SENIOR() == isSenior, "TrancheVault side mismatch");
+        require(candidate.asset() == usdc, "TrancheVault asset mismatch");
+        require(candidate.share() == vault, "TrancheVault share mismatch");
+        require(candidate.supportsInterface(ERC165_INTERFACE_ID), "TrancheVault missing ERC165");
+        require(candidate.supportsInterface(ERC7540_OPERATOR_INTERFACE_ID), "TrancheVault missing ERC7540 operator");
+        require(candidate.supportsInterface(ERC7575_INTERFACE_ID), "TrancheVault missing ERC7575");
+        require(candidate.supportsInterface(ERC7575_SHARE_INTERFACE_ID), "TrancheVault missing ERC7575 share lookup");
+        require(candidate.supportsInterface(ERC7540_DEPOSIT_INTERFACE_ID), "TrancheVault missing async deposit");
+        require(candidate.supportsInterface(ERC7540_REDEEM_INTERFACE_ID), "TrancheVault missing async redeem");
+        require(!candidate.supportsInterface(0xffffffff), "TrancheVault accepts invalid ERC165 id");
+        require(candidate.vault(usdc) == vault, "TrancheVault share lookup mismatch");
     }
 
     /// @dev Stages finite senior limits on the first run, then finalizes the exact proposal on a later run after the

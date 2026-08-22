@@ -330,7 +330,7 @@ contract AuditConfirmedFindingsFailing_HwmRouteConsistency is BasePerpTest {
         usdc.mint(address(seniorVault), recapAmount);
         vm.startPrank(address(seniorVault));
         usdc.approve(address(pool), recapAmount);
-        vm.expectRevert(IHousePool.HousePool__SeniorImpaired.selector);
+        vm.expectRevert(HousePool.HousePool__SynchronousLpActionsDisabled.selector);
         pool.depositSenior(recapAmount);
         vm.stopPrank();
 
@@ -362,8 +362,17 @@ contract AuditConfirmedFindingsFailing_TrancheCooldownGrief is BasePerpTest {
         usdc.mint(attacker, minimumDeposit);
         vm.startPrank(attacker);
         usdc.approve(address(juniorVault), minimumDeposit);
+        uint256 requestId = juniorVault.requestDeposit(minimumDeposit, attacker);
+        vm.stopPrank();
+
+        vm.warp(juniorVault.depositEpochStart(requestId));
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        pool.settleLpEpoch();
+
+        vm.startPrank(attacker);
         vm.expectRevert(TrancheVault.TrancheVault__ThirdPartyDepositForExistingHolder.selector);
-        juniorVault.deposit(minimumDeposit, alice);
+        juniorVault.claimDeposit(requestId, minimumDeposit, alice, attacker);
         vm.stopPrank();
     }
 

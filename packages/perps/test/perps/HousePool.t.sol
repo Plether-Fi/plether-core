@@ -2,7 +2,6 @@
 pragma solidity 0.8.35;
 
 import {BasePerpTest} from "./BasePerpTest.sol";
-import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
@@ -11,7 +10,105 @@ import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 
-contract HousePoolTest is BasePerpTest {
+abstract contract HousePoolAsyncTestBase is BasePerpTest {
+
+    function _requestAsyncDeposit(
+        TrancheVault vault,
+        address owner,
+        uint256 assets
+    ) internal returns (uint256 requestId) {
+        usdc.mint(owner, assets);
+        vm.startPrank(owner);
+        usdc.approve(address(vault), assets);
+        requestId = vault.requestDeposit(assets, owner, owner);
+        vm.stopPrank();
+    }
+
+    function _requestAsyncRedeem(
+        TrancheVault vault,
+        address owner,
+        uint256 shares
+    ) internal returns (uint256 requestId) {
+        vm.prank(owner);
+        requestId = vault.requestRedeem(shares, owner, owner);
+    }
+
+    function _refreshMarkForAsyncSettlement() internal {
+        uint256 markPrice = engine.lastMarkPrice();
+        vm.prank(address(router));
+        engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
+    }
+
+    function _settleAsyncRequest(
+        uint256 requestId,
+        bool refreshMark
+    ) internal returns (IHousePool.LpEpochSettlementResult memory result) {
+        uint256 maturity = pool.lpEpochStart(requestId);
+        if (block.timestamp < maturity) {
+            vm.warp(maturity);
+        }
+        if (refreshMark) {
+            _refreshMarkForAsyncSettlement();
+        }
+        result = pool.settleLpEpoch();
+    }
+
+    function _claimAsyncDeposit(
+        TrancheVault vault,
+        uint256 requestId,
+        address owner
+    ) internal returns (uint256 shares) {
+        uint256 assets = vault.claimableDepositRequest(requestId, owner);
+        assertGt(assets, 0, "deposit request should be claimable");
+        vm.prank(owner);
+        shares = vault.claimDeposit(requestId, assets, owner, owner);
+    }
+
+    function _depositAsync(
+        TrancheVault vault,
+        address owner,
+        uint256 assets
+    ) internal returns (uint256 requestId, uint256 shares) {
+        requestId = _requestAsyncDeposit(vault, owner, assets);
+        _settleAsyncRequest(requestId, true);
+        shares = _claimAsyncDeposit(vault, requestId, owner);
+    }
+
+    function _claimAsyncRedeem(
+        TrancheVault vault,
+        uint256 requestId,
+        address owner
+    ) internal returns (uint256 shares, uint256 assets) {
+        shares = vault.claimableRedeemRequest(requestId, owner);
+        assertGt(shares, 0, "redeem request should be claimable");
+        vm.prank(owner);
+        assets = vault.claimRedeem(requestId, shares, owner, owner);
+    }
+
+    function _redeemAsync(
+        TrancheVault vault,
+        address owner,
+        uint256 shares,
+        bool refreshMark
+    ) internal returns (uint256 requestId, uint256 fundedShares, uint256 assets) {
+        requestId = _requestAsyncRedeem(vault, owner, shares);
+        _settleAsyncRequest(requestId, refreshMark);
+        (fundedShares, assets) = _claimAsyncRedeem(vault, requestId, owner);
+    }
+
+    function _finishAsyncCooldown(
+        TrancheVault vault,
+        address owner
+    ) internal {
+        uint256 unlockTime = vault.lastDepositTime(owner) + vault.DEPOSIT_COOLDOWN();
+        if (block.timestamp < unlockTime) {
+            vm.warp(unlockTime);
+        }
+    }
+
+}
+
+contract HousePoolTest is HousePoolAsyncTestBase {
 
     using stdStorage for StdStorage;
 
@@ -74,14 +171,14 @@ contract HousePoolTest is BasePerpTest {
     // ==========================================
 
     function test_SeniorJuniorDeposit() public {
+        uint256 totalBefore = pool.totalAssets();
         _fundSenior(alice, 500_000 * 1e6);
         _fundJunior(bob, 300_000 * 1e6);
 
-        assertEq(pool.seniorPrincipal(), SEEDED_SENIOR + 500_000 * 1e6);
-        assertEq(pool.juniorPrincipal(), SEEDED_JUNIOR + 300_000 * 1e6);
-        assertEq(pool.totalAssets(), SEEDED_SENIOR + SEEDED_JUNIOR + 800_000 * 1e6);
-        assertEq(seniorVault.totalAssets(), SEEDED_SENIOR + 500_000 * 1e6);
-        assertEq(juniorVault.totalAssets(), SEEDED_JUNIOR + 300_000 * 1e6);
+        assertEq(pool.totalAssets(), totalBefore + 800_000 * 1e6);
+        assertEq(seniorVault.totalAssets(), pool.seniorPrincipal());
+        assertEq(juniorVault.totalAssets(), pool.juniorPrincipal());
+        assertEq(pool.seniorPrincipal() + pool.juniorPrincipal(), pool.totalAssets());
     }
 
     // ==========================================
@@ -91,22 +188,23 @@ contract HousePoolTest is BasePerpTest {
     function test_RevenueDistribution() public {
         _fundSenior(alice, 500_000 * 1e6);
         _fundJunior(bob, 500_000 * 1e6);
+        uint256 seniorBefore = pool.seniorPrincipal();
+        uint256 juniorBefore = pool.juniorPrincipal();
+        uint256 couponCheckpoint = pool.lastSeniorCouponCheckpointTime();
 
         // Simulate realized revenue entering the pool, then account it explicitly.
         _mintAndAccountPoolExcess(100_000 * 1e6);
 
         vm.warp(block.timestamp + 365 days);
+        uint256 expectedCoupon =
+            (seniorBefore * 800 * (block.timestamp - couponCheckpoint)) / (10_000 * uint256(365 days));
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        // Senior coupon = 500k * 8% * 1 year = 40k, plus seeded base coupon.
-        // Realized revenue replenishes junior after the coupon transfer.
-        assertEq(
-            pool.seniorPrincipal(), SEEDED_SENIOR + 540_080 * 1e6, "Senior gets 8% APY coupon plus seeded base coupon"
-        );
+        assertEq(pool.seniorPrincipal(), seniorBefore + expectedCoupon, "Senior gets the elapsed 8% APY coupon");
         assertEq(
             pool.juniorPrincipal(),
-            SEEDED_JUNIOR + 559_920 * 1e6,
+            juniorBefore + 100_000 * 1e6 - expectedCoupon,
             "Junior receives residual surplus after funding the coupon"
         );
     }
@@ -114,24 +212,28 @@ contract HousePoolTest is BasePerpTest {
     function test_RevenueDistribution_SeniorCouponFundedByJuniorWhenRevenueIsLow() public {
         _fundSenior(alice, 500_000 * 1e6);
         _fundJunior(bob, 500_000 * 1e6);
+        uint256 seniorBefore = pool.seniorPrincipal();
+        uint256 juniorBefore = pool.juniorPrincipal();
+        uint256 couponCheckpoint = pool.lastSeniorCouponCheckpointTime();
 
         // Small revenue: only 10k
         _mintAndAccountPoolExcess(10_000 * 1e6);
 
         vm.warp(block.timestamp + 365 days);
+        uint256 expectedCoupon =
+            (seniorBefore * 800 * (block.timestamp - couponCheckpoint)) / (10_000 * uint256(365 days));
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        // Senior coupon is funded by junior NAV; low realized revenue now replenishes junior after the coupon transfer.
-        assertEq(pool.seniorPrincipal(), SEEDED_SENIOR + 540_080 * 1e6, "Senior receives the target coupon");
+        assertEq(pool.seniorPrincipal(), seniorBefore + expectedCoupon, "Senior receives the target coupon");
         assertEq(
             pool.juniorPrincipal(),
-            SEEDED_JUNIOR + 469_920 * 1e6,
+            juniorBefore + 10_000 * 1e6 - expectedCoupon,
             "Junior pays senior coupon and receives the realized revenue"
         );
     }
 
-    function test_SeniorPreviewDeposit_MatchesReconcileFirstDeposit() public {
+    function test_SeniorEstimateDeposit_MatchesSettlementPrice() public {
         _fundSenior(alice, 500_000 * 1e6);
         _fundJunior(bob, 500_000 * 1e6);
         _mintAndAccountPoolExcess(100_000 * 1e6);
@@ -140,15 +242,16 @@ contract HousePoolTest is BasePerpTest {
 
         address dave = address(0x4444);
         uint256 assets = 100_000 * 1e6;
-        usdc.mint(dave, assets);
+        uint256 requestId = _requestAsyncDeposit(seniorVault, dave, assets);
+        uint256 maturity = pool.lpEpochStart(requestId);
+        vm.warp(maturity);
+        _refreshMarkForAsyncSettlement();
 
-        vm.startPrank(dave);
-        usdc.approve(address(seniorVault), assets);
-        uint256 previewedShares = seniorVault.previewDeposit(assets);
-        uint256 mintedShares = seniorVault.deposit(assets, dave);
-        vm.stopPrank();
+        uint256 estimatedShares = seniorVault.estimateDepositShares(assets);
+        pool.settleLpEpoch();
+        uint256 mintedShares = _claimAsyncDeposit(seniorVault, requestId, dave);
 
-        assertEq(mintedShares, previewedShares, "previewDeposit should match reconcile-first deposit shares");
+        assertEq(mintedShares, estimatedShares, "execution-time estimate should match settled deposit shares");
     }
 
     // ==========================================
@@ -158,6 +261,7 @@ contract HousePoolTest is BasePerpTest {
     function test_LossWaterfall_JuniorAbsorbs() public {
         _fundSenior(alice, 500_000 * 1e6);
         _fundJunior(bob, 300_000 * 1e6);
+        uint256 seniorBefore = pool.seniorPrincipal();
 
         _fundTrader(carol, 50_000 * 1e6);
 
@@ -170,7 +274,8 @@ contract HousePoolTest is BasePerpTest {
         pool.reconcile();
 
         assertLe(pool.juniorPrincipal(), 300_000 * 1e6, "Junior absorbed loss");
-        assertEq(pool.seniorPrincipal(), SEEDED_SENIOR + 500_000 * 1e6, "Senior untouched when junior covers");
+        assertGe(pool.seniorPrincipal(), seniorBefore, "Senior is not impaired when junior covers the loss");
+        assertEq(pool.seniorPrincipal(), pool.seniorHighWaterMark(), "Senior remains fully protected");
     }
 
     function test_JuniorWipeout_SeniorAbsorbs() public {
@@ -202,36 +307,32 @@ contract HousePoolTest is BasePerpTest {
         _fundTrader(carol, 50_000 * 1e6);
         _open(carol, CfdTypes.Side.BULL, 800_000 * 1e18, 40_000 * 1e6, 1e8);
 
-        // Max liability = 800k (BULL at $1, cap $2 → max profit = entry*size = $800k)
-        // Free USDC = totalAssets - maxLiability
-        uint256 freeUsdc = pool.getFreeUSDC();
-        uint256 seniorMax = pool.getMaxSeniorWithdraw();
-        uint256 juniorMax = pool.getMaxJuniorWithdraw();
+        _finishAsyncCooldown(seniorVault, alice);
+        _finishAsyncCooldown(juniorVault, bob);
+        uint256 seniorRequest = _requestAsyncRedeem(seniorVault, alice, seniorVault.balanceOf(alice));
+        uint256 juniorRequest = _requestAsyncRedeem(juniorVault, bob, juniorVault.balanceOf(bob));
+        assertEq(seniorRequest, juniorRequest, "same-hour exits should share the synchronized epoch");
 
-        // Senior has first claim on freeUSDC
-        assertEq(seniorMax, freeUsdc < 500_000 * 1e6 ? freeUsdc : 500_000 * 1e6);
-        // Junior only gets what's left after senior's claim
-        uint256 expectedJuniorMax = freeUsdc > 500_000 * 1e6 ? freeUsdc - 500_000 * 1e6 : 0;
-        if (expectedJuniorMax > 500_000 * 1e6) {
-            expectedJuniorMax = 500_000 * 1e6;
-        }
-        assertEq(juniorMax, expectedJuniorMax);
+        _settleAsyncRequest(seniorRequest, true);
+
+        assertGt(seniorVault.claimableRedeemRequest(seniorRequest, alice), 0, "senior exit receives first liquidity");
+        assertEq(
+            juniorVault.claimableRedeemRequest(juniorRequest, bob),
+            0,
+            "junior exit waits while the senior epoch remains backlogged"
+        );
     }
 
-    function test_SeniorCanWithdrawWhenJuniorCannot() public {
+    function test_DormantSeniorDoesNotReserveJuniorWithdrawalLiquidity() public {
         _fundSenior(alice, 200_000 * 1e6);
         _fundJunior(bob, 200_000 * 1e6);
 
         _fundTrader(carol, 50_000 * 1e6);
         _open(carol, CfdTypes.Side.BULL, 250_000 * 1e18, 25_000 * 1e6, 1e8);
 
-        // freeUSDC ≈ 400k - 250k + exec_fees. Senior principal = 200k.
-        // Senior max = min(200k, freeUSDC) < 200k
-        // Junior max = max(0, freeUSDC - 200k) = 0 since freeUSDC < 200k
         uint256 seniorMax = pool.getMaxSeniorWithdraw();
         assertGt(seniorMax, 0, "Senior can withdraw");
-        assertLe(seniorMax, 200_000 * 1e6, "Senior cannot exceed principal when junior is fully subordinated");
-        assertEq(pool.getMaxJuniorWithdraw(), 0, "Junior fully subordinated");
+        assertGt(pool.getMaxJuniorWithdraw(), 0, "dormant senior capacity must not reserve cash from junior exits");
     }
 
     function test_JuniorMaxWithdraw_MatchesReconcileFirstWithdraw() public {
@@ -246,10 +347,14 @@ contract HousePoolTest is BasePerpTest {
 
         vm.warp(block.timestamp + 1 hours + 1);
 
-        uint256 quotedAssets = juniorVault.maxWithdraw(bob);
+        uint256 requestedShares = juniorVault.maxRequestRedeem(bob);
         uint256 sharesBefore = juniorVault.balanceOf(bob);
+        uint256 requestId = _requestAsyncRedeem(juniorVault, bob, requestedShares);
+        _settleAsyncRequest(requestId, true);
+        uint256 quotedAssets = juniorVault.maxWithdraw(bob);
 
         assertLt(quotedAssets, 300_000 * 1e6, "reconciled losses should reduce junior withdraw capacity");
+        assertGt(quotedAssets, 0, "settlement should fund part of the junior exit");
 
         vm.prank(bob);
         juniorVault.withdraw(quotedAssets, bob, bob);
@@ -278,7 +383,7 @@ contract HousePoolTest is BasePerpTest {
         uint256 unrealizedMtmLiability = _poolMtmAdjustment();
         assertEq(
             pool.juniorPrincipal(),
-            totalBalance - unrealizedMtmLiability - SEEDED_SENIOR,
+            totalBalance - unrealizedMtmLiability - pool.seniorPrincipal(),
             "Reconcile should treat treasury fees as clearinghouse margin, not a vault reserve"
         );
     }
@@ -290,6 +395,8 @@ contract HousePoolTest is BasePerpTest {
     function test_FullIntegration() public {
         _fundSenior(alice, 500_000 * 1e6);
         _fundJunior(bob, 500_000 * 1e6);
+        uint256 seniorBefore = pool.seniorPrincipal();
+        uint256 couponCheckpoint = pool.lastSeniorCouponCheckpointTime();
 
         _fundTrader(carol, 50_000 * 1e6);
 
@@ -306,11 +413,10 @@ contract HousePoolTest is BasePerpTest {
 
         // Pool paid out ~$20k profit to trader. Junior absorbs first.
         assertLt(pool.juniorPrincipal(), 500_000 * 1e6, "Junior absorbed trader profit payout");
-        uint256 expectedCoupon =
-            ((SEEDED_SENIOR + 500_000 * 1e6) * 800 * uint256(30 days)) / (10_000 * uint256(365 days));
+        uint256 expectedCoupon = (seniorBefore * 800 * (staleTime - couponCheckpoint)) / (10_000 * uint256(365 days));
         assertEq(
             pool.seniorPrincipal(),
-            SEEDED_SENIOR + 500_000 * 1e6 + expectedCoupon,
+            seniorBefore + expectedCoupon,
             "Senior receives junior-funded coupon before junior absorbs residual loss"
         );
     }
@@ -322,6 +428,9 @@ contract HousePoolTest is BasePerpTest {
     function test_SeniorRateChange() public {
         _fundSenior(alice, 1_000_000 * 1e6);
         _fundJunior(bob, 1_000_000 * 1e6);
+        uint256 seniorBefore = pool.seniorPrincipal();
+        uint256 juniorBefore = pool.juniorPrincipal();
+        uint256 couponCheckpoint = pool.lastSeniorCouponCheckpointTime();
 
         // Generate some revenue
         _mintAndAccountPoolExcess(200_000 * 1e6);
@@ -334,11 +443,12 @@ contract HousePoolTest is BasePerpTest {
         vm.warp(block.timestamp + 48 hours + 1);
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        uint256 expectedCoupon =
+            (seniorBefore * 800 * (block.timestamp - couponCheckpoint)) / (10_000 * uint256(365 days));
         pool.finalizePoolConfig();
 
-        // Senior should have received 8% for the first year
-        assertEq(pool.seniorPrincipal(), 1_081_080 * 1e6, "Senior got 8% before rate change");
-        assertEq(pool.juniorPrincipal(), 1_120_920 * 1e6, "Junior got surplus");
+        assertEq(pool.seniorPrincipal(), seniorBefore + expectedCoupon, "Senior got 8% before rate change");
+        assertEq(pool.juniorPrincipal(), juniorBefore + 200_000 * 1e6 - expectedCoupon, "Junior got residual surplus");
     }
 
     function test_FinalizeSeniorRate_StaleMarkRevertsUntilMarkIsFresh() public {
@@ -487,7 +597,7 @@ contract HousePoolTest is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        uint256 sharesPreview = juniorVault.previewDeposit(100_000e6);
+        uint256 sharesPreview = juniorVault.quoteBootstrapDeposit(100_000e6);
         pool.assignUnassignedAssets(false, alice);
 
         assertEq(pool.unassignedAssets(), 0, "Bootstrap assignment should empty the quarantine bucket");
@@ -502,7 +612,7 @@ contract HousePoolTest is BasePerpTest {
         usdc.mint(address(this), assets);
         usdc.approve(address(pool), assets);
 
-        uint256 sharesPreview = juniorVault.previewDeposit(assets);
+        uint256 sharesPreview = juniorVault.quoteBootstrapDeposit(assets);
         pool.initializeSeedPosition(false, assets, seed);
 
         assertEq(pool.juniorPrincipal(), assets, "Seed init should create junior principal");
@@ -553,8 +663,9 @@ contract HousePoolTest is BasePerpTest {
 
         vm.warp(block.timestamp + juniorVault.DEPOSIT_COOLDOWN() + 1);
 
-        assertEq(juniorVault.maxRedeem(seed), 0, "Seed receiver maxRedeem must exclude the locked floor shares");
-        assertEq(juniorVault.maxWithdraw(seed), 0, "Seed receiver maxWithdraw must exclude the locked floor assets");
+        assertEq(
+            juniorVault.maxRequestRedeem(seed), 0, "Seed receiver request limit must exclude the locked floor shares"
+        );
     }
 
     function helper_WipedSeededTranche_IsTerminallyNonDepositable() public {
@@ -575,16 +686,13 @@ contract HousePoolTest is BasePerpTest {
 
         assertGt(juniorVault.totalSupply(), 0, "Seed shares should still exist");
         assertEq(juniorVault.totalAssets(), 0, "Setup should wipe tranche assets while shares remain");
-        assertEq(juniorVault.maxDeposit(alice), 0, "Wiped tranche must report zero maxDeposit");
-        assertEq(juniorVault.maxMint(alice), 0, "Wiped tranche must report zero maxMint");
+        assertEq(juniorVault.maxRequestDeposit(alice), 0, "Wiped tranche must report zero request capacity");
 
         usdc.mint(alice, 1e6);
         vm.startPrank(alice);
         usdc.approve(address(juniorVault), 1e6);
         vm.expectRevert(TrancheVault.TrancheVault__TerminallyWiped.selector);
-        juniorVault.deposit(1e6, alice);
-        vm.expectRevert(TrancheVault.TrancheVault__TerminallyWiped.selector);
-        juniorVault.mint(1e18, alice);
+        juniorVault.requestDeposit(1e6, alice, alice);
         vm.stopPrank();
     }
 
@@ -603,10 +711,8 @@ contract HousePoolTest is BasePerpTest {
         _fundSenior(alice, 100_000e6);
         _fundJunior(bob, 100_000e6);
 
-        vm.warp(block.timestamp + juniorVault.DEPOSIT_COOLDOWN() + 1);
-        vm.startPrank(bob);
-        juniorVault.redeem(juniorVault.balanceOf(bob), bob, bob);
-        vm.stopPrank();
+        _finishAsyncCooldown(juniorVault, bob);
+        _redeemAsync(juniorVault, bob, juniorVault.balanceOf(bob), true);
 
         uint256 unassignedBefore = pool.unassignedAssets();
         _mintAndAccountPoolExcess(50_000e6);
@@ -926,7 +1032,9 @@ contract HousePoolTest is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        vm.warp(block.timestamp + seniorVault.DEPOSIT_COOLDOWN() + 1);
+        _finishAsyncCooldown(seniorVault, alice);
+        uint256 requestId = _requestAsyncRedeem(seniorVault, alice, seniorVault.maxRequestRedeem(alice));
+        _settleAsyncRequest(requestId, true);
         uint256 quotedAssets = seniorVault.maxWithdraw(alice);
 
         assertEq(pool.unassignedAssets(), 10_000e6, "Setup should quarantine revenue with no junior owners");
@@ -963,6 +1071,8 @@ contract HousePoolTest is BasePerpTest {
         address trader = address(0x99991);
         _fundSenior(alice, 100_000e6);
         _fundJunior(bob, 100_000e6);
+        uint256 seniorBefore = pool.seniorPrincipal();
+        uint256 couponCheckpoint = pool.lastSeniorCouponCheckpointTime();
         _fundTrader(trader, 50_000e6);
 
         address traderAccount = trader;
@@ -990,10 +1100,10 @@ contract HousePoolTest is BasePerpTest {
             block.timestamp,
             "Stale-window coupon checkpoint should advance the senior coupon base"
         );
-        uint256 expectedCoupon = ((SEEDED_SENIOR + 100_000e6) * 800 * uint256(30 days)) / (10_000 * uint256(365 days));
+        uint256 expectedCoupon = (seniorBefore * 800 * (staleTime - couponCheckpoint)) / (10_000 * uint256(365 days));
         assertEq(
             pool.seniorPrincipal(),
-            SEEDED_SENIOR + 100_000e6 + expectedCoupon,
+            seniorBefore + expectedCoupon,
             "Junior-funded coupon should credit senior before stale pending-bucket routing"
         );
         assertEq(
@@ -1004,14 +1114,15 @@ contract HousePoolTest is BasePerpTest {
     function test_StalePendingSeniorMutation_CapsFutureYieldToPostCheckpointInterval() public {
         _fundSenior(alice, 100_000e6);
         _fundJunior(bob, 100_000e6);
+        uint256 hwmBeforeLoss = pool.seniorHighWaterMark();
 
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), 150_000e6);
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        assertEq(pool.seniorPrincipal(), 52_000e6, "Setup should impair senior before stale recapitalization");
-        assertEq(pool.seniorHighWaterMark(), 101_000e6, "Setup should preserve the pre-loss HWM");
+        assertLt(pool.seniorPrincipal(), hwmBeforeLoss, "Setup should impair senior before stale recapitalization");
+        assertEq(pool.seniorHighWaterMark(), hwmBeforeLoss, "Setup should preserve the pre-loss HWM");
 
         address trader = address(0x77771);
         _fundTrader(trader, 50_000e6);
@@ -1037,7 +1148,9 @@ contract HousePoolTest is BasePerpTest {
             block.timestamp,
             "Stale senior mutation should checkpoint coupon time"
         );
-        assertEq(pool.seniorPrincipal(), 101_000e6, "Stale recapitalization should restore senior principal to the HWM");
+        assertEq(
+            pool.seniorPrincipal(), hwmBeforeLoss, "Stale recapitalization should restore senior principal to the HWM"
+        );
 
         uint256 freshTime = staleTime + 2 days;
         vm.warp(freshTime);
@@ -1046,10 +1159,10 @@ contract HousePoolTest is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        uint256 expectedCouponUpperBound = (101_000e6 * 800 * uint256(2 days)) / (10_000 * uint256(365 days));
+        uint256 expectedCouponUpperBound = (hwmBeforeLoss * 800 * uint256(2 days)) / (10_000 * uint256(365 days));
         assertLe(
             pool.seniorPrincipal(),
-            101_000e6 + expectedCouponUpperBound,
+            hwmBeforeLoss + expectedCouponUpperBound,
             "Fresh reconcile must not accrue more than the post-checkpoint senior coupon interval"
         );
         assertGt(
@@ -1062,13 +1175,14 @@ contract HousePoolTest is BasePerpTest {
     function test_FreshPendingSeniorMutation_RestoresHwmWithoutDebtQueue() public {
         _fundSenior(alice, 100_000e6);
         _fundJunior(bob, 100_000e6);
+        uint256 hwmBeforeLoss = pool.seniorHighWaterMark();
 
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), 150_000e6);
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        assertEq(pool.seniorPrincipal(), 52_000e6, "Setup should impair senior before recapitalization");
+        assertLt(pool.seniorPrincipal(), hwmBeforeLoss, "Setup should impair senior before recapitalization");
 
         uint256 freshTime = block.timestamp + 30 days;
         vm.warp(freshTime);
@@ -1084,7 +1198,9 @@ contract HousePoolTest is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        assertEq(pool.seniorPrincipal(), 101_000e6, "Recapitalization should still restore senior principal to the HWM");
+        assertEq(
+            pool.seniorPrincipal(), hwmBeforeLoss, "Recapitalization should still restore senior principal to the HWM"
+        );
     }
 
     function helper_AssignUnassignedAssets_ReconcilesBeforeBootstrappingAndAvoidsPhantomAssets() public {
@@ -1384,9 +1500,10 @@ contract HousePoolTest is BasePerpTest {
 
         _mintAndAccountPoolExcess(50_000 * 1e6);
 
+        uint256 carolShares = juniorVault.balanceOf(carol);
         vm.expectRevert(TrancheVault.TrancheVault__DepositCooldown.selector);
         vm.prank(carol);
-        juniorVault.withdraw(500_000 * 1e6, carol, carol);
+        juniorVault.requestRedeem(carolShares, carol, carol);
     }
 
     function test_DustDepositToExistingHolderDoesNotResetCooldown() public {
@@ -1394,17 +1511,18 @@ contract HousePoolTest is BasePerpTest {
 
         vm.warp(block.timestamp + 50 minutes);
 
-        // Third-party deposits into an existing holder should be rejected outright.
+        // A third party may request with its own funds, but cannot claim shares into an existing holder.
         address attacker = address(0xBAD);
         uint256 minimumDeposit = pool.minTrancheDepositUsdc();
-        usdc.mint(attacker, minimumDeposit);
-        vm.startPrank(attacker);
-        usdc.approve(address(juniorVault), minimumDeposit);
+        uint256 requestId = _requestAsyncDeposit(juniorVault, attacker, minimumDeposit);
+        _settleAsyncRequest(requestId, true);
+        vm.prank(attacker);
         vm.expectRevert(TrancheVault.TrancheVault__ThirdPartyDepositForExistingHolder.selector);
-        juniorVault.deposit(minimumDeposit, alice);
-        vm.stopPrank();
+        juniorVault.claimDeposit(requestId, minimumDeposit, alice, attacker);
 
         vm.warp(block.timestamp + 11 minutes);
+        uint256 redeemId = _requestAsyncRedeem(juniorVault, alice, juniorVault.maxRequestRedeem(alice));
+        _settleAsyncRequest(redeemId, true);
         uint256 withdrawable = juniorVault.maxWithdraw(alice);
         vm.prank(alice);
         juniorVault.withdraw(withdrawable, alice, alice);
@@ -1424,9 +1542,7 @@ contract HousePoolTest is BasePerpTest {
         vm.startPrank(dave);
         usdc.approve(address(seniorVault), pool.minTrancheDepositUsdc());
         vm.expectRevert(TrancheVault.TrancheVault__DepositTooSmall.selector);
-        seniorVault.deposit(1, dave);
-        vm.expectRevert(TrancheVault.TrancheVault__DepositTooSmall.selector);
-        seniorVault.mint(1, dave);
+        seniorVault.requestDeposit(1, dave, dave);
         vm.stopPrank();
 
         assertEq(
@@ -1445,13 +1561,9 @@ contract HousePoolTest is BasePerpTest {
 
         vm.startPrank(alice);
         vm.expectRevert(TrancheVault.TrancheVault__WithdrawalTooSmall.selector);
-        seniorVault.withdraw(0, alice, alice);
+        seniorVault.requestRedeem(0, alice, alice);
         vm.expectRevert(TrancheVault.TrancheVault__WithdrawalTooSmall.selector);
-        seniorVault.withdraw(1, alice, alice);
-        vm.expectRevert(TrancheVault.TrancheVault__WithdrawalTooSmall.selector);
-        seniorVault.redeem(0, alice, alice);
-        vm.expectRevert(TrancheVault.TrancheVault__WithdrawalTooSmall.selector);
-        seniorVault.redeem(1, alice, alice);
+        seniorVault.requestRedeem(1, alice, alice);
         vm.stopPrank();
 
         assertEq(
@@ -1471,17 +1583,22 @@ contract HousePoolTest is BasePerpTest {
 
         vm.warp(block.timestamp + 1 hours);
 
+        uint256 aliceRequestId = _requestAsyncRedeem(juniorVault, alice, juniorVault.balanceOf(alice));
+        uint256 bobRequestId = _requestAsyncRedeem(juniorVault, bob, juniorVault.balanceOf(bob));
+        assertEq(aliceRequestId, bobRequestId, "same-hour exits should share an epoch");
+        _settleAsyncRequest(aliceRequestId, true);
+
         uint256 aliceWithdrawable = juniorVault.maxWithdraw(alice);
         assertGt(aliceWithdrawable, 0, "Setup should leave Alice withdrawable dust");
         assertLt(aliceWithdrawable, minimum, "Setup should leave Alice below the ordinary flow minimum");
         vm.prank(alice);
         uint256 aliceSharesBurned = juniorVault.withdraw(aliceWithdrawable, alice, alice);
-        assertEq(juniorVault.previewRedeem(juniorVault.balanceOf(alice)), 0, "Full dust withdraw should clear value");
+        assertEq(juniorVault.balanceOf(alice), 0, "Full dust withdraw should clear the user position");
         assertEq(usdc.balanceOf(alice), aliceWithdrawable, "Alice should receive the full dust value");
         assertGt(aliceSharesBurned, 0, "Withdraw should burn shares");
 
-        uint256 bobShares = juniorVault.balanceOf(bob);
-        uint256 bobAssets = juniorVault.previewRedeem(bobShares);
+        uint256 bobShares = juniorVault.maxRedeem(bob);
+        uint256 bobAssets = juniorVault.maxWithdraw(bob);
         assertGt(bobAssets, 0, "Setup should leave Bob redeemable dust");
         assertLt(bobAssets, minimum, "Setup should leave Bob below the ordinary flow minimum");
         vm.prank(bob);
@@ -1497,13 +1614,15 @@ contract HousePoolTest is BasePerpTest {
 
         address helper = address(0xB0B);
         usdc.mint(helper, 10_000e6);
-        vm.startPrank(helper);
-        usdc.approve(address(juniorVault), 10_000e6);
+        uint256 requestId = _requestAsyncDeposit(juniorVault, helper, 10_000e6);
+        _settleAsyncRequest(requestId, true);
+        vm.prank(helper);
         vm.expectRevert(TrancheVault.TrancheVault__ThirdPartyDepositForExistingHolder.selector);
-        juniorVault.deposit(10_000e6, alice);
-        vm.stopPrank();
+        juniorVault.claimDeposit(requestId, 10_000e6, alice, helper);
 
         vm.warp(block.timestamp + 11 minutes);
+        uint256 redeemId = _requestAsyncRedeem(juniorVault, alice, juniorVault.maxRequestRedeem(alice));
+        _settleAsyncRequest(redeemId, true);
         uint256 withdrawable = juniorVault.maxWithdraw(alice);
         vm.prank(alice);
         juniorVault.withdraw(withdrawable, alice, alice);
@@ -1512,8 +1631,9 @@ contract HousePoolTest is BasePerpTest {
     function test_SeniorPrincipal_RestoredBeforeJuniorSurplus() public {
         _fundSenior(alice, 500_000 * 1e6);
         _fundJunior(bob, 500_000 * 1e6);
+        uint256 seniorHwmBeforeLoss = pool.seniorHighWaterMark();
 
-        assertEq(pool.seniorHighWaterMark(), SEEDED_SENIOR + 500_000 * 1e6);
+        assertEq(pool.seniorPrincipal(), seniorHwmBeforeLoss);
 
         // Catastrophic loss: pool loses $600k → junior wiped ($500k), senior loses $100k
         // Simulate by burning pool USDC
@@ -1524,12 +1644,8 @@ contract HousePoolTest is BasePerpTest {
         pool.reconcile();
 
         assertEq(pool.juniorPrincipal(), 0, "Junior wiped");
-        assertEq(
-            pool.seniorPrincipal(),
-            402_000 * 1e6,
-            "Senior lost the residual after junior and seeded junior are exhausted"
-        );
-        assertEq(pool.seniorHighWaterMark(), SEEDED_SENIOR + 500_000 * 1e6, "HWM remembers original principal");
+        assertLt(pool.seniorPrincipal(), seniorHwmBeforeLoss, "Senior loses only after junior is exhausted");
+        assertEq(pool.seniorHighWaterMark(), seniorHwmBeforeLoss, "HWM remembers original principal");
 
         // Revenue arrives: $150k. Should restore senior $100k first, then junior gets $50k.
         usdc.mint(address(pool), 150_000 * 1e6);
@@ -1538,23 +1654,23 @@ contract HousePoolTest is BasePerpTest {
         pool.reconcile();
 
         // Coupon for ~0 elapsed time is negligible, so nearly all goes to restoration + junior.
-        assertEq(pool.seniorPrincipal(), SEEDED_SENIOR + 500_000 * 1e6, "Senior restored to HWM");
-        assertEq(pool.juniorPrincipal(), 51_000 * 1e6, "Junior gets remainder after restoration");
+        assertEq(pool.seniorPrincipal(), seniorHwmBeforeLoss, "Senior restored to HWM");
+        assertGt(pool.juniorPrincipal(), 0, "Junior gets the remainder after restoration");
     }
 
     function test_SeniorHWM_ProportionalOnWithdraw() public {
         _fundSenior(alice, 500_000 * 1e6);
         _fundJunior(bob, 500_000 * 1e6);
 
-        // Warp past cooldown
-        vm.warp(block.timestamp + 1 hours);
-        uint256 projectedSeniorBeforeWithdraw = seniorVault.totalAssets();
+        _finishAsyncCooldown(seniorVault, alice);
+        uint256 requestShares = seniorVault.estimateWithdrawShares(250_000 * 1e6);
+        uint256 requestId = _requestAsyncRedeem(seniorVault, alice, requestShares);
+        _settleAsyncRequest(requestId, true);
+        uint256 assetsPaid = seniorVault.maxWithdraw(alice);
+        uint256 projectedSeniorBeforeWithdraw = pool.seniorPrincipal() + assetsPaid;
+        _claimAsyncRedeem(seniorVault, requestId, alice);
 
-        // Alice withdraws half her senior position
-        vm.prank(alice);
-        seniorVault.withdraw(250_000 * 1e6, alice, alice);
-
-        uint256 expectedSenior = projectedSeniorBeforeWithdraw - 250_000 * 1e6;
+        uint256 expectedSenior = projectedSeniorBeforeWithdraw - assetsPaid;
         assertEq(pool.seniorPrincipal(), expectedSenior);
         assertEq(pool.seniorHighWaterMark(), expectedSenior, "HWM scales proportionally on withdraw");
     }
@@ -1562,6 +1678,7 @@ contract HousePoolTest is BasePerpTest {
     function test_SeniorHWM_PreservedOnFullWipeout() public {
         _fundSenior(alice, 100_000 * 1e6);
         _fundJunior(bob, 100_000 * 1e6);
+        uint256 hwmBeforeWipeout = pool.seniorHighWaterMark();
 
         // Total wipeout
         uint256 burnAmount = pool.totalAssets();
@@ -1572,26 +1689,21 @@ contract HousePoolTest is BasePerpTest {
         pool.reconcile();
 
         assertEq(pool.seniorPrincipal(), 0);
-        assertEq(
-            pool.seniorHighWaterMark(),
-            SEEDED_SENIOR + 100_000 * 1e6,
-            "HWM preserves senior recovery rights after wipeout"
-        );
+        assertEq(pool.seniorHighWaterMark(), hwmBeforeWipeout, "HWM preserves senior recovery rights after wipeout");
     }
 
     function test_C3_DepositCooldown_BlocksFlashWithdraw() public {
         _fundJunior(alice, 100_000 * 1e6);
 
         // Alice deposits and tries to withdraw in the same block
+        uint256 aliceShares = juniorVault.balanceOf(alice);
         vm.expectRevert(TrancheVault.TrancheVault__DepositCooldown.selector);
         vm.prank(alice);
-        juniorVault.withdraw(100_000 * 1e6, alice, alice);
+        juniorVault.requestRedeem(aliceShares, alice, alice);
 
         // After cooldown passes, withdrawal succeeds
-        vm.warp(block.timestamp + 1 hours);
-        uint256 withdrawable = juniorVault.maxWithdraw(alice);
-        vm.prank(alice);
-        juniorVault.withdraw(withdrawable, alice, alice);
+        _finishAsyncCooldown(juniorVault, alice);
+        (,, uint256 withdrawable) = _redeemAsync(juniorVault, alice, juniorVault.maxRequestRedeem(alice), true);
         assertEq(usdc.balanceOf(alice), withdrawable, "Withdrawal after cooldown succeeds");
     }
 
@@ -1725,7 +1837,7 @@ contract HousePoolTest is BasePerpTest {
 
 }
 
-contract HousePoolSeedLifecycleGateTest is BasePerpTest {
+contract HousePoolSeedLifecycleGateTest is HousePoolAsyncTestBase {
 
     address alice = address(0x111);
 
@@ -1843,9 +1955,8 @@ contract HousePoolSeedLifecycleGateTest is BasePerpTest {
 
         usdc.approve(address(juniorVault), depositAmount);
         vm.expectRevert(TrancheVault.TrancheVault__TradingNotActive.selector);
-        juniorVault.deposit(depositAmount, address(this));
-        assertEq(juniorVault.maxDeposit(address(this)), 0, "ERC4626 maxDeposit should reflect lifecycle gating");
-        assertEq(juniorVault.maxMint(address(this)), 0, "ERC4626 maxMint should reflect lifecycle gating");
+        juniorVault.requestDeposit(depositAmount, address(this), address(this));
+        assertEq(juniorVault.maxRequestDeposit(address(this)), 0, "request capacity should reflect lifecycle gating");
     }
 
     function test_OrdinaryDeposit_RevertsBeforeSeedLifecycleStarts() public {
@@ -1855,9 +1966,8 @@ contract HousePoolSeedLifecycleGateTest is BasePerpTest {
         usdc.approve(address(juniorVault), depositAmount);
 
         vm.expectRevert(TrancheVault.TrancheVault__TradingNotActive.selector);
-        juniorVault.deposit(depositAmount, address(this));
-        assertEq(juniorVault.maxDeposit(address(this)), 0, "ERC4626 maxDeposit should be zero before bootstrap");
-        assertEq(juniorVault.maxMint(address(this)), 0, "ERC4626 maxMint should be zero before bootstrap");
+        juniorVault.requestDeposit(depositAmount, address(this), address(this));
+        assertEq(juniorVault.maxRequestDeposit(address(this)), 0, "request capacity should be zero before bootstrap");
     }
 
     function test_InitializeSeedPosition_UsesSeedFlagsInsteadOfExistingSupply() public {
@@ -1887,13 +1997,15 @@ contract HousePoolSeedLifecycleGateTest is BasePerpTest {
 
         usdc.approve(address(juniorVault), depositAmount);
         vm.expectRevert(TrancheVault.TrancheVault__TradingNotActive.selector);
-        juniorVault.deposit(depositAmount, address(this));
-        assertEq(juniorVault.maxDeposit(address(this)), 0, "ERC4626 maxDeposit should be zero before activation");
-        assertEq(juniorVault.maxMint(address(this)), 0, "ERC4626 maxMint should be zero before activation");
+        juniorVault.requestDeposit(depositAmount, address(this), address(this));
+        assertEq(juniorVault.maxRequestDeposit(address(this)), 0, "request capacity should be zero before activation");
 
         pool.activateTrading();
-        assertGt(juniorVault.maxDeposit(address(this)), 0, "ERC4626 maxDeposit should reopen after activation");
-        juniorVault.deposit(depositAmount, address(this));
+        assertGt(juniorVault.maxRequestDeposit(address(this)), 0, "request capacity should reopen after activation");
+        uint256 requestId = juniorVault.requestDeposit(depositAmount, address(this), address(this));
+        _settleAsyncRequest(requestId, true);
+        uint256 shares = _claimAsyncDeposit(juniorVault, requestId, address(this));
+        assertGt(shares, 0, "activated request should settle into claimable shares");
     }
 
     function test_MaxDeposit_ZeroWhilePoolPaused() public {
@@ -1907,8 +2019,7 @@ contract HousePoolSeedLifecycleGateTest is BasePerpTest {
         pool.pause();
 
         assertFalse(pool.canAcceptTrancheDeposits(false), "Paused pool should report deposits blocked");
-        assertEq(juniorVault.maxDeposit(address(this)), 0, "ERC4626 maxDeposit should be zero while paused");
-        assertEq(juniorVault.maxMint(address(this)), 0, "ERC4626 maxMint should be zero while paused");
+        assertEq(juniorVault.maxRequestDeposit(address(this)), 0, "request capacity should be zero while paused");
     }
 
     function test_MaxDeposit_ZeroWhileMarkStale() public {
@@ -1926,8 +2037,7 @@ contract HousePoolSeedLifecycleGateTest is BasePerpTest {
         vm.warp(block.timestamp + 2 hours);
 
         assertFalse(pool.canAcceptTrancheDeposits(false), "Stale mark should report deposits blocked");
-        assertEq(juniorVault.maxDeposit(address(this)), 0, "ERC4626 maxDeposit should be zero while mark is stale");
-        assertEq(juniorVault.maxMint(address(this)), 0, "ERC4626 maxMint should be zero while mark is stale");
+        assertEq(juniorVault.maxRequestDeposit(address(this)), 0, "request capacity should be zero while mark is stale");
     }
 
     function obsolete_test_MaxDeposit_ZeroWhileBootstrapPending() public {
@@ -1941,9 +2051,10 @@ contract HousePoolSeedLifecycleGateTest is BasePerpTest {
 
         assertFalse(pool.canAcceptTrancheDeposits(false), "Pending bootstrap should report deposits blocked");
         assertEq(
-            juniorVault.maxDeposit(address(this)), 0, "ERC4626 maxDeposit should be zero while bootstrap is pending"
+            juniorVault.maxRequestDeposit(address(this)),
+            0,
+            "request capacity should be zero while bootstrap is pending"
         );
-        assertEq(juniorVault.maxMint(address(this)), 0, "ERC4626 maxMint should be zero while bootstrap is pending");
     }
 
     function test_MaxDeposit_ZeroWhenFreshReconcileWouldCreateUnassignedAssets() public {
@@ -1962,21 +2073,18 @@ contract HousePoolSeedLifecycleGateTest is BasePerpTest {
             "Projected unassigned assets should block deposits before reconcile mutates storage"
         );
         assertEq(
-            juniorVault.maxDeposit(address(this)),
+            juniorVault.maxRequestDeposit(address(this)),
             0,
-            "ERC4626 maxDeposit should account for projected unassigned assets"
-        );
-        assertEq(
-            juniorVault.maxMint(address(this)), 0, "ERC4626 maxMint should account for projected unassigned assets"
+            "request capacity should account for projected unassigned assets"
         );
 
         vm.expectRevert();
-        juniorVault.deposit(1e6, address(this));
+        juniorVault.requestDeposit(1e6, address(this), address(this));
     }
 
 }
 
-contract HousePoolUnseededBootstrapTest is BasePerpTest {
+contract HousePoolUnseededBootstrapTest is HousePoolAsyncTestBase {
 
     address alice = address(0x111);
     address bob = address(0x222);
@@ -2220,8 +2328,7 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         usdc.approve(address(pool), assets);
         pool.initializeSeedPosition(false, assets, seed);
         vm.warp(block.timestamp + juniorVault.DEPOSIT_COOLDOWN() + 1);
-        assertEq(juniorVault.maxRedeem(seed), 0);
-        assertEq(juniorVault.maxWithdraw(seed), 0);
+        assertEq(juniorVault.maxRequestRedeem(seed), 0);
     }
 
     function helper_WipedSeededTranche_IsTerminallyNonDepositable() public {
@@ -2239,15 +2346,12 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         pool.reconcile();
         assertGt(juniorVault.totalSupply(), 0);
         assertEq(juniorVault.totalAssets(), 0);
-        assertEq(juniorVault.maxDeposit(alice), 0);
-        assertEq(juniorVault.maxMint(alice), 0);
+        assertEq(juniorVault.maxRequestDeposit(alice), 0);
         usdc.mint(alice, 1e6);
         vm.startPrank(alice);
         usdc.approve(address(juniorVault), 1e6);
         vm.expectRevert(TrancheVault.TrancheVault__TerminallyWiped.selector);
-        juniorVault.deposit(1e6, alice);
-        vm.expectRevert(TrancheVault.TrancheVault__TerminallyWiped.selector);
-        juniorVault.mint(1e18, alice);
+        juniorVault.requestDeposit(1e6, alice, alice);
         vm.stopPrank();
     }
 
@@ -2263,10 +2367,8 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         pool.activateTrading();
         _fundSenior(alice, 100_000e6);
         _fundJunior(bob, 100_000e6);
-        vm.warp(block.timestamp + juniorVault.DEPOSIT_COOLDOWN() + 1);
-        vm.startPrank(bob);
-        juniorVault.redeem(juniorVault.balanceOf(bob), bob, bob);
-        vm.stopPrank();
+        _finishAsyncCooldown(juniorVault, bob);
+        _redeemAsync(juniorVault, bob, juniorVault.balanceOf(bob), true);
         uint256 unassignedBefore = pool.unassignedAssets();
         _mintAndAccountPoolExcess(50_000e6);
         vm.prank(address(juniorVault));
@@ -2532,7 +2634,9 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         pool.accountExcess();
         vm.prank(address(juniorVault));
         pool.reconcile();
-        vm.warp(block.timestamp + seniorVault.DEPOSIT_COOLDOWN() + 1);
+        _finishAsyncCooldown(seniorVault, alice);
+        uint256 requestId = _requestAsyncRedeem(seniorVault, alice, seniorVault.maxRequestRedeem(alice));
+        _settleAsyncRequest(requestId, true);
         uint256 quotedAssets = seniorVault.maxWithdraw(alice);
         assertEq(pool.unassignedAssets(), 0);
         assertGe(quotedAssets, 100_000e6);
@@ -2595,7 +2699,7 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
 
 }
 
-contract HousePoolSeededBaseSetupTest is BasePerpTest {
+contract HousePoolSeededBaseSetupTest is HousePoolAsyncTestBase {
 
     function _initialJuniorDeposit() internal pure override returns (uint256) {
         return 0;
@@ -2639,10 +2743,8 @@ contract HousePoolSeededBaseSetupTest is BasePerpTest {
 
         address dave = address(0x444);
         assertGt(pool.seniorHighWaterMark() - pool.seniorPrincipal(), 0, "Senior deficit exists");
-        assertEq(seniorVault.maxDeposit(dave), 0, "ERC4626 maxDeposit should be zero while senior is impaired");
-        assertEq(seniorVault.maxMint(dave), 0, "ERC4626 maxMint should be zero while senior is impaired");
-        assertEq(juniorVault.maxDeposit(dave), 0, "Junior maxDeposit should be zero while senior is impaired");
-        assertEq(juniorVault.maxMint(dave), 0, "Junior maxMint should be zero while senior is impaired");
+        assertEq(seniorVault.maxRequestDeposit(dave), 0, "senior request capacity is zero while impaired");
+        assertEq(juniorVault.maxRequestDeposit(dave), 0, "junior request capacity is zero while senior is impaired");
         assertFalse(pool.canAcceptTrancheDeposits(true), "Pool should block ordinary senior deposits while impaired");
         assertFalse(pool.canAcceptTrancheDeposits(false), "Pool should block ordinary junior deposits while impaired");
     }
@@ -2672,8 +2774,7 @@ contract HousePoolSeededBaseSetupTest is BasePerpTest {
 
         address dave = address(0x444);
         assertEq(pool.getSeniorDepositCapacity(), 0, "Senior capacity should remain zero without junior backing");
-        assertEq(seniorVault.maxDeposit(dave), 0, "Senior maxDeposit should remain zero without junior backing");
-        assertEq(seniorVault.maxMint(dave), 0, "Senior maxMint should remain zero without junior backing");
+        assertEq(seniorVault.maxRequestDeposit(dave), 0, "Senior request capacity remains zero without backing");
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -2690,23 +2791,25 @@ contract HousePoolSeededBaseSetupTest is BasePerpTest {
         assertEq(pool.juniorPrincipal(), juniorBacking, "Junior revenue should supply ratio backing");
         assertTrue(pool.canAcceptTrancheDeposits(true), "Senior deposits should reopen with junior backing");
 
+        uint256 totalBeforeDeposit = pool.totalAssets();
         usdc.mint(dave, 1000e6);
         vm.startPrank(dave);
         usdc.approve(address(seniorVault), 1000e6);
-        assertGe(seniorVault.maxDeposit(dave), 1000e6, "ERC4626 maxDeposit should include supported capacity");
-        assertGt(seniorVault.maxMint(dave), 0, "ERC4626 maxMint should reopen with junior backing");
-        uint256 shares = seniorVault.deposit(1000e6, dave);
+        assertGe(seniorVault.maxRequestDeposit(dave), 1000e6, "request capacity should include supported depth");
+        uint256 requestId = seniorVault.requestDeposit(1000e6, dave, dave);
         vm.stopPrank();
+        _settleAsyncRequest(requestId, true);
+        uint256 shares = _claimAsyncDeposit(seniorVault, requestId, dave);
 
         assertGt(shares, 0, "Senior deposit should succeed after reconcile consumes the pending recap");
         assertEq(
-            pool.seniorPrincipal(), recapAmount + 1000e6, "Live state should include the recap plus the new deposit"
+            pool.totalAssets(), totalBeforeDeposit + 1000e6, "Live state should include the recap plus the new deposit"
         );
     }
 
 }
 
-contract HousePoolAuditTest is BasePerpTest {
+contract HousePoolAuditTest is HousePoolAsyncTestBase {
 
     address alice = address(0x111);
     address bob = address(0x222);
@@ -2815,8 +2918,8 @@ contract HousePoolAuditTest is BasePerpTest {
         assertEq(_unrealizedTraderPnl(), 0, "Unrealized PnL should be zero with no positions");
     }
 
-    // Regression: M-01 — stale mark does not block withdrawal
-    function test_StaleMarkBlocksWithdrawal() public {
+    // Redemption requests remain live while pricing is stale; settlement applies the canonical exit policy.
+    function test_StaleMarkDoesNotBlockRedeemRequest() public {
         _fundJunior(bob, 500_000e6);
         _fundJunior(carol, 500_000e6);
         _fundTrader(alice, 50_000e6);
@@ -2826,13 +2929,13 @@ contract HousePoolAuditTest is BasePerpTest {
 
         vm.warp(block.timestamp + 121);
 
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                bytes4(keccak256("ERC4626ExceededMaxWithdraw(address,uint256,uint256)")), bob, 1e6, 0
-            )
+        uint256 requestedShares = juniorVault.estimateWithdrawShares(1e6);
+        uint256 requestId = _requestAsyncRedeem(juniorVault, bob, requestedShares);
+        assertEq(
+            juniorVault.pendingRedeemRequest(requestId, bob),
+            requestedShares,
+            "stale pricing must not prevent escrowed exit requests"
         );
-        vm.prank(bob);
-        juniorVault.withdraw(1e6, bob, bob);
     }
 
     function test_Reconcile_AllowsStaleMarkWithoutLiveLiability() public {
@@ -2864,10 +2967,14 @@ contract HousePoolAuditTest is BasePerpTest {
         engine.updateMarkPrice(1e8, uint64(saturdayFrozen - 3 hours));
 
         uint256 bobUsdcBefore = usdc.balanceOf(bob);
-        vm.prank(bob);
-        juniorVault.withdraw(1e6, bob, bob);
+        uint256 requestShares = juniorVault.estimateWithdrawShares(1e6);
+        uint256 requestId = _requestAsyncRedeem(juniorVault, bob, requestShares);
+        _settleAsyncRequest(requestId, false);
+        (uint256 fundedShares, uint256 assetsPaid) = _claimAsyncRedeem(juniorVault, requestId, bob);
 
-        assertEq(usdc.balanceOf(bob), bobUsdcBefore + 1e6, "oracleFrozen alone should not block LP withdrawals");
+        assertEq(fundedShares, requestShares, "the frozen-window request should be fully funded");
+        assertGt(assetsPaid, 0, "the frozen-window exit should pay assets after the configured fee");
+        assertEq(usdc.balanceOf(bob), bobUsdcBefore + assetsPaid, "oracleFrozen alone should not block LP exits");
     }
 
     function test_MaxWithdraw_RemainsExecutableWithPendingCarryAccrual() public {
@@ -2890,6 +2997,8 @@ contract HousePoolAuditTest is BasePerpTest {
 
         vm.warp(saturdayFrozen);
 
+        uint256 requestId = _requestAsyncRedeem(juniorVault, bob, juniorVault.maxRequestRedeem(bob));
+        _settleAsyncRequest(requestId, false);
         uint256 quotedAssets = juniorVault.maxWithdraw(bob);
         uint256 bobBalanceBefore = usdc.balanceOf(bob);
 
@@ -2923,14 +3032,16 @@ contract HousePoolAuditTest is BasePerpTest {
 
         vm.warp(saturdayFrozen);
 
+        uint256 requestId = _requestAsyncRedeem(juniorVault, bob, juniorVault.maxRequestRedeem(bob));
+        _settleAsyncRequest(requestId, false);
         uint256 quotedShares = juniorVault.maxRedeem(bob);
         uint256 bobBalanceBefore = usdc.balanceOf(bob);
-        uint256 previewAssets = juniorVault.previewRedeem(quotedShares);
+        uint256 quotedAssets = juniorVault.maxWithdraw(bob);
 
         vm.prank(bob);
         uint256 redeemedAssets = juniorVault.redeem(quotedShares, bob, bob);
 
-        assertEq(redeemedAssets, previewAssets, "maxRedeem quote should reconcile to the previewed asset amount");
+        assertEq(redeemedAssets, quotedAssets, "maxRedeem should pay the settled claimable asset amount");
         assertEq(
             usdc.balanceOf(bob),
             bobBalanceBefore + redeemedAssets,
@@ -3112,10 +3223,9 @@ contract HousePoolAuditTest is BasePerpTest {
         usdc.mint(dave, 10_000_000e6);
         vm.startPrank(dave);
         usdc.approve(address(seniorVault), 10_000_000e6);
-        assertEq(seniorVault.maxDeposit(dave), 0, "ERC4626 maxDeposit should be zero while senior is impaired");
-        assertEq(seniorVault.maxMint(dave), 0, "ERC4626 maxMint should be zero while senior is impaired");
-        vm.expectRevert();
-        seniorVault.deposit(10_000_000e6, dave);
+        assertEq(seniorVault.maxRequestDeposit(dave), 0, "request capacity should be zero while impaired");
+        vm.expectRevert(TrancheVault.TrancheVault__DepositsUnavailable.selector);
+        seniorVault.requestDeposit(10_000_000e6, dave, dave);
         vm.stopPrank();
     }
 

@@ -1,18 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
-/// @notice HousePool tranche-mutation hooks used by the configured senior and junior ERC4626 vaults.
-/// @dev These selectors are not direct end-user deposit/withdraw entrypoints: the HousePool authorizes only configured
-///      tranche vaults. LPs ordinarily interact with the appropriate vault, which handles shares and calls these hooks.
+import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
+
+/// @notice HousePool LP mutation surface used by configured tranche vaults and permissionless epoch settlers.
+/// @dev Reservation selectors authorize only the configured senior vault; legacy synchronous deposit selectors always
+///      revert. `settleLpEpoch` is the sole ordinary entry-finalization and pool cash-exit path and is permissionless.
 interface IPerpsLPActions {
 
-    /// @notice Pulls USDC from the configured senior vault and adds it to senior principal.
-    /// @dev Reconciles, requires any needed mark to satisfy active freshness policy, checkpoints engine carry, and
-    ///      requires an unpaused pool, no unassigned-asset bootstrap, unimpaired senior principal, and the minimum
-    ///      tranche deposit. User-facing vault deposits separately enforce seed and trading-lifecycle readiness before
-    ///      calling this hook. Enforces governed capacity net of reservations and raises the protected senior
-    ///      high-water mark.
-    /// @param amount USDC amount to deposit (6 decimals)
+    /// @notice Retained compatibility selector for the removed synchronous senior-entry hook.
+    /// @dev Always reverts. Senior entry is requested through the vault and finalized only by `settleLpEpoch`.
+    /// @param amount Ignored legacy USDC amount
     function depositSenior(
         uint256 amount
     ) external;
@@ -29,42 +27,17 @@ interface IPerpsLPActions {
         uint256 amount
     ) external;
 
-    /// @notice Deposits a matured delayed-deposit batch against its accepted senior reservation.
-    /// @param amount Gross reserved USDC amount to deposit (6 decimals)
-    function depositReservedSenior(
-        uint256 amount
-    ) external;
-
-    /// @notice Removes senior principal and transfers USDC to a receiver for a configured vault.
-    /// @dev Reconciles first, requires live withdrawals outside degraded mode and any needed mark to satisfy active
-    ///      freshness policy, caps the amount by free cash and senior principal, checkpoints carry, and scales the
-    ///      senior high-water mark. An authorized zero-amount withdrawal returns before those checks.
-    /// @param amount USDC amount to withdraw (6 decimals)
-    /// @param receiver Address receiving withdrawn USDC
-    function withdrawSenior(
-        uint256 amount,
-        address receiver
-    ) external;
-
-    /// @notice Pulls USDC from a configured vault and adds it to junior principal.
-    /// @dev Applies the same reconciliation, mark-freshness, pause, bootstrap, senior-impairment, carry, and minimum-size
-    ///      gates as the senior deposit hook. User-facing vault deposits separately enforce seed and trading-lifecycle
-    ///      readiness before calling this hook.
-    /// @param amount USDC amount to deposit (6 decimals)
+    /// @notice Retained compatibility selector for the removed synchronous junior-entry hook.
+    /// @dev Always reverts. Junior entry is requested through the vault and finalized only by `settleLpEpoch`.
+    /// @param amount Ignored legacy USDC amount
     function depositJunior(
         uint256 amount
     ) external;
 
-    /// @notice Removes junior principal and transfers USDC to a receiver for a configured vault.
-    /// @dev Reconciles first, requires live withdrawals and any needed mark to satisfy active freshness policy, and
-    ///      preserves free liquidity sufficient to cover senior principal plus the active senior-share covenant.
-    ///      Pending senior reservations remain refundable and do not constrain the covenant. Checkpoints carry before
-    ///      reducing pool depth.
-    /// @param amount USDC amount to withdraw (6 decimals)
-    /// @param receiver Address receiving withdrawn USDC
-    function withdrawJunior(
-        uint256 amount,
-        address receiver
-    ) external;
+    /// @notice Runs one bounded synchronized LP epoch settlement.
+    /// @dev Funds matured senior withdrawal requests before junior requests, then finalizes eligible delayed deposits.
+    ///      Funded user claims remain in vault escrow and are claimed without another HousePool call.
+    /// @return result Exact funding, entry finalization, and residual-work summary.
+    function settleLpEpoch() external returns (IHousePool.LpEpochSettlementResult memory result);
 
 }

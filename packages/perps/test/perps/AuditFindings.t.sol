@@ -3,7 +3,6 @@ pragma solidity 0.8.35;
 
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
@@ -52,7 +51,12 @@ contract AuditC01_HwmInflation is BasePerpTest {
         _fundSenior(alice, 100_000 * 1e6);
         _fundJunior(alice, 50_000 * 1e6);
 
-        assertEq(pool.seniorHighWaterMark(), SEEDED_SENIOR + 100_000 * 1e6);
+        assertEq(
+            pool.seniorHighWaterMark(),
+            pool.seniorPrincipal(),
+            "new senior principal and async-epoch coupon accrual must remain at the HWM"
+        );
+        assertGt(pool.seniorHighWaterMark(), SEEDED_SENIOR + 100_000 * 1e6);
 
         // Open a BEAR position. BEAR profits when oracle price rises.
         // 100k tokens at $1.00, max profit = 100k * ($2 - $1) = $100k
@@ -75,11 +79,9 @@ contract AuditC01_HwmInflation is BasePerpTest {
         usdc.mint(attacker, 1_000_000 * 1e6);
         vm.startPrank(attacker);
         usdc.approve(address(seniorVault), 1_000_000 * 1e6);
-        assertEq(seniorVault.maxDeposit(attacker), 0, "impaired senior should zero maxDeposit");
-        vm.expectRevert(
-            abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, attacker, 1_000_000 * 1e6, 0)
-        );
-        seniorVault.deposit(1_000_000 * 1e6, attacker);
+        assertEq(seniorVault.maxRequestDeposit(attacker), 0, "impaired senior should zero request capacity");
+        vm.expectRevert(TrancheVault.TrancheVault__DepositsUnavailable.selector);
+        seniorVault.requestDeposit(1_000_000 * 1e6, attacker);
         vm.stopPrank();
     }
 
@@ -196,19 +198,14 @@ contract AuditC04_StaleOracleMtmBypass is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        // Make mark stale (120s limit)
-        _warpForward(130);
+        uint256 redeemShares = juniorVault.balanceOf(alice) / 2;
+        vm.prank(alice);
+        uint256 requestId = juniorVault.requestRedeem(redeemShares, alice, alice);
 
-        uint256 aliceMaxWithdraw = juniorVault.maxWithdraw(alice);
-        if (aliceMaxWithdraw > 0) {
-            _warpForward(1 hours); // pass cooldown
-
-            // C-04 BUG: withdrawal succeeds during stale period.
-            // _reconcile early-returns, skipping MTM. Alice escapes at pre-crash NAV.
-            vm.prank(alice);
-            vm.expectRevert();
-            juniorVault.withdraw(aliceMaxWithdraw, alice, alice);
-        }
+        // The request must mature, but settlement must not price it from a stale live-market mark.
+        vm.warp(juniorVault.depositEpochStart(requestId));
+        vm.expectRevert(IHousePool.HousePool__MarkPriceStale.selector);
+        pool.settleLpEpoch();
     }
 
     function test_C04_StaleReconcileDoesNotCreateUnpaidDebt() public {
@@ -305,11 +302,12 @@ contract AuditC05_ImpairedDeposit is BasePerpTest {
         // C-05 BUG: attacker can deposit into an impaired tranche.
         // With multiplicative HWM scaling (C-01), this fabricates phantom debt.
         // Deposits should be blocked when seniorPrincipal < seniorHighWaterMark.
-        usdc.mint(attacker, 1000 * 1e6);
+        uint256 depositAmount = pool.minTrancheDepositUsdc();
+        usdc.mint(attacker, depositAmount);
         vm.startPrank(attacker);
-        usdc.approve(address(seniorVault), 1000 * 1e6);
-        vm.expectRevert();
-        seniorVault.deposit(1000 * 1e6, attacker);
+        usdc.approve(address(seniorVault), depositAmount);
+        vm.expectRevert(TrancheVault.TrancheVault__DepositsUnavailable.selector);
+        seniorVault.requestDeposit(depositAmount, attacker);
         vm.stopPrank();
     }
 
@@ -439,11 +437,11 @@ contract AuditN01_TransferBypassesCooldown is BasePerpTest {
     }
 
     function test_N01_TransferRecipientBypassesCooldown() public {
-        uint256 t0 = SETUP_TIMESTAMP;
         _fundJunior(alice, 100_000 * 1e6);
+        uint256 aliceDepositTime = juniorVault.lastDepositTime(alice);
 
         // Wait for Alice's cooldown to expire
-        vm.warp(t0 + 1 hours);
+        vm.warp(aliceDepositTime + juniorVault.DEPOSIT_COOLDOWN());
 
         // Alice transfers to bob (fresh address, lastDepositTime=0)
         uint256 shares = juniorVault.balanceOf(alice);
@@ -454,7 +452,7 @@ contract AuditN01_TransferBypassesCooldown is BasePerpTest {
         // Since sender cooldown is already expired when transfers are allowed,
         // this is defense-in-depth — it ensures lastDepositTime is never 0 for
         // an address holding shares, which matters if cooldown logic evolves.
-        assertEq(juniorVault.lastDepositTime(bob), t0, "Bob inherits Alice's deposit time");
+        assertEq(juniorVault.lastDepositTime(bob), aliceDepositTime, "Bob inherits Alice's deposit time");
         assertGt(juniorVault.lastDepositTime(bob), 0, "Zero default is eliminated");
     }
 
@@ -496,18 +494,23 @@ contract AuditH04_SeniorCouponWithdrawalAccounting is BasePerpTest {
         uint256 hwmBefore = pool.seniorHighWaterMark();
         assertGt(seniorPrincipalBefore, 1_000_000 * 1e6, "Coupon should be paid directly into senior principal");
 
-        uint256 withdrawAmount = seniorVault.maxWithdraw(alice) / 2;
-        if (withdrawAmount == 0) {
-            return;
-        }
-
+        uint256 redeemShares = seniorVault.balanceOf(alice) / 2;
         vm.prank(alice);
-        seniorVault.withdraw(withdrawAmount, alice, alice);
+        uint256 requestId = seniorVault.requestRedeem(redeemShares, alice, alice);
+
+        vm.warp(seniorVault.depositEpochStart(requestId));
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        pool.settleLpEpoch();
 
         uint256 seniorPrincipalAfter = pool.seniorPrincipal();
         uint256 expectedHwm = (hwmBefore * seniorPrincipalAfter) / seniorPrincipalBefore;
 
         assertEq(pool.seniorHighWaterMark(), expectedHwm, "Senior HWM should scale with the withdrawn principal");
+
+        uint256 claimableShares = seniorVault.claimableRedeemRequest(requestId, alice);
+        vm.prank(alice);
+        seniorVault.claimRedeem(requestId, claimableShares, alice, alice);
     }
 
 }

@@ -1278,7 +1278,10 @@ contract NonUsdcCollateralTest is Test {
         CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
         engine.setDependencies(address(planner), address(settlement), address(engineAdmin));
         pool = new HousePool(address(usdc), address(engine));
+        TrancheVault seniorVault =
+            new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior LP", "seniorUSDC");
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "juniorUSDC");
+        pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
         engine.setPool(address(pool));
         engine.setOrderRouter(address(this));
@@ -1287,8 +1290,18 @@ contract NonUsdcCollateralTest is Test {
         vm.warp(1_709_532_000);
 
         usdc.mint(address(this), 10_000_000 * 1e6);
+        usdc.approve(address(pool), 2000e6);
+        pool.initializeSeedPosition(false, 1000e6, address(this));
+        pool.initializeSeedPosition(true, 1000e6, address(this));
+        pool.activateTrading();
+
         usdc.approve(address(juniorVault), type(uint256).max);
-        juniorVault.deposit(5_000_000 * 1e6, address(this));
+        uint256 requestId = juniorVault.requestDeposit(5_000_000 * 1e6, address(this), address(this));
+        vm.warp(pool.lpEpochStart(requestId));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        pool.settleLpEpoch();
+        uint256 claimableAssets = juniorVault.claimableDepositRequest(requestId, address(this));
+        juniorVault.claimDeposit(requestId, claimableAssets, address(this), address(this));
     }
 
     function _deposit(

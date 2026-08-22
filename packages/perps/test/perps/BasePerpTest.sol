@@ -311,49 +311,54 @@ abstract contract BasePerpTest is Test {
         }
     }
 
-    // --- Legacy side-index placeholder helpers ---
+    // --- Asynchronous LP funding helpers ---
 
     function _fundJunior(
         address lp,
         uint256 amount
     ) internal {
-        usdc.mint(lp, amount);
-        vm.startPrank(lp);
-        usdc.approve(address(juniorVault), amount);
-        juniorVault.deposit(amount, lp);
-        vm.stopPrank();
+        _fundTrancheAsync(juniorVault, lp, amount);
     }
 
     function _fundJuniorDelayed(
         address lp,
         uint256 amount
     ) internal returns (uint256 shares) {
-        usdc.mint(lp, amount);
-        vm.startPrank(lp);
-        usdc.approve(address(juniorVault), amount);
-        uint256 epochId = juniorVault.requestDeposit(amount, lp);
-        vm.stopPrank();
-
-        uint256 activationTime = juniorVault.depositEpochStart(epochId);
-        vm.warp(activationTime);
-        uint256 markPrice = engine.lastMarkPrice();
-        vm.prank(address(router));
-        engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, SafeCast.toUint64(activationTime));
-        shares = juniorVault.finalizeDepositEpoch(epochId);
-
-        vm.prank(lp);
-        juniorVault.claimDepositShares(epochId);
+        shares = _fundTrancheAsync(juniorVault, lp, amount);
     }
 
     function _fundSenior(
         address lp,
         uint256 amount
     ) internal {
+        _fundTrancheAsync(seniorVault, lp, amount);
+    }
+
+    function _fundTrancheAsync(
+        TrancheVault vault,
+        address lp,
+        uint256 amount
+    ) internal returns (uint256 shares) {
         usdc.mint(lp, amount);
         vm.startPrank(lp);
-        usdc.approve(address(seniorVault), amount);
-        seniorVault.deposit(amount, lp);
+        usdc.approve(address(vault), amount);
+        uint256 requestId = vault.requestDeposit(amount, lp, lp);
         vm.stopPrank();
+
+        uint256 activationTime = vault.depositEpochStart(requestId);
+        if (block.timestamp < activationTime) {
+            vm.warp(activationTime);
+        }
+        uint256 markPrice = engine.lastMarkPrice();
+        vm.prank(address(router));
+        engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, SafeCast.toUint64(block.timestamp));
+        pool.settleLpEpoch();
+
+        uint256 claimableAssets = vault.claimableDepositRequest(requestId, lp);
+        assertEq(claimableAssets, amount, "async tranche funding must finalize the requested asset basis");
+        vm.prank(lp);
+        shares = vault.claimDeposit(requestId, claimableAssets, lp, lp);
+        assertGt(shares, 0, "async tranche funding must mint claimable shares");
     }
 
     function _fundTrader(

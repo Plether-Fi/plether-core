@@ -72,11 +72,12 @@ In practice, the compact public API is:
   - `OrderRouter.executeLiquidation(address,bytes[])`
   - `OrderRouter.executeLiquidationBatch(address[],bytes[])`
 - LPs:
-  - the configured senior or junior `TrancheVault`: `deposit`, `mint`, `requestDeposit`, `cancelPendingDeposit`,
-    `claimDepositShares`, `withdraw`, and `redeem`
-  - permissionless delayed-batch processing: `TrancheVault.finalizeDepositEpoch(uint256)`
+  - the configured Senior or Junior `TrancheVault`: asynchronous `requestDeposit` / `requestRedeem`, request
+    cancellation and status views, and funded-request claims through `deposit` / `mint` or `withdraw` / `redeem`
+  - permissionless synchronized clearing: `HousePool.settleLpEpoch()`
 - Readers:
-  - `PerpsPublicLens`
+  - `PerpsPublicLens`, including `getTrancheQueues(bool)` for synchronized heads/backlog and
+    `getLpRequestState(bool,uint256,address)` for controller request balances
   - the read-only `IHousePool` capacity getters exposed by `HousePool`:
     `getSeniorDepositCapacity()`, `reservedSeniorDepositAssetsUsdc()`, and
     `areSeniorDepositReservationsWithinLimits()`
@@ -90,15 +91,17 @@ The simplified public interfaces live in `packages/perps/src/interfaces/`:
 - `ICfdEngineLens.sol` for `previewOpen(...)` / `previewClose(...)` trade-ticket previews
 - `IPerpsLPActions.sol` for configured-vault-to-pool integration hooks, not direct LP calls
 - `IPerpsLPViews.sol`
+- `IAsyncTrancheVault.sol` for the complete asynchronous LP request, cancellation, estimate, and claim surface
+- `IERC7540.sol` and `IERC7575.sol` for the standard operator/request/claim and vault-entry fragments
 - `IPerpsKeeper.sol`
 - `IProtocolViews.sol`
 - `PerpsViewTypes.sol`
 
 The wider engine, clearinghouse, router, and house-pool interfaces still exist for tests, admin tooling, and deep accounting inspection, but they are not the recommended product integration surface.
-The three capacity getters above are the deliberate direct-read exception. The tranche-mutation hooks declared by
-`IHousePool` / `IPerpsLPActions`, including senior deposit reservation, release, and reserved finalization, are
-integration plumbing authorized only to the configured tranche vaults; LP applications must perform actions through
-the relevant `TrancheVault`.
+The three capacity getters above are the deliberate direct-read exception. The active vault-authorized hooks declared
+by `IHousePool` / `IPerpsLPActions` are Senior deposit reservation and release. `HousePool.settleLpEpoch()` is the
+permissionless coordinator. The retained `depositSenior` / `depositJunior` selectors are disabled compatibility paths
+that always revert; LP applications must perform actions through the relevant `TrancheVault`.
 
 ### Trade-ticket previews
 
@@ -190,9 +193,12 @@ LPs provide USDC to the `HousePool`, which is split into senior and junior ERC-4
 
 - Senior gets a target coupon funded from junior NAV, plus last-loss protection.
 - Junior absorbs first loss and receives residual upside.
-- LP withdrawals are gated by solvency, reserved liabilities, lifecycle state, mark freshness policy, and holder cooldown rules.
-- Ordinary tranche deposits and partial withdrawals must be at least `1 USDC`, preventing dust flows from forcing coupon checkpoint churn while still allowing full dust exits.
-- During `oracleFrozen`, withdrawals remain live under stale-priced ERC4626 math with a fixed tranche-local surcharge. Immediate active-share deposits use the same surcharge only if no trader positions are open; otherwise LP entry must use pending deposit epochs.
+- LP redemption requests escrow shares after the holder cooldown and size checks. Pending shares remain outstanding and
+  exposed to tranche profit and loss until an epoch settlement funds and burns them.
+- Ordinary tranche deposits and partial redemption requests must be at least `1 USDC` at the current estimate,
+  preventing dust flows from forcing checkpoint churn while still allowing a complete dust exit.
+- During `oracleFrozen`, matured redemptions and deposit activation use the stale-window policy with a fixed
+  tranche-local surcharge. Requests do not lock a price or fee; settlement fixes both.
 - During `oracleFrozen`, bootstrap admin flows stay blocked: `initializeSeedPosition(...)` and `assignUnassignedAssets(...)` must wait for the oracle to become live again instead of inheriting the stale-window LP fee path.
 
 The withdrawal firewall is the key LP safety mechanism:
@@ -201,7 +207,29 @@ The withdrawal firewall is the key LP safety mechanism:
 freeUSDC = totalAssets - withdrawalReservedUsdc
 ```
 
-Only unencumbered USDC can leave the pool.
+Only unencumbered USDC can be committed to funded LP claims. Funded assets then leave `HousePool` for vault claim
+escrow and cannot be reused by later settlements.
+
+Both vaults use the same one-hour epoch clock. `HousePool.settleLpEpoch()` is the sole permissionless clearing
+entrypoint and applies one accounting snapshot in this order:
+
+1. matured Senior redemption demand,
+2. matured Junior redemption demand from the remaining liquidity and covenant capacity,
+3. matured Junior deposits,
+4. matured Senior deposits.
+
+Deposits activated in that transaction do not fund withdrawals in the same transaction. User claims remain separate
+controller/operator pull actions and stay available while new deposit requests or entry activation are paused;
+redemption requests remain available so exit demand can queue during a pause.
+Each redemption or deposit phase examines at most 16 nonempty epochs. Reaching the Senior redemption processing bound
+with an eligible Senior head still pending ends the call before Junior funding; a later call resumes from that head.
+If a call cannot advance any queued epoch, it reverts and rolls back its reconcile and carry checkpoints; keepers should
+retry after an epoch matures or the blocking liquidity, capacity, pause, or safety condition changes.
+If an aggregate deposit quote or unfunded redemption remainder rounds to zero, settlement moves that request into a
+terminal refundable state instead of silently consuming value. `PerpsPublicLens.getLpRequestState(...)` exposes
+`refundableDepositAssets`, `refundableRedeemShares`, and `redeemRefundPending`. The last flag may remain true when a
+controller's pro-rata refund rounds to zero; the controller or its operator must still acknowledge that refund and
+clear an oldest terminal head before the standard claim methods advance to a later request.
 
 ### HousePool basics
 
@@ -221,7 +249,9 @@ Operationally:
 - Senior principal is restored before junior receives surplus if senior has been impaired.
 - `seniorHighWaterMark` is a compounded protected senior claim watermark, not a principal-only watermark.
 - When the junior-funded coupon increases `seniorPrincipal`, the paid coupon also ratchets `seniorHighWaterMark` upward and remains senior-protected after later losses.
-- The mark increases additively on deposits, scales proportionally on withdrawals, and resets cleanly after wipeout plus recapitalization.
+- The mark increases additively on deposits. When an epoch funds `netAssets` of Senior redemptions from pre-funding
+  principal `P`, it scales by remaining principal:
+  `H' = floor(H * (P - netAssets) / P)`. It resets cleanly after wipeout plus recapitalization.
 - Ordinary deposits into both tranches remain blocked while senior is impaired; recovery capital must arrive through explicit recapitalization or realized pool revenue.
 
 ### Senior capacity covenant
@@ -237,20 +267,21 @@ The constructor starts with neutral bootstrap sentinels: unlimited absolute expo
 senior share (`10,000` bps). Governance cannot propose those values: a finalized operational configuration must use a
 finite absolute limit and a share limit below `10,000` bps. Either limit may be zero to close senior admission.
 
-- Immediate senior deposits and new pending senior requests may use only the smaller absolute and ratio headrooms.
+- New Senior deposit requests may use only the smaller absolute and ratio headrooms.
 - A pending senior request reserves gross-asset headroom. Finalization revalidates the complete reservation book under
   the then-active limits; if a cap reduction or accounting change makes it invalid, affected owners may cancel after
   epoch activation and recover their escrowed USDC rather than remain locked.
-- Junior withdrawals preserve the configured senior share using active `E` only, in addition to the ordinary cash and
-  senior-priority withdrawal firewall. Reservations do not lock junior liquidity; a permitted junior withdrawal may
-  instead invalidate the provisional reservation book and unlock refunds.
+- Junior redemption funding preserves the configured senior share using active `E` only. It uses liquidity remaining
+  after all eligible matured Senior demand has been accounted for; dormant Senior NAV is not itself a cash
+  reservation. Pending Senior deposits remain refundable reservations and do not lock Junior withdrawal liquidity, so
+  Junior funding may instead invalidate the provisional deposit-reservation book and unlock refunds.
 - Coupon transfers, waterfall losses, revenue restoration, and privileged claimant recapitalization are not clipped to
   manufacture compliance. They may create a passive overage, which closes new senior capacity without haircutting or
   forcibly withdrawing existing senior claims. Recapitalization routed through
   `recordClaimantInflow(..., Recapitalization, ...)` may therefore restore protected senior claims above a newly
   reduced cap; it does not mint new senior LP shares.
-- Senior withdrawals and junior deposits can cure an overage. Governance limit reductions are prospective for active
-  senior shares, but unfinalized reservations must either fit the active limits at finalization or be refunded.
+- Funded Senior redemptions and Junior deposits can cure an overage. Governance limit reductions are prospective for
+  active Senior shares, but unfinalized reservations must either fit the active limits at finalization or be refunded.
 
 ### Reachability domains
 
@@ -265,14 +296,19 @@ finite absolute limit and a share limit below `10,000` bps. Either limit may be 
 - Activation rejects the constructor's neutral senior-limit defaults, requires both permanent seed positions, and
   requires projected protected senior exposure plus any accepted senior reservations to satisfy both active limits
   against projected junior principal.
-- Risk-increasing order commits and ordinary tranche deposits stay blocked during the seed lifecycle.
-- `TrancheVault.maxDeposit()` / `maxMint()` return zero while lifecycle, stale-mark, deposit-pause, open-position, senior-impairment, pending-bootstrap-assignment, or senior-cap gates block immediate active-share deposits. Senior views report finite residual capacity when entry is open.
-- `TrancheVault.requestDeposit()` keeps ordinary LP entry available through pending deposit epochs; requests are funded
+- Risk-increasing order commits and new tranche-deposit requests stay blocked during the seed lifecycle.
+- `TrancheVault.maxRequestDeposit()` reports request capacity. ERC-4626 `maxDeposit()` / `maxMint()` report only
+  activated deposit-claim capacity for the controller, independent of the eventual receiver, while
+  `previewDeposit()` / `previewMint()` revert for the asynchronous flow. A share-delivering claim, redemption
+  cancellation, or redemption refund may target another account only if that account has no existing vault shares;
+  this prevents unsolicited dust from resetting the account's whole-balance cooldown. Self-receipt is always allowed.
+- `TrancheVault.requestDeposit()` funds LP entry through pending deposit epochs; requests are funded
   up front and reserve senior capacity when applicable. Cancellation is unconditional before the request's epoch
   activates. At or after epoch activation it is available only when projected senior impairment blocks finalization
   (for either tranche), or when the senior vault's aggregate reservation book no longer fits the active limits.
-- During `oracleFrozen`, `TrancheVault.maxMint()` returns the finite share cap implied by the active frozen-entry fee rather than the default unbounded ERC4626 value.
-- `TrancheVault.maxWithdraw()` / `maxRedeem()` enforce cooldown plus pool-level withdrawal availability.
+- `TrancheVault.requestRedeem()` enforces cooldown, allowance, seed-floor, and minimum-request rules. ERC-4626
+  `maxWithdraw()` / `maxRedeem()` report only already-funded claim capacity; `previewWithdraw()` / `previewRedeem()`
+  revert for the asynchronous redemption flow. Use the vault's explicit estimate views for pending requests.
 
 ### Reconcile / freshness nuance
 
@@ -344,14 +380,11 @@ LP accounting intentionally refuses to count unrealized trader losses as present
 - Realized losses increase physical pool cash only when settlement actually happens.
 
 This keeps LP withdrawal limits conservative. Incoming deposits are priced from a separate unrealized-MtM-neutral NAV so conservative phantom liabilities cannot become a discount for new shares, while realized pool losses still lower deposit pricing.
-Immediate active-share deposits are only accepted when no trader positions are open. While positions are open,
-ordinary LP entry moves through pending deposit epochs: the user funds the request up front, waits at least one full
-epoch, and later receives the batch-priced shares after permissionless finalization. Cancellation is unconditional
+Ordinary LP entry always moves through pending deposit epochs: the user funds the request up front, waits at least one
+full epoch, and later claims the batch-priced shares after synchronized pool settlement. Cancellation is unconditional
 before the request's epoch activates. At or after epoch activation it is available when senior impairment blocks
 finalization or, for senior requests, when the aggregate reservation book no longer fits the active governed limits.
-This avoids pricing instantly active new LP shares against an incomplete unrealized-loss model: the engine's O(1) side
-aggregates can conservatively bound winner liabilities, but they cannot compute exact collateral-capped loser
-receivables without per-position accounting.
+This avoids pricing instantly active new LP shares against an incomplete unrealized-loss model.
 
 ### Accounting domains
 
@@ -428,7 +461,8 @@ LP policy follows that split as well:
 - Live and FAD-only closes retain Pyth's adverse-confidence price adjustment and do not pay the frozen-close spread.
 - A partial close must fully settle the spread together with the rest of its close obligation. If a terminal full close cannot collect the entire spread, the uncollectible portion is waived instead of becoming bad debt, preserving exit liveness.
 - Liquidations do not assess the frozen-close spread and retain their existing settlement rules.
-- `oracleFrozen` keeps LP withdrawals live and keeps immediate LP deposits live only when no trader positions are open; pending deposit epochs remain the ordinary entry path. Senior and junior stale-window actions pay fixed surcharges that compensate incumbent LPs in that same tranche.
+- `oracleFrozen` keeps eligible synchronized LP settlement live. Senior and Junior stale-window activation/funding
+  pays fixed surcharges that compensate incumbent LPs in that same tranche.
 
 This preserves close and liquidation liveness during real market closures without turning normal live trading into a free option.
 
@@ -527,7 +561,9 @@ only one field must repeat the desired active values for the other five.
 
 - Pausing `OrderRouter` blocks new risk-increasing order commits.
 - Keeper execution, liquidation, and other protective paths remain available.
-- Pausing `HousePool` blocks new LP deposits but not protective withdrawals or reconcile.
+- Pausing `HousePool` blocks new LP deposit requests and deposit activation. Redemption requests remain available so
+  exit demand can queue, while synchronized settlement continues to reconcile and fund matured exits and reports
+  entries as deferred. Funded redemption claims remain independently callable.
 
 ## Default Parameters
 
@@ -558,7 +594,7 @@ only one field must repeat the desired active values for the other five.
 | `fadRunwaySeconds` | 3 hours | Admin FAD pre-close runway |
 | `seniorRateBps` | 800 (8% APY) | Senior target coupon rate funded from junior NAV |
 | `maxSeniorExposureUsdc` | Timelocked, finite | Absolute counted-admission limit (`E +` pending senior reservations) |
-| `maxSeniorShareBps` | Timelocked, <10,000 | Maximum counted senior admission share; active `E` also governs junior withdrawals |
+| `maxSeniorShareBps` | Timelocked, <10,000 | Maximum counted senior admission share; active `E` also governs Junior redemption funding |
 | `DEPOSIT_COOLDOWN` | 1 hour | LP anti-flash cooldown |
 
 The two senior-capacity rows describe the required post-timelock operating configuration. Fresh deployments initially

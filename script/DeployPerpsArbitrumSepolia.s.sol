@@ -18,11 +18,35 @@ import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import "forge-std/Script.sol";
 
+/// @dev Minimal deployment-time compatibility surface. Keeping this local makes the deploy script fail closed when
+///      one vault comes from the legacy synchronous generation.
+interface IAsyncTrancheVaultDeploymentView {
+
+    function POOL() external view returns (address);
+    function IS_SENIOR() external view returns (bool);
+    function asset() external view returns (address);
+    function share() external view returns (address);
+    function vault(
+        address asset_
+    ) external view returns (address);
+    function supportsInterface(
+        bytes4 interfaceId
+    ) external view returns (bool);
+
+}
+
 contract DeployPerpsArbitrumSepolia is Script {
 
     address internal constant PYTH = 0x4374e5a8b9C22271E9EB878A2AA31DE97DF15DAF;
     uint256 internal constant CAP_PRICE = 2e8;
     uint256 internal constant FROZEN_CLOSE_SPREAD_BPS = 50;
+
+    bytes4 internal constant ERC165_INTERFACE_ID = 0x01ffc9a7;
+    bytes4 internal constant ERC7540_OPERATOR_INTERFACE_ID = 0xe3bc4e65;
+    bytes4 internal constant ERC7575_INTERFACE_ID = 0x2f0a18c5;
+    bytes4 internal constant ERC7575_SHARE_INTERFACE_ID = 0xf815c03d;
+    bytes4 internal constant ERC7540_DEPOSIT_INTERFACE_ID = 0xce3bbe50;
+    bytes4 internal constant ERC7540_REDEEM_INTERFACE_ID = 0x620ee8e4;
 
     bytes32 internal constant PYTH_EUR_USD = 0xa995d00bb36a63cef7fd2c287dc105fc8f3d93779f062f09551b0af3e81ec30b;
     bytes32 internal constant PYTH_USD_JPY = 0xef2c98c804ba503c6a707e38be4dfbb16683775f195b091252bf24693042fd52;
@@ -97,6 +121,7 @@ contract DeployPerpsArbitrumSepolia is Script {
 
         deployed.housePool.setSeniorVault(address(deployed.seniorVault));
         deployed.housePool.setJuniorVault(address(deployed.juniorVault));
+        _verifyAsyncVaultPair(deployed.housePool, deployed.seniorVault, deployed.juniorVault, deployed.usdc);
         deployed.engine.setPool(address(deployed.housePool));
 
         deployed.accountLens = new CfdEngineAccountLens(address(deployed.engine));
@@ -187,6 +212,52 @@ contract DeployPerpsArbitrumSepolia is Script {
         inversions[5] = true;
     }
 
+    /// @dev Rejects partial or mixed-generation LP stacks before any engine/router wiring is completed.
+    function _verifyAsyncVaultPair(
+        HousePool housePool,
+        TrancheVault seniorVault,
+        TrancheVault juniorVault,
+        MockUSDC usdc
+    ) internal view {
+        require(address(seniorVault) != address(juniorVault), "HousePool vault pair is duplicated");
+        require(housePool.seniorVault() == address(seniorVault), "HousePool senior vault mismatch");
+        require(housePool.juniorVault() == address(juniorVault), "HousePool junior vault mismatch");
+        require(address(housePool.USDC()) == address(usdc), "HousePool asset mismatch");
+        require(housePool.LP_EPOCH_DURATION() == 1 hours, "Unexpected LP epoch duration");
+        require(housePool.MAX_LP_EPOCHS_PER_PHASE() == 16, "Unexpected LP epoch bound");
+
+        uint256 currentEpoch = housePool.currentLpEpoch();
+        require(currentEpoch == block.timestamp / housePool.LP_EPOCH_DURATION(), "Invalid current LP epoch");
+        require(
+            housePool.lpEpochStart(currentEpoch) == currentEpoch * housePool.LP_EPOCH_DURATION(),
+            "Invalid LP epoch start"
+        );
+
+        _verifyAsyncVault(address(seniorVault), address(housePool), address(usdc), true);
+        _verifyAsyncVault(address(juniorVault), address(housePool), address(usdc), false);
+    }
+
+    function _verifyAsyncVault(
+        address vault,
+        address housePool,
+        address usdc,
+        bool isSenior
+    ) internal view {
+        IAsyncTrancheVaultDeploymentView candidate = IAsyncTrancheVaultDeploymentView(vault);
+        require(candidate.POOL() == housePool, "TrancheVault pool mismatch");
+        require(candidate.IS_SENIOR() == isSenior, "TrancheVault side mismatch");
+        require(candidate.asset() == usdc, "TrancheVault asset mismatch");
+        require(candidate.share() == vault, "TrancheVault share mismatch");
+        require(candidate.supportsInterface(ERC165_INTERFACE_ID), "TrancheVault missing ERC165");
+        require(candidate.supportsInterface(ERC7540_OPERATOR_INTERFACE_ID), "TrancheVault missing ERC7540 operator");
+        require(candidate.supportsInterface(ERC7575_INTERFACE_ID), "TrancheVault missing ERC7575");
+        require(candidate.supportsInterface(ERC7575_SHARE_INTERFACE_ID), "TrancheVault missing ERC7575 share lookup");
+        require(candidate.supportsInterface(ERC7540_DEPOSIT_INTERFACE_ID), "TrancheVault missing async deposit");
+        require(candidate.supportsInterface(ERC7540_REDEEM_INTERFACE_ID), "TrancheVault missing async redeem");
+        require(!candidate.supportsInterface(0xffffffff), "TrancheVault accepts invalid ERC165 id");
+        require(candidate.vault(usdc) == vault, "TrancheVault share lookup mismatch");
+    }
+
     function _logDeployment(
         DeployedContracts memory deployed
     ) internal view {
@@ -200,6 +271,9 @@ contract DeployPerpsArbitrumSepolia is Script {
         console.log("CfdEngineSettlementSidecar:", address(deployed.settlementSidecar));
         console.log("CfdEngineAdmin:", address(deployed.engineAdmin));
         console.log("HousePool:", address(deployed.housePool));
+        console.log("LpEpochDuration:", deployed.housePool.LP_EPOCH_DURATION());
+        console.log("MaxLpEpochsPerPhase:", deployed.housePool.MAX_LP_EPOCHS_PER_PHASE());
+        console.log("CurrentLpEpoch:", deployed.housePool.currentLpEpoch());
         console.log("SeniorVault:", address(deployed.seniorVault));
         console.log("JuniorVault:", address(deployed.juniorVault));
         console.log("CfdEngineAccountLens:", address(deployed.accountLens));

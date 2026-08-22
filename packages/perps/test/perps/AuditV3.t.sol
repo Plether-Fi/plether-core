@@ -484,7 +484,7 @@ contract AuditV3_H02_JuniorWipeoutDilutionTest is BasePerpTest {
         vm.startPrank(attacker);
         usdc.approve(address(juniorVault), 1e6);
         vm.expectRevert(TrancheVault.TrancheVault__TerminallyWiped.selector);
-        juniorVault.deposit(1e6, attacker);
+        juniorVault.requestDeposit(1e6, attacker);
         vm.stopPrank();
     }
 

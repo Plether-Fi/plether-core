@@ -445,9 +445,9 @@ D_{\mathrm{reconcile}}
 then subtracts pending claimant and unassigned buckets as applicable.
 
 Deposit pricing deliberately uses an MtM adjustment of zero rather than offer
-new LPs a discount created by a conservative phantom liability. Immediate
-active-share deposits are blocked whenever positions are open. New LP capital
-instead enters a pending epoch and receives shares only when a later,
+new LPs a discount created by a conservative phantom liability. There is no
+immediate active-share deposit surface. New LP capital enters a pending epoch
+and receives shares only when a later,
 permissionless finalization fixes the batch price. This is an explicit
 acknowledgement that the engine's constant-time side aggregates cannot compute
 an exact, collateral-capped loser receivable for deposit pricing.
@@ -556,20 +556,35 @@ restores senior to its high-water mark and the remaining $15 million establishes
 junior principal. The resulting state is \(S=60\), \(J=15\), \(H=60\), all in
 millions of USDC.
 
-### 4.3 Deposit epochs are an accounting control
+### 4.3 Synchronized LP epochs are an accounting and liquidity control
 
-Each tranche supports immediate ERC-4626 entry only when the active-book and
-freshness gates allow exact-enough pricing. Otherwise a user:
+Ordinary entry and exit are fully asynchronous. Both tranches share a one-hour
+clock and one permissionless HousePool coordinator. A deposit request targets
+the current epoch plus two, while a redemption request targets the current
+epoch plus one. One bounded settlement transaction then:
 
-1. funds a future deposit request;
-2. receives an activation epoch two one-hour epochs ahead;
-3. may cancel only before that activation epoch begins;
-4. waits for permissionless epoch finalization to fix aggregate shares; and
-5. claims the allocated shares.
+1. reconciles HousePool accounting and fixes one execution-time snapshot;
+2. funds matured senior redemption demand before any junior redemption demand;
+3. funds junior demand only from remaining free liquidity and subordinated
+   capital capacity;
+4. finalizes matured junior deposits and then matured senior deposits; and
+5. leaves funded assets or shares in vault escrow for later user claims.
 
-This resembles the pending-to-claimable lifecycle standardized for asynchronous
-vaults in ERC-7540 [9], although Plether's exact interfaces and epoch rules are
-protocol-specific.
+Redemption priority is demand-based: dormant senior NAV does not reserve cash
+from junior claimants, but any newly matured senior request moves ahead of an
+older unfunded junior remainder. Incoming deposits never expand the withdrawal
+budget captured for the same settlement call. Deposit cancellation is
+unconditional before activation and follows the documented impairment/capacity
+policy after activation; redemption cancellation is available only before
+maturity while the request is wholly unfunded. Funded claims remain callable
+independently of later settlement, pause, or oracle liveness.
+If no queued epoch can advance, settlement reverts and rolls back its reconcile
+and carry checkpoints; this prevents permissionless no-op calls from changing
+time-based accounting.
+
+This implements the pending-to-claimable lifecycle standardized for
+asynchronous vaults in ERC-7540 [9], with protocol-specific shared request ids,
+terminal refund states, and bounded queue rules.
 
 The delayed path prevents an instantaneous entrant from buying active shares
 against a deposit NAV that counts loser receivables the engine cannot compute
@@ -585,12 +600,11 @@ epoch fully eliminates it.
 
 When the oracle is genuinely frozen, permitted LP entry and exit use the
 stale-price policy plus a tranche-local surcharge. Reference defaults are 25
-basis points for senior and 75 basis points for junior. Deposit mints fewer net
-shares for gross assets, mint grosses up the required assets, and
-withdraw/redeem pays fewer net assets against the gross tranche claim. The fee
-remains in the same tranche and does not become protocol revenue. Immediate
-entry remains available only when no positions are open; pending epochs are the
-normal path otherwise.
+basis points for senior and 75 basis points for junior. At synchronized
+settlement, deposits mint fewer net shares for gross assets and redemptions pay
+fewer net assets against the gross tranche claim. The fee remains in the same
+tranche and does not become protocol revenue. Preview methods revert for these
+asynchronous flows; explicit estimate views expose nonbinding current quotes.
 
 ### 4.5 Recapitalization and ownership routing
 
@@ -1527,7 +1541,7 @@ guide:
 | Binding order fields and first unique post-commit tick | Direct `OrderRouter.t.sol` tests; no dedicated stateful invariant covers intent immutability or strict historical-tick uniqueness |
 | Active tranche lifecycle, cooldowns, and excess | `PerpHousePoolLifecycleInvariant.t.sol`, `PerpValueConservationInvariant.t.sol` |
 | Junior-first loss, high-water restoration, coupon ratchet, and recapitalization priority | Direct `HousePool.t.sol` tests plus companion-model vectors; no dedicated stateful waterfall invariant at this revision |
-| Pending-deposit epochs | No stateful invariant coverage at this revision; dedicated epoch lifecycle tests are required |
+| Synchronized LP deposit/redemption epochs | Dedicated coordinator, FIFO, allocation-dust, plateau-liveness, and exact inverse-rounding integration/fuzz tests; no long-running stateful invariant yet spans both queue directions |
 | Account isolation | `PerpMultiAccountInvariant.t.sol` |
 | Fee custody | `PerpFeeFlowInvariant.t.sol` |
 
