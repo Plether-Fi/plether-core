@@ -18,18 +18,6 @@ interface ITerminalNavBookV2 {
         int144 intercept;
     }
 
-    /// @notice Canonical Engine input for one account's terminal price-PnL curve.
-    /// @param lots Number of exact 100-token position quanta.
-    /// @param entryCostUsdcAtoms Exact remaining position basis in 6-decimal USDC atoms.
-    /// @param collectibleCapUsdcAtoms Dedicated PnL pledge plus same-account nettable claim, in USDC atoms.
-    /// @param side Position direction under the protocol's USD-strength oracle convention.
-    struct CurveInput {
-        uint112 lots;
-        uint144 entryCostUsdcAtoms;
-        uint144 collectibleCapUsdcAtoms;
-        CfdTypes.Side side;
-    }
-
     /// @notice Stored canonical account curve after unreachable collateral has been removed from its cap.
     /// @param lots Number of exact 100-token position quanta.
     /// @param entryCostUsdcAtoms Exact remaining position basis in 6-decimal USDC atoms.
@@ -81,9 +69,6 @@ interface ITerminalNavBookV2 {
     error TerminalNavBookV2__CurveHashMismatch(address account, bytes32 expectedHash, bytes32 actualHash);
     /// @notice A canonical curve produced the reserved zero hash sentinel.
     error TerminalNavBookV2__ZeroCurveHash();
-    /// @notice Curve removal was requested for an account with no canonical curve.
-    /// @param account Account without a curve.
-    error TerminalNavBookV2__CurveNotFound(address account);
     /// @notice A terminal query supplied a mark above the immutable price cap.
     /// @param markPrice Supplied 8-decimal mark.
     /// @param capPrice Immutable maximum mark.
@@ -134,7 +119,8 @@ interface ITerminalNavBookV2 {
     ) external view returns (bytes32 expectedHash);
 
     /// @notice Rebuilds and applies an account curve from exact post-mutation Engine and clearinghouse state.
-    /// @dev Callable only by the immutable Engine. Removes the curve when the account no longer has a position.
+    /// @dev This is the sole curve-mutation endpoint and is callable only by the immutable Engine. Reverts unless
+    ///      `expectedOldHash` equals `curveHashOf(account)`, then removes the curve when no position remains.
     function syncFromEngine(
         address account,
         bytes32 expectedOldHash
@@ -142,31 +128,6 @@ interface ITerminalNavBookV2 {
 
     /// @notice Builds the authenticated Engine-level terminal NAV snapshot from the book and bound Engine getters.
     function terminalNavSnapshot() external view returns (ICfdEngineTypes.TerminalNavSnapshot memory snapshot);
-
-    /// @notice Inserts or replaces one account's canonical curve.
-    /// @dev Reverts unless `expectedOldHash` equals `curveHashOf(account)`. A canonically identical replacement is a
-    ///      no-op and does not increment the version. The book reconstructs and removes old coefficients from storage;
-    ///      callers never supply old curve values.
-    /// @param account Canonical one-position-per-account Engine account.
-    /// @param expectedOldHash Engine-observed pre-mutation curve hash, or zero for a new curve.
-    /// @param next Exact lots, basis, candidate collateral cap, and side after the Engine mutation.
-    /// @return newHash Hash of the stored canonical curve.
-    /// @return newBookVersion Current book version, incremented only when canonical state changed.
-    function setCurve(
-        address account,
-        bytes32 expectedOldHash,
-        CurveInput calldata next
-    ) external returns (bytes32 newHash, uint64 newBookVersion);
-
-    /// @notice Removes one account's canonical curve.
-    /// @dev Reverts for a missing curve or unless `expectedOldHash` equals `curveHashOf(account)`.
-    /// @param account Canonical Engine account whose position no longer exists.
-    /// @param expectedOldHash Engine-observed pre-mutation curve hash.
-    /// @return newBookVersion Book version after removal.
-    function removeCurve(
-        address account,
-        bytes32 expectedOldHash
-    ) external returns (uint64 newBookVersion);
 
     /// @notice Returns aggregate collateral-capped LP price PnL at an exact mark.
     /// @dev Positive output is collectible by LPs; negative output is owed to traders. Runtime is independent of the

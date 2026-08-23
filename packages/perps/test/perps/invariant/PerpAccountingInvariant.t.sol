@@ -10,6 +10,7 @@ import {AccountLensViewTypes} from "@plether/perps/interfaces/AccountLensViewTyp
 import {ICfdEngine} from "@plether/perps/interfaces/ICfdEngine.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
+import {ITerminalNavBookV2} from "@plether/perps/interfaces/ITerminalNavBookV2.sol";
 
 contract PerpAccountingInvariantTest is BasePerpInvariantTest {
 
@@ -56,6 +57,82 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
             _sumReservedSettlementBuckets(),
             _sumPendingExecutionBounties(),
             "Clearinghouse reserved settlement must equal live pending execution bounty reserves"
+        );
+    }
+
+    function invariant_TerminalNavBookMatchesCanonicalEngineState() public view {
+        ITerminalNavBookV2 book = engine.terminalNavBook();
+        uint256 activeCurveCount;
+        uint256 totalLots;
+        uint256 totalEntryCostUsdcAtoms;
+        uint256 totalEffectiveCapUsdcAtoms;
+
+        for (uint256 i = 0; i < handler.actorCount(); i++) {
+            address account = _account(handler.actorAt(i));
+            ITerminalNavBookV2.CurveRecord memory curve = book.curveOf(account);
+            bytes32 curveHash = book.curveHashOf(account);
+            (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(account);
+
+            if (size == 0) {
+                assertEq(curveHash, bytes32(0), "Absent Engine position must not have a curve hash");
+                assertEq(curve.lots, 0, "Absent Engine position must not have curve lots");
+                assertEq(curve.entryCostUsdcAtoms, 0, "Absent Engine position must not have curve basis");
+                assertEq(curve.effectiveCapUsdcAtoms, 0, "Absent Engine position must not have a curve cap");
+                assertEq(
+                    uint256(curve.side),
+                    uint256(CfdTypes.Side.BULL),
+                    "Absent Engine position must have default curve side"
+                );
+                continue;
+            }
+
+            assertEq(size % CfdTypes.SIZE_QUANTUM, 0, "Live Engine position must contain exact terminal lots");
+            uint256 expectedLots = size / CfdTypes.SIZE_QUANTUM;
+            uint256 expectedEntryCostUsdcAtoms = engine.positionEntryCostUsdcAtoms(account);
+            uint256 maximumCollectibleUsdcAtoms = side == CfdTypes.Side.BULL
+                ? expectedLots * uint256(book.CAP_PRICE()) - expectedEntryCostUsdcAtoms
+                : expectedEntryCostUsdcAtoms;
+            uint256 candidateCapUsdcAtoms =
+                clearinghouse.pnlPledgeUsdc(account) + engine.traderClaimBalanceUsdc(account);
+            uint256 expectedEffectiveCapUsdcAtoms = candidateCapUsdcAtoms < maximumCollectibleUsdcAtoms
+                ? candidateCapUsdcAtoms
+                : maximumCollectibleUsdcAtoms;
+
+            assertEq(curve.lots, expectedLots, "Curve lots must match canonical Engine size");
+            assertEq(
+                curve.entryCostUsdcAtoms,
+                expectedEntryCostUsdcAtoms,
+                "Curve basis must match canonical Engine entry cost"
+            );
+            assertEq(
+                curve.effectiveCapUsdcAtoms,
+                expectedEffectiveCapUsdcAtoms,
+                "Curve cap must match clipped claim-plus-pledge collateral"
+            );
+            assertEq(uint256(curve.side), uint256(side), "Curve side must match canonical Engine side");
+            assertEq(
+                curveHash,
+                _terminalCurveHash(book, account, curve),
+                "Curve hash must commit to the canonical account record"
+            );
+
+            activeCurveCount++;
+            totalLots += curve.lots;
+            totalEntryCostUsdcAtoms += curve.entryCostUsdcAtoms;
+            totalEffectiveCapUsdcAtoms += curve.effectiveCapUsdcAtoms;
+        }
+
+        ITerminalNavBookV2.BookState memory state = book.bookState();
+        assertEq(state.capPrice, engine.CAP_PRICE(), "Terminal book and Engine price caps must match");
+        assertEq(state.activeCurveCount, activeCurveCount, "Book active curve count must match actor records");
+        assertEq(state.totalLots, totalLots, "Book total lots must match actor records");
+        assertEq(
+            state.totalEntryCostUsdcAtoms, totalEntryCostUsdcAtoms, "Book total entry cost must match actor records"
+        );
+        assertEq(
+            state.totalEffectiveCapUsdcAtoms,
+            totalEffectiveCapUsdcAtoms,
+            "Book total effective cap must match actor records"
         );
     }
 
@@ -463,6 +540,24 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
             totalReservedSettlement += clearinghouse.getLockedMarginBuckets(_account(handler.actorAt(i)))
             .reservedSettlementUsdc;
         }
+    }
+
+    function _terminalCurveHash(
+        ITerminalNavBookV2 book,
+        address account,
+        ITerminalNavBookV2.CurveRecord memory curve
+    ) internal view returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                address(book),
+                book.CAP_PRICE(),
+                account,
+                curve.lots,
+                curve.entryCostUsdcAtoms,
+                curve.effectiveCapUsdcAtoms,
+                curve.side
+            )
+        );
     }
 
     function _account(

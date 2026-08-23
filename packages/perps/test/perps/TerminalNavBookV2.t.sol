@@ -7,18 +7,132 @@ import {ITerminalNavBookV2} from "@plether/perps/interfaces/ITerminalNavBookV2.s
 import {Test} from "forge-std/Test.sol";
 import {VmSafe} from "forge-std/Vm.sol";
 
+struct TestCurveInput {
+    uint112 lots;
+    uint144 entryCostUsdcAtoms;
+    uint144 collectibleCapUsdcAtoms;
+    CfdTypes.Side side;
+}
+
+/// @dev Minimal canonical-state driver used to exercise the book through its production synchronization API.
+contract TerminalNavEngineDriver {
+
+    uint256 public constant SIZE_QUANTUM = 1e20;
+
+    uint256 public immutable CAP_PRICE;
+
+    TerminalNavBookV2 public book;
+
+    bool private _rejectPositionReads;
+
+    struct PositionState {
+        uint256 size;
+        CfdTypes.Side side;
+    }
+
+    mapping(address account => PositionState position) private _positions;
+    mapping(address account => uint256 entryCostUsdcAtoms) private _entryCosts;
+    mapping(address account => uint256 pledgeUsdc) private _pledges;
+    mapping(address account => uint256 claimUsdc) private _claims;
+
+    constructor(
+        uint32 capPrice
+    ) {
+        CAP_PRICE = capPrice;
+    }
+
+    function bind(
+        TerminalNavBookV2 book_
+    ) external {
+        require(address(book) == address(0), "already bound");
+        book = book_;
+    }
+
+    function setPosition(
+        address account,
+        TestCurveInput calldata input
+    ) external {
+        _positions[account] = PositionState({size: uint256(input.lots) * SIZE_QUANTUM, side: input.side});
+        _entryCosts[account] = input.entryCostUsdcAtoms;
+        _pledges[account] = input.collectibleCapUsdcAtoms;
+        _claims[account] = 0;
+    }
+
+    function clearPosition(
+        address account
+    ) external {
+        delete _positions[account];
+        delete _entryCosts[account];
+        delete _pledges[account];
+        delete _claims[account];
+    }
+
+    function setRejectPositionReads(
+        bool rejectPositionReads
+    ) external {
+        _rejectPositionReads = rejectPositionReads;
+    }
+
+    function sync(
+        address account,
+        bytes32 expectedOldHash
+    ) external returns (bytes32 newHash, uint64 newBookVersion) {
+        return book.syncFromEngine(account, expectedOldHash);
+    }
+
+    function authenticate(
+        address account
+    ) external view returns (bytes32 expectedHash) {
+        return book.authenticateEngineState(account);
+    }
+
+    function clearinghouse() external view returns (address) {
+        return address(this);
+    }
+
+    function positions(
+        address account
+    ) external view returns (uint256, uint256, uint256, uint256, CfdTypes.Side, uint64, int256) {
+        require(!_rejectPositionReads, "unexpected Engine read");
+        PositionState memory position = _positions[account];
+        return (position.size, 0, 0, 0, position.side, 0, 0);
+    }
+
+    function positionEntryCostUsdcAtoms(
+        address account
+    ) external view returns (uint256) {
+        return _entryCosts[account];
+    }
+
+    function traderClaimBalanceUsdc(
+        address account
+    ) external view returns (uint256) {
+        return _claims[account];
+    }
+
+    function pnlPledgeUsdc(
+        address account
+    ) external view returns (uint256) {
+        return _pledges[account];
+    }
+
+}
+
 contract TerminalNavBookV2Test is Test {
 
     uint32 private constant CAP_PRICE = 2e8;
 
     TerminalNavBookV2 private book;
+    TerminalNavEngineDriver private driver;
 
     function setUp() public {
-        book = new TerminalNavBookV2(address(this), CAP_PRICE);
+        driver = new TerminalNavEngineDriver(CAP_PRICE);
+        book = new TerminalNavBookV2(address(driver), CAP_PRICE);
+        driver.bind(book);
     }
 
     function test_ConstructorAndEmptyState() public view {
-        assertEq(book.ENGINE(), address(this));
+        assertEq(book.ENGINE(), address(driver));
         assertEq(book.CAP_PRICE(), CAP_PRICE);
         assertEq(book.SIZE_QUANTUM(), 1e20);
         assertEq(book.terminalLpPriceDeltaUsdcAtoms(0), 0);
@@ -43,23 +157,21 @@ contract TerminalNavBookV2Test is Test {
         new TerminalNavBookV2(address(this), 0);
     }
 
-    function test_SetCurveRejectsUnauthorizedCaller() public {
-        ITerminalNavBookV2.CurveInput memory input = _curveInput(1, 1e8, 0, CfdTypes.Side.BULL);
+    function test_AuthenticationAndSynchronizationRejectUnauthorizedCaller() public {
+        vm.prank(address(0xBEEF));
+        vm.expectRevert(ITerminalNavBookV2.TerminalNavBookV2__Unauthorized.selector);
+        book.authenticateEngineState(address(1));
 
         vm.prank(address(0xBEEF));
         vm.expectRevert(ITerminalNavBookV2.TerminalNavBookV2__Unauthorized.selector);
-        book.setCurve(address(1), bytes32(0), input);
+        book.syncFromEngine(address(1), bytes32(0));
     }
 
-    function test_SetCurveRejectsZeroAccountZeroLotsAndInvalidEntryBasis() public {
-        ITerminalNavBookV2.CurveInput memory valid = _curveInput(1, 1e8, 0, CfdTypes.Side.BULL);
-
+    function test_SyncRejectsZeroAccountAndInvalidEntryBasis() public {
         vm.expectRevert(ITerminalNavBookV2.TerminalNavBookV2__ZeroAccount.selector);
-        book.setCurve(address(0), bytes32(0), valid);
+        driver.sync(address(0), bytes32(0));
 
-        vm.expectRevert(ITerminalNavBookV2.TerminalNavBookV2__ZeroLots.selector);
-        book.setCurve(address(1), bytes32(0), _curveInput(0, 0, 0, CfdTypes.Side.BULL));
-
+        driver.setPosition(address(1), _curveInput(1, uint144(uint256(CAP_PRICE) + 1), 0, CfdTypes.Side.BEAR));
         vm.expectRevert(
             abi.encodeWithSelector(
                 ITerminalNavBookV2.TerminalNavBookV2__EntryCostAboveCap.selector,
@@ -67,7 +179,7 @@ contract TerminalNavBookV2Test is Test {
                 uint256(CAP_PRICE)
             )
         );
-        book.setCurve(address(1), bytes32(0), _curveInput(1, uint144(uint256(CAP_PRICE) + 1), 0, CfdTypes.Side.BEAR));
+        driver.sync(address(1), bytes32(0));
     }
 
     function test_BullUncappedCurveMatchesExactPricePnl() public {
@@ -166,15 +278,16 @@ contract TerminalNavBookV2Test is Test {
 
     function test_ExcessCollateralIsCanonicalizedAndIdenticalReplacementIsNoOp() public {
         address account = address(1);
-        ITerminalNavBookV2.CurveInput memory first = _curveInput(10, 500, 500, CfdTypes.Side.BEAR);
+        TestCurveInput memory first = _curveInput(10, 500, 500, CfdTypes.Side.BEAR);
         (bytes32 firstHash, uint64 firstVersion) = _set(account, first);
         assertEq(firstVersion, 1);
 
         ITerminalNavBookV2.CurveRecord memory stored = book.curveOf(account);
         assertEq(stored.effectiveCapUsdcAtoms, 500);
 
-        ITerminalNavBookV2.CurveInput memory sameCanonical = _curveInput(10, 500, 5000, CfdTypes.Side.BEAR);
-        (bytes32 secondHash, uint64 secondVersion) = book.setCurve(account, firstHash, sameCanonical);
+        TestCurveInput memory sameCanonical = _curveInput(10, 500, 5000, CfdTypes.Side.BEAR);
+        driver.setPosition(account, sameCanonical);
+        (bytes32 secondHash, uint64 secondVersion) = driver.sync(account, firstHash);
         assertEq(secondHash, firstHash);
         assertEq(secondVersion, firstVersion);
 
@@ -185,46 +298,90 @@ contract TerminalNavBookV2Test is Test {
     }
 
     function test_CurveHashIsDeploymentAndAccountDomainSeparated() public {
-        ITerminalNavBookV2.CurveInput memory input = _curveInput(10, 500, 100, CfdTypes.Side.BEAR);
+        TestCurveInput memory input = _curveInput(10, 500, 100, CfdTypes.Side.BEAR);
         bytes32 accountOneHash;
         (accountOneHash,) = _set(address(1), input);
         bytes32 accountTwoHash;
         (accountTwoHash,) = _set(address(2), input);
 
-        TerminalNavBookV2 otherBook = new TerminalNavBookV2(address(this), CAP_PRICE);
-        (bytes32 otherBookHash,) = otherBook.setCurve(address(1), bytes32(0), input);
+        (TerminalNavEngineDriver otherDriver, TerminalNavBookV2 otherBook) = _deployBook(CAP_PRICE);
+        otherDriver.setPosition(address(1), input);
+        (bytes32 otherBookHash,) = otherDriver.sync(address(1), bytes32(0));
 
         assertNotEq(accountOneHash, accountTwoHash);
         assertNotEq(accountOneHash, otherBookHash);
+        assertEq(otherBook.curveHashOf(address(1)), otherBookHash);
     }
 
-    function test_StrictExpectedHashRejectsStaleSetAndRemove() public {
+    function test_StrictExpectedHashRejectsStaleLivePositionSynchronization() public {
         address account = address(1);
-        ITerminalNavBookV2.CurveInput memory input = _curveInput(10, 500, 100, CfdTypes.Side.BEAR);
+        TestCurveInput memory input = _curveInput(10, 500, 100, CfdTypes.Side.BEAR);
         bytes32 currentHash;
         (currentHash,) = _set(account, input);
         bytes32 staleHash = keccak256("stale");
+        driver.setPosition(account, _curveInput(11, 550, 100, CfdTypes.Side.BEAR));
 
         vm.expectRevert(
             abi.encodeWithSelector(
                 ITerminalNavBookV2.TerminalNavBookV2__CurveHashMismatch.selector, account, staleHash, currentHash
             )
         );
-        book.setCurve(account, staleHash, input);
+        driver.sync(account, staleHash);
+    }
+
+    function test_SyncAuthenticatesStoredHashBeforeReadingEnginePostState() public {
+        address account = address(1);
+        bytes32 currentHash;
+        (currentHash,) = _set(account, _curveInput(10, 500, 100, CfdTypes.Side.BEAR));
+        bytes32 staleHash = keccak256("stale before Engine read");
+        driver.setRejectPositionReads(true);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ITerminalNavBookV2.TerminalNavBookV2__CurveHashMismatch.selector, account, staleHash, currentHash
+            )
+        );
+        driver.sync(account, staleHash);
+    }
+
+    function test_StrictExpectedHashRejectsStalePositionRemoval() public {
+        address account = address(1);
+        bytes32 currentHash;
+        (currentHash,) = _set(account, _curveInput(10, 500, 100, CfdTypes.Side.BEAR));
+        driver.clearPosition(account);
+        bytes32 staleHash = keccak256("stale removal");
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ITerminalNavBookV2.TerminalNavBookV2__CurveHashMismatch.selector, account, staleHash, currentHash
+            )
+        );
+        driver.sync(account, staleHash);
+    }
+
+    function test_OrphanStoredCurveCannotBeSkippedWithZeroExpectedHash() public {
+        address account = address(1);
+        bytes32 currentHash;
+        (currentHash,) = _set(account, _curveInput(10, 500, 100, CfdTypes.Side.BEAR));
+        driver.clearPosition(account);
 
         vm.expectRevert(
             abi.encodeWithSelector(
                 ITerminalNavBookV2.TerminalNavBookV2__CurveHashMismatch.selector, account, bytes32(0), currentHash
             )
         );
-        book.removeCurve(account, bytes32(0));
+        driver.sync(account, bytes32(0));
     }
 
-    function test_RemoveMissingCurveReverts() public {
-        vm.expectRevert(
-            abi.encodeWithSelector(ITerminalNavBookV2.TerminalNavBookV2__CurveNotFound.selector, address(1))
-        );
-        book.removeCurve(address(1), bytes32(0));
+    function test_AbsentPositionAndCurveSyncIsVersionPreservingNoOp() public {
+        _set(address(2), _curveInput(10, 500, 100, CfdTypes.Side.BEAR));
+        ITerminalNavBookV2.BookState memory beforeState = book.bookState();
+
+        (bytes32 newHash, uint64 newVersion) = driver.sync(address(1), bytes32(0));
+
+        assertEq(newHash, bytes32(0));
+        assertEq(newVersion, beforeState.bookVersion);
+        assertEq(book.bookState().bookVersion, beforeState.bookVersion);
     }
 
     function test_ReplacementAndRemovalRestoreEveryAggregate() public {
@@ -232,14 +389,15 @@ contract TerminalNavBookV2Test is Test {
         bytes32 firstHash;
         (firstHash,) = _set(account, _curveInput(1000, 100_000e6, 20_000e6, CfdTypes.Side.BULL));
 
-        ITerminalNavBookV2.CurveInput memory replacement = _curveInput(1500, 150_000e6, 25_000e6, CfdTypes.Side.BEAR);
-        (bytes32 replacementHash, uint64 replacementVersion) = book.setCurve(account, firstHash, replacement);
+        TestCurveInput memory replacement = _curveInput(1500, 150_000e6, 25_000e6, CfdTypes.Side.BEAR);
+        driver.setPosition(account, replacement);
+        (bytes32 replacementHash, uint64 replacementVersion) = driver.sync(account, firstHash);
         assertEq(replacementVersion, 2);
         _assertAggregateAt(_singleAccount(account), 0);
         _assertAggregateAt(_singleAccount(account), 1e8);
         _assertAggregateAt(_singleAccount(account), CAP_PRICE);
 
-        uint64 removalVersion = book.removeCurve(account, replacementHash);
+        (, uint64 removalVersion) = _remove(account, replacementHash);
         assertEq(removalVersion, 3);
         assertEq(book.curveHashOf(account), bytes32(0));
         assertEq(book.terminalLpPriceDeltaUsdcAtoms(0), 0);
@@ -255,7 +413,7 @@ contract TerminalNavBookV2Test is Test {
     }
 
     function test_DuplicateBreakpointsAggregateAndCancelExactly() public {
-        ITerminalNavBookV2.CurveInput memory input = _curveInput(3, 10, 2, CfdTypes.Side.BULL);
+        TestCurveInput memory input = _curveInput(3, 10, 2, CfdTypes.Side.BULL);
         bytes32 firstHash;
         (firstHash,) = _set(address(1), input);
         _set(address(2), input);
@@ -265,7 +423,7 @@ contract TerminalNavBookV2Test is Test {
         assertEq(leaf.intercept, 24);
         assertEq(book.terminalLpPriceDeltaUsdcAtoms(4), 4);
 
-        book.removeCurve(address(1), firstHash);
+        _remove(address(1), firstHash);
         leaf = book.radixNode(8, 4);
         assertEq(leaf.slope, -3);
         assertEq(leaf.intercept, 12);
@@ -290,55 +448,70 @@ contract TerminalNavBookV2Test is Test {
     }
 
     function test_PackedSlopeLimitIsAcceptedAndPlusOneGrossLotIsRejected() public {
-        TerminalNavBookV2 maxBook = new TerminalNavBookV2(address(this), type(uint32).max);
+        (TerminalNavEngineDriver maxDriver, TerminalNavBookV2 maxBook) = _deployBook(type(uint32).max);
         uint112 maximumLots = uint112(uint256(int256(type(int112).max)));
-        ITerminalNavBookV2.CurveInput memory maximum = _curveInput(maximumLots, 0, 0, CfdTypes.Side.BULL);
-        maxBook.setCurve(address(1), bytes32(0), maximum);
+        TestCurveInput memory maximum = _curveInput(maximumLots, 0, 0, CfdTypes.Side.BULL);
+        maxDriver.setPosition(address(1), maximum);
+        maxDriver.sync(address(1), bytes32(0));
 
+        maxDriver.setPosition(address(2), _curveInput(1, 0, 0, CfdTypes.Side.BULL));
         vm.expectRevert(ITerminalNavBookV2.TerminalNavBookV2__AggregateBoundsExceeded.selector);
-        maxBook.setCurve(address(2), bytes32(0), _curveInput(1, 0, 0, CfdTypes.Side.BULL));
+        maxDriver.sync(address(2), bytes32(0));
+        assertEq(maxBook.bookState().activeCurveCount, 1);
     }
 
     function test_PackedInterceptBudgetAcceptsExactLimitAndRejectsPlusOne() public {
-        TerminalNavBookV2 maxBook = new TerminalNavBookV2(address(this), type(uint32).max);
+        (TerminalNavEngineDriver maxDriver, TerminalNavBookV2 maxBook) = _deployBook(type(uint32).max);
         uint112 maximumLots = uint112(uint256(int256(type(int112).max)));
         uint256 entryCost = uint256(maximumLots) * uint256(type(uint32).max);
         uint256 maximumSignedIntercept = uint256(int256(type(int144).max));
         uint256 cap = maximumSignedIntercept - entryCost;
-        ITerminalNavBookV2.CurveInput memory exact =
-            _curveInput(maximumLots, uint144(entryCost), uint144(cap), CfdTypes.Side.BEAR);
-        (bytes32 exactHash,) = maxBook.setCurve(address(1), bytes32(0), exact);
+        TestCurveInput memory exact = _curveInput(maximumLots, uint144(entryCost), uint144(cap), CfdTypes.Side.BEAR);
+        maxDriver.setPosition(address(1), exact);
+        (bytes32 exactHash,) = maxDriver.sync(address(1), bytes32(0));
 
         ITerminalNavBookV2.BookState memory state = maxBook.bookState();
         assertEq(
             uint256(state.totalEntryCostUsdcAtoms) + uint256(state.totalEffectiveCapUsdcAtoms), maximumSignedIntercept
         );
 
-        ITerminalNavBookV2.CurveInput memory tooLarge =
+        TestCurveInput memory tooLarge =
             _curveInput(maximumLots, uint144(entryCost), uint144(cap + 1), CfdTypes.Side.BEAR);
+        maxDriver.setPosition(address(1), tooLarge);
         vm.expectRevert(ITerminalNavBookV2.TerminalNavBookV2__AggregateBoundsExceeded.selector);
-        maxBook.setCurve(address(1), exactHash, tooLarge);
+        maxDriver.sync(address(1), exactHash);
     }
 
     function test_Gas_CappedInsertAndRelocationStayWithinBookGate() public {
         address account = address(1);
+        driver.setPosition(account, _curveInput(1000, 100_000e6, 20_000e6, CfdTypes.Side.BULL));
         uint256 gasBefore = gasleft();
-        (bytes32 firstHash,) = _set(account, _curveInput(1000, 100_000e6, 20_000e6, CfdTypes.Side.BULL));
+        (bytes32 firstHash,) = driver.sync(account, bytes32(0));
         uint256 insertGas = gasBefore - gasleft();
         if (!vm.isContext(VmSafe.ForgeContext.Coverage)) {
             assertLt(insertGas, 500_000);
         }
 
+        driver.setPosition(account, _curveInput(1000, 100_000e6, 50_000e6, CfdTypes.Side.BULL));
         gasBefore = gasleft();
-        book.setCurve(account, firstHash, _curveInput(1000, 100_000e6, 50_000e6, CfdTypes.Side.BULL));
+        driver.sync(account, firstHash);
         uint256 relocationGas = gasBefore - gasleft();
         if (!vm.isContext(VmSafe.ForgeContext.Coverage)) {
             assertLt(relocationGas, 500_000);
         }
     }
 
+    function test_Gas_AbsentPositionAndCurveNoOpStaysWithinBookGate() public {
+        uint256 gasBefore = gasleft();
+        driver.sync(address(1), bytes32(0));
+        uint256 noOpGas = gasBefore - gasleft();
+        if (!vm.isContext(VmSafe.ForgeContext.Coverage)) {
+            assertLt(noOpGas, 50_000);
+        }
+    }
+
     function test_Gas_MaximumRadixReadStaysWithinBookGate() public {
-        TerminalNavBookV2 maxBook = new TerminalNavBookV2(address(this), type(uint32).max);
+        (, TerminalNavBookV2 maxBook) = _deployBook(type(uint32).max);
         uint256 gasBefore = gasleft();
         maxBook.terminalLpPriceDeltaUsdcAtoms(type(uint32).max);
         uint256 queryGas = gasBefore - gasleft();
@@ -386,9 +559,10 @@ contract TerminalNavBookV2Test is Test {
             address account = accounts[i];
             bytes32 oldHash = book.curveHashOf(account);
             if (i % 3 == 0) {
-                book.removeCurve(account, oldHash);
+                _remove(account, oldHash);
             } else if (i % 2 == 0) {
-                book.setCurve(account, oldHash, _seededInput(seed, i, true));
+                driver.setPosition(account, _seededInput(seed, i, true));
+                driver.sync(account, oldHash);
             }
         }
         _assertSeededMarks(accounts, uint256(keccak256(abi.encode(seed, "after"))));
@@ -396,9 +570,18 @@ contract TerminalNavBookV2Test is Test {
 
     function _set(
         address account,
-        ITerminalNavBookV2.CurveInput memory input
+        TestCurveInput memory input
     ) private returns (bytes32 curveHash, uint64 bookVersion) {
-        return book.setCurve(account, book.curveHashOf(account), input);
+        driver.setPosition(account, input);
+        return driver.sync(account, book.curveHashOf(account));
+    }
+
+    function _remove(
+        address account,
+        bytes32 expectedOldHash
+    ) private returns (bytes32 curveHash, uint64 bookVersion) {
+        driver.clearPosition(account);
+        return driver.sync(account, expectedOldHash);
     }
 
     function _curveInput(
@@ -406,17 +589,15 @@ contract TerminalNavBookV2Test is Test {
         uint144 entryCost,
         uint144 cap,
         CfdTypes.Side side
-    ) private pure returns (ITerminalNavBookV2.CurveInput memory input) {
-        input = ITerminalNavBookV2.CurveInput({
-            lots: lots, entryCostUsdcAtoms: entryCost, collectibleCapUsdcAtoms: cap, side: side
-        });
+    ) private pure returns (TestCurveInput memory input) {
+        input = TestCurveInput({lots: lots, entryCostUsdcAtoms: entryCost, collectibleCapUsdcAtoms: cap, side: side});
     }
 
     function _seededInput(
         uint256 seed,
         uint256 index,
         bool replacement
-    ) private pure returns (ITerminalNavBookV2.CurveInput memory input) {
+    ) private pure returns (TestCurveInput memory input) {
         bytes32 entropy = keccak256(abi.encode(seed, index, replacement));
         uint112 lots = uint112((uint256(entropy) % 1e9) + 1);
         uint256 maximumEntryCost = uint256(lots) * CAP_PRICE;
@@ -424,6 +605,14 @@ contract TerminalNavBookV2Test is Test {
         uint144 cap = uint144(uint256(keccak256(abi.encode(entropy, "cap"))) % (maximumEntryCost + 1));
         CfdTypes.Side side = (uint256(entropy) & 1) == 0 ? CfdTypes.Side.BULL : CfdTypes.Side.BEAR;
         return _curveInput(lots, entryCost, cap, side);
+    }
+
+    function _deployBook(
+        uint32 capPrice
+    ) private returns (TerminalNavEngineDriver newDriver, TerminalNavBookV2 newBook) {
+        newDriver = new TerminalNavEngineDriver(capPrice);
+        newBook = new TerminalNavBookV2(address(newDriver), capPrice);
+        newDriver.bind(newBook);
     }
 
     function _assertSeededMarks(

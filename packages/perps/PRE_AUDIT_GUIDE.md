@@ -18,7 +18,7 @@ If reviewing quickly, focus on these questions in order:
 2. Does the path move value only across the intended custody domains?
 3. Does the path use the correct oracle regime and failure policy for the current market state?
 4. Does the path preserve bounded queue behavior and trader-claim seniority?
-5. Does every position/pledge/claim mutation atomically install the matching `TerminalNavBookV2` curve?
+5. Does every position/pledge/claim mutation atomically synchronize the matching `TerminalNavBookV2` curve from canonical Engine and clearinghouse state?
 
 ## Test Taxonomy
 
@@ -53,7 +53,7 @@ Before trusting a test as a source of truth, ask:
 | Contract | Privileged caller set | Notes |
 |----------|------------------------|-------|
 | `CfdEngine` settlement host hooks | `settlementSidecar` only | settlement sidecar itself is engine-gated |
-| `TerminalNavBookV2.setCurve` / `removeCurve` | immutable bound `CfdEngine` only | hash-authenticated mutation; no owner, repair, or migration path |
+| `TerminalNavBookV2.authenticateEngineState` / `syncFromEngine` | immutable bound `CfdEngine` only | two-step mutation protocol: authenticate canonical pre-transition state, then require that authenticated hash still matches the stored commitment and derive the post-transition curve or removal from canonical Engine and clearinghouse state; `syncFromEngine` is the sole curve mutation endpoint; no caller-supplied curve, owner, repair, or migration path |
 | `CfdEngine.processOrderTyped` / `liquidatePosition` / fee bookkeeping | `orderRouter` only | router is the external execution boundary |
 | `MarginClearinghouse` operator paths | `engine`, `settlementSidecar` | broad settlement mutations only |
 | `MarginClearinghouse` reservation paths | `engine`, `orderRouter` | router can reserve/release queued margin and execution-bounty buckets, but cannot perform broad settlement |
@@ -142,7 +142,7 @@ Any new helper/sidecar contract that can reach these sets should be treated as s
 | Keeper bounty credit | Keeper margin credit | `MarginClearinghouse.balanceUsdc(keeper)` | engine/clearinghouse bounty settlement | no | no pool liability | no | no |
 | Unsettled carry | Protocol-recorded carry obligation on an account | `CfdEngine.unsettledCarryUsdc[account]` | engine carry-checkpoint paths | eligible free settlement only; never PnL pledge or claim | only the remainder uncovered after projected free-settlement collection affects health | no | no |
 | Treasury protocol fees | Protocol/treasury | Treasury account in `MarginClearinghouse`; `MarginClearinghouse.balanceUsdc(CfdEngine.protocolTreasury())` reports that balance | cash-collected execution and liquidation fee routing, settlement top-ups, treasury clearinghouse withdraw | no | yes, as clearinghouse-custodied protocol margin | no | no |
-| Signed terminal price delta | LP marked ownership adjustment | `TerminalNavBookV2` queried through the authenticated Engine snapshot | Engine-only atomic curve set/remove | n/a | not the endpoint admission reserve | cannot fund cash redemption | yes, identically for deposit activation and redemption pricing |
+| Signed terminal price delta | LP marked ownership adjustment | `TerminalNavBookV2` queried through the authenticated Engine snapshot | Engine-only atomic, state-derived `syncFromEngine(...)` | n/a | not the endpoint admission reserve | cannot fund cash redemption | yes, identically for deposit activation and redemption pricing |
 | Canonical pool assets | LP/protocol backing | `HousePool.totalAssets()` and accounting ledger | synchronized LP activation/funding plus accounting hooks | base physical solvency cash | yes | yes | yes |
 | Pending LP deposit assets | Request controller | USDC in `TrancheVault` request escrow plus per-controller/per-epoch accounting | request, eligible cancellation, or pool-authorized activation | no | no | no | no, until activated |
 | Activated LP deposit shares | Request controller | Shares in `TrancheVault` claim escrow plus claimable epoch accounting | atomic Router epoch settlement, then controller/operator claim | no | no separate asset claim | no | yes, through outstanding share supply |
@@ -305,7 +305,7 @@ Reachability note:
 6. Reservation conservation: clearinghouse-reserved execution bounty value and admin-held ETH refund claims are each distributed, refunded, forfeited, or left claimable exactly once.
 7. Exact symmetric NAV: deposits and redemptions use the same signed terminal delta; marked trader losses count only to the account cap and never as spendable withdrawal cash.
 8. Frozen-spread conservation: assessed spread equals LP-paid spread plus terminally waived spread; live/FAD-only closes and all liquidations assess zero.
-9. Terminal-curve parity: every account curve matches live lots, exact entry cost, side, and `pnlPledge + nettable claim` cap after every successful transition.
+9. Terminal-curve parity: after every successful transition, the bound Engine has atomically called the book's sole mutation endpoint and every account curve matches live lots, exact entry cost, side, and `pnlPledge + nettable claim` cap.
 
 ## Test Map
 

@@ -1533,23 +1533,12 @@ contract OrderRouterPythTest is BasePerpTest {
             .checked_write(nextPledgeUsdc);
 
         ITerminalNavBookV2 book = engine.terminalNavBook();
-        (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(account);
+        (uint256 size,,,,,,) = engine.positions(account);
         assertGt(size, 0, "margin-drain fixture requires a live position");
 
-        uint256 collectibleCapUsdc = nextPledgeUsdc + engine.traderClaimBalanceUsdc(account);
-        uint256 entryCostUsdcAtoms = engine.positionEntryCostUsdcAtoms(account);
         bytes32 oldCurveHash = book.curveHashOf(account);
         vm.prank(address(engine));
-        book.setCurve(
-            account,
-            oldCurveHash,
-            ITerminalNavBookV2.CurveInput({
-                lots: uint112(size / CfdTypes.SIZE_QUANTUM),
-                entryCostUsdcAtoms: uint144(entryCostUsdcAtoms),
-                collectibleCapUsdcAtoms: uint144(collectibleCapUsdc),
-                side: side
-            })
-        );
+        book.syncFromEngine(account, oldCurveHash);
     }
 
     function _pythUpdateData() internal pure returns (bytes[] memory updateData) {

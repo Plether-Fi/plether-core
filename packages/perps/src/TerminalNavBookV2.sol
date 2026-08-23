@@ -112,6 +112,14 @@ contract TerminalNavBookV2 is ITerminalNavBookV2 {
         bool hasEvent;
     }
 
+    /// @notice Exact Engine state used to derive one canonical account curve.
+    struct EngineCurveInput {
+        uint112 lots;
+        uint144 entryCostUsdcAtoms;
+        uint144 collectibleCapUsdcAtoms;
+        CfdTypes.Side side;
+    }
+
     /// @notice Restricts every mutation to the immutable Engine.
     modifier onlyEngine() {
         _requireEngine();
@@ -164,7 +172,7 @@ contract TerminalNavBookV2 is ITerminalNavBookV2 {
     function authenticateEngineState(
         address account
     ) external view onlyEngine returns (bytes32 expectedHash) {
-        (bool hasPosition, CurveInput memory input) = _curveInputFromEngine(account);
+        (bool hasPosition, EngineCurveInput memory input) = _curveInputFromEngine(account);
         expectedHash = hasPosition ? _curveHash(account, _canonicalize(input)) : bytes32(0);
         bytes32 actualHash = _curveHashes[account];
         if (actualHash != expectedHash) {
@@ -177,14 +185,23 @@ contract TerminalNavBookV2 is ITerminalNavBookV2 {
         address account,
         bytes32 expectedOldHash
     ) external onlyEngine returns (bytes32 newHash, uint64 newBookVersion) {
-        (bool hasPosition, CurveInput memory input) = _curveInputFromEngine(account);
+        if (account == address(0)) {
+            revert TerminalNavBookV2__ZeroAccount();
+        }
+
+        bytes32 actualOldHash = _curveHashes[account];
+        if (expectedOldHash != actualOldHash) {
+            revert TerminalNavBookV2__CurveHashMismatch(account, expectedOldHash, actualOldHash);
+        }
+
+        (bool hasPosition, EngineCurveInput memory input) = _curveInputFromEngine(account);
         if (!hasPosition) {
-            if (expectedOldHash == bytes32(0)) {
+            if (actualOldHash == bytes32(0)) {
                 return (bytes32(0), _bookVersion);
             }
-            return (bytes32(0), _removeCurve(account, expectedOldHash));
+            return (bytes32(0), _removeCurve(account, actualOldHash, _curves[account]));
         }
-        return _setCurve(account, expectedOldHash, input);
+        return _setCurve(account, actualOldHash, input);
     }
 
     /// @inheritdoc ITerminalNavBookV2
@@ -219,29 +236,11 @@ contract TerminalNavBookV2 is ITerminalNavBookV2 {
         snapshot.degradedMode = engine.degradedMode();
     }
 
-    /// @inheritdoc ITerminalNavBookV2
-    function setCurve(
-        address account,
-        bytes32 expectedOldHash,
-        CurveInput calldata next
-    ) external onlyEngine returns (bytes32 newHash, uint64 newBookVersion) {
-        return _setCurve(account, expectedOldHash, next);
-    }
-
     function _setCurve(
         address account,
-        bytes32 expectedOldHash,
-        CurveInput memory next
+        bytes32 actualOldHash,
+        EngineCurveInput memory next
     ) private returns (bytes32 newHash, uint64 newBookVersion) {
-        if (account == address(0)) {
-            revert TerminalNavBookV2__ZeroAccount();
-        }
-
-        bytes32 actualOldHash = _curveHashes[account];
-        if (expectedOldHash != actualOldHash) {
-            revert TerminalNavBookV2__CurveHashMismatch(account, expectedOldHash, actualOldHash);
-        }
-
         CurveRecord memory nextRecord = _canonicalize(next);
         newHash = _curveHash(account, nextRecord);
         if (newHash == bytes32(0)) {
@@ -290,31 +289,11 @@ contract TerminalNavBookV2 is ITerminalNavBookV2 {
         );
     }
 
-    /// @inheritdoc ITerminalNavBookV2
-    function removeCurve(
-        address account,
-        bytes32 expectedOldHash
-    ) external onlyEngine returns (uint64 newBookVersion) {
-        return _removeCurve(account, expectedOldHash);
-    }
-
     function _removeCurve(
         address account,
-        bytes32 expectedOldHash
+        bytes32 actualOldHash,
+        CurveRecord memory oldRecord
     ) private returns (uint64 newBookVersion) {
-        if (account == address(0)) {
-            revert TerminalNavBookV2__ZeroAccount();
-        }
-
-        bytes32 actualOldHash = _curveHashes[account];
-        if (expectedOldHash != actualOldHash) {
-            revert TerminalNavBookV2__CurveHashMismatch(account, expectedOldHash, actualOldHash);
-        }
-        if (actualOldHash == bytes32(0)) {
-            revert TerminalNavBookV2__CurveNotFound(account);
-        }
-
-        CurveRecord memory oldRecord = _curves[account];
         _applyCurve(oldRecord, false);
 
         _totalLots -= oldRecord.lots;
@@ -408,7 +387,7 @@ contract TerminalNavBookV2 is ITerminalNavBookV2 {
 
     /// @notice Validates a candidate curve and removes collateral that can never be collected inside the price domain.
     function _canonicalize(
-        CurveInput memory next
+        EngineCurveInput memory next
     ) private view returns (CurveRecord memory record) {
         if (next.lots == 0) {
             revert TerminalNavBookV2__ZeroLots();
@@ -438,7 +417,7 @@ contract TerminalNavBookV2 is ITerminalNavBookV2 {
     /// @notice Reconstructs one exact canonical curve candidate from live Engine and clearinghouse state.
     function _curveInputFromEngine(
         address account
-    ) private view returns (bool hasPosition, CurveInput memory input) {
+    ) private view returns (bool hasPosition, EngineCurveInput memory input) {
         ITerminalNavEngineView engine = ITerminalNavEngineView(ENGINE);
         (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(account);
         if (size == 0) {
@@ -459,7 +438,7 @@ contract TerminalNavBookV2 is ITerminalNavBookV2 {
             revert ICfdEngineTypes.CfdEngine__InvalidTerminalNavBook();
         }
 
-        input = CurveInput({
+        input = EngineCurveInput({
             lots: uint112(lots),
             entryCostUsdcAtoms: uint144(entryCostUsdcAtoms),
             collectibleCapUsdcAtoms: uint144(candidateCapUsdcAtoms),

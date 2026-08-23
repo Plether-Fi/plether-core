@@ -73,6 +73,7 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
     using stdStorage for StdStorage;
 
     uint256 internal constant EIP170_RUNTIME_CODE_LIMIT = 24_576;
+    uint256 internal constant CFD_ENGINE_RUNTIME_BASELINE = 24_429;
 
     address internal constant ALICE = address(0xA11CE);
     address internal constant BOB = address(0xB0B);
@@ -105,6 +106,11 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
     }
 
     function test_AtomicLpEpoch_RuntimeFitsEip170() public view {
+        assertLe(
+            address(engine).code.length,
+            CFD_ENGINE_RUNTIME_BASELINE,
+            "terminal NAV synchronization must not grow CfdEngine runtime"
+        );
         assertLe(
             address(pool).code.length, EIP170_RUNTIME_CODE_LIMIT, "atomic LP settlement must keep HousePool deployable"
         );

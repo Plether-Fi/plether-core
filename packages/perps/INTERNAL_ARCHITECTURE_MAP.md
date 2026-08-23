@@ -37,7 +37,7 @@ For normative semantics, use [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md). For sys
 | `MarginClearinghouse` | Custody trader settlement USDC, lock/release reserved buckets, settle or seize balances under trusted engine/router calls | Reprice the HousePool, classify LP ownership, or pay arbitrary third parties |
 | `OrderRouter` | Convert trader balance into queued committed margin and clearinghouse execution-bounty reservations; advance or unwind order lifecycle | Mutate `HousePool` accounting directly or invent trader/pool economics outside engine-validated outcomes |
 | `CfdEngine` | Own core state, planner orchestration, carry realization, and narrow settlement host hooks | Hold funds directly or bypass clearinghouse / `HousePool` custody boundaries |
-| `TerminalNavBookV2` | Aggregate Engine-authenticated account curves for exact signed LP NAV at a mark | Accept non-Engine mutations, infer cash availability, or act as the endpoint risk-admission reserve |
+| `TerminalNavBookV2` | Aggregate account curves derived from canonical Engine and clearinghouse state for exact signed LP NAV at a mark | Accept mutations other than the bound Engine's state-derived `syncFromEngine(...)`, accept caller-supplied curve economics, infer cash availability, or act as the endpoint risk-admission reserve |
 | `CfdEngineSettlementSidecar` | Execute externalized close/liquidation settlement orchestration through engine-owned host hooks | Own storage or bypass engine authorization boundaries |
 | `HousePool` | Maintain canonical pool assets and the LP principal waterfall; atomically reconcile and clear synchronized LP epochs; maintain exceptional excess/unassigned buckets | Inspect raw trader balances, execute order logic, bypass Senior-before-Junior matured-demand priority, or custody protocol fees that moved to treasury margin |
 | `TrancheVault` | Custody active shares, delayed-deposit escrow, pending redemption shares, and funded redemption assets; execute only pool-authorized epoch mutations | Independently finalize a delayed deposit epoch, independently fund a redemption, or reprice an already-funded claim |
@@ -46,7 +46,7 @@ For normative semantics, use [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md). For sys
 
 - `OrderRouter` is the main external execution boundary: it can drive engine order/liquidation paths and a narrow clearinghouse reservation surface, but it does not have broad clearinghouse settlement authority or `HousePool.payOut(...)` authority.
 - `CfdEngineSettlementSidecar` is engine-gated, but any external surface added there is security-critical because it inherits engine settlement authority.
-- `TerminalNavBookV2` is immutable-bound to one Engine and accepts only hash-authenticated set/remove mutations from that Engine; it has no owner, repair, or migration path.
+- `TerminalNavBookV2` is immutable-bound to one Engine, and `syncFromEngine(...)` is its sole external mutation authority. Before a mutation, the Engine calls `authenticateEngineState(...)` to prove that canonical pre-transition state matches the stored curve. Afterward, `syncFromEngine(...)` checks that authenticated hash against the stored commitment, then reads canonical post-transition Engine and clearinghouse state to install, replace, or remove the curve; callers cannot supply curve economics. The book has no owner, repair, or migration path.
 - `MarginClearinghouse` broad settlement paths trust only `engine` and `settlementSidecar`; `orderRouter` is limited to queued-order reservation lifecycle calls.
 - `HousePool.payOut(...)` and `HousePool.recordProtocolInflow(...)` trust only `engine` and `settlementSidecar`; protocol fees remain outside `HousePool` in treasury clearinghouse margin.
 - Any new helper/sidecar that can reach these caller sets should be treated as a core custody/settlement boundary and reviewed accordingly.
@@ -85,7 +85,7 @@ For normative semantics, use [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md). For sys
 - `MarginClearinghouse` owns trader custody.
 - `OrderRouter` owns queued-intent bookkeeping.
 - `CfdEngine` owns state transitions and liability classification.
-- `TerminalNavBookV2` owns the exact account-curve aggregate used symmetrically for LP share NAV; it is not a cash reserve.
+- `TerminalNavBookV2` owns the exact account-curve aggregate used symmetrically for LP share NAV. Its curves are synchronized exclusively from canonical Engine and clearinghouse state; the book is not a cash reserve.
 - `HousePool` owns canonical pool cash, LP waterfall accounting, and the sole synchronized epoch coordinator. Vaults
   own pending-share and funded-asset escrow. Protocol fees that cross out of trader custody are owned by the treasury
   clearinghouse account.

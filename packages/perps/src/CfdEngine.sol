@@ -177,24 +177,17 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
 
     /// @notice Authenticates stable Engine state against the account commitment stored in the terminal NAV book.
     /// @dev This explicitly checks zero-position accounts too, so an unexpected orphan curve cannot be silently kept.
-    function _assertTerminalCurveAndGetExpectedHash(
+    function _beginTerminalCurveMutation(
         address account
     ) internal view returns (bytes32 expectedHash) {
         return _requireTerminalNavBook().authenticateEngineState(account);
     }
 
-    function _syncTerminalCurve(
+    function _endTerminalCurveMutation(
         address account,
         bytes32 expectedOldHash
     ) internal {
         _requireTerminalNavBook().syncFromEngine(account, expectedOldHash);
-    }
-
-    function _endAccountingMutation(
-        address account,
-        bytes32 expectedOldHash
-    ) internal {
-        _syncTerminalCurve(account, expectedOldHash);
     }
 
     function _checkpointTraderClaimCarryIfPossible(
@@ -507,12 +500,12 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         bytes32 expectedOldHash;
         bool syncCurve = _positions[beneficiary].lots > 0;
         if (syncCurve) {
-            expectedOldHash = _assertTerminalCurveAndGetExpectedHash(beneficiary);
+            expectedOldHash = _beginTerminalCurveMutation(beneficiary);
         }
         _checkpointBountyRecipient(beneficiary, price, publishTime);
         clearinghouse.transferReservedSettlement(sourceAccount, beneficiary, amountUsdc);
         if (syncCurve) {
-            _endAccountingMutation(beneficiary, expectedOldHash);
+            _endTerminalCurveMutation(beneficiary, expectedOldHash);
         }
         emit BountyCredited(sourceAccount, beneficiary, amountUsdc);
     }
@@ -539,7 +532,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
             revert CfdEngine__NoOpenPosition();
         }
 
-        bytes32 expectedOldHash = _assertTerminalCurveAndGetExpectedHash(account);
+        bytes32 expectedOldHash = _beginTerminalCurveMutation(account);
         _realizeCarryFromSettlement(account, pos);
 
         uint256 marginBefore = _positionMarginBucketUsdc(account);
@@ -548,7 +541,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         _syncPositionBorrowBase(account, pos);
         pos.lastUpdateTime = uint64(block.timestamp);
         pos.lastCarryTimestamp = uint64(block.timestamp);
-        _endAccountingMutation(account, expectedOldHash);
+        _endTerminalCurveMutation(account, expectedOldHash);
 
         emit MarginAdded(account, amount);
     }
@@ -569,9 +562,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
             return;
         }
 
-        bytes32 expectedOldHash = _assertTerminalCurveAndGetExpectedHash(account);
+        bytes32 expectedOldHash = _beginTerminalCurveMutation(account);
         _realizeCarryFromSettlement(account, pos);
-        _endAccountingMutation(account, expectedOldHash);
+        _endTerminalCurveMutation(account, expectedOldHash);
     }
 
     /// @notice Settles the caller's trader claim balance into the clearinghouse.
@@ -586,7 +579,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         if (msg.sender != account) {
             revert CfdEngine__NotAccountOwner();
         }
-        bytes32 expectedOldHash = _assertTerminalCurveAndGetExpectedHash(account);
+        bytes32 expectedOldHash = _beginTerminalCurveMutation(account);
         _advanceAllCarryIndexes(block.timestamp);
         StoredPosition storage pos = _positions[account];
         _checkpointTraderClaimCarryIfPossible(account, pos);
@@ -606,7 +599,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
 
         traderClaimBalanceUsdc[account] -= claimAmountUsdc;
         totalTraderClaimBalanceUsdc -= claimAmountUsdc;
-        _endAccountingMutation(account, expectedOldHash);
+        _endTerminalCurveMutation(account, expectedOldHash);
 
         emit TraderClaimSettled(account, claimAmountUsdc);
     }
@@ -626,9 +619,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         if (amountUsdc == 0) {
             return;
         }
-        bytes32 expectedOldHash = _assertTerminalCurveAndGetExpectedHash(account);
+        bytes32 expectedOldHash = _beginTerminalCurveMutation(account);
         settlementSidecar.reserveCloseOrderExecutionBounty(account, sizeDelta, amountUsdc);
-        _endAccountingMutation(account, expectedOldHash);
+        _endTerminalCurveMutation(account, expectedOldHash);
     }
 
     /// @notice Clears degraded mode once adjusted solvency has recovered.
@@ -714,9 +707,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         if (_positions[account].lots == 0) {
             return;
         }
-        bytes32 expectedOldHash = _assertTerminalCurveAndGetExpectedHash(account);
+        bytes32 expectedOldHash = _beginTerminalCurveMutation(account);
         settlementSidecar.validateWithdraw(account);
-        _endAccountingMutation(account, expectedOldHash);
+        _endTerminalCurveMutation(account, expectedOldHash);
     }
 
     // ==========================================
@@ -1298,7 +1291,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         CfdEnginePlanTypes.OpenDelta memory delta,
         uint64 publishTime
     ) internal {
-        bytes32 expectedOldHash = _assertTerminalCurveAndGetExpectedHash(delta.account);
+        bytes32 expectedOldHash = _beginTerminalCurveMutation(delta.account);
         StoredPosition storage pos = _positions[delta.account];
         CfdTypes.Position memory currentPosition = _loadPosition(delta.account);
         if (pos.lots > 0) {
@@ -1307,7 +1300,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         }
         settlementSidecar.executeOpen(delta, currentPosition, publishTime);
         _assertPostSolvency();
-        _endAccountingMutation(delta.account, expectedOldHash);
+        _endTerminalCurveMutation(delta.account, expectedOldHash);
 
         emit PositionOpened(delta.account, delta.posSide, delta.sizeDelta, delta.price, delta.marginDeltaUsdc);
     }
@@ -1316,7 +1309,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         CfdEnginePlanTypes.CloseDelta memory delta,
         uint64 publishTime
     ) internal {
-        bytes32 expectedOldHash = _assertTerminalCurveAndGetExpectedHash(delta.account);
+        bytes32 expectedOldHash = _beginTerminalCurveMutation(delta.account);
         StoredPosition storage pos = _positions[delta.account];
         CfdTypes.Side marginSide = pos.side;
         CfdTypes.Position memory currentPosition = _loadPosition(delta.account);
@@ -1326,7 +1319,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         unsettledCarryUsdc[delta.account] = 0;
 
         _enterDegradedModeIfInsolvent(delta.account, 0);
-        _endAccountingMutation(delta.account, expectedOldHash);
+        _endTerminalCurveMutation(delta.account, expectedOldHash);
     }
 
     function _applyLiquidation(
@@ -1334,11 +1327,11 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         uint64 publishTime,
         address keeper
     ) internal returns (uint256 keeperBountyUsdc) {
-        bytes32 expectedOldHash = _assertTerminalCurveAndGetExpectedHash(delta.account);
+        bytes32 expectedOldHash = _beginTerminalCurveMutation(delta.account);
         bool syncKeeper = delta.keeperBountyUsdc > 0 && keeper != delta.account && _positions[keeper].lots > 0;
         bytes32 keeperExpectedOldHash;
         if (syncKeeper) {
-            keeperExpectedOldHash = _assertTerminalCurveAndGetExpectedHash(keeper);
+            keeperExpectedOldHash = _beginTerminalCurveMutation(keeper);
         }
         if (delta.keeperBountyUsdc > 0 && keeper != delta.account) {
             _checkpointBountyRecipient(keeper, delta.price, publishTime);
@@ -1349,9 +1342,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         unsettledCarryUsdc[delta.account] = 0;
 
         _enterDegradedModeIfInsolvent(delta.account, 0);
-        _syncTerminalCurve(delta.account, expectedOldHash);
+        _endTerminalCurveMutation(delta.account, expectedOldHash);
         if (syncKeeper) {
-            _syncTerminalCurve(keeper, keeperExpectedOldHash);
+            _endTerminalCurveMutation(keeper, keeperExpectedOldHash);
         }
     }
 

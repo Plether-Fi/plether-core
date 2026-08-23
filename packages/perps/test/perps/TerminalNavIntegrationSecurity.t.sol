@@ -6,12 +6,16 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {ITerminalNavBookV2} from "@plether/perps/interfaces/ITerminalNavBookV2.sol";
+import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 
 /// @notice Cross-contract security regressions for the authenticated terminal NAV and synchronized LP pricing paths.
 contract TerminalNavIntegrationSecurityTest is BasePerpTest {
 
+    using stdStorage for StdStorage;
+
     address private constant TRADER = address(0x7E4D3E);
     address private constant DEPOSITOR = address(0xD3F0517);
+    address private constant KEEPER = address(0xA11CE55);
 
     uint256 private constant POSITION_SIZE = 100_000e18;
     uint256 private constant HALF_POSITION_SIZE = POSITION_SIZE / 2;
@@ -298,19 +302,102 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
     }
 
     function test_EngineRejectsUnexpectedCurveForAccountWithoutPosition() public {
-        vm.prank(address(engine));
-        terminalNavBook.setCurve(
-            DEPOSITOR,
-            bytes32(0),
-            ITerminalNavBookV2.CurveInput({
-                lots: 1, entryCostUsdcAtoms: 1, collectibleCapUsdcAtoms: 1, side: CfdTypes.Side.BULL
-            })
-        );
-        assertTrue(terminalNavBook.curveHashOf(DEPOSITOR) != bytes32(0), "setup must create an orphan curve");
+        _fundTrader(DEPOSITOR, 60_000e6);
+        _open(DEPOSITOR, CfdTypes.Side.BULL, POSITION_SIZE, 40_000e6, ENTRY_PRICE);
+
+        bytes32 committedHash = terminalNavBook.curveHashOf(DEPOSITOR);
+        assertTrue(committedHash != bytes32(0), "setup must create a canonical live curve");
+
+        // Model an Engine accounting defect after canonical synchronization: erase the packed lots and entry-cost
+        // slot without touching the book, leaving the previously valid curve orphaned.
+        uint256 packedPositionSlot = stdstore.target(address(engine)).sig("positionEntryCostUsdcAtoms(address)")
+            .with_key(DEPOSITOR).enable_packed_slots().find();
+        vm.store(address(engine), bytes32(packedPositionSlot), bytes32(0));
+
+        (uint256 size,,,,,,) = engine.positions(DEPOSITOR);
+        assertEq(size, 0, "setup must remove the canonical Engine position");
+        assertEq(terminalNavBook.curveHashOf(DEPOSITOR), committedHash, "setup must retain the orphaned curve");
 
         vm.expectPartialRevert(ICfdEngineTypes.CfdEngine__TerminalNavBookHashMismatch.selector);
         vm.prank(DEPOSITOR);
         engine.settleTraderClaim(DEPOSITOR);
+    }
+
+    function test_LiquidationSynchronizesDistinctKeeperWithOpenPosition() public {
+        _fundTrader(TRADER, 300e6);
+        _open(TRADER, CfdTypes.Side.BULL, 10_000e18, 200e6, ENTRY_PRICE);
+        vm.prank(TRADER);
+        clearinghouse.withdraw(TRADER, 100e6);
+
+        _fundTrader(KEEPER, 2000e6);
+        _open(KEEPER, CfdTypes.Side.BEAR, 10_000e18, 1000e6, ENTRY_PRICE);
+
+        uint256 liquidationPrice = 101_000_000;
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(TRADER, liquidationPrice);
+        assertTrue(preview.liquidatable, "setup must make the target liquidatable");
+        assertGt(preview.keeperBountyUsdc, 0, "setup must credit a nonzero keeper bounty");
+
+        bytes32 targetHashBefore = terminalNavBook.curveHashOf(TRADER);
+        bytes32 keeperHashBefore = terminalNavBook.curveHashOf(KEEPER);
+        uint64 bookVersionBefore = terminalNavBook.bookState().bookVersion;
+        assertTrue(targetHashBefore != bytes32(0), "target must start with a live curve");
+        assertTrue(keeperHashBefore != bytes32(0), "keeper must start with a live curve");
+
+        vm.expectCall(
+            address(terminalNavBook), abi.encodeCall(ITerminalNavBookV2.syncFromEngine, (KEEPER, keeperHashBefore))
+        );
+        uint256 poolDepthUsdc = pool.totalAssets();
+        vm.prank(address(router));
+        engine.liquidatePosition(TRADER, liquidationPrice, poolDepthUsdc, uint64(block.timestamp), KEEPER);
+
+        (uint256 targetSizeAfter,,,,,,) = engine.positions(TRADER);
+        (uint256 keeperSizeAfter,,,,,,) = engine.positions(KEEPER);
+        assertEq(targetSizeAfter, 0, "liquidation must remove the target position");
+        assertEq(terminalNavBook.curveHashOf(TRADER), bytes32(0), "liquidation must remove the target curve");
+        assertEq(keeperSizeAfter, 10_000e18, "keeper position must remain open");
+        assertEq(terminalNavBook.curveHashOf(KEEPER), keeperHashBefore, "keeper sync must preserve its canonical curve");
+        assertEq(
+            terminalNavBook.bookState().bookVersion,
+            bookVersionBefore + 1,
+            "only target removal may advance the book version"
+        );
+        _assertTerminalCurveMatchesEngine(TRADER);
+        _assertTerminalCurveMatchesEngine(KEEPER);
+        _assertTerminalNavSnapshotMatchesBook();
+    }
+
+    function test_FinalTerminalSyncFailureRollsBackEngineClearinghouseAndBook() public {
+        _openWinningBullPosition();
+
+        bytes32 curveHashBefore = terminalNavBook.curveHashOf(TRADER);
+        bytes32 engineStateBefore = _engineStateHash(TRADER);
+        bytes32 clearinghouseStateBefore = _clearinghouseStateHash(TRADER);
+        CurveObservation memory curveBefore = _observeCurve(TRADER);
+        ITerminalNavBookV2.BookState memory bookBefore = terminalNavBook.bookState();
+
+        bytes memory forcedRevertData = abi.encodeWithSignature("Error(string)", "forced final terminal sync failure");
+        vm.mockCallRevert(
+            address(terminalNavBook),
+            abi.encodeCall(ITerminalNavBookV2.syncFromEngine, (TRADER, curveHashBefore)),
+            forcedRevertData
+        );
+        vm.expectRevert(forcedRevertData);
+        vm.prank(TRADER);
+        engine.addMargin(TRADER, 1e6);
+        vm.clearMockedCalls();
+
+        assertEq(_engineStateHash(TRADER), engineStateBefore, "Engine state must roll back with final synchronization");
+        assertEq(
+            _clearinghouseStateHash(TRADER),
+            clearinghouseStateBefore,
+            "clearinghouse state must roll back with final synchronization"
+        );
+        _assertSameCurve(curveBefore, _observeCurve(TRADER), "curve state must roll back with final synchronization");
+        assertEq(
+            keccak256(abi.encode(terminalNavBook.bookState())),
+            keccak256(abi.encode(bookBefore)),
+            "book aggregates and version must remain unchanged"
+        );
     }
 
     function _openWinningBullPosition() private {
@@ -355,6 +442,62 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
         observed.valueAtZero = terminalNavBook.terminalLpPriceDeltaUsdcAtoms(0);
         observed.valueAtMark = terminalNavBook.terminalLpPriceDeltaUsdcAtoms(MARK_PRICE);
         observed.valueAtCap = terminalNavBook.terminalLpPriceDeltaUsdcAtoms(uint32(CAP_PRICE));
+    }
+
+    function _engineStateHash(
+        address account
+    ) private view returns (bytes32 stateHash) {
+        (
+            uint256 size,
+            uint256 margin,
+            uint256 entryPrice,
+            uint256 maxProfitUsdc,
+            CfdTypes.Side side,
+            uint64 lastUpdateTime,
+            int256 vpiAccrued
+        ) = engine.positions(account);
+        bytes32 positionHash = keccak256(
+            abi.encode(
+                size,
+                margin,
+                entryPrice,
+                maxProfitUsdc,
+                side,
+                lastUpdateTime,
+                vpiAccrued,
+                engine.positionEntryCostUsdcAtoms(account)
+            )
+        );
+        (uint256 borrowBaseUsdc, uint256 lastCarryIndex, uint64 lastCarryTimestamp) = engine.positionCarryState(account);
+        stateHash = keccak256(
+            abi.encode(
+                positionHash,
+                borrowBaseUsdc,
+                lastCarryIndex,
+                lastCarryTimestamp,
+                engine.unsettledCarryUsdc(account),
+                _sideState(CfdTypes.Side.BULL),
+                _sideState(CfdTypes.Side.BEAR),
+                engine.sideBorrowBaseUsdc(uint256(CfdTypes.Side.BULL)),
+                engine.sideBorrowBaseUsdc(uint256(CfdTypes.Side.BEAR)),
+                engine.sideCarryIndex(uint256(CfdTypes.Side.BULL)),
+                engine.sideCarryIndex(uint256(CfdTypes.Side.BEAR)),
+                engine.sideCarryTimestamp(uint256(CfdTypes.Side.BULL)),
+                engine.sideCarryTimestamp(uint256(CfdTypes.Side.BEAR))
+            )
+        );
+    }
+
+    function _clearinghouseStateHash(
+        address account
+    ) private view returns (bytes32 stateHash) {
+        stateHash = keccak256(
+            abi.encode(
+                clearinghouse.getAccountUsdcBuckets(account),
+                clearinghouse.getPnlIsolationBuckets(account),
+                usdc.balanceOf(address(clearinghouse))
+            )
+        );
     }
 
     function _assertSameCurve(
