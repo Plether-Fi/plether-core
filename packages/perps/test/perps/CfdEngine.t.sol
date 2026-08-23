@@ -38,6 +38,13 @@ import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 import {Test} from "forge-std/Test.sol";
 
+struct VpiRebateExtractionSnapshot {
+    uint256 settlementBeforeOpen;
+    uint256 walletBeforeOpen;
+    uint256 poolAssetsBeforeOpen;
+    uint256 rebateReserveUsdc;
+}
+
 contract LiquidationAccountingLibHarness {
 
     function build(
@@ -69,6 +76,17 @@ contract LiquidationAccountingLibHarness {
 }
 
 contract CfdEnginePlanLibHarness {
+
+    struct OpenWithExistingVpiParams {
+        uint256 settlementBalanceUsdc;
+        uint256 positionMarginUsdc;
+        uint256 currentSize;
+        uint256 currentEntryPrice;
+        int256 vpiAccrued;
+        uint256 sizeDelta;
+        uint256 marginDelta;
+        uint256 price;
+    }
 
     function planLiquidation(
         uint256 pnlPledgeUsdc,
@@ -269,47 +287,40 @@ contract CfdEnginePlanLibHarness {
     }
 
     function planOpenWithExistingVpiAccrued(
-        uint256 settlementBalanceUsdc,
-        uint256 positionMarginUsdc,
-        uint256 currentSize,
-        uint256 currentEntryPrice,
-        int256 vpiAccrued,
-        uint256 sizeDelta,
-        uint256 marginDelta,
-        uint256 price
+        OpenWithExistingVpiParams calldata params
     ) external pure returns (CfdEnginePlanTypes.OpenDelta memory delta) {
         CfdEnginePlanTypes.RawSnapshot memory snap;
-        uint256 currentLots = CfdMath.sizeToLots(currentSize);
-        uint256 currentEntryCostUsdcAtoms = currentLots * currentEntryPrice;
+        uint256 currentLots = CfdMath.sizeToLots(params.currentSize);
+        uint256 currentEntryCostUsdcAtoms = currentLots * params.currentEntryPrice;
         uint256 currentMaxProfitUsdc =
             CfdMath.calculateExactMaxProfit(currentLots, currentEntryCostUsdcAtoms, CfdTypes.Side.BULL, 2e8);
-        uint256 vpiReserveUsdc = vpiAccrued < 0 ? uint256(-(vpiAccrued + 1)) + 1 : 0;
-        uint256 liquidationReserveUsdc = (currentLots * price * 10) / 10_000;
+        uint256 vpiReserveUsdc = params.vpiAccrued < 0 ? uint256(-(params.vpiAccrued + 1)) + 1 : 0;
+        uint256 liquidationReserveUsdc = (currentLots * params.price * 10) / 10_000;
         if (liquidationReserveUsdc < 1e6) {
             liquidationReserveUsdc = 1e6;
         }
-        uint256 totalSettlementUsdc = settlementBalanceUsdc + vpiReserveUsdc + liquidationReserveUsdc;
-        uint256 totalLockedUsdc = positionMarginUsdc + vpiReserveUsdc + liquidationReserveUsdc;
+        uint256 totalSettlementUsdc = params.settlementBalanceUsdc + vpiReserveUsdc + liquidationReserveUsdc;
+        uint256 totalLockedUsdc = params.positionMarginUsdc + vpiReserveUsdc + liquidationReserveUsdc;
         snap.account = address(uint160(0x1234));
         snap.position = CfdTypes.Position({
-            size: currentSize,
-            margin: positionMarginUsdc,
-            entryPrice: currentEntryPrice,
+            size: params.currentSize,
+            margin: params.positionMarginUsdc,
+            entryPrice: params.currentEntryPrice,
             maxProfitUsdc: currentMaxProfitUsdc,
             side: CfdTypes.Side.BULL,
             lastUpdateTime: 0,
             lastCarryTimestamp: 0,
-            vpiAccrued: vpiAccrued
+            vpiAccrued: params.vpiAccrued
         });
         snap.positionEntryCostUsdcAtoms = currentEntryCostUsdcAtoms;
         snap.currentTimestamp = 1;
-        snap.lastMarkPrice = price;
+        snap.lastMarkPrice = params.price;
         snap.lastMarkTime = 1;
         snap.bullSide = CfdEnginePlanTypes.SideSnapshot({
             maxProfitUsdc: currentMaxProfitUsdc,
-            openInterest: currentSize,
+            openInterest: params.currentSize,
             entryNotional: currentEntryCostUsdcAtoms * CfdMath.USDC_TO_TOKEN_SCALE,
-            totalMargin: positionMarginUsdc,
+            totalMargin: params.positionMarginUsdc,
             borrowBaseUsdc: 0,
             carryIndex: 0
         });
@@ -319,14 +330,14 @@ contract CfdEnginePlanLibHarness {
         snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
             settlementBalanceUsdc: totalSettlementUsdc,
             totalLockedMarginUsdc: totalLockedUsdc,
-            activePositionMarginUsdc: positionMarginUsdc,
+            activePositionMarginUsdc: params.positionMarginUsdc,
             otherLockedMarginUsdc: vpiReserveUsdc + liquidationReserveUsdc,
-            freeSettlementUsdc: settlementBalanceUsdc > positionMarginUsdc
-                ? settlementBalanceUsdc - positionMarginUsdc
+            freeSettlementUsdc: params.settlementBalanceUsdc > params.positionMarginUsdc
+                ? params.settlementBalanceUsdc - params.positionMarginUsdc
                 : 0
         });
         snap.lockedBuckets = IMarginClearinghouse.LockedMarginBuckets({
-            positionMarginUsdc: positionMarginUsdc,
+            positionMarginUsdc: params.positionMarginUsdc,
             committedOrderMarginUsdc: 0,
             reservedSettlementUsdc: vpiReserveUsdc,
             totalLockedMarginUsdc: totalLockedUsdc
@@ -355,16 +366,16 @@ contract CfdEnginePlanLibHarness {
             snap,
             CfdTypes.Order({
                 account: snap.account,
-                sizeDelta: sizeDelta,
-                marginDelta: marginDelta,
-                targetPrice: price,
+                sizeDelta: params.sizeDelta,
+                marginDelta: params.marginDelta,
+                targetPrice: params.price,
                 commitTime: 0,
                 commitBlock: 0,
                 orderId: 0,
                 side: CfdTypes.Side.BULL,
                 isClose: false
             }),
-            price,
+            params.price,
             0
         );
     }
@@ -3386,8 +3397,18 @@ contract CfdEngineTest is BasePerpTest {
     function test_PlanOpen_FundedNegativeVpiDoesNotDoubleCountAgainstImr() public {
         CfdEnginePlanLibHarness harness = new CfdEnginePlanLibHarness();
 
-        CfdEnginePlanTypes.OpenDelta memory delta =
-            harness.planOpenWithExistingVpiAccrued(1900e6, 1700e6, 100_000e18, 1e8, -1000e6, 10_000e18, 200e6, 1e8);
+        CfdEnginePlanTypes.OpenDelta memory delta = harness.planOpenWithExistingVpiAccrued(
+            CfdEnginePlanLibHarness.OpenWithExistingVpiParams({
+                settlementBalanceUsdc: 1900e6,
+                positionMarginUsdc: 1700e6,
+                currentSize: 100_000e18,
+                currentEntryPrice: 1e8,
+                vpiAccrued: -1000e6,
+                sizeDelta: 10_000e18,
+                marginDelta: 200e6,
+                price: 1e8
+            })
+        );
 
         assertTrue(delta.valid, "Fully backed legacy VPI must not be charged against open risk a second time");
         assertEq(uint8(delta.revertCode), uint8(CfdEnginePlanTypes.OpenRevertCode.OK));
@@ -3897,12 +3918,14 @@ contract CfdEngineTest is BasePerpTest {
 
     function test_Close_WaivesExecutionFeeShortfallWithoutConsumingExistingTraderClaim() public {
         uint256 poolDepth = 1_000_000 * 1e6;
-        address bullAccount = address(uint160(0xD251));
         address bearAccount = address(uint160(0xD252));
-        _fundTrader(bullAccount, 5000e6);
+        {
+            address bullAccount = address(uint160(0xD251));
+            _fundTrader(bullAccount, 5000e6);
+            _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, poolDepth);
+        }
         _fundTrader(bearAccount, 5000e6);
 
-        _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, poolDepth);
         _open(bearAccount, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, poolDepth);
 
         uint64 refreshTime = uint64(block.timestamp + 1 days);
@@ -3911,10 +3934,12 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, refreshTime);
 
-        uint256 firstCloseExecutionFeeUsdc = _engineExecutionFeeUsdc(5000e18, 120_000_000);
-        uint256 poolAssets = pool.totalAssets();
-        vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - firstCloseExecutionFeeUsdc - 1);
+        {
+            uint256 firstCloseExecutionFeeUsdc = _engineExecutionFeeUsdc(5000e18, 120_000_000);
+            uint256 poolAssets = pool.totalAssets();
+            vm.prank(address(pool));
+            usdc.transfer(address(0xDEAD), poolAssets - firstCloseExecutionFeeUsdc - 1);
+        }
 
         _closeAt(bearAccount, CfdTypes.Side.BEAR, 5000e18, 120_000_000, poolDepth, refreshTime);
         uint256 traderClaimBefore = engine.traderClaimBalanceUsdc(bearAccount);
@@ -3922,23 +3947,7 @@ contract CfdEngineTest is BasePerpTest {
             traderClaimBefore, 1e6, "Setup must create an existing trader claim large enough to cover the fee shortfall"
         );
 
-        bytes32 oldCurveHash = terminalNavBook.curveHashOf(bearAccount);
-        IMarginClearinghouse.LockedMarginBuckets memory lockedBefore = clearinghouse.getLockedMarginBuckets(bearAccount);
-        uint256 nonPnlLockedUsdc = lockedBefore.totalLockedMarginUsdc - lockedBefore.positionMarginUsdc;
-        stdstore.target(address(clearinghouse)).sig("balanceUsdc(address)").with_key(bearAccount)
-            .checked_write(nonPnlLockedUsdc);
-        bytes32 positionMarginSlot = keccak256(abi.encode(bearAccount, uint256(3)));
-        vm.store(address(clearinghouse), positionMarginSlot, bytes32(uint256(0)));
-        vm.prank(address(engine));
-        terminalNavBook.syncFromEngine(bearAccount, oldCurveHash);
-
-        IMarginClearinghouse.LockedMarginBuckets memory locked = clearinghouse.getLockedMarginBuckets(bearAccount);
-        assertEq(locked.positionMarginUsdc, 0, "Test must reduce reachable collateral below the terminal close fee");
-        assertEq(
-            clearinghouse.balanceUsdc(bearAccount),
-            locked.totalLockedMarginUsdc,
-            "Synthetic shortfall must preserve backing for every non-PnL locked bucket"
-        );
+        _removePnlPledgeAndSyncTerminalCurve(bearAccount);
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.simulateClose(bearAccount, 5000e18, 1e8, poolDepth);
 
@@ -3967,6 +3976,28 @@ contract CfdEngineTest is BasePerpTest {
             "Live action-fee waiver must leave the existing trader claim untouched"
         );
         assertEq(terminalNavBook.curveHashOf(bearAccount), bytes32(0), "Terminal close must delete the exact NAV curve");
+    }
+
+    function _removePnlPledgeAndSyncTerminalCurve(
+        address account
+    ) internal {
+        bytes32 oldCurveHash = terminalNavBook.curveHashOf(account);
+        IMarginClearinghouse.LockedMarginBuckets memory lockedBefore = clearinghouse.getLockedMarginBuckets(account);
+        uint256 nonPnlLockedUsdc = lockedBefore.totalLockedMarginUsdc - lockedBefore.positionMarginUsdc;
+        stdstore.target(address(clearinghouse)).sig("balanceUsdc(address)").with_key(account)
+            .checked_write(nonPnlLockedUsdc);
+        bytes32 positionMarginSlot = keccak256(abi.encode(account, uint256(3)));
+        vm.store(address(clearinghouse), positionMarginSlot, bytes32(uint256(0)));
+        vm.prank(address(engine));
+        terminalNavBook.syncFromEngine(account, oldCurveHash);
+
+        IMarginClearinghouse.LockedMarginBuckets memory locked = clearinghouse.getLockedMarginBuckets(account);
+        assertEq(locked.positionMarginUsdc, 0, "Test must reduce reachable collateral below the terminal close fee");
+        assertEq(
+            clearinghouse.balanceUsdc(account),
+            locked.totalLockedMarginUsdc,
+            "Synthetic shortfall must preserve backing for every non-PnL locked bucket"
+        );
     }
 
     function test_PreviewLiquidation_ExcludesReservedExecutionBountyFromReachableCollateral() public {
@@ -6888,39 +6919,70 @@ contract VpiDepthTest is BasePerpTest {
     }
 
     function test_VpiRebateReserve_BlocksRebateExtractionAcrossWithdrawAndFullClose() public {
-        address deepLp = address(0x444);
-        address skewTrader = address(0x555);
         address rebateTrader = address(0x666);
+        VpiRebateExtractionSnapshot memory beforeOpen = _openVpiRebateExtractionFixture(rebateTrader);
 
-        address skewAccount = skewTrader;
-        address rebateAccount = rebateTrader;
+        uint256 freeSettlementUsdc = clearinghouse.getAccountUsdcBuckets(rebateTrader).freeSettlementUsdc;
+        assertEq(
+            engineAccountLens.getWithdrawableUsdc(rebateTrader),
+            freeSettlementUsdc,
+            "Dedicated backing should leave genuinely free settlement withdrawable"
+        );
+        vm.prank(rebateTrader);
+        clearinghouse.withdraw(rebateTrader, freeSettlementUsdc);
 
-        _fundJunior(bob, 1_000_000 * 1e6);
-        _fundJunior(deepLp, 10_000_000 * 1e6);
-        _fundTrader(skewTrader, 100_000 * 1e6);
-        _fundTrader(rebateTrader, 20_000 * 1e6);
+        assertEq(
+            clearinghouse.vpiRebateReserveUsdc(rebateTrader),
+            beforeOpen.rebateReserveUsdc,
+            "Withdrawing free cash must not touch rebate backing"
+        );
 
-        uint256 largeDepth = pool.totalAssets();
-        _open(skewAccount, CfdTypes.Side.BEAR, 500_000 * 1e18, 50_000 * 1e6, 1e8, largeDepth);
+        _close(rebateTrader, CfdTypes.Side.BULL, 500_000 * 1e18, 1e8, pool.totalAssets());
 
-        vm.warp(block.timestamp + 2 hours);
-        bytes[] memory freshPrice = new bytes[](1);
-        freshPrice[0] = abi.encode(uint256(1e8));
-        router.updateMarkPrice(freshPrice);
+        (uint256 sizeAfter,,,,,,) = engine.positions(rebateTrader);
+        assertEq(sizeAfter, 0, "The terminal close should complete");
+        assertEq(clearinghouse.vpiRebateReserveUsdc(rebateTrader), 0, "Terminal clawback must consume the reserve");
+        assertGe(pool.totalAssets(), beforeOpen.poolAssetsBeforeOpen, "The round trip must not extract LP cash");
+        assertLe(
+            usdc.balanceOf(rebateTrader) + clearinghouse.balanceUsdc(rebateTrader),
+            beforeOpen.walletBeforeOpen + beforeOpen.settlementBeforeOpen,
+            "Withdrawal plus terminal close must not turn the rebate into trader profit"
+        );
+    }
 
-        _settleAvailableJuniorWithdrawal(deepLp);
+    function _openVpiRebateExtractionFixture(
+        address rebateTrader
+    ) internal returns (VpiRebateExtractionSnapshot memory beforeOpen) {
+        uint256 smallDepth;
+        {
+            address deepLp = address(0x444);
+            address skewTrader = address(0x555);
+            _fundJunior(bob, 1_000_000 * 1e6);
+            _fundJunior(deepLp, 10_000_000 * 1e6);
+            _fundTrader(skewTrader, 100_000 * 1e6);
+            _fundTrader(rebateTrader, 20_000 * 1e6);
 
-        uint256 smallDepth = pool.totalAssets();
-        assertLt(smallDepth, largeDepth, "LP withdrawal should shrink live pool depth");
+            uint256 largeDepth = pool.totalAssets();
+            _open(skewTrader, CfdTypes.Side.BEAR, 500_000 * 1e18, 50_000 * 1e6, 1e8, largeDepth);
 
-        uint256 rebateSettlementBeforeOpen = clearinghouse.balanceUsdc(rebateAccount);
-        uint256 rebateWalletBeforeOpen = usdc.balanceOf(rebateTrader);
-        uint256 poolAssetsBeforeOpen = pool.totalAssets();
+            vm.warp(block.timestamp + 2 hours);
+            bytes[] memory freshPrice = new bytes[](1);
+            freshPrice[0] = abi.encode(uint256(1e8));
+            router.updateMarkPrice(freshPrice);
+            _settleAvailableJuniorWithdrawal(deepLp);
+
+            smallDepth = pool.totalAssets();
+            assertLt(smallDepth, largeDepth, "LP withdrawal should shrink live pool depth");
+        }
+        beforeOpen.settlementBeforeOpen = clearinghouse.balanceUsdc(rebateTrader);
+        beforeOpen.walletBeforeOpen = usdc.balanceOf(rebateTrader);
+        beforeOpen.poolAssetsBeforeOpen = smallDepth;
+
         uint64 rebatePublishTime = engine.lastMarkTime();
         vm.prank(address(router));
         engine.processOrderTyped(
             CfdTypes.Order({
-                account: rebateAccount,
+                account: rebateTrader,
                 sizeDelta: 500_000 * 1e18,
                 marginDelta: 10_000 * 1e6,
                 targetPrice: 1e8,
@@ -6935,50 +6997,23 @@ contract VpiDepthTest is BasePerpTest {
             rebatePublishTime
         );
 
-        (,,,,,, int256 storedVpi) = engine.positions(rebateAccount);
+        (,,,,,, int256 storedVpi) = engine.positions(rebateTrader);
         assertLt(storedVpi, 0, "Setup must create negative accrued VPI on the rebate-bearing leg");
-        uint256 rebateReserveUsdc = clearinghouse.vpiRebateReserveUsdc(rebateAccount);
+        beforeOpen.rebateReserveUsdc = clearinghouse.vpiRebateReserveUsdc(rebateTrader);
         assertEq(
-            rebateReserveUsdc,
+            beforeOpen.rebateReserveUsdc,
             uint256(-storedVpi),
             "The gross lifetime rebate must be backed one-for-one inside action reserve"
         );
         assertGe(
-            clearinghouse.actionReserveUsdc(rebateAccount),
-            rebateReserveUsdc,
+            clearinghouse.actionReserveUsdc(rebateTrader),
+            beforeOpen.rebateReserveUsdc,
             "The VPI sub-ledger must remain a floor inside action reserve"
         );
         assertGt(
-            clearinghouse.balanceUsdc(rebateAccount),
-            rebateSettlementBeforeOpen,
+            clearinghouse.balanceUsdc(rebateTrader),
+            beforeOpen.settlementBeforeOpen,
             "Skew-healing open should credit net rebate into settlement balance"
-        );
-
-        uint256 freeSettlementUsdc = clearinghouse.getAccountUsdcBuckets(rebateAccount).freeSettlementUsdc;
-        assertEq(
-            engineAccountLens.getWithdrawableUsdc(rebateAccount),
-            freeSettlementUsdc,
-            "Dedicated backing should leave genuinely free settlement withdrawable"
-        );
-        vm.prank(rebateTrader);
-        clearinghouse.withdraw(rebateAccount, freeSettlementUsdc);
-
-        assertEq(
-            clearinghouse.vpiRebateReserveUsdc(rebateAccount),
-            rebateReserveUsdc,
-            "Withdrawing free cash must not touch rebate backing"
-        );
-
-        _close(rebateAccount, CfdTypes.Side.BULL, 500_000 * 1e18, 1e8, pool.totalAssets());
-
-        (uint256 sizeAfter,,,,,,) = engine.positions(rebateAccount);
-        assertEq(sizeAfter, 0, "The terminal close should complete");
-        assertEq(clearinghouse.vpiRebateReserveUsdc(rebateAccount), 0, "Terminal clawback must consume the reserve");
-        assertGe(pool.totalAssets(), poolAssetsBeforeOpen, "The round trip must not extract LP cash");
-        assertLe(
-            usdc.balanceOf(rebateTrader) + clearinghouse.balanceUsdc(rebateAccount),
-            rebateWalletBeforeOpen + rebateSettlementBeforeOpen,
-            "Withdrawal plus terminal close must not turn the rebate into trader profit"
         );
     }
 

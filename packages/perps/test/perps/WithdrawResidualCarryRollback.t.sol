@@ -36,6 +36,13 @@ contract WithdrawResidualCarryRollbackTest is BasePerpTest {
         uint256 traderCashUsdc;
     }
 
+    struct RollbackState {
+        CarryState carry;
+        CustodyState custody;
+        bytes32 terminalCurveHash;
+        ITerminalNavBookV2.BookState terminalBook;
+    }
+
     function test_AccountLens_FullyFreeFundedCarryDoesNotWorsenPriceHealth() public {
         address trader = address(0xCA770002);
         address account = trader;
@@ -129,82 +136,98 @@ contract WithdrawResidualCarryRollbackTest is BasePerpTest {
     }
 
     function test_WithdrawResidualCarryBlocksAndRollsBackEveryProvisionalMutation() public {
-        address trader = address(0xCA770001);
-        address account = trader;
+        address account = address(0xCA770001);
         uint256 executionPrice = 1e8;
 
         // The opening action leaves a healthy isolated PnL pledge plus a small amount of free settlement.
         // Ten years of indexed carry exceeds both the free settlement and the position's risk headroom.
-        _fundTrader(trader, 3500e6);
+        _fundTrader(account, 3500e6);
         _open(account, CfdTypes.Side.BULL, 100_000e18, 3000e6, executionPrice);
 
-        vm.warp(block.timestamp + 10 * 365 days);
-        engine.checkpointCarryIndexes();
-        uint64 refreshedAt = engine.sideCarryTimestamp(uint256(CfdTypes.Side.BULL));
-        vm.prank(address(router));
-        engine.updateMarkPrice(executionPrice, refreshedAt);
-        assertEq(engine.lastMarkPrice(), executionPrice, "setup must keep the intended live mark");
-        assertEq(engine.lastMarkTime(), refreshedAt, "setup must refresh mark time after carry accrual");
+        {
+            vm.warp(block.timestamp + 10 * 365 days);
+            engine.checkpointCarryIndexes();
+            uint64 refreshedAt = engine.sideCarryTimestamp(uint256(CfdTypes.Side.BULL));
+            vm.prank(address(router));
+            engine.updateMarkPrice(executionPrice, refreshedAt);
+            assertEq(engine.lastMarkPrice(), executionPrice, "setup must keep the intended live mark");
+            assertEq(engine.lastMarkTime(), refreshedAt, "setup must refresh mark time after carry accrual");
+        }
 
-        uint256 pendingCarryUsdc = _expectedIndexedCarryUsdc(account);
-        IMarginClearinghouse.PnlIsolationBuckets memory buckets = clearinghouse.getPnlIsolationBuckets(account);
-        assertGt(pendingCarryUsdc, buckets.freeSettlementUsdc, "setup must leave uncovered carry after realization");
-        uint256 residualCarryUsdc = pendingCarryUsdc - buckets.freeSettlementUsdc;
+        CfdTypes.Side positionSide;
+        {
+            uint256 pendingCarryUsdc = _expectedIndexedCarryUsdc(account);
+            IMarginClearinghouse.PnlIsolationBuckets memory buckets = clearinghouse.getPnlIsolationBuckets(account);
+            assertGt(pendingCarryUsdc, buckets.freeSettlementUsdc, "setup must leave uncovered carry after realization");
+            uint256 residualCarryUsdc = pendingCarryUsdc - buckets.freeSettlementUsdc;
 
-        CfdTypes.Position memory pos = _position(account);
-        uint256 reachablePriceCollateralUsdc =
-            buckets.pnlPledgeUsdc + engine.traderClaimBalanceUsdc(account) + buckets.vpiRebateReserveUsdc;
-        uint256 requiredMarginBps = _withdrawRequiredMarginBps();
+            CfdTypes.Position memory pos = _position(account);
+            positionSide = pos.side;
+            uint256 reachablePriceCollateralUsdc =
+                buckets.pnlPledgeUsdc + engine.traderClaimBalanceUsdc(account) + buckets.vpiRebateReserveUsdc;
+            uint256 requiredMarginBps = _withdrawRequiredMarginBps();
 
-        assertFalse(
-            engine.planner()
-                .isExactPositionLiquidatableWithCarry(
-                    pos,
-                    engine.positionEntryCostUsdcAtoms(account),
-                    executionPrice,
-                    engine.CAP_PRICE(),
-                    0,
-                    reachablePriceCollateralUsdc,
-                    requiredMarginBps
-                ),
-            "without residual carry, the exact post-withdraw price-risk state must be healthy"
-        );
-        assertTrue(
-            engine.planner()
-                .isExactPositionLiquidatableWithCarry(
-                    pos,
-                    engine.positionEntryCostUsdcAtoms(account),
-                    executionPrice,
-                    engine.CAP_PRICE(),
-                    residualCarryUsdc,
-                    reachablePriceCollateralUsdc,
-                    requiredMarginBps
-                ),
-            "the uncollectible residual alone must make the exact position liquidatable"
-        );
+            assertFalse(
+                engine.planner()
+                    .isExactPositionLiquidatableWithCarry(
+                        pos,
+                        engine.positionEntryCostUsdcAtoms(account),
+                        executionPrice,
+                        engine.CAP_PRICE(),
+                        0,
+                        reachablePriceCollateralUsdc,
+                        requiredMarginBps
+                    ),
+                "without residual carry, the exact post-withdraw price-risk state must be healthy"
+            );
+            assertTrue(
+                engine.planner()
+                    .isExactPositionLiquidatableWithCarry(
+                        pos,
+                        engine.positionEntryCostUsdcAtoms(account),
+                        executionPrice,
+                        engine.CAP_PRICE(),
+                        residualCarryUsdc,
+                        reachablePriceCollateralUsdc,
+                        requiredMarginBps
+                    ),
+                "the uncollectible residual alone must make the exact position liquidatable"
+            );
+        }
 
-        CarryState memory carryBefore = _carryState(account, pos.side);
-        CustodyState memory custodyBefore = _custodyState(account, trader);
-        bytes32 terminalCurveHashBefore = terminalNavBook.curveHashOf(account);
-        ITerminalNavBookV2.BookState memory terminalBookBefore = terminalNavBook.bookState();
+        RollbackState memory beforeState = _rollbackState(account, positionSide);
 
         // The clearinghouse checkpoints carry, provisionally debits settlement, and enters the Engine guard.
         // The uncovered carry must reject here; all earlier mutations belong to the same transaction and roll back.
         vm.expectRevert(ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition.selector);
-        vm.prank(trader);
+        vm.prank(account);
         clearinghouse.withdraw(account, 1e6);
 
-        _assertCarryStateEq(_carryState(account, pos.side), carryBefore);
-        _assertCustodyStateEq(_custodyState(account, trader), custodyBefore);
-        assertEq(terminalNavBook.curveHashOf(account), terminalCurveHashBefore, "terminal curve hash must roll back");
+        _assertCarryStateEq(_carryState(account, positionSide), beforeState.carry);
+        _assertCustodyStateEq(_custodyState(account, account), beforeState.custody);
+        assertEq(
+            terminalNavBook.curveHashOf(account), beforeState.terminalCurveHash, "terminal curve hash must roll back"
+        );
         ITerminalNavBookV2.BookState memory terminalBookAfter = terminalNavBook.bookState();
-        assertEq(terminalBookAfter.bookVersion, terminalBookBefore.bookVersion, "terminal book version must roll back");
-        assertEq(terminalBookAfter.totalLots, terminalBookBefore.totalLots, "terminal book lots must roll back");
+        assertEq(
+            terminalBookAfter.bookVersion, beforeState.terminalBook.bookVersion, "terminal book version must roll back"
+        );
+        assertEq(terminalBookAfter.totalLots, beforeState.terminalBook.totalLots, "terminal book lots must roll back");
         assertEq(
             terminalBookAfter.totalEffectiveCapUsdcAtoms,
-            terminalBookBefore.totalEffectiveCapUsdcAtoms,
+            beforeState.terminalBook.totalEffectiveCapUsdcAtoms,
             "terminal collectible cap must roll back"
         );
+    }
+
+    function _rollbackState(
+        address account,
+        CfdTypes.Side side
+    ) internal view returns (RollbackState memory state) {
+        state.carry = _carryState(account, side);
+        state.custody = _custodyState(account, account);
+        state.terminalCurveHash = terminalNavBook.curveHashOf(account);
+        state.terminalBook = terminalNavBook.bookState();
     }
 
     function _position(

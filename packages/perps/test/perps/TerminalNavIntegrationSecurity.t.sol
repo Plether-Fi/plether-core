@@ -222,8 +222,10 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
         _openWinningBullPosition();
         _refreshMark(MARK_PRICE);
 
-        ICfdEngineTypes.TerminalNavSnapshot memory initialSnapshot = engine.terminalNavSnapshot();
-        assertLt(initialSnapshot.terminalLpPriceDeltaUsdc, 0, "setup requires a live trader-profit liability");
+        {
+            ICfdEngineTypes.TerminalNavSnapshot memory initialSnapshot = engine.terminalNavSnapshot();
+            assertLt(initialSnapshot.terminalLpPriceDeltaUsdc, 0, "setup requires a live trader-profit liability");
+        }
 
         uint256 depositAssets = 25_000e6;
         uint256 depositId = _requestJuniorDeposit(DEPOSITOR, depositAssets);
@@ -232,23 +234,33 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
         _refreshMark(MARK_PRICE);
         uint256 redeemShares = juniorVault.maxRequestRedeem(address(this)) / 10;
         assertGt(redeemShares, 0, "incumbent must have redeemable Junior shares");
-        uint256 redeemId = juniorVault.requestRedeem(redeemShares, address(this), address(this));
-        assertEq(depositId, redeemId, "deposit and redeem must mature in one synchronized settlement");
+        {
+            uint256 redeemId = juniorVault.requestRedeem(redeemShares, address(this), address(this));
+            assertEq(depositId, redeemId, "deposit and redeem must mature in one synchronized settlement");
+        }
 
         _warpToEpoch(depositId);
         _refreshMark(MARK_PRICE);
         ICfdEngineTypes.TerminalNavSnapshot memory pricingSnapshot = engine.terminalNavSnapshot();
-        (uint256 withdrawalSeniorNav, uint256 withdrawalJuniorNav,,) = pool.getPendingTrancheState();
-        (uint256 depositSeniorNav, uint256 depositJuniorNav) = pool.getPendingDepositTrancheState();
-        assertEq(depositSeniorNav, withdrawalSeniorNav, "Senior projection must share the canonical signed state");
-        assertEq(depositJuniorNav, withdrawalJuniorNav, "Junior entry and exit must expose one signed NAV");
+        uint256 withdrawalJuniorNav;
+        {
+            (uint256 withdrawalSeniorNav, uint256 projectedJuniorNav,,) = pool.getPendingTrancheState();
+            (uint256 depositSeniorNav, uint256 depositJuniorNav) = pool.getPendingDepositTrancheState();
+            assertEq(depositSeniorNav, withdrawalSeniorNav, "Senior projection must share the canonical signed state");
+            assertEq(depositJuniorNav, projectedJuniorNav, "Junior entry and exit must expose one signed NAV");
+            withdrawalJuniorNav = projectedJuniorNav;
+        }
 
-        uint256 pricingSupply = juniorVault.totalSupply();
-        uint256 expectedRedeemAssets = juniorVault.estimateRedeemAssets(redeemShares);
-        uint256 postRedeemPricingAssets = withdrawalJuniorNav - expectedRedeemAssets;
-        uint256 postRedeemPricingSupply = pricingSupply - redeemShares;
-        uint256 expectedDepositShares =
-            juniorVault.quoteDepositFromState(depositAssets, postRedeemPricingAssets, postRedeemPricingSupply, 0);
+        uint256 expectedRedeemAssets;
+        uint256 expectedDepositShares;
+        {
+            uint256 pricingSupply = juniorVault.totalSupply();
+            expectedRedeemAssets = juniorVault.estimateRedeemAssets(redeemShares);
+            uint256 postRedeemPricingAssets = withdrawalJuniorNav - expectedRedeemAssets;
+            uint256 postRedeemPricingSupply = pricingSupply - redeemShares;
+            expectedDepositShares =
+                juniorVault.quoteDepositFromState(depositAssets, postRedeemPricingAssets, postRedeemPricingSupply, 0);
+        }
 
         IHousePool.LpEpochSettlementResult memory result = _settleLpEpochForTest();
         assertEq(result.juniorFundedShares, redeemShares, "synchronized exit must fund the quoted shares exactly");
@@ -447,6 +459,12 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
     function _engineStateHash(
         address account
     ) private view returns (bytes32 stateHash) {
+        return keccak256(abi.encode(_positionStateHash(account), _carryStateHash(account), _aggregateSideStateHash()));
+    }
+
+    function _positionStateHash(
+        address account
+    ) private view returns (bytes32 stateHash) {
         (
             uint256 size,
             uint256 margin,
@@ -456,26 +474,24 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
             uint64 lastUpdateTime,
             int256 vpiAccrued
         ) = engine.positions(account);
-        bytes32 positionHash = keccak256(
-            abi.encode(
-                size,
-                margin,
-                entryPrice,
-                maxProfitUsdc,
-                side,
-                lastUpdateTime,
-                vpiAccrued,
-                engine.positionEntryCostUsdcAtoms(account)
-            )
+        bytes32 economicsHash = keccak256(abi.encode(size, margin, entryPrice, maxProfitUsdc));
+        stateHash = keccak256(
+            abi.encode(economicsHash, side, lastUpdateTime, vpiAccrued, engine.positionEntryCostUsdcAtoms(account))
         );
+    }
+
+    function _carryStateHash(
+        address account
+    ) private view returns (bytes32 stateHash) {
         (uint256 borrowBaseUsdc, uint256 lastCarryIndex, uint64 lastCarryTimestamp) = engine.positionCarryState(account);
         stateHash = keccak256(
+            abi.encode(borrowBaseUsdc, lastCarryIndex, lastCarryTimestamp, engine.unsettledCarryUsdc(account))
+        );
+    }
+
+    function _aggregateSideStateHash() private view returns (bytes32 stateHash) {
+        stateHash = keccak256(
             abi.encode(
-                positionHash,
-                borrowBaseUsdc,
-                lastCarryIndex,
-                lastCarryTimestamp,
-                engine.unsettledCarryUsdc(account),
                 _sideState(CfdTypes.Side.BULL),
                 _sideState(CfdTypes.Side.BEAR),
                 engine.sideBorrowBaseUsdc(uint256(CfdTypes.Side.BULL)),

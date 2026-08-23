@@ -5,6 +5,7 @@ import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {CfdEngineSettlementTypes} from "@plether/perps/interfaces/CfdEngineSettlementTypes.sol";
 import {ICfdEnginePlanner} from "@plether/perps/interfaces/ICfdEnginePlanner.sol";
+import {ICfdEngineRiskParamsView} from "@plether/perps/interfaces/ICfdEngineRiskParamsView.sol";
 import {ICfdEngineSettlementHost} from "@plether/perps/interfaces/ICfdEngineSettlementHost.sol";
 import {ICfdEngineSettlementSidecar} from "@plether/perps/interfaces/ICfdEngineSettlementSidecar.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
@@ -199,18 +200,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
     function _loadRiskParams(
         ICfdEngineAccountActionView engine
     ) private view returns (CfdTypes.RiskParams memory params) {
-        (
-            params.vpiFactor,
-            params.maxSkewRatio,
-            params.maintMarginBps,
-            params.initMarginBps,
-            params.fadMarginBps,
-            params.baseCarryBps,
-            params.minBountyUsdc,
-            params.bountyBps,
-            params.keeperShareBps,
-            params.protocolShareBps
-        ) = engine.riskParams();
+        params = ICfdEngineRiskParamsView(address(engine)).riskParams();
     }
 
     function _sideSnapshot(
@@ -271,10 +261,20 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
             revert ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition();
         }
         uint256 reachableUsdc = clearinghouse.pnlPledgeUsdc(account) + engine.traderClaimBalanceUsdc(account);
-        (,, uint256 maintMarginBps, uint256 initMarginBps, uint256 fadMarginBps,,,,,) = engine.riskParams();
-        uint256 currentMarginBps = engine.isFadWindow() ? fadMarginBps : maintMarginBps;
-        uint256 effectiveMarginBps = initMarginBps > currentMarginBps ? initMarginBps : currentMarginBps;
-        bool liquidatable = ICfdEnginePlanner(engine.planner())
+        if (_withdrawPositionLiquidatable(engine, pos, account, price, reachableUsdc)) {
+            revert ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition();
+        }
+    }
+
+    function _withdrawPositionLiquidatable(
+        ICfdEngineAccountActionView engine,
+        CfdTypes.Position memory pos,
+        address account,
+        uint256 price,
+        uint256 reachableUsdc
+    ) private view returns (bool) {
+        uint256 effectiveMarginBps = _withdrawEffectiveMarginBps(engine);
+        return ICfdEnginePlanner(engine.planner())
             .isExactPriceRiskLiquidatable(
                 pos,
                 engine.positionEntryCostUsdcAtoms(account),
@@ -283,9 +283,14 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
                 reachableUsdc,
                 effectiveMarginBps
             );
-        if (liquidatable) {
-            revert ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition();
-        }
+    }
+
+    function _withdrawEffectiveMarginBps(
+        ICfdEngineAccountActionView engine
+    ) private view returns (uint256) {
+        CfdTypes.RiskParams memory params = _loadRiskParams(engine);
+        uint256 currentMarginBps = engine.isFadWindow() ? params.fadMarginBps : params.maintMarginBps;
+        return params.initMarginBps > currentMarginBps ? params.initMarginBps : currentMarginBps;
     }
 
     /// @inheritdoc ICfdEngineSettlementSidecar
@@ -342,8 +347,8 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         CfdTypes.Position memory pos,
         uint256 price
     ) private view {
-        (,, uint256 maintMarginBps,, uint256 fadMarginBps,,,,,) = engine.riskParams();
-        uint256 requiredBps = engine.isFadWindow() ? fadMarginBps : maintMarginBps;
+        CfdTypes.RiskParams memory params = _loadRiskParams(engine);
+        uint256 requiredBps = engine.isFadWindow() ? params.fadMarginBps : params.maintMarginBps;
         bool liquidatable = ICfdEnginePlanner(engine.planner())
             .isExactPriceRiskLiquidatable(
                 pos,
@@ -547,40 +552,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
             }
         }
 
-        uint256 protocolFeeCreditedUsdc;
-        if (clearinghouse.vpiRebateReserveUsdc(delta.account) != delta.vpiRebateReserveBeforeUsdc) {
-            revert CfdEngineSettlementSidecar__SettlementMismatch();
-        }
-        if (delta.vpiRebateReserveConsumedUsdc > 0) {
-            clearinghouse.consumeVpiRebateReserve(delta.account, host.pool(), delta.vpiRebateReserveConsumedUsdc);
-        }
-        uint256 vpiReserveReleaseUsdc =
-            delta.vpiRebateReserveBeforeUsdc - delta.vpiRebateReserveAfterUsdc - delta.vpiRebateReserveConsumedUsdc;
-        if (vpiReserveReleaseUsdc > 0) {
-            clearinghouse.releaseVpiRebateReserve(delta.account, vpiReserveReleaseUsdc);
-        }
-        uint256 genericActionChargeToCollectUsdc = delta.actionChargeToCollectUsdc - delta.vpiRebateReserveConsumedUsdc;
-        if (genericActionChargeToCollectUsdc > 0) {
-            (uint256 collectedUsdc, uint256 creditedUsdc) = clearinghouse.consumeActionCharge(
-                delta.account,
-                genericActionChargeToCollectUsdc,
-                delta.actionReserveConsumedUsdc,
-                delta.actionCommittedMarginConsumedUsdc,
-                host.pool(),
-                host.protocolTreasury(),
-                delta.actionProtocolFeeCreditedUsdc
-            );
-            if (
-                collectedUsdc != delta.actionChargeCollectedUsdc - delta.vpiRebateReserveConsumedUsdc
-                    || creditedUsdc != delta.actionProtocolFeeCreditedUsdc
-            ) {
-                revert CfdEngineSettlementSidecar__SettlementMismatch();
-            }
-            protocolFeeCreditedUsdc = creditedUsdc;
-        }
-        if (clearinghouse.vpiRebateReserveUsdc(delta.account) != delta.vpiRebateReserveAfterUsdc) {
-            revert CfdEngineSettlementSidecar__SettlementMismatch();
-        }
+        uint256 protocolFeeCreditedUsdc = _settleCloseActionCharge(host, clearinghouse, delta);
 
         uint256 cashArrivedRevenueUsdc =
             delta.pricePnlPledgeConsumedUsdc + delta.actionChargeCollectedUsdc - protocolFeeCreditedUsdc;
@@ -661,6 +633,49 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
                 delta.actionChargeWithheldUsdc + delta.actionChargeCollectedUsdc,
                 delta.actionChargeWaivedUsdc
             );
+        }
+    }
+
+    /// @notice Consumes close charges and synchronizes the account's negative-VPI reserve.
+    /// @dev Kept separate from `executeClose` so non-IR coverage builds do not exceed the EVM stack limit.
+    function _settleCloseActionCharge(
+        ICfdEngineSettlementHost host,
+        IMarginClearinghouse clearinghouse,
+        CfdEnginePlanTypes.CloseDelta calldata delta
+    ) private returns (uint256 protocolFeeCreditedUsdc) {
+        if (clearinghouse.vpiRebateReserveUsdc(delta.account) != delta.vpiRebateReserveBeforeUsdc) {
+            revert CfdEngineSettlementSidecar__SettlementMismatch();
+        }
+        if (delta.vpiRebateReserveConsumedUsdc > 0) {
+            clearinghouse.consumeVpiRebateReserve(delta.account, host.pool(), delta.vpiRebateReserveConsumedUsdc);
+        }
+        uint256 vpiReserveReleaseUsdc =
+            delta.vpiRebateReserveBeforeUsdc - delta.vpiRebateReserveAfterUsdc - delta.vpiRebateReserveConsumedUsdc;
+        if (vpiReserveReleaseUsdc > 0) {
+            clearinghouse.releaseVpiRebateReserve(delta.account, vpiReserveReleaseUsdc);
+        }
+
+        uint256 genericActionChargeToCollectUsdc = delta.actionChargeToCollectUsdc - delta.vpiRebateReserveConsumedUsdc;
+        if (genericActionChargeToCollectUsdc > 0) {
+            (uint256 collectedUsdc, uint256 creditedUsdc) = clearinghouse.consumeActionCharge(
+                delta.account,
+                genericActionChargeToCollectUsdc,
+                delta.actionReserveConsumedUsdc,
+                delta.actionCommittedMarginConsumedUsdc,
+                host.pool(),
+                host.protocolTreasury(),
+                delta.actionProtocolFeeCreditedUsdc
+            );
+            if (
+                collectedUsdc != delta.actionChargeCollectedUsdc - delta.vpiRebateReserveConsumedUsdc
+                    || creditedUsdc != delta.actionProtocolFeeCreditedUsdc
+            ) {
+                revert CfdEngineSettlementSidecar__SettlementMismatch();
+            }
+            protocolFeeCreditedUsdc = creditedUsdc;
+        }
+        if (clearinghouse.vpiRebateReserveUsdc(delta.account) != delta.vpiRebateReserveAfterUsdc) {
+            revert CfdEngineSettlementSidecar__SettlementMismatch();
         }
     }
 

@@ -2,6 +2,7 @@
 pragma solidity 0.8.35;
 
 import {BasePerpTest} from "./BasePerpTest.sol";
+import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {IAsyncTrancheVault} from "@plether/perps/interfaces/IAsyncTrancheVault.sol";
@@ -69,6 +70,99 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
     function test_AdvertisesErc7540AndErc7575Interfaces() public view {
         _assertAsyncInterfaces(seniorVault);
         _assertAsyncInterfaces(juniorVault);
+    }
+
+    function test_EpochCompatibilityViewsMatchPool() public view {
+        uint256 currentEpoch = pool.currentLpEpoch();
+        assertEq(juniorVault.currentLpEpoch(), currentEpoch);
+        assertEq(juniorVault.currentDepositEpoch(), currentEpoch);
+        assertEq(juniorVault.depositEpochStart(currentEpoch), pool.lpEpochStart(currentEpoch));
+    }
+
+    function test_AsyncRequestAndEmptyQueueValidationGuards() public {
+        (uint256 depositEpoch, uint256 depositAssets) = juniorVault.getMaturedDepositHead(type(uint256).max);
+        (uint256 redeemEpoch, uint256 redeemShares) = juniorVault.getMaturedRedeemHead(type(uint256).max);
+        assertEq(depositEpoch, 0);
+        assertEq(depositAssets, 0);
+        assertEq(redeemEpoch, 0);
+        assertEq(redeemShares, 0);
+        assertEq(juniorVault.maxRequestRedeem(address(this)), 0, "seed shares must still be cooling down");
+
+        uint256 amount = pool.minTrancheDepositUsdc();
+        vm.expectRevert(TrancheVault.TrancheVault__ZeroAddress.selector);
+        juniorVault.requestDeposit(amount, address(0), ALICE);
+
+        vm.prank(OPERATOR);
+        vm.expectRevert(TrancheVault.TrancheVault__NotControllerOrOperator.selector);
+        juniorVault.requestDeposit(amount, ALICE, ALICE);
+
+        vm.expectRevert(TrancheVault.TrancheVault__ZeroAddress.selector);
+        juniorVault.requestRedeem(1, address(0), ALICE);
+
+        vm.prank(ALICE);
+        vm.expectPartialRevert(TrancheVault.TrancheVault__ExceededMaxRequestRedeem.selector);
+        juniorVault.requestRedeem(1, ALICE, ALICE);
+
+        vm.expectRevert(TrancheVault.TrancheVault__InvalidFee.selector);
+        juniorVault.quoteDepositFromState(amount, amount, 1e9, 10_001);
+
+        vm.expectRevert(TrancheVault.TrancheVault__NotPool.selector);
+        juniorVault.finalizeDepositEpochFromPool(0, 1);
+    }
+
+    function test_AsyncCancellationAndClaimValidationGuards() public {
+        uint256 futureEpoch = pool.currentLpEpoch() + 1;
+
+        vm.prank(OPERATOR);
+        vm.expectRevert(TrancheVault.TrancheVault__NotControllerOrOperator.selector);
+        juniorVault.cancelPendingDeposit(futureEpoch, ALICE, ALICE);
+
+        vm.prank(ALICE);
+        vm.expectRevert(TrancheVault.TrancheVault__ZeroAddress.selector);
+        juniorVault.cancelPendingDeposit(futureEpoch, address(0), ALICE);
+
+        vm.prank(ALICE);
+        vm.expectRevert(TrancheVault.TrancheVault__ZeroAddress.selector);
+        juniorVault.cancelRedeemRequest(futureEpoch, address(0));
+
+        vm.prank(ALICE);
+        vm.expectRevert(TrancheVault.TrancheVault__NoPendingRedeem.selector);
+        juniorVault.cancelRedeemRequest(futureEpoch, ALICE);
+
+        vm.prank(ALICE);
+        vm.expectRevert(TrancheVault.TrancheVault__ZeroAddress.selector);
+        juniorVault.claimRedeemRefund(futureEpoch, address(0), ALICE);
+
+        vm.prank(ALICE);
+        vm.expectRevert(TrancheVault.TrancheVault__RedeemRefundUnavailable.selector);
+        juniorVault.claimRedeemRefund(futureEpoch, ALICE, ALICE);
+
+        vm.startPrank(ALICE);
+        vm.expectRevert(TrancheVault.TrancheVault__ZeroAddress.selector);
+        juniorVault.deposit(0, address(0), ALICE);
+        vm.expectRevert(TrancheVault.TrancheVault__ZeroAddress.selector);
+        juniorVault.mint(0, address(0), ALICE);
+        vm.expectRevert(TrancheVault.TrancheVault__ZeroAddress.selector);
+        juniorVault.redeem(0, address(0), ALICE);
+        vm.expectRevert(TrancheVault.TrancheVault__ZeroAddress.selector);
+        juniorVault.withdraw(0, address(0), ALICE);
+        vm.expectPartialRevert(ERC4626.ERC4626ExceededMaxRedeem.selector);
+        juniorVault.redeem(1, ALICE, ALICE);
+        vm.expectPartialRevert(ERC4626.ERC4626ExceededMaxWithdraw.selector);
+        juniorVault.withdraw(1, ALICE, ALICE);
+        vm.stopPrank();
+
+        uint256 requestId = _requestDeposit(juniorVault, ALICE, 25_000e6);
+        _settleAt(requestId);
+
+        vm.startPrank(ALICE);
+        vm.expectRevert(TrancheVault.TrancheVault__DepositEpochFinalized.selector);
+        juniorVault.cancelPendingDeposit(requestId, ALICE, ALICE);
+        vm.expectPartialRevert(ERC4626.ERC4626ExceededMaxDeposit.selector);
+        juniorVault.deposit(0, ALICE, ALICE);
+        vm.expectPartialRevert(ERC4626.ERC4626ExceededMaxMint.selector);
+        juniorVault.mint(0, ALICE, ALICE);
+        vm.stopPrank();
     }
 
     function test_NoProgressSettlementRevertsWithoutCheckpointingAccounting() public {

@@ -25,6 +25,15 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
 
     using SafeERC20 for IERC20;
 
+    struct LiquidationSettlementExecution {
+        address recipient;
+        address keeper;
+        uint256 keeperBountyUsdc;
+        address protocolFeeAccount;
+        uint256 protocolFeeUsdc;
+        uint256 lpLiquidationFeeUsdc;
+    }
+
     mapping(address => uint256) internal settlementBalances;
 
     mapping(address => uint256) internal positionMarginUsdc;
@@ -870,30 +879,9 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         address protocolTreasury,
         uint256 protocolFeeUsdc
     ) external onlyOperator returns (uint256 collectedUsdc, uint256 protocolFeeCreditedUsdc) {
-        uint256 actionReserveBalanceUsdc = reservedSettlementUsdc[account];
-        uint256 protectedActionReserveUsdc = _activeExecutionBountyUsdc(account) + vpiRebateReserveBalances[account];
-        if (actionReserveBalanceUsdc < protectedActionReserveUsdc) {
-            revert MarginClearinghouse__ActionReserveMismatch();
-        }
-
-        uint256 actionReserveAvailableUsdc = actionReserveBalanceUsdc - protectedActionReserveUsdc;
-        uint256 freeSettlementAvailableUsdc = getFreeBuyingPowerUsdc(account);
-        uint256 committedMarginAvailableUsdc = committedOrderMarginUsdc[account];
-        uint256 eligibleUsdc = actionReserveAvailableUsdc + freeSettlementAvailableUsdc + committedMarginAvailableUsdc;
-        collectedUsdc = chargeUsdc < eligibleUsdc ? chargeUsdc : eligibleUsdc;
-
-        uint256 expectedActionReserveConsumedUsdc =
-            collectedUsdc < actionReserveAvailableUsdc ? collectedUsdc : actionReserveAvailableUsdc;
-        uint256 chargeAfterReserveUsdc = collectedUsdc - expectedActionReserveConsumedUsdc;
-        uint256 freeSettlementConsumedUsdc =
-            chargeAfterReserveUsdc < freeSettlementAvailableUsdc ? chargeAfterReserveUsdc : freeSettlementAvailableUsdc;
-        uint256 expectedCommittedMarginConsumedUsdc = chargeAfterReserveUsdc - freeSettlementConsumedUsdc;
-        if (
-            actionReserveConsumedUsdc != expectedActionReserveConsumedUsdc
-                || actionCommittedMarginConsumedUsdc != expectedCommittedMarginConsumedUsdc
-        ) {
-            revert MarginClearinghouse__ActionReserveMismatch();
-        }
+        collectedUsdc = _validateActionChargeConsumption(
+            account, chargeUsdc, actionReserveConsumedUsdc, actionCommittedMarginConsumedUsdc
+        );
         if (collectedUsdc == 0) {
             return (0, 0);
         }
@@ -914,6 +902,43 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
 
         protocolFeeCreditedUsdc =
             _routeSettlementDebit(account, collectedUsdc, recipient, protocolTreasury, protocolFeeUsdc);
+    }
+
+    function _validateActionChargeConsumption(
+        address account,
+        uint256 chargeUsdc,
+        uint256 actionReserveConsumedUsdc,
+        uint256 actionCommittedMarginConsumedUsdc
+    ) private view returns (uint256 collectedUsdc) {
+        uint256 actionReserveAvailableUsdc = _spendableActionReserveUsdc(account);
+        uint256 freeSettlementAvailableUsdc = getFreeBuyingPowerUsdc(account);
+        uint256 eligibleUsdc =
+            actionReserveAvailableUsdc + freeSettlementAvailableUsdc + committedOrderMarginUsdc[account];
+        collectedUsdc = chargeUsdc < eligibleUsdc ? chargeUsdc : eligibleUsdc;
+
+        uint256 expectedActionReserveConsumedUsdc =
+            collectedUsdc < actionReserveAvailableUsdc ? collectedUsdc : actionReserveAvailableUsdc;
+        uint256 chargeAfterReserveUsdc = collectedUsdc - expectedActionReserveConsumedUsdc;
+        uint256 expectedCommittedMarginConsumedUsdc = chargeAfterReserveUsdc > freeSettlementAvailableUsdc
+            ? chargeAfterReserveUsdc - freeSettlementAvailableUsdc
+            : 0;
+        if (
+            actionReserveConsumedUsdc != expectedActionReserveConsumedUsdc
+                || actionCommittedMarginConsumedUsdc != expectedCommittedMarginConsumedUsdc
+        ) {
+            revert MarginClearinghouse__ActionReserveMismatch();
+        }
+    }
+
+    function _spendableActionReserveUsdc(
+        address account
+    ) private view returns (uint256) {
+        uint256 actionReserveBalanceUsdc = reservedSettlementUsdc[account];
+        uint256 protectedActionReserveUsdc = _activeExecutionBountyUsdc(account) + vpiRebateReserveBalances[account];
+        if (actionReserveBalanceUsdc < protectedActionReserveUsdc) {
+            revert MarginClearinghouse__ActionReserveMismatch();
+        }
+        return actionReserveBalanceUsdc - protectedActionReserveUsdc;
     }
 
     /// @notice Locks free settlement exclusively for keeper and protocol liquidation charges.
@@ -1252,36 +1277,28 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         uint256 protocolFeeUsdc,
         uint256 lpLiquidationFeeUsdc
     ) external onlyOperator returns (uint256 seizedUsdc) {
-        return _applyLiquidationSettlementPlan(
-            account,
-            reservationOrderIds,
-            plan,
-            recipient,
-            keeper,
-            keeperBountyUsdc,
-            protocolFeeAccount,
-            protocolFeeUsdc,
-            lpLiquidationFeeUsdc
-        );
+        LiquidationSettlementExecution memory execution;
+        execution.recipient = recipient;
+        execution.keeper = keeper;
+        execution.keeperBountyUsdc = keeperBountyUsdc;
+        execution.protocolFeeAccount = protocolFeeAccount;
+        execution.protocolFeeUsdc = protocolFeeUsdc;
+        execution.lpLiquidationFeeUsdc = lpLiquidationFeeUsdc;
+        return _applyLiquidationSettlementPlan(account, reservationOrderIds, plan, execution);
     }
 
     function _applyLiquidationSettlementPlan(
         address account,
         uint64[] calldata reservationOrderIds,
         IMarginClearinghouse.LiquidationSettlementPlan calldata plan,
-        address recipient,
-        address keeper,
-        uint256 keeperBountyUsdc,
-        address protocolFeeAccount,
-        uint256 protocolFeeUsdc,
-        uint256 lpLiquidationFeeUsdc
+        LiquidationSettlementExecution memory execution
     ) internal returns (uint256 seizedUsdc) {
         seizedUsdc = plan.settlementSeizedUsdc;
         uint256 pledgeBeforeUsdc = positionMarginUsdc[account];
-        if (seizedUsdc < lpLiquidationFeeUsdc) {
+        if (seizedUsdc < execution.lpLiquidationFeeUsdc) {
             revert MarginClearinghouse__InvalidMarginBucket();
         }
-        uint256 priceSeizureUsdc = seizedUsdc - lpLiquidationFeeUsdc;
+        uint256 priceSeizureUsdc = seizedUsdc - execution.lpLiquidationFeeUsdc;
         if (
             priceSeizureUsdc > pledgeBeforeUsdc || plan.positionMarginUnlockedUsdc != pledgeBeforeUsdc
                 || plan.otherLockedMarginUnlockedUsdc != 0
@@ -1289,7 +1306,8 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
             revert MarginClearinghouse__InvalidMarginBucket();
         }
 
-        uint256 liquidationChargeUsdc = keeperBountyUsdc + protocolFeeUsdc + lpLiquidationFeeUsdc;
+        uint256 liquidationChargeUsdc =
+            execution.keeperBountyUsdc + execution.protocolFeeUsdc + execution.lpLiquidationFeeUsdc;
         if (liquidationReserveBalances[account] < liquidationChargeUsdc) {
             revert MarginClearinghouse__InsufficientBucketMargin();
         }
@@ -1314,25 +1332,25 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
             }
         }
         if (seizedUsdc > 0) {
-            if (recipient == address(0)) {
+            if (execution.recipient == address(0)) {
                 revert MarginClearinghouse__ZeroAddress();
             }
-            IERC20(settlementAsset).safeTransfer(recipient, plan.settlementSeizedUsdc);
-            emit AssetSeized(account, settlementAsset, plan.settlementSeizedUsdc, recipient);
+            IERC20(settlementAsset).safeTransfer(execution.recipient, plan.settlementSeizedUsdc);
+            emit AssetSeized(account, settlementAsset, plan.settlementSeizedUsdc, execution.recipient);
         }
-        if (keeperBountyUsdc > 0) {
-            if (keeper == address(0)) {
+        if (execution.keeperBountyUsdc > 0) {
+            if (execution.keeper == address(0)) {
                 revert MarginClearinghouse__ZeroAddress();
             }
-            settlementBalances[keeper] += keeperBountyUsdc;
-            emit ReservedSettlementTransferred(account, keeper, keeperBountyUsdc);
+            settlementBalances[execution.keeper] += execution.keeperBountyUsdc;
+            emit ReservedSettlementTransferred(account, execution.keeper, execution.keeperBountyUsdc);
         }
-        if (protocolFeeUsdc > 0) {
-            if (protocolFeeAccount == address(0)) {
+        if (execution.protocolFeeUsdc > 0) {
+            if (execution.protocolFeeAccount == address(0)) {
                 revert MarginClearinghouse__ZeroAddress();
             }
-            settlementBalances[protocolFeeAccount] += protocolFeeUsdc;
-            emit AssetSeized(account, settlementAsset, protocolFeeUsdc, protocolFeeAccount);
+            settlementBalances[execution.protocolFeeAccount] += execution.protocolFeeUsdc;
+            emit AssetSeized(account, settlementAsset, execution.protocolFeeUsdc, execution.protocolFeeAccount);
         }
 
         uint256 releasedLiquidationReserveUsdc = liquidationReserveBalances[account];

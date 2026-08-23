@@ -795,18 +795,21 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         _checkpointEngineCarryIndexes();
 
         result.cutoffEpoch = cutoffEpoch;
-        uint256 seniorSupply = _seniorShareSupply();
-        uint256 juniorSupply = _juniorShareSupply();
-        uint256 seniorPricingPrincipal = seniorPrincipal;
-        uint256 juniorPricingPrincipal = juniorPrincipal;
-        HousePoolAccountingLib.WithdrawalSnapshot memory withdrawalSnapshot =
-            _buildWithdrawalSnapshot(accountingSnapshot, unassignedAssets, _pendingClaimantBucketAssets());
-        uint256 freeUsdc = withdrawalSnapshot.freeUsdc;
+        RedemptionPhase memory juniorPhase;
+        juniorPhase.pricingPrincipal = juniorPrincipal;
+        juniorPhase.pricingSupply = _juniorShareSupply();
+        uint256 freeUsdc =
+            _buildWithdrawalSnapshot(accountingSnapshot, unassignedAssets, _pendingClaimantBucketAssets()).freeUsdc;
 
-        RedemptionPhase memory seniorPhase;
-        seniorPhase.pricingPrincipal = seniorPricingPrincipal;
-        seniorPhase.pricingSupply = seniorSupply;
-        seniorPhase.budget = _min(freeUsdc, seniorPricingPrincipal);
+        RedemptionPhase memory seniorPhase = RedemptionPhase({
+            pricingPrincipal: seniorPrincipal,
+            pricingSupply: _seniorShareSupply(),
+            budget: _min(freeUsdc, seniorPrincipal),
+            fundedShares: 0,
+            fundedAssets: 0,
+            processedEpochs: 0,
+            backlog: false
+        });
         seniorPhase = _fundRedemptionPhase(
             seniorVault, result.cutoffEpoch, seniorPhase, _settlementFeeBps(true, statusSnapshot.oracleFrozen)
         );
@@ -833,15 +836,12 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             return result;
         }
 
-        RedemptionPhase memory juniorPhase;
         if (seniorPhase.backlog) {
             juniorPhase.backlog = _hasMaturedRedeemHead(juniorVault, result.cutoffEpoch);
         } else {
             uint256 ratioCap = HousePoolSeniorCapacityLib.juniorWithdrawalRatioCap(
                 seniorPrincipal, seniorHighWaterMark, juniorPrincipal, poolConfig.maxSeniorShareBps
             );
-            juniorPhase.pricingPrincipal = juniorPricingPrincipal;
-            juniorPhase.pricingSupply = juniorSupply;
             juniorPhase.budget = _min(freeUsdc, _min(juniorPrincipal, ratioCap));
             juniorPhase = _fundRedemptionPhase(
                 juniorVault, result.cutoffEpoch, juniorPhase, _settlementFeeBps(false, statusSnapshot.oracleFrozen)
@@ -931,13 +931,19 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
                 uint256 escrowSharesBeforeRefund = IERC20(vaultAddress).balanceOf(vaultAddress);
                 uint256 poolAssetsBeforeRefund = rawAssets();
                 uint256 vaultAssetsBeforeRefund = USDC.balanceOf(vaultAddress);
-                uint256 refundedShares = vault.refundRedeemEpochRemainder(epochId, remainingShares);
-                if (
-                    refundedShares != remainingShares || IERC20(vaultAddress).totalSupply() != supplyBeforeRefund
-                        || IERC20(vaultAddress).balanceOf(vaultAddress) != escrowSharesBeforeRefund
-                        || rawAssets() != poolAssetsBeforeRefund
-                        || USDC.balanceOf(vaultAddress) != vaultAssetsBeforeRefund
-                ) {
+                if (vault.refundRedeemEpochRemainder(epochId, remainingShares) != remainingShares) {
+                    revert HousePool__VaultSettlementInvariant();
+                }
+                if (IERC20(vaultAddress).totalSupply() != supplyBeforeRefund) {
+                    revert HousePool__VaultSettlementInvariant();
+                }
+                if (IERC20(vaultAddress).balanceOf(vaultAddress) != escrowSharesBeforeRefund) {
+                    revert HousePool__VaultSettlementInvariant();
+                }
+                if (rawAssets() != poolAssetsBeforeRefund) {
+                    revert HousePool__VaultSettlementInvariant();
+                }
+                if (USDC.balanceOf(vaultAddress) != vaultAssetsBeforeRefund) {
                     revert HousePool__VaultSettlementInvariant();
                 }
                 phase.processedEpochs += 1;
@@ -964,11 +970,14 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             uint256 escrowAssetsBefore = USDC.balanceOf(vaultAddress);
             USDC.safeTransfer(vaultAddress, fundedAssets);
             vault.fundRedeemEpoch(epochId, fundedShares, fundedAssets);
+            if (USDC.balanceOf(vaultAddress) != escrowAssetsBefore + fundedAssets) {
+                revert HousePool__VaultSettlementInvariant();
+            }
             uint256 supplyAfter = IERC20(vaultAddress).totalSupply();
-            if (
-                supplyAfter > supplyBefore || supplyBefore - supplyAfter != fundedShares
-                    || USDC.balanceOf(vaultAddress) != escrowAssetsBefore + fundedAssets
-            ) {
+            if (supplyAfter > supplyBefore) {
+                revert HousePool__VaultSettlementInvariant();
+            }
+            if (supplyBefore - supplyAfter != fundedShares) {
                 revert HousePool__VaultSettlementInvariant();
             }
             phase.fundedShares += fundedShares;
