@@ -334,7 +334,7 @@ contract PerpsPublicLensTest is BasePerpTest {
         assertTrue(maturedQueue.depositBacklog);
         assertTrue(maturedQueue.redeemBacklog);
 
-        pool.settleLpEpoch();
+        _settleLpEpochForTest();
 
         PerpsViewTypes.TrancheQueueView memory settledQueue = publicLens.getTrancheQueues(false);
         assertEq(settledQueue.depositHeadEpoch, 0);

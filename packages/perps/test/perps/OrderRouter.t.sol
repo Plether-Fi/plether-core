@@ -115,7 +115,7 @@ contract OrderRouterTest is BasePerpTest {
         uint256 markPrice = engine.lastMarkPrice();
         vm.prank(address(router));
         engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
-        pool.settleLpEpoch();
+        pool.settleLpEpoch(0, 0);
 
         uint256 claimableShares = juniorVault.claimableRedeemRequest(requestId, owner);
         vm.prank(owner);
@@ -1459,7 +1459,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.stopPrank();
 
         vm.warp(pool.lpEpochStart(requestId));
-        pool.settleLpEpoch();
+        _settleLpEpochForTest();
 
         uint256 claimableAssets = juniorVault.claimableDepositRequest(requestId, lp);
         vm.prank(lp);
@@ -3238,7 +3238,7 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
         vm.stopPrank();
 
         vm.warp(pool.lpEpochStart(requestId));
-        pool.settleLpEpoch();
+        _settleLpEpochForTest();
 
         uint256 claimableAssets = juniorVault.claimableDepositRequest(requestId, lp);
         vm.prank(lp);
@@ -5504,7 +5504,7 @@ contract VpiImrBypassTest is Test {
         uint256 markPrice = engine.lastMarkPrice();
         vm.prank(address(router));
         engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
-        pool.settleLpEpoch();
+        pool.settleLpEpoch(0, 0);
 
         uint256 claimableAssets = juniorVault.claimableDepositRequest(requestId, lp);
         vm.prank(lp);
@@ -5700,7 +5700,7 @@ contract KeeperFeeRefundTest is Test {
         uint256 markPrice = engine.lastMarkPrice();
         vm.prank(address(router));
         engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
-        pool.settleLpEpoch();
+        pool.settleLpEpoch(0, 0);
 
         uint256 claimableAssets = juniorVault.claimableDepositRequest(requestId, lp);
         vm.prank(lp);
@@ -6098,7 +6098,7 @@ contract WeekendArbitrageTest is Test {
         uint256 markPrice = engine.lastMarkPrice();
         vm.prank(address(router));
         engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
-        pool.settleLpEpoch();
+        pool.settleLpEpoch(0, 0);
 
         uint256 claimableAssets = juniorVault.claimableDepositRequest(requestId, lp);
         vm.prank(lp);

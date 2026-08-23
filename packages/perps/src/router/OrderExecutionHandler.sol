@@ -3,6 +3,7 @@ pragma solidity 0.8.35;
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
+import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {OrderValidation} from "@plether/perps/router/OrderValidation.sol";
@@ -145,7 +146,35 @@ abstract contract OrderExecutionHandler is OrderValidation {
     function _updateMarkPrice(
         bytes[] calldata pythUpdateData
     ) internal {
-        _prepareMarkRefreshOracle(pythUpdateData);
+        _refreshEngineMark(pythUpdateData, IPletherOracle.PriceMode.MarkRefresh, msg.value);
+    }
+
+    /// @notice Refreshes the pool-accounting mark and settles matured LP epochs in one rollback frame.
+    /// @dev Sends only the quoted fee to the oracle so no excess-fee callback can occur before settlement. The caller's
+    ///      remaining ETH is refunded only after the engine and HousePool have consumed the validated snapshot.
+    /// @param pythUpdateData Pyth price update blobs supplied by the caller.
+    function _settleLpEpoch(
+        bytes[] calldata pythUpdateData
+    ) internal {
+        uint256 pythFee = _checkedPythFee(pythUpdateData, 0);
+        (uint256 markPrice, uint64 publishTime) =
+            _refreshEngineMark(pythUpdateData, IPletherOracle.PriceMode.PoolReconcile, pythFee);
+        address pool = address(housePool);
+        uint256 selector = uint32(IHousePool.settleLpEpoch.selector);
+        // Call `settleLpEpoch(uint256,uint256)` without copying its large result struct into Router bytecode. The
+        // HousePool event is canonical for the outcome; this path still bubbles the complete revert payload.
+        assembly ("memory-safe") {
+            let ptr := mload(0x40)
+            mstore(ptr, shl(224, selector))
+            mstore(add(ptr, 4), markPrice)
+            mstore(add(ptr, 36), publishTime)
+            if iszero(call(gas(), pool, 0, ptr, 68, 0, 0)) {
+                returndatacopy(ptr, 0, returndatasize())
+                revert(ptr, returndatasize())
+            }
+            if lt(returndatasize(), 448) { revert(0, 0) }
+        }
+        _sendEth(msg.sender, msg.value - pythFee);
     }
 
     /// @notice Sends an ETH refund or credits it in the admin contract when the recipient rejects the transfer.

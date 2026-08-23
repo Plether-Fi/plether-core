@@ -138,6 +138,17 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, Reentra
         _updateMarkPrice(pythUpdateData);
     }
 
+    /// @notice Atomically refreshes the pool-accounting mark and settles matured LP epochs against that exact mark.
+    /// @dev Permissionless and available while the router admin is paused. Only the exact quoted Pyth fee is sent to
+    ///      the oracle, preventing an oracle refund callback between validation and settlement. The engine mark update,
+    ///      HousePool settlement, and final caller refund share one rollback frame.
+    /// @param pythUpdateData Pyth price update blobs; `msg.value` must cover the Pyth update fee.
+    function settleLpEpoch(
+        bytes[] calldata pythUpdateData
+    ) external payable nonReentrant {
+        _settleLpEpoch(pythUpdateData);
+    }
+
     /// @notice Permissionlessly liquidates an unsafe account using an account-adverse oracle price.
     /// @dev Available while paused. Before liquidation, all reserved bounties on the account's queued orders
     ///      are forfeited through the engine. On success every queued order is failed, its committed margin is

@@ -355,13 +355,27 @@ abstract contract BasePerpTest is Test {
         uint256 markPrice = engine.lastMarkPrice();
         vm.prank(address(router));
         engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, SafeCast.toUint64(block.timestamp));
-        pool.settleLpEpoch();
+        _settleLpEpochForTest();
 
         uint256 claimableAssets = vault.claimableDepositRequest(requestId, lp);
         assertEq(claimableAssets, amount, "async tranche funding must finalize the requested asset basis");
         vm.prank(lp);
         shares = vault.claimDeposit(requestId, claimableAssets, lp, lp);
         assertGt(shares, 0, "async tranche funding must mint claimable shares");
+    }
+
+    /// @dev Unit and economics tests install marks directly through the configured Router address. Route settlement
+    ///      through the production authorization split without forcing every test to construct Pyth update blobs.
+    ///      No-position and frozen-mode calls intentionally exercise the cached-mark liveness path.
+    function _settleLpEpochForTest() internal returns (IHousePool.LpEpochSettlementResult memory result) {
+        ICfdEngineTypes.TerminalNavSnapshot memory terminalSnapshot = engine.terminalNavSnapshot();
+
+        if (!terminalSnapshot.hasOpenPositions || engine.isOracleFrozen()) {
+            return pool.settleLpEpoch(0, 0);
+        }
+
+        vm.prank(address(router));
+        result = pool.settleLpEpoch(terminalSnapshot.markPrice, terminalSnapshot.markTime);
     }
 
     function _fundTrader(

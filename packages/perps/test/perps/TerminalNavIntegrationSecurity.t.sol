@@ -246,7 +246,7 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
         uint256 expectedDepositShares =
             juniorVault.quoteDepositFromState(depositAssets, postRedeemPricingAssets, postRedeemPricingSupply, 0);
 
-        IHousePool.LpEpochSettlementResult memory result = pool.settleLpEpoch();
+        IHousePool.LpEpochSettlementResult memory result = _settleLpEpochForTest();
         assertEq(result.juniorFundedShares, redeemShares, "synchronized exit must fund the quoted shares exactly");
         assertEq(
             result.juniorFundedAssets,

@@ -115,7 +115,7 @@ contract SeniorCapacityTest is BasePerpTest {
     ) internal returns (IHousePool.LpEpochSettlementResult memory result) {
         _warpToEpoch(epochId);
         _refreshMark();
-        result = pool.settleLpEpoch();
+        result = _settleLpEpochForTest();
     }
 
     function _warpToEpoch(
@@ -144,8 +144,6 @@ contract SeniorCapacityTest is BasePerpTest {
     ) internal {
         uint256 amount = pool.minTrancheDepositUsdc();
         vm.startPrank(caller);
-        vm.expectRevert(IHousePool.HousePool__NotSeniorVault.selector);
-        pool.depositSenior(amount);
         vm.expectRevert(IHousePool.HousePool__NotSeniorVault.selector);
         pool.reserveSeniorDeposit(amount);
         vm.expectRevert(IHousePool.HousePool__NotSeniorVault.selector);
@@ -429,7 +427,7 @@ contract SeniorCapacityTest is BasePerpTest {
 
         _refreshMark();
         vm.expectRevert(IHousePool.HousePool__NoLpEpochProgress.selector);
-        pool.settleLpEpoch();
+        pool.settleLpEpoch(0, 0);
         assertEq(seniorVault.pendingDepositRequest(epochId, ALICE), reservedAssets);
 
         vm.prank(ALICE);
@@ -448,7 +446,7 @@ contract SeniorCapacityTest is BasePerpTest {
 
         _refreshMark();
         vm.expectRevert(IHousePool.HousePool__NoLpEpochProgress.selector);
-        pool.settleLpEpoch();
+        pool.settleLpEpoch(0, 0);
         assertEq(pool.reservedSeniorDepositAssetsUsdc(), 100e6);
 
         _fundJunior(BOB, 200e6);
@@ -478,7 +476,7 @@ contract SeniorCapacityTest is BasePerpTest {
         _warpToEpoch(epochId);
         _refreshMark();
         vm.expectRevert(IHousePool.HousePool__NoLpEpochProgress.selector);
-        pool.settleLpEpoch();
+        pool.settleLpEpoch(0, 0);
         assertEq(seniorVault.pendingDepositRequest(epochId, ALICE), reservedAssets);
 
         vm.prank(ALICE);
@@ -524,7 +522,7 @@ contract SeniorCapacityTest is BasePerpTest {
         _warpToEpoch(seniorEpochId);
         _refreshMark();
         vm.expectRevert(IHousePool.HousePool__NoLpEpochProgress.selector);
-        pool.settleLpEpoch();
+        pool.settleLpEpoch(0, 0);
 
         vm.prank(BOB);
         seniorVault.cancelPendingDeposit(seniorEpochId);
@@ -577,7 +575,7 @@ contract SeniorCapacityTest is BasePerpTest {
         _warpToEpoch(redeemEpochId);
         _refreshMark();
         vm.expectRevert(IHousePool.HousePool__NoLpEpochProgress.selector);
-        pool.settleLpEpoch();
+        pool.settleLpEpoch(0, 0);
 
         assertEq(juniorVault.maxWithdraw(ALICE), 0);
         assertEq(juniorVault.claimableRedeemRequest(redeemEpochId, ALICE), 0);

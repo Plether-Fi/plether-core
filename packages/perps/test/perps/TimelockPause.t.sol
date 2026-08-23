@@ -879,7 +879,7 @@ contract TimelockPauseTest is BasePerpTest {
         uint256 markPrice = engine.lastMarkPrice();
         vm.prank(address(router));
         engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
-        pool.settleLpEpoch();
+        _settleLpEpochForTest();
     }
 
 }

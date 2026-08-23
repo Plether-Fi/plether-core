@@ -504,7 +504,7 @@ contract CfdEngineTest is BasePerpTest {
         uint256 markPrice = engine.lastMarkPrice();
         vm.prank(address(router));
         engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
-        pool.settleLpEpoch();
+        _settleLpEpochForTest();
 
         uint256 claimableAssets = juniorVault.claimableDepositRequest(requestId, owner);
         vm.prank(owner);
@@ -523,7 +523,7 @@ contract CfdEngineTest is BasePerpTest {
         uint256 markPrice = engine.lastMarkPrice();
         vm.prank(address(router));
         engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
-        pool.settleLpEpoch();
+        _settleLpEpochForTest();
 
         uint256 claimableShares = juniorVault.claimableRedeemRequest(requestId, owner);
         vm.prank(owner);
@@ -6517,8 +6517,13 @@ contract DegradedModeLifecycleTest is BasePerpTest {
         uint256 requestedShares = juniorVault.estimateWithdrawShares(1e6);
         uint256 requestId = juniorVault.requestRedeem(requestedShares, address(this), address(this));
         vm.warp(pool.lpEpochStart(requestId));
+        uint256 markPrice = engine.lastMarkPrice();
+        vm.prank(address(router));
+        engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
+        uint256 markTime = engine.lastMarkTime();
         vm.expectRevert(IHousePool.HousePool__DegradedMode.selector);
-        pool.settleLpEpoch();
+        vm.prank(address(router));
+        pool.settleLpEpoch(markPrice == 0 ? 1e8 : markPrice, markTime);
     }
 
     function test_DegradedMode_AllowsAddMarginToExistingPosition() public {
@@ -6711,7 +6716,7 @@ contract VpiDepthTest is BasePerpTest {
         uint256 markPrice = engine.lastMarkPrice();
         vm.prank(address(router));
         engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
-        pool.settleLpEpoch();
+        _settleLpEpochForTest();
 
         uint256 claimableShares = juniorVault.claimableRedeemRequest(requestId, owner);
         if (claimableShares == 0) {
@@ -7079,7 +7084,7 @@ contract VpiChunkingTest is Test {
         uint256 requestId = juniorVault.requestDeposit(5_000_000 * 1e6, address(this), address(this));
         vm.warp(pool.lpEpochStart(requestId));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
-        pool.settleLpEpoch();
+        pool.settleLpEpoch(0, 0);
         uint256 claimableAssets = juniorVault.claimableDepositRequest(requestId, address(this));
         juniorVault.claimDeposit(requestId, claimableAssets, address(this), address(this));
     }

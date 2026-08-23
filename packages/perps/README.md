@@ -72,10 +72,12 @@ In practice, the compact public API is:
   - `OrderRouter.executeOrderBatch(uint64,bytes[])`
   - `OrderRouter.executeLiquidation(address,bytes[])`
   - `OrderRouter.executeLiquidationBatch(address[],bytes[])`
+  - `OrderRouter.settleLpEpoch(bytes[])`
 - LPs:
   - the configured Senior or Junior `TrancheVault`: asynchronous `requestDeposit` / `requestRedeem`, request
     cancellation and status views, and funded-request claims through `deposit` / `mint` or `withdraw` / `redeem`
-  - permissionless synchronized clearing: `HousePool.settleLpEpoch()`
+  - permissionless synchronized clearing through `OrderRouter.settleLpEpoch(bytes[])`; the Router validates one
+    post-boundary Pyth mark and settles the bounded batch atomically
 - Readers:
   - `PerpsPublicLens`, including `getTrancheQueues(bool)` for synchronized heads/backlog and
     `getLpRequestState(bool,uint256,address)` for controller request balances
@@ -100,9 +102,10 @@ The simplified public interfaces live in `packages/perps/src/interfaces/`:
 
 The wider engine, clearinghouse, router, and house-pool interfaces still exist for tests, admin tooling, and deep accounting inspection, but they are not the recommended product integration surface.
 The three capacity getters above are the deliberate direct-read exception. The active vault-authorized hooks declared
-by `IHousePool` / `IPerpsLPActions` are Senior deposit reservation and release. `HousePool.settleLpEpoch()` is the
-permissionless coordinator. The retained `depositSenior` / `depositJunior` selectors are disabled compatibility paths
-that always revert; LP applications must perform actions through the relevant `TrancheVault`.
+by `IHousePool` / `IPerpsLPActions` are Senior deposit reservation and release. The permissionless live coordinator is
+`OrderRouter.settleLpEpoch(bytes[])`; with open positions outside oracle-frozen mode, its HousePool callback is
+Router-only. The no-position and oracle-frozen cached-mark fallbacks remain permissionless. LP applications must
+perform actions through the relevant `TrancheVault`.
 
 ### Trade-ticket previews
 
@@ -238,8 +241,11 @@ Only unencumbered physical USDC can be committed to funded LP claims. A positive
 but cannot fund a withdrawal before collection. Funded assets then leave `HousePool` for vault claim escrow and
 cannot be reused by later settlements.
 
-Both vaults use the same one-hour epoch clock. `HousePool.settleLpEpoch()` is the sole permissionless clearing
-entrypoint and applies one accounting snapshot in this order:
+Both vaults use the same round-hour epoch clock. `OrderRouter.settleLpEpoch(bytes[])` is the canonical permissionless
+clearing entrypoint. With open positions outside oracle-frozen mode, it validates a `PoolReconcile` Pyth basket whose
+earliest component publish time is at or after the current epoch boundary, installs that exact Engine mark, and invokes
+the Router-only HousePool callback in the same transaction. HousePool then applies one accounting snapshot in this
+order:
 
 1. matured Senior redemption demand,
 2. matured Junior redemption demand from the remaining liquidity and covenant capacity,
@@ -253,6 +259,10 @@ Each redemption or deposit phase examines at most 16 nonempty epochs. Reaching t
 with an eligible Senior head still pending ends the call before Junior funding; a later call resumes from that head.
 If a call cannot advance any queued epoch, it reverts and rolls back its reconcile and carry checkpoints; keepers should
 retry after an epoch matures or the blocking liquidity, capacity, pause, or safety condition changes.
+The same rollback frame includes the Pyth update and Engine mark/carry update. Low confidence, stale or inconsistent
+live oracle data therefore leaves the queue untouched. A direct cached-mark HousePool fallback exists only when there
+are no open positions or during `oracleFrozen`; frozen withdrawals retain their tranche-local surcharge and deposits
+remain deferred.
 If an aggregate deposit quote or unfunded redemption remainder rounds to zero, settlement moves that request into a
 terminal refundable state instead of silently consuming value. `PerpsPublicLens.getLpRequestState(...)` exposes
 `refundableDepositAssets`, `refundableRedeemShares`, and `redeemRefundPending`. The last flag may remain true when a

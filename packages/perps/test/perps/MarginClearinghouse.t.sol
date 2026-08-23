@@ -1473,7 +1473,7 @@ contract NonUsdcCollateralTest is Test {
         uint256 requestId = juniorVault.requestDeposit(5_000_000 * 1e6, address(this), address(this));
         vm.warp(pool.lpEpochStart(requestId));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
-        pool.settleLpEpoch();
+        pool.settleLpEpoch(0, 0);
         uint256 claimableAssets = juniorVault.claimableDepositRequest(requestId, address(this));
         juniorVault.claimDeposit(requestId, claimableAssets, address(this), address(this));
     }

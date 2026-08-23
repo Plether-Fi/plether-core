@@ -104,7 +104,7 @@ contract GovernedSeniorCapacityHandler is Test {
         if (!_hasSettleableMaturedWork()) {
             return;
         }
-        IHousePool.LpEpochSettlementResult memory result = pool.settleLpEpoch();
+        IHousePool.LpEpochSettlementResult memory result = pool.settleLpEpoch(0, 0);
         if (result.seniorDepositAssets != 0) {
             _recordSuccessfulSeniorAdmission();
         }

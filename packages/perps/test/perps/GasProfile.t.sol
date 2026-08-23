@@ -590,7 +590,7 @@ contract GasProfileTest is Test {
             vm.warp(activationTime);
         }
         _refreshMark();
-        pool.settleLpEpoch();
+        pool.settleLpEpoch(0, 0);
 
         uint256 claimableAssets = vault.claimableDepositRequest(requestId, provider);
         assertEq(claimableAssets, assets, "async tranche funding did not finalize");

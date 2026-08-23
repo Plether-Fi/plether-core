@@ -207,10 +207,13 @@ Definition:
 - ordinary LP entry always starts with an asynchronous deposit request: assets are funded up front, cancellation is
   unconditional before activation and, after activation, reopens when Senior impairment blocks finalization or a
   Senior reservation book no longer fits its governed limits,
-- `HousePool.settleLpEpoch` fixes the epoch price after both redemption phases and activates Junior deposits before
-  Senior deposits; ERC-4626 `deposit` and `mint` only claim already-activated requests,
+- `OrderRouter.settleLpEpoch(bytes[])` validates a `PoolReconcile` Pyth basket, installs its neutral Engine mark, and
+  invokes the Router-only HousePool settlement callback in one rollback frame; with live open positions, the basket's
+  earliest publish time must be at or after the current round-hour epoch boundary,
+- HousePool fixes one shared epoch price after both redemption phases and activates Junior deposits before Senior
+  deposits; ERC-4626 `deposit` and `mint` only claim already-activated requests,
 - a settlement pass that advances no queue item reverts, so its reconcile and carry checkpoints cannot be retained by
-  a permissionless no-op caller,
+  a permissionless no-op caller; on the Router path the Pyth and Engine updates roll back as well,
 - the current terminal snapshot must be fresh and internally stable; the Engine rejects snapshots while a
   multi-contract account mutation is in progress,
 - a nonzero current `terminalDeficit` blocks deposit activation, as do degraded mode, stale/frozen entry policy,
@@ -224,6 +227,8 @@ Rules:
 - value with no valid claimant path must sit in explicit `unassignedAssets`.
 - during `oracleFrozen`, synchronized redemption funding may apply the fixed tranche-local exit surcharge, while
   deposit activation is deferred until the live symmetric-NAV entry gate passes,
+- direct cached-mark settlement is restricted to zero-open-position state or `oracleFrozen`; a separately refreshed
+  live cached mark cannot bypass the atomic Router path,
 - during `oracleFrozen`, bootstrap admin flows (`initializeSeedPosition`, `assignUnassignedAssets`) are blocked rather than inheriting LP frozen-fee pricing.
 
 Required consequences:

@@ -1157,18 +1157,6 @@ contract TrancheVault is ERC4626 {
         emit RedeemEpochRefundable(epochId, IS_SENIOR, shares);
     }
 
-    /// @notice Compatibility wrapper; it invokes the global coordinator and never finalizes independently.
-    function finalizeDepositEpoch(
-        uint256 epochId
-    ) external returns (uint256 shares) {
-        POOL.settleLpEpoch();
-        DepositEpoch storage epoch = depositEpochs[epochId];
-        if (!epoch.finalized) {
-            revert TrancheVault__DepositEpochNotFinalized();
-        }
-        return epoch.shares;
-    }
-
     function _deposit(
         address,
         address,

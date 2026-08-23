@@ -53,7 +53,7 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         uint256 noFeeAssets = juniorVault.convertToAssets(shares);
         uint256 juniorPriceBefore = (juniorVault.totalAssets() * 1e18) / juniorVault.totalSupply();
         uint256 seniorPriceBefore = (seniorVault.totalAssets() * 1e18) / seniorVault.totalSupply();
-        pool.settleLpEpoch();
+        _settleLpEpochForTest();
         vm.prank(incumbent);
         uint256 redeemedAssets = juniorVault.claimRedeem(requestId, shares, incumbent, incumbent);
 
@@ -143,7 +143,7 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         uint256 noFeeAssets = seniorVault.convertToAssets(shares);
         uint256 seniorPriceBefore = (seniorVault.totalAssets() * 1e18) / seniorVault.totalSupply();
         uint256 juniorPriceBefore = (juniorVault.totalAssets() * 1e18) / juniorVault.totalSupply();
-        pool.settleLpEpoch();
+        _settleLpEpochForTest();
         vm.prank(lp);
         uint256 redeemedAssets = seniorVault.claimRedeem(requestId, shares, lp, lp);
 
@@ -171,7 +171,7 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         _prepareFrozenEpoch(requestId);
         uint256 juniorPriceBefore = (juniorVault.totalAssets() * 1e18) / juniorVault.totalSupply();
         uint256 seniorPriceBefore = (seniorVault.totalAssets() * 1e18) / seniorVault.totalSupply();
-        pool.settleLpEpoch();
+        _settleLpEpochForTest();
         assertGe(juniorVault.maxWithdraw(juniorLp), netAssets, "settlement must fund the requested withdrawal");
         vm.prank(juniorLp);
         juniorVault.withdraw(netAssets, juniorLp, juniorLp);
@@ -208,7 +208,7 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         _prepareFrozenEpoch(requestId);
         uint256 estimatedFullAssets = seniorVault.estimateRedeemAssets(requestedShares);
         (,, uint256 poolCap,) = pool.getPendingTrancheState();
-        IHousePool.LpEpochSettlementResult memory result = pool.settleLpEpoch();
+        IHousePool.LpEpochSettlementResult memory result = _settleLpEpochForTest();
         uint256 quotedAssets = seniorVault.maxWithdraw(lp);
         uint256 expectedAssets = estimatedFullAssets < poolCap ? estimatedFullAssets : poolCap;
 
@@ -262,7 +262,7 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         uint256 requestId
     ) internal returns (IHousePool.LpEpochSettlementResult memory result) {
         _prepareFrozenEpoch(requestId);
-        result = pool.settleLpEpoch();
+        result = _settleLpEpochForTest();
     }
 
     function _prepareFrozenEpoch(
@@ -288,7 +288,7 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         assertEq(vault.maxWithdraw(lp), 0, "withdraw claim must remain unavailable before settlement");
         _prepareFrozenEpoch(requestId);
         uint256 maturedEstimate = vault.estimateWithdrawShares(assets);
-        pool.settleLpEpoch();
+        _settleLpEpochForTest();
         assertGe(vault.maxWithdraw(lp), assets, "settlement should fund the requested net withdrawal");
         vm.prank(lp);
         shares = vault.withdraw(assets, lp, lp);

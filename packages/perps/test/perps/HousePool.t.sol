@@ -50,7 +50,7 @@ abstract contract HousePoolAsyncTestBase is BasePerpTest {
         if (refreshMark) {
             _refreshMarkForAsyncSettlement();
         }
-        result = pool.settleLpEpoch();
+        result = _settleLpEpochForTest();
     }
 
     function _claimAsyncDeposit(
@@ -190,7 +190,7 @@ contract HousePoolTest is HousePoolAsyncTestBase {
 
         vm.warp(pool.lpEpochStart(requestId));
         vm.expectRevert(IHousePool.HousePool__DegradedMode.selector);
-        pool.settleLpEpoch();
+        pool.settleLpEpoch(0, 0);
 
         (uint256 epochAssets, uint256 epochShares,,, bool finalized) = juniorVault.depositEpochs(requestId);
         assertEq(epochAssets, depositAssets, "blocked activation must preserve the deposit escrow");
@@ -210,7 +210,7 @@ contract HousePoolTest is HousePoolAsyncTestBase {
         usdc.burn(address(pool), pool.juniorPrincipal());
         vm.warp(pool.lpEpochStart(depositRequestId));
 
-        IHousePool.LpEpochSettlementResult memory result = pool.settleLpEpoch();
+        IHousePool.LpEpochSettlementResult memory result = _settleLpEpochForTest();
         assertEq(pool.juniorPrincipal(), 0, "settlement reconcile should recognize the Junior wipe");
         assertTrue(result.entriesDeferred, "zero-NAV Junior entry must remain deferred");
         assertEq(result.juniorDepositAssets, 0, "deferred entry must not move escrowed assets into the pool");
@@ -325,7 +325,7 @@ contract HousePoolTest is HousePoolAsyncTestBase {
         _refreshMarkForAsyncSettlement();
 
         uint256 estimatedShares = seniorVault.estimateDepositShares(assets);
-        pool.settleLpEpoch();
+        _settleLpEpochForTest();
         uint256 mintedShares = _claimAsyncDeposit(seniorVault, requestId, dave);
 
         assertEq(mintedShares, estimatedShares, "execution-time estimate should match settled deposit shares");
@@ -3017,7 +3017,7 @@ contract HousePoolAuditTest is HousePoolAsyncTestBase {
         uint256 expectedShares =
             juniorVault.quoteDepositFromState(depositAssets, withdrawalJuniorNav, juniorVault.totalSupply(), 0);
 
-        pool.settleLpEpoch();
+        _settleLpEpochForTest();
         (uint256 epochAssets, uint256 epochShares,,, bool finalized) = juniorVault.depositEpochs(requestId);
         assertTrue(finalized, "mature exact-NAV deposit should finalize");
         assertEq(epochAssets, depositAssets, "settled epoch asset basis mismatch");

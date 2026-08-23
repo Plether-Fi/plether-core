@@ -151,7 +151,7 @@ contract AuditFixRegressionTest is BasePerpTest {
         vm.warp(juniorVault.depositEpochStart(epochId));
         vm.prank(address(router));
         engine.updateMarkPrice(150_000_000, uint64(block.timestamp));
-        IHousePool.LpEpochSettlementResult memory settlement = pool.settleLpEpoch();
+        IHousePool.LpEpochSettlementResult memory settlement = _settleLpEpochForTest();
         uint256 finalizedShares = settlement.juniorDepositShares;
 
         assertLt(
@@ -213,7 +213,7 @@ contract AuditFixRegressionTest is BasePerpTest {
             pool.isSeniorImpairedAfterPendingDepositReconcile(), "pending deposit finalization should be impaired"
         );
         vm.expectRevert(IHousePool.HousePool__NoLpEpochProgress.selector);
-        pool.settleLpEpoch();
+        pool.settleLpEpoch(0, 0);
         assertEq(juniorVault.claimableDepositRequest(epochId, pendingLp), 0, "deferred entry must not be claimable");
 
         vm.prank(pendingLp);
@@ -248,7 +248,7 @@ contract AuditFixRegressionTest is BasePerpTest {
         vm.warp(juniorVault.depositEpochStart(epochId));
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
-        IHousePool.LpEpochSettlementResult memory settlement = pool.settleLpEpoch();
+        IHousePool.LpEpochSettlementResult memory settlement = _settleLpEpochForTest();
         uint256 finalizedShares = settlement.juniorDepositShares;
 
         vm.prank(alice);
@@ -282,7 +282,7 @@ contract AuditFixRegressionTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
         uint256 incumbentAssetsBefore = juniorVault.estimateRedeemAssets(juniorVault.balanceOf(address(this)));
-        IHousePool.LpEpochSettlementResult memory settlement = pool.settleLpEpoch();
+        IHousePool.LpEpochSettlementResult memory settlement = _settleLpEpochForTest();
         uint256 finalizedShares = settlement.juniorDepositShares;
 
         assertEq(
@@ -325,7 +325,7 @@ contract AuditFixRegressionTest is BasePerpTest {
         vm.warp(activationTime);
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(activationTime));
-        IHousePool.LpEpochSettlementResult memory settlement = pool.settleLpEpoch();
+        IHousePool.LpEpochSettlementResult memory settlement = _settleLpEpochForTest();
         uint256 finalizedShares = settlement.seniorDepositShares;
 
         vm.prank(seniorLp);
@@ -506,8 +506,11 @@ contract AuditFixRegressionConservativePendingDepositImpairmentTest is BasePerpT
             "active cancellation gate must match conservative finalization accounting"
         );
 
+        uint256 markPrice = engine.lastMarkPrice();
+        uint256 markTime = engine.lastMarkTime();
         vm.expectRevert(IHousePool.HousePool__NoLpEpochProgress.selector);
-        pool.settleLpEpoch();
+        vm.prank(address(router));
+        pool.settleLpEpoch(markPrice, markTime);
         assertEq(juniorVault.claimableDepositRequest(epochId, pendingLp), 0, "deferred entry must not be claimable");
 
         vm.prank(pendingLp);

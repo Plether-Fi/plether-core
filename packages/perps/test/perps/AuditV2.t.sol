@@ -378,7 +378,7 @@ contract AuditV2_H02_WeekendWithdrawalDoS is BasePerpTest {
         vm.warp(saturdayNoon);
 
         // The coordinated async exit remains live during the FAD window.
-        pool.settleLpEpoch();
+        _settleLpEpochForTest();
         uint256 claimableShares = juniorVault.claimableRedeemRequest(requestId, bob);
         vm.prank(bob);
         uint256 withdrawnAssets = juniorVault.claimRedeem(requestId, claimableShares, bob, bob);

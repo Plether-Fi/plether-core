@@ -172,8 +172,9 @@ contract AuditValidFindingsFailing is BasePerpTest {
         usdc.mint(address(seniorVault), depositAmount);
         vm.startPrank(address(seniorVault));
         usdc.approve(address(pool), depositAmount);
-        vm.expectRevert(HousePool.HousePool__SynchronousLpActionsDisabled.selector);
-        pool.depositSenior(depositAmount);
+        (bool legacyDepositAccepted,) =
+            address(pool).call(abi.encodeWithSignature("depositSenior(uint256)", depositAmount));
+        assertFalse(legacyDepositAccepted, "removed synchronous Senior entrypoint must stay unavailable");
         vm.stopPrank();
 
         usdc.mint(address(pool), depositAmount);

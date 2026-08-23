@@ -327,7 +327,7 @@ contract AuditFollowupFindingsFailing_TrancheComposability is BasePerpTest {
         vm.warp(juniorVault.depositEpochStart(requestId));
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
-        pool.settleLpEpoch();
+        _settleLpEpochForTest();
 
         vm.startPrank(helper);
         vm.expectRevert(TrancheVault.TrancheVault__ThirdPartyDepositForExistingHolder.selector);
@@ -359,7 +359,7 @@ contract AuditFollowupFindingsFailing_TrancheCooldownBypass is BasePerpTest {
         vm.warp(juniorVault.depositEpochStart(requestId));
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
-        pool.settleLpEpoch();
+        _settleLpEpochForTest();
 
         vm.startPrank(attacker);
         vm.expectRevert(TrancheVault.TrancheVault__ThirdPartyDepositForExistingHolder.selector);

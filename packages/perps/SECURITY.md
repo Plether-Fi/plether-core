@@ -450,14 +450,20 @@ This prevents partially initialized or uncapped live state and ambiguous ownersh
 
 When marks are stale and freshness is required:
 
-- new redemption funding and deposit activation may be blocked; already-funded claims remain live,
-- mark-dependent reconcile math is skipped,
-- already-funded pending buckets may still settle,
+- live open-position epoch settlement is available only through `OrderRouter.settleLpEpoch(bytes[])`, which validates a
+  `PoolReconcile` Pyth basket and installs the exact Engine mark before the Router-only HousePool callback,
+- the basket's earliest component publish time must be at or after the current round-hour boundary, so a still-fresh
+  pre-boundary tick cannot price a newly matured batch,
+- stale, low-confidence, future, divergent, or out-of-order data reverts the whole call; already-funded claims remain
+  live and pending requests remain queued,
+- no pending epoch bucket advances on a rejected live call; only claims funded by an earlier successful settlement
+  remain independently callable,
 - fresh oracle publication is the recovery path.
 
 Exception: once the protocol enters `oracle frozen`, eligible synchronized settlement remains live under fixed
 stale-price surcharges instead of hard-blocking immediately. Deposit activation keeps the ordinary lifecycle,
 bootstrap, and Senior-impairment gates. Claims never reprice or reassess the fee fixed when a request was funded.
+Direct cached-mark settlement is otherwise limited to the no-open-position case, where NAV is mark independent.
 
 Pool pause blocks new deposit requests and deposit activation, but it does not block redemption requests or reconciled
 funding of already-matured redemptions. The settlement result marks entries deferred, and already-funded claims remain
@@ -555,13 +561,15 @@ the returned cursor leaves any low-gas or empty-revert item unattempted so a kee
 
 ### LP accounting limitations
 
-- exact terminal NAV is only as current as the authenticated cached mark; stale marks defer mark-dependent
-  reconciliation and LP entry,
+- exact terminal NAV is only as current as its authenticated mark; live open-position epoch settlement requires an
+  atomically validated post-boundary mark, while frozen exits deliberately use the cached stale-window mark,
 - a positive marked receivable is not cash, so share NAV can exceed immediately redeemable liquidity,
 - `TerminalNavBookV2` is intentionally non-upgradeable and has no owner repair path; a book/Engine invariant failure
   requires containment and a fresh-stack deployment rather than an in-place edit,
 - `oracleFrozen` keeps eligible synchronized LP settlement live under fixed tranche-local frozen fees rather than a
   separate stale-action gate for exits; redemption funding is allowed to proceed while entry activation is deferred,
+- each bounded live backlog pass pays a Pyth update fee and may use a later valid post-boundary mark than the previous
+  pass; atomicity binds one call, not an arbitrarily large backlog,
 - senior coupon payments are capped by available junior principal,
 - governance can prospectively reduce senior limits below live exposure, closing new senior entry and potentially
   reducing Junior redemption-funding capacity until the covenant is cured; it cannot force existing Senior capital out,

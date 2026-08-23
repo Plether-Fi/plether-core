@@ -83,7 +83,7 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         assertGt(block.timestamp, checkpointBefore, "setup needs elapsed coupon time");
 
         vm.expectRevert(IHousePool.HousePool__NoLpEpochProgress.selector);
-        pool.settleLpEpoch();
+        pool.settleLpEpoch(0, 0);
 
         assertEq(pool.lastSeniorCouponCheckpointTime(), checkpointBefore, "no-op settlement must roll back checkpoint");
         assertEq(pool.lastReconcileTime(), lastReconcileBefore, "no-op settlement must roll back reconcile time");
@@ -241,7 +241,7 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         _warpToEpoch(depositId);
         _refreshMark();
         pool.pause();
-        IHousePool.LpEpochSettlementResult memory result = pool.settleLpEpoch();
+        IHousePool.LpEpochSettlementResult memory result = _settleLpEpochForTest();
 
         assertGt(result.juniorFundedAssets, 0, "pause must not strand already requested exits");
         assertEq(result.juniorDepositAssets, 0, "pause must defer new entry accounting");
@@ -257,7 +257,7 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
 
         pool.unpause();
         _refreshMark();
-        IHousePool.LpEpochSettlementResult memory resumed = pool.settleLpEpoch();
+        IHousePool.LpEpochSettlementResult memory resumed = _settleLpEpochForTest();
         assertEq(resumed.juniorDepositAssets, 25_000e6, "unpause must activate the deferred entry");
         assertEq(_claimableDeposit(juniorVault, depositId, BOB), 25_000e6);
     }
@@ -274,7 +274,7 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         _warpToEpoch(depositId);
         _refreshMark();
         uint256 preEntryFreeUsdc = pool.getFreeUSDC();
-        IHousePool.LpEpochSettlementResult memory result = pool.settleLpEpoch();
+        IHousePool.LpEpochSettlementResult memory result = _settleLpEpochForTest();
 
         assertGt(result.seniorFundedAssets, 0);
         assertLe(result.seniorFundedAssets, preEntryFreeUsdc, "entry escrow must not expand the frozen exit budget");
@@ -302,7 +302,7 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
             "existing Junior capital must absorb the conservative open-risk reserve"
         );
         uint256 preEntryFreeUsdc = pool.getFreeUSDC();
-        IHousePool.LpEpochSettlementResult memory result = pool.settleLpEpoch();
+        IHousePool.LpEpochSettlementResult memory result = _settleLpEpochForTest();
 
         assertGt(result.seniorFundedAssets, 0);
         assertTrue(result.seniorBacklog, "the frozen cash budget must leave Senior shares queued");
@@ -362,7 +362,7 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         uint256 hwmBefore = pool.seniorHighWaterMark();
         uint256 supplyBefore = seniorVault.totalSupply();
 
-        IHousePool.LpEpochSettlementResult memory result = pool.settleLpEpoch();
+        IHousePool.LpEpochSettlementResult memory result = _settleLpEpochForTest();
         uint256 expectedHwm = hwmBefore - (hwmBefore * result.seniorFundedShares) / supplyBefore;
         uint256 noFeeAssets = (principalBefore * result.seniorFundedShares) / supplyBefore;
 
@@ -391,7 +391,7 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         _close(TRADER, CfdTypes.Side.BULL, positionSize, 1e8);
         _warpToEpoch(pool.currentLpEpoch() + 1);
         _refreshMark();
-        IHousePool.LpEpochSettlementResult memory second = pool.settleLpEpoch();
+        IHousePool.LpEpochSettlementResult memory second = _settleLpEpochForTest();
 
         uint256 secondClaimableShares = _claimableRedeem(juniorVault, requestId, ALICE);
         uint256 secondPaid = _claimRedeem(juniorVault, requestId, ALICE, secondClaimableShares);
@@ -458,7 +458,7 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         }
 
         uint256 juniorPendingBefore = _pendingRedeem(juniorVault, juniorRequestId, BOB);
-        IHousePool.LpEpochSettlementResult memory result = pool.settleLpEpoch();
+        IHousePool.LpEpochSettlementResult memory result = _settleLpEpochForTest();
 
         assertEq(result.seniorProcessedEpochs, 16);
         assertEq(result.seniorFundedShares, seniorChunk * 16);
@@ -498,7 +498,7 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         vm.warp(SATURDAY_FROZEN);
         _refreshMark();
         assertTrue(engine.isOracleFrozen(), "setup must settle while oracle-frozen");
-        IHousePool.LpEpochSettlementResult memory frozenResult = pool.settleLpEpoch();
+        IHousePool.LpEpochSettlementResult memory frozenResult = _settleLpEpochForTest();
         assertGt(frozenResult.juniorFundedAssets, 0, "frozen mode must still fund the matured exit");
         assertEq(frozenResult.juniorDepositAssets, 0, "frozen mode must not activate queued entry capital");
         assertTrue(frozenResult.entriesDeferred);
@@ -507,7 +507,7 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         vm.warp(SATURDAY_FROZEN + 48 hours);
         _refreshMark();
         assertFalse(engine.isOracleFrozen(), "entry must resume only after the frozen window closes");
-        IHousePool.LpEpochSettlementResult memory liveResult = pool.settleLpEpoch();
+        IHousePool.LpEpochSettlementResult memory liveResult = _settleLpEpochForTest();
         assertEq(liveResult.juniorDepositAssets, assets);
         assertFalse(liveResult.entriesDeferred);
         assertEq(_pendingDeposit(juniorVault, depositId, ALICE), 0);
@@ -632,7 +632,7 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
     ) internal returns (IHousePool.LpEpochSettlementResult memory result) {
         _warpToEpoch(epochId);
         _refreshMark();
-        result = pool.settleLpEpoch();
+        result = _settleLpEpochForTest();
     }
 
     function _warpToEpoch(

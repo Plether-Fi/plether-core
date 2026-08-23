@@ -336,8 +336,9 @@ contract AuditConfirmedFindingsFailing_HwmRouteConsistency is BasePerpTest {
         usdc.mint(address(seniorVault), recapAmount);
         vm.startPrank(address(seniorVault));
         usdc.approve(address(pool), recapAmount);
-        vm.expectRevert(HousePool.HousePool__SynchronousLpActionsDisabled.selector);
-        pool.depositSenior(recapAmount);
+        (bool legacyDepositAccepted,) =
+            address(pool).call(abi.encodeWithSignature("depositSenior(uint256)", recapAmount));
+        assertFalse(legacyDepositAccepted, "removed synchronous Senior entrypoint must stay unavailable");
         vm.stopPrank();
 
         usdc.mint(address(pool), recapAmount);
@@ -374,7 +375,7 @@ contract AuditConfirmedFindingsFailing_TrancheCooldownGrief is BasePerpTest {
         vm.warp(juniorVault.depositEpochStart(requestId));
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
-        pool.settleLpEpoch();
+        _settleLpEpochForTest();
 
         vm.startPrank(attacker);
         vm.expectRevert(TrancheVault.TrancheVault__ThirdPartyDepositForExistingHolder.selector);

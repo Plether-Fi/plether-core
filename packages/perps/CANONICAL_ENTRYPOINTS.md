@@ -34,11 +34,12 @@ Do not use the wide clearinghouse reservation API or detailed accounting lenses 
 - A share-delivering claim, redemption cancellation, or redemption refund may target the controller or an account with
   no existing vault shares. This prevents unsolicited dust from resetting another holder's whole-balance cooldown;
   `maxDeposit(controller)` and `maxMint(controller)` remain receiver-independent controller limits.
-- Epoch clearing is permissionless only through `HousePool.settleLpEpoch()`. It reconciles once, processes
-  matured Senior withdrawal demand before Junior demand, then finalizes Junior deposits before Senior deposits. If
-  bounded Senior processing stops with an eligible head remaining, the call must stop before Junior. Direct per-vault
-  deposit finalization and direct pool withdrawal hooks are not product entrypoints. A pass that advances no queue item
-  reverts, rolling back its reconcile and carry checkpoints.
+- Epoch clearing is permissionless through `OrderRouter.settleLpEpoch(bytes[])`. With live open positions, the Router
+  validates one post-round-hour `PoolReconcile` mark, installs it in the Engine, and reaches the Router-only HousePool
+  callback in the same rollback frame. HousePool reconciles once, processes matured Senior withdrawal demand before
+  Junior demand, then finalizes Junior deposits before Senior deposits. If bounded Senior processing stops with an
+  eligible head remaining, the call must stop before Junior. A pass that advances no queue item also rolls back the
+  Pyth and Engine updates. Direct cached-mark settlement is only a zero-position or oracle-frozen fallback.
 - Compact reads: `PerpsPublicLens`
 - Capacity-specific reads: `HousePool.getSeniorDepositCapacity()`, `reservedSeniorDepositAssetsUsdc()`, and
   `areSeniorDepositReservationsWithinLimits()`; these intentionally are not added to the compact liquidity lens
@@ -50,8 +51,8 @@ Use these interfaces:
 - `IERC7540` and `IERC7575` for standard-compatible integrations
 
 `IPerpsLPActions` describes configured-vault-to-`HousePool` mutation hooks. It is not a direct user surface. Senior
-reservation/release hooks authorize only the configured vaults. Epoch withdrawal
-funding and delayed-deposit activation are coordinated by `HousePool.settleLpEpoch()`. Treat bootstrap,
+reservation/release hooks authorize only the configured vaults. Epoch withdrawal funding and delayed-deposit
+activation are coordinated by the Router's atomic keeper entrypoint. Treat bootstrap,
 seed-lifecycle, and other tranche setup mechanics as admin/setup concerns rather than the standard LP surface.
 
 ## Keepers
@@ -60,7 +61,7 @@ seed-lifecycle, and other tranche setup mechanics as admin/setup concerns rather
 - Batch execution: `OrderRouter.executeOrderBatch(uint64,bytes[])`
 - Liquidation: `OrderRouter.executeLiquidation(address,bytes[])`
 - Batch liquidation: `OrderRouter.executeLiquidationBatch(address[],bytes[])`
-- LP epoch clearing: `HousePool.settleLpEpoch()`
+- LP epoch clearing: `OrderRouter.settleLpEpoch(bytes[])`
 
 Use this interface:
 

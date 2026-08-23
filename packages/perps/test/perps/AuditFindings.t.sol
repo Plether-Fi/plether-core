@@ -204,8 +204,11 @@ contract AuditC04_StaleOracleMtmBypass is BasePerpTest {
 
         // The request must mature, but settlement must not price it from a stale live-market mark.
         vm.warp(juniorVault.depositEpochStart(requestId));
+        uint256 staleMarkPrice = engine.lastMarkPrice();
+        uint256 staleMarkTime = engine.lastMarkTime();
         vm.expectRevert(IHousePool.HousePool__MarkPriceStale.selector);
-        pool.settleLpEpoch();
+        vm.prank(address(router));
+        pool.settleLpEpoch(staleMarkPrice, staleMarkTime);
     }
 
     function test_C04_StaleReconcileDoesNotCreateUnpaidDebt() public {
@@ -518,7 +521,7 @@ contract AuditH04_SeniorCouponWithdrawalAccounting is BasePerpTest {
         vm.warp(seniorVault.depositEpochStart(requestId));
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
-        pool.settleLpEpoch();
+        _settleLpEpochForTest();
 
         uint256 seniorPrincipalAfter = pool.seniorPrincipal();
         uint256 expectedHwm = (hwmBefore * seniorPrincipalAfter) / seniorPrincipalBefore;

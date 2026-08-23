@@ -597,13 +597,14 @@ millions of USDC.
 
 ### 4.3 Synchronized LP epochs are an accounting and liquidity control
 
-Ordinary entry and exit are fully asynchronous. Both tranches share a one-hour
-clock and one permissionless HousePool coordinator. A deposit request targets
+Ordinary entry and exit are fully asynchronous. Both tranches share a round-hour
+clock and one permissionless Router coordinator backed by a HousePool callback that is Router-only while live
+positions exist outside oracle-frozen mode. A deposit request targets
 the current epoch plus two, while a redemption request targets the current
 epoch plus one. One bounded settlement transaction then:
 
-1. reconciles HousePool accounting and fixes one execution-time signed
-   terminal-NAV and waterfall snapshot;
+1. validates a pool-reconciliation Pyth basket, installs the exact Engine mark,
+   and reconciles HousePool accounting from one signed terminal-NAV and waterfall snapshot;
 2. funds matured senior redemption demand before any junior redemption demand;
 3. funds junior demand only from remaining free liquidity and subordinated
    capital capacity;
@@ -620,8 +621,11 @@ policy after activation; redemption cancellation is available only before
 maturity while the request is wholly unfunded. Funded claims remain callable
 independently of later settlement, pause, or oracle liveness.
 If no queued epoch can advance, settlement reverts and rolls back its reconcile
-and carry checkpoints; this prevents permissionless no-op calls from changing
-time-based accounting.
+and carry checkpoints together with the Pyth and Engine mark updates; this prevents
+permissionless no-op calls from changing time-based accounting. With live open
+positions, the basket's earliest publish time must be at or after the round-hour
+boundary. Cached-mark settlement is retained only for zero-position state and
+the explicit frozen-oracle exit regime.
 
 This implements the pending-to-claimable lifecycle standardized for
 asynchronous vaults in ERC-7540 [9], with protocol-specific shared request ids,
@@ -1549,6 +1553,7 @@ Plether mitigates but does not eliminate these risks through:
   lots, entry cost, PnL pledge, same-account claims, and each account curve;
   deployment therefore binds one empty book to one Engine with no repair path.
 - **Deposit epochs:** synchronized pricing removes the entry/exit NAV mismatch,
+  and live marked finalization atomically validates a post-boundary oracle basket,
   but permissionless finalization still has timing and liveness risk because
   requests have neither an auction nor a user-specified share-price limit.
 - **Frozen spreads:** a fixed spread does not scale with staleness inside the

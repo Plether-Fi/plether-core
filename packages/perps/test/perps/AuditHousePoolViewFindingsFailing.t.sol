@@ -97,7 +97,7 @@ contract AuditHousePoolViewFindingsFailing_EmptyJuniorRevenue is BasePerpTest {
         vm.warp(juniorVault.depositEpochStart(requestId));
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
-        pool.settleLpEpoch();
+        _settleLpEpochForTest();
         uint256 claimableShares = juniorVault.claimableRedeemRequest(requestId, juniorLp);
         vm.prank(juniorLp);
         juniorVault.claimRedeem(requestId, claimableShares, juniorLp, juniorLp);

@@ -120,9 +120,6 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         bool backlog;
     }
 
-    /// @notice A legacy synchronous vault mutation was called after asynchronous epoch settlement was enabled.
-    error HousePool__SynchronousLpActionsDisabled();
-
     /// @notice A configured vault returned data or moved funds inconsistently with its advertised queue head.
     error HousePool__VaultSettlementInvariant();
 
@@ -441,17 +438,6 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         return _canAcceptTrancheDeposits(isSenior);
     }
 
-    /// @notice Returns whether an immediate deposit may be accepted for a tranche.
-    /// @dev Immediate entry is permanently disabled because both tranches use asynchronous deposit requests.
-    /// @param isSenior True for senior tranche, false for junior tranche
-    /// @return True when an immediate deposit is currently permitted
-    function canAcceptInstantTrancheDeposits(
-        bool isSenior
-    ) public pure override returns (bool) {
-        isSenior;
-        return false;
-    }
-
     function _canAcceptTrancheDeposits(
         bool isSenior
     ) internal view returns (bool) {
@@ -744,17 +730,6 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     // TRANCHE DEPOSITS & WITHDRAWALS
     // ==========================================
 
-    /// @notice Deposits USDC into the senior tranche and raises its protected high-water mark.
-    /// @dev Retained only for interface compatibility. Ordinary entry is fully asynchronous and this legacy
-    ///      vault-controlled accounting path is disabled.
-    /// @param amount USDC to deposit (6 decimals)
-    function depositSenior(
-        uint256 amount
-    ) external view override(IHousePool, IPerpsLPActions) onlySeniorVault {
-        amount;
-        revert HousePool__SynchronousLpActionsDisabled();
-    }
-
     /// @notice Reserves governed capacity for a delayed senior deposit request.
     /// @dev Uses the same conservative pending accounting projection as final admission. The exact configured senior
     ///      vault is the only authorized caller.
@@ -778,44 +753,48 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         reservedSeniorDepositAssetsUsdc -= amount;
     }
 
-    /// @notice Deposits USDC into the junior tranche.
-    /// @dev Retained only for interface compatibility. Ordinary entry is fully asynchronous and this legacy
-    ///      vault-controlled accounting path is disabled.
-    /// @param amount USDC to deposit (6 decimals)
-    function depositJunior(
-        uint256 amount
-    ) external view override(IHousePool, IPerpsLPActions) onlyVault {
-        amount;
-        revert HousePool__SynchronousLpActionsDisabled();
-    }
-
-    /// @notice Atomically clears matured LP redemption and deposit epochs in strict tranche order.
-    /// @dev Captures one engine snapshot pair, reconciles and checkpoints carry once, and freezes all withdrawal
-    ///      budgets before any deposit escrow enters the pool. Senior withdrawals have absolute priority over
-    ///      junior withdrawals. Entries run junior-first and senior-second, remain deferred while paused or unsafe,
-    ///      and never increase the withdrawal budget of this call. Each phase visits at most 16 nonempty epochs. A
-    ///      pass that advances no queue item reverts, rolling back its reconcile and carry checkpoints.
-    function settleLpEpoch()
-        external
-        override(IHousePool, IPerpsLPActions)
-        nonReentrant
-        returns (IHousePool.LpEpochSettlementResult memory result)
-    {
-        if (seniorVault == address(0) || juniorVault == address(0)) {
-            revert HousePool__ZeroAddress();
-        }
-
+    /// @notice Clears matured LP epochs using Router-bound mark data whenever open positions require atomic refresh.
+    /// @dev No-position and oracle-frozen settlement remain permissionless from the cached mark. With live or FAD-only
+    ///      open positions, the caller must be the Router and its exact Engine-cached mark must not predate the epoch.
+    function settleLpEpoch(
+        uint256 expectedMarkPrice,
+        uint256 expectedPublishTime
+    ) external override nonReentrant returns (IHousePool.LpEpochSettlementResult memory result) {
         (
             HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
             HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
         ) = _getHousePoolSnapshots();
+        uint256 cutoffEpoch = block.timestamp / LP_EPOCH_DURATION;
+        if (accountingSnapshot.hasOpenPositions && !statusSnapshot.oracleFrozen) {
+            if (
+                msg.sender != ENGINE.orderRouter() || ENGINE.lastMarkPrice() != expectedMarkPrice
+                    || statusSnapshot.lastMarkTime != expectedPublishTime
+            ) {
+                revert HousePool__Unauthorized();
+            }
+            if (expectedPublishTime / LP_EPOCH_DURATION < cutoffEpoch) {
+                revert HousePool__MarkPriceStale();
+            }
+        }
+        return _settleLpEpoch(accountingSnapshot, statusSnapshot, cutoffEpoch);
+    }
+
+    /// @dev Shared bounded settlement body. The caller supplies exactly one Engine snapshot pair and epoch cutoff.
+    function _settleLpEpoch(
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
+        HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot,
+        uint256 cutoffEpoch
+    ) internal returns (IHousePool.LpEpochSettlementResult memory result) {
+        if (seniorVault == address(0) || juniorVault == address(0)) {
+            revert HousePool__ZeroAddress();
+        }
         _requireWithdrawalsLive(statusSnapshot);
         _requireFreshMark(accountingSnapshot, statusSnapshot);
 
         _reconcile(accountingSnapshot, statusSnapshot);
         _checkpointEngineCarryIndexes();
 
-        result.cutoffEpoch = currentLpEpoch();
+        result.cutoffEpoch = cutoffEpoch;
         uint256 seniorSupply = _seniorShareSupply();
         uint256 juniorSupply = _juniorShareSupply();
         uint256 seniorPricingPrincipal = seniorPrincipal;

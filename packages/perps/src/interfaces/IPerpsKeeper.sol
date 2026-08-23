@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
-/// @notice Keeper-facing execution and liquidation surface for the simplified product API.
+/// @notice Keeper-facing order, liquidation, and LP epoch settlement surface for the simplified product API.
 interface IPerpsKeeper {
 
     /// @notice Permissionlessly executes an eligible delayed order using router-validated oracle data.
@@ -28,6 +28,15 @@ interface IPerpsKeeper {
     /// @param pythUpdateData Pyth price update blobs; `msg.value` must cover cumulative Pyth fees used by the batch
     function executeOrderBatch(
         uint64 maxOrderId,
+        bytes[] calldata pythUpdateData
+    ) external payable;
+
+    /// @notice Atomically refreshes the pool-accounting mark and settles matured LP epochs against that exact mark.
+    /// @dev Permissionless and available while the router admin is paused. The router forwards exactly the quoted Pyth
+    ///      fee, installs the validated neutral mark in the engine, invokes the Router-bound HousePool settlement path,
+    ///      and then refunds unused ETH. Any failure rolls back the oracle update, mark update, and LP settlement.
+    /// @param pythUpdateData Pyth price update blobs; `msg.value` must cover the Pyth update fee.
+    function settleLpEpoch(
         bytes[] calldata pythUpdateData
     ) external payable;
 

@@ -23,10 +23,12 @@ The bootstrap script handles operator actions after deploy:
 - minting mock USDC to test users
 - activating trading
 
-LP deposits and redemptions share the vaults' deterministic one-hour epoch clock. After bootstrap, any account may
-clear matured epochs through `HousePool.settleLpEpoch()`; no privileged keeper role is required. Each call
-examines at most 16 nonempty epochs in each tranche phase and must be repeated when older backlog remains. A call that
-cannot advance any queue item reverts without retaining reconcile or carry-checkpoint side effects.
+LP deposits and redemptions share the vaults' deterministic round-hour epoch clock. After bootstrap, any account may
+clear matured epochs through `OrderRouter.settleLpEpoch(bytes[])`; no privileged keeper role is required. Outside
+oracle-frozen mode, live open-position settlement requires a valid `PoolReconcile` Pyth basket published at or after
+the epoch boundary. Each call examines at most 16 nonempty epochs in each tranche phase and must be repeated with a
+freshly validated update when older backlog remains. A no-progress or oracle-rejected call retains no Pyth, Engine,
+pool, or vault side effect.
 
 ## Deployment Shape
 
@@ -289,5 +291,18 @@ This is useful if the first bootstrap attempt completes only partially.
 6. Rerun the same bootstrap command to finalize, seed junior then senior, and activate trading.
 7. Fund any test wallets with Arbitrum Sepolia ETH.
 8. Start integration testing against `PerpsPublicLens`, `MarginClearinghouse`, `OrderRouter`, and `HousePool`.
-9. Submit deposit and redemption requests on both vaults, advance to a matured epoch, call
-   `HousePool.settleLpEpoch()`, and verify that funded claims can be pulled independently.
+9. Submit deposit and redemption requests on both vaults, advance to a matured epoch, fetch a post-boundary Hermes
+   update, call `OrderRouter.settleLpEpoch(bytes[])`, and verify that funded claims can be pulled independently.
+
+For a keeper broadcast, ABI-encode the Hermes payload as `bytes[]`, set `PERPS_ORDER_ROUTER`, `KEEPER_PRIVATE_KEY`,
+and `PYTH_UPDATE_DATA`, then run:
+
+```bash
+forge script script/LpEpochKeeper.s.sol \
+  --tc LpEpochKeeper \
+  --rpc-url "$ARB_SEPOLIA_RPC_URL" \
+  --broadcast
+```
+
+The script quotes and sends the exact Pyth fee. Preflight `PerpsPublicLens` queue state before broadcasting: a call
+with no matured progress deliberately reverts, and every bounded backlog pass needs another validated Pyth update.

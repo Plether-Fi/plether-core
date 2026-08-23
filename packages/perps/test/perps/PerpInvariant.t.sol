@@ -191,7 +191,8 @@ contract PerpHandler is Test {
         if (!_hasSettleableJuniorLpWork()) {
             return;
         }
-        pool.settleLpEpoch();
+        uint256 markPrice = engine.lastMarkPrice();
+        router.settleLpEpoch(_nextBlockPriceData(markPrice == 0 ? 1e8 : markPrice));
     }
 
     function claimLpDeposit() external {
@@ -233,8 +234,7 @@ contract PerpHandler is Test {
 
     function _refreshLpMark() internal {
         uint256 markPrice = engine.lastMarkPrice();
-        vm.prank(address(router));
-        engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
+        router.updateMarkPrice(_nextBlockPriceData(markPrice == 0 ? 1e8 : markPrice));
     }
 
     function _nextBlockPriceData(
@@ -964,7 +964,8 @@ contract AdversarialPerpHandler is Test {
         if (!_hasSettleableJuniorLpWork()) {
             return;
         }
-        pool.settleLpEpoch();
+        uint256 markPrice = engine.lastMarkPrice();
+        router.settleLpEpoch(_nextBlockPriceData(markPrice == 0 ? 1e8 : markPrice));
     }
 
     function _claimLpDeposit() internal {
@@ -988,8 +989,7 @@ contract AdversarialPerpHandler is Test {
 
     function _refreshLpMark() internal {
         uint256 markPrice = engine.lastMarkPrice();
-        vm.prank(address(router));
-        engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
+        router.updateMarkPrice(_nextBlockPriceData(markPrice == 0 ? 1e8 : markPrice));
     }
 
     function _hasSettleableJuniorLpWork() internal view returns (bool) {

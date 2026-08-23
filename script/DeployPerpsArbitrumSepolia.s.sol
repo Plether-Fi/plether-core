@@ -96,6 +96,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         console.log("Deploying Plether perps to Arbitrum Sepolia");
         console.log("Deployer:", deployer);
         console.log("Pyth:", PYTH);
+        require(PYTH.code.length > 0, "Pyth has no code");
 
         vm.startBroadcast(privateKey);
 
@@ -148,6 +149,15 @@ contract DeployPerpsArbitrumSepolia is Script {
 
         deployed.engine.setOrderRouter(address(deployed.router));
         deployed.clearinghouse.setEngine(address(deployed.engine));
+        require(deployed.engine.orderRouter() == address(deployed.router), "Engine OrderRouter mismatch");
+        require(
+            address(PletherOracle(deployed.pletherOracle).engine()) == address(deployed.engine),
+            "PletherOracle Engine mismatch"
+        );
+        require(
+            address(PletherOracle(deployed.pletherOracle).housePool()) == address(deployed.housePool),
+            "PletherOracle HousePool mismatch"
+        );
 
         deployed.publicLens = new PerpsPublicLens(
             address(deployed.accountLens),

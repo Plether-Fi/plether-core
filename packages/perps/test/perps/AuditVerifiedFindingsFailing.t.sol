@@ -346,7 +346,7 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
         vm.warp(juniorVault.depositEpochStart(requestId));
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
-        pool.settleLpEpoch();
+        pool.settleLpEpoch(0, 0);
         uint256 claimableAssets = juniorVault.claimableDepositRequest(requestId, lp);
         vm.prank(lp);
         juniorVault.claimDeposit(requestId, claimableAssets, lp, lp);
@@ -399,7 +399,7 @@ contract AuditVerifiedFindingsFailing_F5_CooldownBypass is BasePerpTest {
         vm.warp(juniorVault.depositEpochStart(requestId));
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
-        pool.settleLpEpoch();
+        _settleLpEpochForTest();
         receiver.claimDeposit(juniorVault, requestId);
 
         vm.expectRevert(TrancheVault.TrancheVault__DepositCooldown.selector);
