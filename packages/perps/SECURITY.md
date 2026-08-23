@@ -106,7 +106,9 @@ These are the highest-value properties an auditor should expect to hold.
 | Bounded entry solvency | Risk-increasing opens require `pool.totalAssets() >= max(globalBullMaxProfit, globalBearMaxProfit)` using canonical physical backing rather than raw token balance |
 | Degraded containment | If a close or liquidation reveals post-op insolvency, `degradedMode` latches and blocks further risk expansion while still permitting protective transitions |
 | Bounded payout | No trader payout can exceed the capped market payoff implied by `CAP_PRICE` |
-| Withdrawal firewall | LP withdrawals are limited to conservative free cash after accounting for bounded liability and trader claim liabilities |
+| Withdrawal firewall | Synchronized LP redemption funding is limited to conservative free cash after accounting for bounded liability and trader claim liabilities |
+| Matured Senior priority | A settlement cannot fund Junior redemptions while any eligible matured Senior demand remains unaccounted for |
+| Funded-claim backing | Every claimable LP asset is held one-for-one in vault escrow and cannot be reused by `HousePool` |
 | Trader claim liabilities are senior | Trader claim balance remains a senior claim on pool liquidity until serviced; keeper bounties are not pool liabilities |
 
 ### Position and engine accounting
@@ -139,8 +141,8 @@ These are the highest-value properties an auditor should expect to hold.
 | Conservative MtM | Unrealized trader losses do not count as instantly withdrawable LP assets |
 | High-water-mark protection | Senior impairment must be restored before junior extracts surplus |
 | Bounded new senior exposure | Counted admission exposure (`E + R`) cannot exceed the smaller absolute and senior-share headrooms |
-| Junior covenant | A voluntary junior withdrawal cannot leave active protected exposure (`E`, excluding `R`) above the configured share of senior-plus-junior claimant capital |
-| Shared accounting inputs | Reconcile, withdrawal limits, and LP status views consume the same canonical engine snapshots |
+| Junior covenant | Junior redemption funding cannot leave active protected exposure (`E`, excluding `R`) above the configured share of Senior-plus-Junior claimant capital |
+| Shared accounting inputs | Reconcile, synchronized redemption funding, deposit finalization, and LP status views consume the same canonical engine snapshot |
 
 ### Coverage map
 
@@ -282,7 +284,11 @@ The protocol distinguishes two states around market closure:
 LP actions intentionally stay live across that split:
 
 - `FAD` alone keeps ordinary LP pricing,
-- `oracle frozen` keeps tranche withdrawals live and keeps immediate tranche deposits live only when no trader positions are open; pending deposit epochs remain the ordinary entry path. Stale-window LP actions charge fixed surcharges (`25 bps` senior, `75 bps` junior) that remain in the same tranche for incumbent LPs.
+- `oracle frozen` keeps eligible synchronized LP settlement live. Ordinary entry and exit remain asynchronous: a
+  request does not lock a price, rate, or fee. Settlement applies the then-active surcharge (`25 bps` Senior,
+  `75 bps` Junior), retains it in the same tranche for incumbents, and places only net redemption assets into claim
+  escrow. Deposit activation remains subject to the lifecycle, bootstrap, freshness, and Senior-impairment gates;
+  withdrawal funding is not blocked merely because entries are deferred.
 
 Voluntary close pricing follows the same regime boundary but is separate from LP entry/exit fees:
 
@@ -307,15 +313,32 @@ That means:
 - same-side loser debt cannot net down live winner liability before settlement,
 - but the protocol avoids phantom-profit withdrawal bugs.
 
-Deposit pricing uses an unrealized-MtM-neutral NAV instead of the conservative withdrawal NAV. Immediate active-share
-deposits are disabled while any trader position is open, while ordinary LP entry uses pending deposit epochs: assets
-are funded up front, cancellation is unconditional before activation and reopens after activation when senior
-impairment blocks finalization or a senior reservation book is invalid, and shares are minted only after
-permissionless finalization fixes the batch price. This avoids letting attackers mint new LP shares at a discount
-created only by conservative phantom liabilities, and avoids the opposite toxic-flow case where incoming LPs buy
-immediately before an under-collateralized trader loss is realized. Realized losses still impair deposit pricing.
+Deposit pricing uses an unrealized-MtM-neutral NAV instead of the conservative withdrawal NAV. Ordinary LP entry uses
+pending deposit epochs: assets are funded up front, cancellation is unconditional before activation and reopens after
+activation when senior impairment blocks finalization or a senior reservation book is invalid, and shares are minted
+only after the synchronized HousePool settlement fixes the batch price. ERC-4626 `deposit` and `mint` only claim
+already activated shares; they never make a request immediately active. This avoids letting attackers mint new LP
+shares at a discount created only by conservative phantom liabilities, and avoids the opposite toxic-flow case where
+incoming LPs buy immediately before an under-collateralized trader loss is realized. Realized losses still impair
+deposit pricing.
 
-Accepted residual risk: a matured, unfinalized deposit epoch can be finalized before a later transaction that realizes a large trader loss into pool cash. The depositor's assets were already committed through the activation delay and cannot be cancelled after activation in normal conditions, but finalization timing is still permissionless and can be priority-gas ordered ahead of a liquidation or close. The deployed protocol relies on permissionless keepers/finalizers to promptly finalize matured epochs; this is a fixed pre-deployment design trade-off, not a governance-adjustable safety valve.
+Accepted residual risk: permissionless synchronized settlement can activate a matured deposit before a later
+transaction realizes a large trader loss into pool cash. The depositor's assets were already committed through the
+activation delay and cannot be cancelled after activation in normal conditions, but settlement ordering can still be
+priority-gas ordered ahead of a liquidation or close. The deployed protocol relies on permissionless callers to keep
+matured epochs moving; this is a fixed pre-deployment design trade-off, not a governance-adjustable safety valve.
+
+A settlement pass that advances no queue item reverts, rolling back both waterfall reconciliation and engine carry
+checkpoints. This prevents per-block no-op checkpoint grief. Senior coupon arithmetic still floors independently at
+each settlement that advances real epoch work, so sub-micro-USDC rounding remains execution-frequency dependent; the
+hourly aggregation of requests bounds that residual rather than making coupon accrual mathematically remainder-exact.
+
+Async allocation uses per-controller floor rounding against immutable epoch totals. Splitting a request among more
+controllers cannot increase aggregate entitlement. Once all controllers reach terminal state, deposit-share dust is
+burned; funded-redemption share dust is booked in the epoch's claimed-share counter; funded asset dust returns raw to
+`HousePool` without restoring `accountedAssets` and therefore becomes excess; and refundable-share dust moves to the
+permanent seed account without resetting its cooldown. These terminal sweeps prevent stranded escrow without allowing
+the final caller to capture another controller's rounding remainder.
 
 This is an explicit design choice, not an accounting accident.
 
@@ -381,12 +404,18 @@ This prevents partially initialized or uncapped live state and ambiguous ownersh
 
 When marks are stale and freshness is required:
 
-- withdrawal and deposit-facing LP paths may be blocked,
+- new redemption funding and deposit activation may be blocked; already-funded claims remain live,
 - mark-dependent reconcile math is skipped,
 - already-funded pending buckets may still settle,
 - fresh oracle publication is the recovery path.
 
-Exception: once the protocol enters `oracle frozen`, tranche withdrawals remain live under fixed stale-price surcharges instead of hard-blocking immediately. Immediate active-share deposits still require zero open trader positions.
+Exception: once the protocol enters `oracle frozen`, eligible synchronized settlement remains live under fixed
+stale-price surcharges instead of hard-blocking immediately. Deposit activation keeps the ordinary lifecycle,
+bootstrap, and Senior-impairment gates. Claims never reprice or reassess the fee fixed when a request was funded.
+
+Pool pause blocks new deposit requests and deposit activation, but it does not block redemption requests or reconciled
+funding of already-matured redemptions. The settlement result marks entries deferred, and already-funded claims remain
+live.
 
 ### Senior coupon model
 
@@ -398,24 +427,25 @@ This removes unpaid senior-coupon debt queues while making the cost of the fixed
 
 Active protected senior exposure is `E = max(projected senior principal, projected senior high-water mark)`. Counted
 admission exposure is `C = E + R`, where `R` is the gross USDC reserved in unfinalized senior deposit epochs. The
-absolute and share admission tests use `C`, while the junior-withdrawal covenant deliberately uses active `E` only.
+absolute and share admission tests use `C`, while the Junior redemption-funding covenant deliberately uses active `E`
+only.
 Governance sets both an absolute USDC limit and a maximum share of senior-plus-junior claimant capital. The high-water
 term prevents an impaired principal balance from falsely reopening capacity while its restoration entitlement remains.
 
 Senior deposit reservations are provisional. They consume quoted headroom when requested, but the whole outstanding
 reservation book is checked again at finalization. If a timelocked cap reduction or later accounting change makes the
 book invalid, finalization remains blocked and post-activation cancellation is unlocked so depositors can recover the
-escrowed USDC. Junior withdrawals do not lock against `R`, so a permitted withdrawal can also invalidate the
+escrowed USDC. Junior redemption funding does not lock against `R`, so a permitted fill can also invalidate the
 provisional book and make it refundable. Integrators must not present a request-time quote as guaranteed finalization.
 
-The covenant also limits voluntary junior withdrawals; using active `E` and explicitly excluding pending reservations,
-the pool retains enough projected junior principal that the configured senior share still holds after the withdrawal.
+The covenant also limits Junior redemption funding; using active `E` and explicitly excluding pending reservations,
+the pool retains enough projected Junior principal that the configured Senior share still holds after the fill.
 This is an LP-liquidity restriction, not an extra source of cash or a guarantee that losses cannot impair senior.
 
 Coupon, loss allocation, revenue restoration, and privileged claimant recapitalization remain higher-priority
 accounting rules. They may passively move the pool above a configured limit, but the protocol does not haircut active
 senior shares, suppress coupon already payable from junior, or misroute loss to force compliance. Instead, new senior
-capacity closes until senior withdrawals, junior deposits, or subsequent revenue cure the state. The engine-authorized
+capacity closes until funded Senior redemptions, Junior deposits, or subsequent revenue cure the state. The engine-authorized
 `recordClaimantInflow(..., Recapitalization, ...)` path is deliberately exempt when restoring protected senior claims;
 it cannot mint new senior LP shares, and excess value continues through the canonical claimant/unassigned routing.
 
@@ -477,10 +507,12 @@ the returned cursor leaves any low-gas or empty-revert item unattempted so a kee
 ### LP accounting limitations
 
 - conservative MtM can temporarily understate junior value,
-- `oracleFrozen` keeps LP withdrawals live under fixed tranche-local frozen fees rather than a separate stale-action gate; immediate active-share deposits still require zero open trader positions,
+- `oracleFrozen` keeps eligible synchronized LP settlement live under fixed tranche-local frozen fees rather than a
+  separate stale-action gate; redemption funding is allowed to proceed when entry activation is deferred by another
+  gate,
 - senior coupon payments are capped by available junior principal,
 - governance can prospectively reduce senior limits below live exposure, closing new senior entry and potentially
-  reducing junior withdrawal capacity until the covenant is cured; it cannot force existing senior capital out,
+  reducing Junior redemption-funding capacity until the covenant is cured; it cannot force existing Senior capital out,
 - pending senior reservations are not grandfathered against later cap or accounting changes, but become refundable if
   they no longer fit at finalization,
 - deposit cooldown can be griefed only by economically irrational donation-style top-ups.

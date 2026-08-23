@@ -57,8 +57,10 @@ Before trusting a test as a source of truth, ask:
 | `MarginClearinghouse` reservation paths | `engine`, `orderRouter` | router can reserve/release queued margin and execution-bounty buckets, but cannot perform broad settlement |
 | `HousePool.payOut` / `recordProtocolInflow` | `engine`, `settlementSidecar` | payout/inflow authority is intentionally narrow |
 | `HousePool.recordClaimantInflow` | `engine`, `settlementSidecar` | claimant-owned revenue/recap routing only |
-| `HousePool.depositSenior` / senior reservation hooks | configured `seniorVault` only | direct LPs and the junior vault cannot admit, reserve, release, or finalize senior capital |
-| Other `HousePool` tranche mutation hooks | configured tranche vaults only | end users enter through `TrancheVault`; pool hooks are integration capabilities |
+| `HousePool.reserveSeniorDeposit` / `releaseSeniorDepositReservation` | configured `seniorVault` only | direct LPs and the Junior vault cannot reserve or release pending Senior-entry capacity; activation happens only through synchronized settlement |
+| `HousePool.reconcile` | either configured tranche vault | retained vault integration hook; end users enter and claim through `TrancheVault` |
+| `HousePool.settleLpEpoch` | permissionless | sole coordinated ordinary LP entry-activation and redemption-funding path |
+| `HousePool.depositSenior` / `depositJunior` and concrete legacy withdrawal selectors | no active mutation authority | compatibility selectors always revert and are not privileged accounting capabilities |
 
 Any new helper/sidecar contract that can reach these sets should be treated as security-critical and explicitly access-controlled.
 
@@ -137,7 +139,11 @@ Any new helper/sidecar contract that can reach these sets should be treated as s
 | Unsettled carry | Protocol-recorded carry debt on an account | `CfdEngine.unsettledCarryUsdc[account]` | engine carry-checkpoint paths | no | yes, as carry drag on account equity | no | no |
 | Treasury protocol fees | Protocol/treasury | Treasury account in `MarginClearinghouse`; `MarginClearinghouse.balanceUsdc(CfdEngine.protocolTreasury())` reports that balance | cash-collected execution and liquidation fee routing, settlement top-ups, treasury clearinghouse withdraw | no | yes, as clearinghouse-custodied protocol margin | no | no |
 | Accumulated bad debt | Protocol loss / LP impairment | `CfdEngine.accumulatedBadDebtUsdc` | engine realization, bad debt clear path | n/a | yes, as realized deficit | yes | yes |
-| Canonical pool assets | LP/protocol backing | `HousePool.totalAssets()` and accounting ledger | pool deposit/withdraw/accounting hooks | base physical solvency cash | yes | yes | yes |
+| Canonical pool assets | LP/protocol backing | `HousePool.totalAssets()` and accounting ledger | synchronized LP activation/funding plus accounting hooks | base physical solvency cash | yes | yes | yes |
+| Pending LP deposit assets | Request controller | USDC in `TrancheVault` request escrow plus per-controller/per-epoch accounting | request, eligible cancellation, or pool-authorized activation | no | no | no | no, until activated |
+| Activated LP deposit shares | Request controller | Shares in `TrancheVault` claim escrow plus claimable epoch accounting | `HousePool.settleLpEpoch()`, then controller/operator claim | no | no separate asset claim | no | yes, through outstanding share supply |
+| Pending LP redemption shares | Request controller; still exposed to tranche P&L | `TrancheVault` request/epoch queue; shares held by vault escrow and still in supply | request path plus pool-authorized settlement callback | no | no separate asset claim before funding | no | yes, through outstanding share supply |
+| Funded LP redemption assets | Request controller | USDC held in `TrancheVault` claim escrow and claimable epoch accounting | `HousePool.settleLpEpoch()`, then controller/operator claim | no | no longer part of pool | no | no |
 | Excess assets | no owner until admitted | `HousePool.excessAssets()` | pool account/sweep paths | no | no | no | no |
 
 Reachability note:
@@ -163,6 +169,19 @@ Reachability note:
 - Chosen tradeoff: record senior trader claim balances instead of reverting the state transition.
 - New risk: payout servicing becomes asynchronous and must respect seniority.
 - Protecting invariant: trader claim liabilities remain senior in withdrawal, solvency, and reconciliation accounting.
+
+### Synchronized LP epoch clearing
+
+- Liveness problem: reserving the full dormant Senior NAV blocks Junior liquidity even when no Senior holder requested
+  an exit.
+- Chosen tradeoff: one permissionless `HousePool` coordinator reconciles once, funds eligible matured Senior demand,
+  then Junior demand, then activates Junior and Senior deposits. Pending shares remain exposed to P&L; funded assets
+  move to claim escrow and are irrevocable.
+- Protecting invariants: bounded processing cannot fall through to Junior while an eligible matured Senior head
+  remains; same-transaction deposits do not finance withdrawals; every claimable asset is escrow-backed; claims do
+  not reprice and remain callable independently of request pauses. Pool pause defers entries but does not block
+  reconciled funding of matured exits. A no-progress pass reverts so permissionless callers cannot retain reconcile or
+  carry checkpoints without advancing a queue.
 
 ### Clearinghouse liquidation-charge servicing
 

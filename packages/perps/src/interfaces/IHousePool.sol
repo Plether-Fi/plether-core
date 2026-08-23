@@ -66,6 +66,42 @@ interface IHousePool {
         uint256 maxSeniorShareBps;
     }
 
+    /// @notice Aggregate result of one synchronized LP epoch settlement.
+    /// @dev Withdrawal fields report exact shares burned and USDC moved into vault claim escrow. Deposit fields report
+    ///      the delayed-deposit batches finalized after withdrawal funding. `seniorBacklog` and `juniorBacklog` report
+    ///      matured demand left after this bounded call; `entriesDeferred` reports that at least one matured deposit
+    ///      batch could not be safely finalized and remains pending. All asset amounts use 6-decimal USDC.
+    /// @param cutoffEpoch Latest withdrawal epoch eligible for funding in this call.
+    /// @param seniorFundedShares Senior shares transitioned from pending to claimable and burned.
+    /// @param seniorFundedAssets Senior USDC moved from HousePool custody into claim escrow.
+    /// @param juniorFundedShares Junior shares transitioned from pending to claimable and burned.
+    /// @param juniorFundedAssets Junior USDC moved from HousePool custody into claim escrow.
+    /// @param seniorProcessedEpochs Number of senior withdrawal epochs visited by the bounded processor.
+    /// @param juniorProcessedEpochs Number of junior withdrawal epochs visited by the bounded processor.
+    /// @param juniorDepositAssets Junior delayed-deposit assets finalized after withdrawal funding.
+    /// @param juniorDepositShares Junior shares minted into delayed-deposit claim escrow.
+    /// @param seniorDepositAssets Senior delayed-deposit assets finalized after junior entry.
+    /// @param seniorDepositShares Senior shares minted into delayed-deposit claim escrow.
+    /// @param seniorBacklog Whether matured senior withdrawal demand remains after the call.
+    /// @param juniorBacklog Whether matured junior withdrawal demand remains after the call.
+    /// @param entriesDeferred Whether at least one matured delayed-deposit batch remains deferred.
+    struct LpEpochSettlementResult {
+        uint256 cutoffEpoch;
+        uint256 seniorFundedShares;
+        uint256 seniorFundedAssets;
+        uint256 juniorFundedShares;
+        uint256 juniorFundedAssets;
+        uint256 seniorProcessedEpochs;
+        uint256 juniorProcessedEpochs;
+        uint256 juniorDepositAssets;
+        uint256 juniorDepositShares;
+        uint256 seniorDepositAssets;
+        uint256 seniorDepositShares;
+        bool seniorBacklog;
+        bool juniorBacklog;
+        bool entriesDeferred;
+    }
+
     /// @notice A tranche-accounting mutation was called by an address other than either configured vault.
     error HousePool__NotAVault();
     /// @notice A senior-only accounting hook was called by an address other than the configured senior vault.
@@ -82,6 +118,9 @@ interface IHousePool {
     error HousePool__ExceedsMaxSeniorWithdraw();
     /// @notice A requested junior withdrawal exceeds the current subordinated junior cap.
     error HousePool__ExceedsMaxJuniorWithdraw();
+    /// @notice A permissionless LP settlement call found no queue item it could advance.
+    /// @dev Reverting rolls back reconcile and carry checkpoints so no-op calls cannot alter time-based accounting.
+    error HousePool__NoLpEpochProgress();
     /// @notice An operation requiring fresh mark-dependent accounting received a stale cached mark.
     error HousePool__MarkPriceStale();
     /// @notice Pool configuration finalization was requested before its activation timestamp.
@@ -221,6 +260,17 @@ interface IHousePool {
     /// @return Lesser of raw pool USDC and the canonical accounted-asset ledger
     function totalAssets() external view returns (uint256);
 
+    /// @notice Returns the current id of the coordinator's shared LP epoch.
+    /// @return Current Unix timestamp divided by the shared LP epoch duration
+    function currentLpEpoch() external view returns (uint256);
+
+    /// @notice Returns the start timestamp for a shared LP epoch.
+    /// @param epochId Shared LP epoch id
+    /// @return Epoch start timestamp in Unix seconds
+    function lpEpochStart(
+        uint256 epochId
+    ) external pure returns (uint256);
+
     /// @notice Transfers USDC from the pool to a recipient.
     /// @dev Callable only by the engine or its current settlement sidecar. Decreases canonical accounted assets and
     ///      transfers the same raw amount atomically.
@@ -273,7 +323,7 @@ interface IHousePool {
 
     /// @notice Returns additional senior assets that can currently be admitted under both capacity limits.
     /// @dev Uses conservative pending reconciliation and subtracts all accepted senior reservations. Returns zero
-    ///      when residual capacity is below the ordinary minimum deposit.
+    ///      when residual capacity is below the asynchronous deposit-request minimum.
     /// @return Additional senior admission capacity in 6-decimal USDC
     function getSeniorDepositCapacity() external view returns (uint256);
 
@@ -305,11 +355,10 @@ interface IHousePool {
     /// @return Ownerless canonical assets reserved from ordinary LP withdrawals and deposits
     function unassignedAssets() external view returns (uint256);
 
-    /// @notice Pulls USDC from the senior vault and adds it to senior principal.
-    /// @dev Reconciles first and requires the exact senior vault caller, an unpaused pool, the minimum deposit,
-    ///      applicable freshness for any required mark, no pending bootstrap, unimpaired senior principal, and enough
-    ///      governed capacity net of reservations. Checkpoints carry and raises the senior high-water mark.
-    /// @param amount USDC amount to deposit (6 decimals)
+    /// @notice Retained compatibility selector for the removed synchronous senior-entry hook.
+    /// @dev Always reverts in the asynchronous deployment. Ordinary entry is requested through the senior vault and
+    ///      finalized only by `settleLpEpoch`; no caller can use this selector to bypass coordinated ordering.
+    /// @param amount Ignored legacy USDC amount
     function depositSenior(
         uint256 amount
     ) external;
@@ -328,45 +377,23 @@ interface IHousePool {
         uint256 amount
     ) external;
 
-    /// @notice Consumes accepted senior capacity and deposits a matured delayed-deposit batch.
-    /// @dev Callable only by the configured senior vault. Revalidates the complete reservation book under current
-    ///      limits before consuming `amount`; reservations are not grandfathered across later limit deterioration.
-    /// @param amount Gross reserved USDC amount to deposit (6 decimals)
-    function depositReservedSenior(
-        uint256 amount
-    ) external;
-
-    /// @notice Removes senior principal and transfers USDC to a receiver for a configured vault.
-    /// @dev Reconciles first, requires live withdrawals and any required mark to satisfy active freshness policy,
-    ///      enforces the senior withdrawal cap, checkpoints carry, and scales the high-water mark pro rata. Zero is a
-    ///      no-op after authorization.
-    /// @param amount USDC amount to withdraw (6 decimals)
-    /// @param receiver Address receiving withdrawn USDC
-    function withdrawSenior(
-        uint256 amount,
-        address receiver
-    ) external;
-
-    /// @notice Pulls USDC from a configured vault and adds it to junior principal.
-    /// @dev Applies the same vault, reconcile, pause, minimum-size, conditional freshness, bootstrap,
-    ///      senior-impairment, and carry gates as the senior deposit path. End users ordinarily call the junior ERC4626
-    ///      vault instead.
-    /// @param amount USDC amount to deposit (6 decimals)
+    /// @notice Retained compatibility selector for the removed synchronous junior-entry hook.
+    /// @dev Always reverts in the asynchronous deployment. Ordinary entry is requested through the junior vault and
+    ///      finalized only by `settleLpEpoch`; no caller can use this selector to bypass coordinated ordering.
+    /// @param amount Ignored legacy USDC amount
     function depositJunior(
         uint256 amount
     ) external;
 
-    /// @notice Removes junior principal and transfers USDC to a receiver for a configured vault.
-    /// @dev Reconciles first, requires live withdrawals and any required mark to satisfy active freshness policy,
-    ///      preserves free cash sufficient to cover current senior principal and enough junior principal for the
-    ///      governed active senior-share covenant, and checkpoints carry before reducing pool depth. Pending senior
-    ///      reservations remain refundable and do not constrain this withdrawal.
-    /// @param amount USDC amount to withdraw (6 decimals)
-    /// @param receiver Address receiving withdrawn USDC
-    function withdrawJunior(
-        uint256 amount,
-        address receiver
-    ) external;
+    /// @notice Atomically reconciles pool accounting, funds matured senior withdrawals before matured junior
+    ///         withdrawals, and then finalizes eligible delayed deposits junior-first and senior-second.
+    /// @dev Permissionless and bounded by the implementation's fixed per-call epoch limit. Reverts if no queued epoch
+    ///      can advance, rolling back reconcile and carry checkpoints. The coordinator is the sole pool cash-exit path
+    ///      for tranche redemptions: configured vaults expose no independently orderable senior or junior withdrawal
+    ///      hook. Funded assets leave HousePool custody for vault claim escrow; claims themselves do not call back into
+    ///      HousePool and remain available if later settlement is unavailable.
+    /// @return result Exact withdrawal funding, delayed-entry finalization, and residual-work summary.
+    function settleLpEpoch() external returns (LpEpochSettlementResult memory result);
 
     /// @notice Explicitly bootstraps quarantined LP assets into a tranche and mints matching shares.
     /// @dev Owner only, outside oracle-frozen mode and with any required mark satisfying active freshness policy.
@@ -394,22 +421,26 @@ interface IHousePool {
         address receiver
     ) external;
 
-    /// @notice Returns current stored senior principal that pool liquidity permits withdrawing.
-    /// @dev Returns zero when degraded mode or applicable mark freshness disables withdrawals. Does not preview a
-    ///      pending reconciliation; use `getPendingTrancheState` for reconcile-first parity.
-    /// @return Withdrawable senior USDC capped by free cash and stored senior principal
+    /// @notice Returns current stored senior principal that conservative pool cash could fund for matured demand.
+    /// @dev Returns zero when degraded mode or applicable mark freshness disables settlement. This is a raw
+    ///      demand-neutral capacity and does not assert that any senior request is matured. Does not preview a pending
+    ///      reconciliation; use `getPendingTrancheState` for reconcile-first parity.
+    /// @return Senior settlement capacity capped by free cash and stored senior principal
     function getMaxSeniorWithdraw() external view returns (uint256);
 
-    /// @notice Returns current stored junior principal that pool liquidity permits withdrawing.
-    /// @dev Returns zero when withdrawals are not live, otherwise reserves current senior principal ahead of junior.
-    ///      Does not preview a pending reconciliation.
-    /// @return Withdrawable junior USDC capped by residual free cash and stored junior principal
+    /// @notice Returns current stored-state capacity for funding queued junior redemptions.
+    /// @dev Returns zero when settlement is not live or any matured senior redemption head exists. Without matured
+    ///      senior demand, caps by conservative free cash, junior principal, and the governed active senior-share
+    ///      covenant without reserving dormant senior principal. Does not preview pending reconciliation.
+    /// @return Current junior queue-funding capacity in USDC
     function getMaxJuniorWithdraw() external view returns (uint256);
 
     /// @notice Read-only tranche state as if `reconcile()` ran immediately with current inputs.
     /// @dev Includes elapsed senior coupon and settleable claimant buckets. Mark-dependent repricing applies only when
     ///      the applicable mark is fresh; residual claimant value and unassigned assets remain reserved. Withdrawal
-    ///      caps are zero whenever withdrawals are not live.
+    ///      caps are zero whenever settlement is not live. The junior cap is also zero while any matured senior head
+    ///      exists; otherwise it does not reserve dormant senior principal. These are current queue-funding capacities,
+    ///      not promises that settlement will consume the full amounts.
     /// @return seniorPrincipalUsdc Simulated senior principal after reconcile (6 decimals)
     /// @return juniorPrincipalUsdc Simulated junior principal after reconcile (6 decimals)
     /// @return maxSeniorWithdrawUsdc Simulated senior withdrawal cap after reconcile (6 decimals)
@@ -427,7 +458,8 @@ interface IHousePool {
     /// @notice Read-only tranche principals for deposit pricing.
     /// @dev Projects the deposit-side reconcile, which intentionally excludes conservative unrealized trader MtM while
     ///      retaining realized losses. Trader claims, coupon accrual, and settleable claimant routing remain included.
-    ///      Immediate vault deposits are disabled while positions are open; delayed epochs may finalize after delay.
+    ///      Fully asynchronous vaults use this state for indicative request estimates and coordinator-time epoch quotes;
+    ///      it does not enable or quote an immediate ERC-4626 entry.
     /// @return seniorPrincipalUsdc Simulated senior principal after reconcile (6 decimals)
     /// @return juniorPrincipalUsdc Simulated junior principal after reconcile (6 decimals)
     function getPendingDepositTrancheState()
@@ -447,9 +479,10 @@ interface IHousePool {
     ///      buckets and advance the coupon checkpoint.
     function reconcile() external;
 
-    /// @notice Returns whether the protocol-level withdrawal status gate is open.
-    /// @dev A true result does not guarantee nonzero pool liquidity, unlocked vault shares, or an elapsed holder cooldown.
-    /// @return Whether the engine is not degraded and any required mark is sufficiently fresh
+    /// @notice Returns whether the protocol-level withdrawal-settlement status gate is open.
+    /// @dev A true result does not guarantee nonzero pool liquidity or matured withdrawal demand. Already funded claims
+    ///      are paid from vault escrow and deliberately do not depend on this gate.
+    /// @return Whether the engine is not degraded and any required mark is sufficiently fresh for new funding
     function isWithdrawalLive() external view returns (bool);
 
     /// @notice Returns true after either tranche seed position has been initialized.
@@ -472,11 +505,11 @@ interface IHousePool {
         bool isSenior
     ) external view returns (bool);
 
-    /// @notice Returns whether an immediate ERC4626 deposit may be accepted for a tranche.
-    /// @dev Applies the delayed-deposit gate and additionally requires that the engine report no open positions.
-    ///      Senior deposits additionally require at least one minimum deposit of remaining governed capacity.
-    /// @param isSenior True for senior tranche, false for junior tranche
-    /// @return Whether an immediate ERC4626 deposit currently passes all pool gates
+    /// @notice Retained compatibility view for removed synchronous tranche entry.
+    /// @dev Always returns false in the asynchronous deployment. ERC-7575 `deposit` and `mint` claim already-activated
+    ///      requests and must not be treated as immediate-entry functions.
+    /// @param isSenior Ignored legacy tranche selector
+    /// @return Always false
     function canAcceptInstantTrancheDeposits(
         bool isSenior
     ) external view returns (bool);
@@ -504,9 +537,10 @@ interface IHousePool {
         bool isSenior
     ) external view returns (uint256);
 
-    /// @notice Minimum assets accepted by ordinary ERC4626 tranche deposit/mint flows (6 decimals).
-    /// @dev The same floor applies to delayed deposit requests.
-    /// @return Minimum accepted asset amount (1 USDC)
+    /// @notice Minimum gross assets accepted for an asynchronous tranche deposit request (6 decimals).
+    /// @dev Request-capacity and nonbinding estimate views use the same floor when deciding whether a useful request or
+    ///      exact-share quote remains available. ERC-7575 `deposit` and `mint` are claims, not new entry flows.
+    /// @return Minimum asynchronous deposit-request asset amount (1 USDC)
     function minTrancheDepositUsdc() external view returns (uint256);
 
 }

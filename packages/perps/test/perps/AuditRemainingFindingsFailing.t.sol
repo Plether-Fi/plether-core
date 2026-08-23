@@ -143,14 +143,15 @@ contract AuditRemainingFindingsFailing_MevDrift is BasePerpTest {
     }
 
     function test_H2_CrossBlockPublishAfterCommitExecutesWhenPublishTimeIsAfterCommit() public {
-        vm.warp(1000);
+        uint256 commitTime = block.timestamp;
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
 
-        mockPyth.setAllUniquePrices(feedIds, int64(100_000_000), 0, int32(-8), 1001, 1000);
+        uint256 publishTime = commitTime + 1;
+        mockPyth.setAllUniquePrices(feedIds, int64(100_000_000), 0, int32(-8), publishTime, commitTime);
 
-        vm.warp(1001);
+        vm.warp(publishTime);
         vm.roll(block.number + 1);
         bytes[] memory empty = new bytes[](1);
         empty[0] = "";
@@ -159,7 +160,9 @@ contract AuditRemainingFindingsFailing_MevDrift is BasePerpTest {
 
         (uint256 size,,,,,,) = engine.positions(alice);
         assertEq(size, 10_000e18, "Fresh post-commit publish time should execute the order");
-        assertEq(engine.lastMarkTime(), 1001, "Execution should advance the mark to the post-commit publish time");
+        assertEq(
+            engine.lastMarkTime(), publishTime, "Execution should advance the mark to the post-commit publish time"
+        );
     }
 
 }

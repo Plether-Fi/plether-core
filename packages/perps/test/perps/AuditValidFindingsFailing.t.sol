@@ -3,6 +3,7 @@ pragma solidity 0.8.35;
 
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {HousePool} from "@plether/perps/HousePool.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 
@@ -123,7 +124,7 @@ contract AuditValidFindingsFailing is BasePerpTest {
         usdc.mint(address(seniorVault), depositAmount);
         vm.startPrank(address(seniorVault));
         usdc.approve(address(pool), depositAmount);
-        vm.expectRevert(IHousePool.HousePool__SeniorImpaired.selector);
+        vm.expectRevert(HousePool.HousePool__SynchronousLpActionsDisabled.selector);
         pool.depositSenior(depositAmount);
         vm.stopPrank();
 

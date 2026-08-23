@@ -24,4 +24,22 @@ interface IPerpsLPViews {
     /// @return viewData Trading, withdrawal, mark-freshness, and oracle-frozen status
     function getLpStatus() external view returns (PerpsViewTypes.LpStatusView memory viewData);
 
+    /// @notice Returns matured queue heads and settlement gates for one tranche.
+    /// @param isSenior True for the Senior tranche and false for the Junior tranche.
+    /// @return viewData Shared epoch, matured work, backlog flags, and runtime gates.
+    function getTrancheQueues(
+        bool isSenior
+    ) external view returns (PerpsViewTypes.TrancheQueueView memory viewData);
+
+    /// @notice Returns one controller's pending, claimable, rejected, and refundable request state.
+    /// @param isSenior True for the Senior tranche and false for the Junior tranche.
+    /// @param requestId Shared LP epoch used as the asynchronous request id.
+    /// @param controller Account that controls the request.
+    /// @return viewData Pending estimates and exact terminal/claim balances for both async directions.
+    function getLpRequestState(
+        bool isSenior,
+        uint256 requestId,
+        address controller
+    ) external view returns (PerpsViewTypes.LpRequestStateView memory viewData);
+
 }

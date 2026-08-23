@@ -5,7 +5,7 @@ This document defines the accounting model for the Plether perps system.
 It is the source of truth for:
 
 - solvency,
-- LP withdrawal limits,
+- LP redemption-funding limits,
 - close and liquidation settlement,
 - trader claim liabilities,
 - clearinghouse reservation treatment,
@@ -26,7 +26,7 @@ The key rules are:
 
 1. Physical USDC and mathematical claims are different objects.
 2. Unrealized trader losses are not LP assets until they are physically realized.
-3. LP withdrawals are stricter than protocol solvency.
+3. LP redemption funding is stricter than protocol solvency.
 4. Pending-order reservations are not free trader collateral.
 5. Realized trading-loss shortfall must become either immediate seizure, trader claim liability, or bad debt; a waived terminal frozen-close spread is an uncollected charge, not trading-loss bad debt.
 6. A valid risk-reducing transition must not revert just to preserve pre-close solvency; the protocol contains the outcome with `degradedMode` instead.
@@ -52,7 +52,8 @@ Operational rules:
 - unsolicited positive transfers do not become economic depth until explicitly admitted,
 - raw-balance shortfalls reduce effective backing immediately,
 - all core accounting paths should read canonical physical assets rather than raw token balance,
-- live HousePool withdrawal and reconcile kernels start from `physicalAssets` and subtract explicit reserve buckets; they do not implicitly reserve `protocolTreasuryBalance`.
+- live HousePool redemption-funding and reconcile kernels start from `physicalAssets` and subtract explicit reserve
+  buckets; they do not implicitly reserve `protocolTreasuryBalance`.
 
 ### Liability terms
 
@@ -108,11 +109,11 @@ Notes:
 - it must not count unrealized trader losses as spendable assets,
 - it is less conservative than LP withdrawal accounting, but still bounded and physical-first.
 
-### 2. LP withdrawal view
+### 2. LP redemption-settlement view
 
 Question answered:
 
-- how much USDC may LPs withdraw right now?
+- how much USDC may the next synchronized settlement commit to matured LP redemptions?
 
 Definition:
 
@@ -129,13 +130,19 @@ Where `withdrawalReservedUsdc` is built from the canonical reserve model, includ
 
 Rule:
 
-- LP withdrawals may use only conservative free cash.
+- matured LP redemptions may be funded only from conservative free cash. Senior demand is funded first. Junior demand
+  uses only the remainder and must also preserve the active Senior-share covenant.
 
 Notes:
 
 - this view is intentionally stricter than solvency,
 - it ignores uncollected trader debts as a cash source for withdrawal.
-- during `oracleFrozen`, ERC4626 LP exits remain live but the user-facing withdraw/redeem output is reduced by the tranche's frozen-window surcharge rather than hard-blocking immediately.
+- dormant Senior NAV is not reserved merely because it exists; only eligible matured Senior demand has priority over
+  Junior demand,
+- deposit assets finalized later in the same synchronized transaction are not a funding source for withdrawals,
+- funded assets leave `HousePool` for vault claim escrow and cannot be counted as free cash again,
+- during `oracleFrozen`, the settlement-time output is reduced by the tranche's frozen-window surcharge rather than
+  hard-blocking automatically.
 
 ### 3. LP reconciliation and deposit-pricing views
 
@@ -153,12 +160,15 @@ Withdrawal/reconcile definition:
 Deposit/mint pricing definition:
 
 - start from the same physical assets, trader-claim liabilities, claimant buckets, recapitalizations, and revenue state,
-- immediate active-share tranche deposits are disabled while any trader position is open,
-- ordinary LP entry remains available through pending deposit epochs: assets are funded up front, cancellation is
-  unconditional before activation and, after activation, reopens when senior impairment blocks finalization or a
-  senior reservation book no longer fits its governed limits; shares are minted only after permissionless
-  finalization fixes the epoch price,
-- matured epochs are expected to be finalized promptly by permissionless keepers or finalizers; if finalization is delayed, the epoch can still be finalized before a later close or liquidation realizes trader losses into pool cash, which is an accepted residual MEV risk of the current ordering model,
+- ordinary LP entry always starts with an asynchronous deposit request: assets are funded up front, cancellation is
+  unconditional before activation and, after activation, reopens when Senior impairment blocks finalization or a
+  Senior reservation book no longer fits its governed limits,
+- `HousePool.settleLpEpoch` fixes the epoch price after both redemption phases and activates Junior deposits before
+  Senior deposits; ERC-4626 `deposit` and `mint` only claim already-activated requests,
+- a settlement pass that advances no queue item reverts, so its reconcile and carry checkpoints cannot be retained by
+  a permissionless no-op caller,
+- permissionless settlement can still be ordered before a later close or liquidation realizes trader losses into pool
+  cash; the request activation delay prevents a depositor from creating and pricing an uncommitted same-block entry,
 - do not subtract unrealized MtM liability unless it comes from an exact, non-manipulable deposit-side model,
 - realized pool losses still lower deposit NAV,
 - conservative unrealized MtM remains a withdrawal protection, not a discount offered to incoming LPs.
@@ -168,15 +178,14 @@ Rules:
 - over-recognition is forbidden,
 - temporary under-recognition is acceptable,
 - value with no valid claimant path must sit in explicit `unassignedAssets`.
-- during `oracleFrozen`, tranche exit pricing remains live by applying fixed tranche-local LP surcharges instead of requiring a fresh live mark; immediate active-share entry pricing still requires zero open trader positions.
+- during `oracleFrozen`, synchronized redemption funding and deposit activation apply fixed tranche-local LP
+  surcharges instead of requiring an ordinary live-market mark,
 - during `oracleFrozen`, bootstrap admin flows (`initializeSeedPosition`, `assignUnassignedAssets`) are blocked rather than inheriting LP frozen-fee pricing.
-- during `oracleFrozen`, ERC4626 `maxMint` reports the finite share cap implied by the active frozen-entry fee.
 
 Required consequences:
 
-- immediate active-share tranche deposits are unavailable whenever `hasOpenPositions` is true,
-- `unassignedAssets > 0` blocks immediate and pending tranche deposits,
-- a wiped tranche cannot be silently revived by a normal ERC-4626 deposit,
+- `unassignedAssets > 0` blocks new tranche-deposit requests and activation,
+- a wiped tranche cannot be silently revived by an ordinary asynchronous deposit,
 - seeded ownership continuity is preferred over governance re-assignment.
 
 ### 3.1 Senior exposure admission limits
@@ -206,17 +215,15 @@ junior deposits do not count as junior subordination.
 
 Rules:
 
-- an immediate senior deposit consumes current capacity by its gross USDC amount; frozen-window share fees do not
-  reduce the exposure added to `HousePool`,
 - a pending senior request adds its gross assets to `R`, preventing parallel epochs from overbooking the same capacity,
 - finalization revalidates the complete reservation book against current accounting and the active limits before it
   atomically releases the reservation and adds the same gross amount to active senior principal,
 - reservations are provisional rather than grandfathered: if a governance reduction, coupon, loss, or junior-capital
   change makes the book invalid, post-activation cancellation is enabled so owners can recover escrowed assets,
-- a voluntary junior withdrawal `w` must additionally preserve
+- funded junior redemptions of net assets `w` must additionally preserve
   `E * 10_000 <= B * (E + J - w)` using active protected exposure only; reservations do not lock junior liquidity, so
-  a permitted junior withdrawal may instead invalidate provisional reservations and make them refundable,
-- senior withdrawals and junior deposits improve capacity and may cure an overage,
+  permitted Junior funding may instead invalidate provisional reservations and make them refundable,
+- funded Senior redemptions and Junior deposits improve capacity and may cure an overage,
 - governance reductions are prospective for active claims: existing senior shares are not burned, repriced, or forced
   out, while new senior capacity remains zero until the state returns within both limits.
 
@@ -250,7 +257,9 @@ Snapshot structs are boundary objects between engine accounting and downstream c
 
 Purpose:
 
-- canonical accounting payload for LP withdrawals and tranche reconciliation. Live LP kernels consume `physicalAssetsUsdc` plus explicit reserve fields; `netPhysicalAssetsUsdc` is exposed for protocol and read-layer parity where treasury margin should be excluded.
+- canonical accounting payload for LP redemption funding and tranche reconciliation. Live LP kernels consume
+  `physicalAssetsUsdc` plus explicit reserve fields; `netPhysicalAssetsUsdc` is exposed for protocol and read-layer
+  parity where treasury margin should be excluded.
 
 Key fields:
 
@@ -266,8 +275,8 @@ Key fields:
 Rule:
 
 - downstream LP accounting should not need to re-derive these values from raw engine state.
-- `hasOpenPositions` gates immediate active-share tranche deposits because the current O(1) side aggregates cannot compute an exact,
-  collateral-capped per-position loser receivable for instant deposit pricing.
+- the request delay and synchronized activation replace the old instant-deposit gate; no ordinary request mints active
+  shares in the submission transaction.
 
 ### `HousePoolStatusSnapshot`
 
@@ -287,7 +296,8 @@ Rule:
 
 ## Frozen-Window LP Fees
 
-The protocol keeps LP actions live during `oracleFrozen` by charging fixed stale-price surcharges rather than fully disabling ERC4626 entry and exit.
+The protocol keeps eligible LP actions live during `oracleFrozen` by charging fixed stale-price surcharges rather than
+fully disabling entry and queued-redemption settlement.
 
 Default configured fees:
 
@@ -301,18 +311,38 @@ Governance model:
 
 Accounting rules:
 
-- `deposit` and `mint` move gross USDC into the tranche while charging the frozen fee by minting fewer net shares (or grossing up the requested share target for `mint`),
-- `withdraw` and `redeem` burn shares against the gross tranche claim while paying only net user assets after the frozen fee,
+- synchronized activation moves requested gross USDC into the tranche and fixes claimant shares after the active
+  frozen fee; `deposit` and `mint` only release already-activated claim shares,
+- a redemption request escrows shares without fixing its exchange rate or fee; pending shares remain outstanding and
+  participate in tranche profit and loss,
+- synchronized settlement prices funded shares from the post-reconcile, pre-burn tranche snapshot using the existing
+  ERC-4626 virtual offsets, applies the then-active frozen fee, burns only shares with nonzero net output, and escrows
+  exactly the resulting net assets,
+- `withdraw` and `redeem` only release already-funded escrow and do not reprice or reassess a fee,
 - the fee does not become protocol revenue,
 - the fee does not increase `protocolTreasuryBalanceUsdc`,
 - the fee remains inside the same tranche and therefore benefits incumbent LPs of that tranche only.
+
+Async allocation dust is resolved only after every controller's entitlement is accounted for:
+
+- each controller receives a floor-rounded pro-rata allocation from the fixed epoch totals; splitting one request
+  across controllers cannot increase aggregate entitlement because the sum of individual floors cannot exceed the
+  floor of the combined allocation,
+- terminal deposit-share dust is removed from claim escrow, booked into `epoch.claimedShares`, and burned,
+- terminal funded-redemption share dust was already burned during funding and is booked into `epoch.claimedShares`;
+  corresponding asset dust is removed from withdrawal escrow and returned raw to `HousePool` without increasing
+  `accountedAssets`, so it becomes pool excess,
+- terminal refundable-redemption share dust is booked into `epoch.refundedShares` and transferred to the permanent
+  seed account without resetting that account's cooldown.
 
 Consequences:
 
 - senior frozen-window actions must not reprice junior shares,
 - junior frozen-window actions must not reprice senior shares,
-- preview and live ERC4626 paths must match under the active frozen fee,
-- `maxWithdraw` and `maxRedeem` must be derived from the same live net-payout constraint used by `withdraw` and `redeem`.
+- pending-request estimate views must reproduce the settlement conversion and fee rounding without promising a fixed
+  future rate,
+- asynchronous `previewWithdraw` and `previewRedeem` revert; `maxWithdraw` and `maxRedeem` expose only funded claim
+  capacity.
 
 ### Preview and simulation solvency outputs
 
@@ -616,7 +646,7 @@ Required transition rules:
 
 The accounting system should preserve the following:
 
-1. `withdrawableAssets <= physicalAssets` after explicit withdrawal reserves
+1. funded redemption assets never exceed physical assets after explicit withdrawal reserves
 2. LP-withdrawable cash is at least as conservative as solvency assets
 3. no realized shortfall goes unrecorded
 4. no pending-order reservation is treated as free trader equity
@@ -627,6 +657,8 @@ The accounting system should preserve the following:
 9. full closes do not eagerly cancel unrelated queued orders
 10. liquidation may perform bounded account-local cleanup under the per-account pending-order cap
 11. every position-deletion path re-checks degraded-mode containment
+12. Junior redemption funding is zero while any eligible matured Senior demand remains unaccounted for
+13. every claimable LP asset is backed one-for-one by vault-held escrow and can be claimed at most once
 
 ## Architecture Goal
 

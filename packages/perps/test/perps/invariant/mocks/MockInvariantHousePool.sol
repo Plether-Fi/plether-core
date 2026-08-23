@@ -42,6 +42,16 @@ contract MockInvariantHousePool is IHousePool {
         return usdc.balanceOf(address(this));
     }
 
+    function currentLpEpoch() external view returns (uint256) {
+        return block.timestamp / 1 hours;
+    }
+
+    function lpEpochStart(
+        uint256 epochId
+    ) external pure returns (uint256) {
+        return epochId * 1 hours;
+    }
+
     function payOut(
         address recipient,
         uint256 amount
@@ -142,23 +152,13 @@ contract MockInvariantHousePool is IHousePool {
         uint256
     ) external pure {}
 
-    function depositReservedSenior(
-        uint256
-    ) external pure {}
-
-    function withdrawSenior(
-        uint256,
-        address
-    ) external pure {}
-
     function depositJunior(
         uint256
     ) external pure {}
 
-    function withdrawJunior(
-        uint256,
-        address
-    ) external pure {}
+    function settleLpEpoch() external pure returns (IHousePool.LpEpochSettlementResult memory result) {
+        return result;
+    }
 
     function assignUnassignedAssets(
         bool,

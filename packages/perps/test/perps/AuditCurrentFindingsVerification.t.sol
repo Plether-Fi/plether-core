@@ -139,7 +139,7 @@ contract AuditCurrentFindingsVerifiedInvalid is BasePerpTest {
         vm.startPrank(recapLp);
         usdc.approve(address(seniorVault), type(uint256).max);
         vm.expectRevert(TrancheVault.TrancheVault__TerminallyWiped.selector);
-        seniorVault.deposit(10_000e6, recapLp);
+        seniorVault.requestDeposit(10_000e6, recapLp);
         vm.stopPrank();
     }
 

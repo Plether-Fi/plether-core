@@ -74,6 +74,9 @@ contract HousePoolSnapshotParityTest is BasePerpTest {
     }
 
     function test_PendingTrancheStateMatchesSeededZeroClaimReconcileOutcome() public {
+        uint256 seniorRestorationTarget = pool.seniorHighWaterMark();
+        uint256 restorationRevenue = 35_000e6;
+
         usdc.burn(address(pool), pool.totalAssets());
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -83,10 +86,10 @@ contract HousePoolSnapshotParityTest is BasePerpTest {
         assertGt(seniorVault.totalSupply(), 0, "Setup should preserve seeded senior ownership");
         assertGt(juniorVault.totalSupply(), 0, "Setup should preserve seeded junior ownership");
 
-        usdc.mint(address(pool), 35_000e6);
+        usdc.mint(address(pool), restorationRevenue);
         vm.prank(address(engine));
         pool.recordClaimantInflow(
-            35_000e6, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.CashArrived
+            restorationRevenue, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.CashArrived
         );
 
         (uint256 pendingSenior, uint256 pendingJunior, uint256 pendingSeniorWithdraw, uint256 pendingJuniorWithdraw) =
@@ -97,8 +100,16 @@ contract HousePoolSnapshotParityTest is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        assertEq(pendingSenior, 1000e6, "Pending state should restore seeded senior before junior in zero-claim states");
-        assertEq(pendingJunior, 34_000e6, "Pending state should route only residual revenue to seeded junior");
+        assertEq(
+            pendingSenior,
+            seniorRestorationTarget,
+            "Pending state should restore the seeded senior HWM before junior in zero-claim states"
+        );
+        assertEq(
+            pendingJunior,
+            restorationRevenue - seniorRestorationTarget,
+            "Pending state should route only residual revenue to seeded junior"
+        );
         assertEq(
             pool.seniorPrincipal(), pendingSenior, "Pending senior principal should match post-reconcile principal"
         );

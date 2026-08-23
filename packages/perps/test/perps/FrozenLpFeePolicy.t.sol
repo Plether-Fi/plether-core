@@ -2,6 +2,7 @@
 pragma solidity 0.8.35;
 
 import {BasePerpTest} from "./BasePerpTest.sol";
+import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 
@@ -34,23 +35,23 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         _fundJunior(address(0xC0FFEE), 500_000e6);
         _enterFrozenWindow();
 
-        usdc.mint(entrant, assets);
-
+        uint256 quotedShares = seniorVault.estimateDepositShares(assets);
+        uint256 requestId = _requestDeposit(seniorVault, entrant, assets);
+        _prepareFrozenEpoch(requestId);
         uint256 priceBefore = (seniorVault.totalAssets() * 1e18) / seniorVault.totalSupply();
         uint256 juniorPriceBefore = (juniorVault.totalAssets() * 1e18) / juniorVault.totalSupply();
-        uint256 quotedShares = seniorVault.previewDeposit(assets);
         uint256 noFeeShares = seniorVault.convertToShares(assets);
-
-        vm.startPrank(entrant);
-        usdc.approve(address(seniorVault), assets);
-        uint256 mintedShares = seniorVault.deposit(assets, entrant);
-        vm.stopPrank();
+        uint256 maturedEstimate = seniorVault.estimateDepositShares(assets);
+        pool.settleLpEpoch();
+        vm.prank(entrant);
+        uint256 mintedShares = seniorVault.claimDeposit(requestId, assets, entrant, entrant);
 
         uint256 priceAfter = (seniorVault.totalAssets() * 1e18) / seniorVault.totalSupply();
         uint256 juniorPriceAfter = (juniorVault.totalAssets() * 1e18) / juniorVault.totalSupply();
 
         assertEq(pool.frozenLpFeeBps(true), 25, "Senior frozen LP fee should be 25 bps");
-        assertEq(mintedShares, quotedShares, "Frozen senior deposit should honor previewDeposit");
+        assertEq(mintedShares, maturedEstimate, "Matured frozen estimate should match synchronized settlement");
+        assertLe(mintedShares, quotedShares, "Senior coupon accrual may only lower the nonbinding entry estimate");
         assertLt(mintedShares, noFeeShares, "Frozen senior deposit should mint fewer shares than no-fee pricing");
         assertGt(priceAfter, priceBefore, "Frozen senior deposit fee should improve incumbent share price");
         assertEq(juniorPriceAfter, juniorPriceBefore, "Senior frozen fee should not reprice the junior tranche");
@@ -68,13 +69,7 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         uint256 frozenFeeBps = pool.frozenLpFeeBps(true);
         uint256 grossShares = seniorVault.convertToShares(assets);
         uint256 expectedNetAssets = _applyFee(assets, frozenFeeBps);
-
-        usdc.mint(entrant, assets);
-        vm.startPrank(entrant);
-        usdc.approve(address(seniorVault), assets);
-        uint256 mintedShares = seniorVault.deposit(assets, entrant);
-        vm.stopPrank();
-
+        uint256 mintedShares = _asyncDeposit(seniorVault, entrant, assets);
         uint256 entrantGrossClaimAfter = seniorVault.convertToAssets(mintedShares);
 
         assertLt(mintedShares, grossShares, "Frozen deposit should still mint fewer shares than no-fee pricing");
@@ -99,11 +94,7 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         uint256 expectedNetAssets = _applyFee(entrantAssets, frozenFeeBps);
         uint256 incumbentClaimBefore = seniorVault.convertToAssets(seniorVault.balanceOf(incumbent));
 
-        usdc.mint(entrant, entrantAssets);
-        vm.startPrank(entrant);
-        usdc.approve(address(seniorVault), entrantAssets);
-        uint256 mintedShares = seniorVault.deposit(entrantAssets, entrant);
-        vm.stopPrank();
+        uint256 mintedShares = _asyncDeposit(seniorVault, entrant, entrantAssets);
 
         uint256 entrantGrossClaimAfter = seniorVault.convertToAssets(mintedShares);
         uint256 incumbentClaimAfter = seniorVault.convertToAssets(seniorVault.balanceOf(incumbent));
@@ -130,20 +121,20 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         _enterFrozenWindow();
 
         uint256 feeBps = pool.frozenLpFeeBps(true);
-        uint256 previewedShares = seniorVault.previewDeposit(entrantAssets);
+        uint256 estimatedShares = seniorVault.estimateDepositShares(entrantAssets);
         uint256 expectedNetAssets = _applyFee(entrantAssets, feeBps);
         uint256 incumbentClaimBefore = seniorVault.convertToAssets(seniorVault.balanceOf(incumbent));
 
-        usdc.mint(entrant, entrantAssets);
-        vm.startPrank(entrant);
-        usdc.approve(address(seniorVault), entrantAssets);
-        uint256 mintedShares = seniorVault.deposit(entrantAssets, entrant);
-        vm.stopPrank();
+        uint256 mintedShares = _asyncDeposit(seniorVault, entrant, entrantAssets);
 
         uint256 entrantGrossClaimAfter = seniorVault.convertToAssets(mintedShares);
         uint256 incumbentClaimAfter = seniorVault.convertToAssets(seniorVault.balanceOf(incumbent));
 
-        assertEq(mintedShares, previewedShares, "Frozen deposit should honor previewDeposit across bounded states");
+        assertLe(
+            mintedShares,
+            estimatedShares,
+            "Senior coupon accrual may only lower the nonbinding estimate across bounded states"
+        );
         assertLe(
             entrantGrossClaimAfter,
             expectedNetAssets,
@@ -164,18 +155,13 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         _enterFrozenWindow();
 
         uint256 feeBps = pool.frozenLpFeeBps(true);
-        uint256 previewedShares = seniorVault.previewDeposit(entrantAssets);
+        uint256 estimatedShares = seniorVault.estimateDepositShares(entrantAssets);
         uint256 expectedNetAssets = _applyFee(entrantAssets, feeBps);
 
-        usdc.mint(entrant, entrantAssets);
-        vm.startPrank(entrant);
-        usdc.approve(address(seniorVault), entrantAssets);
-        uint256 mintedShares = seniorVault.deposit(entrantAssets, entrant);
-        vm.stopPrank();
-
+        uint256 mintedShares = _asyncDeposit(seniorVault, entrant, entrantAssets);
         uint256 entrantGrossClaimAfter = seniorVault.convertToAssets(mintedShares);
 
-        assertEq(mintedShares, previewedShares, "Dust frozen deposit should honor previewDeposit");
+        assertLe(mintedShares, estimatedShares, "Dust settlement may reflect senior coupon accrued while pending");
         assertGt(mintedShares, 0, "Dust frozen deposit should still mint shares above the virtual offset floor");
         assertLe(
             entrantGrossClaimAfter,
@@ -184,7 +170,7 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         );
     }
 
-    function test_FrozenMint_GrossesUpSharesFeeAndHonorsPreview() public {
+    function test_FrozenMint_GrossesUpSharesFeeAndHonorsEstimate() public {
         address lp = address(0xAAA4);
         uint256 targetShares = 100_000e9;
 
@@ -192,31 +178,28 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         _fundJunior(address(0xAAA6), 500_000e6);
         _enterFrozenWindow();
 
-        uint256 quotedAssets = seniorVault.previewMint(targetShares);
+        uint256 quotedAssets = seniorVault.estimateMintAssets(targetShares);
         uint256 noFeeAssets = seniorVault.convertToAssets(targetShares);
+        uint256 requestedAssets = quotedAssets + (quotedAssets / 1000) + 1;
+        uint256 chargedAssets = _asyncMint(seniorVault, lp, targetShares, requestedAssets);
 
-        usdc.mint(lp, quotedAssets);
-        vm.startPrank(lp);
-        usdc.approve(address(seniorVault), quotedAssets);
-        uint256 chargedAssets = seniorVault.mint(targetShares, lp);
-        vm.stopPrank();
-
-        assertEq(chargedAssets, quotedAssets, "Frozen mint should honor previewMint");
+        assertGe(chargedAssets, quotedAssets, "A delayed mint claim must include intervening senior coupon accrual");
+        assertLe(chargedAssets, requestedAssets, "Mint claim must not consume more than its escrowed request basis");
         assertGt(chargedAssets, noFeeAssets, "Frozen mint should charge more assets than no-fee mint pricing");
         assertEq(seniorVault.balanceOf(lp), targetShares, "Frozen mint should deliver the requested net shares");
     }
 
-    function test_FrozenMint_MaxMintCapsFiniteFeeAsymptote() public {
+    function test_FrozenMint_EstimateCapsFiniteFeeAsymptote() public {
         address lp = address(0xAAA7);
 
         _fundSenior(address(0xAAA8), 500_000e6);
         _fundJunior(address(0xAAA9), 500_000e6);
         _enterFrozenWindow();
 
-        uint256 capacity = pool.getSeniorDepositCapacity();
-        uint256 maxShares = seniorVault.maxMint(lp);
-        uint256 maxAssets = seniorVault.previewMint(maxShares);
-        uint256 nextAssets = seniorVault.previewMint(maxShares + 1);
+        uint256 capacity = seniorVault.maxRequestDeposit(lp);
+        uint256 maxEstimatedShares = seniorVault.estimateDepositShares(capacity);
+        uint256 maxAssets = seniorVault.estimateMintAssets(maxEstimatedShares);
+        uint256 nextAssets = seniorVault.estimateMintAssets(maxEstimatedShares + 1);
 
         uint256 feeBps = pool.frozenLpFeeBps(true);
         uint256 adjustedShares = seniorVault.totalSupply() + 10 ** (seniorVault.decimals() - usdc.decimals());
@@ -226,19 +209,24 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
             feeAsymptoteShares -= 1;
         }
 
-        assertGt(maxShares, 0, "Frozen maxMint should allow bounded minting");
-        assertLe(maxShares, feeAsymptoteShares, "Frozen maxMint should remain bounded by the finite fee asymptote");
-        assertLe(maxAssets, capacity, "Frozen maxMint should fit the remaining gross senior capacity");
-        assertGt(nextAssets, capacity, "One share past frozen maxMint should exceed gross senior capacity");
+        assertEq(seniorVault.maxMint(lp), 0, "maxMint must expose claims, not request capacity");
+        assertGt(maxEstimatedShares, 0, "Frozen request capacity should imply bounded estimated shares");
+        assertLe(
+            maxEstimatedShares,
+            feeAsymptoteShares,
+            "Frozen estimated shares should remain bounded by the finite fee asymptote"
+        );
+        assertLe(maxAssets, capacity, "The largest estimated share target should fit gross request capacity");
+        assertGt(nextAssets, capacity, "One share past the request-cap estimate should exceed gross capacity");
         assertLt(
-            seniorVault.previewMint(feeAsymptoteShares),
+            seniorVault.estimateMintAssets(feeAsymptoteShares),
             type(uint256).max,
-            "The final share at the frozen-fee asymptote should remain previewable"
+            "The final share at the frozen-fee asymptote should remain estimable"
         );
         assertEq(
-            seniorVault.previewMint(feeAsymptoteShares + 1),
+            seniorVault.estimateMintAssets(feeAsymptoteShares + 1),
             type(uint256).max,
-            "Preview past the frozen-fee asymptote should not underflow the pricing denominator"
+            "Estimate past the frozen-fee asymptote should not underflow the pricing denominator"
         );
     }
 
@@ -252,28 +240,19 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         _enterFrozenWindow();
 
         uint256 snap = vm.snapshotState();
-        uint256 depositQuotedShares = seniorVault.previewDeposit(assets);
-
-        usdc.mint(depositLp, assets);
-        vm.startPrank(depositLp);
-        usdc.approve(address(seniorVault), assets);
-        uint256 depositShares = seniorVault.deposit(assets, depositLp);
-        vm.stopPrank();
+        uint256 depositEstimatedShares = seniorVault.estimateDepositShares(assets);
+        uint256 depositShares = _asyncDeposit(seniorVault, depositLp, assets);
 
         vm.revertToState(snap);
-        uint256 mintQuotedAssets = seniorVault.previewMint(depositQuotedShares);
+        uint256 mintEstimatedAssets = seniorVault.estimateMintAssets(depositShares);
+        uint256 mintAssets = _asyncMint(seniorVault, mintLp, depositShares, assets);
 
-        usdc.mint(mintLp, mintQuotedAssets);
-        vm.startPrank(mintLp);
-        usdc.approve(address(seniorVault), mintQuotedAssets);
-        uint256 mintAssets = seniorVault.mint(depositQuotedShares, mintLp);
-        vm.stopPrank();
-
-        assertEq(depositShares, depositQuotedShares, "Deposit path should mint the previewed net shares");
+        assertLe(depositShares, depositEstimatedShares, "Deposit settlement may include pending senior coupon accrual");
         assertEq(
             depositShares, seniorVault.balanceOf(mintLp), "Mint path should deliver the same net share ownership target"
         );
-        assertEq(mintAssets, mintQuotedAssets, "Mint path should honor previewMint for the same net share target");
+        assertEq(mintAssets, assets, "Equivalent all-share mint claim should consume the same escrowed asset basis");
+        assertLe(mintEstimatedAssets, mintAssets, "Request-time mint estimate remains explicitly nonbinding");
     }
 
     function testFuzz_FrozenDepositAndMint_MatchEquivalentNetOwnershipAcrossAsymmetricStates(
@@ -292,34 +271,21 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         _enterFrozenWindow();
 
         uint256 snap = vm.snapshotState();
-        uint256 depositQuotedShares = seniorVault.previewDeposit(assets);
-
-        usdc.mint(depositLp, assets);
-        vm.startPrank(depositLp);
-        usdc.approve(address(seniorVault), assets);
-        uint256 depositShares = seniorVault.deposit(assets, depositLp);
-        vm.stopPrank();
+        uint256 depositEstimatedShares = seniorVault.estimateDepositShares(assets);
+        uint256 depositShares = _asyncDeposit(seniorVault, depositLp, assets);
 
         vm.revertToState(snap);
-        uint256 mintQuotedAssets = seniorVault.previewMint(depositQuotedShares);
+        uint256 mintEstimatedAssets = seniorVault.estimateMintAssets(depositShares);
+        uint256 mintAssets = _asyncMint(seniorVault, mintLp, depositShares, assets);
 
-        usdc.mint(mintLp, mintQuotedAssets);
-        vm.startPrank(mintLp);
-        usdc.approve(address(seniorVault), mintQuotedAssets);
-        uint256 mintAssets = seniorVault.mint(depositQuotedShares, mintLp);
-        vm.stopPrank();
-
-        assertEq(
-            depositShares,
-            depositQuotedShares,
-            "Deposit path should mint the previewed frozen shares across asymmetric states"
-        );
         assertEq(
             depositShares,
             seniorVault.balanceOf(mintLp),
-            "Mint path should deliver the same net share ownership target across asymmetric states"
+            "Deposit and mint claims should deliver the same settled ownership across asymmetric states"
         );
-        assertEq(mintAssets, mintQuotedAssets, "Mint path should honor previewMint across asymmetric states");
+        assertLe(depositShares, depositEstimatedShares, "Pending senior coupon may lower the request-time estimate");
+        assertEq(mintAssets, assets, "Equivalent mint claim should consume the same escrowed asset basis");
+        assertLe(mintEstimatedAssets, mintAssets, "Request-time mint estimate remains nonbinding across states");
     }
 
     function test_JuniorRedeem_ChargesFrozenFee() public {
@@ -330,23 +296,27 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         _fundSenior(address(0xD00D), 500_000e6);
         _enterFrozenWindow();
 
-        uint256 quotedAssets = juniorVault.previewRedeem(shares);
-        uint256 noFeeAssets = juniorVault.convertToAssets(shares);
+        uint256 quotedAssets = juniorVault.estimateRedeemAssets(shares);
         uint256 balanceBefore = usdc.balanceOf(incumbent);
+        uint256 requestId = _requestRedeem(juniorVault, incumbent, shares);
+        _prepareFrozenEpoch(requestId);
+        uint256 maturedEstimate = juniorVault.estimateRedeemAssets(shares);
+        uint256 noFeeAssets = juniorVault.convertToAssets(shares);
         uint256 juniorPriceBefore = (juniorVault.totalAssets() * 1e18) / juniorVault.totalSupply();
         uint256 seniorPriceBefore = (seniorVault.totalAssets() * 1e18) / seniorVault.totalSupply();
-
+        pool.settleLpEpoch();
         vm.prank(incumbent);
-        uint256 redeemedAssets = juniorVault.redeem(shares, incumbent, incumbent);
+        uint256 redeemedAssets = juniorVault.claimRedeem(requestId, shares, incumbent, incumbent);
 
         uint256 juniorPriceAfter = (juniorVault.totalAssets() * 1e18) / juniorVault.totalSupply();
         uint256 seniorPriceAfter = (seniorVault.totalAssets() * 1e18) / seniorVault.totalSupply();
 
         assertEq(pool.frozenLpFeeBps(false), 75, "Junior frozen LP fee should be 75 bps");
-        assertEq(redeemedAssets, quotedAssets, "Frozen junior redeem should honor previewRedeem");
+        assertEq(redeemedAssets, maturedEstimate, "Matured frozen estimate should match synchronized settlement");
+        assertLe(redeemedAssets, quotedAssets, "Junior coupon funding may lower the nonbinding exit estimate");
         assertLt(redeemedAssets, noFeeAssets, "Frozen junior redeem should pay fewer assets than no-fee pricing");
         assertEq(
-            usdc.balanceOf(incumbent), balanceBefore + redeemedAssets, "Redeem should transfer the net quoted assets"
+            usdc.balanceOf(incumbent), balanceBefore + redeemedAssets, "Redeem claim should transfer the funded assets"
         );
         assertGt(
             juniorPriceAfter,
@@ -356,20 +326,27 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         assertEq(seniorPriceAfter, seniorPriceBefore, "Junior frozen fee should not reprice the senior tranche");
     }
 
-    function test_FrozenRedeem_SecondSameBlockRedeemRevertsOnCooldown() public {
-        address incumbent = address(0xB0C);
-        uint256 firstShares = 10_000e9;
+    function test_FrozenLpClaims_CannotBypassAsyncRequestsAndPreviewsStayDisabled() public {
+        address lp = address(0xB0C);
+        uint256 shares = 10_000e9;
 
-        _fundJunior(incumbent, 500_000e6);
+        _fundJunior(lp, 500_000e6);
         _fundSenior(address(0xD00E), 500_000e6);
-        vm.warp(block.timestamp + juniorVault.DEPOSIT_COOLDOWN() + 1);
         _enterFrozenWindow();
 
-        vm.startPrank(incumbent);
-        juniorVault.redeem(firstShares, incumbent, incumbent);
-        vm.expectRevert(TrancheVault.TrancheVault__DepositCooldown.selector);
-        juniorVault.redeem(firstShares, incumbent, incumbent);
-        vm.stopPrank();
+        assertEq(juniorVault.maxRedeem(lp), 0, "No redeem claim should exist before an async request settles");
+        vm.prank(lp);
+        vm.expectRevert(abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxRedeem.selector, lp, shares, 0));
+        juniorVault.redeem(shares, lp, lp);
+
+        vm.expectRevert(TrancheVault.TrancheVault__AsyncPreviewUnavailable.selector);
+        juniorVault.previewDeposit(1e6);
+        vm.expectRevert(TrancheVault.TrancheVault__AsyncPreviewUnavailable.selector);
+        juniorVault.previewMint(shares);
+        vm.expectRevert(TrancheVault.TrancheVault__AsyncPreviewUnavailable.selector);
+        juniorVault.previewWithdraw(1e6);
+        vm.expectRevert(TrancheVault.TrancheVault__AsyncPreviewUnavailable.selector);
+        juniorVault.previewRedeem(shares);
     }
 
     function test_FadOnlyShoulder_DoesNotActivateFrozenFee() public {
@@ -381,21 +358,19 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         assertEq(pool.frozenLpFeeBps(false), 0, "Junior fee should be disabled when only FAD is active");
     }
 
-    function test_FrozenWindow_PreviewWithdrawMatchesLiveWithdraw() public {
+    function test_FrozenWindow_EstimateWithdrawMatchesSettledClaim() public {
         address lp = address(0xCAFE);
         uint256 netAssets = 100_000e6;
 
         _fundJunior(lp, 500_000e6);
         _enterFrozenWindow();
 
-        uint256 quotedShares = juniorVault.previewWithdraw(netAssets);
+        uint256 quotedShares = juniorVault.estimateWithdrawShares(netAssets);
         uint256 balanceBefore = usdc.balanceOf(lp);
+        uint256 consumedShares = _asyncWithdraw(juniorVault, lp, netAssets, quotedShares + 1e9);
 
-        vm.prank(lp);
-        uint256 burnedShares = juniorVault.withdraw(netAssets, lp, lp);
-
-        assertEq(burnedShares, quotedShares, "Frozen junior withdraw should honor previewWithdraw");
-        assertEq(usdc.balanceOf(lp), balanceBefore + netAssets, "Withdraw should transfer the quoted net assets");
+        assertGe(consumedShares, quotedShares, "Delayed withdrawal may consume more shares after junior coupon funding");
+        assertEq(usdc.balanceOf(lp), balanceBefore + netAssets, "Withdraw claim should transfer the requested assets");
     }
 
     function test_GovernedFrozenFeeUpdate_FlowsThroughFrozenPricing() public {
@@ -411,21 +386,15 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         pool.finalizePoolConfig();
 
         _enterFrozenWindow();
-        usdc.mint(lp, assets);
 
-        uint256 quotedShares = seniorVault.previewDeposit(assets);
+        uint256 quotedShares = seniorVault.estimateDepositShares(assets);
         uint256 noFeeShares = seniorVault.convertToShares(assets);
         uint256 expectedNetAssets = _applyFee(assets, 40);
-
-        vm.startPrank(lp);
-        usdc.approve(address(seniorVault), assets);
-        uint256 mintedShares = seniorVault.deposit(assets, lp);
-        vm.stopPrank();
-
+        uint256 mintedShares = _asyncDeposit(seniorVault, lp, assets);
         uint256 entrantGrossClaimAfter = seniorVault.convertToAssets(mintedShares);
 
         assertEq(pool.frozenLpFeeBps(true), 40, "Updated governed senior frozen fee should become active");
-        assertEq(mintedShares, quotedShares, "Live deposit should match governed frozen-fee preview");
+        assertLe(mintedShares, quotedShares, "Governed entry estimate remains nonbinding while senior coupon accrues");
         assertLt(
             mintedShares, noFeeShares, "Updated governed fee should still discount minted shares versus no-fee pricing"
         );
@@ -445,9 +414,13 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         _fundSenior(seniorLp, 500_000e6);
         _enterFrozenWindow();
 
+        uint256 quotedShares = juniorVault.estimateWithdrawShares(netAssets);
+        uint256 requestId = _requestRedeem(juniorVault, juniorLp, quotedShares + 1e9);
+        _prepareFrozenEpoch(requestId);
         uint256 juniorPriceBefore = (juniorVault.totalAssets() * 1e18) / juniorVault.totalSupply();
         uint256 seniorPriceBefore = (seniorVault.totalAssets() * 1e18) / seniorVault.totalSupply();
-
+        pool.settleLpEpoch();
+        assertGe(juniorVault.maxWithdraw(juniorLp), netAssets, "settlement must fund the requested withdrawal");
         vm.prank(juniorLp);
         juniorVault.withdraw(netAssets, juniorLp, juniorLp);
 
@@ -462,7 +435,7 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         assertEq(seniorPriceAfter, seniorPriceBefore, "Junior frozen withdraw fee should not affect the senior tranche");
     }
 
-    function test_FrozenWindow_MaxWithdraw_UsesLiveNetPayoutCap() public {
+    function test_FrozenWindow_MaxWithdraw_ExposesSettledNetPayout() public {
         address lp = address(0xAAA7);
         _fundSenior(lp, 500_000e6);
         _fundJunior(address(0xAAA8), 500_000e6);
@@ -476,45 +449,160 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         pool.finalizePoolConfig();
         _enterFrozenWindow();
 
+        uint256 requestedShares = seniorVault.maxRequestRedeem(lp);
+        assertEq(seniorVault.maxWithdraw(lp), 0, "maxWithdraw should be zero until the request is funded");
+
+        uint256 requestId = _requestRedeem(seniorVault, lp, requestedShares);
+        _prepareFrozenEpoch(requestId);
+        uint256 estimatedFullAssets = seniorVault.estimateRedeemAssets(requestedShares);
+        (,, uint256 poolCap,) = pool.getPendingTrancheState();
+        IHousePool.LpEpochSettlementResult memory result = pool.settleLpEpoch();
         uint256 quotedAssets = seniorVault.maxWithdraw(lp);
-        uint256 ownerNetAssets = seniorVault.previewRedeem(seniorVault.balanceOf(lp));
-        uint256 expectedAssets =
-            ownerNetAssets < pool.getMaxSeniorWithdraw() ? ownerNetAssets : pool.getMaxSeniorWithdraw();
-        assertEq(quotedAssets, expectedAssets, "maxWithdraw should use the same net-payout bound as live withdraw");
+        uint256 expectedAssets = estimatedFullAssets < poolCap ? estimatedFullAssets : poolCap;
+
+        assertEq(quotedAssets, result.seniorFundedAssets, "maxWithdraw should expose funded claim escrow");
+        assertLe(quotedAssets, expectedAssets, "Settled assets must respect both owner value and the pool budget");
 
         uint256 balanceBefore = usdc.balanceOf(lp);
         vm.prank(lp);
         seniorVault.withdraw(quotedAssets, lp, lp);
-        assertEq(
-            usdc.balanceOf(lp), balanceBefore + quotedAssets, "Withdraw should succeed for quoted maxWithdraw assets"
-        );
+        assertEq(usdc.balanceOf(lp), balanceBefore + quotedAssets, "Withdraw should claim the quoted funded assets");
     }
 
-    function test_FrozenWindow_MaxRedeem_UsesPreviewWithdrawPoolCap() public {
+    function test_FrozenWindow_MaxRedeem_ExposesSettledFundedShares() public {
         address lp = address(0xAAA9);
         _fundJunior(lp, 500_000e6);
         _fundSenior(address(0xAABA), 500_000e6);
         _enterFrozenWindow();
 
         uint256 poolCap = pool.getMaxJuniorWithdraw();
-        uint256 quotedShares = juniorVault.maxRedeem(lp);
-        uint256 ownerShares = juniorVault.balanceOf(lp);
-        uint256 expectedShares = juniorVault.previewWithdraw(poolCap);
-        if (ownerShares < expectedShares) {
-            expectedShares = ownerShares;
-        }
-        uint256 expectedAssets = juniorVault.previewRedeem(quotedShares);
+        uint256 ownerShares = juniorVault.maxRequestRedeem(lp);
+        uint256 estimatedFullAssets = juniorVault.estimateRedeemAssets(ownerShares);
+        assertEq(juniorVault.maxRedeem(lp), 0, "maxRedeem should be zero until the request is funded");
 
-        assertEq(quotedShares, expectedShares, "maxRedeem should use the same share bound as live redeem");
+        uint256 requestId = _requestRedeem(juniorVault, lp, ownerShares);
+        IHousePool.LpEpochSettlementResult memory result = _settleFrozenEpoch(requestId);
+        uint256 quotedShares = juniorVault.maxRedeem(lp);
+        uint256 expectedAssetCap = estimatedFullAssets < poolCap ? estimatedFullAssets : poolCap;
+
+        assertEq(quotedShares, result.juniorFundedShares, "maxRedeem should expose funded request shares");
+        assertLe(
+            result.juniorFundedAssets, expectedAssetCap, "Funded redeem assets must respect the frozen pool budget"
+        );
 
         uint256 balanceBefore = usdc.balanceOf(lp);
         vm.prank(lp);
         uint256 redeemedAssets = juniorVault.redeem(quotedShares, lp, lp);
-        assertEq(
-            redeemedAssets, expectedAssets, "Redeem should realize the previewed net assets for quoted maxRedeem shares"
-        );
-        assertEq(
-            usdc.balanceOf(lp), balanceBefore + redeemedAssets, "Redeem should succeed for quoted maxRedeem shares"
+        assertEq(redeemedAssets, result.juniorFundedAssets, "Redeem should consume the funded epoch payout");
+        assertEq(usdc.balanceOf(lp), balanceBefore + redeemedAssets, "Redeem should claim the quoted funded assets");
+    }
+
+    function _requestDeposit(
+        TrancheVault vault,
+        address lp,
+        uint256 assets
+    ) internal returns (uint256 requestId) {
+        usdc.mint(lp, assets);
+        vm.startPrank(lp);
+        usdc.approve(address(vault), assets);
+        requestId = vault.requestDeposit(assets, lp, lp);
+        vm.stopPrank();
+    }
+
+    function _requestRedeem(
+        TrancheVault vault,
+        address lp,
+        uint256 shares
+    ) internal returns (uint256 requestId) {
+        vm.prank(lp);
+        requestId = vault.requestRedeem(shares, lp, lp);
+    }
+
+    function _settleFrozenEpoch(
+        uint256 requestId
+    ) internal returns (IHousePool.LpEpochSettlementResult memory result) {
+        _prepareFrozenEpoch(requestId);
+        result = pool.settleLpEpoch();
+    }
+
+    function _prepareFrozenEpoch(
+        uint256 requestId
+    ) internal {
+        uint256 activationTime = pool.lpEpochStart(requestId);
+        if (block.timestamp < activationTime) {
+            vm.warp(activationTime);
+        }
+        assertTrue(engine.isOracleFrozen(), "request must mature while the frozen fee is active");
+        uint256 markPrice = engine.lastMarkPrice();
+        vm.prank(address(router));
+        engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
+    }
+
+    function _asyncDeposit(
+        TrancheVault vault,
+        address lp,
+        uint256 assets
+    ) internal returns (uint256 shares) {
+        uint256 requestId = _requestDeposit(vault, lp, assets);
+        assertEq(vault.maxDeposit(lp), 0, "deposit claim must remain unavailable before settlement");
+        _prepareFrozenEpoch(requestId);
+        uint256 maturedEstimate = vault.estimateDepositShares(assets);
+        pool.settleLpEpoch();
+        assertEq(vault.maxDeposit(lp), assets, "settlement should make the full deposit basis claimable");
+        vm.prank(lp);
+        shares = vault.claimDeposit(requestId, assets, lp, lp);
+        assertEq(shares, maturedEstimate, "matured frozen entry estimate must match synchronized settlement");
+    }
+
+    function _asyncMint(
+        TrancheVault vault,
+        address lp,
+        uint256 shares,
+        uint256 requestedAssets
+    ) internal returns (uint256 claimedAssets) {
+        uint256 requestId = _requestDeposit(vault, lp, requestedAssets);
+        assertEq(vault.maxMint(lp), 0, "mint claim must remain unavailable before settlement");
+        _settleFrozenEpoch(requestId);
+        assertGe(vault.maxMint(lp), shares, "settlement should fund the requested net share target");
+        vm.prank(lp);
+        claimedAssets = vault.mint(shares, lp);
+    }
+
+    function _asyncRedeem(
+        TrancheVault vault,
+        address lp,
+        uint256 shares
+    ) internal returns (uint256 assets) {
+        uint256 requestId = _requestRedeem(vault, lp, shares);
+        assertEq(vault.maxRedeem(lp), 0, "redeem claim must remain unavailable before settlement");
+        _prepareFrozenEpoch(requestId);
+        uint256 maturedEstimate = vault.estimateRedeemAssets(shares);
+        pool.settleLpEpoch();
+        assertEq(vault.maxRedeem(lp), shares, "settlement should fund the full redeem request");
+        vm.prank(lp);
+        assets = vault.claimRedeem(requestId, shares, lp, lp);
+        assertEq(assets, maturedEstimate, "matured frozen exit estimate must match synchronized settlement");
+    }
+
+    function _asyncWithdraw(
+        TrancheVault vault,
+        address lp,
+        uint256 assets,
+        uint256 requestedShares
+    ) internal returns (uint256 shares) {
+        uint256 requestId = _requestRedeem(vault, lp, requestedShares);
+        assertEq(vault.maxWithdraw(lp), 0, "withdraw claim must remain unavailable before settlement");
+        _prepareFrozenEpoch(requestId);
+        uint256 maturedEstimate = vault.estimateWithdrawShares(assets);
+        pool.settleLpEpoch();
+        assertGe(vault.maxWithdraw(lp), assets, "settlement should fund the requested net withdrawal");
+        vm.prank(lp);
+        shares = vault.withdraw(assets, lp, lp);
+        assertApproxEqAbs(
+            shares,
+            maturedEstimate,
+            1e6,
+            "matured frozen withdraw estimate should match the settled claim ratio up to rounding dust"
         );
     }
 

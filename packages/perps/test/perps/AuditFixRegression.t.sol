@@ -2,8 +2,8 @@
 pragma solidity 0.8.35;
 
 import {BasePerpTest} from "./BasePerpTest.sol";
-import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {HousePoolEngineViewTypes} from "@plether/perps/interfaces/HousePoolEngineViewTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 
@@ -18,7 +18,7 @@ contract AuditFixRegressionTest is BasePerpTest {
         );
 
         uint256 depositUsdc = 300_000e6;
-        uint256 sharesBeforePhantomMtm = juniorVault.previewDeposit(depositUsdc);
+        uint256 sharesBeforePhantomMtm = juniorVault.estimateDepositShares(depositUsdc);
 
         address bull = address(0xB011);
         address bear = address(0xBEA2);
@@ -34,7 +34,7 @@ contract AuditFixRegressionTest is BasePerpTest {
 
         assertGt(depositJuniorAssets, conservativeJuniorAssets, "deposit NAV must ignore phantom conservative MTM");
         assertApproxEqAbs(
-            juniorVault.previewDeposit(depositUsdc),
+            juniorVault.estimateDepositShares(depositUsdc),
             sharesBeforePhantomMtm,
             2,
             "delta-neutral phantom MTM must not discount new deposits"
@@ -43,7 +43,7 @@ contract AuditFixRegressionTest is BasePerpTest {
 
     function test_DepositPricingIgnoresOneSidedUnrealizedProfitAfterPriceMove() public {
         uint256 depositUsdc = 300_000e6;
-        uint256 sharesBeforeMtm = juniorVault.previewDeposit(depositUsdc);
+        uint256 sharesBeforeMtm = juniorVault.estimateDepositShares(depositUsdc);
 
         address bull = address(0xB012);
         address bear = address(0xBEA3);
@@ -62,7 +62,7 @@ contract AuditFixRegressionTest is BasePerpTest {
 
         assertGt(depositJuniorAssets, conservativeJuniorAssets, "deposit NAV must ignore unrealized trader PnL");
         assertApproxEqAbs(
-            juniorVault.previewDeposit(depositUsdc),
+            juniorVault.estimateDepositShares(depositUsdc),
             sharesBeforeMtm,
             2,
             "one-sided unrealized profit must not discount new deposits"
@@ -71,13 +71,13 @@ contract AuditFixRegressionTest is BasePerpTest {
 
     function test_DepositPricingAllowsDiscountedSharesAfterRealJuniorLoss() public {
         uint256 depositUsdc = 100_000e6;
-        uint256 sharesBeforeLoss = juniorVault.previewDeposit(depositUsdc);
+        uint256 sharesBeforeLoss = juniorVault.estimateDepositShares(depositUsdc);
 
         vm.prank(address(engine));
         pool.payOut(address(0xD15C0), 200_000e6);
 
         assertGt(
-            juniorVault.previewDeposit(depositUsdc),
+            juniorVault.estimateDepositShares(depositUsdc),
             sharesBeforeLoss,
             "real junior losses should mint at the impaired NAV, not a hard 1.0 floor"
         );
@@ -94,16 +94,15 @@ contract AuditFixRegressionTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(150_000_000, uint64(block.timestamp));
 
-        assertEq(juniorVault.maxDeposit(attacker), 0, "live positions must close the immediate deposit window");
+        assertEq(juniorVault.maxDeposit(attacker), 0, "no finalized request should expose claim capacity");
+        assertGt(
+            juniorVault.maxRequestDeposit(attacker), 0, "live positions should remain compatible with delayed entry"
+        );
 
         usdc.mint(attacker, attackerDepositUsdc);
         vm.startPrank(attacker);
         usdc.approve(address(juniorVault), attackerDepositUsdc);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                ERC4626.ERC4626ExceededMaxDeposit.selector, attacker, attackerDepositUsdc, uint256(0)
-            )
-        );
+        vm.expectRevert(TrancheVault.TrancheVault__DepositEpochNotFinalized.selector);
         juniorVault.deposit(attackerDepositUsdc, attacker);
         vm.stopPrank();
     }
@@ -117,7 +116,7 @@ contract AuditFixRegressionTest is BasePerpTest {
         _fundTrader(trader, 20_000e6);
         _open(trader, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
-        uint256 immediateSharesBeforeLiquidation = juniorVault.previewDeposit(attackerDepositUsdc);
+        uint256 immediateSharesBeforeLiquidation = juniorVault.estimateDepositShares(attackerDepositUsdc);
 
         usdc.mint(attacker, attackerDepositUsdc);
         vm.startPrank(attacker);
@@ -137,7 +136,10 @@ contract AuditFixRegressionTest is BasePerpTest {
         engine.liquidatePosition(trader, 150_000_000, poolDepthUsdc, uint64(block.timestamp), keeper);
 
         vm.warp(juniorVault.depositEpochStart(epochId));
-        uint256 finalizedShares = juniorVault.finalizeDepositEpoch(epochId);
+        vm.prank(address(router));
+        engine.updateMarkPrice(150_000_000, uint64(block.timestamp));
+        IHousePool.LpEpochSettlementResult memory settlement = pool.settleLpEpoch();
+        uint256 finalizedShares = settlement.juniorDepositShares;
 
         assertLt(
             finalizedShares,
@@ -197,8 +199,9 @@ contract AuditFixRegressionTest is BasePerpTest {
         assertTrue(
             pool.isSeniorImpairedAfterPendingDepositReconcile(), "pending deposit finalization should be impaired"
         );
-        vm.expectRevert(IHousePool.HousePool__SeniorImpaired.selector);
-        juniorVault.finalizeDepositEpoch(epochId);
+        vm.expectRevert(IHousePool.HousePool__NoLpEpochProgress.selector);
+        pool.settleLpEpoch();
+        assertEq(juniorVault.claimableDepositRequest(epochId, pendingLp), 0, "deferred entry must not be claimable");
 
         vm.prank(pendingLp);
         uint256 refunded = juniorVault.cancelPendingDeposit(epochId);
@@ -230,7 +233,10 @@ contract AuditFixRegressionTest is BasePerpTest {
         vm.stopPrank();
 
         vm.warp(juniorVault.depositEpochStart(epochId));
-        uint256 finalizedShares = juniorVault.finalizeDepositEpoch(epochId);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        IHousePool.LpEpochSettlementResult memory settlement = pool.settleLpEpoch();
+        uint256 finalizedShares = settlement.juniorDepositShares;
 
         vm.prank(alice);
         uint256 aliceShares = juniorVault.claimDepositShares(epochId);
@@ -238,9 +244,15 @@ contract AuditFixRegressionTest is BasePerpTest {
         uint256 bobShares = juniorVault.claimDepositShares(epochId);
 
         (,, uint256 claimedAssets, uint256 claimedShares,) = juniorVault.depositEpochs(epochId);
-        assertEq(aliceShares + bobShares, finalizedShares, "epoch claims should allocate every finalized share");
+        assertLe(aliceShares + bobShares, finalizedShares, "controller floors must not over-allocate shares");
+        assertLe(
+            finalizedShares - aliceShares - bobShares,
+            1,
+            "two-controller allocation should burn at most one share of terminal dust"
+        );
         assertEq(claimedAssets, aliceDepositUsdc + bobDepositUsdc, "epoch should mark all assets claimed");
         assertEq(claimedShares, finalizedShares, "epoch should mark all shares claimed");
+        assertEq(juniorVault.balanceOf(address(juniorVault)), 0, "terminal deposit dust must leave escrow");
     }
 
     function test_FinalizedPendingDepositSharesAreEscrowedBeforeClaim() public {
@@ -254,8 +266,11 @@ contract AuditFixRegressionTest is BasePerpTest {
         vm.stopPrank();
 
         vm.warp(juniorVault.depositEpochStart(epochId));
-        uint256 incumbentMaxBefore = juniorVault.maxWithdraw(address(this));
-        uint256 finalizedShares = juniorVault.finalizeDepositEpoch(epochId);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        uint256 incumbentAssetsBefore = juniorVault.estimateRedeemAssets(juniorVault.balanceOf(address(this)));
+        IHousePool.LpEpochSettlementResult memory settlement = pool.settleLpEpoch();
+        uint256 finalizedShares = settlement.juniorDepositShares;
 
         assertEq(
             juniorVault.balanceOf(address(juniorVault)),
@@ -263,8 +278,8 @@ contract AuditFixRegressionTest is BasePerpTest {
             "finalized shares must be escrowed before user claim"
         );
         assertApproxEqAbs(
-            juniorVault.maxWithdraw(address(this)),
-            incumbentMaxBefore,
+            juniorVault.estimateRedeemAssets(juniorVault.balanceOf(address(this))),
+            incumbentAssetsBefore,
             2,
             "unclaimed finalized deposits must not boost incumbent withdrawal value"
         );
@@ -284,7 +299,7 @@ contract AuditFixRegressionTest is BasePerpTest {
         _fundTrader(trader, 20_000e6);
         _open(trader, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
-        assertEq(seniorVault.maxDeposit(seniorLp), 0, "live positions must close senior immediate deposits");
+        assertEq(seniorVault.maxDeposit(seniorLp), 0, "no finalized request should expose claim capacity");
         assertGt(seniorVault.maxRequestDeposit(seniorLp), 0, "senior pending deposit requests should remain available");
 
         usdc.mint(seniorLp, depositUsdc);
@@ -297,7 +312,8 @@ contract AuditFixRegressionTest is BasePerpTest {
         vm.warp(activationTime);
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(activationTime));
-        uint256 finalizedShares = seniorVault.finalizeDepositEpoch(epochId);
+        IHousePool.LpEpochSettlementResult memory settlement = pool.settleLpEpoch();
+        uint256 finalizedShares = settlement.seniorDepositShares;
 
         vm.prank(seniorLp);
         uint256 claimedShares = seniorVault.claimDepositShares(epochId);
@@ -318,7 +334,7 @@ contract AuditFixRegressionTest is BasePerpTest {
 
         assertEq(snapshot.maxLiabilityUsdc, 0, "BEAR opened at the cap has no bounded upside liability");
         assertTrue(snapshot.hasOpenPositions, "snapshot must still expose live open interest");
-        assertEq(juniorVault.maxDeposit(lp), 0, "any live open interest must close the immediate deposit window");
+        assertEq(juniorVault.maxDeposit(lp), 0, "no finalized request should expose claim capacity");
         assertGt(juniorVault.maxRequestDeposit(lp), 0, "pending deposit requests should remain available");
     }
 
@@ -477,8 +493,9 @@ contract AuditFixRegressionConservativePendingDepositImpairmentTest is BasePerpT
             "active cancellation gate must match conservative finalization accounting"
         );
 
-        vm.expectRevert(IHousePool.HousePool__SeniorImpaired.selector);
-        juniorVault.finalizeDepositEpoch(epochId);
+        vm.expectRevert(IHousePool.HousePool__NoLpEpochProgress.selector);
+        pool.settleLpEpoch();
+        assertEq(juniorVault.claimableDepositRequest(epochId, pendingLp), 0, "deferred entry must not be claimable");
 
         vm.prank(pendingLp);
         uint256 refunded = juniorVault.cancelPendingDeposit(epochId);

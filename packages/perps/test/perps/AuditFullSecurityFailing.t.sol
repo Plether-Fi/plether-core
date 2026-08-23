@@ -45,12 +45,21 @@ contract AuditFullSecurityFailing_CooldownBypass is BasePerpTest {
         usdc.mint(helper, 100_000e6);
         vm.startPrank(helper);
         usdc.approve(address(juniorVault), 100_000e6);
-        juniorVault.deposit(100_000e6, alice);
+        uint256 depositRequestId = juniorVault.requestDeposit(100_000e6, alice, helper);
         vm.stopPrank();
 
+        vm.warp(juniorVault.depositEpochStart(depositRequestId));
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        pool.settleLpEpoch();
+
         vm.prank(alice);
-        vm.expectRevert();
-        juniorVault.withdraw(100_000e6, alice, alice);
+        juniorVault.claimDeposit(depositRequestId, 100_000e6, alice, alice);
+
+        uint256 aliceShares = juniorVault.balanceOf(alice);
+        vm.expectRevert(TrancheVault.TrancheVault__DepositCooldown.selector);
+        vm.prank(alice);
+        juniorVault.requestRedeem(aliceShares, alice, alice);
     }
 
 }
