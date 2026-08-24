@@ -286,6 +286,19 @@ contract PerpsPublicLensTest is BasePerpTest {
         assertEq(pendingQueue.vault, address(juniorVault));
         assertEq(pendingQueue.currentEpoch, pool.currentLpEpoch());
         assertEq(pendingQueue.cutoffEpoch, pendingQueue.currentEpoch);
+        (uint256 nextRequestEpoch, uint256 nextRequestCutoffTime) = juniorVault.getRequestEpochWindow();
+        assertEq(pendingQueue.nextRequestEpoch, nextRequestEpoch, "lens must use the vault's request epoch");
+        assertEq(
+            pendingQueue.nextRequestCutoffTime, nextRequestCutoffTime, "lens must use the vault's next request cutoff"
+        );
+        assertGt(pendingQueue.nextRequestEpoch, pendingQueue.currentEpoch, "request epoch must remain future");
+        assertGt(pendingQueue.nextRequestCutoffTime, block.timestamp, "request cutoff must remain future");
+
+        PerpsViewTypes.TrancheQueueView memory seniorQueue = publicLens.getTrancheQueues(true);
+        assertEq(seniorQueue.nextRequestEpoch, pendingQueue.nextRequestEpoch, "tranche request epochs must match");
+        assertEq(
+            seniorQueue.nextRequestCutoffTime, pendingQueue.nextRequestCutoffTime, "tranche request cutoffs must match"
+        );
         assertEq(pendingQueue.depositHeadEpoch, 0, "future deposits must not appear as matured work");
         assertEq(pendingQueue.depositHeadAssets, 0);
         assertEq(pendingQueue.redeemHeadEpoch, 0, "future redemptions must not appear as matured work");
@@ -401,22 +414,23 @@ contract PerpsPublicLensTest is BasePerpTest {
     function _createMatchedJuniorRequests(
         uint256 depositAssets
     ) internal returns (uint256 requestId, uint256 redeemShares) {
+        uint256 cooldownEnd = juniorVault.lastDepositTime(address(this)) + juniorVault.DEPOSIT_COOLDOWN();
+        if (block.timestamp < cooldownEnd) {
+            vm.warp(cooldownEnd);
+        }
+
         usdc.mint(LENS_LP, depositAssets);
         vm.startPrank(LENS_LP);
         usdc.approve(address(juniorVault), depositAssets);
         requestId = IAsyncTrancheVault(address(juniorVault)).requestDeposit(depositAssets, LENS_LP, LENS_LP);
         vm.stopPrank();
 
-        uint256 cooldownEnd = juniorVault.lastDepositTime(address(this)) + juniorVault.DEPOSIT_COOLDOWN();
-        if (block.timestamp < cooldownEnd) {
-            vm.warp(cooldownEnd);
-        }
         redeemShares = juniorVault.balanceOf(address(this)) / 10;
         assertGt(redeemShares, 0, "base fixture must provide redeemable Junior shares");
         vm.prank(address(this));
         uint256 redeemRequestId =
             IAsyncTrancheVault(address(juniorVault)).requestRedeem(redeemShares, address(this), address(this));
-        assertEq(redeemRequestId, requestId, "deposit +2 and redeem +1 must converge after one shared epoch");
+        assertEq(redeemRequestId, requestId, "deposit and redeem must use the same request window");
     }
 
     function _warpToLpEpoch(

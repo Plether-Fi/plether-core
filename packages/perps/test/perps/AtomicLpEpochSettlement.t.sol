@@ -77,6 +77,8 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
 
     address internal constant ALICE = address(0xA11CE);
     address internal constant BOB = address(0xB0B);
+    address internal constant CAROL = address(0xCA401);
+    address internal constant DAVE = address(0xDA7E);
     address internal constant TRADER = address(0x7A0E2);
 
     uint256 internal constant FRIDAY_FAD_ONLY = 1_709_934_300;
@@ -187,7 +189,8 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
         uint256 redeemId = _requestJuniorRedeem(ALICE, aliceShares / 5);
         uint256 depositAssets = 10_000e6;
         uint256 depositId = _requestJuniorDeposit(BOB, depositAssets);
-        _warpToEpoch(depositId > redeemId ? depositId : redeemId);
+        assertEq(depositId, redeemId, "same-window deposit and redemption must share one request id");
+        _warpToEpoch(depositId);
 
         _setBasket(110_000_000, 0, block.timestamp);
         router.settleLpEpoch(_emptyUpdateData());
@@ -219,10 +222,147 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
         assertEq(engine.lastMarkTime(), boundary, "the exact epoch boundary must be accepted");
     }
 
+    function test_AtomicSettlement_PreBoundaryNoProgressPreservesImminentAndRolledWork() public {
+        _openMarkSensitivePosition();
+        uint256 assets = 10_000e6;
+        uint256 imminentId = _requestJuniorDeposit(ALICE, assets);
+        uint256 rolledId = _requestRolledJuniorDepositForLivePosition(imminentId, BOB, assets);
+        uint256 boundary = pool.lpEpochStart(imminentId);
+        vm.warp(boundary - 1);
+
+        assertLt(pool.currentLpEpoch(), imminentId, "the imminent request must not mature before its boundary");
+        assertEq(juniorVault.depositQueueHead(), imminentId);
+        assertEq(juniorVault.depositQueueTail(), rolledId);
+
+        _setBasket(110_000_000, 0, block.timestamp);
+        uint256 updateCallsBefore = baseMockPyth.updatePriceFeedsCallCount();
+        uint256 markPriceBefore = engine.lastMarkPrice();
+        uint64 markTimeBefore = engine.lastMarkTime();
+        uint256 reconcileBefore = pool.lastReconcileTime();
+        uint256 couponBefore = pool.lastSeniorCouponCheckpointTime();
+        uint256 accountedBefore = pool.accountedAssets();
+
+        vm.expectRevert(IHousePool.HousePool__NoLpEpochProgress.selector);
+        router.settleLpEpoch(_emptyUpdateData());
+
+        assertEq(baseMockPyth.updatePriceFeedsCallCount(), updateCallsBefore, "failed call must roll back Pyth");
+        assertEq(engine.lastMarkPrice(), markPriceBefore, "failed call must roll back the Engine price");
+        assertEq(engine.lastMarkTime(), markTimeBefore, "failed call must roll back the Engine timestamp");
+        assertEq(pool.lastReconcileTime(), reconcileBefore, "failed call must roll back pool reconciliation");
+        assertEq(pool.lastSeniorCouponCheckpointTime(), couponBefore, "failed call must roll back coupon state");
+        assertEq(pool.accountedAssets(), accountedBefore, "failed call must roll back pool accounting");
+        assertEq(juniorVault.pendingDepositRequest(imminentId, ALICE), assets);
+        assertEq(juniorVault.claimableDepositRequest(imminentId, ALICE), 0);
+        assertEq(juniorVault.pendingDepositRequest(rolledId, BOB), assets);
+        assertEq(juniorVault.claimableDepositRequest(rolledId, BOB), 0);
+        assertEq(juniorVault.depositQueueHead(), imminentId, "imminent queue head must survive atomic rollback");
+        assertEq(juniorVault.depositQueueTail(), rolledId, "rolled queue tail must survive atomic rollback");
+    }
+
+    function test_AtomicSettlement_FailedBoundaryAttemptCannotAdmitMaturedBatchAndRetrySettlesOnlyImminent() public {
+        _openMarkSensitivePosition();
+        uint256 assets = 10_000e6;
+        uint256 imminentId = _requestJuniorDeposit(ALICE, assets);
+        uint256 rolledId = _requestRolledJuniorDepositForLivePosition(imminentId, BOB, assets);
+        uint256 boundary = pool.lpEpochStart(imminentId);
+        vm.warp(boundary);
+
+        uint64 markTimeBefore = engine.lastMarkTime();
+        _setBasket(110_000_000, 0, boundary - 1);
+        vm.expectRevert(IHousePool.HousePool__MarkPriceStale.selector);
+        router.settleLpEpoch(_emptyUpdateData());
+
+        assertEq(engine.lastMarkTime(), markTimeBefore, "failed boundary attempt must roll back the Engine mark");
+        assertEq(juniorVault.pendingDepositRequest(imminentId, ALICE), assets);
+        assertEq(juniorVault.pendingDepositRequest(rolledId, BOB), assets);
+
+        _setBasket(110_000_000, 0, boundary);
+        router.updateMarkPrice(_emptyUpdateData());
+        uint256 retryWindowId = _requestJuniorDeposit(CAROL, assets);
+        assertEq(retryWindowId, rolledId, "post-failure request must not join the already-matured epoch");
+
+        router.settleLpEpoch(_emptyUpdateData());
+
+        assertEq(juniorVault.claimableDepositRequest(imminentId, ALICE), assets);
+        assertEq(juniorVault.pendingDepositRequest(rolledId, BOB), assets);
+        assertEq(juniorVault.pendingDepositRequest(retryWindowId, CAROL), assets);
+        assertEq(juniorVault.depositQueueHead(), rolledId, "rolled epoch must remain at the queue head");
+        assertEq(juniorVault.depositQueueTail(), rolledId, "rolled epoch must remain the only queued epoch");
+
+        uint256 nextCutoff = pool.lpEpochStart(rolledId) - juniorVault.LP_REQUEST_CUTOFF_DURATION();
+        vm.warp(nextCutoff);
+        _setBasket(110_000_000, 0, nextCutoff);
+        router.updateMarkPrice(_emptyUpdateData());
+        uint256 laterId = _requestJuniorDeposit(DAVE, assets);
+        assertEq(laterId, rolledId + 1, "exact next cutoff must route requests beyond the rolled epoch");
+        assertEq(juniorVault.pendingDepositRequest(rolledId, BOB), assets);
+        assertEq(juniorVault.pendingDepositRequest(rolledId, CAROL), assets);
+        assertEq(juniorVault.pendingDepositRequest(laterId, DAVE), assets);
+    }
+
+    function test_AtomicSettlement_FullyCancelledImminentBatchRollsBackAndPreservesRolledQueue() public {
+        _openMarkSensitivePosition();
+        uint256 assets = 10_000e6;
+        uint256 imminentId = _requestJuniorDeposit(ALICE, assets);
+        uint256 rolledId = _requestRolledJuniorDepositForLivePosition(imminentId, BOB, assets);
+
+        vm.prank(ALICE);
+        assertEq(juniorVault.cancelPendingDeposit(imminentId), assets);
+        assertEq(juniorVault.depositQueueHead(), rolledId);
+        assertEq(juniorVault.depositQueueTail(), rolledId);
+
+        vm.warp(pool.lpEpochStart(imminentId));
+        _setBasket(110_000_000, 0, block.timestamp);
+        uint256 updateCallsBefore = baseMockPyth.updatePriceFeedsCallCount();
+        uint256 markPriceBefore = engine.lastMarkPrice();
+        uint64 markTimeBefore = engine.lastMarkTime();
+        uint256 reconcileBefore = pool.lastReconcileTime();
+        uint256 couponBefore = pool.lastSeniorCouponCheckpointTime();
+        uint256 accountedBefore = pool.accountedAssets();
+
+        vm.expectRevert(IHousePool.HousePool__NoLpEpochProgress.selector);
+        router.settleLpEpoch(_emptyUpdateData());
+
+        assertEq(baseMockPyth.updatePriceFeedsCallCount(), updateCallsBefore, "failed call must roll back Pyth");
+        assertEq(engine.lastMarkPrice(), markPriceBefore, "failed call must roll back the Engine price");
+        assertEq(engine.lastMarkTime(), markTimeBefore, "failed call must roll back the Engine timestamp");
+        assertEq(pool.lastReconcileTime(), reconcileBefore, "failed call must roll back pool reconciliation");
+        assertEq(pool.lastSeniorCouponCheckpointTime(), couponBefore, "failed call must roll back coupon state");
+        assertEq(pool.accountedAssets(), accountedBefore, "failed call must roll back pool accounting");
+        assertEq(juniorVault.pendingDepositRequest(imminentId, ALICE), 0);
+        assertEq(juniorVault.pendingDepositRequest(rolledId, BOB), assets);
+        assertEq(juniorVault.depositQueueHead(), rolledId, "rolled queue head must survive atomic rollback");
+        assertEq(juniorVault.depositQueueTail(), rolledId, "rolled queue tail must survive atomic rollback");
+    }
+
+    function test_AtomicSettlement_PartialImminentCancellationSettlesOnlyRemainingController() public {
+        _openMarkSensitivePosition();
+        uint256 assets = 10_000e6;
+        uint256 imminentId = _requestJuniorDeposit(ALICE, assets);
+        assertEq(_requestJuniorDeposit(BOB, assets), imminentId, "pre-cutoff requests must batch together");
+        uint256 rolledId = _requestRolledJuniorDepositForLivePosition(imminentId, CAROL, assets);
+
+        vm.prank(ALICE);
+        assertEq(juniorVault.cancelPendingDeposit(imminentId), assets);
+
+        vm.warp(pool.lpEpochStart(imminentId));
+        _setBasket(110_000_000, 0, block.timestamp);
+        router.settleLpEpoch(_emptyUpdateData());
+
+        assertEq(juniorVault.pendingDepositRequest(imminentId, ALICE), 0);
+        assertEq(juniorVault.claimableDepositRequest(imminentId, ALICE), 0);
+        assertEq(juniorVault.pendingDepositRequest(imminentId, BOB), 0);
+        assertEq(juniorVault.claimableDepositRequest(imminentId, BOB), assets);
+        assertEq(juniorVault.pendingDepositRequest(rolledId, CAROL), assets);
+        assertEq(juniorVault.depositQueueHead(), rolledId);
+        assertEq(juniorVault.depositQueueTail(), rolledId);
+    }
+
     function test_AtomicSettlement_OracleConfidenceAndStalenessFailuresLeaveQueueUntouched() public {
         _openMarkSensitivePosition();
         uint256 assets = 10_000e6;
         uint256 requestId = _requestJuniorDeposit(ALICE, assets);
+        uint256 rolledId = _requestRolledJuniorDepositForLivePosition(requestId, BOB, assets);
         uint256 boundary = pool.lpEpochStart(requestId);
         vm.warp(boundary);
 
@@ -232,6 +372,7 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
         router.settleLpEpoch(_emptyUpdateData());
         assertEq(engine.lastMarkTime(), markTimeBefore);
         assertEq(juniorVault.pendingDepositRequest(requestId, ALICE), assets);
+        assertEq(juniorVault.pendingDepositRequest(rolledId, BOB), assets);
 
         vm.warp(boundary + 61);
         _setBasket(100_000_000, 0, boundary);
@@ -239,6 +380,7 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
         router.settleLpEpoch(_emptyUpdateData());
         assertEq(engine.lastMarkTime(), markTimeBefore);
         assertEq(juniorVault.pendingDepositRequest(requestId, ALICE), assets);
+        assertEq(juniorVault.pendingDepositRequest(rolledId, BOB), assets);
 
         _setBasket(100_000_000, 0, block.timestamp);
         router.settleLpEpoch(_emptyUpdateData());
@@ -247,6 +389,7 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
             assets,
             "valid replacement tick must settle preserved work"
         );
+        assertEq(juniorVault.pendingDepositRequest(rolledId, BOB), assets, "rolled work must remain queued");
     }
 
     function test_AtomicSettlement_InsufficientPythFeeRollsBackWithoutTouchingQueueOrMark() public {
@@ -276,6 +419,7 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
         _openMarkSensitivePosition();
         uint256 assets = 10_000e6;
         uint256 requestId = _requestJuniorDeposit(ALICE, assets);
+        uint256 rolledId = _requestRolledJuniorDepositForLivePosition(requestId, BOB, assets);
         uint256 boundary = pool.lpEpochStart(requestId);
         vm.warp(boundary);
 
@@ -287,6 +431,7 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
         assertEq(baseMockPyth.updatePriceFeedsCallCount(), updateCallsBefore, "future update must roll back Pyth call");
         assertEq(engine.lastMarkTime(), markTimeBefore, "future update must roll back Engine state");
         assertEq(juniorVault.pendingDepositRequest(requestId, ALICE), assets);
+        assertEq(juniorVault.pendingDepositRequest(rolledId, BOB), assets);
 
         _setBasket(110_000_000, 0, boundary);
         router.updateMarkPrice(_emptyUpdateData());
@@ -301,11 +446,13 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
         );
         assertEq(engine.lastMarkTime(), boundary, "out-of-order update must preserve the cached mark");
         assertEq(juniorVault.pendingDepositRequest(requestId, ALICE), assets);
+        assertEq(juniorVault.pendingDepositRequest(rolledId, BOB), assets);
 
         _setBasket(110_000_000, 0, boundary);
         router.settleLpEpoch(_emptyUpdateData());
         assertEq(juniorVault.pendingDepositRequest(requestId, ALICE), 0);
         assertEq(juniorVault.claimableDepositRequest(requestId, ALICE), assets);
+        assertEq(juniorVault.pendingDepositRequest(rolledId, BOB), assets);
     }
 
     function test_AtomicSettlement_ComponentPublishTimeDivergenceRollsBack() public {
@@ -316,6 +463,7 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
         _openMarkSensitivePosition();
         uint256 assets = 10_000e6;
         uint256 requestId = _requestJuniorDeposit(ALICE, assets);
+        uint256 rolledId = _requestRolledJuniorDepositForLivePosition(requestId, BOB, assets);
         uint256 boundary = pool.lpEpochStart(requestId);
         vm.warp(boundary + 11);
 
@@ -333,6 +481,7 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
         assertEq(engine.lastMarkTime(), markTimeBefore, "divergent update must not install a partial basket");
         assertEq(juniorVault.pendingDepositRequest(requestId, ALICE), assets);
         assertEq(juniorVault.claimableDepositRequest(requestId, ALICE), 0);
+        assertEq(juniorVault.pendingDepositRequest(rolledId, BOB), assets);
     }
 
     function test_AtomicSettlement_DegradedModeRejectsAndRollsBackOracleAndMark() public {
@@ -381,7 +530,8 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
         uint256 redeemId = _requestJuniorRedeem(ALICE, aliceShares / 5);
         uint256 depositAssets = 10_000e6;
         uint256 depositId = _requestJuniorDeposit(BOB, depositAssets);
-        _warpToEpoch(depositId > redeemId ? depositId : redeemId);
+        assertEq(depositId, redeemId, "same-window deposit and redemption must share one request id");
+        _warpToEpoch(depositId);
         _setBasket(110_000_000, 0, block.timestamp);
         pool.pause();
 
@@ -591,6 +741,21 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
     ) internal returns (uint256 requestId) {
         vm.prank(owner);
         requestId = juniorVault.requestRedeem(shares, owner, owner);
+    }
+
+    function _requestRolledJuniorDepositForLivePosition(
+        uint256 imminentId,
+        address owner,
+        uint256 assets
+    ) internal returns (uint256 rolledId) {
+        uint256 cutoff = pool.lpEpochStart(imminentId) - juniorVault.LP_REQUEST_CUTOFF_DURATION();
+        assertLt(block.timestamp, cutoff, "fixture must begin before the imminent request cutoff");
+        vm.warp(cutoff);
+        uint256 markPrice = engine.lastMarkPrice();
+        _setBasket(markPrice == 0 ? 100_000_000 : markPrice, 0, cutoff);
+        router.updateMarkPrice(_emptyUpdateData());
+        rolledId = _requestJuniorDeposit(owner, assets);
+        assertEq(rolledId, imminentId + 1, "exact cutoff must roll the request forward one epoch");
     }
 
     function _warpToEpoch(

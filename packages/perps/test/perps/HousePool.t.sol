@@ -205,7 +205,7 @@ contract HousePoolTest is HousePoolAsyncTestBase {
         uint256 depositAssets = 10_000e6;
         uint256 depositRequestId = _requestAsyncDeposit(juniorVault, carol, depositAssets);
         uint256 redeemRequestId = _requestAsyncRedeem(juniorVault, bob, juniorVault.balanceOf(bob) / 10);
-        assertLe(redeemRequestId, depositRequestId, "redeem progress must mature no later than the deposit");
+        assertEq(redeemRequestId, depositRequestId, "simultaneous entry and exit must share one request epoch");
 
         usdc.burn(address(pool), pool.juniorPrincipal());
         vm.warp(pool.lpEpochStart(depositRequestId));

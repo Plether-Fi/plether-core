@@ -43,19 +43,19 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         });
     }
 
-    function test_RequestEpochDelaysAndAsyncPreviews() public {
-        uint256 requestEpoch = pool.currentLpEpoch();
+    function test_RequestEpochWindowAndAsyncPreviews() public {
+        (uint256 expectedDepositId,) = juniorVault.getRequestEpochWindow();
         uint256 depositId = _requestDeposit(juniorVault, ALICE, 100_000e6);
-        assertEq(depositId, requestEpoch + 2, "deposit request must target current epoch + 2");
+        assertEq(depositId, expectedDepositId, "deposit request must use the advertised epoch window");
 
         _settleAt(depositId);
         uint256 shares = _claimAllDeposit(juniorVault, depositId, ALICE);
         assertGt(shares, 0, "matured deposit must become claimable");
         _finishCooldown(juniorVault, ALICE);
 
-        uint256 redeemEpoch = pool.currentLpEpoch();
+        (uint256 expectedRedeemId,) = juniorVault.getRequestEpochWindow();
         uint256 redeemId = _requestRedeem(juniorVault, ALICE, shares / 2, ALICE, ALICE);
-        assertEq(redeemId, redeemEpoch + 1, "redeem request must target current epoch + 1");
+        assertEq(redeemId, expectedRedeemId, "redeem request must use the advertised epoch window");
 
         vm.expectRevert();
         juniorVault.previewDeposit(1e6);
@@ -328,7 +328,6 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         uint256 juniorShares = _fundOne(juniorVault, ALICE, 50_000e6);
         uint256 depositId = _requestDeposit(juniorVault, BOB, 25_000e6);
 
-        _warpToEpoch(pool.currentLpEpoch() + 1);
         uint256 redeemId = _requestRedeem(juniorVault, ALICE, juniorShares / 2, ALICE, ALICE);
         assertEq(depositId, redeemId, "requests must mature in the same clearing pass");
 
@@ -360,7 +359,6 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         uint256 seniorShares = _fundOne(seniorVault, ALICE, 300_000e6);
         uint256 depositId = _requestDeposit(juniorVault, BOB, 200_000e6);
 
-        _warpToEpoch(pool.currentLpEpoch() + 1);
         uint256 redeemId = _requestRedeem(seniorVault, ALICE, seniorShares, ALICE, ALICE);
         assertEq(depositId, redeemId, "entry and exit must mature together");
 
@@ -384,7 +382,6 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         (uint256 seniorShares,) = _fundPair(ALICE, 300_000e6, CAROL, 100_000e6);
         uint256 depositId = _requestDeposit(juniorVault, BOB, 200_000e6);
 
-        _warpToEpoch(pool.currentLpEpoch() + 1);
         uint256 redeemId = _requestRedeem(seniorVault, ALICE, seniorShares, ALICE, ALICE);
         assertEq(depositId, redeemId, "entry and exit must mature together");
 
@@ -412,12 +409,15 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         (, uint256 juniorShares) = _fundPair(ALICE, 100_000e6, CAROL, 300_000e6);
         _setSeniorCapacity(type(uint256).max - 1, 5000);
 
+        (uint256 expectedRedeemId, uint256 requestCutoffTime) = juniorVault.getRequestEpochWindow();
+        uint256 juniorRedeemId = _requestRedeem(juniorVault, CAROL, juniorShares / 2, CAROL, CAROL);
+        assertEq(juniorRedeemId, expectedRedeemId, "the Junior exit must join the pre-cutoff epoch");
+
+        vm.warp(requestCutoffTime);
         uint256 seniorDepositId = _requestDeposit(seniorVault, BOB, 100_000e6);
         uint256 juniorDepositId = _requestDeposit(juniorVault, BOB, 100_000e6);
         assertEq(seniorDepositId, juniorDepositId, "both entry phases must share one maturity epoch");
-
-        uint256 juniorRedeemId = _requestRedeem(juniorVault, CAROL, juniorShares / 2, CAROL, CAROL);
-        assertLt(juniorRedeemId, juniorDepositId, "the Junior exit must mature before the entries");
+        assertEq(juniorDepositId, juniorRedeemId + 1, "post-cutoff entries must follow the older Junior exit");
 
         IHousePool.LpEpochSettlementResult memory result = _settleAt(juniorDepositId);
 
@@ -585,7 +585,6 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         uint256 juniorShares = _fundOne(juniorVault, CAROL, 50_000e6);
         uint256 assets = 25_000e6;
         uint256 depositId = _requestDeposit(juniorVault, ALICE, assets);
-        _warpToEpoch(pool.currentLpEpoch() + 1);
         uint256 redeemId = _requestRedeem(juniorVault, CAROL, juniorShares / 2, CAROL, CAROL);
         assertEq(depositId, redeemId, "exit and pre-frozen entry must mature together");
 
@@ -781,6 +780,10 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         assertTrue(asyncVault.supportsInterface(0x620ee8e4), "ERC-7540 redeem fragment must be advertised");
         assertTrue(asyncVault.supportsInterface(0x2f0a18c5), "ERC-7575 must be advertised");
         assertTrue(asyncVault.supportsInterface(0xf815c03d), "ERC-7575 share token must be advertised");
+        assertTrue(
+            asyncVault.supportsInterface(type(IAsyncTrancheVault).interfaceId),
+            "custom async vault interface must be advertised"
+        );
         assertFalse(asyncVault.supportsInterface(0xffffffff), "unknown interface ids must be rejected");
     }
 

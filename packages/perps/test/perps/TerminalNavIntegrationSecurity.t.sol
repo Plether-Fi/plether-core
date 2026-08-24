@@ -230,13 +230,11 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
         uint256 depositAssets = 25_000e6;
         uint256 depositId = _requestJuniorDeposit(DEPOSITOR, depositAssets);
 
-        _warpToEpoch(pool.currentLpEpoch() + 1);
-        _refreshMark(MARK_PRICE);
         uint256 redeemShares = juniorVault.maxRequestRedeem(address(this)) / 10;
         assertGt(redeemShares, 0, "incumbent must have redeemable Junior shares");
         {
             uint256 redeemId = juniorVault.requestRedeem(redeemShares, address(this), address(this));
-            assertEq(depositId, redeemId, "deposit and redeem must mature in one synchronized settlement");
+            assertEq(depositId, redeemId, "same-window deposit and redeem must share one settlement epoch");
         }
 
         _warpToEpoch(depositId);

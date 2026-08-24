@@ -110,11 +110,14 @@ contract PerpHousePoolLifecycleHandler is Test {
     function requestDeposit(
         bool isSenior,
         uint256 actorIndex,
-        uint256 amountFuzz
+        uint256 amountFuzz,
+        bool cutoffWindow
     ) external {
         TrancheVault vault = isSenior ? seniorVault : juniorVault;
         address actor = actors[actorIndex % actors.length];
+        _warpToRequestWindowSide(vault, cutoffWindow);
         _refreshMark();
+        uint256 expectedRequestId = _expectedRequestId(vault, cutoffWindow);
         uint256 maxRequest_ = vault.maxRequestDeposit(actor);
         uint256 minimum = pool.minTrancheDepositUsdc();
         if (maxRequest_ < minimum) {
@@ -126,17 +129,21 @@ contract PerpHousePoolLifecycleHandler is Test {
         usdc.mint(actor, amount);
         vm.startPrank(actor);
         usdc.approve(address(vault), amount);
-        vault.requestDeposit(amount, actor, actor);
+        uint256 requestId = vault.requestDeposit(amount, actor, actor);
         vm.stopPrank();
+        assertEq(requestId, expectedRequestId, "deposit request must use the advertised LP epoch");
     }
 
     function requestRedeem(
         bool isSenior,
         uint256 actorIndex,
-        uint256 sharesFuzz
+        uint256 sharesFuzz,
+        bool cutoffWindow
     ) external {
         TrancheVault vault = isSenior ? seniorVault : juniorVault;
         address actor = actors[actorIndex % actors.length];
+        _warpToRequestWindowSide(vault, cutoffWindow);
+        uint256 expectedRequestId = _expectedRequestId(vault, cutoffWindow);
         uint256 maxRequest_ = vault.maxRequestRedeem(actor);
         if (maxRequest_ == 0) {
             return;
@@ -146,7 +153,8 @@ contract PerpHousePoolLifecycleHandler is Test {
         uint256 lower = minimumShares != 0 && minimumShares <= maxRequest_ ? minimumShares : maxRequest_;
         uint256 shares = bound(sharesFuzz, lower, maxRequest_);
         vm.prank(actor);
-        vault.requestRedeem(shares, actor, actor);
+        uint256 requestId = vault.requestRedeem(shares, actor, actor);
+        assertEq(requestId, expectedRequestId, "redeem request must use the advertised LP epoch");
     }
 
     function settleLpEpoch() external {
@@ -294,6 +302,29 @@ contract PerpHousePoolLifecycleHandler is Test {
 
     function lastTransferSnapshot() external view returns (LastTransfer memory) {
         return lastTransfer;
+    }
+
+    function _warpToRequestWindowSide(
+        TrancheVault vault,
+        bool cutoffWindow
+    ) internal {
+        (, uint256 nextCutoffTime) = vault.getRequestEpochWindow();
+        assertGt(nextCutoffTime, block.timestamp, "advertised request cutoff must be in the future");
+        vm.warp(cutoffWindow ? nextCutoffTime : nextCutoffTime - 1);
+    }
+
+    function _expectedRequestId(
+        TrancheVault vault,
+        bool cutoffWindow
+    ) internal view returns (uint256 expectedRequestId) {
+        uint256 nextCutoffTime;
+        (expectedRequestId, nextCutoffTime) = vault.getRequestEpochWindow();
+        assertEq(
+            expectedRequestId,
+            vault.currentLpEpoch() + (cutoffWindow ? 2 : 1),
+            "request action must reach the selected side of the cutoff"
+        );
+        assertGt(nextCutoffTime, block.timestamp, "next advertised request cutoff must remain in the future");
     }
 
     function _refreshMark() internal {

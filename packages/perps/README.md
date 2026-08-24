@@ -215,6 +215,25 @@ LPs provide USDC to the `HousePool`, which is split into senior and junior ERC-4
   surcharge, while deposit activation is deferred. Requests do not lock a price or fee; settlement fixes both.
 - During `oracleFrozen`, bootstrap admin flows stay blocked: `initializeSeedPosition(...)` and `assignUnassignedAssets(...)` must wait for the oracle to become live again instead of inheriting the stale-window LP fee path.
 
+Senior and Junior deposits and redemptions all use one five-minute request cutoff. Let `t = block.timestamp`,
+`e = floor(t / 3,600)`, and `b = (e + 1) * 3,600`, the next round-hour boundary. Every request is routed as follows:
+
+```text
+requestEpoch(t) = e + 1, when t < b - 300
+requestEpoch(t) = e + 2, when t >= b - 300
+```
+
+Equality belongs to the later epoch. An otherwise-valid request included during the final five minutes does not
+revert; it rolls forward by one epoch. The numeric target is continuous across the hour boundary: for example,
+requests included from 12:55:00 through 13:54:59 all target 14:00. The returned request id and emitted event are
+authoritative, so a transaction submitted before the cutoff but included after it intentionally receives the later
+id. Existing authorization, cooldown, pause, lifecycle, size, balance, and capacity checks still apply.
+
+`TrancheVault.getRequestEpochWindow()` exposes the currently selected epoch and the next future timestamp at which
+that target changes. `PerpsPublicLens.getTrancheQueues(bool)` relays the same pair as `nextRequestEpoch` and
+`nextRequestCutoffTime`; both tranches report identical values at the same block. For every successful request, the
+target epoch start is more than 300 and at most 3,900 seconds after inclusion.
+
 LP share pricing uses one exact signed terminal-NAV snapshot for both deposits and redemptions. Each position stores
 whole 100-token lots and exact entry cost. `TerminalNavBookV2` evaluates its marked LP-side price PnL and caps a
 positive LP receivable by that trader's dedicated PnL pledge plus nettable same-account claim. Marked trader profits
@@ -241,11 +260,15 @@ Only unencumbered physical USDC can be committed to funded LP claims. A positive
 but cannot fund a withdrawal before collection. Funded assets then leave `HousePool` for vault claim escrow and
 cannot be reused by later settlements.
 
-Both vaults use the same round-hour epoch clock. `OrderRouter.settleLpEpoch(bytes[])` is the canonical permissionless
-clearing entrypoint. With open positions outside oracle-frozen mode, it validates a `PoolReconcile` Pyth basket whose
-earliest component publish time is at or after the current epoch boundary, installs that exact Engine mark, and invokes
-the Router-only HousePool callback in the same transaction. HousePool then applies one accounting snapshot in this
-order:
+Both vaults use the same round-hour epoch clock. The request cutoff changes queue membership only: during the final
+five minutes no new request can increase the epoch about to mature, although cancellations may shrink it and trading,
+claims, accounting, and oracle state remain live. No later request can add to that locked epoch after it matures; at
+the boundary, requests may instead join the new imminent epoch until its own cutoff. Settlement maturity remains
+`currentEpoch >= requestId`.
+`OrderRouter.settleLpEpoch(bytes[])` is the canonical permissionless clearing entrypoint. With open positions outside
+oracle-frozen mode, it validates a `PoolReconcile` Pyth basket whose earliest component publish time is at or after the
+current round-hour boundary, installs that exact Engine mark, and invokes the Router-only HousePool callback in the
+same transaction. HousePool then applies one accounting snapshot in this order:
 
 1. matured Senior redemption demand,
 2. matured Junior redemption demand from the remaining liquidity and covenant capacity,
@@ -309,7 +332,7 @@ finite absolute limit and a share limit below `10,000` bps. Either limit may be 
 - New Senior deposit requests may use only the smaller absolute and ratio headrooms.
 - A pending senior request reserves gross-asset headroom. Finalization revalidates the complete reservation book under
   the then-active limits; if a cap reduction or accounting change makes it invalid, affected owners may cancel after
-  epoch activation and recover their escrowed USDC rather than remain locked.
+  the request epoch matures and recover their escrowed USDC rather than remain locked.
 - Junior redemption funding preserves the configured senior share using active `E` only. It uses liquidity remaining
   after all eligible matured Senior demand has been accounted for; dormant Senior NAV is not itself a cash
   reservation. Pending Senior deposits remain refundable reservations and do not lock Junior withdrawal liquidity, so
@@ -345,12 +368,14 @@ finite absolute limit and a share limit below `10,000` bps. Either limit may be 
   cancellation, or redemption refund may target another account only if that account has no existing vault shares;
   this prevents unsolicited dust from resetting the account's whole-balance cooldown. Self-receipt is always allowed.
 - `TrancheVault.requestDeposit()` funds LP entry through pending deposit epochs; requests are funded
-  up front and reserve senior capacity when applicable. Cancellation is unconditional before the request's epoch
-  activates. At or after epoch activation it is available only when projected senior impairment blocks finalization
-  (for either tranche), or when the senior vault's aggregate reservation book no longer fits the active limits.
+  up front and reserve senior capacity when applicable. A complete pending deposit is cancellable before its request
+  epoch matures. At or after maturity, cancellation remains available only under the existing epoch rejection,
+  projected terminal-wipe, Senior-impairment, or Senior-reservation escape conditions.
 - `TrancheVault.requestRedeem()` enforces cooldown, allowance, seed-floor, and minimum-request rules. ERC-4626
   `maxWithdraw()` / `maxRedeem()` report only already-funded claim capacity; `previewWithdraw()` / `previewRedeem()`
-  revert for the asynchronous redemption flow. Use the vault's explicit estimate views for pending requests.
+  revert for the asynchronous redemption flow. Use the vault's explicit estimate views for pending requests. A
+  complete redemption request is cancellable only while it is unmatured, wholly unfunded, and outside refund state;
+  returned shares restart the receiver's existing cooldown.
 
 ### Reconcile / freshness nuance
 
@@ -439,11 +464,12 @@ The Engine exports one signed terminal price-PnL adjustment for both LP entry an
 
 This removes the deposit/withdrawal pricing asymmetry: a new depositor neither inherits old marked liabilities without
 discount nor receives credit for uncollectible trader debt.
-Ordinary LP entry always moves through pending deposit epochs: the user funds the request up front, waits at least one
-full epoch, and later claims the batch-priced shares after synchronized pool settlement. Cancellation is unconditional
-before the request's epoch activates. At or after epoch activation it is available when senior impairment blocks
-finalization or, for senior requests, when the aggregate reservation book no longer fits the active governed limits.
-This keeps request submission separate from the fresh symmetric NAV fixed at activation.
+Ordinary LP entry always moves through pending deposit epochs: the user funds the request up front and later claims
+the batch-priced shares after synchronized pool settlement. A request included one second before the cutoff waits five
+minutes and one second for its target epoch to mature; a request included at the cutoff rolls to the following epoch.
+A complete pending deposit is cancellable before its request epoch matures. At or after maturity, cancellation remains
+available only under the existing epoch rejection, projected terminal-wipe, Senior-impairment, or Senior-reservation
+escape conditions. This keeps request submission separate from the fresh symmetric NAV fixed at activation.
 
 ### Accounting domains
 
@@ -666,6 +692,7 @@ only one field must repeat the desired active values for the other five.
 | `seniorRateBps` | 800 (8% APY) | Senior target coupon rate funded from junior NAV |
 | `maxSeniorExposureUsdc` | Timelocked, finite | Absolute counted-admission limit (`E +` pending senior reservations) |
 | `maxSeniorShareBps` | Timelocked, <10,000 | Maximum counted senior admission share; active `E` also governs Junior redemption funding |
+| `LP_REQUEST_CUTOFF_DURATION` | 5 minutes | Shared deposit/redemption roll-forward cutoff before each round-hour boundary |
 | `DEPOSIT_COOLDOWN` | 1 hour | LP anti-flash cooldown |
 
 The two senior-capacity rows describe the required post-timelock operating configuration. Fresh deployments initially

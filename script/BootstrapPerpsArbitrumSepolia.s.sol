@@ -5,6 +5,7 @@ import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
+import {IAsyncTrancheVault} from "@plether/perps/interfaces/IAsyncTrancheVault.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {ITerminalNavBookV2} from "@plether/perps/interfaces/ITerminalNavBookV2.sol";
 import "forge-std/Script.sol";
@@ -27,8 +28,10 @@ interface IAsyncTrancheVaultBootstrapView {
 
     function POOL() external view returns (address);
     function IS_SENIOR() external view returns (bool);
+    function LP_REQUEST_CUTOFF_DURATION() external view returns (uint256);
     function asset() external view returns (address);
     function share() external view returns (address);
+    function getRequestEpochWindow() external view returns (uint256 nextRequestEpoch, uint256 nextRequestCutoffTime);
     function vault(
         address asset_
     ) external view returns (address);
@@ -173,12 +176,39 @@ contract BootstrapPerpsArbitrumSepolia is Script {
             "Invalid LP epoch start"
         );
 
+        uint256 imminentEpoch = currentEpoch + 1;
+        require(
+            housePool.lpEpochStart(imminentEpoch) == imminentEpoch * housePool.LP_EPOCH_DURATION(),
+            "Invalid imminent LP epoch start"
+        );
+
         address seniorVault = housePool.seniorVault();
         address juniorVault = housePool.juniorVault();
         require(seniorVault != address(0) && juniorVault != address(0), "HousePool vault pair is incomplete");
         require(seniorVault != juniorVault, "HousePool vault pair is duplicated");
-        _verifyAsyncVault(seniorVault, address(housePool), usdc, true);
-        _verifyAsyncVault(juniorVault, address(housePool), usdc, false);
+        (uint256 seniorNextRequestEpoch, uint256 seniorNextRequestCutoffTime) =
+            _verifyAsyncVault(seniorVault, address(housePool), usdc, true);
+        (uint256 juniorNextRequestEpoch, uint256 juniorNextRequestCutoffTime) =
+            _verifyAsyncVault(juniorVault, address(housePool), usdc, false);
+        require(seniorNextRequestEpoch == juniorNextRequestEpoch, "TrancheVault request epoch mismatch");
+        require(seniorNextRequestCutoffTime == juniorNextRequestCutoffTime, "TrancheVault request cutoff mismatch");
+
+        uint256 cutoffDuration = 5 minutes;
+        uint256 imminentCutoffTime = housePool.lpEpochStart(imminentEpoch) - cutoffDuration;
+        uint256 expectedNextRequestEpoch = block.timestamp < imminentCutoffTime ? imminentEpoch : imminentEpoch + 1;
+        uint256 expectedNextRequestCutoffTime = housePool.lpEpochStart(expectedNextRequestEpoch) - cutoffDuration;
+        require(seniorNextRequestEpoch == expectedNextRequestEpoch, "Unexpected request epoch");
+        require(seniorNextRequestCutoffTime == expectedNextRequestCutoffTime, "Unexpected request cutoff");
+        require(seniorNextRequestCutoffTime > block.timestamp, "Request cutoff is not future");
+
+        uint256 targetEpochStart = housePool.lpEpochStart(seniorNextRequestEpoch);
+        require(
+            targetEpochStart == seniorNextRequestEpoch * housePool.LP_EPOCH_DURATION(),
+            "Invalid request target epoch start"
+        );
+        uint256 targetDelay = targetEpochStart - block.timestamp;
+        require(targetDelay > cutoffDuration, "Request target is inside cutoff");
+        require(targetDelay <= housePool.LP_EPOCH_DURATION() + cutoffDuration, "Request target exceeds routing window");
     }
 
     function _verifyAsyncVault(
@@ -186,10 +216,11 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         address housePool,
         address usdc,
         bool isSenior
-    ) internal view {
+    ) internal view returns (uint256 nextRequestEpoch, uint256 nextRequestCutoffTime) {
         IAsyncTrancheVaultBootstrapView candidate = IAsyncTrancheVaultBootstrapView(vault);
         require(candidate.POOL() == housePool, "TrancheVault pool mismatch");
         require(candidate.IS_SENIOR() == isSenior, "TrancheVault side mismatch");
+        require(candidate.LP_REQUEST_CUTOFF_DURATION() == 5 minutes, "Unexpected LP request cutoff duration");
         require(candidate.asset() == usdc, "TrancheVault asset mismatch");
         require(candidate.share() == vault, "TrancheVault share mismatch");
         require(candidate.supportsInterface(ERC165_INTERFACE_ID), "TrancheVault missing ERC165");
@@ -198,8 +229,13 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         require(candidate.supportsInterface(ERC7575_SHARE_INTERFACE_ID), "TrancheVault missing ERC7575 share lookup");
         require(candidate.supportsInterface(ERC7540_DEPOSIT_INTERFACE_ID), "TrancheVault missing async deposit");
         require(candidate.supportsInterface(ERC7540_REDEEM_INTERFACE_ID), "TrancheVault missing async redeem");
+        require(
+            candidate.supportsInterface(type(IAsyncTrancheVault).interfaceId),
+            "TrancheVault missing custom async interface"
+        );
         require(!candidate.supportsInterface(0xffffffff), "TrancheVault accepts invalid ERC165 id");
         require(candidate.vault(usdc) == vault, "TrancheVault share lookup mismatch");
+        (nextRequestEpoch, nextRequestCutoffTime) = candidate.getRequestEpochWindow();
     }
 
     /// @dev Stages finite senior limits on the first run, then finalizes the exact proposal on a later run after the

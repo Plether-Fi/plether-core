@@ -199,7 +199,7 @@ contract GasProfileTest is Test {
     }
 
     // ==========================================
-    // GAS PROFILING — 20 operations
+    // GAS PROFILING — 20 operation families
     // ==========================================
 
     // --- 1. commitOrder (open) ---
@@ -427,58 +427,40 @@ contract GasProfileTest is Test {
         emit log_named_uint("12_clearinghouse_withdraw", gas);
     }
 
-    // --- 13. juniorVault.requestDeposit ---
-    function test_gas_13_juniorVault_requestDeposit() public {
-        _mintUsdc(lp2, 100_000e6);
-        vm.startPrank(lp2);
-        IERC20(usdc).approve(address(juniorVault), type(uint256).max);
-
-        uint256 g0 = gasleft();
-        juniorVault.requestDeposit(100_000e6, lp2, lp2);
-        uint256 gas = g0 - gasleft();
-        vm.stopPrank();
-        emit log_named_uint("13_juniorVault_requestDeposit", gas);
+    // --- 13a/b. juniorVault.requestDeposit on both sides of the request cutoff ---
+    function test_gas_13a_juniorVault_requestDeposit_beforeCutoff() public {
+        _profileRequestDeposit(juniorVault, 100_000e6, false, "13a_juniorVault_requestDeposit_before_cutoff");
     }
 
-    // --- 14. juniorVault.requestRedeem ---
-    function test_gas_14_juniorVault_requestRedeem() public {
-        uint256 fundedShares = _fundTrancheAsync(juniorVault, lp2, 100_000e6);
-        vm.warp(block.timestamp + 2 hours);
-        uint256 requestedShares = juniorVault.estimateWithdrawShares(50_000e6);
-        assertLe(requestedShares, fundedShares, "junior redeem setup exceeds funded shares");
-
-        vm.prank(lp2);
-        uint256 g0 = gasleft();
-        juniorVault.requestRedeem(requestedShares, lp2, lp2);
-        uint256 gas = g0 - gasleft();
-        emit log_named_uint("14_juniorVault_requestRedeem", gas);
+    function test_gas_13b_juniorVault_requestDeposit_atCutoff() public {
+        _profileRequestDeposit(juniorVault, 100_000e6, true, "13b_juniorVault_requestDeposit_at_cutoff");
     }
 
-    // --- 15. seniorVault.requestDeposit ---
-    function test_gas_15_seniorVault_requestDeposit() public {
-        _mintUsdc(lp2, 500_000e6);
-        vm.startPrank(lp2);
-        IERC20(usdc).approve(address(seniorVault), type(uint256).max);
-
-        uint256 g0 = gasleft();
-        seniorVault.requestDeposit(500_000e6, lp2, lp2);
-        uint256 gas = g0 - gasleft();
-        vm.stopPrank();
-        emit log_named_uint("15_seniorVault_requestDeposit", gas);
+    // --- 14a/b. juniorVault.requestRedeem on both sides of the request cutoff ---
+    function test_gas_14a_juniorVault_requestRedeem_beforeCutoff() public {
+        _profileRequestRedeem(juniorVault, 100_000e6, 50_000e6, false, "14a_juniorVault_requestRedeem_before_cutoff");
     }
 
-    // --- 16. seniorVault.requestRedeem ---
-    function test_gas_16_seniorVault_requestRedeem() public {
-        uint256 fundedShares = _fundTrancheAsync(seniorVault, lp2, 500_000e6);
-        vm.warp(block.timestamp + 2 hours);
-        uint256 requestedShares = seniorVault.estimateWithdrawShares(200_000e6);
-        assertLe(requestedShares, fundedShares, "senior redeem setup exceeds funded shares");
+    function test_gas_14b_juniorVault_requestRedeem_atCutoff() public {
+        _profileRequestRedeem(juniorVault, 100_000e6, 50_000e6, true, "14b_juniorVault_requestRedeem_at_cutoff");
+    }
 
-        vm.prank(lp2);
-        uint256 g0 = gasleft();
-        seniorVault.requestRedeem(requestedShares, lp2, lp2);
-        uint256 gas = g0 - gasleft();
-        emit log_named_uint("16_seniorVault_requestRedeem", gas);
+    // --- 15a/b. seniorVault.requestDeposit on both sides of the request cutoff ---
+    function test_gas_15a_seniorVault_requestDeposit_beforeCutoff() public {
+        _profileRequestDeposit(seniorVault, 500_000e6, false, "15a_seniorVault_requestDeposit_before_cutoff");
+    }
+
+    function test_gas_15b_seniorVault_requestDeposit_atCutoff() public {
+        _profileRequestDeposit(seniorVault, 500_000e6, true, "15b_seniorVault_requestDeposit_at_cutoff");
+    }
+
+    // --- 16a/b. seniorVault.requestRedeem on both sides of the request cutoff ---
+    function test_gas_16a_seniorVault_requestRedeem_beforeCutoff() public {
+        _profileRequestRedeem(seniorVault, 500_000e6, 200_000e6, false, "16a_seniorVault_requestRedeem_before_cutoff");
+    }
+
+    function test_gas_16b_seniorVault_requestRedeem_atCutoff() public {
+        _profileRequestRedeem(seniorVault, 500_000e6, 200_000e6, true, "16b_seniorVault_requestRedeem_at_cutoff");
     }
 
     // --- 17. previewClose ---
@@ -573,6 +555,56 @@ contract GasProfileTest is Test {
     // ==========================================
     // HELPERS
     // ==========================================
+
+    function _profileRequestDeposit(
+        TrancheVault vault,
+        uint256 assets,
+        bool cutoffWindow,
+        string memory label
+    ) internal {
+        _mintUsdc(lp2, assets);
+        vm.prank(lp2);
+        IERC20(usdc).approve(address(vault), type(uint256).max);
+
+        _warpToRequestWindowSide(vault, cutoffWindow);
+        _refreshMark();
+
+        vm.prank(lp2);
+        uint256 g0 = gasleft();
+        vault.requestDeposit(assets, lp2, lp2);
+        uint256 gas = g0 - gasleft();
+        emit log_named_uint(label, gas);
+    }
+
+    function _profileRequestRedeem(
+        TrancheVault vault,
+        uint256 fundingAssets,
+        uint256 redeemAssets,
+        bool cutoffWindow,
+        string memory label
+    ) internal {
+        uint256 fundedShares = _fundTrancheAsync(vault, lp2, fundingAssets);
+        vm.warp(block.timestamp + vault.DEPOSIT_COOLDOWN());
+        _warpToRequestWindowSide(vault, cutoffWindow);
+
+        uint256 requestedShares = vault.estimateWithdrawShares(redeemAssets);
+        assertLe(requestedShares, fundedShares, "redeem setup exceeds funded shares");
+
+        vm.prank(lp2);
+        uint256 g0 = gasleft();
+        vault.requestRedeem(requestedShares, lp2, lp2);
+        uint256 gas = g0 - gasleft();
+        emit log_named_uint(label, gas);
+    }
+
+    function _warpToRequestWindowSide(
+        TrancheVault vault,
+        bool cutoffWindow
+    ) internal {
+        (, uint256 nextCutoffTime) = vault.getRequestEpochWindow();
+        assertGt(nextCutoffTime, block.timestamp, "request cutoff must be in the future");
+        vm.warp(cutoffWindow ? nextCutoffTime : nextCutoffTime - 1);
+    }
 
     function _fundTrancheAsync(
         TrancheVault vault,

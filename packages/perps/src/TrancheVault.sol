@@ -20,9 +20,7 @@ contract TrancheVault is ERC4626 {
     uint256 internal constant VIRTUAL_SHARES = 1000;
 
     uint256 public constant DEPOSIT_COOLDOWN = 1 hours;
-    uint256 public constant DEPOSIT_EPOCH_DURATION = 1 hours;
-    uint256 public constant DEPOSIT_ACTIVATION_EPOCH_DELAY = 2;
-    uint256 public constant REDEEM_ACTIVATION_EPOCH_DELAY = 1;
+    uint256 public constant LP_REQUEST_CUTOFF_DURATION = 5 minutes;
 
     bytes4 internal constant INTERFACE_ID_ERC165 = 0x01ffc9a7;
     bytes4 internal constant INTERFACE_ID_ERC7575 = 0x2f0a18c5;
@@ -280,6 +278,23 @@ contract TrancheVault is ERC4626 {
         return POOL.lpEpochStart(epochId);
     }
 
+    function getRequestEpochWindow() external view returns (uint256 nextRequestEpoch, uint256 nextRequestCutoffTime) {
+        return _requestEpochWindow();
+    }
+
+    function _requestEpochWindow() private view returns (uint256 nextRequestEpoch, uint256 nextRequestCutoffTime) {
+        uint256 currentEpoch = currentLpEpoch();
+        uint256 imminentEpoch = currentEpoch + 1;
+        uint256 imminentCutoff = POOL.lpEpochStart(imminentEpoch) - LP_REQUEST_CUTOFF_DURATION;
+
+        if (block.timestamp < imminentCutoff) {
+            return (imminentEpoch, imminentCutoff);
+        }
+
+        nextRequestEpoch = imminentEpoch + 1;
+        nextRequestCutoffTime = POOL.lpEpochStart(nextRequestEpoch) - LP_REQUEST_CUTOFF_DURATION;
+    }
+
     // ---------------------------------------------------------------------
     // Requests and status views
     // ---------------------------------------------------------------------
@@ -310,7 +325,7 @@ contract TrancheVault is ERC4626 {
         }
         IERC20(asset()).safeTransferFrom(owner, address(this), assets);
 
-        requestId = currentLpEpoch() + DEPOSIT_ACTIVATION_EPOCH_DELAY;
+        (requestId,) = _requestEpochWindow();
         DepositEpoch storage epoch = depositEpochs[requestId];
         if (!depositEpochQueueState[requestId].queued) {
             _appendDepositEpoch(requestId);
@@ -354,7 +369,7 @@ contract TrancheVault is ERC4626 {
         }
         _transfer(owner, address(this), shares);
 
-        requestId = currentLpEpoch() + REDEEM_ACTIVATION_EPOCH_DELAY;
+        (requestId,) = _requestEpochWindow();
         RedeemEpoch storage epoch = redeemEpochs[requestId];
         if (!redeemEpochQueueState[requestId].queued) {
             _appendRedeemEpoch(requestId);

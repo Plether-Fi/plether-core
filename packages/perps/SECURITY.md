@@ -160,6 +160,8 @@ These are the highest-value properties an auditor should expect to hold.
 | High-water-mark protection | Senior impairment must be restored before junior extracts surplus |
 | Bounded new senior exposure | Counted admission exposure (`E + R`) cannot exceed the smaller absolute and senior-share headrooms |
 | Junior covenant | Junior redemption funding cannot leave active protected exposure (`E`, excluding `R`) above the configured share of Senior-plus-Junior claimant capital |
+| Shared cutoff routing | Both tranches and both request directions use the same five-minute cutoff; exact equality rolls to the later epoch without a cutoff-specific revert |
+| Locked-epoch additions | For boundary `b`, no request at or after `b - 300` may increase locked epoch `e + 1`, including after it matures; cancellation may still shrink it, while requests after `b` may join the new imminent numeric epoch `e + 2` until its own cutoff |
 | Shared accounting inputs | Reconcile, synchronized redemption funding, deposit finalization, and LP status views consume the same canonical engine snapshot |
 
 ### Coverage map
@@ -176,6 +178,7 @@ The tables above describe the intended safety properties. The suites below are t
 | Global FIFO / binding intents / bounded cleanup | `packages/perps/test/perps/OrderRouter.t.sol`, `packages/perps/test/perps/invariant/PerpAccountingInvariant.t.sol` |
 | Bounty conservation / reservation source of truth | `packages/perps/test/perps/OrderRouter.t.sol`, `packages/perps/test/perps/invariant/PerpAccountingInvariant.t.sol`, `packages/perps/test/perps/invariant/PerpEconomicConservationInvariant.t.sol` |
 | Canonical asset boundary / symmetric terminal NAV / high-water-mark protection | `packages/perps/test/perps/PerpInvariant.t.sol`, `packages/perps/test/perps/HousePool.t.sol`, `packages/perps/test/perps/invariant/PerpHousePoolLifecycleInvariant.t.sol`, `packages/perps/test/perps/TerminalNavBookV2.t.sol` |
+| Shared request cutoff / locked-epoch additions | `packages/perps/test/perps/LpRequestCutoff.t.sol`, `packages/perps/test/perps/invariant/GovernedSeniorCapacityInvariant.t.sol` |
 | Oracle freshness / FAD boundaries / ETH refund custody | `packages/perps/test/perps/OrderRouter.t.sol`, `packages/perps/test/perps/invariant/PerpOracleBoundaryInvariant.t.sol`, `packages/perps/test/perps/invariant/PerpOraclePathInvariant.t.sol` |
 | Fee custody / protocol accounting snapshots | `packages/perps/test/perps/invariant/PerpFeeFlowInvariant.t.sol`, `packages/perps/test/perps/PerpsReadParity.t.sol` |
 
@@ -351,11 +354,12 @@ Security consequences:
   account mutation is in progress. `HousePool` independently rejects or defers LP actions under its configured mark-age
   and oracle-frozen policy.
 
-Ordinary LP entry remains asynchronous: assets are funded into request escrow, cancellation is unconditional before
-activation and reopens after activation when the request cannot be finalized under the documented gates, and shares
-are minted only after synchronized `HousePool` settlement fixes the batch price. ERC-4626 `deposit` and `mint` only
-claim already activated shares. During a frozen entry state the request remains deferred; redemptions can still use
-the separate conservative cash-reserve path.
+Ordinary LP entry remains asynchronous: assets are funded into request escrow, a complete pending deposit is
+cancellable before maturity, and post-maturity cancellation remains available only under the documented
+epoch rejection, projected terminal-wipe, Senior-impairment, or Senior-reservation escape conditions. Shares are
+minted only after synchronized `HousePool` settlement fixes the batch price. ERC-4626 `deposit` and `mint` only claim
+already activated shares. During a frozen entry state the request remains deferred; redemptions can still use the
+separate conservative cash-reserve path.
 
 Atomic Engine-to-book synchronization is a critical trust boundary. Any path that changes position lots, exact entry
 cost, side, PnL pledge, or same-account claim must finish by installing the matching curve or removing it. The
@@ -446,6 +450,30 @@ limit below 100%, both tranche seeds exist within those limits, and trading is e
 
 This prevents partially initialized or uncapped live state and ambiguous ownership of early revenue flows.
 
+### LP request cutoff and monitoring boundary
+
+For `e = floor(block.timestamp / 3,600)` and next round-hour boundary `b = (e + 1) * 3,600`, every Senior deposit,
+Junior deposit, Senior redemption, and Junior redemption targets `e + 1` before `b - 300` and `e + 2` at or after
+`b - 300`. Equality deliberately belongs to the later epoch. The cutoff's incremental effect on an otherwise-valid
+request is a one-epoch delay, not asset loss or a new revert; ordinary request gates remain active. Sequencer
+inclusion time is authoritative, so a pending transaction may land on either side.
+
+This creates a five-minute **maximum-membership** quiet period for the epoch about to mature. It is not an immutable
+settlement snapshot:
+
+- eligible cancellations can reduce deposit or redemption totals in the locked epoch,
+- trading, closes, liquidations, claims, carry, and pool accounting can change NAV,
+- governance configuration may change if an already-matured proposal is finalized,
+- oracle state and confidence can change, and
+- cancellation in one tranche or direction can change capacity available to later settlement phases.
+
+Monitoring must therefore simulate current state and treat cutoff-time request totals as upper bounds. In particular,
+the conservative case assumes all redemptions remain and no helpful deposits activate. Cancelling Senior redemptions
+may expose more Junior funding, while cancelling Junior deposits may prevent a Senior deposit from fitting. Indexing,
+alerting, sequencer publication, and transaction inclusion also consume part of the nominal five minutes, so the
+operational reaction window is shorter. Exact settlement binding belongs to a separate batch/config-digest design;
+this cutoff adds no signature, challenge period, settlement hold, or trading freeze.
+
 ### Freshness-gated LP actions
 
 When marks are stale and freshness is required:
@@ -486,7 +514,7 @@ term prevents an impaired principal balance from falsely reopening capacity whil
 
 Senior deposit reservations are provisional. They consume quoted headroom when requested, but the whole outstanding
 reservation book is checked again at finalization. If a timelocked cap reduction or later accounting change makes the
-book invalid, finalization remains blocked and post-activation cancellation is unlocked so depositors can recover the
+book invalid, finalization remains blocked and post-maturity cancellation is unlocked so depositors can recover the
 escrowed USDC. Junior redemption funding does not lock against `R`, so a permitted fill can also invalidate the
 provisional book and make it refundable. Integrators must not present a request-time quote as guaranteed finalization.
 

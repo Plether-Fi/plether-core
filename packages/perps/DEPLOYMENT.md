@@ -23,11 +23,14 @@ The bootstrap script handles operator actions after deploy:
 - minting mock USDC to test users
 - activating trading
 
-LP deposits and redemptions share the vaults' deterministic round-hour epoch clock. After bootstrap, any account may
-clear matured epochs through `OrderRouter.settleLpEpoch(bytes[])`; no privileged keeper role is required. Outside
-oracle-frozen mode, live open-position settlement requires a valid `PoolReconcile` Pyth basket published at or after
-the epoch boundary. Each call examines at most 16 nonempty epochs in each tranche phase and must be repeated with a
-freshly validated update when older backlog remains. A no-progress or oracle-rejected call retains no Pyth, Engine,
+LP deposits and redemptions share the vaults' deterministic round-hour epoch clock and fixed 300-second request
+cutoff. Before each cutoff they target the next epoch; during the final five minutes, beginning at exact cutoff
+equality, they remain valid but target the following epoch. The numeric target does not change at the intervening
+round-hour boundary. After bootstrap, any account may clear matured epochs through
+`OrderRouter.settleLpEpoch(bytes[])`; no privileged keeper role is required. Outside oracle-frozen mode, live
+open-position settlement requires a valid `PoolReconcile` Pyth basket published at or after the round-hour boundary,
+not the request cutoff. Each call examines at most 16 nonempty epochs in each tranche phase and must be repeated with
+a freshly validated update when older backlog remains. A no-progress or oracle-rejected call retains no Pyth, Engine,
 pool, or vault side effect.
 
 ## Deployment Shape
@@ -67,13 +70,18 @@ Important:
   zero book version/totals before accepting it once.
 - Trading does not go live until a finite capacity configuration completes its 48-hour timelock, both seed positions
   exist within those limits, and `activateTrading()` is called.
-- Both configured vaults must report the same pool binding, and the pool must expose the expected shared epoch clock
-  and per-phase bound. Deployment verification must reject a mixed old/new vault pair because direct legacy
-  finalization would bypass synchronized Senior/Junior ordering.
+- Both configured vaults must report the same pool binding and fixed `LP_REQUEST_CUTOFF_DURATION` of `300` seconds.
+  At the same block they must return identical `(nextRequestEpoch, nextRequestCutoffTime)` values from
+  `getRequestEpochWindow()`, consistent with the pool's round-hour clock; the cutoff timestamp must be future.
+  The pool must also expose the expected shared epoch clock and per-phase bound. Deployment verification must reject a
+  mixed old/new vault pair because direct legacy finalization would bypass synchronized Senior/Junior ordering.
 - Deploy and bootstrap verification require each vault to report itself from `share()`, map its configured asset back
   to itself through the ERC-7575 share lookup, and advertise ERC-165 plus the ERC-7540 operator (`0xe3bc4e65`),
   async-deposit (`0xce3bbe50`), async-redeem (`0x620ee8e4`), ERC-7575 vault (`0x2f0a18c5`), and ERC-7575 share-token
-  (`0xf815c03d`) interface ids.
+  (`0xf815c03d`) interface ids. The added custom timing view changes the custom `IAsyncTrancheVault` interface id but
+  does not change these standard ids. Both deploy and bootstrap verification must assert
+  `supportsInterface(type(IAsyncTrancheVault).interfaceId)` for the rebuilt custom interface; regenerate the custom
+  vault and lens ABIs for frontend, keeper, and indexer use.
 
 ## Oracle Configuration
 
@@ -293,6 +301,19 @@ This is useful if the first bootstrap attempt completes only partially.
 8. Start integration testing against `PerpsPublicLens`, `MarginClearinghouse`, `OrderRouter`, and `HousePool`.
 9. Submit deposit and redemption requests on both vaults, advance to a matured epoch, fetch a post-boundary Hermes
    update, call `OrderRouter.settleLpEpoch(bytes[])`, and verify that funded claims can be pulled independently.
+
+Frontend and keeper integrations should read `TrancheVault.getRequestEpochWindow()` or the selected
+`PerpsPublicLens.getTrancheQueues(bool)` response immediately before constructing timing-sensitive UI or preflight
+state. `nextRequestCutoffTime` is the next future timestamp at which the advertised target changes; derive the active
+final-five-minute state as `nextRequestEpoch > currentEpoch + 1`. Do not cache a permanently active state across the
+round-hour boundary. Senior and Junior responses must match at the same block.
+
+The included transaction, not its submission time, determines the request id. A transaction pending across the exact
+cutoff intentionally rolls forward, so integrations must index the returned id or emitted request event rather than
+predicting membership from wall-clock submission time. Keepers may use the five-minute interval for simulation and
+alerting, but must treat the locked epoch totals as upper bounds because cancellations and all non-request protocol
+state remain live. Oracle payload selection and settlement eligibility continue to use the round-hour maturity
+boundary.
 
 For a keeper broadcast, ABI-encode the Hermes payload as `bytes[]`, set `PERPS_ORDER_ROUTER`, `KEEPER_PRIVATE_KEY`,
 and `PYTH_UPDATE_DATA`, then run:

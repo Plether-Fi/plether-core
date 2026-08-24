@@ -31,6 +31,16 @@ Do not use the wide clearinghouse reservation API or detailed accounting lenses 
   only to claim an activated request.
 - LP exits are asynchronous. A holder calls `requestRedeem(shares, controller, owner)`; funded requests are exposed by
   `pendingRedeemRequest` / `claimableRedeemRequest` and claimed through ERC-4626 `redeem` or `withdraw`.
+- Canonical request timing: call `TrancheVault.getRequestEpochWindow()` for
+  `(nextRequestEpoch, nextRequestCutoffTime)`. `PerpsPublicLens.getTrancheQueues(bool)` relays the same pair in
+  `TrancheQueueView`; Senior and Junior values must match at the same block. `nextRequestCutoffTime` is always the next
+  future timestamp at which the advertised target changes. Derive the final-five-minute state as
+  `nextRequestEpoch > currentEpoch + 1`; do not persist a boolean across the round-hour boundary. The existing
+  `cutoffEpoch` field remains the latest epoch eligible for settlement now and is not the request cutoff.
+- Every Senior/Junior deposit/redemption uses the same rule: with `e = floor(block.timestamp / 3,600)` and
+  `b = (e + 1) * 3,600`, target `e + 1` before `b - 300` and `e + 2` at or after `b - 300`. Exact equality rolls
+  forward without a cutoff-specific revert. The successful return value and event are authoritative when inclusion
+  crosses the cutoff.
 - A share-delivering claim, redemption cancellation, or redemption refund may target the controller or an account with
   no existing vault shares. This prevents unsolicited dust from resetting another holder's whole-balance cooldown;
   `maxDeposit(controller)` and `maxMint(controller)` remain receiver-independent controller limits.
@@ -51,8 +61,8 @@ Use these interfaces:
 - `IERC7540` and `IERC7575` for standard-compatible integrations
 
 `IPerpsLPActions` describes configured-vault-to-`HousePool` mutation hooks. It is not a direct user surface. Senior
-reservation/release hooks authorize only the configured vaults. Epoch withdrawal funding and delayed-deposit
-activation are coordinated by the Router's atomic keeper entrypoint. Treat bootstrap,
+reservation/release hooks authorize only the configured vaults. Synchronized deposit activation and redemption
+funding are coordinated by the Router's atomic keeper entrypoint. Treat bootstrap,
 seed-lifecycle, and other tranche setup mechanics as admin/setup concerns rather than the standard LP surface.
 
 ## Keepers

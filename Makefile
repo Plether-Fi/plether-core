@@ -29,7 +29,7 @@ test-integration:
 
 coverage-spot coverage-options: COVERAGE_FLAGS := --ir-minimum
 coverage-spot coverage-options: COVERAGE_TEST_FLAGS := --no-match-test 'testFuzz_|invariant_'
-coverage-perps: COVERAGE_TEST_FLAGS := --no-match-test 'testFuzz_|invariant_|test_H01_UpdateMarkUsesPublishTime|test_GetTraderAccount_Withdrawable(Decreases|Drops)'
+coverage-perps: COVERAGE_TEST_FLAGS := --no-match-test 'testFuzz_|invariant_|test_H01_UpdateMarkUsesPublishTime|test_GetTraderAccount_Withdrawable(Decreases|Drops)|test_AtomicLpEpoch_RuntimeFitsEip170|test_Batch_OrderRouterRuntimeFitsEip170'
 
 coverage-spot coverage-options:
 	FOUNDRY_SRC=packages/$(@:coverage-%=%)/src \

@@ -111,6 +111,8 @@ library PerpsViewTypes {
     /// @param vault Configured Senior or Junior tranche vault.
     /// @param currentEpoch Current shared HousePool LP epoch.
     /// @param cutoffEpoch Latest epoch eligible for the next settlement call.
+    /// @param nextRequestEpoch Epoch currently targeted by new deposit and redemption requests.
+    /// @param nextRequestCutoffTime Future Unix timestamp when `nextRequestEpoch` will next roll forward.
     /// @param depositHeadEpoch Oldest matured deposit epoch, or zero when none is visible.
     /// @param depositHeadAssets Assets in the matured deposit head, with 6-decimal USDC units.
     /// @param redeemHeadEpoch Oldest matured redemption epoch, or zero when none is visible.
@@ -123,6 +125,8 @@ library PerpsViewTypes {
         address vault;
         uint256 currentEpoch;
         uint256 cutoffEpoch;
+        uint256 nextRequestEpoch;
+        uint256 nextRequestCutoffTime;
         uint256 depositHeadEpoch;
         uint256 depositHeadAssets;
         uint256 redeemHeadEpoch;
