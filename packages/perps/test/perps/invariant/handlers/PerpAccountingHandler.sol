@@ -205,7 +205,7 @@ contract PerpAccountingHandler is Test {
 
         address account = _account(actor);
         uint256 freeSettlement = _freeSettlementUsdc(account);
-        if (freeSettlement == 0) {
+        if (freeSettlement < 1e6) {
             return;
         }
 
@@ -319,6 +319,40 @@ contract PerpAccountingHandler is Test {
 
         vm.prank(actor);
         try router.commitOrder(side, size, 0, targetPrice, true) {
+            _registerPendingOrder(orderId, account, 0);
+        } catch {}
+    }
+
+    /// @notice Commits a strict whole-lot reduction of the account's current position.
+    /// @dev Requiring an empty account queue makes successful execution exercise residual exact-basis repartitioning.
+    function commitPartialCloseOrder(
+        uint256 actorIndex,
+        uint256 closeLotsFuzz,
+        uint256 targetPriceFuzz
+    ) external {
+        _clearLastPriceLossTraderClaimEvent();
+        _clearTerminalReservationSet();
+        address actor = actors[actorIndex % actors.length];
+        if (_isLiquidated(actor)) {
+            return;
+        }
+
+        address account = _account(actor);
+        if (router.pendingOrderCounts(account) != 0) {
+            return;
+        }
+        (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(account);
+        uint256 positionLots = size / CfdTypes.SIZE_QUANTUM;
+        if (positionLots < 2) {
+            return;
+        }
+
+        uint256 closeLots = bound(closeLotsFuzz, 1, positionLots - 1);
+        uint256 targetPrice = bound(targetPriceFuzz, 0.5e8, 1.5e8);
+        uint64 orderId = router.nextCommitId();
+
+        vm.prank(actor);
+        try router.commitOrder(side, closeLots * CfdTypes.SIZE_QUANTUM, 0, targetPrice, true) {
             _registerPendingOrder(orderId, account, 0);
         } catch {}
     }
@@ -635,6 +669,22 @@ contract PerpAccountingHandler is Test {
         _clearLastPriceLossTraderClaimEvent();
         _clearTerminalReservationSet();
         housePool.setAssets(bound(floorFuzz, 0, 100e6));
+    }
+
+    /// @notice Restores enough mock HousePool cash to cover claims and the larger directional liability.
+    /// @dev Test-only recovery action that keeps long stateful campaigns from becoming permanently degraded.
+    function restoreSolvencyAndClearDegradedMode() external {
+        _clearLastPriceLossTraderClaimEvent();
+        _clearTerminalReservationSet();
+        (uint256 bullMaxProfitUsdc,,,) = engine.sides(uint256(CfdTypes.Side.BULL));
+        (uint256 bearMaxProfitUsdc,,,) = engine.sides(uint256(CfdTypes.Side.BEAR));
+        uint256 maxLiabilityUsdc = bullMaxProfitUsdc > bearMaxProfitUsdc ? bullMaxProfitUsdc : bearMaxProfitUsdc;
+        housePool.setAssets(engine.totalTraderClaimBalanceUsdc() + maxLiabilityUsdc + 1e6);
+
+        if (engine.degradedMode()) {
+            vm.prank(engine.owner());
+            engine.clearDegradedMode();
+        }
     }
 
     function lastPriceLossTraderClaimEventSnapshot() external view returns (PriceLossTraderClaimEvent memory) {
