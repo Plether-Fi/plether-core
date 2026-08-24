@@ -47,9 +47,10 @@ Do not use the wide clearinghouse reservation API or detailed accounting lenses 
 - Epoch clearing is permissionless through `OrderRouter.settleLpEpoch(bytes[])`. With live open positions, the Router
   validates one post-round-hour `PoolReconcile` mark, installs it in the Engine, and reaches the Router-only HousePool
   callback in the same rollback frame. HousePool reconciles once, processes matured Senior withdrawal demand before
-  Junior demand, then finalizes Junior deposits before Senior deposits. If bounded Senior processing stops with an
-  eligible head remaining, the call must stop before Junior. A pass that advances no queue item also rolls back the
-  Pyth and Engine updates. Direct cached-mark settlement is only a zero-position or oracle-frozen fallback.
+  Junior demand, rechecks the live deposit-entry gate after redemption funding, then finalizes Junior deposits before
+  Senior deposits. If bounded Senior processing stops with an eligible head remaining, the call must stop before
+  Junior. A pass that advances no queue item also rolls back the Pyth and Engine updates. Direct cached-mark settlement
+  is only a zero-position or oracle-frozen fallback.
 - Compact reads: `PerpsPublicLens`
 - Capacity-specific reads: `HousePool.getSeniorDepositCapacity()`, `reservedSeniorDepositAssetsUsdc()`, and
   `areSeniorDepositReservationsWithinLimits()`; these intentionally are not added to the compact liquidity lens
@@ -71,7 +72,13 @@ seed-lifecycle, and other tranche setup mechanics as admin/setup concerns rather
 - Batch execution: `OrderRouter.executeOrderBatch(uint64,bytes[])`
 - Liquidation: `OrderRouter.executeLiquidation(address,bytes[])`
 - Batch liquidation: `OrderRouter.executeLiquidationBatch(address[],bytes[])`
-- LP epoch clearing: `OrderRouter.settleLpEpoch(bytes[])`
+- LP epoch clearing: follow `SettlementMonitorLens.requiredExecutionPath`; use direct
+  `HousePool.settleLpEpoch(uint256,uint256)` for `CachedMark` and `OrderRouter.settleLpEpoch(bytes[])` for
+  `AtomicOracleRefresh`
+- LP epoch preflight and health: `SettlementMonitorLens`; select the epoch to observe explicitly, remember that the
+  protocol still settles eligible FIFO heads, and simulate the exact selected direct-Pool or Router calldata before
+  broadcast. The atomic route additionally requires the exact Pyth payload and fee. Its constructor-created
+  `SettlementMonitorLensSidecar` is monitor-bound implementation code and is not a public keeper entrypoint.
 
 Use this interface:
 
@@ -80,12 +87,29 @@ Use this interface:
 ## Protocol / Status Readers
 
 - Compact protocol status and LP/trader views: `PerpsPublicLens`
+- Settlement operations and security monitoring: `SettlementMonitorLens`. Its route, oracle, queue, and invariant
+  observations are advisory and fail-soft; they do not authorize settlement or replace an `eth_call` of
+  the exact route-specific settlement transaction.
+  - `getSettlementStatus(uint256 observedEpoch)`
+  - `getSettlementHealth()`
+  - `getPoolReconcileOracleStatus()`
+  - `getSettlementObservation(uint256 observedEpoch)`
+  - `observableConfigDigest()`
+
+  `getSettlementStatus(...)` exposes `executionPathDependencyMask` for failures that prevent route selection and a
+  broader `dependencyFailureMask`. Its Senior deposit-deferral mask describes pending activation and reservation-limit
+  state, not new-request admission capacity. Use status for routine polling. Composite observations are checkpoint and
+  alert-investigation reads (roughly 6 KB returned and about 0.8–1.3 million representative `eth_call` gas); they
+  expose `observationComplete` and `completeObservationDigest`. Completeness requires every Oracle dependency read,
+  including the updated current-feed ABI, even for cached/no-work routing, but requires Oracle policy validity only on
+  the atomic-refresh route. The complete digest is otherwise zero and always unauthenticated.
 
 Use these interfaces:
 
 - `IProtocolViews`
 - `IPerpsTraderViews`
 - `IPerpsLPViews`
+- `ISettlementMonitorLens` for keeper/security monitoring only
 
 ## Rich Internal Surfaces
 
@@ -105,6 +129,9 @@ The following remain useful for tests, admin tooling, migration, and deep accoun
 - `CfdEngine` / `ICfdEngineCore`: canonical runtime truth for execution, liquidation, and protocol status.
 - `CfdEngineSettlementSidecar`: externalized close/liquidation settlement orchestration used by `CfdEngine`; not a product-facing surface.
 - `PerpsPublicLens`: canonical product-facing read layer.
+- `SettlementMonitorLens`: canonical bounded settlement-monitoring read layer; no mutation or circuit-breaker
+  authority. It validates the required one-time core wiring and its monitor-only sidecar is not a second canonical
+  surface.
 - `CfdEngineAccountLens`: rich account/accounting diagnostics.
 - `CfdEngineProtocolLens`: protocol-accounting and house-pool snapshot diagnostics.
 - `MarginClearinghouse`: custody plumbing with a small public trader surface and a larger operator surface.

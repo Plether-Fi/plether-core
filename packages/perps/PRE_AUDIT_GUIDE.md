@@ -63,6 +63,8 @@ Before trusting a test as a source of truth, ask:
 | `HousePool.reconcile` | either configured tranche vault | retained vault integration hook; end users enter and claim through `TrancheVault` |
 | `OrderRouter.settleLpEpoch(bytes[])` | permissionless | validates one PoolReconcile mark and atomically invokes coordinated LP entry activation and redemption funding |
 | `HousePool.settleLpEpoch(uint256,uint256)` | configured Engine `orderRouter` when live positions exist; otherwise permissionless | binds the Router's exact mark/time for live settlement; `(0,0)` is the mark-independent or frozen cached-mark fallback |
+| `SettlementMonitorLens` views | permissionless | read-only, bounded, fail-soft settlement diagnostics; no settlement, pause, or circuit-breaker authority |
+| `SettlementMonitorLensSidecar` diagnostic builders | constructor-bound `SettlementMonitorLens` facade only | code-size implementation detail; external callers cannot obtain facade-attributed health from fabricated queue masks, integrations must use the facade rather than treating the sidecar as a second canonical surface, and constructor-set binding getters remain publicly readable; there are no setters or delegatecall paths |
 
 Any new helper/sidecar contract that can reach these sets should be treated as security-critical and explicitly access-controlled.
 
@@ -301,6 +303,39 @@ Reachability note:
 ## Read-Surface Canonicality
 
 - `PerpsPublicLens` is the canonical product-facing read layer.
+- `SettlementMonitorLens` is the canonical bounded keeper/security view for an explicitly observed LP epoch. The
+  argument does not select what the Router settles: eligible FIFO heads remain authoritative. Its route, oracle,
+  queue, custody, and invariant outputs are observations rather than authorization. Simulate the exact route-specific
+  call before broadcasting: direct `HousePool` settlement for `CachedMark`, or `OrderRouter` with the exact Oracle
+  payload and value for `AtomicOracleRefresh`. Construction validates required one-time core wiring and health
+  rechecks reciprocal bindings.
+- Review `getSettlementStatus(observedEpoch)` operational blocker/warning/deposit-deferral masks separately from
+  `getSettlementHealth()` critical-fault/dependency-failure masks. Within status,
+  `executionPathDependencyMask` contains only read failures that prevent route selection, while
+  `dependencyFailureMask` covers every unknown status input. The Senior deposit-deferral mask describes pending
+  activation and reservation-limit state rather than new-request admission capacity. Poll status routinely;
+  `getSettlementObservation(observedEpoch)` is a checkpoint/alert read with a roughly 6 KB ABI return and about
+  0.8–1.3 million gas of representative `eth_call` execution.
+- Treat the canonical matured-head getters as route authority. Auxiliary queue lifecycle, membership, neighbor-link,
+  and endpoint reads harden health classification but cannot replace a known canonical route; impossible canonical
+  head pairs are critical. Verify `ActivationNotConfirmed` against
+  `HousePool.canSettleDepositEntries()` and canonical redemption evidence. The Pool projection must include zero-asset
+  epochs that retain pending claimants; the Lens must remain conservative while matured Senior redemptions can change
+  principal/HWM rounding and while matured Junior redemptions can reduce Senior capacity. Live settlement must recheck
+  both gates after funding. Include the zero-fee rebootstrap/redemption regression that creates one-atom impairment
+  and the same-epoch Junior-redemption/Senior-reservation regression. Do not treat the view as new-request admission
+  capacity.
+- Runtime wiring checks pin the Engine planner address and code hash, probe its carry-index and market-calendar ABIs,
+  and require seed receiver/floor pairs to be consistently absent or present. Review the creation-input size regression as well as
+  EIP-170 runtime sizes because the facade embeds the sidecar creation code.
+- `getPoolReconcileOracleStatus()` diagnoses only current readable feeds and requires the updated
+  `PletherOracle.getLatestPoolReconcilePrice()` return ABI; an older oracle is reported as an unknown Oracle
+  dependency. `observationComplete` requires every Oracle dependency read even on cached/no-work routes, while
+  current Oracle policy validity is required only for atomic-refresh routing. `getSettlementObservation(...)` and
+  `observableConfigDigest()` provide advisory block-pinned comparison hashes that the Router does not enforce.
+  `completeObservationDigest` equals `observationDigest` only when `observationComplete` and is otherwise zero; it is
+  still unauthenticated. Because confidence describes the neutral pre-cap basket while the returned mark may be
+  capped, `confidence / markPrice` cannot always reproduce the configured confidence-ratio decision.
 - `CfdEngineAccountLens` and `CfdEngineProtocolLens` are audit/operator/diagnostic surfaces.
 - Engine getters are runtime internals unless explicitly documented as part of the product or audit-facing read surface.
 - When in doubt, prefer `PerpsPublicLens` for integrations and the richer lenses only for diagnostics, tests, and audit review.
@@ -317,6 +352,10 @@ Reachability note:
 7. Exact symmetric NAV: deposits and redemptions use the same signed terminal delta; marked trader losses count only to the account cap and never as spendable withdrawal cash.
 8. Frozen-spread conservation: assessed spread equals LP-paid spread plus terminally waived spread; live/FAD-only closes and all liquidations assess zero.
 9. Terminal-curve parity: after every successful transition, the bound Engine has atomically called the book's sole mutation endpoint and every account curve matches live lots, exact entry cost, side, and `pnlPledge + nettable claim` cap.
+10. Monitor epistemics: a failed dependency read must remain distinguishable from healthy zero state, every Oracle
+    dependency is required for a complete composite even if its feed policy is not required by the selected route,
+    cutoff totals are maximum membership because cancellations may shrink them, and bounded aggregate checks do not
+    prove per-account curve or radix-node parity.
 
 ## Test Map
 
@@ -343,6 +382,7 @@ Use the suites below as the highest-signal audit companions.
 | Governed senior capacity / delayed reservations | `packages/perps/test/perps/SeniorCapacity.t.sol`, `packages/perps/test/perps/FrozenLpFeePolicy.t.sol`, `packages/perps/test/perps/invariant/GovernedSeniorCapacityInvariant.t.sol` |
 | Router policy matrix | `packages/perps/test/perps/OrderRouterPolicyMatrix.t.sol` |
 | Stale-mark / reconcile behavior | `packages/perps/test/perps/HousePool.t.sol`, `packages/perps/test/perps/CfdEngine.t.sol`, `packages/perps/test/perps/AuditV2.t.sol`, `packages/perps/test/perps/AuditV3.t.sol` |
+| Settlement monitor / cutoff observation | `packages/perps/test/perps/SettlementMonitorLens.t.sol`, `packages/perps/test/perps/LpRequestCutoff.t.sol` |
 | Audit-history regressions | `packages/perps/test/perps/AuditCurrentFindingsVerification.t.sol`, `packages/perps/test/perps/AuditFindings.t.sol`, `packages/perps/test/perps/AuditV2.t.sol`, `packages/perps/test/perps/AuditV3.t.sol` |
 
 Historical or obsolete regression names that still mention legacy spread labels are audit-history artifacts, not live accounting concepts. When those names appear, trust the surrounding comments and the current accounting docs rather than the historical label.

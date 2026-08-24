@@ -161,6 +161,44 @@ contract PletherOracleTest is Test {
         assertEq(snapshot.updateFee, 0, "view has no update fee");
     }
 
+    function test_GetLatestPoolReconcilePrice_ReturnsSnapshotAndAggregateConfidence() public {
+        vm.warp(1000);
+        pyth.setPrice(FEED_A, int64(100_000_000), uint64(80_000), int32(-8), 995);
+        pyth.setPrice(FEED_B, int64(100_000_000), uint64(40_000), int32(-8), 995);
+
+        (IPletherOracle.PriceSnapshot memory snapshot, uint256 confidence) = oracle.getLatestPoolReconcilePrice();
+        IPletherOracle.PriceSnapshot memory existingSnapshot =
+            oracle.getLatestPrice(IPletherOracle.PriceMode.PoolReconcile);
+
+        assertEq(snapshot.price, existingSnapshot.price, "price parity");
+        assertEq(snapshot.markPrice, existingSnapshot.markPrice, "mark parity");
+        assertEq(snapshot.publishTime, existingSnapshot.publishTime, "publish-time parity");
+        assertEq(snapshot.updateFee, existingSnapshot.updateFee, "fee parity");
+        assertEq(snapshot.maxStaleness, existingSnapshot.maxStaleness, "staleness parity");
+        assertEq(snapshot.closeOnly, existingSnapshot.closeOnly, "close-only parity");
+        assertEq(snapshot.oracleFrozen, existingSnapshot.oracleFrozen, "frozen parity");
+        assertEq(snapshot.isFadWindow, existingSnapshot.isFadWindow, "FAD parity");
+        assertEq(confidence, 60_000, "weighted aggregate confidence");
+    }
+
+    function test_GetLatestPoolReconcilePrice_PreservesPoolReconcileValidationErrors() public {
+        vm.warp(1000);
+        vault.setMarkStalenessLimit(30);
+        _setBothPrices(100_000_000, 969);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IPletherOracle.PletherOracle__StalePrice.selector,
+                IPletherOracle.PriceMode.PoolReconcile,
+                FEED_A,
+                uint256(969),
+                uint256(30),
+                uint256(1000)
+            )
+        );
+        oracle.getLatestPoolReconcilePrice();
+    }
+
     function test_ReportInterface_ReturnsLatestPriceOnly() public {
         vm.warp(1000);
         _setBothPrices(100_000_000, 995);

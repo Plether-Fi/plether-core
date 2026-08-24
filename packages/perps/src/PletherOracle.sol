@@ -310,6 +310,20 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         return _getLatestPriceSnapshot(mode);
     }
 
+    /// @notice Returns the validated current PoolReconcile basket and its aggregate confidence without updating Pyth.
+    /// @dev Uses the same single basket computation and validation path as `getLatestPrice(PriceMode.PoolReconcile)`;
+    ///      confidence is returned in 8-decimal basket-price units before any cap is applied to the neutral mark.
+    /// @return snapshot Current neutral PoolReconcile snapshot with zero update fee
+    /// @return confidence Aggregate basket confidence in 8-decimal price units
+    function getLatestPoolReconcilePrice()
+        external
+        view
+        override
+        returns (PriceSnapshot memory snapshot, uint256 confidence)
+    {
+        return _getLatestPriceSnapshotWithConfidence(PriceMode.PoolReconcile);
+    }
+
     /// @notice Returns the validated current order-policy basket price without updating Pyth.
     /// @dev Equivalent to `getLatestPrice(PriceMode.OrderExecution).price`. It returns a neutral current basket rather
     ///      than a unique post-commit or side-adverse execution price and may revert on invalid or stale feed state.
@@ -440,10 +454,17 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
     function _getLatestPriceSnapshot(
         PriceMode mode
     ) internal view returns (PriceSnapshot memory snapshot) {
+        (snapshot,) = _getLatestPriceSnapshotWithConfidence(mode);
+    }
+
+    function _getLatestPriceSnapshotWithConfidence(
+        PriceMode mode
+    ) internal view returns (PriceSnapshot memory snapshot, uint256 confidence) {
         PolicySnapshot memory policy = _policyForMode(mode);
         BasketPrice memory basket =
             _computeLiveBasketPrice(mode, policy.maxStaleness, _policyPublishTimeDivergence(mode, policy));
         snapshot = _snapshotFromBasket(mode, basket, policy, true);
+        confidence = basket.confidence;
     }
 
     function _updatePythPrice(

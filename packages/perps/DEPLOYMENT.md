@@ -51,6 +51,7 @@ The deploy script creates and wires:
 12. `CfdEngineLens`
 13. `OrderRouter`
 14. `PerpsPublicLens`
+15. `SettlementMonitorLens` (the facade deploys its monitor-bound `SettlementMonitorLensSidecar` internally)
 
 It then performs the required set-once wiring:
 
@@ -65,6 +66,27 @@ It then performs the required set-once wiring:
 Important:
 
 - `HousePool` remains inactive after deployment.
+- `SettlementMonitorLens` is deployed last, after every dependency is wired. It is the read-only operator/security
+  facade bound to the canonical Router deployment; adding it does not shift any earlier deployment address or grant
+  settlement authority. Its constructor deploys a size-management `SettlementMonitorLensSidecar` that accepts calls
+  only from that facade. Deployment verifies that the facade's `SIDECAR` has code, the sidecar's `MONITOR` is the
+  facade, and both contracts' Router, Engine, HousePool, Engine protocol lens, clearinghouse, terminal-book, vault,
+  and USDC bindings match the deployed stack. The sidecar is an implementation detail, not a second integration
+  address or canonical monitoring surface. Facade construction rejects missing or mismatched required one-time core
+  wiring, including equality between the Router's immutable settlement pool and `Engine.pool()`, and the health view
+  rechecks those reciprocal bindings rather than assuming deployment stayed correct.
+  The sidecar also pins the Engine planner address and code hash at construction and probes its settlement-critical
+  carry-index and market-calendar ABIs at runtime. The facade's creation input is close to the EIP-3860 ceiling because it embeds the
+  sidecar creation code: the optimized build is 48,817 bytes including the 32-byte Router constructor argument,
+  leaving 335 bytes of headroom. Keep the dedicated creation-input size regression green when changing either
+  contract.
+- An already deployed compatible stack may add the lens independently against its Router; there is no storage
+  migration and no core-contract redeployment requirement. Replacing a faulty lens likewise does not move protocol
+  authority, but integrations must pin the intended facade address. Full current-feed diagnostics require the
+  configured oracle to implement the updated `PletherOracle.getLatestPoolReconcilePrice()` return ABI. A lens bound
+  to an older oracle remains read-only and reports that current-feed section as an unknown dependency;
+  `observationComplete` stays false and `completeObservationDigest` stays zero until the Router is timelock-rotated to
+  a compatible oracle.
 - `TerminalNavBookV2` must be deployed empty, immutable-bound to the new Engine, and wired before any position
   exposure. `CfdEngine.setTerminalNavBook(...)` validates matching Engine, `CAP_PRICE`, `SIZE_QUANTUM = 1e20`, and
   zero book version/totals before accepting it once.
@@ -147,6 +169,13 @@ Each component contributes its normalized basket value multiplied by its raw con
 the contribution floored before summation. Equality passes. There is no separate per-component confidence
 ceiling, so a wide low-weight feed can remain usable when its weighted uncertainty keeps the full basket within
 the configured limit. Positive-price, staleness, and component publish-time-divergence checks remain per feed.
+`PletherOracle.getLatestPoolReconcilePrice()` returns the current validated neutral snapshot plus that aggregate
+8-decimal confidence without updating Pyth; `SettlementMonitorLens` consumes it through a fail-soft diagnostic call.
+This is an additive monitoring ABI requirement: an older `PletherOracle` can still serve its existing Router paths,
+but the monitor cannot decode the current-feed observation and deliberately reports the Oracle dependency as unknown.
+The confidence is measured against the neutral pre-cap basket while the returned mark may be capped, so a monitor
+cannot always independently reconstruct the configured ratio from `confidence / markPrice`. Treat `policyValid` as
+the feed-policy result instead of using that post-cap quotient as a second policy check.
 
 `adverseConfidenceMultiplierBps = 2_000` applies `0.2x` of Pyth's confidence interval when shifting live/FAD
 order execution and all liquidation prices in the adverse direction. Oracle-frozen voluntary closes bypass the
@@ -298,9 +327,10 @@ This is useful if the first bootstrap attempt completes only partially.
 5. Wait for the 48-hour `HousePool` timelock.
 6. Rerun the same bootstrap command to finalize, seed junior then senior, and activate trading.
 7. Fund any test wallets with Arbitrum Sepolia ETH.
-8. Start integration testing against `PerpsPublicLens`, `MarginClearinghouse`, `OrderRouter`, and `HousePool`.
-9. Submit deposit and redemption requests on both vaults, advance to a matured epoch, fetch a post-boundary Hermes
-   update, call `OrderRouter.settleLpEpoch(bytes[])`, and verify that funded claims can be pulled independently.
+8. Start product integration testing against `PerpsPublicLens`, `MarginClearinghouse`, `OrderRouter`, and `HousePool`,
+   and operator monitoring against `SettlementMonitorLens`.
+9. Submit deposit and redemption requests on both vaults, advance to a matured epoch, follow the route reported by
+   `SettlementMonitorLens`, and verify that funded claims can be pulled independently.
 
 Frontend and keeper integrations should read `TrancheVault.getRequestEpochWindow()` or the selected
 `PerpsPublicLens.getTrancheQueues(bool)` response immediately before constructing timing-sensitive UI or preflight
@@ -312,11 +342,14 @@ The included transaction, not its submission time, determines the request id. A 
 cutoff intentionally rolls forward, so integrations must index the returned id or emitted request event rather than
 predicting membership from wall-clock submission time. Keepers may use the five-minute interval for simulation and
 alerting, but must treat the locked epoch totals as upper bounds because cancellations and all non-request protocol
-state remain live. Oracle payload selection and settlement eligibility continue to use the round-hour maturity
-boundary.
+state remain live. `SettlementMonitorLens` therefore reads an explicit observation target: once requests roll
+forward, continue observing the locked `currentEpoch + 1` batch rather than blindly following the newly advertised
+request target. This argument does not select what the Router settles; the Router still processes eligible FIFO
+heads. Oracle payload selection and settlement eligibility continue to use the round-hour maturity boundary.
 
-For a keeper broadcast, ABI-encode the Hermes payload as `bytes[]`, set `PERPS_ORDER_ROUTER`, `KEEPER_PRIVATE_KEY`,
-and `PYTH_UPDATE_DATA`, then run:
+For a keeper broadcast, set `SETTLEMENT_MONITOR_LENS`, `PERPS_ORDER_ROUTER`, `OBSERVED_EPOCH`, and
+`KEEPER_PRIVATE_KEY`. ABI-encode a Hermes payload as `bytes[]` and set `PYTH_UPDATE_DATA` only when the Lens reports
+`AtomicOracleRefresh`, then run:
 
 ```bash
 forge script script/LpEpochKeeper.s.sol \
@@ -325,5 +358,44 @@ forge script script/LpEpochKeeper.s.sol \
   --broadcast
 ```
 
-The script quotes and sends the exact Pyth fee. Preflight `PerpsPublicLens` queue state before broadcasting: a call
-with no matured progress deliberately reverts, and every bounded backlog pass needs another validated Pyth update.
+The script verifies that the Lens is bound to the supplied Router, refuses unknown or no-work routing, and selects the
+reported execution path. `CachedMark` calls the bound `HousePool` directly without Pyth data or ETH.
+`AtomicOracleRefresh` quotes the active `PletherOracle` and calls the Router with the exact Pyth fee. Poll the lighter
+`SettlementMonitorLens.getSettlementStatus(observedEpoch)` view during normal operation. The composite
+`getSettlementObservation(observedEpoch)` is an intentional checkpoint/alert read with a roughly 6 KB ABI return and
+about 0.8–1.3 million gas of representative `eth_call` execution, so the recommended keeper sequence is:
+
+1. Call `SettlementMonitorLens.getSettlementObservation(observedEpoch)` and record the first block-pinned post-cutoff
+   observation for that epoch together with its RPC block number and block hash. Apply the operator's confirmation-depth
+   policy before treating that checkpoint as final; re-read after any reorg. This does not select the Router's
+   settlement epoch.
+2. For `CachedMark`, simulate the exact direct
+   `HousePool.settleLpEpoch(status.cachedMarkPrice,status.cachedMarkTime)` call with zero ETH. No Hermes payload is
+   required. For `AtomicOracleRefresh`, fetch a Pyth/Hermes payload, quote its fee through the active `PletherOracle`,
+   and simulate the exact `OrderRouter.settleLpEpoch(bytes[])` calldata and `msg.value`. If
+   `status.clock.minimumAtomicPublishTime` is nonzero, the payload must be published at or after that boundary. Frozen
+   stale-mark recovery reports zero and instead relies on the frozen PoolReconcile freshness policy.
+3. Do not broadcast for `Unknown`, `NoMaturedWork`, or a nonzero `executionPathDependencyMask`.
+4. Broadcast only if the exact selected transaction simulation succeeds, then confirm `LpEpochSettled` from the
+   receipt. `--skip-simulation` is not an approved keeper procedure.
+
+Use `getSettlementStatus(observedEpoch)` for operational blocker, warning, deposit-deferral, and execution-path
+diagnostics. Its `executionPathDependencyMask` is the subset of read failures that prevents selecting cached-mark
+versus atomic-oracle-refresh routing; the broader `dependencyFailureMask` can also include unknown optional
+diagnostics. The canonical matured-head getters are the route-selection evidence; malformed auxiliary queue
+bookkeeping is surfaced as unknown health or a critical queue fault without fabricating a different route.
+`ActivationNotConfirmed` combines the projected `HousePool.canSettleDepositEntries()` common gate with canonical
+redemption evidence. The Pool view projects post-reconcile state, including residual pending claimants, while the Lens
+remains conservative when matured Senior funding can still change principal/HWM rounding before either tranche
+activates, and when matured Junior funding can reduce capacity before Senior activation. HousePool rechecks the exact
+live gates after redemption funding. Senior deposit deferrals describe pending activation and existing-reservation-limit conditions, not the
+amount that a new request may reserve; read the vault admission view or `HousePool.getSeniorDepositCapacity()` for
+new admission capacity. Use `getSettlementHealth()` for critical-fault and dependency-failure masks, and
+`getPoolReconcileOracleStatus()` for a fail-soft view of feeds readable now. `observableConfigDigest()` and the
+composite `observationDigest` are advisory comparison aids only. `completeObservationDigest` equals that observation
+hash when `observationComplete` and is zero otherwise. Completeness requires every Oracle dependency read even on a
+cached/no-work route, while Oracle policy validity is required only for atomic-refresh routing. The digest is still
+unauthenticated and unenforced. The monitor
+deliberately exposes no authoritative `canSettle` decision. A live transaction can still race cancellations, trading,
+configuration, cash, or oracle state. The exact selected-transaction simulation is authoritative; a call with no
+matured progress deliberately reverts, and every atomic-refresh backlog pass needs another validated Pyth update.
