@@ -49,7 +49,7 @@ abstract contract OrderBountyAccounting is OrderRouterBase {
     function _forfeitReservedOrderBountiesOnLiquidation(
         address account
     ) internal {
-        uint256 forfeitedUsdc;
+        uint256 forfeitedUsdc = _protectionBountiesToForfeitOnLiquidation(account);
         for (
             uint64 orderId = accountHeadOrderId[account];
             orderId != 0;
@@ -67,6 +67,18 @@ abstract contract OrderBountyAccounting is OrderRouterBase {
         }
 
         engine.absorbReservedExecutionBounty(account, forfeitedUsdc);
+    }
+
+    /// @notice Terminalizes and returns any unpaid non-order bounty reservation owned by account protection.
+    /// @dev The default router has no such reservation. Position-protection handling overrides this hook so its
+    ///      amount is transferred together with ordinary queued-order bounties in one engine call.
+    /// @param account Account being liquidated.
+    /// @return forfeitedUsdc Additional reserved bounty value to transfer to the protocol treasury.
+    function _protectionBountiesToForfeitOnLiquidation(
+        address account
+    ) internal virtual returns (uint256 forfeitedUsdc) {
+        account;
+        return 0;
     }
 
 }

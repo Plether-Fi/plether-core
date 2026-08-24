@@ -353,7 +353,8 @@ Question answered:
 Reservation / reservation buckets include:
 
 - committed order margin,
-- clearinghouse-reserved execution bounty value.
+- clearinghouse-reserved execution bounty value,
+- dormant position-protection trigger and linked-close bounty value.
 
 Rules:
 
@@ -373,6 +374,36 @@ Rules:
 - the amount parked in reservation is bounded by `MAX_PENDING_ORDERS * 1 USDC` per account,
 - collateral reachability should treat that reservation as temporarily unavailable until the order resolves,
 - terminal-invalid close execution pays the keeper from the clearinghouse-reserved bounty; liquidatable full closes may reserve that bounty only from free settlement, not active position margin.
+
+### Position-protection bounty policy
+
+Component authority is deliberately split:
+
+- `PositionProtectionBook`, discovered through `OrderRouter.positionProtectionBook()`, owns retained protection state,
+  canonical protection actions/views, bounty attribution before trigger, and all protection lifecycle events,
+- `OrderRouter` owns the timelocked protection feature/bounty configuration, the ordinary global FIFO, and the narrow
+  host operations used by the Book to commit the parent open, refresh a trigger mark, and append the linked close,
+- `MarginClearinghouse` remains the custody and reserved-settlement source of truth. The Book holds no tokens, and it
+  cannot mutate the Router queue directly.
+
+- one protection snapshots a fixed trigger bounty and the current fixed close-order bounty at creation,
+- both protection bounties are reserved from free settlement only; dormant protection never uses the active-position-
+  margin close fallback,
+- reservation checkpoints carry and must leave the account above the applicable post-reservation initial/FAD risk floor,
+- `PendingOpen` keeps protection separate from the parent's committed opening margin and opening execution bounty,
+- parent-open success arms protection atomically against the actual resulting side and full size without moving its
+  protection reserve,
+- parent-open failure or expiry releases both protection bounty amounts; the parent execution bounty follows the
+  ordinary terminal-order policy,
+- cancelling `PendingOpen` or `Armed` protection releases both unpaid amounts exactly once; cancelling `PendingOpen`
+  detaches protection but does not cancel the binding parent open,
+- triggering credits the trigger bounty and reattributes the remaining execution bounty to exactly one generated FIFO
+  close without a second clearinghouse reservation,
+- linked-close execution or terminal failure consumes the remaining bounty under ordinary order policy,
+- liquidation forfeits unpaid protection value to treasury. `Triggered` protection does not add the linked order's
+  bounty a second time,
+- a terminal protection has no reserved value, and Book-attributed dormant-protection reserve plus Router-attributed
+  ordinary-order reserve must equal the clearinghouse's reserved settlement source of truth.
 
 ### Open-order failure policy
 
@@ -536,7 +567,8 @@ In storage, the live router persists:
 Interpretation rules:
 
 - `Executable` is derived, not stored,
-- `Expired` is represented by the failure path rather than its own enum member.
+- `Expired` is represented by the failure path rather than its own enum member,
+- position protection uses a separate retained enum and is not an ordinary order until it triggers.
 
 Required transition rules:
 
@@ -546,6 +578,21 @@ Required transition rules:
 - stale or missing oracle data does not destroy a valid pending order,
 - slippage-invalid orders fail terminally and must not pin the FIFO head,
 - live-market execution requires `order.commitTime < oraclePublishTime <= block.timestamp`; only genuine frozen-oracle close-only windows may relax commit-time ordering.
+
+Position-protection storage persists `None`, `PendingOpen`, `Armed`, `Triggered`, `Executed`, `Failed`, `Cancelled`, and
+`Liquidated`.
+
+- The state machine and its canonical reads live in `PositionProtectionBook`; protection lifecycle events originate
+  there. The linked close is an ordinary Router order and its order events originate from the Router.
+- `PendingOpen` is attached to one binding open but remains unable to trigger.
+- Successful parent execution transitions to `Armed` atomically and snapshots the actual resulting position.
+- Trader creation, replacement, and attached-open calls are nonpayable and use the engine's cached fresh neutral mark.
+- Triggering is permissionless and payable for current Pyth data. It requires a later block and a publish time strictly
+  after arming, and is unavailable during `oracleFrozen`.
+- `Armed` is off queue. `Triggered` links one full-size `targetPrice = 0` close appended at the global FIFO tail.
+- The linked close follows ordinary historical settlement, expiry, and terminal failure. Failure does not re-arm.
+- An already-triggered linked close may use ordinary frozen-close execution policy even though a new trigger may not be
+  evaluated while frozen.
 
 ![Order state machine](../../assets/diagrams/perps-order-lifecycle.svg)
 
@@ -564,6 +611,11 @@ The accounting system should preserve the following:
 9. full closes do not eagerly cancel unrelated queued orders
 10. liquidation may perform bounded account-local cleanup under the per-account pending-order cap
 11. every position-deletion path re-checks degraded-mode containment
+12. each account has at most one active (`PendingOpen`, `Armed`, or `Triggered`) protection
+13. an armed protection is never linked into FIFO, and a triggered protection links exactly one full reduce-only order
+14. the take-profit and stop-loss legs collectively trigger at most once
+15. every protection bounty unit is exactly reserved, paid, refunded, or forfeited once
+16. terminal protection owns zero reserve, and liquidation leaves no protection or linked-order residue
 
 ## Architecture Goal
 

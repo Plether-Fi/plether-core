@@ -8,11 +8,14 @@ import {AccountLensViewTypes} from "@plether/perps/interfaces/AccountLensViewTyp
 import {ICfdEngine} from "@plether/perps/interfaces/ICfdEngine.sol";
 import {ICfdEngineAccountLens} from "@plether/perps/interfaces/ICfdEngineAccountLens.sol";
 import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
+import {IOrderRouter} from "@plether/perps/interfaces/IOrderRouter.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {IPerpsLPViews} from "@plether/perps/interfaces/IPerpsLPViews.sol";
 import {IPerpsTraderViews} from "@plether/perps/interfaces/IPerpsTraderViews.sol";
+import {IPositionProtectionViews} from "@plether/perps/interfaces/IPositionProtectionViews.sol";
 import {IProtocolViews} from "@plether/perps/interfaces/IProtocolViews.sol";
 import {PerpsViewTypes} from "@plether/perps/interfaces/PerpsViewTypes.sol";
+import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtectionTypes.sol";
 
 /// @title PerpsPublicLens
 /// @notice Compact read facade for the simplified product-facing perps surface.
@@ -25,7 +28,7 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
     /// @notice Core engine used for mark, risk, lifecycle, and position status.
     ICfdEngineCore public immutable ENGINE;
     /// @notice Delayed-order router accounting surface used for pending reservations and orders.
-    IOrderRouterAccounting public immutable ORDER_ROUTER;
+    IOrderRouter public immutable ORDER_ROUTER;
     /// @notice House pool used for tranche and LP lifecycle views.
     HousePool public immutable HOUSE_POOL;
 
@@ -45,7 +48,7 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
     ) {
         ACCOUNT_LENS = ICfdEngineAccountLens(accountLens_);
         ENGINE = ICfdEngineCore(engine_);
-        ORDER_ROUTER = IOrderRouterAccounting(orderRouter_);
+        ORDER_ROUTER = IOrderRouter(orderRouter_);
         HOUSE_POOL = HousePool(housePool_);
     }
 
@@ -111,6 +114,35 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
             });
             orderId = nextAccountOrderId;
         }
+    }
+
+    /// @notice Returns the account's pending-open, armed, or triggered position protection.
+    /// @dev Returns a zero-valued `None` record when the account has no active protection. Terminal records are
+    ///      available by id through `getPositionProtection`.
+    /// @param account Canonical perps account to inspect.
+    /// @return protection Active protection record, or a zero-valued record when none exists.
+    function getActivePositionProtection(
+        address account
+    ) external view returns (PositionProtectionTypes.PositionProtectionView memory protection) {
+        IPositionProtectionViews protectionViews = _positionProtectionViews();
+        uint64 protectionId = protectionViews.activePositionProtectionId(account);
+        if (protectionId == 0) {
+            return protection;
+        }
+        return protectionViews.getPositionProtection(protectionId);
+    }
+
+    /// @notice Returns a retained position-protection record by id, including terminal history.
+    /// @param protectionId Protection identifier to inspect.
+    /// @return protection Retained protection record; an unknown id returns a zero-valued `None` record.
+    function getPositionProtection(
+        uint64 protectionId
+    ) external view returns (PositionProtectionTypes.PositionProtectionView memory protection) {
+        return _positionProtectionViews().getPositionProtection(protectionId);
+    }
+
+    function _positionProtectionViews() private view returns (IPositionProtectionViews protectionViews) {
+        return IPositionProtectionViews(ORDER_ROUTER.positionProtectionBook());
     }
 
     /// @notice Returns whether the account's current live position is liquidatable at the stored mark.

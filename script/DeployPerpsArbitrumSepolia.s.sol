@@ -58,6 +58,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         CfdEngineAccountLens accountLens;
         CfdEngineLens engineLens;
         OrderRouter router;
+        address positionProtectionBook;
         address pletherOracle;
         address routerAdmin;
         PerpsPublicLens publicLens;
@@ -115,6 +116,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         deployed.router = new OrderRouter(
             address(deployed.engine), address(deployed.engineLens), address(deployed.housePool), deployed.pletherOracle
         );
+        deployed.positionProtectionBook = address(deployed.router.positionProtectionBook());
         deployed.routerAdmin = deployed.router.admin();
 
         deployed.engine.setOrderRouter(address(deployed.router));
@@ -204,6 +206,9 @@ contract DeployPerpsArbitrumSepolia is Script {
         console.log("CfdEngineAccountLens:", address(deployed.accountLens));
         console.log("CfdEngineLens:", address(deployed.engineLens));
         console.log("OrderRouter:", address(deployed.router));
+        console.log("PositionProtectionBook:", deployed.positionProtectionBook);
+        console.log("PositionProtectionCommitsEnabled:", deployed.router.positionProtectionCommitsEnabled());
+        console.log("PositionProtectionTriggerBountyUsdc:", deployed.router.positionProtectionTriggerBountyUsdc());
         console.log("PletherOracle:", deployed.pletherOracle);
         console.log("PythMaxConfidenceRatioBps:", PletherOracle(deployed.pletherOracle).pythMaxConfidenceRatioBps());
         console.log("OrderRouterAdmin:", deployed.routerAdmin);

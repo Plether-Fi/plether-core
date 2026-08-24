@@ -145,7 +145,7 @@ abstract contract OrderExecutionHandler is OrderValidation {
     function _updateMarkPrice(
         bytes[] calldata pythUpdateData
     ) internal {
-        _prepareMarkRefreshOracle(pythUpdateData);
+        _prepareMarkRefreshOracleFor(msg.sender, pythUpdateData);
     }
 
     /// @notice Sends an ETH refund or credits it in the admin contract when the recipient rejects the transfer.

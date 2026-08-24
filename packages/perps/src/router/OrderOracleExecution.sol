@@ -185,13 +185,15 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
     }
 
     /// @notice Applies a mark-refresh update and unconditionally forwards the returned mark to the engine.
+    /// @param refundRecipient Recipient of any ETH above the Pyth update fee.
     /// @param pythUpdateData Pyth update blobs; the oracle receives the call's full `msg.value`.
     /// @return update Normalized refresh snapshot.
-    function _prepareMarkRefreshOracle(
+    function _prepareMarkRefreshOracleFor(
+        address refundRecipient,
         bytes[] calldata pythUpdateData
     ) internal returns (OracleUpdateResult memory update) {
         IPletherOracle.PriceSnapshot memory snapshot =
-            _updateAndGetOraclePrice(pythUpdateData, IPletherOracle.PriceMode.MarkRefresh);
+            _updateAndGetOraclePrice(refundRecipient, pythUpdateData, IPletherOracle.PriceMode.MarkRefresh);
         update = _toOracleUpdateResult(snapshot);
         engine.updateMarkPrice(update.markPrice, update.oraclePublishTime);
     }
@@ -215,10 +217,11 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
     /// @param mode Oracle policy mode to apply.
     /// @return snapshot Validated oracle snapshot.
     function _updateAndGetOraclePrice(
+        address refundRecipient,
         bytes[] calldata pythUpdateData,
         IPletherOracle.PriceMode mode
     ) internal returns (IPletherOracle.PriceSnapshot memory snapshot) {
-        return pletherOracle.updatePrice{value: msg.value}(msg.sender, pythUpdateData, mode);
+        return pletherOracle.updatePrice{value: msg.value}(refundRecipient, pythUpdateData, mode);
     }
 
     /// @notice Validates and installs a Plether oracle wired to this router's engine and HousePool.

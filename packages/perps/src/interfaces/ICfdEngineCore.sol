@@ -219,6 +219,13 @@ interface ICfdEngineCore is ICfdEngineTypes {
             int256 vpiAccrued
         );
 
+    /// @notice Returns carry checkpointed against an account but not yet fully covered by reachable collateral.
+    /// @param account Account whose stored carry obligation should be inspected
+    /// @return Unsettled carry in six-decimal USDC units
+    function unsettledCarryUsdc(
+        address account
+    ) external view returns (uint256);
+
     /// @notice True when a close or liquidation has latched degraded mode after revealing adjusted insolvency.
     /// @return Whether risk-increasing actions are disabled by the insolvency latch
     function degradedMode() external view returns (bool);

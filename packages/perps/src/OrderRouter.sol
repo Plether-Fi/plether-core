@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
-import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
@@ -17,7 +16,7 @@ import {OrderRouterBase} from "@plether/perps/router/OrderRouterBase.sol";
 ///      risk-increasing commits during an emergency pause. Close commits, execution, mark refresh, and
 ///      liquidation remain available while that admin is paused.
 /// @custom:security-contact contact@plether.com
-contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, ReentrancyGuardTransient {
+contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
 
     /// @notice Deploys the router and its owner-controlled timelocked admin.
     /// @dev The admin owner is the constructor caller. Integration addresses are validated by the inherited
@@ -37,7 +36,9 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, Reentra
     /// @dev Reserves committed margin and the keeper bounty in the clearinghouse immediately. Opens are
     ///      blocked while paused, degraded, close-only, or unable to increase pool risk and may be rejected
     ///      by a fresh-mark preflight. Closes remain committable in those modes but must match and not exceed
-    ///      the position obtained after applying the account's earlier queued orders. The caller is the account.
+    ///      the position obtained after applying the account's earlier queued orders. Normally the caller is the
+    ///      account. The router's immutable position-protection book may append an authenticated account word when
+    ///      atomically attaching protection to a newly committed open; no other caller can use that path.
     /// @param side Direction to open/increase, or the direction of the queued position being closed.
     /// @param sizeDelta Position-size change in synthetic-token units (18 decimals); must be nonzero.
     /// @param marginDelta Margin to reserve for an open/increase (6-decimal USDC); must be zero for a close.
@@ -50,7 +51,13 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, Reentra
         uint256 targetPrice,
         bool isClose
     ) external nonReentrant {
-        _commitOrder(side, sizeDelta, marginDelta, targetPrice, isClose);
+        address account = msg.sender;
+        if (account == address(positionProtectionBook)) {
+            assembly ("memory-safe") {
+                account := calldataload(164)
+            }
+        }
+        _commitOrderFor(account, side, sizeDelta, marginDelta, targetPrice, isClose);
     }
 
     /// @notice Prunes spent margin-reservation links for an account's pending-order queue.
@@ -129,13 +136,19 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, Reentra
     }
 
     /// @notice Applies a mark-refresh oracle update and pushes its mark price to the engine.
-    /// @dev Permissionless and available while the router admin is paused. The oracle handles the Pyth fee
-    ///      and refunds unused ETH to the caller.
+    /// @dev Permissionless and available while the router admin is paused. The oracle handles the Pyth fee and
+    ///      normally refunds unused ETH to the caller. The router's immutable position-protection book appends the
+    ///      keeper and protection id when dispatching a trigger; that path refunds the keeper and queues the protected
+    ///      close through the same delayed FIFO machinery.
     /// @param pythUpdateData Pyth price update blobs; `msg.value` must cover the Pyth update fee.
     function updateMarkPrice(
         bytes[] calldata pythUpdateData
     ) external payable nonReentrant {
-        _updateMarkPrice(pythUpdateData);
+        if (msg.sender == address(positionProtectionBook)) {
+            _triggerPositionProtectionFromBook(pythUpdateData);
+        } else {
+            _updateMarkPrice(pythUpdateData);
+        }
     }
 
     /// @notice Permissionlessly liquidates an unsafe account using an account-adverse oracle price.

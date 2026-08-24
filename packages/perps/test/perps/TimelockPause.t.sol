@@ -410,6 +410,8 @@ contract TimelockPauseTest is BasePerpTest {
         config.minOpenOrderExecutionBountyUsdc = 200_000;
         config.maxOpenOrderExecutionBountyUsdc = 300_000;
         config.closeOrderExecutionBountyUsdc = 250_000;
+        config.positionProtectionCommitsEnabled = true;
+        config.positionProtectionTriggerBountyUsdc = 300_000;
         config.maxPendingOrders = 7;
         config.minEngineGas = 700_000;
         config.maxPruneOrdersPerCall = 32;
@@ -427,6 +429,8 @@ contract TimelockPauseTest is BasePerpTest {
         assertEq(router.minOpenOrderExecutionBountyUsdc(), 200_000);
         assertEq(router.maxOpenOrderExecutionBountyUsdc(), 300_000);
         assertEq(router.closeOrderExecutionBountyUsdc(), 250_000);
+        assertTrue(router.positionProtectionCommitsEnabled());
+        assertEq(router.positionProtectionTriggerBountyUsdc(), 300_000);
         assertEq(router.maxPendingOrders(), 7);
         assertEq(router.minEngineGas(), 700_000);
         assertEq(router.maxPruneOrdersPerCall(), 32);
@@ -507,6 +511,24 @@ contract TimelockPauseTest is BasePerpTest {
     function test_OrderRouter_InvalidCloseOrderExecutionBounty_Reverts() public {
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         config.closeOrderExecutionBountyUsdc = 1_000_001;
+
+        vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__InvalidExecutionBounty.selector);
+        routerAdmin.proposeRouterConfig(config);
+    }
+
+    function test_OrderRouter_PositionProtectionConfig_Defaults() public view {
+        assertFalse(router.positionProtectionCommitsEnabled());
+        assertEq(router.positionProtectionTriggerBountyUsdc(), 200_000);
+    }
+
+    function test_OrderRouter_InvalidPositionProtectionTriggerBounty_Reverts() public {
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.positionProtectionTriggerBountyUsdc = 0;
+
+        vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__InvalidExecutionBounty.selector);
+        routerAdmin.proposeRouterConfig(config);
+
+        config.positionProtectionTriggerBountyUsdc = 1_000_001;
 
         vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__InvalidExecutionBounty.selector);
         routerAdmin.proposeRouterConfig(config);

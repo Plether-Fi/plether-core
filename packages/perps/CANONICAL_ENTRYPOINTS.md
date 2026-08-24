@@ -7,15 +7,25 @@ For audit review that needs policy tables and read-surface canonicality in one p
 ## Traders
 
 - Margin actions: `MarginClearinghouse.depositMargin(uint256)` and `MarginClearinghouse.withdrawMargin(uint256)`
-- Trade actions: `OrderRouter.commitOrder(CfdTypes.Side side, uint256 sizeDelta, uint256 marginDelta, uint256 targetPrice, bool isClose)`
+- Ordinary trade action: `OrderRouter.commitOrder(CfdTypes.Side side, uint256 sizeDelta, uint256 marginDelta, uint256 targetPrice, bool isClose)`
+- Discover the immutable protection action/view surface through `OrderRouter.positionProtectionBook()`.
+- Open with staged protection: `PositionProtectionBook.commitOpenOrderWithProtection(CfdTypes.Side,uint256,uint256,uint256,PositionProtectionParams)`
+- Existing-position protection: `PositionProtectionBook.createPositionProtection(PositionProtectionParams)`
+- Protection management: replace a `PendingOpen` or `Armed` record with
+  `PositionProtectionBook.replacePositionProtection(uint64,PositionProtectionParams)`, or detach/cancel a
+  `PendingOpen`/`Armed` record with `PositionProtectionBook.cancelPositionProtection(uint64)`
 - Trader claim settlement: `CfdEngine.settleTraderClaim(address account)` for the account owner
-- Compact reads: `PerpsPublicLens`
+- Compact account/protocol reads: `PerpsPublicLens`
+- Protection reads: `PositionProtectionBook.activePositionProtectionId(address)` and
+  `PositionProtectionBook.getPositionProtection(uint64)`
 - Trade-ticket previews: `CfdEngineLens.previewOpen(...)` and `CfdEngineLens.previewClose(...)`
 
 Use these interfaces:
 
 - `IMarginAccount`
 - `IPerpsTraderActions`
+- `IPositionProtectionActions`
+- `IPositionProtectionViews`
 - `IPerpsTraderViews`
 - `ICfdEngineLens` for `previewOpen(...)` / `previewClose(...)` only
 
@@ -38,15 +48,19 @@ Treat bootstrap, seed-lifecycle, and other tranche setup mechanics as admin/setu
 
 - Order execution: `OrderRouter.executeOrder(uint64,bytes[])`
 - Batch execution: `OrderRouter.executeOrderBatch(uint64,bytes[])`
-- Liquidation: `OrderRouter.executeLiquidation(bytes32,bytes[])`
+- Position-protection activation: `PositionProtectionBook.triggerPositionProtection(uint64,bytes[])`
+- Liquidation: `OrderRouter.executeLiquidation(address,bytes[])`
 
 Use this interface:
 
 - `IPerpsKeeper`
+- `IPositionProtectionActions` for the permissionless trigger entrypoint
 
 ## Protocol / Status Readers
 
 - Compact protocol status and LP/trader views: `PerpsPublicLens`
+- Retained protection status and linkage: `IPositionProtectionViews` on the Book returned by
+  `OrderRouter.positionProtectionBook()`
 
 Use these interfaces:
 
@@ -75,4 +89,11 @@ The following remain useful for tests, admin tooling, migration, and deep accoun
 - `CfdEngineAccountLens`: rich account/accounting diagnostics.
 - `CfdEngineProtocolLens`: protocol-accounting and house-pool snapshot diagnostics.
 - `MarginClearinghouse`: custody plumbing with a small public trader surface and a larger operator surface.
-- `OrderRouter`: delayed-order and keeper-execution plumbing; raw queue state is non-canonical.
+- `OrderRouter`: delayed-order and keeper-execution plumbing, global FIFO ownership, and timelocked protection
+  configuration. It exposes `positionProtectionBook()` for discovery but does not forward public protection selectors;
+  raw queue state is non-canonical.
+- `PositionProtectionBook`: canonical direct action/view surface and retained lifecycle store for position protection.
+  It emits all protection lifecycle events and calls narrow Router host operations for mark refresh and FIFO mutation; it
+  holds no token custody and does not mutate the queue directly.
+- A `PendingOpen` or `Armed` protection is a retained off-queue OCO record, not an ordinary pending order. Once triggered,
+  its linked full-position close is an ordinary binding FIFO order and is read through the normal order surfaces.

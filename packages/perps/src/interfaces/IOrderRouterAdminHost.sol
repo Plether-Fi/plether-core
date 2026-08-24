@@ -17,6 +17,8 @@ interface IOrderRouterAdminHost {
     /// @param minOpenOrderExecutionBountyUsdc Minimum open-order bounty in 6-decimal USDC.
     /// @param maxOpenOrderExecutionBountyUsdc Maximum open-order bounty in 6-decimal USDC.
     /// @param closeOrderExecutionBountyUsdc Fixed close-order bounty in 6-decimal USDC.
+    /// @param positionProtectionCommitsEnabled Whether new protection creation, replacement, and attached opens are enabled.
+    /// @param positionProtectionTriggerBountyUsdc Fixed protection-trigger bounty in 6-decimal USDC.
     /// @param maxPendingOrders Maximum number of live pending orders per account.
     /// @param minEngineGas Minimum EIP-150-forwardable gas required before an engine execution attempt.
     /// @param maxPruneOrdersPerCall Maximum expired queue heads one execution call may terminally prune.
@@ -33,6 +35,8 @@ interface IOrderRouterAdminHost {
         uint256 minOpenOrderExecutionBountyUsdc;
         uint256 maxOpenOrderExecutionBountyUsdc;
         uint256 closeOrderExecutionBountyUsdc;
+        bool positionProtectionCommitsEnabled;
+        uint256 positionProtectionTriggerBountyUsdc;
         uint256 maxPendingOrders;
         uint256 minEngineGas;
         uint256 maxPruneOrdersPerCall;

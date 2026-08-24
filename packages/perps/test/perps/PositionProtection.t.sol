@@ -1,0 +1,897 @@
+// SPDX-License-Identifier: AGPL-3.0
+pragma solidity 0.8.35;
+
+import {BasePerpTest} from "./BasePerpTest.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
+import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
+import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
+import {IPositionProtectionActions} from "@plether/perps/interfaces/IPositionProtectionActions.sol";
+import {IPositionProtectionBook} from "@plether/perps/interfaces/IPositionProtectionBook.sol";
+import {IPositionProtectionViews} from "@plether/perps/interfaces/IPositionProtectionViews.sol";
+import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtectionTypes.sol";
+import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
+
+contract PositionProtectionTest is BasePerpTest {
+
+    using stdStorage for StdStorage;
+
+    IPositionProtectionBook internal protectionBook;
+    IPositionProtectionActions internal protectionActions;
+    IPositionProtectionViews internal protectionViews;
+
+    address internal constant ALICE = address(0xA11CE);
+    address internal constant BOB = address(0xB0B);
+    address internal constant TRIGGER_KEEPER = address(0x7106);
+    address internal constant EXECUTION_KEEPER = address(0xE0EC);
+    address internal constant CAROL = address(0xCA201);
+    address internal constant RISK_EXACT = address(0xB0A0D1);
+    address internal constant RISK_PLUS_ONE = address(0xB0A0D2);
+
+    uint256 internal constant MARK_PRICE = 1e8;
+    uint256 internal constant POSITION_SIZE = 10_000e18;
+    uint256 internal constant POSITION_MARGIN_USDC = 2000e6;
+    uint256 internal constant BULL_TAKE_PROFIT = 90_000_000;
+    uint256 internal constant BULL_STOP_LOSS = 110_000_000;
+    uint256 internal constant BEAR_TAKE_PROFIT = 110_000_000;
+    uint256 internal constant BEAR_STOP_LOSS = 90_000_000;
+    uint256 internal constant FRIDAY_FAD_START = 1_709_924_400;
+
+    function setUp() public override {
+        super.setUp();
+
+        protectionBook = router.positionProtectionBook();
+        protectionActions = IPositionProtectionActions(address(protectionBook));
+        protectionViews = IPositionProtectionViews(address(protectionBook));
+
+        _fundTrader(ALICE, 20_000e6);
+        _fundTrader(BOB, 20_000e6);
+        _fundTrader(CAROL, 20_000e6);
+
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.positionProtectionCommitsEnabled = true;
+        _setRouterConfig(config);
+        _refreshMark(MARK_PRICE);
+    }
+
+    function test_CreatePositionProtection_ValidatesBullGeometryAndArmsOffQueue() public {
+        _open(ALICE, CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
+
+        vm.prank(ALICE);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidProtectionPrices.selector);
+        protectionActions.createPositionProtection(_params(BULL_STOP_LOSS, BULL_TAKE_PROFIT));
+
+        vm.prank(ALICE);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionTriggerAlreadyMet.selector);
+        protectionActions.createPositionProtection(_params(MARK_PRICE, 0));
+
+        uint256 freeBefore = _freeSettlementUsdc(ALICE);
+        vm.prank(ALICE);
+        uint64 protectionId = protectionActions.createPositionProtection(_params(BULL_TAKE_PROFIT, BULL_STOP_LOSS));
+
+        PositionProtectionTypes.PositionProtectionView memory protection =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(protectionId, 1, "first protection id");
+        assertEq(protectionViews.activePositionProtectionId(ALICE), protectionId, "active protection id");
+        assertEq(protection.account, ALICE, "protection owner");
+        assertEq(uint8(protection.side), uint8(CfdTypes.Side.BULL), "protected side");
+        assertEq(protection.size, POSITION_SIZE, "full position size");
+        assertEq(protection.takeProfitTriggerPrice, BULL_TAKE_PROFIT, "take-profit threshold");
+        assertEq(protection.stopLossTriggerPrice, BULL_STOP_LOSS, "stop-loss threshold");
+        assertEq(
+            uint8(protection.status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Armed),
+            "protection should arm immediately"
+        );
+        assertEq(router.pendingOrderCounts(ALICE), 0, "armed protection must not be an ordinary order");
+        assertEq(router.pendingCloseSize(ALICE), 0, "armed protection must not reserve queued close size");
+        assertEq(router.nextCommitId(), 1, "armed protection must not consume an order id");
+        assertEq(
+            _freeSettlementUsdc(ALICE),
+            freeBefore - _totalProtectionBountyUsdc(),
+            "both protection bounties should be reserved"
+        );
+        assertEq(
+            router.getAccountReservations(ALICE).executionBountyUsdc,
+            _totalProtectionBountyUsdc(),
+            "reservation view should include dormant protection bounties"
+        );
+    }
+
+    function test_CreatePositionProtection_ValidatesBearGeometry() public {
+        _open(ALICE, CfdTypes.Side.BEAR, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
+
+        vm.prank(ALICE);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidProtectionPrices.selector);
+        protectionActions.createPositionProtection(_params(BEAR_STOP_LOSS, BEAR_TAKE_PROFIT));
+
+        vm.prank(ALICE);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionTriggerAlreadyMet.selector);
+        protectionActions.createPositionProtection(_params(MARK_PRICE, 0));
+
+        vm.prank(ALICE);
+        uint64 protectionId = protectionActions.createPositionProtection(_params(BEAR_TAKE_PROFIT, BEAR_STOP_LOSS));
+
+        PositionProtectionTypes.PositionProtectionView memory protection =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(uint8(protection.side), uint8(CfdTypes.Side.BEAR), "protected side");
+        assertEq(
+            uint8(protection.status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Armed),
+            "bear protection should arm"
+        );
+    }
+
+    function test_BullTakeProfit_TriggersAtEqualityAndRejectsWrongDirection() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.BULL, BULL_TAKE_PROFIT, 0);
+
+        _expectTriggerNotMet(protectionId, BULL_TAKE_PROFIT + 2);
+        uint64 linkedOrderId = _triggerAt(protectionId, BULL_TAKE_PROFIT);
+
+        _assertTriggered(
+            protectionId,
+            linkedOrderId,
+            PositionProtectionTypes.PositionProtectionTriggerLeg.TakeProfit,
+            BULL_TAKE_PROFIT
+        );
+    }
+
+    function test_BullStopLoss_TriggersAtEqualityAndRejectsWrongDirection() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.BULL, 0, BULL_STOP_LOSS);
+
+        _expectTriggerNotMet(protectionId, BULL_STOP_LOSS - 1);
+        uint64 linkedOrderId = _triggerAt(protectionId, BULL_STOP_LOSS);
+
+        _assertTriggered(
+            protectionId, linkedOrderId, PositionProtectionTypes.PositionProtectionTriggerLeg.StopLoss, BULL_STOP_LOSS
+        );
+    }
+
+    function test_BearTakeProfit_TriggersAtEqualityAndRejectsWrongDirection() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.BEAR, BEAR_TAKE_PROFIT, 0);
+
+        _expectTriggerNotMet(protectionId, BEAR_TAKE_PROFIT - 1);
+        uint64 linkedOrderId = _triggerAt(protectionId, BEAR_TAKE_PROFIT);
+
+        _assertTriggered(
+            protectionId,
+            linkedOrderId,
+            PositionProtectionTypes.PositionProtectionTriggerLeg.TakeProfit,
+            BEAR_TAKE_PROFIT
+        );
+    }
+
+    function test_BearStopLoss_TriggersAtEqualityAndRejectsWrongDirection() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.BEAR, 0, BEAR_STOP_LOSS);
+
+        _expectTriggerNotMet(protectionId, BEAR_STOP_LOSS + 2);
+        uint64 linkedOrderId = _triggerAt(protectionId, BEAR_STOP_LOSS);
+
+        _assertTriggered(
+            protectionId, linkedOrderId, PositionProtectionTypes.PositionProtectionTriggerLeg.StopLoss, BEAR_STOP_LOSS
+        );
+    }
+
+    function test_TriggerPositionProtection_RejectsSameBlockAndOldPublishTime() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.BULL, BULL_TAKE_PROFIT, 0);
+        PositionProtectionTypes.PositionProtectionView memory armed =
+            protectionViews.getPositionProtection(protectionId);
+
+        bytes[] memory sameBlockData = _priceData(BULL_TAKE_PROFIT);
+        vm.prank(TRIGGER_KEEPER);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__SameBlockTrigger.selector);
+        protectionActions.triggerPositionProtection(protectionId, sameBlockData);
+
+        vm.roll(block.number + 1);
+        vm.warp(block.timestamp + 1);
+        baseMockPyth.setAllPrices(_basePythFeedIds(), int64(uint64(BULL_TAKE_PROFIT)), 0, int32(-8), armed.armedAt);
+        bytes[] memory oldPublishData = new bytes[](1);
+        oldPublishData[0] = hex"01";
+
+        vm.prank(TRIGGER_KEEPER);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__SameBlockTrigger.selector);
+        protectionActions.triggerPositionProtection(protectionId, oldPublishData);
+
+        PositionProtectionTypes.PositionProtectionView memory afterReverts =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(
+            uint8(afterReverts.status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Armed),
+            "timing reverts must preserve armed protection"
+        );
+        assertEq(afterReverts.linkedOrderId, 0, "timing reverts must not create a close");
+        assertEq(
+            router.getAccountReservations(ALICE).executionBountyUsdc,
+            _totalProtectionBountyUsdc(),
+            "timing reverts must preserve both bounties"
+        );
+    }
+
+    function test_TriggeredClose_AppendsToGlobalFifoAndExecutesThroughOrdinaryPath() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.BULL, BULL_TAKE_PROFIT, 0);
+
+        vm.prank(BOB);
+        router.commitOrder(CfdTypes.Side.BEAR, POSITION_SIZE, POSITION_MARGIN_USDC, 0, false);
+        assertEq(router.nextExecuteId(), 1, "foreign order should be queue head");
+
+        uint256 triggerKeeperBefore = clearinghouse.balanceUsdc(TRIGGER_KEEPER);
+        uint64 linkedOrderId = _triggerAt(protectionId, BULL_TAKE_PROFIT);
+        assertEq(linkedOrderId, 2, "triggered close should consume the next ordinary order id");
+        assertEq(router.nextExecuteId(), 1, "triggered close must not jump the foreign head");
+        assertEq(router.globalTailOrderId(), linkedOrderId, "triggered close should join the FIFO tail");
+        assertEq(_orderRecord(1).nextGlobalOrderId, linkedOrderId, "foreign head should link to close");
+        assertEq(_orderRecord(linkedOrderId).prevGlobalOrderId, 1, "close should link back to foreign head");
+        assertEq(
+            clearinghouse.balanceUsdc(TRIGGER_KEEPER) - triggerKeeperBefore,
+            router.positionProtectionTriggerBountyUsdc(),
+            "trigger keeper should be paid exactly once"
+        );
+
+        CfdTypes.Order memory closeOrder = _orderRecord(linkedOrderId).core;
+        assertEq(closeOrder.account, ALICE, "linked close owner");
+        assertEq(closeOrder.sizeDelta, POSITION_SIZE, "linked close should cover the full position");
+        assertEq(closeOrder.marginDelta, 0, "linked close margin delta");
+        assertEq(closeOrder.targetPrice, 0, "linked close should be market-style");
+        assertEq(uint8(closeOrder.side), uint8(CfdTypes.Side.BULL), "linked close side");
+        assertTrue(closeOrder.isClose, "linked order should be reduce-only");
+        assertEq(router.pendingCloseSize(ALICE), POSITION_SIZE, "linked close aggregate");
+        assertEq(
+            router.getAccountReservations(ALICE).executionBountyUsdc,
+            router.closeOrderExecutionBountyUsdc(),
+            "trigger must transfer, not duplicate, the close bounty"
+        );
+
+        bytes[] memory nonHeadExecutionData = _mockPythUpdateData(MARK_PRICE);
+        vm.prank(EXECUTION_KEEPER);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__OrderNotQueueHead.selector);
+        router.executeOrder(linkedOrderId, nonHeadExecutionData);
+
+        bytes[] memory bobExecutionData = _mockPythUpdateData(MARK_PRICE);
+        vm.prank(EXECUTION_KEEPER);
+        router.executeOrder(1, bobExecutionData);
+
+        uint256 executionKeeperBefore = clearinghouse.balanceUsdc(EXECUTION_KEEPER);
+        bytes[] memory closeExecutionData = _mockPythUpdateData(BULL_TAKE_PROFIT);
+        vm.prank(EXECUTION_KEEPER);
+        router.executeOrder(linkedOrderId, closeExecutionData);
+
+        PositionProtectionTypes.PositionProtectionView memory terminal =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(
+            uint8(terminal.status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Executed),
+            "successful linked close should terminalize protection"
+        );
+        assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "terminal protection should release trade lock");
+        assertEq(router.pendingOrderCounts(ALICE), 0, "terminal close should leave no account order");
+        assertEq(router.pendingCloseSize(ALICE), 0, "terminal close should clear pending size");
+        assertEq(
+            clearinghouse.balanceUsdc(EXECUTION_KEEPER) - executionKeeperBefore,
+            router.closeOrderExecutionBountyUsdc(),
+            "close executor should receive the remaining bounty once"
+        );
+        (uint256 remainingSize,,,,,,) = engine.positions(ALICE);
+        assertEq(remainingSize, 0, "linked close should fully exit the protected position");
+    }
+
+    function test_CancelPositionProtection_RefundsExactReserveAndClearsTradeLock() public {
+        _open(ALICE, CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
+        uint256 freeBefore = _freeSettlementUsdc(ALICE);
+
+        vm.prank(ALICE);
+        uint64 protectionId = protectionActions.createPositionProtection(_params(BULL_TAKE_PROFIT, BULL_STOP_LOSS));
+        assertEq(_freeSettlementUsdc(ALICE), freeBefore - _totalProtectionBountyUsdc(), "reserve after create");
+
+        vm.prank(ALICE);
+        protectionActions.cancelPositionProtection(protectionId);
+
+        PositionProtectionTypes.PositionProtectionView memory cancelled =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(
+            uint8(cancelled.status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Cancelled),
+            "cancelled lifecycle"
+        );
+        assertEq(cancelled.triggerBountyUsdc, 0, "cancel should clear trigger bounty ownership");
+        assertEq(cancelled.executionBountyUsdc, 0, "cancel should clear execution bounty ownership");
+        assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "cancel should clear active id");
+        assertEq(_freeSettlementUsdc(ALICE), freeBefore, "cancel should refund exact reserve");
+        assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, 0, "reservation view after cancel");
+    }
+
+    function test_PostLockRisk_RejectsInitialMarginEqualityAndAcceptsOneMicroUsdcAboveBoundary() public {
+        CfdTypes.RiskParams memory riskParams = _riskParams();
+        uint256 notionalUsdc = (POSITION_SIZE * MARK_PRICE) / 1e20;
+        uint256 initialRequirementUsdc = (notionalUsdc * riskParams.initMarginBps) / 10_000;
+        uint256 executionFeeUsdc = _engineExecutionFeeUsdc(POSITION_SIZE, MARK_PRICE);
+        uint256 protectionBountiesUsdc = _totalProtectionBountyUsdc();
+        uint256 openingMarginDeltaUsdc = initialRequirementUsdc + executionFeeUsdc;
+        uint256 exactFundingUsdc = executionFeeUsdc + initialRequirementUsdc + protectionBountiesUsdc;
+
+        _fundTrader(RISK_EXACT, exactFundingUsdc);
+        _fundTrader(RISK_PLUS_ONE, exactFundingUsdc + 1);
+        _open(RISK_EXACT, CfdTypes.Side.BULL, POSITION_SIZE, openingMarginDeltaUsdc, MARK_PRICE);
+        _open(RISK_PLUS_ONE, CfdTypes.Side.BULL, POSITION_SIZE, openingMarginDeltaUsdc, MARK_PRICE);
+
+        uint256 exactFreeBefore = _freeSettlementUsdc(RISK_EXACT);
+        assertEq(
+            exactFreeBefore, protectionBountiesUsdc, "exact account should fund both bounties from free settlement"
+        );
+        vm.prank(RISK_EXACT);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector);
+        protectionActions.createPositionProtection(_params(BULL_TAKE_PROFIT, BULL_STOP_LOSS));
+        assertEq(_freeSettlementUsdc(RISK_EXACT), exactFreeBefore, "risk failure must roll back the bounty lock");
+        assertEq(protectionViews.activePositionProtectionId(RISK_EXACT), 0, "risk failure must not create protection");
+
+        vm.prank(RISK_PLUS_ONE);
+        uint64 protectionId = protectionActions.createPositionProtection(_params(BULL_TAKE_PROFIT, BULL_STOP_LOSS));
+        assertEq(
+            uint8(protectionViews.getPositionProtection(protectionId).status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Armed),
+            "one micro-USDC above the inclusive initial-margin boundary should arm"
+        );
+    }
+
+    function test_PostLockRisk_UsesStricterFadBoundary() public {
+        CfdTypes.RiskParams memory riskParams = _riskParams();
+        riskParams.baseCarryBps = 0;
+        _setRiskParams(riskParams);
+
+        uint256 notionalUsdc = (POSITION_SIZE * MARK_PRICE) / 1e20;
+        uint256 initialRequirementUsdc = (notionalUsdc * riskParams.initMarginBps) / 10_000;
+        uint256 fadRequirementUsdc = (notionalUsdc * riskParams.fadMarginBps) / 10_000;
+        uint256 executionFeeUsdc = _engineExecutionFeeUsdc(POSITION_SIZE, MARK_PRICE);
+        uint256 protectionBountiesUsdc = _totalProtectionBountyUsdc();
+        uint256 openingMarginDeltaUsdc = initialRequirementUsdc + executionFeeUsdc;
+        uint256 exactFundingUsdc = executionFeeUsdc + fadRequirementUsdc + protectionBountiesUsdc;
+
+        vm.warp(FRIDAY_FAD_START - 2);
+        router.updateMarkPrice(_mockPythUpdateData(MARK_PRICE));
+        assertFalse(engine.isFadWindow(), "positions should open immediately before the FAD boundary");
+
+        _fundTrader(RISK_EXACT, exactFundingUsdc);
+        _fundTrader(RISK_PLUS_ONE, exactFundingUsdc + 1);
+        _open(RISK_EXACT, CfdTypes.Side.BULL, POSITION_SIZE, openingMarginDeltaUsdc, MARK_PRICE);
+        _open(RISK_PLUS_ONE, CfdTypes.Side.BULL, POSITION_SIZE, openingMarginDeltaUsdc, MARK_PRICE);
+
+        vm.warp(FRIDAY_FAD_START);
+        router.updateMarkPrice(_mockPythUpdateData(MARK_PRICE));
+        assertTrue(engine.isFadWindow(), "post-lock risk should use the stricter FAD requirement");
+
+        uint256 exactFreeBefore = _freeSettlementUsdc(RISK_EXACT);
+        assertGe(exactFreeBefore, protectionBountiesUsdc, "exact-boundary account can fund the bounty itself");
+        vm.prank(RISK_EXACT);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector);
+        protectionActions.createPositionProtection(_params(BULL_TAKE_PROFIT, BULL_STOP_LOSS));
+        assertEq(_freeSettlementUsdc(RISK_EXACT), exactFreeBefore, "risk failure must roll back the bounty lock");
+
+        vm.prank(RISK_PLUS_ONE);
+        uint64 protectionId = protectionActions.createPositionProtection(_params(BULL_TAKE_PROFIT, BULL_STOP_LOSS));
+        assertEq(
+            uint8(protectionViews.getPositionProtection(protectionId).status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Armed),
+            "one micro-USDC above the inclusive risk boundary should arm"
+        );
+    }
+
+    function test_Pause_BlocksNewAndReplacementButAllowsCancelAndTrigger() public {
+        uint64 cancelledProtectionId = _createProtectionFor(
+            ALICE, CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, BULL_TAKE_PROFIT, BULL_STOP_LOSS
+        );
+        uint64 triggeredProtectionId =
+            _createProtectionFor(BOB, CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, BULL_TAKE_PROFIT, 0);
+
+        routerAdmin.pause();
+
+        vm.prank(ALICE);
+        vm.expectRevert(Pausable.EnforcedPause.selector);
+        protectionActions.replacePositionProtection(cancelledProtectionId, _params(BULL_TAKE_PROFIT - 1, 0));
+
+        vm.prank(CAROL);
+        vm.expectRevert(Pausable.EnforcedPause.selector);
+        protectionActions.commitOpenOrderWithProtection(
+            CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, 0, _params(BULL_TAKE_PROFIT, BULL_STOP_LOSS)
+        );
+
+        vm.prank(ALICE);
+        protectionActions.cancelPositionProtection(cancelledProtectionId);
+        assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "pause must not block cancellation");
+
+        uint64 linkedOrderId = _triggerAt(triggeredProtectionId, BULL_TAKE_PROFIT);
+        assertEq(
+            uint8(protectionViews.getPositionProtection(triggeredProtectionId).status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Triggered),
+            "pause must not block a safety trigger"
+        );
+        assertEq(router.accountHeadOrderId(BOB), linkedOrderId, "paused trigger should append the close normally");
+    }
+
+    function test_FeatureOff_BlocksNewAndReplacementButAllowsCancelAndTrigger() public {
+        uint64 cancelledProtectionId = _createProtectionFor(
+            ALICE, CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, BULL_TAKE_PROFIT, BULL_STOP_LOSS
+        );
+        uint64 triggeredProtectionId =
+            _createProtectionFor(BOB, CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, BULL_TAKE_PROFIT, 0);
+
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.positionProtectionCommitsEnabled = false;
+        _setRouterConfig(config);
+
+        vm.prank(ALICE);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionDisabled.selector);
+        protectionActions.replacePositionProtection(cancelledProtectionId, _params(BULL_TAKE_PROFIT - 1, 0));
+
+        vm.prank(CAROL);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionDisabled.selector);
+        protectionActions.commitOpenOrderWithProtection(
+            CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, 0, _params(BULL_TAKE_PROFIT, BULL_STOP_LOSS)
+        );
+
+        vm.prank(ALICE);
+        protectionActions.cancelPositionProtection(cancelledProtectionId);
+        assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "feature-off must not block cancellation");
+
+        uint64 linkedOrderId = _triggerAt(triggeredProtectionId, BULL_TAKE_PROFIT);
+        assertEq(
+            uint8(protectionViews.getPositionProtection(triggeredProtectionId).status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Triggered),
+            "feature-off must not disable existing safety instructions"
+        );
+        assertEq(router.accountHeadOrderId(BOB), linkedOrderId, "feature-off trigger should append the close normally");
+    }
+
+    function test_ReplacePositionProtection_RemainsAvailableInDegradedMode() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.BULL, BULL_TAKE_PROFIT, 0);
+        vm.roll(block.number + 1);
+        vm.warp(block.timestamp + 1);
+        stdstore.target(address(engine)).sig("degradedMode()").checked_write(true);
+        assertTrue(engine.degradedMode(), "setup should enter degraded mode");
+
+        vm.prank(ALICE);
+        protectionActions.replacePositionProtection(protectionId, _params(BULL_TAKE_PROFIT - 1, 0));
+
+        PositionProtectionTypes.PositionProtectionView memory replaced =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(
+            uint8(replaced.status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Armed),
+            "geometry-only replacement should remain available in degraded mode"
+        );
+        assertEq(replaced.takeProfitTriggerPrice, BULL_TAKE_PROFIT - 1, "replacement threshold");
+        assertEq(replaced.armedAt, block.timestamp, "replacement should restart time separation");
+        assertEq(replaced.armedBlock, block.number, "replacement should restart block separation");
+        assertEq(
+            replaced.triggerBountyUsdc + replaced.executionBountyUsdc,
+            _totalProtectionBountyUsdc(),
+            "replacement should retain the snapshotted reserve"
+        );
+    }
+
+    function test_ProtectionBook_NonTriggerActionsRejectEthAndNeverCustodyIt() public {
+        PositionProtectionTypes.PositionProtectionParams memory params = _params(BULL_TAKE_PROFIT, BULL_STOP_LOSS);
+        bytes[] memory calls = new bytes[](4);
+        calls[0] = abi.encodeCall(IPositionProtectionActions.createPositionProtection, (params));
+        calls[1] = abi.encodeCall(IPositionProtectionActions.replacePositionProtection, (uint64(1), params));
+        calls[2] = abi.encodeCall(IPositionProtectionActions.cancelPositionProtection, (uint64(1)));
+        calls[3] = abi.encodeCall(
+            IPositionProtectionActions.commitOpenOrderWithProtection,
+            (CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, 0, params)
+        );
+
+        vm.deal(ALICE, calls.length);
+        for (uint256 i; i < calls.length; ++i) {
+            uint256 callerEthBefore = ALICE.balance;
+            vm.prank(ALICE);
+            (bool success,) = address(protectionBook).call{value: 1}(calls[i]);
+            assertFalse(success, "every non-trigger action must remain nonpayable");
+            assertEq(ALICE.balance, callerEthBefore, "reverted ETH must remain with the caller");
+            assertEq(address(protectionBook).balance, 0, "the Book must never retain native value");
+        }
+    }
+
+    function test_ProtectionBook_LifecycleHooksRejectNonRouterCallers() public {
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__Unauthorized.selector);
+        protectionBook.activate(1, MARK_PRICE, uint64(block.timestamp), 1);
+
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__Unauthorized.selector);
+        protectionBook.afterOrderTerminal(1, ALICE, IOrderRouterAccounting.OrderStatus.Failed);
+
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__Unauthorized.selector);
+        protectionBook.forfeitOnLiquidation(ALICE);
+    }
+
+    function test_Router_IgnoresBookTrailingMetadataFromUntrustedCaller() public {
+        bytes memory commitCall = abi.encodeWithSelector(
+            router.commitOrder.selector, CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, 0, false
+        );
+        vm.prank(BOB);
+        (bool commitSuccess,) = address(router).call(abi.encodePacked(commitCall, abi.encode(ALICE)));
+        assertTrue(commitSuccess, "ordinary callers may still submit canonical orders with ignored trailing bytes");
+        assertEq(_orderRecord(1).core.account, BOB, "only the Book may supply a trailing canonical account");
+
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.BULL, BULL_TAKE_PROFIT, 0);
+        bytes memory refreshCall =
+            abi.encodeWithSelector(router.updateMarkPrice.selector, _mockPythUpdateData(BULL_TAKE_PROFIT));
+        vm.prank(CAROL);
+        (bool refreshSuccess,) =
+            address(router).call(abi.encodePacked(refreshCall, abi.encode(CAROL, uint256(protectionId))));
+        assertTrue(refreshSuccess, "ordinary mark refresh should accept harmless trailing bytes");
+        assertEq(
+            uint8(protectionViews.getPositionProtection(protectionId).status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Armed),
+            "only the Book may use trailing trigger metadata"
+        );
+        assertEq(router.pendingOrderCounts(ALICE), 0, "spoofed metadata must not append a protection close");
+    }
+
+    function test_TriggerPositionProtection_RefundsUnusedEthAndLeavesBookBalanceZero() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.BULL, BULL_TAKE_PROFIT, 0);
+        bytes[] memory updateData = _mockPythUpdateData(BULL_TAKE_PROFIT);
+        vm.deal(TRIGGER_KEEPER, 1 ether);
+        uint256 keeperEthBefore = TRIGGER_KEEPER.balance;
+
+        vm.prank(TRIGGER_KEEPER);
+        uint64 linkedOrderId = protectionActions.triggerPositionProtection{value: 1 ether}(protectionId, updateData);
+
+        assertEq(TRIGGER_KEEPER.balance, keeperEthBefore, "unused oracle ETH should return to the original keeper");
+        assertEq(address(protectionBook).balance, 0, "the Book must only forward native value transiently");
+        assertEq(
+            uint8(protectionViews.getPositionProtection(protectionId).status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Triggered),
+            "ETH forwarding should preserve trigger lifecycle"
+        );
+        assertEq(router.accountHeadOrderId(ALICE), linkedOrderId, "trigger should still append the linked close");
+    }
+
+    function test_ActiveProtection_BlocksDiscretionaryOrdersButAllowsAddMargin() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.BULL, BULL_TAKE_PROFIT, 0);
+
+        vm.prank(ALICE);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionActive.selector);
+        router.commitOrder(CfdTypes.Side.BULL, POSITION_SIZE, 0, 0, true);
+
+        (, uint256 marginBefore,,,,,) = engine.positions(ALICE);
+        vm.prank(ALICE);
+        engine.addMargin(ALICE, 100e6);
+        (, uint256 marginAfter,,,,,) = engine.positions(ALICE);
+        assertEq(marginAfter, marginBefore + 100e6, "protection should not block add-margin safety action");
+
+        _triggerAt(protectionId, BULL_TAKE_PROFIT);
+        vm.prank(ALICE);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionActive.selector);
+        router.commitOrder(CfdTypes.Side.BULL, POSITION_SIZE, 0, 0, true);
+    }
+
+    function test_Liquidation_ArmedProtectionForfeitsBothBountiesAndTerminalizes() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.BULL, 0, BULL_STOP_LOSS);
+        _withdrawAllFreeSettlement(ALICE);
+
+        uint256 treasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        vm.prank(EXECUTION_KEEPER);
+        router.executeLiquidation(ALICE, _mockPythUpdateData(150_000_000));
+
+        PositionProtectionTypes.PositionProtectionView memory liquidated =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(
+            uint8(liquidated.status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Liquidated),
+            "armed protection should terminalize as liquidated"
+        );
+        assertEq(liquidated.triggerBountyUsdc, 0, "liquidation should consume the unpaid trigger bounty");
+        assertEq(liquidated.executionBountyUsdc, 0, "liquidation should consume the dormant close bounty");
+        assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "liquidation should clear active protection");
+        assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, 0, "no bounty reservation should remain");
+        assertEq(
+            clearinghouse.balanceUsdc(engine.protocolTreasury()) - treasuryBefore,
+            _totalProtectionBountyUsdc(),
+            "both unpaid bounties should be forfeited exactly once"
+        );
+        (uint256 remainingSize,,,,,,) = engine.positions(ALICE);
+        assertEq(remainingSize, 0, "liquidation should remove the protected position");
+    }
+
+    function test_Liquidation_TriggeredProtectionForfeitsLinkedCloseBountyExactlyOnce() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.BULL, 0, BULL_STOP_LOSS);
+        _withdrawAllFreeSettlement(ALICE);
+        uint64 linkedOrderId = _triggerAt(protectionId, BULL_STOP_LOSS);
+
+        uint256 treasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        vm.prank(EXECUTION_KEEPER);
+        router.executeLiquidation(ALICE, _mockPythUpdateData(150_000_000));
+
+        PositionProtectionTypes.PositionProtectionView memory liquidated =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(
+            uint8(liquidated.status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Liquidated),
+            "triggered protection should remain liquidated after linked-order cleanup"
+        );
+        assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "liquidation should clear active protection");
+        assertEq(
+            uint8(_orderRecord(linkedOrderId).status),
+            uint8(IOrderRouterAccounting.OrderStatus.Failed),
+            "liquidation should terminally fail the queued linked close"
+        );
+        assertEq(_orderRecord(linkedOrderId).executionBountyUsdc, 0, "linked order bounty should be consumed");
+        assertEq(router.pendingOrderCounts(ALICE), 0, "liquidation should unlink the generated close");
+        assertEq(router.pendingCloseSize(ALICE), 0, "liquidation should clear generated close size");
+        assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, 0, "no bounty reservation should remain");
+        assertEq(
+            clearinghouse.balanceUsdc(engine.protocolTreasury()) - treasuryBefore,
+            router.closeOrderExecutionBountyUsdc(),
+            "only the unpaid linked-close bounty should be forfeited at liquidation"
+        );
+        (uint256 remainingSize,,,,,,) = engine.positions(ALICE);
+        assertEq(remainingSize, 0, "liquidation should remove the protected position");
+    }
+
+    function test_AttachedOpen_SuccessArmsProtectionAtomically() public {
+        PositionProtectionTypes.PositionProtectionParams memory params = _params(BULL_TAKE_PROFIT, BULL_STOP_LOSS);
+
+        vm.prank(ALICE);
+        (uint64 parentOrderId, uint64 protectionId) = protectionActions.commitOpenOrderWithProtection(
+            CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, 0, params
+        );
+
+        PositionProtectionTypes.PositionProtectionView memory staged =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(staged.parentOrderId, parentOrderId, "parent link");
+        assertEq(
+            uint8(staged.status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.PendingOpen),
+            "protection should stage before parent execution"
+        );
+        assertEq(router.pendingOrderCounts(ALICE), 1, "only parent should count as pending");
+        assertEq(
+            router.getAccountReservations(ALICE).executionBountyUsdc,
+            _totalProtectionBountyUsdc() + _executionBountyReserve(parentOrderId),
+            "view should include parent and staged-protection bounties"
+        );
+
+        PositionProtectionTypes.PositionProtectionParams memory replacement = _params(85_000_000, 115_000_000);
+        vm.prank(ALICE);
+        protectionActions.replacePositionProtection(protectionId, replacement);
+        PositionProtectionTypes.PositionProtectionView memory replacedPending =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(
+            uint8(replacedPending.status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.PendingOpen),
+            "staged replacement should remain dormant until parent execution"
+        );
+        assertEq(replacedPending.takeProfitTriggerPrice, replacement.takeProfitTriggerPrice, "staged replacement TP");
+        assertEq(replacedPending.stopLossTriggerPrice, replacement.stopLossTriggerPrice, "staged replacement SL");
+        assertEq(replacedPending.armedAt, 0, "staged replacement must not start trigger timing");
+        assertEq(replacedPending.armedBlock, 0, "staged replacement must not start block separation");
+
+        bytes[] memory executionData = _mockPythUpdateData(MARK_PRICE);
+        vm.prank(EXECUTION_KEEPER);
+        router.executeOrder(parentOrderId, executionData);
+
+        PositionProtectionTypes.PositionProtectionView memory armed =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(
+            uint8(armed.status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Armed),
+            "successful parent should atomically arm protection"
+        );
+        assertEq(armed.size, POSITION_SIZE, "armed size should match actual position");
+        assertEq(uint8(armed.side), uint8(CfdTypes.Side.BULL), "armed side should match actual position");
+        assertEq(protectionViews.activePositionProtectionId(ALICE), protectionId, "active id after parent success");
+        assertEq(router.pendingOrderCounts(ALICE), 0, "parent should be terminal");
+        assertEq(
+            router.getAccountReservations(ALICE).executionBountyUsdc,
+            _totalProtectionBountyUsdc(),
+            "only protection bounties should remain after opening bounty payment"
+        );
+        (uint256 liveSize,,,,,,) = engine.positions(ALICE);
+        assertEq(liveSize, POSITION_SIZE, "parent should open the position");
+    }
+
+    function test_AttachedOpen_ThresholdCrossedBeforeFillArmsThenTriggersOnLaterTick() public {
+        PositionProtectionTypes.PositionProtectionParams memory params = _params(BULL_TAKE_PROFIT, 0);
+
+        vm.prank(ALICE);
+        (uint64 parentOrderId, uint64 protectionId) = protectionActions.commitOpenOrderWithProtection(
+            CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, 0, params
+        );
+
+        uint256 crossedTakeProfit = BULL_TAKE_PROFIT - 2;
+        bytes[] memory executionData = _mockPythUpdateData(crossedTakeProfit);
+        vm.prank(EXECUTION_KEEPER);
+        router.executeOrder(parentOrderId, executionData);
+
+        PositionProtectionTypes.PositionProtectionView memory armed =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(
+            uint8(armed.status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Armed),
+            "a crossed staged threshold must not leave the filled position naked"
+        );
+        assertEq(armed.size, POSITION_SIZE, "activation should bind the actual full position");
+
+        uint64 linkedOrderId = _triggerAt(protectionId, crossedTakeProfit);
+        _assertTriggered(
+            protectionId,
+            linkedOrderId,
+            PositionProtectionTypes.PositionProtectionTriggerLeg.TakeProfit,
+            crossedTakeProfit
+        );
+    }
+
+    function test_AttachedOpen_SlippageFailureRefundsProtectionBounties() public {
+        uint256 freeBefore = _freeSettlementUsdc(ALICE);
+        PositionProtectionTypes.PositionProtectionParams memory params = _params(BULL_TAKE_PROFIT, BULL_STOP_LOSS);
+
+        vm.prank(ALICE);
+        (uint64 parentOrderId, uint64 protectionId) = protectionActions.commitOpenOrderWithProtection(
+            CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, BULL_STOP_LOSS, params
+        );
+        uint256 parentBountyUsdc = _executionBountyReserve(parentOrderId);
+
+        bytes[] memory executionData = _mockPythUpdateData(MARK_PRICE);
+        vm.prank(EXECUTION_KEEPER);
+        router.executeOrder(parentOrderId, executionData);
+
+        PositionProtectionTypes.PositionProtectionView memory failed =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(
+            uint8(failed.status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Failed),
+            "terminal parent failure should fail attached protection"
+        );
+        assertEq(failed.triggerBountyUsdc, 0, "failed attached protection should release trigger bounty");
+        assertEq(failed.executionBountyUsdc, 0, "failed attached protection should release close bounty");
+        assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "failure should clear active protection");
+        assertEq(router.pendingOrderCounts(ALICE), 0, "failed parent should leave no order");
+        assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, 0, "failure should clear all reserves");
+        assertEq(
+            _freeSettlementUsdc(ALICE),
+            freeBefore - parentBountyUsdc,
+            "only the ordinary parent clearer bounty should remain spent"
+        );
+        (uint256 liveSize,,,,,,) = engine.positions(ALICE);
+        assertEq(liveSize, 0, "slippage-failed parent must not create a position");
+    }
+
+    function test_AttachedOpen_ParentExpiryBatchFailsProtectionsAndRefundsTheirBounties() public {
+        PositionProtectionTypes.PositionProtectionParams memory params = _params(BULL_TAKE_PROFIT, BULL_STOP_LOSS);
+
+        vm.prank(ALICE);
+        (uint64 aliceParentId, uint64 aliceProtectionId) = protectionActions.commitOpenOrderWithProtection(
+            CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, 0, params
+        );
+        vm.prank(BOB);
+        (uint64 bobParentId, uint64 bobProtectionId) = protectionActions.commitOpenOrderWithProtection(
+            CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, 0, params
+        );
+        assertEq(aliceParentId, 1, "Alice parent queue id");
+        assertEq(bobParentId, 2, "Bob parent queue id");
+
+        vm.warp(block.timestamp + router.maxOrderAge() + 1);
+        bytes[] memory empty = new bytes[](0);
+        vm.prank(EXECUTION_KEEPER);
+        router.executeOrderBatch(bobParentId, empty);
+
+        _assertExpiredAttachedProtection(ALICE, aliceParentId, aliceProtectionId);
+        _assertExpiredAttachedProtection(BOB, bobParentId, bobProtectionId);
+        assertEq(router.nextExecuteId(), 0, "batch expiry should fully drain the parent queue");
+    }
+
+    function _createSingleLegProtection(
+        CfdTypes.Side side,
+        uint256 takeProfit,
+        uint256 stopLoss
+    ) internal returns (uint64 protectionId) {
+        return _createProtectionFor(ALICE, side, POSITION_SIZE, POSITION_MARGIN_USDC, takeProfit, stopLoss);
+    }
+
+    function _createProtectionFor(
+        address account,
+        CfdTypes.Side side,
+        uint256 size,
+        uint256 marginUsdc,
+        uint256 takeProfit,
+        uint256 stopLoss
+    ) internal returns (uint64 protectionId) {
+        _open(account, side, size, marginUsdc, MARK_PRICE);
+        vm.prank(account);
+        protectionId = protectionActions.createPositionProtection(_params(takeProfit, stopLoss));
+    }
+
+    function _triggerAt(
+        uint64 protectionId,
+        uint256 price
+    ) internal returns (uint64 linkedOrderId) {
+        bytes[] memory updateData = _mockPythUpdateData(price);
+        vm.prank(TRIGGER_KEEPER);
+        linkedOrderId = protectionActions.triggerPositionProtection(protectionId, updateData);
+    }
+
+    function _expectTriggerNotMet(
+        uint64 protectionId,
+        uint256 price
+    ) internal {
+        bytes[] memory updateData = _mockPythUpdateData(price);
+        vm.prank(TRIGGER_KEEPER);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__TriggerNotMet.selector);
+        protectionActions.triggerPositionProtection(protectionId, updateData);
+    }
+
+    function _assertTriggered(
+        uint64 protectionId,
+        uint64 linkedOrderId,
+        PositionProtectionTypes.PositionProtectionTriggerLeg expectedLeg,
+        uint256 expectedMark
+    ) internal view {
+        PositionProtectionTypes.PositionProtectionView memory protection =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(
+            uint8(protection.status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Triggered),
+            "triggered lifecycle"
+        );
+        assertEq(uint8(protection.triggeredLeg), uint8(expectedLeg), "triggered leg");
+        assertEq(protection.triggerMarkPrice, expectedMark, "neutral trigger mark");
+        assertEq(protection.linkedOrderId, linkedOrderId, "linked order id");
+        assertEq(router.pendingOrderCounts(ALICE), 1, "linked close should enter account queue");
+    }
+
+    function _refreshMark(
+        uint256 price
+    ) internal {
+        router.updateMarkPrice(_priceData(price));
+    }
+
+    function _priceData(
+        uint256 price
+    ) internal pure returns (bytes[] memory updateData) {
+        updateData = new bytes[](1);
+        updateData[0] = abi.encode(price);
+    }
+
+    function _params(
+        uint256 takeProfit,
+        uint256 stopLoss
+    ) internal pure returns (PositionProtectionTypes.PositionProtectionParams memory params) {
+        params.takeProfitTriggerPrice = takeProfit;
+        params.stopLossTriggerPrice = stopLoss;
+    }
+
+    function _totalProtectionBountyUsdc() internal view returns (uint256) {
+        return router.positionProtectionTriggerBountyUsdc() + router.closeOrderExecutionBountyUsdc();
+    }
+
+    function _withdrawAllFreeSettlement(
+        address account
+    ) internal {
+        uint256 freeSettlementUsdc = _freeSettlementUsdc(account);
+        vm.prank(account);
+        clearinghouse.withdraw(account, freeSettlementUsdc);
+    }
+
+    function _assertExpiredAttachedProtection(
+        address account,
+        uint64 parentOrderId,
+        uint64 protectionId
+    ) internal view {
+        PositionProtectionTypes.PositionProtectionView memory failed =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(
+            uint8(failed.status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Failed),
+            "expired parent should fail its staged protection"
+        );
+        assertEq(failed.triggerBountyUsdc, 0, "expiry should refund the staged trigger bounty");
+        assertEq(failed.executionBountyUsdc, 0, "expiry should refund the staged close bounty");
+        assertEq(protectionViews.activePositionProtectionId(account), 0, "expiry should clear the trade lock");
+        assertEq(
+            uint8(_orderRecord(parentOrderId).status),
+            uint8(IOrderRouterAccounting.OrderStatus.Failed),
+            "expired parent should be terminally failed"
+        );
+        assertEq(router.pendingOrderCounts(account), 0, "expiry should clear the account queue");
+        assertEq(router.getAccountReservations(account).executionBountyUsdc, 0, "expiry should clear every reserve");
+    }
+
+}

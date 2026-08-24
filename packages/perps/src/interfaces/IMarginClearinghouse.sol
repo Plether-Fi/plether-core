@@ -275,8 +275,9 @@ interface IMarginClearinghouse {
     ) external returns (uint256 consumedUsdc);
 
     /// @notice Locks settlement into a reserved bucket excluded from generic order/position margin release paths.
-    /// @dev Callable only by the engine or reported router. Checkpoints carry and reclassifies free settlement without
-    ///      moving tokens or changing the total settlement balance.
+    /// @dev Callable only by the engine, its reported router, or the router's immutable position-protection book.
+    ///      Checkpoints carry and reclassifies free settlement without moving tokens or changing the total settlement
+    ///      balance.
     /// @param account Account whose settlement should be reserved
     /// @param amountUsdc USDC amount to lock as reserved settlement
     function lockReservedSettlement(
@@ -285,8 +286,9 @@ interface IMarginClearinghouse {
     ) external;
 
     /// @notice Unlocks settlement from the reserved bucket back into free settlement.
-    /// @dev Callable only by the engine or settlement sidecar. Checkpoints carry and reverts rather than clamping on
-    ///      bucket underflow; no tokens move.
+    /// @dev Callable only by the engine, its reported router or settlement sidecar, or the router's immutable
+    ///      position-protection book. Checkpoints carry and reverts rather than clamping on bucket underflow; no tokens
+    ///      move.
     /// @param account Account whose reserved settlement should be unlocked
     /// @param amountUsdc USDC amount to unlock
     function unlockReservedSettlement(

@@ -13,51 +13,59 @@ abstract contract OrderCommitHandler is OrderValidation {
     /// @notice Maximum live pending orders allowed per account.
     uint256 public maxPendingOrders = 5;
 
-    /// @notice Validates, reserves, records, and links a caller's delayed order.
-    /// @dev The caller is the canonical account. The order id is assigned before external reservation calls,
-    ///      but any revert rolls the increment back. Orders are appended to the global and account queues; only
-    ///      opens with nonzero margin enter the margin queue. Reverts if the post-increment account count exceeds
-    ///      `maxPendingOrders` and emits `OrderCommitted` on success.
-    /// @param side Requested open direction or direction of the queued position being closed.
-    /// @param sizeDelta Position-size change (18 decimals).
-    /// @param marginDelta Open committed margin (6-decimal USDC), required to be zero for closes.
-    /// @param targetPrice Direction-aware execution limit (8 decimals), or zero for no limit.
-    /// @param isClose Whether this is a strict position reduction.
-    function _commitOrder(
+    /// @notice Account-explicit commit primitive used by the router-bound position-protection book.
+    /// @dev The public path always passes `msg.sender`; the protected-open host path authenticates the book separately.
+    function _commitOrderFor(
+        address account,
         CfdTypes.Side side,
         uint256 sizeDelta,
         uint256 marginDelta,
         uint256 targetPrice,
         bool isClose
-    ) internal {
+    ) internal returns (uint64 orderId) {
+        _requireNoActivePositionProtection(account);
         if (!isClose) {
             _validateOpenCommitAllowed();
         }
         _validateBaseCommit(sizeDelta, marginDelta, isClose);
 
-        address account = msg.sender;
         uint256 executionBountyUsdc = isClose
             ? _validatedCloseExecutionBountyUsdc(account, side, sizeDelta)
             : _validatedOpenExecutionBountyUsdc(account, side, sizeDelta, marginDelta);
 
-        uint64 orderId = nextCommitId++;
+        orderId = nextCommitId++;
 
-        _reserveExecutionBounty(account, orderId, sizeDelta, executionBountyUsdc, isClose);
+        _reserveExecutionBounty(account, sizeDelta, executionBountyUsdc, isClose);
         _reserveCommittedMargin(account, orderId, isClose, marginDelta);
 
+        _recordCommittedOrder(orderId, account, side, sizeDelta, marginDelta, targetPrice, isClose, executionBountyUsdc);
+    }
+
+    /// @notice Stores and links an already-validated order whose reservations have already been established.
+    /// @dev Position-protection triggering reuses this primitive with a bounty transferred from the external book.
+    function _recordCommittedOrder(
+        uint64 orderId,
+        address account,
+        CfdTypes.Side side,
+        uint256 sizeDelta,
+        uint256 marginDelta,
+        uint256 targetPrice,
+        bool isClose,
+        uint256 executionBountyUsdc
+    ) internal {
         OrderRecord storage record = orderRecords[orderId];
-        record.core = CfdTypes.Order({
-            account: account,
-            sizeDelta: sizeDelta,
-            marginDelta: marginDelta,
-            targetPrice: targetPrice,
-            commitTime: uint64(block.timestamp),
-            commitBlock: uint64(block.number),
-            orderId: orderId,
-            side: side,
-            isClose: isClose
-        });
+        CfdTypes.Order storage order = record.core;
+        order.account = account;
+        order.sizeDelta = sizeDelta;
+        order.marginDelta = marginDelta;
+        order.targetPrice = targetPrice;
+        order.commitTime = uint64(block.timestamp);
+        order.commitBlock = uint64(block.number);
+        order.orderId = orderId;
+        order.side = side;
+        order.isClose = isClose;
         record.status = IOrderRouterAccounting.OrderStatus.Pending;
+        record.executionBountyUsdc = executionBountyUsdc;
         if (isClose) {
             pendingCloseSize[account] += sizeDelta;
         }
@@ -67,6 +75,14 @@ abstract contract OrderCommitHandler is OrderValidation {
             revert OrderRouter__TooManyPendingOrders();
         }
         emit OrderCommitted(orderId, account, side);
+    }
+
+    /// @notice Rejects discretionary order commits while a derived protection feature owns the account trade lock.
+    /// @dev The base router has no such lock. Position-protection handling overrides this hook.
+    function _requireNoActivePositionProtection(
+        address account
+    ) internal view virtual {
+        account;
     }
 
     /// @notice Prunes spent reservation links after authenticating the engine or settlement sidecar.

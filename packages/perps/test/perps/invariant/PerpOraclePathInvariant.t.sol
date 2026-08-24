@@ -92,6 +92,8 @@ contract PerpOraclePathHandler is Test {
             minOpenOrderExecutionBountyUsdc: router.minOpenOrderExecutionBountyUsdc(),
             maxOpenOrderExecutionBountyUsdc: router.maxOpenOrderExecutionBountyUsdc(),
             closeOrderExecutionBountyUsdc: router.closeOrderExecutionBountyUsdc(),
+            positionProtectionCommitsEnabled: router.positionProtectionCommitsEnabled(),
+            positionProtectionTriggerBountyUsdc: router.positionProtectionTriggerBountyUsdc(),
             maxPendingOrders: router.maxPendingOrders(),
             minEngineGas: router.minEngineGas(),
             maxPruneOrdersPerCall: router.maxPruneOrdersPerCall()
@@ -120,6 +122,8 @@ contract PerpOraclePathHandler is Test {
             minOpenOrderExecutionBountyUsdc: router.minOpenOrderExecutionBountyUsdc(),
             maxOpenOrderExecutionBountyUsdc: router.maxOpenOrderExecutionBountyUsdc(),
             closeOrderExecutionBountyUsdc: router.closeOrderExecutionBountyUsdc(),
+            positionProtectionCommitsEnabled: router.positionProtectionCommitsEnabled(),
+            positionProtectionTriggerBountyUsdc: router.positionProtectionTriggerBountyUsdc(),
             maxPendingOrders: router.maxPendingOrders(),
             minEngineGas: router.minEngineGas(),
             maxPruneOrdersPerCall: router.maxPruneOrdersPerCall()
@@ -218,7 +222,7 @@ contract PerpOraclePathHandler is Test {
         bytes memory err
     ) internal pure returns (bytes4 selector) {
         if (err.length >= 4) {
-            assembly {
+            assembly ("memory-safe") {
                 selector := mload(add(err, 32))
             }
         }

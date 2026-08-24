@@ -7,6 +7,7 @@ import {MockPyth} from "../mocks/MockPyth.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
+import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {Test} from "forge-std/Test.sol";
 
@@ -76,9 +77,13 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         PletherOracle oracle = new PletherOracle(
             address(engine), address(0xBEEF), address(pyth), feedIds, quantities, basePrices, inversions
         );
+        OrderRouter router = new OrderRouter(address(engine), address(0xCAFE), address(0xBEEF), address(oracle));
 
         assertEq(oracle.pythMaxConfidenceRatioBps(), 10, "pyth confidence ratio");
         assertEq(oracle.adverseConfidenceMultiplierBps(), 2000, "adverse confidence multiplier");
+        assertFalse(router.positionProtectionCommitsEnabled(), "position protection disabled");
+        assertEq(router.positionProtectionTriggerBountyUsdc(), 200_000, "position protection trigger bounty");
+        assertEq(router.closeOrderExecutionBountyUsdc(), 200_000, "position protection close bounty");
     }
 
     function test_BootstrapDefaults_MatchArbitrumSepoliaReleaseSeeds() public {

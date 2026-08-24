@@ -250,6 +250,8 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
             minOpenOrderExecutionBountyUsdc: router.minOpenOrderExecutionBountyUsdc(),
             maxOpenOrderExecutionBountyUsdc: router.maxOpenOrderExecutionBountyUsdc(),
             closeOrderExecutionBountyUsdc: router.closeOrderExecutionBountyUsdc(),
+            positionProtectionCommitsEnabled: router.positionProtectionCommitsEnabled(),
+            positionProtectionTriggerBountyUsdc: router.positionProtectionTriggerBountyUsdc(),
             maxPendingOrders: router.maxPendingOrders(),
             minEngineGas: router.minEngineGas(),
             maxPruneOrdersPerCall: router.maxPruneOrdersPerCall()

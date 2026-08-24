@@ -55,6 +55,7 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         console.log("USDC:", usdc);
         console.log("HousePool:", housePoolAddr);
         console.log("OrderRouter:", routerAddr);
+        console.log("PositionProtectionBook:", address(router.positionProtectionBook()));
         console.log("OrderRouterAdmin:", address(routerAdmin));
 
         vm.startBroadcast(privateKey);
@@ -80,6 +81,8 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         console.log("Junior seed initialized:", housePool.juniorSeedInitialized());
         console.log("HousePool pauser:", housePool.pauser());
         console.log("Router pauser:", routerAdmin.pauser());
+        console.log("Position protection commits enabled:", router.positionProtectionCommitsEnabled());
+        console.log("Position protection trigger bounty USDC:", router.positionProtectionTriggerBountyUsdc());
         console.log("Note: this script funds users with mock USDC only; ETH still needs a faucet.");
     }
 
