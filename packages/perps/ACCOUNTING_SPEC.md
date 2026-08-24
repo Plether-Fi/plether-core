@@ -9,7 +9,8 @@ It is the source of truth for:
 - close and liquidation settlement,
 - trader claim liabilities,
 - clearinghouse reservation treatment,
-- LP-capital carry.
+- LP-capital carry,
+- LP request admission timing and its separation from settlement maturity and oracle boundaries.
 
 Use it together with:
 
@@ -132,6 +133,49 @@ This is symmetric: an entrant receives the same discount for inherited marked li
 and receives credit only for collectible marked receivables. It does not make those receivables cash. Redemption
 funding still uses the stricter physical withdrawal reserve described below.
 
+### LP request admission, maturity, and oracle boundaries
+
+LP request admission uses one fixed cutoff for both tranches and both request directions. Let:
+
+```text
+D = 3,600 seconds
+C = 300 seconds
+t = block.timestamp
+e = floor(t / D)
+b = (e + 1) * D
+```
+
+The request id is:
+
+```text
+requestEpoch(t) = e + 1, when t < b - C
+requestEpoch(t) = e + 2, when t >= b - C
+```
+
+Exact equality belongs to the later epoch. The cutoff does not add a rejection condition: a request that passes the
+ordinary authorization, cooldown, pause, lifecycle, size, balance, and capacity checks is accepted and routed to the
+calculated epoch. The returned request id and request event reflect the inclusion timestamp and are authoritative.
+For every successful request:
+
+```text
+targetEpochStart - block.timestamp > 300 seconds
+targetEpochStart - block.timestamp <= 3,900 seconds
+```
+
+These are three distinct boundaries:
+
+- **Request admission cutoff:** during `[b - C, b)`, new requests cannot increase epoch `e + 1`; they route to
+  `e + 2`. Cancellations may still reduce `e + 1`, and no later request can add to that epoch after it matures. During
+  `[b, b + D - C)`, requests may legitimately join numeric epoch `e + 2`, which is then the new imminent epoch.
+- **Settlement maturity:** a queued epoch is eligible when `currentEpoch >= requestId`. The cutoff does not alter this
+  test or the settlement phase order.
+- **Live-position oracle boundary:** the reconciliation basket's earliest publish time must be at or after the current
+  round-hour boundary. The request cutoff neither fixes the settlement price nor substitutes for that post-boundary
+  refresh.
+
+The cutoff freezes only additions to the imminent epoch. Trading, closes, liquidations, claims, carry, pool
+accounting, governance finalization, oracle state, and cancellations can still change the state used at settlement.
+
 ## The Four Core Accounting Views
 
 The engine needs separate views because different actions answer different questions.
@@ -204,9 +248,9 @@ Definition:
 - apply the exact signed `terminalLpPriceDeltaUsdc` once,
 - route the resulting distributable equity through the same Senior/Junior waterfall for both redemption and deposit
   pricing,
-- ordinary LP entry always starts with an asynchronous deposit request: assets are funded up front, cancellation is
-  unconditional before activation and, after activation, reopens when Senior impairment blocks finalization or a
-  Senior reservation book no longer fits its governed limits,
+- ordinary LP entry always starts with an asynchronous deposit request: assets are funded up front, a complete
+  pending request is cancellable before maturity, and post-maturity cancellation remains available only under the
+  epoch rejection, projected terminal-wipe, Senior-impairment, or Senior-reservation escape conditions,
 - `OrderRouter.settleLpEpoch(bytes[])` validates a `PoolReconcile` Pyth basket, installs its neutral Engine mark, and
   invokes the Router-only HousePool settlement callback in one rollback frame; with live open positions, the basket's
   earliest publish time must be at or after the current round-hour epoch boundary,
@@ -268,7 +312,7 @@ Rules:
 - finalization revalidates the complete reservation book against current accounting and the active limits before it
   atomically releases the reservation and adds the same gross amount to active senior principal,
 - reservations are provisional rather than grandfathered: if a governance reduction, coupon, loss, or junior-capital
-  change makes the book invalid, post-activation cancellation is enabled so owners can recover escrowed assets,
+  change makes the book invalid, post-maturity cancellation is enabled so owners can recover escrowed assets,
 - funded junior redemptions of net assets `w` must additionally preserve
   `E * 10_000 <= B * (E + J - w)` using active protected exposure only; reservations do not lock junior liquidity, so
   permitted Junior funding may instead invalidate provisional reservations and make them refundable,
@@ -791,6 +835,9 @@ The accounting system should preserve the following:
 19. a current nonzero terminal deficit blocks LP deposit activation
 20. every live negative lifetime-VPI balance has an equal dedicated reserve, and generic action collection preserves
     the combined VPI-plus-execution-bounty floor
+21. LP request ids are monotonically nondecreasing with `block.timestamp` and follow the shared five-minute formula
+    for both tranches and both request directions
+22. no request included at or after `b - 300` can increase the locked `e + 1` epoch
 
 ## Architecture Goal
 

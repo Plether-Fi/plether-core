@@ -181,6 +181,14 @@ Reachability note:
 
 ### Synchronized LP epoch clearing
 
+- Request-id derivation: let `t = block.timestamp`, `e = floor(t / 3,600)`, and `b = (e + 1) * 3,600`. Senior and
+  Junior deposits and redemptions all use `requestId = e + 1` when `t < b - 300` and `requestId = e + 2` when
+  `t >= b - 300`. Exact cutoff equality rolls forward without adding a new revert. The mutation paths derive the id
+  through the vault's shared helper, while `getRequestEpochWindow()` exposes the canonical target and its next future
+  change time.
+- Boundary separation: the cutoff controls admission to a request epoch only. Maturity remains
+  `currentEpoch >= requestId`, and a live-position settlement still needs a `PoolReconcile` basket whose earliest
+  publish time is at or after the round-hour boundary. The cutoff does not bind price or freeze protocol state.
 - Liveness problem: reserving the full dormant Senior NAV blocks Junior liquidity even when no Senior holder requested
   an exit.
 - Chosen tradeoff: one permissionless Router call validates a post-boundary pool-accounting mark and reaches the
@@ -192,6 +200,9 @@ Reachability note:
   not reprice and remain callable independently of request pauses. Pool pause defers entries but does not block
   reconciled funding of matured exits. A no-progress pass reverts so permissionless callers cannot retain reconcile or
   carry checkpoints without advancing a queue. Oracle, Engine, pool, and vault writes share the same rollback frame.
+  No request included at or after `b - 300` may increase the locked `e + 1` epoch, but cancellation may shrink it and
+  removing its final request must preserve the ordered, acyclic queue links. After `b`, new requests may legitimately
+  join numeric epoch `e + 2`, now the imminent epoch, until its own cutoff.
 
 ### Exact symmetric Terminal NAV
 

@@ -24,9 +24,11 @@ interface IPerpsLPViews {
     /// @return viewData Trading, withdrawal, mark-freshness, and oracle-frozen status
     function getLpStatus() external view returns (PerpsViewTypes.LpStatusView memory viewData);
 
-    /// @notice Returns matured queue heads and settlement gates for one tranche.
+    /// @notice Returns request timing, matured queue heads, and settlement gates for one tranche.
+    /// @dev `cutoffEpoch` is the latest epoch eligible for settlement now. `nextRequestCutoffTime` is the future
+    ///      timestamp when the epoch targeted by new deposits and redemptions will next change.
     /// @param isSenior True for the Senior tranche and false for the Junior tranche.
-    /// @return viewData Shared epoch, matured work, backlog flags, and runtime gates.
+    /// @return viewData Shared epoch and request window, matured work, backlog flags, and runtime gates.
     function getTrancheQueues(
         bool isSenior
     ) external view returns (PerpsViewTypes.TrancheQueueView memory viewData);

@@ -17,6 +17,8 @@ import {PerpsViewTypes} from "@plether/perps/interfaces/PerpsViewTypes.sol";
 /// @dev Lightweight asynchronous-vault read surface used only by this lens.
 interface IAsyncTrancheVaultLensView {
 
+    function getRequestEpochWindow() external view returns (uint256 nextRequestEpoch, uint256 nextRequestCutoffTime);
+
     function getMaturedDepositHead(
         uint256 cutoffEpoch
     ) external view returns (uint256 epochId, uint256 assets);
@@ -227,12 +229,13 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
         viewData.oracleFresh = HOUSE_POOL.getPoolLiquidityView().markFresh;
     }
 
-    /// @notice Returns the matured deposit and redemption heads visible to the next synchronized settlement.
-    /// @dev `cutoffEpoch` currently equals `currentEpoch`; requests target a future shared epoch, and become eligible
-    ///      when that epoch reaches this cutoff. `settlementLive` concerns new redemption funding. Pool pause does not
-    ///      disable that funding, but it defers deposit activation; already-funded claims depend on neither flag.
+    /// @notice Returns the request window and matured deposit and redemption heads for the next settlement.
+    /// @dev `cutoffEpoch` currently equals `currentEpoch` and remains the latest epoch eligible for settlement now.
+    ///      The selected vault supplies the coherent future `nextRequestEpoch` and `nextRequestCutoffTime` pair.
+    ///      `settlementLive` concerns new redemption funding. Pool pause does not disable that funding, but it defers
+    ///      deposit activation; already-funded claims depend on neither flag.
     /// @param isSenior True for the Senior queue and false for the Junior queue.
-    /// @return viewData Queue heads, backlog flags, shared epoch, and pool runtime gates.
+    /// @return viewData Request window, queue heads, backlog flags, shared epoch, and pool runtime gates.
     function getTrancheQueues(
         bool isSenior
     ) external view returns (PerpsViewTypes.TrancheQueueView memory viewData) {
@@ -250,6 +253,7 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
         }
 
         IAsyncTrancheVaultLensView vault = IAsyncTrancheVaultLensView(viewData.vault);
+        (viewData.nextRequestEpoch, viewData.nextRequestCutoffTime) = vault.getRequestEpochWindow();
         (viewData.depositHeadEpoch, viewData.depositHeadAssets) = vault.getMaturedDepositHead(viewData.cutoffEpoch);
         (viewData.redeemHeadEpoch, viewData.redeemHeadShares) = vault.getMaturedRedeemHead(viewData.cutoffEpoch);
         viewData.depositBacklog = viewData.depositHeadAssets != 0;

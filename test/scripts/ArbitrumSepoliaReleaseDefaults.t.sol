@@ -4,12 +4,14 @@ pragma solidity 0.8.35;
 import {BootstrapPerpsArbitrumSepolia} from "../../script/BootstrapPerpsArbitrumSepolia.s.sol";
 import {DeployPerpsArbitrumSepolia, MockUSDC} from "../../script/DeployPerpsArbitrumSepolia.s.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
+import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {Test} from "forge-std/Test.sol";
 
 contract DeployPerpsArbitrumSepoliaHarness is DeployPerpsArbitrumSepolia {
@@ -20,6 +22,15 @@ contract DeployPerpsArbitrumSepoliaHarness is DeployPerpsArbitrumSepolia {
 
     function frozenCloseSpreadBps() external pure returns (uint256) {
         return FROZEN_CLOSE_SPREAD_BPS;
+    }
+
+    function verifyAsyncVaultPair(
+        HousePool housePool,
+        TrancheVault seniorVault,
+        TrancheVault juniorVault,
+        MockUSDC usdc
+    ) external view {
+        _verifyAsyncVaultPair(housePool, seniorVault, juniorVault, usdc);
     }
 
 }
@@ -59,6 +70,13 @@ contract BootstrapPerpsArbitrumSepoliaHarness is BootstrapPerpsArbitrumSepolia {
         HousePool housePool
     ) external view {
         _verifyTerminalNavBook(housePool);
+    }
+
+    function verifyAsyncVaultPair(
+        HousePool housePool,
+        address usdc
+    ) external view {
+        _verifyAsyncVaultPair(housePool, usdc);
     }
 
 }
@@ -123,6 +141,20 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         assertEq(bootstrapScript.defaultJuniorSeedUsdc(), 50_000_000e6, "junior seed");
     }
 
+    function test_DeploymentGuardsAcceptCanonicalRequestWindowAcrossCutoffs() public {
+        DeployPerpsArbitrumSepoliaHarness deployScript = new DeployPerpsArbitrumSepoliaHarness();
+        BootstrapPerpsArbitrumSepoliaHarness bootstrapScript = new BootstrapPerpsArbitrumSepoliaHarness();
+        (MockUSDC usdc, HousePool pool, TrancheVault seniorVault, TrancheVault juniorVault) = _deployAsyncVaultPair();
+
+        uint256 boundary = 10 hours;
+        uint256[4] memory timestamps = [boundary - 301 seconds, boundary - 300 seconds, boundary, boundary + 55 minutes];
+        for (uint256 i; i < timestamps.length; ++i) {
+            vm.warp(timestamps[i]);
+            deployScript.verifyAsyncVaultPair(pool, seniorVault, juniorVault, usdc);
+            bootstrapScript.verifyAsyncVaultPair(pool, address(usdc));
+        }
+    }
+
     function test_BootstrapRejectsStackWithoutTerminalNavBook() public {
         DeployPerpsArbitrumSepoliaHarness deployScript = new DeployPerpsArbitrumSepoliaHarness();
         BootstrapPerpsArbitrumSepoliaHarness bootstrapScript = new BootstrapPerpsArbitrumSepoliaHarness();
@@ -178,6 +210,18 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         assertEq(pool.maxSeniorShareBps(), maxShareBps);
 
         assertTrue(bootstrapScript.configureSeniorLimits(pool, maxExposure, maxShareBps));
+    }
+
+    function _deployAsyncVaultPair()
+        internal
+        returns (MockUSDC usdc, HousePool pool, TrancheVault seniorVault, TrancheVault juniorVault)
+    {
+        usdc = new MockUSDC();
+        pool = new HousePool(address(usdc), address(0xE11E));
+        seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior", "senior");
+        juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior", "junior");
+        pool.setSeniorVault(address(seniorVault));
+        pool.setJuniorVault(address(juniorVault));
     }
 
 }

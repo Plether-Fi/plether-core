@@ -15,6 +15,11 @@ import {IERC7575, IERC7575Share} from "@plether/perps/interfaces/IERC7575.sol";
 ///      controller limits and therefore do not certify that a particular third-party receiver is eligible.
 interface IAsyncTrancheVault is IERC7540, IERC7575Share {
 
+    /// @notice Returns the epoch currently targeted by new requests and the timestamp when that target next changes.
+    /// @dev The cutoff timestamp is always in the future. At the exact cutoff, both values roll forward together.
+    ///      Deposit and redemption requests use this same window.
+    function getRequestEpochWindow() external view returns (uint256 nextRequestEpoch, uint256 nextRequestCutoffTime);
+
     /// @notice Returns the maximum underlying assets currently accepted for a new deposit request by `controller`.
     /// @dev This is a request-capacity view, not the ERC-7575 `maxDeposit` claim-capacity view.
     function maxRequestDeposit(

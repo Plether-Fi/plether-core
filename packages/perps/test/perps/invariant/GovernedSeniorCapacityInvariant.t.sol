@@ -33,6 +33,8 @@ contract GovernedSeniorCapacityHandler is Test {
     bool public juniorWithdrawalViolation;
     uint256 public successfulSeniorAdmissions;
     uint256 public successfulJuniorWithdrawals;
+    uint256 public successfulPreCutoffDepositRequests;
+    uint256 public successfulCutoffWindowDepositRequests;
 
     constructor(
         MockUSDC _usdc,
@@ -73,16 +75,18 @@ contract GovernedSeniorCapacityHandler is Test {
 
     function requestSeniorDeposit(
         uint256 actorIndex,
-        uint256 assetsFuzz
+        uint256 assetsFuzz,
+        bool cutoffWindow
     ) external {
-        _requestDeposit(seniorVault, actorIndex, assetsFuzz, true);
+        _requestDeposit(seniorVault, actorIndex, assetsFuzz, true, cutoffWindow);
     }
 
     function requestJuniorDeposit(
         uint256 actorIndex,
-        uint256 assetsFuzz
+        uint256 assetsFuzz,
+        bool cutoffWindow
     ) external {
-        _requestDeposit(juniorVault, actorIndex, assetsFuzz, false);
+        _requestDeposit(juniorVault, actorIndex, assetsFuzz, false, cutoffWindow);
     }
 
     function cancelSeniorDeposit(
@@ -132,16 +136,18 @@ contract GovernedSeniorCapacityHandler is Test {
 
     function requestSeniorRedeem(
         uint256 actorIndex,
-        uint256 sharesFuzz
+        uint256 sharesFuzz,
+        bool cutoffWindow
     ) external {
-        _requestRedeem(seniorVault, actorIndex, sharesFuzz);
+        _requestRedeem(seniorVault, actorIndex, sharesFuzz, cutoffWindow);
     }
 
     function requestJuniorRedeem(
         uint256 actorIndex,
-        uint256 sharesFuzz
+        uint256 sharesFuzz,
+        bool cutoffWindow
     ) external {
-        _requestRedeem(juniorVault, actorIndex, sharesFuzz);
+        _requestRedeem(juniorVault, actorIndex, sharesFuzz, cutoffWindow);
     }
 
     function cancelSeniorRedeem(
@@ -208,10 +214,12 @@ contract GovernedSeniorCapacityHandler is Test {
         TrancheVault vault,
         uint256 actorIndex,
         uint256 assetsFuzz,
-        bool isSenior
+        bool isSenior,
+        bool cutoffWindow
     ) internal {
+        _warpToRequestWindowSide(vault, cutoffWindow);
         _refreshMark();
-        uint256 expectedEpochId = vault.currentLpEpoch() + vault.DEPOSIT_ACTIVATION_EPOCH_DELAY();
+        uint256 expectedEpochId = _expectedRequestId(vault, cutoffWindow);
         if (!_canTrackEpoch(expectedEpochId)) {
             return;
         }
@@ -232,6 +240,11 @@ contract GovernedSeniorCapacityHandler is Test {
 
         assertEq(requestId, expectedEpochId, "deposit request must use the synchronized LP epoch");
         _trackEpoch(requestId);
+        if (requestId == vault.currentLpEpoch() + 1) {
+            successfulPreCutoffDepositRequests += 1;
+        } else {
+            successfulCutoffWindowDepositRequests += 1;
+        }
         if (isSenior) {
             _recordSuccessfulSeniorAdmission();
         }
@@ -279,10 +292,12 @@ contract GovernedSeniorCapacityHandler is Test {
     function _requestRedeem(
         TrancheVault vault,
         uint256 actorIndex,
-        uint256 sharesFuzz
+        uint256 sharesFuzz,
+        bool cutoffWindow
     ) internal {
+        _warpToRequestWindowSide(vault, cutoffWindow);
         _refreshMark();
-        uint256 expectedEpochId = vault.currentLpEpoch() + vault.REDEEM_ACTIVATION_EPOCH_DELAY();
+        uint256 expectedEpochId = _expectedRequestId(vault, cutoffWindow);
         if (!_canTrackEpoch(expectedEpochId)) {
             return;
         }
@@ -301,6 +316,30 @@ contract GovernedSeniorCapacityHandler is Test {
         uint256 requestId = vault.requestRedeem(shares, actor, actor);
         assertEq(requestId, expectedEpochId, "redeem request must use the synchronized LP epoch");
         _trackEpoch(requestId);
+    }
+
+    function _warpToRequestWindowSide(
+        TrancheVault vault,
+        bool cutoffWindow
+    ) internal {
+        (, uint256 nextCutoffTime) = vault.getRequestEpochWindow();
+        assertGt(nextCutoffTime, block.timestamp, "advertised request cutoff must be in the future");
+        vm.warp(cutoffWindow ? nextCutoffTime : nextCutoffTime - 1);
+    }
+
+    function _expectedRequestId(
+        TrancheVault vault,
+        bool cutoffWindow
+    ) internal view returns (uint256 expectedEpochId) {
+        uint256 nextCutoffTime;
+        (expectedEpochId, nextCutoffTime) = vault.getRequestEpochWindow();
+        uint256 currentEpoch = vault.currentLpEpoch();
+        assertEq(
+            expectedEpochId,
+            currentEpoch + (cutoffWindow ? 2 : 1),
+            "request action must reach the selected side of the cutoff"
+        );
+        assertGt(nextCutoffTime, block.timestamp, "next advertised request cutoff must remain in the future");
     }
 
     function _cancelRedeem(
@@ -542,16 +581,24 @@ contract GovernedSeniorCapacityInvariantTest is BasePerpTest {
 
         // Make the postcondition counters non-vacuous in every invariant campaign. The fuzzer retains the full
         // selector set below and continues exploring additional transitions from this valid, exercised state.
-        handler.requestSeniorDeposit(0, SMOKE_SENIOR_DEPOSIT_USDC);
-        handler.requestJuniorDeposit(0, SMOKE_JUNIOR_DEPOSIT_USDC);
-        uint256 depositEpochId = handler.trackedEpochIdAt(0);
-        vm.warp(pool.lpEpochStart(depositEpochId));
+        handler.requestSeniorDeposit(0, SMOKE_SENIOR_DEPOSIT_USDC, false);
+        uint256 seniorDepositEpochIndex = handler.trackedEpochCount() - 1;
+        uint256 seniorDepositEpochId = handler.trackedEpochIdAt(seniorDepositEpochIndex);
+
+        handler.requestJuniorDeposit(0, SMOKE_JUNIOR_DEPOSIT_USDC, true);
+        uint256 juniorDepositEpochIndex = handler.trackedEpochCount() - 1;
+        uint256 juniorDepositEpochId = handler.trackedEpochIdAt(juniorDepositEpochIndex);
+
+        vm.warp(pool.lpEpochStart(seniorDepositEpochId));
         handler.settleLpEpoch();
-        handler.claimSeniorDeposit(0, 0);
-        handler.claimJuniorDeposit(0, 0);
+        handler.claimSeniorDeposit(seniorDepositEpochIndex, 0);
+
+        vm.warp(pool.lpEpochStart(juniorDepositEpochId));
+        handler.settleLpEpoch();
+        handler.claimJuniorDeposit(juniorDepositEpochIndex, 0);
 
         vm.warp(block.timestamp + juniorVault.DEPOSIT_COOLDOWN());
-        handler.requestJuniorRedeem(0, SMOKE_REDEEM_SHARES_FUZZ);
+        handler.requestJuniorRedeem(0, SMOKE_REDEEM_SHARES_FUZZ, false);
         uint256 redeemEpochIndex = handler.trackedEpochCount() - 1;
         uint256 redeemEpochId = handler.trackedEpochIdAt(redeemEpochIndex);
         vm.warp(pool.lpEpochStart(redeemEpochId));
@@ -593,6 +640,19 @@ contract GovernedSeniorCapacityInvariantTest is BasePerpTest {
         assertFalse(
             handler.juniorWithdrawalViolation(),
             "successful junior withdrawal must leave active protected senior exposure within the share limit"
+        );
+    }
+
+    function invariant_RequestGenerationExercisesBothCutoffSides() public view {
+        assertGt(
+            handler.successfulPreCutoffDepositRequests(),
+            0,
+            "campaign must exercise a successful pre-cutoff deposit request"
+        );
+        assertGt(
+            handler.successfulCutoffWindowDepositRequests(),
+            0,
+            "campaign must exercise a successful cutoff-window deposit request"
         );
     }
 

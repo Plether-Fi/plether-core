@@ -109,8 +109,12 @@ This directory contains stateful Foundry invariant suites for the perps system.
     radix-boundary interior marks
 
 - `GovernedSeniorCapacityInvariant.t.sol`
-  - Fuzzes immediate senior and junior deposits, delayed senior request/cancel/
-    finalize/claim transitions, and both tranche withdrawals across multiple actors
+  - Fuzzes cutoff-routed Senior/Junior deposit and redemption request/cancel/settle/claim transitions across multiple
+    actors
+  - Derives every expected request id from `getRequestEpochWindow()` and drives timestamps on both sides of the
+    exact five-minute cutoff instead of assuming a fixed activation delay
+  - Records pre-cutoff and cutoff-window reachability and verifies successful requests use the advertised future
+    target; requests at or after an epoch's cutoff cannot increase that locked epoch
   - Verifies every successful senior admission or finalization leaves active plus
     reserved exposure within both governed limits
   - Verifies successful junior withdrawals preserve the active senior-share covenant
@@ -131,8 +135,9 @@ the accounting specification.
 - `PerpHousePoolLifecycleInvariant.t.sol` covers the active vault lifecycle,
   seed floors, cooldowns, caps, and excess accounting. The separate
   `GovernedSeniorCapacityInvariant.t.sol` covers the bounded pending senior
-  request/cancel/finalize/claim state machine and reservation conservation; it
-  does not model every possible epoch or governance transition.
+  request/cancel/finalize/claim state machine, reservation conservation, and
+  stateful reachability on both sides of the shared request cutoff; it does not
+  model every possible epoch or governance transition.
 - Degraded transition flags and post-operation balances are checked by
   `PerpPreviewInvariant.t.sol`; preview/live degraded settlement parity is
   additionally exercised by `PerpExplicitAccountingInvariant.t.sol`.

@@ -84,9 +84,10 @@ contract AsyncTrancheVaultAllocationTest is BasePerpTest {
         uint256 firstShares = 1e9;
         uint256 firstRequestId = _requestDeposit(ALICE, firstAssets);
 
-        _warpToEpoch(firstRequestId - 1);
+        (, uint256 requestCutoffTime) = juniorVault.getRequestEpochWindow();
+        vm.warp(requestCutoffTime);
         uint256 secondRequestId = _requestDeposit(ALICE, 1e6);
-        assertGt(secondRequestId, firstRequestId, "fixture needs two FIFO epochs");
+        assertEq(secondRequestId, firstRequestId + 1, "crossing the cutoff must create the next FIFO epoch");
 
         _warpToEpoch(firstRequestId);
         vm.prank(address(pool));

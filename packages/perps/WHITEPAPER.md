@@ -599,9 +599,18 @@ millions of USDC.
 
 Ordinary entry and exit are fully asynchronous. Both tranches share a round-hour
 clock and one permissionless Router coordinator backed by a HousePool callback that is Router-only while live
-positions exist outside oracle-frozen mode. A deposit request targets
-the current epoch plus two, while a redemption request targets the current
-epoch plus one. One bounded settlement transaction then:
+positions exist outside oracle-frozen mode. Request-epoch selection is symmetric across Senior and Junior and across
+deposits and redemptions. For inclusion time \(t\), let \(e=\lfloor t/3600\rfloor\) and
+\(b=(e+1)\times3600\). Every request targets \(e+1\) when \(t<b-300\), and \(e+2\) when
+\(t\ge b-300\). Exact cutoff equality therefore rolls forward rather than reverting. The target remains numerically
+continuous across the round-hour boundary, and its start is always more than five minutes and at most sixty-five
+minutes after inclusion.
+
+The five-minute interval is a maximum-membership quiet period for the epoch about to mature, not a price commitment
+or protocol freeze. Cancellations may reduce that epoch, while trading, claims, oracle updates, and pool accounting
+remain live. Settlement maturity remains `currentEpoch >= requestId`, and the live-position reconciliation mark is
+still required to be published at or after the round-hour boundary rather than the request cutoff. One bounded
+settlement transaction then:
 
 1. validates a pool-reconciliation Pyth basket, installs the exact Engine mark,
    and reconciles HousePool accounting from one signed terminal-NAV and waterfall snapshot;
@@ -615,10 +624,11 @@ epoch plus one. One bounded settlement transaction then:
 Redemption priority is demand-based: dormant senior NAV does not reserve cash
 from junior claimants, but any newly matured senior request moves ahead of an
 older unfunded junior remainder. Incoming deposits never expand the withdrawal
-budget captured for the same settlement call. Deposit cancellation is
-unconditional before activation and follows the documented impairment/capacity
-policy after activation; redemption cancellation is available only before
-maturity while the request is wholly unfunded. Funded claims remain callable
+budget captured for the same settlement call. A complete pending deposit is
+cancellable before maturity. After maturity, cancellation follows the documented
+epoch rejection, terminal-wipe, impairment, and Senior-capacity escape policy. A
+complete pending redemption is cancellable only before maturity while it is wholly
+unfunded and no refund has activated. Funded claims remain callable
 independently of later settlement, pause, or oracle liveness.
 If no queued epoch can advance, settlement reverts and rolls back its reconcile
 and carry checkpoints together with the Pyth and Engine mark updates; this prevents
@@ -1636,7 +1646,7 @@ guide:
 | Binding order fields and first unique post-commit tick | Direct `OrderRouter.t.sol` tests; no dedicated stateful invariant covers intent immutability or strict historical-tick uniqueness |
 | Active tranche lifecycle, cooldowns, and excess | `PerpHousePoolLifecycleInvariant.t.sol`, `PerpValueConservationInvariant.t.sol` |
 | Junior-first loss, high-water restoration, coupon ratchet, and recapitalization priority | Direct `HousePool.t.sol` tests plus companion-model vectors; no dedicated stateful waterfall invariant at this revision |
-| Synchronized LP deposit/redemption epochs | Dedicated coordinator, FIFO, allocation-dust, plateau-liveness, and exact inverse-rounding integration/fuzz tests; no long-running stateful invariant yet spans both queue directions |
+| Synchronized LP deposit/redemption epochs | Dedicated cutoff, coordinator, FIFO, allocation-dust, plateau-liveness, and exact inverse-rounding integration/fuzz tests; `GovernedSeniorCapacityInvariant.t.sol` statefully covers shared cutoff routing across both request directions plus reservation/covenant safety, but not the complete settlement-phase/backlog state space |
 | Account isolation | `PerpMultiAccountInvariant.t.sol` |
 | Fee custody | `PerpFeeFlowInvariant.t.sol` |
 

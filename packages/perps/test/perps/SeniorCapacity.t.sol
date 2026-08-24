@@ -127,7 +127,7 @@ contract SeniorCapacityTest is BasePerpTest {
         }
     }
 
-    /// @dev Exact-boundary cases neutralize carry because the +2 epoch request delay intentionally reprices capacity.
+    /// @dev Exact-boundary cases neutralize carry because asynchronous epoch settlement reprices capacity over time.
     function _disableSeniorCoupon() internal {
         IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 0;
