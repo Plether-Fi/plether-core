@@ -40,10 +40,23 @@ contract PerpsReadParityTest is BasePerpTest {
         assertEq(preview.maintenanceMarginUsdc, 1000e6, "Maintenance margin should match");
         assertEq(preview.postSize, size, "Post size should match");
         assertEq(preview.postEntryPrice, price, "Post entry should match");
-        assertEq(preview.postMarginUsdc, margin - preview.executionFeeUsdc, "Post margin should net fee");
+        CfdTypes.RiskParams memory params = _riskParams();
+        uint256 liquidationReserveTargetUsdc = (preview.notionalUsdc * params.bountyBps) / 10_000;
+        if (liquidationReserveTargetUsdc < params.minBountyUsdc) {
+            liquidationReserveTargetUsdc = params.minBountyUsdc;
+        }
+        assertEq(
+            preview.postMarginUsdc + liquidationReserveTargetUsdc,
+            margin - preview.executionFeeUsdc,
+            "Post pledge plus dedicated liquidation reserve should net the fee"
+        );
         assertEq(preview.postVpiAccrued, 0, "Default VPI should be zero");
         assertEq(preview.postUnrealizedPnlUsdc, 0, "Post PnL at entry should be zero");
-        assertEq(preview.postEquityUsdc, int256(9500e6 - preview.executionFeeUsdc), "Post equity should match");
+        assertEq(
+            preview.postEquityUsdc,
+            int256(preview.postMarginUsdc) + preview.postUnrealizedPnlUsdc,
+            "Post equity should contain only pledged price equity"
+        );
         assertFalse(preview.postLiquidatable, "Post position should be healthy");
         assertTrue(preview.postHealthBps > 10_000, "Health should be above maintenance");
         assertTrue(preview.hasLiquidationPrice, "Bull should have a liquidation threshold");
@@ -62,6 +75,11 @@ contract PerpsReadParityTest is BasePerpTest {
         assertEq(liveMargin, preview.postMarginUsdc, "Live margin should match preview");
         assertEq(liveEntryPrice, preview.postEntryPrice, "Live entry should match preview");
         assertEq(liveVpiAccrued, preview.postVpiAccrued, "Live VPI accrued should match preview");
+        assertEq(
+            clearinghouse.liquidationReserveUsdc(account),
+            liquidationReserveTargetUsdc,
+            "Live liquidation reserve should match the previewed reserve carve-out"
+        );
     }
 
     function test_OpenPreview_NewBearAndIncreaseExposePostTradeFields() public {
@@ -138,8 +156,8 @@ contract PerpsReadParityTest is BasePerpTest {
         assertEq(uint256(preview.failureCategory), uint256(legacyCategory), "Failure category should match");
         assertEq(
             uint8(preview.invalidReason),
-            uint8(CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES),
-            "Expected fee drain"
+            uint8(CfdEnginePlanTypes.OpenRevertCode.LIQUIDATION_RESERVE_UNFUNDED),
+            "Zero supplied margin should fail the dedicated liquidation-reserve check"
         );
     }
 
@@ -211,6 +229,11 @@ contract PerpsReadParityTest is BasePerpTest {
     }
 
     function test_LiquidationPreviewMatchesLive() public {
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.keeperShareBps = 2500;
+        params.protocolShareBps = 2500;
+        _setRiskParams(params);
+
         address trader = address(0xAA12);
         address account = trader;
         address keeper = address(0xAA13);
@@ -265,9 +288,19 @@ contract PerpsReadParityTest is BasePerpTest {
             "Free settlement should match collateral view"
         );
         assertEq(
-            snapshot.terminalReachableUsdc,
-            collateralView.terminalReachableUsdc,
-            "Terminal reachable collateral should match collateral view"
+            snapshot.liquidationReachableSettlementUsdc,
+            collateralView.liquidationReachableSettlementUsdc,
+            "Liquidation-reachable settlement should match collateral view"
+        );
+        assertEq(
+            snapshot.terminalPriceCollectibleCapUsdc,
+            collateralView.terminalPriceCollectibleCapUsdc,
+            "Terminal price cap should match collateral view"
+        );
+        assertEq(
+            snapshot.terminalPriceCollectibleCapUsdc,
+            terminalNavBook.curveOf(account).effectiveCapUsdcAtoms,
+            "Terminal price cap should match the canonical book curve"
         );
         assertEq(
             snapshot.accountEquityUsdc, collateralView.accountEquityUsdc, "Account equity should match collateral view"
@@ -297,15 +330,30 @@ contract PerpsReadParityTest is BasePerpTest {
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        AccountLensViewTypes.AccountLedgerSnapshot memory beforeCarry =
+            engineAccountLens.getAccountLedgerSnapshot(account);
         vm.warp(block.timestamp + 30 days);
 
         AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(account);
         PerpsViewTypes.TraderAccountView memory traderView = publicLens.getTraderAccount(account);
         PerpsViewTypes.PositionView memory positionView = publicLens.getPosition(account);
+        ICfdEngineTypes.OpenPreview memory carryProjection =
+            engineLens.previewOpen(account, CfdTypes.Side.BULL, CfdTypes.SIZE_QUANTUM, 0, 1e8, uint64(block.timestamp));
 
+        assertGt(carryProjection.pendingCarryUsdc, 0, "Setup should accrue a nonzero action-side carry charge");
+        assertGe(
+            snapshot.freeSettlementUsdc,
+            carryProjection.pendingCarryUsdc,
+            "Free settlement should fully fund projected carry"
+        );
+        assertEq(
+            snapshot.netEquityUsdc,
+            beforeCarry.netEquityUsdc,
+            "Funded action carry must stay isolated from exact terminal price equity"
+        );
         assertEq(
             traderView.equityUsdc,
-            uint256(snapshot.netEquityUsdc),
+            snapshot.netEquityUsdc > 0 ? uint256(snapshot.netEquityUsdc) : 0,
             "Public trader equity should match account lens net equity"
         );
         assertEq(
@@ -340,6 +388,7 @@ contract PerpsReadParityTest is BasePerpTest {
 
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory protocolSnapshot =
             engineProtocolLens.getProtocolAccountingSnapshot();
+        ICfdEngineTypes.TerminalNavSnapshot memory terminalSnapshot = engine.terminalNavSnapshot();
 
         assertEq(
             protocolSnapshot.poolAssetsUsdc, pool.totalAssets(), "Protocol lens pool assets should match pool assets"
@@ -355,14 +404,9 @@ contract PerpsReadParityTest is BasePerpTest {
             "Protocol lens fees should match engine state"
         );
         assertEq(
-            protocolSnapshot.accumulatedBadDebtUsdc,
-            engine.accumulatedBadDebtUsdc(),
-            "Protocol lens bad debt should match engine state"
-        );
-        assertEq(
             protocolSnapshot.totalTraderClaimBalanceUsdc,
-            engine.totalTraderClaimBalanceUsdc(),
-            "Protocol lens trader claim balance should match engine state"
+            terminalSnapshot.totalTraderClaimsUsdc,
+            "Protocol claims should match the authenticated terminal snapshot"
         );
         assertEq(
             protocolSnapshot.degradedMode,
@@ -371,9 +415,13 @@ contract PerpsReadParityTest is BasePerpTest {
         );
         assertEq(
             protocolSnapshot.maxLiabilityUsdc,
-            _maxLiability(),
-            "Protocol lens max liability should match live side state"
+            terminalSnapshot.maxDirectionalLiabilityUsdc,
+            "Protocol liability should match the authenticated terminal snapshot"
         );
+        assertFalse(terminalSnapshot.hasOpenPositions, "Full close should clear terminal price exposure");
+        assertEq(terminalSnapshot.terminalLpPriceDeltaUsdc, 0, "Closed terminal book should have zero marked delta");
+        _assertTerminalCurveMatchesEngine(account);
+        _assertTerminalNavSnapshotMatchesBook();
     }
 
     function _livePositionPreviewFields(

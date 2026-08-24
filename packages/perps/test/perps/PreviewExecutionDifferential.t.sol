@@ -5,7 +5,6 @@ import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {AccountLensViewTypes} from "@plether/perps/interfaces/AccountLensViewTypes.sol";
-import {ICfdEngine} from "@plether/perps/interfaces/ICfdEngine.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 
@@ -17,7 +16,6 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         IMarginClearinghouse.AccountUsdcBuckets bucketsBefore;
         uint256 settlementBefore;
         uint256 traderClaimBefore;
-        uint256 badDebtBefore;
         uint256 executionBountyUsdc;
     }
 
@@ -193,8 +191,8 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             preview.postUnrealizedPnlUsdc,
             "Open preview PnL should match post-execution liquidation lens"
         );
-        int256 liveEquityUsdc = _liveOpenEquityUsdc(account, liveVpiAccrued, liquidationAtExecution.pnlUsdc);
-        assertEq(liveEquityUsdc, preview.postEquityUsdc, "Open preview equity should match live reachable collateral");
+        int256 liveEquityUsdc = _liveOpenExactPriceEquityUsdc(account, liquidationAtExecution.pnlUsdc);
+        assertEq(liveEquityUsdc, preview.postEquityUsdc, "Open preview equity should match live P+C price equity");
         assertEq(
             liquidationAtExecution.liquidatable,
             preview.postLiquidatable,
@@ -215,17 +213,12 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         _assertOpenLiquidationThresholdMatchesLive(account, side, preview);
     }
 
-    function _liveOpenEquityUsdc(
+    function _liveOpenExactPriceEquityUsdc(
         address account,
-        int256 liveVpiAccrued,
         int256 livePnlUsdc
     ) internal view returns (int256 equityUsdc) {
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(account);
-        uint256 reachableCollateralUsdc = buckets.settlementBalanceUsdc > buckets.otherLockedMarginUsdc
-            ? buckets.settlementBalanceUsdc - buckets.otherLockedMarginUsdc
-            : 0;
-        uint256 vpiClawbackUsdc = liveVpiAccrued < 0 ? uint256(-liveVpiAccrued) : 0;
-        equityUsdc = int256(reachableCollateralUsdc) - int256(vpiClawbackUsdc) + livePnlUsdc;
+        uint256 priceCollateralUsdc = clearinghouse.pnlPledgeUsdc(account) + engine.traderClaimBalanceUsdc(account);
+        equityUsdc = int256(priceCollateralUsdc) + livePnlUsdc;
     }
 
     function _assertOpenLiquidationThresholdMatchesLive(
@@ -356,7 +349,6 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         checkpoint.bucketsBefore = clearinghouse.getAccountUsdcBuckets(account);
         checkpoint.settlementBefore = clearinghouse.balanceUsdc(account);
         checkpoint.traderClaimBefore = engine.traderClaimBalanceUsdc(account);
-        checkpoint.badDebtBefore = engine.accumulatedBadDebtUsdc();
         checkpoint.executionBountyUsdc = executionBountyUsdc;
     }
 
@@ -396,16 +388,14 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             preview.traderClaimBalanceUsdc,
             "Close preview trader claim should match live trader claim delta"
         );
-        assertEq(
-            engine.accumulatedBadDebtUsdc() - checkpoint.badDebtBefore,
-            preview.badDebtUsdc,
-            "Close preview bad debt should match live bad debt delta"
-        );
+        assertEq(preview.badDebtUsdc, 0, "V2 close write-off must not create accumulated debt");
         assertEq(
             preview.triggersDegradedMode,
             engine.degradedMode(),
             "Close preview degraded-mode flag should match live outcome"
         );
+        _assertTerminalCurveMatchesEngine(account);
+        _assertTerminalNavSnapshotMatchesBook();
     }
 
     function test_PreviewClose_PartialCloseMatchesLiveExecution_AfterPositiveCarryAccrual() public {
@@ -427,7 +417,6 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         assertTrue(preview.valid, "Positive-carry partial close preview should remain valid");
 
         uint256 traderClaimBefore = engine.traderClaimBalanceUsdc(bearAccount);
-        uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
 
         _close(bearAccount, CfdTypes.Side.BEAR, 50_000e18, 1e8);
 
@@ -441,11 +430,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             preview.traderClaimBalanceUsdc,
             "Partial close preview trader claim should match live trader claim delta"
         );
-        assertEq(
-            engine.accumulatedBadDebtUsdc() - badDebtBefore,
-            preview.badDebtUsdc,
-            "Partial close preview bad debt should match live bad debt delta"
-        );
+        assertEq(preview.badDebtUsdc, 0, "V2 partial-close write-off must not create accumulated debt");
         assertEq(
             preview.triggersDegradedMode,
             engine.degradedMode(),
@@ -456,6 +441,8 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             engine.degradedMode(),
             "Partial close preview post-op degraded flag should match live outcome"
         );
+        _assertTerminalCurveMatchesEngine(bearAccount);
+        _assertTerminalNavSnapshotMatchesBook();
     }
 
     function test_PreviewClose_PartialCloseIgnoresQueuedCommittedMarginInLiveExecution() public {
@@ -496,6 +483,11 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
     function testFuzz_PreviewLiquidation_MatchesLiveExecution_LiquidVault(
         uint256 liquidationPriceFuzz
     ) public {
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.keeperShareBps = 2500;
+        params.protocolShareBps = 2500;
+        _setRiskParams(params);
+
         address trader = address(0xC102);
         address account = trader;
         uint256 liquidationPrice = bound(liquidationPriceFuzz, 101_000_000, 120_000_000);
@@ -511,8 +503,8 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         vm.assume(preview.liquidatable);
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(KEEPER);
+        uint256 protocolTreasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
         uint256 traderClaimBefore = engine.traderClaimBalanceUsdc(account);
-        uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
         IMarginClearinghouse.AccountUsdcBuckets memory bucketsBefore = clearinghouse.getAccountUsdcBuckets(account);
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(liquidationPrice);
@@ -526,7 +518,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         assertEq(
             bucketsAfter.settlementBalanceUsdc,
             bucketsBefore.settlementBalanceUsdc + preview.immediatePayoutUsdc - preview.seizedCollateralUsdc
-                - preview.keeperBountyUsdc,
+                - preview.keeperBountyUsdc - preview.protocolLiquidationFeeUsdc,
             "Liquidation preview should match the live settlement-balance mutation"
         );
         assertEq(bucketsAfter.activePositionMarginUsdc, 0, "Liquidation should clear the live position-margin bucket");
@@ -537,15 +529,16 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             "Liquidation preview keeper bounty should match live clearinghouse credit"
         );
         assertEq(
+            clearinghouse.balanceUsdc(engine.protocolTreasury()) - protocolTreasuryBefore,
+            preview.protocolLiquidationFeeUsdc,
+            "Liquidation preview protocol fee should match live treasury credit"
+        );
+        assertEq(
             engine.traderClaimBalanceUsdc(account) - traderClaimBefore,
             preview.traderClaimBalanceUsdc,
             "Liquidation preview trader claim should match live trader claim delta"
         );
-        assertEq(
-            engine.accumulatedBadDebtUsdc() - badDebtBefore,
-            preview.badDebtUsdc,
-            "Liquidation preview bad debt should match live bad debt delta"
-        );
+        assertEq(preview.badDebtUsdc, 0, "V2 liquidation write-off must not create accumulated debt");
         assertEq(
             preview.triggersDegradedMode,
             engine.degradedMode(),
@@ -562,6 +555,8 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         assertEq(
             preview.existingTraderClaimRemainingUsdc, 0, "Fresh liquidation path should not leave legacy trader claim"
         );
+        _assertTerminalCurveMatchesEngine(account);
+        _assertTerminalNavSnapshotMatchesBook();
     }
 
     function testFuzz_PreviewLiquidation_MatchesLiveExecution_IlliquidVault(
@@ -587,7 +582,6 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(KEEPER);
         uint256 traderClaimBefore = engine.traderClaimBalanceUsdc(account);
-        uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
         IMarginClearinghouse.AccountUsdcBuckets memory bucketsBefore = clearinghouse.getAccountUsdcBuckets(account);
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(liquidationPrice);
@@ -601,7 +595,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         assertEq(
             bucketsAfter.settlementBalanceUsdc,
             bucketsBefore.settlementBalanceUsdc + preview.immediatePayoutUsdc - preview.seizedCollateralUsdc
-                - preview.keeperBountyUsdc,
+                - preview.keeperBountyUsdc - preview.protocolLiquidationFeeUsdc,
             "Illiquid liquidation preview should match the live settlement-balance mutation"
         );
         assertEq(bucketsAfter.activePositionMarginUsdc, 0, "Illiquid liquidation should clear the live position margin");
@@ -620,11 +614,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             preview.traderClaimBalanceUsdc,
             "Illiquid liquidation preview trader claim should match live trader claim delta"
         );
-        assertEq(
-            engine.accumulatedBadDebtUsdc() - badDebtBefore,
-            preview.badDebtUsdc,
-            "Illiquid liquidation preview bad debt should match live bad debt delta"
-        );
+        assertEq(preview.badDebtUsdc, 0, "V2 illiquid liquidation write-off must not create accumulated debt");
         assertEq(
             preview.triggersDegradedMode,
             engine.degradedMode(),
@@ -645,6 +635,74 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             0,
             "Fresh illiquid liquidation path should not leave legacy trader claim"
         );
+        _assertTerminalCurveMatchesEngine(account);
+        _assertTerminalNavSnapshotMatchesBook();
+    }
+
+    function test_PreviewLiquidation_IncludesIncomingSeizureWhenRoutingFreshPayout() public {
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.keeperShareBps = 2500;
+        params.protocolShareBps = 2500;
+        _setRiskParams(params);
+
+        address trader = address(0xC10C);
+        address account = trader;
+        uint256 liquidationPrice = 99_500_000;
+
+        vm.warp(1_729_283_399); // Friday 20:29:59 UTC, immediately before the daylight-time FAD window.
+        _fundTrader(trader, 200e6);
+        _open(account, CfdTypes.Side.BULL, 10_000e18, 200e6, 1e8);
+        vm.warp(1_729_283_400); // Friday 20:30:00 UTC, when the higher FAD margin becomes active.
+
+        uint256 targetPoolCash = 48e6;
+        uint256 poolCash = usdc.balanceOf(address(pool));
+        assertGt(poolCash, targetPoolCash, "Setup should have enough pool cash to create the boundary");
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolCash - targetPoolCash);
+
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, liquidationPrice);
+        assertTrue(preview.liquidatable, "FAD margin should make the profitable position liquidatable");
+        assertGt(preview.freshTraderPayoutUsdc, 0, "Setup should produce a fresh trader payout");
+        assertGt(preview.seizedCollateralUsdc, 0, "Setup should transfer the LP fee to the pool");
+        assertLt(targetPoolCash, preview.freshTraderPayoutUsdc, "Pre-seizure cash should be insufficient");
+        assertGe(
+            targetPoolCash + preview.seizedCollateralUsdc,
+            preview.freshTraderPayoutUsdc,
+            "Incoming seizure should make the fresh payout serviceable"
+        );
+        assertEq(
+            preview.immediatePayoutUsdc,
+            preview.freshTraderPayoutUsdc,
+            "Preview should include incoming seizure before routing the fresh payout"
+        );
+        assertEq(preview.traderClaimBalanceUsdc, 0, "Preview should not create a serviceable trader claim");
+
+        IMarginClearinghouse.AccountUsdcBuckets memory bucketsBefore = clearinghouse.getAccountUsdcBuckets(account);
+        uint256 traderClaimBefore = engine.traderClaimBalanceUsdc(account);
+        uint256 protocolTreasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(liquidationPrice);
+
+        vm.prank(KEEPER);
+        router.executeLiquidation(account, priceData);
+
+        IMarginClearinghouse.AccountUsdcBuckets memory bucketsAfter = clearinghouse.getAccountUsdcBuckets(account);
+        assertEq(
+            bucketsAfter.settlementBalanceUsdc,
+            bucketsBefore.settlementBalanceUsdc + preview.immediatePayoutUsdc - preview.seizedCollateralUsdc
+                - preview.keeperBountyUsdc - preview.protocolLiquidationFeeUsdc,
+            "Previewed immediate payout should match the live settlement mutation"
+        );
+        assertEq(
+            clearinghouse.balanceUsdc(engine.protocolTreasury()) - protocolTreasuryBefore,
+            preview.protocolLiquidationFeeUsdc,
+            "Previewed protocol fee should match the live treasury credit"
+        );
+        assertEq(
+            engine.traderClaimBalanceUsdc(account) - traderClaimBefore,
+            preview.traderClaimBalanceUsdc,
+            "Previewed trader claim should match live routing at the seizure boundary"
+        );
     }
 
     function test_PreviewLiquidation_MatchesLiveExecution_WithQueuedExecutionReservationOutsideReachability() public {
@@ -661,9 +719,9 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, liquidationPrice);
         AccountLensViewTypes.AccountLedgerSnapshot memory snapshotBefore =
             engineAccountLens.getAccountLedgerSnapshot(account);
+        uint256 vpiRebateReserveBefore = clearinghouse.vpiRebateReserveUsdc(account);
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(KEEPER);
         uint256 traderClaimBefore = engine.traderClaimBalanceUsdc(account);
-        uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(liquidationPrice);
 
@@ -672,8 +730,18 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
 
         assertEq(
             preview.reachableCollateralUsdc,
-            snapshotBefore.terminalReachableUsdc,
-            "Liquidation preview must exclude reserved execution bounty from reachable collateral"
+            snapshotBefore.terminalPriceCollectibleCapUsdc + vpiRebateReserveBefore,
+            "Liquidation preview must expose the exact terminal price cap plus only its dedicated VPI reserve"
+        );
+        assertEq(
+            snapshotBefore.liquidationReachableSettlementUsdc,
+            snapshotBefore.settlementBalanceUsdc - snapshotBefore.executionBountyReserveUsdc,
+            "Account liquidation custody should exclude the queued execution bounty"
+        );
+        assertLt(
+            preview.reachableCollateralUsdc,
+            snapshotBefore.liquidationReachableSettlementUsdc,
+            "Generic free settlement must remain outside terminal price reachability"
         );
         assertEq(
             clearinghouse.balanceUsdc(KEEPER) - keeperSettlementBefore,
@@ -685,11 +753,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             preview.traderClaimBalanceUsdc,
             "Queued-reservation liquidation preview trader claim should match live outcome"
         );
-        assertEq(
-            engine.accumulatedBadDebtUsdc() - badDebtBefore,
-            preview.badDebtUsdc,
-            "Queued-reservation liquidation preview bad debt should match live outcome"
-        );
+        assertEq(preview.badDebtUsdc, 0, "V2 queued-reservation liquidation must not create accumulated debt");
         assertEq(
             usdc.balanceOf(address(router)),
             0,
@@ -700,6 +764,8 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             engine.degradedMode(),
             "Queued-reservation liquidation preview degraded-mode flag should match live outcome"
         );
+        _assertTerminalCurveMatchesEngine(account);
+        _assertTerminalNavSnapshotMatchesBook();
     }
 
 }

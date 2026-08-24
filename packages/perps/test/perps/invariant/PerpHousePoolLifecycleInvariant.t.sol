@@ -2,6 +2,7 @@
 pragma solidity 0.8.35;
 
 import {BasePerpTest} from "../BasePerpTest.sol";
+import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
@@ -19,6 +20,7 @@ contract PerpHousePoolLifecycleHandler is Test {
     }
 
     MockUSDC public immutable usdc;
+    CfdEngine public immutable engine;
     HousePool public immutable pool;
     TrancheVault public immutable seniorVault;
     TrancheVault public immutable juniorVault;
@@ -29,12 +31,14 @@ contract PerpHousePoolLifecycleHandler is Test {
 
     constructor(
         MockUSDC _usdc,
+        CfdEngine _engine,
         HousePool _pool,
         TrancheVault _seniorVault,
         TrancheVault _juniorVault,
         address _owner
     ) {
         usdc = _usdc;
+        engine = _engine;
         pool = _pool;
         seniorVault = _seniorVault;
         juniorVault = _juniorVault;
@@ -103,63 +107,119 @@ contract PerpHousePoolLifecycleHandler is Test {
         pool.unpause();
     }
 
-    function deposit(
+    function requestDeposit(
         bool isSenior,
         uint256 actorIndex,
-        uint256 amountFuzz
+        uint256 amountFuzz,
+        bool cutoffWindow
     ) external {
         TrancheVault vault = isSenior ? seniorVault : juniorVault;
         address actor = actors[actorIndex % actors.length];
-        uint256 maxDeposit_ = vault.maxDeposit(actor);
-        if (maxDeposit_ == 0) {
+        _warpToRequestWindowSide(vault, cutoffWindow);
+        _refreshMark();
+        uint256 expectedRequestId = _expectedRequestId(vault, cutoffWindow);
+        uint256 maxRequest_ = vault.maxRequestDeposit(actor);
+        uint256 minimum = pool.minTrancheDepositUsdc();
+        if (maxRequest_ < minimum) {
             return;
         }
 
-        uint256 upper = maxDeposit_ < 250_000e6 ? maxDeposit_ : 250_000e6;
-        if (upper == 0) {
-            return;
-        }
-
-        uint256 amount = bound(amountFuzz, 1e6, upper);
+        uint256 upper = maxRequest_ < 250_000e6 ? maxRequest_ : 250_000e6;
+        uint256 amount = bound(amountFuzz, minimum, upper);
         usdc.mint(actor, amount);
         vm.startPrank(actor);
         usdc.approve(address(vault), amount);
-        vault.deposit(amount, actor);
+        uint256 requestId = vault.requestDeposit(amount, actor, actor);
         vm.stopPrank();
+        assertEq(requestId, expectedRequestId, "deposit request must use the advertised LP epoch");
     }
 
-    function withdraw(
+    function requestRedeem(
         bool isSenior,
         uint256 actorIndex,
-        uint256 amountFuzz
+        uint256 sharesFuzz,
+        bool cutoffWindow
     ) external {
         TrancheVault vault = isSenior ? seniorVault : juniorVault;
         address actor = actors[actorIndex % actors.length];
-        uint256 maxWithdraw_ = vault.maxWithdraw(actor);
-        if (maxWithdraw_ == 0) {
+        _warpToRequestWindowSide(vault, cutoffWindow);
+        uint256 expectedRequestId = _expectedRequestId(vault, cutoffWindow);
+        uint256 maxRequest_ = vault.maxRequestRedeem(actor);
+        if (maxRequest_ == 0) {
             return;
         }
 
-        uint256 amount = bound(amountFuzz, 1, maxWithdraw_);
+        uint256 minimumShares = vault.estimateWithdrawShares(pool.minTrancheDepositUsdc());
+        uint256 lower = minimumShares != 0 && minimumShares <= maxRequest_ ? minimumShares : maxRequest_;
+        uint256 shares = bound(sharesFuzz, lower, maxRequest_);
         vm.prank(actor);
-        vault.withdraw(amount, actor, actor);
+        uint256 requestId = vault.requestRedeem(shares, actor, actor);
+        assertEq(requestId, expectedRequestId, "redeem request must use the advertised LP epoch");
     }
 
-    function redeem(
+    function settleLpEpoch() external {
+        uint256 cutoffEpoch = pool.currentLpEpoch();
+        (, uint256 seniorRedeemShares) = seniorVault.getMaturedRedeemHead(cutoffEpoch);
+        (, uint256 juniorRedeemShares) = juniorVault.getMaturedRedeemHead(cutoffEpoch);
+        (, uint256 seniorDepositAssets) = seniorVault.getMaturedDepositHead(cutoffEpoch);
+        (, uint256 juniorDepositAssets) = juniorVault.getMaturedDepositHead(cutoffEpoch);
+        bool hasMaturedRedeem = seniorRedeemShares != 0 || juniorRedeemShares != 0;
+        bool hasMaturedDeposit = seniorDepositAssets != 0 || juniorDepositAssets != 0;
+        if (!hasMaturedRedeem && (!hasMaturedDeposit || pool.paused())) {
+            return;
+        }
+
+        _refreshMark();
+        pool.settleLpEpoch(0, 0);
+    }
+
+    function claimDeposit(
         bool isSenior,
-        uint256 actorIndex,
-        uint256 sharesFuzz
+        uint256 actorIndex
     ) external {
         TrancheVault vault = isSenior ? seniorVault : juniorVault;
         address actor = actors[actorIndex % actors.length];
-        uint256 maxRedeem_ = vault.maxRedeem(actor);
-        if (maxRedeem_ == 0) {
+        uint256 requestId = vault.controllerDepositHead(actor);
+        if (requestId == 0) {
             return;
         }
 
-        uint256 shares = bound(sharesFuzz, 1, maxRedeem_);
+        uint256 refundableAssets = vault.refundableDepositRequest(requestId, actor);
+        if (refundableAssets != 0) {
+            vm.prank(actor);
+            vault.cancelPendingDeposit(requestId, actor, actor);
+            return;
+        }
+
+        uint256 claimableAssets = vault.claimableDepositRequest(requestId, actor);
+        if (claimableAssets == 0) {
+            return;
+        }
+
         vm.prank(actor);
-        vault.redeem(shares, actor, actor);
+        vault.claimDeposit(requestId, claimableAssets, actor, actor);
+    }
+
+    function claimRedeem(
+        bool isSenior,
+        uint256 actorIndex
+    ) external {
+        TrancheVault vault = isSenior ? seniorVault : juniorVault;
+        address actor = actors[actorIndex % actors.length];
+        uint256 requestId = vault.controllerRedeemHead(actor);
+        if (requestId == 0) {
+            return;
+        }
+
+        uint256 claimableShares = vault.claimableRedeemRequest(requestId, actor);
+        if (claimableShares != 0) {
+            vm.prank(actor);
+            vault.claimRedeem(requestId, claimableShares, actor, actor);
+        }
+        if (vault.redeemRefundPending(requestId, actor)) {
+            vm.prank(actor);
+            vault.claimRedeemRefund(requestId, actor, actor);
+        }
     }
 
     function transferShares(
@@ -244,6 +304,35 @@ contract PerpHousePoolLifecycleHandler is Test {
         return lastTransfer;
     }
 
+    function _warpToRequestWindowSide(
+        TrancheVault vault,
+        bool cutoffWindow
+    ) internal {
+        (, uint256 nextCutoffTime) = vault.getRequestEpochWindow();
+        assertGt(nextCutoffTime, block.timestamp, "advertised request cutoff must be in the future");
+        vm.warp(cutoffWindow ? nextCutoffTime : nextCutoffTime - 1);
+    }
+
+    function _expectedRequestId(
+        TrancheVault vault,
+        bool cutoffWindow
+    ) internal view returns (uint256 expectedRequestId) {
+        uint256 nextCutoffTime;
+        (expectedRequestId, nextCutoffTime) = vault.getRequestEpochWindow();
+        assertEq(
+            expectedRequestId,
+            vault.currentLpEpoch() + (cutoffWindow ? 2 : 1),
+            "request action must reach the selected side of the cutoff"
+        );
+        assertGt(nextCutoffTime, block.timestamp, "next advertised request cutoff must remain in the future");
+    }
+
+    function _refreshMark() internal {
+        uint256 markPrice = engine.lastMarkPrice();
+        vm.prank(engine.orderRouter());
+        engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
+    }
+
 }
 
 contract PerpHousePoolLifecycleInvariantTest is BasePerpTest {
@@ -273,21 +362,23 @@ contract PerpHousePoolLifecycleInvariantTest is BasePerpTest {
     function setUp() public override {
         super.setUp();
 
-        handler = new PerpHousePoolLifecycleHandler(usdc, pool, seniorVault, juniorVault, address(this));
+        handler = new PerpHousePoolLifecycleHandler(usdc, engine, pool, seniorVault, juniorVault, address(this));
 
-        bytes4[] memory selectors = new bytes4[](12);
+        bytes4[] memory selectors = new bytes4[](14);
         selectors[0] = handler.initializeSeed.selector;
         selectors[1] = handler.activateTrading.selector;
         selectors[2] = handler.pausePool.selector;
         selectors[3] = handler.unpausePool.selector;
-        selectors[4] = handler.deposit.selector;
-        selectors[5] = handler.withdraw.selector;
-        selectors[6] = handler.redeem.selector;
-        selectors[7] = handler.transferShares.selector;
-        selectors[8] = handler.warpForward.selector;
-        selectors[9] = handler.mintExcess.selector;
-        selectors[10] = handler.accountExcess.selector;
-        selectors[11] = handler.sweepExcess.selector;
+        selectors[4] = handler.requestDeposit.selector;
+        selectors[5] = handler.requestRedeem.selector;
+        selectors[6] = handler.settleLpEpoch.selector;
+        selectors[7] = handler.claimDeposit.selector;
+        selectors[8] = handler.claimRedeem.selector;
+        selectors[9] = handler.transferShares.selector;
+        selectors[10] = handler.warpForward.selector;
+        selectors[11] = handler.mintExcess.selector;
+        selectors[12] = handler.accountExcess.selector;
+        selectors[13] = handler.sweepExcess.selector;
 
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
         targetContract(address(handler));
@@ -316,28 +407,26 @@ contract PerpHousePoolLifecycleInvariantTest is BasePerpTest {
         _assertSeedFloorPreserved(juniorVault);
     }
 
-    function invariant_PositiveDepositCapacityRequiresActiveLifecycle() public view {
+    function invariant_PositiveRequestDepositCapacityRequiresActiveLifecycle() public view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address actor = handler.actorAt(i);
 
-            if (seniorVault.maxDeposit(actor) > 0 || seniorVault.maxMint(actor) > 0) {
+            if (seniorVault.maxRequestDeposit(actor) > 0) {
                 assertTrue(pool.canAcceptOrdinaryDeposits(), "senior deposits require active lifecycle");
                 assertFalse(pool.paused(), "senior deposits must be paused when pool is paused");
             }
-            if (juniorVault.maxDeposit(actor) > 0 || juniorVault.maxMint(actor) > 0) {
+            if (juniorVault.maxRequestDeposit(actor) > 0) {
                 assertTrue(pool.canAcceptOrdinaryDeposits(), "junior deposits require active lifecycle");
                 assertFalse(pool.paused(), "junior deposits must be paused when pool is paused");
             }
         }
     }
 
-    function invariant_VaultWithdrawBoundsRespectCooldownAndPoolCaps() public view {
-        (,, uint256 seniorCap, uint256 juniorCap) = pool.getPendingTrancheState();
-
+    function invariant_AsyncRequestAndClaimLimitsMatchQueueState() public view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address actor = handler.actorAt(i);
-            _assertVaultWithdrawBounds(seniorVault, actor, seniorCap);
-            _assertVaultWithdrawBounds(juniorVault, actor, juniorCap);
+            _assertVaultAsyncLimits(seniorVault, actor);
+            _assertVaultAsyncLimits(juniorVault, actor);
         }
     }
 
@@ -347,6 +436,11 @@ contract PerpHousePoolLifecycleInvariantTest is BasePerpTest {
             pool.totalAssets() + pool.excessAssets(),
             "raw pool assets must split into canonical assets plus excess"
         );
+    }
+
+    function invariant_AsyncEscrowsConserveVaultCustody() public view {
+        _assertEscrowConservation(seniorVault);
+        _assertEscrowConservation(juniorVault);
     }
 
     function invariant_ShareTransfersPropagateCooldownTimestamp() public view {
@@ -380,25 +474,49 @@ contract PerpHousePoolLifecycleInvariantTest is BasePerpTest {
         assertGe(vault.totalSupply(), seedShareFloor_, "total supply must always cover the seed floor");
     }
 
-    function _assertVaultWithdrawBounds(
-        TrancheVault vault,
-        address actor,
-        uint256 poolCap
+    function _assertEscrowConservation(
+        TrancheVault vault
     ) internal view {
+        assertEq(
+            usdc.balanceOf(address(vault)),
+            vault.pendingDepositEscrowAssets() + vault.withdrawalEscrowAssets(),
+            "vault USDC must equal pending-deposit plus withdrawal-claim escrow"
+        );
+        assertEq(
+            vault.balanceOf(address(vault)),
+            vault.pendingRedeemEscrowShares() + vault.depositClaimEscrowShares(),
+            "vault shares must equal pending-redeem plus deposit-claim escrow"
+        );
+    }
+
+    function _assertVaultAsyncLimits(
+        TrancheVault vault,
+        address actor
+    ) internal view {
+        uint256 depositHead = vault.controllerDepositHead(actor);
+        uint256 expectedClaimableDepositAssets =
+            depositHead == 0 ? 0 : vault.claimableDepositRequest(depositHead, actor);
+        uint256 expectedClaimableDepositShares = depositHead == 0 ? 0 : vault.claimableDepositShares(depositHead, actor);
+        assertEq(vault.maxDeposit(actor), expectedClaimableDepositAssets, "maxDeposit must match deposit claim head");
+        assertEq(vault.maxMint(actor), expectedClaimableDepositShares, "maxMint must match deposit claim head");
+
+        uint256 redeemHead = vault.controllerRedeemHead(actor);
+        uint256 expectedClaimableRedeemAssets = redeemHead == 0 ? 0 : vault.claimableRedeemAssets(redeemHead, actor);
+        uint256 expectedClaimableRedeemShares = redeemHead == 0 ? 0 : vault.claimableRedeemRequest(redeemHead, actor);
         uint256 maxWithdraw_ = vault.maxWithdraw(actor);
         uint256 maxRedeem_ = vault.maxRedeem(actor);
+        assertEq(maxWithdraw_, expectedClaimableRedeemAssets, "maxWithdraw must match redeem claim head");
+        assertEq(maxRedeem_, expectedClaimableRedeemShares, "maxRedeem must match redeem claim head");
+
         uint256 unlockedShares = _unlockedShares(vault, actor);
         bool coolingDown = block.timestamp < vault.lastDepositTime(actor) + vault.DEPOSIT_COOLDOWN();
 
         if (coolingDown) {
-            assertEq(maxWithdraw_, 0, "cooldown must zero maxWithdraw");
-            assertEq(maxRedeem_, 0, "cooldown must zero maxRedeem");
+            assertEq(vault.maxRequestRedeem(actor), 0, "cooldown must zero maxRequestRedeem");
             return;
         }
 
-        assertLe(maxRedeem_, unlockedShares, "maxRedeem cannot exceed unlocked shares");
-        assertLe(maxWithdraw_, vault.convertToAssets(unlockedShares), "maxWithdraw cannot exceed unlocked assets");
-        assertLe(maxWithdraw_, poolCap, "vault maxWithdraw cannot exceed pool tranche cap");
+        assertLe(vault.maxRequestRedeem(actor), unlockedShares, "redeem requests cannot exceed unlocked shares");
     }
 
     function _unlockedShares(

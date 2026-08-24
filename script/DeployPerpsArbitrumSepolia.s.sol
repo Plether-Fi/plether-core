@@ -15,14 +15,50 @@ import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {PerpsPublicLens} from "@plether/perps/PerpsPublicLens.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
+import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
+import {IAsyncTrancheVault} from "@plether/perps/interfaces/IAsyncTrancheVault.sol";
 import "forge-std/Script.sol";
+
+/// @dev Minimal deployment-time compatibility surface. Keeping this local makes the deploy script fail closed when
+///      one vault comes from the legacy synchronous generation.
+interface IAsyncTrancheVaultDeploymentView {
+
+    function POOL() external view returns (address);
+    function IS_SENIOR() external view returns (bool);
+    function LP_REQUEST_CUTOFF_DURATION() external view returns (uint256);
+    function asset() external view returns (address);
+    function share() external view returns (address);
+    function getRequestEpochWindow() external view returns (uint256 nextRequestEpoch, uint256 nextRequestCutoffTime);
+    function vault(
+        address asset_
+    ) external view returns (address);
+    function supportsInterface(
+        bytes4 interfaceId
+    ) external view returns (bool);
+
+}
+
+/// @dev Minimal immutable-binding surface for the Router-deployed position-protection book.
+interface IPositionProtectionBookDeploymentView {
+
+    function ROUTER() external view returns (address);
+    function ENGINE() external view returns (address);
+
+}
 
 contract DeployPerpsArbitrumSepolia is Script {
 
     address internal constant PYTH = 0x4374e5a8b9C22271E9EB878A2AA31DE97DF15DAF;
-    uint256 internal constant CAP_PRICE = 2e8;
+    uint32 internal constant CAP_PRICE = 2e8;
     uint256 internal constant FROZEN_CLOSE_SPREAD_BPS = 50;
+
+    bytes4 internal constant ERC165_INTERFACE_ID = 0x01ffc9a7;
+    bytes4 internal constant ERC7540_OPERATOR_INTERFACE_ID = 0xe3bc4e65;
+    bytes4 internal constant ERC7575_INTERFACE_ID = 0x2f0a18c5;
+    bytes4 internal constant ERC7575_SHARE_INTERFACE_ID = 0xf815c03d;
+    bytes4 internal constant ERC7540_DEPOSIT_INTERFACE_ID = 0xce3bbe50;
+    bytes4 internal constant ERC7540_REDEEM_INTERFACE_ID = 0x620ee8e4;
 
     bytes32 internal constant PYTH_EUR_USD = 0xa995d00bb36a63cef7fd2c287dc105fc8f3d93779f062f09551b0af3e81ec30b;
     bytes32 internal constant PYTH_USD_JPY = 0xef2c98c804ba503c6a707e38be4dfbb16683775f195b091252bf24693042fd52;
@@ -49,6 +85,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         MockUSDC usdc;
         MarginClearinghouse clearinghouse;
         CfdEngine engine;
+        TerminalNavBookV2 terminalNavBook;
         CfdEnginePlanner planner;
         CfdEngineSettlementSidecar settlementSidecar;
         CfdEngineAdmin engineAdmin;
@@ -71,6 +108,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         console.log("Deploying Plether perps to Arbitrum Sepolia");
         console.log("Deployer:", deployer);
         console.log("Pyth:", PYTH);
+        require(PYTH.code.length > 0, "Pyth has no code");
 
         vm.startBroadcast(privateKey);
 
@@ -79,6 +117,8 @@ contract DeployPerpsArbitrumSepolia is Script {
         deployed.engine = new CfdEngine(
             address(deployed.usdc), address(deployed.clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_SPREAD_BPS
         );
+        deployed.terminalNavBook = new TerminalNavBookV2(address(deployed.engine), CAP_PRICE);
+        deployed.engine.setTerminalNavBook(address(deployed.terminalNavBook));
 
         deployed.planner = new CfdEnginePlanner();
         deployed.settlementSidecar = new CfdEngineSettlementSidecar(address(deployed.engine));
@@ -98,6 +138,7 @@ contract DeployPerpsArbitrumSepolia is Script {
 
         deployed.housePool.setSeniorVault(address(deployed.seniorVault));
         deployed.housePool.setJuniorVault(address(deployed.juniorVault));
+        _verifyAsyncVaultPair(deployed.housePool, deployed.seniorVault, deployed.juniorVault, deployed.usdc);
         deployed.engine.setPool(address(deployed.housePool));
 
         deployed.accountLens = new CfdEngineAccountLens(address(deployed.engine));
@@ -116,11 +157,20 @@ contract DeployPerpsArbitrumSepolia is Script {
         deployed.router = new OrderRouter(
             address(deployed.engine), address(deployed.engineLens), address(deployed.housePool), deployed.pletherOracle
         );
-        deployed.positionProtectionBook = address(deployed.router.positionProtectionBook());
+        deployed.positionProtectionBook = _verifyPositionProtectionBook(deployed.router, deployed.engine);
         deployed.routerAdmin = deployed.router.admin();
 
         deployed.engine.setOrderRouter(address(deployed.router));
         deployed.clearinghouse.setEngine(address(deployed.engine));
+        require(deployed.engine.orderRouter() == address(deployed.router), "Engine OrderRouter mismatch");
+        require(
+            address(PletherOracle(deployed.pletherOracle).engine()) == address(deployed.engine),
+            "PletherOracle Engine mismatch"
+        );
+        require(
+            address(PletherOracle(deployed.pletherOracle).housePool()) == address(deployed.housePool),
+            "PletherOracle HousePool mismatch"
+        );
 
         deployed.publicLens = new PerpsPublicLens(
             address(deployed.accountLens),
@@ -132,9 +182,8 @@ contract DeployPerpsArbitrumSepolia is Script {
         vm.stopBroadcast();
 
         _logDeployment(deployed);
-        console.log(
-            "Trading remains inactive until seed positions are initialized and HousePool.activateTrading() is called."
-        );
+        console.log("Trading remains inactive until finite senior limits complete their HousePool timelock,");
+        console.log("junior and senior seed positions are initialized, and HousePool.activateTrading() is called.");
     }
 
     function _riskParams() internal pure returns (CfdTypes.RiskParams memory) {
@@ -146,7 +195,9 @@ contract DeployPerpsArbitrumSepolia is Script {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -188,6 +239,98 @@ contract DeployPerpsArbitrumSepolia is Script {
         inversions[5] = true;
     }
 
+    /// @dev Rejects a missing or misbound Router-created position-protection book before set-once wiring completes.
+    function _verifyPositionProtectionBook(
+        OrderRouter router,
+        CfdEngine engine
+    ) internal view returns (address book) {
+        book = address(router.positionProtectionBook());
+        require(book != address(0), "PositionProtectionBook is not wired");
+        require(book.code.length > 0, "PositionProtectionBook has no code");
+        IPositionProtectionBookDeploymentView candidate = IPositionProtectionBookDeploymentView(book);
+        require(candidate.ROUTER() == address(router), "PositionProtectionBook router mismatch");
+        require(candidate.ENGINE() == address(engine), "PositionProtectionBook engine mismatch");
+    }
+
+    /// @dev Rejects partial or mixed-generation LP stacks before any engine/router wiring is completed.
+    function _verifyAsyncVaultPair(
+        HousePool housePool,
+        TrancheVault seniorVault,
+        TrancheVault juniorVault,
+        MockUSDC usdc
+    ) internal view {
+        require(address(seniorVault) != address(juniorVault), "HousePool vault pair is duplicated");
+        require(housePool.seniorVault() == address(seniorVault), "HousePool senior vault mismatch");
+        require(housePool.juniorVault() == address(juniorVault), "HousePool junior vault mismatch");
+        require(address(housePool.USDC()) == address(usdc), "HousePool asset mismatch");
+        require(housePool.LP_EPOCH_DURATION() == 1 hours, "Unexpected LP epoch duration");
+        require(housePool.MAX_LP_EPOCHS_PER_PHASE() == 16, "Unexpected LP epoch bound");
+
+        uint256 currentEpoch = housePool.currentLpEpoch();
+        require(currentEpoch == block.timestamp / housePool.LP_EPOCH_DURATION(), "Invalid current LP epoch");
+        require(
+            housePool.lpEpochStart(currentEpoch) == currentEpoch * housePool.LP_EPOCH_DURATION(),
+            "Invalid LP epoch start"
+        );
+
+        uint256 imminentEpoch = currentEpoch + 1;
+        require(
+            housePool.lpEpochStart(imminentEpoch) == imminentEpoch * housePool.LP_EPOCH_DURATION(),
+            "Invalid imminent LP epoch start"
+        );
+
+        (uint256 seniorNextRequestEpoch, uint256 seniorNextRequestCutoffTime) =
+            _verifyAsyncVault(address(seniorVault), address(housePool), address(usdc), true);
+        (uint256 juniorNextRequestEpoch, uint256 juniorNextRequestCutoffTime) =
+            _verifyAsyncVault(address(juniorVault), address(housePool), address(usdc), false);
+        require(seniorNextRequestEpoch == juniorNextRequestEpoch, "TrancheVault request epoch mismatch");
+        require(seniorNextRequestCutoffTime == juniorNextRequestCutoffTime, "TrancheVault request cutoff mismatch");
+
+        uint256 cutoffDuration = 5 minutes;
+        uint256 imminentCutoffTime = housePool.lpEpochStart(imminentEpoch) - cutoffDuration;
+        uint256 expectedNextRequestEpoch = block.timestamp < imminentCutoffTime ? imminentEpoch : imminentEpoch + 1;
+        uint256 expectedNextRequestCutoffTime = housePool.lpEpochStart(expectedNextRequestEpoch) - cutoffDuration;
+        require(seniorNextRequestEpoch == expectedNextRequestEpoch, "Unexpected request epoch");
+        require(seniorNextRequestCutoffTime == expectedNextRequestCutoffTime, "Unexpected request cutoff");
+        require(seniorNextRequestCutoffTime > block.timestamp, "Request cutoff is not future");
+
+        uint256 targetEpochStart = housePool.lpEpochStart(seniorNextRequestEpoch);
+        require(
+            targetEpochStart == seniorNextRequestEpoch * housePool.LP_EPOCH_DURATION(),
+            "Invalid request target epoch start"
+        );
+        uint256 targetDelay = targetEpochStart - block.timestamp;
+        require(targetDelay > cutoffDuration, "Request target is inside cutoff");
+        require(targetDelay <= housePool.LP_EPOCH_DURATION() + cutoffDuration, "Request target exceeds routing window");
+    }
+
+    function _verifyAsyncVault(
+        address vault,
+        address housePool,
+        address usdc,
+        bool isSenior
+    ) internal view returns (uint256 nextRequestEpoch, uint256 nextRequestCutoffTime) {
+        IAsyncTrancheVaultDeploymentView candidate = IAsyncTrancheVaultDeploymentView(vault);
+        require(candidate.POOL() == housePool, "TrancheVault pool mismatch");
+        require(candidate.IS_SENIOR() == isSenior, "TrancheVault side mismatch");
+        require(candidate.LP_REQUEST_CUTOFF_DURATION() == 5 minutes, "Unexpected LP request cutoff duration");
+        require(candidate.asset() == usdc, "TrancheVault asset mismatch");
+        require(candidate.share() == vault, "TrancheVault share mismatch");
+        require(candidate.supportsInterface(ERC165_INTERFACE_ID), "TrancheVault missing ERC165");
+        require(candidate.supportsInterface(ERC7540_OPERATOR_INTERFACE_ID), "TrancheVault missing ERC7540 operator");
+        require(candidate.supportsInterface(ERC7575_INTERFACE_ID), "TrancheVault missing ERC7575");
+        require(candidate.supportsInterface(ERC7575_SHARE_INTERFACE_ID), "TrancheVault missing ERC7575 share lookup");
+        require(candidate.supportsInterface(ERC7540_DEPOSIT_INTERFACE_ID), "TrancheVault missing async deposit");
+        require(candidate.supportsInterface(ERC7540_REDEEM_INTERFACE_ID), "TrancheVault missing async redeem");
+        require(
+            candidate.supportsInterface(type(IAsyncTrancheVault).interfaceId),
+            "TrancheVault missing custom async interface"
+        );
+        require(!candidate.supportsInterface(0xffffffff), "TrancheVault accepts invalid ERC165 id");
+        require(candidate.vault(usdc) == vault, "TrancheVault share lookup mismatch");
+        (nextRequestEpoch, nextRequestCutoffTime) = candidate.getRequestEpochWindow();
+    }
+
     function _logDeployment(
         DeployedContracts memory deployed
     ) internal view {
@@ -195,12 +338,17 @@ contract DeployPerpsArbitrumSepolia is Script {
         console.log("MockUSDC:", address(deployed.usdc));
         console.log("MarginClearinghouse:", address(deployed.clearinghouse));
         console.log("CfdEngine:", address(deployed.engine));
+        console.log("TerminalNavBookV2:", address(deployed.terminalNavBook));
+        console.log("PositionSizeQuantum:", deployed.terminalNavBook.SIZE_QUANTUM());
         console.log("FrozenCloseSpreadBps:", deployed.engine.frozenCloseSpreadBps());
         console.log("FadRunwaySeconds:", deployed.engine.fadRunwaySeconds());
         console.log("CfdEnginePlanner:", address(deployed.planner));
         console.log("CfdEngineSettlementSidecar:", address(deployed.settlementSidecar));
         console.log("CfdEngineAdmin:", address(deployed.engineAdmin));
         console.log("HousePool:", address(deployed.housePool));
+        console.log("LpEpochDuration:", deployed.housePool.LP_EPOCH_DURATION());
+        console.log("MaxLpEpochsPerPhase:", deployed.housePool.MAX_LP_EPOCHS_PER_PHASE());
+        console.log("CurrentLpEpoch:", deployed.housePool.currentLpEpoch());
         console.log("SeniorVault:", address(deployed.seniorVault));
         console.log("JuniorVault:", address(deployed.juniorVault));
         console.log("CfdEngineAccountLens:", address(deployed.accountLens));
@@ -210,7 +358,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         console.log("PositionProtectionCommitsEnabled:", deployed.router.positionProtectionCommitsEnabled());
         console.log("PositionProtectionTriggerBountyUsdc:", deployed.router.positionProtectionTriggerBountyUsdc());
         console.log("PletherOracle:", deployed.pletherOracle);
-        console.log("PythMaxConfidenceRatioBps:", PletherOracle(deployed.pletherOracle).pythMaxConfidenceRatioBps());
+        console.log("BasketMaxConfidenceRatioBps:", PletherOracle(deployed.pletherOracle).basketMaxConfidenceRatioBps());
         console.log("OrderRouterAdmin:", deployed.routerAdmin);
         console.log("PerpsPublicLens:", address(deployed.publicLens));
         console.log("Owner:", deployed.engineAdmin.owner());

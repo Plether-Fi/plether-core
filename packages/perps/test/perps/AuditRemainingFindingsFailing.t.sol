@@ -9,6 +9,7 @@ import {HousePool} from "@plether/perps/HousePool.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
+import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
@@ -64,12 +65,21 @@ contract AuditRemainingFindingsFailing is BasePerpTest {
     function test_H2_LiquidationMustRespectFreeUsdcCollateral() public {
         address account = alice;
         _fundTrader(alice, 1000e6);
-        _open(account, CfdTypes.Side.BULL, 20_000e18, 312e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 20_000e18, 330e6, 1e8);
+        assertEq(clearinghouse.pnlPledgeUsdc(account), 302e6, "Fixture must fund the exact protected price pledge");
+        assertEq(
+            clearinghouse.liquidationReserveUsdc(account), 20e6, "Fixture must separately fund the liquidation reserve"
+        );
+        assertEq(_freeSettlementUsdc(account), 670e6, "Fixture must retain free settlement outside price collateral");
+
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 100_500_000);
+        assertFalse(preview.liquidatable, "Exact P+C price equity must remain just above maintenance");
+        assertEq(preview.equityUsdc, int256(202e6), "Free settlement must not be folded into exact price equity");
         uint256 poolDepth = pool.totalAssets();
 
         vm.prank(address(router));
         vm.expectRevert(ICfdEngineTypes.CfdEngine__PositionIsSolvent.selector);
-        engine.liquidatePosition(account, 99_500_000, poolDepth, uint64(block.timestamp), address(this));
+        engine.liquidatePosition(account, 100_500_000, poolDepth, uint64(block.timestamp), address(this));
     }
 
     function test_H3_RouterCannotTransferReservedSettlement() public {
@@ -108,6 +118,8 @@ contract AuditRemainingFindingsFailing_MevDrift is BasePerpTest {
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = _deployEngine(_riskParams());
         _syncEngineAdmin();
+        terminalNavBook = new TerminalNavBookV2(address(engine), uint32(CAP_PRICE));
+        engine.setTerminalNavBook(address(terminalNavBook));
         pool = new HousePool(address(usdc), address(engine));
 
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");
@@ -143,14 +155,15 @@ contract AuditRemainingFindingsFailing_MevDrift is BasePerpTest {
     }
 
     function test_H2_CrossBlockPublishAfterCommitExecutesWhenPublishTimeIsAfterCommit() public {
-        vm.warp(1000);
+        uint256 commitTime = block.timestamp;
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
 
-        mockPyth.setAllUniquePrices(feedIds, int64(100_000_000), 0, int32(-8), 1001, 1000);
+        uint256 publishTime = commitTime + 1;
+        mockPyth.setAllUniquePrices(feedIds, int64(100_000_000), 0, int32(-8), publishTime, commitTime);
 
-        vm.warp(1001);
+        vm.warp(publishTime);
         vm.roll(block.number + 1);
         bytes[] memory empty = new bytes[](1);
         empty[0] = "";
@@ -159,7 +172,9 @@ contract AuditRemainingFindingsFailing_MevDrift is BasePerpTest {
 
         (uint256 size,,,,,,) = engine.positions(alice);
         assertEq(size, 10_000e18, "Fresh post-commit publish time should execute the order");
-        assertEq(engine.lastMarkTime(), 1001, "Execution should advance the mark to the post-commit publish time");
+        assertEq(
+            engine.lastMarkTime(), publishTime, "Execution should advance the mark to the post-commit publish time"
+        );
     }
 
 }
@@ -182,6 +197,8 @@ contract AuditRemainingFindingsFailing_StaleOracleExecution is BasePerpTest {
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = _deployEngine(_riskParams());
         _syncEngineAdmin();
+        terminalNavBook = new TerminalNavBookV2(address(engine), uint32(CAP_PRICE));
+        engine.setTerminalNavBook(address(terminalNavBook));
         pool = new HousePool(address(usdc), address(engine));
 
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");
@@ -288,7 +305,9 @@ contract AuditRemainingFindingsFailing_CarryPathDependence is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 

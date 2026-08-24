@@ -9,6 +9,7 @@ import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
+import {ITerminalNavBookV2} from "@plether/perps/interfaces/ITerminalNavBookV2.sol";
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 
 contract OrderRouterFailurePolicyHarness is OrderRouter {
@@ -230,6 +231,12 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         _fundTrader(KEEPER, 20_000e6);
         _open(keeperAccount, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
+        uint256 freeSettlementBeforeDrain = _freeSettlementUsdc(keeperAccount);
+        assertGt(freeSettlementBeforeDrain, 0, "Setup must leave free settlement to drain");
+        vm.prank(KEEPER);
+        clearinghouse.withdraw(keeperAccount, freeSettlementBeforeDrain);
+        assertEq(_freeSettlementUsdc(keeperAccount), 0, "Setup must drain all free keeper settlement");
+
         uint256 warpedTime = block.timestamp + 30 days;
         vm.warp(warpedTime);
         vm.prank(address(router));
@@ -237,6 +244,13 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
         uint256 expectedCarry = _expectedIndexedCarryUsdc(keeperAccount);
+        uint256 pledgeBefore = clearinghouse.pnlPledgeUsdc(keeperAccount);
+        uint256 unsettledCarryBefore = engine.unsettledCarryUsdc(keeperAccount);
+        bytes32 terminalCurveHashBefore = terminalNavBook.curveHashOf(keeperAccount);
+        ITerminalNavBookV2.CurveRecord memory terminalCurveBefore = terminalNavBook.curveOf(keeperAccount);
+        ITerminalNavBookV2.BookState memory terminalBookBefore = terminalNavBook.bookState();
+        assertGt(expectedCarry, 0, "Setup must accrue indexed carry");
+        assertEq(unsettledCarryBefore, 0, "Setup must begin without previously checkpointed carry");
 
         _fundTrader(BOB, 1e6);
         vm.prank(address(router));
@@ -246,9 +260,41 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
 
         assertEq(
             clearinghouse.balanceUsdc(keeperAccount),
-            keeperSettlementBefore + 1e6 - expectedCarry,
-            "Keeper execution bounty credit should realize carry before crediting settlement"
+            keeperSettlementBefore + 1e6,
+            "Uncovered carry must checkpoint before the incoming keeper bounty reaches settlement"
         );
+        assertEq(
+            engine.unsettledCarryUsdc(keeperAccount),
+            expectedCarry,
+            "Incoming bounty must not retroactively cover carry checkpointed before the credit"
+        );
+        assertEq(_freeSettlementUsdc(keeperAccount), 1e6, "Incoming bounty should remain newly free settlement");
+        assertEq(
+            clearinghouse.pnlPledgeUsdc(keeperAccount), pledgeBefore, "Carry and bounty credit must preserve PnL pledge"
+        );
+
+        bytes32 terminalCurveHashAfter = terminalNavBook.curveHashOf(keeperAccount);
+        ITerminalNavBookV2.CurveRecord memory terminalCurveAfter = terminalNavBook.curveOf(keeperAccount);
+        ITerminalNavBookV2.BookState memory terminalBookAfter = terminalNavBook.bookState();
+        assertEq(terminalCurveHashAfter, terminalCurveHashBefore, "Stable canonical cap must preserve the curve hash");
+        assertEq(
+            terminalCurveAfter.effectiveCapUsdcAtoms,
+            terminalCurveBefore.effectiveCapUsdcAtoms,
+            "Pledge-isolated carry and free bounty settlement must preserve the terminal cap"
+        );
+        assertEq(terminalCurveAfter.lots, terminalCurveBefore.lots, "Bounty credit must preserve terminal lots");
+        assertEq(
+            terminalCurveAfter.entryCostUsdcAtoms,
+            terminalCurveBefore.entryCostUsdcAtoms,
+            "Bounty credit must preserve terminal entry cost"
+        );
+        assertEq(uint8(terminalCurveAfter.side), uint8(terminalCurveBefore.side), "Bounty credit must preserve side");
+        assertEq(
+            terminalBookAfter.bookVersion,
+            terminalBookBefore.bookVersion,
+            "Canonical no-op synchronization must preserve the terminal book version"
+        );
+        _assertTerminalCurveMatchesEngine(keeperAccount);
     }
 
     function test_UntypedCloseRevertPaysClearerEvenWhenKeeperMarkIsStale() public {

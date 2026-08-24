@@ -48,13 +48,27 @@ The stack is deployed, wired, verified on Arbiscan, bootstrapped, and trading is
 | `initMarginBps` | `45` | Enables high-leverage position-open testing; max initial-margin leverage is about `222.22x` before fees and other protocol limits. |
 | `fadMarginBps` | `300` | Keeps the FAD margin buffer materially stricter than normal trading. |
 | `baseCarryBps` | `500` | Preserves the existing carry baseline for skew/carry behavior testing. |
-| `minBountyUsdc` | `1e6` | Keeps the minimum liquidation bounty at `1` mock USDC. |
-| `bountyBps` | `10` | Preserves the proportional bounty setting for liquidation incentive coverage. |
+| `minBountyUsdc` | `1e6` | Keeps the minimum total liquidation charge at `1` mock USDC. |
+| `bountyBps` | `10` | Preserves the 10 bps total liquidation charge. |
+| `keeperShareBps` | `5_000` | Sends 50% of the collected charge to keepers by default. |
+| `protocolShareBps` | `0` | Disables protocol liquidation-fee revenue by default, leaving the remaining 50% to LPs. |
 | `executionFeeBps` | `4` | Unchanged protocol execution fee. |
 | `fadRunwaySeconds` | `1 hours` | Provides a short close-only runway before configured FAD days without over-constraining testnet order flow. |
 | `pythMaxConfidenceRatioBps` | `10` | Rejects component feeds whose Pyth confidence exceeds `0.10%` of price; appropriate because major FX feeds should usually be tight. |
 | Senior seed | `50_000_000e6` | Provides deep senior-side mock liquidity for integration and stress testing. |
 | Junior seed | `50_000_000e6` | Provides symmetric junior-side mock liquidity and keeps pool accounting balanced at launch. |
+
+### Senior-limit compatibility note
+
+This historical deployment predates the governed `maxSeniorExposureUsdc` and `maxSeniorShareBps` controls. Its
+symmetric seed values describe the launch allocation but are not an on-chain 50% covenant. New deployments must use
+the updated two-run bootstrap flow: explicitly propose finite values through the 48-hour `HousePool` timelock, rerun
+to finalize them, and only then initialize junior followed by senior and activate trading. The addresses above are
+non-upgradeable and do not acquire these controls retroactively.
+
+The `proposePoolConfig` tuple selector, `PoolConfigProposed` event topic, and public `pendingPoolConfig()` return shape
+all changed with the two new fields. This repository has no tracked generated bindings, so downstream frontend,
+admin, and indexer consumers must regenerate/version their ABIs and retain the historical event topic for old stacks.
 
 ## Oracle Notes
 

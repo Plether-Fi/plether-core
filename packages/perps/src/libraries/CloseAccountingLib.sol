@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {CfdMath} from "@plether/perps/CfdMath.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 
@@ -25,6 +26,7 @@ library CloseAccountingLib {
     /// @param executionFeeBps Execution fee rate applied to closed notional, in basis points.
     struct CloseInputs {
         CfdTypes.Position position;
+        uint256 positionEntryCostUsdcAtoms;
         uint256 sizeDelta;
         uint256 oraclePrice;
         uint256 capPrice;
@@ -54,6 +56,8 @@ library CloseAccountingLib {
         uint256 marginToFreeUsdc;
         uint256 remainingMarginUsdc;
         uint256 remainingSize;
+        uint256 closedEntryCostUsdcAtoms;
+        uint256 remainingEntryCostUsdcAtoms;
         uint256 maxProfitReductionUsdc;
         int256 proportionalAccrualUsdc;
         int256 vpiDeltaUsdc;
@@ -74,23 +78,23 @@ library CloseAccountingLib {
     function buildCloseState(
         CloseInputs memory inputs
     ) internal pure returns (CloseState memory state) {
-        CfdTypes.Position memory closedPart = CfdTypes.Position({
-            size: inputs.sizeDelta,
-            margin: inputs.position.margin,
-            entryPrice: inputs.position.entryPrice,
-            maxProfitUsdc: inputs.position.maxProfitUsdc,
-            side: inputs.position.side,
-            lastUpdateTime: 0,
-            lastCarryTimestamp: 0,
-            vpiAccrued: inputs.position.vpiAccrued
-        });
-        (bool isProfit, uint256 pnlAbs) = CfdMath.calculatePnL(closedPart, inputs.oraclePrice, inputs.capPrice);
+        uint256 positionLots = CfdMath.sizeToLots(inputs.position.size);
+        uint256 closedLots = CfdMath.sizeToLots(inputs.sizeDelta);
+        state.closedEntryCostUsdcAtoms = inputs.sizeDelta == inputs.position.size
+            ? inputs.positionEntryCostUsdcAtoms
+            : Math.mulDiv(inputs.positionEntryCostUsdcAtoms, closedLots, positionLots);
+        state.remainingEntryCostUsdcAtoms = inputs.positionEntryCostUsdcAtoms - state.closedEntryCostUsdcAtoms;
+        (bool isProfit, uint256 pnlAbs) = CfdMath.calculateExactPnl(
+            closedLots, state.closedEntryCostUsdcAtoms, inputs.position.side, inputs.oraclePrice, inputs.capPrice
+        );
         state.realizedPnlUsdc = isProfit ? int256(pnlAbs) : -int256(pnlAbs);
 
         state.marginToFreeUsdc = (inputs.position.margin * inputs.sizeDelta) / inputs.position.size;
         state.remainingMarginUsdc = inputs.position.margin - state.marginToFreeUsdc;
         state.remainingSize = inputs.position.size - inputs.sizeDelta;
-        state.maxProfitReductionUsdc = (inputs.position.maxProfitUsdc * inputs.sizeDelta) / inputs.position.size;
+        state.maxProfitReductionUsdc = CfdMath.calculateExactMaxProfit(
+            closedLots, state.closedEntryCostUsdcAtoms, inputs.position.side, inputs.capPrice
+        );
 
         state.proportionalAccrualUsdc =
             (inputs.position.vpiAccrued * int256(inputs.sizeDelta)) / int256(inputs.position.size);

@@ -38,15 +38,18 @@ interface ICfdEngineCore is ICfdEngineTypes {
     /// @return Cached engine mark price, or zero before the first mark
     function lastMarkPrice() external view returns (uint256);
 
-    /// @notice Returns the engine's active position-risk, VPI, carry, and liquidation-bounty parameters.
+    /// @notice Returns the engine's active position-risk, VPI, carry, and liquidation-charge parameters.
     /// @return vpiFactor VPI impact factor, scaled by 1e18
-    /// @return maxSkewRatio Maximum side skew divided by pool depth, scaled by 1e18
+    /// @return maxSkewRatio Maximum side skew divided by pool depth. Opens may remain above it only while strictly
+    ///         reducing an existing imbalance without making the order side heavier, scaled by 1e18
     /// @return maintMarginBps Normal maintenance-margin ratio in basis points
     /// @return initMarginBps Initial-margin ratio in basis points
     /// @return fadMarginBps Maintenance-margin ratio during FAD in basis points
     /// @return baseCarryBps Annualized base carry rate in basis points
-    /// @return minBountyUsdc Minimum liquidation bounty and position-margin floor in USDC
-    /// @return bountyBps Variable liquidation-bounty rate in basis points
+    /// @return minBountyUsdc Minimum total liquidation charge and position-margin floor in USDC
+    /// @return bountyBps Variable total liquidation-charge rate in basis points
+    /// @return keeperShareBps Keeper share of the collected liquidation charge in basis points
+    /// @return protocolShareBps Protocol-treasury share of the collected liquidation charge in basis points
     function riskParams()
         external
         view
@@ -58,7 +61,9 @@ interface ICfdEngineCore is ICfdEngineTypes {
             uint256 fadMarginBps,
             uint256 baseCarryBps,
             uint256 minBountyUsdc,
-            uint256 bountyBps
+            uint256 bountyBps,
+            uint256 keeperShareBps,
+            uint256 protocolShareBps
         );
 
     /// @notice Fixed LP-owned spread charged on oracle-frozen close/reduce notional, in basis points.
@@ -79,9 +84,8 @@ interface ICfdEngineCore is ICfdEngineTypes {
         uint64 publishTime
     ) external;
 
-    /// @notice Reserves the fixed close-order execution bounty against a proportional slice of an open position.
-    /// @dev Callable only by the configured router. Realizes carry first, reserves free settlement then position
-    ///      margin, and rejects reservations that would leave the proportional position slice under-backed.
+    /// @notice Reserves the fixed close-order execution bounty exclusively from free settlement.
+    /// @dev Callable only by the configured router. Realizes carry first; PnL pledge and every reserve stay protected.
     /// @param account Account committing the close order
     /// @param sizeDelta Position size the close order intends to close
     /// @param amountUsdc Execution bounty amount to reserve
@@ -169,8 +173,8 @@ interface ICfdEngineCore is ICfdEngineTypes {
     function checkpointCarryIndexes() external;
 
     /// @notice Returns whether recurring FAD, an override day, or the configured pre-override runway is active.
-    /// @dev The recurring window is Friday 19:00 UTC through Sunday 21:59:59 UTC. This window starts before and ends
-    ///      after the narrower frozen-oracle interval.
+    /// @dev The recurring window starts 30 minutes before Friday's 17:00 New York FX close and ends 15 minutes after
+    ///      Sunday's 17:00 New York FX open. This window surrounds the narrower frozen-oracle interval.
     /// @return Whether FAD maintenance and risk-increase restrictions are active
     function isFadWindow() external view returns (bool);
 
@@ -191,7 +195,8 @@ interface ICfdEngineCore is ICfdEngineTypes {
     ) external view returns (bool);
 
     /// @notice Returns whether the recurring frozen interval or a configured all-day override is active.
-    /// @dev The recurring interval is Friday 22:00 UTC through Sunday 20:59:59 UTC.
+    /// @dev The recurring interval follows Pyth FX hours from Friday 17:00 New York time through Sunday 16:59:59 New
+    ///      York time, including US daylight-saving transitions.
     /// @return Whether frozen-oracle policy is active
     function isOracleFrozen() external view returns (bool);
 
@@ -223,6 +228,12 @@ interface ICfdEngineCore is ICfdEngineTypes {
     /// @param account Account whose stored carry obligation should be inspected
     /// @return Unsettled carry in six-decimal USDC units
     function unsettledCarryUsdc(
+        address account
+    ) external view returns (uint256);
+
+    /// @notice Returns the exact remaining entry basis used by lot-based PnL settlement.
+    /// @dev The average entry price in `positions` is display-only and may omit division dust.
+    function positionEntryCostUsdcAtoms(
         address account
     ) external view returns (uint256);
 

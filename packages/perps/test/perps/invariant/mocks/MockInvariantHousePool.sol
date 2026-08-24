@@ -42,6 +42,16 @@ contract MockInvariantHousePool is IHousePool {
         return usdc.balanceOf(address(this));
     }
 
+    function currentLpEpoch() external view returns (uint256) {
+        return block.timestamp / 1 hours;
+    }
+
+    function lpEpochStart(
+        uint256 epochId
+    ) external pure returns (uint256) {
+        return epochId * 1 hours;
+    }
+
     function payOut(
         address recipient,
         uint256 amount
@@ -106,27 +116,48 @@ contract MockInvariantHousePool is IHousePool {
         return 0;
     }
 
+    function maxSeniorExposureUsdc() external pure returns (uint256) {
+        return type(uint256).max;
+    }
+
+    function maxSeniorShareBps() external pure returns (uint256) {
+        return 10_000;
+    }
+
+    function getSeniorDepositCapacity() external pure returns (uint256) {
+        return type(uint256).max;
+    }
+
+    function reservedSeniorDepositAssetsUsdc() external pure returns (uint256) {
+        return 0;
+    }
+
+    function areSeniorDepositReservationsWithinLimits() external pure returns (bool) {
+        return true;
+    }
+
     function unassignedAssets() external pure returns (uint256) {
         return 0;
     }
 
-    function depositSenior(
+    function terminalDeficitUsdc() external pure returns (uint256) {
+        return 0;
+    }
+
+    function reserveSeniorDeposit(
         uint256
     ) external pure {}
 
-    function withdrawSenior(
-        uint256,
-        address
-    ) external pure {}
-
-    function depositJunior(
+    function releaseSeniorDepositReservation(
         uint256
     ) external pure {}
 
-    function withdrawJunior(
+    function settleLpEpoch(
         uint256,
-        address
-    ) external pure {}
+        uint256
+    ) external pure returns (IHousePool.LpEpochSettlementResult memory result) {
+        return result;
+    }
 
     function assignUnassignedAssets(
         bool,
@@ -179,12 +210,6 @@ contract MockInvariantHousePool is IHousePool {
     }
 
     function canAcceptTrancheDeposits(
-        bool
-    ) external pure returns (bool) {
-        return true;
-    }
-
-    function canAcceptInstantTrancheDeposits(
         bool
     ) external pure returns (bool) {
         return true;

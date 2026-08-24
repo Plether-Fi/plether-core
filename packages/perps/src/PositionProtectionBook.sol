@@ -4,6 +4,8 @@ pragma solidity 0.8.35;
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {ICfdEnginePlanner} from "@plether/perps/interfaces/ICfdEnginePlanner.sol";
+import {ICfdEngineRiskParamsView} from "@plether/perps/interfaces/ICfdEngineRiskParamsView.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
@@ -13,12 +15,11 @@ import {IPositionProtectionActions} from "@plether/perps/interfaces/IPositionPro
 import {IPositionProtectionBook} from "@plether/perps/interfaces/IPositionProtectionBook.sol";
 import {IPositionProtectionViews} from "@plether/perps/interfaces/IPositionProtectionViews.sol";
 import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtectionTypes.sol";
-import {MarginClearinghouseAccountingLib} from "@plether/perps/libraries/MarginClearinghouseAccountingLib.sol";
 import {OracleFreshnessPolicyLib} from "@plether/perps/libraries/OracleFreshnessPolicyLib.sol";
-import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
+import {OrderLiquidationBatchLogic} from "@plether/perps/router/OrderLiquidationBatchLogic.sol";
 
 /// @notice Narrow engine view surface used by the passive position-protection state book.
-interface IPositionProtectionEngine {
+interface IPositionProtectionEngine is ICfdEngineRiskParamsView {
 
     function clearinghouse() external view returns (address);
 
@@ -28,6 +29,8 @@ interface IPositionProtectionEngine {
 
     function CAP_PRICE() external view returns (uint256);
 
+    function planner() external view returns (address);
+
     function isFadWindow() external view returns (bool);
 
     function degradedMode() external view returns (bool);
@@ -36,19 +39,13 @@ interface IPositionProtectionEngine {
         address account
     ) external view returns (uint256);
 
-    function riskParams()
-        external
-        view
-        returns (
-            uint256 vpiFactor,
-            uint256 maxSkewRatio,
-            uint256 maintMarginBps,
-            uint256 initMarginBps,
-            uint256 fadMarginBps,
-            uint256 baseCarryBps,
-            uint256 minBountyUsdc,
-            uint256 bountyBps
-        );
+    function traderClaimBalanceUsdc(
+        address account
+    ) external view returns (uint256);
+
+    function positionEntryCostUsdcAtoms(
+        address account
+    ) external view returns (uint256);
 
     function positions(
         address account
@@ -109,7 +106,12 @@ interface IPositionProtectionAdmin {
 ///      entrypoint. This contract never intentionally custodies tokens or mutates an order queue directly. The immutable
 ///      router remains responsible for queue mutation and keeper credits. All bounty fields are current unpaid amounts
 ///      and are zeroed exactly when transferred back into router-owned accounting.
-contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, ReentrancyGuardTransient {
+contract PositionProtectionBook is
+    IPositionProtectionBook,
+    IOrderRouterErrors,
+    ReentrancyGuardTransient,
+    OrderLiquidationBatchLogic
+{
 
     bytes4 private constant UPDATE_MARK_PRICE_SELECTOR = bytes4(keccak256("updateMarkPrice(bytes[])"));
 
@@ -685,29 +687,46 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         }
     }
 
+    /// @dev Runs after the protection reserve lock, whose clearinghouse callback checkpoints and realizes carry. Any
+    ///      remaining `unsettledCarryUsdc` is therefore independently uncovered. Price risk is delegated to the same
+    ///      exact-basis planner predicate as canonical account actions and excludes free settlement and action reserves.
     function _validatePostLockRisk(
         address account,
         CfdTypes.Position memory position,
         uint256 markPrice
     ) private view {
-        (,, uint256 maintMarginBps, uint256 initMarginBps, uint256 fadMarginBps,,,) = ENGINE.riskParams();
-        uint256 activeMarginBps = ENGINE.isFadWindow() ? fadMarginBps : maintMarginBps;
-        uint256 requiredMarginBps = initMarginBps > activeMarginBps ? initMarginBps : activeMarginBps;
+        CfdTypes.RiskParams memory riskParams = ENGINE.riskParams();
+        uint256 activeMarginBps = ENGINE.isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps;
+        uint256 requiredMarginBps =
+            riskParams.initMarginBps > activeMarginBps ? riskParams.initMarginBps : activeMarginBps;
 
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets =
-            IMarginClearinghouse(ENGINE.clearinghouse()).getAccountUsdcBuckets(account);
-        uint256 reachableCollateralUsdc = MarginClearinghouseAccountingLib.getGenericReachableUsdc(buckets);
-        PositionRiskAccountingLib.PositionRiskState memory riskState =
-            PositionRiskAccountingLib.buildPositionRiskStateWithCarry(
-                position,
-                markPrice,
-                ENGINE.CAP_PRICE(),
-                ENGINE.unsettledCarryUsdc(account),
-                reachableCollateralUsdc,
-                requiredMarginBps
-            );
-        if (riskState.liquidatable) {
+        IMarginClearinghouse clearinghouse = _clearinghouse();
+        if (
+            ENGINE.unsettledCarryUsdc(account) != 0
+                || clearinghouse.vpiRebateReserveUsdc(account) < _negativeVpiReserveTarget(position.vpiAccrued)
+        ) {
             revert OrderRouter__InsufficientFreeEquity();
+        }
+
+        uint256 priceCollateralUsdc = position.margin + ENGINE.traderClaimBalanceUsdc(account);
+        if (ICfdEnginePlanner(ENGINE.planner())
+                .isExactPriceRiskLiquidatable(
+                    position,
+                    ENGINE.positionEntryCostUsdcAtoms(account),
+                    markPrice,
+                    ENGINE.CAP_PRICE(),
+                    priceCollateralUsdc,
+                    requiredMarginBps
+                )) {
+            revert OrderRouter__InsufficientFreeEquity();
+        }
+    }
+
+    function _negativeVpiReserveTarget(
+        int256 vpiAccruedUsdc
+    ) private pure returns (uint256 targetUsdc) {
+        if (vpiAccruedUsdc < 0) {
+            targetUsdc = uint256(-(vpiAccruedUsdc + 1)) + 1;
         }
     }
 

@@ -12,7 +12,7 @@ interface IPerpsTraderActions {
     ///      and HousePool risk gates and may fail planner preflight. Closes must match and not exceed the position after
     ///      replaying the account's earlier queued orders; they require zero `marginDelta`.
     /// @param side Direction to open/increase, or direction of the queued position being reduced
-    /// @param sizeDelta Nonzero position-size change (18 decimals)
+    /// @param sizeDelta Nonzero position-size change (18 decimals), divisible by the canonical 100-token lot
     /// @param marginDelta Margin reserved for an open/increase in USDC; must be zero for a close
     /// @param targetPrice Direction-aware execution limit (8 decimals), or zero for no slippage limit
     /// @param isClose True for a strict position reduction and false for an open/increase

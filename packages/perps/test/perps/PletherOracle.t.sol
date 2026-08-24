@@ -53,6 +53,10 @@ contract PletherOracleEngineMock {
         fadDayOverrides[dayNumber] = active;
     }
 
+    function isOracleFrozen() external view returns (bool) {
+        return fadDayOverrides[block.timestamp / 86_400];
+    }
+
     function setPosition(
         uint256 size,
         CfdTypes.Side side
@@ -212,23 +216,93 @@ contract PletherOracleTest is Test {
         oracle.updatePrice(address(this), _pythUpdateData(), IPletherOracle.PriceMode.OrderExecution);
     }
 
-    function test_UpdatePrice_RevertsOnConfidenceTooWide() public {
+    function test_UpdatePrice_AllowsWideLowWeightComponentWhenBasketConfidenceWithinLimit() public {
         vm.warp(1000);
-        pyth.setPrice(FEED_A, int64(100_000_000), uint64(2_000_000), int32(-8), 990);
-        pyth.setPrice(FEED_B, int64(100_000_000), uint64(2_000_000), int32(-8), 990);
-        oracle.applyConfig(
-            IPletherOracle.OracleConfig({
-                orderExecutionStalenessLimit: 60,
-                liquidationStalenessLimit: 15,
-                pythMaxConfidenceRatioBps: 100,
-                orderSettlementWindow: oracle.orderSettlementWindow(),
-                maxComponentPublishTimeDivergence: oracle.maxComponentPublishTimeDivergence(),
-                adverseConfidenceMultiplierBps: oracle.adverseConfidenceMultiplierBps()
-            })
-        );
+        weights[0] = 0.05e18;
+        weights[1] = 0.95e18;
+        oracle = _deployOracle(address(pyth));
+        pyth.setPrice(FEED_A, int64(100_000_000), uint64(1_000_000), int32(-8), 990);
+        pyth.setPrice(FEED_B, int64(100_000_000), uint64(0), int32(-8), 990);
 
-        vm.expectPartialRevert(IPletherOracle.PletherOracle__ConfidenceTooWide.selector);
-        oracle.updatePrice(address(this), _pythUpdateData(), IPletherOracle.PriceMode.OrderExecution);
+        IPletherOracle.PriceSnapshot memory snapshot =
+            oracle.updatePrice(address(this), _pythUpdateData(), IPletherOracle.PriceMode.MarkRefresh);
+
+        assertEq(snapshot.price, 100_000_000, "wide low-weight feed should not block a sound basket");
+    }
+
+    function test_UpdatePrice_AllowsBasketConfidenceExactlyAtThreshold() public {
+        vm.warp(1000);
+        _setLivePricesWithConfidence(100_000_000, 100_000, 990);
+
+        IPletherOracle.PriceSnapshot memory snapshot =
+            oracle.updatePrice(address(this), _pythUpdateData(), IPletherOracle.PriceMode.MarkRefresh);
+
+        assertEq(snapshot.price, 100_000_000, "equality at the basket limit should pass");
+    }
+
+    function test_UpdatePrice_RevertsOneUnitAboveBasketConfidenceLimitInEveryMode() public {
+        vm.warp(1000);
+        pyth.setPrice(FEED_A, int64(100_000_000), uint64(100_002), int32(-8), 990);
+        pyth.setPrice(FEED_B, int64(100_000_000), uint64(100_000), int32(-8), 990);
+
+        for (uint8 i = 0; i <= uint8(IPletherOracle.PriceMode.PoolReconcile); i++) {
+            IPletherOracle.PriceMode mode = IPletherOracle.PriceMode(i);
+            vm.expectRevert(
+                abi.encodeWithSelector(
+                    IPletherOracle.PletherOracle__BasketConfidenceTooWide.selector,
+                    mode,
+                    uint256(100_001),
+                    uint256(100_000_000),
+                    uint256(10)
+                )
+            );
+            oracle.updatePrice(address(this), _pythUpdateData(), mode);
+        }
+    }
+
+    function test_InvertedAndNonInvertedFeedsUseWeightedBasketConfidence() public {
+        vm.warp(1000);
+        inversions[1] = true;
+        basePrices[1] = 50_000_000;
+        oracle = _deployOracle(address(pyth));
+        engine.setPosition(1e18, CfdTypes.Side.BULL);
+        pyth.setPrice(FEED_A, int64(100_000_000), uint64(100_000), int32(-8), 990);
+        pyth.setPrice(FEED_B, int64(200_000_000), uint64(200_000), int32(-8), 990);
+
+        IPletherOracle.PriceSnapshot memory snapshot =
+            oracle.updateLiquidationPrice(address(this), _pythUpdateData(), address(0xCAFE));
+
+        assertEq(snapshot.markPrice, 100_000_000, "normalized basket price");
+        assertEq(snapshot.price, 100_020_000, "aggregate confidence should be 100,000 before the 20% shift");
+    }
+
+    function testFuzz_BasketAcceptsWhenBothComponentsAreWithinLimit(
+        uint64 confidenceA,
+        uint64 confidenceB
+    ) public {
+        vm.warp(1000);
+        confidenceA = uint64(bound(uint256(confidenceA), 0, 100_000));
+        confidenceB = uint64(bound(uint256(confidenceB), 0, 100_000));
+        pyth.setPrice(FEED_A, int64(100_000_000), confidenceA, int32(-8), 990);
+        pyth.setPrice(FEED_B, int64(100_000_000), confidenceB, int32(-8), 990);
+
+        IPletherOracle.PriceSnapshot memory snapshot =
+            oracle.updatePrice(address(this), _pythUpdateData(), IPletherOracle.PriceMode.MarkRefresh);
+        assertEq(snapshot.price, 100_000_000, "accepted basket price");
+    }
+
+    function testFuzz_BasketRejectsWhenBothComponentsExceedLimit(
+        uint64 confidenceA,
+        uint64 confidenceB
+    ) public {
+        vm.warp(1000);
+        confidenceA = uint64(bound(uint256(confidenceA), 100_002, 1_000_000));
+        confidenceB = uint64(bound(uint256(confidenceB), 100_002, 1_000_000));
+        pyth.setPrice(FEED_A, int64(100_000_000), confidenceA, int32(-8), 990);
+        pyth.setPrice(FEED_B, int64(100_000_000), confidenceB, int32(-8), 990);
+
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__BasketConfidenceTooWide.selector);
+        oracle.updatePrice(address(this), _pythUpdateData(), IPletherOracle.PriceMode.MarkRefresh);
     }
 
     function test_LiquidationMode_UsesStricterStalenessThanOrderExecution() public {
@@ -312,12 +386,20 @@ contract PletherOracleTest is Test {
         assertEq(snapshot.price, 100_000_000, "oracle-frozen close should waive the adverse confidence shift");
     }
 
-    function test_OracleFrozenClose_StillRejectsConfidenceTooWide() public {
+    function test_OracleFrozenClose_StillRejectsBasketConfidenceTooWide() public {
         vm.warp(1000);
         engine.setFadDayOverride(block.timestamp / 86_400, true);
-        _setLivePricesWithConfidence(100_000_000, 100_001, 990);
+        _setLivePricesWithConfidence(100_000_000, 100_002, 990);
 
-        vm.expectPartialRevert(IPletherOracle.PletherOracle__ConfidenceTooWide.selector);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IPletherOracle.PletherOracle__BasketConfidenceTooWide.selector,
+                IPletherOracle.PriceMode.OrderExecution,
+                uint256(100_002),
+                uint256(100_000_000),
+                uint256(10)
+            )
+        );
         oracle.updateOrderExecutionPrice(address(this), _pythUpdateData(), _orderRequest(CfdTypes.Side.BULL, true));
     }
 
@@ -375,7 +457,7 @@ contract PletherOracleTest is Test {
         IPletherOracle.OracleConfig memory config = IPletherOracle.OracleConfig({
             orderExecutionStalenessLimit: 120,
             liquidationStalenessLimit: 30,
-            pythMaxConfidenceRatioBps: 500,
+            basketMaxConfidenceRatioBps: 500,
             orderSettlementWindow: oracle.orderSettlementWindow(),
             maxComponentPublishTimeDivergence: oracle.maxComponentPublishTimeDivergence(),
             adverseConfidenceMultiplierBps: oracle.adverseConfidenceMultiplierBps()
@@ -390,7 +472,7 @@ contract PletherOracleTest is Test {
 
         assertEq(oracle.orderExecutionStalenessLimit(), 120, "router can apply config");
         assertEq(oracle.liquidationStalenessLimit(), 30, "liquidation limit");
-        assertEq(oracle.pythMaxConfidenceRatioBps(), 500, "confidence bps");
+        assertEq(oracle.basketMaxConfidenceRatioBps(), 500, "confidence bps");
     }
 
     function test_ApplyConfig_DeployerCannotBypassRouter() public {
@@ -400,7 +482,7 @@ contract PletherOracleTest is Test {
         IPletherOracle.OracleConfig memory config = IPletherOracle.OracleConfig({
             orderExecutionStalenessLimit: 120,
             liquidationStalenessLimit: 30,
-            pythMaxConfidenceRatioBps: 500,
+            basketMaxConfidenceRatioBps: 500,
             orderSettlementWindow: oracle.orderSettlementWindow(),
             maxComponentPublishTimeDivergence: oracle.maxComponentPublishTimeDivergence(),
             adverseConfidenceMultiplierBps: oracle.adverseConfidenceMultiplierBps()

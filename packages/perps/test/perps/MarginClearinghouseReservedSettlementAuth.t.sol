@@ -3,6 +3,7 @@ pragma solidity 0.8.35;
 
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
+import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {Test} from "forge-std/Test.sol";
 
@@ -39,6 +40,10 @@ contract ReservedSettlementAuthRouterMock {
     ) {
         positionProtectionBook = positionProtectionBook_;
     }
+
+    function getAccountReservations(
+        address
+    ) external pure returns (IOrderRouterAccounting.AccountReservationView memory reservation) {}
 
 }
 

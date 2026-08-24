@@ -324,7 +324,7 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
         IOrderRouterAdminHost.RouterConfig memory config
     ) private pure {
         if (
-            config.pythMaxConfidenceRatioBps > 10_000
+            config.basketMaxConfidenceRatioBps > 10_000
                 || config.adverseConfidenceMultiplierBps > MAX_CONFIDENCE_MULTIPLIER_BPS
         ) {
             revert OrderRouterAdmin__InvalidConfidenceRatio();

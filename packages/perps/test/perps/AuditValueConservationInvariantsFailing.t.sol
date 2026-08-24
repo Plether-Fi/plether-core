@@ -21,7 +21,9 @@ contract AuditValueConservationInvariant_FullCloseBounty is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -74,13 +76,15 @@ contract AuditValueConservationInvariant_MtmDepositPricing is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
     function test_Invariant_DeltaNeutralZeroPnlCannotDiscountNewJuniorDeposits() public {
         uint256 depositAssets = 100_000e6;
-        uint256 baselineShares = juniorVault.previewDeposit(depositAssets);
+        uint256 baselineShares = juniorVault.estimateDepositShares(depositAssets);
 
         _fundTrader(bullTrader, 25_000e6);
         _fundTrader(bearTrader, 25_000e6);
@@ -89,7 +93,7 @@ contract AuditValueConservationInvariant_MtmDepositPricing is BasePerpTest {
 
         assertEq(_unrealizedTraderPnl(), 0, "Equal and opposite positions opened at the mark have zero current PnL");
 
-        uint256 sharesAfterNeutralOpen = juniorVault.previewDeposit(depositAssets);
+        uint256 sharesAfterNeutralOpen = juniorVault.estimateDepositShares(depositAssets);
         assertLe(
             sharesAfterNeutralOpen,
             baselineShares,
@@ -112,7 +116,9 @@ contract AuditValueConservationInvariant_CarryTiming is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 

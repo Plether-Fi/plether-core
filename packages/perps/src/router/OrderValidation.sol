@@ -38,7 +38,7 @@ abstract contract OrderValidation is OrderBountyAccounting {
         }
     }
 
-    /// @notice Requires nonzero size and zero margin on a strict close.
+    /// @notice Requires a nonzero exact-lot size and zero margin on a strict close.
     /// @param sizeDelta Requested position-size change (18 decimals).
     /// @param marginDelta Requested open margin (6-decimal USDC).
     /// @param isClose Whether the order is a strict close.

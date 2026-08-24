@@ -5,6 +5,7 @@ import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {PerpsPublicLens} from "@plether/perps/PerpsPublicLens.sol";
 import {AccountLensViewTypes} from "@plether/perps/interfaces/AccountLensViewTypes.sol";
+import {IAsyncTrancheVault} from "@plether/perps/interfaces/IAsyncTrancheVault.sol";
 import {IPositionProtectionViews} from "@plether/perps/interfaces/IPositionProtectionViews.sol";
 import {PerpsViewTypes} from "@plether/perps/interfaces/PerpsViewTypes.sol";
 import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtectionTypes.sol";
@@ -48,6 +49,7 @@ contract PositionProtectionViewsStub is IPositionProtectionViews {
 contract PerpsPublicLensTest is BasePerpTest {
 
     uint64 internal constant SATURDAY_NOON = 1_710_021_600;
+    address internal constant LENS_LP = address(0x1E45);
 
     function test_GetTraderAccount_UsesNetEquityAndEngineAwareWithdrawable() public {
         address trader = address(0xA11CE);
@@ -65,7 +67,11 @@ contract PerpsPublicLensTest is BasePerpTest {
         PerpsViewTypes.TraderAccountView memory viewData = publicLens.getTraderAccount(account);
 
         assertGt(clearinghouse.getFreeBuyingPowerUsdc(account), 0, "setup should leave free buying power");
-        assertEq(viewData.equityUsdc, uint256(snapshot.netEquityUsdc), "public equity should use net economic equity");
+        assertEq(
+            viewData.equityUsdc,
+            snapshot.netEquityUsdc > 0 ? uint256(snapshot.netEquityUsdc) : 0,
+            "public equity should use floored net economic equity"
+        );
         assertEq(
             viewData.withdrawableUsdc,
             engineAccountLens.getWithdrawableUsdc(account),
@@ -88,6 +94,11 @@ contract PerpsPublicLensTest is BasePerpTest {
         PerpsViewTypes.TraderAccountView memory viewData = publicLens.getTraderAccount(account);
 
         assertGt(withdrawableUsdc, 0, "setup should produce a positive withdrawable amount");
+        assertEq(
+            withdrawableUsdc,
+            clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc,
+            "A healthy isolated position should expose all free settlement"
+        );
         assertEq(
             viewData.withdrawableUsdc, withdrawableUsdc, "lens should delegate withdrawability to the account lens"
         );
@@ -222,8 +233,6 @@ contract PerpsPublicLensTest is BasePerpTest {
         expected.size = 10_000e18;
         expected.takeProfitTriggerPrice = 90_000_000;
         expected.stopLossTriggerPrice = 110_000_000;
-        expected.triggerBountyUsdc = 200_000;
-        expected.executionBountyUsdc = 200_000;
         expected.armedAt = 1_720_100_000;
         expected.armedBlock = 12_678;
         expected.triggerMarkPrice = 90_000_000;
@@ -258,7 +267,9 @@ contract PerpsPublicLensTest is BasePerpTest {
             "Carry-aware lens equity should be below raw settlement equity"
         );
         assertEq(
-            viewData.equityUsdc, uint256(snapshot.netEquityUsdc), "Public equity should inherit carry-aware net equity"
+            viewData.equityUsdc,
+            snapshot.netEquityUsdc > 0 ? uint256(snapshot.netEquityUsdc) : 0,
+            "Public equity should inherit floored carry-aware net equity"
         );
     }
 
@@ -289,7 +300,7 @@ contract PerpsPublicLensTest is BasePerpTest {
         address account = trader;
 
         _fundTrader(trader, 5000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 1600e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 1700e6, 1e8);
 
         uint256 withdrawableBeforeCarry = engineAccountLens.getWithdrawableUsdc(account);
         assertGt(withdrawableBeforeCarry, 0, "Setup should start with positive withdrawable headroom");
@@ -318,8 +329,8 @@ contract PerpsPublicLensTest is BasePerpTest {
         address trader = address(0xB0B2);
         address account = trader;
 
-        _fundTrader(trader, 820e6);
-        _open(account, CfdTypes.Side.BULL, 50_000e18, 800e6, 1e8);
+        _fundTrader(trader, 1000e6);
+        _open(account, CfdTypes.Side.BULL, 50_000e18, 900e6, 1e8);
 
         assertFalse(publicLens.isLiquidatable(account), "Setup should start above maintenance before carry accrues");
 
@@ -367,9 +378,9 @@ contract PerpsPublicLensTest is BasePerpTest {
         assertEq(viewData.frozenLpFeeBps, 25, "Senior tranche view should expose the active frozen LP fee");
     }
 
-    function test_GetJuniorTranche_DoesNotChargeFrozenFeeDuringFadOnlyHour() public {
-        uint256 sunday2130 = 1_710_106_200;
-        vm.warp(sunday2130);
+    function test_GetJuniorTranche_DoesNotChargeFrozenFeeDuringFadOnlyShoulder() public {
+        uint256 sunday2110 = 1_710_105_000;
+        vm.warp(sunday2110);
 
         assertTrue(engine.isFadWindow(), "setup should remain inside FAD");
         assertFalse(engine.isOracleFrozen(), "setup should be after the oracle-frozen window");
@@ -378,6 +389,176 @@ contract PerpsPublicLensTest is BasePerpTest {
 
         assertFalse(viewData.oracleFrozen, "Junior tranche view should report the live oracle state");
         assertEq(viewData.frozenLpFeeBps, 0, "FAD alone should not activate the frozen LP fee");
+    }
+
+    function test_GetTrancheQueuesAndLpRequestState_TracksPendingAndClaimableWork() public {
+        uint256 depositAssets = 25_000e6;
+        (uint256 requestId, uint256 redeemShares) = _createMatchedJuniorRequests(depositAssets);
+
+        PerpsViewTypes.TrancheQueueView memory pendingQueue = publicLens.getTrancheQueues(false);
+        assertEq(pendingQueue.vault, address(juniorVault));
+        assertEq(pendingQueue.currentEpoch, pool.currentLpEpoch());
+        assertEq(pendingQueue.cutoffEpoch, pendingQueue.currentEpoch);
+        (uint256 nextRequestEpoch, uint256 nextRequestCutoffTime) = juniorVault.getRequestEpochWindow();
+        assertEq(pendingQueue.nextRequestEpoch, nextRequestEpoch, "lens must use the vault's request epoch");
+        assertEq(
+            pendingQueue.nextRequestCutoffTime, nextRequestCutoffTime, "lens must use the vault's next request cutoff"
+        );
+        assertGt(pendingQueue.nextRequestEpoch, pendingQueue.currentEpoch, "request epoch must remain future");
+        assertGt(pendingQueue.nextRequestCutoffTime, block.timestamp, "request cutoff must remain future");
+
+        PerpsViewTypes.TrancheQueueView memory seniorQueue = publicLens.getTrancheQueues(true);
+        assertEq(seniorQueue.nextRequestEpoch, pendingQueue.nextRequestEpoch, "tranche request epochs must match");
+        assertEq(
+            seniorQueue.nextRequestCutoffTime, pendingQueue.nextRequestCutoffTime, "tranche request cutoffs must match"
+        );
+        assertEq(pendingQueue.depositHeadEpoch, 0, "future deposits must not appear as matured work");
+        assertEq(pendingQueue.depositHeadAssets, 0);
+        assertEq(pendingQueue.redeemHeadEpoch, 0, "future redemptions must not appear as matured work");
+        assertEq(pendingQueue.redeemHeadShares, 0);
+        assertFalse(pendingQueue.depositBacklog);
+        assertFalse(pendingQueue.redeemBacklog);
+        assertTrue(pendingQueue.settlementLive);
+        assertFalse(pendingQueue.poolPaused);
+
+        PerpsViewTypes.LpRequestStateView memory pendingDeposit =
+            publicLens.getLpRequestState(false, requestId, LENS_LP);
+        assertEq(pendingDeposit.vault, address(juniorVault));
+        assertEq(pendingDeposit.requestId, requestId);
+        assertEq(pendingDeposit.controller, LENS_LP);
+        assertEq(pendingDeposit.pendingDepositAssets, depositAssets);
+        assertEq(
+            pendingDeposit.pendingDepositSharesEstimate,
+            juniorVault.estimateDepositShares(depositAssets),
+            "lens must use the vault's live deposit estimate"
+        );
+        assertEq(pendingDeposit.claimableDepositAssets, 0);
+        assertEq(pendingDeposit.claimableDepositShares, 0);
+        assertEq(pendingDeposit.refundableDepositAssets, 0);
+
+        PerpsViewTypes.LpRequestStateView memory pendingRedeem =
+            publicLens.getLpRequestState(false, requestId, address(this));
+        assertEq(pendingRedeem.pendingRedeemShares, redeemShares);
+        assertEq(
+            pendingRedeem.pendingRedeemAssetsEstimate,
+            juniorVault.estimateRedeemAssets(redeemShares),
+            "lens must use the vault's live redeem estimate"
+        );
+        assertEq(pendingRedeem.claimableRedeemShares, 0);
+        assertEq(pendingRedeem.claimableRedeemAssets, 0);
+        assertEq(pendingRedeem.refundableRedeemShares, 0);
+        assertFalse(pendingRedeem.redeemRefundPending);
+
+        _warpToLpEpoch(requestId);
+        _refreshPoolMark();
+
+        PerpsViewTypes.TrancheQueueView memory maturedQueue = publicLens.getTrancheQueues(false);
+        assertEq(maturedQueue.depositHeadEpoch, requestId);
+        assertEq(maturedQueue.depositHeadAssets, depositAssets);
+        assertEq(maturedQueue.redeemHeadEpoch, requestId);
+        assertEq(maturedQueue.redeemHeadShares, redeemShares);
+        assertTrue(maturedQueue.depositBacklog);
+        assertTrue(maturedQueue.redeemBacklog);
+
+        _settleLpEpochForTest();
+
+        PerpsViewTypes.TrancheQueueView memory settledQueue = publicLens.getTrancheQueues(false);
+        assertEq(settledQueue.depositHeadEpoch, 0);
+        assertEq(settledQueue.depositHeadAssets, 0);
+        assertEq(settledQueue.redeemHeadEpoch, 0);
+        assertEq(settledQueue.redeemHeadShares, 0);
+        assertFalse(settledQueue.depositBacklog);
+        assertFalse(settledQueue.redeemBacklog);
+
+        PerpsViewTypes.LpRequestStateView memory claimableDeposit =
+            publicLens.getLpRequestState(false, requestId, LENS_LP);
+        assertEq(claimableDeposit.pendingDepositAssets, 0);
+        assertEq(claimableDeposit.pendingDepositSharesEstimate, 0);
+        assertEq(claimableDeposit.claimableDepositAssets, depositAssets);
+        assertGt(claimableDeposit.claimableDepositShares, 0);
+        assertEq(claimableDeposit.refundableDepositAssets, 0);
+
+        PerpsViewTypes.LpRequestStateView memory claimableRedeem =
+            publicLens.getLpRequestState(false, requestId, address(this));
+        assertEq(claimableRedeem.pendingRedeemShares, 0);
+        assertEq(claimableRedeem.pendingRedeemAssetsEstimate, 0);
+        assertEq(claimableRedeem.claimableRedeemShares, redeemShares);
+        assertGt(claimableRedeem.claimableRedeemAssets, 0);
+        assertEq(claimableRedeem.refundableRedeemShares, 0);
+        assertFalse(claimableRedeem.redeemRefundPending);
+    }
+
+    function test_GetTrancheQueuesAndLpRequestState_TracksRefundableWork() public {
+        uint256 depositAssets = 25_000e6;
+        (uint256 requestId, uint256 redeemShares) = _createMatchedJuniorRequests(depositAssets);
+        _warpToLpEpoch(requestId);
+
+        vm.prank(address(pool));
+        assertEq(juniorVault.finalizeDepositEpochFromPool(requestId, 0), depositAssets);
+        vm.prank(address(pool));
+        assertEq(juniorVault.refundRedeemEpochRemainder(requestId, redeemShares), redeemShares);
+
+        PerpsViewTypes.TrancheQueueView memory queue = publicLens.getTrancheQueues(false);
+        assertEq(queue.depositHeadEpoch, 0, "rejected deposits must leave the settlement queue");
+        assertEq(queue.depositHeadAssets, 0);
+        assertEq(queue.redeemHeadEpoch, 0, "refundable redemptions must leave the settlement queue");
+        assertEq(queue.redeemHeadShares, 0);
+        assertFalse(queue.depositBacklog);
+        assertFalse(queue.redeemBacklog);
+
+        PerpsViewTypes.LpRequestStateView memory refundableDeposit =
+            publicLens.getLpRequestState(false, requestId, LENS_LP);
+        assertEq(refundableDeposit.pendingDepositAssets, 0);
+        assertEq(refundableDeposit.pendingDepositSharesEstimate, 0);
+        assertEq(refundableDeposit.claimableDepositAssets, 0);
+        assertEq(refundableDeposit.claimableDepositShares, 0);
+        assertEq(refundableDeposit.refundableDepositAssets, depositAssets);
+
+        PerpsViewTypes.LpRequestStateView memory refundableRedeem =
+            publicLens.getLpRequestState(false, requestId, address(this));
+        assertEq(refundableRedeem.pendingRedeemShares, 0);
+        assertEq(refundableRedeem.pendingRedeemAssetsEstimate, 0);
+        assertEq(refundableRedeem.claimableRedeemShares, 0);
+        assertEq(refundableRedeem.claimableRedeemAssets, 0);
+        assertEq(refundableRedeem.refundableRedeemShares, redeemShares);
+        assertTrue(refundableRedeem.redeemRefundPending);
+    }
+
+    function _createMatchedJuniorRequests(
+        uint256 depositAssets
+    ) internal returns (uint256 requestId, uint256 redeemShares) {
+        uint256 cooldownEnd = juniorVault.lastDepositTime(address(this)) + juniorVault.DEPOSIT_COOLDOWN();
+        if (block.timestamp < cooldownEnd) {
+            vm.warp(cooldownEnd);
+        }
+
+        usdc.mint(LENS_LP, depositAssets);
+        vm.startPrank(LENS_LP);
+        usdc.approve(address(juniorVault), depositAssets);
+        requestId = IAsyncTrancheVault(address(juniorVault)).requestDeposit(depositAssets, LENS_LP, LENS_LP);
+        vm.stopPrank();
+
+        redeemShares = juniorVault.balanceOf(address(this)) / 10;
+        assertGt(redeemShares, 0, "base fixture must provide redeemable Junior shares");
+        vm.prank(address(this));
+        uint256 redeemRequestId =
+            IAsyncTrancheVault(address(juniorVault)).requestRedeem(redeemShares, address(this), address(this));
+        assertEq(redeemRequestId, requestId, "deposit and redeem must use the same request window");
+    }
+
+    function _warpToLpEpoch(
+        uint256 epochId
+    ) internal {
+        uint256 epochStart = pool.lpEpochStart(epochId);
+        if (block.timestamp < epochStart) {
+            vm.warp(epochStart);
+        }
+    }
+
+    function _refreshPoolMark() internal {
+        uint256 markPrice = engine.lastMarkPrice();
+        vm.prank(address(router));
+        engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
     }
 
 }

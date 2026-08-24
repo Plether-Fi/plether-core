@@ -23,7 +23,9 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
-            bountyBps: 9
+            bountyBps: 9,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -107,10 +109,18 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
 
             ICfdEngineTypes.LiquidationPreview memory liquidationPreview =
                 engineLens.previewLiquidation(account, oraclePrice);
+            AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
+                engineAccountLens.getAccountLedgerSnapshot(account);
+            uint256 priceRiskCollateralUsdc = snapshot.activePositionMarginUsdc + snapshot.traderClaimBalanceUsdc;
             assertEq(
                 liquidationPreview.reachableCollateralUsdc,
-                _terminalReachableUsdc(account),
-                "Liquidation preview reachable collateral mismatch"
+                priceRiskCollateralUsdc + clearinghouse.vpiRebateReserveUsdc(account),
+                "Liquidation preview must use PnL pledge, same-account claim, and the dedicated VPI reserve"
+            );
+            assertLe(
+                snapshot.terminalPriceCollectibleCapUsdc,
+                priceRiskCollateralUsdc,
+                "Endpoint-clipped price collectible cap must not exceed full P+C risk collateral"
             );
         }
     }
@@ -128,15 +138,16 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
 
             ICfdEngineTypes.LiquidationPreview memory liquidationPreview =
                 engineLens.previewLiquidation(account, oraclePrice);
+            uint256 priceRiskCollateralUsdc = snapshot.activePositionMarginUsdc + snapshot.traderClaimBalanceUsdc;
             assertEq(
                 liquidationPreview.reachableCollateralUsdc,
-                snapshot.terminalReachableUsdc,
-                "Liquidation preview reachable collateral must match snapshot reachability"
+                priceRiskCollateralUsdc + clearinghouse.vpiRebateReserveUsdc(account),
+                "Liquidation preview must remain isolated to pledge, same-account claim, and VPI reserve"
             );
-            assertLt(
-                liquidationPreview.reachableCollateralUsdc,
-                snapshot.settlementBalanceUsdc + snapshot.executionBountyReserveUsdc,
-                "Liquidation preview must exclude reserved execution bounty from reachable collateral"
+            assertEq(
+                snapshot.liquidationReachableSettlementUsdc,
+                snapshot.settlementBalanceUsdc - snapshot.executionBountyReserveUsdc,
+                "Account liquidation custody must exclude the reserved execution bounty"
             );
         }
     }
@@ -293,7 +304,14 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
         assertEq(actual.equityUsdc, expected.equityUsdc, "Liquidation equity should match");
         assertEq(actual.pnlUsdc, expected.pnlUsdc, "Liquidation pnl should match");
         assertEq(actual.reachableCollateralUsdc, expected.reachableCollateralUsdc, "Reachable collateral should match");
+        assertEq(actual.liquidationChargeUsdc, expected.liquidationChargeUsdc, "Liquidation charge should match");
         assertEq(actual.keeperBountyUsdc, expected.keeperBountyUsdc, "Keeper bounty should match");
+        assertEq(
+            actual.protocolLiquidationFeeUsdc,
+            expected.protocolLiquidationFeeUsdc,
+            "Protocol liquidation fee should match"
+        );
+        assertEq(actual.lpLiquidationFeeUsdc, expected.lpLiquidationFeeUsdc, "LP liquidation fee should match");
         assertEq(actual.seizedCollateralUsdc, expected.seizedCollateralUsdc, "Seized collateral should match");
         assertEq(actual.settlementRetainedUsdc, expected.settlementRetainedUsdc, "Settlement retained should match");
         assertEq(actual.freshTraderPayoutUsdc, expected.freshTraderPayoutUsdc, "Fresh trader payout should match");

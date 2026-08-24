@@ -134,9 +134,9 @@
       <div class="fixed-val">4 bps (hardcoded on-chain)</div>
     </div>
     <div class="field">
-      <label>Oracle confidence <span class="val" id="v-oracleconf"></span></label>
+      <label>Basket oracle confidence <span class="val" id="v-oracleconf"></span></label>
       <input type="range" id="oracleconf" min="0" max="10" step="0.1" value="10" oninput="calc()">
-      <div class="hint">Accepted Pyth confidence ratio; feeds above 10 bps are rejected on-chain.</div>
+      <div class="hint">Weighted pre-cap basket confidence ratio; the aggregate is capped at 10 bps on-chain, with no separate per-feed ceiling.</div>
     </div>
     <div class="field">
       <label>Adverse confidence multiplier <span class="val" id="v-confmult"></span></label>
@@ -160,13 +160,23 @@
       <input type="range" id="carrybps" min="0" max="2000" step="25" value="500" oninput="calc()">
     </div>
     <div class="field">
-      <label>Keeper bounty rate <span class="val" id="v-bountybps"></span></label>
-      <input type="range" id="bountybps" min="5" max="50" step="1" value="15" oninput="calc()">
-      <div class="hint">Liquidation bounty = max(min bounty, notional × bounty rate), then capped by available equity at liquidation.</div>
+      <label>Total liquidation charge rate <span class="val" id="v-bountybps"></span></label>
+      <input type="range" id="bountybps" min="5" max="50" step="1" value="10" oninput="calc()">
+      <div class="hint">Total charge = max(minimum charge, notional × charge rate), then capped by reachable collateral. Recipient shares do not increase the trader charge.</div>
     </div>
     <div class="field">
-      <label>Minimum keeper bounty</label>
-      <div class="fixed-val">$5.00 (hardcoded default)</div>
+      <label>Minimum liquidation charge</label>
+      <div class="fixed-val">$1.00 (release default)</div>
+    </div>
+    <div class="field">
+      <label>Keeper share <span class="val" id="v-keepershare"></span></label>
+      <input type="range" id="keepershare" min="0" max="10000" step="250" value="5000" oninput="updateLiquidationShares('keepershare')">
+      <div class="hint">keeperShareBps — release value 5,000; 48h timelocked</div>
+    </div>
+    <div class="field">
+      <label>Protocol share <span class="val" id="v-protocolshare"></span></label>
+      <input type="range" id="protocolshare" min="0" max="10000" step="250" value="0" oninput="updateLiquidationShares('protocolshare')">
+      <div class="hint">protocolShareBps — release value 0; 48h timelocked; keeper + protocol must be at most 10,000</div>
     </div>
     <div class="field">
       <label>Max skew ratio <span class="val" id="v-maxskew"></span></label>
@@ -222,7 +232,7 @@
   </table>
 </div>
 
-<p class="note">Assumptions: full close at the modeled exit market state. Carry accrues linearly on LP-backed notional (`max(notional - collateral, 0)`). Oracle confidence spread models adverse execution-price adjustment as trader cost / LP edge, not protocol fee revenue. Exit VPI uses the same close-path clamp as the onchain close accounting, so net lifetime VPI cannot go negative on a full round trip.</p>
+<p class="note">Assumptions: full close at the modeled exit market state. Carry accrues linearly on LP-backed notional (`max(notional - collateral, 0)`). Basket confidence spread models adverse execution-price adjustment as trader cost / LP edge, not protocol fee revenue. Exit VPI uses the same close-path clamp as the onchain close accounting, so net lifetime VPI cannot go negative on a full round trip. The potential liquidation charge is shown separately and is conserved across keeper, protocol-treasury, and LP allocations; it is not added to a successful voluntary-close cost.</p>
 
 <script>
   const EXEC_FEE_BPS = 4;
@@ -233,11 +243,11 @@
 let currentSide = 'BULL';
 
 const scenarios = {
-  smallRetail:  { side:'BULL', notional:1000,    entry:1.00, leverage:5,  hold:30, depth:5e6, bulloi:2e6,   bearoi:2.5e6, exitbulloi:2.1e6, exitbearoi:2.4e6, oracleconf:10, confmult:0.2, vpi:0.02, imr:150, mmr:100, carrybps:500, bountybps:15, maxskew:40 },
-  whale:        { side:'BULL', notional:2000000, entry:1.00, leverage:3,  hold:50, depth:5e6, bulloi:2e6,   bearoi:2.5e6, exitbulloi:2.6e6, exitbearoi:1.8e6, oracleconf:10, confmult:0.2, vpi:0.02, imr:150, mmr:100, carrybps:500, bountybps:15, maxskew:40 },
-  highSkew:     { side:'BEAR', notional:50000,   entry:1.00, leverage:10, hold:65, depth:5e6, bulloi:1e6,   bearoi:4e6,   exitbulloi:1.4e6, exitbearoi:3.2e6, oracleconf:10, confmult:0.2, vpi:0.02, imr:150, mmr:100, carrybps:500, bountybps:15, maxskew:40 },
-  marketMaker:  { side:'BULL', notional:100000,  entry:1.00, leverage:2,  hold:40, depth:5e6, bulloi:1.5e6, bearoi:3.5e6, exitbulloi:1.8e6, exitbearoi:3.1e6, oracleconf:10, confmult:0.2, vpi:0.02, imr:150, mmr:100, carrybps:500, bountybps:15, maxskew:40 },
-  maxLeverage:  { side:'BULL', notional:10000,   entry:1.00, leverage:66, hold:20, depth:5e6, bulloi:2e6,   bearoi:2.5e6, exitbulloi:2.3e6, exitbearoi:2.2e6, oracleconf:10, confmult:0.2, vpi:0.02, imr:150, mmr:100, carrybps:500, bountybps:15, maxskew:40 },
+  smallRetail:  { side:'BULL', notional:1000,    entry:1.00, leverage:5,  hold:30, depth:5e6, bulloi:2e6,   bearoi:2.5e6, exitbulloi:2.1e6, exitbearoi:2.4e6, oracleconf:10, confmult:0.2, vpi:0.02, imr:150, mmr:100, carrybps:500, bountybps:10, keepershare:5000, protocolshare:0, maxskew:40 },
+  whale:        { side:'BULL', notional:2000000, entry:1.00, leverage:3,  hold:50, depth:5e6, bulloi:2e6,   bearoi:2.5e6, exitbulloi:2.6e6, exitbearoi:1.8e6, oracleconf:10, confmult:0.2, vpi:0.02, imr:150, mmr:100, carrybps:500, bountybps:10, keepershare:5000, protocolshare:0, maxskew:40 },
+  highSkew:     { side:'BEAR', notional:50000,   entry:1.00, leverage:10, hold:65, depth:5e6, bulloi:1e6,   bearoi:4e6,   exitbulloi:1.4e6, exitbearoi:3.2e6, oracleconf:10, confmult:0.2, vpi:0.02, imr:150, mmr:100, carrybps:500, bountybps:10, keepershare:5000, protocolshare:0, maxskew:40 },
+  marketMaker:  { side:'BULL', notional:100000,  entry:1.00, leverage:2,  hold:40, depth:5e6, bulloi:1.5e6, bearoi:3.5e6, exitbulloi:1.8e6, exitbearoi:3.1e6, oracleconf:10, confmult:0.2, vpi:0.02, imr:150, mmr:100, carrybps:500, bountybps:10, keepershare:5000, protocolshare:0, maxskew:40 },
+  maxLeverage:  { side:'BULL', notional:10000,   entry:1.00, leverage:66, hold:20, depth:5e6, bulloi:2e6,   bearoi:2.5e6, exitbulloi:2.3e6, exitbearoi:2.2e6, oracleconf:10, confmult:0.2, vpi:0.02, imr:150, mmr:100, carrybps:500, bountybps:10, keepershare:5000, protocolshare:0, maxskew:40 },
 };
 
 function loadScenario(name) {
@@ -250,6 +260,17 @@ function loadScenario(name) {
   }
   document.querySelectorAll('.scenario-bar button').forEach(b => b.classList.remove('active'));
   event.target.classList.add('active');
+  calc();
+}
+
+function updateLiquidationShares(changedId) {
+  const keeperEl = document.getElementById('keepershare');
+  const protocolEl = document.getElementById('protocolshare');
+  const changedEl = changedId === 'keepershare' ? keeperEl : protocolEl;
+  const otherEl = changedId === 'keepershare' ? protocolEl : keeperEl;
+  if (+keeperEl.value + +protocolEl.value > 10_000) {
+    otherEl.value = Math.max(10_000 - +changedEl.value, 0);
+  }
   calc();
 }
 
@@ -337,6 +358,8 @@ function calc() {
   const mmrBps       = +document.getElementById('mmr').value;
   const carryBps     = +document.getElementById('carrybps').value;
   const bountyBps    = +document.getElementById('bountybps').value;
+  const keeperShareBps = +document.getElementById('keepershare').value;
+  const protocolShareBps = +document.getElementById('protocolshare').value;
   const maxSkewPct   = +document.getElementById('maxskew').value;
 
   const holdHours = holdSliderToHours(holdSlider);
@@ -361,6 +384,8 @@ function calc() {
   document.getElementById('v-mmr').textContent = mmrBps + ' bps (' + (mmrBps/100).toFixed(1) + '%)';
   document.getElementById('v-carrybps').textContent = carryBps + ' bps APY';
   document.getElementById('v-bountybps').textContent = bountyBps + ' bps';
+  document.getElementById('v-keepershare').textContent = keeperShareBps.toLocaleString() + ' bps (' + (keeperShareBps / 100).toFixed(2) + '%)';
+  document.getElementById('v-protocolshare').textContent = protocolShareBps.toLocaleString() + ' bps (' + (protocolShareBps / 100).toFixed(2) + '%)';
   document.getElementById('v-maxskew').textContent = maxSkewPct + '%';
 
   // Skew calculations (pre-trade)
@@ -393,7 +418,7 @@ function calc() {
   const execFeeOpen = notional * EXEC_FEE_BPS / 10000;
   const execFeeClose = notional * EXEC_FEE_BPS / 10000;
 
-  // === 2. Oracle confidence spread (adverse execution price, not protocol fee) ===
+  // === 2. Basket confidence spread (adverse execution price, not protocol fee) ===
   const effectiveConfidenceBps = oracleConfBps * confMultiplier;
   const oracleConfidenceOpenCost = notional * effectiveConfidenceBps / 10000;
   const oracleConfidenceCloseCost = notional * effectiveConfidenceBps / 10000;
@@ -415,7 +440,14 @@ function calc() {
 
   // === Liquidation distance ===
   const maintMarginUsd = notional * mmrBps / 10000;
-  const rawKeeperBounty = Math.max(MIN_BOUNTY_USD, notional * bountyBps / 10000);
+  const liquidationChargeMicros = Math.floor(Math.max(MIN_BOUNTY_USD, notional * bountyBps / 10000) * 1e6);
+  const keeperAllocationMicros = Math.floor(liquidationChargeMicros * keeperShareBps / 10_000);
+  const protocolAllocationMicros = Math.floor(liquidationChargeMicros * protocolShareBps / 10_000);
+  const lpAllocationMicros = liquidationChargeMicros - keeperAllocationMicros - protocolAllocationMicros;
+  const rawLiquidationCharge = liquidationChargeMicros / 1e6;
+  const keeperAllocation = keeperAllocationMicros / 1e6;
+  const protocolAllocation = protocolAllocationMicros / 1e6;
+  const lpAllocation = lpAllocationMicros / 1e6;
   const maxLossBeforeLiq = Math.max(margin - maintMarginUsd, 0);
   const liqMovePct = notional > 0 ? maxLossBeforeLiq / notional : 0;
 
@@ -474,8 +506,8 @@ function calc() {
   detail += `<tr><td colspan="3" style="color:var(--muted);font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em;padding-top:8px"><strong>One-time costs</strong></td></tr>`;
   detail += row('Execution fee (open)', execFeeOpen, notional);
   detail += row('Execution fee (close)', execFeeClose, notional);
-  detail += row('Oracle confidence spread (open)', oracleConfidenceOpenCost, notional);
-  detail += row('Oracle confidence spread (close)', oracleConfidenceCloseCost, notional);
+  detail += row('Basket confidence spread (open)', oracleConfidenceOpenCost, notional);
+  detail += row('Basket confidence spread (close)', oracleConfidenceCloseCost, notional);
   detail += row('VPI (open)', vpiOpen, notional);
   detail += row('VPI (close)', vpiClose, notional);
   detail += rowBold('Subtotal (one-time)', execFeeOpen + execFeeClose + oracleConfidenceTotal + vpiOpen + vpiClose, notional);
@@ -508,7 +540,7 @@ function calc() {
   inter += intRow('Carry for hold period', fmt(carryCost));
   inter += intRow('Hold duration', formatHold(holdHours) + ' (' + holdHours.toLocaleString() + ' hours)');
   inter += `<tr><td colspan="2" style="height:6px"></td></tr>`;
-  inter += intRow('Oracle confidence', oracleConfBps.toFixed(1) + ' bps');
+  inter += intRow('Basket confidence', oracleConfBps.toFixed(1) + ' bps');
   inter += intRow('Adverse confidence multiplier', confMultiplier.toFixed(2) + 'x');
   inter += intRow('Effective confidence shift', effectiveConfidenceBps.toFixed(1) + ' bps per execution');
   inter += intRow('LP confidence edge (round trip)', fmt(oracleConfidenceTotal));
@@ -519,7 +551,10 @@ function calc() {
   inter += `<tr><td colspan="2" style="height:6px"></td></tr>`;
   inter += intRow('Initial margin requirement', fmt(notional * imrBps / 10000) + ' (' + imrBps + ' bps)');
   inter += intRow('Maintenance margin', fmt(maintMarginUsd) + ' (' + mmrBps + ' bps)');
-  inter += intRow('Keeper bounty (raw)', fmt(rawKeeperBounty) + ' (' + bountyBps + ' bps, min ' + fmt(MIN_BOUNTY_USD) + ')');
+  inter += intRow('Total liquidation charge (before collateral cap)', fmt(rawLiquidationCharge) + ' (' + bountyBps + ' bps, min ' + fmt(MIN_BOUNTY_USD) + ')');
+  inter += intRow('Keeper allocation', fmt(keeperAllocation) + ' (' + keeperShareBps.toLocaleString() + ' share bps)');
+  inter += intRow('Protocol-treasury allocation', fmt(protocolAllocation) + ' (' + protocolShareBps.toLocaleString() + ' share bps)');
+  inter += intRow('LP allocation (exact remainder)', fmt(lpAllocation));
   inter += intRow('Max loss before liquidation', fmt(maxLossBeforeLiq));
   inter += intRow('Liquidation distance', pct(liqMovePct));
   inter += intRow('Max profit', fmt(maxProfit));

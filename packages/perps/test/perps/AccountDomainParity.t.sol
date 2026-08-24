@@ -71,14 +71,36 @@ contract AccountDomainParityTest is BasePerpTest {
             "Close reachability should remain free settlement only"
         );
         assertEq(
-            collateralView.terminalReachableUsdc,
+            collateralView.liquidationReachableSettlementUsdc,
             buckets.settlementBalanceUsdc - router.getAccountReservations(account).executionBountyUsdc,
-            "Terminal reachability should exclude queued execution bounty"
+            "Liquidation settlement reachability should exclude queued execution bounty"
         );
         assertLt(
             MarginClearinghouseAccountingLib.getGenericReachableUsdc(buckets),
-            collateralView.terminalReachableUsdc,
-            "Queued reservations should distinguish generic from terminal reachability"
+            collateralView.liquidationReachableSettlementUsdc,
+            "Queued reservations should distinguish generic from liquidation reachability"
+        );
+        assertEq(
+            collateralView.terminalPriceCollectibleCapUsdc,
+            terminalNavBook.curveOf(account).effectiveCapUsdcAtoms,
+            "Terminal price cap should match the canonical account curve"
+        );
+    }
+
+    function test_AccountCollateralView_ClipsTerminalPriceCapToReachableEndpointLoss() public {
+        address account = address(0xD011A4);
+        _fundTrader(account, 300_000e6);
+        _open(account, CfdTypes.Side.BULL, 1000e18, 200_000e6, 1e8);
+
+        ICfdEngineTypes.AccountCollateralView memory collateralView =
+            engineAccountLens.getAccountCollateralView(account);
+        uint256 bookCapUsdc = terminalNavBook.curveOf(account).effectiveCapUsdcAtoms;
+
+        assertGt(clearinghouse.pnlPledgeUsdc(account), bookCapUsdc, "setup must contain unreachable excess pledge");
+        assertEq(
+            collateralView.terminalPriceCollectibleCapUsdc,
+            bookCapUsdc,
+            "Lens cap must apply the same endpoint clipping as the terminal book"
         );
     }
 

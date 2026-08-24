@@ -51,9 +51,8 @@ interface ICfdEngine is ICfdEngineTypes {
         uint64 publishTime
     ) external;
 
-    /// @notice Reserves close-order execution bounty from free settlement first, then active position margin.
-    /// @dev Callable only by the router. Carry is realized first, and any margin-backed portion must preserve the
-    ///      required risk backing for the proportional position slice.
+    /// @notice Reserves close-order execution bounty exclusively from free settlement.
+    /// @dev Callable only by the router. Carry is realized first; PnL pledge and all locked reserves stay protected.
     /// @param account Account committing the close order
     /// @param sizeDelta Position size the close order intends to close (18 decimals)
     /// @param amountUsdc Execution bounty amount to reserve in USDC
@@ -89,9 +88,10 @@ interface ICfdEngine is ICfdEngineTypes {
         uint64 publishTime
     ) external;
 
-    /// @notice Liquidates an undercollateralized position, returns keeper bounty in USDC
-    /// @dev Callable only by the configured router. Deletes the full position, settles collateral and any surplus or
-    ///      bad debt, credits the keeper internally, and can latch degraded mode after a post-operation shortfall.
+    /// @notice Liquidates an undercollateralized position and returns the keeper's charge allocation in USDC.
+    /// @dev Callable only by the configured router. Deletes the full position, settles typed collateral and any surplus,
+    ///      exposes price loss above the exact collectible cap only as a diagnostic write-off, credits keeper and
+    ///      protocol allocations internally, and can latch degraded mode after a physical post-operation shortfall.
     /// @param account          Account holding the position to liquidate
     /// @param currentOraclePrice Mark price from the oracle (8 decimals)
     /// @param poolDepthUsdc     HousePool effective total assets used for planning and settlement checks (6 decimals)
@@ -145,6 +145,11 @@ interface ICfdEngine is ICfdEngineTypes {
     /// @return Aggregate senior HousePool payout liability in USDC
     function totalTraderClaimBalanceUsdc() external view returns (uint256);
 
+    /// @notice Returns one authenticated exact terminal price-PnL snapshot for canonical LP accounting.
+    /// @dev Reverts while multi-contract accounting is transient or when the Engine-bound terminal book/mark fails
+    ///      its consistency checks.
+    function terminalNavSnapshot() external view returns (TerminalNavSnapshot memory snapshot);
+
     /// @notice Timestamp of the last mark price update
     /// @return Oracle publish timestamp associated with `lastMarkPrice`
     function lastMarkTime() external view returns (uint64);
@@ -164,8 +169,8 @@ interface ICfdEngine is ICfdEngineTypes {
     function CAP_PRICE() external view returns (uint256);
 
     /// @notice Returns whether recurring FAD, an override day, or the configured pre-override runway is active.
-    /// @dev The recurring window is Friday 19:00 UTC through Sunday 21:59:59 UTC. This window starts before and ends
-    ///      after the narrower frozen-oracle interval.
+    /// @dev The recurring window starts 30 minutes before Friday's 17:00 New York FX close and ends 15 minutes after
+    ///      Sunday's 17:00 New York FX open. This window surrounds the narrower frozen-oracle interval.
     /// @return Whether FAD maintenance and risk-increase restrictions are active
     function isFadWindow() external view returns (bool);
 
@@ -174,7 +179,8 @@ interface ICfdEngine is ICfdEngineTypes {
     function fadMaxStaleness() external view returns (uint256);
 
     /// @notice Returns whether the recurring frozen interval or a configured all-day override is active.
-    /// @dev The recurring interval is Friday 22:00 UTC through Sunday 20:59:59 UTC.
+    /// @dev The recurring interval follows Pyth FX hours from Friday 17:00 New York time through Sunday 16:59:59 New
+    ///      York time, including US daylight-saving transitions.
     /// @return Whether frozen-oracle policy is active
     function isOracleFrozen() external view returns (bool);
 
@@ -201,6 +207,12 @@ interface ICfdEngine is ICfdEngineTypes {
             uint64 lastUpdateTime,
             int256 vpiAccrued
         );
+
+    /// @notice Returns the exact remaining entry basis used by lot-based PnL settlement.
+    /// @dev The average entry price in `positions` is display-only and may omit division dust.
+    function positionEntryCostUsdcAtoms(
+        address account
+    ) external view returns (uint256);
 
     /// @notice Returns the indexed carry basis for a position.
     /// @param account Account to inspect

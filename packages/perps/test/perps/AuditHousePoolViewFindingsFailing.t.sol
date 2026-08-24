@@ -57,7 +57,7 @@ contract AuditHousePoolViewFindingsFailing_ZeroPrincipalCapture is BasePerpTest 
         vm.startPrank(attacker);
         usdc.approve(address(juniorVault), strandedCash);
         vm.expectRevert(TrancheVault.TrancheVault__TradingNotActive.selector);
-        juniorVault.deposit(strandedCash, attacker);
+        juniorVault.requestDeposit(strandedCash, attacker);
         vm.stopPrank();
 
         assertEq(
@@ -91,9 +91,16 @@ contract AuditHousePoolViewFindingsFailing_EmptyJuniorRevenue is BasePerpTest {
         _fundJunior(juniorLp, 100_000e6);
 
         vm.warp(block.timestamp + 1 hours + 1);
-        vm.startPrank(juniorLp);
-        juniorVault.redeem(juniorVault.balanceOf(juniorLp), juniorLp, juniorLp);
-        vm.stopPrank();
+        uint256 redeemShares = juniorVault.balanceOf(juniorLp);
+        vm.prank(juniorLp);
+        uint256 requestId = juniorVault.requestRedeem(redeemShares, juniorLp, juniorLp);
+        vm.warp(juniorVault.depositEpochStart(requestId));
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        _settleLpEpochForTest();
+        uint256 claimableShares = juniorVault.claimableRedeemRequest(requestId, juniorLp);
+        vm.prank(juniorLp);
+        juniorVault.claimRedeem(requestId, claimableShares, juniorLp, juniorLp);
 
         usdc.mint(address(pool), 100e6);
         pool.accountExcess();
@@ -155,7 +162,9 @@ contract AuditHousePoolViewFindingsFailing_ProjectedLegacySpreadViews is BasePer
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -191,7 +200,9 @@ contract AuditHousePoolViewFindingsFailing_WithdrawalCapLiveness is BasePerpTest
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -240,7 +251,7 @@ contract AuditHousePoolViewFindingsFailing_GrossAssetsReconstruction is BasePerp
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot =
             engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
         HousePoolAccountingLib.WithdrawalSnapshot memory withdrawalSnapshot = harness.buildWithdrawal(snapshot);
-        HousePoolAccountingLib.ReconcileSnapshot memory reconcileSnapshot = harness.buildReconcile(snapshot);
+        harness.buildReconcile(snapshot);
 
         assertEq(snapshot.netPhysicalAssetsUsdc, 0, "Net physical assets should saturate to zero once fees exceed cash");
         assertEq(pool.totalAssets(), actualCash, "Test must leave the pool with less cash than the fee ledger");
@@ -249,11 +260,7 @@ contract AuditHousePoolViewFindingsFailing_GrossAssetsReconstruction is BasePerp
             pool.totalAssets(),
             "Withdrawal snapshot gross assets must not exceed actual cash"
         );
-        assertLe(
-            reconcileSnapshot.physicalAssets,
-            pool.totalAssets(),
-            "Reconcile snapshot gross assets must not exceed actual cash"
-        );
+        assertLe(snapshot.physicalAssetsUsdc, pool.totalAssets(), "Reconcile input must not exceed actual cash");
     }
 
 }

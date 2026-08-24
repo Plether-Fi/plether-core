@@ -21,7 +21,9 @@ contract AuditTightenedFindingsFailing is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -79,12 +81,13 @@ contract AuditTightenedFindingsFailing is BasePerpTest {
 
     function test_M2_NewDepositResetsCooldownTimestamp() public {
         _fundJunior(alice, 100_000 * 1e6);
+        uint256 previousDepositTime = juniorVault.lastDepositTime(alice);
 
         vm.warp(block.timestamp + 2 hours);
+        _fundJunior(alice, 100_000 * 1e6);
         uint256 redepositTime = block.timestamp;
 
-        _fundJunior(alice, 100_000 * 1e6);
-
+        assertGt(redepositTime, previousDepositTime, "New deposit should advance the cooldown timestamp");
         assertEq(juniorVault.lastDepositTime(alice), redepositTime, "New deposit should reset cooldown timestamp");
     }
 

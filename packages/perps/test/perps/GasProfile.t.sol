@@ -13,8 +13,10 @@ import {HousePool} from "@plether/perps/HousePool.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
+import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {ICfdEngine} from "@plether/perps/interfaces/ICfdEngine.sol";
+import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IPyth, PythStructs} from "@plether/shared/interfaces/IPyth.sol";
 import "forge-std/Test.sol";
 
@@ -135,7 +137,9 @@ contract GasProfileTest is Test {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 5e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
 
         clearinghouse = new MarginClearinghouse(usdc);
@@ -144,6 +148,8 @@ contract GasProfileTest is Test {
         CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(engine));
         CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
         engine.setDependencies(address(planner), address(settlement), address(engineAdmin));
+        TerminalNavBookV2 terminalNavBook = new TerminalNavBookV2(address(engine), uint32(CAP_PRICE));
+        engine.setTerminalNavBook(address(terminalNavBook));
         engineAccountLens = new CfdEngineAccountLens(address(engine));
         engineLens = new CfdEngineLens(address(engine));
         pool = new HousePool(usdc, address(engine));
@@ -170,7 +176,17 @@ contract GasProfileTest is Test {
 
         uint256 t0 = block.timestamp;
         clearinghouse.setEngine(address(engine));
+        IHousePool.PoolConfig memory poolConfig = IHousePool.PoolConfig({
+            seniorRateBps: pool.seniorRateBps(),
+            markStalenessLimit: pool.markStalenessLimit(),
+            seniorFrozenLpFeeBps: pool.seniorFrozenLpFeeBps(),
+            juniorFrozenLpFeeBps: pool.juniorFrozenLpFeeBps(),
+            maxSeniorExposureUsdc: type(uint256).max - 1,
+            maxSeniorShareBps: 9999
+        });
+        pool.proposePoolConfig(poolConfig);
         vm.warp(t0 + 144 hours + 3);
+        pool.finalizePoolConfig();
 
         uint256 seedAmount = 1000e6;
         _mintUsdc(address(this), seedAmount * 2);
@@ -179,15 +195,11 @@ contract GasProfileTest is Test {
         pool.initializeSeedPosition(true, seedAmount, address(this));
         pool.activateTrading();
 
-        _mintUsdc(lp, 1_000_000e6);
-        vm.startPrank(lp);
-        IERC20(usdc).approve(address(juniorVault), type(uint256).max);
-        juniorVault.deposit(1_000_000e6, lp);
-        vm.stopPrank();
+        _fundTrancheAsync(juniorVault, lp, 1_000_000e6);
     }
 
     // ==========================================
-    // GAS PROFILING — 20 operations
+    // GAS PROFILING — 20 operation families
     // ==========================================
 
     // --- 1. commitOrder (open) ---
@@ -415,60 +427,40 @@ contract GasProfileTest is Test {
         emit log_named_uint("12_clearinghouse_withdraw", gas);
     }
 
-    // --- 13. juniorVault.deposit ---
-    function test_gas_13_juniorVault_deposit() public {
-        _mintUsdc(lp2, 100_000e6);
-        vm.startPrank(lp2);
-        IERC20(usdc).approve(address(juniorVault), type(uint256).max);
-
-        uint256 g0 = gasleft();
-        juniorVault.deposit(100_000e6, lp2);
-        uint256 gas = g0 - gasleft();
-        vm.stopPrank();
-        emit log_named_uint("13_juniorVault_deposit", gas);
+    // --- 13a/b. juniorVault.requestDeposit on both sides of the request cutoff ---
+    function test_gas_13a_juniorVault_requestDeposit_beforeCutoff() public {
+        _profileRequestDeposit(juniorVault, 100_000e6, false, "13a_juniorVault_requestDeposit_before_cutoff");
     }
 
-    // --- 14. juniorVault.withdraw ---
-    function test_gas_14_juniorVault_withdraw() public {
-        _mintUsdc(lp2, 100_000e6);
-        vm.startPrank(lp2);
-        IERC20(usdc).approve(address(juniorVault), type(uint256).max);
-        juniorVault.deposit(100_000e6, lp2);
-        vm.warp(block.timestamp + 2 hours);
-
-        uint256 g0 = gasleft();
-        juniorVault.withdraw(50_000e6, lp2, lp2);
-        uint256 gas = g0 - gasleft();
-        vm.stopPrank();
-        emit log_named_uint("14_juniorVault_withdraw", gas);
+    function test_gas_13b_juniorVault_requestDeposit_atCutoff() public {
+        _profileRequestDeposit(juniorVault, 100_000e6, true, "13b_juniorVault_requestDeposit_at_cutoff");
     }
 
-    // --- 15. seniorVault.deposit ---
-    function test_gas_15_seniorVault_deposit() public {
-        _mintUsdc(lp2, 500_000e6);
-        vm.startPrank(lp2);
-        IERC20(usdc).approve(address(seniorVault), type(uint256).max);
-
-        uint256 g0 = gasleft();
-        seniorVault.deposit(500_000e6, lp2);
-        uint256 gas = g0 - gasleft();
-        vm.stopPrank();
-        emit log_named_uint("15_seniorVault_deposit", gas);
+    // --- 14a/b. juniorVault.requestRedeem on both sides of the request cutoff ---
+    function test_gas_14a_juniorVault_requestRedeem_beforeCutoff() public {
+        _profileRequestRedeem(juniorVault, 100_000e6, 50_000e6, false, "14a_juniorVault_requestRedeem_before_cutoff");
     }
 
-    // --- 16. seniorVault.withdraw ---
-    function test_gas_16_seniorVault_withdraw() public {
-        _mintUsdc(lp2, 500_000e6);
-        vm.startPrank(lp2);
-        IERC20(usdc).approve(address(seniorVault), type(uint256).max);
-        seniorVault.deposit(500_000e6, lp2);
-        vm.warp(block.timestamp + 2 hours);
+    function test_gas_14b_juniorVault_requestRedeem_atCutoff() public {
+        _profileRequestRedeem(juniorVault, 100_000e6, 50_000e6, true, "14b_juniorVault_requestRedeem_at_cutoff");
+    }
 
-        uint256 g0 = gasleft();
-        seniorVault.withdraw(200_000e6, lp2, lp2);
-        uint256 gas = g0 - gasleft();
-        vm.stopPrank();
-        emit log_named_uint("16_seniorVault_withdraw", gas);
+    // --- 15a/b. seniorVault.requestDeposit on both sides of the request cutoff ---
+    function test_gas_15a_seniorVault_requestDeposit_beforeCutoff() public {
+        _profileRequestDeposit(seniorVault, 500_000e6, false, "15a_seniorVault_requestDeposit_before_cutoff");
+    }
+
+    function test_gas_15b_seniorVault_requestDeposit_atCutoff() public {
+        _profileRequestDeposit(seniorVault, 500_000e6, true, "15b_seniorVault_requestDeposit_at_cutoff");
+    }
+
+    // --- 16a/b. seniorVault.requestRedeem on both sides of the request cutoff ---
+    function test_gas_16a_seniorVault_requestRedeem_beforeCutoff() public {
+        _profileRequestRedeem(seniorVault, 500_000e6, 200_000e6, false, "16a_seniorVault_requestRedeem_before_cutoff");
+    }
+
+    function test_gas_16b_seniorVault_requestRedeem_atCutoff() public {
+        _profileRequestRedeem(seniorVault, 500_000e6, 200_000e6, true, "16b_seniorVault_requestRedeem_at_cutoff");
     }
 
     // --- 17. previewClose ---
@@ -510,11 +502,7 @@ contract GasProfileTest is Test {
     // --- 20. getPoolLiquidityView ---
     function test_gas_20_getPoolLiquidityView() public {
         // Add some state: positions + both tranches
-        _mintUsdc(lp2, 500_000e6);
-        vm.startPrank(lp2);
-        IERC20(usdc).approve(address(seniorVault), type(uint256).max);
-        seniorVault.deposit(500_000e6, lp2);
-        vm.stopPrank();
+        _fundTrancheAsync(seniorVault, lp2, 500_000e6);
 
         _depositToClearinghouse(alice, 10_000e6);
         _openPosition(alice, CfdTypes.Side.BULL, 50_000e18, 5000e6, 1e8);
@@ -539,11 +527,7 @@ contract GasProfileTest is Test {
         uint256 n
     ) internal {
         // Seed pool with enough liquidity for all positions
-        _mintUsdc(lp, n * 100_000e6);
-        vm.startPrank(lp);
-        IERC20(usdc).approve(address(juniorVault), type(uint256).max);
-        juniorVault.deposit(n * 100_000e6, lp);
-        vm.stopPrank();
+        _fundTrancheAsync(juniorVault, lp, n * 100_000e6);
 
         uint256 ts = block.timestamp;
 
@@ -571,6 +555,87 @@ contract GasProfileTest is Test {
     // ==========================================
     // HELPERS
     // ==========================================
+
+    function _profileRequestDeposit(
+        TrancheVault vault,
+        uint256 assets,
+        bool cutoffWindow,
+        string memory label
+    ) internal {
+        _mintUsdc(lp2, assets);
+        vm.prank(lp2);
+        IERC20(usdc).approve(address(vault), type(uint256).max);
+
+        _warpToRequestWindowSide(vault, cutoffWindow);
+        _refreshMark();
+
+        vm.prank(lp2);
+        uint256 g0 = gasleft();
+        vault.requestDeposit(assets, lp2, lp2);
+        uint256 gas = g0 - gasleft();
+        emit log_named_uint(label, gas);
+    }
+
+    function _profileRequestRedeem(
+        TrancheVault vault,
+        uint256 fundingAssets,
+        uint256 redeemAssets,
+        bool cutoffWindow,
+        string memory label
+    ) internal {
+        uint256 fundedShares = _fundTrancheAsync(vault, lp2, fundingAssets);
+        vm.warp(block.timestamp + vault.DEPOSIT_COOLDOWN());
+        _warpToRequestWindowSide(vault, cutoffWindow);
+
+        uint256 requestedShares = vault.estimateWithdrawShares(redeemAssets);
+        assertLe(requestedShares, fundedShares, "redeem setup exceeds funded shares");
+
+        vm.prank(lp2);
+        uint256 g0 = gasleft();
+        vault.requestRedeem(requestedShares, lp2, lp2);
+        uint256 gas = g0 - gasleft();
+        emit log_named_uint(label, gas);
+    }
+
+    function _warpToRequestWindowSide(
+        TrancheVault vault,
+        bool cutoffWindow
+    ) internal {
+        (, uint256 nextCutoffTime) = vault.getRequestEpochWindow();
+        assertGt(nextCutoffTime, block.timestamp, "request cutoff must be in the future");
+        vm.warp(cutoffWindow ? nextCutoffTime : nextCutoffTime - 1);
+    }
+
+    function _fundTrancheAsync(
+        TrancheVault vault,
+        address provider,
+        uint256 assets
+    ) internal returns (uint256 shares) {
+        _mintUsdc(provider, assets);
+        vm.startPrank(provider);
+        IERC20(usdc).approve(address(vault), assets);
+        uint256 requestId = vault.requestDeposit(assets, provider, provider);
+        vm.stopPrank();
+
+        uint256 activationTime = vault.depositEpochStart(requestId);
+        if (block.timestamp < activationTime) {
+            vm.warp(activationTime);
+        }
+        _refreshMark();
+        pool.settleLpEpoch(0, 0);
+
+        uint256 claimableAssets = vault.claimableDepositRequest(requestId, provider);
+        assertEq(claimableAssets, assets, "async tranche funding did not finalize");
+        vm.prank(provider);
+        shares = vault.claimDeposit(requestId, claimableAssets, provider, provider);
+        assertGt(shares, 0, "async tranche funding produced no shares");
+    }
+
+    function _refreshMark() internal {
+        uint256 markPrice = engine.lastMarkPrice();
+        vm.prank(address(router));
+        engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
+    }
 
     function _mintUsdc(
         address to,

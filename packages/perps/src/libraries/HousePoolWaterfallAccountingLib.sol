@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+
 /// @title HousePoolWaterfallAccountingLib
 /// @notice Pure senior/junior principal accounting for coupon, revenue, loss, and senior withdrawal events.
 /// @dev Principal and coupon values use 6-decimal USDC, rates use basis points, and elapsed time uses seconds.
@@ -106,20 +108,26 @@ library HousePoolWaterfallAccountingLib {
         }
     }
 
-    /// @notice Removes senior principal and scales the senior high-water mark pro rata.
-    /// @dev Requires nonzero `state.seniorPrincipal` and `withdrawAmountUsdc <= state.seniorPrincipal`; otherwise
-    ///      Solidity division or subtraction reverts. High-water-mark scaling rounds down. Junior principal is unchanged.
+    /// @notice Removes funded senior principal and the redeemed shares' pro-rata high-water-mark entitlement.
+    /// @dev Requires `fundedAssetsUsdc <= state.seniorPrincipal`, nonzero `preBurnSupply`, and
+    ///      `fundedShares <= preBurnSupply`; otherwise Solidity subtraction or division reverts. The HWM entitlement
+    ///      removed for the funded shares rounds down. Junior principal is unchanged.
     /// @param state Waterfall state before withdrawal.
-    /// @param withdrawAmountUsdc Senior principal withdrawn in 6-decimal USDC.
-    /// @return nextState State with reduced senior principal and proportionally scaled high-water mark.
+    /// @param fundedAssetsUsdc Net senior principal funded in 6-decimal USDC.
+    /// @param fundedShares Senior shares funded and burned by the vault.
+    /// @param preBurnSupply Senior share supply before the vault burns `fundedShares`.
+    /// @return nextState State with reduced senior principal and HWM entitlement.
     function scaleSeniorOnWithdraw(
         WaterfallState memory state,
-        uint256 withdrawAmountUsdc
+        uint256 fundedAssetsUsdc,
+        uint256 fundedShares,
+        uint256 preBurnSupply
     ) internal pure returns (WaterfallState memory nextState) {
         nextState = state;
-        uint256 remaining = state.seniorPrincipal - withdrawAmountUsdc;
-        nextState.seniorHighWaterMark = state.seniorHighWaterMark * remaining / state.seniorPrincipal;
-        nextState.seniorPrincipal = remaining;
+        nextState.seniorHighWaterMark -= Math.mulDiv(
+            state.seniorHighWaterMark, fundedShares, preBurnSupply, Math.Rounding.Floor
+        );
+        nextState.seniorPrincipal -= fundedAssetsUsdc;
     }
 
     /// @notice Distributes revenue by restoring impaired senior principal before crediting junior principal.

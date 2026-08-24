@@ -5,12 +5,16 @@ import {PerpAccountingHandler} from "./handlers/PerpAccountingHandler.sol";
 import {CfdEngineHarness} from "./mocks/CfdEngineHarness.sol";
 import {MockInvariantHousePool} from "./mocks/MockInvariantHousePool.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
+import {CfdEngineAdmin} from "@plether/perps/CfdEngineAdmin.sol";
 import {CfdEngineLens} from "@plether/perps/CfdEngineLens.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
+import {CfdEnginePlanner} from "@plether/perps/CfdEnginePlanner.sol";
+import {CfdEngineSettlementSidecar} from "@plether/perps/CfdEngineSettlementSidecar.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
+import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
 import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
@@ -37,6 +41,12 @@ contract PerpClosePreviewParityInvariantTest is Test {
 
         harness = new CfdEngineHarness(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams(), 50);
         engine = harness;
+        engine.setDependencies(
+            address(new CfdEnginePlanner()),
+            address(new CfdEngineSettlementSidecar(address(engine))),
+            address(new CfdEngineAdmin(address(engine), address(this)))
+        );
+        engine.setTerminalNavBook(address(new TerminalNavBookV2(address(engine), uint32(CAP_PRICE))));
         engineLens = new CfdEngineLens(address(engine));
 
         housePool = new MockInvariantHousePool(address(usdc), address(engine));
@@ -84,14 +94,23 @@ contract PerpClosePreviewParityInvariantTest is Test {
         targetContract(address(handler));
     }
 
+    function test_HandlerCanReachLivePositionState() public {
+        handler.commitOpenOrder(0, 0, 20, 1000e6, 1e8);
+        assertEq(router.nextCommitId(), 2, "handler must commit a valid open order");
+
+        handler.executeNextOrderBatch(1);
+        (uint256 size,,,,,,) = engine.positions(_account(handler.actorAt(0)));
+        assertGt(size, 0, "handler must execute the open into a live position");
+    }
+
     function invariant_ValidPartialCloseNeverLeavesDustPosition() public view {
         uint256 oraclePrice = _previewOraclePrice();
-        (,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
+        (,,,,,, uint256 minBountyUsdc,,,) = engine.riskParams();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
             (uint256 size, uint256 margin,,,,,) = engine.positions(account);
-            if (size < 2) {
+            if (size < 2 * CfdTypes.SIZE_QUANTUM) {
                 continue;
             }
 
@@ -128,7 +147,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
     function invariant_PreviewClose_EqualsSimulateCloseAtCanonicalDepth() public view {
         uint256 oraclePrice = _previewOraclePrice();
         uint256 canonicalDepth = housePool.totalAssets();
-        (,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
+        (,,,,,, uint256 minBountyUsdc,,,) = engine.riskParams();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
@@ -142,7 +161,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
                 engineLens.simulateClose(account, size, oraclePrice, canonicalDepth)
             );
 
-            if (size < 2) {
+            if (size < 2 * CfdTypes.SIZE_QUANTUM) {
                 continue;
             }
 
@@ -162,12 +181,12 @@ contract PerpClosePreviewParityInvariantTest is Test {
 
     function invariant_ValidPartialCloseWithCarryAccrualImpliesHousePoolCanPay() public view {
         uint256 oraclePrice = _previewOraclePrice();
-        (,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
+        (,,,,,, uint256 minBountyUsdc,,,) = engine.riskParams();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
             (uint256 size, uint256 margin,,,,,) = engine.positions(account);
-            if (size < 2) {
+            if (size < 2 * CfdTypes.SIZE_QUANTUM) {
                 continue;
             }
 
@@ -183,12 +202,12 @@ contract PerpClosePreviewParityInvariantTest is Test {
 
     function invariant_PartialCloseInvalidOnlyForNewCodes() public view {
         uint256 oraclePrice = _previewOraclePrice();
-        (,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
+        (,,,,,, uint256 minBountyUsdc,,,) = engine.riskParams();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
             (uint256 size, uint256 margin,,,,,) = engine.positions(account);
-            if (size < 2) {
+            if (size < 2 * CfdTypes.SIZE_QUANTUM) {
                 continue;
             }
 
@@ -218,10 +237,9 @@ contract PerpClosePreviewParityInvariantTest is Test {
         }
     }
 
-    function invariant_ImmediateOrTraderClaimSplitMatchesAdjustedCash() public view {
+    function invariant_ImmediateOrTraderClaimSplitMatchesFreshPayout() public view {
         uint256 oraclePrice = _previewOraclePrice();
-        uint256 poolDepthUsdc = housePool.totalAssets();
-        (,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
+        (,,,,,, uint256 minBountyUsdc,,,) = engine.riskParams();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
@@ -230,9 +248,9 @@ contract PerpClosePreviewParityInvariantTest is Test {
                 continue;
             }
 
-            _checkPayoutSplit(account, size, oraclePrice, poolDepthUsdc, true);
+            _checkPayoutSplit(account, size, oraclePrice);
 
-            if (size < 2) {
+            if (size < 2 * CfdTypes.SIZE_QUANTUM) {
                 continue;
             }
 
@@ -241,7 +259,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
                 if (fractions[f] == 0 || fractions[f] >= size) {
                     continue;
                 }
-                _checkPayoutSplit(account, fractions[f], oraclePrice, poolDepthUsdc, false);
+                _checkPayoutSplit(account, fractions[f], oraclePrice);
             }
         }
     }
@@ -249,27 +267,30 @@ contract PerpClosePreviewParityInvariantTest is Test {
     function _checkPayoutSplit(
         address account,
         uint256 sizeDelta,
-        uint256 oraclePrice,
-        uint256 poolDepthUsdc,
-        bool isFullClose
+        uint256 oraclePrice
     ) internal view {
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, sizeDelta, oraclePrice);
 
-        if (!preview.valid || (preview.immediatePayoutUsdc == 0 && preview.traderClaimBalanceUsdc == 0)) {
+        if (!preview.valid) {
             return;
         }
 
-        uint256 adjustedCash = housePool.totalAssets();
-        uint256 totalOwed = preview.immediatePayoutUsdc + preview.traderClaimBalanceUsdc;
-
-        if (preview.immediatePayoutUsdc > 0) {
-            assertGe(adjustedCash, preview.immediatePayoutUsdc, "Post-carry HousePool cash must cover immediate payout");
-            assertEq(preview.traderClaimBalanceUsdc, 0, "Immediate payout excludes trader claim");
-        }
-
-        if (preview.traderClaimBalanceUsdc > 0) {
-            assertEq(preview.immediatePayoutUsdc, 0, "Trader claim excludes immediate payout");
-            assertLt(adjustedCash, totalOwed, "Trader claim implies adjusted cash insufficient for full settlement");
+        assertGe(
+            preview.traderClaimBalanceUsdc,
+            preview.existingTraderClaimRemainingUsdc,
+            "Resulting trader claim must include the unconsumed existing claim"
+        );
+        uint256 freshTraderClaimUsdc = preview.traderClaimBalanceUsdc - preview.existingTraderClaimRemainingUsdc;
+        assertEq(
+            preview.immediatePayoutUsdc + freshTraderClaimUsdc,
+            preview.freshTraderPayoutUsdc,
+            "Fresh payout must settle immediately or become a new trader claim"
+        );
+        if (preview.freshTraderPayoutUsdc > 0) {
+            assertTrue(
+                (preview.immediatePayoutUsdc > 0) != (freshTraderClaimUsdc > 0),
+                "Fresh payout settlement modes must be mutually exclusive"
+            );
         }
     }
 
@@ -320,18 +341,24 @@ contract PerpClosePreviewParityInvariantTest is Test {
         uint256 margin,
         uint256 minBountyUsdc
     ) internal pure returns (uint256[3] memory fractions) {
-        fractions[0] = 1;
-        fractions[1] = size / 2;
-        if (margin > minBountyUsdc && size > 1) {
-            fractions[2] = size * (margin - minBountyUsdc) / margin;
+        uint256 sizeLots = size / CfdTypes.SIZE_QUANTUM;
+        if (sizeLots < 2) {
+            return fractions;
+        }
+
+        fractions[0] = CfdTypes.SIZE_QUANTUM;
+        fractions[1] = (sizeLots / 2) * CfdTypes.SIZE_QUANTUM;
+        if (margin > minBountyUsdc) {
+            uint256 marginDerivedLots = sizeLots * (margin - minBountyUsdc) / margin;
+            fractions[2] = marginDerivedLots * CfdTypes.SIZE_QUANTUM;
             if (fractions[2] == 0) {
-                fractions[2] = 1;
+                fractions[2] = CfdTypes.SIZE_QUANTUM;
             }
             if (fractions[2] >= size) {
-                fractions[2] = size - 1;
+                fractions[2] = (sizeLots - 1) * CfdTypes.SIZE_QUANTUM;
             }
         } else {
-            fractions[2] = size - 1;
+            fractions[2] = (sizeLots - 1) * CfdTypes.SIZE_QUANTUM;
         }
     }
 
@@ -344,7 +371,9 @@ contract PerpClosePreviewParityInvariantTest is Test {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
-            bountyBps: 9
+            bountyBps: 9,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 

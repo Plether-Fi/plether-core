@@ -3,7 +3,6 @@ pragma solidity 0.8.35;
 
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdEngineAdmin} from "@plether/perps/CfdEngineAdmin.sol";
@@ -12,6 +11,7 @@ import {HousePool} from "@plether/perps/HousePool.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
+import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {ICfdEngineAdminHost} from "@plether/perps/interfaces/ICfdEngineAdminHost.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
@@ -77,6 +77,82 @@ contract TimelockPauseTest is BasePerpTest {
         assertEq(maxSpreadEngine.frozenCloseSpreadBps(), 1000);
     }
 
+    function test_CfdEngineConstructor_RevertsWhenKeeperShareExceedsBpsDenominator() public {
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.keeperShareBps = 10_001;
+
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidRiskParams.selector);
+        new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params, 50);
+    }
+
+    function test_CfdEngineConstructor_RevertsWhenLiquidationSharesExceedBpsDenominator() public {
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.protocolShareBps = 5001;
+
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidRiskParams.selector);
+        new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params, 50);
+    }
+
+    function test_LiquidationShares_ChangeOnlyAfterRiskConfigTimelock() public {
+        ICfdEngineAdminHost.EngineRiskConfig memory config = _engineRiskConfig();
+        assertEq(config.riskParams.keeperShareBps, 5000, "Default keeper share should be 50%");
+        assertEq(config.riskParams.protocolShareBps, 0, "Protocol liquidation fee should default to zero");
+        config.riskParams.keeperShareBps = 2500;
+        config.riskParams.protocolShareBps = 2500;
+
+        engineAdmin.proposeRiskConfig(config);
+        (,,,,,,,, uint256 keeperShareBefore, uint256 protocolShareBefore) = engine.riskParams();
+        assertEq(keeperShareBefore, 5000, "Proposal must not change the live keeper share");
+        assertEq(protocolShareBefore, 0, "Proposal must not change the live protocol share");
+
+        vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__TimelockNotReady.selector);
+        engineAdmin.finalizeRiskConfig();
+
+        _warpForward(48 hours + 1);
+        engineAdmin.finalizeRiskConfig();
+
+        (,,,,,,,, uint256 keeperShareAfter, uint256 protocolShareAfter) = engine.riskParams();
+        assertEq(keeperShareAfter, 2500, "Finalization should apply the configured keeper share");
+        assertEq(protocolShareAfter, 2500, "Finalization should apply the configured protocol share");
+    }
+
+    function test_ProposeRiskConfig_RevertsWhenKeeperShareExceedsBpsDenominator() public {
+        ICfdEngineAdminHost.EngineRiskConfig memory config = _engineRiskConfig();
+        config.riskParams.keeperShareBps = 10_001;
+
+        vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__InvalidRiskParams.selector);
+        engineAdmin.proposeRiskConfig(config);
+    }
+
+    function test_ProposeRiskConfig_RevertsWhenLiquidationSharesExceedBpsDenominator() public {
+        ICfdEngineAdminHost.EngineRiskConfig memory config = _engineRiskConfig();
+        config.riskParams.protocolShareBps = 5001;
+
+        vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__InvalidRiskParams.selector);
+        engineAdmin.proposeRiskConfig(config);
+
+        config.riskParams.protocolShareBps = type(uint256).max;
+        vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__InvalidRiskParams.selector);
+        engineAdmin.proposeRiskConfig(config);
+    }
+
+    function test_ProposeRiskConfig_AcceptsLiquidationShareBoundaries() public {
+        ICfdEngineAdminHost.EngineRiskConfig memory config = _engineRiskConfig();
+        config.riskParams.keeperShareBps = 0;
+        config.riskParams.protocolShareBps = 10_000;
+        engineAdmin.proposeRiskConfig(config);
+
+        config.riskParams.keeperShareBps = 10_000;
+        config.riskParams.protocolShareBps = 0;
+        engineAdmin.proposeRiskConfig(config);
+
+        config.riskParams.keeperShareBps = 5000;
+        config.riskParams.protocolShareBps = 5000;
+        engineAdmin.proposeRiskConfig(config);
+
+        assertGt(engineAdmin.riskConfigActivationTime(), block.timestamp);
+    }
+
     function test_ProposeRiskParams_StoresAndSetsActivationTime() public {
         CfdTypes.RiskParams memory newParams = CfdTypes.RiskParams({
             vpiFactor: 0.001e18,
@@ -86,7 +162,9 @@ contract TimelockPauseTest is BasePerpTest {
             fadMarginBps: 500,
             baseCarryBps: 500,
             minBountyUsdc: 10 * 1e6,
-            bountyBps: 20
+            bountyBps: 20,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
 
         ICfdEngineAdminHost.EngineRiskConfig memory config;
@@ -106,7 +184,9 @@ contract TimelockPauseTest is BasePerpTest {
             fadMarginBps: 500,
             baseCarryBps: 500,
             minBountyUsdc: 10 * 1e6,
-            bountyBps: 20
+            bountyBps: 20,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
 
         ICfdEngineAdminHost.EngineRiskConfig memory config;
@@ -128,7 +208,9 @@ contract TimelockPauseTest is BasePerpTest {
             fadMarginBps: 500,
             baseCarryBps: 500,
             minBountyUsdc: 10 * 1e6,
-            bountyBps: 20
+            bountyBps: 20,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
 
         ICfdEngineAdminHost.EngineRiskConfig memory config;
@@ -139,7 +221,7 @@ contract TimelockPauseTest is BasePerpTest {
         _warpForward(48 hours + 1);
         engineAdmin.finalizeRiskConfig();
 
-        (,, uint256 maintMarginBps,,,,,) = engine.riskParams();
+        (,, uint256 maintMarginBps,,,,,,,) = engine.riskParams();
         assertEq(maintMarginBps, 200);
         assertEq(engine.executionFeeBps(), 7);
         assertEq(engine.frozenCloseSpreadBps(), 70);
@@ -188,7 +270,9 @@ contract TimelockPauseTest is BasePerpTest {
             fadMarginBps: 500,
             baseCarryBps: 500,
             minBountyUsdc: 10 * 1e6,
-            bountyBps: 20
+            bountyBps: 20,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
 
         ICfdEngineAdminHost.EngineRiskConfig memory config;
@@ -214,7 +298,9 @@ contract TimelockPauseTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
 
         ICfdEngineAdminHost.EngineRiskConfig memory config;
@@ -265,7 +351,9 @@ contract TimelockPauseTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
 
         ICfdEngineAdminHost.EngineRiskConfig memory firstConfig;
@@ -285,7 +373,9 @@ contract TimelockPauseTest is BasePerpTest {
             fadMarginBps: 500,
             baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
 
         ICfdEngineAdminHost.EngineRiskConfig memory secondConfig;
@@ -378,12 +468,16 @@ contract TimelockPauseTest is BasePerpTest {
             uint256 pendingSeniorRate,
             uint256 pendingMarkStaleness,
             uint256 pendingSeniorFrozenFee,
-            uint256 pendingJuniorFrozenFee
+            uint256 pendingJuniorFrozenFee,
+            uint256 pendingMaxSeniorExposure,
+            uint256 pendingMaxSeniorShareBps
         ) = pool.pendingPoolConfig();
         assertEq(pendingSeniorRate, 0);
         assertEq(pendingMarkStaleness, 0);
         assertEq(pendingSeniorFrozenFee, 0);
         assertEq(pendingJuniorFrozenFee, 0);
+        assertEq(pendingMaxSeniorExposure, 0);
+        assertEq(pendingMaxSeniorShareBps, 0);
     }
 
     function test_ProposePoolConfig_RevertsForInvalidFrozenLpFees() public {
@@ -484,6 +578,14 @@ contract TimelockPauseTest is BasePerpTest {
         config.maxPendingOrders = 33;
 
         vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__InvalidPendingOrderLimit.selector);
+        routerAdmin.proposeRouterConfig(config);
+    }
+
+    function test_OrderRouter_InvalidBasketConfidenceRatio_Reverts() public {
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.basketMaxConfidenceRatioBps = 10_001;
+
+        vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__InvalidConfidenceRatio.selector);
         routerAdmin.proposeRouterConfig(config);
     }
 
@@ -681,9 +783,9 @@ contract TimelockPauseTest is BasePerpTest {
         usdc.mint(alice, 10_000 * 1e6);
         vm.startPrank(alice);
         usdc.approve(address(seniorVault), 10_000 * 1e6);
-        assertEq(seniorVault.maxDeposit(alice), 0, "paused pool should zero senior maxDeposit");
-        vm.expectRevert(abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, alice, 10_000 * 1e6, 0));
-        seniorVault.deposit(10_000 * 1e6, alice);
+        assertEq(seniorVault.maxRequestDeposit(alice), 0, "paused pool should zero senior request capacity");
+        vm.expectRevert(TrancheVault.TrancheVault__DepositsUnavailable.selector);
+        seniorVault.requestDeposit(10_000 * 1e6, alice, alice);
         vm.stopPrank();
     }
 
@@ -693,9 +795,9 @@ contract TimelockPauseTest is BasePerpTest {
         usdc.mint(alice, 10_000 * 1e6);
         vm.startPrank(alice);
         usdc.approve(address(juniorVault), 10_000 * 1e6);
-        assertEq(juniorVault.maxDeposit(alice), 0, "paused pool should zero junior maxDeposit");
-        vm.expectRevert(abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, alice, 10_000 * 1e6, 0));
-        juniorVault.deposit(10_000 * 1e6, alice);
+        assertEq(juniorVault.maxRequestDeposit(alice), 0, "paused pool should zero junior request capacity");
+        vm.expectRevert(TrancheVault.TrancheVault__DepositsUnavailable.selector);
+        juniorVault.requestDeposit(10_000 * 1e6, alice, alice);
         vm.stopPrank();
     }
 
@@ -703,20 +805,14 @@ contract TimelockPauseTest is BasePerpTest {
         _warpForward(1 hours);
         pool.pause();
 
-        uint256 maxW = seniorVault.maxWithdraw(address(this));
-        if (maxW > 0) {
-            seniorVault.withdraw(maxW, address(this), address(this));
-        }
+        _withdrawTrancheWhileHousePoolPaused(seniorVault);
     }
 
     function test_WithdrawJunior_WorksWhenHousePoolPaused() public {
         _warpForward(1 hours);
         pool.pause();
 
-        uint256 maxW = juniorVault.maxWithdraw(address(this));
-        if (maxW > 0) {
-            juniorVault.withdraw(maxW, address(this), address(this));
-        }
+        _withdrawTrancheWhileHousePoolPaused(juniorVault);
     }
 
     function test_HousePool_Pause_OnlyOwner() public {
@@ -749,16 +845,63 @@ contract TimelockPauseTest is BasePerpTest {
         usdc.mint(alice, 10_000 * 1e6);
         vm.startPrank(alice);
         usdc.approve(address(juniorVault), 10_000 * 1e6);
-        assertEq(juniorVault.maxDeposit(alice), 0, "paused pool should zero junior maxDeposit");
-        vm.expectRevert(abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, alice, 10_000 * 1e6, 0));
-        juniorVault.deposit(10_000 * 1e6, alice);
+        assertEq(juniorVault.maxRequestDeposit(alice), 0, "paused pool should zero junior request capacity");
+        vm.expectRevert(TrancheVault.TrancheVault__DepositsUnavailable.selector);
+        juniorVault.requestDeposit(10_000 * 1e6, alice, alice);
         vm.stopPrank();
 
         pool.unpause();
 
         vm.prank(alice);
-        juniorVault.deposit(10_000 * 1e6, alice);
+        uint256 requestId = juniorVault.requestDeposit(10_000 * 1e6, alice, alice);
+        _settleLpEpochAt(requestId);
+
+        uint256 claimableAssets = juniorVault.claimableDepositRequest(requestId, alice);
+        assertEq(claimableAssets, 10_000 * 1e6, "unpaused deposit request should become claimable");
+        vm.prank(alice);
+        juniorVault.deposit(claimableAssets, alice);
         assertGt(juniorVault.balanceOf(alice), 0);
+    }
+
+    function _withdrawTrancheWhileHousePoolPaused(
+        TrancheVault vault
+    ) internal {
+        uint256 requestCapacity = vault.maxRequestRedeem(address(this));
+        assertGt(requestCapacity, 0, "paused pool should retain redeem request capacity");
+
+        uint256 requestedShares = requestCapacity / 10;
+        uint256 requestId = vault.requestRedeem(requestedShares, address(this), address(this));
+        assertEq(vault.maxWithdraw(address(this)), 0, "withdraw limit should remain zero before settlement");
+
+        _settleLpEpochAt(requestId);
+
+        uint256 claimableAssets = vault.claimableRedeemAssets(requestId, address(this));
+        assertGt(claimableAssets, 0, "paused settlement should fund the redeem request");
+        assertEq(
+            vault.maxWithdraw(address(this)), claimableAssets, "funded assets should remain claimable while paused"
+        );
+
+        uint256 balanceBefore = usdc.balanceOf(address(this));
+        uint256 consumedShares = vault.withdraw(claimableAssets, address(this), address(this));
+        assertEq(consumedShares, requestedShares, "withdraw claim should consume the requested shares");
+        assertEq(
+            usdc.balanceOf(address(this)),
+            balanceBefore + claimableAssets,
+            "withdraw claim should pay assets while the pool is paused"
+        );
+    }
+
+    function _settleLpEpochAt(
+        uint256 epochId
+    ) internal {
+        uint256 activationTime = pool.lpEpochStart(epochId);
+        if (block.timestamp < activationTime) {
+            vm.warp(activationTime);
+        }
+        uint256 markPrice = engine.lastMarkPrice();
+        vm.prank(address(router));
+        engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
+        _settleLpEpochForTest();
     }
 
 }

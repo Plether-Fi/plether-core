@@ -16,7 +16,8 @@ The perps system is built around a few core security choices:
 - bounded trader payouts through a capped market price,
 - delayed-order execution through a keeper-run FIFO router,
 - strict separation between trader custody, router intent records, engine accounting, and LP capital,
-- conservative LP accounting that refuses to count unrealized trader losses as present assets,
+- exact symmetric LP NAV that counts only account-capped collectible marked losses as receivables and never as
+  withdrawal cash before collection,
 - fail-soft terminal settlement through trader claim balances,
 - degraded-mode containment if a terminal transition reveals insolvency.
 
@@ -38,6 +39,10 @@ Engine risk controls live in `CfdEngineAdmin`, and router risk controls live in 
 
 `CfdEngine` sidecars (`CfdEnginePlanner`, `CfdEngineSettlementSidecar`, `CfdEngineAdmin`) are now deployed separately and wired once via `setDependencies(...)`. That wiring is owner-only and one-time. The engine rejects a settlement sidecar or admin bound to another engine and rejects a no-code admin address; audited `CfdEngineAdmin` bytecode remains a deployment trust assumption.
 
+`TerminalNavBookV2` is also deployed separately and wired once through `setTerminalNavBook(...)` before any exposure.
+The Engine accepts only an empty book immutably bound to itself with matching `CAP_PRICE` and the canonical `1e20`
+size quantum.
+
 | Parameter | Contract | Guard |
 |-----------|----------|-------|
 | `EngineRiskConfig` (`riskParams`, `executionFeeBps`, `frozenCloseSpreadBps`) | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 48-hour timelock |
@@ -45,7 +50,8 @@ Engine risk controls live in `CfdEngineAdmin`, and router risk controls live in 
 | `EngineFreshnessConfig` (`fadMaxStaleness`, `engineMarkStalenessLimit`) | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 48-hour timelock |
 | `seniorRateBps` | `HousePool` | `onlyOwner`, 48-hour timelock |
 | `markStalenessLimit` | `HousePool` | `onlyOwner`, 48-hour timelock |
-| `RouterConfig` (`maxOrderAge`, staleness limits, Pyth confidence ratio, historical settlement window, component publish-time skew, adverse confidence multiplier, bounty limits) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
+| `maxSeniorExposureUsdc`, `maxSeniorShareBps` | `HousePool` | `onlyOwner`, 48-hour timelock; finalized values must be finite and below 100%, respectively |
+| `RouterConfig` (`maxOrderAge`, staleness limits, basket confidence ratio, historical settlement window, component publish-time skew, adverse confidence multiplier, bounty limits) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
 | `OracleConfig` (`pletherOracle`) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
 
 The deployed `frozenCloseSpreadBps` default is `50` bps (0.50%). Both construction and timelocked updates reject zero and values above the `1,000` bps (10%) hard cap.
@@ -56,6 +62,7 @@ These are one-time configuration setters rather than mutable governance knobs:
 
 | Setter | Contract |
 |--------|----------|
+| `setTerminalNavBook(address)` | `CfdEngine` |
 | `setPool(address)` | `CfdEngine` |
 | `setOrderRouter(address)` | `CfdEngine` |
 | `setEngine(address)` | `MarginClearinghouse` |
@@ -85,9 +92,23 @@ The owner cannot:
 Several perps contracts intentionally expose narrow but high-authority capability surfaces.
 
 - `OrderRouter` is the external execution boundary and can reach engine order/liquidation paths plus a narrow clearinghouse reservation surface. Router-sourced protocol value must credit the treasury account through clearinghouse accounting rather than calling `HousePool` inflow hooks.
+- `PositionProtectionBook` is immutable-bound to the Router and Engine. In addition to retained protection state, its
+  runtime carries the Router's stateless mark-refresh/trigger-oracle, single-liquidation, liquidation-batch, and
+  LP-epoch orchestration to preserve EIP-170 headroom. The Router is the only valid execution context for those helpers:
+  direct Book calls revert. Under `delegatecall`, the helpers read integrations through external Router getters, never
+  access Router storage by assumed layout, and change Router-owned state only through authorized external self/item
+  calls. The Router remains `address(this)` and the direct-event address, Engine/HousePool see the Router as caller, and
+  the Router entrypoint's `msg.sender` is preserved; the Book-trigger route authenticates keeper/refund identity through
+  its trailing payload.
 - `CfdEngineSettlementSidecar` is engine-gated, but any external function added there is automatically security-critical because it can reach engine-owned settlement hooks.
+- `TerminalNavBookV2` accepts curve mutations only from its immutable-bound Engine. It has no owner, repair, or
+  migration path. Engine wiring validates the bound Engine, price cap, size quantum, and completely empty book before
+  accepting it once.
 - `MarginClearinghouse` broad operator paths trust only `engine` and `settlementSidecar` to move trader custody across settlement and seizure buckets; router access is limited to reservation lifecycle paths needed for queued orders.
-- `MarginClearinghouse.reserveStaleCloseExecutionBountyFromSettlement(...)` and `reserveStaleCloseExecutionBountyFromPositionMargin(...)` are intentionally narrow stale close-commit escape hatches; they must remain reserved for risk-reducing stale fallback flows that have already been bounded by router/engine policy.
+- Close-execution bounty paths, including stale fallback, lock eligible free settlement as action reserve. They must not
+  reclassify PnL pledge without an atomic terminal-curve resynchronization and a new security review.
+- Negative lifetime VPI is protected by a dedicated sub-balance of action reserve. Generic action collection must not
+  cross the combined floor of protected execution bounties plus `max(-vpiAccrued, 0)`.
 - `HousePool.payOut(...)` and `HousePool.recordProtocolInflow(...)` trust only `engine` and `settlementSidecar`; unsolicited raw pool cash must be admitted through owner-governed excess accounting, and protocol fees stay in treasury clearinghouse margin.
 
 Practical rule:
@@ -105,8 +126,11 @@ These are the highest-value properties an auditor should expect to hold.
 | Bounded entry solvency | Risk-increasing opens require `pool.totalAssets() >= max(globalBullMaxProfit, globalBearMaxProfit)` using canonical physical backing rather than raw token balance |
 | Degraded containment | If a close or liquidation reveals post-op insolvency, `degradedMode` latches and blocks further risk expansion while still permitting protective transitions |
 | Bounded payout | No trader payout can exceed the capped market payoff implied by `CAP_PRICE` |
-| Withdrawal firewall | LP withdrawals are limited to conservative free cash after accounting for bounded liability and trader claim liabilities |
+| Withdrawal firewall | Synchronized LP redemption funding is limited to conservative free cash after accounting for bounded liability and trader claim liabilities |
+| Matured Senior priority | A settlement cannot fund Junior redemptions while any eligible matured Senior demand remains unaccounted for |
+| Funded-claim backing | Every claimable LP asset is held one-for-one in vault escrow and cannot be reused by `HousePool` |
 | Trader claim liabilities are senior | Trader claim balance remains a senior claim on pool liquidity until serviced; keeper bounties are not pool liabilities |
+| Explicit terminal deficit | Signed terminal liabilities above physical assets and collectible terminal receivables are persisted on fresh reconcile and block LP entry |
 
 ### Position and engine accounting
 
@@ -118,6 +142,8 @@ These are the highest-value properties an auditor should expect to hold.
 | Total margin conservation | `sides[BULL].totalMargin + sides[BEAR].totalMargin == sum(pos.margin)` across all live positions |
 | Preview/live parity | Close and liquidation preview math should match live execution semantics |
 | Frozen-spread conservation | For a valid frozen voluntary close, assessed spread equals LP-paid spread plus terminally waived spread; none is credited to protocol treasury |
+| Exact-lot basis | Every live position uses whole 100-token lots and exact entry cost is conserved across increases and partial closes |
+| Terminal-book parity | Each account curve matches its live side, lots, exact entry cost, and `pnlPledge + same-account claim` cap after every successful mutation |
 
 ### Router and reservation accounting
 
@@ -126,7 +152,11 @@ These are the highest-value properties an auditor should expect to hold.
 | Global FIFO | Execution always starts from the current global queue head |
 | Binding intents | Users cannot cancel queued orders once committed |
 | Bounty conservation | Clearinghouse-reserved execution bounty value is conserved across order lifecycle transitions until distributed or absorbed, and is excluded from close-loss reachability while reserved |
+| VPI reserve conservation | Every live negative lifetime-VPI balance has equal dedicated action-reserve backing; only an exact clawback, equivalent withholding, or lower surviving target may consume or release it |
 | Reservation source of truth | Clearinghouse reservation records remain the source of truth for committed order margin |
+| Protection post-lock safety | Existing-position protection uses exact entry basis and only PnL pledge plus same-account claim for price equity; free/action reserves are excluded, uncovered carry and underfunded negative VPI fail closed, and equality at the stricter initial/active threshold is rejected |
+| Delegated Router isolation | Book-carried keeper orchestration is delegate-only, storage-layout-independent, and cannot directly write Router storage; the Router remains `address(this)`, downstream caller, and direct-event address |
+| Earliest lot gate | Router commit rejects non-100-token-multiple opens and closes before reserving value or assigning an order id |
 | Economic close granularity | Partial close intents must meet the engine notional floor; only full residual closes may be smaller |
 | Bounded cleanup | Queue cleanup, liquidation cleanup, and close-intent position projection are account-local and intentionally bounded |
 
@@ -135,9 +165,14 @@ These are the highest-value properties an auditor should expect to hold.
 | Invariant | Description |
 |-----------|-------------|
 | Canonical asset boundary | Pool depth is based on `min(rawAssets, accountedAssets)`, not raw token balance alone |
-| Conservative MtM | Unrealized trader losses do not count as instantly withdrawable LP assets |
+| Symmetric terminal NAV | LP entry and exit pricing use the same signed exact terminal price delta and waterfall snapshot |
+| Receivable/cash separation | Positive marked receivables are capped by account pledge/claim value and never increase physical redemption funding before collection |
 | High-water-mark protection | Senior impairment must be restored before junior extracts surplus |
-| Shared accounting inputs | Reconcile, withdrawal limits, and LP status views consume the same canonical engine snapshots |
+| Bounded new senior exposure | Counted admission exposure (`E + R`) cannot exceed the smaller absolute and senior-share headrooms |
+| Junior covenant | Junior redemption funding cannot leave active protected exposure (`E`, excluding `R`) above the configured share of Senior-plus-Junior claimant capital |
+| Shared cutoff routing | Both tranches and both request directions use the same five-minute cutoff; exact equality rolls to the later epoch without a cutoff-specific revert |
+| Locked-epoch additions | For boundary `b`, no request at or after `b - 300` may increase locked epoch `e + 1`, including after it matures; cancellation may still shrink it, while requests after `b` may join the new imminent numeric epoch `e + 2` until its own cutoff |
+| Shared accounting inputs | Reconcile, synchronized redemption funding, deposit finalization, and LP status views consume the same canonical engine snapshot |
 
 ### Coverage map
 
@@ -152,7 +187,10 @@ The tables above describe the intended safety properties. The suites below are t
 | Single direction / side symmetry / total-margin conservation | `packages/perps/test/perps/PerpInvariant.t.sol`, `packages/perps/test/perps/invariant/PerpMultiAccountInvariant.t.sol` |
 | Global FIFO / binding intents / bounded cleanup | `packages/perps/test/perps/OrderRouter.t.sol`, `packages/perps/test/perps/invariant/PerpAccountingInvariant.t.sol` |
 | Bounty conservation / reservation source of truth | `packages/perps/test/perps/OrderRouter.t.sol`, `packages/perps/test/perps/invariant/PerpAccountingInvariant.t.sol`, `packages/perps/test/perps/invariant/PerpEconomicConservationInvariant.t.sol` |
-| Canonical asset boundary / conservative MtM / high-water-mark protection | `packages/perps/test/perps/PerpInvariant.t.sol`, `packages/perps/test/perps/HousePool.t.sol`, `packages/perps/test/perps/invariant/PerpHousePoolLifecycleInvariant.t.sol` |
+| Position-protection lifecycle / post-lock safety | `packages/perps/test/perps/PositionProtection.t.sol`, `packages/perps/test/perps/PositionProtectionLiquidationBatch.t.sol` |
+| Delegated mark refresh, single/batch liquidation, and LP-epoch isolation | `packages/perps/test/perps/OrderRouter.t.sol`, `packages/perps/test/perps/PositionProtection.t.sol`, `packages/perps/test/perps/Liquidation.t.sol`, `packages/perps/test/perps/LiquidationBatch.t.sol`, `packages/perps/test/perps/AtomicLpEpochSettlement.t.sol` |
+| Canonical asset boundary / symmetric terminal NAV / high-water-mark protection | `packages/perps/test/perps/PerpInvariant.t.sol`, `packages/perps/test/perps/HousePool.t.sol`, `packages/perps/test/perps/invariant/PerpHousePoolLifecycleInvariant.t.sol`, `packages/perps/test/perps/TerminalNavBookV2.t.sol` |
+| Shared request cutoff / locked-epoch additions | `packages/perps/test/perps/LpRequestCutoff.t.sol`, `packages/perps/test/perps/invariant/GovernedSeniorCapacityInvariant.t.sol` |
 | Oracle freshness / FAD boundaries / ETH refund custody | `packages/perps/test/perps/OrderRouter.t.sol`, `packages/perps/test/perps/invariant/PerpOracleBoundaryInvariant.t.sol`, `packages/perps/test/perps/invariant/PerpOraclePathInvariant.t.sol` |
 | Fee custody / protocol accounting snapshots | `packages/perps/test/perps/invariant/PerpFeeFlowInvariant.t.sol`, `packages/perps/test/perps/PerpsReadParity.t.sol` |
 
@@ -168,7 +206,7 @@ Mitigations:
 - distinct staleness thresholds for order execution, liquidation, engine-side guards, and HousePool freshness,
 - shared normalized basket-price construction across execution paths,
 - timelocked rotation of the router's `PletherOracle` address if the Pyth endpoint or basket-feed set must be replaced,
-- conservative basket confidence propagation and side-adverse pricing for execution, equity checks, and liquidation, except that oracle-frozen voluntary closes replace the adverse price shift with the fixed frozen-close spread,
+- conservative weighted basket confidence propagation, a timelocked aggregate pre-cap confidence limit, and side-adverse pricing for execution, equity checks, and liquidation, except that oracle-frozen voluntary closes replace the adverse price shift with the fixed frozen-close spread,
 - component publish-time skew limits so a basket cannot mix fresh and stale legs,
 - frozen-oracle regime for close liveness during genuine market closure.
 
@@ -178,6 +216,7 @@ Risks:
 - unavailable historical update data can delay live order execution until a keeper supplies the commit-window tick or the order expires,
 - frozen-market execution is intentionally liveness-first for risk reduction,
 - exponent normalization truncates on scale-down,
+- the basket-only confidence gate deliberately favors liveness over an individual-feed hard ceiling: a low-weight component with a wide confidence interval can pass when its weighted contribution keeps aggregate basket confidence within the configured limit,
 - all live execution still depends on external oracle availability.
 
 ### USDC
@@ -218,6 +257,20 @@ Keepers are permissionless executors.
 - They receive clearinghouse-reserved execution bounties or liquidation bounties depending on the path.
 - They are not trusted with user intent beyond what the delayed-order model reveals.
 
+### Position-protection and Router-logic Book
+
+The Book has two deliberately separate roles. Direct calls own the retained OCO lifecycle and use only narrow
+clearinghouse/Router capabilities. Router `delegatecall` uses the same immutable runtime only as a stateless bytecode
+carrier for mark refresh/trigger-oracle resolution, single and batch liquidation, and LP-epoch settlement. The
+delegated functions reject direct calls and must not read or write Router storage slots by assumed layout.
+
+When existing-position protection locks its trigger and linked-close bounties, admission is checked after the lock.
+The Book calls the Engine-configured planner's canonical `isExactPriceRiskLiquidatable(...)` predicate rather than
+duplicating it. Inputs use `positionEntryCostUsdcAtoms`; price collateral is only `position.margin` (the PnL pledge) plus
+that account's trader claim. Free settlement and generic action, order, liquidation, VPI, and protection reserves cannot
+rescue the test. Nonzero uncovered carry or a VPI reserve below `max(-vpiAccrued, 0)` rejects independently, and price
+equity must be strictly greater than `max(initMargin, active maintenance/FAD margin)`.
+
 ### Engine and router vs clearinghouse
 
 `MarginClearinghouse` grants broad operator authority only to the configured engine and settlement module, while the router address sourced from the engine boundary can reach only narrow reservation lifecycle paths.
@@ -251,7 +304,8 @@ Security properties:
 - live-market execution uses Pyth's unique historical parse over `(commitTime, commitTime + orderSettlementWindow]`, capped at `block.timestamp`, so settlement is bound to the first post-commit tick rather than the keeper's reveal-time tick,
 - the unique historical parse rejects skipped ticks because the parsed update must prove its previous publish time is no later than the order's `commitTime`,
 - batch execution may reuse a parsed historical basket only for later FIFO orders whose `commitTime` is strictly before the cached tick and falls within its proven coverage,
-- basket confidence is included in live/FAD execution and all liquidation prices instead of being treated only as metadata; oracle-frozen voluntary closes retain confidence-width validation but replace the adverse price shift with the fixed frozen-close spread,
+- the neutral pre-cap basket is accepted only when `basketConfidence * 10_000 <= basketPrice * basketMaxConfidenceRatioBps`; equality passes, each weighted component contribution is floored before summation, and no independent component-confidence ceiling applies,
+- aggregate basket confidence is included in live/FAD execution and all liquidation prices instead of being treated only as metadata; oracle-frozen voluntary closes retain aggregate confidence-width validation but replace the adverse price shift with the fixed frozen-close spread,
 - FIFO execution prevents later orders from bypassing earlier ones,
 - partial-close size floors prevent flat-bounty dust closes from occupying global FIFO slots,
 - binding order semantics prevent traders from turning queued intents into free options.
@@ -263,7 +317,7 @@ Current policy is intentionally simple:
 - slippage-invalid orders fail terminally,
 - expired orders fail terminally,
 - typed engine failures route bounty according to semantic failure category,
-- terminal-invalid closes pay the keeper rather than refunding potentially margin-backed reservation to the trader wallet,
+- terminal-invalid closes pay the keeper from the already locked action reserve rather than refunding it to the trader wallet,
 - open-order refunds and keeper payouts credit clearinghouse settlement rather than sending direct wallet USDC transfers,
 - the router does not maintain a retry or requeue lane.
 
@@ -277,34 +331,78 @@ The protocol distinguishes two states around market closure:
 LP actions intentionally stay live across that split:
 
 - `FAD` alone keeps ordinary LP pricing,
-- `oracle frozen` keeps tranche withdrawals live and keeps immediate tranche deposits live only when no trader positions are open; pending deposit epochs remain the ordinary entry path. Stale-window LP actions charge fixed surcharges (`25 bps` senior, `75 bps` junior) that remain in the same tranche for incumbent LPs.
+- `oracle frozen` keeps eligible synchronized redemption settlement live. Ordinary entry and exit remain
+  asynchronous: a request does not lock a price, rate, or fee. Funded redemptions apply the then-active surcharge
+  (`25 bps` Senior, `75 bps` Junior), retain it in the same tranche for incumbents, and place only net assets into
+  claim escrow. Deposit activation is deferred until the live symmetric-NAV entry gate passes; withdrawal funding is
+  not blocked merely because entries are deferred.
 
 Voluntary close pricing follows the same regime boundary but is separate from LP entry/exit fees:
 
 - live and FAD-only close/reduce execution uses normal signed VPI with the lifetime rebate clamp, retains Pyth adverse-confidence pricing, and assesses no frozen-close spread,
 - `oracle frozen` keeps that same signed VPI treatment, waives the Pyth adverse-confidence price shift for voluntary closes, and assesses a fixed spread on reduced notional instead,
 - the spread is LP-owned and never protocol-treasury revenue,
-- partial closes must settle the entire obligation, while an uncollectible spread portion on a terminal full close is waived rather than recorded as bad debt,
+- partial closes must settle required separate charges, while price loss beyond the account's collectible cap is a
+  diagnostic write-off; an uncollectible spread portion on a terminal full close is waived without creating a
+  protocol liability or terminal deficit,
 - liquidation pricing and settlement retain adverse-confidence pricing and do not assess the spread.
 
 This is a deliberate trade-off: preserve close and liquidation liveness during real closures without weakening live-market MEV protections.
 
 ## Accounting And Solvency Security
 
-### Conservative LP accounting
+### Exact symmetric LP NAV
 
-The protocol does not treat unrealized trader losses as immediately realizable LP assets.
+LP entry and exit pricing consume the same authenticated terminal snapshot. The Engine stores whole 100-token lots
+and exact entry cost, while `TerminalNavBookV2` aggregates each account's LP-side marked price PnL. A positive LP
+receivable is capped by only that account's `pnlPledgeUsdc + traderClaimBalanceUsdc`; liquidation, order, and action
+reserves cannot inflate it. A negative value is the exact marked price amount LPs owe the trader within the bounded
+market.
 
-That means:
+Security consequences:
 
-- LP share pricing may temporarily undercount value,
-- junior principal can dip before later realized recovery arrives,
-- same-side loser debt cannot net down live winner liability before settlement,
-- but the protocol avoids phantom-profit withdrawal bugs.
+- new LPs receive the same marked-liability discount borne by existing LPs and do not inherit old trader obligations
+  at a higher deposit NAV,
+- losing-trader value above the account-specific collectible cap is excluded, preventing phantom receivables,
+- marked receivables affect ownership pricing but remain unavailable to fund redemptions until physically collected,
+- carry, VPI, fees, frozen spread, and liquidation charges stay outside the pre-close price book,
+- realized partial-close price gains either replenish the surviving position's PnL pledge or become a nettable
+  same-account trader claim; full-close price gains are free-settlement payouts or trader claims,
+- gross negative lifetime VPI is backed by a dedicated nonwithdrawable reserve equal to `max(-vpiAccrued, 0)`; together
+  with protected execution bounties it forms the action-reserve floor that generic charges cannot consume,
+- opens/increases must fully fund any higher VPI target. Close and liquidation paths consume the reserve for realized
+  clawback and leave the exact residual target protected; only genuinely excess or equivalently replaced value is
+  released,
+- new close-time action rebates use only pool cash free after protecting existing trader claims. Unfunded value is
+  waived rather than claim-backed, and neither anticipated VPI nor its reserve inflates terminal `K` or symmetric NAV,
+- a current terminal deficit blocks deposit activation,
+- the Engine fails closed if the terminal book is absent or inconsistent, an open-position mark is unavailable, or an
+  account mutation is in progress. `HousePool` independently rejects or defers LP actions under its configured mark-age
+  and oracle-frozen policy.
 
-Deposit pricing uses an unrealized-MtM-neutral NAV instead of the conservative withdrawal NAV. Immediate active-share deposits are disabled while any trader position is open, while ordinary LP entry uses pending deposit epochs: assets are funded up front, cancellation is allowed only before the activation epoch begins, and shares are minted only after permissionless finalization fixes the batch price. This avoids letting attackers mint new LP shares at a discount created only by conservative phantom liabilities, and avoids the opposite toxic-flow case where incoming LPs buy immediately before an under-collateralized trader loss is realized. Realized losses still impair deposit pricing.
+Ordinary LP entry remains asynchronous: assets are funded into request escrow, a complete pending deposit is
+cancellable before maturity, and post-maturity cancellation remains available only under the documented
+epoch rejection, projected terminal-wipe, Senior-impairment, or Senior-reservation escape conditions. Shares are
+minted only after synchronized `HousePool` settlement fixes the batch price. ERC-4626 `deposit` and `mint` only claim
+already activated shares. During a frozen entry state the request remains deferred; redemptions can still use the
+separate conservative cash-reserve path.
 
-Accepted residual risk: a matured, unfinalized deposit epoch can be finalized before a later transaction that realizes a large trader loss into pool cash. The depositor's assets were already committed through the activation delay and cannot be cancelled after activation in normal conditions, but finalization timing is still permissionless and can be priority-gas ordered ahead of a liquidation or close. The deployed protocol relies on permissionless keepers/finalizers to promptly finalize matured epochs; this is a fixed pre-deployment design trade-off, not a governance-adjustable safety valve.
+Atomic Engine-to-book synchronization is a critical trust boundary. Any path that changes position lots, exact entry
+cost, side, PnL pledge, or same-account claim must finish by installing the matching curve or removing it. The
+optimistic old-curve hash and monotonic book version protect against stale mutation plans; they are not a substitute
+for invariant and differential testing of every settlement path.
+
+A settlement pass that advances no queue item reverts, rolling back both waterfall reconciliation and engine carry
+checkpoints. This prevents per-block no-op checkpoint grief. Senior coupon arithmetic still floors independently at
+each settlement that advances real epoch work, so sub-micro-USDC rounding remains execution-frequency dependent; the
+hourly aggregation of requests bounds that residual rather than making coupon accrual mathematically remainder-exact.
+
+Async allocation uses per-controller floor rounding against immutable epoch totals. Splitting a request among more
+controllers cannot increase aggregate entitlement. Once all controllers reach terminal state, deposit-share dust is
+burned; funded-redemption share dust is booked in the epoch's claimed-share counter; funded asset dust returns raw to
+`HousePool` without restoring `accountedAssets` and therefore becomes excess; and refundable-share dust moves to the
+permanent seed account without resetting its cooldown. These terminal sweeps prevent stranded escrow without allowing
+the final caller to capture another controller's rounding remainder.
 
 This is an explicit design choice, not an accounting accident.
 
@@ -318,6 +416,9 @@ The perps system uses LP-capital carry instead of a side-to-side rate mechanism.
 - basis-change fallback: if physical collection is unsafe, elapsed carry is checkpointed into `unsettledCarryUsdc`
 - realization points: open, close, add margin, pool-asset changes, risk-parameter changes, and clearinghouse deposit/withdraw before the carry base/rate denominator changes; deposits may collect realized carry from post-deposit settlement in the same transaction, while withdraws realize carry before reducing settlement
 - destination: realized carry becomes LP trading revenue
+- health isolation: project carry against eligible free settlement first. Fully funded carry does not reduce exact
+  price-risk health; any uncovered remainder blocks withdrawal and independently makes the account liquidatable.
+  PnL pledge plus same-account claim remains exclusive to exact price risk and cannot offset residual carry
 
 Close and liquidation security depends on using the planner's canonical carry-adjusted settlement outputs directly in the live executor rather than recomputing a second carry-blind kernel.
 
@@ -330,16 +431,25 @@ Terminal transitions are fail-soft when the HousePool lacks immediate cash.
 - profitable closes can leave senior trader claim balances,
 - trader claim balances are beneficiary-balance based rather than FIFO queue based,
 - they remain part of reserve and solvency accounting until paid,
-- terminal full-close settlement may waive an uncollectible frozen-close spread, but that waived amount is neither a trader claim nor bad debt.
+- terminal full-close settlement may waive an uncollectible frozen-close spread, but that waived amount is neither a trader claim nor a protocol liability.
 
 This preserves risk reduction and liquidation liveness under temporary cash shortfall.
 
 ### Explicit netting boundary
 
-Same-account trader claim balance is not generic collateral.
+Same-account trader claim balance is price-risk backing, not generic cash or action collateral.
 
-- generic account-health and withdraw checks use physically reachable clearinghouse collateral,
-- terminal settlement paths may still explicitly net same-account trader claim balance,
+- open/increase, trader-withdraw, close, and liquidation health use the exact same-account price-risk cap:
+  `pnlPledgeUsdc + traderClaimBalanceUsdc`; VPI never adds to or subtracts from this price-risk equity,
+- the separately funded VPI reserve backs only that account's typed VPI obligation: overfunding never adds price
+  collateral, while backing below `max(-vpiAccrued, 0)` independently blocks withdrawal and makes the account
+  liquidatable,
+- the terminal book includes the claim in that same account's collectible price-loss cap,
+- terminal settlement paths may explicitly net the same-account claim once against that account's exact price loss,
+- the claim is not withdrawable cash and cannot fund carry, VPI, execution fees, frozen spread, liquidation charges,
+  order margin, or other action obligations,
+- when a claim is physically paid while its beneficiary has a live position, the credit goes directly to PnL pledge
+  and the curve cap is resynchronized; crediting free settlement would allow withdrawal and double use,
 - this avoids accidentally reusing a pool IOU as immediately spendable account cash.
 
 ## HousePool And LP-Specific Risks
@@ -359,28 +469,91 @@ Security purpose:
 - raw-balance shortfalls reduce effective backing immediately,
 - all LP accounting works from a controlled economic boundary.
 
-### Seed lifecycle gate
+### Seed and senior-capacity lifecycle gate
 
-The protocol blocks normal live operation until both tranche seeds exist and trading is explicitly activated.
+The protocol blocks normal live operation until governance finalizes a finite absolute senior limit and a senior-share
+limit below 100%, both tranche seeds exist within those limits, and trading is explicitly activated.
 
-This prevents partially initialized live state and ambiguous ownership of early revenue flows.
+This prevents partially initialized or uncapped live state and ambiguous ownership of early revenue flows.
+
+### LP request cutoff and monitoring boundary
+
+For `e = floor(block.timestamp / 3,600)` and next round-hour boundary `b = (e + 1) * 3,600`, every Senior deposit,
+Junior deposit, Senior redemption, and Junior redemption targets `e + 1` before `b - 300` and `e + 2` at or after
+`b - 300`. Equality deliberately belongs to the later epoch. The cutoff's incremental effect on an otherwise-valid
+request is a one-epoch delay, not asset loss or a new revert; ordinary request gates remain active. Sequencer
+inclusion time is authoritative, so a pending transaction may land on either side.
+
+This creates a five-minute **maximum-membership** quiet period for the epoch about to mature. It is not an immutable
+settlement snapshot:
+
+- eligible cancellations can reduce deposit or redemption totals in the locked epoch,
+- trading, closes, liquidations, claims, carry, and pool accounting can change NAV,
+- governance configuration may change if an already-matured proposal is finalized,
+- oracle state and confidence can change, and
+- cancellation in one tranche or direction can change capacity available to later settlement phases.
+
+Monitoring must therefore simulate current state and treat cutoff-time request totals as upper bounds. In particular,
+the conservative case assumes all redemptions remain and no helpful deposits activate. Cancelling Senior redemptions
+may expose more Junior funding, while cancelling Junior deposits may prevent a Senior deposit from fitting. Indexing,
+alerting, sequencer publication, and transaction inclusion also consume part of the nominal five minutes, so the
+operational reaction window is shorter. Exact settlement binding belongs to a separate batch/config-digest design;
+this cutoff adds no signature, challenge period, settlement hold, or trading freeze.
 
 ### Freshness-gated LP actions
 
 When marks are stale and freshness is required:
 
-- withdrawal and deposit-facing LP paths may be blocked,
-- mark-dependent reconcile math is skipped,
-- already-funded pending buckets may still settle,
+- live open-position epoch settlement is available only through `OrderRouter.settleLpEpoch(bytes[])`, which validates a
+  `PoolReconcile` Pyth basket and installs the exact Engine mark before the Router-only HousePool callback,
+- the basket's earliest component publish time must be at or after the current round-hour boundary, so a still-fresh
+  pre-boundary tick cannot price a newly matured batch,
+- stale, low-confidence, future, divergent, or out-of-order data reverts the whole call; already-funded claims remain
+  live and pending requests remain queued,
+- no pending epoch bucket advances on a rejected live call; only claims funded by an earlier successful settlement
+  remain independently callable,
 - fresh oracle publication is the recovery path.
 
-Exception: once the protocol enters `oracle frozen`, tranche withdrawals remain live under fixed stale-price surcharges instead of hard-blocking immediately. Immediate active-share deposits still require zero open trader positions.
+Exception: once the protocol enters `oracle frozen`, eligible synchronized settlement remains live under fixed
+stale-price surcharges instead of hard-blocking immediately. Deposit activation keeps the ordinary lifecycle,
+bootstrap, and Senior-impairment gates. Claims never reprice or reassess the fee fixed when a request was funded.
+Direct cached-mark settlement is otherwise limited to the no-open-position case, where NAV is mark independent.
+
+Pool pause blocks new deposit requests and deposit activation, but it does not block redemption requests or reconciled
+funding of already-matured redemptions. The settlement result marks entries deferred, and already-funded claims remain
+live.
 
 ### Senior coupon model
 
 Senior coupon is funded from existing junior NAV and capped by available junior principal.
 
 This removes unpaid senior-coupon debt queues while making the cost of the fixed senior product explicit for junior LPs.
+
+### Senior exposure limits and passive overage
+
+Active protected senior exposure is `E = max(projected senior principal, projected senior high-water mark)`. Counted
+admission exposure is `C = E + R`, where `R` is the gross USDC reserved in unfinalized senior deposit epochs. The
+absolute and share admission tests use `C`, while the Junior redemption-funding covenant deliberately uses active `E`
+only.
+Governance sets both an absolute USDC limit and a maximum share of senior-plus-junior claimant capital. The high-water
+term prevents an impaired principal balance from falsely reopening capacity while its restoration entitlement remains.
+
+Senior deposit reservations are provisional. They consume quoted headroom when requested, but the whole outstanding
+reservation book is checked again at finalization. If a timelocked cap reduction or later accounting change makes the
+book invalid, finalization remains blocked and post-maturity cancellation is unlocked so depositors can recover the
+escrowed USDC. Junior redemption funding does not lock against `R`, so a permitted fill can also invalidate the
+provisional book and make it refundable. Integrators must not present a request-time quote as guaranteed finalization.
+
+The covenant also limits Junior redemption funding; using active `E` and explicitly excluding pending reservations,
+the pool retains enough projected Junior principal that the configured Senior share still holds after the fill.
+This is an LP-liquidity restriction, not an extra source of cash or a guarantee that losses cannot impair senior.
+
+Coupon, loss allocation, revenue restoration, and privileged claimant recapitalization remain higher-priority
+accounting rules. They may passively move the pool above a configured limit, but the protocol does not haircut active
+senior shares, suppress coupon already payable from junior, or misroute loss to force compliance. Instead, new senior
+capacity closes until funded Senior redemptions, Junior deposits, or subsequent revenue cure the state. The engine-authorized
+`recordClaimantInflow(..., Recapitalization, ...)` path is deliberately exempt when restoring protected senior claims;
+it cannot mint new senior LP shares, and excess value continues through the canonical claimant/unassigned routing.
 
 ## Liquidation Security
 
@@ -396,16 +569,27 @@ Trade-off:
 ### Reachability and bounty bounds
 
 - liquidation accounting is constrained by actually reachable collateral,
-- keeper bounty is proportional with a floor, capped by reachable value, and may explicitly subsidize low-equity liquidations,
+- the proportional liquidation charge has a floor, is capped by reachable value, and may explicitly subsidize
+  low-equity liquidations,
+- the collected charge is conserved across a bounded, timelocked allocation where
+  `keeperShareBps + protocolShareBps <= 10_000`: the keeper and protocol treasury each receive their independently
+  rounded-down configured shares as clearinghouse credit, and LPs receive the exact remainder, including rounding dust,
+  as claimant revenue,
 - residual trader value is preserved when positive,
-- same-account trader claim balance does not support liquidation reachability and is only netted once against terminal shortfall,
-- remaining deficit becomes bad debt socialized to LP capital.
+- same-account trader claim balance is not generic liquidation collateral, but it is included in that account's
+  terminal collectible cap and netted once against exact price loss,
+- uncollateralized position price loss above the PnL cap is reported as a diagnostic write-off and is not socialized
+  as LP debt or terminal deficit.
 
 ### Queue interaction during liquidation
 
 Liquidation performs bounded account-local cleanup of that account's pending orders.
 
 This preserves terminal liveness without requiring an unbounded global queue scan.
+
+Batch liquidation validates and pays for one shared Pyth snapshot, updates the neutral mark once, and isolates each
+account in its own rollback frame. Solvent and positionless accounts are skipped without losing prior successes, while
+the returned cursor leaves any low-gas or empty-revert item unattempted so a keeper can resume safely.
 
 ## Known Limitations
 
@@ -414,8 +598,12 @@ This preserves terminal liveness without requiring an unbounded global queue sca
 - frozen-oracle windows prioritize close liveness over live-market-style freshness guarantees,
 - oracle-frozen voluntary close/reduce execution applies normal signed VPI plus a fixed LP-owned notional spread; normal live and FAD-only closes apply signed VPI without that spread,
 - a fixed spread deliberately does not increase with mark staleness inside the permitted frozen window,
-- full-close liveness takes priority over collecting an otherwise uncollectible spread, while partial closes remain all-or-nothing settlement paths,
-- DST and holiday boundaries can create short safe liveness gaps around market reopen,
+- full-close liveness takes priority over collecting an otherwise uncollectible spread; partial closes retain
+  all-or-nothing rules for required charges but do not fail solely on uncollateralized price loss above the PnL cap,
+- the recurring FX calendar follows New York daylight-saving transitions on-chain; unscheduled provider closures and
+  holiday hours still require governance-configured UTC-day overrides,
+- the current post-2007 US daylight-saving rule is compiled into the planner; a future legal or provider schedule
+  change at an intraday boundary requires a coordinated engine/planner/oracle deployment,
 - execution remains dependent on fresh keeper infrastructure and oracle publication outside frozen windows.
 
 ### Router and keeper limitations
@@ -423,18 +611,35 @@ This preserves terminal liveness without requiring an unbounded global queue sca
 - users cannot manually cancel queued intents,
 - bounded cleanup means heavily expired queues may take multiple keeper calls to clear,
 - per-account pending-order caps bound griefing and liquidation cleanup now stays on bounded account-local order traversal,
+- the Router and immutable Book are one non-upgradeable reviewed bytecode unit. Reusing the Book as a delegate-only
+  code carrier saves Router runtime bytes but increases review coupling: a change to protection code or any delegated
+  keeper path requires rechecking direct-call rejection, external-getter assumptions, Router caller/event context, and
+  both contracts' EIP-170 sizes. Because Router construction deploys the Book, Book creation code also contributes to
+  Router initcode and must remain safely below EIP-3860,
 - failed orders remain terminal rather than retryable.
 
 ### LP accounting limitations
 
-- conservative MtM can temporarily understate junior value,
-- `oracleFrozen` keeps LP withdrawals live under fixed tranche-local frozen fees rather than a separate stale-action gate; immediate active-share deposits still require zero open trader positions,
+- exact terminal NAV is only as current as its authenticated mark; live open-position epoch settlement requires an
+  atomically validated post-boundary mark, while frozen exits deliberately use the cached stale-window mark,
+- a positive marked receivable is not cash, so share NAV can exceed immediately redeemable liquidity,
+- `TerminalNavBookV2` is intentionally non-upgradeable and has no owner repair path; a book/Engine invariant failure
+  requires containment and a fresh-stack deployment rather than an in-place edit,
+- `oracleFrozen` keeps eligible synchronized LP settlement live under fixed tranche-local frozen fees rather than a
+  separate stale-action gate for exits; redemption funding is allowed to proceed while entry activation is deferred,
+- each bounded live backlog pass pays a Pyth update fee and may use a later valid post-boundary mark than the previous
+  pass; atomicity binds one call, not an arbitrarily large backlog,
 - senior coupon payments are capped by available junior principal,
+- governance can prospectively reduce senior limits below live exposure, closing new senior entry and potentially
+  reducing Junior redemption-funding capacity until the covenant is cured; it cannot force existing Senior capital out,
+- pending senior reservations are not grandfathered against later cap or accounting changes, but become refundable if
+  they no longer fit at finalization,
 - deposit cooldown can be griefed only by economically irrational donation-style top-ups.
 
 ### VPI limitations
 
-- liquidation does not compute a fresh VPI delta, but negative accrued VPI is clawed back into liquidation shortfall,
+- liquidation does not compute a fresh VPI delta, but the gross negative accrued VPI clawback is settled from its
+  dedicated reserve or equivalent withheld trader gain before residual planning,
 - VPI depends on live pool depth,
 - voluntary closes use the same signed VPI curve and lifetime rebate clamp in live, FAD-only, and oracle-frozen regimes,
 - frozen-market stale-price protection is a fixed notional spread that leaves VPI unchanged and replaces, rather than compounds with, the Pyth adverse-confidence price shift for oracle-frozen voluntary closes only,
@@ -470,7 +675,11 @@ This preserves terminal liveness without requiring an unbounded global queue sca
 3. Restart keeper infrastructure.
 4. Expect bounded cleanup rather than instant queue drain.
 
-### Bad debt cascade
+### Explicit terminal-deficit cascade
+
+This runbook concerns actual negative terminal LP equity or trader payout claims that physical cash cannot currently
+service. A terminal price-loss write-off above an account's collectible cap and a waived terminal action remainder
+create neither condition; V2 has no accumulated-debt ledger to clear.
 
 1. Let closes and liquidations continue.
 2. Prevent further risk expansion via degraded mode and, if needed, admin pause.
@@ -486,7 +695,7 @@ The protocol explicitly rejects embedding third-party yield or lending-market ex
 
 - turn bounded solvency into an external liquidity assumption,
 - create crisis-time liquidity mismatch,
-- import external smart-contract and bad-debt contagion,
+- import external smart-contract and credit-loss contagion,
 - weaken confidence in immediate trader payout capacity.
 
 If yield overlays are desired, they should sit above the base protocol as opt-in wrappers rather than inside the core clearing layer.

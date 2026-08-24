@@ -9,7 +9,9 @@ import {HousePool} from "@plether/perps/HousePool.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
+import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
+import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
 import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
@@ -28,7 +30,9 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 5e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -36,7 +40,7 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
         return 1_000_000e6;
     }
 
-    function test_C1_RealizedBadDebtShouldNotBeDoubleCountedInMtM() public {
+    function test_C1_PriceWriteoffShouldNotBeDoubleCountedInExactTerminalNav() public {
         address winner = address(0xAAA1);
         address loser = address(0xBBB1);
         address winnerAccount = winner;
@@ -51,13 +55,23 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(loserAccount, 1e8);
+        assertLt(preview.pnlUsdc, 0, "Setup must realize a trader price loss");
+        uint256 priceLossUsdc = uint256(-preview.pnlUsdc);
+        uint256 collectibleCapUsdc =
+            engineAccountLens.getAccountLedgerSnapshot(loserAccount).terminalPriceCollectibleCapUsdc;
+        assertGt(priceLossUsdc, collectibleCapUsdc, "Setup must contain a diagnostic price-loss writeoff");
+        assertEq(preview.badDebtUsdc, 0, "Written-off price tails must not become protocol debt");
+
         uint256 depth = pool.totalAssets();
         vm.prank(address(router));
         engine.liquidatePosition(loserAccount, 1e8, depth, uint64(block.timestamp), address(this));
 
-        assertGt(engine.accumulatedBadDebtUsdc(), 0, "Setup must realize bad debt");
-
-        assertEq(_poolMtmAdjustment(), 75_000e6, "MtM should use the conservative post-liquidation envelope");
+        assertEq(
+            _poolMtmAdjustment(),
+            50_000e6,
+            "Exact NAV must include only the surviving winner's marked gain, not the written-off price tail"
+        );
     }
 
     function test_H1_MarginOnlyUpdateViaRouterReverts() public {
@@ -115,7 +129,7 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
         vm.startPrank(recapLp);
         usdc.approve(address(seniorVault), type(uint256).max);
         vm.expectRevert(TrancheVault.TrancheVault__TerminallyWiped.selector);
-        seniorVault.deposit(10_000e6, recapLp);
+        seniorVault.requestDeposit(10_000e6, recapLp);
         vm.stopPrank();
     }
 
@@ -147,7 +161,9 @@ contract AuditLatestFindingsFailing_VPI is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 5e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -210,6 +226,8 @@ contract AuditLatestFindingsFailing_MevDrift is BasePerpTest {
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = _deployEngine(_riskParams());
         _syncEngineAdmin();
+        terminalNavBook = new TerminalNavBookV2(address(engine), uint32(CAP_PRICE));
+        engine.setTerminalNavBook(address(terminalNavBook));
         pool = new HousePool(address(usdc), address(engine));
 
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");

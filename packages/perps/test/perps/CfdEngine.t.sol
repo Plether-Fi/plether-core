@@ -15,18 +15,19 @@ import {HousePool} from "@plether/perps/HousePool.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {PerpsPublicLens} from "@plether/perps/PerpsPublicLens.sol";
+import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {AccountLensViewTypes} from "@plether/perps/interfaces/AccountLensViewTypes.sol";
 import {ClaimEngineViewTypes} from "@plether/perps/interfaces/ClaimEngineViewTypes.sol";
 import {HousePoolEngineViewTypes} from "@plether/perps/interfaces/HousePoolEngineViewTypes.sol";
 import {ICfdEngine} from "@plether/perps/interfaces/ICfdEngine.sol";
 import {ICfdEngineAdminHost} from "@plether/perps/interfaces/ICfdEngineAdminHost.sol";
-import {ICfdEngineSettlementHost} from "@plether/perps/interfaces/ICfdEngineSettlementHost.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
+import {ITerminalNavBookV2} from "@plether/perps/interfaces/ITerminalNavBookV2.sol";
 import {PerpsViewTypes} from "@plether/perps/interfaces/PerpsViewTypes.sol";
 import {ProtocolLensViewTypes} from "@plether/perps/interfaces/ProtocolLensViewTypes.sol";
 import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
@@ -36,6 +37,13 @@ import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAc
 import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 import {Test} from "forge-std/Test.sol";
+
+struct VpiRebateExtractionSnapshot {
+    uint256 settlementBeforeOpen;
+    uint256 walletBeforeOpen;
+    uint256 poolAssetsBeforeOpen;
+    uint256 rebateReserveUsdc;
+}
 
 contract LiquidationAccountingLibHarness {
 
@@ -47,10 +55,21 @@ contract LiquidationAccountingLibHarness {
         uint256 maintMarginBps,
         uint256 minBountyUsdc,
         uint256 bountyBps,
+        uint256 keeperShareBps,
+        uint256 protocolShareBps,
         uint256 tokenScale
     ) external pure returns (LiquidationAccountingLib.LiquidationState memory) {
         return LiquidationAccountingLib.buildLiquidationState(
-            size, oraclePrice, reachableCollateralUsdc, equityUsdc, maintMarginBps, minBountyUsdc, bountyBps, tokenScale
+            size,
+            oraclePrice,
+            reachableCollateralUsdc,
+            equityUsdc,
+            maintMarginBps,
+            minBountyUsdc,
+            bountyBps,
+            keeperShareBps,
+            protocolShareBps,
+            tokenScale
         );
     }
 
@@ -58,36 +77,60 @@ contract LiquidationAccountingLibHarness {
 
 contract CfdEnginePlanLibHarness {
 
+    struct OpenWithExistingVpiParams {
+        uint256 settlementBalanceUsdc;
+        uint256 positionMarginUsdc;
+        uint256 currentSize;
+        uint256 currentEntryPrice;
+        int256 vpiAccrued;
+        uint256 sizeDelta;
+        uint256 marginDelta;
+        uint256 price;
+    }
+
     function planLiquidation(
-        uint256 settlementReachableUsdc,
+        uint256 pnlPledgeUsdc,
         uint256 traderClaimBalanceUsdc,
         uint256 size,
         uint256 entryPrice,
         uint256 oraclePrice
     ) external pure returns (CfdEnginePlanTypes.LiquidationDelta memory delta) {
         CfdEnginePlanTypes.RawSnapshot memory snap;
+        uint256 lots = CfdMath.sizeToLots(size);
+        uint256 entryCostUsdcAtoms = lots * entryPrice;
+        uint256 maxProfitUsdc = CfdMath.calculateExactMaxProfit(lots, entryCostUsdcAtoms, CfdTypes.Side.BEAR, 2e8);
         snap.position = CfdTypes.Position({
             size: size,
-            margin: 0,
+            margin: pnlPledgeUsdc,
             entryPrice: entryPrice,
-            maxProfitUsdc: 0,
+            maxProfitUsdc: maxProfitUsdc,
             side: CfdTypes.Side.BEAR,
             lastUpdateTime: 0,
             lastCarryTimestamp: 0,
             vpiAccrued: 0
         });
+        snap.positionEntryCostUsdcAtoms = entryCostUsdcAtoms;
         snap.currentTimestamp = 1;
         snap.lastMarkPrice = oraclePrice;
         snap.lastMarkTime = 1;
+        snap.bearSide.maxProfitUsdc = maxProfitUsdc;
         snap.bearSide.openInterest = size;
+        snap.bearSide.entryNotional = entryCostUsdcAtoms * CfdMath.USDC_TO_TOKEN_SCALE;
+        snap.bearSide.totalMargin = pnlPledgeUsdc;
         snap.poolAssetsUsdc = 1_000_000e6;
         snap.poolCashUsdc = 1;
         snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
-            settlementBalanceUsdc: settlementReachableUsdc,
-            totalLockedMarginUsdc: 0,
-            activePositionMarginUsdc: 0,
+            settlementBalanceUsdc: pnlPledgeUsdc,
+            totalLockedMarginUsdc: pnlPledgeUsdc,
+            activePositionMarginUsdc: pnlPledgeUsdc,
             otherLockedMarginUsdc: 0,
-            freeSettlementUsdc: settlementReachableUsdc
+            freeSettlementUsdc: 0
+        });
+        snap.lockedBuckets = IMarginClearinghouse.LockedMarginBuckets({
+            positionMarginUsdc: pnlPledgeUsdc,
+            committedOrderMarginUsdc: 0,
+            reservedSettlementUsdc: 0,
+            totalLockedMarginUsdc: pnlPledgeUsdc
         });
         snap.totalTraderClaimBalanceUsdc = traderClaimBalanceUsdc;
         snap.traderClaimBalanceForAccount = traderClaimBalanceUsdc;
@@ -100,7 +143,9 @@ contract CfdEnginePlanLibHarness {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
         snap.executionFeeBps = 4;
         snap.frozenCloseSpreadBps = 1000;
@@ -108,41 +153,51 @@ contract CfdEnginePlanLibHarness {
         return CfdEnginePlanLib.planLiquidation(snap, oraclePrice, 0);
     }
 
-    function planLiquidationWithCarry(
-        uint256 settlementReachableUsdc,
+    function planLiquidationWithUnsettledCarry(
+        uint256 pnlPledgeUsdc,
+        uint256 freeSettlementUsdc,
         uint256 traderClaimBalanceUsdc,
+        uint256 unsettledCarryUsdc,
         uint256 size,
         uint256 entryPrice,
-        uint256 oraclePrice,
-        uint64 currentTimestamp,
-        uint64 lastCarryTimestamp
+        uint256 oraclePrice
     ) external pure returns (CfdEnginePlanTypes.LiquidationDelta memory delta) {
         CfdEnginePlanTypes.RawSnapshot memory snap;
-        uint256 maxProfitUsdc = CfdMath.calculateMaxProfit(size, entryPrice, CfdTypes.Side.BEAR, 2e8);
+        uint256 lots = CfdMath.sizeToLots(size);
+        uint256 entryCostUsdcAtoms = lots * entryPrice;
+        uint256 maxProfitUsdc = CfdMath.calculateExactMaxProfit(lots, entryCostUsdcAtoms, CfdTypes.Side.BEAR, 2e8);
         snap.position = CfdTypes.Position({
             size: size,
-            margin: 0,
+            margin: pnlPledgeUsdc,
             entryPrice: entryPrice,
             maxProfitUsdc: maxProfitUsdc,
             side: CfdTypes.Side.BEAR,
             lastUpdateTime: 0,
-            lastCarryTimestamp: lastCarryTimestamp,
+            lastCarryTimestamp: 1,
             vpiAccrued: 0
         });
-        snap.currentTimestamp = currentTimestamp;
+        snap.positionEntryCostUsdcAtoms = entryCostUsdcAtoms;
+        snap.currentTimestamp = 1;
         snap.lastMarkPrice = oraclePrice;
-        snap.lastMarkTime = currentTimestamp;
+        snap.lastMarkTime = 1;
         snap.bearSide.maxProfitUsdc = maxProfitUsdc;
         snap.bearSide.openInterest = size;
-        snap.bearSide.entryNotional = size * entryPrice;
+        snap.bearSide.entryNotional = entryCostUsdcAtoms * CfdMath.USDC_TO_TOKEN_SCALE;
+        snap.bearSide.totalMargin = pnlPledgeUsdc;
         snap.poolAssetsUsdc = 1_000_000e6;
         snap.poolCashUsdc = 1;
         snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
-            settlementBalanceUsdc: settlementReachableUsdc,
-            totalLockedMarginUsdc: 0,
-            activePositionMarginUsdc: 0,
+            settlementBalanceUsdc: pnlPledgeUsdc + freeSettlementUsdc,
+            totalLockedMarginUsdc: pnlPledgeUsdc,
+            activePositionMarginUsdc: pnlPledgeUsdc,
             otherLockedMarginUsdc: 0,
-            freeSettlementUsdc: settlementReachableUsdc
+            freeSettlementUsdc: freeSettlementUsdc
+        });
+        snap.lockedBuckets = IMarginClearinghouse.LockedMarginBuckets({
+            positionMarginUsdc: pnlPledgeUsdc,
+            committedOrderMarginUsdc: 0,
+            reservedSettlementUsdc: 0,
+            totalLockedMarginUsdc: pnlPledgeUsdc
         });
         snap.totalTraderClaimBalanceUsdc = traderClaimBalanceUsdc;
         snap.traderClaimBalanceForAccount = traderClaimBalanceUsdc;
@@ -155,14 +210,11 @@ contract CfdEnginePlanLibHarness {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
-        uint256 carryTimeDelta = currentTimestamp > lastCarryTimestamp ? currentTimestamp - lastCarryTimestamp : 0;
-        snap.positionBorrowBaseUsdc = maxProfitUsdc;
-        snap.positionLastCarryIndex = 0;
-        snap.bearSide.borrowBaseUsdc = snap.poolAssetsUsdc;
-        snap.bearSide.carryIndex =
-            PositionRiskAccountingLib.computeCarryIndexIncrement(snap.riskParams.baseCarryBps, carryTimeDelta);
+        snap.unsettledCarryUsdc = unsettledCarryUsdc;
         snap.executionFeeBps = 4;
         return CfdEnginePlanLib.planLiquidation(snap, oraclePrice, 0);
     }
@@ -176,29 +228,45 @@ contract CfdEnginePlanLibHarness {
         int256 vpiAccrued
     ) external pure returns (CfdEnginePlanTypes.LiquidationDelta memory delta) {
         CfdEnginePlanTypes.RawSnapshot memory snap;
+        uint256 entryCostUsdcAtoms = CfdMath.sizeToLots(size) * entryPrice;
+        uint256 maxProfitUsdc =
+            CfdMath.calculateExactMaxProfit(CfdMath.sizeToLots(size), entryCostUsdcAtoms, CfdTypes.Side.BEAR, 2e8);
+        uint256 vpiReserveUsdc = vpiAccrued < 0 ? uint256(-(vpiAccrued + 1)) + 1 : 0;
         snap.position = CfdTypes.Position({
             size: size,
-            margin: 0,
+            margin: settlementReachableUsdc,
             entryPrice: entryPrice,
-            maxProfitUsdc: 0,
+            maxProfitUsdc: maxProfitUsdc,
             side: CfdTypes.Side.BEAR,
             lastUpdateTime: 0,
             lastCarryTimestamp: 0,
             vpiAccrued: vpiAccrued
         });
+        snap.positionEntryCostUsdcAtoms = entryCostUsdcAtoms;
         snap.currentTimestamp = 1;
         snap.lastMarkPrice = oraclePrice;
         snap.lastMarkTime = 1;
+        snap.bearSide.maxProfitUsdc = maxProfitUsdc;
         snap.bearSide.openInterest = size;
+        snap.bearSide.entryNotional = entryCostUsdcAtoms * CfdMath.USDC_TO_TOKEN_SCALE;
+        snap.bearSide.totalMargin = settlementReachableUsdc;
         snap.poolAssetsUsdc = 1_000_000e6;
         snap.poolCashUsdc = 1;
         snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
-            settlementBalanceUsdc: settlementReachableUsdc,
-            totalLockedMarginUsdc: 0,
-            activePositionMarginUsdc: 0,
-            otherLockedMarginUsdc: 0,
-            freeSettlementUsdc: settlementReachableUsdc
+            settlementBalanceUsdc: settlementReachableUsdc + vpiReserveUsdc,
+            totalLockedMarginUsdc: settlementReachableUsdc + vpiReserveUsdc,
+            activePositionMarginUsdc: settlementReachableUsdc,
+            otherLockedMarginUsdc: vpiReserveUsdc,
+            freeSettlementUsdc: 0
         });
+        snap.lockedBuckets = IMarginClearinghouse.LockedMarginBuckets({
+            positionMarginUsdc: settlementReachableUsdc,
+            committedOrderMarginUsdc: 0,
+            reservedSettlementUsdc: vpiReserveUsdc,
+            totalLockedMarginUsdc: settlementReachableUsdc + vpiReserveUsdc
+        });
+        snap.actionReserveUsdc = vpiReserveUsdc;
+        snap.vpiRebateReserveUsdc = vpiReserveUsdc;
         snap.totalTraderClaimBalanceUsdc = traderClaimBalanceUsdc;
         snap.traderClaimBalanceForAccount = traderClaimBalanceUsdc;
         snap.capPrice = 2e8;
@@ -210,42 +278,49 @@ contract CfdEnginePlanLibHarness {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
         snap.executionFeeBps = 4;
         return CfdEnginePlanLib.planLiquidation(snap, oraclePrice, 0);
     }
 
     function planOpenWithExistingVpiAccrued(
-        uint256 settlementBalanceUsdc,
-        uint256 positionMarginUsdc,
-        uint256 currentSize,
-        uint256 currentEntryPrice,
-        int256 vpiAccrued,
-        uint256 sizeDelta,
-        uint256 marginDelta,
-        uint256 price
+        OpenWithExistingVpiParams calldata params
     ) external pure returns (CfdEnginePlanTypes.OpenDelta memory delta) {
         CfdEnginePlanTypes.RawSnapshot memory snap;
+        uint256 currentLots = CfdMath.sizeToLots(params.currentSize);
+        uint256 currentEntryCostUsdcAtoms = currentLots * params.currentEntryPrice;
+        uint256 currentMaxProfitUsdc =
+            CfdMath.calculateExactMaxProfit(currentLots, currentEntryCostUsdcAtoms, CfdTypes.Side.BULL, 2e8);
+        uint256 vpiReserveUsdc = params.vpiAccrued < 0 ? uint256(-(params.vpiAccrued + 1)) + 1 : 0;
+        uint256 liquidationReserveUsdc = (currentLots * params.price * 10) / 10_000;
+        if (liquidationReserveUsdc < 1e6) {
+            liquidationReserveUsdc = 1e6;
+        }
+        uint256 totalSettlementUsdc = params.settlementBalanceUsdc + vpiReserveUsdc + liquidationReserveUsdc;
+        uint256 totalLockedUsdc = params.positionMarginUsdc + vpiReserveUsdc + liquidationReserveUsdc;
         snap.account = address(uint160(0x1234));
         snap.position = CfdTypes.Position({
-            size: currentSize,
-            margin: positionMarginUsdc,
-            entryPrice: currentEntryPrice,
-            maxProfitUsdc: 100_000e6,
+            size: params.currentSize,
+            margin: params.positionMarginUsdc,
+            entryPrice: params.currentEntryPrice,
+            maxProfitUsdc: currentMaxProfitUsdc,
             side: CfdTypes.Side.BULL,
             lastUpdateTime: 0,
             lastCarryTimestamp: 0,
-            vpiAccrued: vpiAccrued
+            vpiAccrued: params.vpiAccrued
         });
+        snap.positionEntryCostUsdcAtoms = currentEntryCostUsdcAtoms;
         snap.currentTimestamp = 1;
-        snap.lastMarkPrice = price;
+        snap.lastMarkPrice = params.price;
         snap.lastMarkTime = 1;
         snap.bullSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: 100_000e6,
-            openInterest: currentSize,
-            entryNotional: currentSize * currentEntryPrice,
-            totalMargin: positionMarginUsdc,
+            maxProfitUsdc: currentMaxProfitUsdc,
+            openInterest: params.currentSize,
+            entryNotional: currentEntryCostUsdcAtoms * CfdMath.USDC_TO_TOKEN_SCALE,
+            totalMargin: params.positionMarginUsdc,
             borrowBaseUsdc: 0,
             carryIndex: 0
         });
@@ -253,14 +328,23 @@ contract CfdEnginePlanLibHarness {
             maxProfitUsdc: 0, openInterest: 0, entryNotional: 0, totalMargin: 0, borrowBaseUsdc: 0, carryIndex: 0
         });
         snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
-            settlementBalanceUsdc: settlementBalanceUsdc,
-            totalLockedMarginUsdc: positionMarginUsdc,
-            activePositionMarginUsdc: positionMarginUsdc,
-            otherLockedMarginUsdc: 0,
-            freeSettlementUsdc: settlementBalanceUsdc > positionMarginUsdc
-                ? settlementBalanceUsdc - positionMarginUsdc
+            settlementBalanceUsdc: totalSettlementUsdc,
+            totalLockedMarginUsdc: totalLockedUsdc,
+            activePositionMarginUsdc: params.positionMarginUsdc,
+            otherLockedMarginUsdc: vpiReserveUsdc + liquidationReserveUsdc,
+            freeSettlementUsdc: params.settlementBalanceUsdc > params.positionMarginUsdc
+                ? params.settlementBalanceUsdc - params.positionMarginUsdc
                 : 0
         });
+        snap.lockedBuckets = IMarginClearinghouse.LockedMarginBuckets({
+            positionMarginUsdc: params.positionMarginUsdc,
+            committedOrderMarginUsdc: 0,
+            reservedSettlementUsdc: vpiReserveUsdc,
+            totalLockedMarginUsdc: totalLockedUsdc
+        });
+        snap.liquidationReserveUsdc = liquidationReserveUsdc;
+        snap.actionReserveUsdc = vpiReserveUsdc;
+        snap.vpiRebateReserveUsdc = vpiReserveUsdc;
         snap.capPrice = 2e8;
         snap.riskParams = CfdTypes.RiskParams({
             vpiFactor: 0,
@@ -270,7 +354,9 @@ contract CfdEnginePlanLibHarness {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
         snap.executionFeeBps = 4;
         snap.poolAssetsUsdc = 1_000_000e6;
@@ -280,16 +366,16 @@ contract CfdEnginePlanLibHarness {
             snap,
             CfdTypes.Order({
                 account: snap.account,
-                sizeDelta: sizeDelta,
-                marginDelta: marginDelta,
-                targetPrice: price,
+                sizeDelta: params.sizeDelta,
+                marginDelta: params.marginDelta,
+                targetPrice: params.price,
                 commitTime: 0,
                 commitBlock: 0,
                 orderId: 0,
                 side: CfdTypes.Side.BULL,
                 isClose: false
             }),
-            price,
+            params.price,
             0
         );
     }
@@ -299,6 +385,7 @@ contract CfdEnginePlanLibHarness {
 contract CfdEngineTest is BasePerpTest {
 
     event FrozenCloseSpreadSettled(address indexed account, uint256 assessedUsdc, uint256 paidUsdc, uint256 waivedUsdc);
+    event PriceLossWrittenOff(address indexed account, uint256 amountUsdc);
     event ClaimantInflowAccounted(
         address indexed caller,
         IHousePool.ClaimantInflowKind kind,
@@ -307,6 +394,30 @@ contract CfdEngineTest is BasePerpTest {
     );
 
     using stdStorage for StdStorage;
+
+    function _seedAuthenticatedTraderClaim(
+        address account,
+        uint256 claimUsdc
+    ) internal {
+        bytes32 oldCurveHash = terminalNavBook.curveHashOf(account);
+        uint256 oldAccountClaimUsdc = engine.traderClaimBalanceUsdc(account);
+        uint256 oldTotalClaimUsdc = engine.totalTraderClaimBalanceUsdc();
+        stdstore.target(address(engine)).sig("traderClaimBalanceUsdc(address)").with_key(account)
+            .checked_write(claimUsdc);
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()")
+            .checked_write(oldTotalClaimUsdc - oldAccountClaimUsdc + claimUsdc);
+        vm.prank(address(engine));
+        terminalNavBook.syncFromEngine(account, oldCurveHash);
+        vm.prank(address(engine));
+        terminalNavBook.authenticateEngineState(account);
+    }
+
+    function _assertTerminalCurveAuthenticated(
+        address account
+    ) internal {
+        vm.prank(address(engine));
+        terminalNavBook.authenticateEngineState(account);
+    }
 
     function _initialJuniorSeedDeposit() internal pure override returns (uint256) {
         return 1000e6;
@@ -369,7 +480,9 @@ contract CfdEngineTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -389,6 +502,43 @@ contract CfdEngineTest is BasePerpTest {
         if (timestamp <= block.timestamp) {
             timestamp += 7 days;
         }
+    }
+
+    function _settleJuniorDepositFromBalance(
+        address owner,
+        uint256 assets
+    ) internal returns (uint256 shares) {
+        vm.prank(owner);
+        uint256 requestId = juniorVault.requestDeposit(assets, owner, owner);
+
+        vm.warp(pool.lpEpochStart(requestId));
+        uint256 markPrice = engine.lastMarkPrice();
+        vm.prank(address(router));
+        engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
+        _settleLpEpochForTest();
+
+        uint256 claimableAssets = juniorVault.claimableDepositRequest(requestId, owner);
+        vm.prank(owner);
+        shares = juniorVault.claimDeposit(requestId, claimableAssets, owner, owner);
+    }
+
+    function _settleJuniorWithdrawal(
+        address owner,
+        uint256 assets
+    ) internal returns (uint256 claimedAssets) {
+        uint256 shares = juniorVault.estimateWithdrawShares(assets);
+        vm.prank(owner);
+        uint256 requestId = juniorVault.requestRedeem(shares, owner, owner);
+
+        vm.warp(pool.lpEpochStart(requestId));
+        uint256 markPrice = engine.lastMarkPrice();
+        vm.prank(address(router));
+        engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
+        _settleLpEpochForTest();
+
+        uint256 claimableShares = juniorVault.claimableRedeemRequest(requestId, owner);
+        vm.prank(owner);
+        claimedAssets = juniorVault.claimRedeem(requestId, claimableShares, owner, owner);
     }
 
     function test_OpenPosition_SolvencyCheck() public {
@@ -426,22 +576,31 @@ contract CfdEngineTest is BasePerpTest {
 
         // Withdraw LP to reduce pool to $50k — solvency check should fail
         vm.warp(block.timestamp + 1 hours); // past deposit cooldown
-        juniorVault.withdraw(950_000 * 1e6, address(this), address(this));
+        uint256 withdrawnAssets = _settleJuniorWithdrawal(address(this), 950_000 * 1e6);
         vm.expectRevert(abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__TypedOrderFailure.selector, 2, 7, false));
         vm.prank(address(router));
         engine.processOrderTyped(order, 1e8, 0, uint64(block.timestamp));
 
         // Re-deposit to allow the trade
-        usdc.approve(address(juniorVault), 950_000 * 1e6);
-        juniorVault.deposit(950_000 * 1e6, address(this));
+        usdc.approve(address(juniorVault), withdrawnAssets);
+        _settleJuniorDepositFromBalance(address(this), withdrawnAssets);
 
         vm.prank(address(router));
         engine.processOrderTyped(order, 1e8, 200_000 * 1e6, uint64(block.timestamp));
 
         (uint256 size, uint256 margin,,,,,) = engine.positions(account);
         assertEq(size, 100_000 * 1e18, "Size mismatch");
-        // With the explicit $200k depth passed to processOrder, the current VPI + fee path leaves $1,947.5 margin.
-        assertEq(margin, 1_947_500_000, "Margin should equal deposit minus VPI and exec fee");
+        assertEq(margin, 1_847_500_000, "PnL pledge should exclude the dedicated liquidation reserve");
+        assertEq(
+            clearinghouse.liquidationReserveUsdc(account),
+            100_000_000,
+            "The entry-notional bounty target must be isolated in its dedicated reserve"
+        );
+        assertEq(
+            margin + clearinghouse.liquidationReserveUsdc(account),
+            1_947_500_000,
+            "PnL pledge plus liquidation reserve should conserve post-cost supplied collateral"
+        );
     }
 
     function test_OpenPosition_UsesExplicitInitMarginBps() public {
@@ -449,7 +608,7 @@ contract CfdEngineTest is BasePerpTest {
         params.initMarginBps = 400;
         _setRiskParams(params);
 
-        (,,, uint256 initMarginBps,,,,) = engine.riskParams();
+        (,,, uint256 initMarginBps,,,,,,) = engine.riskParams();
         assertEq(initMarginBps, 400, "Setup must finalize the explicit init margin config");
 
         vm.prank(address(router));
@@ -500,7 +659,7 @@ contract CfdEngineTest is BasePerpTest {
         CfdTypes.Order memory tooLarge = CfdTypes.Order({
             account: account,
             sizeDelta: 1_200_000 * 1e18,
-            marginDelta: 2000 * 1e6,
+            marginDelta: 5000 * 1e6,
             targetPrice: 1e8,
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
@@ -513,7 +672,7 @@ contract CfdEngineTest is BasePerpTest {
             abi.encodeWithSelector(
                 ICfdEngineTypes.CfdEngine__TypedOrderFailure.selector,
                 CfdEnginePlanTypes.ExecutionFailurePolicyCategory.ProtocolStateInvalidated,
-                uint8(7),
+                uint8(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED),
                 false
             )
         );
@@ -1008,9 +1167,7 @@ contract CfdEngineTest is BasePerpTest {
         _fundTrader(trader, 20_000e6);
 
         _open(account, CfdTypes.Side.BULL, 500_000e18, 10_000e6, 1e8);
-        stdstore.target(address(engine)).sig("traderClaimBalanceUsdc(address)").with_key(account)
-            .checked_write(uint256(5000e6));
-        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(uint256(5000e6));
+        _seedAuthenticatedTraderClaim(account, 5000e6);
 
         vm.warp(block.timestamp + 30 days);
         vm.prank(address(router));
@@ -1049,9 +1206,7 @@ contract CfdEngineTest is BasePerpTest {
         _fundTrader(trader, 20_000e6);
 
         _open(account, CfdTypes.Side.BULL, 500_000e18, 10_000e6, 1e8);
-        stdstore.target(address(engine)).sig("traderClaimBalanceUsdc(address)").with_key(account)
-            .checked_write(uint256(5000e6));
-        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(uint256(5000e6));
+        _seedAuthenticatedTraderClaim(account, 5000e6);
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 30 days);
 
@@ -1089,9 +1244,7 @@ contract CfdEngineTest is BasePerpTest {
         _fundTrader(trader, 20_000e6);
         _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
-        stdstore.target(address(engine)).sig("traderClaimBalanceUsdc(address)").with_key(account)
-            .checked_write(traderClaim);
-        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(traderClaim);
+        _seedAuthenticatedTraderClaim(account, traderClaim);
 
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory beforeSnapshot =
             engineProtocolLens.getProtocolAccountingSnapshot();
@@ -1826,10 +1979,10 @@ contract CfdEngineTest is BasePerpTest {
         CfdTypes.Position memory position;
 
         vm.expectRevert(CfdEngineSettlementSidecar.CfdEngineSettlementSidecar__Unauthorized.selector);
-        sidecar.executeClose(ICfdEngineSettlementHost(address(engine)), delta, position, uint64(block.timestamp));
+        sidecar.executeClose(delta, position, uint64(block.timestamp));
     }
 
-    function test_SettlementSidecar_RevertsWhenEngineCallerPassesDifferentHost() public {
+    function test_SettlementSidecar_RevertsWhenCallerIsNotImmutableEngine() public {
         CfdEngineSettlementSidecar sidecar = CfdEngineSettlementSidecar(address(engine.settlementSidecar()));
         CfdEngine wrongHost =
             new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_SPREAD_BPS);
@@ -1838,20 +1991,16 @@ contract CfdEngineTest is BasePerpTest {
         CfdEnginePlanTypes.LiquidationDelta memory liquidationDelta;
         CfdTypes.Position memory position;
 
-        vm.startPrank(address(engine));
+        vm.startPrank(address(wrongHost));
 
         vm.expectRevert(CfdEngineSettlementSidecar.CfdEngineSettlementSidecar__Unauthorized.selector);
-        sidecar.executeOpen(ICfdEngineSettlementHost(address(wrongHost)), openDelta, position, uint64(block.timestamp));
+        sidecar.executeOpen(openDelta, position, uint64(block.timestamp));
 
         vm.expectRevert(CfdEngineSettlementSidecar.CfdEngineSettlementSidecar__Unauthorized.selector);
-        sidecar.executeClose(
-            ICfdEngineSettlementHost(address(wrongHost)), closeDelta, position, uint64(block.timestamp)
-        );
+        sidecar.executeClose(closeDelta, position, uint64(block.timestamp));
 
         vm.expectRevert(CfdEngineSettlementSidecar.CfdEngineSettlementSidecar__Unauthorized.selector);
-        sidecar.executeLiquidation(
-            ICfdEngineSettlementHost(address(wrongHost)), liquidationDelta, uint64(block.timestamp), address(this)
-        );
+        sidecar.executeLiquidation(liquidationDelta, uint64(block.timestamp), address(this));
 
         vm.stopPrank();
     }
@@ -1915,7 +2064,8 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(viewData.otherLockedMarginUsdc, viewData.lockedMarginUsdc - positionMargin);
         assertEq(viewData.freeSettlementUsdc, _freeSettlementUsdc(account));
         assertEq(viewData.closeReachableUsdc, _freeSettlementUsdc(account));
-        assertEq(viewData.terminalReachableUsdc, _terminalReachableUsdc(account));
+        assertEq(viewData.liquidationReachableSettlementUsdc, _terminalReachableUsdc(account));
+        assertEq(viewData.terminalPriceCollectibleCapUsdc, terminalNavBook.curveOf(account).effectiveCapUsdcAtoms);
         assertEq(viewData.accountEquityUsdc, clearinghouse.getAccountEquityUsdc(account));
         assertEq(viewData.freeBuyingPowerUsdc, clearinghouse.getFreeBuyingPowerUsdc(account));
         assertEq(viewData.traderClaimBalanceUsdc, 0);
@@ -2014,7 +2164,6 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(snapshot.maxLiabilityUsdc, _maxLiability());
         assertEq(snapshot.withdrawalReservedUsdc, _withdrawalReservedUsdc());
         assertEq(snapshot.protocolTreasuryBalanceUsdc, clearinghouse.balanceUsdc(engine.protocolTreasury()));
-        assertEq(snapshot.accumulatedBadDebtUsdc, engine.accumulatedBadDebtUsdc());
         assertEq(snapshot.totalTraderClaimBalanceUsdc, engine.totalTraderClaimBalanceUsdc());
         assertEq(snapshot.degradedMode, engine.degradedMode());
         assertEq(snapshot.hasLiveLiability, (_maxLiability() > 0));
@@ -2129,7 +2278,9 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(snapshot.traderClaimBalanceUsdc, collateralView.traderClaimBalanceUsdc);
         assertEq(snapshot.pendingOrderCount, reservation.pendingOrderCount);
         assertEq(snapshot.closeReachableUsdc, collateralView.closeReachableUsdc);
-        assertEq(snapshot.terminalReachableUsdc, collateralView.terminalReachableUsdc);
+        assertEq(snapshot.liquidationReachableSettlementUsdc, collateralView.liquidationReachableSettlementUsdc);
+        assertEq(snapshot.terminalPriceCollectibleCapUsdc, collateralView.terminalPriceCollectibleCapUsdc);
+        assertEq(snapshot.terminalPriceCollectibleCapUsdc, terminalNavBook.curveOf(account).effectiveCapUsdcAtoms);
         assertEq(snapshot.accountEquityUsdc, collateralView.accountEquityUsdc);
         assertEq(snapshot.freeBuyingPowerUsdc, collateralView.freeBuyingPowerUsdc);
         assertTrue(snapshot.hasPosition);
@@ -2148,6 +2299,7 @@ contract CfdEngineTest is BasePerpTest {
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot =
             engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
         HousePoolEngineViewTypes.HousePoolStatusSnapshot memory status = engineProtocolLens.getHousePoolStatusSnapshot();
+        ICfdEngineTypes.TerminalNavSnapshot memory terminalSnapshot = engine.terminalNavSnapshot();
         uint256 protocolTreasuryBalanceUsdc = clearinghouse.balanceUsdc(engine.protocolTreasury());
         uint256 expectedNetPhysicalAssetsUsdc =
             pool.totalAssets() > protocolTreasuryBalanceUsdc ? pool.totalAssets() - protocolTreasuryBalanceUsdc : 0;
@@ -2163,7 +2315,14 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(snapshot.maxLiabilityUsdc, _maxLiability(), "Snapshot liability must match accessor");
         assertEq(snapshot.supplementalReservedUsdc, uint256(0), "Snapshot supplemental reserve must match accessor");
         assertEq(
-            snapshot.unrealizedMtmLiabilityUsdc, _poolMtmAdjustment(), "Snapshot MtM liability must match accessor"
+            snapshot.terminalLpPriceDeltaUsdc,
+            terminalSnapshot.terminalLpPriceDeltaUsdc,
+            "Snapshot terminal LP price delta must match engine"
+        );
+        assertEq(
+            snapshot.terminalNavBookVersion,
+            terminalSnapshot.bookVersion,
+            "Snapshot terminal NAV book version must match engine"
         );
         assertEq(
             snapshot.traderClaimBalanceUsdc, engine.totalTraderClaimBalanceUsdc(), "Snapshot payout must match storage"
@@ -2204,21 +2363,57 @@ contract CfdEngineTest is BasePerpTest {
     }
 
     function test_MarketCalendar_SundayBoundariesMatchLiveSemantics() public {
-        uint256 sundayTwentyFiftyNine = 1_709_499_599;
-        uint256 sundayTwentyOne = 1_709_499_600;
-        uint256 sundayTwentyTwo = 1_709_503_200;
+        uint256 sundayTwentyFiftyNine = 1_710_104_399;
+        uint256 sundayTwentyOne = 1_710_104_400;
+        uint256 sundayTwentyOneFourteenFiftyNine = 1_710_105_299;
+        uint256 sundayTwentyOneFifteen = 1_710_105_300;
 
         vm.warp(sundayTwentyFiftyNine);
         assertTrue(engine.isOracleFrozen(), "Sunday 20:59:59 should still be oracle frozen");
+        assertEq(pletherOracle.isOracleFrozen(), engine.isOracleFrozen(), "Oracle and engine calendar should agree");
         assertTrue(engine.isFadWindow(), "Sunday 20:59:59 should still be FAD");
 
         vm.warp(sundayTwentyOne);
         assertFalse(engine.isOracleFrozen(), "Sunday 21:00:00 should unfreeze oracle mode");
+        assertEq(pletherOracle.isOracleFrozen(), engine.isOracleFrozen(), "Oracle and engine calendar should agree");
         assertTrue(engine.isFadWindow(), "Sunday 21:00:00 should remain in FAD");
 
-        vm.warp(sundayTwentyTwo);
-        assertFalse(engine.isOracleFrozen(), "Sunday 22:00:00 should remain unfrozen");
-        assertFalse(engine.isFadWindow(), "Sunday 22:00:00 should end FAD");
+        vm.warp(sundayTwentyOneFourteenFiftyNine);
+        assertFalse(engine.isOracleFrozen(), "Sunday 21:14:59 should remain unfrozen");
+        assertEq(pletherOracle.isOracleFrozen(), engine.isOracleFrozen(), "Oracle and engine calendar should agree");
+        assertTrue(engine.isFadWindow(), "Sunday 21:14:59 should remain in FAD");
+
+        vm.warp(sundayTwentyOneFifteen);
+        assertFalse(engine.isOracleFrozen(), "Sunday 21:15:00 should remain unfrozen");
+        assertEq(pletherOracle.isOracleFrozen(), engine.isOracleFrozen(), "Oracle and engine calendar should agree");
+        assertFalse(engine.isFadWindow(), "Sunday 21:15:00 should end FAD");
+    }
+
+    function test_MarketCalendar_FridayBoundariesMatchLiveSemantics() public {
+        uint256 fridayBeforeFad = 1_729_283_399;
+        uint256 fridayFadStart = 1_729_283_400;
+        uint256 fridayBeforeFreeze = fridayFadStart + 30 minutes - 1;
+        uint256 fridayFreezeStart = fridayFadStart + 30 minutes;
+
+        vm.warp(fridayBeforeFad);
+        assertFalse(engine.isFadWindow(), "Friday 20:29:59 should be live");
+        assertFalse(engine.isOracleFrozen(), "Friday 20:29:59 should not be oracle frozen");
+        assertEq(pletherOracle.isOracleFrozen(), engine.isOracleFrozen(), "Oracle and engine calendar should agree");
+
+        vm.warp(fridayFadStart);
+        assertTrue(engine.isFadWindow(), "Friday 20:30:00 should start FAD");
+        assertFalse(engine.isOracleFrozen(), "Friday 20:30:00 should not be oracle frozen");
+        assertEq(pletherOracle.isOracleFrozen(), engine.isOracleFrozen(), "Oracle and engine calendar should agree");
+
+        vm.warp(fridayBeforeFreeze);
+        assertTrue(engine.isFadWindow(), "Friday 20:59:59 should remain in FAD");
+        assertFalse(engine.isOracleFrozen(), "Friday 20:59:59 should not be oracle frozen");
+        assertEq(pletherOracle.isOracleFrozen(), engine.isOracleFrozen(), "Oracle and engine calendar should agree");
+
+        vm.warp(fridayFreezeStart);
+        assertTrue(engine.isFadWindow(), "Friday 21:00:00 should remain in FAD");
+        assertTrue(engine.isOracleFrozen(), "Friday 21:00:00 should start oracle-frozen mode");
+        assertEq(pletherOracle.isOracleFrozen(), engine.isOracleFrozen(), "Oracle and engine calendar should agree");
     }
 
     function test_PreviewClose_ReturnsClaimAndImmediateSettlementBreakdown() public {
@@ -2389,7 +2584,7 @@ contract CfdEngineTest is BasePerpTest {
 
         _open(account, CfdTypes.Side.BULL, 100_000e18, 4000e6, 1e8);
 
-        vm.warp(1_709_928_000); // Friday 20:00 UTC: FAD, but not oracle-frozen.
+        vm.warp(1_709_934_300); // Friday 21:45 UTC: FAD, but not oracle-frozen.
         assertTrue(engine.isFadWindow(), "Setup should be in FAD");
         assertFalse(engine.isOracleFrozen(), "FAD runway should still be live-market mode");
 
@@ -2419,12 +2614,29 @@ contract CfdEngineTest is BasePerpTest {
         assertLt(preview.vpiDeltaUsdc, 0, "Frozen skew-healing close should keep the normal VPI rebate");
         assertEq(preview.vpiUsdc, 0, "Positive-only VPI field should clamp the signed rebate to zero");
         assertEq(preview.frozenSpreadUsdc, 400e6, "Frozen close should assess 50 bps of $80,000 notional");
-        assertEq(preview.frozenSpreadPaidUsdc, 400e6, "Funded frozen close should pay the full fixed spread");
-        assertEq(preview.frozenSpreadWaivedUsdc, 0, "Funded frozen close should not waive spread");
+        uint256 vpiRebateUsdc = uint256(-preview.vpiDeltaUsdc);
+        uint256 expectedPaidSpreadUsdc =
+            preview.frozenSpreadUsdc > vpiRebateUsdc ? preview.frozenSpreadUsdc - vpiRebateUsdc : 0;
+        assertEq(
+            preview.frozenSpreadPaidUsdc,
+            expectedPaidSpreadUsdc,
+            "Signed VPI rebate should offset frozen spread before physical collection"
+        );
+        assertEq(
+            preview.frozenSpreadPaidUsdc + preview.frozenSpreadWaivedUsdc,
+            preview.frozenSpreadUsdc,
+            "VPI-offset and paid spread must conserve the assessment"
+        );
 
         ICfdEngineTypes.ClosePreview memory partialPreview = engineLens.previewClose(account, 25_000e18, 0.8e8);
         assertTrue(partialPreview.valid, "Funded frozen reduction should be previewable");
         assertEq(partialPreview.frozenSpreadUsdc, 100e6, "A 25% reduction should assess $100 of fixed spread");
+        uint256 partialVpiRebateUsdc = uint256(-partialPreview.vpiDeltaUsdc);
+        assertEq(
+            partialPreview.frozenSpreadPaidUsdc,
+            partialPreview.frozenSpreadUsdc - partialVpiRebateUsdc,
+            "Partial frozen spread should use the same signed-VPI offset ordering"
+        );
     }
 
     function test_PreviewClose_OracleFrozenSkewWorseningCloseKeepsSignedVpiAndPaysSameFixedSpread() public {
@@ -2467,7 +2679,17 @@ contract CfdEngineTest is BasePerpTest {
         assertLt(preview.vpiDeltaUsdc, 0, "Zero crossing that reduces absolute skew should keep the normal rebate");
         assertEq(preview.vpiUsdc, 0, "Positive-only VPI field should clamp the signed rebate to zero");
         assertEq(preview.frozenSpreadUsdc, 600e6, "Spread should assess 50 bps of $120,000 notional");
-        assertEq(preview.frozenSpreadPaidUsdc, 600e6, "Funded partial close should pay the full spread");
+        uint256 vpiRebateUsdc = uint256(-preview.vpiDeltaUsdc);
+        assertEq(
+            preview.frozenSpreadPaidUsdc,
+            preview.frozenSpreadUsdc - vpiRebateUsdc,
+            "Zero-crossing VPI rebate should offset frozen spread before collection"
+        );
+        assertEq(
+            preview.frozenSpreadPaidUsdc + preview.frozenSpreadWaivedUsdc,
+            preview.frozenSpreadUsdc,
+            "Paid and VPI-offset spread must conserve the assessment"
+        );
     }
 
     function test_PreviewClose_OracleFrozenFixedSpreadMatchesLiveCloseAndStaysOutOfTreasury() public {
@@ -2490,7 +2712,17 @@ contract CfdEngineTest is BasePerpTest {
 
         assertLt(preview.vpiDeltaUsdc, 0, "Frozen close should preserve normal signed VPI");
         assertEq(preview.frozenSpreadUsdc, 400e6, "Preview should assess the configured fixed spread");
-        assertEq(preview.frozenSpreadPaidUsdc, 400e6, "Live funded close should pay the assessed spread");
+        uint256 vpiRebateUsdc = uint256(-preview.vpiDeltaUsdc);
+        assertEq(
+            preview.frozenSpreadPaidUsdc,
+            preview.frozenSpreadUsdc - vpiRebateUsdc,
+            "Preview should offset the signed VPI rebate before collecting frozen spread"
+        );
+        assertEq(
+            preview.frozenSpreadPaidUsdc + preview.frozenSpreadWaivedUsdc,
+            preview.frozenSpreadUsdc,
+            "Previewed paid and offset spread must conserve the assessment"
+        );
         _assertClosePreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
         assertEq(
             clearinghouse.balanceUsdc(engine.protocolTreasury()) - treasuryBefore,
@@ -2513,8 +2745,16 @@ contract CfdEngineTest is BasePerpTest {
 
         assertTrue(preview.valid, "Terminal close should remain live when only spread is uncollectible");
         assertEq(preview.frozenSpreadUsdc, 509_500_000, "Spread should assess 50 bps of $101,900 notional");
-        assertGt(preview.frozenSpreadPaidUsdc, 0, "Reachable collateral should pay part of the spread");
-        assertGt(preview.frozenSpreadWaivedUsdc, 0, "Uncollectible terminal spread should be waived");
+        assertEq(
+            preview.frozenSpreadPaidUsdc,
+            0,
+            "PnL pledge consumed by price loss must remain isolated from the frozen action charge"
+        );
+        assertEq(
+            preview.frozenSpreadWaivedUsdc,
+            preview.frozenSpreadUsdc,
+            "A terminal spread with no eligible action cash should be fully waived"
+        );
         assertEq(
             preview.frozenSpreadPaidUsdc + preview.frozenSpreadWaivedUsdc,
             preview.frozenSpreadUsdc,
@@ -2522,7 +2762,6 @@ contract CfdEngineTest is BasePerpTest {
         );
         assertEq(preview.badDebtUsdc, 0, "Waived spread should not become LP bad debt");
 
-        uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
         vm.expectEmit(true, false, false, true, address(engine.settlementSidecar()));
         emit FrozenCloseSpreadSettled(
             account, preview.frozenSpreadUsdc, preview.frozenSpreadPaidUsdc, preview.frozenSpreadWaivedUsdc
@@ -2531,7 +2770,11 @@ contract CfdEngineTest is BasePerpTest {
 
         (uint256 remainingSize,,,,,,) = engine.positions(account);
         assertEq(remainingSize, 0, "Full close should complete despite the waived spread");
-        assertEq(engine.accumulatedBadDebtUsdc(), badDebtBefore, "Waived spread should not accumulate bad debt");
+        assertEq(
+            terminalNavBook.curveHashOf(account),
+            bytes32(0),
+            "Terminal close should remove the account's exact terminal-NAV curve"
+        );
     }
 
     function test_OracleFrozenFullClose_ClaimRecoveryPaysFeeThenBaseThenSpread() public {
@@ -2548,10 +2791,17 @@ contract CfdEngineTest is BasePerpTest {
 
         ICfdEngineTypes.ClosePreview memory withoutClaim = engineLens.previewClose(account, size, closePrice);
         uint256 assessedFeeUsdc = _engineExecutionFeeUsdc(size, closePrice);
-        uint256 spreadRecoveryUsdc = withoutClaim.frozenSpreadUsdc / 2;
+        assertLt(withoutClaim.realizedPnlUsdc, 0, "Setup must realize an isolated trader price loss");
+        uint256 priceLossUsdc = uint256(-withoutClaim.realizedPnlUsdc);
+        uint256 extraClaimUsdc = assessedFeeUsdc + withoutClaim.frozenSpreadUsdc / 2;
 
         assertTrue(withoutClaim.valid, "Terminal close should remain valid without physical collateral");
-        assertGt(withoutClaim.badDebtUsdc, 0, "Setup should leave a base close obligation for claim recovery");
+        assertLt(
+            withoutClaim.seizedCollateralUsdc,
+            priceLossUsdc,
+            "Price loss above the PnL pledge should remain a diagnostic writeoff"
+        );
+        assertEq(withoutClaim.badDebtUsdc, 0, "Uncollectible price loss must not create protocol debt");
         assertEq(withoutClaim.executionFeeUsdc, 0, "No physical value should collect the execution fee");
         assertEq(withoutClaim.frozenSpreadPaidUsdc, 0, "No physical value should collect the spread");
         assertEq(
@@ -2560,30 +2810,29 @@ contract CfdEngineTest is BasePerpTest {
             "Without a claim the entire frozen spread should be waivable"
         );
 
-        uint256 traderClaimUsdc = assessedFeeUsdc + withoutClaim.badDebtUsdc + spreadRecoveryUsdc;
-        stdstore.target(address(engine)).sig("traderClaimBalanceUsdc(address)").with_key(account)
-            .checked_write(traderClaimUsdc);
-        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(traderClaimUsdc);
+        uint256 traderClaimUsdc = priceLossUsdc + extraClaimUsdc;
+        _seedAuthenticatedTraderClaim(account, traderClaimUsdc);
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, size, closePrice);
         assertTrue(preview.valid, "Claim-funded terminal frozen close should be valid");
         assertEq(
             preview.existingTraderClaimConsumedUsdc,
-            traderClaimUsdc,
-            "Claim recovery should consume fee, then base loss, then the selected spread portion"
+            priceLossUsdc,
+            "Same-account claim should net only the exact price loss"
         );
-        assertEq(preview.existingTraderClaimRemainingUsdc, 0, "Calibrated claim should be fully consumed");
-        assertEq(preview.executionFeeUsdc, assessedFeeUsdc, "Senior execution fee should be fully recovered first");
-        assertEq(preview.badDebtUsdc, 0, "Claim recovery should extinguish the full base close obligation");
         assertEq(
-            preview.frozenSpreadPaidUsdc,
-            spreadRecoveryUsdc,
-            "Only claim value remaining after fee and base loss should pay the junior spread"
+            preview.existingTraderClaimRemainingUsdc,
+            extraClaimUsdc,
+            "Action charges must not consume claim value left after price-loss netting"
         );
+        assertEq(preview.seizedCollateralUsdc, 0, "Claim-first price netting should preserve the isolated PnL pledge");
+        assertEq(preview.executionFeeUsdc, 0, "Execution fee must be waived without eligible action collateral");
+        assertEq(preview.badDebtUsdc, 0, "Price-loss netting must not create protocol debt");
+        assertEq(preview.frozenSpreadPaidUsdc, 0, "Frozen spread must not consume same-account claim value");
         assertEq(
             preview.frozenSpreadWaivedUsdc,
-            preview.frozenSpreadUsdc - spreadRecoveryUsdc,
-            "Uncovered terminal spread should be waived"
+            preview.frozenSpreadUsdc,
+            "Frozen spread with no eligible action collateral should be fully waived"
         );
         assertEq(
             preview.frozenSpreadPaidUsdc + preview.frozenSpreadWaivedUsdc,
@@ -2593,33 +2842,36 @@ contract CfdEngineTest is BasePerpTest {
 
         uint256 treasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
         uint256 poolAssetsBefore = pool.totalAssets();
-        uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
-
-        vm.expectEmit(true, false, false, true, address(pool));
-        emit ClaimantInflowAccounted(
-            address(engine.settlementSidecar()),
-            IHousePool.ClaimantInflowKind.Revenue,
-            IHousePool.ClaimantInflowCashMode.AlreadyRetained,
-            spreadRecoveryUsdc
-        );
         vm.expectEmit(true, false, false, true, address(engine.settlementSidecar()));
         emit FrozenCloseSpreadSettled(
             account, preview.frozenSpreadUsdc, preview.frozenSpreadPaidUsdc, preview.frozenSpreadWaivedUsdc
         );
         _close(account, CfdTypes.Side.BULL, size, closePrice);
 
-        assertEq(engine.traderClaimBalanceUsdc(account), 0, "Live close should consume the same-account claim");
-        assertEq(engine.totalTraderClaimBalanceUsdc(), 0, "Live close should clear aggregate claim liability");
-        assertEq(engine.accumulatedBadDebtUsdc(), badDebtBefore, "Recovered base loss should not add bad debt");
         assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()) - treasuryBefore,
-            assessedFeeUsdc,
-            "Treasury should receive only the recovered execution fee"
+            engine.traderClaimBalanceUsdc(account),
+            extraClaimUsdc,
+            "Live close should leave action-ineligible claim value untouched"
         );
         assertEq(
-            poolAssetsBefore - pool.totalAssets(),
-            assessedFeeUsdc,
-            "Claim-recovered spread should stay LP-owned while only the protocol fee leaves pool cash"
+            engine.totalTraderClaimBalanceUsdc(),
+            extraClaimUsdc,
+            "Aggregate claims should fall only by the exact price-loss netting amount"
+        );
+        assertEq(
+            terminalNavBook.curveHashOf(account),
+            bytes32(0),
+            "Claim-funded terminal close should remove the account's exact terminal-NAV curve"
+        );
+        assertEq(
+            clearinghouse.balanceUsdc(engine.protocolTreasury()),
+            treasuryBefore,
+            "Treasury must not recover execution fees from trader claims"
+        );
+        assertEq(
+            pool.totalAssets(),
+            poolAssetsBefore,
+            "Claim netting and waived action charges must not fabricate pool cash movement"
         );
     }
 
@@ -2672,24 +2924,28 @@ contract CfdEngineTest is BasePerpTest {
         _open(account, CfdTypes.Side.BEAR, 200_000 * 1e18, 20_000 * 1e6, 1e8);
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000 * 1e18, 80_000_000);
-        (uint256 sizeBefore,,,,,,) = engine.positions(account);
+        (uint256 sizeBefore, uint256 marginBefore,,,,,) = engine.positions(account);
 
-        assertFalse(preview.valid, "Preview should reject an underwater partial close that invades residual backing");
-        assertEq(
-            uint8(preview.invalidReason),
-            uint8(CfdTypes.CloseInvalidReason.PartialCloseUnderwater),
-            "Preview should use the underwater partial-close invalid reason"
+        assertTrue(preview.valid, "Partial price loss above its collectible cap should remain live");
+        assertLt(preview.realizedPnlUsdc, 0, "Setup must realize a partial price loss");
+        assertLt(
+            preview.seizedCollateralUsdc,
+            uint256(-preview.realizedPnlUsdc),
+            "Only exact claim-plus-pledge collateral should be collected; the price tail is written off"
         );
+        assertEq(preview.badDebtUsdc, 0, "Partial price writeoff must not create protocol debt");
+        assertLt(preview.remainingSize, sizeBefore, "Preview should reduce the live position");
+        assertLe(preview.remainingMargin, marginBefore, "Partial loss must not increase the surviving PnL pledge");
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BEAR, 100_000 * 1e18, 0, 0, true);
         bytes[] memory priceData = _mockPythUpdateData(0.8e8);
         router.executeOrder(1, priceData);
 
-        (uint256 sizeAfter,,,,,,) = engine.positions(account);
-        assertEq(
-            sizeAfter, sizeBefore, "Live close path should leave the position unchanged when preview marks it invalid"
-        );
+        (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(account);
+        assertEq(sizeAfter, preview.remainingSize, "Live partial writeoff should match previewed remaining size");
+        assertEq(marginAfter, preview.remainingMargin, "Live partial writeoff should match previewed surviving pledge");
+        _assertTerminalCurveMatchesEngine(account);
     }
 
     function test_PreviewClose_FullLossBadDebtMatchesLiveSettlement() public {
@@ -2699,14 +2955,33 @@ contract CfdEngineTest is BasePerpTest {
         _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 110_000_000);
-        uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
+        uint256 collectibleCapUsdc = engineAccountLens.getAccountLedgerSnapshot(account).terminalPriceCollectibleCapUsdc;
+        uint256 poolAssetsBefore = pool.totalAssets();
 
+        assertTrue(preview.valid, "Terminal price tail must not block a full close");
+        assertLt(preview.realizedPnlUsdc, 0, "Setup must realize a terminal price loss");
+        uint256 priceLossUsdc = uint256(-preview.realizedPnlUsdc);
+        assertGt(priceLossUsdc, collectibleCapUsdc, "Setup must exceed the exact price collectible cap");
+        assertEq(preview.seizedCollateralUsdc, collectibleCapUsdc, "Preview must collect the exact price cap only");
+        assertEq(preview.badDebtUsdc, 0, "Uncollectible terminal price loss must not become protocol debt");
+
+        uint256 writtenOffUsdc = priceLossUsdc - collectibleCapUsdc;
+        vm.expectEmit(true, false, false, true, address(engine.settlementSidecar()));
+        emit PriceLossWrittenOff(account, writtenOffUsdc);
         _close(account, CfdTypes.Side.BULL, 100_000e18, 110_000_000);
 
         assertEq(
-            engine.accumulatedBadDebtUsdc() - badDebtBefore,
-            preview.badDebtUsdc,
-            "Preview bad debt should match live terminal settlement planning"
+            pool.totalAssets() - poolAssetsBefore,
+            collectibleCapUsdc,
+            "Only the exact collectible price cap should become LP cash"
+        );
+        assertEq(
+            terminalNavBook.curveHashOf(account),
+            bytes32(0),
+            "A full-loss close should remove the exact terminal-NAV curve instead of creating a debt ledger"
+        );
+        assertFalse(
+            engine.degradedMode(), "A terminal price write-off must not create protocol debt or degrade the engine"
         );
     }
 
@@ -2742,7 +3017,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(overCapPreview.badDebtUsdc, cappedPreview.badDebtUsdc, "Preview bad debt should clamp to CAP_PRICE");
     }
 
-    function test_PreviewLiquidation_ReturnsBountyAndLiquidatableFlag() public {
+    function test_PreviewLiquidation_ReturnsChargeSplitAndLiquidatableFlag() public {
         address trader = address(0xAB14);
         address account = trader;
         _fundTrader(trader, 300e6);
@@ -2753,8 +3028,16 @@ contract CfdEngineTest is BasePerpTest {
 
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 101_000_000);
         assertTrue(preview.liquidatable);
-        assertEq(preview.keeperBountyUsdc, 10_100_000);
-        assertLe(preview.keeperBountyUsdc, uint256(preview.equityUsdc));
+        assertEq(preview.liquidationChargeUsdc, 10_000_000, "Charge must cap at the entry-time liquidation reserve");
+        assertEq(preview.keeperBountyUsdc, 5_000_000, "Keeper should receive exactly half the reserved charge");
+        assertEq(preview.protocolLiquidationFeeUsdc, 0, "Protocol fee should default to zero");
+        assertEq(preview.lpLiquidationFeeUsdc, 5_000_000, "LPs should receive exactly half the reserved charge");
+        assertEq(
+            preview.keeperBountyUsdc + preview.protocolLiquidationFeeUsdc + preview.lpLiquidationFeeUsdc,
+            preview.liquidationChargeUsdc,
+            "Liquidation charge allocation should conserve value"
+        );
+        assertLe(preview.liquidationChargeUsdc, uint256(preview.equityUsdc));
     }
 
     function test_PlanLiquidation_PositiveResidualAboveTraderClaimDoesNotUnderflow() public {
@@ -2769,8 +3052,8 @@ contract CfdEngineTest is BasePerpTest {
         );
         assertEq(
             delta.residualUsdc,
-            8e6,
-            "Liquidation residual should keep all positive PnL and ignore the max frozen-close spread"
+            18e6,
+            "Exact price-risk equity should include the untouched claim and the positive price PnL"
         );
         assertEq(delta.settlementRetainedUsdc, 0, "No settlement should remain when none is reachable");
         assertEq(
@@ -2798,7 +3081,7 @@ contract CfdEngineTest is BasePerpTest {
 
         assertTrue(delta.liquidatable, "Setup must remain liquidatable");
         assertEq(delta.keeperBountyUsdc, 0, "Zero physically reachable collateral should cap the bounty at zero");
-        assertEq(delta.residualUsdc, -12e6, "Residual should be computed before any trader-claim netting");
+        assertEq(delta.residualUsdc, -2e6, "Exact residual should net the same-account claim against price loss");
         assertEq(
             delta.existingTraderClaimConsumedUsdc,
             10e6,
@@ -2807,21 +3090,25 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(
             delta.existingTraderClaimRemainingUsdc, 0, "No trader claim should survive a negative residual wipeout"
         );
-        assertEq(delta.badDebtUsdc, 2e6, "Bad debt should reflect only the shortfall left after trader claim netting");
+        assertEq(delta.priceLossWrittenOffUsdc, 2e6, "Uncollectible terminal price loss should be diagnostic");
+        assertEq(delta.badDebtUsdc, 0, "V2 must not recreate a protocol bad-debt ledger");
     }
 
     function test_PreviewLiquidation_PreservesExistingTraderClaimOnPositivePhysicalResidual() public {
         address trader = address(0xAB14002);
         address account = trader;
         address keeper = address(0xAB14003);
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.baseCarryBps = 0;
+        _setRiskParams(params);
         _fundTrader(trader, 200e6);
         _open(account, CfdTypes.Side.BEAR, 10_000e18, 200e6, 99_700_000);
 
-        stdstore.target(address(clearinghouse)).sig("balanceUsdc(address)").with_key(account).checked_write(uint256(0));
-
-        stdstore.target(address(engine)).sig("traderClaimBalanceUsdc(address)").with_key(account)
-            .checked_write(uint256(10e6));
-        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(uint256(10e6));
+        _seedAuthenticatedTraderClaim(account, 10e6);
+        params.maintMarginBps = 500;
+        params.initMarginBps = 750;
+        params.fadMarginBps = 750;
+        _setRiskParams(params);
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
@@ -2830,11 +3117,9 @@ contract CfdEngineTest is BasePerpTest {
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 100_000_000);
 
         assertTrue(preview.liquidatable, "Preview should not revert for positive physical residual");
-        assertEq(preview.keeperBountyUsdc, 0, "Zero reachable settlement should cap the direct bounty at zero");
-        assertEq(preview.settlementRetainedUsdc, 0, "No settlement should remain when no settlement is reachable");
-        assertEq(
-            preview.freshTraderPayoutUsdc, 30e6, "Preview should surface the current physical fresh liquidation payout"
-        );
+        assertGt(preview.keeperBountyUsdc, 0, "Dedicated liquidation reserve should fund a keeper bounty");
+        assertGt(preview.settlementRetainedUsdc, 0, "Unused PnL pledge should remain as terminal settlement");
+        assertEq(preview.freshTraderPayoutUsdc, 30e6, "Preview should surface the exact positive price PnL");
         assertEq(
             preview.existingTraderClaimConsumedUsdc,
             0,
@@ -2850,12 +3135,11 @@ contract CfdEngineTest is BasePerpTest {
         );
         assertEq(
             preview.traderClaimBalanceUsdc,
-            40e6,
+            10e6 + preview.freshTraderPayoutUsdc,
             "Trader claim should reflect the untouched existing claim plus the fresh claim amount in the current preview model"
         );
         assertEq(preview.badDebtUsdc, 0, "Positive residual should not report bad debt");
 
-        uint256 settlementBefore = clearinghouse.balanceUsdc(account);
         vm.prank(keeper);
         bytes[] memory liquidationPriceData = new bytes[](1);
         liquidationPriceData[0] = abi.encode(uint256(100_000_000));
@@ -2870,13 +3154,13 @@ contract CfdEngineTest is BasePerpTest {
         liveEffective = liveEffective > traderClaimTotal ? liveEffective - traderClaimTotal : 0;
 
         assertEq(
-            clearinghouse.balanceUsdc(account) - settlementBefore,
-            preview.immediatePayoutUsdc,
-            "Live settlement credit should match preview"
+            clearinghouse.balanceUsdc(account),
+            preview.settlementRetainedUsdc + preview.immediatePayoutUsdc,
+            "Live settlement must conserve retained collateral plus any immediate payout"
         );
         assertEq(
             engine.traderClaimBalanceUsdc(account),
-            40e6,
+            10e6 + preview.freshTraderPayoutUsdc,
             "Live liquidation should preserve the old trader claim plus the fresh claim amount"
         );
         assertEq(
@@ -2911,10 +3195,10 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(sizeAfter, 0, "Close should execute instead of reverting when carry flips the trade into a loss");
     }
 
-    function test_LiquidationState_UsesFullReachableCollateralForUnderwaterBountyCap() public {
+    function test_LiquidationState_UsesFullReachableCollateralForUnderwaterChargeCap() public {
         LiquidationAccountingLibHarness harness = new LiquidationAccountingLibHarness();
         LiquidationAccountingLib.LiquidationState memory state =
-            harness.build(10_000e18, 100_000_000, 125e6, -145e6, 100, 1e6, 900, 1e20);
+            harness.build(10_000e18, 100_000_000, 125e6, -145e6, 100, 1e6, 900, 5000, 0, 1e20);
 
         assertLt(state.equityUsdc, 0, "Setup must make the account underwater");
         assertEq(state.reachableCollateralUsdc, 125e6, "Liquidation state should use full reachable collateral");
@@ -2924,36 +3208,59 @@ contract CfdEngineTest is BasePerpTest {
             "Keeper bounty should be allowed to exceed active position margin when more collateral is reachable"
         );
         assertLe(
-            state.keeperBountyUsdc,
+            state.liquidationChargeUsdc,
             state.reachableCollateralUsdc,
-            "Keeper bounty should still cap at reachable collateral"
+            "Total liquidation charge should still cap at reachable collateral"
+        );
+        assertEq(
+            state.keeperBountyUsdc,
+            state.liquidationChargeUsdc / 2,
+            "Keeper should receive only half of the capped charge"
+        );
+        assertEq(state.protocolLiquidationFeeUsdc, 0, "Protocol liquidation fee should default to zero");
+        assertEq(
+            state.lpLiquidationFeeUsdc,
+            state.liquidationChargeUsdc - state.keeperBountyUsdc - state.protocolLiquidationFeeUsdc,
+            "LPs should receive the other half of the capped charge"
+        );
+    }
+
+    function test_LiquidationState_ShareRoundingRemainderBelongsToLps() public {
+        LiquidationAccountingLibHarness harness = new LiquidationAccountingLibHarness();
+        LiquidationAccountingLib.LiquidationState memory state = harness.build(0, 0, 9, 0, 100, 9, 10, 3333, 2222, 1);
+
+        assertEq(state.liquidationChargeUsdc, 9, "Reachable minimum charge should be collected in full");
+        assertEq(state.keeperBountyUsdc, 2, "Configured keeper share should round down");
+        assertEq(state.protocolLiquidationFeeUsdc, 1, "Configured protocol share should round down");
+        assertEq(state.lpLiquidationFeeUsdc, 6, "LP share should receive both rounding remainders");
+        assertEq(
+            state.liquidationChargeUsdc,
+            state.keeperBountyUsdc + state.protocolLiquidationFeeUsdc + state.lpLiquidationFeeUsdc,
+            "All three allocations should conserve the total charge"
         );
     }
 
     function testFuzz_PlanLiquidation_PositiveResidualPreservesTraderClaimAndUsesOnlyPhysicalReachability(
-        uint256 settlementReachableUsdc,
+        uint256 pnlPledgeUsdc,
         uint256 traderClaimBalanceUsdc
     ) public {
         CfdEnginePlanLibHarness harness = new CfdEnginePlanLibHarness();
 
-        settlementReachableUsdc = bound(settlementReachableUsdc, 0, 20e6);
-        traderClaimBalanceUsdc = bound(traderClaimBalanceUsdc, 1, 20e6);
+        pnlPledgeUsdc = bound(pnlPledgeUsdc, 0, 5e6);
+        traderClaimBalanceUsdc = bound(traderClaimBalanceUsdc, 1, 5e6);
 
         CfdEnginePlanTypes.LiquidationDelta memory delta =
-            harness.planLiquidation(settlementReachableUsdc, traderClaimBalanceUsdc, 2000e18, 99_600_000, 100_000_000);
+            harness.planLiquidation(pnlPledgeUsdc, traderClaimBalanceUsdc, 2000e18, 99_600_000, 100_000_000);
 
-        vm.assume(delta.liquidatable);
-        vm.assume(delta.residualUsdc >= 0);
-
+        assertTrue(delta.liquidatable, "Bounded exact equity should remain below maintenance");
+        assertGe(delta.residualUsdc, 0, "Positive-price fixture must have nonnegative exact residual");
         assertEq(
             delta.liquidationReachableCollateralUsdc,
-            settlementReachableUsdc,
-            "Liquidation reachability must ignore legacy trader claim"
+            pnlPledgeUsdc + traderClaimBalanceUsdc,
+            "Exact liquidation price reachability must include PnL pledge plus the same-account claim"
         );
         assertEq(
-            delta.liquidationState.reachableCollateralUsdc,
-            settlementReachableUsdc,
-            "Keeper bounty state must use only physical reachability"
+            delta.liquidationState.reachableCollateralUsdc, 0, "Keeper bounty state must use only physical reachability"
         );
         assertEq(
             delta.existingTraderClaimConsumedUsdc, 0, "Positive physical residual must not consume legacy trader claim"
@@ -2967,53 +3274,45 @@ contract CfdEngineTest is BasePerpTest {
     }
 
     function testFuzz_PlanLiquidation_NegativeResidualNetsTraderClaimExactlyOnce(
-        uint256 settlementReachableUsdc,
+        uint256 pnlPledgeUsdc,
         uint256 traderClaimBalanceUsdc
     ) public {
         CfdEnginePlanLibHarness harness = new CfdEnginePlanLibHarness();
 
-        settlementReachableUsdc = bound(settlementReachableUsdc, 0, 20e6);
-        traderClaimBalanceUsdc = bound(traderClaimBalanceUsdc, 1, 20e6);
+        pnlPledgeUsdc = bound(pnlPledgeUsdc, 0, 5e6);
+        traderClaimBalanceUsdc = bound(traderClaimBalanceUsdc, 1, 5e6);
 
         CfdEnginePlanTypes.LiquidationDelta memory delta =
-            harness.planLiquidation(settlementReachableUsdc, traderClaimBalanceUsdc, 2000e18, 99_600_000, 99_000_000);
+            harness.planLiquidation(pnlPledgeUsdc, traderClaimBalanceUsdc, 2000e18, 99_600_000, 99_000_000);
 
-        vm.assume(delta.liquidatable);
-        vm.assume(delta.residualUsdc < 0);
+        uint256 priceLossUsdc = 12e6;
+        uint256 expectedClaimConsumedUsdc = traderClaimBalanceUsdc;
+        uint256 expectedPledgeConsumedUsdc = pnlPledgeUsdc;
+        uint256 expectedWriteOffUsdc = priceLossUsdc - expectedClaimConsumedUsdc - expectedPledgeConsumedUsdc;
 
-        uint256 expectedShortfallUsdc = delta.residualPlan.badDebtUsdc;
-        if (delta.liquidationState.equityUsdc >= 0) {
-            uint256 equityUsdc = uint256(delta.liquidationState.equityUsdc);
-            uint256 keeperSubsidyUsdc = delta.keeperBountyUsdc > equityUsdc ? delta.keeperBountyUsdc - equityUsdc : 0;
-            expectedShortfallUsdc =
-                expectedShortfallUsdc > keeperSubsidyUsdc ? expectedShortfallUsdc - keeperSubsidyUsdc : 0;
-        }
-        uint256 expectedConsumed =
-            traderClaimBalanceUsdc < expectedShortfallUsdc ? traderClaimBalanceUsdc : expectedShortfallUsdc;
-
+        assertTrue(delta.liquidatable, "Bounded negative exact equity should always be liquidatable");
+        assertLt(delta.residualUsdc, 0, "Negative-price fixture must have a negative exact residual");
         assertEq(
             delta.liquidationReachableCollateralUsdc,
-            settlementReachableUsdc,
-            "Liquidation reachability must ignore legacy trader claim"
+            pnlPledgeUsdc + traderClaimBalanceUsdc,
+            "Exact liquidation price reachability must include PnL pledge plus the same-account claim"
         );
         assertEq(
             delta.existingTraderClaimConsumedUsdc,
-            expectedConsumed,
-            "Negative residual must net legacy trader claim exactly once against terminal shortfall"
+            expectedClaimConsumedUsdc,
+            "Negative exact price risk must net the same-account claim exactly once"
         );
         assertEq(
             delta.existingTraderClaimRemainingUsdc,
-            traderClaimBalanceUsdc - expectedConsumed,
-            "Trader claim remainder must equal the unconsumed existing claim"
+            0,
+            "The bounded price loss must consume the complete same-account claim"
         );
-        assertEq(
-            delta.badDebtUsdc,
-            expectedShortfallUsdc - expectedConsumed,
-            "Bad debt must only reflect the shortfall left after trader claim netting"
-        );
+        assertEq(delta.pricePnlPledgeConsumedUsdc, expectedPledgeConsumedUsdc);
+        assertEq(delta.priceLossWrittenOffUsdc, expectedWriteOffUsdc);
+        assertEq(delta.badDebtUsdc, 0, "A terminal price write-off must never create protocol debt");
     }
 
-    function test_PlanLiquidation_ClawsBackNegativeAccruedVpiIntoBadDebt() public {
+    function test_PlanLiquidation_FundedNegativeVpiCancelsInHealthAndIsRecovered() public {
         CfdEnginePlanLibHarness harness = new CfdEnginePlanLibHarness();
 
         CfdEnginePlanTypes.LiquidationDelta memory withoutClawback =
@@ -3022,21 +3321,16 @@ contract CfdEngineTest is BasePerpTest {
             harness.planLiquidationWithVpiAccrued(5e6, 0, 2000e18, 100_000_000, 99_000_000, -7e6);
 
         assertTrue(withClawback.liquidatable, "Setup must remain liquidatable");
-        assertEq(
-            withClawback.riskState.equityUsdc,
-            withoutClawback.riskState.equityUsdc - 7e6,
-            "Base risk equity should include the negative accrued VPI clawback"
-        );
+        assertEq(withClawback.riskState.equityUsdc, withoutClawback.riskState.equityUsdc);
         assertEq(
             withClawback.liquidationState.equityUsdc,
-            withoutClawback.liquidationState.equityUsdc - 7e6,
-            "Liquidation equity should apply the negative accrued VPI clawback exactly once"
+            withoutClawback.liquidationState.equityUsdc,
+            "Dedicated backing and its matching liability must cancel exactly once"
         );
-        assertEq(
-            withClawback.badDebtUsdc,
-            withoutClawback.badDebtUsdc + 7e6,
-            "Negative accrued VPI should reduce liquidation residual by exactly the clawback amount"
-        );
+        assertEq(withClawback.vpiRebateReserveBeforeUsdc, 7e6);
+        assertEq(withClawback.vpiRebateReserveConsumedUsdc, 7e6);
+        assertEq(withClawback.vpiRebateReserveAfterUsdc, 0);
+        assertEq(withClawback.badDebtUsdc, 0, "V2 liquidation waives uncollectible charges instead of creating debt");
         assertEq(
             withClawback.keeperBountyUsdc,
             withoutClawback.keeperBountyUsdc,
@@ -3044,16 +3338,16 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
-    function testFuzz_PlanLiquidation_NegativeVpiClawbackAppliedOnce(
+    function testFuzz_PlanLiquidation_FundedNegativeVpiCancelsExactlyOnce(
         uint256 reachableUsdc,
-        uint256 size,
+        uint256 rawLots,
         uint256 oraclePrice,
         uint256 clawbackUsdc
     ) public {
         CfdEnginePlanLibHarness harness = new CfdEnginePlanLibHarness();
 
         reachableUsdc = bound(reachableUsdc, 1, 25_000_000e6);
-        size = bound(size, 1e18, 1_000_000e18);
+        uint256 size = bound(rawLots, 1, 10_000) * CfdTypes.SIZE_QUANTUM;
         oraclePrice = bound(oraclePrice, 1, 2e8);
         clawbackUsdc = bound(clawbackUsdc, 1, 50_000_000e6);
 
@@ -3064,21 +3358,27 @@ contract CfdEngineTest is BasePerpTest {
 
         assertEq(
             withClawback.riskState.equityUsdc,
-            withoutClawback.riskState.equityUsdc - int256(clawbackUsdc),
-            "Risk equity must include the accrued VPI liability exactly once"
+            withoutClawback.riskState.equityUsdc,
+            "Dedicated reserve must cancel the funded VPI liability in risk"
         );
-        if (!withoutClawback.liquidatable || !withClawback.liquidatable) {
+        assertEq(withClawback.liquidatable, withoutClawback.liquidatable);
+        if (!withClawback.liquidatable) {
             return;
         }
 
         assertEq(
             withClawback.liquidationState.equityUsdc,
-            withoutClawback.liquidationState.equityUsdc - int256(clawbackUsdc),
-            "Liquidation equity must not subtract the accrued VPI clawback a second time"
+            withoutClawback.liquidationState.equityUsdc,
+            "Liquidation equity must preserve the same cancellation"
         );
+        uint256 expectedWithheldUsdc =
+            withClawback.priceGainUsdc < clawbackUsdc ? withClawback.priceGainUsdc : clawbackUsdc;
+        assertEq(withClawback.vpiRebateReserveConsumedUsdc, clawbackUsdc - expectedWithheldUsdc);
+        assertEq(withClawback.vpiRebateReserveAfterUsdc, 0);
+        assertEq(withClawback.badDebtUsdc, 0);
     }
 
-    function test_PlanLiquidation_NegativeAccruedVpiCanFlipLiquidatable() public {
+    function test_PlanLiquidation_FundedNegativeVpiDoesNotFlipLiquidatable() public {
         CfdEnginePlanLibHarness harness = new CfdEnginePlanLibHarness();
 
         CfdEnginePlanTypes.LiquidationDelta memory withoutClawback =
@@ -3086,27 +3386,34 @@ contract CfdEngineTest is BasePerpTest {
         CfdEnginePlanTypes.LiquidationDelta memory withClawback =
             harness.planLiquidationWithVpiAccrued(200_000, 0, 1000e18, 100_000_000, 101_000_000, -7e6);
 
-        assertFalse(withoutClawback.liquidatable, "Setup should sit just above maintenance without the VPI liability");
-        assertTrue(withClawback.liquidatable, "Negative accrued VPI should be enough to trigger liquidation");
+        assertEq(withClawback.liquidatable, withoutClawback.liquidatable);
         assertEq(
             withClawback.riskState.equityUsdc,
-            withoutClawback.riskState.equityUsdc - 7e6,
-            "Risk equity should fall by the negative VPI clawback amount"
+            withoutClawback.riskState.equityUsdc,
+            "A fully funded VPI liability cannot independently change liquidation health"
         );
     }
 
-    function test_PlanOpen_ExistingNegativeVpiCountsAgainstImr() public {
+    function test_PlanOpen_FundedNegativeVpiDoesNotDoubleCountAgainstImr() public {
         CfdEnginePlanLibHarness harness = new CfdEnginePlanLibHarness();
 
-        CfdEnginePlanTypes.OpenDelta memory delta =
-            harness.planOpenWithExistingVpiAccrued(1700e6, 1700e6, 100_000e18, 1e8, -1000e6, 10_000e18, 0, 1e8);
-
-        assertEq(
-            uint8(delta.revertCode),
-            uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN),
-            "Existing negative VPI liability should count against open IMR"
+        CfdEnginePlanTypes.OpenDelta memory delta = harness.planOpenWithExistingVpiAccrued(
+            CfdEnginePlanLibHarness.OpenWithExistingVpiParams({
+                settlementBalanceUsdc: 1900e6,
+                positionMarginUsdc: 1700e6,
+                currentSize: 100_000e18,
+                currentEntryPrice: 1e8,
+                vpiAccrued: -1000e6,
+                sizeDelta: 10_000e18,
+                marginDelta: 200e6,
+                price: 1e8
+            })
         );
-        assertFalse(delta.valid, "Planner should reject opens that only clear IMR when negative VPI is ignored");
+
+        assertTrue(delta.valid, "Fully backed legacy VPI must not be charged against open risk a second time");
+        assertEq(uint8(delta.revertCode), uint8(CfdEnginePlanTypes.OpenRevertCode.OK));
+        assertEq(delta.vpiRebateReserveBeforeUsdc, 1000e6);
+        assertEq(delta.vpiRebateReserveAfterUsdc, 1000e6);
     }
 
     function test_LiquidationPreviewAndPositionView_UseCurrentNotionalThreshold() public {
@@ -3211,7 +3518,10 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(interfacePreview.equityUsdc, contractPreview.equityUsdc);
         assertEq(interfacePreview.pnlUsdc, contractPreview.pnlUsdc);
         assertEq(interfacePreview.reachableCollateralUsdc, contractPreview.reachableCollateralUsdc);
+        assertEq(interfacePreview.liquidationChargeUsdc, contractPreview.liquidationChargeUsdc);
         assertEq(interfacePreview.keeperBountyUsdc, contractPreview.keeperBountyUsdc);
+        assertEq(interfacePreview.protocolLiquidationFeeUsdc, contractPreview.protocolLiquidationFeeUsdc);
+        assertEq(interfacePreview.lpLiquidationFeeUsdc, contractPreview.lpLiquidationFeeUsdc);
         assertEq(interfacePreview.seizedCollateralUsdc, contractPreview.seizedCollateralUsdc);
         assertEq(interfacePreview.immediatePayoutUsdc, contractPreview.immediatePayoutUsdc);
         assertEq(interfacePreview.traderClaimBalanceUsdc, contractPreview.traderClaimBalanceUsdc);
@@ -3278,20 +3588,37 @@ contract CfdEngineTest is BasePerpTest {
             preview.traderClaimBalanceUsdc,
             "Illiquid liquidation preview should match live trader claim balance"
         );
-        assertEq(observed.badDebtUsdc, preview.badDebtUsdc, "Illiquid liquidation preview should match live bad debt");
+        assertEq(preview.badDebtUsdc, 0, "Illiquid liquidation must not recreate a protocol debt ledger");
+        assertEq(
+            terminalNavBook.curveHashOf(account),
+            bytes32(0),
+            "Illiquid terminal liquidation must still remove the authenticated account curve"
+        );
     }
 
-    function test_PlanLiquidation_PendingCarryCanTriggerLiquidation() public {
+    function test_PlanLiquidation_CarryDelinquencyIsStrictlyIsolatedFromPriceCollateral() public {
         CfdEnginePlanLibHarness harness = new CfdEnginePlanLibHarness();
 
-        CfdEnginePlanTypes.LiquidationDelta memory beforeCarry =
-            harness.planLiquidationWithCarry(820e6, 0, 50_000e18, 1e8, 1e8, 1, 1);
-        CfdEnginePlanTypes.LiquidationDelta memory afterCarry =
-            harness.planLiquidationWithCarry(820e6, 0, 50_000e18, 1e8, 1e8, uint64(100 days), 1);
+        CfdEnginePlanTypes.LiquidationDelta memory fullyFunded =
+            harness.planLiquidationWithUnsettledCarry(200e6, 50e6, 1000e6, 50e6, 10_000e18, 1e8, 1e8);
+        CfdEnginePlanTypes.LiquidationDelta memory oneAtomUncovered =
+            harness.planLiquidationWithUnsettledCarry(200e6, 50e6, 1000e6, 50e6 + 1, 10_000e18, 1e8, 1e8);
 
-        assertFalse(beforeCarry.liquidatable, "Setup should start above maintenance before carry accrues");
-        assertGt(afterCarry.pendingCarryUsdc, 0, "Setup must accrue pending carry");
-        assertTrue(afterCarry.liquidatable, "Pending carry should reduce liquidation equity below maintenance");
+        assertFalse(fullyFunded.liquidatable, "Carry fully collectible from free settlement must not liquidate");
+        assertEq(fullyFunded.pendingCarryUsdc, 50e6, "Fixture must checkpoint the funded carry exactly");
+        assertTrue(oneAtomUncovered.liquidatable, "One uncovered carry atom must be independently delinquent");
+        assertEq(oneAtomUncovered.pendingCarryUsdc, 50e6 + 1, "Fixture must preserve the one-atom boundary");
+        assertEq(
+            oneAtomUncovered.actionChargeCollectedUsdc,
+            50e6,
+            "Liquidation may collect carry only from eligible free settlement"
+        );
+        assertEq(oneAtomUncovered.actionChargeWaivedUsdc, 1, "Exactly the uncovered carry atom must be waived");
+        assertEq(
+            oneAtomUncovered.existingTraderClaimRemainingUsdc,
+            1000e6,
+            "A large same-account claim must not pay or conceal action carry"
+        );
     }
 
     function test_PreviewLiquidation_StagesForfeitureLikeLiveLiquidation() public {
@@ -3323,6 +3650,12 @@ contract CfdEngineTest is BasePerpTest {
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory afterSnapshot =
             engineProtocolLens.getProtocolAccountingSnapshot();
 
+        assertGe(
+            observed.protocolLiquidationFeeUsdc,
+            reservationBefore.executionBountyUsdc,
+            "Treasury inflow should include the forfeited execution reservation"
+        );
+        observed.protocolLiquidationFeeUsdc -= reservationBefore.executionBountyUsdc;
         _assertLiquidationPreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
 
         assertEq(
@@ -3330,15 +3663,11 @@ contract CfdEngineTest is BasePerpTest {
             preview.traderClaimBalanceUsdc,
             "Preview trader claim should match live liquidation after staged forfeiture"
         );
-        assertEq(
-            observed.badDebtUsdc,
-            preview.badDebtUsdc,
-            "Preview bad debt should match live liquidation after staged forfeiture"
-        );
+        assertEq(preview.badDebtUsdc, 0, "Staged forfeiture must not recreate a protocol debt ledger");
         assertEq(
             afterSnapshot.protocolTreasuryBalanceUsdc - beforeSnapshot.protocol.protocolTreasuryBalanceUsdc,
-            reservationBefore.executionBountyUsdc,
-            "Live liquidation should book the same forfeited reservation preview assumes as protocol fees"
+            reservationBefore.executionBountyUsdc + preview.protocolLiquidationFeeUsdc,
+            "Live liquidation should book forfeited reservations and the configured protocol liquidation fee"
         );
         assertEq(
             observed.effectiveAssetsAfterUsdc,
@@ -3382,7 +3711,7 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
-    function test_Liquidation_ConsumesTraderClaimBeforeRecordingBadDebt() public {
+    function test_Liquidation_ConsumesTraderClaimBeforeWritingOffTerminalPriceLoss() public {
         uint256 poolDepth = 1_000_000 * 1e6;
         address bullAccount = address(uint160(0xD221));
         address bearAccount = address(uint160(0xD222));
@@ -3412,14 +3741,9 @@ contract CfdEngineTest is BasePerpTest {
         stdstore.target(address(clearinghouse)).sig("balanceUsdc(address)").with_key(bearAccount)
             .checked_write(reducedSettlement);
 
-        uint256 settlementReachableBefore = _terminalReachableUsdc(bearAccount);
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(bearAccount, 50_000_000);
         assertTrue(preview.liquidatable, "Setup must produce a liquidatable position even after trader claim credit");
 
-        int256 terminalResidual =
-            int256(settlementReachableBefore + traderClaimBefore) + preview.pnlUsdc - int256(preview.keeperBountyUsdc);
-
-        uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(50_000_000));
         vm.prank(keeper);
@@ -3428,27 +3752,23 @@ contract CfdEngineTest is BasePerpTest {
         assertLt(
             engine.traderClaimBalanceUsdc(bearAccount),
             traderClaimBefore,
-            "Liquidation should consume trader claim before socializing loss"
+            "Liquidation should consume the same-account claim before writing off terminal price loss"
         );
         assertEq(
             engine.traderClaimBalanceUsdc(bearAccount),
             preview.traderClaimBalanceUsdc,
             "Preview should match remaining trader claim after liquidation"
         );
+        assertEq(preview.badDebtUsdc, 0, "V2 liquidation must not recreate protocol bad debt");
         assertEq(
-            engine.accumulatedBadDebtUsdc() - badDebtBefore,
-            preview.badDebtUsdc,
-            "Bad debt should only reflect the post-claim shortfall"
+            clearinghouse.balanceUsdc(bearAccount),
+            preview.settlementRetainedUsdc + preview.immediatePayoutUsdc,
+            "Live retained settlement and immediate payout must match the exact liquidation preview"
         );
         assertEq(
-            clearinghouse.balanceUsdc(bearAccount) + engine.traderClaimBalanceUsdc(bearAccount),
-            _positivePart(terminalResidual),
-            "Terminal liquidation residual should equal retained settlement plus remaining trader claim and immediate credit"
-        );
-        assertEq(
-            engine.accumulatedBadDebtUsdc() - badDebtBefore,
-            preview.badDebtUsdc,
-            "Terminal liquidation bad debt should align with the previewed trader-claim-adjusted shortfall"
+            terminalNavBook.curveHashOf(bearAccount),
+            bytes32(0),
+            "Terminal liquidation must remove the authenticated account curve"
         );
     }
 
@@ -3505,9 +3825,7 @@ contract CfdEngineTest is BasePerpTest {
             observed.traderClaimBalanceUsdc,
             "Live close should leave the same trader claim remainder observed in settlement state"
         );
-        assertEq(
-            observed.badDebtUsdc, preview.badDebtUsdc, "Bad debt should only reflect the post-claim shortfall on close"
-        );
+        assertEq(preview.badDebtUsdc, 0, "Post-claim terminal price loss must remain a diagnostic write-off");
         assertEq(
             preview.existingTraderClaimConsumedUsdc,
             traderClaimBefore - preview.existingTraderClaimRemainingUsdc,
@@ -3598,14 +3916,16 @@ contract CfdEngineTest is BasePerpTest {
         assertGe(bearClaimAfter, bearClaimBefore, "Coalescing should not move the account behind later claimants");
     }
 
-    function test_Close_RecoversExecutionFeeShortfallFromExistingTraderClaim() public {
+    function test_Close_WaivesExecutionFeeShortfallWithoutConsumingExistingTraderClaim() public {
         uint256 poolDepth = 1_000_000 * 1e6;
-        address bullAccount = address(uint160(0xD251));
         address bearAccount = address(uint160(0xD252));
-        _fundTrader(bullAccount, 5000e6);
+        {
+            address bullAccount = address(uint160(0xD251));
+            _fundTrader(bullAccount, 5000e6);
+            _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, poolDepth);
+        }
         _fundTrader(bearAccount, 5000e6);
 
-        _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, poolDepth);
         _open(bearAccount, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, poolDepth);
 
         uint64 refreshTime = uint64(block.timestamp + 1 days);
@@ -3614,10 +3934,12 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, refreshTime);
 
-        uint256 firstCloseExecutionFeeUsdc = _engineExecutionFeeUsdc(5000e18, 120_000_000);
-        uint256 poolAssets = pool.totalAssets();
-        vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - firstCloseExecutionFeeUsdc - 1);
+        {
+            uint256 firstCloseExecutionFeeUsdc = _engineExecutionFeeUsdc(5000e18, 120_000_000);
+            uint256 poolAssets = pool.totalAssets();
+            vm.prank(address(pool));
+            usdc.transfer(address(0xDEAD), poolAssets - firstCloseExecutionFeeUsdc - 1);
+        }
 
         _closeAt(bearAccount, CfdTypes.Side.BEAR, 5000e18, 120_000_000, poolDepth, refreshTime);
         uint256 traderClaimBefore = engine.traderClaimBalanceUsdc(bearAccount);
@@ -3625,29 +3947,19 @@ contract CfdEngineTest is BasePerpTest {
             traderClaimBefore, 1e6, "Setup must create an existing trader claim large enough to cover the fee shortfall"
         );
 
-        stdstore.target(address(clearinghouse)).sig("balanceUsdc(address)").with_key(bearAccount)
-            .checked_write(uint256(0));
-        bytes32 positionMarginSlot = keccak256(abi.encode(bearAccount, uint256(3)));
-        vm.store(address(clearinghouse), positionMarginSlot, bytes32(uint256(0)));
-
-        IMarginClearinghouse.LockedMarginBuckets memory locked = clearinghouse.getLockedMarginBuckets(bearAccount);
-        assertEq(locked.positionMarginUsdc, 0, "Test must reduce reachable collateral below the terminal close fee");
+        _removePnlPledgeAndSyncTerminalCurve(bearAccount);
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.simulateClose(bearAccount, 5000e18, 1e8, poolDepth);
-        uint256 nominalExecutionFeeUsdc = _engineExecutionFeeUsdc(5000e18, 1e8);
 
+        assertTrue(preview.valid, "Terminal action fee shortfall should be waived rather than blocking close");
+        assertEq(preview.realizedPnlUsdc, 0, "Setup must isolate action fees from price PnL");
+        assertEq(preview.badDebtUsdc, 0, "Action-fee shortfall must remain a waiver rather than protocol debt");
+        assertEq(preview.executionFeeUsdc, 0, "Execution fee with no eligible action collateral should be waived");
+        assertEq(preview.existingTraderClaimConsumedUsdc, 0, "Action fees must not consume same-account trader claims");
         assertEq(
-            preview.badDebtUsdc, 0, "Trader claim should prevent LP bad debt when close shortfall includes unpaid fees"
-        );
-        assertEq(
-            preview.executionFeeUsdc,
-            nominalExecutionFeeUsdc,
-            "Preview should surface the direct execution fee collection required by the current accounting model"
-        );
-        assertGt(
-            preview.existingTraderClaimConsumedUsdc,
-            0,
-            "Trader claim should still contribute to covering the close shortfall"
+            preview.existingTraderClaimRemainingUsdc,
+            traderClaimBefore,
+            "Price-neutral close should preserve the entire existing trader claim"
         );
 
         uint256 feesBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
@@ -3660,8 +3972,31 @@ contract CfdEngineTest is BasePerpTest {
         );
         assertEq(
             engine.traderClaimBalanceUsdc(bearAccount),
-            preview.existingTraderClaimRemainingUsdc,
-            "Trader claim should be consumed without routing reserved cash to treasury"
+            traderClaimBefore,
+            "Live action-fee waiver must leave the existing trader claim untouched"
+        );
+        assertEq(terminalNavBook.curveHashOf(bearAccount), bytes32(0), "Terminal close must delete the exact NAV curve");
+    }
+
+    function _removePnlPledgeAndSyncTerminalCurve(
+        address account
+    ) internal {
+        bytes32 oldCurveHash = terminalNavBook.curveHashOf(account);
+        IMarginClearinghouse.LockedMarginBuckets memory lockedBefore = clearinghouse.getLockedMarginBuckets(account);
+        uint256 nonPnlLockedUsdc = lockedBefore.totalLockedMarginUsdc - lockedBefore.positionMarginUsdc;
+        stdstore.target(address(clearinghouse)).sig("balanceUsdc(address)").with_key(account)
+            .checked_write(nonPnlLockedUsdc);
+        bytes32 positionMarginSlot = keccak256(abi.encode(account, uint256(3)));
+        vm.store(address(clearinghouse), positionMarginSlot, bytes32(uint256(0)));
+        vm.prank(address(engine));
+        terminalNavBook.syncFromEngine(account, oldCurveHash);
+
+        IMarginClearinghouse.LockedMarginBuckets memory locked = clearinghouse.getLockedMarginBuckets(account);
+        assertEq(locked.positionMarginUsdc, 0, "Test must reduce reachable collateral below the terminal close fee");
+        assertEq(
+            clearinghouse.balanceUsdc(account),
+            locked.totalLockedMarginUsdc,
+            "Synthetic shortfall must preserve backing for every non-PnL locked bucket"
         );
     }
 
@@ -3686,13 +4021,18 @@ contract CfdEngineTest is BasePerpTest {
         assertGt(reservation.executionBountyUsdc, 0, "Setup must create clearinghouse-reserved execution bounty");
         assertEq(
             preview.reachableCollateralUsdc,
-            snapshot.terminalReachableUsdc,
-            "Liquidation preview must use the same liquidation reachability as the account ledger snapshot"
+            snapshot.terminalPriceCollectibleCapUsdc,
+            "Liquidation preview must use only the exact PnL pledge/claim price-loss cap"
+        );
+        assertEq(
+            snapshot.liquidationReachableSettlementUsdc,
+            snapshot.settlementBalanceUsdc - reservation.executionBountyUsdc,
+            "Account-ledger terminal reachability must exclude reserved execution bounty"
         );
         assertLt(
             preview.reachableCollateralUsdc,
-            clearinghouse.balanceUsdc(account) + reservation.executionBountyUsdc,
-            "Liquidation preview must exclude reserved execution bounty from reachable collateral"
+            snapshot.liquidationReachableSettlementUsdc,
+            "Generic free settlement must remain outside the exact terminal price-loss cap"
         );
         assertEq(
             snapshot.executionBountyReserveUsdc,
@@ -3756,7 +4096,8 @@ contract CfdEngineTest is BasePerpTest {
 
         uint256 bearMaxProfit = _sideMaxProfit(CfdTypes.Side.BEAR);
         uint256 targetAssets = bearMaxProfit + clearinghouse.balanceUsdc(engine.protocolTreasury())
-            + preDrainPreview.keeperBountyUsdc - preDrainPreview.seizedCollateralUsdc - 1;
+            + preDrainPreview.keeperBountyUsdc + preDrainPreview.protocolLiquidationFeeUsdc
+            - preDrainPreview.seizedCollateralUsdc - 1;
         uint256 currentAssets = pool.totalAssets();
         assertGt(currentAssets, targetAssets, "Test setup must be able to drain the pool into the degraded-mode gap");
 
@@ -3823,36 +4164,67 @@ contract CfdEngineTest is BasePerpTest {
         assertTrue(status.traderClaimServiceableNow, "Trader claim should be serviceable under partial liquidity");
     }
 
-    function test_CloseLoss_ConsumesQueuedCommittedMarginBeforeBadDebt() public {
+    function test_CloseLoss_ProtectsQueuedCommittedMarginFromPriceLossAndConsumesOnlyActionCharge() public {
         address trader = address(0xABD0);
         address account = trader;
         _fundTrader(trader, 10_000 * 1e6);
 
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.vpiFactor = 0;
+        _setRiskParams(params);
         _open(account, CfdTypes.Side.BULL, 100_000 * 1e18, 2000 * 1e6, 1e8);
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 7900e6, type(uint256).max, false);
 
-        uint256 lockedBeforeClose = clearinghouse.lockedMarginUsdc(account);
-        (, uint256 liveMarginBeforeClose,,,,,) = engine.positions(account);
-        uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
+        // Make the terminal action charge large enough to exhaust free settlement. This is deliberately separate from
+        // the adverse price move: only the action slice may reach the queued committed-margin bucket.
+        stdstore.target(address(engine)).sig("unsettledCarryUsdc(address)").with_key(account)
+            .checked_write(uint256(500e6));
+
+        CfdTypes.Order memory closeOrder = CfdTypes.Order({
+            account: account,
+            sizeDelta: 100_000e18,
+            marginDelta: 0,
+            targetPrice: 103_000_000,
+            commitTime: uint64(block.timestamp),
+            commitBlock: uint64(block.number),
+            orderId: 0,
+            side: CfdTypes.Side.BULL,
+            isClose: true
+        });
+        CfdEngineSettlementSidecar sidecar = CfdEngineSettlementSidecar(address(engine.settlementSidecar()));
+        uint256 currentPoolDepthUsdc = pool.totalAssets();
+        vm.prank(address(engine));
+        CfdEnginePlanTypes.RawSnapshot memory snap = sidecar.buildRawSnapshot(account, currentPoolDepthUsdc);
+        CfdEnginePlanTypes.CloseDelta memory delta =
+            engine.planner().planClose(snap, closeOrder, 103_000_000, uint64(block.timestamp));
+
+        uint256 committedBefore = clearinghouse.getLockedMarginBuckets(account).committedOrderMarginUsdc;
+        assertTrue(delta.valid, "Terminal close plan should remain executable");
+        assertGt(delta.priceLossWrittenOffUsdc, 0, "Adverse price loss must exceed the isolated PnL pledge");
+        assertGt(
+            delta.actionCommittedMarginConsumedUsdc,
+            0,
+            "Only the independently assessed terminal action charge should reach committed margin"
+        );
+        assertEq(
+            delta.priceLossUsdc,
+            delta.pricePnlClaimConsumedUsdc + delta.pricePnlPledgeConsumedUsdc + delta.priceLossWrittenOffUsdc,
+            "Price loss must conserve across claim, PnL pledge, and diagnostic write-off"
+        );
 
         _close(account, CfdTypes.Side.BULL, 100_000 * 1e18, 103_000_000);
 
-        assertLt(
-            _remainingCommittedMargin(1),
-            7900e6,
-            "Order record should reflect committed margin consumed by terminal settlement"
-        );
-        assertLt(
-            clearinghouse.lockedMarginUsdc(account),
-            lockedBeforeClose - liveMarginBeforeClose,
-            "Close settlement should consume queued committed margin before recording bad debt"
+        assertEq(
+            committedBefore - clearinghouse.getLockedMarginBuckets(account).committedOrderMarginUsdc,
+            delta.actionCommittedMarginConsumedUsdc,
+            "Live FIFO consumption must equal the planned action-only committed-margin slice"
         );
         assertEq(
-            engine.accumulatedBadDebtUsdc(),
-            badDebtBefore,
-            "Queued committed margin should prevent avoidable close bad debt"
+            terminalNavBook.curveHashOf(account),
+            bytes32(0),
+            "Terminal settlement should remove the exact account curve after diagnostic price write-off"
         );
     }
 
@@ -3939,7 +4311,7 @@ contract CfdEngineTest is BasePerpTest {
         CfdTypes.Order memory openOrder = CfdTypes.Order({
             account: account,
             sizeDelta: 100_000 * 1e18,
-            marginDelta: 1600 * 1e6,
+            marginDelta: 2000 * 1e6,
             targetPrice: 1e8,
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
@@ -4004,7 +4376,7 @@ contract CfdEngineTest is BasePerpTest {
         CfdTypes.Order memory second = CfdTypes.Order({
             account: account,
             sizeDelta: 30_000 * 1e18,
-            marginDelta: 2000 * 1e6,
+            marginDelta: 7000 * 1e6,
             targetPrice: 1.2e8,
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
@@ -4097,7 +4469,9 @@ contract CfdEngineTest is BasePerpTest {
                 fadMarginBps: 500,
                 baseCarryBps: 500,
                 minBountyUsdc: 1 * 1e6,
-                bountyBps: 10
+                bountyBps: 10,
+                keeperShareBps: 5000,
+                protocolShareBps: 0
             })
         );
 
@@ -4252,7 +4626,7 @@ contract CfdEngineTest is BasePerpTest {
         CfdTypes.Order memory order = CfdTypes.Order({
             account: account,
             sizeDelta: 100_000 * 1e18,
-            marginDelta: 50 * 1e6,
+            marginDelta: 1100 * 1e6,
             targetPrice: 1e8,
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
@@ -4260,7 +4634,14 @@ contract CfdEngineTest is BasePerpTest {
             side: CfdTypes.Side.BULL,
             isClose: false
         });
-        vm.expectRevert(abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__TypedOrderFailure.selector, 1, 6, false));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ICfdEngineTypes.CfdEngine__TypedOrderFailure.selector,
+                CfdEnginePlanTypes.ExecutionFailurePolicyCategory.UserInvalid,
+                uint8(CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES),
+                false
+            )
+        );
         vm.prank(address(router));
         engine.processOrderTyped(order, 1e8, poolDepth, uint64(block.timestamp));
     }
@@ -4320,7 +4701,9 @@ contract CfdEngineTest is BasePerpTest {
                 fadMarginBps: 300,
                 baseCarryBps: 500,
                 minBountyUsdc: 1 * 1e6,
-                bountyBps: 10
+                bountyBps: 10,
+                keeperShareBps: 5000,
+                protocolShareBps: 0
             })
         );
 
@@ -4346,11 +4729,11 @@ contract CfdEngineTest is BasePerpTest {
         address account = address(uint160(1));
         _fundTrader(account, 10_000 * 1e6);
 
-        // Open BULL 100k tokens at $1.00 with $1600 margin (meets explicit 1.5% init margin)
+        // Open BULL 100k tokens at $1.00 with enough supplied collateral for pledge plus liquidation reserve.
         CfdTypes.Order memory openOrder = CfdTypes.Order({
             account: account,
             sizeDelta: 100_000 * 1e18,
-            marginDelta: 1600 * 1e6,
+            marginDelta: 2000 * 1e6,
             targetPrice: 1e8,
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
@@ -4403,7 +4786,7 @@ contract CfdEngineTest is BasePerpTest {
         CfdTypes.Order memory order = CfdTypes.Order({
             account: account,
             sizeDelta: 100_000 * 1e18,
-            marginDelta: 100 * 1e6,
+            marginDelta: 200 * 1e6,
             targetPrice: 1e8,
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
@@ -4412,7 +4795,14 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
 
-        vm.expectRevert(abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__TypedOrderFailure.selector, 1, 6, false));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ICfdEngineTypes.CfdEngine__TypedOrderFailure.selector,
+                CfdEnginePlanTypes.ExecutionFailurePolicyCategory.UserInvalid,
+                uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN),
+                false
+            )
+        );
         vm.prank(address(router));
         engine.processOrderTyped(order, 1e8, poolDepth, uint64(block.timestamp));
     }
@@ -4426,7 +4816,7 @@ contract CfdEngineTest is BasePerpTest {
         CfdTypes.Order memory first = CfdTypes.Order({
             account: account,
             sizeDelta: 100_000 * 1e18,
-            marginDelta: 1600 * 1e6,
+            marginDelta: 2000 * 1e6,
             targetPrice: 0,
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
@@ -4475,7 +4865,7 @@ contract CfdEngineTest is BasePerpTest {
 
     function test_H9_SolvencyDeadlock_CloseAllowedDuringInsolvency() public {
         vm.warp(block.timestamp + 1 hours);
-        juniorVault.withdraw(800_000 * 1e6, address(this), address(this));
+        _settleJuniorWithdrawal(address(this), 800_000 * 1e6);
 
         uint256 poolDepth = 200_000 * 1e6;
         address aliceAccount = address(uint160(1));
@@ -4537,7 +4927,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(aliceSize, 0, "Close should succeed during insolvency");
     }
 
-    function test_M11_LiquidationSeizesFreeEquity() public {
+    function test_M11_LiquidationDoesNotSeizeGenericFreeEquityForPriceLoss() public {
         uint256 poolDepth = 1_000_000 * 1e6;
         address account = address(uint160(1));
         address trader = account;
@@ -4546,7 +4936,7 @@ contract CfdEngineTest is BasePerpTest {
         CfdTypes.Order memory openOrder = CfdTypes.Order({
             account: account,
             sizeDelta: 100_000 * 1e18,
-            marginDelta: 1600 * 1e6,
+            marginDelta: 2000 * 1e6,
             targetPrice: 1e8,
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
@@ -4573,12 +4963,15 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(size, 0, "Position should be liquidated");
 
         uint256 freeEquityAfter = clearinghouse.getFreeBuyingPowerUsdc(account);
-        assertTrue(freeEquityAfter < freeEquityBefore, "Free equity should be reduced to cover bad debt");
+        assertEq(
+            freeEquityAfter,
+            freeEquityBefore,
+            "Terminal price loss must never consume generic free settlement outside the isolated PnL pledge"
+        );
 
         uint256 poolBalanceAfter = usdc.balanceOf(address(pool));
         uint256 totalRecovered = poolBalanceAfter - poolBalanceBefore;
-        (, uint256 posMarginStored,,,,,) = engine.positions(account);
-        assertTrue(totalRecovered > 0, "Pool should recover more than zero from bad debt liquidation");
+        assertTrue(totalRecovered > 0, "Pool should recover the isolated price pledge and LP charge allocation");
     }
 
     function test_LiquidationWorksWhenPoolInsolvent() public {
@@ -4644,7 +5037,7 @@ contract CfdEngineTest is BasePerpTest {
         engine.liquidatePosition(account, 1e8, 1_000_000 * 1e6, uint64(block.timestamp), address(this));
     }
 
-    function test_LiquidationBounty_UsesReachableCollateralSubsidyCap() public {
+    function test_LiquidationCharge_UsesReachableCollateralSubsidyCap() public {
         uint256 poolDepth = 1_000_000 * 1e6;
         address account = address(uint160(1234));
         address trader = account;
@@ -4659,14 +5052,16 @@ contract CfdEngineTest is BasePerpTest {
                 fadMarginBps: 10,
                 baseCarryBps: 500,
                 minBountyUsdc: 1 * 1e6,
-                bountyBps: 100
+                bountyBps: 100,
+                keeperShareBps: 5000,
+                protocolShareBps: 0
             })
         );
 
         CfdTypes.Order memory openOrder = CfdTypes.Order({
             account: account,
             sizeDelta: 1000 * 1e18,
-            marginDelta: 6 * 1e6,
+            marginDelta: 20 * 1e6,
             targetPrice: 0,
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
@@ -4677,49 +5072,33 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         engine.processOrderTyped(openOrder, 1e8, poolDepth, uint64(block.timestamp));
 
-        (, uint256 posMargin,,,,,) = engine.positions(account);
+        uint256 liquidationReserveBefore = clearinghouse.liquidationReserveUsdc(account);
+        uint256 withdrawableUsdc = engineAccountLens.getWithdrawableUsdc(account);
 
         vm.prank(trader);
-        clearinghouse.withdraw(account, 194 * 1e6);
+        clearinghouse.withdraw(account, withdrawableUsdc);
 
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 101_000_000);
         vm.prank(address(router));
         uint256 bounty =
-            engine.liquidatePosition(account, 100_500_000, poolDepth, uint64(block.timestamp), address(this));
+            engine.liquidatePosition(account, 101_000_000, poolDepth, uint64(block.timestamp), address(this));
 
-        assertEq(bounty, posMargin, "Keeper bounty subsidy should be bounded by physically reachable collateral");
+        assertEq(
+            preview.liquidationChargeUsdc,
+            liquidationReserveBefore,
+            "Total liquidation charge should be bounded by the dedicated entry-time reserve"
+        );
+        assertEq(bounty, preview.keeperBountyUsdc, "Live keeper credit should match the previewed half");
+        assertEq(
+            preview.keeperBountyUsdc + preview.protocolLiquidationFeeUsdc + preview.lpLiquidationFeeUsdc,
+            liquidationReserveBefore,
+            "Keeper, protocol, and LP shares should conserve the capped charge"
+        );
     }
 
-    function test_ClearBadDebt_ReducesOutstandingDebt() public {
-        address account = address(uint160(0xBADD));
-        _fundTrader(account, 4000 * 1e6);
-
-        _open(account, CfdTypes.Side.BULL, 100_000 * 1e18, 3000 * 1e6, 1e8);
-
-        uint256 depth = pool.totalAssets();
-        vm.prank(address(router));
-        engine.liquidatePosition(account, 1.2e8, depth, uint64(block.timestamp), address(this));
-
-        uint256 badDebt = engine.accumulatedBadDebtUsdc();
-        assertGt(badDebt, 0, "Expected liquidation shortfall to create bad debt");
-
-        uint256 clearAmount = badDebt / 2;
-        uint256 poolAssetsBefore = pool.totalAssets();
-        usdc.mint(address(this), clearAmount);
-        usdc.approve(address(engine), clearAmount);
-        engine.clearBadDebt(clearAmount);
-        assertEq(engine.accumulatedBadDebtUsdc(), badDebt - clearAmount, "Bad debt should decrease after clearing");
-        assertEq(
-            pool.totalAssets(),
-            poolAssetsBefore + clearAmount,
-            "Bad-debt recapitalization should raise canonical pool assets"
-        );
-        assertEq(pool.excessAssets(), 0, "Bad-debt recapitalization should not strand excess assets");
-
-        vm.expectRevert(ICfdEngineTypes.CfdEngine__ZeroAmount.selector);
-        engine.clearBadDebt(0);
-
-        vm.expectRevert(ICfdEngineTypes.CfdEngine__BadDebtTooLarge.selector);
-        engine.clearBadDebt(badDebt + 1);
+    function test_RetiredDebtLedgerSelectorIsAbsent() public {
+        (bool success,) = address(engine).call(abi.encodeWithSignature("clearBadDebt(uint256)", 1));
+        assertFalse(success, "V2 must not expose a mutable protocol bad-debt ledger selector");
     }
 
     function test_CheckWithdraw_UsesMinimumOfEngineAndPoolMarkStalenessLimits() public {
@@ -4758,14 +5137,26 @@ contract CfdEngineTest is BasePerpTest {
         engine.checkWithdraw(account);
     }
 
-    function test_SweepToken_RecoversAccidentallySentUsdc() public {
+    function test_DirectEngineDonationIsOutsideCanonicalPoolAndCannotBeSweptThroughRetiredSelector() public {
+        uint256 poolAssetsBefore = pool.totalAssets();
+        ICfdEngineTypes.TerminalNavSnapshot memory terminalBefore = engine.terminalNavSnapshot();
         usdc.mint(address(engine), 123e6);
         uint256 ownerBefore = usdc.balanceOf(address(this));
 
-        engine.sweepToken(address(usdc), address(this), 123e6);
+        (bool success,) = address(engine)
+            .call(abi.encodeWithSignature("sweepToken(address,address,uint256)", address(usdc), address(this), 123e6));
 
-        assertEq(usdc.balanceOf(address(engine)), 0);
-        assertEq(usdc.balanceOf(address(this)), ownerBefore + 123e6);
+        assertFalse(success, "V2 engine must not expose a discretionary token-sweep selector");
+        assertEq(usdc.balanceOf(address(engine)), 123e6, "A direct donation must remain outside canonical custody");
+        assertEq(usdc.balanceOf(address(this)), ownerBefore, "The retired selector must not transfer donated tokens");
+        assertEq(pool.totalAssets(), poolAssetsBefore, "Direct engine donations must not alter canonical pool assets");
+        ICfdEngineTypes.TerminalNavSnapshot memory terminalAfter = engine.terminalNavSnapshot();
+        assertEq(
+            terminalAfter.terminalLpPriceDeltaUsdc,
+            terminalBefore.terminalLpPriceDeltaUsdc,
+            "Direct engine donations must not alter exact terminal NAV"
+        );
+        assertEq(terminalAfter.bookVersion, terminalBefore.bookVersion, "Direct donations must not mutate the NAV book");
     }
 
     function test_ReserveCloseOrderExecutionBounty_AllowsStaleLastMarkPriceWhenStored() public {
@@ -4786,12 +5177,24 @@ contract CfdEngineTest is BasePerpTest {
         _open(counterpartyAccount, CfdTypes.Side.BEAR, 10_000e18, 50_000e6, 1e8);
 
         vm.warp(block.timestamp + 31);
+        uint256 reserveBeforeFresh = clearinghouse.actionReserveUsdc(account);
         vm.prank(address(router));
         engine.reserveCloseOrderExecutionBounty(account, 10_000e18, 1e6);
+        assertEq(
+            clearinghouse.actionReserveUsdc(account) - reserveBeforeFresh,
+            1e6,
+            "fresh sidecar path must reserve the requested bounty"
+        );
 
         vm.warp(block.timestamp + 30 days);
+        uint256 reserveBeforeStale = clearinghouse.actionReserveUsdc(account);
         vm.prank(address(router));
         engine.reserveCloseOrderExecutionBounty(account, 10_000e18, 1e6);
+        assertEq(
+            clearinghouse.actionReserveUsdc(account) - reserveBeforeStale,
+            1e6,
+            "stale sidecar path must reserve the requested bounty"
+        );
     }
 
     function test_ReserveCloseOrderExecutionBounty_RevertsWhenNoStoredMarkExists() public {
@@ -4829,8 +5232,8 @@ contract CfdEngineTest is BasePerpTest {
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(account);
         assertEq(
             buckets.otherLockedMarginUsdc,
-            4000e6 + _executionBountyReserve(1),
-            "Setup should reserve queued order funds plus clearinghouse-held bounty reservation"
+            4000e6 + _executionBountyReserve(1) + clearinghouse.liquidationReserveUsdc(account),
+            "Other locked value must include queued margin, execution bounty, and the dedicated liquidation reserve"
         );
         assertEq(
             MarginClearinghouseAccountingLib.getGenericReachableUsdc(buckets),
@@ -4856,26 +5259,39 @@ contract CfdEngineTest is BasePerpTest {
         engine.checkWithdraw(account);
     }
 
-    function test_CheckWithdraw_DoesNotCountTraderClaimAsReachableCollateral() public {
+    function test_CheckWithdraw_SameAccountClaimRescuesAdverseExactPriceRiskWithoutBeingSpent() public {
         address trader = address(0x51581);
         address account = trader;
-        _fundTrader(trader, 5000e6);
-        _open(account, CfdTypes.Side.BEAR, 10_000e18, 5000e6, 1e8);
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.vpiFactor = 0;
+        _setRiskParams(params);
+        _fundTrader(trader, 10_000e6);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
 
-        uint256 closeExecutionFeeUsdc = _engineExecutionFeeUsdc(5000e18, 120_000_000);
-        uint256 poolAssets = pool.totalAssets();
-        vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - closeExecutionFeeUsdc - 1);
+        vm.prank(address(router));
+        engine.updateMarkPrice(102_000_000, uint64(block.timestamp));
+        assertEq(engine.unsettledCarryUsdc(account), 0, "Fixture must isolate exact price risk from carry");
 
-        _close(account, CfdTypes.Side.BEAR, 5000e18, 120_000_000);
-        assertGt(engine.traderClaimBalanceUsdc(account), 0, "Setup must create a trader claim balance");
-
-        bytes4 expectedError = engine.degradedMode()
-            ? ICfdEngineTypes.CfdEngine__DegradedMode.selector
-            : ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition.selector;
-        vm.expectRevert(expectedError);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition.selector);
         vm.prank(address(clearinghouse));
         engine.checkWithdraw(account);
+
+        uint256 claimUsdc = 3000e6;
+        _seedAuthenticatedTraderClaim(account, claimUsdc);
+
+        vm.prank(address(clearinghouse));
+        engine.checkWithdraw(account);
+        assertEq(
+            engine.traderClaimBalanceUsdc(account),
+            claimUsdc,
+            "Withdrawal validation may count the typed price claim but must not spend it"
+        );
+        assertGt(
+            engineAccountLens.getWithdrawableUsdc(account),
+            0,
+            "Claim-rescued exact price health should expose free cash"
+        );
+        _assertTerminalCurveMatchesEngine(account);
     }
 
     function test_CheckWithdrawParity_FailThenLiveWithdrawReverts() public {
@@ -4933,7 +5349,7 @@ contract CfdEngineTest is BasePerpTest {
         params.initMarginBps = 300;
         _setRiskParams(params);
 
-        (,,, uint256 initMarginBps,,,,) = engine.riskParams();
+        (,,, uint256 initMarginBps,,,,,,) = engine.riskParams();
         assertEq(initMarginBps, 300, "Setup must finalize the explicit init margin config");
 
         vm.prank(address(router));
@@ -4955,8 +5371,8 @@ contract CfdEngineTest is BasePerpTest {
 
         address trader = address(0x515817);
         address account = trader;
-        _fundTrader(trader, 100e6);
-        _open(account, CfdTypes.Side.BULL, 100e18, 6e6, 1e8);
+        _fundTrader(trader, 20e6);
+        _open(account, CfdTypes.Side.BULL, 100e18, 16e6, 1e8);
 
         vm.warp(1_709_971_200);
         assertTrue(engine.isFadWindow(), "Setup must execute inside the FAD window");
@@ -4965,11 +5381,11 @@ contract CfdEngineTest is BasePerpTest {
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
         uint256 withdrawableUsdc = engineAccountLens.getWithdrawableUsdc(account);
-        assertGt(withdrawableUsdc, 0, "Buggy init-margin path should expose withdrawable headroom during FAD");
+        assertEq(withdrawableUsdc, 0, "Active FAD margin must remove all withdrawal headroom");
 
         vm.expectRevert(ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition.selector);
-        vm.prank(trader);
-        clearinghouse.withdraw(account, withdrawableUsdc);
+        vm.prank(address(clearinghouse));
+        engine.checkWithdraw(account);
     }
 
     function test_ReserveCloseOrderExecutionBounty_UsesCarryAwareProjectedRiskState() public {
@@ -4978,8 +5394,8 @@ contract CfdEngineTest is BasePerpTest {
 
         address trader = address(0x51583);
         address account = trader;
-        _fundTrader(trader, 1600e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 1600e6, 1e8);
+        _fundTrader(trader, 2000e6);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
@@ -5000,11 +5416,13 @@ contract CfdEngineTest is BasePerpTest {
         address account = trader;
         uint256 price = 1e8;
         uint256 size = 100_000e18;
-        uint256 marginUsdc = 1600e6;
+        uint256 marginUsdc = 2000e6;
         uint256 bountyUsdc = 1e6;
         uint256 carryTimeDelta = 3_839_405;
 
-        _fundTrader(trader, marginUsdc);
+        // Leave a distinct free-settlement slice so the historical carry and close bounty are actually collectible;
+        // neither obligation may borrow from the isolated price pledge or liquidation reserve in V2.
+        _fundTrader(trader, marginUsdc + 100e6);
         _open(account, CfdTypes.Side.BULL, size, marginUsdc, price);
 
         vm.prank(address(router));
@@ -5013,6 +5431,9 @@ contract CfdEngineTest is BasePerpTest {
 
         uint256 borrowBaseBefore = _positionBorrowBaseUsdc(account);
         uint256 expectedCarry = _expectedIndexedCarry(account);
+        uint256 settlementBefore = clearinghouse.balanceUsdc(account);
+        uint256 pnlPledgeBefore = clearinghouse.pnlPledgeUsdc(account);
+        uint256 actionReserveBefore = clearinghouse.actionReserveUsdc(account);
         assertGt(expectedCarry, 0, "Setup must accrue indexed carry");
 
         vm.prank(address(router));
@@ -5021,8 +5442,23 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(engine.unsettledCarryUsdc(account), 0, "Reservation should realize indexed carry first");
         assertEq(
             _positionBorrowBaseUsdc(account),
-            borrowBaseBefore + expectedCarry + bountyUsdc,
-            "Future borrow base should rise only after old carry is realized and margin is reserved"
+            borrowBaseBefore,
+            "Free-funded historical carry and an action reserve must not change the price-pledge borrow base"
+        );
+        assertEq(
+            clearinghouse.balanceUsdc(account),
+            settlementBefore - expectedCarry,
+            "Exactly the historical carry should leave settlement custody"
+        );
+        assertEq(
+            clearinghouse.pnlPledgeUsdc(account),
+            pnlPledgeBefore,
+            "Carry and bounty reservation must preserve the isolated PnL pledge"
+        );
+        assertEq(
+            clearinghouse.actionReserveUsdc(account),
+            actionReserveBefore + bountyUsdc,
+            "The close bounty should move only into the isolated action reserve"
         );
     }
 
@@ -5157,6 +5593,19 @@ contract CfdEngineTest is BasePerpTest {
 
 contract CfdEngineCarryRegressionTest is BasePerpTest {
 
+    function _accountTerminalLpPriceDelta(
+        address account,
+        uint256 markPrice
+    ) internal view returns (int256 deltaUsdc) {
+        ITerminalNavBookV2.CurveRecord memory curve = terminalNavBook.curveOf(account);
+        int256 markedNotionalUsdc = int256(uint256(curve.lots) * markPrice);
+        int256 entryCostUsdc = int256(uint256(curve.entryCostUsdcAtoms));
+        int256 uncappedUsdc =
+            curve.side == CfdTypes.Side.BULL ? markedNotionalUsdc - entryCostUsdc : entryCostUsdc - markedNotionalUsdc;
+        int256 collectibleCapUsdc = int256(uint256(curve.effectiveCapUsdcAtoms));
+        deltaUsdc = uncappedUsdc > collectibleCapUsdc ? collectibleCapUsdc : uncappedUsdc;
+    }
+
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
@@ -5166,7 +5615,9 @@ contract CfdEngineCarryRegressionTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -5186,12 +5637,20 @@ contract CfdEngineCarryRegressionTest is BasePerpTest {
         _open(counterAccount, CfdTypes.Side.BEAR, 500_000 * 1e18, 50_000 * 1e6, 1e8, depth);
 
         uint256 minNotional = (uint256(1) * 1e6 * 10_000) / 10 + 1e6;
-        uint256 minSize = (minNotional * 1e20) / 1e8;
+        uint256 rawMinSize = (minNotional * CfdTypes.SIZE_QUANTUM) / 1e8;
+        uint256 minSize = ((rawMinSize + CfdTypes.SIZE_QUANTUM - 1) / CfdTypes.SIZE_QUANTUM) * CfdTypes.SIZE_QUANTUM;
         _open(attackerAccount, CfdTypes.Side.BULL, minSize, 50_000 * 1e6, 1e8, depth);
 
-        // H-03: closing to 1 wei now reverts (remaining margin < minBountyUsdc)
+        // Canonical whole-lot accounting rejects a close that would create a sub-lot dust position.
         uint256 closeSize = minSize - 1;
-        vm.expectRevert(abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__TypedOrderFailure.selector, 1, 2, true));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ICfdEngineTypes.CfdEngine__TypedOrderFailure.selector,
+                CfdEnginePlanTypes.ExecutionFailurePolicyCategory.UserInvalid,
+                uint8(CfdEnginePlanTypes.CloseRevertCode.INVALID_SIZE_QUANTUM),
+                true
+            )
+        );
         vm.prank(address(router));
         engine.processOrderTyped(
             CfdTypes.Order({
@@ -5211,8 +5670,8 @@ contract CfdEngineCarryRegressionTest is BasePerpTest {
         );
     }
 
-    // Regression: C-02 — per-side MtM cap creates phantom profit
-    function test_PerSideMtmCap_PhantomProfit() public {
+    // Regression: C-02 — aggregate exact account-local terminal curves, never a side-level cap.
+    function test_TerminalNavBook_AggregatesAccountLocalCappedPriceCurves() public {
         uint256 depth = 5_000_000 * 1e6;
 
         address aliceAccount = address(0xA2);
@@ -5226,37 +5685,51 @@ contract CfdEngineCarryRegressionTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1.1e8, uint64(block.timestamp));
 
-        uint256 mtm = _poolMtmAdjustment();
+        int256 aliceDeltaUsdc = _accountTerminalLpPriceDelta(aliceAccount, 1.1e8);
+        int256 bobDeltaUsdc = _accountTerminalLpPriceDelta(bobAccount, 1.1e8);
+        int256 aggregateDeltaUsdc = _terminalLpPriceDelta();
         assertEq(
-            mtm,
-            71_000e6,
-            "MtM should use a conservative max-profit envelope instead of netting side-level paper losses"
+            aggregateDeltaUsdc,
+            aliceDeltaUsdc + bobDeltaUsdc,
+            "Book aggregate must equal the sum of exact account-local collateral-capped curves"
         );
+        uint256 expectedLiabilityUsdc = aggregateDeltaUsdc < 0 ? uint256(-(aggregateDeltaUsdc + 1)) + 1 : 0;
+        assertEq(_poolMtmAdjustment(), expectedLiabilityUsdc, "HousePool liability must derive from the signed book");
+        _assertTerminalCurveMatchesEngine(aliceAccount);
+        _assertTerminalCurveMatchesEngine(bobAccount);
     }
 
-    // Regression: C-03 — unrealized MtM profits distributed as withdrawable cash
-    function test_UnrealizedGains_DistributedAsWithdrawableCash() public {
+    // Regression: C-03 — entry and exit share one signed terminal NAV without mutating physical cash.
+    function test_UnrealizedTraderLoss_UsesOneSignedDepositAndWithdrawalNav() public {
         uint256 depth = 5_000_000 * 1e6;
 
         address traderAccount = address(0x2222);
         _fundTrader(address(0x2222), 500_000 * 1e6);
         _open(traderAccount, CfdTypes.Side.BULL, 2_000_000 * 1e18, 200_000 * 1e6, 1e8, depth);
 
-        uint256 juniorBefore = pool.juniorPrincipal();
+        uint256 rawAssetsBefore = pool.rawAssets();
+        uint256 accountedAssetsBefore = pool.accountedAssets();
+        uint256 juniorBefore = juniorVault.totalAssets();
 
         vm.prank(address(router));
         engine.updateMarkPrice(1.5e8, uint64(block.timestamp));
 
+        int256 terminalDeltaUsdc = _terminalLpPriceDelta();
+        (uint256 withdrawalSeniorNav, uint256 withdrawalJuniorNav,,) = pool.getPendingTrancheState();
+        (uint256 depositSeniorNav, uint256 depositJuniorNav) = pool.getPendingDepositTrancheState();
+        assertGt(terminalDeltaUsdc, 0, "Adverse BULL mark must create collectible LP terminal price value");
+        assertEq(depositSeniorNav, withdrawalSeniorNav, "Senior entry and exit must share the signed projection");
+        assertEq(depositJuniorNav, withdrawalJuniorNav, "Junior entry and exit must share the signed projection");
+        assertGt(withdrawalJuniorNav, juniorBefore, "Collectible trader loss must increase the shared Junior NAV");
+        assertEq(pool.rawAssets(), rawAssetsBefore, "A mark update must not move physical pool cash");
+        assertEq(pool.accountedAssets(), accountedAssetsBefore, "A mark update must not fabricate accounted cash");
+
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        uint256 juniorAfter = pool.juniorPrincipal();
-
-        assertLe(
-            juniorAfter,
-            juniorBefore,
-            "C-03: Junior principal must not increase from unrealized trader losses (paper MtM)"
-        );
+        assertEq(pool.juniorPrincipal(), withdrawalJuniorNav, "Reconcile must commit the same projected Junior NAV");
+        assertEq(pool.rawAssets(), rawAssetsBefore, "Reconcile of terminal price value must not move physical cash");
+        assertEq(pool.accountedAssets(), accountedAssetsBefore, "Reconcile must preserve canonical cash accounting");
     }
 
 }
@@ -5282,7 +5755,9 @@ contract CfdEngineAuditTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -5328,14 +5803,14 @@ contract CfdEngineAuditTest is BasePerpTest {
         address account = trader;
 
         _fundJunior(bob, 1_000_000 * 1e6);
-        _fundTrader(trader, 1020 * 1e6);
+        _fundTrader(trader, 1040 * 1e6);
         _open(account, CfdTypes.Side.BULL, 50_000 * 1e18, 1000 * 1e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(101_800_000, uint64(block.timestamp));
 
         uint8 revertCode = engineLens.previewOpenRevertCode(
-            account, CfdTypes.Side.BULL, 10_000 * 1e18, 0, 101_800_000, uint64(block.timestamp)
+            account, CfdTypes.Side.BULL, 10_000 * 1e18, 20 * 1e6, 101_800_000, uint64(block.timestamp)
         );
         assertEq(
             revertCode,
@@ -5346,7 +5821,7 @@ contract CfdEngineAuditTest is BasePerpTest {
         CfdTypes.Order memory order = CfdTypes.Order({
             account: account,
             sizeDelta: 10_000 * 1e18,
-            marginDelta: 0,
+            marginDelta: 20 * 1e6,
             targetPrice: 101_800_000,
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
@@ -5373,7 +5848,7 @@ contract CfdEngineAuditTest is BasePerpTest {
         address account = trader;
 
         _fundJunior(bob, 1_000_000 * 1e6);
-        _fundTrader(trader, 1020 * 1e6);
+        _fundTrader(trader, 1040 * 1e6);
         _open(account, CfdTypes.Side.BULL, 50_000 * 1e18, 1000 * 1e6, 1e8);
 
         vm.prank(address(router));
@@ -5383,10 +5858,10 @@ contract CfdEngineAuditTest is BasePerpTest {
         assertTrue(positionView.liquidatable, "Setup must make the existing position liquidatable before the increase");
 
         uint8 revertCode = engineLens.previewOpenRevertCode(
-            account, CfdTypes.Side.BULL, 10_000 * 1e18, 0, 102_000_000, uint64(block.timestamp)
+            account, CfdTypes.Side.BULL, 10_000 * 1e18, 20 * 1e6, 102_000_000, uint64(block.timestamp)
         );
         CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory = engineLens.previewOpenFailurePolicyCategory(
-            account, CfdTypes.Side.BULL, 10_000 * 1e18, 0, 102_000_000, uint64(block.timestamp)
+            account, CfdTypes.Side.BULL, 10_000 * 1e18, 20 * 1e6, 102_000_000, uint64(block.timestamp)
         );
         assertEq(
             revertCode,
@@ -5402,7 +5877,7 @@ contract CfdEngineAuditTest is BasePerpTest {
         CfdTypes.Order memory order = CfdTypes.Order({
             account: account,
             sizeDelta: 10_000 * 1e18,
-            marginDelta: 0,
+            marginDelta: 20 * 1e6,
             targetPrice: 102_000_000,
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
@@ -5444,25 +5919,24 @@ contract CfdEngineAuditTest is BasePerpTest {
         address carolAccount = carol;
         (uint256 sizeBefore,,,,,,) = engine.positions(carolAccount);
 
-        IOrderRouterAdminHost.RouterConfig memory config = IOrderRouterAdminHost.RouterConfig({
-            maxOrderAge: router.maxOrderAge(),
-            orderExecutionStalenessLimit: router.orderExecutionStalenessLimit(),
-            liquidationStalenessLimit: router.liquidationStalenessLimit(),
-            pythMaxConfidenceRatioBps: router.pythMaxConfidenceRatioBps(),
-            orderSettlementWindow: router.orderSettlementWindow(),
-            maxComponentPublishTimeDivergence: router.maxComponentPublishTimeDivergence(),
-            adverseConfidenceMultiplierBps: router.adverseConfidenceMultiplierBps(),
-            minOpenNotionalUsdc: router.minOpenNotionalUsdc(),
-            openOrderExecutionBountyBps: router.openOrderExecutionBountyBps(),
-            minOpenOrderExecutionBountyUsdc: router.minOpenOrderExecutionBountyUsdc(),
-            maxOpenOrderExecutionBountyUsdc: router.maxOpenOrderExecutionBountyUsdc(),
-            closeOrderExecutionBountyUsdc: router.closeOrderExecutionBountyUsdc(),
-            positionProtectionCommitsEnabled: router.positionProtectionCommitsEnabled(),
-            positionProtectionTriggerBountyUsdc: router.positionProtectionTriggerBountyUsdc(),
-            maxPendingOrders: router.maxPendingOrders(),
-            minEngineGas: router.minEngineGas(),
-            maxPruneOrdersPerCall: router.maxPruneOrdersPerCall()
-        });
+        IOrderRouterAdminHost.RouterConfig memory config;
+        config.maxOrderAge = router.maxOrderAge();
+        config.orderExecutionStalenessLimit = router.orderExecutionStalenessLimit();
+        config.liquidationStalenessLimit = router.liquidationStalenessLimit();
+        config.basketMaxConfidenceRatioBps = router.basketMaxConfidenceRatioBps();
+        config.orderSettlementWindow = router.orderSettlementWindow();
+        config.maxComponentPublishTimeDivergence = router.maxComponentPublishTimeDivergence();
+        config.adverseConfidenceMultiplierBps = router.adverseConfidenceMultiplierBps();
+        config.minOpenNotionalUsdc = router.minOpenNotionalUsdc();
+        config.openOrderExecutionBountyBps = router.openOrderExecutionBountyBps();
+        config.minOpenOrderExecutionBountyUsdc = router.minOpenOrderExecutionBountyUsdc();
+        config.maxOpenOrderExecutionBountyUsdc = router.maxOpenOrderExecutionBountyUsdc();
+        config.closeOrderExecutionBountyUsdc = router.closeOrderExecutionBountyUsdc();
+        config.positionProtectionCommitsEnabled = router.positionProtectionCommitsEnabled();
+        config.positionProtectionTriggerBountyUsdc = router.positionProtectionTriggerBountyUsdc();
+        config.maxPendingOrders = router.maxPendingOrders();
+        config.minEngineGas = router.minEngineGas();
+        config.maxPruneOrdersPerCall = router.maxPruneOrdersPerCall();
         routerAdmin.proposeRouterConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
         routerAdmin.finalizeRouterConfig();
@@ -5500,8 +5974,15 @@ contract CfdEngineAuditTest is BasePerpTest {
         bytes[] memory empty = _mockPythUpdateData();
         router.executeOrder(1, empty);
 
-        (uint256 openSize,,,,,,) = engine.positions(account);
+        (uint256 openSize, uint256 openMargin,,,,,) = engine.positions(account);
         assertEq(openSize, 200_000 * 1e18);
+
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000 * 1e18, 0.8e8);
+        assertTrue(preview.valid, "Collateral-capped V2 partial close should remain executable");
+        assertEq(preview.remainingSize, 100_000 * 1e18, "Preview must retain exactly half the position");
+        assertGt(preview.remainingMargin, 0, "Preview must preserve pledge for the surviving position");
+        assertLt(preview.remainingMargin, openMargin, "Partial close must release only the closed portion's pledge");
+        assertEq(preview.badDebtUsdc, 0, "Price loss above the collectible cap must remain a V2 write-off");
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 100_000 * 1e18, 0, 0, true);
@@ -5510,8 +5991,14 @@ contract CfdEngineAuditTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(2, priceData);
 
-        (uint256 remainingSize,,,,,,) = engine.positions(account);
-        assertEq(remainingSize, 200_000 * 1e18, "Underwater partial close should fail and leave the position untouched");
+        (uint256 remainingSize, uint256 remainingMargin,,,,,) = engine.positions(account);
+        assertEq(remainingSize, preview.remainingSize, "Live partial close size must match the preview");
+        assertEq(remainingMargin, preview.remainingMargin, "Live partial close must preserve the previewed pledge");
+        assertEq(
+            clearinghouse.pnlPledgeUsdc(account),
+            remainingMargin,
+            "The surviving position's canonical PnL pledge must stay locked"
+        );
 
         uint256 balAfter = clearinghouse.balanceUsdc(account);
         uint256 lockedAfter = clearinghouse.lockedMarginUsdc(account);
@@ -5552,7 +6039,9 @@ contract CfdEngineAuditTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = newParams;
@@ -5655,7 +6144,9 @@ contract MarginCappedMtmTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -5835,7 +6326,9 @@ contract PhantomExecFeeTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -5846,11 +6339,7 @@ contract PhantomExecFeeTest is BasePerpTest {
     // Regression: phantom exec fee
     function test_PhantomExecFee_DoesNotOverCreditTreasuryMargin() public {
         uint256 lpDeposit = 1_000_000e6;
-        usdc.mint(bob, lpDeposit);
-        vm.startPrank(bob);
-        usdc.approve(address(juniorVault), lpDeposit);
-        juniorVault.deposit(lpDeposit, bob);
-        vm.stopPrank();
+        _fundJunior(bob, lpDeposit);
 
         uint256 margin = 1002e6;
         usdc.mint(alice, margin);
@@ -5903,7 +6392,9 @@ contract CarryModelFreeUsdcTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -5913,11 +6404,7 @@ contract CarryModelFreeUsdcTest is BasePerpTest {
 
     // Regression: legacy negative spread receivables
     function helper_GetFreeUSDC_CarryModelBaseline() public {
-        usdc.mint(bob, 1_000_000e6);
-        vm.startPrank(bob);
-        usdc.approve(address(juniorVault), 1_000_000e6);
-        juniorVault.deposit(1_000_000e6, bob);
-        vm.stopPrank();
+        _fundJunior(bob, 1_000_000e6);
 
         uint256 margin = 100_001e6;
         usdc.mint(alice, margin);
@@ -5988,7 +6475,9 @@ contract DegradedModeLifecycleTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -6040,7 +6529,13 @@ contract DegradedModeLifecycleTest is BasePerpTest {
         vm.expectRevert(ICfdEngineTypes.CfdEngine__StillInsolvent.selector);
         engine.clearDegradedMode();
 
-        _fundJuniorDelayed(address(this), 500_000e6);
+        usdc.mint(address(pool), 500_000e6);
+        vm.prank(address(engine));
+        pool.recordClaimantInflow(
+            500_000e6, IHousePool.ClaimantInflowKind.Recapitalization, IHousePool.ClaimantInflowCashMode.CashArrived
+        );
+        vm.prank(address(juniorVault));
+        pool.reconcile();
         engine.clearDegradedMode();
 
         assertFalse(engine.degradedMode(), "Owner should clear degraded mode after recapitalization");
@@ -6051,9 +6546,16 @@ contract DegradedModeLifecycleTest is BasePerpTest {
         assertTrue(engine.degradedMode(), "Setup must latch degraded mode");
 
         vm.warp(block.timestamp + 1 hours + 1);
-        vm.prank(address(juniorVault));
+        uint256 requestedShares = juniorVault.estimateWithdrawShares(1e6);
+        uint256 requestId = juniorVault.requestRedeem(requestedShares, address(this), address(this));
+        vm.warp(pool.lpEpochStart(requestId));
+        uint256 markPrice = engine.lastMarkPrice();
+        vm.prank(address(router));
+        engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
+        uint256 markTime = engine.lastMarkTime();
         vm.expectRevert(IHousePool.HousePool__DegradedMode.selector);
-        pool.withdrawJunior(1e6, address(this));
+        vm.prank(address(router));
+        pool.settleLpEpoch(markPrice == 0 ? 1e8 : markPrice, markTime);
     }
 
     function test_DegradedMode_AllowsAddMarginToExistingPosition() public {
@@ -6100,7 +6602,9 @@ contract ProtocolPhaseTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -6113,7 +6617,7 @@ contract ProtocolPhaseTest is BasePerpTest {
 
         PerpsViewTypes.ProtocolStatusView memory status = _publicProtocolStatus();
         assertEq(uint8(status.phase), uint8(ICfdEngine.ProtocolPhase.Active));
-        assertEq(status.lastMarkPrice, 0);
+        assertEq(status.lastMarkPrice, 1e8, "Async LP setup should establish the mark used for epoch settlement");
 
         address bullAccount = bullTrader;
         address bearAccount = bearTrader;
@@ -6129,7 +6633,13 @@ contract ProtocolPhaseTest is BasePerpTest {
             "Insolvency-revealing close should latch Degraded"
         );
 
-        _fundJuniorDelayed(address(this), 500_000e6);
+        usdc.mint(address(pool), 500_000e6);
+        vm.prank(address(engine));
+        pool.recordClaimantInflow(
+            500_000e6, IHousePool.ClaimantInflowKind.Recapitalization, IHousePool.ClaimantInflowCashMode.CashArrived
+        );
+        vm.prank(address(juniorVault));
+        pool.reconcile();
         engine.clearDegradedMode();
 
         assertEq(
@@ -6202,12 +6712,50 @@ contract VpiDepthTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
     function _initialJuniorDeposit() internal pure override returns (uint256) {
         return 0;
+    }
+
+    function _settleAvailableJuniorWithdrawal(
+        address owner
+    ) internal returns (uint256 claimedAssets) {
+        uint256 maxShares = juniorVault.maxRequestRedeem(owner);
+        if (maxShares == 0) {
+            return 0;
+        }
+
+        uint256 ownerAssets = juniorVault.estimateRedeemAssets(maxShares);
+        (,,, uint256 maxJuniorWithdrawUsdc) = pool.getPendingTrancheState();
+        uint256 targetAssets = ownerAssets < maxJuniorWithdrawUsdc ? ownerAssets : maxJuniorWithdrawUsdc;
+        if (targetAssets == 0) {
+            return 0;
+        }
+
+        uint256 requestedShares = juniorVault.estimateWithdrawShares(targetAssets);
+        if (requestedShares > maxShares) {
+            requestedShares = maxShares;
+        }
+        vm.prank(owner);
+        uint256 requestId = juniorVault.requestRedeem(requestedShares, owner, owner);
+
+        vm.warp(pool.lpEpochStart(requestId));
+        uint256 markPrice = engine.lastMarkPrice();
+        vm.prank(address(router));
+        engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
+        _settleLpEpochForTest();
+
+        uint256 claimableShares = juniorVault.claimableRedeemRequest(requestId, owner);
+        if (claimableShares == 0) {
+            return 0;
+        }
+        vm.prank(owner);
+        claimedAssets = juniorVault.claimRedeem(requestId, claimableShares, owner, owner);
     }
 
     // Regression: C-02a
@@ -6267,12 +6815,7 @@ contract VpiDepthTest is BasePerpTest {
         bytes[] memory freshPrice = new bytes[](1);
         freshPrice[0] = abi.encode(uint256(1e8));
         router.updateMarkPrice(freshPrice);
-        vm.startPrank(bob);
-        uint256 withdrawable = juniorVault.maxWithdraw(bob);
-        if (withdrawable > 0) {
-            juniorVault.withdraw(withdrawable, bob, bob);
-        }
-        vm.stopPrank();
+        _settleAvailableJuniorWithdrawal(bob);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 110_000 * 1e18, 0, 0, true);
@@ -6286,43 +6829,163 @@ contract VpiDepthTest is BasePerpTest {
         assertLe(aliceBalAfter, aliceBalBefore, "Size addition VPI bypass must not be profitable");
     }
 
-    function test_VpiRebateLiability_ReducesWithdrawableHeadroom() public {
-        address deepLp = address(0x444);
-        address skewTrader = address(0x555);
+    function _openNegativeVpiIsolationFixture(
+        address skewTrader,
+        address rebateTrader,
+        address deepLp
+    ) internal returns (address rebateAccount, uint256 reserveTargetUsdc) {
+        _fundJunior(deepLp, 10_000_000e6);
+        _fundTrader(skewTrader, 100_000e6);
+        _fundTrader(rebateTrader, 20_000e6);
+
+        uint256 depth = pool.totalAssets();
+        _open(skewTrader, CfdTypes.Side.BEAR, 500_000e18, 50_000e6, 1e8, depth);
+        rebateAccount = rebateTrader;
+        _open(rebateAccount, CfdTypes.Side.BULL, 500_000e18, 10_000e6, 1e8, depth);
+
+        (,,,,,, int256 storedVpi) = engine.positions(rebateAccount);
+        assertLt(storedVpi, 0, "Fixture must create a negative lifetime VPI obligation");
+        reserveTargetUsdc = uint256(-(storedVpi + 1)) + 1;
+        assertEq(
+            clearinghouse.vpiRebateReserveUsdc(rebateAccount),
+            reserveTargetUsdc,
+            "Fixture must exactly fund the mandatory VPI reserve"
+        );
+    }
+
+    function test_VpiReserveOverfund_DoesNotImproveExactPriceHealth() public {
+        (address account, uint256 reserveTargetUsdc) =
+            _openNegativeVpiIsolationFixture(address(0x7111), address(0x7112), address(0x7113));
+        AccountLensViewTypes.AccountLedgerSnapshot memory beforeSnapshot =
+            engineAccountLens.getAccountLedgerSnapshot(account);
+        bytes32 curveHashBefore = terminalNavBook.curveHashOf(account);
+
+        vm.prank(address(engine));
+        clearinghouse.lockVpiRebateReserve(account, 1e6);
+
+        AccountLensViewTypes.AccountLedgerSnapshot memory afterSnapshot =
+            engineAccountLens.getAccountLedgerSnapshot(account);
+        assertEq(
+            clearinghouse.vpiRebateReserveUsdc(account),
+            reserveTargetUsdc + 1e6,
+            "Fixture must overfund the independent VPI reserve"
+        );
+        assertEq(
+            afterSnapshot.netEquityUsdc,
+            beforeSnapshot.netEquityUsdc,
+            "VPI reserve overfund must never count as exact price collateral"
+        );
+        assertEq(
+            afterSnapshot.liquidatable,
+            beforeSnapshot.liquidatable,
+            "VPI reserve overfund must never improve the exact price-health decision"
+        );
+        assertEq(
+            terminalNavBook.curveHashOf(account),
+            curveHashBefore,
+            "Action-reserve overfund must not mutate the terminal price-PnL curve"
+        );
+        _assertTerminalCurveMatchesEngine(account);
+    }
+
+    function test_VpiReserveUnderfund_FailsClosedAsIndependentDelinquency() public {
+        (address account, uint256 reserveTargetUsdc) =
+            _openNegativeVpiIsolationFixture(address(0x7121), address(0x7122), address(0x7123));
+        AccountLensViewTypes.AccountLedgerSnapshot memory fundedSnapshot =
+            engineAccountLens.getAccountLedgerSnapshot(account);
+        assertFalse(fundedSnapshot.liquidatable, "Exactly funded healthy fixture must not start delinquent");
+
+        vm.prank(address(engine));
+        clearinghouse.releaseVpiRebateReserve(account, 1);
+
+        AccountLensViewTypes.AccountLedgerSnapshot memory underfundedSnapshot =
+            engineAccountLens.getAccountLedgerSnapshot(account);
+        assertEq(
+            clearinghouse.vpiRebateReserveUsdc(account),
+            reserveTargetUsdc - 1,
+            "Fixture must leave exactly one VPI-reserve atom uncovered"
+        );
+        assertEq(
+            underfundedSnapshot.netEquityUsdc,
+            fundedSnapshot.netEquityUsdc,
+            "Independent VPI delinquency must not distort exact price equity"
+        );
+        assertTrue(underfundedSnapshot.liquidatable, "One uncovered VPI-reserve atom must fail closed");
+        assertEq(engineAccountLens.getWithdrawableUsdc(account), 0, "Underfunded VPI reserve must block withdrawal");
+
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition.selector);
+        vm.prank(address(clearinghouse));
+        engine.checkWithdraw(account);
+        _assertTerminalCurveMatchesEngine(account);
+    }
+
+    function test_VpiRebateReserve_BlocksRebateExtractionAcrossWithdrawAndFullClose() public {
         address rebateTrader = address(0x666);
+        VpiRebateExtractionSnapshot memory beforeOpen = _openVpiRebateExtractionFixture(rebateTrader);
 
-        address skewAccount = skewTrader;
-        address rebateAccount = rebateTrader;
+        uint256 freeSettlementUsdc = clearinghouse.getAccountUsdcBuckets(rebateTrader).freeSettlementUsdc;
+        assertEq(
+            engineAccountLens.getWithdrawableUsdc(rebateTrader),
+            freeSettlementUsdc,
+            "Dedicated backing should leave genuinely free settlement withdrawable"
+        );
+        vm.prank(rebateTrader);
+        clearinghouse.withdraw(rebateTrader, freeSettlementUsdc);
 
-        _fundJunior(bob, 1_000_000 * 1e6);
-        _fundJunior(deepLp, 10_000_000 * 1e6);
-        _fundTrader(skewTrader, 100_000 * 1e6);
-        _fundTrader(rebateTrader, 20_000 * 1e6);
+        assertEq(
+            clearinghouse.vpiRebateReserveUsdc(rebateTrader),
+            beforeOpen.rebateReserveUsdc,
+            "Withdrawing free cash must not touch rebate backing"
+        );
 
-        uint256 largeDepth = pool.totalAssets();
-        _open(skewAccount, CfdTypes.Side.BEAR, 500_000 * 1e18, 50_000 * 1e6, 1e8, largeDepth);
+        _close(rebateTrader, CfdTypes.Side.BULL, 500_000 * 1e18, 1e8, pool.totalAssets());
 
-        vm.warp(block.timestamp + 2 hours);
-        bytes[] memory freshPrice = new bytes[](1);
-        freshPrice[0] = abi.encode(uint256(1e8));
-        router.updateMarkPrice(freshPrice);
+        (uint256 sizeAfter,,,,,,) = engine.positions(rebateTrader);
+        assertEq(sizeAfter, 0, "The terminal close should complete");
+        assertEq(clearinghouse.vpiRebateReserveUsdc(rebateTrader), 0, "Terminal clawback must consume the reserve");
+        assertGe(pool.totalAssets(), beforeOpen.poolAssetsBeforeOpen, "The round trip must not extract LP cash");
+        assertLe(
+            usdc.balanceOf(rebateTrader) + clearinghouse.balanceUsdc(rebateTrader),
+            beforeOpen.walletBeforeOpen + beforeOpen.settlementBeforeOpen,
+            "Withdrawal plus terminal close must not turn the rebate into trader profit"
+        );
+    }
 
-        vm.startPrank(deepLp);
-        uint256 juniorWithdrawable = juniorVault.maxWithdraw(deepLp);
-        juniorVault.withdraw(juniorWithdrawable, deepLp, deepLp);
-        vm.stopPrank();
+    function _openVpiRebateExtractionFixture(
+        address rebateTrader
+    ) internal returns (VpiRebateExtractionSnapshot memory beforeOpen) {
+        uint256 smallDepth;
+        {
+            address deepLp = address(0x444);
+            address skewTrader = address(0x555);
+            _fundJunior(bob, 1_000_000 * 1e6);
+            _fundJunior(deepLp, 10_000_000 * 1e6);
+            _fundTrader(skewTrader, 100_000 * 1e6);
+            _fundTrader(rebateTrader, 20_000 * 1e6);
 
-        uint256 smallDepth = pool.totalAssets();
-        assertLt(smallDepth, largeDepth, "LP withdrawal should shrink live pool depth");
+            uint256 largeDepth = pool.totalAssets();
+            _open(skewTrader, CfdTypes.Side.BEAR, 500_000 * 1e18, 50_000 * 1e6, 1e8, largeDepth);
 
-        uint256 rebateSettlementBeforeOpen = clearinghouse.balanceUsdc(rebateAccount);
+            vm.warp(block.timestamp + 2 hours);
+            bytes[] memory freshPrice = new bytes[](1);
+            freshPrice[0] = abi.encode(uint256(1e8));
+            router.updateMarkPrice(freshPrice);
+            _settleAvailableJuniorWithdrawal(deepLp);
+
+            smallDepth = pool.totalAssets();
+            assertLt(smallDepth, largeDepth, "LP withdrawal should shrink live pool depth");
+        }
+        beforeOpen.settlementBeforeOpen = clearinghouse.balanceUsdc(rebateTrader);
+        beforeOpen.walletBeforeOpen = usdc.balanceOf(rebateTrader);
+        beforeOpen.poolAssetsBeforeOpen = smallDepth;
+
         uint64 rebatePublishTime = engine.lastMarkTime();
         vm.prank(address(router));
         engine.processOrderTyped(
             CfdTypes.Order({
-                account: rebateAccount,
+                account: rebateTrader,
                 sizeDelta: 500_000 * 1e18,
-                marginDelta: 7000 * 1e6,
+                marginDelta: 10_000 * 1e6,
                 targetPrice: 1e8,
                 commitTime: rebatePublishTime,
                 commitBlock: uint64(block.number),
@@ -6335,25 +6998,24 @@ contract VpiDepthTest is BasePerpTest {
             rebatePublishTime
         );
 
-        (,,,,,, int256 storedVpi) = engine.positions(rebateAccount);
+        (,,,,,, int256 storedVpi) = engine.positions(rebateTrader);
         assertLt(storedVpi, 0, "Setup must create negative accrued VPI on the rebate-bearing leg");
+        beforeOpen.rebateReserveUsdc = clearinghouse.vpiRebateReserveUsdc(rebateTrader);
+        assertEq(
+            beforeOpen.rebateReserveUsdc,
+            uint256(-storedVpi),
+            "The gross lifetime rebate must be backed one-for-one inside action reserve"
+        );
+        assertGe(
+            clearinghouse.actionReserveUsdc(rebateTrader),
+            beforeOpen.rebateReserveUsdc,
+            "The VPI sub-ledger must remain a floor inside action reserve"
+        );
         assertGt(
-            clearinghouse.balanceUsdc(rebateAccount),
-            rebateSettlementBeforeOpen,
+            clearinghouse.balanceUsdc(rebateTrader),
+            beforeOpen.settlementBeforeOpen,
             "Skew-healing open should credit net rebate into settlement balance"
         );
-
-        uint256 freeSettlementUsdc = clearinghouse.getAccountUsdcBuckets(rebateAccount).freeSettlementUsdc;
-        uint256 withdrawableUsdc = engineAccountLens.getWithdrawableUsdc(rebateAccount);
-        assertLt(
-            withdrawableUsdc,
-            freeSettlementUsdc,
-            "Rebate liability should reduce withdrawable headroom below free settlement"
-        );
-
-        vm.prank(rebateTrader);
-        vm.expectRevert(ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition.selector);
-        clearinghouse.withdraw(rebateAccount, freeSettlementUsdc);
     }
 
 }
@@ -6390,6 +7052,26 @@ contract VpiChunkingTest is Test {
     uint256 constant CAP_PRICE = 2e8;
     uint256 constant DEPTH = 5_000_000 * 1e6;
 
+    function getAccountReservations(
+        address
+    ) external pure returns (IOrderRouterAccounting.AccountReservationView memory reservation) {
+        return reservation;
+    }
+
+    function _configureBroadSeniorCapacity() internal {
+        IHousePool.PoolConfig memory config = IHousePool.PoolConfig({
+            seniorRateBps: pool.seniorRateBps(),
+            markStalenessLimit: pool.markStalenessLimit(),
+            seniorFrozenLpFeeBps: pool.seniorFrozenLpFeeBps(),
+            juniorFrozenLpFeeBps: pool.juniorFrozenLpFeeBps(),
+            maxSeniorExposureUsdc: type(uint256).max - 1,
+            maxSeniorShareBps: 9999
+        });
+        pool.proposePoolConfig(config);
+        vm.warp(pool.poolConfigActivationTime());
+        pool.finalizePoolConfig();
+    }
+
     function setUp() public {
         usdc = new VpiMockUSDC6();
 
@@ -6401,7 +7083,9 @@ contract VpiChunkingTest is Test {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1 * 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
 
         clearinghouse = new MarginClearinghouse(address(usdc));
@@ -6410,6 +7094,8 @@ contract VpiChunkingTest is Test {
         CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(engine));
         CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
         engine.setDependencies(address(planner), address(settlement), address(engineAdmin));
+        TerminalNavBookV2 terminalBook = new TerminalNavBookV2(address(engine), uint32(CAP_PRICE));
+        engine.setTerminalNavBook(address(terminalBook));
         pool = new HousePool(address(usdc), address(engine));
         TrancheVault seniorVault =
             new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior LP", "seniorUSDC");
@@ -6420,6 +7106,7 @@ contract VpiChunkingTest is Test {
         engine.setOrderRouter(address(this));
 
         clearinghouse.setEngine(address(engine));
+        _configureBroadSeniorCapacity();
         vm.warp(1_709_532_000);
 
         usdc.mint(address(this), 2000e6);
@@ -6430,7 +7117,12 @@ contract VpiChunkingTest is Test {
 
         usdc.mint(address(this), 10_000_000 * 1e6);
         usdc.approve(address(juniorVault), type(uint256).max);
-        juniorVault.deposit(5_000_000 * 1e6, address(this));
+        uint256 requestId = juniorVault.requestDeposit(5_000_000 * 1e6, address(this), address(this));
+        vm.warp(pool.lpEpochStart(requestId));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        pool.settleLpEpoch(0, 0);
+        uint256 claimableAssets = juniorVault.claimableDepositRequest(requestId, address(this));
+        juniorVault.claimDeposit(requestId, claimableAssets, address(this), address(this));
     }
 
     function _deposit(
@@ -6585,7 +7277,9 @@ contract SolvencySnapshotRegressionTest is BasePerpTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
-            bountyBps: 10
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 

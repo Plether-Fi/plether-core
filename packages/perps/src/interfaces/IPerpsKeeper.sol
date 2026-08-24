@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
-/// @notice Keeper-facing execution and liquidation surface for the simplified product API.
+/// @notice Keeper-facing order, liquidation, and LP epoch settlement surface for the simplified product API.
 interface IPerpsKeeper {
 
     /// @notice Permissionlessly executes an eligible delayed order using router-validated oracle data.
@@ -31,6 +31,15 @@ interface IPerpsKeeper {
         bytes[] calldata pythUpdateData
     ) external payable;
 
+    /// @notice Atomically refreshes the pool-accounting mark and settles matured LP epochs against that exact mark.
+    /// @dev Permissionless and available while the router admin is paused. The router forwards exactly the quoted Pyth
+    ///      fee, installs the validated neutral mark in the engine, invokes the Router-bound HousePool settlement path,
+    ///      and then refunds unused ETH. Any failure rolls back the oracle update, mark update, and LP settlement.
+    /// @param pythUpdateData Pyth price update blobs; `msg.value` must cover the Pyth update fee.
+    function settleLpEpoch(
+        bytes[] calldata pythUpdateData
+    ) external payable;
+
     /// @notice Liquidates an unsafe account using fresh oracle data.
     /// @dev Permissionless and available while paused. Uses an account-adverse price. On success it forfeits every
     ///      queued execution bounty on the account, fails and unlinks all queued orders, releases committed margin, and
@@ -42,5 +51,19 @@ interface IPerpsKeeper {
         address account,
         bytes[] calldata pythUpdateData
     ) external payable;
+
+    /// @notice Attempts up to 256 account liquidations using one shared Pyth update and neutral mark refresh.
+    /// @dev Each account executes in an independent rollback frame. No-position and solvent accounts are skipped, while
+    ///      unexpected account-local failures are reported without reverting earlier successes. The original caller
+    ///      receives each successful engine-planned bounty. Low gas or an empty item revert leaves the returned index
+    ///      unattempted. The limit bounds candidates rather than guaranteed executions in one transaction; resume by
+    ///      submitting the suffix at `nextIndex` with a fresh Pyth update.
+    /// @param accounts Candidate accounts, in keeper-selected processing order.
+    /// @param pythUpdateData Pyth price update blobs; `msg.value` funds one shared update.
+    /// @return nextIndex First unattempted account index, or `accounts.length` when every account was attempted.
+    function executeLiquidationBatch(
+        address[] calldata accounts,
+        bytes[] calldata pythUpdateData
+    ) external payable returns (uint256 nextIndex);
 
 }

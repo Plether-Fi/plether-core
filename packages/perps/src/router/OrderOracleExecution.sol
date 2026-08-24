@@ -82,10 +82,10 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
         return pletherOracle.liquidationStalenessLimit();
     }
 
-    /// @notice Returns the max accepted Pyth confidence ratio from the configured Plether oracle.
-    /// @return Maximum confidence-to-price ratio in basis points.
-    function pythMaxConfidenceRatioBps() public view returns (uint256) {
-        return pletherOracle.pythMaxConfidenceRatioBps();
+    /// @notice Returns the max accepted aggregate basket confidence ratio from the configured Plether oracle.
+    /// @return Maximum basket confidence-to-price ratio in basis points.
+    function basketMaxConfidenceRatioBps() public view returns (uint256) {
+        return pletherOracle.basketMaxConfidenceRatioBps();
     }
 
     /// @notice Returns the historical order settlement window from the configured Plether oracle.
@@ -182,46 +182,6 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
             openExecutionCloseOnly: snapshot.closeOnly
         });
         _updateEngineMarkIfCurrent(update);
-    }
-
-    /// @notice Applies a mark-refresh update and unconditionally forwards the returned mark to the engine.
-    /// @param refundRecipient Recipient of any ETH above the Pyth update fee.
-    /// @param pythUpdateData Pyth update blobs; the oracle receives the call's full `msg.value`.
-    /// @return update Normalized refresh snapshot.
-    function _prepareMarkRefreshOracleFor(
-        address refundRecipient,
-        bytes[] calldata pythUpdateData
-    ) internal returns (OracleUpdateResult memory update) {
-        IPletherOracle.PriceSnapshot memory snapshot =
-            _updateAndGetOraclePrice(refundRecipient, pythUpdateData, IPletherOracle.PriceMode.MarkRefresh);
-        update = _toOracleUpdateResult(snapshot);
-        engine.updateMarkPrice(update.markPrice, update.oraclePublishTime);
-    }
-
-    /// @notice Applies an account-adverse liquidation update and advances the engine mark when current.
-    /// @param account Account whose side determines the adverse confidence adjustment.
-    /// @param pythUpdateData Pyth update blobs; the oracle receives the call's full `msg.value`.
-    /// @return update Normalized liquidation snapshot.
-    function _prepareLiquidationOracle(
-        address account,
-        bytes[] calldata pythUpdateData
-    ) internal returns (OracleUpdateResult memory update) {
-        IPletherOracle.PriceSnapshot memory snapshot =
-            pletherOracle.updateLiquidationPrice{value: msg.value}(msg.sender, pythUpdateData, account);
-        update = _toOracleUpdateResult(snapshot);
-        _updateEngineMarkIfCurrent(update);
-    }
-
-    /// @notice Forwards a generic mode-specific update to the Plether oracle with the call's full ETH value.
-    /// @param pythUpdateData Pyth update blobs.
-    /// @param mode Oracle policy mode to apply.
-    /// @return snapshot Validated oracle snapshot.
-    function _updateAndGetOraclePrice(
-        address refundRecipient,
-        bytes[] calldata pythUpdateData,
-        IPletherOracle.PriceMode mode
-    ) internal returns (IPletherOracle.PriceSnapshot memory snapshot) {
-        return pletherOracle.updatePrice{value: msg.value}(refundRecipient, pythUpdateData, mode);
     }
 
     /// @notice Validates and installs a Plether oracle wired to this router's engine and HousePool.

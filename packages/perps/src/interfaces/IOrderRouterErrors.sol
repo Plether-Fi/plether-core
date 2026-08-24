@@ -7,8 +7,18 @@ import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtect
 /// @notice Canonical custom errors and commit event shared by the delayed-order router stack.
 interface IOrderRouterErrors {
 
+    /// @notice Terminal result of one independently isolated liquidation-batch item.
+    enum LiquidationBatchResult {
+        Liquidated,
+        SkippedNoPosition,
+        SkippedSolvent,
+        Failed
+    }
+
     /// @notice An order commit supplied a zero position-size delta.
     error OrderRouter__ZeroSize();
+    /// @notice An order size is not an exact multiple of the canonical 100-token position lot.
+    error OrderRouter__InvalidSizeQuantum();
     /// @notice A commit failed a compact economic or planner-derived validation rule.
     /// @param code Numeric validation code; current code `11` denotes a below-minimum notional or close-size floor.
     error OrderRouter__CommitValidation(uint8 code);
@@ -75,7 +85,7 @@ interface IOrderRouterErrors {
     error OrderRouter__SideMismatch();
     /// @notice A close commit would reduce more than the position remaining after earlier queued orders.
     error OrderRouter__SizeExceedsQueued();
-    /// @notice Free settlement or proportional active margin cannot back the requested margin or execution bounty.
+    /// @notice Free settlement cannot back the requested margin or execution bounty.
     error OrderRouter__InsufficientFreeEquity();
     /// @notice Committing another order would exceed the per-account pending-order limit.
     error OrderRouter__TooManyPendingOrders();
@@ -120,12 +130,30 @@ interface IOrderRouterErrors {
     /// @notice Commit-time planner preflight identified a predictably invalid open/increase.
     /// @param code Numeric `CfdEnginePlanTypes.OpenRevertCode` returned by the engine lens.
     error OrderRouter__PredictableOpenInvalid(uint8 code);
+    /// @notice A liquidation batch was empty or exceeded the hard 256-account bound.
+    error OrderRouter__InvalidLiquidationBatchSize();
 
     /// @notice Emitted after a delayed order is stored, reserved, and linked into live queues.
     /// @param orderId Monotonically increasing router order id.
     /// @param account Account that submitted and funds the order.
     /// @param side Direction to open/increase or direction of the queued position to close.
     event OrderCommitted(uint64 indexed orderId, address indexed account, CfdTypes.Side side);
+    /// @notice Reports the terminal result of one attempted liquidation-batch account.
+    /// @param index Zero-based account index in the submitted batch.
+    /// @param account Account whose liquidation was attempted.
+    /// @param result Success, expected skip, or unexpected failure classification.
+    /// @param keeperBountyUsdc Bounty credited on success, or zero otherwise.
+    /// @param errorSelector Revert selector on a skipped or failed item, or zero on success.
+    event LiquidationBatchItem(
+        uint256 indexed index,
+        address indexed account,
+        LiquidationBatchResult result,
+        uint256 keeperBountyUsdc,
+        bytes4 errorSelector
+    );
+    /// @notice Reports the first unattempted account after a low-gas check or empty-data item revert stops the batch.
+    /// @param nextIndex Zero-based index from which a keeper should resume with a fresh oracle update.
+    event LiquidationBatchStopped(uint256 indexed nextIndex);
 
     /// @notice Emitted when protection is created for a live position or attached to a pending open.
     event PositionProtectionCreated(

@@ -6,7 +6,7 @@ contract PerpGhostLedger {
     struct LiquidationSnapshot {
         bool liquidated;
         uint256 walletUsdc;
-        uint256 badDebtUsdc;
+        uint256 legacyDebtDiagnosticUsdc;
     }
 
     address public immutable handler;
@@ -28,14 +28,15 @@ contract PerpGhostLedger {
     function recordLiquidation(
         address account,
         uint256 walletUsdc,
-        uint256 badDebtUsdc
+        uint256 legacyDebtDiagnosticUsdc
     ) external {
         if (msg.sender != handler) {
             revert PerpGhostLedger__Unauthorized();
         }
 
-        liquidationSnapshots[account] =
-            LiquidationSnapshot({liquidated: true, walletUsdc: walletUsdc, badDebtUsdc: badDebtUsdc});
+        liquidationSnapshots[account] = LiquidationSnapshot({
+            liquidated: true, walletUsdc: walletUsdc, legacyDebtDiagnosticUsdc: legacyDebtDiagnosticUsdc
+        });
     }
 
     function increaseCommittedMargin(

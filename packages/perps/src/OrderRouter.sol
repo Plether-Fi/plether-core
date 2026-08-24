@@ -6,6 +6,7 @@ import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAcco
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IPerpsKeeper} from "@plether/perps/interfaces/IPerpsKeeper.sol";
 import {IPerpsTraderActions} from "@plether/perps/interfaces/IPerpsTraderActions.sol";
+import {IPositionProtectionBook} from "@plether/perps/interfaces/IPositionProtectionBook.sol";
 import {OrderHandler} from "@plether/perps/router/OrderHandler.sol";
 import {OrderRouterBase} from "@plether/perps/router/OrderRouterBase.sol";
 
@@ -40,7 +41,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
     ///      account. The router's immutable position-protection book may append an authenticated account word when
     ///      atomically attaching protection to a newly committed open; no other caller can use that path.
     /// @param side Direction to open/increase, or the direction of the queued position being closed.
-    /// @param sizeDelta Position-size change in synthetic-token units (18 decimals); must be nonzero.
+    /// @param sizeDelta Position-size change in synthetic-token units (18 decimals); must be a nonzero 100-token lot multiple.
     /// @param marginDelta Margin to reserve for an open/increase (6-decimal USDC); must be zero for a close.
     /// @param targetPrice Direction-aware slippage limit (8 decimals), or zero for no price limit.
     /// @param isClose True for a strict position reduction and false for an open/increase.
@@ -144,11 +145,39 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
     function updateMarkPrice(
         bytes[] calldata pythUpdateData
     ) external payable nonReentrant {
-        if (msg.sender == address(positionProtectionBook)) {
-            _triggerPositionProtectionFromBook(pythUpdateData);
-        } else {
-            _updateMarkPrice(pythUpdateData);
+        pythUpdateData;
+        _delegateToPositionProtectionBook();
+    }
+
+    /// @notice Completes a protection trigger after delegated oracle resolution.
+    /// @dev Callable only by this router's delegated sidecar through an external self-call. The outer mark-refresh
+    ///      entrypoint holds the transient reentrancy guard and the sidecar preserves the original keeper identity.
+    function executePositionProtectionTriggerItem(
+        address keeper,
+        uint64 protectionId,
+        uint256 markPrice,
+        uint64 publishTime
+    ) external {
+        if (msg.sender != address(this)) {
+            revert OrderRouter__Unauthorized();
         }
+        uint64 linkedOrderId = nextCommitId++;
+        IPositionProtectionBook.TriggerPlan memory plan =
+            positionProtectionBook.activate(protectionId, markPrice, publishTime, linkedOrderId);
+        _recordCommittedOrder(linkedOrderId, plan.account, plan.side, plan.size, 0, 0, true, plan.executionBountyUsdc);
+        engine.creditBounty(plan.account, keeper, plan.triggerBountyUsdc, markPrice, publishTime);
+    }
+
+    /// @notice Atomically refreshes the pool-accounting mark and settles matured LP epochs against that exact mark.
+    /// @dev Permissionless and available while the router admin is paused. Only the exact quoted Pyth fee is sent to
+    ///      the oracle, preventing an oracle refund callback between validation and settlement. The engine mark update,
+    ///      HousePool settlement, and final caller refund share one rollback frame.
+    /// @param pythUpdateData Pyth price update blobs; `msg.value` must cover the Pyth update fee.
+    function settleLpEpoch(
+        bytes[] calldata pythUpdateData
+    ) external payable nonReentrant {
+        pythUpdateData;
+        _delegateToPositionProtectionBook();
     }
 
     /// @notice Permissionlessly liquidates an unsafe account using an account-adverse oracle price.
@@ -161,7 +190,46 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
         address account,
         bytes[] calldata pythUpdateData
     ) external payable nonReentrant {
-        _executeLiquidation(account, pythUpdateData);
+        account;
+        pythUpdateData;
+        _delegateToPositionProtectionBook();
+    }
+
+    /// @notice Permissionlessly attempts up to 256 account liquidations from one shared Pyth snapshot.
+    /// @dev Available while paused. The neutral mark is updated once, then each account's bounty forfeiture,
+    ///      liquidation settlement, and order cleanup execute in an independently caught rollback frame. Accounts with
+    ///      no position or a solvent position are skipped. Unexpected account-local failures are reported and do not
+    ///      revert earlier successes. Processing stops before the router's reserved gas tail is consumed; an empty
+    ///      item revert is treated as possible out-of-gas and leaves that item unattempted. The 256-account limit bounds
+    ///      candidates, not successful executions per transaction; resume by submitting `accounts[nextIndex:]` with a
+    ///      fresh Pyth update.
+    /// @param accounts Candidate accounts, in keeper-selected processing order.
+    /// @param pythUpdateData Pyth price update blobs; `msg.value` funds one shared update.
+    /// @return nextIndex First unattempted account index, or `accounts.length` when every account was attempted.
+    function executeLiquidationBatch(
+        address[] calldata accounts,
+        bytes[] calldata pythUpdateData
+    ) external payable nonReentrant returns (uint256 nextIndex) {
+        // Delegate the large stateless loop to the immutable sidecar that also owns protection state. The delegated
+        // implementation uses only external router getters/item calls, so it is independent of router storage layout.
+        accounts;
+        pythUpdateData;
+        nextIndex = _delegateToPositionProtectionBook();
+    }
+
+    /// @dev Forwards the original selector and calldata to stateless logic carried by the immutable protection book.
+    ///      Normal Solidity return keeps the outer transient reentrancy guard's cleanup reachable.
+    function _delegateToPositionProtectionBook() private returns (uint256 outputWord) {
+        address logic = address(positionProtectionBook);
+        assembly ("memory-safe") {
+            let input := mload(0x40)
+            calldatacopy(input, 0, calldatasize())
+            let success := delegatecall(gas(), logic, input, calldatasize(), 0, 0)
+            let outputSize := returndatasize()
+            returndatacopy(input, 0, outputSize)
+            if iszero(success) { revert(input, outputSize) }
+            outputWord := mload(input)
+        }
     }
 
 }

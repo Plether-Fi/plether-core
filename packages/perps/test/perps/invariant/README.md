@@ -56,15 +56,116 @@ This directory contains stateful Foundry invariant suites for the perps system.
   - Verifies the expanded account ledger snapshot fully subsumes compact, collateral, and position views
   - Verifies per-account settlement buckets reconcile with clearinghouse storage
   - Verifies the canonical protocol accounting snapshot stays aligned with accessors and house-pool snapshots
-  - Verifies house-pool input/status snapshots stay aligned with HousePool assets, fees, trader claim liabilities, and engine status
-  - Verifies withdrawal reserves include liabilities, fees, and trader claim obligations
-  - Verifies tracked bad debt only remains after reachable tracked account value is exhausted
+  - Verifies house-pool input/status snapshots stay aligned with physical assets, exact terminal NAV, trader claim liabilities, and engine status
+  - Verifies withdrawal reserves use maximum directional liability, trader claims, and the supplemental slot
+  - Verifies terminal price loss never exceeds same-account claim plus PnL-pledge collection; any excess is a diagnostic write-off rather than protocol debt or terminal deficit
   - Verifies ghost-tracked trader claims match engine storage and totals
 
 - `PerpValueConservationInvariant.t.sol`
   - Catches adversarial value-category transitions in the full perps stack
-  - Fuzzes failed full-close execution, neutral MTM LP deposits/withdrawals, timed carry checkpoints, and recapitalization/revenue reconciliation
+  - Fuzzes terminal close execution, signed terminal-NAV LP pricing, timed carry checkpoints, and recapitalization/revenue reconciliation
   - Verifies active margin, LP share value, historical carry, and pending claimant revenue cannot move owners without an intended settlement path
+
+- `PerpClosePreviewParityInvariant.t.sol`
+  - Catches drift between close previews and canonical-depth simulations
+  - Verifies valid partial closes conserve exact entry cost, PnL pledge, and residual terminal curves
+  - Restricts partial-close invalidity to documented shape and separate action-charge failures; price loss above the account cap is write-off eligible
+  - Verifies the immediate-payout versus trader-claim split uses adjusted pool cash
+  - Note: the currently named carry-accrual invariant performs no time warp or
+    carry assertion; timed carry conservation is covered by
+    `PerpValueConservationInvariant.t.sol`
+
+- `PerpExplicitAccountingInvariant.t.sol`
+  - Exercises preview/live parity for successful closes and liquidations against
+    the full deployed accounting stack
+  - Verifies paired Long/Short round trips conserve LP, trader, and protocol value
+  - Verifies the same round trips conserve physical protocol cash
+
+- `PerpHousePoolLifecycleInvariant.t.sol`
+  - Catches seed-lifecycle, vault-cap, cooldown, and raw/canonical asset drift
+  - Verifies trading and ordinary deposits cannot activate before both tranche
+    seeds exist
+  - Verifies seed floors, withdrawal caps, and share-transfer cooldown
+    propagation
+  - Verifies raw assets split into canonical assets plus excess
+
+- `PerpOraclePathInvariant.t.sol`
+  - Catches state drift across successful and rejected mark-refresh paths
+  - Verifies the stored mark equals the last successful capped oracle update
+  - Verifies failed ETH refunds remain beneficiary-claimable rather than
+    becoming router-admin custody
+  - Verifies configurable execution and liquidation staleness limits remain
+    positive
+
+- `PerpTerminalNavBruteForceInvariant.t.sol`
+  - Reconstructs terminal price PnL by exhaustively enumerating canonical Engine
+    positions, exact entry bases, clearinghouse PnL pledges, and Engine claims
+  - Proves the tracked account set is exhaustive against Engine side aggregates
+    before comparing it with the production NAV book
+  - Seeds opposing positions plus a partial-close residual with exact-basis dust
+    and a same-account deferred claim; separately verifies liquidation removal
+  - Verifies the radix result at both price endpoints, the live mark, and every
+    account-derived break-even and collateral-cap transition with adjacent and
+    radix-boundary interior marks
+
+- `GovernedSeniorCapacityInvariant.t.sol`
+  - Fuzzes cutoff-routed Senior/Junior deposit and redemption request/cancel/settle/claim transitions across multiple
+    actors
+  - Derives every expected request id from `getRequestEpochWindow()` and drives timestamps on both sides of the
+    exact five-minute cutoff instead of assuming a fixed activation delay
+  - Records pre-cutoff and cutoff-window reachability and verifies successful requests use the advertised future
+    target; requests at or after an epoch's cutoff cannot increase that locked epoch
+  - Verifies every successful senior admission or finalization leaves active plus
+    reserved exposure within both governed limits
+  - Verifies successful junior withdrawals preserve the active senior-share covenant
+  - Reconciles the pool reservation counter with unfinalized epoch assets and checks
+    vault escrow plus per-user pending-asset accounting
+
+## Coverage boundaries
+
+The stateful suites are high-signal conformance checks, not a complete proof of
+the accounting specification.
+
+- The current invariant harnesses use a zero VPI factor. Unit, fuzz, differential,
+  and matrix tests cover nonzero VPI arithmetic and lifetime clamps, but the
+  stateful invariant family does not yet exercise nonzero VPI.
+- The stateful invariant family does not currently drive a successful
+  oracle-frozen voluntary close with a nonzero frozen spread. Dedicated
+  frozen-close tests cover assessed/paid/waived allocation.
+- `PerpHousePoolLifecycleInvariant.t.sol` covers the active vault lifecycle,
+  seed floors, cooldowns, caps, and excess accounting. The separate
+  `GovernedSeniorCapacityInvariant.t.sol` covers the bounded pending senior
+  request/cancel/finalize/claim state machine, reservation conservation, and
+  stateful reachability on both sides of the shared request cutoff; it does not
+  model every possible epoch or governance transition.
+- Degraded transition flags and post-operation balances are checked by
+  `PerpPreviewInvariant.t.sol`; preview/live degraded settlement parity is
+  additionally exercised by `PerpExplicitAccountingInvariant.t.sol`.
+- The stateful suites align protocol accounting views and withdrawal-reserve
+  composition, but they do not prove the asymptotic complexity of endpoint
+  aggregation or independently prove every projected admission branch.
+- The complete senior/junior waterfall - junior-first loss, senior high-water
+  restoration, coupon ratcheting, and recapitalization priority - is covered by
+  direct `HousePool.t.sol` tests rather than a dedicated stateful invariant.
+- FIFO structure and reservation ownership are statefully checked. Binding
+  order-field immutability and the first unique strictly post-commit historical
+  Pyth tick are covered by direct `OrderRouter.t.sol` tests, not a dedicated
+  invariant.
+- Timed carry ownership is statefully checked, while utilization-rate arithmetic
+  and simultaneous carry on both sides remain direct-test/model properties.
+- Oracle/FAD boundary invariants do not span the complete two-axis authorization
+  matrix formed by the oracle/calendar state and the degraded-mode latch.
+- Account-capped price collection, failed full-close value safety, and preview/live terminal
+  parity are statefully exercised. No single invariant quantifies over every
+  valid insolvent terminal path and every risk-increasing entry point.
+- Whole-lot PnL/max-profit arithmetic and exact entry-cost conservation are
+  unit- and fuzz-tested. `TerminalNavBookV2.t.sol`,
+  `TerminalNavCloseConservation.t.sol`, and
+  `TerminalNavIntegrationSecurity.t.sol` provide focused book, split-close, and
+  symmetric-pricing evidence. `PerpTerminalNavBruteForceInvariant.t.sol`
+  independently reproduces the aggregate over the invariant harness's bounded,
+  completeness-checked actor domain; this remains stateful differential evidence,
+  not a formal proof over an unbounded production account set.
 
 ## Harness Pieces
 
@@ -91,4 +192,9 @@ forge test --match-contract PerpMultiAccountInvariantTest
 forge test --match-contract PerpFeeFlowInvariantTest
 forge test --match-contract PerpEconomicConservationInvariantTest
 forge test --match-contract PerpValueConservationInvariantTest
+forge test --match-contract PerpClosePreviewParityInvariantTest
+forge test --match-contract PerpExplicitAccountingInvariantTest
+forge test --match-contract PerpHousePoolLifecycleInvariantTest
+forge test --match-contract PerpOraclePathInvariantTest
+forge test --match-contract PerpTerminalNavBruteForceInvariantTest
 ```

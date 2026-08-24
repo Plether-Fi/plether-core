@@ -140,14 +140,6 @@ abstract contract OrderExecutionHandler is OrderValidation {
         _sendEth(msg.sender, msg.value - pythFeeTotal);
     }
 
-    /// @notice Applies a mark-refresh oracle update and forwards it to the engine.
-    /// @param pythUpdateData Pyth update blobs supplied by the caller.
-    function _updateMarkPrice(
-        bytes[] calldata pythUpdateData
-    ) internal {
-        _prepareMarkRefreshOracleFor(msg.sender, pythUpdateData);
-    }
-
     /// @notice Sends an ETH refund or credits it in the admin contract when the recipient rejects the transfer.
     /// @dev A zero amount is a no-op. The fallback admin credit is funded with the same ETH amount and may revert.
     /// @param to Refund recipient.

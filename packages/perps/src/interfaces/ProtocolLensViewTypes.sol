@@ -14,7 +14,6 @@ library ProtocolLensViewTypes {
     /// @param withdrawalReservedUsdc Maximum position liability plus aggregate trader claims.
     /// @param freeUsdc Pool assets above maximum position liability and aggregate trader claims.
     /// @param protocolTreasuryBalanceUsdc Settlement credited to the protocol treasury in the clearinghouse.
-    /// @param accumulatedBadDebtUsdc Aggregate recognized protocol bad debt not yet recapitalized.
     /// @param totalTraderClaimBalanceUsdc Aggregate unpaid trader claims.
     /// @param degradedMode Whether the engine has entered insolvency-protection mode.
     /// @param hasLiveLiability Whether either side has a nonzero maximum-profit liability.
@@ -26,7 +25,6 @@ library ProtocolLensViewTypes {
         uint256 withdrawalReservedUsdc;
         uint256 freeUsdc;
         uint256 protocolTreasuryBalanceUsdc;
-        uint256 accumulatedBadDebtUsdc;
         uint256 totalTraderClaimBalanceUsdc;
         bool degradedMode;
         bool hasLiveLiability;

@@ -4,11 +4,8 @@ pragma solidity 0.8.35;
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
-import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 
 contract PayoutModesMatrixTest is BasePerpTest {
-
-    using stdStorage for StdStorage;
 
     function test_CloseImmediatePayoutMode() public {
         address trader = address(0xA001);
@@ -57,15 +54,15 @@ contract PayoutModesMatrixTest is BasePerpTest {
         );
     }
 
-    function test_LiquidationBadDebtMode() public {
+    function test_LiquidationPriceLossWriteoffMode() public {
         address trader = address(0xA005);
         address account = trader;
         _fundTrader(trader, 400e6);
         _open(account, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
-        stdstore.target(address(clearinghouse)).sig("balanceUsdc(address)").with_key(account).checked_write(uint256(0));
 
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 180_000_000);
-        assertGt(preview.badDebtUsdc, 0, "Deeply underwater liquidation should surface bad debt");
+        assertTrue(preview.liquidatable, "Deeply underwater position should be liquidatable");
+        assertEq(preview.badDebtUsdc, 0, "Uncollectible price loss is written off, not stored as protocol debt");
     }
 
 }

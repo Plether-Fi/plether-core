@@ -17,6 +17,13 @@ contract PositionProtectionTest is BasePerpTest {
 
     using stdStorage for StdStorage;
 
+    struct RiskBoundaryFixture {
+        uint256 requirementUsdc;
+        uint256 exactOpeningMarginDeltaUsdc;
+        uint256 plusOneOpeningMarginDeltaUsdc;
+        uint256 protectionBountiesUsdc;
+    }
+
     IPositionProtectionBook internal protectionBook;
     IPositionProtectionActions internal protectionActions;
     IPositionProtectionViews internal protectionViews;
@@ -36,7 +43,7 @@ contract PositionProtectionTest is BasePerpTest {
     uint256 internal constant BULL_STOP_LOSS = 110_000_000;
     uint256 internal constant BEAR_TAKE_PROFIT = 110_000_000;
     uint256 internal constant BEAR_STOP_LOSS = 90_000_000;
-    uint256 internal constant FRIDAY_FAD_START = 1_709_924_400;
+    uint256 internal constant FRIDAY_FAD_START = 1_709_933_400;
 
     function setUp() public override {
         super.setUp();
@@ -302,21 +309,21 @@ contract PositionProtectionTest is BasePerpTest {
 
     function test_PostLockRisk_RejectsInitialMarginEqualityAndAcceptsOneMicroUsdcAboveBoundary() public {
         CfdTypes.RiskParams memory riskParams = _riskParams();
-        uint256 notionalUsdc = (POSITION_SIZE * MARK_PRICE) / 1e20;
-        uint256 initialRequirementUsdc = (notionalUsdc * riskParams.initMarginBps) / 10_000;
-        uint256 executionFeeUsdc = _engineExecutionFeeUsdc(POSITION_SIZE, MARK_PRICE);
-        uint256 protectionBountiesUsdc = _totalProtectionBountyUsdc();
-        uint256 openingMarginDeltaUsdc = initialRequirementUsdc + executionFeeUsdc;
-        uint256 exactFundingUsdc = executionFeeUsdc + initialRequirementUsdc + protectionBountiesUsdc;
+        RiskBoundaryFixture memory fixture = _riskBoundaryFixture(riskParams, riskParams.initMarginBps);
 
-        _fundTrader(RISK_EXACT, exactFundingUsdc);
-        _fundTrader(RISK_PLUS_ONE, exactFundingUsdc + 1);
-        _open(RISK_EXACT, CfdTypes.Side.BULL, POSITION_SIZE, openingMarginDeltaUsdc, MARK_PRICE);
-        _open(RISK_PLUS_ONE, CfdTypes.Side.BULL, POSITION_SIZE, openingMarginDeltaUsdc, MARK_PRICE);
+        _fundTrader(RISK_EXACT, fixture.exactOpeningMarginDeltaUsdc + fixture.protectionBountiesUsdc);
+        _fundTrader(RISK_PLUS_ONE, fixture.plusOneOpeningMarginDeltaUsdc + fixture.protectionBountiesUsdc);
+        _open(RISK_EXACT, CfdTypes.Side.BULL, POSITION_SIZE, fixture.exactOpeningMarginDeltaUsdc, MARK_PRICE);
+        _open(RISK_PLUS_ONE, CfdTypes.Side.BULL, POSITION_SIZE, fixture.plusOneOpeningMarginDeltaUsdc, MARK_PRICE);
+
+        assertEq(clearinghouse.pnlPledgeUsdc(RISK_EXACT), fixture.requirementUsdc, "exact pledge boundary");
+        assertEq(clearinghouse.pnlPledgeUsdc(RISK_PLUS_ONE), fixture.requirementUsdc + 1, "one-atom pledge surplus");
 
         uint256 exactFreeBefore = _freeSettlementUsdc(RISK_EXACT);
         assertEq(
-            exactFreeBefore, protectionBountiesUsdc, "exact account should fund both bounties from free settlement"
+            exactFreeBefore,
+            fixture.protectionBountiesUsdc,
+            "exact account should fund both bounties from free settlement"
         );
         vm.prank(RISK_EXACT);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector);
@@ -333,34 +340,89 @@ contract PositionProtectionTest is BasePerpTest {
         );
     }
 
+    function test_PostLockRisk_FreeSettlementCannotCureExactPriceRisk() public {
+        CfdTypes.RiskParams memory riskParams = _riskParams();
+        RiskBoundaryFixture memory fixture = _riskBoundaryFixture(riskParams, riskParams.initMarginBps);
+        uint256 surplusFreeSettlementUsdc = 5000e6;
+
+        _fundTrader(
+            RISK_EXACT, fixture.exactOpeningMarginDeltaUsdc + fixture.protectionBountiesUsdc + surplusFreeSettlementUsdc
+        );
+        _open(RISK_EXACT, CfdTypes.Side.BULL, POSITION_SIZE, fixture.exactOpeningMarginDeltaUsdc, MARK_PRICE);
+
+        assertEq(clearinghouse.pnlPledgeUsdc(RISK_EXACT), fixture.requirementUsdc, "price pledge at equality");
+        assertEq(
+            _freeSettlementUsdc(RISK_EXACT),
+            fixture.protectionBountiesUsdc + surplusFreeSettlementUsdc,
+            "fixture must have abundant generic free settlement"
+        );
+
+        vm.prank(RISK_EXACT);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector);
+        protectionActions.createPositionProtection(_params(BULL_TAKE_PROFIT, BULL_STOP_LOSS));
+
+        assertEq(
+            _freeSettlementUsdc(RISK_EXACT),
+            fixture.protectionBountiesUsdc + surplusFreeSettlementUsdc,
+            "failed protection must roll back the temporary bounty lock"
+        );
+        assertEq(protectionViews.activePositionProtectionId(RISK_EXACT), 0, "free cash must not create price backing");
+    }
+
+    function test_PostLockRisk_SameAccountClaimProvidesOneAtomOfExactPriceCollateral() public {
+        CfdTypes.RiskParams memory riskParams = _riskParams();
+        RiskBoundaryFixture memory fixture = _riskBoundaryFixture(riskParams, riskParams.initMarginBps);
+
+        _fundTrader(RISK_EXACT, fixture.exactOpeningMarginDeltaUsdc + fixture.protectionBountiesUsdc);
+        _open(RISK_EXACT, CfdTypes.Side.BULL, POSITION_SIZE, fixture.exactOpeningMarginDeltaUsdc, MARK_PRICE);
+        assertEq(clearinghouse.pnlPledgeUsdc(RISK_EXACT), fixture.requirementUsdc, "pledge starts at equality");
+
+        vm.prank(RISK_EXACT);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector);
+        protectionActions.createPositionProtection(_params(BULL_TAKE_PROFIT, BULL_STOP_LOSS));
+
+        _seedAuthenticatedTraderClaim(RISK_EXACT, 1);
+        vm.prank(RISK_EXACT);
+        uint64 protectionId = protectionActions.createPositionProtection(_params(BULL_TAKE_PROFIT, BULL_STOP_LOSS));
+
+        assertEq(engine.traderClaimBalanceUsdc(RISK_EXACT), 1, "fixture must add one same-account claim atom");
+        assertEq(
+            uint8(protectionViews.getPositionProtection(protectionId).status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Armed),
+            "one claim atom above equality should arm"
+        );
+    }
+
     function test_PostLockRisk_UsesStricterFadBoundary() public {
         CfdTypes.RiskParams memory riskParams = _riskParams();
         riskParams.baseCarryBps = 0;
         _setRiskParams(riskParams);
 
-        uint256 notionalUsdc = (POSITION_SIZE * MARK_PRICE) / 1e20;
-        uint256 initialRequirementUsdc = (notionalUsdc * riskParams.initMarginBps) / 10_000;
-        uint256 fadRequirementUsdc = (notionalUsdc * riskParams.fadMarginBps) / 10_000;
-        uint256 executionFeeUsdc = _engineExecutionFeeUsdc(POSITION_SIZE, MARK_PRICE);
-        uint256 protectionBountiesUsdc = _totalProtectionBountyUsdc();
-        uint256 openingMarginDeltaUsdc = initialRequirementUsdc + executionFeeUsdc;
-        uint256 exactFundingUsdc = executionFeeUsdc + fadRequirementUsdc + protectionBountiesUsdc;
+        RiskBoundaryFixture memory fixture = _riskBoundaryFixture(riskParams, riskParams.fadMarginBps);
+        assertGt(
+            fixture.requirementUsdc,
+            ((POSITION_SIZE * MARK_PRICE) / 1e20) * riskParams.initMarginBps / 10_000,
+            "fixture requires FAD to be stricter than initial"
+        );
 
         vm.warp(FRIDAY_FAD_START - 2);
         router.updateMarkPrice(_mockPythUpdateData(MARK_PRICE));
         assertFalse(engine.isFadWindow(), "positions should open immediately before the FAD boundary");
 
-        _fundTrader(RISK_EXACT, exactFundingUsdc);
-        _fundTrader(RISK_PLUS_ONE, exactFundingUsdc + 1);
-        _open(RISK_EXACT, CfdTypes.Side.BULL, POSITION_SIZE, openingMarginDeltaUsdc, MARK_PRICE);
-        _open(RISK_PLUS_ONE, CfdTypes.Side.BULL, POSITION_SIZE, openingMarginDeltaUsdc, MARK_PRICE);
+        _fundTrader(RISK_EXACT, fixture.exactOpeningMarginDeltaUsdc + fixture.protectionBountiesUsdc);
+        _fundTrader(RISK_PLUS_ONE, fixture.plusOneOpeningMarginDeltaUsdc + fixture.protectionBountiesUsdc);
+        _open(RISK_EXACT, CfdTypes.Side.BULL, POSITION_SIZE, fixture.exactOpeningMarginDeltaUsdc, MARK_PRICE);
+        _open(RISK_PLUS_ONE, CfdTypes.Side.BULL, POSITION_SIZE, fixture.plusOneOpeningMarginDeltaUsdc, MARK_PRICE);
+
+        assertEq(clearinghouse.pnlPledgeUsdc(RISK_EXACT), fixture.requirementUsdc, "exact FAD pledge boundary");
+        assertEq(clearinghouse.pnlPledgeUsdc(RISK_PLUS_ONE), fixture.requirementUsdc + 1, "one-atom FAD pledge surplus");
 
         vm.warp(FRIDAY_FAD_START);
         router.updateMarkPrice(_mockPythUpdateData(MARK_PRICE));
         assertTrue(engine.isFadWindow(), "post-lock risk should use the stricter FAD requirement");
 
         uint256 exactFreeBefore = _freeSettlementUsdc(RISK_EXACT);
-        assertGe(exactFreeBefore, protectionBountiesUsdc, "exact-boundary account can fund the bounty itself");
+        assertGe(exactFreeBefore, fixture.protectionBountiesUsdc, "exact-boundary account can fund the bounty itself");
         vm.prank(RISK_EXACT);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector);
         protectionActions.createPositionProtection(_params(BULL_TAKE_PROFIT, BULL_STOP_LOSS));
@@ -373,6 +435,59 @@ contract PositionProtectionTest is BasePerpTest {
             uint8(PositionProtectionTypes.PositionProtectionStatus.Armed),
             "one micro-USDC above the inclusive risk boundary should arm"
         );
+    }
+
+    function test_PostLockRisk_RejectsUnderfundedNegativeVpiReserveIndependently() public {
+        CfdTypes.RiskParams memory riskParams = _riskParams();
+        riskParams.vpiFactor = 0.05e18;
+        riskParams.baseCarryBps = 0;
+        _setRiskParams(riskParams);
+
+        uint256 size = 100_000e18;
+        uint256 depth = pool.totalAssets();
+        _open(ALICE, CfdTypes.Side.BEAR, size, 5000e6, MARK_PRICE, depth);
+        _open(BOB, CfdTypes.Side.BULL, size, 5000e6, MARK_PRICE, depth);
+        (,,,,,, int256 vpiAccrued) = engine.positions(BOB);
+        assertLt(vpiAccrued, 0, "rebate-side fixture must have negative lifetime VPI");
+
+        uint256 reserveTargetUsdc = uint256(-(vpiAccrued + 1)) + 1;
+        assertEq(clearinghouse.vpiRebateReserveUsdc(BOB), reserveTargetUsdc, "reserve starts exactly funded");
+        vm.prank(address(engine));
+        clearinghouse.releaseVpiRebateReserve(BOB, 1);
+
+        uint256 freeBefore = _freeSettlementUsdc(BOB);
+        vm.prank(BOB);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector);
+        protectionActions.createPositionProtection(_params(BULL_TAKE_PROFIT, BULL_STOP_LOSS));
+
+        assertEq(
+            clearinghouse.vpiRebateReserveUsdc(BOB), reserveTargetUsdc - 1, "failed action must not repair VPI backing"
+        );
+        assertEq(_freeSettlementUsdc(BOB), freeBefore, "failed action must roll back its bounty lock");
+        assertEq(protectionViews.activePositionProtectionId(BOB), 0, "VPI delinquency must fail closed");
+    }
+
+    function test_PostLockRisk_RejectsCarryLeftUncoveredByLockCheckpoint() public {
+        _open(ALICE, CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
+        _withdrawAllFreeSettlement(ALICE);
+
+        stdstore.target(address(router)).sig("closeOrderExecutionBountyUsdc()").checked_write(uint256(0));
+        stdstore.target(address(router)).sig("positionProtectionTriggerBountyUsdc()").checked_write(uint256(0));
+
+        vm.warp(block.timestamp + 365 days);
+        _refreshMark(MARK_PRICE);
+        assertGt(_expectedIndexedCarryUsdc(ALICE), 0, "fixture must accrue carry with no eligible free settlement");
+
+        vm.prank(ALICE);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector);
+        protectionActions.createPositionProtection(_params(BULL_TAKE_PROFIT, BULL_STOP_LOSS));
+
+        assertEq(
+            engine.unsettledCarryUsdc(ALICE),
+            0,
+            "risk failure must roll back the lock-time carry checkpoint with the rest of the action"
+        );
+        assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "uncovered carry must fail closed");
     }
 
     function test_Pause_BlocksNewAndReplacementButAllowsCancelAndTrigger() public {
@@ -860,6 +975,46 @@ contract PositionProtectionTest is BasePerpTest {
 
     function _totalProtectionBountyUsdc() internal view returns (uint256) {
         return router.positionProtectionTriggerBountyUsdc() + router.closeOrderExecutionBountyUsdc();
+    }
+
+    function _riskBoundaryFixture(
+        CfdTypes.RiskParams memory riskParams,
+        uint256 requiredMarginBps
+    ) internal view returns (RiskBoundaryFixture memory fixture) {
+        uint256 notionalUsdc = (POSITION_SIZE * MARK_PRICE) / 1e20;
+        fixture.requirementUsdc = (notionalUsdc * requiredMarginBps) / 10_000;
+        fixture.exactOpeningMarginDeltaUsdc = fixture.requirementUsdc
+            + _engineExecutionFeeUsdc(POSITION_SIZE, MARK_PRICE)
+            + _liquidationReserveTargetUsdc(notionalUsdc, riskParams);
+        fixture.plusOneOpeningMarginDeltaUsdc = fixture.exactOpeningMarginDeltaUsdc + 1;
+        fixture.protectionBountiesUsdc = _totalProtectionBountyUsdc();
+    }
+
+    function _liquidationReserveTargetUsdc(
+        uint256 notionalUsdc,
+        CfdTypes.RiskParams memory riskParams
+    ) internal pure returns (uint256 reserveTargetUsdc) {
+        reserveTargetUsdc = (notionalUsdc * riskParams.bountyBps) / 10_000;
+        if (reserveTargetUsdc < riskParams.minBountyUsdc) {
+            reserveTargetUsdc = riskParams.minBountyUsdc;
+        }
+    }
+
+    function _seedAuthenticatedTraderClaim(
+        address account,
+        uint256 claimUsdc
+    ) internal {
+        bytes32 oldCurveHash = terminalNavBook.curveHashOf(account);
+        uint256 oldAccountClaimUsdc = engine.traderClaimBalanceUsdc(account);
+        uint256 oldTotalClaimUsdc = engine.totalTraderClaimBalanceUsdc();
+        stdstore.target(address(engine)).sig("traderClaimBalanceUsdc(address)").with_key(account)
+            .checked_write(claimUsdc);
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()")
+            .checked_write(oldTotalClaimUsdc - oldAccountClaimUsdc + claimUsdc);
+        vm.prank(address(engine));
+        terminalNavBook.syncFromEngine(account, oldCurveHash);
+        vm.prank(address(engine));
+        terminalNavBook.authenticateEngineState(account);
     }
 
     function _withdrawAllFreeSettlement(

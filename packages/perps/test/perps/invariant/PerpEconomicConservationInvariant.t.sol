@@ -40,6 +40,85 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         targetContract(address(handler));
     }
 
+    function test_BatchSynchronizesClaimsForEveryProcessedOrderOwner() public {
+        handler.commitOpenOrder(0, uint8(CfdTypes.Side.BULL), 20, 1000e6, 1e8);
+        handler.commitOpenOrder(1, uint8(CfdTypes.Side.BULL), 20, 1000e6, 1e8);
+        handler.executeNextOrderModelled();
+        handler.executeNextOrderModelled();
+
+        address firstAccount = _account(handler.actorAt(0));
+        address secondAccount = _account(handler.actorAt(1));
+        assertGt(_positionSize(firstAccount), 0, "First position must be live");
+        assertGt(_positionSize(secondAccount), 0, "Second position must be live");
+
+        handler.commitCloseOrder(0, 0.5e8);
+        handler.createTraderClaim(1);
+
+        uint256 firstClaimUsdc = engine.traderClaimBalanceUsdc(firstAccount);
+        uint256 secondClaimUsdc = engine.traderClaimBalanceUsdc(secondAccount);
+        assertGt(firstClaimUsdc, 0, "Earlier batched close must create a claim");
+        assertGt(secondClaimUsdc, 0, "Requested batched close must create a claim");
+        assertEq(handler.traderClaimSnapshot(firstAccount), firstClaimUsdc, "First owner claim cache mismatch");
+        assertEq(handler.traderClaimSnapshot(secondAccount), secondClaimUsdc, "Second owner claim cache mismatch");
+        assertEq(
+            handler.totalTraderClaimSnapshot(),
+            engine.totalTraderClaimBalanceUsdc(),
+            "Aggregate claim cache must include every processed owner"
+        );
+    }
+
+    function test_ExpiredModelledTerminalCloseDoesNotCreateExecutionGhosts() public {
+        handler.commitOpenOrder(0, uint8(CfdTypes.Side.BULL), 20, 1000e6, 1e8);
+        handler.executeNextOrderModelled();
+
+        address account = _account(handler.actorAt(0));
+        uint256 sizeBefore = _positionSize(account);
+        assertGt(sizeBefore, 0, "Position must be live");
+
+        handler.setPoolAssets(0);
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, sizeBefore, 0.5e8);
+        assertTrue(preview.valid, "Profitable terminal close preview must be valid");
+        assertEq(preview.remainingSize, 0, "Close preview must be terminal");
+        assertGt(preview.traderClaimBalanceUsdc, 0, "Close preview must project a deferred claim");
+
+        uint64 closeOrderId = router.nextCommitId();
+        handler.commitCloseOrder(0, 0.5e8);
+        uint256 executedBefore = handler.ghostExecutedOrderCount();
+        uint256 liveClaimBefore = engine.traderClaimBalanceUsdc(account);
+        uint256 ghostClaimBefore = handler.traderClaimSnapshot(account);
+        assertGt(handler.accountExecutionBountyReserve(account), 0, "Close bounty must be reserved");
+
+        handler.warpForward(router.maxOrderAge() + 1);
+        handler.executeNextOrderModelled();
+
+        assertEq(handler.ghostOrderLifecycleState(closeOrderId), 3, "Expired close must be tracked as failed");
+        assertEq(_positionSize(account), sizeBefore, "Expired close must not mutate the position");
+        assertEq(handler.ghostExecutedOrderCount(), executedBefore, "Expired close must not count as executed");
+        assertEq(engine.traderClaimBalanceUsdc(account), liveClaimBefore, "Expired close must not create a claim");
+        assertEq(handler.traderClaimSnapshot(account), ghostClaimBefore, "Expired close must not mutate claim ghost");
+        assertEq(router.pendingOrderCounts(account), 0, "Expired close must leave the pending queue");
+        assertEq(handler.accountExecutionBountyReserve(account), 0, "Expired close bounty must be cleared");
+        assertEq(
+            clearinghouse.getLockedMarginBuckets(account).reservedSettlementUsdc,
+            0,
+            "Expired close reserved settlement must be cleared"
+        );
+        assertFalse(
+            handler.lastTerminalResidualEventSnapshot().active,
+            "Expired close must not fabricate a terminal residual event"
+        );
+        assertFalse(
+            handler.lastPriceLossTraderClaimEventSnapshot().active,
+            "Expired close must not fabricate a price-loss event"
+        );
+    }
+
+    function _positionSize(
+        address account
+    ) internal view returns (uint256 size) {
+        (size,,,,,,) = engine.positions(account);
+    }
+
     function invariant_KnownActorAndProtocolBalancesConserveUsdcSupply() public view {
         assertEq(
             _knownBalancesSum(),
@@ -49,7 +128,8 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
     }
 
     function invariant_ClearinghouseCustodyMatchesTrackedAccountBalances() public view {
-        uint256 trackedBalances = clearinghouse.balanceUsdc(_account(address(handler)));
+        uint256 trackedBalances = clearinghouse.balanceUsdc(_account(address(handler)))
+            + clearinghouse.balanceUsdc(engine.protocolTreasury());
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             trackedBalances += clearinghouse.balanceUsdc(_account(handler.actorAt(i)));
         }
@@ -82,6 +162,8 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
             IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(account);
             IMarginClearinghouse.LockedMarginBuckets memory lockedBuckets =
                 clearinghouse.getLockedMarginBuckets(account);
+            IMarginClearinghouse.PnlIsolationBuckets memory isolationBuckets =
+                clearinghouse.getPnlIsolationBuckets(account);
 
             assertEq(
                 buckets.totalLockedMarginUsdc,
@@ -95,8 +177,9 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
             );
             assertEq(
                 buckets.otherLockedMarginUsdc,
-                lockedBuckets.committedOrderMarginUsdc + lockedBuckets.reservedSettlementUsdc,
-                "Tracked account other locked margin must equal typed non-position buckets"
+                isolationBuckets.liquidationReserveUsdc + isolationBuckets.orderMarginUsdc
+                    + isolationBuckets.actionReserveUsdc,
+                "Tracked account other locked margin must equal canonical non-position buckets"
             );
             assertEq(
                 buckets.totalLockedMarginUsdc,
@@ -166,8 +249,8 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
     }
 
     function invariant_TrackedAccountLedgerTotalsMatchProtocolCustodyAndObligations() public view {
-        uint256 totalSettlementUsdc =
-            engineAccountLens.getAccountLedgerView(_account(address(handler))).settlementBalanceUsdc;
+        uint256 totalSettlementUsdc = engineAccountLens.getAccountLedgerView(_account(address(handler)))
+            .settlementBalanceUsdc + clearinghouse.balanceUsdc(engine.protocolTreasury());
         uint256 totalReservedSettlementUsdc =
             clearinghouse.getLockedMarginBuckets(_account(address(handler))).reservedSettlementUsdc;
         uint256 totalExecutionReservationUsdc;
@@ -200,26 +283,26 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         );
     }
 
-    function invariant_BadDebtEventCannotLeaveLegacyTraderClaimOnSameAccount() public view {
-        PerpAccountingHandler.BadDebtTraderClaimEvent memory eventSnapshot =
-            handler.lastBadDebtTraderClaimEventSnapshot();
+    function invariant_PriceLossEventLeavesExactlyThePreviewedTraderClaim() public view {
+        PerpAccountingHandler.PriceLossTraderClaimEvent memory eventSnapshot =
+            handler.lastPriceLossTraderClaimEventSnapshot();
         if (!eventSnapshot.active) {
             return;
         }
 
         assertEq(
-            engine.accumulatedBadDebtUsdc(),
-            eventSnapshot.badDebtAfterUsdc,
-            "Bad debt event snapshot should describe the current bad debt-producing step"
+            eventSnapshot.legacyDebtDiagnosticUsdc,
+            0,
+            "Terminal price tails must be diagnostic writeoffs rather than protocol debt"
         );
-        assertLe(
+        assertEq(
             engine.traderClaimBalanceUsdc(eventSnapshot.account),
-            eventSnapshot.allowedTraderClaimAfterUsdc,
-            "Bad debt-producing close/liquidation may only leave newly created trader claim on the same account"
+            eventSnapshot.expectedTraderClaimAfterUsdc,
+            "Terminal price-loss settlement must leave exactly the claim projected by the planner"
         );
     }
 
-    function invariant_TerminalEventsMatchResidualAndBadDebtAccounting() public view {
+    function invariant_TerminalEventsMatchResidualAndPriceWriteoffAccounting() public view {
         PerpAccountingHandler.TerminalResidualEvent memory eventSnapshot = handler.lastTerminalResidualEventSnapshot();
         if (!eventSnapshot.active) {
             return;
@@ -233,9 +316,9 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         }
 
         assertEq(
-            engine.accumulatedBadDebtUsdc(),
-            eventSnapshot.badDebtBeforeUsdc + eventSnapshot.expectedBadDebtDeltaUsdc,
-            "Terminal event bad debt delta should match previewed accounting"
+            eventSnapshot.legacyDebtDiagnosticUsdc,
+            0,
+            "Terminal settlement must not externalize uncollectible price tails as mutable debt"
         );
         assertEq(
             actualFinalResidualUsdc,
@@ -255,6 +338,8 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
             AccountLensViewTypes.AccountLedgerSnapshot memory positionView = snapshot;
             IMarginClearinghouse.LockedMarginBuckets memory lockedBuckets =
                 clearinghouse.getLockedMarginBuckets(account);
+            IMarginClearinghouse.PnlIsolationBuckets memory isolationBuckets =
+                clearinghouse.getPnlIsolationBuckets(account);
 
             assertEq(
                 snapshot.settlementBalanceUsdc, ledgerView.settlementBalanceUsdc, "Account snapshot settlement mismatch"
@@ -294,8 +379,9 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
             );
             assertEq(
                 snapshot.otherLockedMarginUsdc,
-                snapshot.committedOrderMarginBucketUsdc + snapshot.reservedSettlementBucketUsdc,
-                "Account snapshot other locked margin must equal typed non-position buckets"
+                isolationBuckets.liquidationReserveUsdc + isolationBuckets.orderMarginUsdc
+                    + isolationBuckets.actionReserveUsdc,
+                "Account snapshot other locked margin must equal canonical non-position buckets"
             );
             assertEq(
                 snapshot.executionBountyReserveUsdc,
@@ -323,9 +409,14 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
                 "Account snapshot close reachable mismatch"
             );
             assertEq(
-                snapshot.terminalReachableUsdc,
-                collateralView.terminalReachableUsdc,
-                "Account snapshot terminal reachable mismatch"
+                snapshot.liquidationReachableSettlementUsdc,
+                collateralView.liquidationReachableSettlementUsdc,
+                "Account snapshot liquidation reachability mismatch"
+            );
+            assertEq(
+                snapshot.terminalPriceCollectibleCapUsdc,
+                collateralView.terminalPriceCollectibleCapUsdc,
+                "Account snapshot terminal price cap mismatch"
             );
             assertEq(snapshot.accountEquityUsdc, collateralView.accountEquityUsdc, "Account snapshot equity mismatch");
             assertEq(
@@ -360,7 +451,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
                 assertGe(
                     transition.afterTerminalReachableUsdc,
                     transition.beforeTerminalReachableUsdc,
-                    "Deposits must not reduce terminal-reachable settlement"
+                    "Deposits must not reduce liquidation-reachable settlement"
                 );
             } else if (transition.action == 2) {
                 assertLe(
@@ -371,7 +462,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
                 assertLe(
                     transition.afterTerminalReachableUsdc,
                     transition.beforeTerminalReachableUsdc,
-                    "Withdrawals must not increase terminal-reachable settlement"
+                    "Withdrawals must not increase liquidation-reachable settlement"
                 );
             }
         }
@@ -395,10 +486,11 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
                 "Orphaned accounts close reachability must equal free settlement"
             );
             assertEq(
-                snapshot.terminalReachableUsdc,
+                snapshot.liquidationReachableSettlementUsdc,
                 snapshot.settlementBalanceUsdc,
                 "Orphaned accounts liquidation reachability must equal settlement balance"
             );
+            assertEq(snapshot.terminalPriceCollectibleCapUsdc, 0, "Orphaned accounts must have zero terminal price cap");
             assertEq(snapshot.size, 0, "Orphaned accounts must have zero size");
             assertEq(snapshot.margin, 0, "Orphaned accounts must have zero margin");
             assertEq(snapshot.entryPrice, 0, "Orphaned accounts must have zero entry price");
@@ -444,6 +536,16 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
                 "Snapshot must subsume collateral close reachability"
             );
             assertEq(
+                snapshot.liquidationReachableSettlementUsdc,
+                collateralView.liquidationReachableSettlementUsdc,
+                "Snapshot must subsume collateral liquidation reachability"
+            );
+            assertEq(
+                snapshot.terminalPriceCollectibleCapUsdc,
+                collateralView.terminalPriceCollectibleCapUsdc,
+                "Snapshot must subsume collateral terminal price cap"
+            );
+            assertEq(
                 snapshot.accountEquityUsdc, collateralView.accountEquityUsdc, "Snapshot must subsume collateral equity"
             );
             assertEq(snapshot.hasPosition, positionView.hasPosition, "Snapshot must subsume position existence");
@@ -466,10 +568,13 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
             clearinghouse.balanceUsdc(engine.protocolTreasury()),
             "Protocol snapshot fees mismatch"
         );
+        uint256 expectedEffectiveSolvencyAssetsUsdc = poolAssetsUsdc > engine.totalTraderClaimBalanceUsdc()
+            ? poolAssetsUsdc - engine.totalTraderClaimBalanceUsdc()
+            : 0;
         assertEq(
-            protocolSnapshot.accumulatedBadDebtUsdc,
-            engine.accumulatedBadDebtUsdc(),
-            "Protocol snapshot bad debt mismatch"
+            protocolSnapshot.effectiveSolvencyAssetsUsdc,
+            expectedEffectiveSolvencyAssetsUsdc,
+            "Price writeoffs must not create a second subtraction from physical solvency assets"
         );
         assertEq(
             protocolSnapshot.withdrawalReservedUsdc,
@@ -497,8 +602,10 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         );
         assertEq(
             snapshot.netPhysicalAssetsUsdc,
-            poolAssetsUsdc,
-            "House-pool snapshot net physical assets must not reserve treasury clearinghouse fees"
+            poolAssetsUsdc > protocolSnapshot.protocolTreasuryBalanceUsdc
+                ? poolAssetsUsdc - protocolSnapshot.protocolTreasuryBalanceUsdc
+                : 0,
+            "House-pool snapshot net physical assets must exclude treasury clearinghouse fees"
         );
         assertEq(
             snapshot.physicalAssetsUsdc, poolAssetsUsdc, "House-pool snapshot physical asset decomposition mismatch"
@@ -527,28 +634,24 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         assertEq(snapshot.degradedMode, engine.degradedMode(), "House-pool status degraded mode mismatch");
     }
 
-    function invariant_BadDebtOnlyRemainsAfterTrackedAccountsExhaustReachableValue() public view {
-        uint256 badDebtUsdc = engine.accumulatedBadDebtUsdc();
-        if (badDebtUsdc == 0) {
-            return;
-        }
-
+    function invariant_LiquidationWriteoffsNeverBecomeDebtOrPreserveExecutionBounties() public view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
             PerpGhostLedger.LiquidationSnapshot memory snapshot = handler.liquidationSnapshot(account);
-            if (!snapshot.liquidated || badDebtUsdc <= snapshot.badDebtUsdc) {
+            if (!snapshot.liquidated) {
                 continue;
             }
 
             assertEq(
-                handler.accountExecutionBountyReserve(account),
+                snapshot.legacyDebtDiagnosticUsdc,
                 0,
-                "Bad debt cannot coexist with tracked execution bounty reserves"
+                "Liquidation price-loss shortfall must remain a diagnostic writeoff"
             );
             assertEq(
-                clearinghouse.balanceUsdc(account), 0, "Bad debt cannot coexist with tracked clearinghouse balance"
+                handler.accountExecutionBountyReserve(account),
+                0,
+                "Liquidation must forfeit tracked execution bounty reserves"
             );
-            assertEq(engine.traderClaimBalanceUsdc(account), 0, "Bad debt cannot coexist with trader claim balances");
         }
     }
 

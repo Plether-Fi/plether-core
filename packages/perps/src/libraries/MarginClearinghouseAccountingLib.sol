@@ -38,10 +38,11 @@ library MarginClearinghouseAccountingLib {
     /// @notice Planned settlement and position-margin mutations for an open or increase.
     /// @dev Resulting balances are populated only when both insufficiency flags are false. Mutation fields populated
     ///      before a failing check are diagnostic and must not be applied.
-    /// @param netMarginChangeUsdc Signed `marginDeltaUsdc - tradeCostUsdc`; positive locks margin, negative unlocks it.
+    /// @param netMarginChangeUsdc Nonnegative PnL-pledge increase funded by this action's margin contribution after
+    ///        its positive trade cost; rebates never increase pledge and costs never decrease pre-existing pledge.
     /// @param settlementCreditUsdc Rebate credited when trade cost is negative.
     /// @param settlementDebitUsdc Positive trade cost debited from settlement.
-    /// @param positionMarginUnlockedUsdc Active margin released when net margin change is negative.
+    /// @param positionMarginUnlockedUsdc Retained compatibility field; always zero under V2 pledge isolation.
     /// @param positionMarginLockedUsdc Active margin added when net margin change is positive.
     /// @param resultingSettlementBalanceUsdc Settlement balance after rebate or positive-cost debit.
     /// @param resultingPositionMarginUsdc Active-position margin after unlock or lock.
@@ -61,15 +62,16 @@ library MarginClearinghouseAccountingLib {
         bool insufficientPositionMargin;
     }
 
-    /// @notice Planned account disposition after removing a liquidated position and paying a keeper bounty.
-    /// @param keeperBountyUsdc Requested bounty debited from the liquidated account.
+    /// @notice Planned account disposition after removing a liquidated position and reserving its total charge.
+    /// @param liquidationChargeUsdc Total keeper, protocol, and LP charge reserved from the liquidated account.
     /// @param settlementRetainedUsdc Existing settlement left in the account toward positive residual equity.
-    /// @param settlementSeizedUsdc Existing settlement transferred away after bounty and retained equity.
+    /// @param settlementSeizedUsdc Existing settlement transferred away after the charge reserve and retained equity;
+    ///        the LP-owned charge is added by the liquidation planner before live settlement.
     /// @param freshTraderPayoutUsdc New value required to satisfy positive residual equity.
     /// @param badDebtUsdc Magnitude of negative residual equity; seizure is not subtracted from this field.
     /// @param mutation Settlement debit and locked-margin consumption required to apply the plan.
     struct LiquidationResidualPlan {
-        uint256 keeperBountyUsdc;
+        uint256 liquidationChargeUsdc;
         uint256 settlementRetainedUsdc;
         uint256 settlementSeizedUsdc;
         uint256 freshTraderPayoutUsdc;
@@ -91,10 +93,26 @@ library MarginClearinghouseAccountingLib {
         uint256 committedOrderMarginUsdc,
         uint256 reservedSettlementUsdc
     ) internal pure returns (IMarginClearinghouse.AccountUsdcBuckets memory buckets) {
+        return buildIsolatedAccountUsdcBuckets(
+            settlementBalanceUsdc, positionMarginUsdc, 0, committedOrderMarginUsdc, reservedSettlementUsdc
+        );
+    }
+
+    /// @notice Classifies settlement under the V2 PnL-isolation bucket model.
+    /// @dev `pnlPledgeUsdc` is the only active margin reachable by position price-loss paths. Liquidation, order, and
+    ///      action reserves are all reported in `otherLockedMarginUsdc` and remain excluded unless a dedicated path
+    ///      explicitly consumes them.
+    function buildIsolatedAccountUsdcBuckets(
+        uint256 settlementBalanceUsdc,
+        uint256 pnlPledgeUsdc,
+        uint256 liquidationReserveUsdc,
+        uint256 orderMarginUsdc,
+        uint256 actionReserveUsdc
+    ) internal pure returns (IMarginClearinghouse.AccountUsdcBuckets memory buckets) {
         buckets.settlementBalanceUsdc = settlementBalanceUsdc;
-        buckets.activePositionMarginUsdc = positionMarginUsdc;
-        buckets.otherLockedMarginUsdc = committedOrderMarginUsdc + reservedSettlementUsdc;
-        buckets.totalLockedMarginUsdc = positionMarginUsdc + committedOrderMarginUsdc + reservedSettlementUsdc;
+        buckets.activePositionMarginUsdc = pnlPledgeUsdc;
+        buckets.otherLockedMarginUsdc = liquidationReserveUsdc + orderMarginUsdc + actionReserveUsdc;
+        buckets.totalLockedMarginUsdc = pnlPledgeUsdc + liquidationReserveUsdc + orderMarginUsdc + actionReserveUsdc;
 
         uint256 encumberedUsdc = buckets.totalLockedMarginUsdc;
         buckets.freeSettlementUsdc =
@@ -136,9 +154,9 @@ library MarginClearinghouseAccountingLib {
         reachableUsdc = settlementBalanceUsdc > queuedReservedUsdc ? settlementBalanceUsdc - queuedReservedUsdc : 0;
     }
 
-    /// @notice Plans carry-loss collection from free settlement first and active-position margin second.
-    /// @dev Other locked margin is never consumed. If eligible collateral is insufficient, the remainder is reported
-    ///      in `uncoveredUsdc`. The priority split involves no division or rounding.
+    /// @notice Plans carry-loss collection exclusively from free settlement.
+    /// @dev PnL pledge and every reserve bucket remain protected. If free settlement is insufficient, the remainder is
+    ///      reported in `uncoveredUsdc`; callers waive it rather than converting it into position price-loss debt.
     /// @param buckets Account bucket snapshot.
     /// @param lossUsdc Carry loss requested for collection.
     /// @return consumption Free/active consumption, total debit, and uncovered remainder.
@@ -148,20 +166,14 @@ library MarginClearinghouseAccountingLib {
     ) internal pure returns (SettlementConsumption memory consumption) {
         uint256 freeSettlementUsdc = buckets.freeSettlementUsdc;
         consumption.freeSettlementConsumedUsdc = freeSettlementUsdc > lossUsdc ? lossUsdc : freeSettlementUsdc;
-
-        uint256 remainingLossUsdc = lossUsdc - consumption.freeSettlementConsumedUsdc;
-        uint256 positionMarginUsdc = buckets.activePositionMarginUsdc;
-        consumption.activeMarginConsumedUsdc =
-            positionMarginUsdc > remainingLossUsdc ? remainingLossUsdc : positionMarginUsdc;
-        consumption.totalConsumedUsdc = consumption.freeSettlementConsumedUsdc + consumption.activeMarginConsumedUsdc;
-        consumption.uncoveredUsdc = remainingLossUsdc - consumption.activeMarginConsumedUsdc;
+        consumption.totalConsumedUsdc = consumption.freeSettlementConsumedUsdc;
+        consumption.uncoveredUsdc = lossUsdc - consumption.freeSettlementConsumedUsdc;
     }
 
-    /// @notice Plans how signed trade cost and supplied margin change settlement and active-position margin.
-    /// @dev A negative trade cost first credits settlement and increases net margin change. A negative net margin
-    ///      change then unlocks position margin. Free settlement is recomputed before a positive trade-cost debit and
-    ///      any positive net-margin lock, in that order. Other locked margin remains protected throughout. Inputs must
-    ///      fit signed arithmetic (`marginDeltaUsdc` is cast to `int256` and the minimum int cannot be negated).
+    /// @notice Plans how signed action cost and newly supplied margin change settlement and PnL pledge.
+    /// @dev Positive cost may consume this action's supplied margin before it becomes pledge. Any excess must come
+    ///      from pre-existing free settlement. It never unlocks existing pledge. A negative cost is credited as free
+    ///      settlement and never increases pledge. Other locked buckets remain protected throughout.
     /// @param buckets Account bucket snapshot before the open/increase.
     /// @param marginDeltaUsdc Margin supplied by the order.
     /// @param tradeCostUsdc Signed VPI plus fee; positive is a debit and negative is a rebate.
@@ -171,8 +183,6 @@ library MarginClearinghouseAccountingLib {
         uint256 marginDeltaUsdc,
         int256 tradeCostUsdc
     ) internal pure returns (OpenCostPlan memory plan) {
-        plan.netMarginChangeUsdc = int256(marginDeltaUsdc) - tradeCostUsdc;
-
         uint256 settlementBalanceUsdc = buckets.settlementBalanceUsdc;
         uint256 positionMarginUsdc = buckets.activePositionMarginUsdc;
         uint256 otherLockedMarginUsdc = buckets.otherLockedMarginUsdc;
@@ -180,15 +190,6 @@ library MarginClearinghouseAccountingLib {
         if (tradeCostUsdc < 0) {
             plan.settlementCreditUsdc = uint256(-tradeCostUsdc);
             settlementBalanceUsdc += plan.settlementCreditUsdc;
-        }
-
-        if (plan.netMarginChangeUsdc < 0) {
-            plan.positionMarginUnlockedUsdc = uint256(-plan.netMarginChangeUsdc);
-            if (plan.positionMarginUnlockedUsdc > positionMarginUsdc) {
-                plan.insufficientPositionMargin = true;
-                return plan;
-            }
-            positionMarginUsdc -= plan.positionMarginUnlockedUsdc;
         }
 
         uint256 totalLockedMarginUsdc = positionMarginUsdc + otherLockedMarginUsdc;
@@ -205,8 +206,14 @@ library MarginClearinghouseAccountingLib {
             freeSettlementUsdc -= plan.settlementDebitUsdc;
         }
 
-        if (plan.netMarginChangeUsdc > 0) {
-            plan.positionMarginLockedUsdc = uint256(plan.netMarginChangeUsdc);
+        uint256 actionCostFundedByMarginUsdc;
+        if (tradeCostUsdc > 0) {
+            uint256 positiveCostUsdc = uint256(tradeCostUsdc);
+            actionCostFundedByMarginUsdc = positiveCostUsdc < marginDeltaUsdc ? positiveCostUsdc : marginDeltaUsdc;
+        }
+        plan.positionMarginLockedUsdc = marginDeltaUsdc - actionCostFundedByMarginUsdc;
+        plan.netMarginChangeUsdc = int256(plan.positionMarginLockedUsdc);
+        if (plan.positionMarginLockedUsdc > 0) {
             if (plan.positionMarginLockedUsdc > freeSettlementUsdc) {
                 plan.insufficientFreeEquity = true;
                 return plan;
@@ -302,7 +309,7 @@ library MarginClearinghouseAccountingLib {
         mutation.otherLockedMarginUnlockedUsdc = consumption.otherLockedMarginConsumedUsdc;
     }
 
-    /// @notice Plans liquidation residual settlement without a keeper bounty.
+    /// @notice Plans liquidation residual settlement without a liquidation charge.
     /// @param buckets Terminal account bucket snapshot.
     /// @param residualUsdc Signed post-liquidation equity; positive is owed to the trader and negative is bad debt.
     /// @return plan Retention, seizure, fresh-payout, bad-debt, and bucket-mutation plan.
@@ -313,39 +320,40 @@ library MarginClearinghouseAccountingLib {
         return planLiquidationResidual(buckets, residualUsdc, 0);
     }
 
-    /// @notice Plans terminal account settlement for residual equity after reserving a keeper bounty.
-    /// @dev The bounty is subtracted from reachable settlement with a zero floor. For nonnegative residual equity,
+    /// @notice Plans terminal account settlement for residual equity after reserving a total liquidation charge.
+    /// @dev The charge is subtracted from reachable settlement with a zero floor. For nonnegative residual equity,
     ///      remaining settlement is retained up to the residual, excess is seized, and any deficit is a fresh payout.
-    ///      For negative residual equity, all post-bounty reachable settlement is seized and the full residual magnitude
+    ///      For negative residual equity, all post-charge reachable settlement is seized and the full residual magnitude
     ///      is reported as bad debt. The mutation always unlocks/declassifies the full active-position margin, while
     ///      other locked margin is consumed only for the debit beyond free settlement plus active margin. Canonical
-    ///      callers cap the bounty to terminal reachable settlement; otherwise `mutation.settlementDebitUsdc` can
+    ///      callers cap the charge to terminal reachable settlement; otherwise `mutation.settlementDebitUsdc` can
     ///      exceed the balance. `type(int256).min` cannot be negated and reverts on the negative-residual path.
     /// @param buckets Terminal account bucket snapshot.
     /// @param residualUsdc Signed equity remaining after PnL, carry, VPI, and liquidation economics.
-    /// @param keeperBountyUsdc Keeper bounty to debit before retaining or seizing residual settlement.
+    /// @param liquidationChargeUsdc Total keeper, protocol, and LP charge debited before residual settlement.
     /// @return plan Retention, seizure, payout, bad-debt, and clearinghouse mutation values.
     function planLiquidationResidual(
         IMarginClearinghouse.AccountUsdcBuckets memory buckets,
         int256 residualUsdc,
-        uint256 keeperBountyUsdc
+        uint256 liquidationChargeUsdc
     ) internal pure returns (LiquidationResidualPlan memory plan) {
         uint256 reachableUsdc = getTerminalReachableUsdc(buckets);
-        plan.keeperBountyUsdc = keeperBountyUsdc;
-        uint256 reachableAfterBountyUsdc = reachableUsdc > keeperBountyUsdc ? reachableUsdc - keeperBountyUsdc : 0;
+        plan.liquidationChargeUsdc = liquidationChargeUsdc;
+        uint256 reachableAfterChargeUsdc =
+            reachableUsdc > liquidationChargeUsdc ? reachableUsdc - liquidationChargeUsdc : 0;
 
         if (residualUsdc >= 0) {
             plan.settlementRetainedUsdc =
-                reachableAfterBountyUsdc > uint256(residualUsdc) ? uint256(residualUsdc) : reachableAfterBountyUsdc;
-            plan.settlementSeizedUsdc = reachableAfterBountyUsdc - plan.settlementRetainedUsdc;
+                reachableAfterChargeUsdc > uint256(residualUsdc) ? uint256(residualUsdc) : reachableAfterChargeUsdc;
+            plan.settlementSeizedUsdc = reachableAfterChargeUsdc - plan.settlementRetainedUsdc;
             plan.freshTraderPayoutUsdc = uint256(residualUsdc) - plan.settlementRetainedUsdc;
         } else {
             plan.settlementRetainedUsdc = 0;
-            plan.settlementSeizedUsdc = reachableAfterBountyUsdc;
+            plan.settlementSeizedUsdc = reachableAfterChargeUsdc;
             plan.badDebtUsdc = uint256(-residualUsdc);
         }
 
-        plan.mutation.settlementDebitUsdc = plan.settlementSeizedUsdc + keeperBountyUsdc;
+        plan.mutation.settlementDebitUsdc = plan.settlementSeizedUsdc + liquidationChargeUsdc;
         uint256 freeSettlementUsdc = buckets.freeSettlementUsdc;
         uint256 positionMarginUsdc = buckets.activePositionMarginUsdc;
         plan.mutation.positionMarginUnlockedUsdc = positionMarginUsdc;

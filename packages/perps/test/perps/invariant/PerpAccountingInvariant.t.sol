@@ -10,8 +10,11 @@ import {AccountLensViewTypes} from "@plether/perps/interfaces/AccountLensViewTyp
 import {ICfdEngine} from "@plether/perps/interfaces/ICfdEngine.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
+import {ITerminalNavBookV2} from "@plether/perps/interfaces/ITerminalNavBookV2.sol";
 
 contract PerpAccountingInvariantTest is BasePerpInvariantTest {
+
+    uint256 internal constant ORDER_EXECUTION_REACHABILITY_ATTEMPT_THRESHOLD = 32;
 
     PerpAccountingHandler internal handler;
 
@@ -24,7 +27,9 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
-            bountyBps: 9
+            bountyBps: 9,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
         });
     }
 
@@ -52,6 +57,82 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
             _sumReservedSettlementBuckets(),
             _sumPendingExecutionBounties(),
             "Clearinghouse reserved settlement must equal live pending execution bounty reserves"
+        );
+    }
+
+    function invariant_TerminalNavBookMatchesCanonicalEngineState() public view {
+        ITerminalNavBookV2 book = engine.terminalNavBook();
+        uint256 activeCurveCount;
+        uint256 totalLots;
+        uint256 totalEntryCostUsdcAtoms;
+        uint256 totalEffectiveCapUsdcAtoms;
+
+        for (uint256 i = 0; i < handler.actorCount(); i++) {
+            address account = _account(handler.actorAt(i));
+            ITerminalNavBookV2.CurveRecord memory curve = book.curveOf(account);
+            bytes32 curveHash = book.curveHashOf(account);
+            (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(account);
+
+            if (size == 0) {
+                assertEq(curveHash, bytes32(0), "Absent Engine position must not have a curve hash");
+                assertEq(curve.lots, 0, "Absent Engine position must not have curve lots");
+                assertEq(curve.entryCostUsdcAtoms, 0, "Absent Engine position must not have curve basis");
+                assertEq(curve.effectiveCapUsdcAtoms, 0, "Absent Engine position must not have a curve cap");
+                assertEq(
+                    uint256(curve.side),
+                    uint256(CfdTypes.Side.BULL),
+                    "Absent Engine position must have default curve side"
+                );
+                continue;
+            }
+
+            assertEq(size % CfdTypes.SIZE_QUANTUM, 0, "Live Engine position must contain exact terminal lots");
+            uint256 expectedLots = size / CfdTypes.SIZE_QUANTUM;
+            uint256 expectedEntryCostUsdcAtoms = engine.positionEntryCostUsdcAtoms(account);
+            uint256 maximumCollectibleUsdcAtoms = side == CfdTypes.Side.BULL
+                ? expectedLots * uint256(book.CAP_PRICE()) - expectedEntryCostUsdcAtoms
+                : expectedEntryCostUsdcAtoms;
+            uint256 candidateCapUsdcAtoms =
+                clearinghouse.pnlPledgeUsdc(account) + engine.traderClaimBalanceUsdc(account);
+            uint256 expectedEffectiveCapUsdcAtoms = candidateCapUsdcAtoms < maximumCollectibleUsdcAtoms
+                ? candidateCapUsdcAtoms
+                : maximumCollectibleUsdcAtoms;
+
+            assertEq(curve.lots, expectedLots, "Curve lots must match canonical Engine size");
+            assertEq(
+                curve.entryCostUsdcAtoms,
+                expectedEntryCostUsdcAtoms,
+                "Curve basis must match canonical Engine entry cost"
+            );
+            assertEq(
+                curve.effectiveCapUsdcAtoms,
+                expectedEffectiveCapUsdcAtoms,
+                "Curve cap must match clipped claim-plus-pledge collateral"
+            );
+            assertEq(uint256(curve.side), uint256(side), "Curve side must match canonical Engine side");
+            assertEq(
+                curveHash,
+                _terminalCurveHash(book, account, curve),
+                "Curve hash must commit to the canonical account record"
+            );
+
+            activeCurveCount++;
+            totalLots += curve.lots;
+            totalEntryCostUsdcAtoms += curve.entryCostUsdcAtoms;
+            totalEffectiveCapUsdcAtoms += curve.effectiveCapUsdcAtoms;
+        }
+
+        ITerminalNavBookV2.BookState memory state = book.bookState();
+        assertEq(state.capPrice, engine.CAP_PRICE(), "Terminal book and Engine price caps must match");
+        assertEq(state.activeCurveCount, activeCurveCount, "Book active curve count must match actor records");
+        assertEq(state.totalLots, totalLots, "Book total lots must match actor records");
+        assertEq(
+            state.totalEntryCostUsdcAtoms, totalEntryCostUsdcAtoms, "Book total entry cost must match actor records"
+        );
+        assertEq(
+            state.totalEffectiveCapUsdcAtoms,
+            totalEffectiveCapUsdcAtoms,
+            "Book total effective cap must match actor records"
         );
     }
 
@@ -97,19 +178,23 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function invariant_BadDebtOnlyAppearsAfterAccountReservationExhaustion() public view {
-        uint256 currentBadDebt = engine.accumulatedBadDebtUsdc();
+    function invariant_LiquidationPriceTailsRemainDiagnosticAfterReservationExhaustion() public view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
             PerpGhostLedger.LiquidationSnapshot memory snapshot = handler.liquidationSnapshot(account);
-            if (!snapshot.liquidated || currentBadDebt <= snapshot.badDebtUsdc) {
+            if (!snapshot.liquidated) {
                 continue;
             }
 
             assertEq(
+                snapshot.legacyDebtDiagnosticUsdc,
+                0,
+                "Liquidation price tails must remain diagnostic writeoffs, never protocol debt"
+            );
+            assertEq(
                 handler.accountExecutionBountyReserve(account),
                 0,
-                "Bad debt growth cannot coexist with same-account execution bounty reserves"
+                "Terminal liquidation must exhaust same-account execution bounty reservations"
             );
         }
     }
@@ -356,6 +441,16 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         assertLe(router.nextExecuteId(), router.nextCommitId(), "nextExecuteId must not exceed nextCommitId");
     }
 
+    function invariant_OrderExecutionPathRemainsReachable() public view {
+        uint256 attempts = handler.ghostOrderExecutionAttemptCount();
+        uint256 executedOrders = handler.ghostExecutedOrderCount();
+        if (attempts < ORDER_EXECUTION_REACHABILITY_ATTEMPT_THRESHOLD) {
+            return;
+        }
+
+        assertGt(executedOrders, 0, "Order execution must become reachable after repeated valid attempts");
+    }
+
     function invariant_PendingQueueCountsStayConsistent() public view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
@@ -397,7 +492,13 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
                     "Margin queue may only contain pending orders"
                 );
                 assertTrue(record.inMarginQueue, "Margin queue traversal must only include in-queue orders");
-                assertGt(_remainingCommittedMargin(current), 0, "Margin queue orders must retain committed margin");
+                assertFalse(record.core.isClose, "Margin queue may only contain open orders");
+                assertGt(record.core.marginDelta, 0, "Margin queue orders must originate with committed margin");
+                assertLe(
+                    _remainingCommittedMargin(current),
+                    record.core.marginDelta,
+                    "Remaining committed margin cannot exceed the order's original reservation"
+                );
                 assertEq(record.prevMarginOrderId, previous, "Margin prev pointer must match traversal");
                 if (previous != 0) {
                     assertGt(current, previous, "Margin queue must preserve FIFO commit order");
@@ -439,6 +540,24 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
             totalReservedSettlement += clearinghouse.getLockedMarginBuckets(_account(handler.actorAt(i)))
             .reservedSettlementUsdc;
         }
+    }
+
+    function _terminalCurveHash(
+        ITerminalNavBookV2 book,
+        address account,
+        ITerminalNavBookV2.CurveRecord memory curve
+    ) internal view returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                address(book),
+                book.CAP_PRICE(),
+                account,
+                curve.lots,
+                curve.entryCostUsdcAtoms,
+                curve.effectiveCapUsdcAtoms,
+                curve.side
+            )
+        );
     }
 
     function _account(

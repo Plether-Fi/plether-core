@@ -49,7 +49,7 @@ abstract contract OrderHandler is PositionProtectionHandler, OrderExecutionHandl
             IPletherOracle.OracleConfig({
                 orderExecutionStalenessLimit: config.orderExecutionStalenessLimit,
                 liquidationStalenessLimit: config.liquidationStalenessLimit,
-                pythMaxConfidenceRatioBps: config.pythMaxConfidenceRatioBps,
+                basketMaxConfidenceRatioBps: config.basketMaxConfidenceRatioBps,
                 orderSettlementWindow: config.orderSettlementWindow,
                 maxComponentPublishTimeDivergence: config.maxComponentPublishTimeDivergence,
                 adverseConfidenceMultiplierBps: config.adverseConfidenceMultiplierBps
