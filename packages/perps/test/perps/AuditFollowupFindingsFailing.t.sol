@@ -150,15 +150,22 @@ contract AuditFollowupFindingsFailing_LiquidationBadDebt is BasePerpTest {
         vm.prank(trader);
         clearinghouse.withdraw(account, 8000e6);
 
-        vm.startPrank(address(router));
-        engine.liquidatePosition(account, 101_900_000, pool.totalAssets(), uint64(block.timestamp), address(this));
-        vm.stopPrank();
+        uint256 liquidationPrice = 101_800_000;
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, liquidationPrice);
+        assertTrue(preview.liquidatable, "Setup must remain below maintenance margin");
+        assertLt(preview.pnlUsdc, 0, "Setup must realize a trader price loss");
+        uint256 priceLossUsdc = uint256(-preview.pnlUsdc);
+        uint256 collectibleCapUsdc = engineAccountLens.getAccountLedgerSnapshot(account).terminalPriceCollectibleCapUsdc;
+        assertLe(priceLossUsdc, collectibleCapUsdc, "Setup price loss must remain fully collectible");
+        assertEq(preview.badDebtUsdc, 0, "A collectible price loss must not produce a debt diagnostic");
 
-        assertEq(
-            engine.accumulatedBadDebtUsdc(),
-            0,
-            "Liquidation should not manufacture bad debt after seizing reachable account balance"
-        );
+        uint256 depth = pool.totalAssets();
+        vm.prank(address(router));
+        engine.liquidatePosition(account, liquidationPrice, depth, uint64(block.timestamp), address(this));
+
+        (uint256 remainingSize,,,,,,) = engine.positions(account);
+        assertEq(remainingSize, 0, "Liquidation should consume reachable price collateral and clear the position");
+        assertEq(clearinghouse.pnlPledgeUsdc(account), 0, "Terminal liquidation must release the PnL pledge bucket");
     }
 
 }
@@ -186,23 +193,27 @@ contract AuditFollowupFindingsFailing_LiquidationBounty is BasePerpTest {
 
         _fundTrader(trader, 100e6);
 
-        _open(account, CfdTypes.Side.BULL, 100e18, 6e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, CfdTypes.SIZE_QUANTUM, 12e6, 1e8);
 
+        uint256 freeSettlementUsdc = _freeSettlementUsdc(account);
         vm.prank(trader);
-        clearinghouse.withdraw(account, 94e6);
+        clearinghouse.withdraw(account, freeSettlementUsdc);
 
-        vm.startPrank(address(router));
         vm.warp(1_709_971_200);
-        uint256 bounty =
-            engine.liquidatePosition(account, 101_000_000, pool.totalAssets(), uint64(block.timestamp), address(this));
-        vm.stopPrank();
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 101_000_000);
+        uint256 liquidationReserveBefore = clearinghouse.liquidationReserveUsdc(account);
+        assertTrue(preview.liquidatable, "FAD maintenance must make the positive-equity fixture liquidatable");
 
-        assertGt(bounty, 0, "Keeper bounty should stay positive for a still-positive-equity liquidation");
-        uint256 minimumKeeperShare = (5e6 * _riskParams().keeperShareBps) / 10_000;
-        assertGe(
+        uint256 poolDepth = pool.totalAssets();
+        vm.prank(address(router));
+        uint256 bounty =
+            engine.liquidatePosition(account, 101_000_000, poolDepth, uint64(block.timestamp), address(this));
+
+        assertEq(bounty, preview.keeperBountyUsdc, "Execution must match the dedicated-reserve preview");
+        assertEq(
             bounty,
-            minimumKeeperShare,
-            "Keeper's configured share of the subsidy should avoid a near-zero positive-equity cliff"
+            (liquidationReserveBefore * _riskParams().keeperShareBps) / 10_000,
+            "Keeper must receive its configured share of the dedicated liquidation reserve"
         );
     }
 
@@ -316,7 +327,7 @@ contract AuditFollowupFindingsFailing_TrancheComposability is BasePerpTest {
         vm.warp(juniorVault.depositEpochStart(requestId));
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
-        pool.settleLpEpoch();
+        _settleLpEpochForTest();
 
         vm.startPrank(helper);
         vm.expectRevert(TrancheVault.TrancheVault__ThirdPartyDepositForExistingHolder.selector);
@@ -348,7 +359,7 @@ contract AuditFollowupFindingsFailing_TrancheCooldownBypass is BasePerpTest {
         vm.warp(juniorVault.depositEpochStart(requestId));
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
-        pool.settleLpEpoch();
+        _settleLpEpochForTest();
 
         vm.startPrank(attacker);
         vm.expectRevert(TrancheVault.TrancheVault__ThirdPartyDepositForExistingHolder.selector);

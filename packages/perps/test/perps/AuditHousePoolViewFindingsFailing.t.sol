@@ -97,7 +97,7 @@ contract AuditHousePoolViewFindingsFailing_EmptyJuniorRevenue is BasePerpTest {
         vm.warp(juniorVault.depositEpochStart(requestId));
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
-        pool.settleLpEpoch();
+        _settleLpEpochForTest();
         uint256 claimableShares = juniorVault.claimableRedeemRequest(requestId, juniorLp);
         vm.prank(juniorLp);
         juniorVault.claimRedeem(requestId, claimableShares, juniorLp, juniorLp);
@@ -251,7 +251,7 @@ contract AuditHousePoolViewFindingsFailing_GrossAssetsReconstruction is BasePerp
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot =
             engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
         HousePoolAccountingLib.WithdrawalSnapshot memory withdrawalSnapshot = harness.buildWithdrawal(snapshot);
-        HousePoolAccountingLib.ReconcileSnapshot memory reconcileSnapshot = harness.buildReconcile(snapshot);
+        harness.buildReconcile(snapshot);
 
         assertEq(snapshot.netPhysicalAssetsUsdc, 0, "Net physical assets should saturate to zero once fees exceed cash");
         assertEq(pool.totalAssets(), actualCash, "Test must leave the pool with less cash than the fee ledger");
@@ -260,11 +260,7 @@ contract AuditHousePoolViewFindingsFailing_GrossAssetsReconstruction is BasePerp
             pool.totalAssets(),
             "Withdrawal snapshot gross assets must not exceed actual cash"
         );
-        assertLe(
-            reconcileSnapshot.physicalAssets,
-            pool.totalAssets(),
-            "Reconcile snapshot gross assets must not exceed actual cash"
-        );
+        assertLe(snapshot.physicalAssetsUsdc, pool.totalAssets(), "Reconcile input must not exceed actual cash");
     }
 
 }

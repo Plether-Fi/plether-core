@@ -30,10 +30,10 @@ abstract contract OrderCommitHandler is OrderValidation {
         uint256 targetPrice,
         bool isClose
     ) internal {
+        _validateBaseCommit(sizeDelta, marginDelta, isClose);
         if (!isClose) {
             _validateOpenCommitAllowed();
         }
-        _validateBaseCommit(sizeDelta, marginDelta, isClose);
 
         address account = msg.sender;
         uint256 executionBountyUsdc = isClose

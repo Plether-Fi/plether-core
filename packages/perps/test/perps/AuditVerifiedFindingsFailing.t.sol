@@ -17,6 +17,7 @@ import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
+import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IOrderRouter} from "@plether/perps/interfaces/IOrderRouter.sol";
@@ -205,6 +206,8 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
         CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(engine));
         CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
         engine.setDependencies(address(planner), address(settlement), address(engineAdmin));
+        TerminalNavBookV2 terminalNavBook = new TerminalNavBookV2(address(engine), uint32(CAP_PRICE));
+        engine.setTerminalNavBook(address(terminalNavBook));
         pool = new HousePool(address(usdc), address(engine));
 
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");
@@ -343,7 +346,7 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
         vm.warp(juniorVault.depositEpochStart(requestId));
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
-        pool.settleLpEpoch();
+        pool.settleLpEpoch(0, 0);
         uint256 claimableAssets = juniorVault.claimableDepositRequest(requestId, lp);
         vm.prank(lp);
         juniorVault.claimDeposit(requestId, claimableAssets, lp, lp);
@@ -396,7 +399,7 @@ contract AuditVerifiedFindingsFailing_F5_CooldownBypass is BasePerpTest {
         vm.warp(juniorVault.depositEpochStart(requestId));
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
-        pool.settleLpEpoch();
+        _settleLpEpochForTest();
         receiver.claimDeposit(juniorVault, requestId);
 
         vm.expectRevert(TrancheVault.TrancheVault__DepositCooldown.selector);

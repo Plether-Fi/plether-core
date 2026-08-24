@@ -20,15 +20,20 @@ Use it together with:
 
 ## Accounting Model In One Page
 
-The protocol deliberately keeps several different accounting views instead of trying to collapse everything into one notion of equity.
+The protocol keeps cash availability, risk solvency, and terminal LP equity as separate questions. LP entry and exit
+pricing, however, deliberately share one exact terminal-NAV view.
 
 The key rules are:
 
 1. Physical USDC and mathematical claims are different objects.
-2. Unrealized trader losses are not LP assets until they are physically realized.
+2. Marked LP equity includes only the portion of an unrealized trader loss collectible from that account's dedicated
+   PnL pledge or nettable same-account trader claim. It is not spendable withdrawal cash before collection.
 3. LP redemption funding is stricter than protocol solvency.
 4. Pending-order reservations are not free trader collateral.
-5. Realized trading-loss shortfall must become either immediate seizure, trader claim liability, or bad debt; a waived terminal frozen-close spread is an uncollected charge, not trading-loss bad debt.
+5. A trader price loss is collectible only up to the account's PnL pledge plus explicitly nettable claim. Any excess
+   is a diagnostic write-off, not an LP asset, trader claim, or terminal deficit. An unpaid protocol-side payout
+   becomes a trader claim; independently negative terminal equity remains explicit as terminal deficit. A waived
+   frozen-close spread is an uncollected charge. V2 has no accumulated-debt ledger or repayment selector.
 6. A valid risk-reducing transition must not revert just to preserve pre-close solvency; the protocol contains the outcome with `degradedMode` instead.
 7. Frozen-close spread value belongs to LPs and must never be credited to protocol treasury.
 
@@ -60,7 +65,46 @@ Operational rules:
 - `bullMaxProfit`: worst-case payout to all live BULL positions at one price extreme
 - `bearMaxProfit`: worst-case payout to all live BEAR positions at the opposite price extreme
 - `maxLiability = max(bullMaxProfit, bearMaxProfit)`
-- `badDebt`: realized shortfall that could not be covered by reachable account value or available settlement paths
+- `badDebt`: a realized protocol-side shortfall that remains after its authorized settlement paths; it excludes
+  uncollateralized trader price loss above the account's collectible cap
+
+### Exact terminal price-PnL terms
+
+Every live position is stored as whole 100-token lots:
+
+```text
+SIZE_QUANTUM = 1e20
+lots = size / SIZE_QUANTUM
+```
+
+At an 8-decimal price, `lots * price` is already denominated in 6-decimal USDC atoms. The Engine stores
+`entryCostUsdcAtoms` exactly rather than reconstructing it from the display-only average `entryPrice`. On an increase,
+the added basis is `addedLots * executionPrice`. On a partial close:
+
+```text
+closedEntryCost = floor(oldEntryCost * closedLots / oldLots)
+remainingEntryCost = oldEntryCost - closedEntryCost
+```
+
+This assigns every entry-cost atom exactly once and preserves all basis dust for the residual position.
+
+For one account at mark `p`, let `E` be exact entry cost and let
+`K = pnlPledgeUsdc + sameAccountTraderClaimUsdc`. Its LP-side terminal price delta is:
+
+```text
+BULL: min(lots * p - E, K)
+BEAR: min(E - lots * p, K)
+```
+
+A negative result is an amount owed by LPs to the trader. A positive result is capped at value reachable from that
+same account. Carry, VPI, execution/frozen spreads, protocol fees, liquidation reserve, order margin, and action
+reserves are deliberately excluded: they are separate realized-settlement quantities, not marked price PnL.
+
+`TerminalNavBookV2` aggregates these account curves exactly over `[0, CAP_PRICE]`. It is immutable-bound to one
+Engine, writable only by that Engine, and queried at the Engine's authenticated cached mark. The Engine authenticates
+mark availability and book consistency; `HousePool` separately enforces its configured mark-age and oracle-frozen
+policy before LP actions. The Engine updates the position, pledge/claim state, and curve as one atomic transition;
+the book's monotonic version makes the captured snapshot auditable.
 
 ### Frozen-close spread terms
 
@@ -70,18 +114,23 @@ Operational rules:
 
 For a valid close plan, `frozenSpreadUsdc == frozenSpreadPaidUsdc + frozenSpreadWaivedUsdc`. All three values are zero for live and FAD-only closes. Liquidations never assess this spread.
 
-### Conservative unrealized MtM
+### Symmetric exact marked NAV
 
-For LP accounting, unrealized trader profits may be recognized as liabilities, but unrealized trader losses must not be recognized as present assets.
+The aggregate signed book output is the sole mark-to-close adjustment used to price both LP deposits and LP
+redemptions:
 
-Definition:
+```text
+signedTerminalEquity = physicalAssets
+                     - totalTraderClaimBalanceUsdc
+                     + terminalLpPriceDeltaUsdc
 
-- compute a side-local upper bound from cached max-profit exposure,
-- for BULL, scale side max profit by `(CAP_PRICE - markPrice) / CAP_PRICE`,
-- for BEAR, scale side max profit by `markPrice / CAP_PRICE`,
-- sum the two conservative side liabilities.
+distributable = max(signedTerminalEquity, 0)
+terminalDeficit = max(-signedTerminalEquity, 0)
+```
 
-This quantity is appropriate for conservative LP equity and tranche reconciliation, not for pretending the pool has already collected losing traders' money. It can temporarily over-reserve LP value when entry prices are dispersed inside a side, but it avoids netting winners against uncollected same-side loser debt.
+This is symmetric: an entrant receives the same discount for inherited marked liabilities that an exiting LP bears,
+and receives credit only for collectible marked receivables. It does not make those receivables cash. Redemption
+funding still uses the stricter physical withdrawal reserve described below.
 
 ## The Four Core Accounting Views
 
@@ -105,7 +154,6 @@ Rule:
 
 Notes:
 
-- this view does not rely on speculative receivables,
 - it must not count unrealized trader losses as spendable assets,
 - it is less conservative than LP withdrawal accounting, but still bounded and physical-first.
 
@@ -144,42 +192,43 @@ Notes:
 - during `oracleFrozen`, the settlement-time output is reduced by the tranche's frozen-window surcharge rather than
   hard-blocking automatically.
 
-### 3. LP reconciliation and deposit-pricing views
+### 3. Canonical LP reconciliation and share-pricing view
 
 Question answered:
 
 - what is tranche equity for share pricing and revenue distribution?
 
-Withdrawal/reconcile definition:
-
-- start from `physicalAssets`,
-- subtract trader claim liabilities,
-- apply conservative unrealized MtM liability only,
-- do not book unrealized trader losses as assets.
-
-Deposit/mint pricing definition:
+Definition:
 
 - start from the same physical assets, trader-claim liabilities, claimant buckets, recapitalizations, and revenue state,
+- apply the exact signed `terminalLpPriceDeltaUsdc` once,
+- route the resulting distributable equity through the same Senior/Junior waterfall for both redemption and deposit
+  pricing,
 - ordinary LP entry always starts with an asynchronous deposit request: assets are funded up front, cancellation is
   unconditional before activation and, after activation, reopens when Senior impairment blocks finalization or a
   Senior reservation book no longer fits its governed limits,
-- `HousePool.settleLpEpoch` fixes the epoch price after both redemption phases and activates Junior deposits before
-  Senior deposits; ERC-4626 `deposit` and `mint` only claim already-activated requests,
+- `OrderRouter.settleLpEpoch(bytes[])` validates a `PoolReconcile` Pyth basket, installs its neutral Engine mark, and
+  invokes the Router-only HousePool settlement callback in one rollback frame; with live open positions, the basket's
+  earliest publish time must be at or after the current round-hour epoch boundary,
+- HousePool fixes one shared epoch price after both redemption phases and activates Junior deposits before Senior
+  deposits; ERC-4626 `deposit` and `mint` only claim already-activated requests,
 - a settlement pass that advances no queue item reverts, so its reconcile and carry checkpoints cannot be retained by
-  a permissionless no-op caller,
-- permissionless settlement can still be ordered before a later close or liquidation realizes trader losses into pool
-  cash; the request activation delay prevents a depositor from creating and pricing an uncommitted same-block entry,
-- do not subtract unrealized MtM liability unless it comes from an exact, non-manipulable deposit-side model,
-- realized pool losses still lower deposit NAV,
-- conservative unrealized MtM remains a withdrawal protection, not a discount offered to incoming LPs.
+  a permissionless no-op caller; on the Router path the Pyth and Engine updates roll back as well,
+- the current terminal snapshot must be fresh and internally stable; the Engine rejects snapshots while a
+  multi-contract account mutation is in progress,
+- a nonzero current `terminalDeficit` blocks deposit activation, as do degraded mode, stale/frozen entry policy,
+  Senior impairment, ownerless assets, or zero tranche NAV with nonzero supply,
+- realized pool losses continue to lower the same NAV.
 
 Rules:
 
-- over-recognition is forbidden,
-- temporary under-recognition is acceptable,
+- uncollateralized trader losses beyond an account's collectible cap are not booked as LP receivables,
+- marked receivables cannot fund same-transaction LP withdrawals,
 - value with no valid claimant path must sit in explicit `unassignedAssets`.
-- during `oracleFrozen`, synchronized redemption funding and deposit activation apply fixed tranche-local LP
-  surcharges instead of requiring an ordinary live-market mark,
+- during `oracleFrozen`, synchronized redemption funding may apply the fixed tranche-local exit surcharge, while
+  deposit activation is deferred until the live symmetric-NAV entry gate passes,
+- direct cached-mark settlement is restricted to zero-open-position state or `oracleFrozen`; a separately refreshed
+  live cached mark cannot bypass the atomic Router path,
 - during `oracleFrozen`, bootstrap admin flows (`initializeSeedPosition`, `assignUnassignedAssets`) are blocked rather than inheriting LP frozen-fee pricing.
 
 Required consequences:
@@ -240,13 +289,21 @@ capital structure; once those finite limits are active, later senior assignment 
 
 Question answered:
 
-- what value is actually reachable from this account for close, liquidation, and generic health checks?
+- what value backs this account's exact price-risk health across open/increase, trader withdrawal, close, and
+  liquidation, and which of that value is physically spendable?
 
 Rules:
 
-- use physically reachable clearinghouse collateral for generic views and withdraw checks,
-- same-account trader claim balance is a separate explicit netting bucket rather than generic collateral,
-- liquidation and close settlement must cap seizure and payout logic by actually reachable value,
+- generic account views distinguish free settlement, PnL pledge, liquidation reserve, order margin, and action reserve,
+- exact price-risk health uses `pnlPledgeUsdc + traderClaimBalanceUsdc`, including for open/increase, trader-withdraw,
+  close, and liquidation checks; the claim is nettable exactly once against that same account's price loss,
+- the separately funded VPI reserve backs only that account's typed VPI obligation: excess reserve never increases
+  price-risk equity or the terminal price-PnL cap, while backing below `max(-vpiAccrued, 0)` is an independent
+  delinquency that blocks withdrawal and makes the account liquidatable,
+- same-account trader claim balance is not withdrawable cash and cannot fund carry, VPI, execution fees, frozen
+  spread, liquidation charges, order margin, or other action obligations,
+- liquidation and close settlement must cap physical seizure and payout logic by actually spendable typed value while
+  applying the explicit same-account price-loss netting once,
 - pending-order reservations and execution bounty reserves must be handled explicitly rather than assumed to be free cash.
 
 ## Snapshot Boundaries
@@ -267,14 +324,18 @@ Key fields:
 - `netPhysicalAssetsUsdc`
 - `maxLiabilityUsdc`
 - `supplementalReservedUsdc`: reserved extension slot for LP-withdrawal accounting; currently zero in the carry model
-- `unrealizedMtmLiabilityUsdc`
+- `terminalLpPriceDeltaUsdc`: exact signed collectible price-PnL adjustment used by both entry and exit pricing
+- `terminalNavBookVersion`: monotonic version captured with the exact delta
 - `traderClaimBalanceUsdc`
+- `hasOpenPositions`
 - `markFreshnessRequired`
 - `maxMarkStaleness`
 
 Rule:
 
-- downstream LP accounting should not need to re-derive these values from raw engine state.
+- downstream LP accounting must not re-derive the terminal delta from rounded position tuples or side aggregates,
+- the Engine snapshot authenticates mark, claims, position status, maximum directional liability, and book version in
+  one call,
 - the request delay and synchronized activation replace the old instant-deposit gate; no ordinary request mints active
   shares in the submission transaction.
 
@@ -296,8 +357,8 @@ Rule:
 
 ## Frozen-Window LP Fees
 
-The protocol keeps eligible LP actions live during `oracleFrozen` by charging fixed stale-price surcharges rather than
-fully disabling entry and queued-redemption settlement.
+The protocol keeps eligible queued-redemption settlement live during `oracleFrozen` by charging fixed stale-price
+surcharges. It defers deposit activation because symmetric entry pricing requires the live terminal-NAV gate.
 
 Default configured fees:
 
@@ -311,8 +372,8 @@ Governance model:
 
 Accounting rules:
 
-- synchronized activation moves requested gross USDC into the tranche and fixes claimant shares after the active
-  frozen fee; `deposit` and `mint` only release already-activated claim shares,
+- synchronized deposit activation does not run during `oracleFrozen`; `deposit` and `mint` can still release shares
+  activated by an earlier live settlement,
 - a redemption request escrows shares without fixing its exchange rate or fee; pending shares remain outstanding and
   participate in tranche profit and loss,
 - synchronized settlement prices funded shares from the post-reconcile, pre-burn tranche snapshot using the existing
@@ -400,7 +461,10 @@ Rules:
 - carry accrues continuously by wall-clock time,
 - carry does not pause when the oracle is stale or frozen,
 - both sides pay when they have nonzero borrow base,
-- pending carry reduces equity for guard and risk checks before realization,
+- guard, open/modify, withdrawal, and liquidation checks first project pending carry against eligible free settlement,
+- carry fully covered by eligible free settlement does not reduce the separate exact price-risk health basis,
+- any uncovered carry remainder blocks withdrawal and independently makes the account liquidatable; PnL pledge plus
+  same-account claim cannot offset that remainder,
 - basis-changing settlement credits must checkpoint carry even when physical collection remains pending,
 - carry is realized before margin, pool-asset, or risk-parameter mutations change the carry base/rate denominator,
 - on deposit, realized carry may be collected from post-deposit settlement in the same transaction,
@@ -417,7 +481,10 @@ The protocol supports fail-soft terminal settlement.
 - profitable closes and some liquidation residuals may create `traderClaimBalanceUsdc[account]`,
 - only the beneficiary account owner may call `settleTraderClaim(account)`,
 - settlement is all-or-nothing for the account claim once aggregate trader claim liabilities are fully cash-covered,
-- settlement is credited into `MarginClearinghouse`.
+- settlement is credited into `MarginClearinghouse`,
+- if the beneficiary still has a live position, paid claim value is credited directly to `pnlPledgeUsdc` and the
+  account's terminal curve is resynchronized; it must not become withdrawable free settlement while its value was
+  already included in the marked collectible cap.
 
 Rules:
 
@@ -433,23 +500,50 @@ Question answered:
 
 - what value is reserved for queued actions and therefore not free to withdraw or reuse?
 
-Reservation / reservation buckets include:
+The canonical clearinghouse split includes:
 
-- committed order margin,
-- clearinghouse-reserved execution bounty value.
+- `pnlPledgeUsdc`: the only live-position custody reachable by marked price losses,
+- `liquidationReserveUsdc`: keeper/protocol liquidation-charge backing, isolated from price PnL,
+- `orderMarginUsdc`: committed open/increase margin,
+- `actionReserveUsdc`: execution bounties and other action charges, including the dedicated negative lifetime-VPI
+  reserve.
+
+For a live position, the gross VPI reserve target is:
+
+```text
+vpiRebateReserveUsdc = max(-vpiAccrued, 0)
+actionReserveUsdc >= protectedExecutionBountyUsdc + vpiRebateReserveUsdc
+```
+
+The second relation is a protected floor: generic action-charge collection may consume only action reserve above it.
+An open/increase that raises the VPI target must fully fund the increase from eligible settlement or newly supplied
+pledge, otherwise planning fails before exposure grows.
+
+After an open/increase, the target liquidation reserve is:
+
+```text
+max(minBountyUsdc, floor(resultingNotionalUsdc * bountyBps / 10_000))
+```
+
+Approved position collateral beyond that target is PnL pledge. A reduction recomputes the target and releases excess
+reserve; price movement alone never permits a liquidation charge to consume PnL pledge.
 
 Rules:
 
 - reserved value is not withdrawable,
 - reserved value is not free buying power,
-- reserved execution bounty value is not reachable collateral for unrelated close losses,
+- liquidation, order, and action reserves do not increase the TerminalNavBook collectible cap,
+- reserved execution bounty value is not reachable collateral for unrelated price losses,
+- VPI reserve is nonwithdrawable, cannot fund generic action charges, and cannot be extracted by LPs before its
+  account obligation settles,
 - releasing or consuming reservation must happen exactly once,
 - clearinghouse reservation records are the source of truth for committed trader margin,
 - execution bounty reserves are not LP cash and should not become a pool liability bucket.
 
 ### Close-order bounty policy
 
-- close intents may source their flat clearinghouse-reserved bounty from active position margin when free settlement is exhausted,
+- close intents source their flat bounty from free settlement and lock it as action reserve; the bounty never consumes
+  or reclassifies PnL pledge,
 - this is an explicit bounded liveness tradeoff,
 - partial close intents below the engine's minimum meaningful notional are rejected at commit time unless they fully close the queued residual position,
 - `closeOrderExecutionBountyUsdc` is governance-configured but hard-capped at `1 USDC`,
@@ -474,19 +568,38 @@ Every voluntary close uses the normal signed VPI curve and the lifetime rebate c
 
 When a close realizes a loss:
 
-1. seize what is immediately collectible from reachable trader-owned value,
-2. if this is a full close, same-account committed reservations may also be consumed through the clearinghouse reservation path before bad debt is recorded,
-3. allocate collected close value according to settlement priority, with the frozen-close spread junior to the base close obligation,
-4. if this is a partial close and any obligation remains unsettled, revert the partial close,
-5. if this is a full close, waive any still-uncollectible frozen-close spread rather than converting it into bad debt,
-6. record any remaining uncovered base trading-loss shortfall as explicit bad debt.
+1. allocate exact entry cost to the closed lots and compute their price PnL from that basis,
+2. seize price loss from the dedicated PnL pledge and explicitly net same-account claim value up to the book's cap,
+3. treat price loss above that cap as a diagnostic write-off; it does not create LP equity, LP deficit, trader claim,
+   or protocol debt and does not by itself block a partial close,
+4. handle carry, VPI, fees, spreads, and liquidation charges through their separate settlement paths; those distinct
+   charges retain their explicit partial-close collection policy,
+5. if this is a full close, waive any still-uncollectible frozen-close spread without creating a protocol liability,
+6. atomically replace or remove the account's terminal curve, including the residual position's updated collectible
+   cap, before the transition completes.
 
 Required properties:
 
-- a user must not partially close, externalize realized losses to LPs, and keep a protected residual alive,
+- a partial close remains live when its price loss exceeds the collectible cap; LP accounting never recognized the
+  excess as a receivable,
+- a price gain on a partial close is either paid from unreserved pool cash directly into the surviving position's PnL
+  pledge or recorded as a same-account trader claim; both outcomes remain in that account's next terminal collectible
+  cap,
+- a price gain on a full close is either paid from unreserved pool cash into free settlement or recorded as a trader
+  claim,
+- the full gross negative lifetime-VPI clawback target `max(-vpiAccrued, 0)` remains protected in the dedicated VPI
+  sub-reserve while a position survives. A partial close must leave the exact target for the residual accrual; value
+  above that target is consumed when the clawback is collected or released only when equivalent trader value was
+  withheld,
+- a new close-time action rebate is funded only from pool cash left free after protecting existing trader claims. Any
+  unfunded portion is explicitly waived and never becomes a trader claim or PnL pledge,
+- anticipated carry, VPI, fees, spreads, and other action economics stay outside terminal `K`; the book is synchronized
+  only to actually installed PnL pledge and same-account claim state after settlement. The VPI reserve therefore does
+  not inflate marked LP receivables or symmetric LP NAV,
 - a user must not shield otherwise reachable settlement by parking it in queued committed margin right before terminal settlement,
 - carry-adjusted close loss must be planned once and consumed live from that same canonical loss amount,
-- retained, cash-collected, or same-account-claim-recovered frozen spread becomes LP revenue and never treasury margin,
+- price-gain-withheld or cash-collected frozen spread becomes LP revenue and never treasury margin; same-account claim
+  netting remains exclusive to exact price loss,
 - assessed spread must equal paid spread plus waived spread,
 - preview and live close paths should share one close-accounting kernel and expose the same assessed/paid/waived result; successful nonzero assessments emit `FrozenCloseSpreadSettled`.
 
@@ -510,12 +623,12 @@ Required properties:
 
 Liquidation must:
 
-1. seize reachable account value,
+1. collect position price loss from the PnL pledge and explicitly nettable claim, matching the pre-liquidation book cap,
 2. allocate the capped liquidation charge using the configured `keeperShareBps` and `protocolShareBps`, crediting the
    keeper and protocol-treasury shares through clearinghouse settlement and transferring the exact LP remainder to
    `HousePool` claimant revenue,
 3. preserve residual trader value when positive,
-4. realize remaining shortfall as bad debt,
+4. report uncollateralized price loss above the cap as a diagnostic write-off rather than protocol debt or terminal deficit,
 5. delete the position,
 6. re-evaluate degraded-mode containment.
 
@@ -533,9 +646,16 @@ Liquidation-charge rule:
 
 Required property:
 
-- liquidation eligibility, charge caps, and residual planning must use carry-adjusted equity,
-- negative accrued VPI must reduce liquidation equity before charge and residual planning,
-- any charge assessed above positive equity must flow through the normal residual shortfall and bad-debt accounting,
+- liquidation eligibility first projects carry from eligible free settlement, then uses exact price-risk equity; any
+  uncovered carry independently makes the account liquidatable and cannot be offset by PnL pledge or claim,
+- liquidation charge caps and residual planning use their typed physically eligible sources rather than folding carry
+  into the price channel,
+- negative accrued VPI does not reduce P+C price-risk equity. Its gross target must instead remain fully backed by the
+  dedicated VPI reserve; underfunding is an independent liquidation condition, and the clawback is consumed from that
+  reserve or replaced by an equivalent withheld trader gain before excess reserve is released,
+- the keeper/protocol charge is capped by its dedicated reserve and other explicitly eligible charge funds; it must
+  never raid PnL pledge needed by price settlement,
+- an uncollectible terminal action charge is waived rather than reclassified as protocol debt or price loss,
 - liquidation does not assess `frozenCloseSpreadBps`, including while `oracleFrozen`,
 - preview and live liquidation should share the same liquidation-accounting kernel.
 
@@ -595,7 +715,8 @@ Freshness policy is action-specific.
 - normal signed VPI and the lifetime rebate clamp apply to voluntary close/reduce execution in every regime,
 - during `oracleFrozen` only, voluntary closes assess the fixed LP-owned `frozenCloseSpreadBps` against reduced notional instead of applying the Pyth adverse-confidence price shift,
 - live and FAD-only closes retain Pyth adverse-confidence pricing and assess no frozen-close spread,
-- a terminal full close may waive uncollectible spread without creating bad debt, while a partial close must settle the full obligation.
+- a terminal full close may waive uncollectible spread without creating a protocol liability; a partial close must satisfy its
+  separate charge policy, while uncollateralized price loss above the account cap is simply written off.
 
 ### Liquidations
 
@@ -605,10 +726,11 @@ Freshness policy is action-specific.
 
 ### LP accounting actions
 
-- withdrawals and reconcile use LP-accounting freshness policy,
-- during `oracleFrozen`, LP entry and exit stay live under the fixed frozen-fee policy rather than introducing a second outer stale-action gate,
+- reconciliation and redemption funding use LP-accounting freshness and cash-reserve policy,
+- during `oracleFrozen`, matured redemption funding may remain live under the fixed exit-fee policy, but deposit
+  activation is deferred until the exact marked snapshot can satisfy the live entry gate,
 - already-funded pending buckets may still settle through the same settlement entrypoint,
-- preview and live LP paths must agree on the active frozen-fee treatment whenever `oracleFrozen` is true.
+- preview and live LP paths must agree on entry deferral and the active redemption fee.
 
 ## Order State Model
 
@@ -659,10 +781,22 @@ The accounting system should preserve the following:
 11. every position-deletion path re-checks degraded-mode containment
 12. Junior redemption funding is zero while any eligible matured Senior demand remains unaccounted for
 13. every claimable LP asset is backed one-for-one by vault-held escrow and can be claimed at most once
+14. every live position and order size is a whole 100-token lot
+15. exact position entry cost is conserved across increases and partial closes without reconstructing basis from a
+    rounded average price
+16. the terminal book curve for every account equals its live lots, exact entry cost, side, and current
+    `pnlPledge + same-account claim` collectible cap
+17. LP deposits and redemptions use the same signed terminal price delta and waterfall snapshot
+18. positive marked receivables do not increase physical cash available to fund redemptions
+19. a current nonzero terminal deficit blocks LP deposit activation
+20. every live negative lifetime-VPI balance has an equal dedicated reserve, and generic action collection preserves
+    the combined VPI-plus-execution-bounty floor
 
 ## Architecture Goal
 
-The system uses multiple conservative accounting kernels because different paths answer different questions: solvency, withdrawal availability, close settlement, liquidation planning, trader claim liabilities, and clearinghouse reservations all need different boundaries.
+The system uses separate kernels when actions answer different questions: solvency, physical withdrawal availability,
+close settlement, liquidation planning, trader claims, and clearinghouse reservations each need their own boundary. LP
+entry and exit pricing answer the same ownership question and therefore use one exact signed terminal-NAV kernel.
 
 Design rules:
 

@@ -116,7 +116,11 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
     }
 
     /// @notice Returns equity, withdrawal capacity, pending reservations, and position risk for an account.
-    /// @dev For an open position, negative net equity is floored at zero; without a position, clearinghouse
+    /// @dev For an open position, exact price-risk equity is PnL pledge plus same-account claim plus exact price PnL.
+    ///      Carry is projected from eligible free settlement first; an uncovered remainder independently marks the
+    ///      account liquidatable rather than debiting price equity. Negative VPI is independently required to have full
+    ///      dedicated-reserve backing; an underfunded floor also marks the account liquidatable, while excess reserve
+    ///      never adds price collateral. Negative net equity is floored at zero. Without a position, clearinghouse
     ///      account equity is returned. Monetary fields use 6-decimal USDC units.
     /// @param account Canonical perps account to inspect.
     /// @return viewData Trader account summary derived from the account lens and router.
@@ -179,7 +183,7 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
         }
     }
 
-    /// @notice Returns whether the account's current live position is liquidatable at the stored mark.
+    /// @notice Returns whether exact price risk breaches maintenance or projected carry remains uncovered at the stored mark.
     /// @param account Canonical perps account to inspect.
     /// @return True only when the account lens reports an existing liquidatable position.
     function isLiquidatable(
@@ -305,7 +309,8 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
     }
 
     /// @notice Builds the position view and applies the FAD maintenance ratio when the FAD window is active.
-    /// @dev Maintenance notional is marked at `ENGINE.lastMarkPrice()` and integer division rounds down.
+    /// @dev Maintenance notional is marked at `ENGINE.lastMarkPrice()` and integer division rounds down. Carry is first
+    ///      projected against eligible free settlement; any uncovered remainder independently sets `liquidatable`.
     /// @param account Canonical perps account to inspect.
     /// @return viewData Zeroed for no position; otherwise the current compact position view.
     function _getPositionView(

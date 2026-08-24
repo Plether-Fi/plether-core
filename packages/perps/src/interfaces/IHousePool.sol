@@ -11,7 +11,7 @@ interface IHousePool {
     enum ClaimantInflowKind {
         /// @notice Trading, carry, or spread revenue owned by tranche claimants.
         Revenue,
-        /// @notice Owner-funded value intended to recapitalize realized protocol bad debt.
+        /// @notice Owner-funded value routed as claimant equity restoration without minting LP shares.
         Recapitalization
     }
 
@@ -33,6 +33,7 @@ interface IHousePool {
     /// @param seniorPrincipalUsdc Stored value attributed to senior tranche claimants.
     /// @param juniorPrincipalUsdc Stored value attributed to junior tranche claimants.
     /// @param seniorHighWaterMarkUsdc Protected senior entitlement restored before revenue reaches junior claimants.
+    /// @param currentTerminalDeficitUsdc Deficit derived from the current engine terminal-NAV snapshot.
     /// @param markFresh Whether the cached mark satisfies the currently applicable HousePool freshness policy.
     /// @param oracleFrozen Whether the engine reports recurring or override-driven frozen-oracle policy.
     /// @param degradedMode Whether the engine's adjusted-insolvency latch is active.
@@ -45,6 +46,7 @@ interface IHousePool {
         uint256 seniorPrincipalUsdc;
         uint256 juniorPrincipalUsdc;
         uint256 seniorHighWaterMarkUsdc;
+        uint256 currentTerminalDeficitUsdc;
         bool markFresh;
         bool oracleFrozen;
         bool degradedMode;
@@ -53,8 +55,8 @@ interface IHousePool {
     /// @notice Governed senior coupon, live-mark, frozen-oracle LP fee, and senior-capacity configuration.
     /// @param seniorRateBps Annualized simple senior target coupon rate in basis points.
     /// @param markStalenessLimit HousePool component of the live cached-mark age limit, in seconds.
-    /// @param seniorFrozenLpFeeBps Senior vault entry/exit fee while the oracle is frozen, in basis points.
-    /// @param juniorFrozenLpFeeBps Junior vault entry/exit fee while the oracle is frozen, in basis points.
+    /// @param seniorFrozenLpFeeBps Senior vault exit fee while the oracle is frozen, in basis points.
+    /// @param juniorFrozenLpFeeBps Junior vault exit fee while the oracle is frozen, in basis points.
     /// @param maxSeniorExposureUsdc Maximum protected senior exposure, including accepted reservations, in USDC.
     /// @param maxSeniorShareBps Maximum senior share of committed tranche capital, in basis points.
     struct PoolConfig {
@@ -112,7 +114,7 @@ interface IHousePool {
     error HousePool__SeniorVaultAlreadySet();
     /// @notice The owner attempted to replace the configured junior vault.
     error HousePool__JuniorVaultAlreadySet();
-    /// @notice A pool settlement or inflow hook was called by neither the engine nor its settlement sidecar.
+    /// @notice A privileged pool hook caller or Router-bound LP settlement mark did not match its authority.
     error HousePool__Unauthorized();
     /// @notice A requested senior withdrawal exceeds the current senior cap.
     error HousePool__ExceedsMaxSeniorWithdraw();
@@ -260,6 +262,10 @@ interface IHousePool {
     /// @return Lesser of raw pool USDC and the canonical accounted-asset ledger
     function totalAssets() external view returns (uint256);
 
+    /// @notice Returns the terminal deficit persisted by the most recent mark-fresh reconcile.
+    /// @return Last reconciled terminal deficit in 6-decimal USDC
+    function terminalDeficitUsdc() external view returns (uint256);
+
     /// @notice Returns the current id of the coordinator's shared LP epoch.
     /// @return Current Unix timestamp divided by the shared LP epoch duration
     function currentLpEpoch() external view returns (uint256);
@@ -355,14 +361,6 @@ interface IHousePool {
     /// @return Ownerless canonical assets reserved from ordinary LP withdrawals and deposits
     function unassignedAssets() external view returns (uint256);
 
-    /// @notice Retained compatibility selector for the removed synchronous senior-entry hook.
-    /// @dev Always reverts in the asynchronous deployment. Ordinary entry is requested through the senior vault and
-    ///      finalized only by `settleLpEpoch`; no caller can use this selector to bypass coordinated ordering.
-    /// @param amount Ignored legacy USDC amount
-    function depositSenior(
-        uint256 amount
-    ) external;
-
     /// @notice Commits senior capacity for a delayed deposit request.
     /// @dev Callable only by the configured senior vault. The amount must fit additional capacity when reserved.
     /// @param amount Gross USDC request amount to reserve (6 decimals)
@@ -377,23 +375,19 @@ interface IHousePool {
         uint256 amount
     ) external;
 
-    /// @notice Retained compatibility selector for the removed synchronous junior-entry hook.
-    /// @dev Always reverts in the asynchronous deployment. Ordinary entry is requested through the junior vault and
-    ///      finalized only by `settleLpEpoch`; no caller can use this selector to bypass coordinated ordering.
-    /// @param amount Ignored legacy USDC amount
-    function depositJunior(
-        uint256 amount
-    ) external;
-
-    /// @notice Atomically reconciles pool accounting, funds matured senior withdrawals before matured junior
-    ///         withdrawals, and then finalizes eligible delayed deposits junior-first and senior-second.
-    /// @dev Permissionless and bounded by the implementation's fixed per-call epoch limit. Reverts if no queued epoch
-    ///      can advance, rolling back reconcile and carry checkpoints. The coordinator is the sole pool cash-exit path
-    ///      for tranche redemptions: configured vaults expose no independently orderable senior or junior withdrawal
-    ///      hook. Funded assets leave HousePool custody for vault claim escrow; claims themselves do not call back into
-    ///      HousePool and remain available if later settlement is unavailable.
+    /// @notice Settles one bounded LP epoch pass, using Router-bound mark data whenever open positions require it.
+    /// @dev With open positions outside oracle-frozen mode, only `ENGINE.orderRouter()` may call, the supplied mark
+    ///      must exactly match the Engine cache, and its publish time must be at or after the current epoch boundary.
+    ///      Otherwise settlement is permissionless from the cached mark; arguments are ignored because no-position or
+    ///      frozen-oracle settlement does not require an atomic refresh. Frozen settlement retains the FAD-age limit,
+    ///      withdrawal fees, and deferred-entry policy. Any no-progress revert rolls back the enclosing oracle update.
+    /// @param expectedMarkPrice Router-validated mark expected in the Engine cache, with 8 decimals.
+    /// @param expectedPublishTime Router-validated oracle publish timestamp expected in the Engine cache.
     /// @return result Exact withdrawal funding, delayed-entry finalization, and residual-work summary.
-    function settleLpEpoch() external returns (LpEpochSettlementResult memory result);
+    function settleLpEpoch(
+        uint256 expectedMarkPrice,
+        uint256 expectedPublishTime
+    ) external returns (LpEpochSettlementResult memory result);
 
     /// @notice Explicitly bootstraps quarantined LP assets into a tranche and mints matching shares.
     /// @dev Owner only, outside oracle-frozen mode and with any required mark satisfying active freshness policy.
@@ -456,8 +450,8 @@ interface IHousePool {
         );
 
     /// @notice Read-only tranche principals for deposit pricing.
-    /// @dev Projects the deposit-side reconcile, which intentionally excludes conservative unrealized trader MtM while
-    ///      retaining realized losses. Trader claims, coupon accrual, and settleable claimant routing remain included.
+    /// @dev Projects the same signed terminal-NAV reconcile used by withdrawals, including trader claims, terminal
+    ///      price value, coupon accrual, realized value, and settleable claimant routing.
     ///      Fully asynchronous vaults use this state for indicative request estimates and coordinator-time epoch quotes;
     ///      it does not enable or quote an immediate ERC-4626 entry.
     /// @return seniorPrincipalUsdc Simulated senior principal after reconcile (6 decimals)
@@ -468,7 +462,7 @@ interface IHousePool {
         returns (uint256 seniorPrincipalUsdc, uint256 juniorPrincipalUsdc);
 
     /// @notice Whether pending deposit finalization would hit the senior impairment gate after reconcile.
-    /// @dev Uses the standard conservative reconcile snapshot, including withdrawal-side unrealized MtM.
+    /// @dev Uses the canonical signed terminal-NAV reconcile snapshot shared by entry and exit pricing.
     /// @return Whether projected senior principal is below its projected high-water mark
     function isSeniorImpairedAfterPendingDepositReconcile() external view returns (bool);
 
@@ -502,15 +496,6 @@ interface IHousePool {
     /// @param isSenior True for senior tranche, false for junior tranche
     /// @return Whether a delayed deposit request currently passes the shared tranche gate
     function canAcceptTrancheDeposits(
-        bool isSenior
-    ) external view returns (bool);
-
-    /// @notice Retained compatibility view for removed synchronous tranche entry.
-    /// @dev Always returns false in the asynchronous deployment. ERC-7575 `deposit` and `mint` claim already-activated
-    ///      requests and must not be treated as immediate-entry functions.
-    /// @param isSenior Ignored legacy tranche selector
-    /// @return Always false
-    function canAcceptInstantTrancheDeposits(
         bool isSenior
     ) external view returns (bool);
 

@@ -7,7 +7,7 @@ import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.s
 /// @notice Pure validation helpers for delayed-order router checks.
 library OrderValidationLib {
 
-    /// @notice Validates size and margin constraints common to order commits.
+    /// @notice Validates size, lot-alignment, and margin constraints common to order commits.
     /// @param sizeDelta Requested position-size delta (18 decimals).
     /// @param marginDelta Requested nonnegative margin amount (6 decimals).
     /// @param isClose Whether the order is a close/reduce order.
@@ -18,6 +18,9 @@ library OrderValidationLib {
     ) internal pure {
         if (sizeDelta == 0) {
             revert IOrderRouterErrors.OrderRouter__ZeroSize();
+        }
+        if (sizeDelta % CfdTypes.SIZE_QUANTUM != 0) {
+            revert IOrderRouterErrors.OrderRouter__InvalidSizeQuantum();
         }
         if (isClose && marginDelta > 0) {
             revert IOrderRouterErrors.OrderRouter__CloseWithPositiveMargin();

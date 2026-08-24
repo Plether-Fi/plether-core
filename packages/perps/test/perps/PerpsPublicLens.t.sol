@@ -28,7 +28,11 @@ contract PerpsPublicLensTest is BasePerpTest {
         PerpsViewTypes.TraderAccountView memory viewData = publicLens.getTraderAccount(account);
 
         assertGt(clearinghouse.getFreeBuyingPowerUsdc(account), 0, "setup should leave free buying power");
-        assertEq(viewData.equityUsdc, uint256(snapshot.netEquityUsdc), "public equity should use net economic equity");
+        assertEq(
+            viewData.equityUsdc,
+            snapshot.netEquityUsdc > 0 ? uint256(snapshot.netEquityUsdc) : 0,
+            "public equity should use floored net economic equity"
+        );
         assertEq(
             viewData.withdrawableUsdc,
             engineAccountLens.getWithdrawableUsdc(account),
@@ -51,6 +55,11 @@ contract PerpsPublicLensTest is BasePerpTest {
         PerpsViewTypes.TraderAccountView memory viewData = publicLens.getTraderAccount(account);
 
         assertGt(withdrawableUsdc, 0, "setup should produce a positive withdrawable amount");
+        assertEq(
+            withdrawableUsdc,
+            clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc,
+            "A healthy isolated position should expose all free settlement"
+        );
         assertEq(
             viewData.withdrawableUsdc, withdrawableUsdc, "lens should delegate withdrawability to the account lens"
         );
@@ -145,7 +154,9 @@ contract PerpsPublicLensTest is BasePerpTest {
             "Carry-aware lens equity should be below raw settlement equity"
         );
         assertEq(
-            viewData.equityUsdc, uint256(snapshot.netEquityUsdc), "Public equity should inherit carry-aware net equity"
+            viewData.equityUsdc,
+            snapshot.netEquityUsdc > 0 ? uint256(snapshot.netEquityUsdc) : 0,
+            "Public equity should inherit floored carry-aware net equity"
         );
     }
 
@@ -176,7 +187,7 @@ contract PerpsPublicLensTest is BasePerpTest {
         address account = trader;
 
         _fundTrader(trader, 5000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 1600e6, 1e8);
+        _open(account, CfdTypes.Side.BULL, 100_000e18, 1700e6, 1e8);
 
         uint256 withdrawableBeforeCarry = engineAccountLens.getWithdrawableUsdc(account);
         assertGt(withdrawableBeforeCarry, 0, "Setup should start with positive withdrawable headroom");
@@ -205,8 +216,8 @@ contract PerpsPublicLensTest is BasePerpTest {
         address trader = address(0xB0B2);
         address account = trader;
 
-        _fundTrader(trader, 820e6);
-        _open(account, CfdTypes.Side.BULL, 50_000e18, 800e6, 1e8);
+        _fundTrader(trader, 1000e6);
+        _open(account, CfdTypes.Side.BULL, 50_000e18, 900e6, 1e8);
 
         assertFalse(publicLens.isLiquidatable(account), "Setup should start above maintenance before carry accrues");
 
@@ -323,7 +334,7 @@ contract PerpsPublicLensTest is BasePerpTest {
         assertTrue(maturedQueue.depositBacklog);
         assertTrue(maturedQueue.redeemBacklog);
 
-        pool.settleLpEpoch();
+        _settleLpEpochForTest();
 
         PerpsViewTypes.TrancheQueueView memory settledQueue = publicLens.getTrancheQueues(false);
         assertEq(settledQueue.depositHeadEpoch, 0);

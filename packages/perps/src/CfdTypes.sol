@@ -6,6 +6,10 @@ pragma solidity 0.8.35;
 /// @custom:security-contact contact@plether.com
 library CfdTypes {
 
+    /// @notice Canonical position-size quantum: one lot represents 100 synthetic tokens.
+    /// @dev With 8-decimal prices, `lots * price` is exactly denominated in 6-decimal USDC atoms.
+    uint256 internal constant SIZE_QUANTUM = 1e20;
+
     /// @notice Direction of a position or order relative to the protocol's USD-strength oracle price.
     /// @dev The oracle price represents the BEAR leg: BULL profits as it falls and BEAR profits as it rises.
     enum Side {
@@ -70,7 +74,11 @@ library CfdTypes {
         /// @notice The requested partial close would leave an undercollateralized position.
         PartialCloseUnderwater,
         /// @notice The requested partial close would leave a position below protocol dust floors.
-        DustPosition
+        DustPosition,
+        /// @notice The requested close size is not divisible by the canonical 100-token position quantum.
+        InvalidSizeQuantum,
+        /// @notice The position's dedicated negative-VPI rebate reserve is below its required target.
+        VpiRebateReserveUnderfunded
     }
 
     /// @notice Global risk parameters used by position, VPI, carry, margin, and liquidation accounting.

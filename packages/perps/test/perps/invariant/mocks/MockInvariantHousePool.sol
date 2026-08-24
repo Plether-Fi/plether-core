@@ -140,9 +140,9 @@ contract MockInvariantHousePool is IHousePool {
         return 0;
     }
 
-    function depositSenior(
-        uint256
-    ) external pure {}
+    function terminalDeficitUsdc() external pure returns (uint256) {
+        return 0;
+    }
 
     function reserveSeniorDeposit(
         uint256
@@ -152,11 +152,10 @@ contract MockInvariantHousePool is IHousePool {
         uint256
     ) external pure {}
 
-    function depositJunior(
+    function settleLpEpoch(
+        uint256,
         uint256
-    ) external pure {}
-
-    function settleLpEpoch() external pure returns (IHousePool.LpEpochSettlementResult memory result) {
+    ) external pure returns (IHousePool.LpEpochSettlementResult memory result) {
         return result;
     }
 
@@ -211,12 +210,6 @@ contract MockInvariantHousePool is IHousePool {
     }
 
     function canAcceptTrancheDeposits(
-        bool
-    ) external pure returns (bool) {
-        return true;
-    }
-
-    function canAcceptInstantTrancheDeposits(
         bool
     ) external pure returns (bool) {
         return true;

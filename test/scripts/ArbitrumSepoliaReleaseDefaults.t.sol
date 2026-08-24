@@ -9,6 +9,7 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
+import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {Test} from "forge-std/Test.sol";
 
 contract DeployPerpsArbitrumSepoliaHarness is DeployPerpsArbitrumSepolia {
@@ -54,6 +55,12 @@ contract BootstrapPerpsArbitrumSepoliaHarness is BootstrapPerpsArbitrumSepolia {
         return _configureSeniorLimits(housePool, maxSeniorExposureUsdc, maxSeniorShareBps);
     }
 
+    function verifyTerminalNavBook(
+        HousePool housePool
+    ) external view {
+        _verifyTerminalNavBook(housePool);
+    }
+
 }
 
 contract ArbitrumSepoliaReleaseDefaultsTest is Test {
@@ -83,10 +90,14 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         CfdEngine engine = new CfdEngine(
             address(usdc), address(clearinghouse), 2e8, deployScript.riskParams(), deployScript.frozenCloseSpreadBps()
         );
+        TerminalNavBookV2 terminalNavBook = new TerminalNavBookV2(address(engine), 2e8);
+        engine.setTerminalNavBook(address(terminalNavBook));
 
         assertEq(engine.executionFeeBps(), 4, "execution fee");
         assertEq(engine.frozenCloseSpreadBps(), 50, "frozen close spread");
         assertEq(engine.fadRunwaySeconds(), 1 hours, "fad runway");
+        assertEq(address(engine.terminalNavBook()), address(terminalNavBook), "terminal NAV book");
+        assertEq(terminalNavBook.SIZE_QUANTUM(), 1e20, "position size quantum");
 
         bytes32[] memory feedIds = new bytes32[](1);
         feedIds[0] = bytes32(uint256(1));
@@ -110,6 +121,24 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
 
         assertEq(bootstrapScript.defaultSeniorSeedUsdc(), 50_000_000e6, "senior seed");
         assertEq(bootstrapScript.defaultJuniorSeedUsdc(), 50_000_000e6, "junior seed");
+    }
+
+    function test_BootstrapRejectsStackWithoutTerminalNavBook() public {
+        DeployPerpsArbitrumSepoliaHarness deployScript = new DeployPerpsArbitrumSepoliaHarness();
+        BootstrapPerpsArbitrumSepoliaHarness bootstrapScript = new BootstrapPerpsArbitrumSepoliaHarness();
+        MockUSDC usdc = new MockUSDC();
+        MarginClearinghouse clearinghouse = new MarginClearinghouse(address(usdc));
+        CfdEngine engine = new CfdEngine(
+            address(usdc), address(clearinghouse), 2e8, deployScript.riskParams(), deployScript.frozenCloseSpreadBps()
+        );
+        HousePool pool = new HousePool(address(usdc), address(engine));
+
+        vm.expectRevert(bytes("TerminalNavBookV2 is not wired"));
+        bootstrapScript.verifyTerminalNavBook(pool);
+
+        TerminalNavBookV2 terminalNavBook = new TerminalNavBookV2(address(engine), 2e8);
+        engine.setTerminalNavBook(address(terminalNavBook));
+        bootstrapScript.verifyTerminalNavBook(pool);
     }
 
     function test_BootstrapRequiresFiniteExplicitSeniorLimits() public {

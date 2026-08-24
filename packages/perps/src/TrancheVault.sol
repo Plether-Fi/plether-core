@@ -505,7 +505,7 @@ contract TrancheVault is ERC4626 {
         if (epoch.finalized) {
             revert TrancheVault__DepositEpochFinalized();
         }
-        if (currentLpEpoch() >= requestId && !queueState.rejected) {
+        if (currentLpEpoch() >= requestId && !queueState.rejected && !_projectedTerminalWipe()) {
             bool reservationsWithinLimits = !IS_SENIOR || POOL.areSeniorDepositReservationsWithinLimits();
             if (!POOL.isSeniorImpairedAfterPendingDepositReconcile() && reservationsWithinLimits) {
                 revert TrancheVault__DepositEpochAlreadyActive();
@@ -1001,14 +1001,13 @@ contract TrancheVault is ERC4626 {
     function estimateDepositShares(
         uint256 assets
     ) public view returns (uint256) {
-        return quoteDepositFromState(assets, _depositPricingAssets(), totalSupply(), _frozenLpFeeBps());
+        return quoteDepositFromState(assets, _depositPricingAssets(), totalSupply(), 0);
     }
 
     function estimateMintAssets(
         uint256 shares
     ) external view returns (uint256) {
-        uint256 feeBps = _frozenLpFeeBps();
-        return feeBps == 0 ? _previewMintAssets(shares) : _previewFrozenMintAssets(shares, feeBps);
+        return _previewMintAssets(shares);
     }
 
     function estimateWithdrawShares(
@@ -1158,18 +1157,6 @@ contract TrancheVault is ERC4626 {
         emit RedeemEpochRefundable(epochId, IS_SENIOR, shares);
     }
 
-    /// @notice Compatibility wrapper; it invokes the global coordinator and never finalizes independently.
-    function finalizeDepositEpoch(
-        uint256 epochId
-    ) external returns (uint256 shares) {
-        POOL.settleLpEpoch();
-        DepositEpoch storage epoch = depositEpochs[epochId];
-        if (!epoch.finalized) {
-            revert TrancheVault__DepositEpochNotFinalized();
-        }
-        return epoch.shares;
-    }
-
     function _deposit(
         address,
         address,
@@ -1277,6 +1264,12 @@ contract TrancheVault is ERC4626 {
 
     function _isTerminallyWiped() internal view returns (bool) {
         return totalSupply() > 0 && totalAssets() == 0;
+    }
+
+    function _projectedTerminalWipe() internal view returns (bool) {
+        (uint256 seniorPricingAssets, uint256 juniorPricingAssets) = POOL.getPendingDepositTrancheState();
+        uint256 pricingAssets = IS_SENIOR ? seniorPricingAssets : juniorPricingAssets;
+        return totalSupply() > 0 && pricingAssets == 0;
     }
 
     function _frozenLpFeeBps() internal view returns (uint256) {

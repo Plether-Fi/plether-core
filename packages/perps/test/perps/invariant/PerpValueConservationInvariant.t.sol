@@ -113,7 +113,7 @@ contract PerpValueConservationHandler is Test {
         bool violation;
         uint256 profit;
 
-        uint256 size = bound(sizeFuzz, 50_000e18, 300_000e18);
+        uint256 size = bound(sizeFuzz, 500, 3000) * CfdTypes.SIZE_QUANTUM;
         uint256 depositAssets = bound(depositFuzz, 10_000e6, 300_000e6);
 
         _fundTrader(BULL_TRADER, 50_000e6);
@@ -130,8 +130,8 @@ contract PerpValueConservationHandler is Test {
             vm.stopPrank();
 
             vm.warp(juniorVault.depositEpochStart(depositRequestId));
-            _refreshMark();
-            pool.settleLpEpoch();
+            uint256 depositMarkPrice = engine.lastMarkPrice();
+            router.settleLpEpoch(_mockPythUpdateData(depositMarkPrice == 0 ? 1e8 : depositMarkPrice));
 
             uint256 claimableDepositAssets = juniorVault.claimableDepositRequest(depositRequestId, JUNIOR_ATTACKER);
             vm.prank(JUNIOR_ATTACKER);
@@ -153,8 +153,8 @@ contract PerpValueConservationHandler is Test {
             uint256 redeemRequestId = juniorVault.requestRedeem(shares, JUNIOR_ATTACKER, JUNIOR_ATTACKER);
 
             vm.warp(juniorVault.depositEpochStart(redeemRequestId));
-            _refreshMark();
-            pool.settleLpEpoch();
+            uint256 redeemMarkPrice = engine.lastMarkPrice();
+            router.settleLpEpoch(_mockPythUpdateData(redeemMarkPrice == 0 ? 1e8 : redeemMarkPrice));
 
             uint256 claimableRedeemShares = juniorVault.claimableRedeemRequest(redeemRequestId, JUNIOR_ATTACKER);
             if (claimableRedeemShares == shares) {
@@ -388,12 +388,6 @@ contract PerpValueConservationHandler is Test {
             pool.totalAssets(),
             baseCarryBps
         );
-    }
-
-    function _refreshMark() internal {
-        uint256 markPrice = engine.lastMarkPrice();
-        vm.prank(address(router));
-        engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
     }
 
 }

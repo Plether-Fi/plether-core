@@ -39,7 +39,7 @@ contract LiquidationBatchTest is BasePerpTest {
         _fundAndOpenThinBull(ELIGIBLE_TWO);
 
         _fundTrader(SOLVENT, 2000e6);
-        _open(SOLVENT, CfdTypes.Side.BULL, 10_000e18, 250e6, NEUTRAL_PRICE);
+        _open(SOLVENT, CfdTypes.Side.BULL, 10_000e18, 1000e6, NEUTRAL_PRICE);
 
         _fundTrader(NO_POSITION, 1000e6);
         uint64 solventOrderId = _queueOpen(SOLVENT, 200e6);

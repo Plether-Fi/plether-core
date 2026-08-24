@@ -5,6 +5,7 @@ import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
+import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 
 contract AuditValidFindingsFailing is BasePerpTest {
@@ -26,7 +27,7 @@ contract AuditValidFindingsFailing is BasePerpTest {
         clearinghouse.withdraw(account, 9999 * 1e6);
     }
 
-    function test_C2_MtmMustAccountForUncollectibleLosses() public {
+    function test_C2_ExactMtmCapsLossesAtAccountPriceCollateral() public {
         _fundTrader(traderA, 200_000 * 1e6);
         _fundTrader(traderB, 1000 * 1e6);
 
@@ -41,31 +42,54 @@ contract AuditValidFindingsFailing is BasePerpTest {
         // Move mark to 1e8 — both positions still open (no liquidation).
         // A is winning $50K, B is losing $50K but has only $1K margin.
         // The pool has a live winner on the same side as an undercollateralized loser.
-        // The conservative O(1) MtM bound must not let that loser's uncollected debt net
-        // the winner down to zero before liquidation realizes any collectible value.
+        // Exact terminal NAV nets only the loser's account-local collectible price collateral
+        // against the winner liability. The uncollectible tail is a diagnostic writeoff.
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
+        uint256 loserCollectibleCapUsdc =
+            engineAccountLens.getAccountLedgerSnapshot(bAccount).terminalPriceCollectibleCapUsdc;
+        assertEq(loserCollectibleCapUsdc, 930e6, "Fixture should leave 930 USDC of exact price collateral");
+
         uint256 mtm = _poolMtmAdjustment();
-        assertEq(mtm, 100_000e6, "MtM should over-reserve rather than net uncollectible same-side losses");
+        assertEq(
+            mtm,
+            50_000e6 - loserCollectibleCapUsdc,
+            "Exact MtM should net only the loser's collectible cap against the winner liability"
+        );
     }
 
-    function test_H1_FailedSingleExecuteDoesNotPayKeeperOrEthRefund() public {
+    function test_H1_FailedSingleExecutePaysReservedUsdcBountyWithoutNativeEthTransfer() public {
         vm.deal(trader, 2 ether);
         vm.deal(keeper, 1 ether);
 
         _fundTrader(trader, 10_000 * 1e6);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 1, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 200e6, 1.5e8, false);
 
-        uint256 keeperBefore = keeper.balance;
+        uint256 executionBountyUsdc = _executionBountyReserve(1);
+        uint256 keeperEthBefore = keeper.balance;
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeper);
+        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(trader);
         bytes[] memory empty = _mockPythUpdateData();
         vm.prank(keeper);
         router.executeOrder(1, empty);
 
-        assertEq(keeper.balance - keeperBefore, 0, "Keeper should not receive fee when order fails");
-        assertEq(trader.balance, 2 ether, "Failed open-order execution should not route any ETH refund to the user");
+        assertEq(keeper.balance, keeperEthBefore, "Failed execution must not transfer native ETH to the keeper");
+        assertEq(trader.balance, 2 ether, "Failed execution must not route a native ETH refund to the trader");
+        assertEq(
+            clearinghouse.balanceUsdc(keeper) - keeperSettlementBefore,
+            executionBountyUsdc,
+            "Terminal slippage failure must pay the separately reserved USDC bounty"
+        );
+        assertEq(
+            traderSettlementBefore - clearinghouse.balanceUsdc(trader),
+            executionBountyUsdc,
+            "Failed order must forfeit only its reserved execution bounty"
+        );
+        assertEq(router.pendingOrderCounts(trader), 0, "Terminal failure must clear the queued order");
+        assertEq(_executionBountyReserve(1), 0, "Terminal failure must clear the bounty attribution");
     }
 
     function test_H2_LiquidationBountyShouldNotIncreaseAfterCrossingZeroEquity() public {
@@ -77,33 +101,57 @@ contract AuditValidFindingsFailing is BasePerpTest {
         _fundTrader(traderPositive, 10_000 * 1e6);
         _fundTrader(traderNegative, 10_000 * 1e6);
 
-        // BULL at 1e8, $1,600 margin. Equity hits 0 at price 101,600,000.
-        _open(positiveAccount, CfdTypes.Side.BULL, 100_000 * 1e18, 1600 * 1e6, 1e8);
-        _open(negativeAccount, CfdTypes.Side.BULL, 100_000 * 1e18, 1600 * 1e6, 1e8);
+        // Each open funds a $100 dedicated liquidation reserve in addition to execution
+        // fees and the exact PnL pledge used for price health.
+        _open(positiveAccount, CfdTypes.Side.BULL, 100_000 * 1e18, 1700 * 1e6, 1e8);
+        _open(negativeAccount, CfdTypes.Side.BULL, 100_000 * 1e18, 1700 * 1e6, 1e8);
 
+        uint256 positiveFreeSettlementUsdc = _freeSettlementUsdc(positiveAccount);
+        uint256 negativeFreeSettlementUsdc = _freeSettlementUsdc(negativeAccount);
         vm.prank(traderPositive);
-        clearinghouse.withdraw(positiveAccount, 8400 * 1e6);
+        clearinghouse.withdraw(positiveAccount, positiveFreeSettlementUsdc);
         vm.prank(traderNegative);
-        clearinghouse.withdraw(negativeAccount, 8400 * 1e6);
+        clearinghouse.withdraw(negativeAccount, negativeFreeSettlementUsdc);
 
-        // Liquidate at equity ≈ +$5 (just above zero)
-        // Bounty capped at min(~$152, $5) = $5
+        uint256 pledgeUsdc = clearinghouse.pnlPledgeUsdc(positiveAccount);
+        assertEq(pledgeUsdc, 1560e6, "Fixture must retain the exact post-fee, post-reserve PnL pledge");
+        assertEq(
+            clearinghouse.liquidationReserveUsdc(positiveAccount),
+            100e6,
+            "Fixture must independently fund the liquidation charge"
+        );
+
+        // With 1,000 whole lots, these prices place exact P+C equity $5 above and
+        // below zero. Both bounties are funded by the same protected reserve.
+        uint256 positiveEquityPrice = 101_555_000;
+        uint256 negativeEquityPrice = 101_565_000;
+        ICfdEngineTypes.LiquidationPreview memory positivePreview =
+            engineLens.previewLiquidation(positiveAccount, positiveEquityPrice);
+        ICfdEngineTypes.LiquidationPreview memory negativePreview =
+            engineLens.previewLiquidation(negativeAccount, negativeEquityPrice);
+        assertEq(positivePreview.equityUsdc, int256(5e6), "Positive fixture must sit five USDC above zero");
+        assertEq(negativePreview.equityUsdc, -int256(5e6), "Negative fixture must sit five USDC below zero");
+        assertEq(
+            positivePreview.keeperBountyUsdc,
+            negativePreview.keeperBountyUsdc,
+            "Dedicated reserve must remove any bounty discontinuity around zero price equity"
+        );
+
         uint256 depth = pool.totalAssets();
         vm.prank(address(router));
-        uint256 bountyAtPositiveEquity =
-            engine.liquidatePosition(positiveAccount, 101_595_000, depth, uint64(block.timestamp), address(this));
+        uint256 bountyAtPositiveEquity = engine.liquidatePosition(
+            positiveAccount, positiveEquityPrice, depth, uint64(block.timestamp), address(this)
+        );
 
-        // Liquidate at equity ≈ -$5 (just below zero)
-        // Bounty capped at min(~$152, $1600 margin) = $152
         depth = pool.totalAssets();
         vm.prank(address(router));
-        uint256 bountyAtNegativeEquity =
-            engine.liquidatePosition(negativeAccount, 101_605_000, depth, uint64(block.timestamp), address(this));
+        uint256 bountyAtNegativeEquity = engine.liquidatePosition(
+            negativeAccount, negativeEquityPrice, depth, uint64(block.timestamp), address(this)
+        );
 
-        uint256 jump = bountyAtNegativeEquity > bountyAtPositiveEquity
-            ? bountyAtNegativeEquity - bountyAtPositiveEquity
-            : bountyAtPositiveEquity - bountyAtNegativeEquity;
-        assertLt(jump, 1e6, "Bounty should not exhibit a large discontinuity around zero equity");
+        assertEq(bountyAtPositiveEquity, positivePreview.keeperBountyUsdc, "Positive execution must match preview");
+        assertEq(bountyAtNegativeEquity, negativePreview.keeperBountyUsdc, "Negative execution must match preview");
+        assertEq(bountyAtPositiveEquity, bountyAtNegativeEquity, "Bounty must remain continuous across zero equity");
     }
 
     function test_H4_SeniorRequiresExplicitRecapAfterFullWipeout() public {
@@ -124,8 +172,9 @@ contract AuditValidFindingsFailing is BasePerpTest {
         usdc.mint(address(seniorVault), depositAmount);
         vm.startPrank(address(seniorVault));
         usdc.approve(address(pool), depositAmount);
-        vm.expectRevert(HousePool.HousePool__SynchronousLpActionsDisabled.selector);
-        pool.depositSenior(depositAmount);
+        (bool legacyDepositAccepted,) =
+            address(pool).call(abi.encodeWithSignature("depositSenior(uint256)", depositAmount));
+        assertFalse(legacyDepositAccepted, "removed synchronous Senior entrypoint must stay unavailable");
         vm.stopPrank();
 
         usdc.mint(address(pool), depositAmount);

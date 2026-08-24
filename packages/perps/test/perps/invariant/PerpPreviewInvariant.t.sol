@@ -109,10 +109,18 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
 
             ICfdEngineTypes.LiquidationPreview memory liquidationPreview =
                 engineLens.previewLiquidation(account, oraclePrice);
+            AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
+                engineAccountLens.getAccountLedgerSnapshot(account);
+            uint256 priceRiskCollateralUsdc = snapshot.activePositionMarginUsdc + snapshot.traderClaimBalanceUsdc;
             assertEq(
                 liquidationPreview.reachableCollateralUsdc,
-                _terminalReachableUsdc(account),
-                "Liquidation preview reachable collateral mismatch"
+                priceRiskCollateralUsdc + clearinghouse.vpiRebateReserveUsdc(account),
+                "Liquidation preview must use PnL pledge, same-account claim, and the dedicated VPI reserve"
+            );
+            assertLe(
+                snapshot.terminalPriceCollectibleCapUsdc,
+                priceRiskCollateralUsdc,
+                "Endpoint-clipped price collectible cap must not exceed full P+C risk collateral"
             );
         }
     }
@@ -130,15 +138,16 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
 
             ICfdEngineTypes.LiquidationPreview memory liquidationPreview =
                 engineLens.previewLiquidation(account, oraclePrice);
+            uint256 priceRiskCollateralUsdc = snapshot.activePositionMarginUsdc + snapshot.traderClaimBalanceUsdc;
             assertEq(
                 liquidationPreview.reachableCollateralUsdc,
-                snapshot.terminalReachableUsdc,
-                "Liquidation preview reachable collateral must match snapshot reachability"
+                priceRiskCollateralUsdc + clearinghouse.vpiRebateReserveUsdc(account),
+                "Liquidation preview must remain isolated to pledge, same-account claim, and VPI reserve"
             );
-            assertLt(
-                liquidationPreview.reachableCollateralUsdc,
-                snapshot.settlementBalanceUsdc + snapshot.executionBountyReserveUsdc,
-                "Liquidation preview must exclude reserved execution bounty from reachable collateral"
+            assertEq(
+                snapshot.liquidationReachableSettlementUsdc,
+                snapshot.settlementBalanceUsdc - snapshot.executionBountyReserveUsdc,
+                "Account liquidation custody must exclude the reserved execution bounty"
             );
         }
     }

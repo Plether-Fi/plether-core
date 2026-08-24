@@ -13,6 +13,7 @@ import {HousePool} from "@plether/perps/HousePool.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
+import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {ICfdEngine} from "@plether/perps/interfaces/ICfdEngine.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
@@ -147,6 +148,8 @@ contract GasProfileTest is Test {
         CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(engine));
         CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
         engine.setDependencies(address(planner), address(settlement), address(engineAdmin));
+        TerminalNavBookV2 terminalNavBook = new TerminalNavBookV2(address(engine), uint32(CAP_PRICE));
+        engine.setTerminalNavBook(address(terminalNavBook));
         engineAccountLens = new CfdEngineAccountLens(address(engine));
         engineLens = new CfdEngineLens(address(engine));
         pool = new HousePool(usdc, address(engine));
@@ -587,7 +590,7 @@ contract GasProfileTest is Test {
             vm.warp(activationTime);
         }
         _refreshMark();
-        pool.settleLpEpoch();
+        pool.settleLpEpoch(0, 0);
 
         uint256 claimableAssets = vault.claimableDepositRequest(requestId, provider);
         assertEq(claimableAssets, assets, "async tranche funding did not finalize");

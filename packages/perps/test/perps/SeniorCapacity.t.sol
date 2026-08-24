@@ -115,7 +115,7 @@ contract SeniorCapacityTest is BasePerpTest {
     ) internal returns (IHousePool.LpEpochSettlementResult memory result) {
         _warpToEpoch(epochId);
         _refreshMark();
-        result = pool.settleLpEpoch();
+        result = _settleLpEpochForTest();
     }
 
     function _warpToEpoch(
@@ -145,13 +145,9 @@ contract SeniorCapacityTest is BasePerpTest {
         uint256 amount = pool.minTrancheDepositUsdc();
         vm.startPrank(caller);
         vm.expectRevert(IHousePool.HousePool__NotSeniorVault.selector);
-        pool.depositSenior(amount);
-        vm.expectRevert(IHousePool.HousePool__NotSeniorVault.selector);
         pool.reserveSeniorDeposit(amount);
         vm.expectRevert(IHousePool.HousePool__NotSeniorVault.selector);
         pool.releaseSeniorDepositReservation(amount);
-        vm.expectRevert(HousePool.HousePool__SynchronousLpActionsDisabled.selector);
-        pool.depositReservedSenior(amount);
         vm.stopPrank();
     }
 
@@ -398,12 +394,9 @@ contract SeniorCapacityTest is BasePerpTest {
 
         assertEq(pool.reservedSeniorDepositAssetsUsdc(), 0);
 
-        uint256 minimumDeposit = pool.minTrancheDepositUsdc();
         vm.startPrank(address(seniorVault));
         vm.expectRevert(IHousePool.HousePool__InsufficientSeniorDepositReservation.selector);
         pool.releaseSeniorDepositReservation(1);
-        vm.expectRevert(HousePool.HousePool__SynchronousLpActionsDisabled.selector);
-        pool.depositReservedSenior(minimumDeposit);
         vm.stopPrank();
     }
 
@@ -434,7 +427,7 @@ contract SeniorCapacityTest is BasePerpTest {
 
         _refreshMark();
         vm.expectRevert(IHousePool.HousePool__NoLpEpochProgress.selector);
-        pool.settleLpEpoch();
+        pool.settleLpEpoch(0, 0);
         assertEq(seniorVault.pendingDepositRequest(epochId, ALICE), reservedAssets);
 
         vm.prank(ALICE);
@@ -453,7 +446,7 @@ contract SeniorCapacityTest is BasePerpTest {
 
         _refreshMark();
         vm.expectRevert(IHousePool.HousePool__NoLpEpochProgress.selector);
-        pool.settleLpEpoch();
+        pool.settleLpEpoch(0, 0);
         assertEq(pool.reservedSeniorDepositAssetsUsdc(), 100e6);
 
         _fundJunior(BOB, 200e6);
@@ -483,7 +476,7 @@ contract SeniorCapacityTest is BasePerpTest {
         _warpToEpoch(epochId);
         _refreshMark();
         vm.expectRevert(IHousePool.HousePool__NoLpEpochProgress.selector);
-        pool.settleLpEpoch();
+        pool.settleLpEpoch(0, 0);
         assertEq(seniorVault.pendingDepositRequest(epochId, ALICE), reservedAssets);
 
         vm.prank(ALICE);
@@ -529,7 +522,7 @@ contract SeniorCapacityTest is BasePerpTest {
         _warpToEpoch(seniorEpochId);
         _refreshMark();
         vm.expectRevert(IHousePool.HousePool__NoLpEpochProgress.selector);
-        pool.settleLpEpoch();
+        pool.settleLpEpoch(0, 0);
 
         vm.prank(BOB);
         seniorVault.cancelPendingDeposit(seniorEpochId);
@@ -582,7 +575,7 @@ contract SeniorCapacityTest is BasePerpTest {
         _warpToEpoch(redeemEpochId);
         _refreshMark();
         vm.expectRevert(IHousePool.HousePool__NoLpEpochProgress.selector);
-        pool.settleLpEpoch();
+        pool.settleLpEpoch(0, 0);
 
         assertEq(juniorVault.maxWithdraw(ALICE), 0);
         assertEq(juniorVault.claimableRedeemRequest(redeemEpochId, ALICE), 0);
@@ -723,7 +716,7 @@ contract SeniorCapacityTest is BasePerpTest {
         vm.stopPrank();
     }
 
-    function test_MaxMintIsExactAtFrozenGrossCapacityBoundary() public {
+    function test_FrozenAdmissionReportsZeroDespiteGrossSeniorCapacity() public {
         _configureAndReconcile(1200e6, 9999);
         _disableSeniorCoupon();
         vm.warp(SATURDAY_FROZEN);
@@ -735,41 +728,28 @@ contract SeniorCapacityTest is BasePerpTest {
         uint256 estimatedShares = seniorVault.estimateDepositShares(capacity);
         uint256 quotedAssets = seniorVault.estimateMintAssets(estimatedShares);
 
-        assertEq(seniorVault.maxRequestDeposit(ALICE), capacity, "request limit should expose gross capacity");
+        assertGt(capacity, 0, "economic senior capacity remains available after the oracle reopens");
+        assertEq(seniorVault.maxRequestDeposit(ALICE), 0, "frozen-oracle admission must be closed");
         assertEq(seniorVault.maxDeposit(ALICE), 0, "claim limit remains zero before settlement");
+        assertEq(seniorVault.maxMint(ALICE), 0, "no frozen-oracle request can become claimable");
         assertGt(estimatedShares, 0);
         assertLe(quotedAssets, capacity);
-
-        uint256 epochId = _requestSenior(ALICE, capacity);
-        IHousePool.LpEpochSettlementResult memory result = _settleAt(epochId);
-        assertEq(result.seniorDepositAssets, capacity);
-        uint256 maxShares = seniorVault.maxMint(ALICE);
-
-        vm.startPrank(ALICE);
-        vm.expectRevert(
-            abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxMint.selector, ALICE, maxShares + 1, maxShares)
-        );
-        seniorVault.mint(maxShares + 1, ALICE);
-        assertEq(seniorVault.mint(maxShares, ALICE), capacity);
-        vm.stopPrank();
     }
 
-    function test_FrozenDepositRejectsGrossAssetsAboveSeniorCapacity() public {
+    function test_FrozenDepositRejectsBeforeApplyingGrossSeniorCapacity() public {
         _configureAndReconcile(1200e6, 9999);
         vm.warp(SATURDAY_FROZEN);
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(SATURDAY_FROZEN - 3 hours));
 
-        uint256 capacity = seniorVault.maxRequestDeposit(ALICE);
+        uint256 capacity = pool.getSeniorDepositCapacity();
         uint256 oversizedAssets = capacity + 1;
+        assertGt(capacity, 0);
+        assertEq(seniorVault.maxRequestDeposit(ALICE), 0);
         usdc.mint(ALICE, oversizedAssets);
         vm.startPrank(ALICE);
         usdc.approve(address(seniorVault), oversizedAssets);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                TrancheVault.TrancheVault__ExceededMaxRequestDeposit.selector, ALICE, oversizedAssets, capacity
-            )
-        );
+        vm.expectRevert(TrancheVault.TrancheVault__DepositsUnavailable.selector);
         seniorVault.requestDeposit(oversizedAssets, ALICE);
         vm.stopPrank();
     }

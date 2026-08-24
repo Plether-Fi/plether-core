@@ -120,9 +120,6 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         bool backlog;
     }
 
-    /// @notice A legacy synchronous vault mutation was called after asynchronous epoch settlement was enabled.
-    error HousePool__SynchronousLpActionsDisabled();
-
     /// @notice A configured vault returned data or moved funds inconsistently with its advertised queue head.
     error HousePool__VaultSettlementInvariant();
 
@@ -168,6 +165,8 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     uint256 public pendingTradingRevenueUsdc;
     /// @notice Accepted senior delayed-deposit assets not yet cancelled or finalized (6-decimal USDC).
     uint256 public override reservedSeniorDepositAssetsUsdc;
+    /// @notice Explicit terminal LP deficit captured by the most recent mark-fresh reconcile (6-decimal USDC).
+    uint256 public override terminalDeficitUsdc;
 
     /// @notice Deployment time or Unix timestamp of the most recent mark-fresh waterfall reconcile.
     uint256 public lastReconcileTime;
@@ -436,32 +435,25 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     function canAcceptTrancheDeposits(
         bool isSenior
     ) public view override returns (bool) {
-        return _canAcceptTrancheDeposits(isSenior, false);
-    }
-
-    /// @notice Returns whether an immediate deposit may be accepted for a tranche.
-    /// @dev Immediate entry is permanently disabled because both tranches use asynchronous deposit requests.
-    /// @param isSenior True for senior tranche, false for junior tranche
-    /// @return True when an immediate deposit is currently permitted
-    function canAcceptInstantTrancheDeposits(
-        bool isSenior
-    ) public pure override returns (bool) {
-        isSenior;
-        return false;
+        return _canAcceptTrancheDeposits(isSenior);
     }
 
     function _canAcceptTrancheDeposits(
-        bool isSenior,
-        bool requireNoOpenPositions
+        bool isSenior
     ) internal view returns (bool) {
         (
             HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
             HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
         ) = _getHousePoolSnapshots();
-        if (requireNoOpenPositions && accountingSnapshot.hasOpenPositions) {
+        if (_entryStatusBlocked(accountingSnapshot, statusSnapshot)) {
             return false;
         }
         HousePoolContext memory ctx = _buildHousePoolContext(accountingSnapshot, statusSnapshot);
+        if (isSenior
+                ? ctx.pendingState.waterfall.seniorPrincipal == 0 && ctx.pendingState.seniorSupply != 0
+                : ctx.pendingState.waterfall.juniorPrincipal == 0 && ctx.pendingState.juniorSupply != 0) {
+            return false;
+        }
         bool commonGateOpen = HousePoolTrancheGateLib.trancheDepositsAllowed(
             canAcceptOrdinaryDeposits(),
             paused(),
@@ -738,17 +730,6 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     // TRANCHE DEPOSITS & WITHDRAWALS
     // ==========================================
 
-    /// @notice Deposits USDC into the senior tranche and raises its protected high-water mark.
-    /// @dev Retained only for interface compatibility. Ordinary entry is fully asynchronous and this legacy
-    ///      vault-controlled accounting path is disabled.
-    /// @param amount USDC to deposit (6 decimals)
-    function depositSenior(
-        uint256 amount
-    ) external view override(IHousePool, IPerpsLPActions) onlySeniorVault {
-        amount;
-        revert HousePool__SynchronousLpActionsDisabled();
-    }
-
     /// @notice Reserves governed capacity for a delayed senior deposit request.
     /// @dev Uses the same conservative pending accounting projection as final admission. The exact configured senior
     ///      vault is the only authorized caller.
@@ -772,73 +753,48 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         reservedSeniorDepositAssetsUsdc -= amount;
     }
 
-    /// @notice Deposits USDC into the junior tranche.
-    /// @dev Retained only for interface compatibility. Ordinary entry is fully asynchronous and this legacy
-    ///      vault-controlled accounting path is disabled.
-    /// @param amount USDC to deposit (6 decimals)
-    function depositJunior(
-        uint256 amount
-    ) external view override(IHousePool, IPerpsLPActions) onlyVault {
-        amount;
-        revert HousePool__SynchronousLpActionsDisabled();
-    }
-
-    /// @dev Concrete compatibility selector for integrations compiled against the old vault ABI.
-    function depositReservedSenior(
-        uint256 amount
-    ) external pure {
-        amount;
-        revert HousePool__SynchronousLpActionsDisabled();
-    }
-
-    /// @dev Concrete compatibility selector for integrations compiled against the old vault ABI.
-    function withdrawSenior(
-        uint256 amount,
-        address receiver
-    ) external pure {
-        amount;
-        receiver;
-        revert HousePool__SynchronousLpActionsDisabled();
-    }
-
-    /// @dev Concrete compatibility selector for integrations compiled against the old vault ABI.
-    function withdrawJunior(
-        uint256 amount,
-        address receiver
-    ) external pure {
-        amount;
-        receiver;
-        revert HousePool__SynchronousLpActionsDisabled();
-    }
-
-    /// @notice Atomically clears matured LP redemption and deposit epochs in strict tranche order.
-    /// @dev Captures one engine snapshot pair, reconciles and checkpoints carry once, and freezes all withdrawal
-    ///      budgets before any deposit escrow enters the pool. Senior withdrawals have absolute priority over
-    ///      junior withdrawals. Entries run junior-first and senior-second, remain deferred while paused or unsafe,
-    ///      and never increase the withdrawal budget of this call. Each phase visits at most 16 nonempty epochs. A
-    ///      pass that advances no queue item reverts, rolling back its reconcile and carry checkpoints.
-    function settleLpEpoch()
-        external
-        override(IHousePool, IPerpsLPActions)
-        nonReentrant
-        returns (IHousePool.LpEpochSettlementResult memory result)
-    {
-        if (seniorVault == address(0) || juniorVault == address(0)) {
-            revert HousePool__ZeroAddress();
-        }
-
+    /// @notice Clears matured LP epochs using Router-bound mark data whenever open positions require atomic refresh.
+    /// @dev No-position and oracle-frozen settlement remain permissionless from the cached mark. With live or FAD-only
+    ///      open positions, the caller must be the Router and its exact Engine-cached mark must not predate the epoch.
+    function settleLpEpoch(
+        uint256 expectedMarkPrice,
+        uint256 expectedPublishTime
+    ) external override nonReentrant returns (IHousePool.LpEpochSettlementResult memory result) {
         (
             HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
             HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
         ) = _getHousePoolSnapshots();
+        uint256 cutoffEpoch = block.timestamp / LP_EPOCH_DURATION;
+        if (accountingSnapshot.hasOpenPositions && !statusSnapshot.oracleFrozen) {
+            if (
+                msg.sender != ENGINE.orderRouter() || ENGINE.lastMarkPrice() != expectedMarkPrice
+                    || statusSnapshot.lastMarkTime != expectedPublishTime
+            ) {
+                revert HousePool__Unauthorized();
+            }
+            if (expectedPublishTime / LP_EPOCH_DURATION < cutoffEpoch) {
+                revert HousePool__MarkPriceStale();
+            }
+        }
+        return _settleLpEpoch(accountingSnapshot, statusSnapshot, cutoffEpoch);
+    }
+
+    /// @dev Shared bounded settlement body. The caller supplies exactly one Engine snapshot pair and epoch cutoff.
+    function _settleLpEpoch(
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
+        HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot,
+        uint256 cutoffEpoch
+    ) internal returns (IHousePool.LpEpochSettlementResult memory result) {
+        if (seniorVault == address(0) || juniorVault == address(0)) {
+            revert HousePool__ZeroAddress();
+        }
         _requireWithdrawalsLive(statusSnapshot);
         _requireFreshMark(accountingSnapshot, statusSnapshot);
 
-        HousePoolContext memory depositContext = _buildHousePoolContext(accountingSnapshot, statusSnapshot, false);
         _reconcile(accountingSnapshot, statusSnapshot);
         _checkpointEngineCarryIndexes();
 
-        result.cutoffEpoch = currentLpEpoch();
+        result.cutoffEpoch = cutoffEpoch;
         RedemptionPhase memory juniorPhase;
         juniorPhase.pricingPrincipal = juniorPrincipal;
         juniorPhase.pricingSupply = _juniorShareSupply();
@@ -859,7 +815,9 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         );
         if (seniorPhase.fundedAssets > 0) {
             HousePoolWaterfallAccountingLib.WaterfallState memory nextState =
-                HousePoolWaterfallAccountingLib.scaleSeniorOnWithdraw(_getWaterfallState(), seniorPhase.fundedAssets);
+                HousePoolWaterfallAccountingLib.scaleSeniorOnWithdraw(
+                    _getWaterfallState(), seniorPhase.fundedAssets, seniorPhase.fundedShares, seniorPhase.pricingSupply
+                );
             _setWaterfallState(nextState);
             accountedAssets -= seniorPhase.fundedAssets;
             freeUsdc -= seniorPhase.fundedAssets;
@@ -917,23 +875,13 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             return result;
         }
 
-        DepositPhase memory juniorDepositPhase = DepositPhase({
-            pricingAssets: _saturatingSubtract(
-                depositContext.pendingState.waterfall.juniorPrincipal, result.juniorFundedAssets
-            ),
-            pricingSupply: _juniorShareSupply(),
-            acceptedAssets: 0,
-            mintedShares: 0,
-            processedEpochs: 0,
-            backlog: false
-        });
-        juniorDepositPhase = _settleDepositPhase(
-            juniorVault,
-            result.cutoffEpoch,
-            juniorDepositPhase,
-            _settlementFeeBps(false, statusSnapshot.oracleFrozen),
-            false
-        );
+        DepositPhase memory juniorDepositPhase;
+        juniorDepositPhase.pricingAssets = juniorPrincipal;
+        juniorDepositPhase.pricingSupply = _juniorShareSupply();
+        bool juniorActivationDeferred = juniorDepositPhase.pricingAssets == 0 && juniorDepositPhase.pricingSupply != 0;
+        if (!juniorActivationDeferred) {
+            juniorDepositPhase = _settleDepositPhase(juniorVault, result.cutoffEpoch, juniorDepositPhase, 0, false);
+        }
         result.juniorDepositAssets = juniorDepositPhase.acceptedAssets;
         result.juniorDepositShares = juniorDepositPhase.mintedShares;
         if (juniorDepositPhase.backlog) {
@@ -942,26 +890,17 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             return result;
         }
 
-        DepositPhase memory seniorDepositPhase = DepositPhase({
-            pricingAssets: _saturatingSubtract(
-                depositContext.pendingState.waterfall.seniorPrincipal, result.seniorFundedAssets
-            ),
-            pricingSupply: _seniorShareSupply(),
-            acceptedAssets: 0,
-            mintedShares: 0,
-            processedEpochs: 0,
-            backlog: false
-        });
-        seniorDepositPhase = _settleDepositPhase(
-            seniorVault,
-            result.cutoffEpoch,
-            seniorDepositPhase,
-            _settlementFeeBps(true, statusSnapshot.oracleFrozen),
-            true
-        );
+        DepositPhase memory seniorDepositPhase;
+        seniorDepositPhase.pricingAssets = seniorPrincipal;
+        seniorDepositPhase.pricingSupply = _seniorShareSupply();
+        bool seniorActivationDeferred = seniorDepositPhase.pricingAssets == 0 && seniorDepositPhase.pricingSupply != 0;
+        if (!seniorActivationDeferred) {
+            seniorDepositPhase = _settleDepositPhase(seniorVault, result.cutoffEpoch, seniorDepositPhase, 0, true);
+        }
         result.seniorDepositAssets = seniorDepositPhase.acceptedAssets;
         result.seniorDepositShares = seniorDepositPhase.mintedShares;
-        result.entriesDeferred = juniorDepositPhase.backlog || seniorDepositPhase.backlog;
+        result.entriesDeferred = seniorDepositPhase.backlog
+            || ((juniorActivationDeferred || seniorActivationDeferred) && _hasMaturedDepositHead(result.cutoffEpoch));
 
         _emitLpEpochSettled(result, juniorDepositPhase.processedEpochs + seniorDepositPhase.processedEpochs);
     }
@@ -1128,6 +1067,9 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
         HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
     ) internal view returns (bool) {
+        if (_entryStatusBlocked(accountingSnapshot, statusSnapshot)) {
+            return false;
+        }
         uint256 pendingClaimantAssets = _pendingClaimantBucketAssets();
         uint256 projectedUnassignedAssets = unassignedAssets;
         if (pendingClaimantAssets > type(uint256).max - projectedUnassignedAssets) {
@@ -1143,6 +1085,14 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             seniorPrincipal,
             seniorHighWaterMark
         );
+    }
+
+    function _entryStatusBlocked(
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
+        HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
+    ) internal pure returns (bool) {
+        return statusSnapshot.oracleFrozen || statusSnapshot.degradedMode
+            || HousePoolAccountingLib.buildReconcileSnapshot(accountingSnapshot).deficit != 0;
     }
 
     function _settlementFeeBps(
@@ -1296,10 +1246,9 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         }
     }
 
-    /// @notice Returns tranche principals for deposit pricing as if the deposit-side reconcile ran now.
-    /// @dev When mark-dependent reconciliation is permitted, deposit-side pricing intentionally excludes
-    ///      conservative unrealized trader MtM while retaining realized pool losses. Trader-claim liabilities,
-    ///      coupon accrual, and settleable claimant-bucket routing remain part of the projection.
+    /// @notice Returns tranche principals for deposit pricing under the canonical terminal-NAV reconcile.
+    /// @dev Entry and exit project the same signed, collateral-capped terminal price delta, trader claims, coupon
+    ///      accrual, realized value, and settleable claimant-bucket routing from one Engine snapshot.
     /// @return seniorPrincipalUsdc Simulated senior principal after deposit reconcile (6 decimals)
     /// @return juniorPrincipalUsdc Simulated junior principal after deposit reconcile (6 decimals)
     function getPendingDepositTrancheState()
@@ -1307,14 +1256,13 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         view
         returns (uint256 seniorPrincipalUsdc, uint256 juniorPrincipalUsdc)
     {
-        HousePoolContext memory ctx = _buildCurrentHousePoolDepositContext();
+        HousePoolContext memory ctx = _buildCurrentHousePoolContext();
         seniorPrincipalUsdc = ctx.pendingState.waterfall.seniorPrincipal;
         juniorPrincipalUsdc = ctx.pendingState.waterfall.juniorPrincipal;
     }
 
     /// @notice Returns whether a reconcile triggered by deposit finalization would leave senior impaired.
-    /// @dev Uses the standard conservative reconcile snapshot, including withdrawal-side unrealized MtM, because
-    ///      the subsequent pool deposit performs that reconcile before accepting assets.
+    /// @dev Uses the same signed terminal-NAV snapshot that settlement reconciles before accepting assets.
     /// @return True when projected senior principal is below its projected high-water mark
     function isSeniorImpairedAfterPendingDepositReconcile() external view returns (bool) {
         HousePoolContext memory ctx = _buildCurrentHousePoolContext();
@@ -1368,13 +1316,13 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         return _seniorCommitmentsWithinLimits(ctx.pendingState.waterfall);
     }
 
-    /// @notice Returns the configured senior LP fee for oracle-frozen entry and exit.
+    /// @notice Returns the configured senior LP exit fee for oracle-frozen settlement.
     /// @return Configured senior frozen-oracle fee in basis points
     function seniorFrozenLpFeeBps() public view returns (uint256) {
         return poolConfig.seniorFrozenLpFeeBps;
     }
 
-    /// @notice Returns the configured junior LP fee for oracle-frozen entry and exit.
+    /// @notice Returns the configured junior LP exit fee for oracle-frozen settlement.
     /// @return Configured junior frozen-oracle fee in basis points
     function juniorFrozenLpFeeBps() public view returns (uint256) {
         return poolConfig.juniorFrozenLpFeeBps;
@@ -1387,8 +1335,8 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     }
 
     /// @notice Returns the active frozen-oracle LP fee for a tranche, or zero outside frozen mode.
-    /// @dev TrancheVault applies this same-tranche fee to ERC4626 entry and exit quotes; it is retained for
-    ///      incumbent LPs rather than paid to the protocol treasury.
+    /// @dev TrancheVault applies this same-tranche fee to exit quotes; entry requests and activations are unavailable
+    ///      while the oracle is frozen. The fee is retained for incumbent LPs rather than paid to the protocol treasury.
     /// @param isSenior True for senior tranche, false for junior tranche
     /// @return Active fee in basis points, or zero when the oracle is not frozen
     function frozenLpFeeBps(
@@ -1423,6 +1371,9 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         viewData.seniorPrincipalUsdc = seniorPrincipal;
         viewData.juniorPrincipalUsdc = juniorPrincipal;
         viewData.seniorHighWaterMarkUsdc = seniorHighWaterMark;
+        HousePoolAccountingLib.ReconcileSnapshot memory reconcileSnapshot =
+            HousePoolAccountingLib.buildReconcileSnapshot(accountingSnapshot);
+        viewData.currentTerminalDeficitUsdc = reconcileSnapshot.deficit;
         viewData.markFresh = HousePoolFreshnessLib.markFresh(accountingSnapshot, statusSnapshot, block.timestamp);
         viewData.oracleFrozen = statusSnapshot.oracleFrozen;
         viewData.degradedMode = statusSnapshot.degradedMode;
@@ -1557,6 +1508,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         unassignedAssets = plan.state.unassignedAssets;
 
         if (markFresh) {
+            terminalDeficitUsdc = reconcileSnapshot.deficit;
             lastReconcileTime = block.timestamp;
 
             uint256 juniorRevenueWithoutOwners = HousePoolReconcilePlanLib.juniorRevenueWithoutOwners(plan);
@@ -1581,19 +1533,10 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
         HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
     ) internal view returns (HousePoolContext memory ctx) {
-        return _buildHousePoolContext(accountingSnapshot, statusSnapshot, true);
-    }
-
-    function _buildHousePoolContext(
-        HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
-        HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot,
-        bool useWithdrawalMtm
-    ) internal view returns (HousePoolContext memory ctx) {
         ctx.accountingSnapshot = accountingSnapshot;
         ctx.statusSnapshot = statusSnapshot;
-        HousePoolAccountingLib.ReconcileSnapshot memory reconcileSnapshot = useWithdrawalMtm
-            ? HousePoolAccountingLib.buildReconcileSnapshot(accountingSnapshot)
-            : HousePoolAccountingLib.buildDepositReconcileSnapshot(accountingSnapshot);
+        HousePoolAccountingLib.ReconcileSnapshot memory reconcileSnapshot =
+            HousePoolAccountingLib.buildReconcileSnapshot(accountingSnapshot);
         HousePoolPendingPreviewLib.ClaimantPendingBuckets memory claimantBuckets = _getPendingClaimantBuckets();
         HousePoolPendingPreviewLib.ClaimantPendingBuckets memory settleableClaimantBuckets =
             _settleablePendingClaimantBuckets(reconcileSnapshot, claimantBuckets);
@@ -1613,10 +1556,6 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
 
     function _buildCurrentHousePoolContext() internal view returns (HousePoolContext memory ctx) {
         return _buildHousePoolContext(_getHousePoolInputSnapshot(), _getHousePoolStatusSnapshot());
-    }
-
-    function _buildCurrentHousePoolDepositContext() internal view returns (HousePoolContext memory ctx) {
-        return _buildHousePoolContext(_getHousePoolInputSnapshot(), _getHousePoolStatusSnapshot(), false);
     }
 
     function _previewPendingAccountingState(

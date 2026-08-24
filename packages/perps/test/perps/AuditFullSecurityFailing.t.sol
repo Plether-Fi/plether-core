@@ -51,7 +51,7 @@ contract AuditFullSecurityFailing_CooldownBypass is BasePerpTest {
         vm.warp(juniorVault.depositEpochStart(depositRequestId));
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
-        pool.settleLpEpoch();
+        _settleLpEpochForTest();
 
         vm.prank(alice);
         juniorVault.claimDeposit(depositRequestId, 100_000e6, alice, alice);
@@ -94,12 +94,12 @@ contract AuditFullSecurityFailing_SeniorRateRetroactive is BasePerpTest {
 
 }
 
-contract AuditFullSecurityFailing_BadDebtClearing is BasePerpTest {
+contract AuditFullSecurityFailing_PriceWriteoff is BasePerpTest {
 
     address winner = address(0xAAA1);
     address loser = address(0xBBB1);
 
-    function test_L1_ClearBadDebtRequiresOnchainRecapitalizationProof() public {
+    function test_L1_UncollectiblePriceTailIsWrittenOffWithoutMutableDebtState() public {
         address winnerAccount = winner;
         address loserAccount = loser;
 
@@ -109,16 +109,28 @@ contract AuditFullSecurityFailing_BadDebtClearing is BasePerpTest {
         _open(winnerAccount, CfdTypes.Side.BULL, 100_000e18, 100_000e6, 1.5e8);
         _open(loserAccount, CfdTypes.Side.BULL, 100_000e18, 1000e6, 0.5e8);
 
-        vm.startPrank(address(router));
+        vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
-        engine.liquidatePosition(loserAccount, 1e8, pool.totalAssets(), uint64(block.timestamp), address(this));
-        vm.stopPrank();
 
-        uint256 badDebt = engine.accumulatedBadDebtUsdc();
-        assertGt(badDebt, 0, "Setup must realize bad debt");
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(loserAccount, 1e8);
+        assertLt(preview.pnlUsdc, 0, "Setup must realize a trader price loss");
+        uint256 priceLossUsdc = uint256(-preview.pnlUsdc);
+        uint256 collectibleCapUsdc =
+            engineAccountLens.getAccountLedgerSnapshot(loserAccount).terminalPriceCollectibleCapUsdc;
+        assertGt(priceLossUsdc, collectibleCapUsdc, "Setup must contain an uncollectible terminal price tail");
+        assertEq(preview.badDebtUsdc, 0, "V2 price tails are diagnostic writeoffs, not protocol debt");
 
-        vm.expectRevert();
-        engine.clearBadDebt(badDebt);
+        uint256 depth = pool.totalAssets();
+        vm.prank(address(router));
+        engine.liquidatePosition(loserAccount, 1e8, depth, uint64(block.timestamp), address(this));
+
+        (uint256 remainingSize,,,,,,) = engine.positions(loserAccount);
+        assertEq(remainingSize, 0, "Diagnostic writeoff must not block terminal liquidation");
+
+        (bool debtGetterExists,) = address(engine).staticcall(abi.encodeWithSignature("accumulatedBadDebtUsdc()"));
+        assertFalse(debtGetterExists, "V2 must not expose mutable accumulated-debt state");
+        (bool debtClearExists,) = address(engine).call(abi.encodeWithSignature("clearBadDebt(uint256)", priceLossUsdc));
+        assertFalse(debtClearExists, "V2 must not expose the retired debt-clearing selector");
     }
 
 }

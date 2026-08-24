@@ -162,7 +162,7 @@ contract PerpHousePoolLifecycleHandler is Test {
         }
 
         _refreshMark();
-        pool.settleLpEpoch();
+        pool.settleLpEpoch(0, 0);
     }
 
     function claimDeposit(

@@ -13,6 +13,7 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
+import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
@@ -48,6 +49,7 @@ contract MockToken is ERC20 {
 contract MockClearinghouseEngine {
 
     address public orderRouter;
+    address public settlementSidecar;
     uint256 public carryCheckpointCalls;
     address public lastCarryAccountId;
 
@@ -55,6 +57,12 @@ contract MockClearinghouseEngine {
         address router
     ) external {
         orderRouter = router;
+    }
+
+    function setSettlementSidecar(
+        address sidecar
+    ) external {
+        settlementSidecar = sidecar;
     }
 
     function checkWithdraw(
@@ -75,6 +83,7 @@ contract MockClearinghouseEngine {
 contract MockMarginReservationRouter {
 
     mapping(address => uint64[]) internal reservationIdsByAccount;
+    mapping(address => uint256) internal executionBountyByAccount;
 
     function setMarginReservationIds(
         address account,
@@ -94,6 +103,21 @@ contract MockMarginReservationRouter {
         for (uint256 i = 0; i < stored.length; ++i) {
             orderIds[i] = stored[i];
         }
+    }
+
+    function setExecutionBountyUsdc(
+        address account,
+        uint256 executionBountyUsdc
+    ) external {
+        executionBountyByAccount[account] = executionBountyUsdc;
+    }
+
+    function getAccountReservations(
+        address account
+    ) external view returns (uint256 committedMarginUsdc, uint256 executionBountyUsdc, uint256 pendingOrderCount) {
+        committedMarginUsdc = 0;
+        executionBountyUsdc = executionBountyByAccount[account];
+        pendingOrderCount = executionBountyUsdc == 0 ? 0 : 1;
     }
 
 }
@@ -254,6 +278,27 @@ contract MarginClearinghouseTest is Test {
         assertEq(buckets.activePositionMarginUsdc, 600 * 1e6);
         assertEq(buckets.otherLockedMarginUsdc, 300 * 1e6);
         assertEq(buckets.freeSettlementUsdc, 1100 * 1e6);
+    }
+
+    function test_GetPnlIsolationBuckets_ReportsFourIndependentLocks() public {
+        vm.prank(alice);
+        clearinghouse.deposit(aliceAccount, 1000 * 1e6);
+
+        vm.startPrank(engine);
+        clearinghouse.lockPositionMargin(aliceAccount, 200 * 1e6);
+        clearinghouse.lockLiquidationReserve(aliceAccount, 100 * 1e6);
+        clearinghouse.lockCommittedOrderMargin(aliceAccount, 150 * 1e6);
+        clearinghouse.lockActionReserve(aliceAccount, 50 * 1e6);
+        vm.stopPrank();
+
+        IMarginClearinghouse.PnlIsolationBuckets memory buckets = clearinghouse.getPnlIsolationBuckets(aliceAccount);
+        assertEq(buckets.settlementBalanceUsdc, 1000 * 1e6);
+        assertEq(buckets.pnlPledgeUsdc, 200 * 1e6);
+        assertEq(buckets.liquidationReserveUsdc, 100 * 1e6);
+        assertEq(buckets.orderMarginUsdc, 150 * 1e6);
+        assertEq(buckets.actionReserveUsdc, 50 * 1e6);
+        assertEq(buckets.totalLockedUsdc, 500 * 1e6);
+        assertEq(buckets.freeSettlementUsdc, 500 * 1e6);
     }
 
     function test_GetLockedMarginBuckets_ReturnsTypedBucketBreakdown() public {
@@ -458,7 +503,7 @@ contract MarginClearinghouseTest is Test {
         assertEq(mockEngine.lastCarryAccountId(), aliceAccount, "Release checkpoint should use the reservation account");
     }
 
-    function test_UnlockReservedSettlement_CheckpointsIndexedCarryDirectly() public {
+    function test_GenericReservedUnlockCheckpointsButFreshEngineBountyLockDoesNotReenter() public {
         vm.prank(alice);
         clearinghouse.deposit(aliceAccount, 1000 * 1e6);
 
@@ -480,6 +525,43 @@ contract MarginClearinghouseTest is Test {
             aliceAccount,
             "Reserved-settlement checkpoint should use the mutated account"
         );
+
+        uint256 checkpointCallsBeforeFreshBountyLock = mockEngine.carryCheckpointCalls();
+        vm.prank(engine);
+        clearinghouse.reserveCloseExecutionBountyFromSettlement(aliceAccount, 50 * 1e6);
+
+        assertEq(
+            mockEngine.carryCheckpointCalls(),
+            checkpointCallsBeforeFreshBountyLock,
+            "Engine-controlled fresh bounty lock must not reenter the engine checkpoint hook"
+        );
+        assertEq(clearinghouse.actionReserveUsdc(aliceAccount), 50 * 1e6);
+    }
+
+    function test_CloseBountySettlementHooks_AuthorizeOnlyEngineAndBoundSidecar() public {
+        address sidecar = address(0x5E771E);
+        vm.prank(alice);
+        clearinghouse.deposit(aliceAccount, 1000 * 1e6);
+        mockEngine.setSettlementSidecar(sidecar);
+
+        vm.prank(engine);
+        clearinghouse.reserveCloseExecutionBountyFromSettlement(aliceAccount, 10 * 1e6);
+        vm.prank(sidecar);
+        clearinghouse.reserveCloseExecutionBountyFromSettlement(aliceAccount, 20 * 1e6);
+        vm.prank(sidecar);
+        clearinghouse.reserveStaleCloseExecutionBountyFromSettlement(aliceAccount, 30 * 1e6);
+
+        assertEq(clearinghouse.actionReserveUsdc(aliceAccount), 60 * 1e6, "authorized paths must reserve exactly");
+
+        vm.prank(address(mockRouter));
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__NotOperator.selector);
+        clearinghouse.reserveCloseExecutionBountyFromSettlement(aliceAccount, 1);
+
+        vm.prank(alice);
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__NotOperator.selector);
+        clearinghouse.reserveStaleCloseExecutionBountyFromSettlement(aliceAccount, 1);
+
+        assertEq(clearinghouse.actionReserveUsdc(aliceAccount), 60 * 1e6, "rejected callers must not mutate reserve");
     }
 
     function test_ConsumeOrderReservation_ReducesResidualAndKeepsAggregateParity() public {
@@ -660,11 +742,11 @@ contract MarginClearinghouseTest is Test {
 
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceAccount);
         assertEq(freeConsumed, 1100 * 1e6);
-        assertEq(marginConsumed, 100 * 1e6);
-        assertEq(uncovered, 0);
-        assertEq(buckets.settlementBalanceUsdc, 800 * 1e6);
-        assertEq(buckets.totalLockedMarginUsdc, 800 * 1e6);
-        assertEq(buckets.activePositionMarginUsdc, 500 * 1e6);
+        assertEq(marginConsumed, 0, "Carry/action loss must not consume PnL pledge");
+        assertEq(uncovered, 100 * 1e6);
+        assertEq(buckets.settlementBalanceUsdc, 900 * 1e6);
+        assertEq(buckets.totalLockedMarginUsdc, 900 * 1e6);
+        assertEq(buckets.activePositionMarginUsdc, 600 * 1e6);
         assertEq(buckets.otherLockedMarginUsdc, 300 * 1e6);
         assertEq(buckets.freeSettlementUsdc, 0);
     }
@@ -683,18 +765,18 @@ contract MarginClearinghouseTest is Test {
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceAccount);
         IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(61);
         assertEq(freeConsumed, 1100 * 1e6);
-        assertEq(marginConsumed, 600 * 1e6);
-        assertEq(uncovered, 300 * 1e6, "Settlement-loss planner should report residual uncovered loss");
-        assertEq(buckets.settlementBalanceUsdc, 300 * 1e6);
-        assertEq(buckets.totalLockedMarginUsdc, 300 * 1e6);
-        assertEq(buckets.activePositionMarginUsdc, 0);
+        assertEq(marginConsumed, 0);
+        assertEq(uncovered, 900 * 1e6, "Only free settlement is eligible for carry/action loss");
+        assertEq(buckets.settlementBalanceUsdc, 900 * 1e6);
+        assertEq(buckets.totalLockedMarginUsdc, 900 * 1e6);
+        assertEq(buckets.activePositionMarginUsdc, 600 * 1e6);
         assertEq(buckets.otherLockedMarginUsdc, 300 * 1e6);
         assertEq(buckets.freeSettlementUsdc, 0);
         assertEq(uint256(reservation.status), uint256(IMarginClearinghouse.ReservationStatus.Active));
         assertEq(reservation.remainingAmountUsdc, 300 * 1e6);
     }
 
-    function test_ConsumeLiquidationResidual_ConsumesQueuedCommittedMarginBeforeBadDebt() public {
+    function test_ConsumeLiquidationResidual_RejectsOrderMarginConsumption() public {
         vm.prank(alice);
         clearinghouse.deposit(aliceAccount, 2000 * 1e6);
 
@@ -711,23 +793,14 @@ contract MarginClearinghouseTest is Test {
             positionMarginUnlockedUsdc: 600 * 1e6,
             otherLockedMarginUnlockedUsdc: 100 * 1e6
         });
-        uint256 seizedUsdc = clearinghouse.applyLiquidationSettlementPlan(
-            aliceAccount, reservationIds, plan, engine, address(0), 0, address(0), 0
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InvalidMarginBucket.selector);
+        clearinghouse.applyLiquidationSettlementPlan(
+            aliceAccount, reservationIds, plan, engine, address(0), 0, address(0), 0, 0
         );
         vm.stopPrank();
-
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceAccount);
-        IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(41);
-        assertEq(seizedUsdc, 1800 * 1e6);
-        assertEq(buckets.settlementBalanceUsdc, 200 * 1e6);
-        assertEq(buckets.totalLockedMarginUsdc, 200 * 1e6);
-        assertEq(buckets.otherLockedMarginUsdc, 200 * 1e6);
-        assertEq(buckets.freeSettlementUsdc, 0);
-        assertEq(uint256(reservation.status), uint256(IMarginClearinghouse.ReservationStatus.Active));
-        assertEq(reservation.remainingAmountUsdc, 200 * 1e6);
     }
 
-    function test_ConsumeCloseLoss_ConsumesQueuedCommittedMarginBeforeShortfall() public {
+    function test_ConsumeCloseLoss_ConsumesOnlyPnlPledge() public {
         vm.prank(alice);
         clearinghouse.deposit(aliceAccount, 2000 * 1e6);
 
@@ -742,21 +815,17 @@ contract MarginClearinghouseTest is Test {
 
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceAccount);
         IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(31);
-        assertEq(seizedUsdc, 1800 * 1e6);
-        assertEq(shortfallUsdc, 0);
+        assertEq(seizedUsdc, 600 * 1e6);
+        assertEq(shortfallUsdc, 1200 * 1e6);
         assertEq(protocolFeeCreditedUsdc, 0);
-        assertEq(buckets.settlementBalanceUsdc, 200 * 1e6);
-        assertEq(
-            buckets.totalLockedMarginUsdc,
-            200 * 1e6,
-            "Close loss helper should keep only unconsumed queued margin locked"
-        );
-        assertEq(buckets.freeSettlementUsdc, 0);
+        assertEq(buckets.settlementBalanceUsdc, 1400 * 1e6);
+        assertEq(buckets.totalLockedMarginUsdc, 300 * 1e6);
+        assertEq(buckets.freeSettlementUsdc, 1100 * 1e6);
         assertEq(uint256(reservation.status), uint256(IMarginClearinghouse.ReservationStatus.Active));
-        assertEq(reservation.remainingAmountUsdc, 200 * 1e6);
+        assertEq(reservation.remainingAmountUsdc, 300 * 1e6);
     }
 
-    function test_ConsumeCloseLoss_RevertsWhenReservationIdsDoNotCoverCommittedBucket() public {
+    function test_ConsumeCloseLoss_DoesNotRequireReservationIds() public {
         vm.prank(alice);
         clearinghouse.deposit(aliceAccount, 2000 * 1e6);
 
@@ -764,12 +833,16 @@ contract MarginClearinghouseTest is Test {
         clearinghouse.lockPositionMargin(aliceAccount, 600 * 1e6);
         clearinghouse.lockCommittedOrderMargin(aliceAccount, 300 * 1e6);
         uint64[] memory reservationIds = new uint64[](0);
-        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__IncompleteReservationCoverage.selector);
-        clearinghouse.consumeCloseLoss(aliceAccount, reservationIds, 1800 * 1e6, 0, true, engine, address(0), 0);
+        (uint256 seizedUsdc, uint256 shortfallUsdc,) =
+            clearinghouse.consumeCloseLoss(aliceAccount, reservationIds, 1800 * 1e6, 0, true, engine, address(0), 0);
         vm.stopPrank();
+
+        assertEq(seizedUsdc, 600 * 1e6);
+        assertEq(shortfallUsdc, 1200 * 1e6);
+        assertEq(clearinghouse.orderMarginUsdc(aliceAccount), 300 * 1e6);
     }
 
-    function test_ConsumeCloseLoss_RevertsWhenCommittedBucketMissingFromReservationIdsEvenWithShortfall() public {
+    function test_ConsumeCloseLoss_LeavesAggregateOrderMarginUntouched() public {
         vm.prank(alice);
         clearinghouse.deposit(aliceAccount, 1000 * 1e6);
 
@@ -777,42 +850,45 @@ contract MarginClearinghouseTest is Test {
         clearinghouse.lockPositionMargin(aliceAccount, 600 * 1e6);
         clearinghouse.lockCommittedOrderMargin(aliceAccount, 300 * 1e6);
         uint64[] memory reservationIds = new uint64[](0);
-        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__IncompleteReservationCoverage.selector);
-        clearinghouse.consumeCloseLoss(aliceAccount, reservationIds, 1500 * 1e6, 0, true, engine, address(0), 0);
+        (uint256 seizedUsdc, uint256 shortfallUsdc,) =
+            clearinghouse.consumeCloseLoss(aliceAccount, reservationIds, 1500 * 1e6, 0, true, engine, address(0), 0);
         vm.stopPrank();
+
+        assertEq(seizedUsdc, 600 * 1e6);
+        assertEq(shortfallUsdc, 900 * 1e6);
+        assertEq(clearinghouse.orderMarginUsdc(aliceAccount), 300 * 1e6);
     }
 
-    function test_ConsumeCloseLoss_PartialCloseExcludesQueuedCommittedMarginFromReachability() public {
+    function test_ConsumeCloseLoss_PartialCloseCollectsBeforeUnlockAndProtectsResidualPledge() public {
         vm.prank(alice);
         clearinghouse.deposit(aliceAccount, 1000 * 1e6);
 
         vm.startPrank(engine);
         clearinghouse.lockPositionMargin(aliceAccount, 400 * 1e6);
         clearinghouse.reserveCommittedOrderMargin(aliceAccount, 31, 300 * 1e6);
-        clearinghouse.unlockPositionMargin(aliceAccount, 300 * 1e6);
 
         uint64[] memory reservationIds = new uint64[](1);
         reservationIds[0] = 31;
         (uint256 seizedUsdc, uint256 shortfallUsdc, uint256 protocolFeeCreditedUsdc) = clearinghouse.consumeCloseLoss(
-            aliceAccount, reservationIds, 700 * 1e6, 100 * 1e6, false, engine, address(0), 0
+            aliceAccount, reservationIds, 250 * 1e6, 100 * 1e6, false, engine, address(0), 0
         );
+        clearinghouse.unlockPositionMargin(aliceAccount, 50 * 1e6);
         vm.stopPrank();
 
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceAccount);
         IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(31);
 
-        assertEq(seizedUsdc, 600 * 1e6, "Partial close should only seize free settlement after excluding queued margin");
-        assertEq(shortfallUsdc, 100 * 1e6, "Queued margin should remain protected and surface a shortfall");
+        assertEq(seizedUsdc, 250 * 1e6, "Price loss should consume only the closed lots' pledge allocation");
+        assertEq(shortfallUsdc, 0);
         assertEq(protocolFeeCreditedUsdc, 0);
-        assertEq(
-            buckets.settlementBalanceUsdc, 400 * 1e6, "Settlement debit should stop before invading queued collateral"
-        );
+        assertEq(buckets.settlementBalanceUsdc, 750 * 1e6);
         assertEq(
             buckets.totalLockedMarginUsdc,
             400 * 1e6,
             "Remaining locked margin should still include live position and queued order"
         );
-        assertEq(buckets.freeSettlementUsdc, 0, "No free settlement should remain after the partial-close debit");
+        assertEq(buckets.activePositionMarginUsdc, 100 * 1e6, "Residual-position pledge must remain protected");
+        assertEq(buckets.freeSettlementUsdc, 350 * 1e6, "Only unused closed allocation becomes free after collection");
         assertEq(uint256(reservation.status), uint256(IMarginClearinghouse.ReservationStatus.Active));
         assertEq(
             reservation.remainingAmountUsdc, 300 * 1e6, "Queued reservation should remain untouched by partial close"
@@ -835,9 +911,9 @@ contract MarginClearinghouseTest is Test {
             positionMarginUnlockedUsdc: 600 * 1e6,
             otherLockedMarginUnlockedUsdc: 100 * 1e6
         });
-        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__IncompleteReservationCoverage.selector);
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InvalidMarginBucket.selector);
         clearinghouse.applyLiquidationSettlementPlan(
-            aliceAccount, reservationIds, plan, engine, address(0), 0, address(0), 0
+            aliceAccount, reservationIds, plan, engine, address(0), 0, address(0), 0, 0
         );
         vm.stopPrank();
     }
@@ -856,6 +932,106 @@ contract MarginClearinghouseTest is Test {
         assertEq(buckets.freeSettlementUsdc, 1000 * 1e6);
     }
 
+    function test_CreditPnlPledge_CreditsCustodyClassificationWithoutIncreasingFreeSettlement() public {
+        vm.prank(alice);
+        clearinghouse.deposit(aliceAccount, 1000 * 1e6);
+
+        vm.prank(engine);
+        clearinghouse.creditPnlPledge(aliceAccount, 200 * 1e6);
+
+        IMarginClearinghouse.PnlIsolationBuckets memory buckets = clearinghouse.getPnlIsolationBuckets(aliceAccount);
+        assertEq(buckets.settlementBalanceUsdc, 1200 * 1e6);
+        assertEq(buckets.pnlPledgeUsdc, 200 * 1e6);
+        assertEq(buckets.freeSettlementUsdc, 1000 * 1e6);
+    }
+
+    function test_PromoteOrderReservationToPnlPledge_ReclassifiesWithoutChangingTotalLocked() public {
+        vm.prank(alice);
+        clearinghouse.deposit(aliceAccount, 1000 * 1e6);
+
+        vm.startPrank(engine);
+        clearinghouse.reserveCommittedOrderMargin(aliceAccount, 81, 200 * 1e6);
+        clearinghouse.promoteOrderReservationToPnlPledge(81, 150 * 1e6);
+        vm.stopPrank();
+
+        IMarginClearinghouse.PnlIsolationBuckets memory buckets = clearinghouse.getPnlIsolationBuckets(aliceAccount);
+        IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(81);
+        assertEq(buckets.pnlPledgeUsdc, 150 * 1e6);
+        assertEq(buckets.orderMarginUsdc, 50 * 1e6);
+        assertEq(buckets.totalLockedUsdc, 200 * 1e6);
+        assertEq(buckets.freeSettlementUsdc, 800 * 1e6);
+        assertEq(reservation.remainingAmountUsdc, 50 * 1e6);
+        assertEq(uint256(reservation.status), uint256(IMarginClearinghouse.ReservationStatus.Active));
+    }
+
+    function test_ConsumePnlPledgeLoss_ProtectsFreeAndEveryReserveBucket() public {
+        vm.prank(alice);
+        clearinghouse.deposit(aliceAccount, 1000 * 1e6);
+
+        vm.startPrank(engine);
+        clearinghouse.lockPositionMargin(aliceAccount, 200 * 1e6);
+        clearinghouse.lockLiquidationReserve(aliceAccount, 100 * 1e6);
+        clearinghouse.lockCommittedOrderMargin(aliceAccount, 100 * 1e6);
+        clearinghouse.lockActionReserve(aliceAccount, 100 * 1e6);
+        (uint256 consumedUsdc, uint256 shortfallUsdc) =
+            clearinghouse.consumePnlPledgeLoss(aliceAccount, 350 * 1e6, engine);
+        vm.stopPrank();
+
+        IMarginClearinghouse.PnlIsolationBuckets memory buckets = clearinghouse.getPnlIsolationBuckets(aliceAccount);
+        assertEq(consumedUsdc, 200 * 1e6);
+        assertEq(shortfallUsdc, 150 * 1e6);
+        assertEq(buckets.settlementBalanceUsdc, 800 * 1e6);
+        assertEq(buckets.pnlPledgeUsdc, 0);
+        assertEq(buckets.liquidationReserveUsdc, 100 * 1e6);
+        assertEq(buckets.orderMarginUsdc, 100 * 1e6);
+        assertEq(buckets.actionReserveUsdc, 100 * 1e6);
+        assertEq(buckets.freeSettlementUsdc, 500 * 1e6);
+    }
+
+    function test_ConsumeActionCharge_UsesSpendableReserveThenFreeAndPreservesRouterBounty() public {
+        address recipient = address(0x5001);
+        address protocolTreasury = address(0xFEE5);
+        address keeper = address(0xB0A7);
+
+        vm.prank(alice);
+        clearinghouse.deposit(aliceAccount, 1200 * 1e6);
+        mockRouter.setExecutionBountyUsdc(aliceAccount, 150 * 1e6);
+
+        vm.startPrank(engine);
+        clearinghouse.lockPositionMargin(aliceAccount, 300 * 1e6);
+        clearinghouse.lockLiquidationReserve(aliceAccount, 100 * 1e6);
+        clearinghouse.lockCommittedOrderMargin(aliceAccount, 100 * 1e6);
+        clearinghouse.lockActionReserve(aliceAccount, 350 * 1e6);
+
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__ActionReserveMismatch.selector);
+        clearinghouse.consumeActionCharge(aliceAccount, 450 * 1e6, 350 * 1e6, 0, recipient, protocolTreasury, 50 * 1e6);
+
+        (uint256 collectedUsdc, uint256 protocolFeeCreditedUsdc) = clearinghouse.consumeActionCharge(
+            aliceAccount, 450 * 1e6, 200 * 1e6, 0, recipient, protocolTreasury, 50 * 1e6
+        );
+
+        IMarginClearinghouse.PnlIsolationBuckets memory beforeBountyPayment =
+            clearinghouse.getPnlIsolationBuckets(aliceAccount);
+        assertEq(beforeBountyPayment.actionReserveUsdc, 150 * 1e6);
+
+        mockRouter.setExecutionBountyUsdc(aliceAccount, 0);
+        clearinghouse.transferReservedSettlement(aliceAccount, keeper, 150 * 1e6);
+        vm.stopPrank();
+
+        IMarginClearinghouse.PnlIsolationBuckets memory buckets = clearinghouse.getPnlIsolationBuckets(aliceAccount);
+        assertEq(collectedUsdc, 450 * 1e6);
+        assertEq(protocolFeeCreditedUsdc, 50 * 1e6);
+        assertEq(buckets.settlementBalanceUsdc, 600 * 1e6);
+        assertEq(buckets.pnlPledgeUsdc, 300 * 1e6);
+        assertEq(buckets.liquidationReserveUsdc, 100 * 1e6);
+        assertEq(buckets.orderMarginUsdc, 100 * 1e6);
+        assertEq(buckets.actionReserveUsdc, 0);
+        assertEq(buckets.freeSettlementUsdc, 100 * 1e6);
+        assertEq(clearinghouse.balanceUsdc(protocolTreasury), 50 * 1e6);
+        assertEq(clearinghouse.balanceUsdc(keeper), 150 * 1e6);
+        assertEq(usdc.balanceOf(recipient), 400 * 1e6);
+    }
+
     function test_ApplyOpenCost_DebitsSettlementAndLeavesRemainingFreeBalance() public {
         vm.prank(alice);
         clearinghouse.deposit(aliceAccount, 2000 * 1e6);
@@ -872,7 +1048,7 @@ contract MarginClearinghouseTest is Test {
         assertEq(buckets.freeSettlementUsdc, 1700 * 1e6);
     }
 
-    function test_ApplyOpenCost_UnlocksPositionMarginBeforeDebitingTradeCost() public {
+    function test_ApplyOpenCost_DoesNotUnlockExistingPnlPledgeForTradeCost() public {
         vm.prank(alice);
         clearinghouse.deposit(aliceAccount, 100 * 1e6);
 
@@ -886,14 +1062,12 @@ contract MarginClearinghouseTest is Test {
         );
 
         vm.prank(engine);
-        (int256 netMarginChangeUsdc, uint256 protocolFeeCreditedUsdc) =
-            clearinghouse.applyOpenCost(aliceAccount, 0, int256(20 * 1e6), engine, address(0), 0);
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientFreeEquity.selector);
+        clearinghouse.applyOpenCost(aliceAccount, 0, int256(20 * 1e6), engine, address(0), 0);
 
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceAccount);
-        assertEq(netMarginChangeUsdc, -int256(20 * 1e6));
-        assertEq(protocolFeeCreditedUsdc, 0);
-        assertEq(buckets.settlementBalanceUsdc, 80 * 1e6);
-        assertEq(buckets.activePositionMarginUsdc, 80 * 1e6);
+        assertEq(buckets.settlementBalanceUsdc, 100 * 1e6);
+        assertEq(buckets.activePositionMarginUsdc, 100 * 1e6);
         assertEq(buckets.freeSettlementUsdc, 0);
     }
 
@@ -906,7 +1080,7 @@ contract MarginClearinghouseTest is Test {
         clearinghouse.applyOpenCost(aliceAccount, 100 * 1e6, int256(20 * 1e6), engine, address(0), 0);
     }
 
-    function test_ApplyOpenCost_RevertsWhenUnlockExceedsPositionMargin() public {
+    function test_ApplyOpenCost_RevertsWhenPositiveCostExceedsFreeSettlement() public {
         vm.prank(alice);
         clearinghouse.deposit(aliceAccount, 10 * 1e6);
 
@@ -914,8 +1088,23 @@ contract MarginClearinghouseTest is Test {
         clearinghouse.lockPositionMargin(aliceAccount, 10 * 1e6);
 
         vm.prank(engine);
-        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientBucketMargin.selector);
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientFreeEquity.selector);
         clearinghouse.applyOpenCost(aliceAccount, 0, int256(20 * 1e6), engine, address(0), 0);
+    }
+
+    function test_ApplyOpenCost_NegativeRebateRemainsFreeSettlement() public {
+        vm.prank(alice);
+        clearinghouse.deposit(aliceAccount, 300 * 1e6);
+
+        vm.prank(engine);
+        (int256 netMarginChangeUsdc,) =
+            clearinghouse.applyOpenCost(aliceAccount, 200 * 1e6, -int256(50 * 1e6), engine, address(0), 0);
+
+        IMarginClearinghouse.PnlIsolationBuckets memory buckets = clearinghouse.getPnlIsolationBuckets(aliceAccount);
+        assertEq(netMarginChangeUsdc, int256(200 * 1e6));
+        assertEq(buckets.settlementBalanceUsdc, 350 * 1e6);
+        assertEq(buckets.pnlPledgeUsdc, 200 * 1e6);
+        assertEq(buckets.freeSettlementUsdc, 150 * 1e6, "Rebate must not auto-increase PnL pledge");
     }
 
     function testFuzz_ApplyOpenCost_MatchesSharedOpenPlan(
@@ -989,7 +1178,7 @@ contract MarginClearinghouseTest is Test {
         vm.stopPrank();
     }
 
-    function test_ConsumeCloseLoss_MatchesSharedTerminalLossPlan() public {
+    function test_ConsumeCloseLoss_LeavesFreeAndOrderMarginOutsideTerminalPriceLossCap() public {
         vm.prank(alice);
         clearinghouse.deposit(aliceAccount, 2000 * 1e6);
 
@@ -998,9 +1187,6 @@ contract MarginClearinghouseTest is Test {
         clearinghouse.reserveCommittedOrderMargin(aliceAccount, 31, 300 * 1e6);
         vm.stopPrank();
 
-        IMarginClearinghouse.AccountUsdcBuckets memory bucketsBefore = clearinghouse.getAccountUsdcBuckets(aliceAccount);
-        MarginClearinghouseAccountingLib.SettlementConsumption memory plan =
-            accountingHarness.planTerminalLossConsumption(bucketsBefore, 0, 1800 * 1e6);
         uint64[] memory reservationIds = new uint64[](1);
         reservationIds[0] = 31;
 
@@ -1010,29 +1196,16 @@ contract MarginClearinghouseTest is Test {
 
         IMarginClearinghouse.AccountUsdcBuckets memory bucketsAfter = clearinghouse.getAccountUsdcBuckets(aliceAccount);
         IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(31);
-        assertEq(
-            seizedUsdc, plan.totalConsumedUsdc, "Close loss seized amount should match planned terminal consumption"
-        );
-        assertEq(shortfallUsdc, plan.uncoveredUsdc, "Close loss shortfall should match planned terminal consumption");
+        assertEq(seizedUsdc, 600 * 1e6);
+        assertEq(shortfallUsdc, 1200 * 1e6);
         assertEq(protocolFeeCreditedUsdc, 0);
-        assertEq(
-            bucketsAfter.settlementBalanceUsdc,
-            bucketsBefore.settlementBalanceUsdc - plan.totalConsumedUsdc,
-            "Close loss settlement debit should match shared plan"
-        );
-        assertEq(
-            bucketsAfter.activePositionMarginUsdc,
-            bucketsBefore.activePositionMarginUsdc - plan.activeMarginConsumedUsdc,
-            "Close loss position margin unlock should match shared plan"
-        );
-        assertEq(
-            reservation.remainingAmountUsdc,
-            300 * 1e6 - plan.otherLockedMarginConsumedUsdc,
-            "Close loss reservation consumption should match shared plan"
-        );
+        assertEq(bucketsAfter.settlementBalanceUsdc, 1400 * 1e6);
+        assertEq(bucketsAfter.activePositionMarginUsdc, 0);
+        assertEq(bucketsAfter.freeSettlementUsdc, 1100 * 1e6);
+        assertEq(reservation.remainingAmountUsdc, 300 * 1e6);
     }
 
-    function test_ApplyLiquidationSettlementPlan_MatchesSharedResidualPlan() public {
+    function test_ApplyLiquidationSettlementPlan_ConsumesPnlPledgeWithoutTouchingOrderMargin() public {
         vm.prank(alice);
         clearinghouse.deposit(aliceAccount, 2000 * 1e6);
 
@@ -1041,40 +1214,30 @@ contract MarginClearinghouseTest is Test {
         clearinghouse.reserveCommittedOrderMargin(aliceAccount, 41, 300 * 1e6);
         vm.stopPrank();
 
-        IMarginClearinghouse.AccountUsdcBuckets memory bucketsBefore = clearinghouse.getAccountUsdcBuckets(aliceAccount);
-        MarginClearinghouseAccountingLib.LiquidationResidualPlan memory plan =
-            accountingHarness.planLiquidationResidual(bucketsBefore, int256(200 * 1e6));
         uint64[] memory reservationIds = new uint64[](1);
         reservationIds[0] = 41;
         IMarginClearinghouse.LiquidationSettlementPlan memory settlementPlan =
             IMarginClearinghouse.LiquidationSettlementPlan({
-                settlementRetainedUsdc: plan.settlementRetainedUsdc,
-                settlementSeizedUsdc: plan.settlementSeizedUsdc,
-                freshTraderPayoutUsdc: plan.freshTraderPayoutUsdc,
-                badDebtUsdc: plan.badDebtUsdc,
-                positionMarginUnlockedUsdc: plan.mutation.positionMarginUnlockedUsdc,
-                otherLockedMarginUnlockedUsdc: plan.mutation.otherLockedMarginUnlockedUsdc
+                settlementRetainedUsdc: 0,
+                settlementSeizedUsdc: 600 * 1e6,
+                freshTraderPayoutUsdc: 0,
+                badDebtUsdc: 0,
+                positionMarginUnlockedUsdc: 600 * 1e6,
+                otherLockedMarginUnlockedUsdc: 0
             });
 
         vm.prank(engine);
         uint256 seizedUsdc = clearinghouse.applyLiquidationSettlementPlan(
-            aliceAccount, reservationIds, settlementPlan, engine, address(0), 0, address(0), 0
+            aliceAccount, reservationIds, settlementPlan, engine, address(0), 0, address(0), 0, 0
         );
 
         IMarginClearinghouse.AccountUsdcBuckets memory bucketsAfter = clearinghouse.getAccountUsdcBuckets(aliceAccount);
         IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(41);
-        assertEq(seizedUsdc, plan.settlementSeizedUsdc, "Liquidation seized amount should match shared residual plan");
-        assertEq(
-            bucketsAfter.settlementBalanceUsdc,
-            bucketsBefore.settlementBalanceUsdc - plan.settlementSeizedUsdc,
-            "Liquidation settlement debit should match shared residual plan"
-        );
+        assertEq(seizedUsdc, 600 * 1e6);
+        assertEq(bucketsAfter.settlementBalanceUsdc, 1400 * 1e6);
         assertEq(bucketsAfter.activePositionMarginUsdc, 0, "Liquidation should unlock the full live position margin");
-        assertEq(
-            reservation.remainingAmountUsdc,
-            300 * 1e6 - plan.mutation.otherLockedMarginUnlockedUsdc,
-            "Liquidation reservation consumption should match shared residual plan"
-        );
+        assertEq(bucketsAfter.freeSettlementUsdc, 1100 * 1e6);
+        assertEq(reservation.remainingAmountUsdc, 300 * 1e6);
     }
 
     function test_Deposit_ZeroAmount_Reverts() public {
@@ -1091,19 +1254,24 @@ contract MarginClearinghouseTest is Test {
         vm.prank(alice);
         clearinghouse.deposit(aliceAccount, 1000 * 1e6);
 
+        vm.startPrank(engine);
+        clearinghouse.lockPositionMargin(aliceAccount, 600 * 1e6);
+        clearinghouse.lockLiquidationReserve(aliceAccount, 250 * 1e6);
+        vm.stopPrank();
+
         uint64[] memory reservationIds = new uint64[](0);
         IMarginClearinghouse.LiquidationSettlementPlan memory plan = IMarginClearinghouse.LiquidationSettlementPlan({
             settlementRetainedUsdc: 250 * 1e6,
             settlementSeizedUsdc: 600 * 1e6,
             freshTraderPayoutUsdc: 0,
             badDebtUsdc: 0,
-            positionMarginUnlockedUsdc: 0,
+            positionMarginUnlockedUsdc: 600 * 1e6,
             otherLockedMarginUnlockedUsdc: 0
         });
 
         vm.prank(engine);
         uint256 seizedUsdc = clearinghouse.applyLiquidationSettlementPlan(
-            aliceAccount, reservationIds, plan, poolRecipient, keeper, 100 * 1e6, protocolTreasury, 50 * 1e6
+            aliceAccount, reservationIds, plan, poolRecipient, keeper, 100 * 1e6, protocolTreasury, 50 * 1e6, 50 * 1e6
         );
 
         assertEq(seizedUsdc, 600 * 1e6, "Only the pool allocation should be returned as seized cash");
@@ -1117,6 +1285,10 @@ contract MarginClearinghouseTest is Test {
         assertEq(
             usdc.balanceOf(poolRecipient), 600 * 1e6, "Only the pool allocation should leave clearinghouse custody"
         );
+        IMarginClearinghouse.PnlIsolationBuckets memory buckets = clearinghouse.getPnlIsolationBuckets(aliceAccount);
+        assertEq(buckets.pnlPledgeUsdc, 0, "Unused PnL pledge should become free after full liquidation");
+        assertEq(buckets.liquidationReserveUsdc, 0, "Unused liquidation reserve should become free");
+        assertEq(buckets.freeSettlementUsdc, 250 * 1e6);
     }
 
 }
@@ -1277,6 +1449,8 @@ contract NonUsdcCollateralTest is Test {
         CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(engine));
         CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
         engine.setDependencies(address(planner), address(settlement), address(engineAdmin));
+        TerminalNavBookV2 terminalNavBook = new TerminalNavBookV2(address(engine), uint32(CAP_PRICE));
+        engine.setTerminalNavBook(address(terminalNavBook));
         pool = new HousePool(address(usdc), address(engine));
         TrancheVault seniorVault =
             new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior LP", "seniorUSDC");
@@ -1299,7 +1473,7 @@ contract NonUsdcCollateralTest is Test {
         uint256 requestId = juniorVault.requestDeposit(5_000_000 * 1e6, address(this), address(this));
         vm.warp(pool.lpEpochStart(requestId));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
-        pool.settleLpEpoch();
+        pool.settleLpEpoch(0, 0);
         uint256 claimableAssets = juniorVault.claimableDepositRequest(requestId, address(this));
         juniorVault.claimDeposit(requestId, claimableAssets, address(this), address(this));
     }

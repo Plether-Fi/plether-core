@@ -184,18 +184,6 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
         _updateEngineMarkIfCurrent(update);
     }
 
-    /// @notice Applies a mark-refresh update and unconditionally forwards the returned mark to the engine.
-    /// @param pythUpdateData Pyth update blobs; the oracle receives the call's full `msg.value`.
-    /// @return update Normalized refresh snapshot.
-    function _prepareMarkRefreshOracle(
-        bytes[] calldata pythUpdateData
-    ) internal returns (OracleUpdateResult memory update) {
-        IPletherOracle.PriceSnapshot memory snapshot =
-            _updateAndGetOraclePrice(pythUpdateData, IPletherOracle.PriceMode.MarkRefresh);
-        update = _toOracleUpdateResult(snapshot);
-        engine.updateMarkPrice(update.markPrice, update.oraclePublishTime);
-    }
-
     /// @notice Applies an account-adverse liquidation update and advances the engine mark when current.
     /// @param account Account whose side determines the adverse confidence adjustment.
     /// @param pythUpdateData Pyth update blobs; the oracle receives the call's full `msg.value`.
@@ -210,15 +198,22 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
         _updateEngineMarkIfCurrent(update);
     }
 
-    /// @notice Forwards a generic mode-specific update to the Plether oracle with the call's full ETH value.
+    /// @notice Applies a mode-specific oracle update and installs its neutral mark in the Engine.
     /// @param pythUpdateData Pyth update blobs.
     /// @param mode Oracle policy mode to apply.
-    /// @return snapshot Validated oracle snapshot.
-    function _updateAndGetOraclePrice(
+    /// @param value ETH value forwarded to the oracle.
+    /// @return markPrice Validated neutral basket mark, with 8 decimals.
+    /// @return publishTime Earliest component publish timestamp.
+    function _refreshEngineMark(
         bytes[] calldata pythUpdateData,
-        IPletherOracle.PriceMode mode
-    ) internal returns (IPletherOracle.PriceSnapshot memory snapshot) {
-        return pletherOracle.updatePrice{value: msg.value}(msg.sender, pythUpdateData, mode);
+        IPletherOracle.PriceMode mode,
+        uint256 value
+    ) internal returns (uint256 markPrice, uint64 publishTime) {
+        IPletherOracle.PriceSnapshot memory snapshot =
+            pletherOracle.updatePrice{value: value}(msg.sender, pythUpdateData, mode);
+        markPrice = snapshot.markPrice;
+        publishTime = snapshot.publishTime;
+        engine.updateMarkPrice(markPrice, publishTime);
     }
 
     /// @notice Validates and installs a Plether oracle wired to this router's engine and HousePool.

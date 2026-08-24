@@ -34,7 +34,8 @@ interface IPerpsTraderViews {
     ) external view returns (PerpsViewTypes.PendingOrderView[] memory pending);
 
     /// @notice Returns whether the account's current live position is liquidatable.
-    /// @dev Uses the same cached-mark, no-freshness-check risk snapshot as `getPosition`; returns false with no position.
+    /// @dev Uses the same cached-mark, no-freshness-check risk snapshot as `getPosition`: exact price risk uses dedicated
+    ///      backing, while any carry left after projected eligible-free-settlement collection independently returns true.
     /// @param account Account to inspect
     /// @return Whether the current cached-mark position meets the active liquidation condition
     function isLiquidatable(

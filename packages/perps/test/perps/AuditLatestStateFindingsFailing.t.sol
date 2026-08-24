@@ -7,6 +7,7 @@ import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
+import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 
 contract AuditLatestStateFindingsFailing_KeeperReserveStripsMargin is BasePerpTest {
 
@@ -14,15 +15,28 @@ contract AuditLatestStateFindingsFailing_KeeperReserveStripsMargin is BasePerpTe
 
     function test_C1_KeeperReserveMustNotComeFromLockedPositionMargin() public {
         address account = trader;
-        _fundTrader(trader, 160e6);
-        _open(account, CfdTypes.Side.BULL, 10_000e18, 160e6, 1e8);
+        _fundTrader(trader, 175e6);
+        _open(account, CfdTypes.Side.BULL, 10_000e18, 175e6, 1e8);
 
-        vm.prank(address(router));
-        engine.updateMarkPrice(150_000_000, uint64(block.timestamp));
+        uint256 pledgeBefore = clearinghouse.pnlPledgeUsdc(account);
+        uint256 liquidationReserveBefore = clearinghouse.liquidationReserveUsdc(account);
+        assertEq(_freeSettlementUsdc(account), 0, "Setup must leave no free settlement for a close bounty");
 
         vm.prank(trader);
-        vm.expectRevert();
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 0, false);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 0, true);
+
+        assertEq(
+            clearinghouse.pnlPledgeUsdc(account),
+            pledgeBefore,
+            "Failed bounty reservation must not consume protected PnL pledge"
+        );
+        assertEq(
+            clearinghouse.liquidationReserveUsdc(account),
+            liquidationReserveBefore,
+            "Failed bounty reservation must not consume the dedicated liquidation reserve"
+        );
+        assertEq(router.pendingOrderCounts(account), 0, "Failed bounty reservation must not enqueue a close");
     }
 
 }
@@ -70,7 +84,7 @@ contract AuditLatestStateFindingsFailing_TrancheCooldownBypass is BasePerpTest {
         vm.warp(juniorVault.depositEpochStart(requestId));
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
-        pool.settleLpEpoch();
+        _settleLpEpochForTest();
 
         vm.startPrank(helper);
         vm.expectRevert(TrancheVault.TrancheVault__ThirdPartyDepositForExistingHolder.selector);

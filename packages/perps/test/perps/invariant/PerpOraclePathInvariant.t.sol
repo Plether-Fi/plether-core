@@ -14,6 +14,7 @@ import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
 import {PerpsPublicLens} from "@plether/perps/PerpsPublicLens.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
+import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IOrderRouter} from "@plether/perps/interfaces/IOrderRouter.sol";
@@ -259,6 +260,8 @@ contract PerpOraclePathInvariantTest is BasePerpTest {
 
         engine = _deployEngine(_riskParams());
         _syncEngineAdmin();
+        terminalNavBook = new TerminalNavBookV2(address(engine), uint32(CAP_PRICE));
+        engine.setTerminalNavBook(address(terminalNavBook));
         engineAccountLens = new CfdEngineAccountLens(address(engine));
         engineLens = new CfdEngineLens(address(engine));
         engineProtocolLens = new CfdEngineProtocolLens(address(engine));
