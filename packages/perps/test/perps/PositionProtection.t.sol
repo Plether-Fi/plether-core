@@ -4,6 +4,7 @@ pragma solidity 0.8.35;
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {PositionProtectionBook} from "@plether/perps/PositionProtectionBook.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
@@ -60,6 +61,52 @@ contract PositionProtectionTest is BasePerpTest {
         config.positionProtectionCommitsEnabled = true;
         _setRouterConfig(config);
         _refreshMark(MARK_PRICE);
+    }
+
+    function test_Constructor_RejectsZeroRouterOrEngine() public {
+        vm.expectRevert(PositionProtectionBook.PositionProtectionBook__ZeroAddress.selector);
+        new PositionProtectionBook(address(0), address(engine));
+
+        vm.expectRevert(PositionProtectionBook.PositionProtectionBook__ZeroAddress.selector);
+        new PositionProtectionBook(address(router), address(0));
+    }
+
+    function test_CreatePositionProtection_RejectsNoPositionAndDegradedMode() public {
+        vm.prank(ALICE);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__NoOpenPosition.selector);
+        protectionActions.createPositionProtection(_params(BULL_TAKE_PROFIT, BULL_STOP_LOSS));
+
+        _open(ALICE, CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
+        stdstore.target(address(engine)).sig("degradedMode()").checked_write(true);
+
+        vm.prank(ALICE);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__DegradedMode.selector);
+        protectionActions.createPositionProtection(_params(BULL_TAKE_PROFIT, BULL_STOP_LOSS));
+
+        assertEq(
+            router.getAccountReservations(ALICE).executionBountyUsdc,
+            0,
+            "failed protection creation must roll back both bounty locks"
+        );
+    }
+
+    function test_CreatePositionProtection_RejectsEmptyOrAboveCapThresholds() public {
+        _open(ALICE, CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
+
+        vm.prank(ALICE);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidProtectionPrices.selector);
+        protectionActions.createPositionProtection(_params(0, 0));
+
+        uint256 capPrice = engine.CAP_PRICE();
+        vm.prank(ALICE);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidProtectionPrices.selector);
+        protectionActions.createPositionProtection(_params(capPrice + 1, 0));
+
+        assertEq(
+            router.getAccountReservations(ALICE).executionBountyUsdc,
+            0,
+            "invalid protection prices must roll back both bounty locks"
+        );
     }
 
     function test_CreatePositionProtection_ValidatesBullGeometryAndArmsOffQueue() public {

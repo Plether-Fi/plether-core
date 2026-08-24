@@ -288,7 +288,7 @@ contract PositionProtectionBook is
         bytes[] calldata pythUpdateData
     ) external payable nonReentrant returns (uint64 linkedOrderId) {
         bytes memory refreshCall = abi.encodeWithSelector(UPDATE_MARK_PRICE_SELECTOR, pythUpdateData);
-        bytes memory callData = abi.encodePacked(refreshCall, abi.encode(msg.sender, uint256(protectionId)));
+        bytes memory callData = bytes.concat(refreshCall, abi.encode(msg.sender, uint256(protectionId)));
         linkedOrderId = IPositionProtectionRouterHost(ROUTER).nextCommitId();
         _callRouterNoReturn(callData, msg.value);
     }
@@ -409,7 +409,7 @@ contract PositionProtectionBook is
         if (_activeOracle().isOracleFrozen()) {
             revert OrderRouter__ConditionalTriggerFrozen();
         }
-        if (block.number == protection.armedBlock || publishTime <= protection.armedAt) {
+        if (block.number <= protection.armedBlock || publishTime <= protection.armedAt) {
             revert OrderRouter__SameBlockTrigger();
         }
         _requireMatchingPosition(protection);
@@ -571,7 +571,7 @@ contract PositionProtectionBook is
     ) private returns (uint64 parentOrderId) {
         bytes memory commitCall =
             abi.encodeCall(IPerpsTraderActions.commitOrder, (side, sizeDelta, marginDelta, targetPrice, false));
-        bytes memory callData = abi.encodePacked(commitCall, abi.encode(account));
+        bytes memory callData = bytes.concat(commitCall, abi.encode(account));
         parentOrderId = IPositionProtectionRouterHost(ROUTER).nextCommitId();
         _callRouterNoReturn(callData, 0);
     }
