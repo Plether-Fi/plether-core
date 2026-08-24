@@ -97,6 +97,17 @@ This directory contains stateful Foundry invariant suites for the perps system.
   - Verifies configurable execution and liquidation staleness limits remain
     positive
 
+- `PerpTerminalNavBruteForceInvariant.t.sol`
+  - Reconstructs terminal price PnL by exhaustively enumerating canonical Engine
+    positions, exact entry bases, clearinghouse PnL pledges, and Engine claims
+  - Proves the tracked account set is exhaustive against Engine side aggregates
+    before comparing it with the production NAV book
+  - Seeds opposing positions plus a partial-close residual with exact-basis dust
+    and a same-account deferred claim; separately verifies liquidation removal
+  - Verifies the radix result at both price endpoints, the live mark, and every
+    account-derived break-even and collateral-cap transition with adjacent and
+    radix-boundary interior marks
+
 - `GovernedSeniorCapacityInvariant.t.sol`
   - Fuzzes immediate senior and junior deposits, delayed senior request/cancel/
     finalize/claim transitions, and both tranche withdrawals across multiple actors
@@ -145,9 +156,11 @@ the accounting specification.
 - Whole-lot PnL/max-profit arithmetic and exact entry-cost conservation are
   unit- and fuzz-tested. `TerminalNavBookV2.t.sol`,
   `TerminalNavCloseConservation.t.sol`, and
-  `TerminalNavIntegrationSecurity.t.sol` provide the focused book, split-close,
-  and symmetric-pricing evidence; no long-running invariant yet reproduces the
-  complete radix accumulator independently.
+  `TerminalNavIntegrationSecurity.t.sol` provide focused book, split-close, and
+  symmetric-pricing evidence. `PerpTerminalNavBruteForceInvariant.t.sol`
+  independently reproduces the aggregate over the invariant harness's bounded,
+  completeness-checked actor domain; this remains stateful differential evidence,
+  not a formal proof over an unbounded production account set.
 
 ## Harness Pieces
 
@@ -178,4 +191,5 @@ forge test --match-contract PerpClosePreviewParityInvariantTest
 forge test --match-contract PerpExplicitAccountingInvariantTest
 forge test --match-contract PerpHousePoolLifecycleInvariantTest
 forge test --match-contract PerpOraclePathInvariantTest
+forge test --match-contract PerpTerminalNavBruteForceInvariantTest
 ```
