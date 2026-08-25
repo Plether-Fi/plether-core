@@ -12,6 +12,7 @@ import {CfdEngineSettlementSidecar} from "@plether/perps/CfdEngineSettlementSide
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {EmergencyPauseCoordinator} from "@plether/perps/EmergencyPauseCoordinator.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
+import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
@@ -85,6 +86,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         CfdEnginePlanner planner;
         CfdEngineSettlementSidecar settlementSidecar;
         CfdEngineAdmin engineAdmin;
+        HousePoolRedemptionMathSidecar housePoolRedemptionMathSidecar;
         HousePool housePool;
         TrancheVault seniorVault;
         TrancheVault juniorVault;
@@ -127,7 +129,19 @@ contract DeployPerpsArbitrumSepolia is Script {
                 address(deployed.planner), address(deployed.settlementSidecar), address(deployed.engineAdmin)
             );
 
-        deployed.housePool = new HousePool(address(deployed.usdc), address(deployed.engine));
+        deployed.housePoolRedemptionMathSidecar = new HousePoolRedemptionMathSidecar();
+        require(
+            address(deployed.housePoolRedemptionMathSidecar).code.length > 0,
+            "HousePool redemption math sidecar has no code"
+        );
+        require(
+            deployed.housePoolRedemptionMathSidecar.implementationId()
+                == keccak256("Plether.HousePoolRedemptionMathSidecar.v1"),
+            "HousePool redemption math sidecar ID mismatch"
+        );
+        deployed.housePool = new HousePool(
+            address(deployed.usdc), address(deployed.engine), address(deployed.housePoolRedemptionMathSidecar)
+        );
         deployed.seniorVault = new TrancheVault(
             IERC20(address(deployed.usdc)), address(deployed.housePool), true, "Plether Senior LP", "psLP"
         );
@@ -232,43 +246,6 @@ contract DeployPerpsArbitrumSepolia is Script {
             deployed.settlementMonitorLensSidecar.MONITOR() == address(deployed.settlementMonitorLens),
             "SettlementMonitorLens Sidecar monitor mismatch"
         );
-        require(
-            address(deployed.settlementMonitorLensSidecar.ROUTER()) == address(deployed.router),
-            "SettlementMonitorLens Sidecar Router mismatch"
-        );
-        require(
-            address(deployed.settlementMonitorLensSidecar.ENGINE()) == address(deployed.engine),
-            "SettlementMonitorLens Sidecar Engine mismatch"
-        );
-        require(
-            address(deployed.settlementMonitorLensSidecar.HOUSE_POOL()) == address(deployed.housePool),
-            "SettlementMonitorLens Sidecar HousePool mismatch"
-        );
-        require(
-            address(deployed.settlementMonitorLensSidecar.ENGINE_PROTOCOL_LENS())
-                == address(deployed.housePool.ENGINE_PROTOCOL_LENS()),
-            "SettlementMonitorLens Sidecar ProtocolLens mismatch"
-        );
-        require(
-            address(deployed.settlementMonitorLensSidecar.CLEARINGHOUSE()) == address(deployed.clearinghouse),
-            "SettlementMonitorLens Sidecar Clearinghouse mismatch"
-        );
-        require(
-            address(deployed.settlementMonitorLensSidecar.TERMINAL_NAV_BOOK()) == address(deployed.terminalNavBook),
-            "SettlementMonitorLens Sidecar TerminalNavBook mismatch"
-        );
-        require(
-            address(deployed.settlementMonitorLensSidecar.SENIOR_VAULT()) == address(deployed.seniorVault),
-            "SettlementMonitorLens Sidecar SeniorVault mismatch"
-        );
-        require(
-            address(deployed.settlementMonitorLensSidecar.JUNIOR_VAULT()) == address(deployed.juniorVault),
-            "SettlementMonitorLens Sidecar JuniorVault mismatch"
-        );
-        require(
-            address(deployed.settlementMonitorLensSidecar.USDC()) == address(deployed.usdc),
-            "SettlementMonitorLens Sidecar USDC mismatch"
-        );
 
         deployed.emergencyPauseCoordinator =
             new EmergencyPauseCoordinator(deployed.routerAdmin, address(deployed.housePool), deployer);
@@ -289,6 +266,10 @@ contract DeployPerpsArbitrumSepolia is Script {
         );
         require(!deployed.emergencyPauseCoordinator.ROUTER_ADMIN().paused(), "OrderRouterAdmin unexpectedly paused");
         require(!deployed.emergencyPauseCoordinator.HOUSE_POOL().paused(), "HousePool unexpectedly paused");
+        require(
+            !deployed.emergencyPauseCoordinator.HOUSE_POOL().lpEpochSettlementPaused(),
+            "LP epoch settlement unexpectedly paused"
+        );
 
         deployed.housePool.setPauser(address(deployed.emergencyPauseCoordinator));
         deployed.emergencyPauseCoordinator.ROUTER_ADMIN().setPauser(address(deployed.emergencyPauseCoordinator));
@@ -454,6 +435,8 @@ contract DeployPerpsArbitrumSepolia is Script {
         console.log("CfdEnginePlanner:", address(deployed.planner));
         console.log("CfdEngineSettlementSidecar:", address(deployed.settlementSidecar));
         console.log("CfdEngineAdmin:", address(deployed.engineAdmin));
+        console.log("HousePoolRedemptionMathSidecar:", address(deployed.housePoolRedemptionMathSidecar));
+        console.logBytes32(deployed.housePoolRedemptionMathSidecar.implementationId());
         console.log("HousePool:", address(deployed.housePool));
         console.log("LpEpochDuration:", deployed.housePool.LP_EPOCH_DURATION());
         console.log("MaxLpEpochsPerPhase:", deployed.housePool.MAX_LP_EPOCHS_PER_PHASE());
@@ -473,6 +456,9 @@ contract DeployPerpsArbitrumSepolia is Script {
         console.log("EmergencyPauseCoordinator:", address(deployed.emergencyPauseCoordinator));
         console.log("Emergency guardian:", deployed.emergencyPauseCoordinator.guardian());
         console.log("Risk-off order cutoff:", deployed.emergencyPauseCoordinator.ROUTER_ADMIN().riskOffOrderCutoff());
+        console.log(
+            "LP epoch settlement paused:", deployed.emergencyPauseCoordinator.HOUSE_POOL().lpEpochSettlementPaused()
+        );
         console.log("Owner:", deployed.engineAdmin.owner());
     }
 

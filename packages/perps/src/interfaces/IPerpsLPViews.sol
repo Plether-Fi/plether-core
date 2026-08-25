@@ -20,13 +20,15 @@ interface IPerpsLPViews {
 
     /// @notice Returns high-level LP status flags.
     /// @dev Oracle freshness is the HousePool liquidity view's current `markFresh` result; `lastMarkTime` is the
-    ///      cached engine mark's Unix publish timestamp.
-    /// @return viewData Trading, withdrawal, mark-freshness, and oracle-frozen status
+    ///      cached engine mark's Unix publish timestamp. The settlement-hold flag distinguishes intentional
+    ///      governance containment from oracle or solvency liveness failures.
+    /// @return viewData Trading, withdrawal, settlement-hold, mark-freshness, and oracle-frozen status
     function getLpStatus() external view returns (PerpsViewTypes.LpStatusView memory viewData);
 
     /// @notice Returns request timing, matured queue heads, and settlement gates for one tranche.
     /// @dev `cutoffEpoch` is the latest epoch eligible for settlement now. `nextRequestCutoffTime` is the future
-    ///      timestamp when the epoch targeted by new deposits and redemptions will next change.
+    ///      timestamp when the epoch targeted by new deposits and redemptions will next change. The settlement-hold
+    ///      flag is independent from the LP-entry pause and does not imply request admission is disabled.
     /// @param isSenior True for the Senior tranche and false for the Junior tranche.
     /// @return viewData Shared epoch and request window, matured work, backlog flags, and runtime gates.
     function getTrancheQueues(

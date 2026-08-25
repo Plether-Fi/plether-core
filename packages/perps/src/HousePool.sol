@@ -12,6 +12,7 @@ import {HousePoolEngineViewTypes} from "@plether/perps/interfaces/HousePoolEngin
 import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
 import {ICfdEngineProtocolLens} from "@plether/perps/interfaces/ICfdEngineProtocolLens.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
+import {IHousePoolRedemptionMathSidecar} from "@plether/perps/interfaces/IHousePoolRedemptionMathSidecar.sol";
 import {IPerpsLPActions} from "@plether/perps/interfaces/IPerpsLPActions.sol";
 import {ITrancheVaultBootstrap} from "@plether/perps/interfaces/ITrancheVaultBootstrap.sol";
 import {HousePoolAccountingLib} from "@plether/perps/libraries/HousePoolAccountingLib.sol";
@@ -19,7 +20,6 @@ import {HousePoolFreshnessLib} from "@plether/perps/libraries/HousePoolFreshness
 import {HousePoolPendingLivePlanLib} from "@plether/perps/libraries/HousePoolPendingLivePlanLib.sol";
 import {HousePoolPendingPreviewLib} from "@plether/perps/libraries/HousePoolPendingPreviewLib.sol";
 import {HousePoolReconcilePlanLib} from "@plether/perps/libraries/HousePoolReconcilePlanLib.sol";
-import {HousePoolRedemptionMathLib} from "@plether/perps/libraries/HousePoolRedemptionMathLib.sol";
 import {HousePoolSeedLifecycleLib} from "@plether/perps/libraries/HousePoolSeedLifecycleLib.sol";
 import {HousePoolSeniorCapacityLib} from "@plether/perps/libraries/HousePoolSeniorCapacityLib.sol";
 import {HousePoolTrancheGateLib} from "@plether/perps/libraries/HousePoolTrancheGateLib.sol";
@@ -141,6 +141,8 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     ICfdEngineCore public immutable ENGINE;
     /// @notice Accounting lens deployed for engine snapshots consumed by this pool.
     ICfdEngineProtocolLens public immutable ENGINE_PROTOCOL_LENS;
+    /// @dev Constructor-validated stateless exact redemption-pricing dependency.
+    IHousePoolRedemptionMathSidecar internal immutable REDEMPTION_MATH_SIDECAR;
 
     /// @notice Senior asynchronous vault authorized to mutate pool tranche accounting.
     address public seniorVault;
@@ -148,6 +150,8 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     address public juniorVault;
     /// @notice Account authorized to pause deposits alongside the owner; may be the zero address.
     address public pauser;
+    /// @notice Whether new LP epoch settlement is held by the dedicated emergency circuit breaker.
+    bool public override lpEpochSettlementPaused;
 
     /// @notice Stored senior-tranche claim in USDC (6 decimals), before any pending reconcile preview.
     uint256 public seniorPrincipal;
@@ -228,13 +232,27 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     ///      Deployment neither initializes tranche vaults nor activates trading.
     /// @param _usdc USDC token address used as 6-decimal collateral
     /// @param _engine CfdEngine that manages positions, liabilities, and PnL
+    /// @param _redemptionMathSidecar Stateless exact redemption-pricing implementation
     constructor(
         address _usdc,
-        address _engine
+        address _engine,
+        address _redemptionMathSidecar
     ) Ownable(msg.sender) {
+        if (_redemptionMathSidecar.code.length == 0) {
+            revert HousePool__InvalidRedemptionMathSidecar();
+        }
+        IHousePoolRedemptionMathSidecar redemptionMathSidecar = IHousePoolRedemptionMathSidecar(_redemptionMathSidecar);
+        try redemptionMathSidecar.implementationId() returns (bytes32 implementationId) {
+            if (implementationId != keccak256("Plether.HousePoolRedemptionMathSidecar.v1")) {
+                revert HousePool__InvalidRedemptionMathSidecar();
+            }
+        } catch {
+            revert HousePool__InvalidRedemptionMathSidecar();
+        }
         USDC = IERC20(_usdc);
         ENGINE = ICfdEngineCore(_engine);
         ENGINE_PROTOCOL_LENS = ICfdEngineProtocolLens(address(new CfdEngineProtocolLens(_engine)));
+        REDEMPTION_MATH_SIDECAR = redemptionMathSidecar;
         lastReconcileTime = block.timestamp;
         lastSeniorCouponCheckpointTime = block.timestamp;
         poolConfig = PoolConfig({
@@ -376,6 +394,26 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         _unpause();
     }
 
+    /// @notice Holds new LP epoch clearing without pausing requests, cancellations, claims, or trading.
+    /// @dev Callable by the owner or dedicated pauser. Governance alone can release the hold.
+    function pauseLpEpochSettlement() external override onlyPauserOrOwner {
+        if (lpEpochSettlementPaused) {
+            revert HousePool__LpEpochSettlementPaused();
+        }
+        lpEpochSettlementPaused = true;
+        emit LpEpochSettlementPauseUpdated(msg.sender, true);
+    }
+
+    /// @notice Releases the dedicated LP epoch settlement hold.
+    /// @dev Only the owner may recover settlement after an incident.
+    function unpauseLpEpochSettlement() external override onlyOwner {
+        if (!lpEpochSettlementPaused) {
+            revert HousePool__LpEpochSettlementNotPaused();
+        }
+        lpEpochSettlementPaused = false;
+        emit LpEpochSettlementPauseUpdated(msg.sender, false);
+    }
+
     // ==========================================
     // IHousePool INTERFACE
     // ==========================================
@@ -462,6 +500,9 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
 
     /// @inheritdoc IHousePool
     function canSettleDepositEntries() external view override returns (bool) {
+        if (lpEpochSettlementPaused) {
+            return false;
+        }
         (
             HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
             HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
@@ -764,6 +805,9 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         uint256 expectedMarkPrice,
         uint256 expectedPublishTime
     ) external override nonReentrant returns (IHousePool.LpEpochSettlementResult memory result) {
+        if (lpEpochSettlementPaused) {
+            revert HousePool__LpEpochSettlementPaused();
+        }
         (
             HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
             HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
@@ -922,7 +966,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
                 break;
             }
 
-            uint256 fullHeadAssets = HousePoolRedemptionMathLib.netAssetsForShares(
+            uint256 fullHeadAssets = REDEMPTION_MATH_SIDECAR.netAssetsForShares(
                 remainingShares, phase.pricingPrincipal, phase.pricingSupply, 1, 1000, feeBps
             );
             if (fullHeadAssets == 0) {
@@ -957,7 +1001,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
                 break;
             }
 
-            (uint256 fundedShares, uint256 fundedAssets) = HousePoolRedemptionMathLib.maxSharesForNetBudget(
+            (uint256 fundedShares, uint256 fundedAssets) = REDEMPTION_MATH_SIDECAR.maxSharesForNetBudget(
                 phase.budget - phase.fundedAssets,
                 remainingShares,
                 phase.pricingPrincipal,
@@ -1288,10 +1332,11 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         return ctx.pendingState.waterfall.seniorPrincipal < ctx.pendingState.waterfall.seniorHighWaterMark;
     }
 
-    /// @notice Returns whether withdrawals are live under current mark freshness and runtime mode.
+    /// @notice Returns whether new redemption funding is live under the settlement hold, mark freshness, and runtime
+    ///         mode.
     /// @dev This is a status gate only: a true result does not guarantee nonzero liquidity, unlocked vault shares,
-    ///      or satisfaction of the vault's holder cooldown.
-    /// @return True when the engine is not degraded and any required mark is sufficiently fresh
+    ///      or satisfaction of the vault's holder cooldown. Already-funded claims do not depend on this gate.
+    /// @return True when settlement is not held, the engine is not degraded, and any required mark is fresh
     function isWithdrawalLive() external view returns (bool) {
         return _withdrawalsLive(_getHousePoolInputSnapshot(), _getHousePoolStatusSnapshot());
     }
@@ -1638,7 +1683,8 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
         HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
     ) internal view returns (bool) {
-        return HousePoolFreshnessLib.withdrawalsLive(accountingSnapshot, statusSnapshot, block.timestamp);
+        return !lpEpochSettlementPaused
+            && HousePoolFreshnessLib.withdrawalsLive(accountingSnapshot, statusSnapshot, block.timestamp);
     }
 
     function _validatePoolConfig(

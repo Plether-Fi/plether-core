@@ -250,6 +250,53 @@ contract PerpsPublicLensTest is BasePerpTest {
         assertFalse(viewData.oracleFresh, "LP status should mirror the actual house-pool freshness policy");
     }
 
+    function test_PublicLpViews_ExposeSettlementHoldWithoutDisablingDepositsOrTrading() public {
+        PerpsViewTypes.TrancheView memory trancheBefore = publicLens.getJuniorTranche();
+        PerpsViewTypes.LpStatusView memory lpStatusBefore = publicLens.getLpStatus();
+        PerpsViewTypes.TrancheQueueView memory queueBefore = publicLens.getTrancheQueues(false);
+        PerpsViewTypes.ProtocolStatusView memory protocolBefore = publicLens.getProtocolStatus();
+
+        assertTrue(trancheBefore.depositEnabled, "setup should accept Junior deposit requests");
+        assertTrue(trancheBefore.withdrawEnabled, "setup should permit redemption funding");
+        assertTrue(lpStatusBefore.tradingActive, "setup should have active trading");
+        assertTrue(lpStatusBefore.withdrawalLive, "setup should have live LP settlement");
+        assertTrue(queueBefore.settlementLive, "setup queue settlement should be live");
+        assertTrue(protocolBefore.withdrawalLive, "setup protocol withdrawal funding should be live");
+        assertFalse(lpStatusBefore.lpEpochSettlementPaused);
+        assertFalse(queueBefore.lpEpochSettlementPaused);
+        assertFalse(protocolBefore.lpEpochSettlementPaused);
+
+        pool.pauseLpEpochSettlement();
+
+        PerpsViewTypes.TrancheView memory trancheHeld = publicLens.getJuniorTranche();
+        PerpsViewTypes.LpStatusView memory lpStatusHeld = publicLens.getLpStatus();
+        PerpsViewTypes.TrancheQueueView memory queueHeld = publicLens.getTrancheQueues(false);
+        PerpsViewTypes.ProtocolStatusView memory protocolHeld = publicLens.getProtocolStatus();
+
+        assertTrue(trancheHeld.depositEnabled, "settlement hold must not disable deposit requests");
+        assertFalse(trancheHeld.withdrawEnabled, "settlement hold must disable new redemption funding");
+        assertTrue(lpStatusHeld.tradingActive, "settlement hold must not disable trading");
+        assertFalse(lpStatusHeld.withdrawalLive, "LP status must report settlement funding unavailable");
+        assertFalse(queueHeld.settlementLive, "queue view must report settlement unavailable");
+        assertFalse(queueHeld.poolPaused, "settlement hold must remain distinct from LP-entry pause");
+        assertTrue(lpStatusHeld.lpEpochSettlementPaused);
+        assertTrue(queueHeld.lpEpochSettlementPaused);
+        assertTrue(protocolHeld.lpEpochSettlementPaused);
+        assertTrue(protocolHeld.tradingActive, "protocol view must keep trading active");
+        assertFalse(protocolHeld.withdrawalLive, "protocol view must report redemption funding unavailable");
+
+        pool.unpauseLpEpochSettlement();
+
+        assertFalse(publicLens.getLpStatus().lpEpochSettlementPaused, "release must clear LP status hold flag");
+        assertFalse(
+            publicLens.getTrancheQueues(false).lpEpochSettlementPaused, "release must clear tranche queue hold flag"
+        );
+        assertFalse(
+            publicLens.getProtocolStatus().lpEpochSettlementPaused, "release must clear protocol status hold flag"
+        );
+        assertTrue(publicLens.getJuniorTranche().withdrawEnabled, "release must restore redemption funding liveness");
+    }
+
     function test_GetSeniorTranche_ExposesFrozenLpFeeWhenOracleFrozen() public {
         _fundSenior(address(0xA11CE), 100_000e6);
 

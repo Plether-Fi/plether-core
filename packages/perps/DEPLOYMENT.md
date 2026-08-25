@@ -44,15 +44,16 @@ The deploy script creates and wires:
 5. `CfdEnginePlanner`
 6. `CfdEngineSettlementSidecar`
 7. `CfdEngineAdmin`
-8. `HousePool`
-9. `TrancheVault` senior
-10. `TrancheVault` junior
-11. `CfdEngineAccountLens`
-12. `CfdEngineLens`
-13. `OrderRouter` (constructor-deploys its immutable `OrderRouterLiquidationBatchSidecar`)
-14. `PerpsPublicLens`
-15. `SettlementMonitorLens` (the facade deploys its monitor-bound `SettlementMonitorLensSidecar` internally)
-16. `EmergencyPauseCoordinator`
+8. `HousePoolRedemptionMathSidecar`
+9. `HousePool`, constructed with the redemption-math sidecar
+10. `TrancheVault` senior
+11. `TrancheVault` junior
+12. `CfdEngineAccountLens`
+13. `CfdEngineLens`
+14. `OrderRouter` (constructor-deploys its immutable `OrderRouterLiquidationBatchSidecar`)
+15. `PerpsPublicLens`
+16. `SettlementMonitorLens` (the facade deploys its monitor-bound `SettlementMonitorLensSidecar` internally)
+17. `EmergencyPauseCoordinator`
 
 It then performs the required set-once wiring:
 
@@ -67,6 +68,10 @@ It then performs the required set-once wiring:
 Important:
 
 - `HousePool` remains inactive after deployment.
+- `HousePoolRedemptionMathSidecar` is deployed before `HousePool`. It is stateless pure size-management code with no
+  storage, setter, delegatecall, upgrade path, custody, or settlement authority. The deploy and bootstrap scripts
+  require code and `implementationId() == keccak256("Plether.HousePoolRedemptionMathSidecar.v1")`; HousePool stores
+  the validated address immutably. Record it as a first-class deployment artifact even though users never call it.
 - `SettlementMonitorLens` is deployed after every settlement dependency is wired. It is the read-only operator/security
   facade bound to the canonical Router deployment; adding it does not shift any earlier deployment address or grant
   settlement authority. Its constructor deploys a size-management `SettlementMonitorLensSidecar` that accepts calls
@@ -77,15 +82,17 @@ Important:
   wiring, including equality between the Router's immutable settlement pool and `Engine.pool()`, and the health view
   rechecks those reciprocal bindings rather than assuming deployment stayed correct.
   The sidecar also pins the Engine planner address and code hash at construction and probes its settlement-critical
-  carry-index and market-calendar ABIs at runtime. The facade's creation input is close to the EIP-3860 ceiling because it embeds the
-  sidecar creation code: the optimized build is 48,817 bytes including the 32-byte Router constructor argument,
-  leaving 335 bytes of headroom. Keep the dedicated creation-input size regression green when changing either
-  contract.
+  carry-index and market-calendar ABIs at runtime. The facade's creation input is close to the EIP-3860 ceiling
+  because it embeds the sidecar creation code. The verified V2 build has a 23,339-byte facade runtime, 48,794-byte
+  creation code, and 48,826-byte creation input including the 32-byte Router constructor argument, leaving 326 bytes
+  of EIP-3860 headroom. The monitor sidecar is 19,114 bytes at runtime with 20,488-byte initcode. Keep the dedicated
+  runtime and creation-input size regressions green when changing either contract.
 - `EmergencyPauseCoordinator` is deployed after the monitor and immutable-bound to the exact RouterAdmin and
   HousePool. The deploy transaction verifies its code, bindings, owner, disabled initial guardian, zero initial
-  `riskOffOrderCutoff`, and unpaused children, then installs it as both pausers. It has no unpause, pricing,
-  configuration, fund-transfer, or arbitrary-call surface. Its later reason/evidence hashes remain advisory and are
-  not derived or authenticated by the Lens.
+  `riskOffOrderCutoff`, unpaused children, and inactive LP settlement hold, then installs it as both pausers. It has
+  three fixed guardian actions—risk-off plus LP entry, LP-settlement-only, and full containment—but no unpause,
+  arbitrary mask, pricing, configuration, fund-transfer, or arbitrary-call surface. Its later reason/evidence hashes
+  remain advisory and are not derived or authenticated by the Lens.
 - `OrderRouterLiquidationBatchSidecar` is a stateless EIP-170 size split, not an independently operated contract.
   Deploy and bootstrap both require its address to contain code and its immutable `ROUTER()` binding to equal the
   deployed Router. Its entrypoint rejects direct calls and works only through Router delegatecall; it has no mutable
@@ -232,12 +239,14 @@ The script prints the deployed addresses to the console. Save at least:
 - `CfdEngine`
 - `TerminalNavBookV2`
 - `HousePool`
+- `HousePoolRedemptionMathSidecar`
 - `OrderRouter`
 - `OrderRouterLiquidationBatchSidecar`
 - `EmergencyPauseCoordinator`
 
-Bootstrap directly consumes the USDC, HousePool, Router, and coordinator addresses and derives the RouterAdmin and
-liquidation sidecar from the Router. Record every listed address for independent deployment verification.
+Bootstrap directly consumes the USDC, HousePool, redemption-math sidecar, Router, and coordinator addresses and
+derives the RouterAdmin and liquidation sidecar from the Router. Record every listed address for independent
+deployment verification.
 
 ### Bootstrap
 
@@ -249,6 +258,7 @@ ARB_SEPOLIA_RPC_URL=...
 
 PERPS_USDC=0x...
 PERPS_HOUSE_POOL=0x...
+PERPS_HOUSE_POOL_REDEMPTION_MATH_SIDECAR=0x...
 PERPS_ORDER_ROUTER=0x...
 PERPS_EMERGENCY_COORDINATOR=0x...
 PERPS_GUARDIAN=0x...
@@ -278,9 +288,12 @@ Notes:
 - `50000000000000` means `50_000_000e6`, or 50,000,000 mock USDC.
 - Both senior-limit variables are mandatory. The exposure limit must be finite and the share limit must be below
   `10_000` bps; the script deliberately refuses the constructor's uncapped bootstrap values.
-- `PERPS_EMERGENCY_COORDINATOR` and `PERPS_GUARDIAN` are mandatory, and the guardian must be nonzero. Bootstrap
-  verifies that the coordinator has code, is bound to this exact RouterAdmin and HousePool, and is already installed
-  as both pausers. It fails closed rather than repairing any partial or cross-deployment binding.
+- `PERPS_HOUSE_POOL_REDEMPTION_MATH_SIDECAR`, `PERPS_EMERGENCY_COORDINATOR`, and `PERPS_GUARDIAN` are mandatory, and
+  the guardian must be nonzero. Bootstrap verifies the supplied released sidecar's code and implementation id for
+  rerun inspection; HousePool's internal immutable binding was fixed by its constructor and the deploy script and has
+  no runtime getter by design. Bootstrap then verifies that the coordinator has code, is bound to this exact
+  RouterAdmin and HousePool, and is already installed as both pausers. It fails closed rather than repairing partial
+  or cross-deployment coordinator wiring.
 - Choose limits that admit the intended seeds. For symmetric `50_000_000e6` seeds, the exposure cap must be at least
   `50_000_000e6` and the senior-share cap must be at least `5_000` bps.
 - `TEST_USER_RECIPIENTS` and `TEST_USER_AMOUNTS` must have the same length.
@@ -308,10 +321,13 @@ The configuration, seed, and activation phases of the bootstrap script are desig
 - it skips activation if trading is already active
 
 Before proposing limits, seeding, or activation, bootstrap derives the Engine from `HousePool.ENGINE()` and verifies
-that a code-bearing `TerminalNavBookV2` is wired with matching Engine, cap, and 100-token quantum. A partial or
-misbound V2 stack fails closed. Before a first trading activation it additionally requires a nonzero live guardian,
-both exact coordinator pauser bindings, and unpaused RouterAdmin and HousePool. Bootstrap never unpauses either child
-and never clears or rewrites the historical risk-off cutoff.
+that a code-bearing `TerminalNavBookV2` is wired with matching Engine, cap, and 100-token quantum and that the supplied
+redemption-math sidecar has the expected implementation id. Observable core and coordinator binding mismatches fail
+closed. The supplied sidecar check is inspection-only because bootstrap cannot read back HousePool's internal
+immutable binding; the canonical deployment transaction and manifest establish that exact binding. Before a first
+trading activation bootstrap additionally requires a nonzero live guardian, both exact coordinator pauser bindings,
+unpaused RouterAdmin/HousePool entry, and an inactive LP settlement hold. Inspection-safe reruns after activation may
+observe active containment but never unpause any component or clear/rewrite the historical risk-off cutoff.
 
 Test-user funding is intentionally not idempotent: each ready-state rerun mints the configured amounts again. Remove
 the test-user recipient/amount inputs after the intended funding run.
@@ -343,7 +359,8 @@ This is useful if the first bootstrap attempt completes only partially.
 
 1. Run the deploy script.
 2. Record the deployed addresses.
-3. Set bootstrap env vars, including the printed coordinator, a nonzero guardian, and both explicit senior limits.
+3. Set bootstrap env vars, including the printed redemption-math sidecar and coordinator, a nonzero guardian, and both
+   explicit senior limits.
 4. Run the bootstrap script to propose the finite limits.
 5. Wait for the 48-hour `HousePool` timelock.
 6. Rerun the same bootstrap command to finalize, seed junior then senior, and activate trading.
@@ -352,36 +369,38 @@ This is useful if the first bootstrap attempt completes only partially.
    and operator monitoring against `SettlementMonitorLens`.
 9. Submit deposit and redemption requests on both vaults, advance to a matured epoch, follow the route reported by
    `SettlementMonitorLens`, and verify that funded claims can be pulled independently.
-10. Dry-run the guardian containment procedure on the fresh testnet stack, verify both pause states and the emitted
-    cutoff, clear invalidated opens with the protocol incident keeper, then have governance perform the deliberate
-    two-component recovery.
+10. Dry-run all three guardian actions on the fresh testnet stack. Verify restriction masks/states, the emitted cutoff
+    for risk-off actions, settlement rollback, and deliberately live closes/funded claims; clear invalidated opens,
+    then have governance perform independent recovery of every active restriction.
 
 ## Emergency Containment Runbook
 
 This section is the transaction-level deployment runbook. The complete action matrix, monitor trigger policy,
 limitations, and off-chain guardian architecture are maintained in
 [EMERGENCY_RESPONSE_GUIDE.md](EMERGENCY_RESPONSE_GUIDE.md). Operators must understand that the coordinator cannot
-pause trader closes or reductions and does not create a global protocol freeze.
+pause trader closes/reductions or already-funded claims and does not create a global protocol freeze.
 
 1. Archive the monitor observation, RPC block/hash, external oracle evidence, and incident rationale. Compute stable
    `reasonHash` and `evidenceHash` values; zero is accepted when metadata is unavailable because containment must not
    be blocked by evidence collection.
-2. From the configured guardian, simulate and call
-   `EmergencyPauseCoordinator.triggerEmergencyPause(reasonHash,evidenceHash)`. The coordinator does not query the
-   advisory Lens and no Lens condition trips it permissionlessly.
-3. Confirm `EmergencyPauseTriggered`, both component pause states, and the inclusive `riskOffOrderCutoff`. Old opens
-   at or below the cutoff remain invalid forever, including after recovery.
-4. Keep closes, liquidations, LP redemption requests and funding, and funded claims operating. HousePool pause blocks
-   only new deposit requests/activation. A matured pending deposit is not automatically cancellable merely because
-   the pool is paused; use only its existing escape conditions or wait for recovery.
+2. Choose and simulate the minimum fixed action: `triggerEmergencyPause(reasonHash,evidenceHash)` for Router risk-off
+   plus LP entry, `triggerLpEpochSettlementHold(reasonHash,evidenceHash)` for isolated epoch clearing, or
+   `triggerFullContainment(reasonHash,evidenceHash)` for all restrictions atomically. The coordinator does not query
+   the advisory Lens and no Lens condition trips it permissionlessly.
+3. Confirm `EmergencyContainmentTriggered`, its action and previous/new masks, and every targeted state. When risk-off
+   is included, confirm the inclusive cutoff; covered opens remain invalid forever, including after recovery.
+4. Keep closes, liquidations, LP redemption requests, existing cancellation paths, recapitalization/reconciliation,
+   and funded claims operating. Under settlement-only, new deposits and Senior reservations remain accepted but cannot
+   activate; assets can accumulate under unchanged cancellation rules. Stop settlement broadcasts while held.
 5. Have the protocol incident keeper call permissionless risk-off cleanup for invalidated opens. Cleanup requires no
    Pyth payload, refunds full remaining margin and bounty to the trader's internal settlement, and pays no caller, so
    the protocol pays gas.
-6. After remediation, governance—not the guardian—calls the component `unpause()` functions. Never attempt to reset
-   the historical cutoff. Rotate or disable the guardian separately if the key or monitoring process was implicated.
+6. After remediation and exact route simulation, governance—not the guardian—calls the relevant `unpause()` and/or
+   `unpauseLpEpochSettlement()` functions. There is no expiry. Never attempt to reset the historical cutoff. Release
+   restores eligibility but does not repair state or guarantee success. Rotate/disable an implicated guardian.
 
-This runbook does not provide LP request-off, LP settlement-off, or corrupted-queue quarantine; those are explicit
-follow-up circuit breakers.
+This runbook does not provide redemption-request-off or a global all-LP-request freeze, corrupted-queue quarantine,
+an arbitrary restriction mask, emergency pricing, discretionary close-off, or off-chain automatic triggering.
 
 Frontend and keeper integrations should read `TrancheVault.getRequestEpochWindow()` or the selected
 `PerpsPublicLens.getTrancheQueues(bool)` response immediately before constructing timing-sensitive UI or preflight
@@ -409,8 +428,9 @@ forge script script/LpEpochKeeper.s.sol \
   --broadcast
 ```
 
-The script verifies that the Lens is bound to the supplied Router, refuses unknown or no-work routing, and selects the
-reported execution path. `CachedMark` calls the bound `HousePool` directly without Pyth data or ETH.
+The script verifies that the Lens is bound to the supplied Router, rejects an active settlement hold before decoding
+the payload or quoting fees, refuses unknown or no-work routing, and selects the reported execution path. `CachedMark`
+calls the bound `HousePool` directly without Pyth data or ETH.
 `AtomicOracleRefresh` quotes the active `PletherOracle` and calls the Router with the exact Pyth fee. Poll the lighter
 `SettlementMonitorLens.getSettlementStatus(observedEpoch)` view during normal operation. The composite
 `getSettlementObservation(observedEpoch)` is an intentional checkpoint/alert read with a roughly 6 KB ABI return and
@@ -433,8 +453,12 @@ about 0.8–1.3 million gas of representative `eth_call` execution, so the recom
 Use `getSettlementStatus(observedEpoch)` for operational blocker, warning, deposit-deferral, and execution-path
 diagnostics. Its `executionPathDependencyMask` is the subset of read failures that prevents selecting cached-mark
 versus atomic-oracle-refresh routing; the broader `dependencyFailureMask` can also include unknown optional
-diagnostics. The canonical matured-head getters are the route-selection evidence; malformed auxiliary queue
-bookkeeping is surfaced as unknown health or a critical queue fault without fabricating a different route.
+diagnostics. A readable active hold sets `lpEpochSettlementPaused`,
+`OperationalBlocker.LpEpochSettlementPaused`, and `DepositDeferral.LpEpochSettlementPaused` without erasing the
+post-recovery route; it is intentional complete state, not a critical fault. A failed hold read is an unknown Pool
+dependency and makes the observation incomplete. The canonical matured-head getters are the route-selection evidence;
+malformed auxiliary queue bookkeeping is surfaced as unknown health or a critical queue fault without fabricating a
+different route.
 `ActivationNotConfirmed` combines the projected `HousePool.canSettleDepositEntries()` common gate with canonical
 redemption evidence. The Pool view projects post-reconcile state, including residual pending claimants, while the Lens
 remains conservative when matured Senior funding can still change principal/HWM rounding before either tranche

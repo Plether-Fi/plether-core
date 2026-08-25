@@ -39,11 +39,12 @@ For normative semantics, use [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md). For sys
 | `CfdEngine` | Own core state, planner orchestration, carry realization, and narrow settlement host hooks | Hold funds directly or bypass clearinghouse / `HousePool` custody boundaries |
 | `TerminalNavBookV2` | Aggregate account curves derived from canonical Engine and clearinghouse state for exact signed LP NAV at a mark | Accept mutations other than the bound Engine's state-derived `syncFromEngine(...)`, accept caller-supplied curve economics, infer cash availability, or act as the endpoint risk-admission reserve |
 | `CfdEngineSettlementSidecar` | Execute externalized close/liquidation settlement orchestration through engine-owned host hooks | Own storage or bypass engine authorization boundaries |
-| `HousePool` | Maintain canonical pool assets, the shared round-hour epoch clock, and the LP principal waterfall; atomically reconcile and clear synchronized LP epochs; maintain exceptional excess/unassigned buckets | Select deposit/redemption request epochs, inspect raw trader balances, execute order logic, bypass Senior-before-Junior matured-demand priority, or custody protocol fees that moved to treasury margin |
+| `HousePool` | Maintain canonical pool assets, the shared round-hour epoch clock, the LP principal waterfall, independent entry/settlement restrictions, and synchronized LP epoch clearing; maintain exceptional excess/unassigned buckets | Select deposit/redemption request epochs, inspect raw trader balances, execute order logic, bypass Senior-before-Junior matured-demand priority, block closes or already-funded claims, or custody protocol fees that moved to treasury margin |
+| `HousePoolRedemptionMathSidecar` | Provide stateless pure redemption-budget calculations to the immutable-bound HousePool and advertise its fixed implementation id | Own state, mutate Pool/vault accounting, authorize settlement, accept configuration, delegatecall, or serve as an upgrade target |
 | `TrancheVault` | Custody active shares, pending-deposit escrow, pending redemption shares, and funded redemption assets; select both deposit and redemption request ids through one five-minute-cutoff helper over the HousePool clock; execute only pool-authorized epoch mutations | Define a competing epoch clock, independently finalize a pending deposit epoch, independently fund a redemption, or reprice an already-funded claim |
 | `SettlementMonitorLens` | Validate required one-time core wiring and read bounded epoch, oracle, wiring, NAV, pool, and vault-custody diagnostics for one explicitly observed epoch | Select FIFO settlement heads, mutate protocol state, authorize settlement, promise transaction success, traverse an unbounded queue, or replace exact route-specific `eth_call` simulation |
 | `SettlementMonitorLensSidecar` | Execute the facade's code-size-split accounting, oracle, health, and config reads when called by its constructor-bound monitor; expose constructor-set binding getters for verification | Accept another caller on monitor-only diagnostic builders, act as a second canonical monitoring surface, mutate its constructor-set bindings, or mutate protocol state |
-| `EmergencyPauseCoordinator` | Let one configured guardian atomically pause the immutable-bound RouterAdmin and HousePool; record advisory reason/evidence hashes | Read the Lens as authorization, unpause, change child configuration, set prices, move funds, or call arbitrary targets |
+| `EmergencyPauseCoordinator` | Let one configured guardian choose among three fixed immutable-bound actions: Router risk-off plus LP entry, LP-settlement-only hold, or atomic full containment; record advisory reason/evidence hashes and restriction masks | Accept an arbitrary mask, read the Lens as authorization, unpause, block closes/funded claims, change child configuration, set prices, move funds, or call arbitrary targets |
 | `OrderRouterLiquidationBatchSidecar` | Execute the bounded liquidation-batch loop in its deploying Router's delegatecall context; read Router state through public getters and invoke the Router's self-only item callback | Accept a direct call, own mutable storage, execute for another Router, replace its immutable Router binding, or provide an upgrade target |
 
 ## LP Timing Ownership
@@ -54,7 +55,7 @@ For normative semantics, use [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md). For sys
 | Request-epoch selection | `TrancheVault` | Both request directions target `e + 1` before `b - 300` and `e + 2` at or after `b - 300`, where `b` is the next HousePool epoch start |
 | Integration timing view | `TrancheVault.getRequestEpochWindow()` | Returns the current target and the next future cutoff at which that target changes; no stored state or second clock |
 | Compact timing read | `PerpsPublicLens.getTrancheQueues(bool)` | Relays the selected vault's canonical pair as `nextRequestEpoch` and `nextRequestCutoffTime` |
-| Operational epoch monitoring | `SettlementMonitorLens` | Reads the caller-selected observed epoch rather than silently switching from the closed epoch to the new request target at cutoff; both cached-Pool and atomic-Router settlement remain FIFO |
+| Operational epoch monitoring | `SettlementMonitorLens` | Reads the caller-selected observed epoch rather than silently switching from the closed epoch to the new request target at cutoff; both cached-Pool and atomic-Router settlement remain FIFO. A readable settlement hold is an intentional blocker/deferral while route classification remains visible; a failed hold read is an unknown Pool dependency |
 | Settlement and live oracle refresh | `OrderRouter` -> `HousePool` | Request cutoff does not change maturity, phase order, or the post-round-hour publication boundary |
 
 ## Critical Capability Boundaries
@@ -117,10 +118,12 @@ For normative semantics, use [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md). For sys
   simulation and transaction remain authoritative: direct `HousePool` settlement for `CachedMark`, or `OrderRouter`
   with the exact Oracle payload and value for `AtomicOracleRefresh`.
 - `EmergencyPauseCoordinator` owns no economic state and does not consume Lens output. It is a least-authority
-  guardian gateway into the two existing pause states. RouterAdmin owns the persistent inclusive order cutoff;
-  governance owns all recovery.
+  guardian gateway into three fixed restriction combinations. RouterAdmin owns the persistent inclusive order cutoff;
+  HousePool independently owns LP-entry and epoch-settlement state; governance owns all recovery and no restriction
+  expires automatically.
 - `HousePool` owns canonical pool cash, the round-hour clock, LP waterfall accounting, and the sole synchronized epoch
-  coordinator. Each `TrancheVault` owns request-epoch selection over that clock plus pending-share and funded-asset
+  coordinator. Its immutable pure-math sidecar externalizes redemption-budget calculations without gaining state or
+  authority. Each `TrancheVault` owns request-epoch selection over that clock plus pending-share and funded-asset
   escrow. Protocol fees that cross out of trader custody are owned by the treasury clearinghouse account.
 
 When auditing a path, ask four questions in order: who owns the bucket before the action, which contract may mutate it, which accounting view may read it, and whether crossing into a new domain changes owner semantics or only custody semantics.

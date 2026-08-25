@@ -79,6 +79,10 @@ comparison. This is detection only; the monitor cannot repair wiring or authoriz
 installs it as both components' pauser. It does not trust or call the Lens: monitoring output, `reasonHash`, and
 `evidenceHash` are advisory incident evidence, and only the configured guardian may trigger containment.
 
+`HousePool` is also immutable-bound to a separately deployed, stateless `HousePoolRedemptionMathSidecar`. Construction
+requires code and the exact implementation id. The sidecar exposes only pure redemption-budget calculations: it has no
+storage, setter, delegatecall, upgrade path, custody, or settlement authority.
+
 `OrderRouter` constructor-deploys one `OrderRouterLiquidationBatchSidecar` and exposes its immutable address. The
 sidecar has no mutable storage or upgrade setter, records the deploying Router immutably, and rejects direct calls;
 its batch entrypoint is valid only under delegatecall where `address(this)` is that Router. Its Router self-callback
@@ -90,6 +94,7 @@ The owner can act immediately to:
 
 - pause and unpause `OrderRouter` through `OrderRouterAdmin`,
 - pause and unpause `HousePool`,
+- pause and unpause `HousePool` LP epoch settlement independently,
 - install or replace the common coordinator pauser on `OrderRouterAdmin` and `HousePool`,
 - rotate or disable the coordinator guardian,
 - set the protocol treasury account,
@@ -246,14 +251,19 @@ The owner can tune risk and liveness configuration and activate pauses, but cann
 
 ### Guardian and emergency coordinator
 
-`OrderRouterAdmin` and `HousePool` retain separate owner-controlled pause state, but normal deployment installs one
-`EmergencyPauseCoordinator` as both pausers. Governance owns the coordinator and assigns its guardian.
+`OrderRouterAdmin` retains its owner-controlled risk-off state. `HousePool` retains separate owner-controlled LP-entry
+and LP-settlement states. Normal deployment installs one `EmergencyPauseCoordinator` as both components' pauser;
+governance owns the coordinator and assigns its guardian.
 
-- Only the guardian may call `triggerEmergencyPause(reasonHash,evidenceHash)`.
-- The transaction pauses RouterAdmin first and HousePool second; any failure rolls back every change made by that
-  call while preserving pre-existing pause state. Repeated or partially pre-paused calls are idempotent.
+- Only the guardian may invoke its three fixed actions: `triggerEmergencyPause` applies Router risk-off plus LP-entry
+  pause, `triggerLpEpochSettlementHold` applies only the settlement hold, and `triggerFullContainment` applies all
+  three restrictions atomically. There is no caller-supplied mask.
+- Each transaction skips already-active restrictions; any downstream failure rolls back every change made by that
+  call while preserving pre-existing state. `EmergencyContainmentTriggered` records the selected action, incident
+  hashes, cutoff, and previous/new restriction masks.
 - The coordinator can only add restrictions. It cannot unpause, change child configuration, set prices, move funds,
-  or call arbitrary targets. Governance retains direct owner-only recovery and role assignment.
+  or call arbitrary targets. Restrictions have no expiry. Governance retains direct owner-only recovery and role
+  assignment.
 - Router pause records an inclusive, monotonic order-id cutoff. Pending opens at or below it are permanently invalid,
   including after unpause; later orders are unaffected.
 - Cleanup is permissionless and oracle-independent. It returns all remaining committed margin and execution bounty to
@@ -268,8 +278,15 @@ The owner can tune risk and liveness configuration and activate pauses, but cann
 - HousePool pause blocks LP entry only. Redemptions, synchronized redemption funding, and funded claims remain live.
   It does not itself unlock cancellation of a matured deposit; that request still needs an existing rejection,
   projected-wipe, Senior-impairment, or Senior-reservation escape condition, or later activation after recovery.
-- LP request-off, LP settlement-off, and corrupted-queue quarantine are separate proposed breakers, not powers hidden
-  in this coordinator.
+- The independent settlement hold makes every synchronized epoch call revert before mutation, including direct
+  cached/no-position and Router atomic-refresh routes. New deposits, Senior reservations, redemptions, existing
+  cancellations, trading, recapitalization/reconciliation, and already-funded claims remain live. Deposits can
+  accumulate in escrow under unchanged cancellation rules.
+- Trader closes/reductions, liquidations, and already-funded claims are deliberately outside guardian authority.
+  Redemption-request-off, a global all-LP-request freeze, corrupted-queue quarantine, emergency pricing, and a
+  global protocol freeze do not exist. Actions containing the LP-entry restriction do stop new deposit requests.
+- A breaker is containment, not repair. Its release only restores eligibility to attempt the path and does not prove
+  accounting, oracle, custody, liquidity, or queue health or guarantee transaction success.
 
 ### Keepers
 
@@ -514,8 +531,8 @@ keep following the closed batch after the request target rolls forward. That arg
 settles; eligible FIFO heads remain authoritative. `observableConfigDigest()` and the `observationDigest` returned by
 `getSettlementObservation(observedEpoch)` help detect off-chain drift. `completeObservationDigest` repeats that hash
 only when `observationComplete` and is otherwise zero, but it remains unauthenticated. None is a trusted batch commitment
-and the Router does not accept or enforce them. This cutoff and lens add no signature, challenge period, settlement
-hold, or trading freeze.
+and the Router does not accept or enforce them. This cutoff and lens add no signature, challenge period, or trading
+freeze; the independently controlled HousePool settlement hold is a separate manual circuit breaker.
 
 ### Settlement-monitor trust boundary
 
@@ -539,6 +556,12 @@ quote new-request capacity. The facade constructor rejects a Router whose immuta
 `Engine.pool()` and deploys a code-size sidecar whose diagnostic builders accept only the constructor-bound
 facade; its constructor-set binding getters remain publicly readable and it has no setter or delegatecall path. That
 sidecar is a monitor-bound implementation detail, not another trusted public result surface.
+
+The monitor reads `lpEpochSettlementPaused` fail-soft. A successful active read is intentional state rather than a
+critical fault: it sets the explicit status flag, `OperationalBlocker.LpEpochSettlementPaused`, and
+`DepositDeferral.LpEpochSettlementPaused`, while preserving cached-versus-atomic route classification for recovery.
+A reverted or malformed hold read makes the Pool dependency unknown and the composite observation incomplete.
+`LpEpochKeeper` rejects an active hold before decoding update data, quoting Pyth fees, or broadcasting.
 
 The sidecar pins the Engine planner address and code hash at construction and probes the planner's canonical
 carry-index and market-calendar ABIs before treating wiring as healthy. Seed receiver/floor settings must be consistently zero/zero or
@@ -586,6 +609,10 @@ Direct cached-mark settlement is otherwise limited to the no-open-position case,
 Pool pause blocks new deposit requests and deposit activation, but it does not block redemption requests or reconciled
 funding of already-matured redemptions. The settlement result marks entries deferred, and already-funded claims remain
 live.
+
+The independent settlement hold blocks both funding and activation by reverting the canonical epoch transition. It
+does not block new deposit/redemption requests, Senior reservations, existing cancellation paths, reconciliation, or
+funded claims. It has no automatic expiry and only the HousePool owner can release it.
 
 ### Senior coupon model
 
@@ -716,18 +743,20 @@ The canonical operator capability matrix, trigger policy, containment procedure,
 guardian design requirements live in [EMERGENCY_RESPONSE_GUIDE.md](EMERGENCY_RESPONSE_GUIDE.md). Read that guide
 before automating any response from `SettlementMonitorLens`.
 
-### Emergency pause
+### Emergency containment
 
 1. Corroborate the unsafe observation from block-pinned direct reads and an independent provider when time permits.
-2. Have the guardian simulate and call the coordinator so Router risk-off and HousePool entry pause activate
-   atomically.
-3. Verify both pause states, the permanent inclusive order cutoff, and the emitted incident hashes.
-4. Keep closes, liquidations, mark refresh, redemption requests, eligible redemption funding, funded claims, and
-   incident cleanup operating.
-5. Governance investigates and recovers deliberately; the guardian never auto-unpauses.
+2. Choose the minimum fixed action: risk-off plus LP entry for new-risk incidents, settlement-only for an isolated
+   epoch-clearing concern, or full containment when domains overlap or cannot be isolated safely.
+3. Simulate the exact coordinator call and verify `EmergencyContainmentTriggered`, its masks/action, all targeted
+   states, and the permanent cutoff when risk-off is included.
+4. Keep closes, liquidations, mark refresh, redemption requests, eligible cancellations, funded claims, and recovery
+   infrastructure operating. Stop settlement broadcasts only while settlement is held.
+5. Governance investigates and releases components deliberately; the guardian never auto-unpauses and no timer does.
 
-Monitoring should page operators before applying a breaker. An observable NAV or custody invariant failure warrants
-pausing new risk and LP entry while preserving protective exits where protocol policy allows them. Oracle-read
+Monitoring should page operators before applying a breaker. A confirmed isolated settlement defect may justify the
+settlement-only hold; a NAV/custody invariant or cross-domain failure warrants full containment while preserving
+protective exits. Oracle-read
 failure is transient until corroborated; queue backlog, Senior priority, capacity, and insufficient free cash are
 liveness states rather than accounting corruption. `SettlementMonitorLens` cannot pause anything itself. A critical
 fault also makes the composite observation incomplete, so automation must inspect masks individually rather than
@@ -737,7 +766,8 @@ watching only the complete-observation digest.
 
 1. Distinguish a confirmed correctness/integrity problem from routine staleness or low confidence that the on-chain
    policy already rejects.
-2. For a credible integrity incident, use composite containment to stop both new trading risk and new LP entry.
+2. For a credible cross-domain integrity incident, use full containment. Use settlement-only only when independent
+   evidence isolates the failure to epoch clearing and continued trading/request admission is safe.
 3. Preserve protective flows and archive the raw signed update plus independent market evidence.
 4. Governance resumes only after feed bindings, behavior, and canonical accounting are understood.
 
@@ -825,10 +855,10 @@ As of May 21, 2026, `master` includes the resolution commit and later changes. F
 | `CfdMath` | Pre-audit reviewed as supporting logic; formal audit pending |
 | `OrderRouter` | Pre-audit reviewed; formal audit pending |
 | `MarginClearinghouse` | Pre-audit reviewed; formal audit pending |
-| `HousePool` | Pre-audit reviewed; formal audit pending |
+| `HousePool` and stateless redemption-math sidecar | Settlement-hold and size-split changes require formal review |
 | `TrancheVault` | Pre-audit reviewed; formal audit pending |
 | `SettlementMonitorLens` and monitor-bound sidecar | Read-only monitoring addition; formal audit pending |
-| `EmergencyPauseCoordinator` and persistent Router risk-off refund path | Emergency containment addition; formal audit pending |
+| `EmergencyPauseCoordinator` and persistent Router risk-off refund path | Three-action emergency containment addition; formal audit pending |
 
 ## Security Contact
 

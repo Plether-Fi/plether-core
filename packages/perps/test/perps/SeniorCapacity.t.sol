@@ -5,6 +5,7 @@ import {BasePerpTest} from "./BasePerpTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
+import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {HousePoolSeniorCapacityLib} from "@plether/perps/libraries/HousePoolSeniorCapacityLib.sol";
@@ -265,7 +266,8 @@ contract SeniorCapacityTest is BasePerpTest {
     }
 
     function test_ConstructorSentinelsCannotActivateTrading() public {
-        HousePool neutralPool = new HousePool(address(usdc), address(engine));
+        HousePool neutralPool =
+            new HousePool(address(usdc), address(engine), address(new HousePoolRedemptionMathSidecar()));
         TrancheVault neutralSenior = new TrancheVault(
             IERC20(address(usdc)), address(neutralPool), true, "Neutral Senior LP", "neutralSeniorUSDC"
         );

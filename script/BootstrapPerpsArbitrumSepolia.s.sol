@@ -9,6 +9,7 @@ import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
 import {IAsyncTrancheVault} from "@plether/perps/interfaces/IAsyncTrancheVault.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
+import {IHousePoolRedemptionMathSidecar} from "@plether/perps/interfaces/IHousePoolRedemptionMathSidecar.sol";
 import {ITerminalNavBookV2} from "@plether/perps/interfaces/ITerminalNavBookV2.sol";
 import "forge-std/Script.sol";
 
@@ -61,6 +62,7 @@ contract BootstrapPerpsArbitrumSepolia is Script {
 
         address usdc = vm.envAddress("PERPS_USDC");
         address housePoolAddr = vm.envAddress("PERPS_HOUSE_POOL");
+        address redemptionMathSidecarAddr = vm.envAddress("PERPS_HOUSE_POOL_REDEMPTION_MATH_SIDECAR");
         address routerAddr = vm.envAddress("PERPS_ORDER_ROUTER");
         address emergencyCoordinatorAddr = vm.envAddress("PERPS_EMERGENCY_COORDINATOR");
         address desiredGuardian = vm.envAddress("PERPS_GUARDIAN");
@@ -87,6 +89,7 @@ contract BootstrapPerpsArbitrumSepolia is Script {
 
         _validateGuardian(desiredGuardian);
         _validateSeniorLimits(maxSeniorExposureUsdc, maxSeniorShareBps);
+        _verifyRedemptionMathSidecar(redemptionMathSidecarAddr);
         _verifyAsyncVaultPair(housePool, usdc);
         _verifyTerminalNavBook(housePool);
         _verifyRouterWiring(housePool, router);
@@ -96,6 +99,7 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         console.log("Deployer:", deployer);
         console.log("USDC:", usdc);
         console.log("HousePool:", housePoolAddr);
+        console.log("HousePoolRedemptionMathSidecar:", redemptionMathSidecarAddr);
         console.log("OrderRouter:", routerAddr);
         console.log("OrderRouterAdmin:", address(routerAdmin));
         console.log("EmergencyPauseCoordinator:", emergencyCoordinatorAddr);
@@ -135,12 +139,26 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         console.log("Router pauser:", routerAdmin.pauser());
         console.log("Emergency guardian:", emergencyCoordinator.guardian());
         console.log("Risk-off order cutoff:", routerAdmin.riskOffOrderCutoff());
+        console.log("LP epoch settlement paused:", housePool.lpEpochSettlementPaused());
         console.log("Maximum senior exposure (USDC units):", housePool.maxSeniorExposureUsdc());
         console.log("Maximum senior share (bps):", housePool.maxSeniorShareBps());
         console.log("LP epoch duration:", housePool.LP_EPOCH_DURATION());
         console.log("Maximum LP epochs per settlement phase:", housePool.MAX_LP_EPOCHS_PER_PHASE());
         console.log("Current LP epoch:", housePool.currentLpEpoch());
         console.log("Note: this script funds users with mock USDC only; ETH still needs a faucet.");
+    }
+
+    /// @dev Keeps bootstrap reruns fail-closed against an omitted or wrong-generation redemption math dependency.
+    function _verifyRedemptionMathSidecar(
+        address redemptionMathSidecar
+    ) internal view {
+        require(redemptionMathSidecar != address(0), "PERPS_HOUSE_POOL_REDEMPTION_MATH_SIDECAR is zero");
+        require(redemptionMathSidecar.code.length > 0, "HousePool redemption math sidecar has no code");
+        require(
+            IHousePoolRedemptionMathSidecar(redemptionMathSidecar).implementationId()
+                == keccak256("Plether.HousePoolRedemptionMathSidecar.v1"),
+            "HousePool redemption math sidecar ID mismatch"
+        );
     }
 
     /// @dev Refuses to seed or activate a stack whose exact terminal-NAV book is absent or misbound.
@@ -433,6 +451,7 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         require(housePool.pauser() == address(coordinator), "HousePool pauser changed before activation");
         require(routerAdmin.pauser() == address(coordinator), "Router pauser changed before activation");
         require(!housePool.paused(), "HousePool is paused");
+        require(!housePool.lpEpochSettlementPaused(), "LP epoch settlement is paused");
         require(!routerAdmin.paused(), "OrderRouterAdmin is paused");
 
         if (!housePool.seniorSeedInitialized() || !housePool.juniorSeedInitialized()) {
