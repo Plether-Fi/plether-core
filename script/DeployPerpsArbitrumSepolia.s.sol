@@ -10,9 +10,11 @@ import {CfdEngineLens} from "@plether/perps/CfdEngineLens.sol";
 import {CfdEnginePlanner} from "@plether/perps/CfdEnginePlanner.sol";
 import {CfdEngineSettlementSidecar} from "@plether/perps/CfdEngineSettlementSidecar.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {EmergencyPauseCoordinator} from "@plether/perps/EmergencyPauseCoordinator.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
+import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
 import {PerpsPublicLens} from "@plether/perps/PerpsPublicLens.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {SettlementMonitorLens} from "@plether/perps/SettlementMonitorLens.sol";
@@ -97,12 +99,14 @@ contract DeployPerpsArbitrumSepolia is Script {
         CfdEngineAccountLens accountLens;
         CfdEngineLens engineLens;
         OrderRouter router;
+        OrderRouterLiquidationBatchSidecar liquidationBatchSidecar;
         address positionProtectionBook;
         address pletherOracle;
         address routerAdmin;
         PerpsPublicLens publicLens;
         SettlementMonitorLens settlementMonitorLens;
         SettlementMonitorLensSidecar settlementMonitorLensSidecar;
+        EmergencyPauseCoordinator emergencyPauseCoordinator;
     }
 
     function run() external returns (DeployedContracts memory deployed) {
@@ -158,9 +162,17 @@ contract DeployPerpsArbitrumSepolia is Script {
                 _inversions()
             )
         );
+        uint64 sidecarNonce = vm.getNonce(deployer);
+        address expectedRouter = vm.computeCreateAddress(deployer, uint256(sidecarNonce) + 1);
+        deployed.liquidationBatchSidecar = new OrderRouterLiquidationBatchSidecar(expectedRouter);
         deployed.router = new OrderRouter(
-            address(deployed.engine), address(deployed.engineLens), address(deployed.housePool), deployed.pletherOracle
+            address(deployed.engine),
+            address(deployed.engineLens),
+            address(deployed.housePool),
+            deployed.pletherOracle,
+            address(deployed.liquidationBatchSidecar)
         );
+        require(address(deployed.router) == expectedRouter, "OrderRouter CREATE address mismatch");
         deployed.positionProtectionBook = _verifyPositionProtectionBook(deployed.router, deployed.engine);
         deployed.routerAdmin = deployed.router.admin();
 
@@ -266,6 +278,37 @@ contract DeployPerpsArbitrumSepolia is Script {
             "SettlementMonitorLens Sidecar USDC mismatch"
         );
 
+        deployed.emergencyPauseCoordinator =
+            new EmergencyPauseCoordinator(deployed.routerAdmin, address(deployed.housePool), deployer);
+        require(address(deployed.emergencyPauseCoordinator).code.length > 0, "Emergency coordinator has no code");
+        require(
+            address(deployed.emergencyPauseCoordinator.ROUTER_ADMIN()) == deployed.routerAdmin,
+            "Emergency coordinator RouterAdmin mismatch"
+        );
+        require(
+            address(deployed.emergencyPauseCoordinator.HOUSE_POOL()) == address(deployed.housePool),
+            "Emergency coordinator HousePool mismatch"
+        );
+        require(deployed.emergencyPauseCoordinator.owner() == deployer, "Emergency coordinator owner mismatch");
+        require(deployed.emergencyPauseCoordinator.guardian() == address(0), "Emergency guardian must start disabled");
+        require(
+            deployed.emergencyPauseCoordinator.ROUTER_ADMIN().riskOffOrderCutoff() == 0,
+            "Unexpected initial risk-off cutoff"
+        );
+        require(!deployed.emergencyPauseCoordinator.ROUTER_ADMIN().paused(), "OrderRouterAdmin unexpectedly paused");
+        require(!deployed.emergencyPauseCoordinator.HOUSE_POOL().paused(), "HousePool unexpectedly paused");
+
+        deployed.housePool.setPauser(address(deployed.emergencyPauseCoordinator));
+        deployed.emergencyPauseCoordinator.ROUTER_ADMIN().setPauser(address(deployed.emergencyPauseCoordinator));
+        require(
+            deployed.housePool.pauser() == address(deployed.emergencyPauseCoordinator),
+            "HousePool emergency coordinator mismatch"
+        );
+        require(
+            deployed.emergencyPauseCoordinator.ROUTER_ADMIN().pauser() == address(deployed.emergencyPauseCoordinator),
+            "OrderRouterAdmin emergency coordinator mismatch"
+        );
+
         vm.stopBroadcast();
 
         _logDeployment(deployed);
@@ -326,7 +369,8 @@ contract DeployPerpsArbitrumSepolia is Script {
         inversions[5] = true;
     }
 
-    /// @dev Rejects a missing or misbound Router-created position-protection book before set-once wiring completes.
+    /// @dev Rejects missing, misbound, aliased, or mixed-generation Router helper contracts before set-once wiring
+    ///      completes.
     function _verifyPositionProtectionBook(
         OrderRouter router,
         CfdEngine engine
@@ -334,6 +378,14 @@ contract DeployPerpsArbitrumSepolia is Script {
         book = address(router.positionProtectionBook());
         require(book != address(0), "PositionProtectionBook is not wired");
         require(book.code.length > 0, "PositionProtectionBook has no code");
+        address sidecar = router.liquidationBatchSidecar();
+        require(sidecar != address(0), "OrderRouter sidecar is not wired");
+        require(sidecar.code.length > 0, "OrderRouter sidecar has no code");
+        require(sidecar != book, "OrderRouter sidecar aliases PositionProtectionBook");
+        require(
+            OrderRouterLiquidationBatchSidecar(sidecar).ROUTER() == address(router),
+            "OrderRouter sidecar router mismatch"
+        );
         IPositionProtectionBookDeploymentView candidate = IPositionProtectionBookDeploymentView(book);
         require(candidate.ROUTER() == address(router), "PositionProtectionBook router mismatch");
         require(candidate.ENGINE() == address(engine), "PositionProtectionBook engine mismatch");
@@ -441,6 +493,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         console.log("CfdEngineAccountLens:", address(deployed.accountLens));
         console.log("CfdEngineLens:", address(deployed.engineLens));
         console.log("OrderRouter:", address(deployed.router));
+        console.log("OrderRouterLiquidationBatchSidecar:", address(deployed.liquidationBatchSidecar));
         console.log("PositionProtectionBook:", deployed.positionProtectionBook);
         console.log("PositionProtectionCommitsEnabled:", deployed.router.positionProtectionCommitsEnabled());
         console.log("PositionProtectionTriggerBountyUsdc:", deployed.router.positionProtectionTriggerBountyUsdc());
@@ -450,6 +503,9 @@ contract DeployPerpsArbitrumSepolia is Script {
         console.log("PerpsPublicLens:", address(deployed.publicLens));
         console.log("SettlementMonitorLens:", address(deployed.settlementMonitorLens));
         console.log("SettlementMonitorLensSidecar:", address(deployed.settlementMonitorLensSidecar));
+        console.log("EmergencyPauseCoordinator:", address(deployed.emergencyPauseCoordinator));
+        console.log("Emergency guardian:", deployed.emergencyPauseCoordinator.guardian());
+        console.log("Risk-off order cutoff:", deployed.emergencyPauseCoordinator.ROUTER_ADMIN().riskOffOrderCutoff());
         console.log("Owner:", deployed.engineAdmin.owner());
     }
 

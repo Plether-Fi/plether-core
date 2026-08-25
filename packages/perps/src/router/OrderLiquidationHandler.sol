@@ -11,21 +11,23 @@ import {OrderValidation} from "@plether/perps/router/OrderValidation.sol";
 abstract contract OrderLiquidationHandler is OrderValidation {
 
     /// @notice Processes one batch account inside its own rollback frame.
-    /// @dev Callable only by this router through delegated batch logic. This function deliberately has no reentrancy
-    ///      modifier because the outer public batch call already holds the router's transient guard.
+    /// @dev Callable only by this router through its immutable liquidation-batch sidecar. This function deliberately
+    ///      has no reentrancy modifier because the outer public batch call already holds the router's transient guard.
     /// @param account Candidate liquidation account.
     /// @param bullPrice Shared oracle price adverse to BULL positions.
     /// @param bearPrice Shared oracle price adverse to BEAR positions.
     /// @param publishTime Shared oracle publish timestamp.
     /// @param keeper Original external caller credited with any liquidation bounty.
-    /// @return keeperBountyUsdc Bounty credited by the engine on success.
+    /// @param riskOffCutoff Inclusive persistent invalidation cutoff cached by the outer batch call.
+    /// @return outcome Keeper bounty on liquidation, or `uint256.max` when refunds restored solvency.
     function executeLiquidationBatchItem(
         address account,
         uint256 bullPrice,
         uint256 bearPrice,
         uint64 publishTime,
-        address keeper
-    ) external returns (uint256 keeperBountyUsdc) {
+        address keeper,
+        uint64 riskOffCutoff
+    ) external returns (uint256 outcome) {
         if (msg.sender != address(this)) {
             revert OrderRouter__Unauthorized();
         }
@@ -34,20 +36,25 @@ abstract contract OrderLiquidationHandler is OrderValidation {
             revert ICfdEngineTypes.CfdEngine__NoPositionToLiquidate();
         }
         uint256 executionPrice = side == CfdTypes.Side.BULL ? bullPrice : bearPrice;
-        return _executeLiquidationAtPrice(account, executionPrice, publishTime, keeper);
+        return _executeLiquidationAtPrice(account, executionPrice, publishTime, keeper, riskOffCutoff);
     }
 
-    /// @notice Applies one fully atomic liquidation after oracle resolution.
+    /// @notice Applies risk-off refunds and, if the account remains eligible, one atomic liquidation after pricing.
+    /// @return outcome Keeper bounty on liquidation, or `uint256.max` when refunds restored solvency.
     function _executeLiquidationAtPrice(
         address account,
         uint256 executionPrice,
         uint64 publishTime,
-        address keeper
-    ) internal returns (uint256 keeperBountyUsdc) {
-        _forfeitReservedOrderBountiesOnLiquidation(account);
+        address keeper,
+        uint64 riskOffCutoff
+    ) internal returns (uint256 outcome) {
+        uint256 refundedOrders = _refundRiskOffAccountOrders(account, riskOffCutoff);
         uint256 housePoolDepth = housePool.totalAssets();
-        keeperBountyUsdc = engine.liquidatePosition(account, executionPrice, housePoolDepth, publishTime, keeper);
-
+        if (refundedOrders != 0 && !engineLens.isLiquidatableAt(account, executionPrice, housePoolDepth)) {
+            return type(uint256).max;
+        }
+        _forfeitReservedOrderBountiesOnLiquidation(account);
+        outcome = engine.liquidatePosition(account, executionPrice, housePoolDepth, publishTime, keeper);
         _clearLiquidatedAccountOrders(account);
     }
 

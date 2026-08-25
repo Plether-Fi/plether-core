@@ -4,6 +4,8 @@ pragma solidity 0.8.35;
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
+import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
+import {PositionProtectionBook} from "@plether/perps/PositionProtectionBook.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
@@ -22,15 +24,31 @@ interface IDelegatedMarkRefresh {
 
 }
 
+interface ILiquidationBatchSidecarErrors {
+
+    error OrderRouterLiquidationBatchSidecar__OnlyDelegateCall();
+
+}
+
 contract OrderRouterInitcodeSizeTest is Test {
 
     uint256 internal constant EIP3860_INITCODE_LIMIT = 49_152;
 
     function test_OrderRouterCreationCodeAndConstructorArgsFitEip3860() public pure {
         assertLe(
-            type(OrderRouter).creationCode.length + (4 * 32),
+            type(OrderRouter).creationCode.length + (5 * 32),
             EIP3860_INITCODE_LIMIT,
-            "OrderRouter creation code plus four static constructor arguments must fit EIP-3860"
+            "OrderRouter creation code plus five static constructor arguments must fit EIP-3860"
+        );
+        assertLe(
+            type(OrderRouterLiquidationBatchSidecar).creationCode.length + 32,
+            EIP3860_INITCODE_LIMIT,
+            "sidecar creation code plus its static constructor argument must fit EIP-3860"
+        );
+        assertLe(
+            type(PositionProtectionBook).creationCode.length + (2 * 32),
+            EIP3860_INITCODE_LIMIT,
+            "PositionProtectionBook creation code plus two static constructor arguments must fit EIP-3860"
         );
     }
 
@@ -216,47 +234,58 @@ contract PositionProtectionLiquidationBatchTest is BasePerpTest {
         );
     }
 
-    function test_Batch_DirectCallToProtectionBookSidecarRevertsUnauthorized() public {
+    function test_Batch_DirectCallToSidecarUsesPreservedDelegateRejection() public {
         address[] memory accounts = new address[](1);
         accounts[0] = ARMED_ACCOUNT;
         bytes[] memory updateData = new bytes[](0);
+        address sidecar = router.liquidationBatchSidecar();
 
-        vm.expectRevert(IOrderRouterErrors.OrderRouter__Unauthorized.selector);
-        IPerpsKeeper(address(protectionBook)).executeLiquidationBatch(accounts, updateData);
+        vm.expectRevert(ILiquidationBatchSidecarErrors.OrderRouterLiquidationBatchSidecar__OnlyDelegateCall.selector);
+        IPerpsKeeper(sidecar).executeLiquidationBatch(accounts, updateData);
     }
 
-    function test_DelegatedMarkRefresh_DirectCallToProtectionBookRevertsUnauthorized() public {
+    function test_DelegatedMarkRefresh_DirectCallToSidecarRevertsUnauthorized() public {
         bytes[] memory updateData = new bytes[](0);
+        address sidecar = router.liquidationBatchSidecar();
 
         vm.expectRevert(IOrderRouterErrors.OrderRouter__Unauthorized.selector);
-        IDelegatedMarkRefresh(address(protectionBook)).updateMarkPrice(updateData);
+        IDelegatedMarkRefresh(sidecar).updateMarkPrice(updateData);
     }
 
-    function test_DelegatedLpSettlement_DirectCallToProtectionBookRevertsUnauthorized() public {
+    function test_DelegatedLpSettlement_DirectCallToSidecarRevertsUnauthorized() public {
         bytes[] memory updateData = new bytes[](0);
+        address sidecar = router.liquidationBatchSidecar();
 
         vm.expectRevert(IOrderRouterErrors.OrderRouter__Unauthorized.selector);
-        IPerpsKeeper(address(protectionBook)).settleLpEpoch(updateData);
+        IPerpsKeeper(sidecar).settleLpEpoch(updateData);
     }
 
-    function test_DelegatedSingleLiquidation_DirectCallToProtectionBookRevertsUnauthorized() public {
+    function test_DelegatedSingleLiquidation_DirectCallToSidecarRevertsUnauthorized() public {
         bytes[] memory updateData = new bytes[](0);
+        address sidecar = router.liquidationBatchSidecar();
 
         vm.expectRevert(IOrderRouterErrors.OrderRouter__Unauthorized.selector);
-        IPerpsKeeper(address(protectionBook)).executeLiquidation(ARMED_ACCOUNT, updateData);
+        IPerpsKeeper(sidecar).executeLiquidation(ARMED_ACCOUNT, updateData);
     }
 
     function test_ProtectionTriggerItem_DirectExternalRouterCallRevertsUnauthorized() public {
         vm.expectRevert(IOrderRouterErrors.OrderRouter__Unauthorized.selector);
-        router.executePositionProtectionTriggerItem(TRIGGER_KEEPER, uint64(1), MARK_PRICE, uint64(block.timestamp));
+        router.executePositionProtectionTriggerItem();
     }
 
-    function test_Batch_ProtectionBookSidecarRuntimeFitsEip170() public view {
-        assertLe(
-            address(protectionBook).code.length,
-            EIP170_RUNTIME_CODE_LIMIT,
-            "PositionProtectionBook delegated-logic runtime must fit EIP-170"
+    function test_Batch_SplitComponentBindingAndRuntimeFitsEip170() public view {
+        address sidecar = router.liquidationBatchSidecar();
+        address book = address(protectionBook);
+        assertNotEq(sidecar, book, "keeper sidecar and state-owning protection Book must be separate contracts");
+        assertEq(
+            OrderRouterLiquidationBatchSidecar(sidecar).ROUTER(), address(router), "sidecar must bind the exact Router"
         );
+        assertEq(PositionProtectionBook(book).ROUTER(), address(router), "Book must bind the exact Router");
+        assertLe(address(router).code.length, EIP170_RUNTIME_CODE_LIMIT, "OrderRouter runtime must fit EIP-170");
+        assertGt(sidecar.code.length, 0, "keeper sidecar must be deployed");
+        assertLe(sidecar.code.length, EIP170_RUNTIME_CODE_LIMIT, "keeper sidecar runtime must fit EIP-170");
+        assertGt(book.code.length, 0, "PositionProtectionBook must be deployed");
+        assertLe(book.code.length, EIP170_RUNTIME_CODE_LIMIT, "PositionProtectionBook runtime must fit EIP-170");
     }
 
     function _openAndProtect(

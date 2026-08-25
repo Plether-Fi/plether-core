@@ -6,9 +6,15 @@ import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAcco
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IPerpsKeeper} from "@plether/perps/interfaces/IPerpsKeeper.sol";
 import {IPerpsTraderActions} from "@plether/perps/interfaces/IPerpsTraderActions.sol";
-import {IPositionProtectionBook} from "@plether/perps/interfaces/IPositionProtectionBook.sol";
 import {OrderHandler} from "@plether/perps/router/OrderHandler.sol";
 import {OrderRouterBase} from "@plether/perps/router/OrderRouterBase.sol";
+
+/// @notice Binding surface exposed by the Router's predeployed stateless keeper sidecar.
+interface IOrderRouterKeeperSidecarBinding {
+
+    function ROUTER() external view returns (address);
+
+}
 
 /// @title OrderRouter (The MEV Shield)
 /// @notice Queues delayed perps orders and permissionlessly executes them in global FIFO order using Pyth prices.
@@ -19,6 +25,11 @@ import {OrderRouterBase} from "@plether/perps/router/OrderRouterBase.sol";
 /// @custom:security-contact contact@plether.com
 contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
 
+    /// @notice Fixed stateless delegate module for oracle config, mark refresh, LP settlement, and liquidations.
+    /// @dev The sidecar is deployed immediately before this Router and constructor-bound to this exact address. Keeping
+    ///      its creation payload outside the Router preserves EIP-3860 deployability without trusting storage layout.
+    address public immutable liquidationBatchSidecar;
+
     /// @notice Deploys the router and its owner-controlled timelocked admin.
     /// @dev The admin owner is the constructor caller. Integration addresses are validated by the inherited
     ///      constructors as described there; the router is not upgradeable.
@@ -26,12 +37,22 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
     /// @param _engineLens CfdEngineLens used for commit-time open validation previews.
     /// @param _housePool HousePool used for depth and risk-availability queries.
     /// @param _pletherOracle Deployed Plether oracle used for Pyth basket pricing.
+    /// @param _keeperSidecar Predeployed stateless keeper logic bound to this Router's address.
     constructor(
         address _engine,
         address _engineLens,
         address _housePool,
-        address _pletherOracle
-    ) OrderRouterBase(_engine, _engineLens, _housePool, _pletherOracle) {}
+        address _pletherOracle,
+        address _keeperSidecar
+    ) OrderRouterBase(_engine, _engineLens, _housePool, _pletherOracle) {
+        if (
+            _keeperSidecar.code.length == 0
+                || IOrderRouterKeeperSidecarBinding(_keeperSidecar).ROUTER() != address(this)
+        ) {
+            revert OrderRouter__InvalidKeeperSidecar();
+        }
+        liquidationBatchSidecar = _keeperSidecar;
+    }
 
     /// @notice Submits an open/increase or strict reduce-only intent to the delayed global FIFO queue.
     /// @dev Reserves committed margin and the keeper bounty in the clearinghouse immediately. Opens are
@@ -84,14 +105,16 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
     }
 
     /// @notice Permissionlessly executes an eligible global queue head and pays its reserved USDC bounty.
-    /// @dev Prunes expired heads up to the requested id before oracle work, subject to the configured prune cap.
-    ///      It then enforces FIFO, post-commit timing outside frozen-oracle mode, staleness, slippage, and a
-    ///      minimum engine-call gas reserve. Expired, slippage-failed, and engine failures other than
-    ///      mark-price-out-of-order—including business-rule rejections and panics—are terminal: committed margin is
-    ///      released and their bounty is still credited to the caller. Mark-price-out-of-order instead reverts
-    ///      nonterminally and leaves the order pending. Excess ETH is refunded, or recorded in the admin contract
-    ///      if the transfer fails. Terminal failures have no retry lane.
-    /// @param orderId Queue-head id to execute, or a later committed id used as the expired-head pruning bound.
+    /// @dev Before oracle work, refunds cutoff-invalid open heads up to the requested id, before pruning expired heads.
+    ///      Risk-off refunds return all remaining margin and bounty to the trader, pay no caller reward, and are capped
+    ///      at 64 per call; reaching the cap or removing a head before the requested target may return without executing
+    ///      that target. Expiry pruning remains subject to its separately configured cap. Execution then enforces FIFO,
+    ///      post-commit timing outside frozen-oracle mode, staleness, slippage, and a minimum engine-call gas reserve.
+    ///      Expired, slippage-failed, and engine failures other than mark-price-out-of-order—including business-rule
+    ///      rejections and panics—are terminal: committed margin is released and their bounty is credited to the caller.
+    ///      Mark-price-out-of-order instead reverts nonterminally and leaves the order pending. Excess ETH is refunded,
+    ///      or recorded in the admin contract if the transfer fails. Terminal failures have no retry lane.
+    /// @param orderId Queue-head id to execute, or a later committed id used as the terminal-head cleanup bound.
     /// @param pythUpdateData Pyth price update blobs; `msg.value` must cover all Pyth fees used by the call.
     function executeOrder(
         uint64 orderId,
@@ -101,12 +124,16 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
     }
 
     /// @notice Permissionlessly processes consecutive FIFO orders through a committed inclusive id bound.
-    /// @dev Uses strictly post-commit historical Pyth prices outside frozen-oracle mode and may reuse a proven
-    ///      basket for later compatible orders. It terminally cleans expired, slippage-failed, and engine failures
-    ///      other than mark-price-out-of-order, but stops at an open blocked by close-only policy, an MEV timing
-    ///      boundary, insufficient gas, the prune cap, or unavailable historical data after prior progress.
-    ///      Mark-price-out-of-order reverts the whole batch and leaves its state unchanged. Reserved USDC bounties
-    ///      accrue to the caller; unused ETH is refunded once or deferred to the admin on transfer failure.
+    /// @dev Before oracle work for each item, refunds cutoff-invalid opens before applying expiry or other policy.
+    ///      Those refunds return the complete remaining margin and bounty to the trader and pay no caller reward. The
+    ///      batch processes at most 64 such refunds; after the 64th it may continue with a non-risk-off head, while a
+    ///      65th eligible refund stops the call. The batch otherwise uses strictly post-commit historical Pyth prices
+    ///      outside frozen-oracle mode and may reuse a proven basket for later compatible orders. It terminally cleans
+    ///      expired, slippage-failed, and engine failures other than mark-price-out-of-order, but stops at an open
+    ///      blocked by close-only policy, an MEV timing boundary, insufficient gas, either cleanup cap, or unavailable
+    ///      historical data after prior progress. Mark-price-out-of-order reverts the whole batch and leaves its state
+    ///      unchanged. Ordinary reserved USDC bounties accrue to the caller; unused ETH is refunded once or deferred
+    ///      to the admin on transfer failure.
     /// @param maxOrderId Last committed order id the batch may process; must be at or after the head and below `nextCommitId`.
     /// @param pythUpdateData Pyth price update blobs; `msg.value` must cover the cumulative Pyth fees used.
     function executeOrderBatch(
@@ -114,6 +141,17 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
         bytes[] calldata pythUpdateData
     ) external payable nonReentrant {
         _executeOrderBatch(maxOrderId, pythUpdateData);
+    }
+
+    /// @notice Permissionlessly refunds one pending open invalidated by the persistent risk-off cutoff.
+    /// @dev Requires no oracle update or ETH. The complete remaining committed-margin reservation and execution
+    ///      bounty are returned to the submitting account's free internal settlement; the caller receives nothing.
+    ///      The order may be removed from any position in the global queue.
+    /// @param orderId Pending pre-cutoff open to refund and terminally fail.
+    function clearRiskOffOrder(
+        uint64 orderId
+    ) external nonReentrant {
+        _clearRiskOffOrder(orderId);
     }
 
     /// @notice Applies a finalized router risk and queue configuration.
@@ -124,6 +162,8 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
         IOrderRouterAdminHost.RouterConfig calldata config
     ) external nonReentrant {
         _applyRouterConfig(config);
+        _delegateToKeeperSidecar();
+        _applyRouterConfigAfterOracle(config);
     }
 
     /// @notice Applies a finalized oracle integration configuration.
@@ -146,26 +186,34 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
         bytes[] calldata pythUpdateData
     ) external payable nonReentrant {
         pythUpdateData;
-        _delegateToPositionProtectionBook();
+        _delegateToKeeperSidecar();
     }
 
-    /// @notice Completes a protection trigger after delegated oracle resolution.
-    /// @dev Callable only by this router's delegated sidecar through an external self-call. The outer mark-refresh
-    ///      entrypoint holds the transient reentrancy guard and the sidecar preserves the original keeper identity.
-    function executePositionProtectionTriggerItem(
-        address keeper,
-        uint64 protectionId,
-        uint256 markPrice,
-        uint64 publishTime
-    ) external {
+    /// @notice Records the already-validated close order produced by a delegated protection trigger.
+    /// @dev Callable only through an external self-call from the exactly bound keeper sidecar. The sidecar performs
+    ///      Book activation and bounty crediting; this callback alone mutates Router queue storage and revalidates the
+    ///      next id across the intervening external Book call.
+    function executePositionProtectionTriggerItem() external {
         if (msg.sender != address(this)) {
             revert OrderRouter__Unauthorized();
         }
-        uint64 linkedOrderId = nextCommitId++;
-        IPositionProtectionBook.TriggerPlan memory plan =
-            positionProtectionBook.activate(protectionId, markPrice, publishTime, linkedOrderId);
-        _recordCommittedOrder(linkedOrderId, plan.account, plan.side, plan.size, 0, 0, true, plan.executionBountyUsdc);
-        engine.creditBounty(plan.account, keeper, plan.triggerBountyUsdc, markPrice, publishTime);
+        uint64 linkedOrderId;
+        address account;
+        CfdTypes.Side side;
+        uint256 size;
+        uint256 executionBountyUsdc;
+        assembly ("memory-safe") {
+            linkedOrderId := calldataload(4)
+            account := calldataload(36)
+            side := calldataload(68)
+            size := calldataload(100)
+            executionBountyUsdc := calldataload(132)
+        }
+        if (linkedOrderId != nextCommitId) {
+            revert OrderRouter__Unauthorized();
+        }
+        nextCommitId = linkedOrderId + 1;
+        _recordCommittedOrder(linkedOrderId, account, side, size, 0, 0, true, executionBountyUsdc);
     }
 
     /// @notice Atomically refreshes the pool-accounting mark and settles matured LP epochs against that exact mark.
@@ -177,13 +225,13 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
         bytes[] calldata pythUpdateData
     ) external payable nonReentrant {
         pythUpdateData;
-        _delegateToPositionProtectionBook();
+        _delegateToKeeperSidecar();
     }
 
     /// @notice Permissionlessly liquidates an unsafe account using an account-adverse oracle price.
-    /// @dev Available while paused. Before liquidation, all reserved bounties on the account's queued orders
-    ///      are forfeited through the engine. On success every queued order is failed, its committed margin is
-    ///      released, and its queue links are removed. The oracle handles Pyth fees and ETH refunds.
+    /// @dev Available while paused. Before liquidation, cutoff-invalid opens are refunded and only bounties on the
+    ///      remaining live orders are forfeited through the engine. On success every queued order is failed, its
+    ///      committed margin is released, and its queue links are removed. The oracle handles Pyth fees and ETH refunds.
     /// @param account Canonical account to liquidate.
     /// @param pythUpdateData Pyth price update blobs; `msg.value` must cover the Pyth update fee.
     function executeLiquidation(
@@ -192,7 +240,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
     ) external payable nonReentrant {
         account;
         pythUpdateData;
-        _delegateToPositionProtectionBook();
+        _delegateToKeeperSidecar();
     }
 
     /// @notice Permissionlessly attempts up to 256 account liquidations from one shared Pyth snapshot.
@@ -210,17 +258,15 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
         address[] calldata accounts,
         bytes[] calldata pythUpdateData
     ) external payable nonReentrant returns (uint256 nextIndex) {
-        // Delegate the large stateless loop to the immutable sidecar that also owns protection state. The delegated
-        // implementation uses only external router getters/item calls, so it is independent of router storage layout.
         accounts;
         pythUpdateData;
-        nextIndex = _delegateToPositionProtectionBook();
+        nextIndex = _delegateToKeeperSidecar();
     }
 
-    /// @dev Forwards the original selector and calldata to stateless logic carried by the immutable protection book.
+    /// @dev Forwards the original selector and calldata to the immutable, exactly Router-bound stateless sidecar.
     ///      Normal Solidity return keeps the outer transient reentrancy guard's cleanup reachable.
-    function _delegateToPositionProtectionBook() private returns (uint256 outputWord) {
-        address logic = address(positionProtectionBook);
+    function _delegateToKeeperSidecar() private returns (uint256 outputWord) {
+        address logic = liquidationBatchSidecar;
         assembly ("memory-safe") {
             let input := mload(0x40)
             calldatacopy(input, 0, calldatasize())

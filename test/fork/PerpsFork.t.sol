@@ -13,6 +13,7 @@ import {HousePool} from "@plether/perps/HousePool.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
+import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
@@ -144,12 +145,14 @@ contract PerpsForkTest is Test {
         w[0] = 1e18;
         uint256[] memory b = new uint256[](1);
         b[0] = 1e8;
-        router = new OrderRouter(
-            address(engine),
-            address(new CfdEngineLens(address(engine))),
-            address(pool),
-            address(new PletherOracle(address(engine), address(pool), address(pyth), feedIds, w, b, new bool[](1)))
-        );
+        CfdEngineLens lens = new CfdEngineLens(address(engine));
+        PletherOracle oracle =
+            new PletherOracle(address(engine), address(pool), address(pyth), feedIds, w, b, new bool[](1));
+        uint64 routerSidecarNonce = vm.getNonce(address(this));
+        address predictedRouter = vm.computeCreateAddress(address(this), routerSidecarNonce + 1);
+        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
+        router = new OrderRouter(address(engine), address(lens), address(pool), address(oracle), address(keeperSidecar));
+        assertEq(address(router), predictedRouter, "router prediction");
         routerAdmin = OrderRouterAdmin(router.admin());
         engine.setOrderRouter(address(router));
 
@@ -366,12 +369,16 @@ contract PerpsForkTest is Test {
         rw[0] = 1e18;
         uint256[] memory rb = new uint256[](1);
         rb[0] = 1e8;
+        CfdEngineLens realPythLens = new CfdEngineLens(address(engine));
+        PletherOracle realPythOracle =
+            new PletherOracle(address(engine), address(pool), REAL_PYTH, feedIds, rw, rb, new bool[](1));
+        uint64 routerSidecarNonce = vm.getNonce(address(this));
+        address predictedRouter = vm.computeCreateAddress(address(this), routerSidecarNonce + 1);
+        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
         OrderRouter realPythRouter = new OrderRouter(
-            address(engine),
-            address(new CfdEngineLens(address(engine))),
-            address(pool),
-            address(new PletherOracle(address(engine), address(pool), REAL_PYTH, feedIds, rw, rb, new bool[](1)))
+            address(engine), address(realPythLens), address(pool), address(realPythOracle), address(keeperSidecar)
         );
+        assertEq(address(realPythRouter), predictedRouter, "router prediction");
 
         vm.expectRevert(ICfdEngineTypes.CfdEngine__RouterAlreadySet.selector);
         engine.setOrderRouter(address(realPythRouter));

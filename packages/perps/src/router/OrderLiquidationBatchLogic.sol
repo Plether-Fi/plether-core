@@ -1,18 +1,26 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
+import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
+import {IOrderRouterEmergencyAdmin} from "@plether/perps/interfaces/IOrderRouterEmergencyAdmin.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
+import {IPositionProtectionBook} from "@plether/perps/interfaces/IPositionProtectionBook.sol";
 
-/// @notice Router getters and the isolated item entrypoint used by delegated liquidation-batch logic.
+/// @notice Router getters and isolated item entrypoints used by delegated keeper logic.
 interface IOrderLiquidationBatchHost {
 
     function engine() external view returns (ICfdEngineCore);
 
     function pletherOracle() external view returns (IPletherOracle);
+
+    function positionProtectionBook() external view returns (IPositionProtectionBook);
+
+    function nextCommitId() external view returns (uint64);
 
     function minEngineGas() external view returns (uint256);
 
@@ -27,15 +35,11 @@ interface IOrderLiquidationBatchHost {
         uint256 bullPrice,
         uint256 bearPrice,
         uint64 publishTime,
-        address keeper
-    ) external returns (uint256 keeperBountyUsdc);
-
-    function executePositionProtectionTriggerItem(
         address keeper,
-        uint64 protectionId,
-        uint256 markPrice,
-        uint64 publishTime
-    ) external;
+        uint64 riskOffCutoff
+    ) external returns (uint256 outcome);
+
+    function executePositionProtectionTriggerItem() external;
 
 }
 
@@ -50,24 +54,47 @@ interface IOrderDelegatedLogicRefundAdmin {
 }
 
 /// @title OrderLiquidationBatchLogic
-/// @notice Stateless liquidation-batch loop carried by the router's immutable sidecar and executed by delegatecall.
+/// @notice Stateless mark-refresh, LP-settlement, and liquidation orchestration executed by Router delegatecall.
 /// @dev This code deliberately reads router state only through external getters and mutates it only through the
-///      isolated item entrypoint. It therefore has no dependency on the router's storage layout. Delegatecall keeps
-///      the oracle/engine caller and emitted-event address equal to the router while moving the large loop out of the
-///      router's EIP-170-constrained runtime bytecode.
+///      isolated item entrypoints. It therefore has no dependency on the router's storage layout. Delegatecall keeps
+///      the oracle/engine caller and emitted-event address equal to the router while keeping this code out of the
+///      Router's EIP-170 runtime and EIP-3860 creation input.
 abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
+
+    /// @notice Dedicated rejection ABI for direct or foreign-context liquidation-batch calls.
+    error OrderRouterLiquidationBatchSidecar__OnlyDelegateCall();
 
     /// @notice Hard candidate-list bound; transaction gas can stop a batch before all 256 accounts are attempted.
     uint256 private constant MAX_LIQUIDATION_BATCH_ACCOUNTS = 256;
     /// @notice Fixed item budget above `minEngineGas` for router dispatch and account-level bounty accounting.
-    uint256 private constant LIQUIDATION_BATCH_ROUTER_GAS = 200_000;
+    uint256 private constant LIQUIDATION_BATCH_ROUTER_GAS = 250_000;
     /// @notice Item budget for each live order's bounty scan plus terminal reservation and queue cleanup.
     uint256 private constant LIQUIDATION_BATCH_GAS_PER_ORDER = 150_000;
     /// @notice Gas retained by the batch frame for failure classification, events, and a clean return.
     uint256 private constant LIQUIDATION_BATCH_TAIL_GAS = 250_000;
 
-    /// @dev Concrete sidecar address embedded in its runtime; equality means the function was called directly.
-    address private immutable _DELEGATED_LOGIC_SELF = address(this);
+    /// @notice Returns the only Router address in which this immutable code may execute by delegatecall.
+    function _delegatedLogicRouter() internal view virtual returns (address);
+
+    /// @notice Forwards the oracle-policy portion of an authenticated Router configuration.
+    /// @dev The Router performs admin authentication and its pre-oracle stores before delegating here, then applies
+    ///      its remaining fields after this call. Delegate context preserves `msg.sender == Router` at the oracle.
+    function applyRouterConfig(
+        IOrderRouterAdminHost.RouterConfig calldata config
+    ) external {
+        _requireDelegateCall();
+        IOrderLiquidationBatchHost(address(this)).pletherOracle()
+            .applyConfig(
+                IPletherOracle.OracleConfig({
+                    orderExecutionStalenessLimit: config.orderExecutionStalenessLimit,
+                    liquidationStalenessLimit: config.liquidationStalenessLimit,
+                    basketMaxConfidenceRatioBps: config.basketMaxConfidenceRatioBps,
+                    orderSettlementWindow: config.orderSettlementWindow,
+                    maxComponentPublishTimeDivergence: config.maxComponentPublishTimeDivergence,
+                    adverseConfidenceMultiplierBps: config.adverseConfidenceMultiplierBps
+                })
+            );
+    }
 
     /// @notice Refreshes the pool-accounting mark and settles matured LP epochs in one rollback frame.
     /// @dev Must be reached by delegatecall from the router. Every integration is obtained through external getters,
@@ -116,7 +143,9 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         _requireDelegateCall();
 
         IOrderLiquidationBatchHost host = IOrderLiquidationBatchHost(address(this));
-        bool isProtectionTrigger = msg.sender == _DELEGATED_LOGIC_SELF;
+        // Only the Router's immutable state-owning Book may append the authenticated trigger payload.
+        IPositionProtectionBook protectionBook = host.positionProtectionBook();
+        bool isProtectionTrigger = msg.sender == address(protectionBook);
         address refundRecipient = msg.sender;
         uint64 protectionId;
         if (isProtectionTrigger) {
@@ -128,10 +157,28 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         IPletherOracle.PriceSnapshot memory snapshot = host.pletherOracle().updatePrice{value: msg.value}(
             refundRecipient, pythUpdateData, IPletherOracle.PriceMode.MarkRefresh
         );
-        host.engine().updateMarkPrice(snapshot.markPrice, snapshot.publishTime);
+        ICfdEngineCore engine = host.engine();
+        engine.updateMarkPrice(snapshot.markPrice, snapshot.publishTime);
         if (isProtectionTrigger) {
-            host.executePositionProtectionTriggerItem(
-                refundRecipient, protectionId, snapshot.markPrice, snapshot.publishTime
+            uint64 linkedOrderId = host.nextCommitId();
+            IPositionProtectionBook.TriggerPlan memory plan =
+                protectionBook.activate(protectionId, snapshot.markPrice, snapshot.publishTime, linkedOrderId);
+            bytes memory triggerItemCall = abi.encodeWithSelector(
+                IOrderLiquidationBatchHost.executePositionProtectionTriggerItem.selector,
+                linkedOrderId,
+                plan.account,
+                plan.side,
+                plan.size,
+                plan.executionBountyUsdc
+            );
+            (bool triggerRecorded, bytes memory triggerRevertData) = address(host).call(triggerItemCall);
+            if (!triggerRecorded) {
+                assembly ("memory-safe") {
+                    revert(add(triggerRevertData, 0x20), mload(triggerRevertData))
+                }
+            }
+            engine.creditBounty(
+                plan.account, refundRecipient, plan.triggerBountyUsdc, snapshot.markPrice, snapshot.publishTime
             );
         }
     }
@@ -148,13 +195,16 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         _requireDelegateCall();
 
         IOrderLiquidationBatchHost host = IOrderLiquidationBatchHost(address(this));
+        uint64 riskOffCutoff = IOrderRouterEmergencyAdmin(host.admin()).riskOffOrderCutoff();
         IPletherOracle.PriceSnapshot memory snapshot =
             host.pletherOracle().updateLiquidationPrice{value: msg.value}(msg.sender, pythUpdateData, account);
         ICfdEngineCore engine = host.engine();
         if (snapshot.publishTime >= engine.lastMarkTime()) {
             engine.updateMarkPrice(snapshot.markPrice, snapshot.publishTime);
         }
-        host.executeLiquidationBatchItem(account, snapshot.price, snapshot.price, snapshot.publishTime, msg.sender);
+        host.executeLiquidationBatchItem(
+            account, snapshot.price, snapshot.price, snapshot.publishTime, msg.sender, riskOffCutoff
+        );
     }
 
     /// @notice Updates Pyth and the neutral engine mark once, then independently attempts each supplied account.
@@ -167,7 +217,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         address[] calldata accounts,
         bytes[] calldata pythUpdateData
     ) external payable returns (uint256 nextIndex) {
-        _requireDelegateCall();
+        _requireLiquidationBatchDelegateCall();
 
         uint256 accountCount = accounts.length;
         if (accountCount == 0 || accountCount > MAX_LIQUIDATION_BATCH_ACCOUNTS) {
@@ -175,6 +225,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         }
 
         IOrderLiquidationBatchHost host = IOrderLiquidationBatchHost(address(this));
+        uint64 riskOffCutoff = IOrderRouterEmergencyAdmin(host.admin()).riskOffOrderCutoff();
         IPletherOracle.LiquidationBatchSnapshot memory snapshot =
             host.pletherOracle().updateLiquidationBatchPrice{value: msg.value}(msg.sender, pythUpdateData);
         host.engine().updateMarkPrice(snapshot.markPrice, snapshot.publishTime);
@@ -192,12 +243,17 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
             }
 
             try host.executeLiquidationBatchItem{gas: itemGas}(
-                account, snapshot.bullPrice, snapshot.bearPrice, snapshot.publishTime, msg.sender
+                account, snapshot.bullPrice, snapshot.bearPrice, snapshot.publishTime, msg.sender, riskOffCutoff
             ) returns (
-                uint256 keeperBountyUsdc
+                uint256 outcome
             ) {
+                bool restoredSolvency = outcome == type(uint256).max;
                 emit LiquidationBatchItem(
-                    nextIndex, account, LiquidationBatchResult.Liquidated, keeperBountyUsdc, bytes4(0)
+                    nextIndex,
+                    account,
+                    restoredSolvency ? LiquidationBatchResult.SkippedSolvent : LiquidationBatchResult.Liquidated,
+                    restoredSolvency ? 0 : outcome,
+                    bytes4(0)
                 );
             } catch (bytes memory revertData) {
                 if (revertData.length == 0) {
@@ -227,8 +283,14 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
     }
 
     function _requireDelegateCall() private view {
-        if (address(this) == _DELEGATED_LOGIC_SELF) {
+        if (address(this) != _delegatedLogicRouter()) {
             revert OrderRouter__Unauthorized();
+        }
+    }
+
+    function _requireLiquidationBatchDelegateCall() private view {
+        if (address(this) != _delegatedLogicRouter()) {
+            revert OrderRouterLiquidationBatchSidecar__OnlyDelegateCall();
         }
     }
 

@@ -16,6 +16,7 @@ import {HousePool} from "@plether/perps/HousePool.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
+import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
@@ -227,16 +228,15 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
         bases[0] = 1e8;
         bases[1] = 1e8;
 
+        CfdEngineLens testEngineLens = new CfdEngineLens(address(engine));
+        PletherOracle testOracle =
+            new PletherOracle(address(engine), address(pool), address(mockPyth), feedIds, weights, bases, inversions);
+        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
+        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
         router = new OrderRouter(
-            address(engine),
-            address(new CfdEngineLens(address(engine))),
-            address(pool),
-            address(
-                new PletherOracle(
-                    address(engine), address(pool), address(mockPyth), feedIds, weights, bases, inversions
-                )
-            )
+            address(engine), address(testEngineLens), address(pool), address(testOracle), address(keeperSidecar)
         );
+        assertEq(address(router), predictedRouter);
         routerAdmin = OrderRouterAdmin(router.admin());
         engine.setOrderRouter(address(router));
 

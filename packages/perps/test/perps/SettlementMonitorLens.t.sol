@@ -4,6 +4,7 @@ pragma solidity 0.8.35;
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
+import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
 import {SettlementMonitorLens} from "@plether/perps/SettlementMonitorLens.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
@@ -124,7 +125,12 @@ contract SettlementMonitorLensTest is BasePerpTest {
         address wrongPool = address(0xBADF00D);
         SettlementMonitorOracleBindingMock wrongOracle =
             new SettlementMonitorOracleBindingMock(address(engine), wrongPool, address(baseMockPyth));
-        OrderRouter wrongRouter = new OrderRouter(address(engine), address(engineLens), wrongPool, address(wrongOracle));
+        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
+        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
+        OrderRouter wrongRouter = new OrderRouter(
+            address(engine), address(engineLens), wrongPool, address(wrongOracle), address(keeperSidecar)
+        );
+        assertEq(address(wrongRouter), predictedRouter);
         vm.mockCall(
             address(engine),
             abi.encodeWithSelector(bytes4(keccak256("orderRouter()"))),

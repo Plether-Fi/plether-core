@@ -12,6 +12,7 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
+import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
@@ -166,12 +167,14 @@ contract GasProfileTest is Test {
         w[0] = 1e18;
         uint256[] memory b = new uint256[](1);
         b[0] = 1e8;
+        PletherOracle testOracle =
+            new PletherOracle(address(engine), address(pool), address(pyth), feedIds, w, b, new bool[](1));
+        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
+        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
         router = new OrderRouter(
-            address(engine),
-            address(new CfdEngineLens(address(engine))),
-            address(pool),
-            address(new PletherOracle(address(engine), address(pool), address(pyth), feedIds, w, b, new bool[](1)))
+            address(engine), address(engineLens), address(pool), address(testOracle), address(keeperSidecar)
         );
+        assertEq(address(router), predictedRouter);
         engine.setOrderRouter(address(router));
 
         uint256 t0 = block.timestamp;

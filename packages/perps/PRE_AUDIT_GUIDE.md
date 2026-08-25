@@ -57,6 +57,7 @@ Before trusting a test as a source of truth, ask:
 | `CfdEngine.processOrderTyped` / `liquidatePosition` / fee bookkeeping | `orderRouter` only | router is the external execution boundary |
 | `MarginClearinghouse` operator paths | `engine`, `settlementSidecar` | broad settlement mutations only |
 | `MarginClearinghouse` reservation paths | `engine`, `orderRouter` | router can reserve/release queued margin and execution-bounty buckets, but cannot perform broad settlement |
+| `MarginClearinghouse.releaseInvalidatedOrderReserves` | Engine-reported `orderRouter` only | exact order-margin, order-bounty, and attached-protection-bounty risk-off reclassification; authorization reads the Engine's Router binding, while the transition performs no Engine mutation, carry checkpoint, Terminal NAV synchronization, or token movement |
 | `HousePool.payOut` / `recordProtocolInflow` | `engine`, `settlementSidecar` | payout/inflow authority is intentionally narrow |
 | `HousePool.recordClaimantInflow` | `engine`, `settlementSidecar` | claimant-owned revenue/recap routing only |
 | `HousePool.reserveSeniorDeposit` / `releaseSeniorDepositReservation` | configured `seniorVault` only | direct LPs and the Junior vault cannot reserve or release pending Senior-entry capacity; activation happens only through synchronized settlement |
@@ -65,8 +66,18 @@ Before trusting a test as a source of truth, ask:
 | `HousePool.settleLpEpoch(uint256,uint256)` | configured Engine `orderRouter` when live positions exist; otherwise permissionless | binds the Router's exact mark/time for live settlement; `(0,0)` is the mark-independent or frozen cached-mark fallback |
 | `SettlementMonitorLens` views | permissionless | read-only, bounded, fail-soft settlement diagnostics; no settlement, pause, or circuit-breaker authority |
 | `SettlementMonitorLensSidecar` diagnostic builders | constructor-bound `SettlementMonitorLens` facade only | code-size implementation detail; external callers cannot obtain facade-attributed health from fabricated queue masks, integrations must use the facade rather than treating the sidecar as a second canonical surface, and constructor-set binding getters remain publicly readable; there are no setters or delegatecall paths |
+| `EmergencyPauseCoordinator.triggerEmergencyPause` | configured guardian only | atomically pauses new open commits and LP entry; advisory reason/evidence hashes are not Lens authorization; no unpause, pricing, configuration, fund movement, or arbitrary call |
+| `EmergencyPauseCoordinator.setGuardian` | coordinator owner only | rotate or disable containment authority; the guardian cannot rotate itself |
+| `OrderRouter.clearRiskOffOrder` | permissionless | oracle-free cleanup of one permanently invalidated open; full internal refund to trader, no clearer bounty |
+| `OrderRouterLiquidationBatchSidecar` delegated selectors | exact immutable-bound Router delegatecall context only | separately predeployed stateless size split for mark refresh/protection trigger, LP-epoch settlement, single/batch liquidation, and authenticated active-oracle configuration forwarding; direct and foreign-context calls revert, binding has no setter, Router keeps admin authentication, and Router self-only item callbacks remain the mutation boundary |
 
 Any new helper/sidecar contract that can reach these sets should be treated as security-critical and explicitly access-controlled.
+
+Deployment must precompute the next Router `CREATE` address, deploy the sidecar bound to that address, and deploy the
+Router immediately afterward from the same deployer without an intervening nonce-consuming transaction or `CREATE`.
+The Router constructor rejects a
+sidecar with no code or a sidecar whose `ROUTER()` does not equal the Router being constructed. Audit the prediction,
+transaction ordering, and post-deployment getter/code-hash verification as one ordered deployment invariant.
 
 ### Order lifecycle state machine
 
@@ -82,6 +93,7 @@ Any new helper/sidecar contract that can reach these sets should be treated as s
 - protocol-state invalidation
 - slippage failure
 - expiry
+- persistent risk-off invalidation for a pre-cutoff open
 - liquidation cleanup
 
 `Pending -> Pending`
@@ -108,6 +120,7 @@ Any new helper/sidecar contract that can reach these sets should be treated as s
 | Slippage failure on close | `Failed` | keeper paid | dequeue |
 | Expired open order | `Failed` | keeper paid from reserved bounty | dequeue |
 | Expired close order | `Failed` | keeper paid from reservation under the current terminal-close policy | dequeue |
+| Risk-off open at or below persistent cutoff | `Failed` | full order and attached `PendingOpen` protection bounties returned to trader's internal settlement; clearer unpaid | dequeue |
 | Stale oracle | blocked, not terminal | no distribution | keep pending |
 | Live-market publish-time ordering failure | blocked, not terminal | no distribution | keep pending |
 | Close-only ineligibility for queued open | blocked, not terminal | no distribution | keep pending |
@@ -116,7 +129,7 @@ Any new helper/sidecar contract that can reach these sets should be treated as s
 
 | Bounty type | Source of funds | Custody while pending | Success path | Illiquid path | Terminal failure path |
 |-------------|-----------------|-----------------------|--------------|---------------|-----------------------|
-| Order execution bounty | Eligible trader free settlement; never active PnL pledge | `MarginClearinghouse` reserved settlement bucket plus router order record | clearinghouse credit for the keeper | n/a | terminal close failures pay the keeper; other failure handling follows the typed policy |
+| Order execution bounty | Eligible trader free settlement; never active PnL pledge | `MarginClearinghouse` reserved settlement bucket plus router order record | clearinghouse credit for the keeper | n/a | persistent risk-off cleanup refunds the trader internally; every other ordinary terminal failure pays the keeper |
 | Liquidation charge | Dedicated liquidation-charge reserve, capped by the canonical planned charge | clearinghouse liquidation reserve | Default: 50% keeper clearinghouse credit; 0% protocol-treasury clearinghouse credit; exact 50% remainder to HousePool claimant revenue | n/a | n/a |
 
 ### Oracle regime table
@@ -234,9 +247,24 @@ Reachability note:
 ### Binding queued orders
 
 - Liveness problem: allowing arbitrary user cancellations would turn the queue into an option-like mechanism.
-- Chosen tradeoff: queued orders are binding until executed, expired, or failed by policy.
+- Chosen tradeoff: queued orders are binding until executed, expired, or failed by policy. The sole administrative
+  exception is a persistent risk-off cutoff for opens that existed when RouterAdmin paused.
 - New risk: user flexibility is reduced once committed.
-- Protecting invariant: failure policy is explicit and terminal paths clean up reservations exactly once.
+- Protecting invariant: cutoff-invalid opens can never execute after unpause; their oracle-free terminal cleanup
+  returns the exact remaining margin and bounty to free internal settlement without carry/NAV mutation or clearer pay.
+
+### Atomic guardian containment
+
+- Liveness problem: independent Router and HousePool pause transactions leave a race and partial-containment window.
+- Chosen tradeoff: one immutable-bound coordinator pauses new trading risk and LP entry atomically, while closes,
+  liquidations, redemption requests/funding, and funded claims remain available.
+- New risk: the guardian can deny new opens and deposits, and physical order cleanup still consumes protocol-keeper
+  gas because the trader receives the entire reserved bounty.
+- Protecting invariant: the guardian can only add restrictions. It cannot unpause, configure, price, move funds, or
+  make arbitrary calls; governance owns recovery. Lens observations and incident hashes remain advisory.
+- LP limitation: HousePool pause does not itself unlock a matured deposit cancellation. Existing post-maturity escape
+  conditions or later activation after recovery remain necessary.
+- Follow-ups: LP request-off, LP settlement-off, and corrupted-queue quarantine are deliberately out of scope.
 
 ### Stale-mark close bounty commits
 
@@ -371,6 +399,7 @@ Use the suites below as the highest-signal audit companions.
 | Economic conservation | `packages/perps/test/perps/invariant/PerpEconomicConservationInvariant.t.sol`, `packages/perps/test/perps/invariant/PerpAccountingInvariant.t.sol` |
 | Multi-account isolation | `packages/perps/test/perps/invariant/PerpMultiAccountInvariant.t.sol` |
 | FIFO / expiry / queue | `packages/perps/test/perps/OrderRouter.t.sol` |
+| Atomic emergency pause / persistent risk-off refunds | `packages/perps/test/perps/EmergencyPauseCoordinator.t.sol`, `packages/perps/test/perps/OrderRouterRiskOff.t.sol`, `packages/perps/test/perps/EmergencyRiskOffGas.t.sol`, `packages/perps/test/perps/TimelockPause.t.sol`, `packages/perps/test/perps/LiquidationBatch.t.sol`, `packages/perps/test/perps/invariant/EmergencyRiskOffInvariant.t.sol`, `test/scripts/ArbitrumSepoliaReleaseDefaults.t.sol` |
 | Frozen oracle / FAD | `packages/perps/test/perps/OrderRouter.t.sol`, `packages/perps/test/perps/invariant/PerpOracleBoundaryInvariant.t.sol` |
 | Oracle refresh / ETH refunds | `packages/perps/test/perps/invariant/PerpOraclePathInvariant.t.sol` |
 | Fee accounting | `packages/perps/test/perps/invariant/PerpFeeFlowInvariant.t.sol` |

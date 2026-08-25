@@ -11,12 +11,12 @@ import {OrderValidation} from "@plether/perps/router/OrderValidation.sol";
 /// @notice Coordinates oracle fees, FIFO traversal, terminal cleanup, and ETH refunds for keeper execution calls.
 abstract contract OrderExecutionHandler is OrderValidation {
 
-    /// @notice Processes one requested FIFO order after bounded pre-oracle expiry pruning.
-    /// @dev If pruning empties the queue, passes the target, or makes progress without landing on the requested
+    /// @notice Processes one requested FIFO order after bounded pre-oracle terminal-head cleanup.
+    /// @dev If cleanup empties the queue, passes the target, or makes progress without landing on the requested
     ///      target as the new head, it refunds all ETH and returns. Otherwise it prices the initial live head,
     ///      cleans stale preceding orders, enforces that the target resolves to the current head, and may pay a
     ///      second oracle fee if the priced head changed. Unused ETH is refunded or deferred.
-    /// @param orderId Head order to execute, or later id used as the expiry-pruning bound.
+    /// @param orderId Head order to execute, or later id used as the terminal-head cleanup bound.
     /// @param pythUpdateData Pyth update blobs shared by oracle attempts in this call.
     function _executeOrder(
         uint64 orderId,
@@ -25,8 +25,14 @@ abstract contract OrderExecutionHandler is OrderValidation {
         if (nextExecuteId == 0) {
             revert OrderRouter__NoOrdersToExecute();
         }
-        uint256 expiredPrunes = _skipExpiredHeadOrdersBeforeOracle(orderId, true);
-        if (nextExecuteId == 0 || orderId < nextExecuteId || (expiredPrunes > 0 && orderId != nextExecuteId)) {
+        uint64 riskOffCutoff = _riskOffOrderCutoff();
+        (uint256 expiredPrunes, uint256 riskOffRefunds) =
+            _skipTerminalHeadOrdersBeforeOracle(orderId, true, riskOffCutoff);
+        bool terminalProgress = expiredPrunes != 0 || riskOffRefunds != 0;
+        if (
+            nextExecuteId == 0 || orderId < nextExecuteId || (terminalProgress && orderId != nextExecuteId)
+                || riskOffRefunds == MAX_RISK_OFF_REFUNDS_PER_CALL
+        ) {
             _sendEth(msg.sender, msg.value);
             return;
         }
@@ -74,7 +80,9 @@ abstract contract OrderExecutionHandler is OrderValidation {
         IPletherOracle.BatchOrderPriceCache memory oracleCache;
         uint256 pythFeeTotal;
         uint256 expiredPrunes;
+        uint256 riskOffRefunds;
         bool madeProgress;
+        uint64 riskOffCutoff = _riskOffOrderCutoff();
 
         while (nextExecuteId != 0 && nextExecuteId <= maxOrderId) {
             uint64 orderId = nextExecuteId;
@@ -86,32 +94,39 @@ abstract contract OrderExecutionHandler is OrderValidation {
                 continue;
             }
 
+            if (_isRiskOffOpen(orderId, order.isClose, riskOffCutoff)) {
+                if (riskOffRefunds == MAX_RISK_OFF_REFUNDS_PER_CALL) {
+                    break;
+                }
+                _refundRiskOffOrder(orderId, riskOffCutoff);
+                ++riskOffRefunds;
+                madeProgress = true;
+                continue;
+            }
+
             if (maxOrderAge > 0 && block.timestamp - order.commitTime > maxOrderAge) {
                 if (expiredPrunes >= maxPruneOrdersPerCall) {
                     break;
                 }
                 OracleUpdateResult memory cleanupMark = _cachedMarkForExpiredOrderCleanup();
                 emit OrderFailed(orderId, OrderFailReason.Expired);
-                _cleanupOrder(
-                    orderId,
-                    _failedOutcomeForTerminalFailure(order),
-                    cleanupMark.executionPrice,
-                    cleanupMark.oraclePublishTime
-                );
+                _cleanupOrder(orderId, cleanupMark.executionPrice, cleanupMark.oraclePublishTime);
                 expiredPrunes++;
                 madeProgress = true;
                 continue;
             }
 
-            bool oracleResolved;
-            (oracleResolved, update, executionContext, oracleCache) =
-                _tryPrepareBatchOrderExecutionOracle(pythUpdateData, order, pythFeeTotal, oracleCache);
-            if (!oracleResolved) {
-                pythFeeTotal += update.pythFee;
-                if (!madeProgress) {
-                    _revertOrderExecutionStale();
+            {
+                bool oracleResolved;
+                (oracleResolved, update, executionContext, oracleCache) =
+                    _tryPrepareBatchOrderExecutionOracle(pythUpdateData, order, pythFeeTotal, oracleCache);
+                if (!oracleResolved) {
+                    pythFeeTotal += update.pythFee;
+                    if (!madeProgress) {
+                        _revertOrderExecutionStale();
+                    }
+                    break;
                 }
-                break;
             }
             pythFeeTotal += update.pythFee;
 
@@ -120,9 +135,7 @@ abstract contract OrderExecutionHandler is OrderValidation {
                     break;
                 }
                 emit OrderFailed(orderId, OrderFailReason.Expired);
-                _cleanupOrder(
-                    orderId, _failedOutcomeForTerminalFailure(order), update.executionPrice, update.oraclePublishTime
-                );
+                _cleanupOrder(orderId, update.executionPrice, update.oraclePublishTime);
                 expiredPrunes++;
                 madeProgress = true;
                 continue;
@@ -138,6 +151,13 @@ abstract contract OrderExecutionHandler is OrderValidation {
         }
 
         _sendEth(msg.sender, msg.value - pythFeeTotal);
+    }
+
+    /// @notice Permissionlessly refunds one pending open covered by the persistent risk-off cutoff.
+    function _clearRiskOffOrder(
+        uint64 orderId
+    ) internal {
+        _refundRiskOffOrder(orderId, _riskOffOrderCutoff());
     }
 
     /// @notice Sends an ETH refund or credits it in the admin contract when the recipient rejects the transfer.

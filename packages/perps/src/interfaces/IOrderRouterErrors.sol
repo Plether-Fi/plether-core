@@ -35,6 +35,8 @@ interface IOrderRouterErrors {
     error OrderRouter__MockOracleUnavailable();
     /// @notice A proposed Plether oracle has invalid code, Pyth, engine, or HousePool wiring.
     error OrderRouter__InvalidPletherOracle();
+    /// @notice The supplied stateless keeper sidecar has no code or is not bound to this exact Router address.
+    error OrderRouter__InvalidKeeperSidecar();
     /// @notice Legacy router oracle path received no Pyth update blobs.
     error OrderRouter__EmptyPythUpdateData();
     /// @notice Legacy router oracle path received less ETH than the required Pyth update fee.
@@ -66,6 +68,8 @@ interface IOrderRouterErrors {
     error OrderRouter__BatchOrderNotCommitted();
     /// @notice An internal path expected the supplied order id to have `Pending` status.
     error OrderRouter__OrderNotPending();
+    /// @notice Permissionless cleanup targeted an order that is not an invalidated pre-cutoff open.
+    error OrderRouter__OrderNotRiskOff();
     /// @notice Stored committed-margin linked-list pointers are internally inconsistent.
     error OrderRouter__MarginQueueCorrupt();
     /// @notice Stored per-account live-order linked-list pointers are internally inconsistent.

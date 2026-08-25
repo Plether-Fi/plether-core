@@ -4,6 +4,10 @@ pragma solidity 0.8.35;
 /// @notice Router host surface called by the timelocked router admin.
 interface IOrderRouterAdminHost {
 
+    /// @notice Next order identifier that will be assigned by the router.
+    /// @dev The admin snapshots the last committed id (`nextCommitId - 1`) when activating risk-off.
+    function nextCommitId() external view returns (uint64);
+
     /// @notice Complete router queue, oracle-policy, bounty, and execution-resource configuration.
     /// @param maxOrderAge Maximum pending lifetime before an order is expired, in seconds.
     /// @param orderExecutionStalenessLimit Maximum live order-execution price age, in seconds.

@@ -23,6 +23,8 @@ abstract contract OrderExecutionOrchestrator is OrderExecutionSettlement {
 
     /// @notice Initial maximum pending lifetime: 60 seconds.
     uint256 internal constant DEFAULT_MAX_ORDER_AGE = 60;
+    /// @notice Hard cap on risk-off refunds performed by one keeper call.
+    uint256 internal constant MAX_RISK_OFF_REFUNDS_PER_CALL = 64;
     /// @notice Maximum order age in seconds; zero disables age-based expiry.
     uint256 public maxOrderAge = DEFAULT_MAX_ORDER_AGE;
     /// @notice Minimum EIP-150-forwardable gas required before calling the engine.
@@ -49,18 +51,55 @@ abstract contract OrderExecutionOrchestrator is OrderExecutionSettlement {
         skipped = _pruneExpiredHeadOrders(upToId, maxPruneOrdersPerCall, executionPrice, oraclePublishTime, false);
     }
 
-    /// @notice Prunes expired heads before paying for oracle work, using the engine's cached mark.
+    /// @notice Refunds risk-off heads and then prunes expired heads before paying for oracle work.
+    /// @dev Risk-off is checked before expiry and needs no oracle or cached mark. Expiry cleanup lazily loads the
+    ///      engine's cached mark only when it encounters an expired non-risk-off order.
     /// @param upToId Highest order id to consider.
     /// @param includeUpTo Whether the order exactly equal to `upToId` may also be pruned.
-    /// @return skipped Number of expired pending orders terminally failed.
-    function _skipExpiredHeadOrdersBeforeOracle(
+    /// @return expiredPrunes Number of expired pending orders terminally failed.
+    /// @return riskOffRefunds Number of invalidated opens refunded.
+    function _skipTerminalHeadOrdersBeforeOracle(
         uint64 upToId,
-        bool includeUpTo
-    ) internal returns (uint256 skipped) {
-        OracleUpdateResult memory cleanupMark = _cachedMarkForExpiredOrderCleanup();
-        skipped = _pruneExpiredHeadOrders(
-            upToId, maxPruneOrdersPerCall, cleanupMark.executionPrice, cleanupMark.oraclePublishTime, includeUpTo
-        );
+        bool includeUpTo,
+        uint64 riskOffCutoff
+    ) internal returns (uint256 expiredPrunes, uint256 riskOffRefunds) {
+        uint256 age = maxOrderAge;
+        OracleUpdateResult memory cleanupMark;
+        bool cleanupMarkLoaded;
+        while (nextExecuteId != 0 && nextExecuteId <= upToId) {
+            uint64 headId = nextExecuteId;
+            OrderRecord storage record = _orderRecord(headId);
+            if (record.status != IOrderRouterAccounting.OrderStatus.Pending) {
+                nextExecuteId = record.nextGlobalOrderId;
+                continue;
+            }
+            if (!includeUpTo && headId == upToId) {
+                break;
+            }
+
+            CfdTypes.Order memory order = record.core;
+            if (_isRiskOffOpen(headId, order.isClose, riskOffCutoff)) {
+                if (riskOffRefunds == MAX_RISK_OFF_REFUNDS_PER_CALL) {
+                    break;
+                }
+                _refundRiskOffOrder(headId, riskOffCutoff);
+                ++riskOffRefunds;
+                continue;
+            }
+            if (age == 0 || block.timestamp - order.commitTime <= age) {
+                break;
+            }
+            if (expiredPrunes == maxPruneOrdersPerCall) {
+                break;
+            }
+            if (!cleanupMarkLoaded) {
+                cleanupMark = _cachedMarkForExpiredOrderCleanup();
+                cleanupMarkLoaded = true;
+            }
+            emit OrderFailed(headId, OrderFailReason.Expired);
+            _cleanupOrder(headId, cleanupMark.executionPrice, cleanupMark.oraclePublishTime);
+            ++expiredPrunes;
+        }
     }
 
     /// @notice Terminally removes consecutive expired global queue heads within explicit bounds.
@@ -95,7 +134,7 @@ abstract contract OrderExecutionOrchestrator is OrderExecutionSettlement {
                 break;
             }
             emit OrderFailed(headId, OrderFailReason.Expired);
-            _cleanupOrder(headId, _failedOutcomeForTerminalFailure(order), executionPrice, oraclePublishTime);
+            _cleanupOrder(headId, executionPrice, oraclePublishTime);
             pruned++;
         }
     }
@@ -131,9 +170,7 @@ abstract contract OrderExecutionOrchestrator is OrderExecutionSettlement {
     ) internal returns (OrderExecutionStepResult result) {
         if (maxOrderAge > 0 && block.timestamp - order.commitTime > maxOrderAge) {
             emit OrderFailed(orderId, OrderFailReason.Expired);
-            _finalizeOrCleanupOrder(
-                orderId, false, _failedOutcomeForTerminalFailure(order), executionPrice, oraclePublishTime
-            );
+            _finalizeOrCleanupOrder(orderId, false, executionPrice, oraclePublishTime);
             return revertOnBlockedExecution ? OrderExecutionStepResult.Return : OrderExecutionStepResult.Continue;
         }
 
@@ -160,9 +197,7 @@ abstract contract OrderExecutionOrchestrator is OrderExecutionSettlement {
 
         if (!OrderValidationLib.checkSlippage(order, executionPrice)) {
             emit OrderFailed(orderId, OrderFailReason.SlippageExceeded);
-            _finalizeOrCleanupOrder(
-                orderId, false, _failedOutcomeForSlippageFailure(order), executionPrice, oraclePublishTime
-            );
+            _finalizeOrCleanupOrder(orderId, false, executionPrice, oraclePublishTime);
             return revertOnBlockedExecution ? OrderExecutionStepResult.Return : OrderExecutionStepResult.Continue;
         }
 
@@ -177,16 +212,16 @@ abstract contract OrderExecutionOrchestrator is OrderExecutionSettlement {
         uint256 housePoolDepth = housePool.totalAssets();
         _releaseCommittedMarginForExecution(orderId);
 
-        (bool executionSucceeded, OrderFailReason failureReason, FailedOrderOutcome failureOutcome) =
+        (bool executionSucceeded, OrderFailReason failureReason) =
             _processTypedOrderExecution(order, executionPrice, housePoolDepth, oraclePublishTime);
         if (executionSucceeded) {
             emit OrderExecuted(orderId, executionPrice);
-            _finalizeOrCleanupOrder(orderId, true, FailedOrderOutcome.ClearerFull, executionPrice, oraclePublishTime);
+            _finalizeOrCleanupOrder(orderId, true, executionPrice, oraclePublishTime);
             return revertOnBlockedExecution ? OrderExecutionStepResult.Return : OrderExecutionStepResult.Continue;
         }
 
         emit OrderFailed(orderId, failureReason);
-        _finalizeOrCleanupOrder(orderId, false, failureOutcome, executionPrice, oraclePublishTime);
+        _finalizeOrCleanupOrder(orderId, false, executionPrice, oraclePublishTime);
         return revertOnBlockedExecution ? OrderExecutionStepResult.Return : OrderExecutionStepResult.Continue;
     }
 

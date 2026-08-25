@@ -255,9 +255,9 @@ Definition:
   invokes the Router-only HousePool settlement callback in one rollback frame; with live open positions, the basket's
   earliest publish time must be at or after the current round-hour epoch boundary,
 - the Router retains the canonical external entrypoint while delegating the large stateless epoch orchestration to
-  bytecode carried by its immutable `PositionProtectionBook`; in that frame the Router remains `address(this)` and the
-  direct-event address, HousePool sees the Router as caller, and the implementation reads Router integrations through
-  external getters rather than depending on Router storage layout,
+  its separately predeployed, immutable, exactly Router-bound `OrderRouterLiquidationBatchSidecar`; in that frame the
+  Router remains `address(this)` and the direct-event address, HousePool sees the Router as caller, and the
+  implementation reads Router integrations through external getters rather than depending on Router storage layout,
 - HousePool fixes one shared epoch price after both redemption phases and activates Junior deposits before Senior
   deposits; ERC-4626 `deposit` and `mint` only claim already-activated requests,
 - a settlement pass that advances no queue item reverts, so its reconcile and carry checkpoints cannot be retained by
@@ -641,9 +641,12 @@ Component authority is deliberately split:
 ### Open-order failure policy
 
 - deterministic live-state open failures may be rejected at commit time,
-- execution-time user-invalid opens pay the keeper from clearinghouse-reserved bounty value,
-- genuine post-commit protocol-state invalidations pay the keeper from clearinghouse-reserved bounty value so FIFO head cleanup remains incentive compatible,
-- typed engine policy categories, not raw revert selectors, should drive the split.
+- ordinary execution-time terminal failures pay the keeper from clearinghouse-reserved bounty value,
+- the persistent administrative risk-off cutoff is the sole terminal-failure exception: it refunds the full remaining
+  margin, ordinary execution bounty, and any attached `PendingOpen` protection bounties internally to the trader in
+  one no-checkpoint clearinghouse release, and pays no cleanup reward,
+- engine revert selectors classify the public failure reason and preserve mark-price-out-of-order as nonterminal, but
+  do not split ordinary terminal-failure bounty routing.
 
 ## Settlement Rules
 
@@ -747,13 +750,16 @@ Required property:
 - preview and live liquidation should share the same liquidation-accounting kernel.
 
 Mark refresh (including protection-trigger oracle resolution), single liquidation, liquidation batching, and LP-epoch
-settlement remain canonical `OrderRouter` entrypoints. To preserve EIP-170 headroom, their large stateless orchestration
-is carried in the immutable `PositionProtectionBook` runtime and reached only by Router `delegatecall`. Direct calls to
-those Book selectors revert. The delegated code discovers integrations through external Router getters rather than
-assumed storage slots, never writes Router storage by layout, and changes Router-owned state only through authorized
-external self/item calls. The Router remains `address(this)` and the direct-event address, downstream Engine/HousePool
-calls see the Router as caller, exact revert data propagates, and the Router entrypoint's `msg.sender` is preserved;
-the protection-trigger route carries authenticated keeper/refund identity in its trailing payload.
+settlement remain canonical `OrderRouter` entrypoints. To preserve EIP-170 headroom, their large stateless orchestration,
+together with active-oracle policy forwarding inside authenticated Router configuration, is carried in the separately
+deployed `OrderRouterLiquidationBatchSidecar` runtime and reached only by Router `delegatecall`. Direct and
+foreign-context calls to those sidecar selectors revert. The delegated code discovers
+integrations through external Router getters rather than assumed storage slots, never writes Router storage by layout,
+and changes Router-owned state only through authorized external self/item calls. The Router remains `address(this)` and
+the direct-event address, downstream Engine/HousePool calls see the Router as caller, exact revert data propagates, and
+the Router entrypoint's `msg.sender` is preserved; the protection-trigger route carries authenticated keeper/refund
+identity in its trailing payload. The stateful `PositionProtectionBook` remains a separate Router-created lifecycle
+store and direct protection action/view surface.
 
 ### Three-bucket liquidation residual accounting
 
@@ -853,8 +859,12 @@ Interpretation rules:
 Required transition rules:
 
 - execution consumes reservation exactly once,
-- user cancellation is disallowed once pending,
+- user cancellation is disallowed once pending; the only binding-order exception is a protocol risk-off cutoff that
+  terminally invalidates pre-cutoff opens and refunds their remaining committed margin, execution bounty, and any
+  attached `PendingOpen` protection bounties to the trader's free internal settlement,
 - expiry resolves through the configured bounty and reservation policy,
+- risk-off invalidation precedes expiry, requires no oracle and performs no Engine mutation, carry checkpoint, or
+  Terminal NAV synchronization, pays no cleanup bounty, and remains effective after governance unpauses,
 - stale or missing oracle data does not destroy a valid pending order,
 - slippage-invalid orders fail terminally and must not pin the FIFO head,
 - live-market execution requires `order.commitTime < oraclePublishTime <= block.timestamp`; only genuine frozen-oracle close-only windows may relax commit-time ordering.
@@ -890,30 +900,33 @@ The accounting system should preserve the following:
 8. terminal full closes and liquidations must not perform work proportional to total queue length
 9. full closes do not eagerly cancel unrelated queued orders
 10. liquidation may perform bounded account-local cleanup under the per-account pending-order cap
-11. every position-deletion path re-checks degraded-mode containment
-12. Junior redemption funding is zero while any eligible matured Senior demand remains unaccounted for
-13. every claimable LP asset is backed one-for-one by vault-held escrow and can be claimed at most once
-14. every live position and order size is a whole 100-token lot
-15. exact position entry cost is conserved across increases and partial closes without reconstructing basis from a
+11. emergency risk-off cleanup preserves custody and total settlement while releasing exactly the invalidated open's
+    remaining committed margin, execution bounty, and attached `PendingOpen` protection bounties, with no carry or
+    Terminal NAV mutation
+12. every position-deletion path re-checks degraded-mode containment
+13. Junior redemption funding is zero while any eligible matured Senior demand remains unaccounted for
+14. every claimable LP asset is backed one-for-one by vault-held escrow and can be claimed at most once
+15. every live position and order size is a whole 100-token lot
+16. exact position entry cost is conserved across increases and partial closes without reconstructing basis from a
     rounded average price
-16. the terminal book curve for every account equals its live lots, exact entry cost, side, and current
+17. the terminal book curve for every account equals its live lots, exact entry cost, side, and current
     `pnlPledge + same-account claim` collectible cap
-17. LP deposits and redemptions use the same signed terminal price delta and waterfall snapshot
-18. positive marked receivables do not increase physical cash available to fund redemptions
-19. a current nonzero terminal deficit blocks LP deposit activation
-20. every live negative lifetime-VPI balance has an equal dedicated reserve, and generic action collection preserves
+18. LP deposits and redemptions use the same signed terminal price delta and waterfall snapshot
+19. positive marked receivables do not increase physical cash available to fund redemptions
+20. a current nonzero terminal deficit blocks LP deposit activation
+21. every live negative lifetime-VPI balance has an equal dedicated reserve, and generic action collection preserves
     the combined VPI-plus-execution-bounty floor
-21. LP request ids are monotonically nondecreasing with `block.timestamp` and follow the shared five-minute formula
+22. LP request ids are monotonically nondecreasing with `block.timestamp` and follow the shared five-minute formula
     for both tranches and both request directions
-22. no request included at or after `b - 300` can increase the locked `e + 1` epoch
-23. each account has at most one active (`PendingOpen`, `Armed`, or `Triggered`) protection
-24. an armed protection is never linked into FIFO, and a triggered protection links exactly one full reduce-only order
-25. the take-profit and stop-loss legs collectively trigger at most once
-26. every protection bounty unit is exactly reserved, paid, refunded, or forfeited once
-27. terminal protection owns zero reserve, and liquidation leaves no protection or linked-order residue
-28. existing-position protection cannot arm after its reserve lock unless canonical exact-basis price equity, using
+23. no request included at or after `b - 300` can increase the locked `e + 1` epoch
+24. each account has at most one active (`PendingOpen`, `Armed`, or `Triggered`) protection
+25. an armed protection is never linked into FIFO, and a triggered protection links exactly one full reduce-only order
+26. the take-profit and stop-loss legs collectively trigger at most once
+27. every protection bounty unit is exactly reserved, paid, refunded, or forfeited once
+28. terminal protection owns zero reserve, and liquidation leaves no protection or linked-order residue
+29. existing-position protection cannot arm after its reserve lock unless canonical exact-basis price equity, using
     only PnL pledge plus same-account claim, remains strictly above the stricter initial/active requirement
-29. uncovered carry and an underfunded negative-VPI reserve independently block existing-position protection creation
+30. uncovered carry and an underfunded negative-VPI reserve independently block existing-position protection creation
 
 ## Architecture Goal
 

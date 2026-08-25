@@ -16,6 +16,7 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
+import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
 import {PerpsPublicLens} from "@plether/perps/PerpsPublicLens.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
@@ -146,22 +147,21 @@ contract AuditBlockingAccountingFindingsFailing_SolvencyTiming is BasePerpTest {
         pool.setJuniorVault(address(juniorVault));
         engine.setPool(address(pool));
 
-        router = new OrderRouter(
+        pletherOracle = new PletherOracle(
             address(engine),
-            address(engineLens),
             address(pool),
-            address(
-                new PletherOracle(
-                    address(engine),
-                    address(pool),
-                    address(baseMockPyth),
-                    baseFeedIds,
-                    _basePythWeights(),
-                    _basePythBasePrices(),
-                    _basePythInversions()
-                )
-            )
+            address(baseMockPyth),
+            baseFeedIds,
+            _basePythWeights(),
+            _basePythBasePrices(),
+            _basePythInversions()
         );
+        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
+        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
+        router = new OrderRouter(
+            address(engine), address(engineLens), address(pool), address(pletherOracle), address(keeperSidecar)
+        );
+        assertEq(address(router), predictedRouter);
         _syncRouterAdmin();
         engine.setOrderRouter(address(router));
         publicLens = new PerpsPublicLens(address(engineAccountLens), address(engine), address(router), address(pool));

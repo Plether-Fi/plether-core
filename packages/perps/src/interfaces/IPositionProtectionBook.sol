@@ -34,6 +34,13 @@ interface IPositionProtectionBook is IPositionProtectionActions, IPositionProtec
         IOrderRouterAccounting.OrderStatus terminalStatus
     ) external;
 
+    /// @notice Fails protection attached to a risk-off-invalidated parent without unlocking its reserve directly.
+    /// @dev Router-only. The returned bounty is folded into the Router's no-checkpoint clearinghouse refund.
+    function failPendingOpenForRiskOff(
+        uint64 parentOrderId,
+        address account
+    ) external returns (uint256 refundableProtectionBountyUsdc);
+
     /// @notice Terminalizes active protection during liquidation and returns its unpaid non-order bounty.
     function forfeitOnLiquidation(
         address account

@@ -15,11 +15,16 @@ import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {ICfdEngineAdminHost} from "@plether/perps/interfaces/ICfdEngineAdminHost.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
+import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
+import {OrderExecutionSettlement} from "@plether/perps/router/OrderExecutionSettlement.sol";
 
 contract TimelockPauseTest is BasePerpTest {
 
     event RiskConfigCancelled();
+    event Paused(address account);
+    event RiskOffActivated(uint64 previousCutoff, uint64 newCutoff);
+    event OrderFailed(uint64 indexed orderId, OrderExecutionSettlement.OrderFailReason reason);
 
     address alice = address(0x111);
     address nonOwner = address(0xBAD);
@@ -697,14 +702,29 @@ contract TimelockPauseTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
     }
 
-    function test_ExecuteOrder_WorksWhenPaused() public {
+    function test_ExecuteOrder_RefundsPrePauseOpenWithoutOracleWhenPaused() public {
+        uint256 traderFreeSettlementBefore = _freeSettlementUsdc(alice);
+        uint256 executorSettlementBefore = _settlementBalance(address(this));
+
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         routerAdmin.pause();
 
-        router.executeOrder(1, _mockPythUpdateData());
+        vm.expectEmit(address(router));
+        emit OrderFailed(1, OrderExecutionSettlement.OrderFailReason.RiskOff);
+        router.executeOrder(1, new bytes[](0));
+
         assertEq(router.nextExecuteId(), 0);
+        assertEq(
+            uint256(_orderRecord(1).status),
+            uint256(IOrderRouterAccounting.OrderStatus.Failed),
+            "risk-off open should become terminally failed"
+        );
+        assertEq(_freeSettlementUsdc(alice), traderFreeSettlementBefore, "trader should receive margin and bounty");
+        assertEq(_settlementBalance(address(this)), executorSettlementBefore, "executor should receive no bounty");
+        (uint256 size,,,,,,) = engine.positions(alice);
+        assertEq(size, 0, "risk-off open must never reach the engine");
     }
 
     function test_ExecuteLiquidation_WorksWhenPaused() public {
@@ -757,6 +777,69 @@ contract TimelockPauseTest is BasePerpTest {
         vm.prank(pauser);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, pauser));
         routerAdmin.unpause();
+    }
+
+    function test_Pause_SnapshotsInclusiveRiskOffCutoff() public {
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+
+        vm.expectEmit(address(routerAdmin));
+        emit Paused(address(this));
+        vm.expectEmit(address(routerAdmin));
+        emit RiskOffActivated(0, 1);
+        routerAdmin.pause();
+
+        assertEq(router.nextCommitId(), 2);
+        assertEq(routerAdmin.riskOffOrderCutoff(), 1);
+    }
+
+    function test_Pause_EmptyQueueReaffirmsZeroRiskOffCutoff() public {
+        vm.expectEmit(address(routerAdmin));
+        emit Paused(address(this));
+        vm.expectEmit(address(routerAdmin));
+        emit RiskOffActivated(0, 0);
+        routerAdmin.pause();
+
+        assertEq(router.nextCommitId(), 1);
+        assertEq(routerAdmin.riskOffOrderCutoff(), 0);
+    }
+
+    function test_Unpause_DoesNotClearRiskOffCutoff() public {
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+
+        routerAdmin.pause();
+        routerAdmin.unpause();
+
+        assertFalse(routerAdmin.paused());
+        assertEq(routerAdmin.riskOffOrderCutoff(), 1);
+    }
+
+    function test_Pause_RiskOffCutoffIsMonotonicAcrossPauseCycles() public {
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        routerAdmin.pause();
+        assertEq(routerAdmin.riskOffOrderCutoff(), 1);
+
+        routerAdmin.unpause();
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+
+        vm.expectEmit(address(routerAdmin));
+        emit Paused(address(this));
+        vm.expectEmit(address(routerAdmin));
+        emit RiskOffActivated(1, 2);
+        routerAdmin.pause();
+
+        assertEq(routerAdmin.riskOffOrderCutoff(), 2);
+
+        routerAdmin.unpause();
+        vm.expectEmit(address(routerAdmin));
+        emit Paused(address(this));
+        vm.expectEmit(address(routerAdmin));
+        emit RiskOffActivated(2, 2);
+        routerAdmin.pause();
+        assertEq(routerAdmin.riskOffOrderCutoff(), 2);
     }
 
     function test_Unpause_RestoresCommitOrder() public {

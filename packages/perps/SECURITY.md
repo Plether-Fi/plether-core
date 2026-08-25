@@ -75,13 +75,27 @@ constructor bindings. `getSettlementHealth()` checks those bindings again at run
 records the planner, settlement-sidecar, admin, Oracle/Pyth, vault, terminal NAV book, and asset identities for off-chain drift
 comparison. This is detection only; the monitor cannot repair wiring or authorize a replacement.
 
+`EmergencyPauseCoordinator` is independently immutable-bound to the exact RouterAdmin and HousePool. Deployment
+installs it as both components' pauser. It does not trust or call the Lens: monitoring output, `reasonHash`, and
+`evidenceHash` are advisory incident evidence, and only the configured guardian may trigger containment.
+
+`OrderRouterLiquidationBatchSidecar` is separately predeployed with the predicted address of the immediately next
+Router `CREATE`; the same deployer must then create the Router with no intervening nonce-consuming transaction or
+`CREATE`. The Router constructor
+rejects a sidecar with no code or one whose immutable `ROUTER()` does not equal `address(this)`, and exposes the
+accepted address through `liquidationBatchSidecar()`. The sidecar has no mutable storage or upgrade setter and its
+keeper/liquidation selectors are valid only under delegatecall where `address(this)` is that exact Router. Direct calls
+and delegatecalls from a foreign host revert. Router self-callbacks remain self-only, so an external caller cannot use
+the sidecar to bypass Router authorization or reentrancy guards.
+
 ### Instant owner controls
 
 The owner can act immediately to:
 
 - pause and unpause `OrderRouter` through `OrderRouterAdmin`,
 - pause and unpause `HousePool`,
-- assign the dedicated `pauser` role on `OrderRouterAdmin` and `HousePool`,
+- install or replace the common coordinator pauser on `OrderRouterAdmin` and `HousePool`,
+- rotate or disable the coordinator guardian,
 - set the protocol treasury account,
 - initiate an ownership transfer, which the pending owner must explicitly accept through the `Ownable2Step` flow.
 
@@ -98,11 +112,12 @@ The owner cannot:
 Several perps contracts intentionally expose narrow but high-authority capability surfaces.
 
 - `OrderRouter` is the external execution boundary and can reach engine order/liquidation paths plus a narrow clearinghouse reservation surface. Router-sourced protocol value must credit the treasury account through clearinghouse accounting rather than calling `HousePool` inflow hooks.
-- `PositionProtectionBook` is immutable-bound to the Router and Engine. In addition to retained protection state, its
-  runtime carries the Router's stateless mark-refresh/trigger-oracle, single-liquidation, liquidation-batch, and
-  LP-epoch orchestration to preserve EIP-170 headroom. The Router is the only valid execution context for those helpers:
-  direct Book calls revert. Under `delegatecall`, the helpers read integrations through external Router getters, never
-  access Router storage by assumed layout, and change Router-owned state only through authorized external self/item
+- `PositionProtectionBook` is created by and immutable-bound to the Router and Engine. It owns retained protection
+  state, direct actions/views, and Router-only lifecycle hooks; it does not carry keeper or liquidation orchestration.
+- The separately predeployed `OrderRouterLiquidationBatchSidecar` carries stateless mark-refresh/protection-trigger,
+  single-liquidation, liquidation-batch, and LP-epoch orchestration to preserve Router deploy-size headroom. The Router
+  is the only valid execution context for those helpers. Under `delegatecall`, they read integrations through external
+  Router getters, never access Router storage by assumed layout, and change Router-owned state only through authorized external self/item
   calls. The Router remains `address(this)` and the direct-event address, Engine/HousePool see the Router as caller, and
   the Router entrypoint's `msg.sender` is preserved; the Book-trigger route authenticates keeper/refund identity through
   its trailing payload.
@@ -161,7 +176,7 @@ These are the highest-value properties an auditor should expect to hold.
 | VPI reserve conservation | Every live negative lifetime-VPI balance has equal dedicated action-reserve backing; only an exact clawback, equivalent withholding, or lower surviving target may consume or release it |
 | Reservation source of truth | Clearinghouse reservation records remain the source of truth for committed order margin |
 | Protection post-lock safety | Existing-position protection uses exact entry basis and only PnL pledge plus same-account claim for price equity; free/action reserves are excluded, uncovered carry and underfunded negative VPI fail closed, and equality at the stricter initial/active threshold is rejected |
-| Delegated Router isolation | Book-carried keeper orchestration is delegate-only, storage-layout-independent, and cannot directly write Router storage; the Router remains `address(this)`, downstream caller, and direct-event address |
+| Delegated Router isolation | The separately predeployed, exactly Router-bound keeper sidecar is delegate-only, storage-layout-independent, and cannot directly write Router storage; the Router remains `address(this)`, downstream caller, and direct-event address |
 | Earliest lot gate | Router commit rejects non-100-token-multiple opens and closes before reserving value or assigning an order id |
 | Economic close granularity | Partial close intents must meet the engine notional floor; only full residual closes may be smaller |
 | Bounded cleanup | Queue cleanup, liquidation cleanup, and close-intent position projection are account-local and intentionally bounded |
@@ -246,13 +261,32 @@ The system relies on standard audited libraries and treats them as trusted build
 
 The owner can tune risk and liveness configuration and activate pauses, but cannot arbitrarily rewrite custody state.
 
-### Dedicated pauser
+### Guardian and emergency coordinator
 
-`OrderRouterAdmin` and `HousePool` each support an owner-assigned `pauser` address. Router pausing is applied through the admin contract onto router-controlled paths.
+`OrderRouterAdmin` and `HousePool` retain separate owner-controlled pause state, but normal deployment installs one
+`EmergencyPauseCoordinator` as both pausers. Governance owns the coordinator and assigns its guardian.
 
-- The `pauser` can call `pause()` immediately.
-- The `pauser` cannot call `unpause()` or change configuration.
-- The owner retains both `pause()` and `unpause()` authority plus role assignment.
+- Only the guardian may call `triggerEmergencyPause(reasonHash,evidenceHash)`.
+- The transaction pauses RouterAdmin first and HousePool second; any failure rolls back every change made by that
+  call while preserving pre-existing pause state. Repeated or partially pre-paused calls are idempotent.
+- The coordinator can only add restrictions. It cannot unpause, change child configuration, set prices, move funds,
+  or call arbitrary targets. Governance retains direct owner-only recovery and role assignment.
+- Router pause records an inclusive, monotonic order-id cutoff. Pending opens at or below it are permanently invalid,
+  including after unpause; later orders are unaffected.
+- Cleanup is permissionless and oracle-independent. It returns all remaining committed margin and execution bounty to
+  the trader's free internal settlement, pays the caller nothing, and defers carry checkpointing to the trader's next
+  ordinary margin mutation. The protocol incident keeper therefore funds cleanup gas.
+- Liquidation applies the same risk-off refund before forfeiting unaffected queued bounties, so cleanup-first and
+  liquidation-first keeper ordering cannot change whether the invalidated-open reservation is refunded. Refunded free
+  settlement remains ordinary trader capital and may still satisfy legitimate liquidation obligations. Liquidation
+  reuses the exact single-order Clearinghouse reversal for each invalidated open; this is bounded by the 32-order
+  account cap and remains inside one rollback frame. A one-call aggregate variant was rejected because it made the
+  Router exceed both EIP-170 and its pre-change runtime baseline.
+- HousePool pause blocks LP entry only. Redemptions, synchronized redemption funding, and funded claims remain live.
+  It does not itself unlock cancellation of a matured deposit; that request still needs an existing rejection,
+  projected-wipe, Senior-impairment, or Senior-reservation escape condition, or later activation after recovery.
+- LP request-off, LP settlement-off, and corrupted-queue quarantine are separate proposed breakers, not powers hidden
+  in this coordinator.
 
 ### Keepers
 
@@ -263,13 +297,15 @@ Keepers are permissionless executors.
 - They receive clearinghouse-reserved execution bounties or liquidation bounties depending on the path.
 - They are not trusted with user intent beyond what the delayed-order model reveals.
 
-### Position-protection and Router-logic Book
+### Position protection and Router keeper sidecar
 
-The Book has two deliberately separate roles. Direct calls own the retained OCO lifecycle and use only narrow
-clearinghouse/Router capabilities. Router `delegatecall` uses the same immutable runtime only as a stateless bytecode
-carrier for mark refresh/trigger-oracle resolution, single and batch liquidation, and atomic-refresh LP-epoch
-settlement. The delegated functions reject direct calls and must not read or write Router storage slots by assumed
-layout.
+The Router-created Book owns the retained OCO lifecycle and uses only narrow clearinghouse/Router capabilities. It is
+stateful and distinct from the separately predeployed `OrderRouterLiquidationBatchSidecar`. Router `delegatecall` uses
+that sidecar only as a stateless bytecode carrier for mark refresh/protection-trigger resolution, single and batch
+liquidation, atomic-refresh LP-epoch settlement, and the active-oracle forwarding step inside an authenticated Router
+configuration finalization. The Router retains admin authentication and applies its storage fields in the original
+before/after ordering. Delegated functions reject direct and foreign-context calls and must not read or write Router
+storage slots by assumed layout.
 
 When existing-position protection locks its trigger and linked-close bounties, admission is checked after the lock.
 The Book calls the Engine-configured planner's canonical `isExactPriceRiskLiquidatable(...)` predicate rather than
@@ -323,9 +359,13 @@ Current policy is intentionally simple:
 
 - slippage-invalid orders fail terminally,
 - expired orders fail terminally,
-- typed engine failures route bounty according to semantic failure category,
+- ordinary terminal engine failures pay the cleanup caller from the reserved bounty; the reason remains typed for
+  diagnostics but does not change that routing,
 - terminal-invalid closes pay the keeper from the already locked action reserve rather than refunding it to the trader wallet,
 - open-order refunds and keeper payouts credit clearinghouse settlement rather than sending direct wallet USDC transfers,
+- persistent risk-off cancellation is administrative invalidation, precedes expiry, needs no oracle, and fully refunds
+  the trader's order plus attached `PendingOpen` protection reserves internally in one no-checkpoint clearinghouse
+  release without paying the cleanup caller,
 - the router does not maintain a retry or requeue lane.
 
 ### Oracle regimes
@@ -713,25 +753,34 @@ the returned cursor leaves any low-gas or empty-revert item unattempted so a kee
 
 ## Emergency Procedures
 
+The canonical operator capability matrix, trigger policy, containment procedure, recovery criteria, and off-chain
+guardian design requirements live in [EMERGENCY_RESPONSE_GUIDE.md](EMERGENCY_RESPONSE_GUIDE.md). Read that guide
+before automating any response from `SettlementMonitorLens`.
+
 ### Emergency pause
 
-1. Pause `OrderRouter` and/or `HousePool`.
-2. New risk-increasing order commits and/or LP deposits stop immediately.
-3. Protective execution paths remain available.
-4. Investigate and remediate.
-5. Unpause when safe.
+1. Corroborate the unsafe observation from block-pinned direct reads and an independent provider when time permits.
+2. Have the guardian simulate and call the coordinator so Router risk-off and HousePool entry pause activate
+   atomically.
+3. Verify both pause states, the permanent inclusive order cutoff, and the emitted incident hashes.
+4. Keep closes, liquidations, mark refresh, redemption requests, eligible redemption funding, funded claims, and
+   incident cleanup operating.
+5. Governance investigates and recovers deliberately; the guardian never auto-unpauses.
 
 Monitoring should page operators before applying a breaker. An observable NAV or custody invariant failure warrants
 pausing new risk and LP entry while preserving protective exits where protocol policy allows them. Oracle-read
 failure is transient until corroborated; queue backlog, Senior priority, capacity, and insufficient free cash are
-liveness states rather than accounting corruption. `SettlementMonitorLens` cannot pause anything itself.
+liveness states rather than accounting corruption. `SettlementMonitorLens` cannot pause anything itself. A critical
+fault also makes the composite observation incomplete, so automation must inspect masks individually rather than
+watching only the complete-observation digest.
 
 ### Suspected oracle issue
 
-1. Pause `OrderRouter` to stop new commitments.
-2. Let existing protective flows continue.
-3. Investigate feed correctness and liveness.
-4. Resume once oracle behavior is understood.
+1. Distinguish a confirmed correctness/integrity problem from routine staleness or low confidence that the on-chain
+   policy already rejects.
+2. For a credible integrity incident, use composite containment to stop both new trading risk and new LP entry.
+3. Preserve protective flows and archive the raw signed update plus independent market evidence.
+4. Governance resumes only after feed bindings, behavior, and canonical accounting are understood.
 
 ### Keeper outage
 
@@ -820,6 +869,7 @@ As of May 21, 2026, `master` includes the resolution commit and later changes. F
 | `HousePool` | Pre-audit reviewed; formal audit pending |
 | `TrancheVault` | Pre-audit reviewed; formal audit pending |
 | `SettlementMonitorLens` and monitor-bound sidecar | Read-only monitoring addition; formal audit pending |
+| `EmergencyPauseCoordinator` and persistent Router risk-off refund path | Emergency containment addition; formal audit pending |
 
 ## Security Contact
 

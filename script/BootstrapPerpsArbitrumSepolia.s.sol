@@ -2,9 +2,11 @@
 pragma solidity 0.8.35;
 
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
+import {EmergencyPauseCoordinator} from "@plether/perps/EmergencyPauseCoordinator.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
+import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
 import {IAsyncTrancheVault} from "@plether/perps/interfaces/IAsyncTrancheVault.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {ITerminalNavBookV2} from "@plether/perps/interfaces/ITerminalNavBookV2.sol";
@@ -68,8 +70,9 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         address usdc = vm.envAddress("PERPS_USDC");
         address housePoolAddr = vm.envAddress("PERPS_HOUSE_POOL");
         address routerAddr = vm.envAddress("PERPS_ORDER_ROUTER");
+        address emergencyCoordinatorAddr = vm.envAddress("PERPS_EMERGENCY_COORDINATOR");
+        address desiredGuardian = vm.envAddress("PERPS_GUARDIAN");
 
-        address pauser = vm.envOr("PERPS_PAUSER", address(0));
         uint256 maxSeniorExposureUsdc = vm.envUint("MAX_SENIOR_EXPOSURE_USDC");
         uint256 maxSeniorShareBps = vm.envUint("MAX_SENIOR_SHARE_BPS");
         uint256 seniorSeedUsdc = vm.envOr("SENIOR_SEED_USDC", DEFAULT_SENIOR_SEED_USDC);
@@ -88,23 +91,29 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         HousePool housePool = HousePool(housePoolAddr);
         OrderRouter router = OrderRouter(routerAddr);
         OrderRouterAdmin routerAdmin = OrderRouterAdmin(router.admin());
+        EmergencyPauseCoordinator emergencyCoordinator = EmergencyPauseCoordinator(emergencyCoordinatorAddr);
 
+        _validateGuardian(desiredGuardian);
         _validateSeniorLimits(maxSeniorExposureUsdc, maxSeniorShareBps);
         _verifyAsyncVaultPair(housePool, usdc);
         _verifyTerminalNavBook(housePool);
         _verifyRouterWiring(housePool, router);
+        _verifyEmergencyCoordinator(housePool, routerAdmin, emergencyCoordinator);
 
         console.log("Bootstrapping Plether perps on Arbitrum Sepolia");
         console.log("Deployer:", deployer);
         console.log("USDC:", usdc);
         console.log("HousePool:", housePoolAddr);
         console.log("OrderRouter:", routerAddr);
+        console.log("OrderRouterLiquidationBatchSidecar:", router.liquidationBatchSidecar());
         console.log("PositionProtectionBook:", address(router.positionProtectionBook()));
         console.log("OrderRouterAdmin:", address(routerAdmin));
+        console.log("EmergencyPauseCoordinator:", emergencyCoordinatorAddr);
+        console.log("Requested guardian:", desiredGuardian);
 
         vm.startBroadcast(privateKey);
 
-        _configurePauser(housePool, routerAdmin, pauser);
+        _configureGuardian(emergencyCoordinator, desiredGuardian, deployer);
         bool poolConfigReady = _configureSeniorLimits(housePool, maxSeniorExposureUsdc, maxSeniorShareBps);
         if (!poolConfigReady) {
             vm.stopBroadcast();
@@ -124,7 +133,7 @@ contract BootstrapPerpsArbitrumSepolia is Script {
             deployer
         );
         _fundTestUsers(IMintableERC20(usdc), testUsers, testUserAmounts);
-        _activateTrading(housePool, activateTrading);
+        _activateTrading(housePool, routerAdmin, emergencyCoordinator, activateTrading);
 
         vm.stopBroadcast();
 
@@ -136,6 +145,8 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         console.log("Router pauser:", routerAdmin.pauser());
         console.log("Position protection commits enabled:", router.positionProtectionCommitsEnabled());
         console.log("Position protection trigger bounty USDC:", router.positionProtectionTriggerBountyUsdc());
+        console.log("Emergency guardian:", emergencyCoordinator.guardian());
+        console.log("Risk-off order cutoff:", routerAdmin.riskOffOrderCutoff());
         console.log("Maximum senior exposure (USDC units):", housePool.maxSeniorExposureUsdc());
         console.log("Maximum senior share (bps):", housePool.maxSeniorShareBps());
         console.log("LP epoch duration:", housePool.LP_EPOCH_DURATION());
@@ -173,9 +184,32 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         address book = address(router.positionProtectionBook());
         require(book != address(0), "PositionProtectionBook is not wired");
         require(book.code.length > 0, "PositionProtectionBook has no code");
+        address sidecar = router.liquidationBatchSidecar();
+        require(sidecar != address(0), "OrderRouter sidecar is not wired");
+        require(sidecar.code.length > 0, "OrderRouter sidecar has no code");
+        require(sidecar != book, "OrderRouter sidecar aliases PositionProtectionBook");
+        require(
+            OrderRouterLiquidationBatchSidecar(sidecar).ROUTER() == address(router),
+            "OrderRouter sidecar router mismatch"
+        );
         IPositionProtectionBookBootstrapView candidate = IPositionProtectionBookBootstrapView(book);
         require(candidate.ROUTER() == address(router), "PositionProtectionBook router mismatch");
         require(candidate.ENGINE() == address(engine), "PositionProtectionBook engine mismatch");
+    }
+
+    /// @dev Requires the deploy-time coordinator and both pauser bindings to match this exact stack. Bootstrap never
+    ///      repairs a partial binding because doing so could silently combine authority from two deployments.
+    function _verifyEmergencyCoordinator(
+        HousePool housePool,
+        OrderRouterAdmin routerAdmin,
+        EmergencyPauseCoordinator coordinator
+    ) internal view {
+        require(address(coordinator) != address(0), "PERPS_EMERGENCY_COORDINATOR is zero");
+        require(address(coordinator).code.length > 0, "EmergencyPauseCoordinator has no code");
+        require(address(coordinator.ROUTER_ADMIN()) == address(routerAdmin), "Emergency RouterAdmin mismatch");
+        require(address(coordinator.HOUSE_POOL()) == address(housePool), "Emergency HousePool mismatch");
+        require(housePool.pauser() == address(coordinator), "HousePool pauser is not emergency coordinator");
+        require(routerAdmin.pauser() == address(coordinator), "Router pauser is not emergency coordinator");
     }
 
     /// @dev Checks all immutable/set-once LP wiring before any governance proposal, seed mint, or activation occurs.
@@ -333,24 +367,25 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         }
     }
 
-    function _configurePauser(
-        HousePool housePool,
-        OrderRouterAdmin routerAdmin,
-        address pauser
+    function _validateGuardian(
+        address guardian
+    ) internal pure {
+        require(guardian != address(0), "PERPS_GUARDIAN is zero");
+    }
+
+    function _configureGuardian(
+        EmergencyPauseCoordinator coordinator,
+        address desiredGuardian,
+        address broadcaster
     ) internal {
-        if (pauser == address(0)) {
+        _validateGuardian(desiredGuardian);
+        if (coordinator.guardian() == desiredGuardian) {
             return;
         }
-
-        if (housePool.pauser() != pauser) {
-            housePool.setPauser(pauser);
-            console.log("Set HousePool pauser:", pauser);
-        }
-
-        if (routerAdmin.pauser() != pauser) {
-            routerAdmin.setPauser(pauser);
-            console.log("Set OrderRouterAdmin pauser:", pauser);
-        }
+        require(coordinator.owner() == broadcaster, "Broadcaster is not emergency coordinator owner");
+        coordinator.setGuardian(desiredGuardian);
+        require(coordinator.guardian() == desiredGuardian, "Emergency guardian update failed");
+        console.log("Set emergency guardian:", desiredGuardian);
     }
 
     function _seedLifecycle(
@@ -407,11 +442,19 @@ contract BootstrapPerpsArbitrumSepolia is Script {
 
     function _activateTrading(
         HousePool housePool,
+        OrderRouterAdmin routerAdmin,
+        EmergencyPauseCoordinator coordinator,
         bool activateTrading
     ) internal {
         if (!activateTrading || housePool.isTradingActive()) {
             return;
         }
+
+        require(coordinator.guardian() != address(0), "Emergency guardian is disabled");
+        require(housePool.pauser() == address(coordinator), "HousePool pauser changed before activation");
+        require(routerAdmin.pauser() == address(coordinator), "Router pauser changed before activation");
+        require(!housePool.paused(), "HousePool is paused");
+        require(!routerAdmin.paused(), "OrderRouterAdmin is paused");
 
         if (!housePool.seniorSeedInitialized() || !housePool.juniorSeedInitialized()) {
             revert("Cannot activate trading before both seeds exist");

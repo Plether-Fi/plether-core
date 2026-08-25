@@ -126,4 +126,13 @@ interface ICfdEngineLens {
         uint256 poolDepthUsdc
     ) external view returns (ICfdEngineTypes.LiquidationPreview memory preview);
 
+    /// @notice Returns exact planner liquidation eligibility after hypothetically forfeiting live order bounties.
+    /// @dev Uses caller-supplied pool depth and the same canonical preview path as `simulateLiquidation`, but returns
+    ///      only the eligibility bit for size-constrained integrations.
+    function isLiquidatableAt(
+        address account,
+        uint256 oraclePrice,
+        uint256 poolDepthUsdc
+    ) external view returns (bool liquidatable);
+
 }

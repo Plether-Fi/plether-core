@@ -16,7 +16,6 @@ import {IPositionProtectionBook} from "@plether/perps/interfaces/IPositionProtec
 import {IPositionProtectionViews} from "@plether/perps/interfaces/IPositionProtectionViews.sol";
 import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtectionTypes.sol";
 import {OracleFreshnessPolicyLib} from "@plether/perps/libraries/OracleFreshnessPolicyLib.sol";
-import {OrderLiquidationBatchLogic} from "@plether/perps/router/OrderLiquidationBatchLogic.sol";
 
 /// @notice Narrow engine view surface used by the passive position-protection state book.
 interface IPositionProtectionEngine is ICfdEngineRiskParamsView {
@@ -106,12 +105,7 @@ interface IPositionProtectionAdmin {
 ///      entrypoint. This contract never intentionally custodies tokens or mutates an order queue directly. The immutable
 ///      router remains responsible for queue mutation and keeper credits. All bounty fields are current unpaid amounts
 ///      and are zeroed exactly when transferred back into router-owned accounting.
-contract PositionProtectionBook is
-    IPositionProtectionBook,
-    IOrderRouterErrors,
-    ReentrancyGuardTransient,
-    OrderLiquidationBatchLogic
-{
+contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, ReentrancyGuardTransient {
 
     bytes4 private constant UPDATE_MARK_PRICE_SELECTOR = bytes4(keccak256("updateMarkPrice(bytes[])"));
 
@@ -506,6 +500,34 @@ contract PositionProtectionBook is
         triggeredProtection.status = protectionStatus;
         delete _activeProtectionIds[account];
         emit PositionProtectionTerminal(protectionId, account, orderId, protectionStatus);
+    }
+
+    /// @inheritdoc IPositionProtectionBook
+    function failPendingOpenForRiskOff(
+        uint64 parentOrderId,
+        address account
+    ) external onlyRouter returns (uint256 refundableProtectionBountyUsdc) {
+        uint64 protectionId = _parentProtectionIds[parentOrderId];
+        if (protectionId == 0) {
+            return 0;
+        }
+
+        PositionProtectionTypes.PositionProtectionView storage protection = _protections[protectionId];
+        if (
+            protection.status != PositionProtectionTypes.PositionProtectionStatus.PendingOpen
+                || protection.account != account || protection.parentOrderId != parentOrderId
+                || _activeProtectionIds[account] != protectionId
+        ) {
+            revert OrderRouter__PositionChanged();
+        }
+
+        delete _parentProtectionIds[parentOrderId];
+        delete _activeProtectionIds[account];
+        protection.status = PositionProtectionTypes.PositionProtectionStatus.Failed;
+        refundableProtectionBountyUsdc = _takeUnpaidBounties(protection);
+        emit PositionProtectionTerminal(
+            protectionId, account, 0, PositionProtectionTypes.PositionProtectionStatus.Failed
+        );
     }
 
     /// @inheritdoc IPositionProtectionBook

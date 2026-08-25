@@ -5,6 +5,8 @@ import {BasePerpTest} from "./BasePerpTest.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {PositionProtectionBook} from "@plether/perps/PositionProtectionBook.sol";
+import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
+import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
@@ -13,6 +15,7 @@ import {IPositionProtectionBook} from "@plether/perps/interfaces/IPositionProtec
 import {IPositionProtectionViews} from "@plether/perps/interfaces/IPositionProtectionViews.sol";
 import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtectionTypes.sol";
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
+import {Vm} from "forge-std/Vm.sol";
 
 contract PositionProtectionTest is BasePerpTest {
 
@@ -45,6 +48,8 @@ contract PositionProtectionTest is BasePerpTest {
     uint256 internal constant BEAR_TAKE_PROFIT = 110_000_000;
     uint256 internal constant BEAR_STOP_LOSS = 90_000_000;
     uint256 internal constant FRIDAY_FAD_START = 1_709_933_400;
+    bytes32 internal constant RISK_OFF_RESERVES_REFUNDED_TOPIC =
+        keccak256("RiskOffOrderReservesRefunded(address,uint256,uint256)");
 
     function setUp() public override {
         super.setUp();
@@ -660,6 +665,9 @@ contract PositionProtectionTest is BasePerpTest {
         protectionBook.afterOrderTerminal(1, ALICE, IOrderRouterAccounting.OrderStatus.Failed);
 
         vm.expectRevert(IOrderRouterErrors.OrderRouter__Unauthorized.selector);
+        protectionBook.failPendingOpenForRiskOff(1, ALICE);
+
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__Unauthorized.selector);
         protectionBook.forfeitOnLiquidation(ALICE);
     }
 
@@ -916,6 +924,173 @@ contract PositionProtectionTest is BasePerpTest {
         assertEq(liveSize, 0, "slippage-failed parent must not create a position");
     }
 
+    function test_AttachedOpen_RiskOffRefundFailsProtectionAndReleasesAllReservesExactlyOnce() public {
+        uint256 freeBefore = _freeSettlementUsdc(ALICE);
+        uint256 settlementBefore = _settlementBalance(ALICE);
+        uint256 cleanerSettlementBefore = _settlementBalance(CAROL);
+        PositionProtectionTypes.PositionProtectionParams memory params = _params(BULL_TAKE_PROFIT, BULL_STOP_LOSS);
+
+        vm.prank(ALICE);
+        (uint64 parentOrderId, uint64 protectionId) = protectionActions.commitOpenOrderWithProtection(
+            CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, 0, params
+        );
+
+        uint256 parentMarginUsdc = _remainingCommittedMargin(parentOrderId);
+        uint256 parentBountyUsdc = _executionBountyReserve(parentOrderId);
+        uint256 protectionBountiesUsdc = _totalProtectionBountyUsdc();
+        uint256 totalReservedUsdc = parentMarginUsdc + parentBountyUsdc + protectionBountiesUsdc;
+        IOrderRouterAccounting.AccountReservationView memory stagedReservations = router.getAccountReservations(ALICE);
+
+        assertEq(freeBefore - _freeSettlementUsdc(ALICE), totalReservedUsdc, "setup must lock every reserve exactly");
+        assertEq(_settlementBalance(ALICE), settlementBefore, "reservation must not debit gross settlement");
+        assertEq(stagedReservations.committedMarginUsdc, parentMarginUsdc, "parent margin reserve");
+        assertEq(
+            stagedReservations.executionBountyUsdc,
+            parentBountyUsdc + protectionBountiesUsdc,
+            "parent and protection bounty reserves"
+        );
+        assertEq(stagedReservations.pendingOrderCount, 1, "only the parent open should be queued");
+        assertEq(
+            uint8(protectionViews.getPositionProtection(protectionId).status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.PendingOpen),
+            "protection must be pending on its parent"
+        );
+
+        routerAdmin.pause();
+        assertTrue(routerAdmin.paused(), "risk-off must pause new risk");
+        assertEq(routerAdmin.riskOffOrderCutoff(), parentOrderId, "cutoff must include the attached parent");
+
+        vm.mockCallRevert(
+            address(engine),
+            abi.encodeCall(ICfdEngineCore.realizeCarryBeforeMarginChange, (ALICE)),
+            bytes("risk-off must not checkpoint carry")
+        );
+        vm.recordLogs();
+        vm.prank(CAROL);
+        router.clearRiskOffOrder(parentOrderId);
+        Vm.Log[] memory riskOffLogs = vm.getRecordedLogs();
+        vm.clearMockedCalls();
+        _assertSingleRiskOffRefund(riskOffLogs, ALICE, parentMarginUsdc, parentBountyUsdc + protectionBountiesUsdc);
+
+        assertEq(
+            uint8(_orderRecord(parentOrderId).status),
+            uint8(IOrderRouterAccounting.OrderStatus.Failed),
+            "risk-off parent must fail"
+        );
+        assertEq(_orderRecord(parentOrderId).executionBountyUsdc, 0, "parent must retain no unpaid bounty");
+        assertFalse(_orderRecord(parentOrderId).inAccountQueue, "parent must leave the account queue");
+        assertFalse(_orderRecord(parentOrderId).inMarginQueue, "parent must leave the margin queue");
+        assertEq(_orderRecord(parentOrderId).nextGlobalOrderId, 0, "parent global next link");
+        assertEq(_orderRecord(parentOrderId).prevGlobalOrderId, 0, "parent global previous link");
+        assertEq(_orderRecord(parentOrderId).nextAccountOrderId, 0, "parent account next link");
+        assertEq(_orderRecord(parentOrderId).prevAccountOrderId, 0, "parent account previous link");
+        assertEq(_orderRecord(parentOrderId).nextMarginOrderId, 0, "parent margin next link");
+        assertEq(_orderRecord(parentOrderId).prevMarginOrderId, 0, "parent margin previous link");
+        assertEq(router.nextExecuteId(), 0, "global queue must be empty");
+        assertEq(router.globalTailOrderId(), 0, "global tail must be empty");
+        assertEq(router.accountHeadOrderId(ALICE), 0, "account queue must be empty");
+        assertEq(router.marginHeadOrderId(ALICE), 0, "margin queue head must be empty");
+        assertEq(router.marginTailOrderId(ALICE), 0, "margin queue tail must be empty");
+        assertEq(router.pendingOrderCounts(ALICE), 0, "parent must no longer count as pending");
+
+        PositionProtectionTypes.PositionProtectionView memory failed =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(
+            uint8(failed.status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Failed),
+            "risk-off parent must fail its staged protection"
+        );
+        assertEq(failed.parentOrderId, parentOrderId, "terminal protection should retain its parent id");
+        assertEq(failed.linkedOrderId, 0, "failed staged protection must never create a close");
+        assertEq(failed.triggerBountyUsdc, 0, "risk-off must refund the trigger bounty");
+        assertEq(failed.executionBountyUsdc, 0, "risk-off must refund the staged close bounty");
+        assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "risk-off must clear the active protection");
+
+        IMarginClearinghouse.OrderReservation memory releasedParent = clearinghouse.getOrderReservation(parentOrderId);
+        assertEq(
+            uint8(releasedParent.status),
+            uint8(IMarginClearinghouse.ReservationStatus.Released),
+            "parent margin reservation must be released"
+        );
+        assertEq(releasedParent.originalAmountUsdc, parentMarginUsdc, "parent original margin must be retained");
+        assertEq(releasedParent.remainingAmountUsdc, 0, "parent margin must have no remainder");
+        IOrderRouterAccounting.AccountReservationView memory clearedReservations = router.getAccountReservations(ALICE);
+        assertEq(clearedReservations.committedMarginUsdc, 0, "no parent margin may remain reserved");
+        assertEq(clearedReservations.executionBountyUsdc, 0, "no parent or protection bounty may remain reserved");
+        assertEq(clearedReservations.pendingOrderCount, 0, "no parent order may remain live");
+        assertEq(_freeSettlementUsdc(ALICE), freeBefore, "every reserve must return to free settlement");
+        assertEq(_settlementBalance(ALICE), settlementBefore, "risk-off refund must preserve gross settlement");
+        assertEq(_settlementBalance(CAROL), cleanerSettlementBefore, "permissionless cleaner must receive no bounty");
+
+        vm.prank(CAROL);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__OrderNotRiskOff.selector);
+        router.clearRiskOffOrder(parentOrderId);
+
+        assertEq(_freeSettlementUsdc(ALICE), freeBefore, "retry must not double-release reserves");
+        assertEq(_settlementBalance(CAROL), cleanerSettlementBefore, "retry must not credit the cleaner");
+        assertEq(
+            router.getAccountReservations(ALICE).executionBountyUsdc, 0, "retry must leave all bounty reserves cleared"
+        );
+        assertEq(
+            clearinghouse.getOrderReservation(parentOrderId).remainingAmountUsdc, 0, "retry must release no margin"
+        );
+    }
+
+    function test_AttachedOpen_RiskOffClearinghouseFailureRollsBackProtectionAndRouter() public {
+        PositionProtectionTypes.PositionProtectionParams memory params = _params(BULL_TAKE_PROFIT, BULL_STOP_LOSS);
+        vm.prank(ALICE);
+        (uint64 parentOrderId, uint64 protectionId) = protectionActions.commitOpenOrderWithProtection(
+            CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, 0, params
+        );
+        routerAdmin.pause();
+
+        bytes32 orderHashBefore = keccak256(abi.encode(_orderRecord(parentOrderId)));
+        bytes32 reservationHashBefore = keccak256(abi.encode(clearinghouse.getOrderReservation(parentOrderId)));
+        bytes32 accountReservationsHashBefore = keccak256(abi.encode(router.getAccountReservations(ALICE)));
+        bytes32 protectionHashBefore = keccak256(abi.encode(protectionViews.getPositionProtection(protectionId)));
+        uint64 activeProtectionIdBefore = protectionViews.activePositionProtectionId(ALICE);
+        uint64 nextExecuteBefore = router.nextExecuteId();
+        uint64 globalTailBefore = router.globalTailOrderId();
+        uint64 accountHeadBefore = router.accountHeadOrderId(ALICE);
+        uint256 freeSettlementBefore = _freeSettlementUsdc(ALICE);
+
+        vm.mockCallRevert(
+            address(clearinghouse),
+            abi.encodeWithSelector(IMarginClearinghouse.releaseInvalidatedOrderReserves.selector),
+            bytes("forced clearinghouse failure")
+        );
+        vm.expectRevert(bytes("forced clearinghouse failure"));
+        vm.prank(CAROL);
+        router.clearRiskOffOrder(parentOrderId);
+        vm.clearMockedCalls();
+
+        assertEq(keccak256(abi.encode(_orderRecord(parentOrderId))), orderHashBefore, "order must roll back");
+        assertEq(
+            keccak256(abi.encode(clearinghouse.getOrderReservation(parentOrderId))),
+            reservationHashBefore,
+            "margin reservation must roll back"
+        );
+        assertEq(
+            keccak256(abi.encode(router.getAccountReservations(ALICE))),
+            accountReservationsHashBefore,
+            "router reservation aggregates must roll back"
+        );
+        assertEq(
+            keccak256(abi.encode(protectionViews.getPositionProtection(protectionId))),
+            protectionHashBefore,
+            "protection lifecycle and bounties must roll back"
+        );
+        assertEq(
+            protectionViews.activePositionProtectionId(ALICE),
+            activeProtectionIdBefore,
+            "active protection must roll back"
+        );
+        assertEq(router.nextExecuteId(), nextExecuteBefore, "global head must roll back");
+        assertEq(router.globalTailOrderId(), globalTailBefore, "global tail must roll back");
+        assertEq(router.accountHeadOrderId(ALICE), accountHeadBefore, "account head must roll back");
+        assertEq(_freeSettlementUsdc(ALICE), freeSettlementBefore, "free settlement must roll back");
+    }
+
     function test_AttachedOpen_ParentExpiryBatchFailsProtectionsAndRefundsTheirBounties() public {
         PositionProtectionTypes.PositionProtectionParams memory params = _params(BULL_TAKE_PROFIT, BULL_STOP_LOSS);
 
@@ -1094,6 +1269,30 @@ contract PositionProtectionTest is BasePerpTest {
         );
         assertEq(router.pendingOrderCounts(account), 0, "expiry should clear the account queue");
         assertEq(router.getAccountReservations(account).executionBountyUsdc, 0, "expiry should clear every reserve");
+    }
+
+    function _assertSingleRiskOffRefund(
+        Vm.Log[] memory logs,
+        address expectedAccount,
+        uint256 expectedMarginUsdc,
+        uint256 expectedBountyUsdc
+    ) internal view {
+        uint256 matches;
+        for (uint256 i; i < logs.length; ++i) {
+            Vm.Log memory entry = logs[i];
+            if (
+                entry.emitter != address(clearinghouse) || entry.topics.length < 2
+                    || entry.topics[0] != RISK_OFF_RESERVES_REFUNDED_TOPIC
+            ) {
+                continue;
+            }
+            ++matches;
+            assertEq(address(uint160(uint256(entry.topics[1]))), expectedAccount, "risk-off refund account");
+            (uint256 releasedMarginUsdc, uint256 refundableBountyUsdc) = abi.decode(entry.data, (uint256, uint256));
+            assertEq(releasedMarginUsdc, expectedMarginUsdc, "risk-off released margin");
+            assertEq(refundableBountyUsdc, expectedBountyUsdc, "risk-off aggregate bounty refund");
+        }
+        assertEq(matches, 1, "exactly one aggregate risk-off refund event");
     }
 
 }

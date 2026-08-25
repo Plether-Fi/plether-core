@@ -174,6 +174,10 @@ contract MarginClearinghouseAccountingHarness {
 
 contract MarginClearinghouseTest is Test {
 
+    event RiskOffOrderReservesRefunded(
+        address indexed account, uint256 releasedMarginUsdc, uint256 executionBountyUsdc
+    );
+
     MarginClearinghouse clearinghouse;
     MarginClearinghouseAccountingHarness accountingHarness;
     MockToken usdc;
@@ -715,6 +719,198 @@ contract MarginClearinghouseTest is Test {
         vm.prank(address(mockRouter));
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__NotOperator.selector);
         clearinghouse.transferReservedSettlement(aliceAccount, address(0xB0B), 1);
+    }
+
+    function test_ReleaseInvalidatedOrderReserves_AuthorizesOnlyReportedRouter() public {
+        uint64[] memory orderIds = new uint64[](0);
+
+        vm.prank(engine);
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__NotOperator.selector);
+        clearinghouse.releaseInvalidatedOrderReserves(aliceAccount, orderIds, 0);
+
+        vm.prank(alice);
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__NotOperator.selector);
+        clearinghouse.releaseInvalidatedOrderReserves(aliceAccount, orderIds, 0);
+    }
+
+    function test_ReleaseInvalidatedOrderReserves_UnknownIdsAndZeroBountyAreEventfulNoop() public {
+        uint64[] memory orderIds = new uint64[](2);
+        orderIds[0] = 1001;
+        orderIds[1] = 1002;
+        mockRouter.setExecutionBountyUsdc(aliceAccount, 1);
+        uint256 checkpointCallsBefore = mockEngine.carryCheckpointCalls();
+
+        vm.expectEmit(true, false, false, true, address(clearinghouse));
+        emit RiskOffOrderReservesRefunded(aliceAccount, 0, 0);
+        vm.prank(address(mockRouter));
+        uint256 releasedMarginUsdc = clearinghouse.releaseInvalidatedOrderReserves(aliceAccount, orderIds, 0);
+
+        assertEq(releasedMarginUsdc, 0);
+        assertEq(clearinghouse.balanceUsdc(aliceAccount), 0);
+        assertEq(clearinghouse.lockedMarginUsdc(aliceAccount), 0);
+        assertEq(mockEngine.carryCheckpointCalls(), checkpointCallsBefore, "risk-off no-op must not checkpoint carry");
+    }
+
+    function test_ReleaseInvalidatedOrderReserves_ReleasesRemainingMatchingReservationsAndExactBounty() public {
+        vm.prank(alice);
+        clearinghouse.deposit(aliceAccount, 1000 * 1e6);
+
+        vm.startPrank(engine);
+        clearinghouse.lockPositionMargin(aliceAccount, 100 * 1e6);
+        clearinghouse.reserveCommittedOrderMargin(aliceAccount, 101, 200 * 1e6);
+        clearinghouse.reserveCommittedOrderMargin(aliceAccount, 102, 150 * 1e6);
+        clearinghouse.reserveCommittedOrderMargin(aliceAccount, 103, 50 * 1e6);
+        clearinghouse.consumeOrderReservation(101, 60 * 1e6);
+        clearinghouse.releaseOrderReservation(103);
+        vm.stopPrank();
+
+        vm.prank(address(mockRouter));
+        clearinghouse.lockReservedSettlement(aliceAccount, 75 * 1e6);
+        mockRouter.setExecutionBountyUsdc(aliceAccount, 0);
+
+        uint64[] memory orderIds = new uint64[](6);
+        orderIds[0] = 101;
+        orderIds[1] = 999;
+        orderIds[2] = 103;
+        orderIds[3] = 102;
+        orderIds[4] = 101;
+        orderIds[5] = 1000;
+
+        uint256 settlementBalanceBefore = clearinghouse.balanceUsdc(aliceAccount);
+        uint256 clearinghouseTokensBefore = usdc.balanceOf(address(clearinghouse));
+        uint256 checkpointCallsBefore = mockEngine.carryCheckpointCalls();
+
+        vm.prank(address(mockRouter));
+        uint256 releasedMarginUsdc = clearinghouse.releaseInvalidatedOrderReserves(aliceAccount, orderIds, 75 * 1e6);
+
+        IMarginClearinghouse.LockedMarginBuckets memory buckets = clearinghouse.getLockedMarginBuckets(aliceAccount);
+        IMarginClearinghouse.AccountReservationSummary memory summary =
+            clearinghouse.getAccountReservationSummary(aliceAccount);
+        IMarginClearinghouse.OrderReservation memory first = clearinghouse.getOrderReservation(101);
+        IMarginClearinghouse.OrderReservation memory second = clearinghouse.getOrderReservation(102);
+        IMarginClearinghouse.OrderReservation memory alreadyTerminal = clearinghouse.getOrderReservation(103);
+
+        assertEq(releasedMarginUsdc, 290 * 1e6, "only the two active reservation remainders should release");
+        assertEq(uint256(first.status), uint256(IMarginClearinghouse.ReservationStatus.Released));
+        assertEq(uint256(second.status), uint256(IMarginClearinghouse.ReservationStatus.Released));
+        assertEq(uint256(alreadyTerminal.status), uint256(IMarginClearinghouse.ReservationStatus.Released));
+        assertEq(buckets.positionMarginUsdc, 100 * 1e6, "PnL pledge must remain isolated");
+        assertEq(buckets.committedOrderMarginUsdc, 0);
+        assertEq(buckets.reservedSettlementUsdc, 0, "the exact invalidated bounty should unlock");
+        assertEq(summary.activeCommittedOrderMarginUsdc, 0);
+        assertEq(summary.activeReservationCount, 0);
+        assertEq(clearinghouse.balanceUsdc(aliceAccount), settlementBalanceBefore, "settlement balance must not move");
+        assertEq(usdc.balanceOf(address(clearinghouse)), clearinghouseTokensBefore, "token custody must not move");
+        assertEq(mockEngine.carryCheckpointCalls(), checkpointCallsBefore, "risk-off refund must not checkpoint carry");
+    }
+
+    function test_ReleaseInvalidatedOrderReserves_RevertsAndRollsBackOnReservationAccountMismatch() public {
+        address bob = address(0x222);
+        usdc.mint(bob, 500 * 1e6);
+        vm.startPrank(bob);
+        usdc.approve(address(clearinghouse), type(uint256).max);
+        clearinghouse.deposit(bob, 500 * 1e6);
+        vm.stopPrank();
+
+        vm.prank(alice);
+        clearinghouse.deposit(aliceAccount, 500 * 1e6);
+
+        vm.startPrank(engine);
+        clearinghouse.reserveCommittedOrderMargin(aliceAccount, 201, 100 * 1e6);
+        clearinghouse.reserveCommittedOrderMargin(bob, 202, 120 * 1e6);
+        vm.stopPrank();
+
+        uint64[] memory orderIds = new uint64[](2);
+        orderIds[0] = 201;
+        orderIds[1] = 202;
+
+        vm.prank(address(mockRouter));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                MarginClearinghouse.MarginClearinghouse__ReservationAccountMismatch.selector,
+                uint64(202),
+                aliceAccount,
+                bob
+            )
+        );
+        clearinghouse.releaseInvalidatedOrderReserves(aliceAccount, orderIds, 0);
+
+        assertEq(
+            uint256(clearinghouse.getOrderReservation(201).status),
+            uint256(IMarginClearinghouse.ReservationStatus.Active),
+            "an earlier matching release must roll back"
+        );
+        assertEq(clearinghouse.getLockedMarginBuckets(aliceAccount).committedOrderMarginUsdc, 100 * 1e6);
+    }
+
+    function test_ReleaseInvalidatedOrderReserves_RejectsTerminalReservationOwnedByAnotherAccount() public {
+        address bob = address(0x222);
+        usdc.mint(bob, 500 * 1e6);
+        vm.startPrank(bob);
+        usdc.approve(address(clearinghouse), type(uint256).max);
+        clearinghouse.deposit(bob, 500 * 1e6);
+        vm.stopPrank();
+
+        vm.startPrank(engine);
+        clearinghouse.reserveCommittedOrderMargin(bob, 211, 120 * 1e6);
+        clearinghouse.releaseOrderReservation(211);
+        vm.stopPrank();
+
+        uint64[] memory orderIds = new uint64[](1);
+        orderIds[0] = 211;
+
+        vm.prank(address(mockRouter));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                MarginClearinghouse.MarginClearinghouse__ReservationAccountMismatch.selector,
+                uint64(211),
+                aliceAccount,
+                bob
+            )
+        );
+        clearinghouse.releaseInvalidatedOrderReserves(aliceAccount, orderIds, 0);
+    }
+
+    function test_ReleaseInvalidatedOrderReserves_ProtectsVpiAndRemainingLiveBounties() public {
+        vm.prank(alice);
+        clearinghouse.deposit(aliceAccount, 1000 * 1e6);
+
+        vm.startPrank(engine);
+        clearinghouse.lockVpiRebateReserve(aliceAccount, 100 * 1e6);
+        clearinghouse.reserveCommittedOrderMargin(aliceAccount, 221, 40 * 1e6);
+        vm.stopPrank();
+        vm.prank(address(mockRouter));
+        clearinghouse.lockReservedSettlement(aliceAccount, 70 * 1e6);
+        mockRouter.setExecutionBountyUsdc(aliceAccount, 50 * 1e6);
+
+        uint64[] memory orderIds = new uint64[](1);
+        orderIds[0] = 221;
+        uint256 checkpointCallsBefore = mockEngine.carryCheckpointCalls();
+
+        vm.prank(address(mockRouter));
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__ActionReserveMismatch.selector);
+        clearinghouse.releaseInvalidatedOrderReserves(aliceAccount, orderIds, 21 * 1e6);
+
+        assertEq(clearinghouse.actionReserveUsdc(aliceAccount), 170 * 1e6, "failed floor check must roll back");
+        assertEq(clearinghouse.vpiRebateReserveUsdc(aliceAccount), 100 * 1e6);
+        assertEq(
+            uint256(clearinghouse.getOrderReservation(221).status),
+            uint256(IMarginClearinghouse.ReservationStatus.Active),
+            "reservation release must roll back with the floor rejection"
+        );
+        assertEq(clearinghouse.orderMarginUsdc(aliceAccount), 40 * 1e6);
+        assertEq(mockEngine.carryCheckpointCalls(), checkpointCallsBefore, "floor rejection must not checkpoint carry");
+
+        vm.prank(address(mockRouter));
+        uint256 releasedMarginUsdc = clearinghouse.releaseInvalidatedOrderReserves(aliceAccount, orderIds, 20 * 1e6);
+
+        assertEq(releasedMarginUsdc, 40 * 1e6);
+        assertEq(clearinghouse.actionReserveUsdc(aliceAccount), 150 * 1e6, "exact protected floor should remain");
+        assertEq(clearinghouse.vpiRebateReserveUsdc(aliceAccount), 100 * 1e6);
+        assertEq(clearinghouse.orderMarginUsdc(aliceAccount), 0);
+        assertEq(
+            mockEngine.carryCheckpointCalls(), checkpointCallsBefore, "successful refund must not checkpoint carry"
+        );
     }
 
     function test_C01_WithdrawUsdcBelowLockedMargin_ShouldRevert() public {

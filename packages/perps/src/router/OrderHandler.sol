@@ -3,7 +3,6 @@ pragma solidity 0.8.35;
 
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
-import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {OrderBountyAccounting} from "@plether/perps/router/OrderBountyAccounting.sol";
 import {OrderExecutionHandler} from "@plether/perps/router/OrderExecutionHandler.sol";
 import {OrderLiquidationHandler} from "@plether/perps/router/OrderLiquidationHandler.sol";
@@ -35,7 +34,14 @@ abstract contract OrderHandler is PositionProtectionHandler, OrderExecutionHandl
         return PositionProtectionHandler._protectionBountiesToForfeitOnLiquidation(account);
     }
 
-    /// @notice Applies a complete router and active-oracle policy configuration after admin authentication.
+    function _failPendingOpenProtectionForRiskOff(
+        uint64 parentOrderId,
+        address account
+    ) internal override returns (uint256 refundableProtectionBountyUsdc) {
+        return positionProtectionBook.failPendingOpenForRiskOff(parentOrderId, account);
+    }
+
+    /// @notice Applies the pre-oracle portion of a finalized configuration after admin authentication.
     /// @dev Time values are seconds, monetary values are 6-decimal USDC, ratios are basis points, gas is
     ///      unscaled gas units, and count limits are unscaled. The admin validates bounds before forwarding.
     /// @param config Timelocked configuration finalized by this router's admin.
@@ -45,16 +51,14 @@ abstract contract OrderHandler is PositionProtectionHandler, OrderExecutionHandl
         _onlyAdmin();
         maxOrderAge = config.maxOrderAge;
         minOpenNotionalUsdc = config.minOpenNotionalUsdc;
-        pletherOracle.applyConfig(
-            IPletherOracle.OracleConfig({
-                orderExecutionStalenessLimit: config.orderExecutionStalenessLimit,
-                liquidationStalenessLimit: config.liquidationStalenessLimit,
-                basketMaxConfidenceRatioBps: config.basketMaxConfidenceRatioBps,
-                orderSettlementWindow: config.orderSettlementWindow,
-                maxComponentPublishTimeDivergence: config.maxComponentPublishTimeDivergence,
-                adverseConfidenceMultiplierBps: config.adverseConfidenceMultiplierBps
-            })
-        );
+    }
+
+    /// @notice Applies the post-oracle Router fields of an authenticated finalized configuration.
+    /// @dev The external Router entrypoint invokes the immutable sidecar between these two storage phases so the
+    ///      active oracle observes exactly the same update ordering as the former in-Router implementation.
+    function _applyRouterConfigAfterOracle(
+        IOrderRouterAdminHost.RouterConfig calldata config
+    ) internal {
         openOrderExecutionBountyBps = config.openOrderExecutionBountyBps;
         minOpenOrderExecutionBountyUsdc = config.minOpenOrderExecutionBountyUsdc;
         maxOpenOrderExecutionBountyUsdc = config.maxOpenOrderExecutionBountyUsdc;
