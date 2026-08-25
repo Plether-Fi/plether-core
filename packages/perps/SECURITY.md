@@ -62,12 +62,18 @@ These are one-time configuration setters rather than mutable governance knobs:
 
 | Setter | Contract |
 |--------|----------|
+| `setDependencies(planner, settlementSidecar, admin)` | `CfdEngine` |
 | `setTerminalNavBook(address)` | `CfdEngine` |
 | `setPool(address)` | `CfdEngine` |
 | `setOrderRouter(address)` | `CfdEngine` |
 | `setEngine(address)` | `MarginClearinghouse` |
 | `setSeniorVault(address)` | `HousePool` |
 | `setJuniorVault(address)` | `HousePool` |
+
+`SettlementMonitorLens` construction validates the required core wiring and reciprocal bindings before fixing its
+constructor bindings. `getSettlementHealth()` checks those bindings again at runtime, and the observable configuration digest
+records the planner, settlement-sidecar, admin, Oracle/Pyth, vault, terminal NAV book, and asset identities for off-chain drift
+comparison. This is detection only; the monitor cannot repair wiring or authorize a replacement.
 
 ### Instant owner controls
 
@@ -261,8 +267,9 @@ Keepers are permissionless executors.
 
 The Book has two deliberately separate roles. Direct calls own the retained OCO lifecycle and use only narrow
 clearinghouse/Router capabilities. Router `delegatecall` uses the same immutable runtime only as a stateless bytecode
-carrier for mark refresh/trigger-oracle resolution, single and batch liquidation, and LP-epoch settlement. The
-delegated functions reject direct calls and must not read or write Router storage slots by assumed layout.
+carrier for mark refresh/trigger-oracle resolution, single and batch liquidation, and atomic-refresh LP-epoch
+settlement. The delegated functions reject direct calls and must not read or write Router storage slots by assumed
+layout.
 
 When existing-position protection locks its trigger and linked-close bounties, admission is checked after the lock.
 The Book calls the Engine-configured planner's canonical `isExactPriceRiskLiquidatable(...)` predicate rather than
@@ -497,8 +504,61 @@ Monitoring must therefore simulate current state and treat cutoff-time request t
 the conservative case assumes all redemptions remain and no helpful deposits activate. Cancelling Senior redemptions
 may expose more Junior funding, while cancelling Junior deposits may prevent a Senior deposit from fitting. Indexing,
 alerting, sequencer publication, and transaction inclusion also consume part of the nominal five minutes, so the
-operational reaction window is shorter. Exact settlement binding belongs to a separate batch/config-digest design;
-this cutoff adds no signature, challenge period, settlement hold, or trading freeze.
+operational reaction window is shorter. `SettlementMonitorLens` reads an explicitly observed epoch so a monitor can
+keep following the closed batch after the request target rolls forward. That argument does not select what the Router
+settles; eligible FIFO heads remain authoritative. `observableConfigDigest()` and the `observationDigest` returned by
+`getSettlementObservation(observedEpoch)` help detect off-chain drift. `completeObservationDigest` repeats that hash
+only when `observationComplete` and is otherwise zero, but it remains unauthenticated. None is a trusted batch commitment
+and the Router does not accept or enforce them. This cutoff and lens add no signature, challenge period, settlement
+hold, or trading freeze.
+
+### Settlement-monitor trust boundary
+
+`SettlementMonitorLens` is a read-only, bounded operator/security surface. `getSettlementStatus(observedEpoch)`
+separates operational blockers, warnings, and deposit deferrals; `getSettlementHealth()` separately reports critical
+faults and dependency-read failures. A reverted or malformed dependency read is unknown state, never a healthy zero.
+Its checks can detect observable wiring, epoch-window, NAV aggregate, pool-backing, vault-escrow, and seed-floor
+failures, but they do not enumerate accounts, radix nodes, or unbounded queues and cannot prove per-account
+terminal-curve parity. `executionPathDependencyMask` is the narrow subset of status read failures that makes the
+cached-mark versus atomic-refresh route unknown; `dependencyFailureMask` remains the complete status read-failure
+set. Canonical matured-head getters are the sole route evidence: auxiliary lifecycle, link, membership, or endpoint
+corruption degrades health without replacing a route that is still known, while impossible canonical head pairs are
+critical. Projected deposit deferrals combine the tranche-neutral
+`HousePool.canSettleDepositEntries()` pre-redemption projection with canonical redemption evidence, so residual
+pending claimants remain visible even when an epoch's queued assets are zero. The Lens does not confirm either
+tranche's activation while matured Senior funding can still change principal/HWM rounding, or Senior activation while
+matured Junior funding can reduce reservation capacity. HousePool rechecks the exact gates after redemption funding;
+this prevents a zero-fee
+virtual-offset rounding transition from admitting deposits into newly impaired Senior accounting. The view does not
+quote new-request capacity. The facade constructor rejects a Router whose immutable settlement pool differs from
+`Engine.pool()` and deploys a code-size sidecar whose diagnostic builders accept only the constructor-bound
+facade; its constructor-set binding getters remain publicly readable and it has no setter or delegatecall path. That
+sidecar is a monitor-bound implementation detail, not another trusted public result surface.
+
+The sidecar pins the Engine planner address and code hash at construction and probes the planner's canonical
+carry-index and market-calendar ABIs before treating wiring as healthy. Seed receiver/floor settings must be consistently zero/zero or
+nonzero/nonzero. Because the facade embeds the sidecar's creation code, EIP-3860 creation-input size is a release
+constraint in addition to each contract's EIP-170 runtime limit.
+
+Normal monitoring should poll the lighter `getSettlementStatus(observedEpoch)` view. The composite
+`getSettlementObservation(observedEpoch)` is designed for checkpoints and alert investigation: its ABI return is
+roughly 6 KB and representative `eth_call` execution is about 0.8–1.3 million gas. The Senior deposit-deferral mask
+describes whether pending activation or existing reservation limits are blocked, not how much new Senior capital can
+be admitted; use the canonical admission-capacity view for a new request.
+
+`getPoolReconcileOracleStatus()` describes feeds readable at the observation block. It cannot certify a future Hermes
+payload or the fee and publish times used by a later transaction. It requires the updated
+`PletherOracle.getLatestPoolReconcilePrice()` return ABI; an older configured oracle causes a fail-soft Oracle
+dependency failure rather than fabricated zero-valued feed health. Every Oracle dependency read must succeed for
+`observationComplete`, even when the execution route is cached mark or no work; Oracle `policyValid` is required for
+completeness only when atomic refresh is the selected route. Thus an older Oracle ABI always leaves
+`completeObservationDigest == 0`, while a readable but currently stale or low-confidence feed need not invalidate a
+cached/no-work checkpoint. Reported confidence is for the neutral pre-cap basket, but the returned mark can be capped,
+so recomputing the ratio against `markPrice` is not always an independent policy check. Likewise, the reported
+required execution path is advisory rather than an authoritative `canSettle` result. Keepers must quote and simulate
+the exact route-specific call: direct `HousePool.settleLpEpoch(uint256,uint256)` with zero ETH for `CachedMark`, or
+`OrderRouter.settleLpEpoch(bytes[])` with the exact `msg.value` for `AtomicOracleRefresh`. The selected contract and
+EVM rollback frame remain the execution authority.
 
 ### Freshness-gated LP actions
 
@@ -661,6 +721,11 @@ the returned cursor leaves any low-gas or empty-revert item unattempted so a kee
 4. Investigate and remediate.
 5. Unpause when safe.
 
+Monitoring should page operators before applying a breaker. An observable NAV or custody invariant failure warrants
+pausing new risk and LP entry while preserving protective exits where protocol policy allows them. Oracle-read
+failure is transient until corroborated; queue backlog, Senior priority, capacity, and insufficient free cash are
+liveness states rather than accounting corruption. `SettlementMonitorLens` cannot pause anything itself.
+
 ### Suspected oracle issue
 
 1. Pause `OrderRouter` to stop new commitments.
@@ -754,6 +819,7 @@ As of May 21, 2026, `master` includes the resolution commit and later changes. F
 | `MarginClearinghouse` | Pre-audit reviewed; formal audit pending |
 | `HousePool` | Pre-audit reviewed; formal audit pending |
 | `TrancheVault` | Pre-audit reviewed; formal audit pending |
+| `SettlementMonitorLens` and monitor-bound sidecar | Read-only monitoring addition; formal audit pending |
 
 ## Security Contact
 

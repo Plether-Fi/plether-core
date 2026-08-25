@@ -15,6 +15,8 @@ import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {PerpsPublicLens} from "@plether/perps/PerpsPublicLens.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
+import {SettlementMonitorLens} from "@plether/perps/SettlementMonitorLens.sol";
+import {SettlementMonitorLensSidecar} from "@plether/perps/SettlementMonitorLensSidecar.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {IAsyncTrancheVault} from "@plether/perps/interfaces/IAsyncTrancheVault.sol";
@@ -99,6 +101,8 @@ contract DeployPerpsArbitrumSepolia is Script {
         address pletherOracle;
         address routerAdmin;
         PerpsPublicLens publicLens;
+        SettlementMonitorLens settlementMonitorLens;
+        SettlementMonitorLensSidecar settlementMonitorLensSidecar;
     }
 
     function run() external returns (DeployedContracts memory deployed) {
@@ -177,6 +181,89 @@ contract DeployPerpsArbitrumSepolia is Script {
             address(deployed.engine),
             address(deployed.router),
             address(deployed.housePool)
+        );
+        deployed.settlementMonitorLens = new SettlementMonitorLens(address(deployed.router));
+        deployed.settlementMonitorLensSidecar = deployed.settlementMonitorLens.SIDECAR();
+        require(
+            address(deployed.settlementMonitorLensSidecar).code.length > 0, "SettlementMonitorLens Sidecar has no code"
+        );
+        require(
+            address(deployed.settlementMonitorLens.ROUTER()) == address(deployed.router),
+            "SettlementMonitorLens Router mismatch"
+        );
+        require(
+            address(deployed.settlementMonitorLens.ENGINE()) == address(deployed.engine),
+            "SettlementMonitorLens Engine mismatch"
+        );
+        require(
+            address(deployed.settlementMonitorLens.HOUSE_POOL()) == address(deployed.housePool),
+            "SettlementMonitorLens HousePool mismatch"
+        );
+        require(
+            address(deployed.settlementMonitorLens.ENGINE_PROTOCOL_LENS())
+                == address(deployed.housePool.ENGINE_PROTOCOL_LENS()),
+            "SettlementMonitorLens ProtocolLens mismatch"
+        );
+        require(
+            address(deployed.settlementMonitorLens.CLEARINGHOUSE()) == address(deployed.clearinghouse),
+            "SettlementMonitorLens Clearinghouse mismatch"
+        );
+        require(
+            address(deployed.settlementMonitorLens.TERMINAL_NAV_BOOK()) == address(deployed.terminalNavBook),
+            "SettlementMonitorLens TerminalNavBook mismatch"
+        );
+        require(
+            address(deployed.settlementMonitorLens.SENIOR_VAULT()) == address(deployed.seniorVault),
+            "SettlementMonitorLens SeniorVault mismatch"
+        );
+        require(
+            address(deployed.settlementMonitorLens.JUNIOR_VAULT()) == address(deployed.juniorVault),
+            "SettlementMonitorLens JuniorVault mismatch"
+        );
+        require(
+            address(deployed.settlementMonitorLens.USDC()) == address(deployed.usdc),
+            "SettlementMonitorLens USDC mismatch"
+        );
+        require(
+            deployed.settlementMonitorLensSidecar.MONITOR() == address(deployed.settlementMonitorLens),
+            "SettlementMonitorLens Sidecar monitor mismatch"
+        );
+        require(
+            address(deployed.settlementMonitorLensSidecar.ROUTER()) == address(deployed.router),
+            "SettlementMonitorLens Sidecar Router mismatch"
+        );
+        require(
+            address(deployed.settlementMonitorLensSidecar.ENGINE()) == address(deployed.engine),
+            "SettlementMonitorLens Sidecar Engine mismatch"
+        );
+        require(
+            address(deployed.settlementMonitorLensSidecar.HOUSE_POOL()) == address(deployed.housePool),
+            "SettlementMonitorLens Sidecar HousePool mismatch"
+        );
+        require(
+            address(deployed.settlementMonitorLensSidecar.ENGINE_PROTOCOL_LENS())
+                == address(deployed.housePool.ENGINE_PROTOCOL_LENS()),
+            "SettlementMonitorLens Sidecar ProtocolLens mismatch"
+        );
+        require(
+            address(deployed.settlementMonitorLensSidecar.CLEARINGHOUSE()) == address(deployed.clearinghouse),
+            "SettlementMonitorLens Sidecar Clearinghouse mismatch"
+        );
+        require(
+            address(deployed.settlementMonitorLensSidecar.TERMINAL_NAV_BOOK()) == address(deployed.terminalNavBook),
+            "SettlementMonitorLens Sidecar TerminalNavBook mismatch"
+        );
+        require(
+            address(deployed.settlementMonitorLensSidecar.SENIOR_VAULT()) == address(deployed.seniorVault),
+            "SettlementMonitorLens Sidecar SeniorVault mismatch"
+        );
+        require(
+            address(deployed.settlementMonitorLensSidecar.JUNIOR_VAULT()) == address(deployed.juniorVault),
+            "SettlementMonitorLens Sidecar JuniorVault mismatch"
+        );
+        require(
+            address(deployed.settlementMonitorLensSidecar.USDC()) == address(deployed.usdc),
+            "SettlementMonitorLens Sidecar USDC mismatch"
         );
 
         vm.stopBroadcast();
@@ -361,6 +448,8 @@ contract DeployPerpsArbitrumSepolia is Script {
         console.log("BasketMaxConfidenceRatioBps:", PletherOracle(deployed.pletherOracle).basketMaxConfidenceRatioBps());
         console.log("OrderRouterAdmin:", deployed.routerAdmin);
         console.log("PerpsPublicLens:", address(deployed.publicLens));
+        console.log("SettlementMonitorLens:", address(deployed.settlementMonitorLens));
+        console.log("SettlementMonitorLensSidecar:", address(deployed.settlementMonitorLensSidecar));
         console.log("Owner:", deployed.engineAdmin.owner());
     }
 

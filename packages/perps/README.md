@@ -83,17 +83,23 @@ In practice, the compact public API is:
   - `PositionProtectionBook.triggerPositionProtection(uint64,bytes[])`
   - `OrderRouter.executeLiquidation(address,bytes[])`
   - `OrderRouter.executeLiquidationBatch(address[],bytes[])`
-  - `OrderRouter.settleLpEpoch(bytes[])`
+  - LP epoch clearing through the route reported by `SettlementMonitorLens.requiredExecutionPath`:
+    `HousePool.settleLpEpoch(uint256,uint256)` for `CachedMark` or `OrderRouter.settleLpEpoch(bytes[])` for
+    `AtomicOracleRefresh`
 - LPs:
   - the configured Senior or Junior `TrancheVault`: asynchronous `requestDeposit` / `requestRedeem`, request
     cancellation and status views, and funded-request claims through `deposit` / `mint` or `withdraw` / `redeem`
-  - permissionless synchronized clearing through `OrderRouter.settleLpEpoch(bytes[])`; the Router validates one
-    post-boundary Pyth mark and settles the bounded batch atomically
+  - permissionless synchronized clearing through the Lens-selected direct-Pool or Router route; on
+    `AtomicOracleRefresh`, the Router validates one Pyth mark under the reported minimum-publish-time policy and settles
+    the bounded batch atomically
 - Readers:
   - `PerpsPublicLens`, including `getTrancheQueues(bool)` for synchronized heads/backlog and
     `getLpRequestState(bool,uint256,address)` for controller request balances
   - `PositionProtectionBook.activePositionProtectionId(address)` /
     `PositionProtectionBook.getPositionProtection(uint64)` for canonical retained protection state
+  - `SettlementMonitorLens` for explicitly observed epoch operations, fail-soft oracle diagnostics, and bounded
+    accounting/custody health checks; it is an operator/security surface, not the product API or a settlement
+    authorization oracle
   - the read-only `IHousePool` capacity getters exposed by `HousePool`:
     `getSeniorDepositCapacity()`, `reservedSeniorDepositAssetsUsdc()`, and
     `areSeniorDepositReservationsWithinLimits()`
@@ -115,13 +121,16 @@ The simplified public interfaces live in `packages/perps/src/interfaces/`:
 - `IPerpsKeeper.sol`
 - `IProtocolViews.sol`
 - `PerpsViewTypes.sol`
+- `ISettlementMonitorLens.sol` and `SettlementMonitorViewTypes.sol` for bounded operator/security observations
 
 The wider engine, clearinghouse, router, and house-pool interfaces still exist for tests, admin tooling, and deep accounting inspection, but they are not the recommended product integration surface.
 The three capacity getters above are the deliberate direct-read exception. The active vault-authorized hooks declared
-by `IHousePool` / `IPerpsLPActions` are Senior deposit reservation and release. The permissionless live coordinator is
-`OrderRouter.settleLpEpoch(bytes[])`; with open positions outside oracle-frozen mode, its HousePool callback is
-Router-only. The no-position and oracle-frozen cached-mark fallbacks remain permissionless. LP applications must
-perform actions through the relevant `TrancheVault`.
+by `IHousePool` / `IPerpsLPActions` are Senior deposit reservation and release. Permissionless LP clearing follows the
+route reported by `SettlementMonitorLens`: direct `HousePool` settlement for `CachedMark`, or
+`OrderRouter.settleLpEpoch(bytes[])` for `AtomicOracleRefresh`. With open positions outside oracle-frozen mode, the
+HousePool callback is Router-only. Frozen mode selects the cached route only while the mark is fresh under the
+applicable frozen-mode limit; a frozen stale mark selects atomic refresh. LP applications must perform actions through
+the relevant `TrancheVault`.
 
 ### Trade-ticket previews
 
@@ -156,6 +165,9 @@ The main runtime and read surfaces are:
 - `HousePool`: LP capital, liabilities, reserves, and tranche waterfall.
 - `TrancheVault`: ERC-4626 LP vault wrappers for senior and junior capital.
 - `PerpsPublicLens`: compact product-facing read layer.
+- `SettlementMonitorLens`: read-only epoch-settlement, oracle, and invariant diagnostics for keepers and security
+  monitoring. Its constructor-created `SettlementMonitorLensSidecar` is a facade-bound code-size implementation
+  detail, not a second public or canonical read surface.
 - `CfdEngineAccountLens` / `CfdEngineProtocolLens`: richer audit and operator read layers.
 
 ### Intended boundaries
@@ -175,8 +187,9 @@ The main runtime and read surfaces are:
   does not forward public protection selectors: clients call the discovered Book directly. The Book has no token custody
   and cannot mutate FIFO by itself; it invokes narrow Router host paths for the parent open, trigger mark refresh, and
   linked-close append.
-- Public mark refresh, single liquidation, liquidation batch, and LP-epoch settlement remain Router selectors. Their
-  large stateless implementations are reached only by Router `delegatecall` into bytecode carried by the immutable Book.
+- Public mark refresh, single liquidation, liquidation batch, and atomic-refresh LP-epoch settlement remain Router
+  selectors. Their large stateless implementations are reached only by Router `delegatecall` into bytecode carried by
+  the immutable Book.
   That code reads integrations through external Router getters and does not read or write Router storage by layout;
   Router-owned mutations use authorized external self/item calls. Direct calls to those selectors on the Book revert.
   The delegate frame preserves the Router entrypoint's `msg.sender`, uses the Router as `address(this)` and direct-event
@@ -185,6 +198,9 @@ The main runtime and read surfaces are:
   keeper/protection-id payload preserves the keeper's refund and bounty identity.
 - `HousePool` owns LP capital and pays engine-authorized obligations that must leave the pool.
 - `PerpsPublicLens` is the default read surface for product consumers.
+- `SettlementMonitorLens` is the default bounded settlement-monitoring surface for keeper and security automation.
+  Its internal sidecar accepts diagnostic-builder calls only from its constructor-bound facade; the sidecar's public
+  bindings are constructor-set storage with no setter or delegatecall path.
 - The account and protocol lenses are for deeper diagnostics, tests, audits, and operator tooling.
 
 ## Trader Lifecycle
@@ -371,10 +387,13 @@ five minutes no new request can increase the epoch about to mature, although can
 claims, accounting, and oracle state remain live. No later request can add to that locked epoch after it matures; at
 the boundary, requests may instead join the new imminent epoch until its own cutoff. Settlement maturity remains
 `currentEpoch >= requestId`.
-`OrderRouter.settleLpEpoch(bytes[])` is the canonical permissionless clearing entrypoint. With open positions outside
-oracle-frozen mode, it validates a `PoolReconcile` Pyth basket whose earliest component publish time is at or after the
-current round-hour boundary, installs that exact Engine mark, and invokes the Router-only HousePool callback in the
-same transaction. HousePool then applies one accounting snapshot in this order:
+Permissionless clearing follows the route reported by `SettlementMonitorLens.requiredExecutionPath`:
+`HousePool.settleLpEpoch(uint256,uint256)` for `CachedMark`, or `OrderRouter.settleLpEpoch(bytes[])` for
+`AtomicOracleRefresh`. On the atomic route, the Router validates a `PoolReconcile` Pyth basket under the reported
+minimum-publish-time policy, installs that exact Engine mark, and invokes the Router-only HousePool callback in the
+same transaction. A nonzero `minimumAtomicPublishTime` enforces the current-round-hour floor; frozen stale-mark
+recovery reports zero and uses the frozen oracle policy instead. HousePool then applies one accounting snapshot in
+this order:
 
 1. matured Senior redemption demand,
 2. matured Junior redemption demand from the remaining liquidity and covenant capacity,
@@ -389,9 +408,60 @@ with an eligible Senior head still pending ends the call before Junior funding; 
 If a call cannot advance any queued epoch, it reverts and rolls back its reconcile and carry checkpoints; keepers should
 retry after an epoch matures or the blocking liquidity, capacity, pause, or safety condition changes.
 The same rollback frame includes the Pyth update and Engine mark/carry update. Low confidence, stale or inconsistent
-live oracle data therefore leaves the queue untouched. A direct cached-mark HousePool fallback exists only when there
-are no open positions or during `oracleFrozen`; frozen withdrawals retain their tranche-local surcharge and deposits
+live oracle data therefore leaves the queue untouched. The direct cached-mark HousePool route is selected when there
+are no open positions or when `oracleFrozen` and the cached mark remains fresh under the applicable frozen-mode limit;
+a frozen stale mark selects atomic refresh. Frozen withdrawals retain their tranche-local surcharge and deposits
 remain deferred.
+
+`SettlementMonitorLens` packages the bounded state needed to operate this flow without copying protocol arithmetic
+off chain. Callers choose the epoch to observe explicitly, so after the five-minute cutoff they can continue tracking
+the closed epoch while new requests target the following one. The observed epoch does not select what the Router
+settles; eligible FIFO heads remain authoritative. Its observations distinguish recoverable operational conditions
+from critical invariant failures and dependency-read failures, and they report whether the current state calls for a
+cached-mark path or an atomic Router oracle refresh. Cutoff totals are maximum membership, not immutable snapshots:
+eligible cancellations can only shrink them. The lens is read-only and intentionally does not expose an authoritative
+`canSettle`; keepers must still simulate the exact route-specific call before broadcasting: direct `HousePool`
+settlement with the cached mark and time for `CachedMark`, or `OrderRouter` with the exact Pyth bytes and fee for
+`AtomicOracleRefresh`.
+
+Use `getSettlementStatus(observedEpoch)` as the lighter high-frequency polling surface. The composite
+`getSettlementObservation(observedEpoch)` is intentionally a checkpoint and alert-investigation read: its ABI return
+is roughly 6 KB and representative `eth_call` execution is about 0.8–1.3 million gas. It is suitable for a
+block-pinned preflight record, not every monitoring tick.
+
+The bounded monitoring API is:
+
+- `getSettlementStatus(uint256 observedEpoch)`: epoch clock, queue endpoints and observed-epoch totals, current
+  execution-path diagnosis, and separate operational blocker, warning, and deposit-deferral masks.
+  `executionPathDependencyMask` isolates read failures that prevent choosing cached-mark versus atomic-refresh
+  routing; `dependencyFailureMask` is the broader set of unknown status inputs. Canonical matured-head getters alone
+  select the reported route; auxiliary lifecycle, link, membership, and endpoint inconsistencies degrade health or
+  raise queue faults rather than rewriting known route evidence. `ActivationNotConfirmed` combines the projected
+  `HousePool.canSettleDepositEntries()` common gate with canonical redemption evidence. The Pool view projects
+  post-reconcile accounting, including residual pending claimants; the Lens remains conservative while matured Senior
+  redemptions can still change principal/HWM rounding before either tranche activates, and while matured Junior
+  redemptions can reduce capacity before Senior activation. HousePool rechecks the exact live gates after redemption
+  funding. That tranche-neutral Pool view reports pending-epoch
+  activation only; it is not a quote for admitting a new deposit request. The Senior deposit-deferral mask
+  describes activation and existing-reservation-limit conditions; it is not additional admission capacity for a new
+  request. Use the vault admission view or `HousePool.getSeniorDepositCapacity()` for that quote.
+- `getSettlementHealth()`: observable wiring, NAV aggregate, pool backing, vault escrow, and seed-floor checks, with
+  distinct critical-fault and dependency-failure masks. Construction rejects a Router whose immutable settlement pool
+  differs from `Engine.pool()`. Runtime binding checks include the constructor-pinned Engine
+  planner address/code hash and its settlement-critical carry-index and market-calendar ABIs; seed receiver/floor
+  configuration must be a consistent zero/zero or nonzero/nonzero pair.
+- `getPoolReconcileOracleStatus()`: fail-soft diagnostic for the current validated PoolReconcile observation; it
+  cannot certify a future Hermes payload.
+- `getSettlementObservation(uint256 observedEpoch)`: block-pinned composite observation, always-computed
+  `observationDigest`, explicit `observationComplete`, and `completeObservationDigest` that equals the observation hash
+  only when every required section is complete and otherwise remains zero. Completeness requires every Oracle
+  dependency read to succeed even for cached-mark or no-work routing; current feed-policy validity is required only
+  when the selected route is atomic refresh.
+- `observableConfigDigest()`: domain-separated digest of the observable active configuration.
+
+All digests are unauthenticated advisory comparison aids, not trusted batch commitments, and none is consumed by the
+Router.
+
 If an aggregate deposit quote or unfunded redemption remainder rounds to zero, settlement moves that request into a
 terminal refundable state instead of silently consuming value. `PerpsPublicLens.getLpRequestState(...)` exposes
 `refundableDepositAssets`, `refundableRedeemShares`, and `redeemRefundPending`. The last flag may remain true when a
@@ -637,6 +707,17 @@ The router is configured with a `PletherOracle` contract. The oracle instance ow
 - `PletherOracle` normalizes each feed to 8 decimals while computing the basket price.
 - The oracle computes the weighted basket price in the same shape as the spot basket oracle.
 - Basket confidence is propagated conservatively by summing each normalized component contribution multiplied by that feed's confidence-to-price ratio, with each contribution floored independently.
+- `PletherOracle.getLatestPoolReconcilePrice()` exposes the already-validated neutral PoolReconcile snapshot together
+  with that aggregate 8-decimal confidence for monitoring; it performs no Pyth update and preserves the ordinary
+  freshness, confidence-width, divergence, and publish-order reverts.
+- Full `SettlementMonitorLens` current-feed diagnostics require that updated return ABI. Binding the monitor to a
+  stack whose Router still uses an older `PletherOracle` is fail-soft: the current-feed section is unknown,
+  `observationComplete` is false, and `completeObservationDigest` is zero until a compatible oracle is
+  timelock-rotated into the Router.
+- The reported confidence belongs to the neutral pre-cap basket, while the returned execution mark may be capped.
+  Consumers therefore cannot always reproduce the configured confidence ratio by dividing confidence by the capped
+  mark. Use `policyValid` and the configured ratio for monitoring; do not reinterpret that post-cap quotient as an
+  independent oracle-policy proof.
 - The neutral, pre-cap basket is accepted when `basketConfidence * 10_000 <= basketPrice * basketMaxConfidenceRatioBps`. The initial `basketMaxConfidenceRatioBps` is `10` (0.10%), equality passes, and there is no separate per-component confidence ceiling.
 - Opening orders and live/FAD-only closing orders use the adverse side of the confidence interval for the trader's side: `BULL` opens are priced lower, `BEAR` opens are priced higher, `BULL` closes are priced higher, and `BEAR` closes are priced lower. Oracle-frozen voluntary closes instead use the unshifted validated basket price and pay the fixed frozen-close spread.
 - Liquidation checks also use the side-adverse confidence-adjusted mark for the liquidated account.

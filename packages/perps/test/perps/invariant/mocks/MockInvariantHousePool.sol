@@ -215,6 +215,10 @@ contract MockInvariantHousePool is IHousePool {
         return true;
     }
 
+    function canSettleDepositEntries() external pure returns (bool) {
+        return true;
+    }
+
     function isOracleFrozen() external pure returns (bool) {
         return false;
     }

@@ -499,6 +499,13 @@ interface IHousePool {
         bool isSenior
     ) external view returns (bool);
 
+    /// @notice Returns the projected tranche-neutral pending-deposit activation gate before redemption funding.
+    /// @dev Projects post-reconcile state before tranche-specific checks. Senior redemption funding can still change
+    ///      principal/HWM rounding, and exact settlement rechecks the live post-redemption gate. This diagnostic is not
+    ///      a new-request admission quote or an execution commitment.
+    /// @return Whether projected post-reconcile state passes the common activation gate before redemption funding
+    function canSettleDepositEntries() external view returns (bool);
+
     /// @notice Returns whether the seed and trading lifecycle allows new trader risk.
     /// @dev Requires both seeds and owner-activated trading; degraded, oracle, and other engine gates are separate.
     /// @return Whether the lifecycle risk-increase gate is open
