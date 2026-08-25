@@ -358,6 +358,11 @@ This is useful if the first bootstrap attempt completes only partially.
 
 ## Emergency Containment Runbook
 
+This section is the transaction-level deployment runbook. The complete action matrix, monitor trigger policy,
+limitations, and off-chain guardian architecture are maintained in
+[EMERGENCY_RESPONSE_GUIDE.md](EMERGENCY_RESPONSE_GUIDE.md). Operators must understand that the coordinator cannot
+pause trader closes or reductions and does not create a global protocol freeze.
+
 1. Archive the monitor observation, RPC block/hash, external oracle evidence, and incident rationale. Compute stable
    `reasonHash` and `evidenceHash` values; zero is accepted when metadata is unavailable because containment must not
    be blocked by evidence collection.

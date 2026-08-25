@@ -712,25 +712,34 @@ the returned cursor leaves any low-gas or empty-revert item unattempted so a kee
 
 ## Emergency Procedures
 
+The canonical operator capability matrix, trigger policy, containment procedure, recovery criteria, and off-chain
+guardian design requirements live in [EMERGENCY_RESPONSE_GUIDE.md](EMERGENCY_RESPONSE_GUIDE.md). Read that guide
+before automating any response from `SettlementMonitorLens`.
+
 ### Emergency pause
 
-1. Pause `OrderRouter` and/or `HousePool`.
-2. New risk-increasing order commits and/or LP deposits stop immediately.
-3. Protective execution paths remain available.
-4. Investigate and remediate.
-5. Unpause when safe.
+1. Corroborate the unsafe observation from block-pinned direct reads and an independent provider when time permits.
+2. Have the guardian simulate and call the coordinator so Router risk-off and HousePool entry pause activate
+   atomically.
+3. Verify both pause states, the permanent inclusive order cutoff, and the emitted incident hashes.
+4. Keep closes, liquidations, mark refresh, redemption requests, eligible redemption funding, funded claims, and
+   incident cleanup operating.
+5. Governance investigates and recovers deliberately; the guardian never auto-unpauses.
 
 Monitoring should page operators before applying a breaker. An observable NAV or custody invariant failure warrants
 pausing new risk and LP entry while preserving protective exits where protocol policy allows them. Oracle-read
 failure is transient until corroborated; queue backlog, Senior priority, capacity, and insufficient free cash are
-liveness states rather than accounting corruption. `SettlementMonitorLens` cannot pause anything itself.
+liveness states rather than accounting corruption. `SettlementMonitorLens` cannot pause anything itself. A critical
+fault also makes the composite observation incomplete, so automation must inspect masks individually rather than
+watching only the complete-observation digest.
 
 ### Suspected oracle issue
 
-1. Pause `OrderRouter` to stop new commitments.
-2. Let existing protective flows continue.
-3. Investigate feed correctness and liveness.
-4. Resume once oracle behavior is understood.
+1. Distinguish a confirmed correctness/integrity problem from routine staleness or low confidence that the on-chain
+   policy already rejects.
+2. For a credible integrity incident, use composite containment to stop both new trading risk and new LP entry.
+3. Preserve protective flows and archive the raw signed update plus independent market evidence.
+4. Governance resumes only after feed bindings, behavior, and canonical accounting are understood.
 
 ### Keeper outage
 

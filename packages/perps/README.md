@@ -660,6 +660,10 @@ This preserves close and liquidation liveness during real market closures withou
 
 ## Risk and Failure Containment
 
+See [EMERGENCY_RESPONSE_GUIDE.md](EMERGENCY_RESPONSE_GUIDE.md) for the complete operator capability matrix,
+recommended monitor triggers and non-triggers, containment/recovery runbook, and the controls that intentionally do
+not exist. In particular, the guardian cannot disable trader closes or reductions.
+
 ### Degraded mode
 
 If a close or liquidation reveals post-op insolvency, the engine latches `degradedMode`.
@@ -763,6 +767,8 @@ only one field must repeat the desired active values for the other five.
   contracts. Governance may rotate/disable it and owns staged recovery.
 - LP request-off, LP settlement-off, and corrupted-queue quarantine are follow-up circuit breakers and are not
   implied by this coordinator.
+- The canonical operator guide, including off-chain guardian requirements and hard limitations, is
+  [EMERGENCY_RESPONSE_GUIDE.md](EMERGENCY_RESPONSE_GUIDE.md).
 
 ## Default Parameters
 
