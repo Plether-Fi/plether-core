@@ -243,6 +243,32 @@ contract PositionProtectionTest is BasePerpTest {
         );
     }
 
+    function test_TriggeredProtection_RejectsReplacementAndCancellation() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.BULL, BULL_TAKE_PROFIT, 0);
+        uint64 linkedOrderId = _triggerAt(protectionId, BULL_TAKE_PROFIT);
+
+        vm.startPrank(ALICE);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionNotArmed.selector);
+        protectionActions.replacePositionProtection(protectionId, _params(BULL_TAKE_PROFIT - 1, 0));
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionNotArmed.selector);
+        protectionActions.cancelPositionProtection(protectionId);
+        vm.stopPrank();
+
+        PositionProtectionTypes.PositionProtectionView memory triggered =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(
+            uint8(triggered.status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Triggered),
+            "rejected mutations must preserve triggered lifecycle"
+        );
+        assertEq(triggered.linkedOrderId, linkedOrderId, "rejected mutations must preserve the linked close");
+        assertEq(
+            protectionViews.activePositionProtectionId(ALICE),
+            protectionId,
+            "rejected mutations must preserve the active trade lock"
+        );
+    }
+
     function test_TriggerPositionProtection_RejectsSameBlockAndOldPublishTime() public {
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.BULL, BULL_TAKE_PROFIT, 0);
         PositionProtectionTypes.PositionProtectionView memory armed =
