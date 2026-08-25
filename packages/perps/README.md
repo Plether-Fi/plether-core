@@ -1204,6 +1204,8 @@ be described as a trigger that queues a market close, never as an automatic or g
 
 ## Further Reading
 
+- [`WORKING_WITH_AI_AGENTS.md`](WORKING_WITH_AI_AGENTS.md): bounded autonomous trading, machine-readable execution,
+  and independent intent/outcome verification
 - [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md): full accounting and reserve model
 - [`SECURITY.md`](SECURITY.md): trust assumptions, liveness tradeoffs, and security posture
 - [`CANONICAL_ENTRYPOINTS.md`](CANONICAL_ENTRYPOINTS.md): intended product-facing integration surface

@@ -4,6 +4,9 @@ This file defines the intended product-facing perps surface.
 
 For audit review that needs policy tables and read-surface canonicality in one place, use [`PRE_AUDIT_GUIDE.md`](PRE_AUDIT_GUIDE.md) alongside this file.
 
+For autonomous trading-account and AI-agent integration, including bounded authority and receipt verification, use
+[`WORKING_WITH_AI_AGENTS.md`](WORKING_WITH_AI_AGENTS.md) alongside this file.
+
 ## Traders
 
 - Margin actions: `MarginClearinghouse.depositMargin(uint256)` and `MarginClearinghouse.withdrawMargin(uint256)`
