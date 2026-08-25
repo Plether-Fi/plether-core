@@ -54,6 +54,9 @@ Do not use the wide clearinghouse reservation API or detailed accounting lenses 
   future timestamp at which the advertised target changes. Derive the final-five-minute state as
   `nextRequestEpoch > currentEpoch + 1`; do not persist a boolean across the round-hour boundary. The existing
   `cutoffEpoch` field remains the latest epoch eligible for settlement now and is not the request cutoff.
+- Read `lpEpochSettlementPaused` from the public LP, tranche-queue, or protocol status view before presenting
+  settlement liveness. While true, `TrancheView.depositEnabled` can remain true even though activation and new
+  redemption funding are stopped. Existing cancellation rules and funded claims are unchanged.
 - Every Senior/Junior deposit/redemption uses the same rule: with `e = floor(block.timestamp / 3,600)` and
   `b = (e + 1) * 3,600`, target `e + 1` before `b - 300` and `e + 2` at or after `b - 300`. Exact equality rolls
   forward without a cutoff-specific revert. The successful return value and event are authoritative when inclusion
@@ -105,7 +108,8 @@ seed-lifecycle, and other tranche setup mechanics as admin/setup concerns rather
 - LP epoch preflight and health: `SettlementMonitorLens`; select the epoch to observe explicitly, remember that the
   protocol still settles eligible FIFO heads, and simulate the exact selected direct-Pool or Router calldata before
   broadcast. The atomic route additionally requires the exact Pyth payload and fee. Its constructor-created
-  `SettlementMonitorLensSidecar` is monitor-bound implementation code and is not a public keeper entrypoint.
+  `SettlementMonitorLensSidecar` is monitor-bound implementation code and is not a public keeper entrypoint. An active
+  `lpEpochSettlementPaused` blocker stops both routes; `LpEpochKeeper` rejects it before payload decoding or fee quote.
 
 The protocol-operated incident keeper should clear risk-off orders after containment. A risk-off open is already
 logically unexecutable before physical cleanup, and cleanup authority does not grant its caller the trader's bounty.
@@ -143,10 +147,16 @@ by the Book's trailing payload.
   expose `observationComplete` and `completeObservationDigest`. Completeness requires every Oracle dependency read,
   including the updated current-feed ABI, even for cached/no-work routing, but requires Oracle policy validity only on
   the atomic-refresh route. The complete digest is otherwise zero and always unauthenticated.
-- Emergency containment: `EmergencyPauseCoordinator.triggerEmergencyPause(bytes32,bytes32)`, callable only by the
-  configured guardian. Monitoring output and incident hashes are advisory evidence; neither the Lens nor an arbitrary
-  caller can trip the coordinator. Governance uses `setGuardian(address)` for rotation/disablement and recovers by
-  calling the two component owners directly because the coordinator has no unpause surface.
+  A successfully read settlement hold is intentional complete state: the explicit status flag, operational blocker,
+  and deposit deferral are set while route classification remains visible. A failed hold read is an unknown Pool
+  dependency and makes the observation incomplete.
+- Emergency containment: the configured guardian may call exactly
+  `EmergencyPauseCoordinator.triggerEmergencyPause(bytes32,bytes32)`,
+  `triggerLpEpochSettlementHold(bytes32,bytes32)`, or `triggerFullContainment(bytes32,bytes32)`. These fixed actions
+  respectively add Router risk-off plus LP-entry pause, settlement-only hold, or all restrictions atomically.
+  Monitoring output and incident hashes are advisory; neither the Lens nor an arbitrary caller can trip containment.
+  Governance rotates/disables the guardian and releases RouterAdmin, HousePool entry, and HousePool settlement
+  directly because the coordinator has no unpause surface and restrictions have no expiry.
 
 Use these interfaces:
 
@@ -179,8 +189,10 @@ The following remain useful for tests, admin tooling, migration, and deep accoun
 - `SettlementMonitorLens`: canonical bounded settlement-monitoring read layer; no mutation or circuit-breaker
   authority. It validates the required one-time core wiring and its monitor-only sidecar is not a second canonical
   surface.
-- `EmergencyPauseCoordinator`: guardian-only, immutable-bound containment surface for new trading risk plus LP entry;
-  no recovery, pricing, configuration, fund movement, or arbitrary-call capability.
+- `EmergencyPauseCoordinator`: guardian-only, immutable-bound surface with three fixed containment actions for new
+  trading risk, LP entry, and/or LP settlement; no recovery, arbitrary mask, pricing, configuration, fund movement,
+  or arbitrary-call capability. Closes/reductions, liquidations, redemption requests, and already-funded claims
+  remain outside its authority; LP deposit requests are stopped by actions that include the entry restriction.
 - `CfdEngineAccountLens`: rich account/accounting diagnostics.
 - `CfdEngineProtocolLens`: protocol-accounting and house-pool snapshot diagnostics.
 - `MarginClearinghouse`: custody plumbing with a small public trader surface and a larger operator surface.

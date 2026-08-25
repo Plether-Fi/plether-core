@@ -39,8 +39,8 @@ If you want the accounting model first, read [`ACCOUNTING_SPEC.md`](ACCOUNTING_S
 - LPs deposit USDC into `HousePool` through senior and junior `TrancheVault`s.
 - `CfdEngine` is the canonical ledger. It does the math but does not custody raw tokens.
 - Governance installs one `EmergencyPauseCoordinator` as the pauser on both `OrderRouterAdmin` and `HousePool`.
-  Its separately rotatable guardian can atomically stop new trading risk and LP entry, while governance alone retains
-  component unpause and role-assignment authority.
+  Its separately rotatable guardian can trigger fixed risk-off, LP-settlement-only, or full-containment actions;
+  governance alone retains every release and role-assignment authority.
 
 ### Core product rules
 
@@ -99,7 +99,8 @@ In practice, the compact public API is:
     the bounded batch atomically
 - Readers:
   - `PerpsPublicLens`, including `getTrancheQueues(bool)` for synchronized heads/backlog and
-    `getLpRequestState(bool,uint256,address)` for controller request balances
+    `getLpRequestState(bool,uint256,address)` for controller request balances. LP, queue, and protocol status expose
+    `lpEpochSettlementPaused`; request admission may remain enabled while settlement/withdrawal funding is not live.
   - `PositionProtectionBook.activePositionProtectionId(address)` /
     `PositionProtectionBook.getPositionProtection(uint64)` for canonical retained protection state
   - `SettlementMonitorLens` for explicitly observed epoch operations, fail-soft oracle diagnostics, and bounded
@@ -171,13 +172,16 @@ The main runtime and read surfaces are:
 - `CfdEngineSettlementSidecar`: externalized open/close/liquidation settlement orchestration used by the engine.
 - `CfdEnginePlanner`: externalized open/close/liquidation plan builder wired into the engine after deployment.
 - `HousePool`: LP capital, liabilities, reserves, and tranche waterfall.
+- `HousePoolRedemptionMathSidecar`: separately deployed stateless pure redemption-budget math used by its immutable
+  HousePool binding to preserve bytecode headroom; it has no mutable state, authorization, or upgrade path.
 - `TrancheVault`: ERC-4626 LP vault wrappers for senior and junior capital.
 - `PerpsPublicLens`: compact product-facing read layer.
 - `SettlementMonitorLens`: read-only epoch-settlement, oracle, and invariant diagnostics for keepers and security
   monitoring. Its constructor-created `SettlementMonitorLensSidecar` is a facade-bound code-size implementation
   detail, not a second public or canonical read surface.
-- `EmergencyPauseCoordinator`: least-authority guardian boundary that can atomically pause new open commits and LP
-  entry. It cannot unpause, set prices, change protocol configuration, move funds, or invoke arbitrary targets.
+- `EmergencyPauseCoordinator`: least-authority guardian boundary exposing exactly three fixed actions: Router
+  risk-off plus LP-entry pause, LP-settlement-only hold, and atomic full containment. It cannot unpause, set prices,
+  change protocol configuration, move funds, or invoke arbitrary targets.
 - `CfdEngineAccountLens` / `CfdEngineProtocolLens`: richer audit and operator read layers.
 
 ### Intended boundaries
@@ -211,6 +215,8 @@ The main runtime and read surfaces are:
   Its logic reads the persistent risk-off cutoff, rejects direct and foreign-context execution, and can reach Router
   state-changing callbacks only through self-only item calls. There is no setter or upgrade path.
 - `HousePool` owns LP capital and pays engine-authorized obligations that must leave the pool.
+- `HousePool` also owns an LP-entry pause and an independent epoch-settlement hold. The hold blocks both direct and
+  Router-mediated epoch clearing without blocking new requests, reconciliation, or already-funded claims.
 - `PerpsPublicLens` is the default read surface for product consumers.
 - `SettlementMonitorLens` is the default bounded settlement-monitoring surface for keeper and security automation.
   Its internal sidecar accepts diagnostic-builder calls only from its constructor-bound facade; the sidecar's public
@@ -424,6 +430,11 @@ this order:
 Deposits activated in that transaction do not fund withdrawals in the same transaction. User claims remain separate
 controller/operator pull actions and stay available while new deposit requests or entry activation are paused;
 redemption requests remain available so exit demand can queue during a pause.
+`HousePool.lpEpochSettlementPaused()` is an independent no-expiry hold. While active, both direct cached/no-position
+and Router atomic-refresh settlement revert, so no pending deposit activates and no new redemption is funded. New
+deposit and redemption requests, Senior reservations, existing cancellation paths, trading, reconciliation, and
+already-funded claims remain available. Deposits can therefore accumulate in escrow under the existing cancellation
+rules; neither the hold nor its release repairs state or guarantees later settlement.
 Each redemption or deposit phase examines at most 16 nonempty epochs. Reaching the Senior redemption processing bound
 with an eligible Senior head still pending ends the call before Junior funding; a later call resumes from that head.
 If a call cannot advance any queued epoch, it reverts and rolls back its reconcile and carry checkpoints; keepers should
@@ -444,6 +455,14 @@ eligible cancellations can only shrink them. The lens is read-only and intention
 `canSettle`; keepers must still simulate the exact route-specific call before broadcasting: direct `HousePool`
 settlement with the cached mark and time for `CachedMark`, or `OrderRouter` with the exact Pyth bytes and fee for
 `AtomicOracleRefresh`.
+
+The monitor reads the settlement hold fail-soft. A readable active hold is intentional state, not a critical fault:
+`lpEpochSettlementPaused` is true, both `OperationalBlocker.LpEpochSettlementPaused` and
+`DepositDeferral.LpEpochSettlementPaused` are reported, and the cached-versus-atomic route remains visible for
+post-recovery planning. A failed hold read instead marks the Pool dependency unknown and the composite incomplete.
+The included `LpEpochKeeper` aborts on an active hold before decoding a payload, quoting a Pyth fee, or broadcasting.
+Adding this ABI/digest input bumps the monitor configuration schema and observation domain to V2; off-chain consumers
+must not compare V1 and V2 digests as if they shared a domain.
 
 Use `getSettlementStatus(observedEpoch)` as the lighter high-frequency polling surface. The composite
 `getSettlementObservation(observedEpoch)` is intentionally a checkpoint and alert-investigation read: its ABI return
@@ -878,9 +897,11 @@ Timelocked surfaces include:
 - `OrderRouterAdmin` -> `OrderRouter.RouterConfig`
 - `OrderRouterAdmin` -> `OrderRouter.OracleConfig` for the configured `PletherOracle` address
 
-Instant controls remain for one-time wiring and fee withdrawal. `OrderRouter` pause/unpause is owner-gated on
-`OrderRouterAdmin` rather than the router itself. The installed coordinator may pause both components but exposes no
-unpause method; governance recovers each component directly and deliberately.
+Instant controls remain for one-time wiring and fee withdrawal. `OrderRouterAdmin.pause()` is callable by its owner
+or configured pauser, while `unpause()` is owner-only; neither control lives on the router itself. The installed
+coordinator can add any of its three fixed restriction combinations but exposes no unpause method; governance
+recovers Router risk-off, Pool entry, and Pool settlement separately and deliberately. Manual restrictions do not
+expire.
 
 Each valid `PoolConfig` proposal supplies all six fields, replaces any earlier pending proposal, and restarts the
 48-hour timelock. Finalization atomically replaces the entire active configuration, so a proposal intended to change
@@ -888,10 +909,12 @@ only one field must repeat the desired active values for the other five.
 
 ### Pause behavior
 
-- The guardian calls `EmergencyPauseCoordinator.triggerEmergencyPause(reasonHash,evidenceHash)`. One atomic
-  transaction pauses RouterAdmin first and HousePool second; failure reverts every state change made by that call and
-  leaves any pre-existing pause unchanged. The hashes are advisory incident metadata, not an on-chain proof from
-  `SettlementMonitorLens`.
+- The guardian selects one fixed coordinator action: `triggerEmergencyPause(reasonHash,evidenceHash)` for Router
+  risk-off plus LP entry, `triggerLpEpochSettlementHold(reasonHash,evidenceHash)` for epoch settlement only, or
+  `triggerFullContainment(reasonHash,evidenceHash)` for all three restrictions atomically. Calls are idempotent;
+  downstream failure rolls back the call while preserving pre-existing restrictions. The unified
+  `EmergencyContainmentTriggered` event records the action, hashes, cutoff, and previous/new masks. The hashes are
+  advisory incident metadata, not an on-chain proof from `SettlementMonitorLens`.
 - Router pausing blocks new risk-increasing commits and permanently snapshots the highest existing order id. Opens at
   or below that cutoff are refunded internally when lazily cleaned; closes, liquidations, mark refresh, and other
   protective paths remain available. Unpausing never revives invalidated opens.
@@ -903,10 +926,17 @@ only one field must repeat the desired active values for the other five.
   synchronized reconciliation/redemption funding, and funded claims remain live. A matured pending deposit is not
   made cancellable merely by the pause; it can be recovered only through the pre-existing rejection, terminal-wipe,
   Senior-impairment, or Senior-reservation escape conditions, or activated after recovery.
+- HousePool settlement hold blocks every synchronized epoch mutation, including both cached/no-position and Router
+  atomic-refresh routes. It does not block new deposit or redemption requests, Senior reservations, existing
+  cancellation paths, reconciliation, trading, or already-funded claims. Pending requests may accumulate; the hold
+  creates no new cancellation right and has no expiry. Only the HousePool owner can release it.
 - The guardian cannot unpause, rotate itself, change configuration, set prices, move funds, or call arbitrary
   contracts. Governance may rotate/disable it and owns staged recovery.
-- LP request-off, LP settlement-off, and corrupted-queue quarantine are follow-up circuit breakers and are not
-  implied by this coordinator.
+- Trader closes/reductions, liquidations, redemption requests, and already-funded claims are deliberately
+  unpausable. There is no redemption-request-off or global all-LP-request freeze, arbitrary restriction mask,
+  corrupted-queue quarantine, emergency price setter, or global protocol freeze.
+- A breaker contains transitions; it does not repair accounting, oracle, custody, liquidity, or queue state, and
+  releasing it is not a promise that the next transaction succeeds. Off-chain automatic triggering is out of scope.
 - The canonical operator guide, including off-chain guardian requirements and hard limitations, is
   [EMERGENCY_RESPONSE_GUIDE.md](EMERGENCY_RESPONSE_GUIDE.md).
 

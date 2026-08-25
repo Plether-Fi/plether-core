@@ -125,6 +125,7 @@ Start with the package that owns the product:
 - [Options module](packages/options/README.md)
 - [Perps protocol](packages/perps/README.md)
 - [Perps accounting specification](packages/perps/ACCOUNTING_SPEC.md)
+- [Perps emergency response and circuit breakers](packages/perps/EMERGENCY_RESPONSE_GUIDE.md)
 - [Perps bounded-credit white paper](packages/perps/WHITEPAPER.md)
 - [Perps bounded-credit white paper (PDF)](output/pdf/plether-perps-bounded-credit-whitepaper.pdf)
 - [Integration and fork tests](test/README.md)
@@ -155,6 +156,7 @@ Security assumptions are product-specific:
 - [Options security model](packages/options/README.md#security-model)
 - [Perps security model](packages/perps/SECURITY.md)
 - [Perps pre-audit guide](packages/perps/PRE_AUDIT_GUIDE.md)
+- [Perps emergency response and circuit breakers](packages/perps/EMERGENCY_RESPONSE_GUIDE.md)
 
 Some components have undergone external security review, but audit coverage is partial and release-specific. Review the
 security model, audit reports, deployment parameters, and exact bytecode before production use.

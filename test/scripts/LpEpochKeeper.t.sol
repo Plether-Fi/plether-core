@@ -71,6 +71,12 @@ contract MockLpEpochSettlementMonitor {
         _status.cachedMarkTime = cachedMarkTime;
     }
 
+    function setLpEpochSettlementPaused(
+        bool paused
+    ) external {
+        _status.lpEpochSettlementPaused = paused;
+    }
+
     function getSettlementStatus(
         uint256
     ) external view returns (SettlementMonitorViewTypes.SettlementStatus memory status) {
@@ -258,8 +264,30 @@ contract LpEpochKeeperTest is Test {
         assertEq(pool.callCount(), 0);
     }
 
-    /// @dev Both routes share one test because Foundry's process-global environment can race between parallel tests.
-    function test_RunDispatchesCachedThenAtomicWithoutCrossRouteInputs() public {
+    /// @dev Run cases share one test because Foundry's process-global environment can race between parallel tests.
+    function test_RunRejectsHeldRoutesBeforeInputsThenDispatchesAfterRelease() public {
+        bytes[] memory updateData = _updateData();
+
+        monitor.setLpEpochSettlementPaused(true);
+        monitor.setStatus(SettlementMonitorViewTypes.ExecutionPath.CachedMark, true, 0, 0, CACHED_PRICE, CACHED_TIME);
+        _setKeeperEnvironment("not-valid-abi-encoded-bytes");
+        vm.expectRevert(LpEpochKeeper.LpEpochKeeper__LpEpochSettlementPaused.selector);
+        keeper.run();
+
+        monitor.setStatus(SettlementMonitorViewTypes.ExecutionPath.AtomicOracleRefresh, true, 0, 0, 0, 0);
+        vm.expectRevert(LpEpochKeeper.LpEpochKeeper__LpEpochSettlementPaused.selector);
+        keeper.run();
+
+        router.setPletherOracle(address(0));
+        _setKeeperEnvironment(vm.toString(abi.encode(updateData)));
+        vm.expectRevert(LpEpochKeeper.LpEpochKeeper__LpEpochSettlementPaused.selector);
+        keeper.run();
+
+        assertEq(pool.callCount(), 0, "held cached route must not broadcast");
+        assertEq(router.callCount(), 0, "held atomic route must not broadcast");
+
+        router.setPletherOracle(address(oracle));
+        monitor.setLpEpochSettlementPaused(false);
         monitor.setStatus(SettlementMonitorViewTypes.ExecutionPath.CachedMark, true, 0, 0, CACHED_PRICE, CACHED_TIME);
         _setKeeperEnvironment("not-valid-abi-encoded-bytes");
 
@@ -271,7 +299,6 @@ contract LpEpochKeeperTest is Test {
         assertEq(pool.lastCaller(), vm.addr(KEEPER_PRIVATE_KEY));
         assertEq(router.callCount(), 0);
 
-        bytes[] memory updateData = _updateData();
         uint256 fee = 23 wei;
         oracle.configure(updateData, fee);
         monitor.setStatus(SettlementMonitorViewTypes.ExecutionPath.AtomicOracleRefresh, true, 0, 0, 0, 0);

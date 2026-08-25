@@ -249,12 +249,13 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
     /// @notice Returns high-level LP status flags.
     /// @dev `lastMarkTime` is a Unix timestamp. Oracle freshness is the pool liquidity view's `markFresh` flag.
     ///      The retained `withdrawalLive` field means new queued-redemption funding is live; escrowed claims do not
-    ///      depend on it.
-    /// @return viewData Trading, redemption-funding, mark freshness, and oracle-frozen status.
+    ///      depend on it. `lpEpochSettlementPaused` explicitly identifies a governance settlement hold.
+    /// @return viewData Trading, redemption-funding, settlement-hold, mark freshness, and oracle-frozen status.
     function getLpStatus() external view returns (PerpsViewTypes.LpStatusView memory viewData) {
         viewData.tradingActive = HOUSE_POOL.isTradingActive();
         viewData.withdrawalLive = HOUSE_POOL.isWithdrawalLive();
         viewData.oracleFrozen = HOUSE_POOL.isOracleFrozen();
+        viewData.lpEpochSettlementPaused = HOUSE_POOL.lpEpochSettlementPaused();
 
         PerpsViewTypes.ProtocolStatusView memory status = _getProtocolStatusView();
         viewData.lastMarkTime = status.lastMarkTime;
@@ -265,7 +266,8 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
     /// @dev `cutoffEpoch` currently equals `currentEpoch` and remains the latest epoch eligible for settlement now.
     ///      The selected vault supplies the coherent future `nextRequestEpoch` and `nextRequestCutoffTime` pair.
     ///      `settlementLive` concerns new redemption funding. Pool pause does not disable that funding, but it defers
-    ///      deposit activation; already-funded claims depend on neither flag.
+    ///      deposit activation. A settlement hold defers both deposit activation and new redemption funding without
+    ///      disabling request admission; already-funded claims depend on neither flag.
     /// @param isSenior True for the Senior queue and false for the Junior queue.
     /// @return viewData Request window, queue heads, backlog flags, shared epoch, and pool runtime gates.
     function getTrancheQueues(
@@ -280,6 +282,7 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
         viewData.cutoffEpoch = viewData.currentEpoch;
         viewData.settlementLive = HOUSE_POOL.isWithdrawalLive();
         viewData.poolPaused = HOUSE_POOL.paused();
+        viewData.lpEpochSettlementPaused = HOUSE_POOL.lpEpochSettlementPaused();
         if (viewData.vault == address(0)) {
             return viewData;
         }
@@ -337,9 +340,9 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
 
     /// @notice Returns high-level protocol runtime status flags.
     /// @dev Prices use 8 decimals and `lastMarkTime` is a Unix timestamp. When `HOUSE_POOL` is zero,
-    ///      `tradingActive` and `withdrawalLive` remain false. `withdrawalLive` describes new LP claim funding, not
-    ///      claims already held in vault escrow.
-    /// @return viewData Protocol phase, stored mark, oracle, FAD, trading, and redemption-funding status.
+    ///      `tradingActive`, `withdrawalLive`, and `lpEpochSettlementPaused` remain false. `withdrawalLive` describes
+    ///      new LP claim funding, not claims already held in vault escrow.
+    /// @return viewData Protocol phase, stored mark, oracle, FAD, trading, redemption-funding, and settlement-hold status.
     function getProtocolStatus() external view returns (PerpsViewTypes.ProtocolStatusView memory viewData) {
         return _getProtocolStatusView();
     }
@@ -418,6 +421,7 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
         if (address(HOUSE_POOL) != address(0)) {
             viewData.tradingActive = HOUSE_POOL.isTradingActive();
             viewData.withdrawalLive = HOUSE_POOL.isWithdrawalLive();
+            viewData.lpEpochSettlementPaused = HOUSE_POOL.lpEpochSettlementPaused();
         }
     }
 

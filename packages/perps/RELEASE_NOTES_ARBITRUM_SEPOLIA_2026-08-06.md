@@ -3,7 +3,7 @@
 ## Summary
 
 This release candidate replaces Plether's per-component Pyth confidence ceiling with a weighted aggregate basket
-confidence gate and adds unified emergency containment. The default confidence limit remains `10` bps, but now
+confidence gate and adds granular emergency containment. The default confidence limit remains `10` bps, but now
 applies to the neutral basket before the protocol's price cap rather than independently to every currency feed.
 
 This file describes the intended next Arbitrum Sepolia deployment. Contract addresses, deployment block,
@@ -43,18 +43,37 @@ price, staleness, feed ordering, and component publish-time-divergence validatio
 - Deployment creates an `EmergencyPauseCoordinator` after the settlement monitor and installs it as the common pauser
   on RouterAdmin and HousePool. Bootstrap requires its address and a nonzero guardian, verifies exact bindings, and
   never repairs partial wiring or unpauses a component.
-- The guardian can atomically stop new open commits and LP entry. The Lens remains advisory and does not
-  permissionlessly trip containment; reason/evidence hashes point to archived off-chain incident material.
+- The guardian has three fixed actions: Router risk-off plus LP entry, LP-settlement-only hold, and atomic full
+  containment. It cannot supply an arbitrary mask. The Lens remains advisory and does not permissionlessly trip
+  containment; reason/evidence hashes point to archived off-chain incident material.
 - Router pause records a permanent inclusive order-id cutoff. Pre-cutoff opens are refunded to the trader's internal
   settlement without an oracle, Engine mutation, carry checkpoint, Terminal NAV synchronization, or cleanup bounty;
   Router authorization still reads the Engine's canonical binding, and the protocol incident keeper pays gas.
 - Liquidation performs the same exact refund for each invalidated account order before forfeiting unaffected bounties.
   The loop is account-local and capped at 32; an aggregate Router implementation was rejected after exceeding
   EIP-170, while the retained path stays below the pre-change Router runtime baseline.
-- Closes, liquidations, LP redemption requests/funding, and funded claims remain available. HousePool pause is
-  entry-only and does not by itself unlock a mature pending-deposit cancellation.
-- Governance alone recovers the two child components. Unpause never clears the historical cutoff. LP request-off,
-  settlement-off, and corrupted-queue quarantine remain follow-up controls.
+- HousePool settlement hold blocks both direct cached/no-position and Router atomic-refresh epoch clearing, so pending
+  deposits do not activate and new redemptions are not funded. New deposits/Senior reservations and redemptions may
+  still queue, existing cancellation rules do not change, and already-funded claims remain available.
+- Closes/reductions, liquidations, mark refresh, recapitalization/reconciliation, and funded claims are deliberately
+  unpausable. Redemption-request-off and a global all-LP-request freeze do not exist; actions containing the entry
+  restriction do stop new deposit requests. There is no arbitrary mask, queue quarantine, emergency price setter, or
+  global protocol freeze.
+- Governance alone recovers Router risk-off, LP entry, and LP settlement. Restrictions have no expiry; release does
+  not repair state or guarantee the next transaction, and unpause never clears the historical cutoff. Automated
+  off-chain guardian operation remains out of scope.
+
+`SettlementMonitorLens` reports a readable active hold as an explicit operational blocker and deposit deferral while
+preserving route classification for recovery. A failed hold read is an unknown Pool dependency. `LpEpochKeeper`
+rejects an active hold before payload decoding, fee quotation, or broadcast. Hold state is part of the observation
+digest, and the monitoring ABI changes, so the monitor schema and both digest domains advance from V1 to V2. Runtime
+hold changes do not alter `observableConfigDigest`.
+
+To preserve HousePool EIP-170 headroom, deployment now creates a stateless pure
+`HousePoolRedemptionMathSidecar` before HousePool and passes its address into the constructor. The deploy/bootstrap
+flow records the sidecar and verifies code plus
+`implementationId() == keccak256("Plether.HousePoolRedemptionMathSidecar.v1")`. The binding is internal immutable;
+the sidecar has no storage, setter, delegatecall, upgrade path, custody, or settlement authority.
 
 The release separately predeploys a fixed `OrderRouterLiquidationBatchSidecar` to preserve Router EIP-170 and
 EIP-3860 headroom. The deployer computes the immediately next Router `CREATE` address, binds the sidecar to that
@@ -72,7 +91,7 @@ Populate this section after the parallel stack is deployed and verified:
 - new contract addresses and deployment block,
 - configured `basketMaxConfidenceRatioBps`,
 - bootstrap and trading-activation status,
-- Router keeper/liquidation sidecar address, code hash, exact binding and deployment-order verification; emergency
-  coordinator, guardian, shared-pauser verification, and first
-  containment-drill result,
+- Router keeper/protection/liquidation sidecar address, code hash, exact Router binding, and deployment-order
+  verification; HousePool redemption-math sidecar address and implementation identity; emergency coordinator,
+  guardian, shared-pauser verification, and all three containment-drill results,
 - oracle-worker soak result and decoded-revert monitoring status.

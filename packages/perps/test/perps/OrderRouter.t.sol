@@ -14,6 +14,7 @@ import {CfdEnginePlanner} from "@plether/perps/CfdEnginePlanner.sol";
 import {CfdEngineSettlementSidecar} from "@plether/perps/CfdEngineSettlementSidecar.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
+import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
@@ -1475,7 +1476,7 @@ contract OrderRouterPythTest is BasePerpTest {
         engine = _deployEngine(_riskParams());
         _syncEngineAdmin();
         engine.setTerminalNavBook(address(new TerminalNavBookV2(address(engine), uint32(engine.CAP_PRICE()))));
-        pool = new HousePool(address(usdc), address(engine));
+        pool = new HousePool(address(usdc), address(engine), address(new HousePoolRedemptionMathSidecar()));
 
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
@@ -3257,7 +3258,7 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
         engine = _deployEngine(_riskParams());
         _syncEngineAdmin();
         engine.setTerminalNavBook(address(new TerminalNavBookV2(address(engine), uint32(engine.CAP_PRICE()))));
-        pool = new HousePool(address(usdc), address(engine));
+        pool = new HousePool(address(usdc), address(engine), address(new HousePoolRedemptionMathSidecar()));
 
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
@@ -3978,7 +3979,7 @@ contract FadStalenessTest is BasePerpTest {
         engine = _deployEngine(_riskParams());
         _syncEngineAdmin();
         engine.setTerminalNavBook(address(new TerminalNavBookV2(address(engine), uint32(engine.CAP_PRICE()))));
-        pool = new HousePool(address(usdc), address(engine));
+        pool = new HousePool(address(usdc), address(engine), address(new HousePoolRedemptionMathSidecar()));
 
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
@@ -5179,7 +5180,7 @@ contract MarkPriceStalenessTest is BasePerpTest {
         engine = _deployEngine(_riskParams());
         _syncEngineAdmin();
         engine.setTerminalNavBook(address(new TerminalNavBookV2(address(engine), uint32(engine.CAP_PRICE()))));
-        pool = new HousePool(address(usdc), address(engine));
+        pool = new HousePool(address(usdc), address(engine), address(new HousePoolRedemptionMathSidecar()));
 
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC");
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior LP", "sUSDC");
@@ -5296,7 +5297,7 @@ contract StalenessGriefTest is BasePerpTest {
         engine = _deployEngine(_riskParams());
         _syncEngineAdmin();
         engine.setTerminalNavBook(address(new TerminalNavBookV2(address(engine), uint32(engine.CAP_PRICE()))));
-        pool = new HousePool(address(usdc), address(engine));
+        pool = new HousePool(address(usdc), address(engine), address(new HousePoolRedemptionMathSidecar()));
 
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC");
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior LP", "sUSDC");
@@ -5445,7 +5446,7 @@ contract VpiImrBypassTest is Test {
         CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
         engine.setDependencies(address(planner), address(settlement), address(engineAdmin));
         engine.setTerminalNavBook(address(new TerminalNavBookV2(address(engine), uint32(CAP_PRICE))));
-        pool = new HousePool(address(usdc), address(engine));
+        pool = new HousePool(address(usdc), address(engine), address(new HousePoolRedemptionMathSidecar()));
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior LP", "sUSDC");
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC");
         pool.setSeniorVault(address(seniorVault));
@@ -5749,7 +5750,7 @@ contract KeeperFeeRefundTest is Test {
         CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
         engine.setDependencies(address(planner), address(settlement), address(engineAdmin));
         engine.setTerminalNavBook(address(new TerminalNavBookV2(address(engine), uint32(CAP_PRICE))));
-        pool = new HousePool(address(usdc), address(engine));
+        pool = new HousePool(address(usdc), address(engine), address(new HousePoolRedemptionMathSidecar()));
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior LP", "sUSDC");
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC");
         pool.setSeniorVault(address(seniorVault));
@@ -6134,7 +6135,7 @@ contract WeekendArbitrageTest is Test {
         CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
         engine.setDependencies(address(planner), address(settlement), address(engineAdmin));
         engine.setTerminalNavBook(address(new TerminalNavBookV2(address(engine), uint32(CAP_PRICE))));
-        pool = new HousePool(address(usdc), address(engine));
+        pool = new HousePool(address(usdc), address(engine), address(new HousePoolRedemptionMathSidecar()));
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior LP", "sUSDC");
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC");
         pool.setSeniorVault(address(seniorVault));

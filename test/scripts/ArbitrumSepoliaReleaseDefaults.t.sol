@@ -9,6 +9,7 @@ import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {EmergencyPauseCoordinator} from "@plether/perps/EmergencyPauseCoordinator.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
+import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
@@ -66,7 +67,14 @@ contract BootstrapPerpsArbitrumSepoliaHarness is BootstrapPerpsArbitrumSepolia {
     function deployConfigTestPool(
         address usdc
     ) external returns (HousePool) {
-        return new HousePool(usdc, address(0xE11E));
+        HousePoolRedemptionMathSidecar redemptionMathSidecar = new HousePoolRedemptionMathSidecar();
+        return new HousePool(usdc, address(0xE11E), address(redemptionMathSidecar));
+    }
+
+    function verifyRedemptionMathSidecar(
+        address redemptionMathSidecar
+    ) external view {
+        _verifyRedemptionMathSidecar(redemptionMathSidecar);
     }
 
     function configureSeniorLimits(
@@ -152,11 +160,28 @@ contract MockEmergencyAdmin {
 
 }
 
+contract MockWrongRedemptionMathSidecar {
+
+    function implementationId() external pure returns (bytes32) {
+        return keccak256("wrong-generation");
+    }
+
+}
+
 contract MockBootstrapHousePoolAdmin is MockEmergencyAdmin {
 
     bool public isTradingActive;
+    bool public lpEpochSettlementPaused;
     bool public seniorSeedInitialized = true;
     bool public juniorSeedInitialized = true;
+
+    function pauseLpEpochSettlement() external {
+        lpEpochSettlementPaused = true;
+    }
+
+    function unpauseLpEpochSettlement() external {
+        lpEpochSettlementPaused = false;
+    }
 
     function activateTrading() external {
         isTradingActive = true;
@@ -234,7 +259,8 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         CfdEngine engine = new CfdEngine(
             address(usdc), address(clearinghouse), 2e8, deployScript.riskParams(), deployScript.frozenCloseSpreadBps()
         );
-        HousePool pool = new HousePool(address(usdc), address(engine));
+        HousePoolRedemptionMathSidecar redemptionMathSidecar = new HousePoolRedemptionMathSidecar();
+        HousePool pool = new HousePool(address(usdc), address(engine), address(redemptionMathSidecar));
 
         bytes32[] memory feedIds = new bytes32[](1);
         feedIds[0] = bytes32(uint256(1));
@@ -268,6 +294,37 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
 
         assertEq(bootstrapScript.defaultSeniorSeedUsdc(), 50_000_000e6, "senior seed");
         assertEq(bootstrapScript.defaultJuniorSeedUsdc(), 50_000_000e6, "junior seed");
+    }
+
+    function test_DeploymentUsesExpectedRedemptionMathSidecarAndSettlementStartsLive() public {
+        BootstrapPerpsArbitrumSepoliaHarness bootstrapScript = new BootstrapPerpsArbitrumSepoliaHarness();
+        MockUSDC usdc = new MockUSDC();
+        HousePoolRedemptionMathSidecar redemptionMathSidecar = new HousePoolRedemptionMathSidecar();
+
+        bootstrapScript.verifyRedemptionMathSidecar(address(redemptionMathSidecar));
+        HousePool pool = new HousePool(address(usdc), address(0xE11E), address(redemptionMathSidecar));
+
+        assertGt(address(redemptionMathSidecar).code.length, 0, "redemption math sidecar code");
+        assertEq(
+            redemptionMathSidecar.implementationId(),
+            keccak256("Plether.HousePoolRedemptionMathSidecar.v1"),
+            "redemption math sidecar ID"
+        );
+        assertFalse(pool.lpEpochSettlementPaused(), "LP epoch settlement starts paused");
+    }
+
+    function test_BootstrapRejectsMissingRedemptionMathSidecarOnRerun() public {
+        BootstrapPerpsArbitrumSepoliaHarness bootstrapScript = new BootstrapPerpsArbitrumSepoliaHarness();
+
+        vm.expectRevert(bytes("PERPS_HOUSE_POOL_REDEMPTION_MATH_SIDECAR is zero"));
+        bootstrapScript.verifyRedemptionMathSidecar(address(0));
+
+        vm.expectRevert(bytes("HousePool redemption math sidecar has no code"));
+        bootstrapScript.verifyRedemptionMathSidecar(address(0xBEEF));
+
+        MockWrongRedemptionMathSidecar wrongSidecar = new MockWrongRedemptionMathSidecar();
+        vm.expectRevert(bytes("HousePool redemption math sidecar ID mismatch"));
+        bootstrapScript.verifyRedemptionMathSidecar(address(wrongSidecar));
     }
 
     function test_BootstrapRequiresNonzeroEmergencyGuardian() public {
@@ -349,10 +406,30 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         );
 
         routerAdmin.unpause();
+        housePool.pause();
+        vm.expectRevert(bytes("HousePool is paused"));
+        bootstrapScript.activateTrading(
+            HousePool(address(housePool)), OrderRouterAdmin(address(routerAdmin)), coordinator
+        );
+
+        housePool.unpause();
+        housePool.pauseLpEpochSettlement();
+        vm.expectRevert(bytes("LP epoch settlement is paused"));
+        bootstrapScript.activateTrading(
+            HousePool(address(housePool)), OrderRouterAdmin(address(routerAdmin)), coordinator
+        );
+
+        housePool.unpauseLpEpochSettlement();
         bootstrapScript.activateTrading(
             HousePool(address(housePool)), OrderRouterAdmin(address(routerAdmin)), coordinator
         );
         assertTrue(housePool.isTradingActive());
+
+        housePool.pauseLpEpochSettlement();
+        bootstrapScript.activateTrading(
+            HousePool(address(housePool)), OrderRouterAdmin(address(routerAdmin)), coordinator
+        );
+        assertTrue(housePool.lpEpochSettlementPaused(), "bootstrap rerun must not release settlement hold");
     }
 
     function test_DeploymentGuardsAcceptCanonicalRequestWindowAcrossCutoffs() public {
@@ -377,7 +454,8 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         CfdEngine engine = new CfdEngine(
             address(usdc), address(clearinghouse), 2e8, deployScript.riskParams(), deployScript.frozenCloseSpreadBps()
         );
-        HousePool pool = new HousePool(address(usdc), address(engine));
+        HousePoolRedemptionMathSidecar redemptionMathSidecar = new HousePoolRedemptionMathSidecar();
+        HousePool pool = new HousePool(address(usdc), address(engine), address(redemptionMathSidecar));
 
         vm.expectRevert(bytes("TerminalNavBookV2 is not wired"));
         bootstrapScript.verifyTerminalNavBook(pool);
@@ -431,7 +509,8 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         returns (MockUSDC usdc, HousePool pool, TrancheVault seniorVault, TrancheVault juniorVault)
     {
         usdc = new MockUSDC();
-        pool = new HousePool(address(usdc), address(0xE11E));
+        HousePoolRedemptionMathSidecar redemptionMathSidecar = new HousePoolRedemptionMathSidecar();
+        pool = new HousePool(address(usdc), address(0xE11E), address(redemptionMathSidecar));
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior", "senior");
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior", "junior");
         pool.setSeniorVault(address(seniorVault));

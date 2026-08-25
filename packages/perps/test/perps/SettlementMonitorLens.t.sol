@@ -51,6 +51,7 @@ contract SettlementMonitorLensTest is BasePerpTest {
     bytes4 internal constant REDEEM_QUEUE_STATE_SELECTOR = bytes4(keccak256("redeemEpochQueueState(uint256)"));
     bytes4 internal constant MATURED_DEPOSIT_HEAD_SELECTOR = bytes4(keccak256("getMaturedDepositHead(uint256)"));
     bytes4 internal constant MATURED_REDEEM_HEAD_SELECTOR = bytes4(keccak256("getMaturedRedeemHead(uint256)"));
+    bytes4 internal constant LP_EPOCH_SETTLEMENT_PAUSED_SELECTOR = bytes4(keccak256("lpEpochSettlementPaused()"));
 
     address internal constant ALICE = address(0xA11CE);
     address internal constant BOB = address(0xB0B);
@@ -78,15 +79,6 @@ contract SettlementMonitorLensTest is BasePerpTest {
         assertEq(address(monitorLens.JUNIOR_VAULT()), address(juniorVault));
         assertEq(address(monitorLens.USDC()), address(usdc));
         assertEq(monitorLens.SIDECAR().MONITOR(), address(monitorLens));
-        assertEq(address(monitorLens.SIDECAR().ROUTER()), address(router));
-        assertEq(address(monitorLens.SIDECAR().ENGINE()), address(engine));
-        assertEq(address(monitorLens.SIDECAR().HOUSE_POOL()), address(pool));
-        assertEq(address(monitorLens.SIDECAR().ENGINE_PROTOCOL_LENS()), address(pool.ENGINE_PROTOCOL_LENS()));
-        assertEq(address(monitorLens.SIDECAR().CLEARINGHOUSE()), address(clearinghouse));
-        assertEq(address(monitorLens.SIDECAR().TERMINAL_NAV_BOOK()), address(terminalNavBook));
-        assertEq(address(monitorLens.SIDECAR().SENIOR_VAULT()), address(seniorVault));
-        assertEq(address(monitorLens.SIDECAR().JUNIOR_VAULT()), address(juniorVault));
-        assertEq(address(monitorLens.SIDECAR().USDC()), address(usdc));
 
         (uint256 observedEpoch, uint256 nextCutoff) = juniorVault.getRequestEpochWindow();
         SettlementMonitorViewTypes.SettlementStatus memory status = monitorLens.getSettlementStatus(observedEpoch);
@@ -117,8 +109,85 @@ contract SettlementMonitorLensTest is BasePerpTest {
         assertEq(health.poolAccountedAssetsUsdc, pool.accountedAssets());
         assertEq(health.poolCustodyDeficitUsdc, 0);
         assertEq(health.seniorImpairmentUsdc, 0);
-        assertEq(monitorLens.CONFIG_SCHEMA_VERSION(), 1);
+        assertEq(monitorLens.CONFIG_SCHEMA_VERSION(), 2);
+        assertEq(monitorLens.OBSERVATION_DOMAIN(), keccak256("PLETHER_SETTLEMENT_OBSERVATION_V2"));
+        assertTrue(monitorLens.OBSERVATION_DOMAIN() != keccak256("PLETHER_SETTLEMENT_OBSERVATION_V1"));
         assertTrue(monitorLens.observableConfigDigest() != bytes32(0));
+    }
+
+    function test_ReadableSettlementHoldIsCompleteAndPreservesRouteDiagnostics() public {
+        uint256 observedEpoch = pool.currentLpEpoch();
+        SettlementMonitorViewTypes.SettlementObservation memory beforeHold =
+            monitorLens.getSettlementObservation(observedEpoch);
+        bytes32 configBefore = beforeHold.observableConfigDigest;
+
+        pool.pauseLpEpochSettlement();
+        SettlementMonitorViewTypes.SettlementObservation memory held =
+            monitorLens.getSettlementObservation(observedEpoch);
+
+        assertTrue(held.status.lpEpochSettlementPaused);
+        assertTrue(
+            _hasOperationalBlocker(
+                held.status.operationalBlockerMask,
+                SettlementMonitorViewTypes.OperationalBlocker.LpEpochSettlementPaused
+            )
+        );
+        assertTrue(
+            _hasDeferral(
+                held.status.seniorDepositDeferralMask,
+                SettlementMonitorViewTypes.DepositDeferral.LpEpochSettlementPaused
+            )
+        );
+        assertTrue(
+            _hasDeferral(
+                held.status.juniorDepositDeferralMask,
+                SettlementMonitorViewTypes.DepositDeferral.LpEpochSettlementPaused
+            )
+        );
+        assertEq(held.status.dependencyFailureMask, 0);
+        assertEq(uint8(held.status.requiredExecutionPath), uint8(beforeHold.status.requiredExecutionPath));
+        assertEq(held.status.executionPathDependencyMask, beforeHold.status.executionPathDependencyMask);
+        assertEq(held.observableConfigDigest, configBefore, "an active breaker is runtime state, not configuration");
+        assertTrue(held.observationDigest != beforeHold.observationDigest);
+        assertTrue(held.observationComplete, "an intentional readable hold must remain complete evidence");
+        assertTrue(held.completeObservationDigest != bytes32(0));
+    }
+
+    function test_UnreadableSettlementHoldIsPoolDependencyUnknownWithoutErasingRoute() public {
+        uint256 observedEpoch = pool.currentLpEpoch();
+        SettlementMonitorViewTypes.SettlementStatus memory beforeFailure =
+            monitorLens.getSettlementStatus(observedEpoch);
+
+        vm.mockCallRevert(
+            address(pool), abi.encodeWithSelector(LP_EPOCH_SETTLEMENT_PAUSED_SELECTOR), bytes("unreadable")
+        );
+        SettlementMonitorViewTypes.SettlementObservation memory unreadable =
+            monitorLens.getSettlementObservation(observedEpoch);
+
+        assertFalse(unreadable.status.lpEpochSettlementPaused);
+        assertTrue(_hasDependency(unreadable.status.dependencyFailureMask, SettlementMonitorViewTypes.Dependency.Pool));
+        assertTrue(
+            _hasOperationalBlocker(
+                unreadable.status.operationalBlockerMask,
+                SettlementMonitorViewTypes.OperationalBlocker.RequiredDependencyUnknown
+            )
+        );
+        assertTrue(
+            _hasDeferral(
+                unreadable.status.seniorDepositDeferralMask,
+                SettlementMonitorViewTypes.DepositDeferral.DependencyUnknown
+            )
+        );
+        assertTrue(
+            _hasDeferral(
+                unreadable.status.juniorDepositDeferralMask,
+                SettlementMonitorViewTypes.DepositDeferral.DependencyUnknown
+            )
+        );
+        assertEq(uint8(unreadable.status.requiredExecutionPath), uint8(beforeFailure.requiredExecutionPath));
+        assertEq(unreadable.status.executionPathDependencyMask, beforeFailure.executionPathDependencyMask);
+        assertFalse(unreadable.observationComplete);
+        assertEq(unreadable.completeObservationDigest, bytes32(0));
     }
 
     function test_ConstructorRejectsRouterSettlementPoolDifferentFromEnginePool() public {

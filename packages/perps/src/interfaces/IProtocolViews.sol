@@ -9,8 +9,9 @@ interface IProtocolViews {
     /// @notice Returns high-level protocol runtime status flags.
     /// @dev Phase is `Configuring` until engine pool/router wiring and the HousePool risk lifecycle are active,
     ///      `Degraded` when the wired engine's insolvency latch is set, and `Active` otherwise. Price uses 8 decimals
-    ///      and mark time is a Unix timestamp; this view reports state but does not enforce mark freshness.
-    /// @return viewData Protocol phase, cached mark, FAD, oracle-frozen, trading, and withdrawal status
+    ///      and mark time is a Unix timestamp; this view reports state but does not enforce mark freshness. An LP
+    ///      settlement hold is reported independently from the protocol phase and trading availability.
+    /// @return viewData Protocol phase, cached mark, FAD, oracle-frozen, trading, withdrawal, and settlement-hold status
     function getProtocolStatus() external view returns (PerpsViewTypes.ProtocolStatusView memory viewData);
 
 }

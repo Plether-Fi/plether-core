@@ -105,8 +105,8 @@ contract SettlementMonitorLens is ISettlementMonitorLens {
         bool positive;
     }
 
-    uint256 public constant CONFIG_SCHEMA_VERSION = 1;
-    bytes32 public constant OBSERVATION_DOMAIN = keccak256("PLETHER_SETTLEMENT_OBSERVATION_V1");
+    uint256 public constant CONFIG_SCHEMA_VERSION = 2;
+    bytes32 public constant OBSERVATION_DOMAIN = keccak256("PLETHER_SETTLEMENT_OBSERVATION_V2");
     uint256 internal constant STATIC_READ_GAS = 500_000;
     uint256 internal constant MAX_STATIC_WORDS = 16;
 
@@ -1117,15 +1117,17 @@ contract SettlementMonitorLens is ISettlementMonitorLens {
         (bool fadOk, bool fadWindow) = _readBool(address(ENGINE), CfdEngine.isFadWindow.selector);
         (bool withdrawalsOk, bool withdrawalsLive) = _readBool(address(HOUSE_POOL), HousePool.isWithdrawalLive.selector);
         (bool poolPausedOk, bool poolPaused) = _readBool(address(HOUSE_POOL), bytes4(keccak256("paused()")));
+        (bool settlementHoldOk, bool settlementHold) =
+            _readBool(address(HOUSE_POOL), bytes4(keccak256("lpEpochSettlementPaused()")));
         address routerAdmin = ROUTER.admin();
         (bool routerPausedOk, bool routerPaused) = _readBool(routerAdmin, bytes4(keccak256("paused()")));
         if (!fadOk) {
             status.dependencyFailureMask |= _dependencyBit(SettlementMonitorViewTypes.Dependency.Engine);
         }
-        if (!withdrawalsOk || !poolPausedOk) {
+        if (!withdrawalsOk || !poolPausedOk || !settlementHoldOk) {
             status.dependencyFailureMask |= _dependencyBit(SettlementMonitorViewTypes.Dependency.Pool);
         }
-        if (!withdrawalsOk) {
+        if (!withdrawalsOk || !settlementHoldOk) {
             status.operationalBlockerMask |= _operationalBit(
                 SettlementMonitorViewTypes.OperationalBlocker.RequiredDependencyUnknown
             );
@@ -1142,6 +1144,19 @@ contract SettlementMonitorLens is ISettlementMonitorLens {
         }
         if (poolPausedOk) {
             status.poolPaused = poolPaused;
+        }
+        if (settlementHoldOk) {
+            status.lpEpochSettlementPaused = settlementHold;
+            if (settlementHold) {
+                status.operationalBlockerMask |= _operationalBit(
+                    SettlementMonitorViewTypes.OperationalBlocker.LpEpochSettlementPaused
+                );
+                uint256 holdDeferral = _deferralBit(SettlementMonitorViewTypes.DepositDeferral.LpEpochSettlementPaused);
+                status.seniorDepositDeferralMask |= holdDeferral;
+                status.juniorDepositDeferralMask |= holdDeferral;
+            }
+        } else {
+            _markDeferralDependencyUnknown(status, _dependencyBit(SettlementMonitorViewTypes.Dependency.Pool), 3);
         }
         if (routerPausedOk) {
             status.routerAdminPaused = routerPaused;
@@ -1184,7 +1199,6 @@ contract SettlementMonitorLens is ISettlementMonitorLens {
         if (!commonGateOk) {
             _markDeferralDependencyUnknown(status, previewDependencyBit, 3);
         }
-
         {
             (bool lifecycleOk, bool lifecycleOpen) =
                 _readBool(address(HOUSE_POOL), HousePool.canAcceptOrdinaryDeposits.selector);

@@ -32,7 +32,8 @@ library SettlementMonitorViewTypes {
         EngineDegraded,
         RequiredOracleInvalid,
         OracleBeforeEpochBoundary,
-        RequiredDependencyUnknown
+        RequiredDependencyUnknown,
+        LpEpochSettlementPaused
     }
 
     /// @notice Indexes for `SettlementStatus.warningMask`.
@@ -61,7 +62,8 @@ library SettlementMonitorViewTypes {
         ZeroPrincipalWithSupply,
         SeniorCapacityUnavailable,
         ActivationNotConfirmed,
-        DependencyUnknown
+        DependencyUnknown,
+        LpEpochSettlementPaused
     }
 
     /// @notice Indexes for `SettlementHealth.criticalFaultMask`.
@@ -192,6 +194,7 @@ library SettlementMonitorViewTypes {
         bool withdrawalsLive;
         bool poolPaused;
         bool routerAdminPaused;
+        bool lpEpochSettlementPaused;
     }
 
     /// @notice Cached-state and reconcile-preview accounting observed without mutating settlement state.
