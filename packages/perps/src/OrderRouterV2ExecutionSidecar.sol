@@ -111,10 +111,12 @@ contract OrderRouterV2ExecutionSidecar is IOrderRouterErrors {
 
         address executor = msg.sender;
         uint64 riskOffCutoff = _riskOffCutoff(host);
-        uint256 riskOffRefunds;
-        uint256 terminalPrunes;
+        uint256 riskOffRefunds = 0;
+        uint256 terminalPrunes = 0;
         bool madeProgress;
 
+        // Every full-value refund in this loop is immediately followed by a return, so one call cannot refund twice.
+        // slither-disable-start msg-value-loop
         while (head != 0 && head <= orderId) {
             IOrderRouterV2ExecutionHost.OrderView memory orderView = host.getV2OrderForSidecar(head);
             _requireOrderView(head, orderView);
@@ -162,6 +164,7 @@ contract OrderRouterV2ExecutionSidecar is IOrderRouterErrors {
             }
             head = host.nextExecuteId();
         }
+        // slither-disable-end msg-value-loop
 
         head = host.nextExecuteId();
         if (head == 0) {
@@ -206,9 +209,9 @@ contract OrderRouterV2ExecutionSidecar is IOrderRouterErrors {
 
         address executor = msg.sender;
         uint64 riskOffCutoff = _riskOffCutoff(host);
-        uint256 riskOffRefunds;
-        uint256 terminalPrunes;
-        uint256 pythFeeTotal;
+        uint256 riskOffRefunds = 0;
+        uint256 terminalPrunes = 0;
+        uint256 pythFeeTotal = 0;
         IPletherOracle.BatchOrderPriceCache memory oracleCache;
 
         while (host.nextExecuteId() != 0 && host.nextExecuteId() <= maxOrderId) {
@@ -399,6 +402,8 @@ contract OrderRouterV2ExecutionSidecar is IOrderRouterErrors {
         if (!order.isClose && request.openExecutionCloseOnly) {
             return _pendingResult(order.orderId, OrderV2Types.PendingReason.CloseOnly);
         }
+        // Exact block equality is the intended same-block MEV boundary, not a balance or price comparison.
+        // slither-disable-next-line incorrect-equality
         if (!request.oracleFrozen && block.number == order.commitBlock) {
             return _pendingResult(order.orderId, OrderV2Types.PendingReason.SameBlock);
         }
@@ -738,7 +743,8 @@ contract OrderRouterV2ExecutionSidecar is IOrderRouterErrors {
             uint256 code = _word(revertData, 36);
             uint256 isClose = _word(revertData, 68);
             bool knownCode = isClose == 0 ? code > 0 && code <= 10 : isClose == 1 && code > 0 && code <= 5;
-            CfdEnginePlanTypes.ExecutionFailurePolicyCategory expectedCategory;
+            CfdEnginePlanTypes.ExecutionFailurePolicyCategory expectedCategory =
+            CfdEnginePlanTypes.ExecutionFailurePolicyCategory.None;
             if (knownCode) {
                 expectedCategory = isClose == 1
                     ? CfdEnginePlanLib.getExecutionFailurePolicyCategory(CfdEnginePlanTypes.CloseRevertCode(code))
@@ -888,11 +894,14 @@ contract OrderRouterV2ExecutionSidecar is IOrderRouterErrors {
         IPletherOracle.BatchOrderPriceCache memory cache
     ) private returns (bool ok, OracleResult memory result, IPletherOracle.BatchOrderPriceCache memory nextCache) {
         IPletherOracle oracle = IPletherOracle(host.pletherOracle());
-        uint256 fee;
+        uint256 fee = 0;
         if (!_canReuseHistoricalBatchBasket(oracle, order, cache)) {
             fee = oracle.getUpdateFee(pythUpdateData);
-            if (msg.value < pythFeeAlreadySpent + fee) {
-                revert IPletherOracle.PletherOracle__InsufficientFee(msg.value, pythFeeAlreadySpent + fee);
+            // The outer FIFO loop passes a monotonic spent total; this guard prevents aggregate Pyth overspending.
+            // slither-disable-next-line msg-value-loop
+            uint256 suppliedValue = msg.value;
+            if (suppliedValue < pythFeeAlreadySpent + fee) {
+                revert IPletherOracle.PletherOracle__InsufficientFee(suppliedValue, pythFeeAlreadySpent + fee);
             }
         }
         IPletherOracle.PriceSnapshot memory snapshot;

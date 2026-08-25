@@ -128,6 +128,8 @@ abstract contract OrderValidation is OrderBountyAccounting {
         if (neutralMarkPrice > capPrice) {
             neutralMarkPrice = capPrice;
         }
+        // Solidity zero-initializes oracle fields that are deliberately absent from pre-oracle risk-off cleanup.
+        // slither-disable-next-line uninitialized-local
         IOrderRouterV2ExecutionHost.ItemRequest memory request;
         request.orderId = orderId;
         request.action = IOrderRouterV2ExecutionHost.ItemAction.RiskOff;

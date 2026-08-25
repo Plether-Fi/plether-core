@@ -450,6 +450,8 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
     /// @dev Delegates the exact current calldata to the immutable V2 execution module and bubbles failures verbatim.
     function _delegateExecutionSidecar() private returns (bytes memory returndata) {
         bool success;
+        // The target is immutable and constructor code-validated; Router entrypoints constrain the forwarded selector.
+        // slither-disable-next-line controlled-delegatecall
         (success, returndata) = executionSidecar.delegatecall(msg.data);
         if (!success) {
             assembly ("memory-safe") {

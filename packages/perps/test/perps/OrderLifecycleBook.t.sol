@@ -63,29 +63,30 @@ contract OrderLifecycleBookTest is Test {
         uint256 markStalenessLimit = 45 minutes;
         _mockConfig(routerVersion, engineVersion, markStalenessLimit);
 
-        bytes32 expectedHash = keccak256(
-            abi.encode(
-                book.CONFIG_SCHEMA_HASH(),
-                block.chainid,
-                address(book),
-                address(this),
-                ENGINE,
-                CLEARINGHOUSE,
-                HOUSE_POOL,
-                POLICY_EVALUATOR,
-                EXECUTION_SIDECAR,
-                ORACLE,
-                ROUTER_ADMIN,
-                routerVersion,
-                PLANNER,
-                SETTLEMENT_SIDECAR,
-                TERMINAL_NAV_BOOK,
-                ENGINE_ADMIN,
-                engineVersion,
-                PROTOCOL_TREASURY,
-                markStalenessLimit
-            )
+        bytes memory routerConfig = abi.encode(
+            book.CONFIG_SCHEMA_HASH(),
+            block.chainid,
+            address(book),
+            address(this),
+            ENGINE,
+            CLEARINGHOUSE,
+            HOUSE_POOL,
+            POLICY_EVALUATOR,
+            EXECUTION_SIDECAR,
+            ORACLE,
+            ROUTER_ADMIN,
+            routerVersion
         );
+        bytes memory engineConfig = abi.encode(
+            PLANNER,
+            SETTLEMENT_SIDECAR,
+            TERMINAL_NAV_BOOK,
+            ENGINE_ADMIN,
+            engineVersion,
+            PROTOCOL_TREASURY,
+            markStalenessLimit
+        );
+        bytes32 expectedHash = keccak256(bytes.concat(routerConfig, engineConfig));
         assertEq(book.currentExecutionConfigHash(), expectedHash);
 
         _mockConfig(routerVersion + 1, engineVersion, markStalenessLimit);
@@ -121,6 +122,39 @@ contract OrderLifecycleBookTest is Test {
         OrderV2Types.CompactOutcome memory terminalOutcome = book.outcome(17);
         assertEq(uint8(terminalOutcome.status), uint8(OrderV2Types.LifecycleStatus.None));
         assertEq(uint8(book.lifecycleStatus(17)), uint8(OrderV2Types.LifecycleStatus.Pending));
+    }
+
+    function test_HashOrderRequestMatchesCanonicalFlatEncoding() public view {
+        OrderV2Types.OrderRequest memory request = _request(bytes32("canonical-hash"));
+        OrderV2Types.ExecutionBounds memory bounds = request.bounds;
+        bytes memory identityAndOrder = abi.encode(
+            book.INTENT_TYPEHASH(),
+            block.chainid,
+            address(this),
+            ACCOUNT,
+            request.clientOrderId,
+            uint8(request.side),
+            request.sizeDelta,
+            request.marginDelta,
+            request.targetPrice,
+            request.isClose
+        );
+        bytes memory financialPolicy = abi.encode(
+            bounds.validUntil,
+            bounds.allowedExecutionModes,
+            bounds.expectedConfigHash,
+            bounds.maxExecutionBountyUsdc,
+            bounds.maxExecutionNotionalUsdc,
+            bounds.maxGrossAccountDebitUsdc,
+            bounds.maxActionChargeUsdc,
+            bounds.maxExplicitFeesUsdc,
+            bounds.maxPostPositionSize,
+            bounds.minPostSettlementBalanceUsdc,
+            bounds.minPostPositionEquityUsdc,
+            bounds.maxPostLeverageBps
+        );
+
+        assertEq(book.hashOrderRequest(ACCOUNT, request), keccak256(bytes.concat(identityAndOrder, financialPolicy)));
     }
 
     function test_IntentRegisteredEventContainsFullOrderRequestPreimage() public {

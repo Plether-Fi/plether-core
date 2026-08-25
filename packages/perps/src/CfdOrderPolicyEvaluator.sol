@@ -316,8 +316,8 @@ contract CfdOrderPolicyEvaluator is ICfdOrderPolicyEvaluator {
         bool bountyReturnsToAccount,
         OrderV2Types.ExecutionMode mode
     ) private pure returns (OrderV2Types.ExecutionAssessment memory assessment) {
-        uint256 positiveTradeCostUsdc;
-        uint256 tradeRebateUsdc;
+        uint256 positiveTradeCostUsdc = 0;
+        uint256 tradeRebateUsdc = 0;
         if (delta.tradeCostUsdc >= 0) {
             positiveTradeCostUsdc = uint256(delta.tradeCostUsdc);
         } else {
@@ -325,6 +325,7 @@ contract CfdOrderPolicyEvaluator is ICfdOrderPolicyEvaluator {
         }
 
         // A zero-size snapshot deliberately does not realize an inconsistent stale carry value during Engine apply.
+        // slither-disable-next-line incorrect-equality
         uint256 realizedCarryUsdc = snapshot.position.size == 0 ? 0 : delta.pendingCarryUsdc;
 
         assessment.mode = mode;

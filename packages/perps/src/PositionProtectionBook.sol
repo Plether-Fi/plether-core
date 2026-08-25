@@ -607,6 +607,8 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         IPositionProtectionRouterHost router = IPositionProtectionRouterHost(ROUTER);
         parentOrderId = router.nextCommitId();
 
+        // Solidity zero-initializes the fields intentionally omitted from this synthetic permissive request.
+        // slither-disable-next-line uninitialized-local
         OrderV2Types.OrderRequest memory request;
         request.clientOrderId = keccak256(
             abi.encode("PLETHER_POSITION_PROTECTION_PARENT_V2", block.chainid, ROUTER, account, parentOrderId)

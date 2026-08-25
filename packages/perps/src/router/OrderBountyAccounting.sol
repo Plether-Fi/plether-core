@@ -49,7 +49,7 @@ abstract contract OrderBountyAccounting is OrderRouterBase {
     function _forfeitReservedOrderBountiesOnLiquidation(
         address account
     ) internal returns (uint64[] memory orderIds, uint256[] memory orderBountiesUsdc) {
-        uint256 orderCount;
+        uint256 orderCount = 0;
         for (
             uint64 cursor = accountHeadOrderId[account]; cursor != 0; cursor = orderRecords[cursor].nextAccountOrderId) {
             ++orderCount;
@@ -58,7 +58,7 @@ abstract contract OrderBountyAccounting is OrderRouterBase {
         orderBountiesUsdc = new uint256[](orderCount);
 
         uint256 forfeitedUsdc = _protectionBountiesToForfeitOnLiquidation(account);
-        uint256 index;
+        uint256 index = 0;
         for (
             uint64 orderId = accountHeadOrderId[account];
             orderId != 0;

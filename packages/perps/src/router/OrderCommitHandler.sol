@@ -13,6 +13,9 @@ abstract contract OrderCommitHandler is OrderValidation {
     uint256 public maxPendingOrders = 5;
 
     /// @notice Reserves funds, stores one live order, and appends it to the router's queue indexes.
+    /// @dev Public commit entrypoints are non-reentrant and both reservation dependencies are immutable protocol
+    ///      contracts. Any reservation failure reverts before the queue write and rolls back the complete transaction.
+    // slither-disable-start reentrancy-benign
     function _createPendingOrder(
         CfdTypes.Order memory order,
         uint256 executionBountyUsdc
@@ -24,6 +27,8 @@ abstract contract OrderCommitHandler is OrderValidation {
 
         _recordCommittedOrder(order, executionBountyUsdc);
     }
+
+    // slither-disable-end reentrancy-benign
 
     /// @notice Stores and links an already-validated order whose reservations have already been established.
     /// @dev Position-protection triggering reuses this primitive with a bounty transferred from the external book.

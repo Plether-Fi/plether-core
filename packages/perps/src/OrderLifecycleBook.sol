@@ -127,29 +127,32 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         IOrderLifecycleEngineConfigView engine = IOrderLifecycleEngineConfigView(ENGINE);
         address routerAdmin = router.admin();
         address engineAdmin = engine.admin();
-        return keccak256(
-            abi.encode(
-                CONFIG_SCHEMA_HASH,
-                block.chainid,
-                address(this),
-                ROUTER,
-                ENGINE,
-                CLEARINGHOUSE,
-                HOUSE_POOL,
-                router.policyEvaluator(),
-                router.executionSidecar(),
-                router.pletherOracle(),
-                routerAdmin,
-                IOrderLifecycleAdminConfigView(routerAdmin).activeConfigVersion(),
-                engine.planner(),
-                engine.settlementSidecar(),
-                engine.terminalNavBook(),
-                engineAdmin,
-                IOrderLifecycleAdminConfigView(engineAdmin).activeConfigVersion(),
-                engine.protocolTreasury(),
-                IOrderLifecyclePoolConfigView(HOUSE_POOL).markStalenessLimit()
-            )
+        // Both fragments contain only static ABI values. Concatenating their encodings is byte-for-byte equivalent to
+        // one flat abi.encode call, while keeping low-optimization documentation builds below the Yul stack limit.
+        bytes memory routerConfig = abi.encode(
+            CONFIG_SCHEMA_HASH,
+            block.chainid,
+            address(this),
+            ROUTER,
+            ENGINE,
+            CLEARINGHOUSE,
+            HOUSE_POOL,
+            router.policyEvaluator(),
+            router.executionSidecar(),
+            router.pletherOracle(),
+            routerAdmin,
+            IOrderLifecycleAdminConfigView(routerAdmin).activeConfigVersion()
         );
+        bytes memory engineConfig = abi.encode(
+            engine.planner(),
+            engine.settlementSidecar(),
+            engine.terminalNavBook(),
+            engineAdmin,
+            IOrderLifecycleAdminConfigView(engineAdmin).activeConfigVersion(),
+            engine.protocolTreasury(),
+            IOrderLifecyclePoolConfigView(HOUSE_POOL).markStalenessLimit()
+        );
+        return keccak256(bytes.concat(routerConfig, engineConfig));
     }
 
     /// @inheritdoc IOrderLifecycleBook
@@ -157,33 +160,10 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         address account,
         OrderV2Types.OrderRequest calldata request
     ) public view override returns (bytes32 intentHash) {
-        OrderV2Types.ExecutionBounds calldata bounds = request.bounds;
-        return keccak256(
-            abi.encode(
-                INTENT_TYPEHASH,
-                block.chainid,
-                ROUTER,
-                account,
-                request.clientOrderId,
-                uint8(request.side),
-                request.sizeDelta,
-                request.marginDelta,
-                request.targetPrice,
-                request.isClose,
-                bounds.validUntil,
-                bounds.allowedExecutionModes,
-                bounds.expectedConfigHash,
-                bounds.maxExecutionBountyUsdc,
-                bounds.maxExecutionNotionalUsdc,
-                bounds.maxGrossAccountDebitUsdc,
-                bounds.maxActionChargeUsdc,
-                bounds.maxExplicitFeesUsdc,
-                bounds.maxPostPositionSize,
-                bounds.minPostSettlementBalanceUsdc,
-                bounds.minPostPositionEquityUsdc,
-                bounds.maxPostLeverageBps
-            )
-        );
+        // OrderRequest and its nested ExecutionBounds contain only static ABI values in the canonical field order.
+        // Encoding the tuple directly therefore produces the same flat words named by INTENT_TYPEHASH without keeping
+        // all twenty-two values live on the compiler stack.
+        return keccak256(abi.encode(INTENT_TYPEHASH, block.chainid, ROUTER, account, request));
     }
 
     /// @inheritdoc IOrderLifecycleBook

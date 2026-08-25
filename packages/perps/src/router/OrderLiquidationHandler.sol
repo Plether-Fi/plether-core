@@ -113,6 +113,8 @@ abstract contract OrderLiquidationHandler is OrderValidation {
             emit OrderFailed(orderId, OrderFailReason.AccountLiquidated);
             _deleteOrder(orderId, IOrderRouterAccounting.OrderStatus.Failed);
 
+            // Solidity zero-initializes fields that are inapplicable to liquidation terminal evidence.
+            // slither-disable-next-line uninitialized-local
             IOrderRouterV2ExecutionHost.SettledTerminalInput memory receiptInput;
             receiptInput.orderId = orderId;
             receiptInput.executor = keeper;

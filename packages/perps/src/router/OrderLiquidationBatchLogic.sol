@@ -517,6 +517,8 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         uint64 linkedOrderId,
         IPositionProtectionBook.TriggerPlan memory plan
     ) private {
+        // Solidity zero-initializes margin and minimum-bound fields omitted from this synthetic close request.
+        // slither-disable-next-line uninitialized-local
         OrderV2Types.OrderRequest memory request;
         request.clientOrderId = keccak256(
             abi.encode(
