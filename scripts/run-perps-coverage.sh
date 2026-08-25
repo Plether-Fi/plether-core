@@ -130,4 +130,5 @@ merge_args=()
 for shard_report in "${shard_reports[@]}"; do
     merge_args+=(--add-tracefile "${shard_report}")
 done
-lcov --branch-coverage --no-checksum "${merge_args[@]}" --output-file "${report_file}"
+lcov --branch-coverage --no-checksum --ignore-errors inconsistent,corrupt \
+    "${merge_args[@]}" --output-file "${report_file}"
