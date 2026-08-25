@@ -4,6 +4,7 @@ pragma solidity 0.8.35;
 // Audit-history file: tests prefixed with `obsolete_` preserve superseded findings for context only.
 // They are intentionally not statements about the live carry model or current accounting semantics.
 
+import {LegacyOrderRouterHarness} from "../utils/LegacyOrderRouterHarness.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
@@ -11,13 +12,15 @@ import {CfdEngineAdmin} from "@plether/perps/CfdEngineAdmin.sol";
 import {CfdEngineLens} from "@plether/perps/CfdEngineLens.sol";
 import {CfdEnginePlanner} from "@plether/perps/CfdEnginePlanner.sol";
 import {CfdEngineSettlementSidecar} from "@plether/perps/CfdEngineSettlementSidecar.sol";
+import {CfdOrderPolicyEvaluator} from "@plether/perps/CfdOrderPolicyEvaluator.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
-import {OrderRouter} from "@plether/perps/OrderRouter.sol";
+import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
+import {OrderRouterV2ExecutionSidecar} from "@plether/perps/OrderRouterV2ExecutionSidecar.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
@@ -186,7 +189,7 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
     MarginClearinghouse clearinghouse;
     TrancheVault seniorVault;
     TrancheVault juniorVault;
-    OrderRouter router;
+    LegacyOrderRouterHarness router;
     OrderRouterAdmin routerAdmin;
 
     bytes32 constant FEED_A = bytes32(uint256(1));
@@ -229,13 +232,24 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
         bases[0] = 1e8;
         bases[1] = 1e8;
 
+        CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
+        OrderRouterV2ExecutionSidecar executionSidecar = new OrderRouterV2ExecutionSidecar();
         CfdEngineLens testEngineLens = new CfdEngineLens(address(engine));
         PletherOracle testOracle =
             new PletherOracle(address(engine), address(pool), address(mockPyth), feedIds, weights, bases, inversions);
-        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
-        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
-        router = new OrderRouter(
-            address(engine), address(testEngineLens), address(pool), address(testOracle), address(keeperSidecar)
+        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
+        OrderLifecycleBook lifecycleBook =
+            new OrderLifecycleBook(predictedRouter, address(engine), address(clearinghouse), address(pool));
+        OrderRouterLiquidationBatchSidecar liquidationSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
+        router = new LegacyOrderRouterHarness(
+            address(engine),
+            address(testEngineLens),
+            address(pool),
+            address(testOracle),
+            address(liquidationSidecar),
+            address(evaluator),
+            address(executionSidecar),
+            address(lifecycleBook)
         );
         assertEq(address(router), predictedRouter);
         routerAdmin = OrderRouterAdmin(router.admin());
@@ -255,24 +269,25 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
     }
 
     function test_F3_StaleOracleCancellationMustNotPayKeeperUsdc() public {
-        IOrderRouterAdminHost.RouterConfig memory config;
-        config.maxOrderAge = 3600;
-        config.orderExecutionStalenessLimit = router.orderExecutionStalenessLimit();
-        config.liquidationStalenessLimit = router.liquidationStalenessLimit();
-        config.basketMaxConfidenceRatioBps = router.basketMaxConfidenceRatioBps();
-        config.orderSettlementWindow = router.orderSettlementWindow();
-        config.maxComponentPublishTimeDivergence = router.maxComponentPublishTimeDivergence();
-        config.adverseConfidenceMultiplierBps = router.adverseConfidenceMultiplierBps();
-        config.minOpenNotionalUsdc = router.minOpenNotionalUsdc();
-        config.openOrderExecutionBountyBps = router.openOrderExecutionBountyBps();
-        config.minOpenOrderExecutionBountyUsdc = router.minOpenOrderExecutionBountyUsdc();
-        config.maxOpenOrderExecutionBountyUsdc = router.maxOpenOrderExecutionBountyUsdc();
-        config.closeOrderExecutionBountyUsdc = router.closeOrderExecutionBountyUsdc();
-        config.positionProtectionCommitsEnabled = router.positionProtectionCommitsEnabled();
-        config.positionProtectionTriggerBountyUsdc = router.positionProtectionTriggerBountyUsdc();
-        config.maxPendingOrders = router.maxPendingOrders();
-        config.minEngineGas = router.minEngineGas();
-        config.maxPruneOrdersPerCall = router.maxPruneOrdersPerCall();
+        IOrderRouterAdminHost.RouterConfig memory config = IOrderRouterAdminHost.RouterConfig({
+            maxOrderAge: 3600,
+            orderExecutionStalenessLimit: router.pletherOracle().orderExecutionStalenessLimit(),
+            liquidationStalenessLimit: router.pletherOracle().liquidationStalenessLimit(),
+            basketMaxConfidenceRatioBps: router.pletherOracle().basketMaxConfidenceRatioBps(),
+            orderSettlementWindow: router.pletherOracle().orderSettlementWindow(),
+            maxComponentPublishTimeDivergence: router.pletherOracle().maxComponentPublishTimeDivergence(),
+            adverseConfidenceMultiplierBps: router.pletherOracle().adverseConfidenceMultiplierBps(),
+            minOpenNotionalUsdc: router.minOpenNotionalUsdc(),
+            openOrderExecutionBountyBps: router.openOrderExecutionBountyBps(),
+            minOpenOrderExecutionBountyUsdc: router.minOpenOrderExecutionBountyUsdc(),
+            maxOpenOrderExecutionBountyUsdc: router.maxOpenOrderExecutionBountyUsdc(),
+            closeOrderExecutionBountyUsdc: router.closeOrderExecutionBountyUsdc(),
+            positionProtectionCommitsEnabled: router.positionProtectionCommitsEnabled(),
+            positionProtectionTriggerBountyUsdc: router.positionProtectionTriggerBountyUsdc(),
+            maxPendingOrders: router.maxPendingOrders(),
+            minEngineGas: router.minEngineGas(),
+            maxPruneOrdersPerCall: router.maxPruneOrdersPerCall()
+        });
         routerAdmin.proposeRouterConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
         routerAdmin.finalizeRouterConfig();

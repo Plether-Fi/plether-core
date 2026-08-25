@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {LegacyOrderRouterHarness} from "../utils/LegacyOrderRouterHarness.sol";
 import {OrderRouterDebugLens} from "../utils/OrderRouterDebugLens.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
@@ -11,13 +12,16 @@ import {CfdEngineLens} from "@plether/perps/CfdEngineLens.sol";
 import {CfdEnginePlanner} from "@plether/perps/CfdEnginePlanner.sol";
 import {CfdEngineProtocolLens} from "@plether/perps/CfdEngineProtocolLens.sol";
 import {CfdEngineSettlementSidecar} from "@plether/perps/CfdEngineSettlementSidecar.sol";
+import {CfdOrderPolicyEvaluator} from "@plether/perps/CfdOrderPolicyEvaluator.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
+import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
+import {OrderRouterV2ExecutionSidecar} from "@plether/perps/OrderRouterV2ExecutionSidecar.sol";
 import {PerpsPublicLens} from "@plether/perps/PerpsPublicLens.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
@@ -95,7 +99,9 @@ abstract contract BasePerpTest is Test {
     MarginClearinghouse clearinghouse;
     TrancheVault seniorVault;
     TrancheVault juniorVault;
-    OrderRouter router;
+    LegacyOrderRouterHarness router;
+    CfdOrderPolicyEvaluator policyEvaluator;
+    OrderRouterV2ExecutionSidecar orderExecutionSidecar;
     OrderRouterAdmin routerAdmin;
     PletherOracle pletherOracle;
     PerpsPublicLens publicLens;
@@ -146,12 +152,7 @@ abstract contract BasePerpTest is Test {
             _basePythBasePrices(),
             _basePythInversions()
         );
-        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
-        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
-        router = new OrderRouter(
-            address(engine), address(engineLens), address(pool), address(pletherOracle), address(keeperSidecar)
-        );
-        assertEq(address(router), predictedRouter);
+        router = _deployLegacyOrderRouter(address(engine), address(engineLens), address(pool), address(pletherOracle));
         _syncRouterAdmin();
         engine.setOrderRouter(address(router));
         publicLens = new PerpsPublicLens(address(engineAccountLens), address(engine), address(router), address(pool));
@@ -826,12 +827,12 @@ abstract contract BasePerpTest is Test {
 
     function _routerConfig() internal view returns (IOrderRouterAdminHost.RouterConfig memory config) {
         config.maxOrderAge = router.maxOrderAge();
-        config.orderExecutionStalenessLimit = router.orderExecutionStalenessLimit();
-        config.liquidationStalenessLimit = router.liquidationStalenessLimit();
-        config.basketMaxConfidenceRatioBps = router.basketMaxConfidenceRatioBps();
-        config.orderSettlementWindow = router.orderSettlementWindow();
-        config.maxComponentPublishTimeDivergence = router.maxComponentPublishTimeDivergence();
-        config.adverseConfidenceMultiplierBps = router.adverseConfidenceMultiplierBps();
+        config.orderExecutionStalenessLimit = router.pletherOracle().orderExecutionStalenessLimit();
+        config.liquidationStalenessLimit = router.pletherOracle().liquidationStalenessLimit();
+        config.basketMaxConfidenceRatioBps = router.pletherOracle().basketMaxConfidenceRatioBps();
+        config.orderSettlementWindow = router.pletherOracle().orderSettlementWindow();
+        config.maxComponentPublishTimeDivergence = router.pletherOracle().maxComponentPublishTimeDivergence();
+        config.adverseConfidenceMultiplierBps = router.pletherOracle().adverseConfidenceMultiplierBps();
         config.minOpenNotionalUsdc = router.minOpenNotionalUsdc();
         config.openOrderExecutionBountyBps = router.openOrderExecutionBountyBps();
         config.minOpenOrderExecutionBountyUsdc = router.minOpenOrderExecutionBountyUsdc();
@@ -866,6 +867,32 @@ abstract contract BasePerpTest is Test {
         CfdEngineAdmin adminModule = new CfdEngineAdmin(address(deployedEngine), address(this));
         deployedEngine.setDependencies(address(planner), address(settlement), address(adminModule));
         deployedEngine.setProtocolTreasury(PROTOCOL_TREASURY_ACCOUNT);
+    }
+
+    /// @dev Deploys the test-only legacy adapter around the production bounded-order router.
+    function _deployLegacyOrderRouter(
+        address engine_,
+        address engineLens_,
+        address pool_,
+        address oracle_
+    ) internal returns (LegacyOrderRouterHarness deployedRouter) {
+        policyEvaluator = new CfdOrderPolicyEvaluator();
+        orderExecutionSidecar = new OrderRouterV2ExecutionSidecar();
+        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
+        OrderLifecycleBook lifecycleBook =
+            new OrderLifecycleBook(predictedRouter, engine_, address(clearinghouse), pool_);
+        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
+        deployedRouter = new LegacyOrderRouterHarness(
+            engine_,
+            engineLens_,
+            pool_,
+            oracle_,
+            address(keeperSidecar),
+            address(policyEvaluator),
+            address(orderExecutionSidecar),
+            address(lifecycleBook)
+        );
+        assertEq(address(deployedRouter), predictedRouter);
     }
 
     function _frozenCloseSpreadBps() internal pure virtual returns (uint256) {

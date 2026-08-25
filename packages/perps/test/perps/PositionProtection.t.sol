@@ -4,6 +4,7 @@ pragma solidity 0.8.35;
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
 import {PositionProtectionBook} from "@plether/perps/PositionProtectionBook.sol";
 import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
@@ -230,6 +231,11 @@ contract PositionProtectionTest is BasePerpTest {
             PositionProtectionTypes.PositionProtectionTriggerLeg.TakeProfit,
             BEAR_TAKE_PROFIT
         );
+        assertEq(
+            _orderRecord(linkedOrderId).core.targetPrice,
+            1,
+            "linked close should use the canonical unbounded BEAR-close sentinel"
+        );
     }
 
     function test_BearStopLoss_TriggersAtEqualityAndRejectsWrongDirection() public {
@@ -328,7 +334,11 @@ contract PositionProtectionTest is BasePerpTest {
         assertEq(closeOrder.account, ALICE, "linked close owner");
         assertEq(closeOrder.sizeDelta, POSITION_SIZE, "linked close should cover the full position");
         assertEq(closeOrder.marginDelta, 0, "linked close margin delta");
-        assertEq(closeOrder.targetPrice, 0, "linked close should be market-style");
+        assertEq(
+            closeOrder.targetPrice,
+            engine.CAP_PRICE(),
+            "linked close should use the canonical unbounded BULL-close sentinel"
+        );
         assertEq(uint8(closeOrder.side), uint8(CfdTypes.Side.BULL), "linked close side");
         assertTrue(closeOrder.isClose, "linked order should be reduce-only");
         assertEq(router.pendingCloseSize(ALICE), POSITION_SIZE, "linked close aggregate");
@@ -708,14 +718,11 @@ contract PositionProtectionTest is BasePerpTest {
         protectionBook.forfeitOnLiquidation(ALICE);
     }
 
-    function test_Router_IgnoresBookTrailingMetadataFromUntrustedCaller() public {
-        bytes memory commitCall = abi.encodeWithSelector(
-            router.commitOrder.selector, CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, 0, false
-        );
+    function test_Router_RejectsUntrustedProtectionHostMetadata() public {
+        OrderV2Types.OrderRequest memory protectedOpenRequest;
         vm.prank(BOB);
-        (bool commitSuccess,) = address(router).call(abi.encodePacked(commitCall, abi.encode(ALICE)));
-        assertTrue(commitSuccess, "ordinary callers may still submit canonical orders with ignored trailing bytes");
-        assertEq(_orderRecord(1).core.account, BOB, "only the Book may supply a trailing canonical account");
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__Unauthorized.selector);
+        router.commitProtectedOpen(ALICE, protectedOpenRequest);
 
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.BULL, BULL_TAKE_PROFIT, 0);
         bytes memory refreshCall =
@@ -768,6 +775,16 @@ contract PositionProtectionTest is BasePerpTest {
         vm.prank(ALICE);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionActive.selector);
         router.commitOrder(CfdTypes.Side.BULL, POSITION_SIZE, 0, 0, true);
+    }
+
+    function test_ActiveProtection_BlocksAttachedOpenWithCanonicalSelector() public {
+        _createSingleLegProtection(CfdTypes.Side.BULL, BULL_TAKE_PROFIT, 0);
+
+        vm.prank(ALICE);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionActive.selector);
+        protectionActions.commitOpenOrderWithProtection(
+            CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, 0, _params(BULL_TAKE_PROFIT, BULL_STOP_LOSS)
+        );
     }
 
     function test_Liquidation_ArmedProtectionForfeitsBothBountiesAndTerminalizes() public {

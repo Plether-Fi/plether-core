@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {LegacyOrderRouterHarness} from "../../utils/LegacyOrderRouterHarness.sol";
 import {OrderRouterDebugLens} from "../../utils/OrderRouterDebugLens.sol";
 import {MockInvariantHousePool} from "./mocks/MockInvariantHousePool.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
@@ -11,11 +12,14 @@ import {CfdEngineLens} from "@plether/perps/CfdEngineLens.sol";
 import {CfdEnginePlanner} from "@plether/perps/CfdEnginePlanner.sol";
 import {CfdEngineProtocolLens} from "@plether/perps/CfdEngineProtocolLens.sol";
 import {CfdEngineSettlementSidecar} from "@plether/perps/CfdEngineSettlementSidecar.sol";
+import {CfdOrderPolicyEvaluator} from "@plether/perps/CfdOrderPolicyEvaluator.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
+import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
+import {OrderRouterV2ExecutionSidecar} from "@plether/perps/OrderRouterV2ExecutionSidecar.sol";
 import {PerpsPublicLens} from "@plether/perps/PerpsPublicLens.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
@@ -37,7 +41,7 @@ abstract contract BasePerpInvariantTest is Test {
     MarginClearinghouse internal clearinghouse;
     MockInvariantHousePool internal housePool;
     MockPyth internal mockPyth;
-    OrderRouter internal router;
+    LegacyOrderRouterHarness internal router;
     OrderRouterAdmin internal routerAdmin;
     PerpsPublicLens internal publicLens;
 
@@ -65,10 +69,21 @@ abstract contract BasePerpInvariantTest is Test {
         PletherOracle testOracle = new PletherOracle(
             address(engine), address(housePool), address(mockPyth), feedIds, weights, basePrices, new bool[](1)
         );
-        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
+        CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
+        OrderRouterV2ExecutionSidecar executionSidecar = new OrderRouterV2ExecutionSidecar();
+        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
+        OrderLifecycleBook lifecycleBook =
+            new OrderLifecycleBook(predictedRouter, address(engine), address(clearinghouse), address(housePool));
         OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
-        router = new OrderRouter(
-            address(engine), address(engineLens), address(housePool), address(testOracle), address(keeperSidecar)
+        router = new LegacyOrderRouterHarness(
+            address(engine),
+            address(engineLens),
+            address(housePool),
+            address(testOracle),
+            address(keeperSidecar),
+            address(evaluator),
+            address(executionSidecar),
+            address(lifecycleBook)
         );
         assertEq(address(router), predictedRouter);
         _syncRouterAdmin();

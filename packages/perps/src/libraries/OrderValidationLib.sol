@@ -73,8 +73,8 @@ library OrderValidationLib {
     }
 
     /// @notice Checks execution price against the order's directional target-price boundary.
-    /// @dev A zero target disables the check. Close BULL accepts prices at or below the target; close BEAR accepts
-    ///      prices at or above it. Open BULL uses the opposite comparison, as does open BEAR.
+    /// @dev Production V2 commits require a nonzero target. Close BULL accepts prices at or below the target; close
+    ///      BEAR accepts prices at or above it. Open BULL uses the opposite comparison, as does open BEAR.
     /// @param order Order whose side, close flag, and target price define the boundary.
     /// @param executionPrice Proposed execution price (8 decimals).
     /// @return Whether the proposed price satisfies the order boundary.
@@ -82,9 +82,6 @@ library OrderValidationLib {
         CfdTypes.Order memory order,
         uint256 executionPrice
     ) internal pure returns (bool) {
-        if (order.targetPrice == 0) {
-            return true;
-        }
         if (order.isClose) {
             if (order.side == CfdTypes.Side.BULL) {
                 return executionPrice <= order.targetPrice;

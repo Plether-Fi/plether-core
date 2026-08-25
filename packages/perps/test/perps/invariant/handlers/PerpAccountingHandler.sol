@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {LegacyOrderRouterHarness} from "../../../utils/LegacyOrderRouterHarness.sol";
 import {OrderRouterDebugLens} from "../../../utils/OrderRouterDebugLens.sol";
 import {PerpGhostLedger} from "../ghost/PerpGhostLedger.sol";
 import {MockInvariantHousePool} from "../mocks/MockInvariantHousePool.sol";
@@ -93,7 +94,7 @@ contract PerpAccountingHandler is Test {
     CfdEngineAccountLens public immutable engineAccountLens;
     CfdEngineLens public immutable engineLens;
     MarginClearinghouse public immutable clearinghouse;
-    OrderRouter public immutable router;
+    LegacyOrderRouterHarness public immutable router;
     OrderRouterAdmin public immutable routerAdmin;
     MockInvariantHousePool public immutable housePool;
     PerpGhostLedger public immutable ghost;
@@ -130,7 +131,7 @@ contract PerpAccountingHandler is Test {
         MockUSDC _usdc,
         CfdEngine _engine,
         MarginClearinghouse _clearinghouse,
-        OrderRouter _router,
+        LegacyOrderRouterHarness _router,
         MockInvariantHousePool _housePool
     ) {
         usdc = _usdc;
@@ -785,7 +786,7 @@ contract PerpAccountingHandler is Test {
 
         uint256 age = block.timestamp > lastMarkTime ? block.timestamp - lastMarkTime : 0;
         uint256 maxStaleness =
-            engine.isOracleFrozen() ? engine.fadMaxStaleness() : router.orderExecutionStalenessLimit();
+            engine.isOracleFrozen() ? engine.fadMaxStaleness() : router.pletherOracle().orderExecutionStalenessLimit();
         return age <= maxStaleness;
     }
 

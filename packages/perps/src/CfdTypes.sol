@@ -45,7 +45,7 @@ library CfdTypes {
     /// @param account Canonical clearinghouse account that submitted the order.
     /// @param sizeDelta Position-size change in synthetic-token units (18 decimals).
     /// @param marginDelta Margin committed by an open/increase order in 6-decimal USDC; close orders require zero.
-    /// @param targetPrice Direction-aware execution limit (8 decimals), or zero for no slippage limit.
+    /// @param targetPrice Direction-aware execution limit (8 decimals); production V2 commits require it nonzero.
     /// @param commitTime Unix timestamp at submission, used for expiry and post-commit oracle checks.
     /// @param commitBlock Block number at submission, used to block same-block execution outside frozen-oracle mode.
     /// @param orderId Monotonically increasing router order identifier.

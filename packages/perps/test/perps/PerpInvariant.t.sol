@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {LegacyOrderRouterHarness} from "../utils/LegacyOrderRouterHarness.sol";
 import {OrderRouterDebugLens} from "../utils/OrderRouterDebugLens.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
@@ -28,7 +29,7 @@ contract PerpHandler is Test {
     CfdEngineLens public engineLens;
     HousePool public pool;
     MarginClearinghouse public clearinghouse;
-    OrderRouter public router;
+    LegacyOrderRouterHarness public router;
     TrancheVault public juniorVault;
 
     address[3] public traders;
@@ -45,7 +46,7 @@ contract PerpHandler is Test {
         CfdEngine _engine,
         HousePool _pool,
         MarginClearinghouse _clearinghouse,
-        OrderRouter _router,
+        LegacyOrderRouterHarness _router,
         TrancheVault _juniorVault
     ) {
         usdc = _usdc;
@@ -762,7 +763,7 @@ contract AdversarialPerpHandler is Test {
     CfdEngineLens public engineLens;
     HousePool public pool;
     MarginClearinghouse public clearinghouse;
-    OrderRouter public router;
+    LegacyOrderRouterHarness public router;
     TrancheVault public juniorVault;
 
     address[4] public actors;
@@ -788,7 +789,7 @@ contract AdversarialPerpHandler is Test {
         CfdEngine _engine,
         HousePool _pool,
         MarginClearinghouse _clearinghouse,
-        OrderRouter _router,
+        LegacyOrderRouterHarness _router,
         TrancheVault _juniorVault
     ) {
         usdc = _usdc;

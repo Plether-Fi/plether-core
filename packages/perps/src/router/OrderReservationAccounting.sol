@@ -9,13 +9,14 @@ import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAcco
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 
 /// @title OrderReservationAccounting
-/// @notice Router-side reservation records and per-account queue links shared by commit, execution, and liquidation.
+/// @notice Router-side pending records and per-account queue links shared by commit, execution, and liquidation.
 /// @dev The clearinghouse is canonical for USDC custody and committed-margin values. This contract stores
 ///      order metadata, bounty amounts, and linked-list indexes; it never holds the reserved USDC itself.
 abstract contract OrderReservationAccounting is IOrderRouterAccounting, IOrderRouterErrors {
 
-    /// @notice Persistent metadata and linked-list pointers for one committed order.
-    /// @dev Core order data is retained after terminal status, while all live queue pointers are cleared on deletion.
+    /// @notice Ephemeral metadata and linked-list pointers for one pending order.
+    /// @dev The complete record is deleted on every terminal transition. Permanent identity and outcomes live in the
+    ///      immutable lifecycle book.
     /// @param core Canonical delayed-order payload.
     /// @param status Current lifecycle status.
     /// @param executionBountyUsdc Unpaid keeper bounty reserved in the clearinghouse (6-decimal USDC).

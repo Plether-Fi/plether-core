@@ -9,13 +9,16 @@ import {CfdEngineAdmin} from "@plether/perps/CfdEngineAdmin.sol";
 import {CfdEngineLens} from "@plether/perps/CfdEngineLens.sol";
 import {CfdEnginePlanner} from "@plether/perps/CfdEnginePlanner.sol";
 import {CfdEngineSettlementSidecar} from "@plether/perps/CfdEngineSettlementSidecar.sol";
+import {CfdOrderPolicyEvaluator} from "@plether/perps/CfdOrderPolicyEvaluator.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {EmergencyPauseCoordinator} from "@plether/perps/EmergencyPauseCoordinator.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
+import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
+import {OrderRouterV2ExecutionSidecar} from "@plether/perps/OrderRouterV2ExecutionSidecar.sol";
 import {PerpsPublicLens} from "@plether/perps/PerpsPublicLens.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {SettlementMonitorLens} from "@plether/perps/SettlementMonitorLens.sol";
@@ -100,9 +103,12 @@ contract DeployPerpsArbitrumSepolia is Script {
         TrancheVault juniorVault;
         CfdEngineAccountLens accountLens;
         CfdEngineLens engineLens;
+        CfdOrderPolicyEvaluator orderPolicyEvaluator;
+        OrderRouterV2ExecutionSidecar orderExecutionSidecar;
         OrderRouter router;
         OrderRouterLiquidationBatchSidecar liquidationBatchSidecar;
         address positionProtectionBook;
+        OrderLifecycleBook lifecycleBook;
         address pletherOracle;
         address routerAdmin;
         PerpsPublicLens publicLens;
@@ -176,15 +182,23 @@ contract DeployPerpsArbitrumSepolia is Script {
                 _inversions()
             )
         );
-        uint64 sidecarNonce = vm.getNonce(deployer);
-        address expectedRouter = vm.computeCreateAddress(deployer, uint256(sidecarNonce) + 1);
+        deployed.orderPolicyEvaluator = new CfdOrderPolicyEvaluator();
+        deployed.orderExecutionSidecar = new OrderRouterV2ExecutionSidecar();
+        uint64 routerDependencyNonce = vm.getNonce(deployer);
+        address expectedRouter = vm.computeCreateAddress(deployer, uint256(routerDependencyNonce) + 2);
+        deployed.lifecycleBook = new OrderLifecycleBook(
+            expectedRouter, address(deployed.engine), address(deployed.clearinghouse), address(deployed.housePool)
+        );
         deployed.liquidationBatchSidecar = new OrderRouterLiquidationBatchSidecar(expectedRouter);
         deployed.router = new OrderRouter(
             address(deployed.engine),
             address(deployed.engineLens),
             address(deployed.housePool),
             deployed.pletherOracle,
-            address(deployed.liquidationBatchSidecar)
+            address(deployed.liquidationBatchSidecar),
+            address(deployed.orderPolicyEvaluator),
+            address(deployed.orderExecutionSidecar),
+            address(deployed.lifecycleBook)
         );
         require(address(deployed.router) == expectedRouter, "OrderRouter CREATE address mismatch");
         deployed.positionProtectionBook = _verifyPositionProtectionBook(deployed.router, deployed.engine);
@@ -193,6 +207,17 @@ contract DeployPerpsArbitrumSepolia is Script {
         deployed.engine.setOrderRouter(address(deployed.router));
         deployed.clearinghouse.setEngine(address(deployed.engine));
         require(deployed.engine.orderRouter() == address(deployed.router), "Engine OrderRouter mismatch");
+        OrderLifecycleBook verifiedLifecycleBook = _verifyV2OrderStack(
+            deployed.engine,
+            deployed.clearinghouse,
+            deployed.housePool,
+            deployed.orderPolicyEvaluator,
+            deployed.orderExecutionSidecar,
+            deployed.router
+        );
+        require(
+            address(verifiedLifecycleBook) == address(deployed.lifecycleBook), "OrderRouter lifecycle book mismatch"
+        );
         require(
             address(PletherOracle(deployed.pletherOracle).engine()) == address(deployed.engine),
             "PletherOracle Engine mismatch"
@@ -372,6 +397,39 @@ contract DeployPerpsArbitrumSepolia is Script {
         require(candidate.ENGINE() == address(engine), "PositionProtectionBook engine mismatch");
     }
 
+    /// @dev Verifies the independently deployed V2 policy modules and predeployed authoritative lifecycle book.
+    function _verifyV2OrderStack(
+        CfdEngine engine,
+        MarginClearinghouse clearinghouse,
+        HousePool housePool,
+        CfdOrderPolicyEvaluator orderPolicyEvaluator,
+        OrderRouterV2ExecutionSidecar orderExecutionSidecar,
+        OrderRouter router
+    ) internal view returns (OrderLifecycleBook lifecycleBook) {
+        require(address(engine.pool()) == address(housePool), "Engine HousePool mismatch");
+        require(address(housePool.ENGINE()) == address(engine), "HousePool Engine mismatch");
+        require(address(engine.clearinghouse()) == address(clearinghouse), "Engine Clearinghouse mismatch");
+        require(clearinghouse.engine() == address(engine), "Clearinghouse Engine mismatch");
+        require(address(engine.USDC()) == address(housePool.USDC()), "Engine settlement asset mismatch");
+        require(clearinghouse.settlementAsset() == address(housePool.USDC()), "Clearinghouse settlement asset mismatch");
+        require(address(orderPolicyEvaluator).code.length > 0, "Order policy evaluator has no code");
+        require(address(orderExecutionSidecar).code.length > 0, "Order execution sidecar has no code");
+        require(
+            orderExecutionSidecar.SELF() == address(orderExecutionSidecar),
+            "Order execution sidecar self binding mismatch"
+        );
+        require(router.policyEvaluator() == address(orderPolicyEvaluator), "OrderRouter policy evaluator mismatch");
+        require(router.executionSidecar() == address(orderExecutionSidecar), "OrderRouter execution sidecar mismatch");
+
+        lifecycleBook = router.lifecycleBook();
+        require(address(lifecycleBook).code.length > 0, "Order lifecycle book has no code");
+        require(lifecycleBook.ROUTER() == address(router), "Order lifecycle book Router mismatch");
+        require(lifecycleBook.ENGINE() == address(engine), "Order lifecycle book Engine mismatch");
+        require(lifecycleBook.CLEARINGHOUSE() == address(clearinghouse), "Order lifecycle book Clearinghouse mismatch");
+        require(lifecycleBook.HOUSE_POOL() == address(housePool), "Order lifecycle book HousePool mismatch");
+        require(lifecycleBook.currentExecutionConfigHash() != bytes32(0), "Order config hash is zero");
+    }
+
     /// @dev Rejects partial or mixed-generation LP stacks before any engine/router wiring is completed.
     function _verifyAsyncVaultPair(
         HousePool housePool,
@@ -475,11 +533,16 @@ contract DeployPerpsArbitrumSepolia is Script {
         console.log("JuniorVault:", address(deployed.juniorVault));
         console.log("CfdEngineAccountLens:", address(deployed.accountLens));
         console.log("CfdEngineLens:", address(deployed.engineLens));
+        console.log("CfdOrderPolicyEvaluator:", address(deployed.orderPolicyEvaluator));
+        console.log("OrderRouterV2ExecutionSidecar:", address(deployed.orderExecutionSidecar));
         console.log("OrderRouter:", address(deployed.router));
         console.log("OrderRouterLiquidationBatchSidecar:", address(deployed.liquidationBatchSidecar));
         console.log("PositionProtectionBook:", deployed.positionProtectionBook);
         console.log("PositionProtectionCommitsEnabled:", deployed.router.positionProtectionCommitsEnabled());
         console.log("PositionProtectionTriggerBountyUsdc:", deployed.router.positionProtectionTriggerBountyUsdc());
+        console.log("OrderLifecycleBook:", address(deployed.lifecycleBook));
+        console.log("OrderExecutionConfigHash:");
+        console.logBytes32(deployed.lifecycleBook.currentExecutionConfigHash());
         console.log("PletherOracle:", deployed.pletherOracle);
         console.log("BasketMaxConfidenceRatioBps:", PletherOracle(deployed.pletherOracle).basketMaxConfidenceRatioBps());
         console.log("OrderRouterAdmin:", deployed.routerAdmin);

@@ -86,7 +86,16 @@ contract PerpValueConservationHandler is Test {
 
         vm.prank(FULL_CLOSE_TRADER);
         (bool committed,) = address(router)
-            .call(abi.encodeCall(router.commitOrder, (CfdTypes.Side.BULL, 100_000e18, 0, targetPrice, true)));
+            .call(
+                abi.encodeWithSelector(
+                    bytes4(keccak256("commitOrder(uint8,uint256,uint256,uint256,bool)")),
+                    CfdTypes.Side.BULL,
+                    100_000e18,
+                    0,
+                    targetPrice,
+                    true
+                )
+            );
         if (committed) {
             bytes[] memory priceData = _mockPythUpdateData(executionPrice);
             vm.prank(FAILED_CLOSE_KEEPER);

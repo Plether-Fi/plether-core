@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {LegacyOrderRouterHarness} from "../../../utils/LegacyOrderRouterHarness.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
-import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {Test} from "forge-std/Test.sol";
 
@@ -13,7 +13,7 @@ contract PerpFeeHandler is Test {
     MockUSDC public immutable usdc;
     CfdEngine public immutable engine;
     MarginClearinghouse public immutable clearinghouse;
-    OrderRouter public immutable router;
+    LegacyOrderRouterHarness public immutable router;
     address public immutable owner;
 
     address[2] internal actors;
@@ -26,7 +26,7 @@ contract PerpFeeHandler is Test {
         MockUSDC _usdc,
         CfdEngine _engine,
         MarginClearinghouse _clearinghouse,
-        OrderRouter _router
+        LegacyOrderRouterHarness _router
     ) {
         usdc = _usdc;
         engine = _engine;

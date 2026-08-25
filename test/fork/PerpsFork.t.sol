@@ -8,13 +8,17 @@ import {CfdEngineAdmin} from "@plether/perps/CfdEngineAdmin.sol";
 import {CfdEngineLens} from "@plether/perps/CfdEngineLens.sol";
 import {CfdEnginePlanner} from "@plether/perps/CfdEnginePlanner.sol";
 import {CfdEngineSettlementSidecar} from "@plether/perps/CfdEngineSettlementSidecar.sol";
+import {CfdOrderPolicyEvaluator} from "@plether/perps/CfdOrderPolicyEvaluator.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
+import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
+import {OrderRouterV2ExecutionSidecar} from "@plether/perps/OrderRouterV2ExecutionSidecar.sol";
+import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
@@ -149,10 +153,23 @@ contract PerpsForkTest is Test {
         CfdEngineLens lens = new CfdEngineLens(address(engine));
         PletherOracle oracle =
             new PletherOracle(address(engine), address(pool), address(pyth), feedIds, w, b, new bool[](1));
-        uint64 routerSidecarNonce = vm.getNonce(address(this));
-        address predictedRouter = vm.computeCreateAddress(address(this), routerSidecarNonce + 1);
+        CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
+        OrderRouterV2ExecutionSidecar executionSidecar = new OrderRouterV2ExecutionSidecar();
+        uint64 routerDependencyNonce = vm.getNonce(address(this));
+        address predictedRouter = vm.computeCreateAddress(address(this), routerDependencyNonce + 2);
+        OrderLifecycleBook lifecycleBook =
+            new OrderLifecycleBook(predictedRouter, address(engine), address(clearinghouse), address(pool));
         OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
-        router = new OrderRouter(address(engine), address(lens), address(pool), address(oracle), address(keeperSidecar));
+        router = new OrderRouter(
+            address(engine),
+            address(lens),
+            address(pool),
+            address(oracle),
+            address(keeperSidecar),
+            address(evaluator),
+            address(executionSidecar),
+            address(lifecycleBook)
+        );
         assertEq(address(router), predictedRouter, "router prediction");
         routerAdmin = OrderRouterAdmin(router.admin());
         engine.setOrderRouter(address(router));
@@ -214,7 +231,7 @@ contract PerpsForkTest is Test {
         uint64 orderId = router.nextCommitId();
 
         vm.prank(trader);
-        router.commitOrder(side, size, margin, targetPrice, isClose);
+        router.commitOrder(_orderRequest(trader, side, size, margin, targetPrice, isClose));
 
         pyth.setAllPrices(feedIds, pythPrice, int32(-8), commitTime + 6);
         vm.warp(commitTime + 7);
@@ -248,12 +265,12 @@ contract PerpsForkTest is Test {
     function _configureLongOrderExpiry() internal {
         IOrderRouterAdminHost.RouterConfig memory config;
         config.maxOrderAge = 1000;
-        config.orderExecutionStalenessLimit = router.orderExecutionStalenessLimit();
-        config.liquidationStalenessLimit = router.liquidationStalenessLimit();
-        config.basketMaxConfidenceRatioBps = router.basketMaxConfidenceRatioBps();
-        config.orderSettlementWindow = router.orderSettlementWindow();
-        config.maxComponentPublishTimeDivergence = router.maxComponentPublishTimeDivergence();
-        config.adverseConfidenceMultiplierBps = router.adverseConfidenceMultiplierBps();
+        config.orderExecutionStalenessLimit = router.pletherOracle().orderExecutionStalenessLimit();
+        config.liquidationStalenessLimit = router.pletherOracle().liquidationStalenessLimit();
+        config.basketMaxConfidenceRatioBps = router.pletherOracle().basketMaxConfidenceRatioBps();
+        config.orderSettlementWindow = router.pletherOracle().orderSettlementWindow();
+        config.maxComponentPublishTimeDivergence = router.pletherOracle().maxComponentPublishTimeDivergence();
+        config.adverseConfidenceMultiplierBps = router.pletherOracle().adverseConfidenceMultiplierBps();
         config.minOpenNotionalUsdc = router.minOpenNotionalUsdc();
         config.openOrderExecutionBountyBps = router.openOrderExecutionBountyBps();
         config.minOpenOrderExecutionBountyUsdc = router.minOpenOrderExecutionBountyUsdc();
@@ -282,7 +299,46 @@ contract PerpsForkTest is Test {
         commitBlock = block.number;
 
         vm.prank(trader);
-        router.commitOrder(side, size, margin, targetPrice, isClose);
+        router.commitOrder(_orderRequest(trader, side, size, margin, targetPrice, isClose));
+    }
+
+    function _orderRequest(
+        address trader,
+        CfdTypes.Side side,
+        uint256 size,
+        uint256 margin,
+        uint256 targetPrice,
+        bool isClose
+    ) internal view returns (OrderV2Types.OrderRequest memory request) {
+        if (targetPrice == 0) {
+            targetPrice = isClose
+                ? (side == CfdTypes.Side.BULL ? type(uint256).max : 1)
+                : (side == CfdTypes.Side.BULL ? 1 : type(uint256).max);
+        }
+        request = OrderV2Types.OrderRequest({
+            clientOrderId: keccak256(
+                abi.encode("PerpsForkTest", block.chainid, address(router), trader, router.nextCommitId())
+            ),
+            side: side,
+            sizeDelta: size,
+            marginDelta: margin,
+            targetPrice: targetPrice,
+            isClose: isClose,
+            bounds: OrderV2Types.ExecutionBounds({
+                validUntil: uint64(block.timestamp + router.maxOrderAge()),
+                allowedExecutionModes: 7,
+                expectedConfigHash: router.lifecycleBook().currentExecutionConfigHash(),
+                maxExecutionBountyUsdc: type(uint256).max,
+                maxExecutionNotionalUsdc: type(uint256).max,
+                maxGrossAccountDebitUsdc: type(uint256).max,
+                maxActionChargeUsdc: type(uint256).max,
+                maxExplicitFeesUsdc: type(uint256).max,
+                maxPostPositionSize: type(uint256).max,
+                minPostSettlementBalanceUsdc: 0,
+                minPostPositionEquityUsdc: 0,
+                maxPostLeverageBps: type(uint32).max
+            })
+        });
     }
 
     function _pythUpdateData() internal pure returns (bytes[] memory updateData) {
@@ -373,11 +429,22 @@ contract PerpsForkTest is Test {
         CfdEngineLens realPythLens = new CfdEngineLens(address(engine));
         PletherOracle realPythOracle =
             new PletherOracle(address(engine), address(pool), REAL_PYTH, feedIds, rw, rb, new bool[](1));
-        uint64 routerSidecarNonce = vm.getNonce(address(this));
-        address predictedRouter = vm.computeCreateAddress(address(this), routerSidecarNonce + 1);
+        CfdOrderPolicyEvaluator realPythEvaluator = new CfdOrderPolicyEvaluator();
+        OrderRouterV2ExecutionSidecar realPythExecutionSidecar = new OrderRouterV2ExecutionSidecar();
+        uint64 routerDependencyNonce = vm.getNonce(address(this));
+        address predictedRouter = vm.computeCreateAddress(address(this), routerDependencyNonce + 2);
+        OrderLifecycleBook lifecycleBook =
+            new OrderLifecycleBook(predictedRouter, address(engine), address(clearinghouse), address(pool));
         OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
         OrderRouter realPythRouter = new OrderRouter(
-            address(engine), address(realPythLens), address(pool), address(realPythOracle), address(keeperSidecar)
+            address(engine),
+            address(realPythLens),
+            address(pool),
+            address(realPythOracle),
+            address(keeperSidecar),
+            address(realPythEvaluator),
+            address(realPythExecutionSidecar),
+            address(lifecycleBook)
         );
         assertEq(address(realPythRouter), predictedRouter, "router prediction");
 
@@ -385,7 +452,9 @@ contract PerpsForkTest is Test {
         engine.setOrderRouter(address(realPythRouter));
 
         assertEq(
-            address(realPythRouter.pyth()), REAL_PYTH, "Router construction should still accept the real Pyth contract"
+            address(realPythRouter.pletherOracle().pyth()),
+            REAL_PYTH,
+            "Router construction should still accept the real Pyth contract"
         );
     }
 
@@ -534,7 +603,7 @@ contract PerpsForkTest is Test {
 
         uint256 ts = block.timestamp;
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+        router.commitOrder(_orderRequest(alice, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false));
 
         pyth.setAllPrices(feedIds, int64(100_000_000), -8, ts + 6);
         vm.warp(ts + 7);
@@ -720,7 +789,7 @@ contract PerpsForkTest is Test {
 
         uint256 commitTime = block.timestamp;
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+        router.commitOrder(_orderRequest(alice, CfdTypes.Side.BULL, 100_000e18, 0, 0, true));
         pyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), commitTime + 6);
         vm.warp(commitTime + 7);
         vm.roll(block.number + 2);
@@ -769,12 +838,12 @@ contract PerpsForkTest is Test {
         IERC20(USDC).safeTransfer(address(0xDEAD), poolAssets - 8000e6);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+        router.commitOrder(_orderRequest(alice, CfdTypes.Side.BULL, 100_000e18, 0, 0, true));
 
         vm.warp(block.timestamp + 10);
         vm.roll(block.number + 1);
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BEAR, 10_000e18, 500e6, 0, false);
+        router.commitOrder(_orderRequest(alice, CfdTypes.Side.BEAR, 10_000e18, 500e6, 0, false));
 
         pyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), block.timestamp + 6);
         vm.warp(block.timestamp + 7);

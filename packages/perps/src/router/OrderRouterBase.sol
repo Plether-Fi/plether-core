@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
 import {IOrderRouter} from "@plether/perps/interfaces/IOrderRouter.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
@@ -14,6 +15,12 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
 
     /// @notice Dedicated timelocked `OrderRouterAdmin` deployed with ownership assigned to the router deployer.
     address public immutable admin;
+
+    /// @notice Stateless evaluator that enforces the account's pinned execution policy before settlement is applied.
+    address public immutable policyEvaluator;
+
+    /// @notice Predeployed immutable registry for V2 client intents, pending policy, and authenticated receipts.
+    OrderLifecycleBook public immutable lifecycleBook;
 
     /// @notice Minimum open/increase notional accepted at commit time (6-decimal USDC).
     uint256 public minOpenNotionalUsdc;
@@ -38,13 +45,32 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
     /// @param _engineLens CfdEngineLens used for open-order commit preflight.
     /// @param _housePool HousePool used for depth and risk-availability queries.
     /// @param _pletherOracle Deployed Plether oracle used for Pyth basket pricing.
+    /// @param _policyEvaluator Deployed stateless V2 financial-policy evaluator.
+    /// @param _lifecycleBook Predeployed lifecycle Book bound to this predicted Router and protocol stack.
     constructor(
         address _engine,
         address _engineLens,
         address _housePool,
-        address _pletherOracle
+        address _pletherOracle,
+        address _policyEvaluator,
+        address _lifecycleBook
     ) OrderOracleExecution(_engine, _engineLens, _housePool, _pletherOracle) {
+        if (_policyEvaluator == address(0) || _policyEvaluator.code.length == 0) {
+            revert OrderRouter__InvalidPolicyEvaluator();
+        }
+        if (_lifecycleBook.code.length == 0) {
+            revert OrderRouter__InvalidLifecycleBook();
+        }
+        OrderLifecycleBook lifecycleBook_ = OrderLifecycleBook(_lifecycleBook);
+        if (
+            lifecycleBook_.ROUTER() != address(this) || lifecycleBook_.ENGINE() != _engine
+                || lifecycleBook_.CLEARINGHOUSE() != address(clearinghouse) || lifecycleBook_.HOUSE_POOL() != _housePool
+        ) {
+            revert OrderRouter__InvalidLifecycleBook();
+        }
         admin = address(new OrderRouterAdmin(address(this), msg.sender));
+        policyEvaluator = _policyEvaluator;
+        lifecycleBook = lifecycleBook_;
         minOpenNotionalUsdc = 100_000_000;
         openOrderExecutionBountyBps = 1;
         minOpenOrderExecutionBountyUsdc = 10_000;
@@ -100,10 +126,9 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
         }
     }
 
-    /// @notice Unlinks an order from every live queue, records terminal status, and updates account aggregates.
+    /// @notice Unlinks an order from every live queue, deletes its ephemeral record, and updates account aggregates.
     /// @dev Decrements counts defensively only when positive. Pending close size is decremented only when its
-    ///      stored aggregate is at least the order size. Core order data and terminal status remain in the record;
-    ///      live queue links and the separately collected or forfeited unpaid bounty are cleared.
+    ///      stored aggregate is at least the order size. The lifecycle book is the permanent terminal source of truth.
     /// @param orderId Live order id to delete.
     /// @param terminalStatus Terminal `Executed` or `Failed` status.
     function _deleteOrder(
@@ -125,6 +150,7 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
             pendingCloseSize[account] -= record.core.sizeDelta;
         }
         _afterOrderDeleted(orderId, account, terminalStatus);
+        delete orderRecords[orderId];
     }
 
     /// @notice Applies derived-feature lifecycle changes after an ordinary order becomes terminal.

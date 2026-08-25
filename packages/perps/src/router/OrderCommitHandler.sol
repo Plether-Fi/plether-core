@@ -2,7 +2,6 @@
 pragma solidity 0.8.35;
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
-import {IOrderRouter} from "@plether/perps/interfaces/IOrderRouter.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {OrderValidation} from "@plether/perps/router/OrderValidation.sol";
 
@@ -13,72 +12,43 @@ abstract contract OrderCommitHandler is OrderValidation {
     /// @notice Maximum live pending orders allowed per account.
     uint256 public maxPendingOrders = 5;
 
-    /// @notice Account-explicit commit primitive used by the router-bound position-protection book.
-    /// @dev The public path always passes `msg.sender`; the protected-open host path authenticates the book separately.
-    function _commitOrderFor(
-        address account,
-        CfdTypes.Side side,
-        uint256 sizeDelta,
-        uint256 marginDelta,
-        uint256 targetPrice,
-        bool isClose
-    ) internal returns (uint64 orderId) {
-        _validateBaseCommit(sizeDelta, marginDelta, isClose);
-        _requireNoActivePositionProtection(account);
-        if (!isClose) {
-            _validateOpenCommitAllowed();
-        }
+    /// @notice Reserves funds, stores one live order, and appends it to the router's queue indexes.
+    function _createPendingOrder(
+        CfdTypes.Order memory order,
+        uint256 executionBountyUsdc
+    ) internal {
+        uint64 orderId = order.orderId;
+        address account = order.account;
+        _reserveExecutionBounty(account, order.sizeDelta, executionBountyUsdc, order.isClose);
+        _reserveCommittedMargin(account, orderId, order.isClose, order.marginDelta);
 
-        uint256 executionBountyUsdc = isClose
-            ? _validatedCloseExecutionBountyUsdc(account, side, sizeDelta)
-            : _validatedOpenExecutionBountyUsdc(account, side, sizeDelta, marginDelta);
-
-        orderId = nextCommitId++;
-
-        _reserveExecutionBounty(account, sizeDelta, executionBountyUsdc, isClose);
-        _reserveCommittedMargin(account, orderId, isClose, marginDelta);
-
-        _recordCommittedOrder(orderId, account, side, sizeDelta, marginDelta, targetPrice, isClose, executionBountyUsdc);
+        _recordCommittedOrder(order, executionBountyUsdc);
     }
 
     /// @notice Stores and links an already-validated order whose reservations have already been established.
     /// @dev Position-protection triggering reuses this primitive with a bounty transferred from the external book.
     function _recordCommittedOrder(
-        uint64 orderId,
-        address account,
-        CfdTypes.Side side,
-        uint256 sizeDelta,
-        uint256 marginDelta,
-        uint256 targetPrice,
-        bool isClose,
+        CfdTypes.Order memory order,
         uint256 executionBountyUsdc
     ) internal {
+        uint64 orderId = order.orderId;
+        address account = order.account;
         OrderRecord storage record = orderRecords[orderId];
-        CfdTypes.Order storage order = record.core;
-        order.account = account;
-        order.sizeDelta = sizeDelta;
-        order.marginDelta = marginDelta;
-        order.targetPrice = targetPrice;
-        order.commitTime = uint64(block.timestamp);
-        order.commitBlock = uint64(block.number);
-        order.orderId = orderId;
-        order.side = side;
-        order.isClose = isClose;
+        record.core = order;
         record.status = IOrderRouterAccounting.OrderStatus.Pending;
         record.executionBountyUsdc = executionBountyUsdc;
-        if (isClose) {
-            pendingCloseSize[account] += sizeDelta;
+        if (order.isClose) {
+            pendingCloseSize[account] += order.sizeDelta;
         }
         _linkGlobalOrder(orderId);
         _linkAccountOrder(account, orderId);
         if (++pendingOrderCounts[account] > maxPendingOrders) {
             revert OrderRouter__TooManyPendingOrders();
         }
-        emit OrderCommitted(orderId, account, side);
+        emit OrderCommitted(orderId, account, order.side);
     }
 
-    /// @notice Rejects discretionary order commits while a derived protection feature owns the account trade lock.
-    /// @dev The base router has no such lock. Position-protection handling overrides this hook.
+    /// @dev Retained as an override seam for position-protection handlers; delegated commit logic owns the live check.
     function _requireNoActivePositionProtection(
         address account
     ) internal view virtual {
@@ -95,10 +65,10 @@ abstract contract OrderCommitHandler is OrderValidation {
     }
 
     /// @notice Builds the accounting view stored for an order id and returns its live account-queue successor.
-    /// @dev Does not inspect `record.status`: terminal records retain core fields but have zeroed live links and
-    ///      consumed reservations; an unknown id returns a zero-valued view except `pending.orderId == orderId`.
+    /// @dev Terminal records are deleted. An unknown or terminal id returns a zero-valued view except
+    ///      `pending.orderId == orderId`; permanent terminal identity and outcomes live in the lifecycle book.
     /// @param orderId Order id to inspect.
-    /// @return pending Retained core data plus current clearinghouse margin and router bounty reservation.
+    /// @return pending Pending core data plus current clearinghouse margin and router bounty reservation.
     /// @return nextAccountOrderId Next live order for the same account, or zero.
     function _getPendingOrderView(
         uint64 orderId

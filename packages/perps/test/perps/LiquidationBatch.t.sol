@@ -3,6 +3,7 @@ pragma solidity 0.8.35;
 
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
 import {PositionProtectionBook} from "@plether/perps/PositionProtectionBook.sol";
@@ -71,25 +72,49 @@ contract LiquidationBatchTest is BasePerpTest {
 
     function test_Batch_SplitComponentsFitDeploymentLimits() public view {
         assertLe(
-            address(router).code.length, EIP170_RUNTIME_CODE_LIMIT, "batch entrypoint must keep OrderRouter deployable"
+            vm.getDeployedCode("OrderRouter.sol:OrderRouter").length,
+            EIP170_RUNTIME_CODE_LIMIT,
+            "batch entrypoint must keep production OrderRouter deployable"
         );
 
         address sidecar = router.liquidationBatchSidecar();
-        address book = address(router.positionProtectionBook());
-        assertNotEq(sidecar, book, "keeper sidecar and state-owning protection Book must be separate contracts");
+        address protectionBook = address(router.positionProtectionBook());
+        OrderLifecycleBook lifecycleBook = router.lifecycleBook();
+        assertNotEq(
+            sidecar, protectionBook, "keeper sidecar and state-owning protection Book must be separate contracts"
+        );
+        assertNotEq(sidecar, address(lifecycleBook), "keeper sidecar and lifecycle Book must be separate contracts");
+        assertNotEq(
+            protectionBook, address(lifecycleBook), "position-protection and lifecycle Books must be separate contracts"
+        );
         assertGt(sidecar.code.length, 0, "predeployed keeper sidecar must have code");
         assertLe(sidecar.code.length, EIP170_RUNTIME_CODE_LIMIT, "sidecar runtime must remain EIP-170 deployable");
-        assertGt(book.code.length, 0, "Router must deploy the protection Book");
-        assertLe(book.code.length, EIP170_RUNTIME_CODE_LIMIT, "Book runtime must remain EIP-170 deployable");
+        assertGt(protectionBook.code.length, 0, "Router must deploy the protection Book");
+        assertLe(protectionBook.code.length, EIP170_RUNTIME_CODE_LIMIT, "Book runtime must remain EIP-170 deployable");
+        assertGt(address(lifecycleBook).code.length, 0, "predeployed lifecycle Book must have code");
+        assertLe(
+            address(lifecycleBook).code.length,
+            EIP170_RUNTIME_CODE_LIMIT,
+            "lifecycle Book runtime must remain EIP-170 deployable"
+        );
+        assertEq(lifecycleBook.ROUTER(), address(router), "lifecycle Book must bind the exact Router");
+        assertEq(lifecycleBook.ENGINE(), address(engine), "lifecycle Book Engine binding");
+        assertEq(lifecycleBook.CLEARINGHOUSE(), address(clearinghouse), "lifecycle Book clearinghouse binding");
+        assertEq(lifecycleBook.HOUSE_POOL(), address(pool), "lifecycle Book HousePool binding");
 
-        uint256 routerCreationInputLength = type(OrderRouter).creationCode.length + (5 * 32);
+        uint256 sidecarCreationInputLength = type(OrderRouterLiquidationBatchSidecar).creationCode.length + 32;
+        assertLe(sidecarCreationInputLength, EIP3860_INITCODE_LIMIT, "sidecar initcode must remain EIP-3860 deployable");
+
+        uint256 lifecycleCreationInputLength = type(OrderLifecycleBook).creationCode.length + (4 * 32);
+        assertLe(
+            lifecycleCreationInputLength,
+            EIP3860_INITCODE_LIMIT,
+            "lifecycle Book creation input must remain EIP-3860 deployable"
+        );
+
+        uint256 routerCreationInputLength = type(OrderRouter).creationCode.length + (8 * 32);
         assertLe(
             routerCreationInputLength, EIP3860_INITCODE_LIMIT, "Router creation input must remain EIP-3860 deployable"
-        );
-        assertLe(
-            type(OrderRouterLiquidationBatchSidecar).creationCode.length + 32,
-            EIP3860_INITCODE_LIMIT,
-            "sidecar creation input must remain EIP-3860 deployable"
         );
         assertLe(
             type(PositionProtectionBook).creationCode.length + (2 * 32),
@@ -117,12 +142,41 @@ contract LiquidationBatchTest is BasePerpTest {
     }
 
     function test_RouterConstructor_RejectsSidecarBoundToForeignRouter() public {
+        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
+        OrderLifecycleBook lifecycleBook =
+            new OrderLifecycleBook(predictedRouter, address(engine), address(clearinghouse), address(pool));
         OrderRouterLiquidationBatchSidecar foreignBoundSidecar =
             new OrderRouterLiquidationBatchSidecar(address(0xBADB1D));
 
         vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidKeeperSidecar.selector);
         new OrderRouter(
-            address(engine), address(engineLens), address(pool), address(pletherOracle), address(foreignBoundSidecar)
+            address(engine),
+            address(engineLens),
+            address(pool),
+            address(pletherOracle),
+            address(foreignBoundSidecar),
+            address(policyEvaluator),
+            address(orderExecutionSidecar),
+            address(lifecycleBook)
+        );
+    }
+
+    function test_RouterConstructor_RejectsLifecycleBookBoundToForeignRouter() public {
+        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
+        OrderLifecycleBook foreignBoundLifecycleBook =
+            new OrderLifecycleBook(address(0xBADB1D), address(engine), address(clearinghouse), address(pool));
+        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
+
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidLifecycleBook.selector);
+        new OrderRouter(
+            address(engine),
+            address(engineLens),
+            address(pool),
+            address(pletherOracle),
+            address(keeperSidecar),
+            address(policyEvaluator),
+            address(orderExecutionSidecar),
+            address(foreignBoundLifecycleBook)
         );
     }
 
@@ -657,7 +711,7 @@ contract LiquidationBatchTest is BasePerpTest {
     function test_BatchItem_DirectCallRevertsUnauthorized() public {
         vm.expectRevert(IOrderRouterErrors.OrderRouter__Unauthorized.selector);
         router.executeLiquidationBatchItem(
-            ELIGIBLE_ONE, NEUTRAL_PRICE, NEUTRAL_PRICE, uint64(block.timestamp), KEEPER, 0
+            ELIGIBLE_ONE, NEUTRAL_PRICE, NEUTRAL_PRICE, NEUTRAL_PRICE, uint64(block.timestamp), KEEPER, 0
         );
     }
 

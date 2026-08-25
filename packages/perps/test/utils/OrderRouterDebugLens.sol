@@ -4,12 +4,24 @@ pragma solidity 0.8.35;
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
+import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {Vm} from "forge-std/Vm.sol";
 
 library OrderRouterDebugLens {
 
     function loadOrderRecord(
+        Vm vm_,
+        OrderRouter router,
+        uint64 orderId
+    ) internal view returns (OrderRouter.OrderRecord memory record) {
+        record = loadRawOrderRecord(vm_, router, orderId);
+        record.status = _legacyCompatibleStatus(router, orderId, record.status);
+    }
+
+    /// @dev Loads Router storage without consulting the lifecycle book. New V2 tests use this to prove terminal
+    ///      records were fully deleted; historical tests use `loadOrderRecord` for their old status assertions.
+    function loadRawOrderRecord(
         Vm vm_,
         OrderRouter router,
         uint64 orderId
@@ -52,10 +64,28 @@ library OrderRouterDebugLens {
         uint64 orderId
     ) internal view returns (IOrderRouterAccounting.OrderStatus) {
         uint256 baseSlot = uint256(keccak256(abi.encode(orderId, uint256(0))));
-        return
-            IOrderRouterAccounting.OrderStatus(
-                SafeCast.toUint8(uint256(vm_.load(address(router), bytes32(baseSlot + 5))))
-            );
+        IOrderRouterAccounting.OrderStatus rawStatus = IOrderRouterAccounting.OrderStatus(
+            SafeCast.toUint8(uint256(vm_.load(address(router), bytes32(baseSlot + 5))))
+        );
+        return _legacyCompatibleStatus(router, orderId, rawStatus);
+    }
+
+    function _legacyCompatibleStatus(
+        OrderRouter router,
+        uint64 orderId,
+        IOrderRouterAccounting.OrderStatus rawStatus
+    ) private view returns (IOrderRouterAccounting.OrderStatus) {
+        if (rawStatus != IOrderRouterAccounting.OrderStatus.None) {
+            return rawStatus;
+        }
+        OrderV2Types.LifecycleStatus lifecycleStatus = router.lifecycleBook().lifecycleStatus(orderId);
+        if (lifecycleStatus == OrderV2Types.LifecycleStatus.Executed) {
+            return IOrderRouterAccounting.OrderStatus.Executed;
+        }
+        if (lifecycleStatus == OrderV2Types.LifecycleStatus.Failed) {
+            return IOrderRouterAccounting.OrderStatus.Failed;
+        }
+        return rawStatus;
     }
 
     function _packedUint64(

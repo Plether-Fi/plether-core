@@ -20,6 +20,7 @@ interface IOrderRouterLiquidationBatchHost {
         address account,
         uint256 bullPrice,
         uint256 bearPrice,
+        uint256 neutralMarkPrice,
         uint64 publishTime,
         address keeper,
         uint64 riskOffCutoff

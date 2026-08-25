@@ -10,7 +10,6 @@ import {HousePool} from "@plether/perps/HousePool.sol";
 import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
-import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
@@ -79,15 +78,16 @@ contract AuditExecutionPathFindingsFailing_EthRefundFallback is BasePerpTest {
         bases[0] = 1e8;
         bases[1] = 1e8;
 
-        engineLens = new CfdEngineLens(address(engine));
-        pletherOracle =
-            new PletherOracle(address(engine), address(pool), address(mockPyth), feedIds, weights, bases, inversions);
-        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
-        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
-        router = new OrderRouter(
-            address(engine), address(engineLens), address(pool), address(pletherOracle), address(keeperSidecar)
+        router = _deployLegacyOrderRouter(
+            address(engine),
+            address(new CfdEngineLens(address(engine))),
+            address(pool),
+            address(
+                new PletherOracle(
+                    address(engine), address(pool), address(mockPyth), feedIds, weights, bases, inversions
+                )
+            )
         );
-        assertEq(address(router), predictedRouter);
         _syncRouterAdmin();
         engine.setOrderRouter(address(router));
 

@@ -157,7 +157,14 @@ abstract contract OrderExecutionHandler is OrderValidation {
     function _clearRiskOffOrder(
         uint64 orderId
     ) internal {
-        _refundRiskOffOrder(orderId, _riskOffOrderCutoff());
+        OrderRecord storage record = _orderRecord(orderId);
+        if (
+            record.status != IOrderRouterAccounting.OrderStatus.Pending
+                || !_isRiskOffOpen(orderId, record.core.isClose, _riskOffOrderCutoff())
+        ) {
+            revert OrderRouter__OrderNotRiskOff();
+        }
+        _settleRiskOffOrderWithReceipt(orderId, msg.sender);
     }
 
     /// @notice Sends an ETH refund or credits it in the admin contract when the recipient rejects the transfer.
@@ -171,7 +178,9 @@ abstract contract OrderExecutionHandler is OrderValidation {
         if (amount == 0) {
             return;
         }
-        (bool ok,) = payable(to).call{value: amount}("");
+        // Bound recipient code so a gas-burning fallback cannot consume the caller's bookkeeping tail and roll back
+        // already-completed batch items. Contracts that need more gas can claim the deferred balance from the admin.
+        (bool ok,) = payable(to).call{value: amount, gas: 30_000}("");
         if (!ok) {
             OrderRouterAdmin(admin).creditClaimableEth{value: amount}(to, amount);
         }

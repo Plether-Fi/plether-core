@@ -10,26 +10,19 @@ import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdmin
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {PythStructs} from "@plether/shared/interfaces/IPyth.sol";
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
+import {Vm} from "forge-std/Vm.sol";
 
 /// @notice Caller used to prove that the Router's final ETH refund cannot reenter LP settlement.
 contract LpEpochRefundReenterer {
 
     OrderRouter internal immutable ROUTER;
-    IHousePool internal immutable POOL;
 
-    bool public attempted;
-    bool public reentered;
-    bytes4 public revertSelector;
-    bool public directAttempted;
-    bool public directSettled;
-    bytes4 public directRevertSelector;
+    event RefundCallback(bool reentered, bytes4 revertSelector);
 
     constructor(
-        OrderRouter router,
-        IHousePool pool
+        OrderRouter router
     ) {
         ROUTER = router;
-        POOL = pool;
     }
 
     function settle(
@@ -39,30 +32,17 @@ contract LpEpochRefundReenterer {
     }
 
     receive() external payable {
-        attempted = true;
         bytes[] memory updateData = new bytes[](1);
         updateData[0] = "";
         (bool ok, bytes memory revertData) =
             address(ROUTER).call(abi.encodeCall(OrderRouter.settleLpEpoch, (updateData)));
-        reentered = ok;
+        bytes4 revertSelector;
         if (revertData.length >= 4) {
-            bytes4 selector;
             assembly ("memory-safe") {
-                selector := mload(add(revertData, 0x20))
+                revertSelector := mload(add(revertData, 0x20))
             }
-            revertSelector = selector;
         }
-
-        directAttempted = true;
-        (ok, revertData) = address(POOL).call(abi.encodeCall(IHousePool.settleLpEpoch, (0, 0)));
-        directSettled = ok;
-        if (revertData.length >= 4) {
-            bytes4 selector;
-            assembly ("memory-safe") {
-                selector := mload(add(revertData, 0x20))
-            }
-            directRevertSelector = selector;
-        }
+        emit RefundCallback(ok, revertSelector);
     }
 
 }
@@ -156,9 +136,9 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
             "redemption math sidecar must remain below its runtime limit"
         );
         assertLe(
-            address(router).code.length,
+            vm.getDeployedCode("OrderRouter.sol:OrderRouter").length,
             EIP170_RUNTIME_CODE_LIMIT,
-            "atomic LP settlement must keep OrderRouter deployable"
+            "atomic LP settlement must keep production OrderRouter deployable"
         );
     }
 
@@ -886,26 +866,41 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
         _setBasket(100_000_000, 0, block.timestamp);
         baseMockPyth.setFee(1 ether);
 
-        LpEpochRefundReenterer receiver = new LpEpochRefundReenterer(router, IHousePool(address(pool)));
+        LpEpochRefundReenterer receiver = new LpEpochRefundReenterer(router);
         vm.deal(address(this), 2 ether);
+        vm.recordLogs();
         receiver.settle{value: 2 ether}(_emptyUpdateData());
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        bytes32 settlementTopic = keccak256("LpEpochSettled(uint256,uint256,uint256,uint256,uint256,bool,bool,bool)");
+        bytes32 refundTopic = keccak256("RefundCallback(bool,bytes4)");
+        uint256 settlementLogPosition;
+        uint256 refundLogPosition;
+        bool reentered;
+        bytes4 reentryRevertSelector;
+        for (uint256 i = 0; i < logs.length; ++i) {
+            if (logs[i].topics.length == 0) {
+                continue;
+            }
+            if (logs[i].emitter == address(pool) && logs[i].topics[0] == settlementTopic) {
+                settlementLogPosition = i + 1;
+            } else if (logs[i].emitter == address(receiver) && logs[i].topics[0] == refundTopic) {
+                refundLogPosition = i + 1;
+                (reentered, reentryRevertSelector) = abi.decode(logs[i].data, (bool, bytes4));
+            }
+        }
 
         assertEq(juniorVault.claimableDepositRequest(requestId, ALICE), assets);
-        assertTrue(receiver.attempted(), "the final excess-fee refund must reach the caller");
-        assertFalse(receiver.reentered(), "Router transient guard must reject refund reentry");
+        assertGt(settlementLogPosition, 0, "LP settlement event must be present");
+        assertGt(refundLogPosition, settlementLogPosition, "the refund callback must occur after LP settlement");
+        assertFalse(reentered, "Router transient guard must reject refund reentry");
         assertEq(
-            receiver.revertSelector(),
+            reentryRevertSelector,
             bytes4(keccak256("ReentrancyGuardReentrantCall()")),
             "refund callback must fail at the nonreentrant boundary"
         );
-        assertTrue(receiver.directAttempted(), "refund callback must observe the settled HousePool state");
-        assertFalse(receiver.directSettled(), "the already-consumed batch must not settle twice");
-        assertEq(
-            receiver.directRevertSelector(),
-            IHousePool.HousePool__NoLpEpochProgress.selector,
-            "direct callback proves the first settlement consumed all matured work"
-        );
         assertEq(address(receiver).balance, 1 ether, "only excess ETH must be returned");
+        assertEq(routerAdmin.claimableEth(address(receiver)), 0, "the bounded callback must not require deferral");
         assertEq(address(baseMockPyth).balance, 1 ether, "Pyth must receive exactly its quoted fee");
     }
 

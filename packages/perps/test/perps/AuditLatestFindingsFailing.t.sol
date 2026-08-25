@@ -9,12 +9,11 @@ import {HousePool} from "@plether/perps/HousePool.sol";
 import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
-import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
+import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
-import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
 import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 
@@ -83,7 +82,16 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
 
         vm.prank(alice);
         (bool ok,) = address(router)
-            .call(abi.encodeWithSelector(router.commitOrder.selector, CfdTypes.Side.BULL, 0, 500e6, 1e8, false));
+            .call(
+                abi.encodeWithSelector(
+                    bytes4(keccak256("commitOrder(uint8,uint256,uint256,uint256,bool)")),
+                    CfdTypes.Side.BULL,
+                    0,
+                    500e6,
+                    1e8,
+                    false
+                )
+            );
         assertFalse(ok, "Margin-only updates must be rejected at commit time");
     }
 
@@ -142,7 +150,16 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
 
         vm.prank(alice);
         (bool ok,) = address(router)
-            .call(abi.encodeWithSelector(router.commitOrder.selector, CfdTypes.Side.BULL, 20_000e18, 500e6, 0, true));
+            .call(
+                abi.encodeWithSelector(
+                    bytes4(keccak256("commitOrder(uint8,uint256,uint256,uint256,bool)")),
+                    CfdTypes.Side.BULL,
+                    20_000e18,
+                    500e6,
+                    0,
+                    true
+                )
+            );
         assertFalse(ok, "Close orders with positive marginDelta must be rejected");
     }
 
@@ -245,16 +262,16 @@ contract AuditLatestFindingsFailing_MevDrift is BasePerpTest {
         bases.push(1e8);
         bases.push(1e8);
 
-        engineLens = new CfdEngineLens(address(engine));
-        pletherOracle = new PletherOracle(
-            address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
+        router = _deployLegacyOrderRouter(
+            address(engine),
+            address(new CfdEngineLens(address(engine))),
+            address(pool),
+            address(
+                new PletherOracle(
+                    address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
+                )
+            )
         );
-        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
-        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
-        router = new OrderRouter(
-            address(engine), address(engineLens), address(pool), address(pletherOracle), address(keeperSidecar)
-        );
-        assertEq(address(router), predictedRouter);
         engine.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
@@ -265,7 +282,7 @@ contract AuditLatestFindingsFailing_MevDrift is BasePerpTest {
         vm.deal(alice, 10 ether);
     }
 
-    function test_H2_CrossBlockPublishAfterCommitReverts() public {
+    function test_H2_SameBlockPublishAfterCommitReturnsPending() public {
         vm.warp(1000);
 
         vm.prank(alice);
@@ -278,8 +295,11 @@ contract AuditLatestFindingsFailing_MevDrift is BasePerpTest {
         bytes[] memory updateData = new bytes[](1);
         updateData[0] = "";
 
-        vm.expectRevert(IOrderRouterErrors.OrderRouter__MevDetected.selector);
-        router.executeOrder(1, updateData);
+        OrderV2Types.ExecutionResult memory result = router.executeOrder(1, updateData);
+
+        assertEq(uint8(result.status), uint8(OrderV2Types.LifecycleStatus.Pending));
+        assertEq(uint8(result.pendingReason), uint8(OrderV2Types.PendingReason.SameBlock));
+        assertEq(router.nextExecuteId(), 1, "Same-block execution must leave the FIFO head pending");
     }
 
 }

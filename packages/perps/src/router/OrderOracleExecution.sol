@@ -64,49 +64,6 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
         _setOracleConfig(_pletherOracle);
     }
 
-    /// @notice Returns the Pyth contract used by the configured Plether oracle.
-    /// @return Active Pyth integration contract.
-    function pyth() public view returns (IPyth) {
-        return pletherOracle.pyth();
-    }
-
-    /// @notice Returns the order-execution staleness limit from the configured Plether oracle.
-    /// @return Maximum accepted price age in seconds.
-    function orderExecutionStalenessLimit() public view returns (uint256) {
-        return pletherOracle.orderExecutionStalenessLimit();
-    }
-
-    /// @notice Returns the liquidation staleness limit from the configured Plether oracle.
-    /// @return Maximum accepted liquidation-price age in seconds.
-    function liquidationStalenessLimit() public view returns (uint256) {
-        return pletherOracle.liquidationStalenessLimit();
-    }
-
-    /// @notice Returns the max accepted aggregate basket confidence ratio from the configured Plether oracle.
-    /// @return Maximum basket confidence-to-price ratio in basis points.
-    function basketMaxConfidenceRatioBps() public view returns (uint256) {
-        return pletherOracle.basketMaxConfidenceRatioBps();
-    }
-
-    /// @notice Returns the historical order settlement window from the configured Plether oracle.
-    /// @return Maximum seconds after commit in which the historical execution tick may publish.
-    function orderSettlementWindow() public view returns (uint256) {
-        return pletherOracle.orderSettlementWindow();
-    }
-
-    /// @notice Returns max allowed basket component publish-time divergence.
-    /// @return Maximum difference between component publish times in seconds.
-    function maxComponentPublishTimeDivergence() public view returns (uint256) {
-        return pletherOracle.maxComponentPublishTimeDivergence();
-    }
-
-    /// @notice Returns the multiplier used for adverse order pricing outside oracle-frozen voluntary closes
-    ///         and for all liquidation pricing.
-    /// @return Confidence adjustment multiplier in basis points, where 10,000 is 1x.
-    function adverseConfidenceMultiplierBps() public view returns (uint256) {
-        return pletherOracle.adverseConfidenceMultiplierBps();
-    }
-
     /// @notice Resolves a single order's execution snapshot, policy context, fee, and current engine mark.
     /// @dev Requires a usable historical/frozen snapshot and reverts with the router's canonical stale-price error
     ///      otherwise. The oracle receives only the newly required fee; `pythFeeAlreadySpent` protects aggregate `msg.value`.
@@ -290,7 +247,7 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
         if (cache.publishTime > block.timestamp) {
             return false;
         }
-        return uint256(cache.publishTime) <= uint256(commitTime) + orderSettlementWindow();
+        return uint256(cache.publishTime) <= uint256(commitTime) + pletherOracle.orderSettlementWindow();
     }
 
     /// @notice Reverts with the canonical order-execution stale-price error for the current block time.
@@ -299,7 +256,7 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
             IPletherOracle.PriceMode.OrderExecution,
             bytes32(0),
             block.timestamp,
-            orderExecutionStalenessLimit(),
+            pletherOracle.orderExecutionStalenessLimit(),
             block.timestamp
         );
     }

@@ -42,7 +42,7 @@ interface IMarginClearinghouse {
     error MarginClearinghouse__AmountOverflow();
     /// @notice Planned action-reserve consumption does not match the currently spendable reserve after queued bounties.
     error MarginClearinghouse__ActionReserveMismatch();
-    /// @notice A supplied reservation belongs to an account other than the risk-off refund target.
+    /// @notice A supplied reservation belongs to an account other than the expected account.
     error MarginClearinghouse__ReservationAccountMismatch(
         uint64 orderId, address expectedAccount, address actualAccount
     );
@@ -297,6 +297,15 @@ interface IMarginClearinghouse {
         uint64 orderId
     ) external returns (uint256 releasedUsdc);
 
+    /// @notice Releases an order reservation during terminal Router cleanup if it remains active.
+    /// @dev Callable only by the Engine-reported Router. Unknown and terminal ids return zero. This path deliberately
+    ///      does not checkpoint carry, change settlement balance, or move tokens.
+    /// @param orderId Order reservation id to release
+    /// @return releasedUsdc Remaining reservation amount released in USDC, or zero when not active
+    function releaseOrderReservationForTerminalCleanup(
+        uint64 orderId
+    ) external returns (uint256 releasedUsdc);
+
     /// @notice Releases risk-off order margin and refundable bounties back to an account's free settlement.
     /// @dev Callable only by the Engine-reported order router. Unknown and terminal reservations are skipped, but
     ///      every existing supplied reservation must belong to `account`. This path deliberately does not checkpoint
@@ -311,6 +320,16 @@ interface IMarginClearinghouse {
         uint64[] calldata orderIds,
         uint256 refundableBountyUsdc
     ) external returns (uint256 releasedMarginUsdc);
+
+    /// @notice Releases one consumed execution-bounty classification back to its source account.
+    /// @dev Callable only by the Engine-reported Router. This self-executor path deliberately skips carry
+    ///      checkpointing because settlement custody does not change and the bounty returns to its source.
+    /// @param account Account whose reserved bounty becomes free settlement.
+    /// @param executionBountyUsdc Exact bounty classification to release.
+    function releaseReservedExecutionBountyToSource(
+        address account,
+        uint256 executionBountyUsdc
+    ) external;
 
     /// @notice Consumes a specific amount from an order reservation, capped by its remaining balance.
     /// @dev Callable only by the engine or settlement sidecar. Decreases committed-order locked classification and

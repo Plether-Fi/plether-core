@@ -854,22 +854,38 @@ and FIFO does not by itself prove fairness [21-22].
 ### 6.1 Order lifecycle
 
 1. The trader deposits USDC into MarginClearinghouse.
-2. `commitOrder` records side, size, margin, slippage limit, commit time, commit
-   block, and close/open intent.
-3. The router moves open margin into an order-specific reservation and reserves
+2. The trader constructs one typed request with an account-scoped nonzero
+   `clientOrderId`, side, size, margin, nonzero price limit, close/open intent,
+   deadline, permitted execution modes, expected execution-configuration hash,
+   and inclusive financial limits.
+3. `commitOrder` permanently binds `(account, clientOrderId)` to the full intent
+   hash in OrderLifecycleBook. An exact replay returns the original order ID
+   before current-state validation and creates no second side effect; conflicting
+   reuse reverts.
+4. For a fresh valid intent, the router records commit time and block, moves open
+   margin into an order-specific reservation, and reserves
    a keeper bounty from trader value.
-4. The order becomes the global FIFO head in turn.
-5. For live execution, a keeper supplies Pyth updates and native-token oracle
+5. The binding, user-uncancellable order becomes the global FIFO head in turn.
+6. For live execution, a keeper supplies Pyth updates and native-token oracle
    fees.
-6. The router resolves the unique historical update in the configured window
+7. The router resolves the unique historical update in the configured window
    strictly after commit.
-7. Basket components are normalized, confidence is propagated, publish-time
+8. Basket components are normalized, confidence is propagated, publish-time
    dispersion is checked, and the side-adverse execution price is capped at
    \(C\).
-8. Typed policy determines whether the order executes, fails terminally, or
-   remains pending for retry.
-9. Reserved value is consumed, paid, refunded, forfeited, or remains claimable
-   exactly once.
+9. The stateless policy evaluator rebuilds authoritative Engine state, derives
+   protocol meaning through the canonical planner, and checks the resulting
+   economics against the request's pinned modes and bounds.
+10. Exact known planner or policy failures may terminate; timing, close-only,
+    insufficient-gas, mark-ordering, unknown, panic, out-of-gas, empty, or
+    malformed failures leave the FIFO head pending for retry.
+11. Each prepared batch item executes in an independent Router rollback frame,
+    so one retryable item cannot undo an already finalized prefix. Oracle/Pyth
+    preparation remains batch-atomic.
+12. A terminal item settles reserved value exactly once, deletes ephemeral Router
+    state, and then finalizes an authenticated lifecycle receipt. The Book retains
+    the compact outcome and receipt hash permanently while emitting the full
+    receipt preimage for independent reconstruction of what happened.
 
 Pyth's `parsePriceFeedUpdatesUnique` primitive verifies that returned updates are
 the first qualifying feed updates in a specified range [6]. Plether obtains

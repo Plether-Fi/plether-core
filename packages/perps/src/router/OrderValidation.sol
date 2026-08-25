@@ -5,6 +5,8 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
+import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {IOrderRouterV2ExecutionHost} from "@plether/perps/interfaces/IOrderRouterV2ExecutionHost.sol";
 import {OrderFailurePolicyLib} from "@plether/perps/libraries/OrderFailurePolicyLib.sol";
 import {OrderValidationLib} from "@plether/perps/libraries/OrderValidationLib.sol";
 import {OrderBountyAccounting} from "@plether/perps/router/OrderBountyAccounting.sol";
@@ -112,6 +114,37 @@ abstract contract OrderValidation is OrderBountyAccounting {
         uint64 maxOrderId
     ) internal view {
         OrderValidationLib.validateBatchBounds(maxOrderId, nextExecuteId, nextCommitId);
+    }
+
+    /// @notice Settles one cutoff-invalid open through the V2 sidecar and records its canonical receipt.
+    /// @dev The external Router self-call supplies an independent rollback boundary while preserving the original
+    ///      external cleaner or liquidation keeper as the receipt executor.
+    function _settleRiskOffOrderWithReceipt(
+        uint64 orderId,
+        address executor
+    ) internal returns (OrderV2Types.ExecutionResult memory result) {
+        uint256 neutralMarkPrice = engine.lastMarkPrice();
+        uint256 capPrice = engine.CAP_PRICE();
+        if (neutralMarkPrice > capPrice) {
+            neutralMarkPrice = capPrice;
+        }
+        IOrderRouterV2ExecutionHost.ItemRequest memory request;
+        request.orderId = orderId;
+        request.action = IOrderRouterV2ExecutionHost.ItemAction.RiskOff;
+        request.executor = executor;
+        request.observedConfigHash = lifecycleBook.currentExecutionConfigHash();
+        request.neutralMarkPrice = neutralMarkPrice;
+        request.poolDepthUsdc = housePool.totalAssets();
+        request.bountyAccountingPrice = neutralMarkPrice;
+        request.bountyAccountingPublishTime = engine.lastMarkTime();
+        return IOrderRouterV2ExecutionHost(address(this)).executeV2OrderItemFromSidecar(request);
+    }
+
+    /// @notice Delegates canonical receipt construction for accounting already settled by liquidation.
+    function _recordSettledTerminalReceipt(
+        IOrderRouterV2ExecutionHost.SettledTerminalInput memory input
+    ) internal returns (OrderV2Types.ExecutionResult memory result) {
+        return IOrderRouterV2ExecutionHost(address(this)).recordSettledTerminal(input);
     }
 
 }

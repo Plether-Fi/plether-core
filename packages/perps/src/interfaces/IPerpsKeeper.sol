@@ -1,40 +1,34 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+
 /// @notice Keeper-facing order, liquidation, and LP epoch settlement surface for the simplified product API.
 interface IPerpsKeeper {
 
     /// @notice Permissionlessly executes an eligible delayed order using router-validated oracle data.
-    /// @dev Before oracle work, refunds cutoff-invalid open heads and then prunes expired heads below or equal to the
-    ///      requested bound. Risk-off refunds return all remaining margin and bounty to the trader, pay no caller reward,
-    ///      and are capped at 64 per call; cleanup progress may return without executing the target. The target must
-    ///      otherwise be the global head. Expiry, slippage, and engine failures other than
-    ///      `CfdEngine__MarkPriceOutOfOrder` terminally fail an order and pay its reserved USDC bounty to the caller; that
-    ///      mark-ordering error is rethrown and leaves the order pending. MEV timing, close-only, and gas gates can also
-    ///      leave it pending. The router refunds aggregate unused ETH; a failed refund becomes an admin-held claim.
+    /// @dev Risk-off, expiry, and pinned-config mismatch are checked before oracle work. Slippage and exact-shape typed
+    ///      planner/policy rejections terminally fail with canonical receipts. Close-only, MEV, gas, mark ordering, and
+    ///      unknown, panic, empty, or malformed failures leave the order pending. The return value is machine-readable.
     /// @param orderId Queue-head id to execute, or a later committed id used as the terminal-head cleanup bound
     /// @param pythUpdateData Pyth price update blobs; `msg.value` must cover all Pyth fees used by the call
     function executeOrder(
         uint64 orderId,
         bytes[] calldata pythUpdateData
-    ) external payable;
+    ) external payable returns (OrderV2Types.ExecutionResult memory result);
 
     /// @notice Permissionlessly processes consecutive eligible FIFO orders through an inclusive committed id bound.
-    /// @dev Before oracle work, refunds cutoff-invalid opens before expiry. It processes at most 64 risk-off refunds;
-    ///      after the 64th it may continue with a non-risk-off head, while a 65th eligible refund stops the call. Each
-    ///      refund returns all remaining margin and bounty to the trader and pays no caller reward. The batch otherwise
-    ///      uses post-commit historical Pyth baskets outside frozen-oracle mode and can reuse a proven compatible tick.
-    ///      Ordinary terminal failures are cleaned up and pay bounties; the batch stops without consuming the blocked
-    ///      order at a close-only open, MEV boundary, insufficient gas, either cleanup cap, or unavailable historical
-    ///      data after progress. `CfdEngine__MarkPriceOutOfOrder` reverts the batch nonterminally. The router refunds
-    ///      aggregate unused ETH; a failed refund becomes an admin-held deferred claim.
+    /// @dev Each prepared item executes in an independent Router rollback frame. Retryable item/receipt failures stop
+    ///      without undoing prior progress; Oracle/Pyth preparation remains batch-atomic outside that frame. Cleanup
+    ///      caps report `CleanupLimit`; terminal outcomes are finalized in the lifecycle book. The return value reports
+    ///      the next live order, terminal count, and exact stop reason.
     /// @param maxOrderId Last committed order id the batch may process; must be at or after the current head and below
     ///        the next unassigned commit id
     /// @param pythUpdateData Pyth price update blobs; `msg.value` must cover cumulative Pyth fees used by the batch
     function executeOrderBatch(
         uint64 maxOrderId,
         bytes[] calldata pythUpdateData
-    ) external payable;
+    ) external payable returns (OrderV2Types.BatchResult memory result);
 
     /// @notice Permissionlessly refunds one pending open invalidated by the persistent risk-off cutoff.
     /// @dev This oracle-independent path accepts no ETH, may remove a non-head order, refunds all remaining margin and

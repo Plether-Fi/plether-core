@@ -9,7 +9,6 @@ import {HousePool} from "@plether/perps/HousePool.sol";
 import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
-import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
@@ -86,16 +85,16 @@ contract AuditV3_C01_FIFODeadlockTest is BasePerpTest {
         bases.push(1e8);
         bases.push(1e8);
 
-        engineLens = new CfdEngineLens(address(engine));
-        pletherOracle = new PletherOracle(
-            address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
+        router = _deployLegacyOrderRouter(
+            address(engine),
+            address(new CfdEngineLens(address(engine))),
+            address(pool),
+            address(
+                new PletherOracle(
+                    address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
+                )
+            )
         );
-        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
-        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
-        router = new OrderRouter(
-            address(engine), address(engineLens), address(pool), address(pletherOracle), address(keeperSidecar)
-        );
-        assertEq(address(router), predictedRouter);
         engine.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
@@ -323,24 +322,25 @@ contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
 
     function test_H01_KeeperReceivesFullFeeOnExpiredOrder() public {
         // Set maxOrderAge so orders can expire
-        IOrderRouterAdminHost.RouterConfig memory config;
-        config.maxOrderAge = 60;
-        config.orderExecutionStalenessLimit = router.orderExecutionStalenessLimit();
-        config.liquidationStalenessLimit = router.liquidationStalenessLimit();
-        config.basketMaxConfidenceRatioBps = router.basketMaxConfidenceRatioBps();
-        config.orderSettlementWindow = router.orderSettlementWindow();
-        config.maxComponentPublishTimeDivergence = router.maxComponentPublishTimeDivergence();
-        config.adverseConfidenceMultiplierBps = router.adverseConfidenceMultiplierBps();
-        config.minOpenNotionalUsdc = router.minOpenNotionalUsdc();
-        config.openOrderExecutionBountyBps = router.openOrderExecutionBountyBps();
-        config.minOpenOrderExecutionBountyUsdc = router.minOpenOrderExecutionBountyUsdc();
-        config.maxOpenOrderExecutionBountyUsdc = router.maxOpenOrderExecutionBountyUsdc();
-        config.closeOrderExecutionBountyUsdc = router.closeOrderExecutionBountyUsdc();
-        config.positionProtectionCommitsEnabled = router.positionProtectionCommitsEnabled();
-        config.positionProtectionTriggerBountyUsdc = router.positionProtectionTriggerBountyUsdc();
-        config.maxPendingOrders = router.maxPendingOrders();
-        config.minEngineGas = router.minEngineGas();
-        config.maxPruneOrdersPerCall = router.maxPruneOrdersPerCall();
+        IOrderRouterAdminHost.RouterConfig memory config = IOrderRouterAdminHost.RouterConfig({
+            maxOrderAge: 60,
+            orderExecutionStalenessLimit: router.pletherOracle().orderExecutionStalenessLimit(),
+            liquidationStalenessLimit: router.pletherOracle().liquidationStalenessLimit(),
+            basketMaxConfidenceRatioBps: router.pletherOracle().basketMaxConfidenceRatioBps(),
+            orderSettlementWindow: router.pletherOracle().orderSettlementWindow(),
+            maxComponentPublishTimeDivergence: router.pletherOracle().maxComponentPublishTimeDivergence(),
+            adverseConfidenceMultiplierBps: router.pletherOracle().adverseConfidenceMultiplierBps(),
+            minOpenNotionalUsdc: router.minOpenNotionalUsdc(),
+            openOrderExecutionBountyBps: router.openOrderExecutionBountyBps(),
+            minOpenOrderExecutionBountyUsdc: router.minOpenOrderExecutionBountyUsdc(),
+            maxOpenOrderExecutionBountyUsdc: router.maxOpenOrderExecutionBountyUsdc(),
+            closeOrderExecutionBountyUsdc: router.closeOrderExecutionBountyUsdc(),
+            positionProtectionCommitsEnabled: router.positionProtectionCommitsEnabled(),
+            positionProtectionTriggerBountyUsdc: router.positionProtectionTriggerBountyUsdc(),
+            maxPendingOrders: router.maxPendingOrders(),
+            minEngineGas: router.minEngineGas(),
+            maxPruneOrdersPerCall: router.maxPruneOrdersPerCall()
+        });
         routerAdmin.proposeRouterConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
         routerAdmin.finalizeRouterConfig();
@@ -368,24 +368,25 @@ contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
     function test_H01_FinalizeExecutionSuccessParamIsDeadCode() public {
         // Demonstrate that both successful and failed processing pay the keeper
         // from the order's reserved USDC fee.
-        IOrderRouterAdminHost.RouterConfig memory config;
-        config.maxOrderAge = 60;
-        config.orderExecutionStalenessLimit = router.orderExecutionStalenessLimit();
-        config.liquidationStalenessLimit = router.liquidationStalenessLimit();
-        config.basketMaxConfidenceRatioBps = router.basketMaxConfidenceRatioBps();
-        config.orderSettlementWindow = router.orderSettlementWindow();
-        config.maxComponentPublishTimeDivergence = router.maxComponentPublishTimeDivergence();
-        config.adverseConfidenceMultiplierBps = router.adverseConfidenceMultiplierBps();
-        config.minOpenNotionalUsdc = router.minOpenNotionalUsdc();
-        config.openOrderExecutionBountyBps = router.openOrderExecutionBountyBps();
-        config.minOpenOrderExecutionBountyUsdc = router.minOpenOrderExecutionBountyUsdc();
-        config.maxOpenOrderExecutionBountyUsdc = router.maxOpenOrderExecutionBountyUsdc();
-        config.closeOrderExecutionBountyUsdc = router.closeOrderExecutionBountyUsdc();
-        config.positionProtectionCommitsEnabled = router.positionProtectionCommitsEnabled();
-        config.positionProtectionTriggerBountyUsdc = router.positionProtectionTriggerBountyUsdc();
-        config.maxPendingOrders = router.maxPendingOrders();
-        config.minEngineGas = router.minEngineGas();
-        config.maxPruneOrdersPerCall = router.maxPruneOrdersPerCall();
+        IOrderRouterAdminHost.RouterConfig memory config = IOrderRouterAdminHost.RouterConfig({
+            maxOrderAge: 60,
+            orderExecutionStalenessLimit: router.pletherOracle().orderExecutionStalenessLimit(),
+            liquidationStalenessLimit: router.pletherOracle().liquidationStalenessLimit(),
+            basketMaxConfidenceRatioBps: router.pletherOracle().basketMaxConfidenceRatioBps(),
+            orderSettlementWindow: router.pletherOracle().orderSettlementWindow(),
+            maxComponentPublishTimeDivergence: router.pletherOracle().maxComponentPublishTimeDivergence(),
+            adverseConfidenceMultiplierBps: router.pletherOracle().adverseConfidenceMultiplierBps(),
+            minOpenNotionalUsdc: router.minOpenNotionalUsdc(),
+            openOrderExecutionBountyBps: router.openOrderExecutionBountyBps(),
+            minOpenOrderExecutionBountyUsdc: router.minOpenOrderExecutionBountyUsdc(),
+            maxOpenOrderExecutionBountyUsdc: router.maxOpenOrderExecutionBountyUsdc(),
+            closeOrderExecutionBountyUsdc: router.closeOrderExecutionBountyUsdc(),
+            positionProtectionCommitsEnabled: router.positionProtectionCommitsEnabled(),
+            positionProtectionTriggerBountyUsdc: router.positionProtectionTriggerBountyUsdc(),
+            maxPendingOrders: router.maxPendingOrders(),
+            minEngineGas: router.minEngineGas(),
+            maxPruneOrdersPerCall: router.maxPruneOrdersPerCall()
+        });
         routerAdmin.proposeRouterConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
         routerAdmin.finalizeRouterConfig();

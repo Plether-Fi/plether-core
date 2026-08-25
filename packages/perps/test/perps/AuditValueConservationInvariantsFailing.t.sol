@@ -40,8 +40,17 @@ contract AuditValueConservationInvariant_FullCloseBounty is BasePerpTest {
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeper);
 
         vm.prank(trader);
-        (bool committed,) =
-            address(router).call(abi.encodeCall(router.commitOrder, (CfdTypes.Side.BULL, 100_000e18, 0, 1.95e8, true)));
+        (bool committed,) = address(router)
+            .call(
+                abi.encodeWithSelector(
+                    bytes4(keccak256("commitOrder(uint8,uint256,uint256,uint256,bool)")),
+                    CfdTypes.Side.BULL,
+                    100_000e18,
+                    0,
+                    1.95e8,
+                    true
+                )
+            );
         if (!committed) {
             return;
         }

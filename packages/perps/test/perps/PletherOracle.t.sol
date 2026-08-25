@@ -97,6 +97,35 @@ contract PletherOracleVaultMock {
 
 }
 
+/// @dev Consumes every gas unit offered to the immediate refund callback until explicitly configured to accept ETH.
+contract GasBurningOracleRefundRecipient {
+
+    bool internal burnRefundGas = true;
+    uint256 public receivedEth;
+
+    receive() external payable {
+        if (burnRefundGas) {
+            assembly ("memory-safe") {
+                for {} 1 {} { pop(gas()) }
+            }
+        }
+        receivedEth += msg.value;
+    }
+
+    function setBurnRefundGas(
+        bool burnRefundGas_
+    ) external {
+        burnRefundGas = burnRefundGas_;
+    }
+
+    function claim(
+        IPletherOracle oracle
+    ) external {
+        oracle.claimEthRefund();
+    }
+
+}
+
 contract PletherOracleTest is Test {
 
     bytes32 internal constant FEED_A = bytes32(uint256(1));
@@ -148,6 +177,34 @@ contract PletherOracleTest is Test {
         assertEq(snapshot.updateFee, 0.1 ether, "fee snapshot");
         assertEq(snapshot.maxStaleness, 60, "mode staleness");
         assertEq(balanceBefore - address(this).balance, 0.1 ether, "only Pyth fee retained");
+    }
+
+    function test_UpdatePrice_GasBurningRefundRecipientAccruesAndClaimsDeferredRefund() public {
+        vm.warp(1000);
+        vm.deal(address(this), 1 ether);
+        pyth.setFee(0.1 ether);
+        _setBothPrices(100_000_000, 990);
+
+        GasBurningOracleRefundRecipient recipient = new GasBurningOracleRefundRecipient();
+        uint256 refund = 0.15 ether;
+
+        IPletherOracle.PriceSnapshot memory snapshot = oracle.updatePrice{value: 0.1 ether + refund, gas: 1_000_000}(
+            address(recipient), _pythUpdateData(), IPletherOracle.PriceMode.OrderExecution
+        );
+
+        assertEq(snapshot.updateFee, 0.1 ether, "price update should still complete after the capped callback fails");
+        assertEq(address(recipient).balance, 0, "failed immediate refund must not transfer ETH");
+        assertEq(recipient.receivedEth(), 0, "failed callback state must roll back");
+        assertEq(oracle.claimableEth(address(recipient)), refund, "the full failed refund must become claimable");
+        assertEq(address(oracle).balance, refund, "the deferred claim must remain fully funded");
+
+        recipient.setBurnRefundGas(false);
+        recipient.claim(oracle);
+
+        assertEq(oracle.claimableEth(address(recipient)), 0, "a successful claim must clear its accounting");
+        assertEq(recipient.receivedEth(), refund, "the recipient must receive the complete deferred refund");
+        assertEq(address(recipient).balance, refund, "claimed ETH balance");
+        assertEq(address(oracle).balance, 0, "the oracle must not retain claimed ETH");
     }
 
     function test_GetLatestPrice_IsViewOnlyAndUsesCurrentStoredPythPrice() public {

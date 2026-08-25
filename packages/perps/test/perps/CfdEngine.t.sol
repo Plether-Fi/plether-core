@@ -2938,10 +2938,9 @@ contract CfdEngineTest is BasePerpTest {
         assertLt(preview.remainingSize, sizeBefore, "Preview should reduce the live position");
         assertLe(preview.remainingMargin, marginBefore, "Partial loss must not increase the surviving PnL pledge");
 
-        vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BEAR, 100_000 * 1e18, 0, 0, true);
-        bytes[] memory priceData = _mockPythUpdateData(0.8e8);
-        router.executeOrder(1, priceData);
+        // This is Engine preview/apply parity. A V2 Router order intentionally rejects the same partial close at
+        // the mandatory nonnegative post-position-equity boundary before it can reach Engine apply.
+        _close(account, CfdTypes.Side.BEAR, 100_000 * 1e18, 0.8e8);
 
         (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(account);
         assertEq(sizeAfter, preview.remainingSize, "Live partial writeoff should match previewed remaining size");
@@ -5922,12 +5921,12 @@ contract CfdEngineAuditTest is BasePerpTest {
 
         IOrderRouterAdminHost.RouterConfig memory config;
         config.maxOrderAge = router.maxOrderAge();
-        config.orderExecutionStalenessLimit = router.orderExecutionStalenessLimit();
-        config.liquidationStalenessLimit = router.liquidationStalenessLimit();
-        config.basketMaxConfidenceRatioBps = router.basketMaxConfidenceRatioBps();
-        config.orderSettlementWindow = router.orderSettlementWindow();
-        config.maxComponentPublishTimeDivergence = router.maxComponentPublishTimeDivergence();
-        config.adverseConfidenceMultiplierBps = router.adverseConfidenceMultiplierBps();
+        config.orderExecutionStalenessLimit = router.pletherOracle().orderExecutionStalenessLimit();
+        config.liquidationStalenessLimit = router.pletherOracle().liquidationStalenessLimit();
+        config.basketMaxConfidenceRatioBps = router.pletherOracle().basketMaxConfidenceRatioBps();
+        config.orderSettlementWindow = router.pletherOracle().orderSettlementWindow();
+        config.maxComponentPublishTimeDivergence = router.pletherOracle().maxComponentPublishTimeDivergence();
+        config.adverseConfidenceMultiplierBps = router.pletherOracle().adverseConfidenceMultiplierBps();
         config.minOpenNotionalUsdc = router.minOpenNotionalUsdc();
         config.openOrderExecutionBountyBps = router.openOrderExecutionBountyBps();
         config.minOpenOrderExecutionBountyUsdc = router.minOpenOrderExecutionBountyUsdc();
@@ -5979,18 +5978,18 @@ contract CfdEngineAuditTest is BasePerpTest {
         assertEq(openSize, 200_000 * 1e18);
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000 * 1e18, 0.8e8);
-        assertTrue(preview.valid, "Collateral-capped V2 partial close should remain executable");
+        assertTrue(preview.valid, "Engine partial-close plan should preserve its collateral-capped write-off path");
         assertEq(preview.remainingSize, 100_000 * 1e18, "Preview must retain exactly half the position");
         assertGt(preview.remainingMargin, 0, "Preview must preserve pledge for the surviving position");
         assertLt(preview.remainingMargin, openMargin, "Partial close must release only the closed portion's pledge");
-        assertEq(preview.badDebtUsdc, 0, "Price loss above the collectible cap must remain a V2 write-off");
+        assertEq(preview.badDebtUsdc, 0, "Price loss above the collectible cap must remain an Engine write-off");
 
-        vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BEAR, 100_000 * 1e18, 0, 0, true);
         bytes[] memory priceData = _mockPythUpdateData(0.8e8);
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
-        router.executeOrder(2, priceData);
+        // Preserve the original Engine C-01 regression independently of V2 policy. The V2 Router correctly
+        // terminalizes this underwater partial close because its surviving position has negative execution equity.
+        _close(account, CfdTypes.Side.BEAR, 100_000 * 1e18, 0.8e8);
 
         (uint256 remainingSize, uint256 remainingMargin,,,,,) = engine.positions(account);
         assertEq(remainingSize, preview.remainingSize, "Live partial close size must match the preview");

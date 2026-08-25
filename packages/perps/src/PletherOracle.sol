@@ -21,6 +21,9 @@ import {DecimalConstants} from "@plether/shared/libraries/DecimalConstants.sol";
 /// @custom:security-contact contact@plether.com
 contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
 
+    /// @dev Keeps an untrusted refund recipient from consuming the Oracle's post-call accounting gas.
+    uint256 internal constant ETH_REFUND_GAS = 30_000;
+
     /// @notice Internal aggregate of a validated set of basket component prices.
     /// @param price Weighted basket price in 8-decimal units
     /// @param confidence Sum of weighted component confidence contributions in 8-decimal price units
@@ -802,7 +805,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         if (refund == 0) {
             return;
         }
-        (bool ok,) = payable(refundRecipient).call{value: refund}("");
+        (bool ok,) = payable(refundRecipient).call{value: refund, gas: ETH_REFUND_GAS}("");
         if (ok) {
             return;
         }
@@ -817,7 +820,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         if (amount == 0) {
             return;
         }
-        (bool ok,) = refundRecipient.call{value: amount}("");
+        (bool ok,) = refundRecipient.call{value: amount, gas: ETH_REFUND_GAS}("");
         if (ok) {
             return;
         }

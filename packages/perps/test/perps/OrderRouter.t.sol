@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {LegacyOrderRouterHarness} from "../utils/LegacyOrderRouterHarness.sol";
 import {OrderRouterDebugLens} from "../utils/OrderRouterDebugLens.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
@@ -12,13 +13,17 @@ import {CfdEngineLens} from "@plether/perps/CfdEngineLens.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdEnginePlanner} from "@plether/perps/CfdEnginePlanner.sol";
 import {CfdEngineSettlementSidecar} from "@plether/perps/CfdEngineSettlementSidecar.sol";
+import {CfdOrderPolicyEvaluator} from "@plether/perps/CfdOrderPolicyEvaluator.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
+import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
+import {OrderRouterV2ExecutionSidecar} from "@plether/perps/OrderRouterV2ExecutionSidecar.sol";
+import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
@@ -244,9 +249,16 @@ contract OrderRouterTest is BasePerpTest {
             "keeper should receive the reserved execution bounty as clearinghouse credit after terminal failure"
         );
         assertEq(
-            uint256(_orderRecord(1).status),
-            uint256(IOrderRouterAccounting.OrderStatus.Failed),
-            "increase without action-cost backing should finalize as failed"
+            uint256(OrderRouterDebugLens.loadRawOrderRecord(vm, router, 1).status),
+            uint256(IOrderRouterAccounting.OrderStatus.None),
+            "terminal order should be deleted from Router storage"
+        );
+        OrderV2Types.CompactOutcome memory outcome = router.lifecycleBook().outcome(1);
+        assertEq(uint8(outcome.status), uint8(OrderV2Types.LifecycleStatus.Failed));
+        assertEq(
+            uint8(outcome.reason),
+            uint8(OrderV2Types.TerminalReason.PlannerRejected),
+            "increase without action-cost backing should finalize as a typed planner rejection"
         );
     }
 
@@ -469,7 +481,7 @@ contract OrderRouterTest is BasePerpTest {
         assertTrue(record.inMarginQueue, "Positive-margin pending order should advertise margin-queue membership");
     }
 
-    function test_OrderRecord_PreservesExecutedLifecycle() public {
+    function test_OrderRecord_DeletesExecutedStateAndBookPreservesLifecycle() public {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
@@ -477,9 +489,12 @@ contract OrderRouterTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        OrderRouter.OrderRecord memory record = _orderRecord(1);
-        assertEq(uint256(record.status), uint256(IOrderRouterAccounting.OrderStatus.Executed));
-        assertEq(record.core.orderId, 1, "Terminal record should keep immutable order metadata");
+        OrderRouter.OrderRecord memory record = OrderRouterDebugLens.loadRawOrderRecord(vm, router, 1);
+        assertEq(uint256(record.status), uint256(IOrderRouterAccounting.OrderStatus.None));
+        assertEq(record.core.orderId, 0, "Terminal Router record should be fully deleted");
+        OrderV2Types.CompactOutcome memory outcome = router.lifecycleBook().outcome(1);
+        assertEq(uint8(outcome.status), uint8(OrderV2Types.LifecycleStatus.Executed));
+        assertEq(uint8(outcome.reason), uint8(OrderV2Types.TerminalReason.Executed));
         assertEq(_remainingCommittedMargin(1), 0, "Executed order should clear committed margin reservation");
         assertEq(record.executionBountyUsdc, 0, "Executed order should clear execution bounty reservation");
         assertFalse(record.inMarginQueue, "Executed order should not remain linked in the margin queue");
@@ -1495,12 +1510,7 @@ contract OrderRouterPythTest is BasePerpTest {
         pletherOracle = new PletherOracle(
             address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
         );
-        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
-        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
-        router = new OrderRouter(
-            address(engine), address(engineLens), address(pool), address(pletherOracle), address(keeperSidecar)
-        );
-        assertEq(address(router), predictedRouter);
+        router = _deployLegacyOrderRouter(address(engine), address(engineLens), address(pool), address(pletherOracle));
         _syncRouterAdmin();
         engine.setOrderRouter(address(router));
 
@@ -1585,7 +1595,7 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(engine.lastMarkTime(), 0, "Future oracle publication must not update the cached mark");
     }
 
-    function test_SameBlockExecution_Reverts() public {
+    function test_SameBlockExecution_ReturnsPending() public {
         vm.warp(1000);
 
         vm.prank(alice);
@@ -1595,9 +1605,10 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(1050);
 
         bytes[] memory empty = _pythUpdateData();
-        vm.expectRevert(IOrderRouterErrors.OrderRouter__MevDetected.selector);
-        router.executeOrder(1, empty);
+        OrderV2Types.ExecutionResult memory result = router.executeOrder(1, empty);
 
+        assertEq(uint8(result.status), uint8(OrderV2Types.LifecycleStatus.Pending));
+        assertEq(uint8(result.pendingReason), uint8(OrderV2Types.PendingReason.SameBlock));
         assertEq(router.nextExecuteId(), 1, "Order stays in queue when executed in same block");
     }
 
@@ -1706,7 +1717,7 @@ contract OrderRouterPythTest is BasePerpTest {
         routerAdmin.proposeRouterConfig(config);
         vm.warp(1000 + 48 hours + 1);
         routerAdmin.finalizeRouterConfig();
-        assertEq(router.basketMaxConfidenceRatioBps(), 100, "timelocked basket confidence limit");
+        assertEq(router.pletherOracle().basketMaxConfidenceRatioBps(), 100, "timelocked basket confidence limit");
 
         mockPyth.setAllPrices(feedIds, int64(100_000_000), uint64(500_000), int32(-8), 1006);
 
@@ -1857,7 +1868,7 @@ contract OrderRouterPythTest is BasePerpTest {
         address eveAccount = eve;
         _fundTrader(eve, 1000e6);
 
-        vm.warp(block.timestamp + router.orderExecutionStalenessLimit() + 1);
+        vm.warp(block.timestamp + router.pletherOracle().orderExecutionStalenessLimit() + 1);
 
         vm.prank(eve);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 100e6, 1e8, false);
@@ -2093,7 +2104,8 @@ contract OrderRouterPythTest is BasePerpTest {
         _forcePnlPledgeForMarginDrain(aliceAccount, 1e6);
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
-        uint64 historicalPublishTime = uint64(uint256(pending.commitTime) + router.orderSettlementWindow());
+        uint64 historicalPublishTime =
+            uint64(uint256(pending.commitTime) + router.pletherOracle().orderSettlementWindow());
         uint64 staleMarkTimeBefore = engine.lastMarkTime();
         mockPyth.setAllUniquePrices(
             feedIds, int64(100_000_000), 0, int32(-8), historicalPublishTime, pending.commitTime
@@ -2157,7 +2169,8 @@ contract OrderRouterPythTest is BasePerpTest {
         _forcePnlPledgeForMarginDrain(aliceAccount, 1e6);
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
-        uint64 historicalPublishTime = uint64(uint256(pending.commitTime) + router.orderSettlementWindow());
+        uint64 historicalPublishTime =
+            uint64(uint256(pending.commitTime) + router.pletherOracle().orderSettlementWindow());
         uint64 staleMarkTimeBefore = engine.lastMarkTime();
         mockPyth.setAllUniquePrices(
             feedIds, int64(100_000_000), 0, int32(-8), historicalPublishTime, pending.commitTime
@@ -2262,7 +2275,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(block.timestamp + 48 hours + 1);
         routerAdmin.finalizeOracleConfig();
 
-        assertEq(address(router.pyth()), address(newPyth), "Pyth endpoint should rotate after timelock");
+        assertEq(address(router.pletherOracle().pyth()), address(newPyth), "Pyth endpoint should rotate after timelock");
         PletherOracle rotatedOracle = PletherOracle(address(router.pletherOracle()));
         assertEq(address(rotatedOracle), address(newOracle), "Oracle endpoint should rotate after timelock");
         assertEq(rotatedOracle.pythFeedIds(0), newFeedIds[0], "First feed id should rotate");
@@ -2338,7 +2351,8 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
         (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(closeOrderId);
-        uint64 historicalPublishTime = uint64(uint256(pending.commitTime) + router.orderSettlementWindow());
+        uint64 historicalPublishTime =
+            uint64(uint256(pending.commitTime) + router.pletherOracle().orderSettlementWindow());
 
         _close(aliceAccount, CfdTypes.Side.BULL, 10_000 * 1e18, 1e8);
 
@@ -3053,7 +3067,7 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(size, 10_000 * 1e18, "Only the strictly post-commit order should execute");
     }
 
-    function test_BatchExecution_StalePrice_Reverts() public {
+    function test_BatchExecution_StalePrice_ReturnsUnavailableAndLeavesPending() public {
         vm.warp(1000);
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 900);
 
@@ -3062,9 +3076,12 @@ contract OrderRouterPythTest is BasePerpTest {
 
         vm.warp(1000);
         bytes[] memory empty = _pythUpdateData();
-        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         vm.roll(block.number + 1);
-        router.executeOrderBatch(1, empty);
+        OrderV2Types.BatchResult memory result = router.executeOrderBatch(1, empty);
+
+        assertEq(result.nextOrderId, 1);
+        assertEq(uint8(result.stopReason), uint8(OrderV2Types.PendingReason.HistoricalPriceUnavailable));
+        assertEq(router.nextExecuteId(), 1, "Stale batch price must leave the FIFO head pending");
     }
 
     function test_BasketMath_WeightedAverage() public {
@@ -3099,14 +3116,7 @@ contract OrderRouterPythTest is BasePerpTest {
         b[0] = 1e8;
         b[1] = 1e8;
 
-        PletherOracle testOracle =
-            new PletherOracle(address(1), address(1), address(mockPyth), ids, w, b, new bool[](2));
-        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
-        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
-        BasketPriceHarness harness = new BasketPriceHarness(
-            address(mockPyth), ids, w, b, new bool[](2), address(testOracle), address(keeperSidecar)
-        );
-        assertEq(address(harness), predictedRouter);
+        BasketPriceHarness harness = new BasketPriceHarness(address(mockPyth), ids, w, b, new bool[](2));
 
         mockPyth.setPrice(FEED_A, int64(120_000_000), int32(-8), 1001);
         mockPyth.setPrice(FEED_B, int64(80_000_000), int32(-8), 1001);
@@ -3135,7 +3145,7 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(router.nextExecuteId(), 1, "Weakest-link publish time should still enforce post-commit settlement");
     }
 
-    function test_WeakestLink_Staleness() public {
+    function test_WeakestLink_StalenessReturnsUnavailableAndLeavesPending() public {
         vm.warp(1000);
 
         mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1001);
@@ -3146,9 +3156,12 @@ contract OrderRouterPythTest is BasePerpTest {
 
         vm.warp(1001);
         bytes[] memory empty = _pythUpdateData();
-        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         vm.roll(block.number + 1);
-        router.executeOrderBatch(1, empty);
+        OrderV2Types.BatchResult memory result = router.executeOrderBatch(1, empty);
+
+        assertEq(result.nextOrderId, 1);
+        assertEq(uint8(result.stopReason), uint8(OrderV2Types.PendingReason.HistoricalPriceUnavailable));
+        assertEq(router.nextExecuteId(), 1, "Weakest-link staleness must leave the FIFO head pending");
     }
 
     function test_BasketPrice_RevertsWhenFeedPublishTimesDivergeTooFar() public {
@@ -3157,14 +3170,7 @@ contract OrderRouterPythTest is BasePerpTest {
         mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1000);
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 930);
 
-        PletherOracle testOracle =
-            new PletherOracle(address(1), address(1), address(mockPyth), feedIds, weights, bases, new bool[](2));
-        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
-        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
-        BasketPriceHarness harness = new BasketPriceHarness(
-            address(mockPyth), feedIds, weights, bases, new bool[](2), address(testOracle), address(keeperSidecar)
-        );
-        assertEq(address(harness), predictedRouter);
+        BasketPriceHarness harness = new BasketPriceHarness(address(mockPyth), feedIds, weights, bases, new bool[](2));
         vm.expectPartialRevert(IPletherOracle.PletherOracle__PublishTimeDivergence.selector);
         harness.computeBasketPrice(3 days, 60);
     }
@@ -3277,12 +3283,7 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
         pletherOracle = new PletherOracle(
             address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
         );
-        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
-        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
-        router = new OrderRouter(
-            address(engine), address(engineLens), address(pool), address(pletherOracle), address(keeperSidecar)
-        );
-        assertEq(address(router), predictedRouter);
+        router = _deployLegacyOrderRouter(address(engine), address(engineLens), address(pool), address(pletherOracle));
         _syncRouterAdmin();
         engine.setOrderRouter(address(router));
 
@@ -3424,7 +3425,7 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
 
 }
 
-contract BasketPriceHarness is OrderRouter {
+contract BasketPriceHarness {
 
     IPyth internal localPyth;
     bytes32[] internal localPythFeedIds;
@@ -3437,10 +3438,16 @@ contract BasketPriceHarness is OrderRouter {
         bytes32[] memory _feedIds,
         uint256[] memory _quantities,
         uint256[] memory _basePrices,
-        bool[] memory _inversions,
-        address _pletherOracle,
-        address _keeperSidecar
-    ) OrderRouter(address(1), address(1), address(1), _pletherOracle, _keeperSidecar) {
+        bool[] memory _inversions
+    ) {
+        if (
+            _feedIds.length == 0 || _feedIds.length != _quantities.length || _feedIds.length != _basePrices.length
+                || _feedIds.length != _inversions.length
+        ) {
+            revert IPletherOracle.PletherOracle__ArrayLengthMismatch(
+                _feedIds.length, _quantities.length, _basePrices.length, _inversions.length
+            );
+        }
         localPyth = IPyth(_pyth);
         localPythFeedIds = _feedIds;
         localQuantities = _quantities;
@@ -3526,12 +3533,7 @@ contract BasketPriceHarness is OrderRouter {
 
 }
 
-contract NormalizePythHarness is OrderRouter {
-
-    constructor(
-        address _pletherOracle,
-        address _keeperSidecar
-    ) OrderRouter(address(1), address(1), address(1), _pletherOracle, _keeperSidecar) {}
+contract NormalizePythHarness {
 
     function normalizePythPrice(
         int64 price,
@@ -3558,18 +3560,7 @@ contract NormalizePythFuzzTest is Test {
     NormalizePythHarness harness;
 
     function setUp() public {
-        bytes32[] memory feedIds = new bytes32[](1);
-        feedIds[0] = bytes32(uint256(1));
-        uint256[] memory weights = new uint256[](1);
-        weights[0] = 1e18;
-        uint256[] memory basePrices = new uint256[](1);
-        basePrices[0] = 1e8;
-        PletherOracle testOracle =
-            new PletherOracle(address(1), address(1), address(1), feedIds, weights, basePrices, new bool[](1));
-        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
-        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
-        harness = new NormalizePythHarness(address(testOracle), address(keeperSidecar));
-        assertEq(address(harness), predictedRouter);
+        harness = new NormalizePythHarness();
     }
 
     function testFuzz_NormalizePythPrice(
@@ -3998,12 +3989,7 @@ contract FadStalenessTest is BasePerpTest {
         pletherOracle = new PletherOracle(
             address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
         );
-        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
-        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
-        router = new OrderRouter(
-            address(engine), address(engineLens), address(pool), address(pletherOracle), address(keeperSidecar)
-        );
-        assertEq(address(router), predictedRouter);
+        router = _deployLegacyOrderRouter(address(engine), address(engineLens), address(pool), address(pletherOracle));
         _syncRouterAdmin();
         engine.setOrderRouter(address(router));
 
@@ -4340,7 +4326,13 @@ contract FadStalenessTest is BasePerpTest {
         address aliceAccount = alice;
         (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 10_000 * 1e18, "Expired weekday close should leave the position unchanged");
-        assertEq(uint256(_orderRecord(2).status), uint256(IOrderRouterAccounting.OrderStatus.Failed));
+        assertEq(
+            uint256(OrderRouterDebugLens.loadRawOrderRecord(vm, router, 2).status),
+            uint256(IOrderRouterAccounting.OrderStatus.None)
+        );
+        OrderV2Types.CompactOutcome memory outcome = router.lifecycleBook().outcome(2);
+        assertEq(uint8(outcome.status), uint8(OrderV2Types.LifecycleStatus.Failed));
+        assertEq(uint8(outcome.reason), uint8(OrderV2Types.TerminalReason.Expired));
     }
 
     function test_Weekday_OpenOrder_Allowed() public {
@@ -4698,12 +4690,7 @@ contract InversionTest is Test {
         bool[] memory inv = new bool[](1);
         inv[0] = true;
 
-        PletherOracle testOracle = new PletherOracle(address(1), address(1), address(mockPyth), ids, w, b, inv);
-        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
-        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
-        BasketPriceHarness harness =
-            new BasketPriceHarness(address(mockPyth), ids, w, b, inv, address(testOracle), address(keeperSidecar));
-        assertEq(address(harness), predictedRouter);
+        BasketPriceHarness harness = new BasketPriceHarness(address(mockPyth), ids, w, b, inv);
 
         mockPyth.setPrice(FEED_JPY, int64(156_700), int32(-3), 1001);
         vm.warp(1001);
@@ -4727,7 +4714,7 @@ contract InversionTest is Test {
         bool[] memory inv = new bool[](1);
 
         vm.expectPartialRevert(IPletherOracle.PletherOracle__ArrayLengthMismatch.selector);
-        new PletherOracle(address(1), address(1), address(mockPyth), ids, w, b, inv);
+        new BasketPriceHarness(address(mockPyth), ids, w, b, inv);
     }
 
     function test_H03_MixedInversionsComputeCorrectBasket() public {
@@ -4744,12 +4731,7 @@ contract InversionTest is Test {
         inv[0] = false;
         inv[1] = true;
 
-        PletherOracle testOracle = new PletherOracle(address(1), address(1), address(mockPyth), ids, w, b, inv);
-        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
-        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
-        BasketPriceHarness harness =
-            new BasketPriceHarness(address(mockPyth), ids, w, b, inv, address(testOracle), address(keeperSidecar));
-        assertEq(address(harness), predictedRouter);
+        BasketPriceHarness harness = new BasketPriceHarness(address(mockPyth), ids, w, b, inv);
 
         mockPyth.setPrice(FEED_EUR, int64(108_000_000), int32(-8), 1001);
         mockPyth.setPrice(FEED_JPY, int64(156_700), int32(-3), 1001);
@@ -4764,9 +4746,47 @@ contract InversionTest is Test {
 
 contract OrderRouterAuditTest is BasePerpTest {
 
+    enum LifecycleBookFault {
+        NoCode,
+        Router,
+        Engine,
+        Clearinghouse,
+        Pool
+    }
+
     address alice = address(0x111);
     address bob = address(0x222);
     address carol = address(0x333);
+
+    function _expectInvalidLifecycleBook(
+        LifecycleBookFault fault
+    ) internal {
+        CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
+        OrderRouterV2ExecutionSidecar executionSidecar = new OrderRouterV2ExecutionSidecar();
+        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
+
+        address boundRouter = fault == LifecycleBookFault.Router ? address(0xBAD1) : predictedRouter;
+        address boundEngine = fault == LifecycleBookFault.Engine ? address(0xBAD2) : address(engine);
+        address boundClearinghouse =
+            fault == LifecycleBookFault.Clearinghouse ? address(0xBAD3) : address(clearinghouse);
+        address boundPool = fault == LifecycleBookFault.Pool ? address(0xBAD4) : address(pool);
+        OrderLifecycleBook lifecycleBook =
+            new OrderLifecycleBook(boundRouter, boundEngine, boundClearinghouse, boundPool);
+        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
+
+        address lifecycleBookCandidate = fault == LifecycleBookFault.NoCode ? address(0xB00C) : address(lifecycleBook);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidLifecycleBook.selector);
+        new OrderRouter(
+            address(engine),
+            address(engineLens),
+            address(pool),
+            address(pletherOracle),
+            address(keeperSidecar),
+            address(evaluator),
+            address(executionSidecar),
+            lifecycleBookCandidate
+        );
+    }
 
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
         return CfdTypes.RiskParams({
@@ -4812,10 +4832,43 @@ contract OrderRouterAuditTest is BasePerpTest {
     }
 
     function test_Constructor_ZeroPletherOracleReverts() public {
-        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
+        CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
+        OrderRouterV2ExecutionSidecar executionSidecar = new OrderRouterV2ExecutionSidecar();
+        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
+        OrderLifecycleBook lifecycleBook =
+            new OrderLifecycleBook(predictedRouter, address(engine), address(clearinghouse), address(pool));
         OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidPletherOracle.selector);
-        new OrderRouter(address(engine), address(engineLens), address(pool), address(0), address(keeperSidecar));
+        new OrderRouter(
+            address(engine),
+            address(engineLens),
+            address(pool),
+            address(0),
+            address(keeperSidecar),
+            address(evaluator),
+            address(executionSidecar),
+            address(lifecycleBook)
+        );
+    }
+
+    function test_Constructor_LifecycleBookWithoutCodeReverts() public {
+        _expectInvalidLifecycleBook(LifecycleBookFault.NoCode);
+    }
+
+    function test_Constructor_LifecycleBookRouterMismatchReverts() public {
+        _expectInvalidLifecycleBook(LifecycleBookFault.Router);
+    }
+
+    function test_Constructor_LifecycleBookEngineMismatchReverts() public {
+        _expectInvalidLifecycleBook(LifecycleBookFault.Engine);
+    }
+
+    function test_Constructor_LifecycleBookClearinghouseMismatchReverts() public {
+        _expectInvalidLifecycleBook(LifecycleBookFault.Clearinghouse);
+    }
+
+    function test_Constructor_LifecycleBookPoolMismatchReverts() public {
+        _expectInvalidLifecycleBook(LifecycleBookFault.Pool);
     }
 
     // Regression: H-02 — stale order executes via executeOrder
@@ -5200,12 +5253,7 @@ contract MarkPriceStalenessTest is BasePerpTest {
         pletherOracle = new PletherOracle(
             address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
         );
-        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
-        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
-        router = new OrderRouter(
-            address(engine), address(engineLens), address(pool), address(pletherOracle), address(keeperSidecar)
-        );
-        assertEq(address(router), predictedRouter);
+        router = _deployLegacyOrderRouter(address(engine), address(engineLens), address(pool), address(pletherOracle));
         engine.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
@@ -5248,10 +5296,23 @@ contract MarkPriceStalenessTest is BasePerpTest {
         PletherOracle testOracle = new PletherOracle(
             address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
         );
-        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
+        CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
+        OrderRouterV2ExecutionSidecar executionSidecar = new OrderRouterV2ExecutionSidecar();
+        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
+        OrderLifecycleBook lifecycleBook =
+            new OrderLifecycleBook(predictedRouter, address(engine), address(clearinghouse), address(pool));
         OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidEngineLens.selector);
-        new OrderRouter(address(engine), address(0), address(pool), address(testOracle), address(keeperSidecar));
+        new OrderRouter(
+            address(engine),
+            address(0),
+            address(pool),
+            address(testOracle),
+            address(keeperSidecar),
+            address(evaluator),
+            address(executionSidecar),
+            address(lifecycleBook)
+        );
     }
 
 }
@@ -5317,12 +5378,7 @@ contract StalenessGriefTest is BasePerpTest {
         pletherOracle = new PletherOracle(
             address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
         );
-        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
-        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
-        router = new OrderRouter(
-            address(engine), address(engineLens), address(pool), address(pletherOracle), address(keeperSidecar)
-        );
-        assertEq(address(router), predictedRouter);
+        router = _deployLegacyOrderRouter(address(engine), address(engineLens), address(pool), address(pletherOracle));
         engine.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
@@ -5375,7 +5431,7 @@ contract VpiImrBypassTest is Test {
     TrancheVault seniorVault;
     TrancheVault juniorVault;
     MarginClearinghouse clearinghouse;
-    OrderRouter router;
+    LegacyOrderRouterHarness router;
     OrderRouterAdmin routerAdmin;
     MockPyth mockPyth;
     bytes32[] feedIds;
@@ -5468,10 +5524,21 @@ contract VpiImrBypassTest is Test {
         PletherOracle testOracle = new PletherOracle(
             address(engine), address(pool), address(mockPyth), feedIds, weights, basePrices, inversions
         );
-        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
+        CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
+        OrderRouterV2ExecutionSidecar executionSidecar = new OrderRouterV2ExecutionSidecar();
+        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
+        OrderLifecycleBook lifecycleBook =
+            new OrderLifecycleBook(predictedRouter, address(engine), address(clearinghouse), address(pool));
         OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
-        router = new OrderRouter(
-            address(engine), address(testEngineLens), address(pool), address(testOracle), address(keeperSidecar)
+        router = new LegacyOrderRouterHarness(
+            address(engine),
+            address(testEngineLens),
+            address(pool),
+            address(testOracle),
+            address(keeperSidecar),
+            address(evaluator),
+            address(executionSidecar),
+            address(lifecycleBook)
         );
         assertEq(address(router), predictedRouter);
         routerAdmin = OrderRouterAdmin(router.admin());
@@ -5557,7 +5624,7 @@ contract VpiImrBypassTest is Test {
         bytes[] memory empty = _mockPythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
-        vm.warp(block.timestamp + router.orderExecutionStalenessLimit() + 1);
+        vm.warp(block.timestamp + router.pletherOracle().orderExecutionStalenessLimit() + 1);
 
         address eve = address(0xE222);
         address eveAccount = eve;
@@ -5596,7 +5663,14 @@ contract VpiImrBypassTest is Test {
             200_000,
             "Typed user-invalid open should pay the clearer as clearinghouse credit"
         );
-        assertEq(uint256(_orderStatus(1)), uint256(IOrderRouterAccounting.OrderStatus.Failed), "Order should fail");
+        assertEq(
+            uint256(OrderRouterDebugLens.loadRawOrderRecord(vm, router, 1).status),
+            uint256(IOrderRouterAccounting.OrderStatus.None),
+            "terminal order should be deleted from Router storage"
+        );
+        OrderV2Types.CompactOutcome memory outcome = router.lifecycleBook().outcome(1);
+        assertEq(uint8(outcome.status), uint8(OrderV2Types.LifecycleStatus.Failed));
+        assertEq(uint8(outcome.reason), uint8(OrderV2Types.TerminalReason.PlannerRejected));
         assertEq(
             usdc.balanceOf(address(router)), 0, "Router should not retain consumed user-invalid bounty reservation"
         );
@@ -5621,7 +5695,7 @@ contract KeeperFeeRefundTest is Test {
     TrancheVault seniorVault;
     TrancheVault juniorVault;
     MarginClearinghouse clearinghouse;
-    OrderRouter router;
+    LegacyOrderRouterHarness router;
     OrderRouterAdmin routerAdmin;
     MockPyth mockPyth;
     bytes32[] feedIds;
@@ -5772,10 +5846,21 @@ contract KeeperFeeRefundTest is Test {
         PletherOracle testOracle = new PletherOracle(
             address(engine), address(pool), address(mockPyth), feedIds, weights, basePrices, inversions
         );
-        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
+        CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
+        OrderRouterV2ExecutionSidecar executionSidecar = new OrderRouterV2ExecutionSidecar();
+        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
+        OrderLifecycleBook lifecycleBook =
+            new OrderLifecycleBook(predictedRouter, address(engine), address(clearinghouse), address(pool));
         OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
-        router = new OrderRouter(
-            address(engine), address(testEngineLens), address(pool), address(testOracle), address(keeperSidecar)
+        router = new LegacyOrderRouterHarness(
+            address(engine),
+            address(testEngineLens),
+            address(pool),
+            address(testOracle),
+            address(keeperSidecar),
+            address(evaluator),
+            address(executionSidecar),
+            address(lifecycleBook)
         );
         assertEq(address(router), predictedRouter);
         routerAdmin = OrderRouterAdmin(router.admin());
@@ -5784,12 +5869,12 @@ contract KeeperFeeRefundTest is Test {
         _configureBroadSeniorCapacity();
         IOrderRouterAdminHost.RouterConfig memory config;
         config.maxOrderAge = 300;
-        config.orderExecutionStalenessLimit = router.orderExecutionStalenessLimit();
-        config.liquidationStalenessLimit = router.liquidationStalenessLimit();
-        config.basketMaxConfidenceRatioBps = router.basketMaxConfidenceRatioBps();
-        config.orderSettlementWindow = router.orderSettlementWindow();
-        config.maxComponentPublishTimeDivergence = router.maxComponentPublishTimeDivergence();
-        config.adverseConfidenceMultiplierBps = router.adverseConfidenceMultiplierBps();
+        config.orderExecutionStalenessLimit = router.pletherOracle().orderExecutionStalenessLimit();
+        config.liquidationStalenessLimit = router.pletherOracle().liquidationStalenessLimit();
+        config.basketMaxConfidenceRatioBps = router.pletherOracle().basketMaxConfidenceRatioBps();
+        config.orderSettlementWindow = router.pletherOracle().orderSettlementWindow();
+        config.maxComponentPublishTimeDivergence = router.pletherOracle().maxComponentPublishTimeDivergence();
+        config.adverseConfidenceMultiplierBps = router.pletherOracle().adverseConfidenceMultiplierBps();
         config.minOpenNotionalUsdc = router.minOpenNotionalUsdc();
         config.openOrderExecutionBountyBps = router.openOrderExecutionBountyBps();
         config.minOpenOrderExecutionBountyUsdc = router.minOpenOrderExecutionBountyUsdc();
@@ -6033,7 +6118,7 @@ contract WeekendArbitrageTest is Test {
     TrancheVault seniorVault;
     TrancheVault juniorVault;
     MarginClearinghouse clearinghouse;
-    OrderRouter router;
+    LegacyOrderRouterHarness router;
     MockPyth mockPyth;
 
     bytes32 constant FEED_A = bytes32(uint256(1));
@@ -6153,10 +6238,21 @@ contract WeekendArbitrageTest is Test {
         PletherOracle testOracle = new PletherOracle(
             address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
         );
-        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
+        CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
+        OrderRouterV2ExecutionSidecar executionSidecar = new OrderRouterV2ExecutionSidecar();
+        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
+        OrderLifecycleBook lifecycleBook =
+            new OrderLifecycleBook(predictedRouter, address(engine), address(clearinghouse), address(pool));
         OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
-        router = new OrderRouter(
-            address(engine), address(testEngineLens), address(pool), address(testOracle), address(keeperSidecar)
+        router = new LegacyOrderRouterHarness(
+            address(engine),
+            address(testEngineLens),
+            address(pool),
+            address(testOracle),
+            address(keeperSidecar),
+            address(evaluator),
+            address(executionSidecar),
+            address(lifecycleBook)
         );
         assertEq(address(router), predictedRouter);
         engine.setOrderRouter(address(router));

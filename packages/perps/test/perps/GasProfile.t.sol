@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {LegacyOrderRouterHarness} from "../utils/LegacyOrderRouterHarness.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdEngineAccountLens} from "@plether/perps/CfdEngineAccountLens.sol";
@@ -8,12 +9,14 @@ import {CfdEngineAdmin} from "@plether/perps/CfdEngineAdmin.sol";
 import {CfdEngineLens} from "@plether/perps/CfdEngineLens.sol";
 import {CfdEnginePlanner} from "@plether/perps/CfdEnginePlanner.sol";
 import {CfdEngineSettlementSidecar} from "@plether/perps/CfdEngineSettlementSidecar.sol";
+import {CfdOrderPolicyEvaluator} from "@plether/perps/CfdOrderPolicyEvaluator.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
-import {OrderRouter} from "@plether/perps/OrderRouter.sol";
+import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
+import {OrderRouterV2ExecutionSidecar} from "@plether/perps/OrderRouterV2ExecutionSidecar.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
@@ -102,7 +105,7 @@ contract GasProfileTest is Test {
     HousePool pool;
     TrancheVault seniorVault;
     TrancheVault juniorVault;
-    OrderRouter router;
+    LegacyOrderRouterHarness router;
     ControllablePythGas pyth;
     address usdc;
 
@@ -170,10 +173,21 @@ contract GasProfileTest is Test {
         b[0] = 1e8;
         PletherOracle testOracle =
             new PletherOracle(address(engine), address(pool), address(pyth), feedIds, w, b, new bool[](1));
-        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
-        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
-        router = new OrderRouter(
-            address(engine), address(engineLens), address(pool), address(testOracle), address(keeperSidecar)
+        CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
+        OrderRouterV2ExecutionSidecar executionSidecar = new OrderRouterV2ExecutionSidecar();
+        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
+        OrderLifecycleBook lifecycleBook =
+            new OrderLifecycleBook(predictedRouter, address(engine), address(clearinghouse), address(pool));
+        OrderRouterLiquidationBatchSidecar liquidationSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
+        router = new LegacyOrderRouterHarness(
+            address(engine),
+            address(engineLens),
+            address(pool),
+            address(testOracle),
+            address(liquidationSidecar),
+            address(evaluator),
+            address(executionSidecar),
+            address(lifecycleBook)
         );
         assertEq(address(router), predictedRouter);
         engine.setOrderRouter(address(router));

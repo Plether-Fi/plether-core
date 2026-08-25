@@ -112,7 +112,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     /// @notice Planned action-reserve consumption does not match the reserve available above queued bounties.
     error MarginClearinghouse__ActionReserveMismatch();
 
-    /// @notice A supplied reservation belongs to an account other than the risk-off refund target.
+    /// @notice A supplied reservation belongs to an account other than the expected account.
     error MarginClearinghouse__ReservationAccountMismatch(
         uint64 orderId, address expectedAccount, address actualAccount
     );
@@ -619,6 +619,24 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         emit ReservationReleased(orderId, reservation.account, releasedUsdc);
     }
 
+    /// @notice Releases an order reservation during terminal Router cleanup if it remains active.
+    /// @dev Callable only by the Router currently reported by the configured Engine. Unknown and terminal ids return
+    ///      zero. This path deliberately skips the carry checkpoint and only releases locked classification; it does
+    ///      not change settlement balance or move tokens.
+    /// @param orderId Order reservation id to release
+    /// @return releasedUsdc Remaining reservation amount released, or zero when the reservation is not active
+    function releaseOrderReservationForTerminalCleanup(
+        uint64 orderId
+    ) external onlyOrderRouter returns (uint256 releasedUsdc) {
+        IMarginClearinghouse.OrderReservation storage reservation = orderReservations[orderId];
+        if (reservation.status != IMarginClearinghouse.ReservationStatus.Active) {
+            return 0;
+        }
+
+        releasedUsdc = _releaseReservation(reservation, true);
+        emit ReservationReleased(orderId, reservation.account, releasedUsdc);
+    }
+
     /// @notice Releases risk-off order margin and refundable bounty classifications back to free settlement.
     /// @dev Callable only by the Engine-reported order router after it has removed the invalidated bounties from its
     ///      live accounting. Unknown and terminal reservation ids are tolerated, but every existing record must belong
@@ -658,6 +676,23 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
             _unlockMargin(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, refundableBountyUsdc);
         }
         emit RiskOffOrderReservesRefunded(account, releasedMarginUsdc, refundableBountyUsdc);
+    }
+
+    /// @notice Releases a settled execution bounty back to the same account that funded it.
+    /// @dev Callable only by the Engine-reported Router. Unlike the general Engine bounty-credit path, this exact
+    ///      self-transfer changes only the reserved classification and deliberately skips carry checkpointing. The
+    ///      Router must first remove the bounty from its live accounting so the protected-reserve floor remains exact.
+    /// @param account Account whose bounty classification is released to free settlement.
+    /// @param executionBountyUsdc Exact bounty amount in six-decimal USDC units.
+    function releaseReservedExecutionBountyToSource(
+        address account,
+        uint256 executionBountyUsdc
+    ) external onlyOrderRouter {
+        if (executionBountyUsdc == 0) {
+            return;
+        }
+        _requireActionReserveDecreaseAboveProtectedFloor(account, executionBountyUsdc);
+        _unlockMargin(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, executionBountyUsdc);
     }
 
     /// @notice Consumes up to a requested amount from one active order reservation.

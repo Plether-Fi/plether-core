@@ -54,13 +54,18 @@ The deploy script creates and wires:
 12. `CfdEngineAccountLens`
 13. `CfdEngineLens`
 14. `PletherOracle`
-15. `OrderRouterLiquidationBatchSidecar`, separately deployed with the predicted address of the next Router `CREATE`
-16. `OrderRouter`, deployed immediately after the sidecar and constructor-deploying its immutable RouterAdmin and
-    stateful protection Book
-17. `PositionProtectionBook`, deployed internally and immutably bound by the Router constructor
-18. `PerpsPublicLens`
-19. `SettlementMonitorLens` (the facade deploys its monitor-bound `SettlementMonitorLensSidecar` internally)
-20. `EmergencyPauseCoordinator`
+15. `CfdOrderPolicyEvaluator`
+16. `OrderRouterV2ExecutionSidecar`
+17. `OrderLifecycleBook`, separately deployed and immutable-bound to the predicted Router, Engine,
+    MarginClearinghouse, and HousePool
+18. `OrderRouterLiquidationBatchSidecar`, separately deployed with the same predicted Router address
+19. `OrderRouter`, deployed immediately after those two Router-bound dependencies. Its eighth and final constructor
+    dependency is the predeployed lifecycle Book; its constructor deploys the immutable RouterAdmin and stateful
+    position-protection Book
+20. `PositionProtectionBook`, deployed internally and immutably bound by the Router constructor
+21. `PerpsPublicLens`
+22. `SettlementMonitorLens` (the facade deploys its monitor-bound `SettlementMonitorLensSidecar` internally)
+23. `EmergencyPauseCoordinator`
 
 It then performs the required set-once wiring:
 
@@ -72,22 +77,26 @@ It then performs the required set-once wiring:
 - `CfdEngine.setOrderRouter(...)`
 - `MarginClearinghouse.setEngine(...)`
 
-The stateless keeper sidecar and Router have a strict deployment pair. Let `n` be the deployer's nonce immediately
-before deploying `OrderRouterLiquidationBatchSidecar`. Compute the expected Router address as the deployer's `CREATE`
-address at nonce `n + 1`, deploy the sidecar at nonce `n` with that expected address, and deploy `OrderRouter` as the
-deployer's very next nonce-consuming transaction and next `CREATE`. No intervening transaction, call, or contract
-creation may consume the deployer's nonce. The Router constructor rejects a sidecar without code or whose immutable
-`ROUTER()` is not `address(this)`; the deploy script also verifies the actual Router address equals the prediction. If
-the deployer nonce changes between the pair, discard the orphaned sidecar, recompute the next Router address, and deploy
-a newly bound sidecar; its immutable binding cannot be repaired.
+The lifecycle Book, stateless keeper sidecar, and Router form a strict three-`CREATE` deployment sequence. Let `n` be
+the deployer's nonce immediately before deploying `OrderLifecycleBook`. Compute the expected Router address at nonce
+`n + 2`; deploy the lifecycle Book at `n` with that Router plus the exact Engine, MarginClearinghouse, and HousePool;
+deploy `OrderRouterLiquidationBatchSidecar` at `n + 1` with the same Router; then deploy `OrderRouter` at `n + 2` as
+the deployer's next creation. No intervening nonce-consuming transaction or contract creation may break this order.
+The Router receives the lifecycle Book as its eighth and final constructor dependency and rejects it unless code is
+present and its immutable `ROUTER()`, `ENGINE()`, `CLEARINGHOUSE()`, and `HOUSE_POOL()` values exactly match the Router
+being constructed and its supplied core dependencies. It separately rejects a keeper sidecar without code or whose
+immutable `ROUTER()` is not `address(this)`. The deploy script also verifies the actual Router address equals the
+prediction. If the deployer nonce changes during the sequence, discard both orphaned Router-bound dependencies,
+recompute the prediction, and redeploy them; neither immutable binding can be repaired.
 
-The Router constructor separately creates the stateful position-protection Book. That Book requires no separate
-deployment transaction or mutable wiring of its own. Discover it from `OrderRouter.positionProtectionBook()` and
-verify its immutable `ROUTER()` and `ENGINE()` values against the new Router and Engine. Discover the stateless sidecar
-from `OrderRouter.liquidationBatchSidecar()`, require it to have code and a matching immutable `ROUTER()`, and require
-it to be different from the Book. Its runtime carries the Router's mark-refresh, protection-trigger oracle and
-orchestration, single-liquidation, risk-off-aware liquidation-batch, and atomic-refresh LP-epoch implementations to
-preserve EIP-170 and EIP-3860 headroom. Those selectors remain public only on the Router: direct and foreign-context
+The Router constructor creates only the stateful position-protection Book. That Book requires no separate deployment
+transaction or mutable wiring. Discover it from `OrderRouter.positionProtectionBook()` and verify its immutable
+`ROUTER()` and `ENGINE()` values against the new Router and Engine. Discover the separately deployed lifecycle Book
+through `OrderRouter.lifecycleBook()` and the stateless keeper sidecar through
+`OrderRouter.liquidationBatchSidecar()`. Require all three to contain code and be pairwise distinct. The keeper
+sidecar's runtime carries the Router's mark-refresh, protection-trigger oracle and orchestration,
+single-liquidation, risk-off-aware liquidation-batch, and atomic-refresh LP-epoch implementations to preserve EIP-170
+and EIP-3860 headroom. Those selectors remain public only on the Router: direct and foreign-context
 sidecar calls must revert. Under Router `delegatecall`, the Router remains `address(this)` and the direct-event address,
 downstream contracts see it as caller, and the entrypoint's `msg.sender` is preserved. External-callee events remain at
 the callee; the Book-trigger route carries the keeper/protection id in authenticated trailing data.
@@ -99,6 +108,22 @@ Important:
   storage, setter, delegatecall, upgrade path, custody, or settlement authority. The deploy and bootstrap scripts
   require code and `implementationId() == keccak256("Plether.HousePoolRedemptionMathSidecar.v1")`; HousePool stores
   the validated address immutably. Record it as a first-class deployment artifact even though users never call it.
+- This is a fresh V2 stack deployment. Deploy the evaluator and V2 execution sidecar before the Router-bound
+  three-`CREATE` sequence, and pass their exact addresses together with the predeployed keeper sidecar and lifecycle
+  Book to the eight-argument `OrderRouter` constructor. Do not mix any Router, Book, evaluator, sidecar, Engine,
+  clearinghouse, or pool from another deployment generation. There is no V1-to-V2 order or lifecycle migration path.
+- `OrderLifecycleBook` is independently predeployed and permanently binds the predicted Router, Engine,
+  MarginClearinghouse, and HousePool. Deployment must check all four immutable bindings before accepting the Router,
+  verify that `router.lifecycleBook()` returns the exact predeployed instance, and confirm
+  `currentExecutionConfigHash()` is nonzero after core wiring. The Book is
+  the authoritative source for permanent client-intent identity and terminal order outcomes; it has no independent
+  owner, setter, or mutable wiring.
+- `CfdOrderPolicyEvaluator` and `OrderRouterV2ExecutionSidecar` are separately deployed contracts whose exact
+  addresses are pinned immutably in the Router. Deployment must verify code at both addresses and equality with the
+  Router's `policyEvaluator()` and `executionSidecar()` getters. The execution sidecar is stateless and rejects direct
+  stateful use; keepers call the Router. Record both addresses independently for bytecode verification. Bootstrap
+  rediscovers both modules and the Book through the Router and repeats their code, self-binding, immutable-binding,
+  and nonzero-config-hash checks; it takes no separate operator-supplied address for any of them.
 - `SettlementMonitorLens` is deployed after every settlement dependency is wired. It is the read-only operator/security
   facade bound to the canonical Router deployment; adding it does not shift any earlier deployment address or grant
   settlement authority. Its constructor deploys a size-management `SettlementMonitorLensSidecar` that accepts calls
@@ -120,9 +145,10 @@ Important:
   three fixed guardian actions—risk-off plus LP entry, LP-settlement-only, and full containment—but no unpause,
   arbitrary mask, pricing, configuration, fund-transfer, or arbitrary-call surface. Its later reason/evidence hashes
   remain advisory and are not derived or authenticated by the Lens.
-- `OrderRouter.liquidationBatchSidecar()` returns the separately deployed stateless keeper module, not the
-  `PositionProtectionBook`. Deploy and bootstrap must require both addresses to contain code, require them to differ,
-  and verify the sidecar's immutable `ROUTER()` plus the Book's immutable `ROUTER()` and `ENGINE()` bindings. The
+- `OrderRouter.liquidationBatchSidecar()` returns the separately deployed stateless keeper module, not either Book.
+  Deploy and bootstrap must require the sidecar, lifecycle Book, and position-protection Book
+  addresses to contain code and be pairwise distinct. They must verify the sidecar's immutable `ROUTER()`, the
+  lifecycle Book's full core bindings, and the protection Book's immutable `ROUTER()` and `ENGINE()` bindings. The
   sidecar rejects direct and foreign-context calls, reads the RouterAdmin's persistent risk-off cutoff through the
   Router-bound execution context, and works only through Router delegatecall. It is an EIP-170 size split with no
   mutable storage, setter, proxy, upgrade path, custody, or independent operational surface. Record the address for
@@ -160,12 +186,13 @@ Important:
   selector, its return tuple is longer, so an old decoder can silently misinterpret the final fields. Regenerate and
   version Router/Admin ABIs, retain the old event topics for historical deployments, and update every governance,
   indexer, keeper, and product consumer before proposing configuration on the new stack.
-- Treat the Router, its predeployed keeper sidecar, and its internally created Book as one bytecode release. The
-  delegated sidecar logic reads integrations through Router external getters, does not read or write Router storage by
-  layout, and changes Router-owned state only through authorized external self/item calls. Verify all three runtimes
-  from the same source commit and test that direct and foreign-context helper calls fail. Sidecar creation code is not
-  embedded in Router initcode, but Book creation code remains embedded because the Router constructor deploys it.
-  Verify Router, sidecar, and Book creation inputs plus all three EIP-170 runtimes with explicit safety margin.
+- Treat the Router, its two predeployed Router-bound dependencies, and its internally created protection Book as one
+  bytecode release. The delegated sidecar logic reads integrations through Router external getters, does not read or
+  write Router storage by layout, and changes Router-owned state only through authorized external self/item calls.
+  Verify all components from the same source commit and test that direct and foreign-context helper calls fail.
+  Neither lifecycle-Book nor keeper-sidecar creation code is embedded in Router initcode; position-protection Book
+  creation code remains embedded because the Router constructor deploys it. Verify the creation inputs and EIP-170
+  runtimes of the Router, both Books, the keeper sidecar, and the V2 execution sidecar with explicit safety margin.
 - Position-protection creation is disabled on a fresh router. Ordinary trading can be bootstrapped independently while
   the trigger worker, indexer, and product integrations are verified. Do not enable the flag until the product has the
   Book ABI and attached-open/existing-position flows, the trigger worker is live, and every offchain oracle-policy
@@ -301,20 +328,25 @@ including at least:
 - `HousePoolRedemptionMathSidecar`
 - both tranche vaults
 - `PletherOracle`
+- `CfdOrderPolicyEvaluator`
+- `OrderRouterV2ExecutionSidecar`
 - `OrderRouter`
 - the separately deployed `OrderRouterLiquidationBatchSidecar` returned by
   `OrderRouter.liquidationBatchSidecar()`
+- the separately deployed `OrderLifecycleBook` returned by `OrderRouter.lifecycleBook()`
 - the internally deployed `PositionProtectionBook` returned by `OrderRouter.positionProtectionBook()`
 - `OrderRouterAdmin`
 - `PerpsPublicLens`
 - `SettlementMonitorLens` and its internally deployed `SettlementMonitorLensSidecar`
 - `EmergencyPauseCoordinator`
 
-Also record the source commit, deployment block, transaction hashes, and verified-bytecode status. `MockUSDC`,
+Also record the active V2 execution-config hash, source commit, deployment block, transaction hashes, and
+verified-bytecode status. `MockUSDC`,
 `HousePool`, `HousePoolRedemptionMathSidecar`, `OrderRouter`, and `EmergencyPauseCoordinator` are consumed directly by
-the bootstrap script. Bootstrap derives the RouterAdmin, stateful protection Book, and stateless keeper sidecar from
-the Router; it verifies the supplied redemption-math sidecar's identity for rerun inspection and verifies that the
-Book and keeper sidecar are distinct code-bearing contracts with exact immutable bindings. The deploy transaction is
+the bootstrap script. Bootstrap derives the RouterAdmin, policy evaluator, V2 execution sidecar, lifecycle Book,
+stateful protection Book, and stateless keeper sidecar from the Router; it verifies the supplied redemption-math
+sidecar's identity for rerun inspection and verifies that both Books and the keeper sidecar are distinct code-bearing
+contracts with exact immutable bindings. The deploy transaction is
 the evidence for HousePool's immutable redemption-math-sidecar constructor binding because the Pool deliberately has
 no runtime getter for it. The remaining addresses are needed by product, indexer, keeper, monitoring, audit, and
 independent deployment-verification tooling.
@@ -423,6 +455,12 @@ payable `triggerPositionProtection(...)` keeper call. The Router does not forwar
 trigger call ingests payable Pyth update data. This keeps the trader flow compatible with zero-native-value sponsored
 accounts while retaining an independently verified trigger observation.
 
+The protected parent open and triggered linked close are internal typed V2 requests. Only these Router-authenticated
+paths set `expectedConfigHash == bytes32(0)`, which is an unpinned internal marker rather than a public wildcard.
+Fresh external `OrderRouter.commitOrder(...)` calls reject zero and must pin the active lifecycle-Book digest. Deploy,
+bootstrap, and integration tests must verify both sides of that boundary: direct external zero-hash commits fail,
+while valid Book-authenticated parent/trigger creation succeeds and terminal receipts retain the observed config hash.
+
 Before enabling the feature, verify the existing-position post-reservation gate against boundary tests. The Book locks
 both bounties first, then calls the Engine-configured planner's canonical V2 exact-price predicate with exact entry cost
 and price equity composed only of PnL pledge plus the same-account trader claim plus exact capped unrealized PnL. Free
@@ -430,7 +468,7 @@ settlement and generic action/reservation buckets are excluded; uncovered carry 
 fail closed; and equality at the stricter of initial or active normal/FAD margin is rejected. Attached opens lock
 protection value before the ordinary open planner evaluates the parent. Reusing the configured planner is both the
 single source of risk semantics and an initcode constraint: do not re-embed a local copy of the exact-price kernel in
-the internally deployed Book.
+the internally deployed position-protection Book.
 
 Protection lifecycle events originate from the Book. Indexers and trigger workers must subscribe at the Book address;
 the generated close's ordinary `OrderCommitted` and terminal-order events originate from the Router.
@@ -477,14 +515,16 @@ liquidation remain live.
 
 1. Run formatting, package tests, integration script tests, and `forge build --sizes`; do not deploy an oversized Router
    or helper module, and retain reviewed safety margin below the EIP-170 runtime and EIP-3860 initcode limits rather
-   than accepting a byte-exact boundary. Keep the dedicated Router, stateful protection Book, stateless keeper sidecar,
-   redemption-math sidecar, HousePool, and `SettlementMonitorLens` size regressions green.
+   than accepting a byte-exact boundary. Keep the dedicated Router, predeployed lifecycle Book, stateful protection
+   Book, stateless keeper sidecar, redemption-math sidecar, HousePool, and `SettlementMonitorLens` size regressions
+   green.
 2. Simulate and then run the deploy script for a fresh complete stack.
 3. Record the exact commit, deployment block, transaction hashes, addresses, and verification status.
 4. Verify every set-once and immutable binding, including `TerminalNavBookV2` and the redemption-math sidecar; record
-   the protection Book returned by `positionProtectionBook()` and the distinct stateless helper returned by
-   `liquidationBatchSidecar()`. Confirm the redemption-math sidecar implementation id and HousePool constructor input,
-   the keeper sidecar's `ROUTER()` binding, the Book's `ROUTER()` and `ENGINE()` bindings, and that protection creation
+   the lifecycle Book returned by `lifecycleBook()`, the protection Book returned by `positionProtectionBook()`, and
+   the distinct stateless helper returned by `liquidationBatchSidecar()`. Confirm the redemption-math sidecar
+   implementation id and HousePool constructor input, all four lifecycle-Book bindings, the keeper sidecar's
+   `ROUTER()` binding, the protection Book's `ROUTER()` and `ENGINE()` bindings, and that protection creation
    is disabled with a `200_000` trigger bounty and `200_000` linked-close execution bounty. Exercise direct and
    foreign-context rejection for the sidecar-carried Router helpers, including the risk-off-aware batch entrypoint,
    plus the canonical Router success paths for mark refresh, protection-trigger oracle resolution, single liquidation,

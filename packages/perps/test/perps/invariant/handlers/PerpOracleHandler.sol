@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {LegacyOrderRouterHarness} from "../../../utils/LegacyOrderRouterHarness.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdEngineAdmin} from "@plether/perps/CfdEngineAdmin.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
-import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {ICfdEngineAdminHost} from "@plether/perps/interfaces/ICfdEngineAdminHost.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
 import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
@@ -18,7 +18,7 @@ contract PerpOracleHandler is Test {
     CfdEngine public immutable engine;
     CfdEngineAdmin public immutable engineAdmin;
     MarginClearinghouse public immutable clearinghouse;
-    OrderRouter public immutable router;
+    LegacyOrderRouterHarness public immutable router;
     address public immutable owner;
 
     address[2] internal actors;
@@ -28,7 +28,7 @@ contract PerpOracleHandler is Test {
         MockPyth _mockPyth,
         CfdEngine _engine,
         MarginClearinghouse _clearinghouse,
-        OrderRouter _router
+        LegacyOrderRouterHarness _router
     ) {
         usdc = _usdc;
         mockPyth = _mockPyth;

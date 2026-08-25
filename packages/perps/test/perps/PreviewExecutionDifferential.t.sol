@@ -462,12 +462,15 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
 
-        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 50_000e18, 110_000_000);
+        // Keep the surviving position solvent so this remains a Router reservation-isolation regression. V2
+        // intentionally terminalizes underwater partial closes at the post-position-equity policy boundary.
+        uint256 executionPrice = 102_000_000;
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 50_000e18, executionPrice);
         assertTrue(preview.valid, "Partial close preview should remain valid without queued margin support");
 
         uint256 committedBefore = _remainingCommittedMargin(2);
         bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(1.1e8));
+        priceData[0] = abi.encode(executionPrice);
 
         vm.prank(KEEPER);
         router.executeOrder(1, priceData);

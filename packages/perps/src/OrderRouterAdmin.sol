@@ -34,6 +34,9 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
 
     /// @notice Router host controlled by this admin.
     IOrderRouterAdminHost public immutable router;
+    /// @notice Monotonic version of the active router configuration, starting at one.
+    /// @dev Advances once after every successful router or oracle configuration finalization.
+    uint64 public activeConfigVersion = 1;
     /// @notice Deferred ETH refund balance claimable by each beneficiary, denominated in wei.
     mapping(address => uint256) public claimableEth;
     /// @notice Account allowed to pause alongside the owner; the zero address disables the separate pauser.
@@ -154,6 +157,7 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
         delete _pendingRouterConfig;
         routerConfigActivationTime = 0;
         router.applyRouterConfig(config);
+        activeConfigVersion += 1;
         emit RouterConfigFinalized(config);
     }
 
@@ -187,6 +191,7 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
         delete _pendingOracleConfig;
         oracleConfigActivationTime = 0;
         router.applyOracleConfig(config);
+        activeConfigVersion += 1;
         emit OracleConfigFinalized(config);
     }
 

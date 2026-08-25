@@ -3,8 +3,10 @@ pragma solidity 0.8.35;
 
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
+import {OrderRouterV2ExecutionSidecar} from "@plether/perps/OrderRouterV2ExecutionSidecar.sol";
 import {SettlementMonitorLens} from "@plether/perps/SettlementMonitorLens.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
@@ -194,10 +196,20 @@ contract SettlementMonitorLensTest is BasePerpTest {
         address wrongPool = address(0xBADF00D);
         SettlementMonitorOracleBindingMock wrongOracle =
             new SettlementMonitorOracleBindingMock(address(engine), wrongPool, address(baseMockPyth));
-        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
-        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
+        OrderRouterV2ExecutionSidecar executionSidecar = new OrderRouterV2ExecutionSidecar();
+        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
+        OrderLifecycleBook lifecycleBook =
+            new OrderLifecycleBook(predictedRouter, address(engine), address(clearinghouse), wrongPool);
+        OrderRouterLiquidationBatchSidecar liquidationSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
         OrderRouter wrongRouter = new OrderRouter(
-            address(engine), address(engineLens), wrongPool, address(wrongOracle), address(keeperSidecar)
+            address(engine),
+            address(engineLens),
+            wrongPool,
+            address(wrongOracle),
+            address(liquidationSidecar),
+            address(policyEvaluator),
+            address(executionSidecar),
+            address(lifecycleBook)
         );
         assertEq(address(wrongRouter), predictedRouter);
         vm.mockCall(
