@@ -75,9 +75,13 @@ flow records the sidecar and verifies code plus
 `implementationId() == keccak256("Plether.HousePoolRedemptionMathSidecar.v1")`. The binding is internal immutable;
 the sidecar has no storage, setter, delegatecall, upgrade path, custody, or settlement authority.
 
-The Router also constructor-deploys a fixed `OrderRouterLiquidationBatchSidecar` to remain under EIP-170. Deployment
-verifies its code and immutable Router binding. It has no mutable storage or upgrade path and rejects direct calls;
-keepers continue calling `OrderRouter.executeLiquidationBatch(...)`.
+The release separately predeploys a fixed `OrderRouterLiquidationBatchSidecar` to preserve Router EIP-170 and
+EIP-3860 headroom. The deployer computes the immediately next Router `CREATE` address, binds the sidecar to that
+address, and creates the Router next without an intervening nonce-consuming transaction or `CREATE`. The Router
+constructor rejects missing sidecar
+code or a `ROUTER()` mismatch. The sidecar carries stateless mark-refresh/protection-trigger, LP-epoch settlement, and
+single/batch liquidation orchestration; it has no mutable storage or upgrade path and rejects direct or foreign-context
+execution. Keepers continue calling the canonical `OrderRouter` entrypoints.
 
 ## Deployment Record
 
@@ -87,6 +91,7 @@ Populate this section after the parallel stack is deployed and verified:
 - new contract addresses and deployment block,
 - configured `basketMaxConfidenceRatioBps`,
 - bootstrap and trading-activation status,
-- Router liquidation sidecar binding, HousePool redemption-math sidecar identity, emergency coordinator, guardian,
-  shared-pauser verification, and all three containment-drill results,
+- Router keeper/protection/liquidation sidecar address, code hash, exact Router binding, and deployment-order
+  verification; HousePool redemption-math sidecar address and implementation identity; emergency coordinator,
+  guardian, shared-pauser verification, and all three containment-drill results,
 - oracle-worker soak result and decoded-revert monitoring status.

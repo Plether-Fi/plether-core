@@ -1,15 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
-import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
-import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IPerpsKeeper} from "@plether/perps/interfaces/IPerpsKeeper.sol";
 import {IPerpsTraderActions} from "@plether/perps/interfaces/IPerpsTraderActions.sol";
 import {OrderHandler} from "@plether/perps/router/OrderHandler.sol";
 import {OrderRouterBase} from "@plether/perps/router/OrderRouterBase.sol";
+
+/// @notice Binding surface exposed by the Router's predeployed stateless keeper sidecar.
+interface IOrderRouterKeeperSidecarBinding {
+
+    function ROUTER() external view returns (address);
+
+}
 
 /// @title OrderRouter (The MEV Shield)
 /// @notice Queues delayed perps orders and permissionlessly executes them in global FIFO order using Pyth prices.
@@ -18,9 +23,11 @@ import {OrderRouterBase} from "@plether/perps/router/OrderRouterBase.sol";
 ///      risk-increasing commits during an emergency pause. Close commits, execution, mark refresh, and
 ///      liquidation remain available while that admin is paused.
 /// @custom:security-contact contact@plether.com
-contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, ReentrancyGuardTransient {
+contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
 
-    /// @notice Fixed stateless delegate module for liquidation-batch orchestration.
+    /// @notice Fixed stateless delegate module for oracle config, mark refresh, LP settlement, and liquidations.
+    /// @dev The sidecar is deployed immediately before this Router and constructor-bound to this exact address. Keeping
+    ///      its creation payload outside the Router preserves EIP-3860 deployability without trusting storage layout.
     address public immutable liquidationBatchSidecar;
 
     /// @notice Deploys the router and its owner-controlled timelocked admin.
@@ -30,20 +37,30 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, Reentra
     /// @param _engineLens CfdEngineLens used for commit-time open validation previews.
     /// @param _housePool HousePool used for depth and risk-availability queries.
     /// @param _pletherOracle Deployed Plether oracle used for Pyth basket pricing.
+    /// @param _keeperSidecar Predeployed stateless keeper logic bound to this Router's address.
     constructor(
         address _engine,
         address _engineLens,
         address _housePool,
-        address _pletherOracle
+        address _pletherOracle,
+        address _keeperSidecar
     ) OrderRouterBase(_engine, _engineLens, _housePool, _pletherOracle) {
-        liquidationBatchSidecar = address(new OrderRouterLiquidationBatchSidecar());
+        if (
+            _keeperSidecar.code.length == 0
+                || IOrderRouterKeeperSidecarBinding(_keeperSidecar).ROUTER() != address(this)
+        ) {
+            revert OrderRouter__InvalidKeeperSidecar();
+        }
+        liquidationBatchSidecar = _keeperSidecar;
     }
 
     /// @notice Submits an open/increase or strict reduce-only intent to the delayed global FIFO queue.
     /// @dev Reserves committed margin and the keeper bounty in the clearinghouse immediately. Opens are
     ///      blocked while paused, degraded, close-only, or unable to increase pool risk and may be rejected
     ///      by a fresh-mark preflight. Closes remain committable in those modes but must match and not exceed
-    ///      the position obtained after applying the account's earlier queued orders. The caller is the account.
+    ///      the position obtained after applying the account's earlier queued orders. Normally the caller is the
+    ///      account. The router's immutable position-protection book may append an authenticated account word when
+    ///      atomically attaching protection to a newly committed open; no other caller can use that path.
     /// @param side Direction to open/increase, or the direction of the queued position being closed.
     /// @param sizeDelta Position-size change in synthetic-token units (18 decimals); must be a nonzero 100-token lot multiple.
     /// @param marginDelta Margin to reserve for an open/increase (6-decimal USDC); must be zero for a close.
@@ -56,7 +73,13 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, Reentra
         uint256 targetPrice,
         bool isClose
     ) external nonReentrant {
-        _commitOrder(side, sizeDelta, marginDelta, targetPrice, isClose);
+        address account = msg.sender;
+        if (account == address(positionProtectionBook)) {
+            assembly ("memory-safe") {
+                account := calldataload(164)
+            }
+        }
+        _commitOrderFor(account, side, sizeDelta, marginDelta, targetPrice, isClose);
     }
 
     /// @notice Prunes spent margin-reservation links for an account's pending-order queue.
@@ -139,6 +162,8 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, Reentra
         IOrderRouterAdminHost.RouterConfig calldata config
     ) external nonReentrant {
         _applyRouterConfig(config);
+        _delegateToKeeperSidecar();
+        _applyRouterConfigAfterOracle(config);
     }
 
     /// @notice Applies a finalized oracle integration configuration.
@@ -152,13 +177,43 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, Reentra
     }
 
     /// @notice Applies a mark-refresh oracle update and pushes its mark price to the engine.
-    /// @dev Permissionless and available while the router admin is paused. The oracle handles the Pyth fee
-    ///      and refunds unused ETH to the caller.
+    /// @dev Permissionless and available while the router admin is paused. The oracle handles the Pyth fee and
+    ///      normally refunds unused ETH to the caller. The router's immutable position-protection book appends the
+    ///      keeper and protection id when dispatching a trigger; that path refunds the keeper and queues the protected
+    ///      close through the same delayed FIFO machinery.
     /// @param pythUpdateData Pyth price update blobs; `msg.value` must cover the Pyth update fee.
     function updateMarkPrice(
         bytes[] calldata pythUpdateData
     ) external payable nonReentrant {
-        _updateMarkPrice(pythUpdateData);
+        pythUpdateData;
+        _delegateToKeeperSidecar();
+    }
+
+    /// @notice Records the already-validated close order produced by a delegated protection trigger.
+    /// @dev Callable only through an external self-call from the exactly bound keeper sidecar. The sidecar performs
+    ///      Book activation and bounty crediting; this callback alone mutates Router queue storage and revalidates the
+    ///      next id across the intervening external Book call.
+    function executePositionProtectionTriggerItem() external {
+        if (msg.sender != address(this)) {
+            revert OrderRouter__Unauthorized();
+        }
+        uint64 linkedOrderId;
+        address account;
+        CfdTypes.Side side;
+        uint256 size;
+        uint256 executionBountyUsdc;
+        assembly ("memory-safe") {
+            linkedOrderId := calldataload(4)
+            account := calldataload(36)
+            side := calldataload(68)
+            size := calldataload(100)
+            executionBountyUsdc := calldataload(132)
+        }
+        if (linkedOrderId != nextCommitId) {
+            revert OrderRouter__Unauthorized();
+        }
+        nextCommitId = linkedOrderId + 1;
+        _recordCommittedOrder(linkedOrderId, account, side, size, 0, 0, true, executionBountyUsdc);
     }
 
     /// @notice Atomically refreshes the pool-accounting mark and settles matured LP epochs against that exact mark.
@@ -169,7 +224,8 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, Reentra
     function settleLpEpoch(
         bytes[] calldata pythUpdateData
     ) external payable nonReentrant {
-        _settleLpEpoch(pythUpdateData);
+        pythUpdateData;
+        _delegateToKeeperSidecar();
     }
 
     /// @notice Permissionlessly liquidates an unsafe account using an account-adverse oracle price.
@@ -182,7 +238,9 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, Reentra
         address account,
         bytes[] calldata pythUpdateData
     ) external payable nonReentrant {
-        _executeLiquidation(account, pythUpdateData);
+        account;
+        pythUpdateData;
+        _delegateToKeeperSidecar();
     }
 
     /// @notice Permissionlessly attempts up to 256 account liquidations from one shared Pyth snapshot.
@@ -200,16 +258,23 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, Reentra
         address[] calldata accounts,
         bytes[] calldata pythUpdateData
     ) external payable nonReentrant returns (uint256 nextIndex) {
-        address target = liquidationBatchSidecar;
+        accounts;
+        pythUpdateData;
+        nextIndex = _delegateToKeeperSidecar();
+    }
+
+    /// @dev Forwards the original selector and calldata to the immutable, exactly Router-bound stateless sidecar.
+    ///      Normal Solidity return keeps the outer transient reentrancy guard's cleanup reachable.
+    function _delegateToKeeperSidecar() private returns (uint256 outputWord) {
+        address logic = liquidationBatchSidecar;
         assembly ("memory-safe") {
-            let ptr := mload(0x40)
-            calldatacopy(ptr, 0, calldatasize())
-            let ok := delegatecall(gas(), target, ptr, calldatasize(), 0, 0)
-            let size := returndatasize()
-            returndatacopy(ptr, 0, size)
-            if iszero(ok) { revert(ptr, size) }
-            if lt(size, 32) { revert(0, 0) }
-            nextIndex := mload(ptr)
+            let input := mload(0x40)
+            calldatacopy(input, 0, calldatasize())
+            let success := delegatecall(gas(), logic, input, calldatasize(), 0, 0)
+            let outputSize := returndatasize()
+            returndatacopy(input, 0, outputSize)
+            if iszero(success) { revert(input, outputSize) }
+            outputWord := mload(input)
         }
     }
 

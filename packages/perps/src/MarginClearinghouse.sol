@@ -13,6 +13,12 @@ import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAcco
 import {IWithdrawGuard} from "@plether/perps/interfaces/IWithdrawGuard.sol";
 import {MarginClearinghouseAccountingLib} from "@plether/perps/libraries/MarginClearinghouseAccountingLib.sol";
 
+interface IPositionProtectionBookSource {
+
+    function positionProtectionBook() external view returns (address);
+
+}
+
 /// @title MarginClearinghouse
 /// @notice Custodies settlement USDC and maintains the margin buckets used by Plether perpetual accounts.
 /// @dev Account ids are addresses. A settlement balance is an internal claim on this contract's USDC custody;
@@ -165,12 +171,12 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     /// @param amountUsdc Amount released from committed-order margin, in six-decimal USDC units
     event ReservationReleased(uint64 indexed orderId, address indexed account, uint256 amountUsdc);
 
-    /// @notice Emitted after a risk-off refund releases order margin and execution bounty classifications.
+    /// @notice Emitted after a risk-off refund releases order margin and refundable bounty classifications.
     /// @param account Account whose risk-off order reserves were released
     /// @param releasedMarginUsdc Aggregate committed-order margin released in six-decimal USDC units
-    /// @param executionBountyUsdc Reserved execution bounty released in six-decimal USDC units
+    /// @param refundableBountyUsdc Reserved order and attached-protection bounties released in six-decimal USDC units
     event RiskOffOrderReservesRefunded(
-        address indexed account, uint256 releasedMarginUsdc, uint256 executionBountyUsdc
+        address indexed account, uint256 releasedMarginUsdc, uint256 refundableBountyUsdc
     );
 
     /// @notice Emitted when settlement value is debited from an account and routed to a recipient.
@@ -208,10 +214,39 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         _;
     }
 
+    /// @dev Restricts reserved-settlement locks to the engine, its router, or that router's immutable book.
+    modifier onlyReservedSettlementLocker() {
+        address engine_ = engine;
+        if (
+            engine_ == address(0)
+                || (msg.sender != engine_
+                    && !_isOrderRouter(engine_, msg.sender)
+                    && !_isPositionProtectionBook(engine_, msg.sender))
+        ) {
+            revert MarginClearinghouse__NotOperator();
+        }
+        _;
+    }
+
     /// @dev Restricts calls to the order router currently reported by the configured engine.
     modifier onlyOrderRouter() {
         address engine_ = engine;
         if (engine_ == address(0) || !_isOrderRouter(engine_, msg.sender)) {
+            revert MarginClearinghouse__NotOperator();
+        }
+        _;
+    }
+
+    /// @dev Restricts reserved-settlement unlocks to the engine, its router/sidecar, or that router's immutable book.
+    modifier onlyReservedSettlementOperator() {
+        address engine_ = engine;
+        if (
+            engine_ == address(0)
+                || (msg.sender != engine_
+                    && !_isOrderRouter(engine_, msg.sender)
+                    && !_isSettlementSidecar(engine_, msg.sender)
+                    && !_isPositionProtectionBook(engine_, msg.sender))
+        ) {
             revert MarginClearinghouse__NotOperator();
         }
         _;
@@ -584,7 +619,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         emit ReservationReleased(orderId, reservation.account, releasedUsdc);
     }
 
-    /// @notice Releases risk-off order margin and execution bounty classifications back to free settlement.
+    /// @notice Releases risk-off order margin and refundable bounty classifications back to free settlement.
     /// @dev Callable only by the Engine-reported order router after it has removed the invalidated bounties from its
     ///      live accounting. Unknown and terminal reservation ids are tolerated, but every existing record must belong
     ///      to `account`. This incident path deliberately skips the Engine carry checkpoint: settlement balance, token
@@ -592,12 +627,12 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     ///      settlement to protect negative-VPI backing and all bounties that the router still reports as live.
     /// @param account Account receiving the released margin classifications
     /// @param orderIds Order reservation ids invalidated by the risk-off cutoff
-    /// @param executionBountyUsdc Exact invalidated bounty to unlock from reserved settlement
+    /// @param refundableBountyUsdc Exact invalidated order and attached-protection bounties to unlock
     /// @return releasedMarginUsdc Aggregate remaining committed-order margin released
     function releaseInvalidatedOrderReserves(
         address account,
         uint64[] calldata orderIds,
-        uint256 executionBountyUsdc
+        uint256 refundableBountyUsdc
     ) external onlyOrderRouter returns (uint256 releasedMarginUsdc) {
         for (uint256 i = 0; i < orderIds.length; ++i) {
             uint64 orderId = orderIds[i];
@@ -618,11 +653,11 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
             emit ReservationReleased(orderId, account, releasedUsdc);
         }
 
-        if (executionBountyUsdc > 0) {
-            _requireActionReserveDecreaseAboveProtectedFloor(account, executionBountyUsdc);
-            _unlockMargin(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, executionBountyUsdc);
+        if (refundableBountyUsdc > 0) {
+            _requireActionReserveDecreaseAboveProtectedFloor(account, refundableBountyUsdc);
+            _unlockMargin(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, refundableBountyUsdc);
         }
-        emit RiskOffOrderReservesRefunded(account, releasedMarginUsdc, executionBountyUsdc);
+        emit RiskOffOrderReservesRefunded(account, releasedMarginUsdc, refundableBountyUsdc);
     }
 
     /// @notice Consumes up to a requested amount from one active order reservation.
@@ -806,27 +841,29 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     }
 
     /// @notice Encumbers free settlement in the reserved-settlement bucket.
-    /// @dev Callable only by the engine or its reported order router. Checkpoints carry before increasing the bucket.
-    ///      The settlement balance is unchanged, and insufficient free settlement reverts.
+    /// @dev Callable only by the engine, its reported router, or the router's immutable position-protection book.
+    ///      Checkpoints carry before increasing the bucket. The settlement balance is unchanged, and insufficient
+    ///      free settlement reverts.
     /// @param account Account whose settlement should be reserved
     /// @param amountUsdc Amount to reserve in six-decimal USDC units
     function lockReservedSettlement(
         address account,
         uint256 amountUsdc
-    ) external onlyEngineOrOrderRouter {
+    ) external onlyReservedSettlementLocker {
         _checkpointCarryBeforeMarginChange(account);
         _lockMargin(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, amountUsdc);
     }
 
     /// @notice Decreases the reserved-settlement bucket, making the amount free settlement.
-    /// @dev Callable only by the engine or its reported settlement sidecar. Checkpoints carry and reverts rather than
-    ///      clamping on bucket underflow. The settlement balance is unchanged.
+    /// @dev Callable only by the engine, its reported router or settlement sidecar, or the router's immutable
+    ///      position-protection book. Checkpoints carry and reverts rather than clamping on bucket underflow. The
+    ///      settlement balance is unchanged.
     /// @param account Account whose reserved settlement should be unlocked
     /// @param amountUsdc Exact amount to unlock in six-decimal USDC units
     function unlockReservedSettlement(
         address account,
         uint256 amountUsdc
-    ) external onlyOperator {
+    ) external onlyReservedSettlementOperator {
         _checkpointCarryBeforeMarginChange(account);
         _requireActionReserveDecreaseAboveProtectedFloor(account, amountUsdc);
         _unlockMargin(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, amountUsdc);
@@ -1520,6 +1557,24 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     ) internal view returns (bool) {
         try ICfdEngineCore(engine_).settlementSidecar() returns (address settlementSidecar_) {
             return settlementSidecar_ != address(0) && caller == settlementSidecar_;
+        } catch {
+            return false;
+        }
+    }
+
+    function _isPositionProtectionBook(
+        address engine_,
+        address caller
+    ) internal view returns (bool) {
+        try ICfdEngineCore(engine_).orderRouter() returns (address router_) {
+            if (router_ == address(0) || router_.code.length == 0) {
+                return false;
+            }
+            try IPositionProtectionBookSource(router_).positionProtectionBook() returns (address book_) {
+                return book_ != address(0) && caller == book_;
+            } catch {
+                return false;
+            }
         } catch {
             return false;
         }

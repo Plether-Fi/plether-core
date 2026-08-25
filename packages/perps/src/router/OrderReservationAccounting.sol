@@ -84,6 +84,18 @@ abstract contract OrderReservationAccounting is IOrderRouterAccounting, IOrderRo
         reservation.committedMarginUsdc =
         clearinghouse.getAccountReservationSummary(account).activeCommittedOrderMarginUsdc;
         (reservation.pendingOrderCount, reservation.executionBountyUsdc,,) = _summarizePendingOrders(account);
+        reservation.executionBountyUsdc += _additionalExecutionBountyUsdc(account);
+    }
+
+    /// @notice Returns unpaid reserved bounty value owned by router features outside the ordinary order queue.
+    /// @dev Derived handlers may override this hook without changing ordinary pending-order counts or queue traversal.
+    /// @param account Account whose additional bounty reservation should be reported.
+    /// @return Additional reserved execution-bounty value, in 6-decimal USDC.
+    function _additionalExecutionBountyUsdc(
+        address account
+    ) internal view virtual returns (uint256) {
+        account;
+        return 0;
     }
 
     /// @notice Traverses an account queue and summarizes live orders.
@@ -142,17 +154,15 @@ abstract contract OrderReservationAccounting is IOrderRouterAccounting, IOrderRo
         }
     }
 
-    /// @notice Reserves and records the keeper bounty for a newly assigned order id.
+    /// @notice Reserves the keeper bounty for a newly assigned order id.
     /// @dev A zero bounty is a no-op. Open-order bounties are locked from free settlement after an explicit
     ///      balance check; close-order bounties use the engine hook implemented by the router base.
     /// @param account Account funding the bounty.
-    /// @param orderId Newly assigned order id.
     /// @param sizeDelta Order size used by close-bounty reservation (18 decimals).
     /// @param executionBountyUsdc Bounty to reserve (6-decimal USDC).
     /// @param isClose Whether to use the close-order reservation path.
     function _reserveExecutionBounty(
         address account,
-        uint64 orderId,
         uint256 sizeDelta,
         uint256 executionBountyUsdc,
         bool isClose
@@ -169,7 +179,6 @@ abstract contract OrderReservationAccounting is IOrderRouterAccounting, IOrderRo
             }
             clearinghouse.lockReservedSettlement(account, executionBountyUsdc);
         }
-        orderRecords[orderId].executionBountyUsdc = executionBountyUsdc;
     }
 
     /// @notice Reserves open-order margin in the clearinghouse and links the order into the margin queue.

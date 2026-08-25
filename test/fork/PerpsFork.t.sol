@@ -14,6 +14,7 @@ import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemption
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
+import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
@@ -145,12 +146,14 @@ contract PerpsForkTest is Test {
         w[0] = 1e18;
         uint256[] memory b = new uint256[](1);
         b[0] = 1e8;
-        router = new OrderRouter(
-            address(engine),
-            address(new CfdEngineLens(address(engine))),
-            address(pool),
-            address(new PletherOracle(address(engine), address(pool), address(pyth), feedIds, w, b, new bool[](1)))
-        );
+        CfdEngineLens lens = new CfdEngineLens(address(engine));
+        PletherOracle oracle =
+            new PletherOracle(address(engine), address(pool), address(pyth), feedIds, w, b, new bool[](1));
+        uint64 routerSidecarNonce = vm.getNonce(address(this));
+        address predictedRouter = vm.computeCreateAddress(address(this), routerSidecarNonce + 1);
+        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
+        router = new OrderRouter(address(engine), address(lens), address(pool), address(oracle), address(keeperSidecar));
+        assertEq(address(router), predictedRouter, "router prediction");
         routerAdmin = OrderRouterAdmin(router.admin());
         engine.setOrderRouter(address(router));
 
@@ -243,23 +246,24 @@ contract PerpsForkTest is Test {
     }
 
     function _configureLongOrderExpiry() internal {
-        IOrderRouterAdminHost.RouterConfig memory config = IOrderRouterAdminHost.RouterConfig({
-            maxOrderAge: 1000,
-            orderExecutionStalenessLimit: router.orderExecutionStalenessLimit(),
-            liquidationStalenessLimit: router.liquidationStalenessLimit(),
-            basketMaxConfidenceRatioBps: router.basketMaxConfidenceRatioBps(),
-            orderSettlementWindow: router.orderSettlementWindow(),
-            maxComponentPublishTimeDivergence: router.maxComponentPublishTimeDivergence(),
-            adverseConfidenceMultiplierBps: router.adverseConfidenceMultiplierBps(),
-            minOpenNotionalUsdc: router.minOpenNotionalUsdc(),
-            openOrderExecutionBountyBps: router.openOrderExecutionBountyBps(),
-            minOpenOrderExecutionBountyUsdc: router.minOpenOrderExecutionBountyUsdc(),
-            maxOpenOrderExecutionBountyUsdc: router.maxOpenOrderExecutionBountyUsdc(),
-            closeOrderExecutionBountyUsdc: router.closeOrderExecutionBountyUsdc(),
-            maxPendingOrders: router.maxPendingOrders(),
-            minEngineGas: router.minEngineGas(),
-            maxPruneOrdersPerCall: router.maxPruneOrdersPerCall()
-        });
+        IOrderRouterAdminHost.RouterConfig memory config;
+        config.maxOrderAge = 1000;
+        config.orderExecutionStalenessLimit = router.orderExecutionStalenessLimit();
+        config.liquidationStalenessLimit = router.liquidationStalenessLimit();
+        config.basketMaxConfidenceRatioBps = router.basketMaxConfidenceRatioBps();
+        config.orderSettlementWindow = router.orderSettlementWindow();
+        config.maxComponentPublishTimeDivergence = router.maxComponentPublishTimeDivergence();
+        config.adverseConfidenceMultiplierBps = router.adverseConfidenceMultiplierBps();
+        config.minOpenNotionalUsdc = router.minOpenNotionalUsdc();
+        config.openOrderExecutionBountyBps = router.openOrderExecutionBountyBps();
+        config.minOpenOrderExecutionBountyUsdc = router.minOpenOrderExecutionBountyUsdc();
+        config.maxOpenOrderExecutionBountyUsdc = router.maxOpenOrderExecutionBountyUsdc();
+        config.closeOrderExecutionBountyUsdc = router.closeOrderExecutionBountyUsdc();
+        config.positionProtectionCommitsEnabled = router.positionProtectionCommitsEnabled();
+        config.positionProtectionTriggerBountyUsdc = router.positionProtectionTriggerBountyUsdc();
+        config.maxPendingOrders = router.maxPendingOrders();
+        config.minEngineGas = router.minEngineGas();
+        config.maxPruneOrdersPerCall = router.maxPruneOrdersPerCall();
         routerAdmin.proposeRouterConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
         routerAdmin.finalizeRouterConfig();
@@ -366,12 +370,16 @@ contract PerpsForkTest is Test {
         rw[0] = 1e18;
         uint256[] memory rb = new uint256[](1);
         rb[0] = 1e8;
+        CfdEngineLens realPythLens = new CfdEngineLens(address(engine));
+        PletherOracle realPythOracle =
+            new PletherOracle(address(engine), address(pool), REAL_PYTH, feedIds, rw, rb, new bool[](1));
+        uint64 routerSidecarNonce = vm.getNonce(address(this));
+        address predictedRouter = vm.computeCreateAddress(address(this), routerSidecarNonce + 1);
+        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
         OrderRouter realPythRouter = new OrderRouter(
-            address(engine),
-            address(new CfdEngineLens(address(engine))),
-            address(pool),
-            address(new PletherOracle(address(engine), address(pool), REAL_PYTH, feedIds, rw, rb, new bool[](1)))
+            address(engine), address(realPythLens), address(pool), address(realPythOracle), address(keeperSidecar)
         );
+        assertEq(address(realPythRouter), predictedRouter, "router prediction");
 
         vm.expectRevert(ICfdEngineTypes.CfdEngine__RouterAlreadySet.selector);
         engine.setOrderRouter(address(realPythRouter));

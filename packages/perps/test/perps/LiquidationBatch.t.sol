@@ -5,6 +5,7 @@ import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
+import {PositionProtectionBook} from "@plether/perps/PositionProtectionBook.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
@@ -13,6 +14,20 @@ import {IPerpsKeeper} from "@plether/perps/interfaces/IPerpsKeeper.sol";
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {Vm} from "forge-std/Vm.sol";
 
+interface ILiquidationBatchSidecarErrors {
+
+    error OrderRouterLiquidationBatchSidecar__OnlyDelegateCall();
+
+}
+
+interface IDelegatedRouterConfig {
+
+    function applyRouterConfig(
+        IOrderRouterAdminHost.RouterConfig calldata config
+    ) external;
+
+}
+
 contract ForeignLiquidationBatchDelegateHarness {
 
     function execute(
@@ -20,9 +35,15 @@ contract ForeignLiquidationBatchDelegateHarness {
         address[] calldata accounts,
         bytes[] calldata updateData
     ) external payable returns (bool ok, bytes memory result) {
-        (ok, result) = sidecar.delegatecall(
-            abi.encodeCall(OrderRouterLiquidationBatchSidecar.executeLiquidationBatch, (accounts, updateData))
-        );
+        (ok, result) =
+            sidecar.delegatecall(abi.encodeCall(IPerpsKeeper.executeLiquidationBatch, (accounts, updateData)));
+    }
+
+    function applyRouterConfig(
+        address sidecar,
+        IOrderRouterAdminHost.RouterConfig calldata config
+    ) external returns (bool ok, bytes memory result) {
+        (ok, result) = sidecar.delegatecall(abi.encodeCall(IDelegatedRouterConfig.applyRouterConfig, (config)));
     }
 
 }
@@ -31,9 +52,6 @@ contract LiquidationBatchTest is BasePerpTest {
 
     uint256 internal constant EIP170_RUNTIME_CODE_LIMIT = 24_576;
     uint256 internal constant EIP3860_INITCODE_LIMIT = 49_152;
-    uint256 internal constant ORDER_ROUTER_RUNTIME_BASELINE = 24_446;
-    uint256 internal constant SIDECAR_RUNTIME_CODE_BUDGET = 3000;
-    uint256 internal constant SIDECAR_INITCODE_BUDGET = 3000;
     uint256 internal constant LIQUIDATION_PRICE = 102_000_000;
     uint256 internal constant NEUTRAL_PRICE = 100_000_000;
     uint256 internal constant BULL_ADVERSE_PRICE = 100_020_000;
@@ -51,44 +69,61 @@ contract LiquidationBatchTest is BasePerpTest {
     bytes32 internal constant LIQUIDATION_BATCH_ITEM_TOPIC =
         keccak256("LiquidationBatchItem(uint256,address,uint8,uint256,bytes4)");
 
-    function test_Batch_OrderRouterRuntimeFitsEip170() public view {
-        assertLe(
-            address(router).code.length,
-            ORDER_ROUTER_RUNTIME_BASELINE,
-            "batch sidecar must not exceed the pre-refactor OrderRouter runtime baseline"
-        );
+    function test_Batch_SplitComponentsFitDeploymentLimits() public view {
         assertLe(
             address(router).code.length, EIP170_RUNTIME_CODE_LIMIT, "batch entrypoint must keep OrderRouter deployable"
         );
 
         address sidecar = router.liquidationBatchSidecar();
-        assertGt(sidecar.code.length, 0, "Router must deploy a sidecar contract");
-        assertLe(sidecar.code.length, SIDECAR_RUNTIME_CODE_BUDGET, "sidecar runtime unexpectedly expanded");
+        address book = address(router.positionProtectionBook());
+        assertNotEq(sidecar, book, "keeper sidecar and state-owning protection Book must be separate contracts");
+        assertGt(sidecar.code.length, 0, "predeployed keeper sidecar must have code");
         assertLe(sidecar.code.length, EIP170_RUNTIME_CODE_LIMIT, "sidecar runtime must remain EIP-170 deployable");
+        assertGt(book.code.length, 0, "Router must deploy the protection Book");
+        assertLe(book.code.length, EIP170_RUNTIME_CODE_LIMIT, "Book runtime must remain EIP-170 deployable");
 
-        uint256 sidecarCreationInputLength = type(OrderRouterLiquidationBatchSidecar).creationCode.length;
-        assertLe(sidecarCreationInputLength, SIDECAR_INITCODE_BUDGET, "sidecar initcode unexpectedly expanded");
-        assertLe(sidecarCreationInputLength, EIP3860_INITCODE_LIMIT, "sidecar initcode must remain EIP-3860 deployable");
-
-        uint256 routerCreationInputLength = type(OrderRouter).creationCode.length + (4 * 32);
+        uint256 routerCreationInputLength = type(OrderRouter).creationCode.length + (5 * 32);
         assertLe(
             routerCreationInputLength, EIP3860_INITCODE_LIMIT, "Router creation input must remain EIP-3860 deployable"
+        );
+        assertLe(
+            type(OrderRouterLiquidationBatchSidecar).creationCode.length + 32,
+            EIP3860_INITCODE_LIMIT,
+            "sidecar creation input must remain EIP-3860 deployable"
+        );
+        assertLe(
+            type(PositionProtectionBook).creationCode.length + (2 * 32),
+            EIP3860_INITCODE_LIMIT,
+            "Book creation input must remain EIP-3860 deployable"
         );
     }
 
     function test_BatchSidecar_IsImmutablyBoundAndRejectsDirectCalls() public {
         OrderRouterLiquidationBatchSidecar sidecar =
             OrderRouterLiquidationBatchSidecar(router.liquidationBatchSidecar());
-        assertEq(sidecar.ROUTER(), address(router), "sidecar must bind the exact deploying Router");
+        assertNotEq(
+            address(sidecar),
+            address(router.positionProtectionBook()),
+            "batch sidecar must be separate from the protection Book"
+        );
+        assertEq(sidecar.ROUTER(), address(router), "sidecar must bind the exact Router");
 
         address[] memory accounts = new address[](1);
         accounts[0] = ELIGIBLE_ONE;
         bytes[] memory updateData = new bytes[](0);
         vm.deal(address(this), 1);
-        vm.expectRevert(
-            OrderRouterLiquidationBatchSidecar.OrderRouterLiquidationBatchSidecar__OnlyDelegateCall.selector
+        vm.expectRevert(ILiquidationBatchSidecarErrors.OrderRouterLiquidationBatchSidecar__OnlyDelegateCall.selector);
+        IPerpsKeeper(address(sidecar)).executeLiquidationBatch{value: 1}(accounts, updateData);
+    }
+
+    function test_RouterConstructor_RejectsSidecarBoundToForeignRouter() public {
+        OrderRouterLiquidationBatchSidecar foreignBoundSidecar =
+            new OrderRouterLiquidationBatchSidecar(address(0xBADB1D));
+
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidKeeperSidecar.selector);
+        new OrderRouter(
+            address(engine), address(engineLens), address(pool), address(pletherOracle), address(foreignBoundSidecar)
         );
-        sidecar.executeLiquidationBatch{value: 1}(accounts, updateData);
     }
 
     function test_BatchSidecar_RejectsForeignDelegateCallBeforeOracleWork() public {
@@ -103,7 +138,7 @@ contract LiquidationBatchTest is BasePerpTest {
         assertFalse(ok, "foreign delegate context must reject");
         assertEq(
             bytes4(result),
-            OrderRouterLiquidationBatchSidecar.OrderRouterLiquidationBatchSidecar__OnlyDelegateCall.selector,
+            ILiquidationBatchSidecarErrors.OrderRouterLiquidationBatchSidecar__OnlyDelegateCall.selector,
             "foreign delegate rejection selector"
         );
 
@@ -111,6 +146,21 @@ contract LiquidationBatchTest is BasePerpTest {
             baseMockPyth.updatePriceFeedsCallCount(),
             pythCallsBefore,
             "foreign delegate context must reject before oracle work"
+        );
+    }
+
+    function test_ConfigSidecar_RejectsDirectAndForeignContextCalls() public {
+        address sidecar = router.liquidationBatchSidecar();
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__Unauthorized.selector);
+        IDelegatedRouterConfig(sidecar).applyRouterConfig(config);
+
+        ForeignLiquidationBatchDelegateHarness foreign = new ForeignLiquidationBatchDelegateHarness();
+        (bool ok, bytes memory result) = foreign.applyRouterConfig(sidecar, config);
+        assertFalse(ok, "foreign delegate context must reject config forwarding");
+        assertEq(
+            bytes4(result), IOrderRouterErrors.OrderRouter__Unauthorized.selector, "foreign config rejection selector"
         );
     }
 
@@ -548,7 +598,7 @@ contract LiquidationBatchTest is BasePerpTest {
         );
         assertEq(address(router).balance, 0, "Router must not retain oracle ETH");
         assertEq(address(pletherOracle).balance, 0, "oracle adapter must not retain excess ETH");
-        assertEq(router.liquidationBatchSidecar().balance, 0, "sidecar must never receive ETH in its own context");
+        assertEq(router.liquidationBatchSidecar().balance, 0, "sidecar must never receive delegated oracle ETH");
     }
 
     function test_Batch_EmptyAccountsRevertsBeforePythUpdate() public {

@@ -54,6 +54,17 @@ abstract contract OrderExecutionSettlement is OrderOracleExecution, OrderQueueBo
         IOrderRouterAccounting.OrderStatus terminalStatus
     ) internal virtual;
 
+    /// @notice Fails protection attached to a risk-off parent and returns its no-checkpoint bounty refund.
+    /// @dev The default keeps the execution layer independent of optional attached-order features.
+    function _failPendingOpenProtectionForRiskOff(
+        uint64 parentOrderId,
+        address account
+    ) internal virtual returns (uint256 refundableProtectionBountyUsdc) {
+        parentOrderId;
+        account;
+        return 0;
+    }
+
     /// @notice Calls the engine's typed order path and normalizes success or revert classification.
     /// @dev A mark-price-out-of-order engine revert is promoted to a router revert instead of terminally
     ///      failing the order. Other panics and reverts return failure metadata to the caller.
@@ -114,7 +125,8 @@ abstract contract OrderExecutionSettlement is OrderOracleExecution, OrderQueueBo
     }
 
     /// @notice Refunds one invalidated open to its account without paying or consulting an oracle.
-    /// @dev Router queue and bounty effects precede the clearinghouse call; any downstream failure reverts all effects.
+    /// @dev Router queue, attached-protection, and bounty effects precede the clearinghouse call; any downstream
+    ///      failure reverts all effects. Protection bounties are included in the same no-checkpoint reserve release.
     function _refundRiskOffOrder(
         uint64 orderId,
         uint64 riskOffCutoff
@@ -133,8 +145,9 @@ abstract contract OrderExecutionSettlement is OrderOracleExecution, OrderQueueBo
         uint256 executionBountyUsdc = record.executionBountyUsdc;
         record.executionBountyUsdc = 0;
         emit OrderFailed(orderId, OrderFailReason.RiskOff);
+        uint256 refundableBountyUsdc = executionBountyUsdc + _failPendingOpenProtectionForRiskOff(orderId, account);
         _deleteOrder(orderId, IOrderRouterAccounting.OrderStatus.Failed);
-        clearinghouse.releaseInvalidatedOrderReserves(account, orderIds, executionBountyUsdc);
+        clearinghouse.releaseInvalidatedOrderReserves(account, orderIds, refundableBountyUsdc);
     }
 
     /// @notice Refunds every invalidated open in one account queue.

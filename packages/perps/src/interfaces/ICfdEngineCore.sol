@@ -224,6 +224,13 @@ interface ICfdEngineCore is ICfdEngineTypes {
             int256 vpiAccrued
         );
 
+    /// @notice Returns carry checkpointed against an account but not yet fully covered by reachable collateral.
+    /// @param account Account whose stored carry obligation should be inspected
+    /// @return Unsettled carry in six-decimal USDC units
+    function unsettledCarryUsdc(
+        address account
+    ) external view returns (uint256);
+
     /// @notice Returns the exact remaining entry basis used by lot-based PnL settlement.
     /// @dev The average entry price in `positions` is display-only and may omit division dust.
     function positionEntryCostUsdcAtoms(

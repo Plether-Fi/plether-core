@@ -5920,23 +5920,24 @@ contract CfdEngineAuditTest is BasePerpTest {
         address carolAccount = carol;
         (uint256 sizeBefore,,,,,,) = engine.positions(carolAccount);
 
-        IOrderRouterAdminHost.RouterConfig memory config = IOrderRouterAdminHost.RouterConfig({
-            maxOrderAge: router.maxOrderAge(),
-            orderExecutionStalenessLimit: router.orderExecutionStalenessLimit(),
-            liquidationStalenessLimit: router.liquidationStalenessLimit(),
-            basketMaxConfidenceRatioBps: router.basketMaxConfidenceRatioBps(),
-            orderSettlementWindow: router.orderSettlementWindow(),
-            maxComponentPublishTimeDivergence: router.maxComponentPublishTimeDivergence(),
-            adverseConfidenceMultiplierBps: router.adverseConfidenceMultiplierBps(),
-            minOpenNotionalUsdc: router.minOpenNotionalUsdc(),
-            openOrderExecutionBountyBps: router.openOrderExecutionBountyBps(),
-            minOpenOrderExecutionBountyUsdc: router.minOpenOrderExecutionBountyUsdc(),
-            maxOpenOrderExecutionBountyUsdc: router.maxOpenOrderExecutionBountyUsdc(),
-            closeOrderExecutionBountyUsdc: router.closeOrderExecutionBountyUsdc(),
-            maxPendingOrders: router.maxPendingOrders(),
-            minEngineGas: router.minEngineGas(),
-            maxPruneOrdersPerCall: router.maxPruneOrdersPerCall()
-        });
+        IOrderRouterAdminHost.RouterConfig memory config;
+        config.maxOrderAge = router.maxOrderAge();
+        config.orderExecutionStalenessLimit = router.orderExecutionStalenessLimit();
+        config.liquidationStalenessLimit = router.liquidationStalenessLimit();
+        config.basketMaxConfidenceRatioBps = router.basketMaxConfidenceRatioBps();
+        config.orderSettlementWindow = router.orderSettlementWindow();
+        config.maxComponentPublishTimeDivergence = router.maxComponentPublishTimeDivergence();
+        config.adverseConfidenceMultiplierBps = router.adverseConfidenceMultiplierBps();
+        config.minOpenNotionalUsdc = router.minOpenNotionalUsdc();
+        config.openOrderExecutionBountyBps = router.openOrderExecutionBountyBps();
+        config.minOpenOrderExecutionBountyUsdc = router.minOpenOrderExecutionBountyUsdc();
+        config.maxOpenOrderExecutionBountyUsdc = router.maxOpenOrderExecutionBountyUsdc();
+        config.closeOrderExecutionBountyUsdc = router.closeOrderExecutionBountyUsdc();
+        config.positionProtectionCommitsEnabled = router.positionProtectionCommitsEnabled();
+        config.positionProtectionTriggerBountyUsdc = router.positionProtectionTriggerBountyUsdc();
+        config.maxPendingOrders = router.maxPendingOrders();
+        config.minEngineGas = router.minEngineGas();
+        config.maxPruneOrdersPerCall = router.maxPruneOrdersPerCall();
         routerAdmin.proposeRouterConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
         routerAdmin.finalizeRouterConfig();

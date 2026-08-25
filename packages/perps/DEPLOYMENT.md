@@ -27,10 +27,13 @@ LP deposits and redemptions share the vaults' deterministic round-hour epoch clo
 cutoff. Before each cutoff they target the next epoch; during the final five minutes, beginning at exact cutoff
 equality, they remain valid but target the following epoch. The numeric target does not change at the intervening
 round-hour boundary. After bootstrap, any account may clear matured epochs through
-`OrderRouter.settleLpEpoch(bytes[])`; no privileged keeper role is required. Outside oracle-frozen mode, live
-open-position settlement requires a valid `PoolReconcile` Pyth basket published at or after the round-hour boundary,
-not the request cutoff. Each call examines at most 16 nonempty epochs in each tranche phase and must be repeated with
-a freshly validated update when older backlog remains. A no-progress or oracle-rejected call retains no Pyth, Engine,
+the route reported by `SettlementMonitorLens.requiredExecutionPath`; no privileged keeper role is required. The
+`CachedMark` route calls `HousePool` directly, while `AtomicOracleRefresh` calls `OrderRouter` with a valid
+`PoolReconcile` Pyth basket. Outside oracle-frozen mode, live open-position settlement requires the atomic route and a
+basket published at or after the round-hour boundary, not the request cutoff. Frozen mode also selects atomic refresh
+when its cached mark is stale under the applicable frozen-mode limit. Each call examines at most 16 nonempty epochs in
+each tranche phase. Each atomic-refresh pass must be repeated with a freshly validated update when older backlog
+remains; cached-mark passes require no Pyth update. A no-progress or oracle-rejected call retains no Pyth, Engine,
 pool, or vault side effect.
 
 ## Deployment Shape
@@ -50,10 +53,14 @@ The deploy script creates and wires:
 11. `TrancheVault` junior
 12. `CfdEngineAccountLens`
 13. `CfdEngineLens`
-14. `OrderRouter` (constructor-deploys its immutable `OrderRouterLiquidationBatchSidecar`)
-15. `PerpsPublicLens`
-16. `SettlementMonitorLens` (the facade deploys its monitor-bound `SettlementMonitorLensSidecar` internally)
-17. `EmergencyPauseCoordinator`
+14. `PletherOracle`
+15. `OrderRouterLiquidationBatchSidecar`, separately deployed with the predicted address of the next Router `CREATE`
+16. `OrderRouter`, deployed immediately after the sidecar and constructor-deploying its immutable RouterAdmin and
+    stateful protection Book
+17. `PositionProtectionBook`, deployed internally and immutably bound by the Router constructor
+18. `PerpsPublicLens`
+19. `SettlementMonitorLens` (the facade deploys its monitor-bound `SettlementMonitorLensSidecar` internally)
+20. `EmergencyPauseCoordinator`
 
 It then performs the required set-once wiring:
 
@@ -64,6 +71,26 @@ It then performs the required set-once wiring:
 - `CfdEngine.setPool(...)`
 - `CfdEngine.setOrderRouter(...)`
 - `MarginClearinghouse.setEngine(...)`
+
+The stateless keeper sidecar and Router have a strict deployment pair. Let `n` be the deployer's nonce immediately
+before deploying `OrderRouterLiquidationBatchSidecar`. Compute the expected Router address as the deployer's `CREATE`
+address at nonce `n + 1`, deploy the sidecar at nonce `n` with that expected address, and deploy `OrderRouter` as the
+deployer's very next nonce-consuming transaction and next `CREATE`. No intervening transaction, call, or contract
+creation may consume the deployer's nonce. The Router constructor rejects a sidecar without code or whose immutable
+`ROUTER()` is not `address(this)`; the deploy script also verifies the actual Router address equals the prediction. If
+the deployer nonce changes between the pair, discard the orphaned sidecar, recompute the next Router address, and deploy
+a newly bound sidecar; its immutable binding cannot be repaired.
+
+The Router constructor separately creates the stateful position-protection Book. That Book requires no separate
+deployment transaction or mutable wiring of its own. Discover it from `OrderRouter.positionProtectionBook()` and
+verify its immutable `ROUTER()` and `ENGINE()` values against the new Router and Engine. Discover the stateless sidecar
+from `OrderRouter.liquidationBatchSidecar()`, require it to have code and a matching immutable `ROUTER()`, and require
+it to be different from the Book. Its runtime carries the Router's mark-refresh, protection-trigger oracle and
+orchestration, single-liquidation, risk-off-aware liquidation-batch, and atomic-refresh LP-epoch implementations to
+preserve EIP-170 and EIP-3860 headroom. Those selectors remain public only on the Router: direct and foreign-context
+sidecar calls must revert. Under Router `delegatecall`, the Router remains `address(this)` and the direct-event address,
+downstream contracts see it as caller, and the entrypoint's `msg.sender` is preserved. External-callee events remain at
+the callee; the Book-trigger route carries the keeper/protection id in authenticated trailing data.
 
 Important:
 
@@ -93,10 +120,13 @@ Important:
   three fixed guardian actions—risk-off plus LP entry, LP-settlement-only, and full containment—but no unpause,
   arbitrary mask, pricing, configuration, fund-transfer, or arbitrary-call surface. Its later reason/evidence hashes
   remain advisory and are not derived or authenticated by the Lens.
-- `OrderRouterLiquidationBatchSidecar` is a stateless EIP-170 size split, not an independently operated contract.
-  Deploy and bootstrap both require its address to contain code and its immutable `ROUTER()` binding to equal the
-  deployed Router. Its entrypoint rejects direct calls and works only through Router delegatecall; it has no mutable
-  storage, setter, proxy, or upgrade path. Record the address for verification, but keepers must call the Router.
+- `OrderRouter.liquidationBatchSidecar()` returns the separately deployed stateless keeper module, not the
+  `PositionProtectionBook`. Deploy and bootstrap must require both addresses to contain code, require them to differ,
+  and verify the sidecar's immutable `ROUTER()` plus the Book's immutable `ROUTER()` and `ENGINE()` bindings. The
+  sidecar rejects direct and foreign-context calls, reads the RouterAdmin's persistent risk-off cutoff through the
+  Router-bound execution context, and works only through Router delegatecall. It is an EIP-170 size split with no
+  mutable storage, setter, proxy, upgrade path, custody, or independent operational surface. Record the address for
+  verification, but keepers must call the Router.
 - An already deployed compatible stack may add the lens independently against its Router; there is no storage
   migration and no core-contract redeployment requirement. Replacing a faulty lens likewise does not move protocol
   authority, but integrations must pin the intended facade address. Full current-feed diagnostics require the
@@ -121,12 +151,35 @@ Important:
   does not change these standard ids. Both deploy and bootstrap verification must assert
   `supportsInterface(type(IAsyncTrancheVault).interfaceId)` for the rebuilt custom interface; regenerate the custom
   vault and lens ABIs for frontend, keeper, and indexer use.
+- `OrderRouter` is non-upgradeable and `CfdEngine.setOrderRouter(...)` is one-time. A release containing position
+  protection therefore requires a fresh complete perps stack; do not point a new router at an existing engine or
+  migrate live positions into the new release.
+- The position-protection fields expand `OrderRouterAdmin.RouterConfig` from 15 to 17 fields. This changes the
+  `proposeRouterConfig` selector from `0xf8eb837c` to `0xbe6e421a`, the Router's `applyRouterConfig` selector from
+  `0xf2444582` to `0x5f3838b0`, and both configuration event topics. Although `pendingRouterConfig()` keeps its
+  selector, its return tuple is longer, so an old decoder can silently misinterpret the final fields. Regenerate and
+  version Router/Admin ABIs, retain the old event topics for historical deployments, and update every governance,
+  indexer, keeper, and product consumer before proposing configuration on the new stack.
+- Treat the Router, its predeployed keeper sidecar, and its internally created Book as one bytecode release. The
+  delegated sidecar logic reads integrations through Router external getters, does not read or write Router storage by
+  layout, and changes Router-owned state only through authorized external self/item calls. Verify all three runtimes
+  from the same source commit and test that direct and foreign-context helper calls fail. Sidecar creation code is not
+  embedded in Router initcode, but Book creation code remains embedded because the Router constructor deploys it.
+  Verify Router, sidecar, and Book creation inputs plus all three EIP-170 runtimes with explicit safety margin.
+- Position-protection creation is disabled on a fresh router. Ordinary trading can be bootstrapped independently while
+  the trigger worker, indexer, and product integrations are verified. Do not enable the flag until the product has the
+  Book ABI and attached-open/existing-position flows, the trigger worker is live, and every offchain oracle-policy
+  reader uses `basketMaxConfidenceRatioBps()` rather than the retired `pythMaxConfidenceRatioBps()` getter.
 
 ## Oracle Configuration
 
 The Arbitrum Sepolia deploy script uses Pyth at:
 
 - `0x4374e5a8b9C22271E9EB878A2AA31DE97DF15DAF`
+
+Pre-broadcast blocker: the current `plether-app` Arbitrum Sepolia configuration instead names
+`0x0B73614636C855Bf23F342F307FB981A3e47f42B`. Confirm the authoritative Pyth endpoint and align both repositories before
+deploying; this guide intentionally does not choose between the conflicting addresses.
 
 The router basket uses 6 FX feeds with DXY weights:
 
@@ -161,6 +214,9 @@ The next Arbitrum Sepolia perps deployment uses these initial defaults:
 | `fadRunwaySeconds` | `1 hours` |
 | `basketMaxConfidenceRatioBps` | `10` |
 | `adverseConfidenceMultiplierBps` | `2_000` |
+| `closeOrderExecutionBountyUsdc` | `200_000` (`0.20 USDC`) |
+| `positionProtectionTriggerBountyUsdc` | `200_000` (`0.20 USDC`) |
+| `positionProtectionCommitsEnabled` | `false` |
 | `maxSeniorExposureUsdc` | Operator-supplied finite USDC amount |
 | `maxSeniorShareBps` | Operator-supplied value below `10_000` |
 
@@ -233,20 +289,35 @@ Run:
 source .env && forge script script/DeployPerpsArbitrumSepolia.s.sol:DeployPerpsArbitrumSepolia --rpc-url $ARB_SEPOLIA_RPC_URL --broadcast
 ```
 
-The script prints the deployed addresses to the console. Save at least:
+The script prints the deployed addresses and position-protection defaults to the console. Save the complete output,
+including at least:
 
 - `MockUSDC`
+- `MarginClearinghouse`
 - `CfdEngine`
 - `TerminalNavBookV2`
+- `CfdEnginePlanner`, `CfdEngineSettlementSidecar`, `CfdEngineAdmin`, and the engine lenses
 - `HousePool`
 - `HousePoolRedemptionMathSidecar`
+- both tranche vaults
+- `PletherOracle`
 - `OrderRouter`
-- `OrderRouterLiquidationBatchSidecar`
+- the separately deployed `OrderRouterLiquidationBatchSidecar` returned by
+  `OrderRouter.liquidationBatchSidecar()`
+- the internally deployed `PositionProtectionBook` returned by `OrderRouter.positionProtectionBook()`
+- `OrderRouterAdmin`
+- `PerpsPublicLens`
+- `SettlementMonitorLens` and its internally deployed `SettlementMonitorLensSidecar`
 - `EmergencyPauseCoordinator`
 
-Bootstrap directly consumes the USDC, HousePool, redemption-math sidecar, Router, and coordinator addresses and
-derives the RouterAdmin and liquidation sidecar from the Router. Record every listed address for independent
-deployment verification.
+Also record the source commit, deployment block, transaction hashes, and verified-bytecode status. `MockUSDC`,
+`HousePool`, `HousePoolRedemptionMathSidecar`, `OrderRouter`, and `EmergencyPauseCoordinator` are consumed directly by
+the bootstrap script. Bootstrap derives the RouterAdmin, stateful protection Book, and stateless keeper sidecar from
+the Router; it verifies the supplied redemption-math sidecar's identity for rerun inspection and verifies that the
+Book and keeper sidecar are distinct code-bearing contracts with exact immutable bindings. The deploy transaction is
+the evidence for HousePool's immutable redemption-math-sidecar constructor binding because the Pool deliberately has
+no runtime getter for it. The remaining addresses are needed by product, indexer, keeper, monitoring, audit, and
+independent deployment-verification tooling.
 
 ### Bootstrap
 
@@ -334,6 +405,51 @@ the test-user recipient/amount inputs after the intended funding run.
 
 This is useful if the first bootstrap attempt completes only partially.
 
+Bootstrap does not enable position protection or propose router configuration. Its final output reports the discovered
+Book address, current feature flag, and trigger bounty so operators can verify that ordinary trading was activated
+without exposing an unprepared conditional-order surface.
+
+## Position Protection Activation
+
+Position protection has a two-stage keeper model:
+
+1. A permissionless trigger worker evaluates an armed TP/SL condition with a current Pyth update and, when a condition
+   is met, appends a full-position market-style close to the ordinary global FIFO tail.
+2. The ordinary order keeper executes that linked close using the normal post-commit historical Pyth rule.
+
+Trader calls that create, replace, or attach protection are nonpayable and validate against the engine's cached fresh
+mark. They target the `PositionProtectionBook` discovered through `OrderRouter.positionProtectionBook()`, as does the
+payable `triggerPositionProtection(...)` keeper call. The Router does not forward these public selectors. Only the
+trigger call ingests payable Pyth update data. This keeps the trader flow compatible with zero-native-value sponsored
+accounts while retaining an independently verified trigger observation.
+
+Before enabling the feature, verify the existing-position post-reservation gate against boundary tests. The Book locks
+both bounties first, then calls the Engine-configured planner's canonical V2 exact-price predicate with exact entry cost
+and price equity composed only of PnL pledge plus the same-account trader claim plus exact capped unrealized PnL. Free
+settlement and generic action/reservation buckets are excluded; uncovered carry and an underfunded negative-VPI reserve
+fail closed; and equality at the stricter of initial or active normal/FAD margin is rejected. Attached opens lock
+protection value before the ordinary open planner evaluates the parent. Reusing the configured planner is both the
+single source of risk semantics and an initcode constraint: do not re-embed a local copy of the exact-price kernel in
+the internally deployed Book.
+
+Protection lifecycle events originate from the Book. Indexers and trigger workers must subscribe at the Book address;
+the generated close's ordinary `OrderCommitted` and terminal-order events originate from the Router.
+
+The feature flag and trigger bounty are members of the 48-hour timelocked `OrderRouterAdmin.RouterConfig`. Enabling the
+feature must use the normal proposal/finalization path:
+
+1. Read every current router and oracle-policy field onchain.
+2. Build a complete `RouterConfig` from those current values, changing only the intended protection fields.
+3. Propose the configuration through `OrderRouterAdmin` and record the proposal transaction and activation timestamp.
+4. Wait the full 48-hour delay.
+5. Re-read the pending configuration, verify every field, and finalize it.
+6. Confirm `positionProtectionCommitsEnabled() == true` and the expected snapshotted bounty values on the router.
+
+Do not reconstruct unrelated fields from old release notes or hardcoded defaults: finalizing `RouterConfig` replaces the
+complete router configuration. Disabling new protection commits follows the same timelocked path. Disabling or pausing
+must not strand existing records: cancellation, valid triggering, linked FIFO execution, terminal cleanup, and
+liquidation remain live.
+
 ## Operational Notes
 
 - Perps contracts are non-upgradeable. Synchronized async LP settlement therefore requires a coordinated replacement
@@ -350,6 +466,8 @@ This is useful if the first bootstrap attempt completes only partially.
 - Test users still need Arbitrum Sepolia ETH from a faucet to submit transactions.
 - The deploy and bootstrap scripts currently assume the broadcaster owns the deployed contracts.
 - The router admin is deployed internally by `OrderRouter`; bootstrap uses `router.admin()` to reach it.
+- The position-protection Book is deployed internally by `OrderRouter`; bootstrap logs
+  `router.positionProtectionBook()` for discovery and consistency checks.
 - The deploy script installs `EmergencyPauseCoordinator` as the pauser on both RouterAdmin and HousePool. Do not set
   the guardian address directly as either pauser: doing so would reintroduce a partial-containment race.
 - All ownership-bearing perps contracts use `Ownable2Step`: the current owner initiates a handoff and the pending
@@ -357,21 +475,50 @@ This is useful if the first bootstrap attempt completes only partially.
 
 ## Recommended Flow
 
-1. Run the deploy script.
-2. Record the deployed addresses.
-3. Set bootstrap env vars, including the printed redemption-math sidecar and coordinator, a nonzero guardian, and both
-   explicit senior limits.
-4. Run the bootstrap script to propose the finite limits.
-5. Wait for the 48-hour `HousePool` timelock.
-6. Rerun the same bootstrap command to finalize, seed junior then senior, and activate trading.
-7. Fund any test wallets with Arbitrum Sepolia ETH.
-8. Start product integration testing against `PerpsPublicLens`, `MarginClearinghouse`, `OrderRouter`, and `HousePool`,
-   and operator monitoring against `SettlementMonitorLens`.
-9. Submit deposit and redemption requests on both vaults, advance to a matured epoch, follow the route reported by
-   `SettlementMonitorLens`, and verify that funded claims can be pulled independently.
-10. Dry-run all three guardian actions on the fresh testnet stack. Verify restriction masks/states, the emitted cutoff
-    for risk-off actions, settlement rollback, and deliberately live closes/funded claims; clear invalidated opens,
-    then have governance perform independent recovery of every active restriction.
+1. Run formatting, package tests, integration script tests, and `forge build --sizes`; do not deploy an oversized Router
+   or helper module, and retain reviewed safety margin below the EIP-170 runtime and EIP-3860 initcode limits rather
+   than accepting a byte-exact boundary. Keep the dedicated Router, stateful protection Book, stateless keeper sidecar,
+   redemption-math sidecar, HousePool, and `SettlementMonitorLens` size regressions green.
+2. Simulate and then run the deploy script for a fresh complete stack.
+3. Record the exact commit, deployment block, transaction hashes, addresses, and verification status.
+4. Verify every set-once and immutable binding, including `TerminalNavBookV2` and the redemption-math sidecar; record
+   the protection Book returned by `positionProtectionBook()` and the distinct stateless helper returned by
+   `liquidationBatchSidecar()`. Confirm the redemption-math sidecar implementation id and HousePool constructor input,
+   the keeper sidecar's `ROUTER()` binding, the Book's `ROUTER()` and `ENGINE()` bindings, and that protection creation
+   is disabled with a `200_000` trigger bounty and `200_000` linked-close execution bounty. Exercise direct and
+   foreign-context rejection for the sidecar-carried Router helpers, including the risk-off-aware batch entrypoint,
+   plus the canonical Router success paths for mark refresh, protection-trigger oracle resolution, single liquidation,
+   batch liquidation, and atomic-refresh LP-epoch settlement, and the direct-Pool cached settlement path. Verify the
+   `SettlementMonitorLens` facade and its internal sidecar are bound to the same Router, Engine, pool, terminal book,
+   clearinghouse, vaults, USDC, protocol lens, and planner version. Verify the `EmergencyPauseCoordinator` is bound to
+   the exact RouterAdmin and HousePool, installed as pauser on both, and starts with no active settlement hold.
+5. Set bootstrap environment variables, including the printed redemption-math sidecar and coordinator, a nonzero
+   guardian, and both explicit senior limits, then run bootstrap to configure the guardian and propose the limits.
+6. Wait for the 48-hour `HousePool` timelock, then rerun the same bootstrap command to finalize the limits, seed Junior
+   then Senior, and activate trading.
+7. Fund test wallets with Arbitrum Sepolia ETH as needed.
+8. Point the frontend, public lens consumers, indexer, ordinary order keeper, LP epoch keeper, trigger worker, and
+   monitoring at the new release. Configure the guardian monitor and protocol-funded incident keeper. Protection
+   clients and event subscriptions use the Book; ordinary FIFO and LP epoch services use their canonical endpoints,
+   with the LP keeper following the Lens-selected direct-Pool or Router route; operator and security monitoring use the
+   canonical `SettlementMonitorLens` facade, never its sidecar. Start all offchain services from the deployment block.
+9. Submit deposit and redemption requests on both vaults, advance to a matured epoch, and follow the route reported by
+   `SettlementMonitorLens`. When it selects `AtomicOracleRefresh`, fetch a Hermes update that satisfies the reported
+   `minimumAtomicPublishTime` and frozen/live oracle policy. Verify that funded claims can be pulled independently.
+10. Dry-run all three fixed guardian actions on the fresh testnet stack. Verify restriction masks/states, the emitted
+    cutoff for risk-off actions, settlement rollback, and deliberately live closes, protection lifecycle paths, and
+    funded claims; clear invalidated opens with the protocol incident keeper, then have governance perform independent
+    recovery of every active restriction.
+11. Exercise trigger-worker discovery and dry-run/simulation paths while protection creation remains disabled.
+12. Propose, wait 48 hours, verify, and finalize the complete router configuration that enables protection commits.
+13. Test attached-open activation, existing-position protection, both trigger directions, cancellation/replacement,
+    linked-order execution and expiry, frozen-oracle behavior, emergency-pause cancellation/trigger liveness, and
+    liquidation end to end.
+14. Run a limited-TVL soak for at least seven days before broader use. Monitor armed and triggered counts,
+    trigger-to-FIFO and FIFO-to-terminal latency, linked-close failure/expiry, keeper profitability, liquidation before
+    fill, exact reservation reconciliation, LP queue backlog, epoch-settlement progress, monitor dependency/critical
+    masks, observation completeness, cached-mark versus atomic-refresh routing, LP settlement-hold state, guardian
+    availability, and risk-off cleanup backlog.
 
 ## Emergency Containment Runbook
 
@@ -389,9 +536,12 @@ pause trader closes/reductions or already-funded claims and does not create a gl
    the advisory Lens and no Lens condition trips it permissionlessly.
 3. Confirm `EmergencyContainmentTriggered`, its action and previous/new masks, and every targeted state. When risk-off
    is included, confirm the inclusive cutoff; covered opens remain invalid forever, including after recovery.
-4. Keep closes, liquidations, LP redemption requests, existing cancellation paths, recapitalization/reconciliation,
-   and funded claims operating. Under settlement-only, new deposits and Senior reservations remain accepted but cannot
-   activate; assets can accumulate under unchanged cancellation rules. Stop settlement broadcasts while held.
+4. Keep closes, liquidations, protection cancellation and valid trigger/linked-close processing, LP redemption
+   requests, existing cancellation paths, recapitalization/reconciliation, and funded claims operating. Risk-off's
+   HousePool pause blocks new deposit requests and activation. Under settlement-only, new deposits and Senior
+   reservations remain accepted but cannot activate; assets can accumulate under unchanged cancellation rules. A
+   matured pending deposit is not automatically cancellable merely because either restriction is active; use only its
+   existing escape conditions or wait for recovery. Stop settlement broadcasts while held.
 5. Have the protocol incident keeper call permissionless risk-off cleanup for invalidated opens. Cleanup requires no
    Pyth payload, refunds full remaining margin and bounty to the trader's internal settlement, and pays no caller, so
    the protocol pays gas.
@@ -474,3 +624,11 @@ unauthenticated and unenforced. The monitor
 deliberately exposes no authoritative `canSettle` decision. A live transaction can still race cancellations, trading,
 configuration, cash, or oracle state. The exact selected-transaction simulation is authoritative; a call with no
 matured progress deliberately reverts, and every atomic-refresh backlog pass needs another validated Pyth update.
+
+Cross-check `PerpsPublicLens` queue state immediately before broadcasting, but use the monitor's canonical matured-head
+evidence and selected execution route for keeper preflight. Each bounded `AtomicOracleRefresh` backlog pass requires a
+new validated Pyth update; a `CachedMark` pass requires neither a Hermes payload nor ETH.
+
+Create a new dated release note after deployment. Do not edit historical release notes. The new note must identify the
+old stack as lacking position protection and state clearly that a trigger queues a close; it does not guarantee
+execution time, execution price, or execution before liquidation.

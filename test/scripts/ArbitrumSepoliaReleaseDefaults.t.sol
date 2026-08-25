@@ -11,7 +11,9 @@ import {EmergencyPauseCoordinator} from "@plether/perps/EmergencyPauseCoordinato
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
+import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
+import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
@@ -34,6 +36,13 @@ contract DeployPerpsArbitrumSepoliaHarness is DeployPerpsArbitrumSepolia {
         MockUSDC usdc
     ) external view {
         _verifyAsyncVaultPair(housePool, seniorVault, juniorVault, usdc);
+    }
+
+    function verifyPositionProtectionBook(
+        OrderRouter router,
+        CfdEngine engine
+    ) external view returns (address book) {
+        return _verifyPositionProtectionBook(router, engine);
     }
 
 }
@@ -87,6 +96,13 @@ contract BootstrapPerpsArbitrumSepoliaHarness is BootstrapPerpsArbitrumSepolia {
         address usdc
     ) external view {
         _verifyAsyncVaultPair(housePool, usdc);
+    }
+
+    function verifyRouterWiring(
+        HousePool housePool,
+        OrderRouter router
+    ) external view {
+        _verifyRouterWiring(housePool, router);
     }
 
     function validateGuardian(
@@ -221,9 +237,56 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         PletherOracle oracle = new PletherOracle(
             address(engine), address(0xBEEF), address(pyth), feedIds, quantities, basePrices, inversions
         );
+        uint64 sidecarNonce = vm.getNonce(address(this));
+        address expectedRouter = vm.computeCreateAddress(address(this), uint256(sidecarNonce) + 1);
+        OrderRouterLiquidationBatchSidecar sidecar = new OrderRouterLiquidationBatchSidecar(expectedRouter);
+        OrderRouter router =
+            new OrderRouter(address(engine), address(0xCAFE), address(0xBEEF), address(oracle), address(sidecar));
 
+        assertEq(address(router), expectedRouter, "predicted Router CREATE address");
         assertEq(oracle.basketMaxConfidenceRatioBps(), 10, "basket confidence ratio");
         assertEq(oracle.adverseConfidenceMultiplierBps(), 2000, "adverse confidence multiplier");
+        assertFalse(router.positionProtectionCommitsEnabled(), "position protection disabled");
+        assertEq(router.positionProtectionTriggerBountyUsdc(), 200_000, "position protection trigger bounty");
+        assertEq(router.closeOrderExecutionBountyUsdc(), 200_000, "position protection close bounty");
+    }
+
+    function test_DeploymentGuardsAcceptDistinctCanonicalPositionProtectionBookAndBoundSidecar() public {
+        DeployPerpsArbitrumSepoliaHarness deployScript = new DeployPerpsArbitrumSepoliaHarness();
+        BootstrapPerpsArbitrumSepoliaHarness bootstrapScript = new BootstrapPerpsArbitrumSepoliaHarness();
+        MockUSDC usdc = new MockUSDC();
+        MarginClearinghouse clearinghouse = new MarginClearinghouse(address(usdc));
+        CfdEngine engine = new CfdEngine(
+            address(usdc), address(clearinghouse), 2e8, deployScript.riskParams(), deployScript.frozenCloseSpreadBps()
+        );
+        HousePoolRedemptionMathSidecar redemptionMathSidecar = new HousePoolRedemptionMathSidecar();
+        HousePool pool = new HousePool(address(usdc), address(engine), address(redemptionMathSidecar));
+
+        bytes32[] memory feedIds = new bytes32[](1);
+        feedIds[0] = bytes32(uint256(1));
+        uint256[] memory quantities = new uint256[](1);
+        quantities[0] = 1e18;
+        uint256[] memory basePrices = new uint256[](1);
+        basePrices[0] = 1e8;
+        bool[] memory inversions = new bool[](1);
+        MockPyth pyth = new MockPyth();
+        PletherOracle oracle = new PletherOracle(
+            address(engine), address(pool), address(pyth), feedIds, quantities, basePrices, inversions
+        );
+        uint64 sidecarNonce = vm.getNonce(address(this));
+        address expectedRouter = vm.computeCreateAddress(address(this), uint256(sidecarNonce) + 1);
+        OrderRouterLiquidationBatchSidecar sidecar = new OrderRouterLiquidationBatchSidecar(expectedRouter);
+        OrderRouter router =
+            new OrderRouter(address(engine), address(0xCAFE), address(pool), address(oracle), address(sidecar));
+        engine.setOrderRouter(address(router));
+
+        address book = deployScript.verifyPositionProtectionBook(router, engine);
+        assertEq(address(router), expectedRouter, "predicted Router CREATE address");
+        assertEq(book, address(router.positionProtectionBook()), "position-protection book discovery");
+        assertEq(router.liquidationBatchSidecar(), address(sidecar), "liquidation batch sidecar discovery");
+        assertEq(sidecar.ROUTER(), address(router), "liquidation batch sidecar Router binding");
+        assertNotEq(address(sidecar), book, "sidecar and position-protection book must be distinct");
+        bootstrapScript.verifyRouterWiring(pool, router);
     }
 
     function test_BootstrapDefaults_MatchArbitrumSepoliaReleaseSeeds() public {

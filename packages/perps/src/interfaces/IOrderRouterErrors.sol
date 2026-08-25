@@ -2,6 +2,7 @@
 pragma solidity 0.8.35;
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtectionTypes.sol";
 
 /// @notice Canonical custom errors and commit event shared by the delayed-order router stack.
 interface IOrderRouterErrors {
@@ -34,6 +35,8 @@ interface IOrderRouterErrors {
     error OrderRouter__MockOracleUnavailable();
     /// @notice A proposed Plether oracle has invalid code, Pyth, engine, or HousePool wiring.
     error OrderRouter__InvalidPletherOracle();
+    /// @notice The supplied stateless keeper sidecar has no code or is not bound to this exact Router address.
+    error OrderRouter__InvalidKeeperSidecar();
     /// @notice Legacy router oracle path received no Pyth update blobs.
     error OrderRouter__EmptyPythUpdateData();
     /// @notice Legacy router oracle path received less ETH than the required Pyth update fee.
@@ -97,6 +100,35 @@ interface IOrderRouterErrors {
     /// @notice An open/increase commit or execution is blocked by the active oracle close-only policy.
     error OrderRouter__CloseOnlyWindow();
 
+    /// @notice Creating or replacing position protection is disabled by router configuration.
+    error OrderRouter__ProtectionDisabled();
+    /// @notice Existing-position protection was requested for an account without a live position.
+    error OrderRouter__NoOpenPosition();
+    /// @notice Protection creation or attached-open submission requires an account with no ordinary pending orders.
+    error OrderRouter__PendingOrdersExist();
+    /// @notice The account already has a pending-open, armed, or triggered protection.
+    error OrderRouter__ProtectionAlreadyActive();
+    /// @notice No protection record exists for the supplied identifier.
+    error OrderRouter__ProtectionNotFound();
+    /// @notice The requested lifecycle transition requires an armed protection.
+    error OrderRouter__ProtectionNotArmed();
+    /// @notice An ordinary discretionary order was attempted while account protection is active.
+    error OrderRouter__ProtectionActive();
+    /// @notice Trigger prices are both disabled, out of bounds, or inconsistent with the protected direction.
+    error OrderRouter__InvalidProtectionPrices();
+    /// @notice A proposed protection threshold is already met at its validation mark.
+    error OrderRouter__ProtectionTriggerAlreadyMet();
+    /// @notice The cached engine mark is too old to create or replace position protection safely.
+    error OrderRouter__ProtectionMarkTooStale();
+    /// @notice Neither enabled OCO leg is met at the supplied trigger mark.
+    error OrderRouter__TriggerNotMet();
+    /// @notice Protection creation, replacement, or triggering was attempted while the oracle is frozen.
+    error OrderRouter__ConditionalTriggerFrozen();
+    /// @notice The live position no longer exactly matches the side and size bound to the protection.
+    error OrderRouter__PositionChanged();
+    /// @notice Trigger evaluation was attempted in the block in which protection became armed.
+    error OrderRouter__SameBlockTrigger();
+
     /// @notice The EIP-150-forwardable gas remaining is below the configured minimum for an engine call.
     error OrderRouter__InsufficientGas();
     /// @notice Commit-time planner preflight identified a predictably invalid open/increase.
@@ -126,5 +158,55 @@ interface IOrderRouterErrors {
     /// @notice Reports the first unattempted account after a low-gas check or empty-data item revert stops the batch.
     /// @param nextIndex Zero-based index from which a keeper should resume with a fresh oracle update.
     event LiquidationBatchStopped(uint256 indexed nextIndex);
+
+    /// @notice Emitted when protection is created for a live position or attached to a pending open.
+    event PositionProtectionCreated(
+        uint64 indexed protectionId,
+        address indexed account,
+        uint64 indexed parentOrderId,
+        uint256 takeProfitTriggerPrice,
+        uint256 stopLossTriggerPrice,
+        uint256 triggerBountyUsdc,
+        uint256 executionBountyUsdc
+    );
+
+    /// @notice Emitted when a staged or armed protection's trigger prices are atomically replaced.
+    event PositionProtectionReplaced(
+        uint64 indexed protectionId,
+        address indexed account,
+        uint256 takeProfitTriggerPrice,
+        uint256 stopLossTriggerPrice
+    );
+
+    /// @notice Emitted when a parent open succeeds or existing-position protection becomes armed.
+    event PositionProtectionArmed(
+        uint64 indexed protectionId,
+        address indexed account,
+        CfdTypes.Side side,
+        uint256 size,
+        uint64 armedAt,
+        uint64 armedBlock
+    );
+
+    /// @notice Emitted when the owner cancels protection before it triggers.
+    event PositionProtectionCancelled(uint64 indexed protectionId, address indexed account);
+
+    /// @notice Emitted when an OCO leg activates and creates an ordinary FIFO close.
+    event PositionProtectionTriggered(
+        uint64 indexed protectionId,
+        address indexed account,
+        uint64 indexed linkedOrderId,
+        PositionProtectionTypes.PositionProtectionTriggerLeg leg,
+        uint256 triggerMarkPrice,
+        uint64 triggerPublishTime
+    );
+
+    /// @notice Emitted when a protection reaches an executed, failed, or liquidated terminal state.
+    event PositionProtectionTerminal(
+        uint64 indexed protectionId,
+        address indexed account,
+        uint64 indexed linkedOrderId,
+        PositionProtectionTypes.PositionProtectionStatus status
+    );
 
 }

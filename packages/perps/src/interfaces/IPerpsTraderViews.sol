@@ -2,6 +2,7 @@
 pragma solidity 0.8.35;
 
 import {PerpsViewTypes} from "@plether/perps/interfaces/PerpsViewTypes.sol";
+import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtectionTypes.sol";
 
 /// @notice Compact trader-facing read surface implemented by `PerpsPublicLens`.
 interface IPerpsTraderViews {
@@ -32,6 +33,21 @@ interface IPerpsTraderViews {
     function getPendingOrders(
         address account
     ) external view returns (PerpsViewTypes.PendingOrderView[] memory pending);
+
+    /// @notice Returns the account's pending-open, armed, or triggered position protection.
+    /// @param account Account to inspect
+    /// @return protection Active protection record, or a zero-valued `None` record when none exists
+    function getActivePositionProtection(
+        address account
+    ) external view returns (PositionProtectionTypes.PositionProtectionView memory protection);
+
+    /// @notice Returns a retained position-protection record by id, including terminal history.
+    /// @dev Historical enumeration is event-driven; this getter resolves one known protection id.
+    /// @param protectionId Protection identifier to inspect
+    /// @return protection Retained record, or a zero-valued `None` record for an unknown id
+    function getPositionProtection(
+        uint64 protectionId
+    ) external view returns (PositionProtectionTypes.PositionProtectionView memory protection);
 
     /// @notice Returns whether the account's current live position is liquidatable.
     /// @dev Uses the same cached-mark, no-freshness-check risk snapshot as `getPosition`: exact price risk uses dedicated

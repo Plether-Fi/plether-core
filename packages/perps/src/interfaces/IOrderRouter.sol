@@ -13,6 +13,10 @@ import {IPerpsTraderActions} from "@plether/perps/interfaces/IPerpsTraderActions
 ///      role-specific parent interfaces.
 interface IOrderRouter is IPerpsKeeper, IPerpsTraderActions, IOrderRouterAccounting, IOrderRouterAdminHost {
 
+    /// @notice Returns the immutable lifecycle book that exposes position-protection actions and retained views.
+    /// @dev TP/SL calls are made directly to this address; the router does not forward their selectors.
+    function positionProtectionBook() external view returns (address book);
+
     /// @notice An order commit supplied a zero position-size delta.
     error OrderRouter__ZeroSize();
     /// @notice Legacy compact oracle validation failure.

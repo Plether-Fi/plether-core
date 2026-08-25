@@ -10,22 +10,6 @@ import {OrderValidation} from "@plether/perps/router/OrderValidation.sol";
 /// @notice Prices and executes account liquidation, forfeits queued bounties, and clears the account's live orders.
 abstract contract OrderLiquidationHandler is OrderValidation {
 
-    /// @notice Liquidates an account with an adverse oracle snapshot and current HousePool depth.
-    /// @dev Refunds cutoff-invalid opens first, then forfeits every remaining queued execution bounty before calling
-    ///      the engine. The engine receives `msg.sender` as liquidation keeper. If the refund restores solvency, the
-    ///      refund remains committed and liquidation stops. After successful liquidation, all remaining account orders
-    ///      are failed and unlinked; any oracle or downstream revert rolls the whole operation back.
-    /// @param account Canonical account to liquidate.
-    /// @param pythUpdateData Pyth update blobs funded by the call's `msg.value`.
-    function _executeLiquidation(
-        address account,
-        bytes[] calldata pythUpdateData
-    ) internal {
-        uint64 riskOffCutoff = _riskOffOrderCutoff();
-        OracleUpdateResult memory update = _prepareLiquidationOracle(account, pythUpdateData);
-        _executeLiquidationAtPrice(account, update.executionPrice, update.oraclePublishTime, msg.sender, riskOffCutoff);
-    }
-
     /// @notice Processes one batch account inside its own rollback frame.
     /// @dev Callable only by this router through its immutable liquidation-batch sidecar. This function deliberately
     ///      has no reentrancy modifier because the outer public batch call already holds the router's transient guard.

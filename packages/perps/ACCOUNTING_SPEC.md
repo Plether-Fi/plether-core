@@ -254,6 +254,10 @@ Definition:
 - `OrderRouter.settleLpEpoch(bytes[])` validates a `PoolReconcile` Pyth basket, installs its neutral Engine mark, and
   invokes the Router-only HousePool settlement callback in one rollback frame; with live open positions, the basket's
   earliest publish time must be at or after the current round-hour epoch boundary,
+- the Router retains the canonical external entrypoint while delegating the large stateless epoch orchestration to
+  its separately predeployed, immutable, exactly Router-bound `OrderRouterLiquidationBatchSidecar`; in that frame the
+  Router remains `address(this)` and the direct-event address, HousePool sees the Router as caller, and the
+  implementation reads Router integrations through external getters rather than depending on Router storage layout,
 - HousePool fixes one shared epoch price after both redemption phases and activates Junior deposits before Senior
   deposits; ERC-4626 `deposit` and `mint` only claim already-activated requests,
 - a settlement pass that advances no queue item reverts, so its reconcile and carry checkpoints cannot be retained by
@@ -550,7 +554,7 @@ The canonical clearinghouse split includes:
 - `liquidationReserveUsdc`: keeper/protocol liquidation-charge backing, isolated from price PnL,
 - `orderMarginUsdc`: committed open/increase margin,
 - `actionReserveUsdc`: execution bounties and other action charges, including the dedicated negative lifetime-VPI
-  reserve.
+  reserve and dormant position-protection trigger and linked-close bounties.
 
 For a live position, the gross VPI reserve target is:
 
@@ -595,12 +599,52 @@ Rules:
 - collateral reachability should treat that reservation as temporarily unavailable until the order resolves,
 - terminal-invalid close execution pays the keeper from the clearinghouse-reserved bounty; liquidatable full closes may reserve that bounty only from free settlement, not active position margin.
 
+### Position-protection bounty policy
+
+Component authority is deliberately split:
+
+- `PositionProtectionBook`, discovered through `OrderRouter.positionProtectionBook()`, owns retained protection state,
+  canonical protection actions/views, bounty attribution before trigger, and all protection lifecycle events,
+- `OrderRouter` owns the timelocked protection feature/bounty configuration, the ordinary global FIFO, and the narrow
+  host operations used by the Book to commit the parent open, refresh a trigger mark, and append the linked close,
+- `MarginClearinghouse` remains the custody and reserved-settlement source of truth. The Book holds no tokens, and it
+  cannot mutate the Router queue directly.
+
+- one protection snapshots a fixed trigger bounty and the current fixed close-order bounty at creation,
+- both protection bounties are reserved from free settlement only; dormant protection never uses the active-position-
+  margin close fallback,
+- the protection reserve is locked before post-reservation safety is evaluated. Existing-position creation uses the
+  Engine-configured canonical planner's V2 exact-price predicate rather than a local copy of risk math. Inputs are exact
+  entry cost and price-risk equity composed only of PnL pledge (`position.margin`) plus the same-account trader claim
+  plus exact capped unrealized PnL; generic free settlement and action, order, liquidation, VPI, and protection reserves
+  are excluded,
+- any uncovered carry or dedicated VPI reserve below `max(-vpiAccrued, 0)` fails closed independently. The exact-price
+  equity test rejects equality and requires the account to remain strictly above the larger of initial margin and the
+  active normal-maintenance/FAD requirement,
+- an attached-open flow locks protection bounties before committing the parent, so the ordinary canonical open planner
+  admits and executes that parent against the balances that remain after the protection reservation,
+- `PendingOpen` keeps protection separate from the parent's committed opening margin and opening execution bounty,
+- parent-open success arms protection atomically against the actual resulting side and full size without moving its
+  protection reserve,
+- parent-open failure or expiry releases both protection bounty amounts; the parent execution bounty follows the
+  ordinary terminal-order policy,
+- cancelling `PendingOpen` or `Armed` protection releases both unpaid amounts exactly once; cancelling `PendingOpen`
+  detaches protection but does not cancel the binding parent open,
+- triggering credits the trigger bounty and reattributes the remaining execution bounty to exactly one generated FIFO
+  close without a second clearinghouse reservation,
+- linked-close execution or terminal failure consumes the remaining bounty under ordinary order policy,
+- liquidation forfeits unpaid protection value to treasury. `Triggered` protection does not add the linked order's
+  bounty a second time,
+- a terminal protection has no reserved value, and Book-attributed dormant-protection reserve plus Router-attributed
+  ordinary-order reserve must equal the clearinghouse's reserved settlement source of truth.
+
 ### Open-order failure policy
 
 - deterministic live-state open failures may be rejected at commit time,
 - ordinary execution-time terminal failures pay the keeper from clearinghouse-reserved bounty value,
 - the persistent administrative risk-off cutoff is the sole terminal-failure exception: it refunds the full remaining
-  margin and bounty internally to the trader and pays no cleanup reward,
+  margin, ordinary execution bounty, and any attached `PendingOpen` protection bounties internally to the trader in
+  one no-checkpoint clearinghouse release, and pays no cleanup reward,
 - engine revert selectors classify the public failure reason and preserve mark-price-out-of-order as nonterminal, but
   do not split ordinary terminal-failure bounty routing.
 
@@ -705,6 +749,18 @@ Required property:
 - liquidation does not assess `frozenCloseSpreadBps`, including while `oracleFrozen`,
 - preview and live liquidation should share the same liquidation-accounting kernel.
 
+Mark refresh (including protection-trigger oracle resolution), single liquidation, liquidation batching, and LP-epoch
+settlement remain canonical `OrderRouter` entrypoints. To preserve EIP-170 headroom, their large stateless orchestration,
+together with active-oracle policy forwarding inside authenticated Router configuration, is carried in the separately
+deployed `OrderRouterLiquidationBatchSidecar` runtime and reached only by Router `delegatecall`. Direct and
+foreign-context calls to those sidecar selectors revert. The delegated code discovers
+integrations through external Router getters rather than assumed storage slots, never writes Router storage by layout,
+and changes Router-owned state only through authorized external self/item calls. The Router remains `address(this)` and
+the direct-event address, downstream Engine/HousePool calls see the Router as caller, exact revert data propagates, and
+the Router entrypoint's `msg.sender` is preserved; the protection-trigger route carries authenticated keeper/refund
+identity in its trailing payload. The stateful `PositionProtectionBook` remains a separate Router-created lifecycle
+store and direct protection action/view surface.
+
 ### Three-bucket liquidation residual accounting
 
 Liquidation residuals must be modeled explicitly as:
@@ -797,20 +853,36 @@ In storage, the live router persists:
 Interpretation rules:
 
 - `Executable` is derived, not stored,
-- `Expired` is represented by the failure path rather than its own enum member.
+- `Expired` is represented by the failure path rather than its own enum member,
+- position protection uses a separate retained enum and is not an ordinary order until it triggers.
 
 Required transition rules:
 
 - execution consumes reservation exactly once,
 - user cancellation is disallowed once pending; the only binding-order exception is a protocol risk-off cutoff that
-  terminally invalidates pre-cutoff opens and refunds their remaining committed margin and execution bounty to the
-  trader's free internal settlement,
+  terminally invalidates pre-cutoff opens and refunds their remaining committed margin, execution bounty, and any
+  attached `PendingOpen` protection bounties to the trader's free internal settlement,
 - expiry resolves through the configured bounty and reservation policy,
 - risk-off invalidation precedes expiry, requires no oracle and performs no Engine mutation, carry checkpoint, or
   Terminal NAV synchronization, pays no cleanup bounty, and remains effective after governance unpauses,
 - stale or missing oracle data does not destroy a valid pending order,
 - slippage-invalid orders fail terminally and must not pin the FIFO head,
 - live-market execution requires `order.commitTime < oraclePublishTime <= block.timestamp`; only genuine frozen-oracle close-only windows may relax commit-time ordering.
+
+Position-protection storage persists `None`, `PendingOpen`, `Armed`, `Triggered`, `Executed`, `Failed`, `Cancelled`, and
+`Liquidated`.
+
+- The state machine and its canonical reads live in `PositionProtectionBook`; protection lifecycle events originate
+  there. The linked close is an ordinary Router order and its order events originate from the Router.
+- `PendingOpen` is attached to one binding open but remains unable to trigger.
+- Successful parent execution transitions to `Armed` atomically and snapshots the actual resulting position.
+- Trader creation, replacement, and attached-open calls are nonpayable and use the engine's cached fresh neutral mark.
+- Triggering is permissionless and payable for current Pyth data. It requires a later block and a publish time strictly
+  after arming, and is unavailable during `oracleFrozen`.
+- `Armed` is off queue. `Triggered` links one full-size `targetPrice = 0` close appended at the global FIFO tail.
+- The linked close follows ordinary historical settlement, expiry, and terminal failure. Failure does not re-arm.
+- An already-triggered linked close may use ordinary frozen-close execution policy even though a new trigger may not be
+  evaluated while frozen.
 
 ![Order state machine](../../assets/diagrams/perps-order-lifecycle.svg)
 
@@ -829,7 +901,8 @@ The accounting system should preserve the following:
 9. full closes do not eagerly cancel unrelated queued orders
 10. liquidation may perform bounded account-local cleanup under the per-account pending-order cap
 11. emergency risk-off cleanup preserves custody and total settlement while releasing exactly the invalidated open's
-    remaining committed margin and execution bounty, with no carry or Terminal NAV mutation
+    remaining committed margin, execution bounty, and attached `PendingOpen` protection bounties, with no carry or
+    Terminal NAV mutation
 12. every position-deletion path re-checks degraded-mode containment
 13. Junior redemption funding is zero while any eligible matured Senior demand remains unaccounted for
 14. every claimable LP asset is backed one-for-one by vault-held escrow and can be claimed at most once
@@ -846,6 +919,14 @@ The accounting system should preserve the following:
 22. LP request ids are monotonically nondecreasing with `block.timestamp` and follow the shared five-minute formula
     for both tranches and both request directions
 23. no request included at or after `b - 300` can increase the locked `e + 1` epoch
+24. each account has at most one active (`PendingOpen`, `Armed`, or `Triggered`) protection
+25. an armed protection is never linked into FIFO, and a triggered protection links exactly one full reduce-only order
+26. the take-profit and stop-loss legs collectively trigger at most once
+27. every protection bounty unit is exactly reserved, paid, refunded, or forfeited once
+28. terminal protection owns zero reserve, and liquidation leaves no protection or linked-order residue
+29. existing-position protection cannot arm after its reserve lock unless canonical exact-basis price equity, using
+    only PnL pledge plus same-account claim, remains strictly above the stricter initial/active requirement
+30. uncovered carry and an underfunded negative-VPI reserve independently block existing-position protection creation
 
 ## Architecture Goal
 

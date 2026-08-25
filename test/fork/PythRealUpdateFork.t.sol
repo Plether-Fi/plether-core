@@ -12,6 +12,7 @@ import {HousePool} from "@plether/perps/HousePool.sol";
 import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
+import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
@@ -159,16 +160,15 @@ contract PythRealUpdateForkTest is Test {
         weights[0] = 1e18;
         uint256[] memory basePrices = new uint256[](1);
         basePrices[0] = 1e8;
-        router = new OrderRouter(
-            address(engine),
-            address(new CfdEngineLens(address(engine))),
-            address(pool),
-            address(
-                new PletherOracle(
-                    address(engine), address(pool), REAL_PYTH, _singleFeedIds(), weights, basePrices, new bool[](1)
-                )
-            )
+        CfdEngineLens lens = new CfdEngineLens(address(engine));
+        PletherOracle oracle = new PletherOracle(
+            address(engine), address(pool), REAL_PYTH, _singleFeedIds(), weights, basePrices, new bool[](1)
         );
+        uint64 routerSidecarNonce = vm.getNonce(address(this));
+        address predictedRouter = vm.computeCreateAddress(address(this), routerSidecarNonce + 1);
+        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
+        router = new OrderRouter(address(engine), address(lens), address(pool), address(oracle), address(keeperSidecar));
+        assertEq(address(router), predictedRouter, "router prediction");
 
         engine.setOrderRouter(address(router));
         clearinghouse.setEngine(address(engine));

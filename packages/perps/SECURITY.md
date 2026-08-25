@@ -72,7 +72,7 @@ These are one-time configuration setters rather than mutable governance knobs:
 
 `SettlementMonitorLens` construction validates the required core wiring and reciprocal bindings before fixing its
 constructor bindings. `getSettlementHealth()` checks those bindings again at runtime, and the observable configuration digest
-records the planner, settlement-sidecar, admin, Oracle/Pyth, vault, book, and asset identities for off-chain drift
+records the planner, settlement-sidecar, admin, Oracle/Pyth, vault, terminal NAV book, and asset identities for off-chain drift
 comparison. This is detection only; the monitor cannot repair wiring or authorize a replacement.
 
 `EmergencyPauseCoordinator` is independently immutable-bound to the exact RouterAdmin and HousePool. Deployment
@@ -83,10 +83,16 @@ installs it as both components' pauser. It does not trust or call the Lens: moni
 requires code and the exact implementation id. The sidecar exposes only pure redemption-budget calculations: it has no
 storage, setter, delegatecall, upgrade path, custody, or settlement authority.
 
-`OrderRouter` constructor-deploys one `OrderRouterLiquidationBatchSidecar` and exposes its immutable address. The
-sidecar has no mutable storage or upgrade setter, records the deploying Router immutably, and rejects direct calls;
-its batch entrypoint is valid only under delegatecall where `address(this)` is that Router. Its Router self-callback
-remains self-only, so an external caller cannot use the sidecar to bypass Router authorization or reentrancy guards.
+`OrderRouterLiquidationBatchSidecar` is separately predeployed with the predicted address of the immediately next
+Router `CREATE`; the same deployer must then create the Router with no intervening nonce-consuming transaction or
+`CREATE`. The Router constructor
+rejects a sidecar with no code or one whose immutable `ROUTER()` does not equal `address(this)`, and exposes the
+accepted address through `liquidationBatchSidecar()`. The sidecar has no mutable storage or upgrade setter and its
+active-oracle configuration, mark-refresh/protection-trigger, LP-epoch settlement, and liquidation selectors are valid
+only under delegatecall where `address(this)` is that exact Router. Direct calls and delegatecalls from a foreign host
+revert. Router self-callbacks remain self-only, so an external caller cannot use the sidecar to bypass Router
+authorization or reentrancy guards. HousePool remains the canonical settlement-policy boundary, so delegated atomic
+refresh cannot bypass its independent LP-epoch settlement hold.
 
 ### Instant owner controls
 
@@ -113,6 +119,15 @@ The owner cannot:
 Several perps contracts intentionally expose narrow but high-authority capability surfaces.
 
 - `OrderRouter` is the external execution boundary and can reach engine order/liquidation paths plus a narrow clearinghouse reservation surface. Router-sourced protocol value must credit the treasury account through clearinghouse accounting rather than calling `HousePool` inflow hooks.
+- `PositionProtectionBook` is created by and immutable-bound to the Router and Engine. It owns retained protection
+  state, direct actions/views, and Router-only lifecycle hooks; it does not carry keeper or liquidation orchestration.
+- The separately predeployed `OrderRouterLiquidationBatchSidecar` carries stateless mark-refresh/protection-trigger,
+  single-liquidation, liquidation-batch, and LP-epoch orchestration to preserve Router deploy-size headroom. The Router
+  is the only valid execution context for those helpers. Under `delegatecall`, they read integrations through external
+  Router getters, never access Router storage by assumed layout, and change Router-owned state only through authorized external self/item
+  calls. The Router remains `address(this)` and the direct-event address, Engine/HousePool see the Router as caller, and
+  the Router entrypoint's `msg.sender` is preserved; the Book-trigger route authenticates keeper/refund identity through
+  its trailing payload.
 - `CfdEngineSettlementSidecar` is engine-gated, but any external function added there is automatically security-critical because it can reach engine-owned settlement hooks.
 - `TerminalNavBookV2` accepts curve mutations only from its immutable-bound Engine. It has no owner, repair, or
   migration path. Engine wiring validates the bound Engine, price cap, size quantum, and completely empty book before
@@ -167,6 +182,8 @@ These are the highest-value properties an auditor should expect to hold.
 | Bounty conservation | Clearinghouse-reserved execution bounty value is conserved across order lifecycle transitions until distributed or absorbed, and is excluded from close-loss reachability while reserved |
 | VPI reserve conservation | Every live negative lifetime-VPI balance has equal dedicated action-reserve backing; only an exact clawback, equivalent withholding, or lower surviving target may consume or release it |
 | Reservation source of truth | Clearinghouse reservation records remain the source of truth for committed order margin |
+| Protection post-lock safety | Existing-position protection uses exact entry basis and only PnL pledge plus same-account claim for price equity; free/action reserves are excluded, uncovered carry and underfunded negative VPI fail closed, and equality at the stricter initial/active threshold is rejected |
+| Delegated Router isolation | The separately predeployed, exactly Router-bound keeper sidecar is delegate-only, storage-layout-independent, and cannot directly write Router storage; the Router remains `address(this)`, downstream caller, and direct-event address |
 | Earliest lot gate | Router commit rejects non-100-token-multiple opens and closes before reserving value or assigning an order id |
 | Economic close granularity | Partial close intents must meet the engine notional floor; only full residual closes may be smaller |
 | Bounded cleanup | Queue cleanup, liquidation cleanup, and close-intent position projection are account-local and intentionally bounded |
@@ -198,6 +215,8 @@ The tables above describe the intended safety properties. The suites below are t
 | Single direction / side symmetry / total-margin conservation | `packages/perps/test/perps/PerpInvariant.t.sol`, `packages/perps/test/perps/invariant/PerpMultiAccountInvariant.t.sol` |
 | Global FIFO / binding intents / bounded cleanup | `packages/perps/test/perps/OrderRouter.t.sol`, `packages/perps/test/perps/invariant/PerpAccountingInvariant.t.sol` |
 | Bounty conservation / reservation source of truth | `packages/perps/test/perps/OrderRouter.t.sol`, `packages/perps/test/perps/invariant/PerpAccountingInvariant.t.sol`, `packages/perps/test/perps/invariant/PerpEconomicConservationInvariant.t.sol` |
+| Position-protection lifecycle / post-lock safety | `packages/perps/test/perps/PositionProtection.t.sol`, `packages/perps/test/perps/PositionProtectionLiquidationBatch.t.sol` |
+| Delegated mark refresh, single/batch liquidation, and LP-epoch isolation | `packages/perps/test/perps/OrderRouter.t.sol`, `packages/perps/test/perps/PositionProtection.t.sol`, `packages/perps/test/perps/Liquidation.t.sol`, `packages/perps/test/perps/LiquidationBatch.t.sol`, `packages/perps/test/perps/AtomicLpEpochSettlement.t.sol` |
 | Canonical asset boundary / symmetric terminal NAV / high-water-mark protection | `packages/perps/test/perps/PerpInvariant.t.sol`, `packages/perps/test/perps/HousePool.t.sol`, `packages/perps/test/perps/invariant/PerpHousePoolLifecycleInvariant.t.sol`, `packages/perps/test/perps/TerminalNavBookV2.t.sol` |
 | Shared request cutoff / locked-epoch additions | `packages/perps/test/perps/LpRequestCutoff.t.sol`, `packages/perps/test/perps/invariant/GovernedSeniorCapacityInvariant.t.sol` |
 | Oracle freshness / FAD boundaries / ETH refund custody | `packages/perps/test/perps/OrderRouter.t.sol`, `packages/perps/test/perps/invariant/PerpOracleBoundaryInvariant.t.sol`, `packages/perps/test/perps/invariant/PerpOraclePathInvariant.t.sol` |
@@ -297,6 +316,23 @@ Keepers are permissionless executors.
 - They receive clearinghouse-reserved execution bounties or liquidation bounties depending on the path.
 - They are not trusted with user intent beyond what the delayed-order model reveals.
 
+### Position protection and Router keeper sidecar
+
+The Router-created Book owns the retained OCO lifecycle and uses only narrow clearinghouse/Router capabilities. It is
+stateful and distinct from the separately predeployed `OrderRouterLiquidationBatchSidecar`. Router `delegatecall` uses
+that sidecar only as a stateless bytecode carrier for mark refresh/protection-trigger resolution, single and batch
+liquidation, atomic-refresh LP-epoch settlement, and the active-oracle forwarding step inside an authenticated Router
+configuration finalization. The Router retains admin authentication and applies its storage fields in the original
+before/after ordering. Delegated functions reject direct and foreign-context calls and must not read or write Router
+storage slots by assumed layout.
+
+When existing-position protection locks its trigger and linked-close bounties, admission is checked after the lock.
+The Book calls the Engine-configured planner's canonical `isExactPriceRiskLiquidatable(...)` predicate rather than
+duplicating it. Inputs use `positionEntryCostUsdcAtoms`; price collateral is only `position.margin` (the PnL pledge) plus
+that account's trader claim. Free settlement and generic action, order, liquidation, VPI, and protection reserves cannot
+rescue the test. Nonzero uncovered carry or a VPI reserve below `max(-vpiAccrued, 0)` rejects independently, and price
+equity must be strictly greater than `max(initMargin, active maintenance/FAD margin)`.
+
 ### Engine and router vs clearinghouse
 
 `MarginClearinghouse` grants broad operator authority only to the configured engine and settlement module, while the router address sourced from the engine boundary can reach only narrow reservation lifecycle paths.
@@ -347,7 +383,8 @@ Current policy is intentionally simple:
 - terminal-invalid closes pay the keeper from the already locked action reserve rather than refunding it to the trader wallet,
 - open-order refunds and keeper payouts credit clearinghouse settlement rather than sending direct wallet USDC transfers,
 - persistent risk-off cancellation is administrative invalidation, precedes expiry, needs no oracle, and fully refunds
-  the trader internally without paying the cleanup caller,
+  the trader's order plus attached `PendingOpen` protection reserves internally in one no-checkpoint clearinghouse
+  release without paying the cleanup caller,
 - the router does not maintain a retry or requeue lane.
 
 ### Oracle regimes
@@ -554,7 +591,8 @@ this prevents a zero-fee
 virtual-offset rounding transition from admitting deposits into newly impaired Senior accounting. The view does not
 quote new-request capacity. The facade constructor rejects a Router whose immutable settlement pool differs from
 `Engine.pool()` and deploys a code-size sidecar whose diagnostic builders accept only the constructor-bound
-facade; its constructor-set binding getters remain publicly readable and it has no setter or delegatecall path. That
+facade; its public `MONITOR()` binding remains readable, dependency bindings stay internal, and it has no setter or
+delegatecall path. That
 sidecar is a monitor-bound implementation detail, not another trusted public result surface.
 
 The monitor reads `lpEpochSettlementPaused` fail-soft. A successful active read is intentional state rather than a
@@ -583,9 +621,10 @@ completeness only when atomic refresh is the selected route. Thus an older Oracl
 `completeObservationDigest == 0`, while a readable but currently stale or low-confidence feed need not invalidate a
 cached/no-work checkpoint. Reported confidence is for the neutral pre-cap basket, but the returned mark can be capped,
 so recomputing the ratio against `markPrice` is not always an independent policy check. Likewise, the reported
-required execution path is advisory rather than an authoritative `canSettle` result. Keepers must quote and simulate the exact
-`OrderRouter.settleLpEpoch(bytes[])` calldata and `msg.value`; the Router and EVM rollback frame remain the execution
-authority.
+required execution path is advisory rather than an authoritative `canSettle` result. Keepers must quote and simulate
+the exact route-specific call: direct `HousePool.settleLpEpoch(uint256,uint256)` with zero ETH for `CachedMark`, or
+`OrderRouter.settleLpEpoch(bytes[])` with the exact `msg.value` for `AtomicOracleRefresh`. The selected contract and
+EVM rollback frame remain the execution authority.
 
 ### Freshness-gated LP actions
 
@@ -702,6 +741,11 @@ the returned cursor leaves any low-gas or empty-revert item unattempted so a kee
 - users cannot manually cancel queued intents,
 - bounded cleanup means heavily expired queues may take multiple keeper calls to clear,
 - per-account pending-order caps bound griefing and liquidation cleanup now stays on bounded account-local order traversal,
+- the Router and immutable Book are one non-upgradeable reviewed bytecode unit. Reusing the Book as a delegate-only
+  code carrier saves Router runtime bytes but increases review coupling: a change to protection code or any delegated
+  keeper path requires rechecking direct-call rejection, external-getter assumptions, Router caller/event context, and
+  both contracts' EIP-170 sizes. Because Router construction deploys the Book, Book creation code also contributes to
+  Router initcode and must remain safely below EIP-3860,
 - failed orders remain terminal rather than retryable.
 
 ### LP accounting limitations

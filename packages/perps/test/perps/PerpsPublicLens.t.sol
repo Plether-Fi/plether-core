@@ -3,9 +3,48 @@ pragma solidity 0.8.35;
 
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {PerpsPublicLens} from "@plether/perps/PerpsPublicLens.sol";
 import {AccountLensViewTypes} from "@plether/perps/interfaces/AccountLensViewTypes.sol";
 import {IAsyncTrancheVault} from "@plether/perps/interfaces/IAsyncTrancheVault.sol";
+import {IPositionProtectionViews} from "@plether/perps/interfaces/IPositionProtectionViews.sol";
 import {PerpsViewTypes} from "@plether/perps/interfaces/PerpsViewTypes.sol";
+import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtectionTypes.sol";
+
+contract PositionProtectionViewsStub is IPositionProtectionViews {
+
+    mapping(address => uint64) internal activeProtectionIds;
+    mapping(uint64 => PositionProtectionTypes.PositionProtectionView) internal protections;
+
+    function positionProtectionBook() external view returns (address book) {
+        return address(this);
+    }
+
+    function setActivePositionProtectionId(
+        address account,
+        uint64 protectionId
+    ) external {
+        activeProtectionIds[account] = protectionId;
+    }
+
+    function activePositionProtectionId(
+        address account
+    ) external view returns (uint64 protectionId) {
+        return activeProtectionIds[account];
+    }
+
+    function setPositionProtection(
+        PositionProtectionTypes.PositionProtectionView calldata protection
+    ) external {
+        protections[protection.protectionId] = protection;
+    }
+
+    function getPositionProtection(
+        uint64 protectionId
+    ) external view returns (PositionProtectionTypes.PositionProtectionView memory protection) {
+        return protections[protectionId];
+    }
+
+}
 
 contract PerpsPublicLensTest is BasePerpTest {
 
@@ -132,6 +171,80 @@ contract PerpsPublicLensTest is BasePerpTest {
             snapshot.liquidatable,
             "Public liquidatable flag should match carry-aware account lens state"
         );
+    }
+
+    function test_GetActivePositionProtection_ForwardsRouterRecord() public {
+        address account = address(0xA11CE);
+        PositionProtectionViewsStub protectionViews = new PositionProtectionViewsStub();
+        PerpsPublicLens protectionLens =
+            new PerpsPublicLens(address(engineAccountLens), address(engine), address(protectionViews), address(pool));
+
+        PositionProtectionTypes.PositionProtectionView memory expected;
+        expected.protectionId = 7;
+        expected.parentOrderId = 3;
+        expected.account = account;
+        expected.side = CfdTypes.Side.BEAR;
+        expected.size = 42_000e18;
+        expected.takeProfitTriggerPrice = 120_000_000;
+        expected.stopLossTriggerPrice = 80_000_000;
+        expected.triggerBountyUsdc = 200_000;
+        expected.executionBountyUsdc = 200_000;
+        expected.armedAt = 1_720_000_000;
+        expected.armedBlock = 12_345;
+        expected.status = PositionProtectionTypes.PositionProtectionStatus.Armed;
+        protectionViews.setPositionProtection(expected);
+        protectionViews.setActivePositionProtectionId(account, expected.protectionId);
+
+        PositionProtectionTypes.PositionProtectionView memory actual =
+            protectionLens.getActivePositionProtection(account);
+
+        assertEq(
+            keccak256(abi.encode(actual)), keccak256(abi.encode(expected)), "active protection should pass through"
+        );
+    }
+
+    function test_GetActivePositionProtection_ReturnsNoneWhenAccountHasNoProtection() public {
+        PositionProtectionViewsStub protectionViews = new PositionProtectionViewsStub();
+        PerpsPublicLens protectionLens =
+            new PerpsPublicLens(address(engineAccountLens), address(engine), address(protectionViews), address(pool));
+
+        PositionProtectionTypes.PositionProtectionView memory actual =
+            protectionLens.getActivePositionProtection(address(0xB0B));
+
+        assertEq(actual.protectionId, 0, "missing active protection should have no id");
+        assertEq(
+            uint8(actual.status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.None),
+            "missing active protection should report None"
+        );
+    }
+
+    function test_GetPositionProtection_ForwardsTerminalHistoryById() public {
+        address account = address(0xCAFE);
+        PositionProtectionViewsStub protectionViews = new PositionProtectionViewsStub();
+        PerpsPublicLens protectionLens =
+            new PerpsPublicLens(address(engineAccountLens), address(engine), address(protectionViews), address(pool));
+
+        PositionProtectionTypes.PositionProtectionView memory expected;
+        expected.protectionId = 9;
+        expected.linkedOrderId = 11;
+        expected.account = account;
+        expected.side = CfdTypes.Side.BULL;
+        expected.size = 10_000e18;
+        expected.takeProfitTriggerPrice = 90_000_000;
+        expected.stopLossTriggerPrice = 110_000_000;
+        expected.armedAt = 1_720_100_000;
+        expected.armedBlock = 12_678;
+        expected.triggerMarkPrice = 90_000_000;
+        expected.triggerPublishTime = 1_720_100_015;
+        expected.triggeredLeg = PositionProtectionTypes.PositionProtectionTriggerLeg.TakeProfit;
+        expected.status = PositionProtectionTypes.PositionProtectionStatus.Executed;
+        protectionViews.setPositionProtection(expected);
+
+        PositionProtectionTypes.PositionProtectionView memory actual =
+            protectionLens.getPositionProtection(expected.protectionId);
+
+        assertEq(keccak256(abi.encode(actual)), keccak256(abi.encode(expected)), "terminal history should pass through");
     }
 
     function test_GetTraderAccount_UsesCarryAwareNetEquity() public {

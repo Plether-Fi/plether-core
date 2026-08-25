@@ -4,14 +4,31 @@ pragma solidity 0.8.35;
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
+import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 
 contract LiquidationTest is BasePerpTest {
+
+    struct DelegatedLiquidationRollbackSnapshot {
+        uint256 pythUpdateCallCount;
+        uint256 markPrice;
+        uint64 markTime;
+        uint256 routerEth;
+        uint256 routerAdminEth;
+        uint256 routerAdminClaimableEth;
+        uint256 oracleEth;
+        uint256 oracleClaimableEth;
+        uint256 pythEth;
+        uint256 callerEth;
+    }
 
     address alice = address(0x111);
     address keeper = address(0x999);
 
     uint256 constant WEDNESDAY_NOON = 1_729_080_000;
     uint256 constant FRIDAY_EVENING = 1_729_283_400;
+    uint256 constant BOUNDARY_CACHED_MARK_PRICE = 100_500_000;
+    uint256 constant BOUNDARY_RESOLVED_MARK_PRICE = 101_000_000;
+    uint256 constant BOUNDARY_LIQUIDATION_PRICE = 101_500_000;
 
     function setUp() public override {
         super.setUp();
@@ -35,6 +52,106 @@ contract LiquidationTest is BasePerpTest {
             vm.prank(trader);
             clearinghouse.withdraw(account, withdrawable);
         }
+    }
+
+    function _delegatedLiquidationRollbackSnapshot(
+        address caller
+    ) internal view returns (DelegatedLiquidationRollbackSnapshot memory snapshot) {
+        snapshot.pythUpdateCallCount = baseMockPyth.updatePriceFeedsCallCount();
+        snapshot.markPrice = engine.lastMarkPrice();
+        snapshot.markTime = engine.lastMarkTime();
+        snapshot.routerEth = address(router).balance;
+        snapshot.routerAdminEth = address(routerAdmin).balance;
+        snapshot.routerAdminClaimableEth = routerAdmin.claimableEth(caller);
+        snapshot.oracleEth = address(pletherOracle).balance;
+        snapshot.oracleClaimableEth = pletherOracle.claimableEth(caller);
+        snapshot.pythEth = address(baseMockPyth).balance;
+        snapshot.callerEth = caller.balance;
+    }
+
+    function _assertDelegatedLiquidationRolledBack(
+        address caller,
+        DelegatedLiquidationRollbackSnapshot memory beforeSnapshot
+    ) internal view {
+        assertEq(
+            baseMockPyth.updatePriceFeedsCallCount(),
+            beforeSnapshot.pythUpdateCallCount,
+            "reverted liquidation must roll back the Pyth update"
+        );
+        assertEq(engine.lastMarkPrice(), beforeSnapshot.markPrice, "reverted liquidation must restore the mark price");
+        assertEq(engine.lastMarkTime(), beforeSnapshot.markTime, "reverted liquidation must restore the mark time");
+        assertEq(address(router).balance, beforeSnapshot.routerEth, "Router ETH balance changed after revert");
+        assertEq(
+            address(routerAdmin).balance, beforeSnapshot.routerAdminEth, "Router admin ETH balance changed after revert"
+        );
+        assertEq(
+            routerAdmin.claimableEth(caller),
+            beforeSnapshot.routerAdminClaimableEth,
+            "Router admin refund credit changed after revert"
+        );
+        assertEq(address(pletherOracle).balance, beforeSnapshot.oracleEth, "oracle ETH balance changed after revert");
+        assertEq(
+            pletherOracle.claimableEth(caller),
+            beforeSnapshot.oracleClaimableEth,
+            "oracle refund credit changed after revert"
+        );
+        assertEq(address(baseMockPyth).balance, beforeSnapshot.pythEth, "Pyth fee transfer must roll back");
+        assertEq(caller.balance, beforeSnapshot.callerEth, "liquidation caller ETH must be restored");
+    }
+
+    function _positionHash(
+        address account
+    ) internal view returns (bytes32) {
+        (
+            uint256 size,
+            uint256 margin,
+            uint256 entryPrice,
+            uint256 maxProfit,
+            CfdTypes.Side side,
+            uint64 lastUpdateTime,
+            int256 vpiAccrued
+        ) = engine.positions(account);
+        return keccak256(abi.encode(size, margin, entryPrice, maxProfit, side, lastUpdateTime, vpiAccrued));
+    }
+
+    function _preparePublishTimeBoundaryLiquidation()
+        internal
+        returns (uint64 cachedMarkTime, bytes[] memory pythUpdateData)
+    {
+        vm.warp(WEDNESDAY_NOON);
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
+        router.executeOrder(1, _mockPythUpdateData());
+        _withdrawFreeUsdc(alice, 0);
+
+        vm.warp(block.timestamp + 2);
+        cachedMarkTime = uint64(block.timestamp - 1);
+        vm.prank(address(router));
+        engine.updateMarkPrice(BOUNDARY_CACHED_MARK_PRICE, cachedMarkTime);
+
+        pythUpdateData = new bytes[](1);
+        pythUpdateData[0] = abi.encode(BOUNDARY_LIQUIDATION_PRICE);
+    }
+
+    function _mockBoundaryLiquidationSnapshot(
+        bytes[] memory pythUpdateData,
+        uint64 publishTime
+    ) internal {
+        IPletherOracle.PriceSnapshot memory snapshot = IPletherOracle.PriceSnapshot({
+            price: BOUNDARY_LIQUIDATION_PRICE,
+            markPrice: BOUNDARY_RESOLVED_MARK_PRICE,
+            publishTime: publishTime,
+            updateFee: 0,
+            maxStaleness: pletherOracle.liquidationStalenessLimit(),
+            closeOnly: false,
+            oracleFrozen: false,
+            isFadWindow: false
+        });
+        vm.mockCall(
+            address(pletherOracle),
+            abi.encodeCall(IPletherOracle.updateLiquidationPrice, (keeper, pythUpdateData, alice)),
+            abi.encode(snapshot)
+        );
     }
 
     function test_FridayAutoDeleverage() public {
@@ -143,8 +260,86 @@ contract LiquidationTest is BasePerpTest {
         address account = alice;
 
         bytes[] memory solventPriceData = _mockPythUpdateData();
+        baseMockPyth.setFee(1 ether);
+        vm.deal(keeper, 2 ether);
+
+        bytes32 positionBefore = _positionHash(account);
+        uint256 accountSettlementBefore = _settlementBalance(account);
+        uint256 keeperSettlementBefore = _settlementBalance(keeper);
+        DelegatedLiquidationRollbackSnapshot memory rollbackBefore = _delegatedLiquidationRollbackSnapshot(keeper);
+
+        vm.prank(keeper);
         vm.expectRevert(ICfdEngineTypes.CfdEngine__PositionIsSolvent.selector);
-        router.executeLiquidation(account, solventPriceData);
+        router.executeLiquidation{value: 2 ether}(account, solventPriceData);
+
+        assertEq(_positionHash(account), positionBefore, "solvent liquidation must restore the full position");
+        assertEq(
+            _settlementBalance(account), accountSettlementBefore, "solvent account settlement changed after revert"
+        );
+        assertEq(_settlementBalance(keeper), keeperSettlementBefore, "solvent keeper settlement changed after revert");
+        _assertDelegatedLiquidationRolledBack(keeper, rollbackBefore);
+    }
+
+    function test_NoPosition_RevertsDelegatedLiquidationAndRollsBackOracleState() public {
+        address account = address(0xDEAD);
+        bytes[] memory updateData = _mockPythUpdateData(110_000_000);
+        baseMockPyth.setFee(1 ether);
+        vm.deal(keeper, 2 ether);
+
+        (uint256 sizeBefore,,,,,,) = engine.positions(account);
+        assertEq(sizeBefore, 0, "test account must not have a position");
+        bytes32 positionBefore = _positionHash(account);
+        uint256 keeperSettlementBefore = _settlementBalance(keeper);
+        DelegatedLiquidationRollbackSnapshot memory rollbackBefore = _delegatedLiquidationRollbackSnapshot(keeper);
+
+        vm.prank(keeper);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__NoPositionToLiquidate.selector);
+        router.executeLiquidation{value: 2 ether}(account, updateData);
+
+        assertEq(_positionHash(account), positionBefore, "failed liquidation must not create or alter a position");
+        assertEq(_settlementBalance(keeper), keeperSettlementBefore, "failed liquidation changed keeper settlement");
+        _assertDelegatedLiquidationRolledBack(keeper, rollbackBefore);
+    }
+
+    function test_DelegatedSingleLiquidation_OlderPublishTimeSkipsMarkRefreshAndEngineRejects() public {
+        (uint64 cachedMarkTime, bytes[] memory pythUpdateData) = _preparePublishTimeBoundaryLiquidation();
+        _mockBoundaryLiquidationSnapshot(pythUpdateData, cachedMarkTime - 1);
+
+        vm.prank(keeper);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__MarkPriceOutOfOrder.selector);
+        router.executeLiquidation(alice, pythUpdateData);
+
+        assertEq(engine.lastMarkPrice(), BOUNDARY_CACHED_MARK_PRICE, "older liquidation must retain the cached mark");
+        assertEq(engine.lastMarkTime(), cachedMarkTime, "older liquidation must retain the cached mark time");
+        (uint256 size,,,,,,) = engine.positions(alice);
+        assertEq(size, 100_000 * 1e18, "out-of-order liquidation must leave the position intact");
+    }
+
+    function test_DelegatedSingleLiquidation_EqualPublishTimeRefreshesMarkAndLiquidates() public {
+        (uint64 cachedMarkTime, bytes[] memory pythUpdateData) = _preparePublishTimeBoundaryLiquidation();
+        _mockBoundaryLiquidationSnapshot(pythUpdateData, cachedMarkTime);
+
+        vm.prank(keeper);
+        router.executeLiquidation(alice, pythUpdateData);
+
+        assertEq(engine.lastMarkPrice(), BOUNDARY_RESOLVED_MARK_PRICE, "equal-time liquidation must refresh the mark");
+        assertEq(engine.lastMarkTime(), cachedMarkTime, "equal-time liquidation must preserve the mark time");
+        (uint256 size,,,,,,) = engine.positions(alice);
+        assertEq(size, 0, "equal-time liquidation must remove the unsafe position");
+    }
+
+    function test_DelegatedSingleLiquidation_NewerPublishTimeRefreshesMarkAndLiquidates() public {
+        (uint64 cachedMarkTime, bytes[] memory pythUpdateData) = _preparePublishTimeBoundaryLiquidation();
+        uint64 newerPublishTime = cachedMarkTime + 1;
+        _mockBoundaryLiquidationSnapshot(pythUpdateData, newerPublishTime);
+
+        vm.prank(keeper);
+        router.executeLiquidation(alice, pythUpdateData);
+
+        assertEq(engine.lastMarkPrice(), BOUNDARY_RESOLVED_MARK_PRICE, "newer liquidation must refresh the mark");
+        assertEq(engine.lastMarkTime(), newerPublishTime, "newer liquidation must advance the mark time");
+        (uint256 size,,,,,,) = engine.positions(alice);
+        assertEq(size, 0, "newer liquidation must remove the unsafe position");
     }
 
     function test_KeeperBounty_CappedAtEquity() public {

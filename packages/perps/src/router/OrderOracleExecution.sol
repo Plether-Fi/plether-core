@@ -184,38 +184,6 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
         _updateEngineMarkIfCurrent(update);
     }
 
-    /// @notice Applies an account-adverse liquidation update and advances the engine mark when current.
-    /// @param account Account whose side determines the adverse confidence adjustment.
-    /// @param pythUpdateData Pyth update blobs; the oracle receives the call's full `msg.value`.
-    /// @return update Normalized liquidation snapshot.
-    function _prepareLiquidationOracle(
-        address account,
-        bytes[] calldata pythUpdateData
-    ) internal returns (OracleUpdateResult memory update) {
-        IPletherOracle.PriceSnapshot memory snapshot =
-            pletherOracle.updateLiquidationPrice{value: msg.value}(msg.sender, pythUpdateData, account);
-        update = _toOracleUpdateResult(snapshot);
-        _updateEngineMarkIfCurrent(update);
-    }
-
-    /// @notice Applies a mode-specific oracle update and installs its neutral mark in the Engine.
-    /// @param pythUpdateData Pyth update blobs.
-    /// @param mode Oracle policy mode to apply.
-    /// @param value ETH value forwarded to the oracle.
-    /// @return markPrice Validated neutral basket mark, with 8 decimals.
-    /// @return publishTime Earliest component publish timestamp.
-    function _refreshEngineMark(
-        bytes[] calldata pythUpdateData,
-        IPletherOracle.PriceMode mode,
-        uint256 value
-    ) internal returns (uint256 markPrice, uint64 publishTime) {
-        IPletherOracle.PriceSnapshot memory snapshot =
-            pletherOracle.updatePrice{value: value}(msg.sender, pythUpdateData, mode);
-        markPrice = snapshot.markPrice;
-        publishTime = snapshot.publishTime;
-        engine.updateMarkPrice(markPrice, publishTime);
-    }
-
     /// @notice Validates and installs a Plether oracle wired to this router's engine and HousePool.
     /// @param newPletherOracle Candidate deployed oracle address.
     function _setOracleConfig(

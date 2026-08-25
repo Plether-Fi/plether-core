@@ -9,6 +9,7 @@ import {HousePool} from "@plether/perps/HousePool.sol";
 import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
+import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
@@ -136,16 +137,16 @@ contract AuditRemainingFindingsFailing_MevDrift is BasePerpTest {
         bases.push(1e8);
         bases.push(1e8);
 
-        router = new OrderRouter(
-            address(engine),
-            address(new CfdEngineLens(address(engine))),
-            address(pool),
-            address(
-                new PletherOracle(
-                    address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
-                )
-            )
+        engineLens = new CfdEngineLens(address(engine));
+        pletherOracle = new PletherOracle(
+            address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
         );
+        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
+        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
+        router = new OrderRouter(
+            address(engine), address(engineLens), address(pool), address(pletherOracle), address(keeperSidecar)
+        );
+        assertEq(address(router), predictedRouter);
         engine.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
@@ -215,16 +216,16 @@ contract AuditRemainingFindingsFailing_StaleOracleExecution is BasePerpTest {
         bases.push(1e8);
         bases.push(1e8);
 
-        router = new OrderRouter(
-            address(engine),
-            address(new CfdEngineLens(address(engine))),
-            address(pool),
-            address(
-                new PletherOracle(
-                    address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
-                )
-            )
+        engineLens = new CfdEngineLens(address(engine));
+        pletherOracle = new PletherOracle(
+            address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
         );
+        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
+        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
+        router = new OrderRouter(
+            address(engine), address(engineLens), address(pool), address(pletherOracle), address(keeperSidecar)
+        );
+        assertEq(address(router), predictedRouter);
         engine.setOrderRouter(address(router));
 
         _bypassAllTimelocks();

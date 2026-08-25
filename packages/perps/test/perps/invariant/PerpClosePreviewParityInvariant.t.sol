@@ -13,6 +13,7 @@ import {CfdEngineSettlementSidecar} from "@plether/perps/CfdEngineSettlementSide
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
+import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
@@ -58,16 +59,15 @@ contract PerpClosePreviewParityInvariantTest is Test {
         weights[0] = 1e18;
         uint256[] memory basePrices = new uint256[](1);
         basePrices[0] = 1e8;
-        router = new OrderRouter(
-            address(engine),
-            address(engineLens),
-            address(housePool),
-            address(
-                new PletherOracle(
-                    address(engine), address(housePool), address(mockPyth), feedIds, weights, basePrices, new bool[](1)
-                )
-            )
+        PletherOracle testOracle = new PletherOracle(
+            address(engine), address(housePool), address(mockPyth), feedIds, weights, basePrices, new bool[](1)
         );
+        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
+        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
+        router = new OrderRouter(
+            address(engine), address(engineLens), address(housePool), address(testOracle), address(keeperSidecar)
+        );
+        assertEq(address(router), predictedRouter);
 
         clearinghouse.setEngine(address(engine));
         vm.warp(SETUP_TIMESTAMP);

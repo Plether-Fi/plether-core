@@ -44,6 +44,14 @@ interface IAsyncTrancheVaultDeploymentView {
 
 }
 
+/// @dev Minimal immutable-binding surface for the Router-deployed position-protection book.
+interface IPositionProtectionBookDeploymentView {
+
+    function ROUTER() external view returns (address);
+    function ENGINE() external view returns (address);
+
+}
+
 contract DeployPerpsArbitrumSepolia is Script {
 
     address internal constant PYTH = 0x4374e5a8b9C22271E9EB878A2AA31DE97DF15DAF;
@@ -93,7 +101,8 @@ contract DeployPerpsArbitrumSepolia is Script {
         CfdEngineAccountLens accountLens;
         CfdEngineLens engineLens;
         OrderRouter router;
-        OrderRouterLiquidationBatchSidecar routerLiquidationBatchSidecar;
+        OrderRouterLiquidationBatchSidecar liquidationBatchSidecar;
+        address positionProtectionBook;
         address pletherOracle;
         address routerAdmin;
         PerpsPublicLens publicLens;
@@ -167,19 +176,18 @@ contract DeployPerpsArbitrumSepolia is Script {
                 _inversions()
             )
         );
+        uint64 sidecarNonce = vm.getNonce(deployer);
+        address expectedRouter = vm.computeCreateAddress(deployer, uint256(sidecarNonce) + 1);
+        deployed.liquidationBatchSidecar = new OrderRouterLiquidationBatchSidecar(expectedRouter);
         deployed.router = new OrderRouter(
-            address(deployed.engine), address(deployed.engineLens), address(deployed.housePool), deployed.pletherOracle
+            address(deployed.engine),
+            address(deployed.engineLens),
+            address(deployed.housePool),
+            deployed.pletherOracle,
+            address(deployed.liquidationBatchSidecar)
         );
-        deployed.routerLiquidationBatchSidecar =
-            OrderRouterLiquidationBatchSidecar(deployed.router.liquidationBatchSidecar());
-        require(
-            address(deployed.routerLiquidationBatchSidecar).code.length > 0,
-            "OrderRouter liquidation batch sidecar has no code"
-        );
-        require(
-            deployed.routerLiquidationBatchSidecar.ROUTER() == address(deployed.router),
-            "OrderRouter liquidation batch sidecar binding mismatch"
-        );
+        require(address(deployed.router) == expectedRouter, "OrderRouter CREATE address mismatch");
+        deployed.positionProtectionBook = _verifyPositionProtectionBook(deployed.router, deployed.engine);
         deployed.routerAdmin = deployed.router.admin();
 
         deployed.engine.setOrderRouter(address(deployed.router));
@@ -342,6 +350,28 @@ contract DeployPerpsArbitrumSepolia is Script {
         inversions[5] = true;
     }
 
+    /// @dev Rejects missing, misbound, aliased, or mixed-generation Router helper contracts before set-once wiring
+    ///      completes.
+    function _verifyPositionProtectionBook(
+        OrderRouter router,
+        CfdEngine engine
+    ) internal view returns (address book) {
+        book = address(router.positionProtectionBook());
+        require(book != address(0), "PositionProtectionBook is not wired");
+        require(book.code.length > 0, "PositionProtectionBook has no code");
+        address sidecar = router.liquidationBatchSidecar();
+        require(sidecar != address(0), "OrderRouter sidecar is not wired");
+        require(sidecar.code.length > 0, "OrderRouter sidecar has no code");
+        require(sidecar != book, "OrderRouter sidecar aliases PositionProtectionBook");
+        require(
+            OrderRouterLiquidationBatchSidecar(sidecar).ROUTER() == address(router),
+            "OrderRouter sidecar router mismatch"
+        );
+        IPositionProtectionBookDeploymentView candidate = IPositionProtectionBookDeploymentView(book);
+        require(candidate.ROUTER() == address(router), "PositionProtectionBook router mismatch");
+        require(candidate.ENGINE() == address(engine), "PositionProtectionBook engine mismatch");
+    }
+
     /// @dev Rejects partial or mixed-generation LP stacks before any engine/router wiring is completed.
     function _verifyAsyncVaultPair(
         HousePool housePool,
@@ -446,7 +476,10 @@ contract DeployPerpsArbitrumSepolia is Script {
         console.log("CfdEngineAccountLens:", address(deployed.accountLens));
         console.log("CfdEngineLens:", address(deployed.engineLens));
         console.log("OrderRouter:", address(deployed.router));
-        console.log("OrderRouterLiquidationBatchSidecar:", address(deployed.routerLiquidationBatchSidecar));
+        console.log("OrderRouterLiquidationBatchSidecar:", address(deployed.liquidationBatchSidecar));
+        console.log("PositionProtectionBook:", deployed.positionProtectionBook);
+        console.log("PositionProtectionCommitsEnabled:", deployed.router.positionProtectionCommitsEnabled());
+        console.log("PositionProtectionTriggerBountyUsdc:", deployed.router.positionProtectionTriggerBountyUsdc());
         console.log("PletherOracle:", deployed.pletherOracle);
         console.log("BasketMaxConfidenceRatioBps:", PletherOracle(deployed.pletherOracle).basketMaxConfidenceRatioBps());
         console.log("OrderRouterAdmin:", deployed.routerAdmin);

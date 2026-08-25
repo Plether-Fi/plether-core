@@ -44,6 +44,14 @@ interface IAsyncTrancheVaultBootstrapView {
 
 }
 
+/// @dev Minimal immutable-binding surface for the Router-deployed position-protection book.
+interface IPositionProtectionBookBootstrapView {
+
+    function ROUTER() external view returns (address);
+    function ENGINE() external view returns (address);
+
+}
+
 contract BootstrapPerpsArbitrumSepolia is Script {
 
     uint256 internal constant DEFAULT_SENIOR_SEED_USDC = 50_000_000e6;
@@ -101,6 +109,8 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         console.log("HousePool:", housePoolAddr);
         console.log("HousePoolRedemptionMathSidecar:", redemptionMathSidecarAddr);
         console.log("OrderRouter:", routerAddr);
+        console.log("OrderRouterLiquidationBatchSidecar:", router.liquidationBatchSidecar());
+        console.log("PositionProtectionBook:", address(router.positionProtectionBook()));
         console.log("OrderRouterAdmin:", address(routerAdmin));
         console.log("EmergencyPauseCoordinator:", emergencyCoordinatorAddr);
         console.log("Requested guardian:", desiredGuardian);
@@ -137,6 +147,8 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         console.log("Junior seed initialized:", housePool.juniorSeedInitialized());
         console.log("HousePool pauser:", housePool.pauser());
         console.log("Router pauser:", routerAdmin.pauser());
+        console.log("Position protection commits enabled:", router.positionProtectionCommitsEnabled());
+        console.log("Position protection trigger bounty USDC:", router.positionProtectionTriggerBountyUsdc());
         console.log("Emergency guardian:", emergencyCoordinator.guardian());
         console.log("Risk-off order cutoff:", routerAdmin.riskOffOrderCutoff());
         console.log("LP epoch settlement paused:", housePool.lpEpochSettlementPaused());
@@ -186,12 +198,21 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         require(address(router.pletherOracle().engine()) == address(engine), "PletherOracle Engine mismatch");
         require(address(router.pletherOracle().housePool()) == address(housePool), "PletherOracle HousePool mismatch");
         require(address(router.pyth()).code.length > 0, "Pyth has no code");
-        address liquidationBatchSidecar = router.liquidationBatchSidecar();
-        require(liquidationBatchSidecar.code.length > 0, "OrderRouter liquidation batch sidecar has no code");
+
+        address book = address(router.positionProtectionBook());
+        require(book != address(0), "PositionProtectionBook is not wired");
+        require(book.code.length > 0, "PositionProtectionBook has no code");
+        address sidecar = router.liquidationBatchSidecar();
+        require(sidecar != address(0), "OrderRouter sidecar is not wired");
+        require(sidecar.code.length > 0, "OrderRouter sidecar has no code");
+        require(sidecar != book, "OrderRouter sidecar aliases PositionProtectionBook");
         require(
-            OrderRouterLiquidationBatchSidecar(liquidationBatchSidecar).ROUTER() == address(router),
-            "OrderRouter liquidation batch sidecar binding mismatch"
+            OrderRouterLiquidationBatchSidecar(sidecar).ROUTER() == address(router),
+            "OrderRouter sidecar router mismatch"
         );
+        IPositionProtectionBookBootstrapView candidate = IPositionProtectionBookBootstrapView(book);
+        require(candidate.ROUTER() == address(router), "PositionProtectionBook router mismatch");
+        require(candidate.ENGINE() == address(engine), "PositionProtectionBook engine mismatch");
     }
 
     /// @dev Requires the deploy-time coordinator and both pauser bindings to match this exact stack. Bootstrap never

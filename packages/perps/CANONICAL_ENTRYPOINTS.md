@@ -7,21 +7,35 @@ For audit review that needs policy tables and read-surface canonicality in one p
 ## Traders
 
 - Margin actions: `MarginClearinghouse.depositMargin(uint256)` and `MarginClearinghouse.withdrawMargin(uint256)`
-- Trade actions: `OrderRouter.commitOrder(CfdTypes.Side side, uint256 sizeDelta, uint256 marginDelta, uint256 targetPrice, bool isClose)`
+- Ordinary trade action: `OrderRouter.commitOrder(CfdTypes.Side side, uint256 sizeDelta, uint256 marginDelta, uint256 targetPrice, bool isClose)`
 - Emergency policy note: committed orders remain user-uncancellable. If RouterAdmin enters risk-off, each pre-cutoff
   open is instead terminally invalidated by protocol policy and its remaining reservations are refunded to the
   trader's internal clearinghouse balance.
+- Discover the immutable protection action/view surface through `OrderRouter.positionProtectionBook()`.
+- Open with staged protection: `PositionProtectionBook.commitOpenOrderWithProtection(CfdTypes.Side,uint256,uint256,uint256,PositionProtectionParams)`
+- Existing-position protection: `PositionProtectionBook.createPositionProtection(PositionProtectionParams)`
+- Existing-position protection creation locks both bounties first, then applies the canonical V2 exact-price safety
+  gate through the Engine's configured planner. Price equity uses exact entry cost and only PnL pledge plus same-account
+  claim; free settlement and generic action/reservation buckets do not count. Uncovered carry, an underfunded
+  negative-VPI reserve, or equity at or below the stricter of initial and active normal/FAD margin rejects the action.
+- Protection management: replace a `PendingOpen` or `Armed` record with
+  `PositionProtectionBook.replacePositionProtection(uint64,PositionProtectionParams)`, or detach/cancel a
+  `PendingOpen`/`Armed` record with `PositionProtectionBook.cancelPositionProtection(uint64)`
 - Trader claim settlement: `CfdEngine.settleTraderClaim(address account)` for the account owner
 - Compact reads: `PerpsPublicLens`; use `getTrancheQueues(bool)` for matured heads/backlog and
   `getLpRequestState(bool,uint256,address)` for controller-specific pending/claimable balances. The legacy
   `TrancheView.maxWithdrawUsdc` field now means current pool-level queue-funding capacity, not synchronous holder
   withdrawal capacity.
+- Protection reads: `PositionProtectionBook.activePositionProtectionId(address)` and
+  `PositionProtectionBook.getPositionProtection(uint64)`
 - Trade-ticket previews: `CfdEngineLens.previewOpen(...)` and `CfdEngineLens.previewClose(...)`
 
 Use these interfaces:
 
 - `IMarginAccount`
 - `IPerpsTraderActions`
+- `IPositionProtectionActions`
+- `IPositionProtectionViews`
 - `IPerpsTraderViews`
 - `ICfdEngineLens` for `previewOpen(...)` / `previewClose(...)` only
 
@@ -50,13 +64,17 @@ Do not use the wide clearinghouse reservation API or detailed accounting lenses 
 - A share-delivering claim, redemption cancellation, or redemption refund may target the controller or an account with
   no existing vault shares. This prevents unsolicited dust from resetting another holder's whole-balance cooldown;
   `maxDeposit(controller)` and `maxMint(controller)` remain receiver-independent controller limits.
-- Epoch clearing is permissionless through `OrderRouter.settleLpEpoch(bytes[])`. With live open positions, the Router
-  validates one post-round-hour `PoolReconcile` mark, installs it in the Engine, and reaches the Router-only HousePool
-  callback in the same rollback frame. HousePool reconciles once, processes matured Senior withdrawal demand before
-  Junior demand, rechecks the live deposit-entry gate after redemption funding, then finalizes Junior deposits before
-  Senior deposits. If bounded Senior processing stops with an eligible head remaining, the call must stop before
-  Junior. A pass that advances no queue item also rolls back the Pyth and Engine updates. Direct cached-mark settlement
-  is only a zero-position or oracle-frozen fallback.
+- Epoch clearing is permissionless through the route reported by `SettlementMonitorLens.requiredExecutionPath`.
+  `CachedMark` calls `HousePool.settleLpEpoch(uint256,uint256)` directly; `AtomicOracleRefresh` calls
+  `OrderRouter.settleLpEpoch(bytes[])`. On the atomic route, the Router validates one `PoolReconcile` mark under the
+  reported minimum-publish-time policy, installs it in the Engine, and reaches the Router-only HousePool callback in
+  the same rollback frame. A nonzero `minimumAtomicPublishTime` enforces the post-round-hour floor; frozen stale-mark
+  recovery reports zero and uses the frozen oracle policy instead. HousePool reconciles once, processes matured Senior
+  withdrawal demand before Junior demand, rechecks the live deposit-entry gate after redemption funding, then
+  finalizes Junior deposits before Senior deposits. If bounded Senior processing stops with an eligible head remaining,
+  the call must stop before Junior. A pass that advances no queue item also rolls back the Pyth and Engine updates. The
+  Lens selects the direct cached route when there are no open positions or when the oracle is frozen and the cached
+  mark is still fresh under the applicable frozen-mode limit; a frozen stale mark requires the atomic-refresh route.
 - Compact reads: `PerpsPublicLens`
 - Capacity-specific reads: `HousePool.getSeniorDepositCapacity()`, `reservedSeniorDepositAssetsUsdc()`, and
   `areSeniorDepositReservationsWithinLimits()`; these intentionally are not added to the compact liquidity lens
@@ -69,17 +87,21 @@ Use these interfaces:
 
 `IPerpsLPActions` describes configured-vault-to-`HousePool` mutation hooks. It is not a direct user surface. Senior
 reservation/release hooks authorize only the configured vaults. Synchronized deposit activation and redemption
-funding are coordinated by the Router's atomic keeper entrypoint. Treat bootstrap,
+funding are coordinated by the Lens-selected cached or atomic keeper route; the atomic-refresh route enters through
+the Router. Treat bootstrap,
 seed-lifecycle, and other tranche setup mechanics as admin/setup concerns rather than the standard LP surface.
 
 ## Keepers
 
 - Order execution: `OrderRouter.executeOrder(uint64,bytes[])`
 - Batch execution: `OrderRouter.executeOrderBatch(uint64,bytes[])`
+- Neutral mark refresh: `OrderRouter.updateMarkPrice(bytes[])`
+- Position-protection activation: `PositionProtectionBook.triggerPositionProtection(uint64,bytes[])`
 - Liquidation: `OrderRouter.executeLiquidation(address,bytes[])`
 - Batch liquidation: `OrderRouter.executeLiquidationBatch(address[],bytes[])`
 - Risk-off queue cleanup: `OrderRouter.clearRiskOffOrder(uint64)`; permissionless, oracle-free, and unpaid. The caller
-  funds gas while the trader receives the full internal margin and execution-bounty refund.
+  funds gas while the trader receives the full internal margin, execution-bounty, and attached `PendingOpen`
+  protection-bounty refund.
 - LP epoch clearing: follow `SettlementMonitorLens.requiredExecutionPath`; use direct
   `HousePool.settleLpEpoch(uint256,uint256)` for `CachedMark` and `OrderRouter.settleLpEpoch(bytes[])` for
   `AtomicOracleRefresh`
@@ -95,10 +117,20 @@ logically unexecutable before physical cleanup, and cleanup authority does not g
 Use this interface:
 
 - `IPerpsKeeper`
+- `IPositionProtectionActions` for the permissionless trigger entrypoint
+
+Mark refresh, single and batch liquidation, and atomic-refresh LP-epoch settlement remain Router entrypoints.
+Integrations must not call matching selectors on `OrderRouterLiquidationBatchSidecar`: the Router invokes that
+separately deployed stateless implementation only through `delegatecall`, and direct or foreign-context sidecar calls
+revert. In the delegate frame the Router remains `address(this)` and the direct-event address, downstream integrations
+see it as caller, and the Router entrypoint caller is preserved; protection-trigger keeper identity is authenticated
+by the Book's trailing payload.
 
 ## Protocol / Status Readers
 
 - Compact protocol status and LP/trader views: `PerpsPublicLens`
+- Retained protection status and linkage: `IPositionProtectionViews` on the Book returned by
+  `OrderRouter.positionProtectionBook()`
 - Settlement operations and security monitoring: `SettlementMonitorLens`. Its route, oracle, queue, and invariant
   observations are advisory and fail-soft; they do not authorize settlement or replace an `eth_call` of
   the exact route-specific settlement transaction.
@@ -150,8 +182,9 @@ The following remain useful for tests, admin tooling, migration, and deep accoun
 
 - `CfdEngine` / `ICfdEngineCore`: canonical runtime truth for execution, liquidation, and protocol status.
 - `CfdEngineSettlementSidecar`: externalized close/liquidation settlement orchestration used by `CfdEngine`; not a product-facing surface.
-- `OrderRouterLiquidationBatchSidecar`: immutable stateless Router implementation detail for batch liquidation;
-  direct integrations must call `OrderRouter.executeLiquidationBatch(...)`, never the sidecar.
+- `OrderRouterLiquidationBatchSidecar`: separately predeployed, immutable, exactly Router-bound stateless
+  implementation detail for mark refresh, protection-trigger oracle/orchestration, single and batch liquidation, and
+  atomic-refresh LP-epoch settlement. Direct integrations call the corresponding Router entrypoint, never the sidecar.
 - `PerpsPublicLens`: canonical product-facing read layer.
 - `SettlementMonitorLens`: canonical bounded settlement-monitoring read layer; no mutation or circuit-breaker
   authority. It validates the required one-time core wiring and its monitor-only sidecar is not a second canonical
@@ -163,4 +196,15 @@ The following remain useful for tests, admin tooling, migration, and deep accoun
 - `CfdEngineAccountLens`: rich account/accounting diagnostics.
 - `CfdEngineProtocolLens`: protocol-accounting and house-pool snapshot diagnostics.
 - `MarginClearinghouse`: custody plumbing with a small public trader surface and a larger operator surface.
-- `OrderRouter`: delayed-order and keeper-execution plumbing; raw queue state is non-canonical.
+- `OrderRouter`: delayed-order and keeper-execution plumbing, global FIFO ownership, and timelocked protection
+  configuration. It exposes `positionProtectionBook()` for discovery but does not forward public protection selectors;
+  raw queue state is non-canonical. To stay within EIP-170 it delegatecalls its separate stateless keeper sidecar for
+  mark refresh/trigger-oracle resolution, single liquidation, liquidation batches, and atomic-refresh LP-epoch
+  settlement, plus the active-oracle forwarding step of authenticated configuration, while retaining every public
+  entrypoint, admin check, and Router execution/event address.
+- `PositionProtectionBook`: canonical direct action/view surface and retained lifecycle store for position protection.
+  It emits all protection lifecycle events and calls narrow Router host operations for mark refresh and FIFO mutation; it
+  holds no token custody and does not mutate the queue directly. It is stateful and distinct from the stateless keeper
+  sidecar returned by `OrderRouter.liquidationBatchSidecar()`.
+- A `PendingOpen` or `Armed` protection is a retained off-queue OCO record, not an ordinary pending order. Once triggered,
+  its linked full-position close is an ordinary binding FIFO order and is read through the normal order surfaces.

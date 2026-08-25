@@ -13,6 +13,7 @@ import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemption
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
+import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
 import {PerpsPublicLens} from "@plether/perps/PerpsPublicLens.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
@@ -81,23 +82,24 @@ contract PerpOraclePathHandler is Test {
     ) external {
         uint256 limit = bound(limitFuzz, 1, 600);
         vm.startPrank(owner);
-        IOrderRouterAdminHost.RouterConfig memory config = IOrderRouterAdminHost.RouterConfig({
-            maxOrderAge: router.maxOrderAge(),
-            orderExecutionStalenessLimit: limit,
-            liquidationStalenessLimit: router.liquidationStalenessLimit(),
-            basketMaxConfidenceRatioBps: router.basketMaxConfidenceRatioBps(),
-            orderSettlementWindow: router.orderSettlementWindow(),
-            maxComponentPublishTimeDivergence: router.maxComponentPublishTimeDivergence(),
-            adverseConfidenceMultiplierBps: router.adverseConfidenceMultiplierBps(),
-            minOpenNotionalUsdc: router.minOpenNotionalUsdc(),
-            openOrderExecutionBountyBps: router.openOrderExecutionBountyBps(),
-            minOpenOrderExecutionBountyUsdc: router.minOpenOrderExecutionBountyUsdc(),
-            maxOpenOrderExecutionBountyUsdc: router.maxOpenOrderExecutionBountyUsdc(),
-            closeOrderExecutionBountyUsdc: router.closeOrderExecutionBountyUsdc(),
-            maxPendingOrders: router.maxPendingOrders(),
-            minEngineGas: router.minEngineGas(),
-            maxPruneOrdersPerCall: router.maxPruneOrdersPerCall()
-        });
+        IOrderRouterAdminHost.RouterConfig memory config;
+        config.maxOrderAge = router.maxOrderAge();
+        config.orderExecutionStalenessLimit = limit;
+        config.liquidationStalenessLimit = router.liquidationStalenessLimit();
+        config.basketMaxConfidenceRatioBps = router.basketMaxConfidenceRatioBps();
+        config.orderSettlementWindow = router.orderSettlementWindow();
+        config.maxComponentPublishTimeDivergence = router.maxComponentPublishTimeDivergence();
+        config.adverseConfidenceMultiplierBps = router.adverseConfidenceMultiplierBps();
+        config.minOpenNotionalUsdc = router.minOpenNotionalUsdc();
+        config.openOrderExecutionBountyBps = router.openOrderExecutionBountyBps();
+        config.minOpenOrderExecutionBountyUsdc = router.minOpenOrderExecutionBountyUsdc();
+        config.maxOpenOrderExecutionBountyUsdc = router.maxOpenOrderExecutionBountyUsdc();
+        config.closeOrderExecutionBountyUsdc = router.closeOrderExecutionBountyUsdc();
+        config.positionProtectionCommitsEnabled = router.positionProtectionCommitsEnabled();
+        config.positionProtectionTriggerBountyUsdc = router.positionProtectionTriggerBountyUsdc();
+        config.maxPendingOrders = router.maxPendingOrders();
+        config.minEngineGas = router.minEngineGas();
+        config.maxPruneOrdersPerCall = router.maxPruneOrdersPerCall();
         routerAdmin.proposeRouterConfig(config);
         vm.warp(block.timestamp + 48 hours);
         routerAdmin.finalizeRouterConfig();
@@ -109,23 +111,24 @@ contract PerpOraclePathHandler is Test {
     ) external {
         uint256 limit = bound(limitFuzz, 1, 600);
         vm.startPrank(owner);
-        IOrderRouterAdminHost.RouterConfig memory config = IOrderRouterAdminHost.RouterConfig({
-            maxOrderAge: router.maxOrderAge(),
-            orderExecutionStalenessLimit: router.orderExecutionStalenessLimit(),
-            liquidationStalenessLimit: limit,
-            basketMaxConfidenceRatioBps: router.basketMaxConfidenceRatioBps(),
-            orderSettlementWindow: router.orderSettlementWindow(),
-            maxComponentPublishTimeDivergence: router.maxComponentPublishTimeDivergence(),
-            adverseConfidenceMultiplierBps: router.adverseConfidenceMultiplierBps(),
-            minOpenNotionalUsdc: router.minOpenNotionalUsdc(),
-            openOrderExecutionBountyBps: router.openOrderExecutionBountyBps(),
-            minOpenOrderExecutionBountyUsdc: router.minOpenOrderExecutionBountyUsdc(),
-            maxOpenOrderExecutionBountyUsdc: router.maxOpenOrderExecutionBountyUsdc(),
-            closeOrderExecutionBountyUsdc: router.closeOrderExecutionBountyUsdc(),
-            maxPendingOrders: router.maxPendingOrders(),
-            minEngineGas: router.minEngineGas(),
-            maxPruneOrdersPerCall: router.maxPruneOrdersPerCall()
-        });
+        IOrderRouterAdminHost.RouterConfig memory config;
+        config.maxOrderAge = router.maxOrderAge();
+        config.orderExecutionStalenessLimit = router.orderExecutionStalenessLimit();
+        config.liquidationStalenessLimit = limit;
+        config.basketMaxConfidenceRatioBps = router.basketMaxConfidenceRatioBps();
+        config.orderSettlementWindow = router.orderSettlementWindow();
+        config.maxComponentPublishTimeDivergence = router.maxComponentPublishTimeDivergence();
+        config.adverseConfidenceMultiplierBps = router.adverseConfidenceMultiplierBps();
+        config.minOpenNotionalUsdc = router.minOpenNotionalUsdc();
+        config.openOrderExecutionBountyBps = router.openOrderExecutionBountyBps();
+        config.minOpenOrderExecutionBountyUsdc = router.minOpenOrderExecutionBountyUsdc();
+        config.maxOpenOrderExecutionBountyUsdc = router.maxOpenOrderExecutionBountyUsdc();
+        config.closeOrderExecutionBountyUsdc = router.closeOrderExecutionBountyUsdc();
+        config.positionProtectionCommitsEnabled = router.positionProtectionCommitsEnabled();
+        config.positionProtectionTriggerBountyUsdc = router.positionProtectionTriggerBountyUsdc();
+        config.maxPendingOrders = router.maxPendingOrders();
+        config.minEngineGas = router.minEngineGas();
+        config.maxPruneOrdersPerCall = router.maxPruneOrdersPerCall();
         routerAdmin.proposeRouterConfig(config);
         vm.warp(block.timestamp + 48 hours);
         routerAdmin.finalizeRouterConfig();
@@ -220,7 +223,7 @@ contract PerpOraclePathHandler is Test {
         bytes memory err
     ) internal pure returns (bytes4 selector) {
         if (err.length >= 4) {
-            assembly {
+            assembly ("memory-safe") {
                 selector := mload(add(err, 32))
             }
         }
@@ -285,16 +288,14 @@ contract PerpOraclePathInvariantTest is BasePerpTest {
         inversions.push(false);
         inversions.push(false);
 
+        pletherOracle =
+            new PletherOracle(address(engine), address(pool), address(mockPyth), feedIds, weights, bases, inversions);
+        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
+        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
         router = new OrderRouter(
-            address(engine),
-            address(engineLens),
-            address(pool),
-            address(
-                new PletherOracle(
-                    address(engine), address(pool), address(mockPyth), feedIds, weights, bases, inversions
-                )
-            )
+            address(engine), address(engineLens), address(pool), address(pletherOracle), address(keeperSidecar)
         );
+        assertEq(address(router), predictedRouter);
         _syncRouterAdmin();
         engine.setOrderRouter(address(router));
         publicLens = new PerpsPublicLens(address(engineAccountLens), address(engine), address(router), address(pool));

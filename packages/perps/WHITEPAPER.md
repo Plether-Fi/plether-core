@@ -91,7 +91,9 @@ future. It is a pooled, oracle-settled perpetual CFD with USDC cross-margin
 custody, explicit position-margin buckets, and a tranched external capital
 provider. Long means long the Plether basket and gains as its mark rises; Short
 means short the basket and gains as its mark falls. Accounts may hold one live
-side at a time, and changing direction requires closing first.
+side at a time, and changing direction requires closing first. In contract
+nomenclature, generic Long maps to `BEAR` and generic Short maps to `BULL` because
+the stored oracle mark is the raw price of the BEAR leg.
 
 ### 1.1 Contributions and prior art
 

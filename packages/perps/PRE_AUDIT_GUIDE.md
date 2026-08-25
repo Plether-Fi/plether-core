@@ -57,7 +57,7 @@ Before trusting a test as a source of truth, ask:
 | `CfdEngine.processOrderTyped` / `liquidatePosition` / fee bookkeeping | `orderRouter` only | router is the external execution boundary |
 | `MarginClearinghouse` operator paths | `engine`, `settlementSidecar` | broad settlement mutations only |
 | `MarginClearinghouse` reservation paths | `engine`, `orderRouter` | router can reserve/release queued margin and execution-bounty buckets, but cannot perform broad settlement |
-| `MarginClearinghouse.releaseInvalidatedOrderReserves` | Engine-reported `orderRouter` only | exact risk-off reclassification; authorization reads the Engine's Router binding, while the transition performs no Engine mutation, carry checkpoint, Terminal NAV synchronization, or token movement |
+| `MarginClearinghouse.releaseInvalidatedOrderReserves` | Engine-reported `orderRouter` only | exact order-margin, order-bounty, and attached-protection-bounty risk-off reclassification; authorization reads the Engine's Router binding, while the transition performs no Engine mutation, carry checkpoint, Terminal NAV synchronization, or token movement |
 | `HousePool.payOut` / `recordProtocolInflow` | `engine`, `settlementSidecar` | payout/inflow authority is intentionally narrow |
 | `HousePool.recordClaimantInflow` | `engine`, `settlementSidecar` | claimant-owned revenue/recap routing only |
 | `HousePool.reserveSeniorDeposit` / `releaseSeniorDepositReservation` | configured `seniorVault` only | direct LPs and the Junior vault cannot reserve or release pending Senior-entry capacity; activation happens only through synchronized settlement |
@@ -68,15 +68,21 @@ Before trusting a test as a source of truth, ask:
 | `HousePool.unpauseLpEpochSettlement` | HousePool owner only | restores eligibility to attempt settlement; it does not repair state or guarantee progress |
 | `HousePoolRedemptionMathSidecar` pure functions | permissionless | stateless EIP-170 size split used by the HousePool immutable binding; fixed implementation id, no storage, authorization, setter, delegatecall, or upgrade path |
 | `SettlementMonitorLens` views | permissionless | read-only, bounded, fail-soft settlement diagnostics; no settlement, pause, or circuit-breaker authority |
-| `SettlementMonitorLensSidecar` diagnostic builders | constructor-bound `SettlementMonitorLens` facade only | code-size implementation detail; external callers cannot obtain facade-attributed health from fabricated queue masks, integrations must use the facade rather than treating the sidecar as a second canonical surface, and constructor-set binding getters remain publicly readable; there are no setters or delegatecall paths |
+| `SettlementMonitorLensSidecar` diagnostic builders | constructor-bound `SettlementMonitorLens` facade only | code-size implementation detail; external callers cannot obtain facade-attributed health from fabricated queue masks, integrations must use the facade rather than treating the sidecar as a second canonical surface, the public `MONITOR()` binding remains readable while dependency bindings stay internal, and there are no setters or delegatecall paths |
 | `EmergencyPauseCoordinator.triggerEmergencyPause` | configured guardian only | fixed Router risk-off plus LP-entry action |
 | `EmergencyPauseCoordinator.triggerLpEpochSettlementHold` | configured guardian only | fixed settlement-only action; requests and already-funded claims remain live |
 | `EmergencyPauseCoordinator.triggerFullContainment` | configured guardian only | fixed atomic union of Router risk-off, LP entry pause, and settlement hold |
 | `EmergencyPauseCoordinator.setGuardian` | coordinator owner only | rotate or disable containment authority; the guardian cannot rotate itself |
 | `OrderRouter.clearRiskOffOrder` | permissionless | oracle-free cleanup of one permanently invalidated open; full internal refund to trader, no clearer bounty |
-| `OrderRouterLiquidationBatchSidecar.executeLiquidationBatch` | immutable deploying Router delegatecall context only | stateless size split; direct calls revert, binding has no setter, and Router self-only item callbacks remain the mutation boundary |
+| `OrderRouterLiquidationBatchSidecar` delegated selectors | exact immutable-bound Router delegatecall context only | separately predeployed stateless size split for mark refresh/protection trigger, LP-epoch settlement, single/batch liquidation, and authenticated active-oracle configuration forwarding; direct and foreign-context calls revert, binding has no setter, Router keeps admin authentication, and Router self-only item callbacks remain the mutation boundary |
 
 Any new helper/sidecar contract that can reach these sets should be treated as security-critical and explicitly access-controlled.
+
+Deployment must precompute the next Router `CREATE` address, deploy the sidecar bound to that address, and deploy the
+Router immediately afterward from the same deployer without an intervening nonce-consuming transaction or `CREATE`.
+The Router constructor rejects a
+sidecar with no code or a sidecar whose `ROUTER()` does not equal the Router being constructed. Audit the prediction,
+transaction ordering, and post-deployment getter/code-hash verification as one ordered deployment invariant.
 
 ### Order lifecycle state machine
 
@@ -119,7 +125,7 @@ Any new helper/sidecar contract that can reach these sets should be treated as s
 | Slippage failure on close | `Failed` | keeper paid | dequeue |
 | Expired open order | `Failed` | keeper paid from reserved bounty | dequeue |
 | Expired close order | `Failed` | keeper paid from reservation under the current terminal-close policy | dequeue |
-| Risk-off open at or below persistent cutoff | `Failed` | full bounty returned to trader's internal settlement; clearer unpaid | dequeue |
+| Risk-off open at or below persistent cutoff | `Failed` | full order and attached `PendingOpen` protection bounties returned to trader's internal settlement; clearer unpaid | dequeue |
 | Stale oracle | blocked, not terminal | no distribution | keep pending |
 | Live-market publish-time ordering failure | blocked, not terminal | no distribution | keep pending |
 | Close-only ineligibility for queued open | blocked, not terminal | no distribution | keep pending |
