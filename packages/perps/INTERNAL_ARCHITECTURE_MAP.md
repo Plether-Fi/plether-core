@@ -41,6 +41,8 @@ For normative semantics, use [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md). For sys
 | `CfdEngineSettlementSidecar` | Execute externalized close/liquidation settlement orchestration through engine-owned host hooks | Own storage or bypass engine authorization boundaries |
 | `HousePool` | Maintain canonical pool assets, the shared round-hour epoch clock, and the LP principal waterfall; atomically reconcile and clear synchronized LP epochs; maintain exceptional excess/unassigned buckets | Select deposit/redemption request epochs, inspect raw trader balances, execute order logic, bypass Senior-before-Junior matured-demand priority, or custody protocol fees that moved to treasury margin |
 | `TrancheVault` | Custody active shares, pending-deposit escrow, pending redemption shares, and funded redemption assets; select both deposit and redemption request ids through one five-minute-cutoff helper over the HousePool clock; execute only pool-authorized epoch mutations | Define a competing epoch clock, independently finalize a pending deposit epoch, independently fund a redemption, or reprice an already-funded claim |
+| `SettlementMonitorLens` | Validate required one-time core wiring and read bounded epoch, oracle, wiring, NAV, pool, and vault-custody diagnostics for one explicitly observed epoch | Select FIFO settlement heads, mutate protocol state, authorize settlement, promise transaction success, traverse an unbounded queue, or replace exact route-specific `eth_call` simulation |
+| `SettlementMonitorLensSidecar` | Execute the facade's code-size-split accounting, oracle, health, and config reads when called by its constructor-bound monitor; expose constructor-set binding getters for verification | Accept another caller on monitor-only diagnostic builders, act as a second canonical monitoring surface, mutate its constructor-set bindings, or mutate protocol state |
 
 ## LP Timing Ownership
 
@@ -50,6 +52,7 @@ For normative semantics, use [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md). For sys
 | Request-epoch selection | `TrancheVault` | Both request directions target `e + 1` before `b - 300` and `e + 2` at or after `b - 300`, where `b` is the next HousePool epoch start |
 | Integration timing view | `TrancheVault.getRequestEpochWindow()` | Returns the current target and the next future cutoff at which that target changes; no stored state or second clock |
 | Compact timing read | `PerpsPublicLens.getTrancheQueues(bool)` | Relays the selected vault's canonical pair as `nextRequestEpoch` and `nextRequestCutoffTime` |
+| Operational epoch monitoring | `SettlementMonitorLens` | Reads the caller-selected observed epoch rather than silently switching from the closed epoch to the new request target at cutoff; both cached-Pool and atomic-Router settlement remain FIFO |
 | Settlement and live oracle refresh | `OrderRouter` -> `HousePool` | Request cutoff does not change maturity, phase order, or the post-round-hour publication boundary |
 
 ## Critical Capability Boundaries
@@ -70,6 +73,7 @@ For normative semantics, use [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md). For sys
 | Solvency / redemption-funding cash state | `SolvencyAccountingLib`, degraded-mode checks, protocol accounting snapshot builders | `HousePool.totalAssets()` / net physical assets, bounded max liability, trader claim liabilities, withdrawal reserve, free cash available to synchronized LP settlement |
 | Reconciliation / share NAV | `TerminalNavBookV2`, Engine snapshot, `HousePoolAccountingLib.buildReconcileSnapshot()` | Physical assets minus aggregate trader claims plus exact signed account-capped terminal price delta; one snapshot for LP entry and exit pricing |
 | Pending-order reservation view | Router + clearinghouse reservation getters, liquidation reachability helpers | Committed order margin, clearinghouse-reserved bounty value, free settlement excluded by active reservations |
+| LP settlement monitor | `SettlementMonitorLens.getSettlementStatus(observedEpoch)` / `getSettlementHealth()` / `getPoolReconcileOracleStatus()` / `getSettlementObservation(observedEpoch)` | Poll the lighter status view; use the roughly 6 KB / 0.8–1.3m representative `eth_call`-gas composite for checkpoints and alerts. Exposes fail-soft dependencies, bounded queues, route-specific `executionPathDependencyMask`, activation/reservation-limit deferrals (not new Senior admission capacity), current oracle observation, custody, and NAV parity; not per-account/radix proof. Every Oracle dependency read is required for `observationComplete`, policy validity only on atomic refresh. Confidence is pre-cap and cannot always be ratio-checked against a capped mark. Both digests are advisory |
 
 ## Cross-Domain Value Flows
 
@@ -85,7 +89,7 @@ For normative semantics, use [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md). For sys
 | Liquidation charge | Dedicated liquidation reserve -> keeper clearinghouse account + protocol-treasury clearinghouse account + `HousePool` claimant revenue | `CfdEngine` / `CfdEngineSettlementSidecar` | Allocates the capped charge using timelocked shares; both configured shares round down and LPs get the exact remainder without consuming PnL pledge or pre-existing pool cash |
 | Carry realization | Eligible free settlement -> `HousePool` claimant revenue routing | `CfdEngine` via open/close/add-margin and clearinghouse deposit/withdraw hooks | Time-based LP-capital rent is projected/collected before health checks; a funded amount leaves exact price health unchanged, while an uncovered remainder blocks withdrawal and makes the account liquidatable without consuming PnL pledge or claim |
 | Router forfeiture on liquidation cleanup | Clearinghouse-reserved bounty value -> treasury clearinghouse account | `OrderRouter` -> `CfdEngine.absorbReservedExecutionBounty(...)` | Converts abandoned queued-order reserves into protocol-owned clearinghouse margin |
-| LP deposit request / activation | External wallet -> `TrancheVault` escrow -> `HousePool` | Vault routes the request with its shared cutoff helper, then atomic Router epoch settlement activates it | Deposit activation follows both withdrawal phases; Junior activates before Senior; never changes trader balances |
+| LP deposit request / activation | External wallet -> `TrancheVault` escrow -> `HousePool` | Vault routes the request with its shared cutoff helper, then route-appropriate epoch settlement activates it | Funding follows both withdrawal phases, the live common entry gate is rechecked after Senior HWM/principal scaling, Junior activates before Senior, and activation never changes trader balances |
 | LP redeem request / funding / claim | LP shares -> `TrancheVault` pending escrow; `HousePool` cash -> vault asset escrow -> receiver | Vault routes the request with the same cutoff helper; permissionless Router settlement funds it; controller/operator later claims | Pending shares retain P&L exposure; funded shares burn; claimable assets are irrevocable and leave pool depth at funding |
 | Governance recapitalization | External wallet -> `HousePool` canonical cash | Owner-controlled recap path | Restores the senior-first claimant path or lands in `unassignedAssets` if no valid claimant exists |
 | Excess assignment / sweep | Raw unsolicited pool cash -> canonical accounting or treasury sweep | `HousePool` owner path | Resolves cash that exists physically but has no admitted economic owner |
@@ -96,6 +100,10 @@ For normative semantics, use [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md). For sys
 - `OrderRouter` owns queued-intent bookkeeping.
 - `CfdEngine` owns state transitions and liability classification.
 - `TerminalNavBookV2` owns the exact account-curve aggregate used symmetrically for LP share NAV. Its curves are synchronized exclusively from canonical Engine and clearinghouse state; the book is not a cash reserve.
+- `SettlementMonitorLens` owns no state transition. It summarizes observable protocol state for keepers and security
+  monitors; its internally deployed monitor-only sidecar is an implementation detail. The exact route-specific
+  simulation and transaction remain authoritative: direct `HousePool` settlement for `CachedMark`, or `OrderRouter`
+  with the exact Oracle payload and value for `AtomicOracleRefresh`.
 - `HousePool` owns canonical pool cash, the round-hour clock, LP waterfall accounting, and the sole synchronized epoch
   coordinator. Each `TrancheVault` owns request-epoch selection over that clock plus pending-share and funded-asset
   escrow. Protocol fees that cross out of trader custody are owned by the treasury clearinghouse account.

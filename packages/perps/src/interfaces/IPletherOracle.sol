@@ -302,6 +302,14 @@ interface IPletherOracle {
         PriceMode mode
     ) external view returns (PriceSnapshot memory snapshot);
 
+    /// @notice Returns the current validated PoolReconcile snapshot and its aggregate basket confidence.
+    /// @dev Applies exactly the same freshness, confidence-width, component-timing, and publish-order validation as
+    ///      `getLatestPrice(PriceMode.PoolReconcile)`. The confidence amount is expressed in 8-decimal basket-price
+    ///      units and is the value already computed while constructing the validated basket.
+    /// @return snapshot Validated neutral PoolReconcile price, mark, publish time, zero fee, and policy metadata.
+    /// @return confidence Aggregate basket confidence in 8-decimal price units.
+    function getLatestPoolReconcilePrice() external view returns (PriceSnapshot memory snapshot, uint256 confidence);
+
     /// @notice Returns the latest validated live order-execution basket price without applying a Pyth update.
     /// @dev Equivalent to `getLatestPrice(PriceMode.OrderExecution).price`; it is neither historical nor side-adjusted.
     /// @return latestPrice Latest validated neutral order-policy basket price in 8-decimal units.

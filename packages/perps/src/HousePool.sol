@@ -454,19 +454,23 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
                 : ctx.pendingState.waterfall.juniorPrincipal == 0 && ctx.pendingState.juniorSupply != 0) {
             return false;
         }
-        bool commonGateOpen = HousePoolTrancheGateLib.trancheDepositsAllowed(
-            canAcceptOrdinaryDeposits(),
-            paused(),
-            unassignedAssets,
-            _markIsFreshForReconcile(accountingSnapshot, statusSnapshot),
-            ctx.pendingState.unassignedAssets + ctx.residualPendingClaimantAssets,
-            ctx.pendingState.waterfall.seniorPrincipal,
-            ctx.pendingState.waterfall.seniorHighWaterMark
-        );
-        if (!commonGateOpen) {
+        if (!_projectedEntriesMaySettle(accountingSnapshot, statusSnapshot, ctx, unassignedAssets)) {
             return false;
         }
         return !isSenior || _seniorDepositCapacity(ctx.pendingState.waterfall) >= MIN_TRANCHE_DEPOSIT_USDC;
+    }
+
+    /// @inheritdoc IHousePool
+    function canSettleDepositEntries() external view override returns (bool) {
+        (
+            HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
+            HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
+        ) = _getHousePoolSnapshots();
+        if (_entryStatusBlocked(accountingSnapshot, statusSnapshot)) {
+            return false;
+        }
+        HousePoolContext memory ctx = _buildHousePoolContext(accountingSnapshot, statusSnapshot);
+        return _projectedEntriesMaySettle(accountingSnapshot, statusSnapshot, ctx, ctx.pendingState.unassignedAssets);
     }
 
     /// @notice Returns whether the seed and trading lifecycle allows new trader risk.
@@ -1070,12 +1074,8 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         if (_entryStatusBlocked(accountingSnapshot, statusSnapshot)) {
             return false;
         }
-        uint256 pendingClaimantAssets = _pendingClaimantBucketAssets();
-        uint256 projectedUnassignedAssets = unassignedAssets;
-        if (pendingClaimantAssets > type(uint256).max - projectedUnassignedAssets) {
-            return false;
-        }
-        projectedUnassignedAssets += pendingClaimantAssets;
+        // The gate consumes only zero/nonzero state, so OR preserves the predicate without addition overflow.
+        uint256 projectedUnassignedAssets = unassignedAssets | _pendingClaimantBucketAssets();
         return HousePoolTrancheGateLib.trancheDepositsAllowed(
             canAcceptOrdinaryDeposits(),
             paused(),
@@ -1084,6 +1084,25 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             projectedUnassignedAssets,
             seniorPrincipal,
             seniorHighWaterMark
+        );
+    }
+
+    function _projectedEntriesMaySettle(
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
+        HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot,
+        HousePoolContext memory ctx,
+        uint256 liveUnassignedAssets
+    ) internal view returns (bool) {
+        // The gate consumes only zero/nonzero state, so OR preserves the predicate without addition overflow.
+        uint256 projectedUnassignedAssets = ctx.pendingState.unassignedAssets | ctx.residualPendingClaimantAssets;
+        return HousePoolTrancheGateLib.trancheDepositsAllowed(
+            canAcceptOrdinaryDeposits(),
+            paused(),
+            liveUnassignedAssets,
+            _markIsFreshForReconcile(accountingSnapshot, statusSnapshot),
+            projectedUnassignedAssets,
+            ctx.pendingState.waterfall.seniorPrincipal,
+            ctx.pendingState.waterfall.seniorHighWaterMark
         );
     }
 
