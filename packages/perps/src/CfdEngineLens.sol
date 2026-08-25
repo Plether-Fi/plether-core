@@ -173,6 +173,15 @@ contract CfdEngineLens is ICfdEngineLens {
         preview = _previewLiquidation(account, oraclePrice, poolDepthUsdc);
     }
 
+    /// @notice Returns the canonical liquidation-eligibility bit at an explicit pool depth.
+    function isLiquidatableAt(
+        address account,
+        uint256 oraclePrice,
+        uint256 poolDepthUsdc
+    ) external view returns (bool liquidatable) {
+        return _previewLiquidation(account, oraclePrice, poolDepthUsdc).liquidatable;
+    }
+
     /// @notice Builds an open plan and, on success, projects post-trade risk and a liquidation threshold.
     /// @param account Account whose position and collateral seed the plan.
     /// @param side Requested position side.

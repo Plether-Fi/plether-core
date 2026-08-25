@@ -62,7 +62,7 @@ abstract contract OrderValidation is OrderBountyAccounting {
         CfdTypes.Side side,
         uint256 sizeDelta
     ) internal view returns (uint256) {
-        QueuedPositionView memory queuedPosition = _getQueuedPositionView(account);
+        QueuedPositionView memory queuedPosition = _getQueuedPositionView(account, _riskOffOrderCutoff());
         OrderValidationLib.validateCloseCommit(
             queuedPosition.exists, queuedPosition.size, queuedPosition.side, side, sizeDelta
         );

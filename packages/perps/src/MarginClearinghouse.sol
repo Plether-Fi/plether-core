@@ -106,6 +106,11 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     /// @notice Planned action-reserve consumption does not match the reserve available above queued bounties.
     error MarginClearinghouse__ActionReserveMismatch();
 
+    /// @notice A supplied reservation belongs to an account other than the risk-off refund target.
+    error MarginClearinghouse__ReservationAccountMismatch(
+        uint64 orderId, address expectedAccount, address actualAccount
+    );
+
     /// @notice Emitted after settlement tokens are transferred in and credited to an account.
     /// @param account Account credited with the deposit
     /// @param asset Settlement token transferred in
@@ -160,6 +165,14 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     /// @param amountUsdc Amount released from committed-order margin, in six-decimal USDC units
     event ReservationReleased(uint64 indexed orderId, address indexed account, uint256 amountUsdc);
 
+    /// @notice Emitted after a risk-off refund releases order margin and execution bounty classifications.
+    /// @param account Account whose risk-off order reserves were released
+    /// @param releasedMarginUsdc Aggregate committed-order margin released in six-decimal USDC units
+    /// @param executionBountyUsdc Reserved execution bounty released in six-decimal USDC units
+    event RiskOffOrderReservesRefunded(
+        address indexed account, uint256 releasedMarginUsdc, uint256 executionBountyUsdc
+    );
+
     /// @notice Emitted when settlement value is debited from an account and routed to a recipient.
     /// @dev Routing may be an external token transfer or an internal clearinghouse credit, such as a protocol fee.
     /// @param account Account from which settlement value was debited
@@ -190,6 +203,15 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     modifier onlyEngineOrOrderRouter() {
         address engine_ = engine;
         if (engine_ == address(0) || (msg.sender != engine_ && !_isOrderRouter(engine_, msg.sender))) {
+            revert MarginClearinghouse__NotOperator();
+        }
+        _;
+    }
+
+    /// @dev Restricts calls to the order router currently reported by the configured engine.
+    modifier onlyOrderRouter() {
+        address engine_ = engine;
+        if (engine_ == address(0) || !_isOrderRouter(engine_, msg.sender)) {
             revert MarginClearinghouse__NotOperator();
         }
         _;
@@ -560,6 +582,47 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         _checkpointCarryBeforeMarginChange(reservation.account);
         releasedUsdc = _releaseReservation(reservation, true);
         emit ReservationReleased(orderId, reservation.account, releasedUsdc);
+    }
+
+    /// @notice Releases risk-off order margin and execution bounty classifications back to free settlement.
+    /// @dev Callable only by the Engine-reported order router after it has removed the invalidated bounties from its
+    ///      live accounting. Unknown and terminal reservation ids are tolerated, but every existing record must belong
+    ///      to `account`. This incident path deliberately skips the Engine carry checkpoint: settlement balance, token
+    ///      custody, PnL pledge, and carry state remain unchanged. The exact bounty release must leave enough reserved
+    ///      settlement to protect negative-VPI backing and all bounties that the router still reports as live.
+    /// @param account Account receiving the released margin classifications
+    /// @param orderIds Order reservation ids invalidated by the risk-off cutoff
+    /// @param executionBountyUsdc Exact invalidated bounty to unlock from reserved settlement
+    /// @return releasedMarginUsdc Aggregate remaining committed-order margin released
+    function releaseInvalidatedOrderReserves(
+        address account,
+        uint64[] calldata orderIds,
+        uint256 executionBountyUsdc
+    ) external onlyOrderRouter returns (uint256 releasedMarginUsdc) {
+        for (uint256 i = 0; i < orderIds.length; ++i) {
+            uint64 orderId = orderIds[i];
+            IMarginClearinghouse.OrderReservation storage reservation = orderReservations[orderId];
+            IMarginClearinghouse.ReservationStatus status = reservation.status;
+            if (status == IMarginClearinghouse.ReservationStatus.None) {
+                continue;
+            }
+            if (reservation.account != account) {
+                revert MarginClearinghouse__ReservationAccountMismatch(orderId, account, reservation.account);
+            }
+            if (status != IMarginClearinghouse.ReservationStatus.Active) {
+                continue;
+            }
+
+            uint256 releasedUsdc = _releaseReservation(reservation, true);
+            releasedMarginUsdc += releasedUsdc;
+            emit ReservationReleased(orderId, account, releasedUsdc);
+        }
+
+        if (executionBountyUsdc > 0) {
+            _requireActionReserveDecreaseAboveProtectedFloor(account, executionBountyUsdc);
+            _unlockMargin(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, executionBountyUsdc);
+        }
+        emit RiskOffOrderReservesRefunded(account, releasedMarginUsdc, executionBountyUsdc);
     }
 
     /// @notice Consumes up to a requested amount from one active order reservation.

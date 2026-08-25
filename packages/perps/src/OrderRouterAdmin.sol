@@ -36,6 +36,8 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
     mapping(address => uint256) public claimableEth;
     /// @notice Account allowed to pause alongside the owner; the zero address disables the separate pauser.
     address public pauser;
+    /// @notice Inclusive highest order id permanently invalidated by a successful risk-off pause.
+    uint64 public riskOffOrderCutoff;
 
     IOrderRouterAdminHost.RouterConfig private _pendingRouterConfig;
     /// @notice Earliest Unix timestamp at which the pending router configuration can be finalized, or zero if none.
@@ -95,6 +97,10 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
     /// @param previousPauser Previously configured pauser.
     /// @param newPauser Newly configured pauser, which may be the zero address.
     event PauserUpdated(address indexed previousPauser, address indexed newPauser);
+    /// @notice Emitted when pausing extends or reaffirms the persistent risk-off order boundary.
+    /// @param previousCutoff Inclusive cutoff recorded before this pause.
+    /// @param newCutoff Inclusive monotonic cutoff recorded by this pause.
+    event RiskOffActivated(uint64 previousCutoff, uint64 newCutoff);
 
     /// @notice Creates an admin for a fixed router host and starts two-step ownership at `initialOwner`.
     /// @dev Neither address is validated here. Ownership transfers use `Ownable2Step` proposal and acceptance.
@@ -214,15 +220,23 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
         pauser = newPauser;
     }
 
-    /// @notice Activates the emergency gate on new risk-increasing order commits.
-    /// @dev Callable by the owner or configured pauser. Close commits, queued-order execution, mark refresh,
-    ///      and liquidation are intentionally not blocked by this pause flag.
+    /// @notice Activates the emergency gate and permanently invalidates opens committed through the current tail.
+    /// @dev Callable by the owner or configured pauser. The inclusive cutoff is monotonic across pause cycles;
+    ///      unpausing permits later commits but never revives orders covered by an earlier cutoff. Close commits,
+    ///      queued close execution, mark refresh, and liquidation remain available.
     function pause() external onlyPauserOrOwner {
         _pause();
+
+        uint64 previousCutoff = riskOffOrderCutoff;
+        uint64 currentTail = router.nextCommitId() - 1;
+        uint64 newCutoff = currentTail > previousCutoff ? currentTail : previousCutoff;
+
+        riskOffOrderCutoff = newCutoff;
+        emit RiskOffActivated(previousCutoff, newCutoff);
     }
 
     /// @notice Removes the emergency gate on new risk-increasing commits; callable only by owner.
-    /// @dev Re-enables commits with respect to this pause flag; other close-only and risk gates still apply.
+    /// @dev Re-enables later commits but does not clear or reduce `riskOffOrderCutoff`.
     function unpause() external onlyOwner {
         _unpause();
     }

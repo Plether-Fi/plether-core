@@ -65,6 +65,8 @@ interface IOrderRouterErrors {
     error OrderRouter__BatchOrderNotCommitted();
     /// @notice An internal path expected the supplied order id to have `Pending` status.
     error OrderRouter__OrderNotPending();
+    /// @notice Permissionless cleanup targeted an order that is not an invalidated pre-cutoff open.
+    error OrderRouter__OrderNotRiskOff();
     /// @notice Stored committed-margin linked-list pointers are internally inconsistent.
     error OrderRouter__MarginQueueCorrupt();
     /// @notice Stored per-account live-order linked-list pointers are internally inconsistent.

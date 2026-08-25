@@ -42,6 +42,10 @@ interface IMarginClearinghouse {
     error MarginClearinghouse__AmountOverflow();
     /// @notice Planned action-reserve consumption does not match the currently spendable reserve after queued bounties.
     error MarginClearinghouse__ActionReserveMismatch();
+    /// @notice A supplied reservation belongs to an account other than the risk-off refund target.
+    error MarginClearinghouse__ReservationAccountMismatch(
+        uint64 orderId, address expectedAccount, address actualAccount
+    );
 
     /// @notice Canonical locked-margin bucket whose balance is being classified or mutated.
     enum MarginBucket {
@@ -292,6 +296,21 @@ interface IMarginClearinghouse {
     function releaseOrderReservationIfActive(
         uint64 orderId
     ) external returns (uint256 releasedUsdc);
+
+    /// @notice Releases risk-off order margin and its execution bounty back to an account's free settlement.
+    /// @dev Callable only by the Engine-reported order router. Unknown and terminal reservations are skipped, but
+    ///      every existing supplied reservation must belong to `account`. This path deliberately does not checkpoint
+    ///      carry or move settlement tokens. The exact bounty unlock must preserve negative-VPI backing and every
+    ///      execution bounty that the router still reports as live.
+    /// @param account Account receiving the released margin classifications
+    /// @param orderIds Order reservation ids invalidated by the risk-off cutoff
+    /// @param executionBountyUsdc Exact invalidated execution bounty to unlock from reserved settlement
+    /// @return releasedMarginUsdc Aggregate remaining committed-order margin released
+    function releaseInvalidatedOrderReserves(
+        address account,
+        uint64[] calldata orderIds,
+        uint256 executionBountyUsdc
+    ) external returns (uint256 releasedMarginUsdc);
 
     /// @notice Consumes a specific amount from an order reservation, capped by its remaining balance.
     /// @dev Callable only by the engine or settlement sidecar. Decreases committed-order locked classification and

@@ -7,8 +7,10 @@ import {MockPyth} from "../mocks/MockPyth.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {EmergencyPauseCoordinator} from "@plether/perps/EmergencyPauseCoordinator.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
+import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
@@ -79,6 +81,71 @@ contract BootstrapPerpsArbitrumSepoliaHarness is BootstrapPerpsArbitrumSepolia {
         _verifyAsyncVaultPair(housePool, usdc);
     }
 
+    function validateGuardian(
+        address guardian
+    ) external pure {
+        _validateGuardian(guardian);
+    }
+
+    function verifyEmergencyCoordinator(
+        HousePool housePool,
+        OrderRouterAdmin routerAdmin,
+        EmergencyPauseCoordinator coordinator
+    ) external view {
+        _verifyEmergencyCoordinator(housePool, routerAdmin, coordinator);
+    }
+
+    function configureGuardian(
+        EmergencyPauseCoordinator coordinator,
+        address guardian,
+        address broadcaster
+    ) external {
+        _configureGuardian(coordinator, guardian, broadcaster);
+    }
+
+    function activateTrading(
+        HousePool housePool,
+        OrderRouterAdmin routerAdmin,
+        EmergencyPauseCoordinator coordinator
+    ) external {
+        _activateTrading(housePool, routerAdmin, coordinator, true);
+    }
+
+}
+
+contract MockEmergencyAdmin {
+
+    address public pauser;
+    bool public paused;
+    uint64 public riskOffOrderCutoff;
+
+    function setPauser(
+        address newPauser
+    ) external {
+        pauser = newPauser;
+    }
+
+    function pause() external {
+        paused = true;
+        riskOffOrderCutoff = 1;
+    }
+
+    function unpause() external {
+        paused = false;
+    }
+
+}
+
+contract MockBootstrapHousePoolAdmin is MockEmergencyAdmin {
+
+    bool public isTradingActive;
+    bool public seniorSeedInitialized = true;
+    bool public juniorSeedInitialized = true;
+
+    function activateTrading() external {
+        isTradingActive = true;
+    }
+
 }
 
 contract ArbitrumSepoliaReleaseDefaultsTest is Test {
@@ -139,6 +206,91 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
 
         assertEq(bootstrapScript.defaultSeniorSeedUsdc(), 50_000_000e6, "senior seed");
         assertEq(bootstrapScript.defaultJuniorSeedUsdc(), 50_000_000e6, "junior seed");
+    }
+
+    function test_BootstrapRequiresNonzeroEmergencyGuardian() public {
+        BootstrapPerpsArbitrumSepoliaHarness bootstrapScript = new BootstrapPerpsArbitrumSepoliaHarness();
+
+        bootstrapScript.validateGuardian(address(0xBEEF));
+        vm.expectRevert(bytes("PERPS_GUARDIAN is zero"));
+        bootstrapScript.validateGuardian(address(0));
+    }
+
+    function test_BootstrapVerifiesSharedCoordinatorAndRotatesGuardianIdempotently() public {
+        BootstrapPerpsArbitrumSepoliaHarness bootstrapScript = new BootstrapPerpsArbitrumSepoliaHarness();
+        MockEmergencyAdmin routerAdmin = new MockEmergencyAdmin();
+        MockBootstrapHousePoolAdmin housePool = new MockBootstrapHousePoolAdmin();
+        EmergencyPauseCoordinator coordinator =
+            new EmergencyPauseCoordinator(address(routerAdmin), address(housePool), address(bootstrapScript));
+
+        routerAdmin.setPauser(address(coordinator));
+        housePool.setPauser(address(coordinator));
+        bootstrapScript.verifyEmergencyCoordinator(
+            HousePool(address(housePool)), OrderRouterAdmin(address(routerAdmin)), coordinator
+        );
+
+        address guardian = address(0xBEEF);
+        bootstrapScript.configureGuardian(coordinator, guardian, address(bootstrapScript));
+        bootstrapScript.configureGuardian(coordinator, guardian, address(0xBAD));
+        assertEq(coordinator.guardian(), guardian, "matching rerun must not require owner authority");
+    }
+
+    function test_BootstrapRejectsPartialCoordinatorPauserBinding() public {
+        BootstrapPerpsArbitrumSepoliaHarness bootstrapScript = new BootstrapPerpsArbitrumSepoliaHarness();
+        MockEmergencyAdmin routerAdmin = new MockEmergencyAdmin();
+        MockBootstrapHousePoolAdmin housePool = new MockBootstrapHousePoolAdmin();
+        EmergencyPauseCoordinator coordinator =
+            new EmergencyPauseCoordinator(address(routerAdmin), address(housePool), address(this));
+
+        routerAdmin.setPauser(address(coordinator));
+        vm.expectRevert(bytes("HousePool pauser is not emergency coordinator"));
+        bootstrapScript.verifyEmergencyCoordinator(
+            HousePool(address(housePool)), OrderRouterAdmin(address(routerAdmin)), coordinator
+        );
+    }
+
+    function test_BootstrapRejectsCoordinatorBoundToAnotherPool() public {
+        BootstrapPerpsArbitrumSepoliaHarness bootstrapScript = new BootstrapPerpsArbitrumSepoliaHarness();
+        MockEmergencyAdmin routerAdmin = new MockEmergencyAdmin();
+        MockBootstrapHousePoolAdmin housePool = new MockBootstrapHousePoolAdmin();
+        MockBootstrapHousePoolAdmin otherHousePool = new MockBootstrapHousePoolAdmin();
+        EmergencyPauseCoordinator coordinator =
+            new EmergencyPauseCoordinator(address(routerAdmin), address(otherHousePool), address(this));
+
+        routerAdmin.setPauser(address(coordinator));
+        housePool.setPauser(address(coordinator));
+        vm.expectRevert(bytes("Emergency HousePool mismatch"));
+        bootstrapScript.verifyEmergencyCoordinator(
+            HousePool(address(housePool)), OrderRouterAdmin(address(routerAdmin)), coordinator
+        );
+    }
+
+    function test_BootstrapRefusesTradingActivationWithoutLiveGuardianOrWhilePaused() public {
+        BootstrapPerpsArbitrumSepoliaHarness bootstrapScript = new BootstrapPerpsArbitrumSepoliaHarness();
+        MockEmergencyAdmin routerAdmin = new MockEmergencyAdmin();
+        MockBootstrapHousePoolAdmin housePool = new MockBootstrapHousePoolAdmin();
+        EmergencyPauseCoordinator coordinator =
+            new EmergencyPauseCoordinator(address(routerAdmin), address(housePool), address(this));
+        routerAdmin.setPauser(address(coordinator));
+        housePool.setPauser(address(coordinator));
+
+        vm.expectRevert(bytes("Emergency guardian is disabled"));
+        bootstrapScript.activateTrading(
+            HousePool(address(housePool)), OrderRouterAdmin(address(routerAdmin)), coordinator
+        );
+
+        coordinator.setGuardian(address(0xBEEF));
+        routerAdmin.pause();
+        vm.expectRevert(bytes("OrderRouterAdmin is paused"));
+        bootstrapScript.activateTrading(
+            HousePool(address(housePool)), OrderRouterAdmin(address(routerAdmin)), coordinator
+        );
+
+        routerAdmin.unpause();
+        bootstrapScript.activateTrading(
+            HousePool(address(housePool)), OrderRouterAdmin(address(routerAdmin)), coordinator
+        );
+        assertTrue(housePool.isTradingActive());
     }
 
     function test_DeploymentGuardsAcceptCanonicalRequestWindowAcrossCutoffs() public {

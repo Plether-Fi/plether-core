@@ -3,16 +3,37 @@ pragma solidity 0.8.35;
 
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {OrderRouter} from "@plether/perps/OrderRouter.sol";
+import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 import {IPerpsKeeper} from "@plether/perps/interfaces/IPerpsKeeper.sol";
+import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {Vm} from "forge-std/Vm.sol";
+
+contract ForeignLiquidationBatchDelegateHarness {
+
+    function execute(
+        address sidecar,
+        address[] calldata accounts,
+        bytes[] calldata updateData
+    ) external payable returns (bool ok, bytes memory result) {
+        (ok, result) = sidecar.delegatecall(
+            abi.encodeCall(OrderRouterLiquidationBatchSidecar.executeLiquidationBatch, (accounts, updateData))
+        );
+    }
+
+}
 
 contract LiquidationBatchTest is BasePerpTest {
 
     uint256 internal constant EIP170_RUNTIME_CODE_LIMIT = 24_576;
+    uint256 internal constant EIP3860_INITCODE_LIMIT = 49_152;
+    uint256 internal constant ORDER_ROUTER_RUNTIME_BASELINE = 24_446;
+    uint256 internal constant SIDECAR_RUNTIME_CODE_BUDGET = 3000;
+    uint256 internal constant SIDECAR_INITCODE_BUDGET = 3000;
     uint256 internal constant LIQUIDATION_PRICE = 102_000_000;
     uint256 internal constant NEUTRAL_PRICE = 100_000_000;
     uint256 internal constant BULL_ADVERSE_PRICE = 100_020_000;
@@ -27,10 +48,69 @@ contract LiquidationBatchTest is BasePerpTest {
 
     bytes32 internal constant POSITION_LIQUIDATED_TOPIC =
         keccak256("PositionLiquidated(address,uint8,uint256,uint256,uint256)");
+    bytes32 internal constant LIQUIDATION_BATCH_ITEM_TOPIC =
+        keccak256("LiquidationBatchItem(uint256,address,uint8,uint256,bytes4)");
 
     function test_Batch_OrderRouterRuntimeFitsEip170() public view {
         assertLe(
+            address(router).code.length,
+            ORDER_ROUTER_RUNTIME_BASELINE,
+            "batch sidecar must not exceed the pre-refactor OrderRouter runtime baseline"
+        );
+        assertLe(
             address(router).code.length, EIP170_RUNTIME_CODE_LIMIT, "batch entrypoint must keep OrderRouter deployable"
+        );
+
+        address sidecar = router.liquidationBatchSidecar();
+        assertGt(sidecar.code.length, 0, "Router must deploy a sidecar contract");
+        assertLe(sidecar.code.length, SIDECAR_RUNTIME_CODE_BUDGET, "sidecar runtime unexpectedly expanded");
+        assertLe(sidecar.code.length, EIP170_RUNTIME_CODE_LIMIT, "sidecar runtime must remain EIP-170 deployable");
+
+        uint256 sidecarCreationInputLength = type(OrderRouterLiquidationBatchSidecar).creationCode.length;
+        assertLe(sidecarCreationInputLength, SIDECAR_INITCODE_BUDGET, "sidecar initcode unexpectedly expanded");
+        assertLe(sidecarCreationInputLength, EIP3860_INITCODE_LIMIT, "sidecar initcode must remain EIP-3860 deployable");
+
+        uint256 routerCreationInputLength = type(OrderRouter).creationCode.length + (4 * 32);
+        assertLe(
+            routerCreationInputLength, EIP3860_INITCODE_LIMIT, "Router creation input must remain EIP-3860 deployable"
+        );
+    }
+
+    function test_BatchSidecar_IsImmutablyBoundAndRejectsDirectCalls() public {
+        OrderRouterLiquidationBatchSidecar sidecar =
+            OrderRouterLiquidationBatchSidecar(router.liquidationBatchSidecar());
+        assertEq(sidecar.ROUTER(), address(router), "sidecar must bind the exact deploying Router");
+
+        address[] memory accounts = new address[](1);
+        accounts[0] = ELIGIBLE_ONE;
+        bytes[] memory updateData = new bytes[](0);
+        vm.deal(address(this), 1);
+        vm.expectRevert(
+            OrderRouterLiquidationBatchSidecar.OrderRouterLiquidationBatchSidecar__OnlyDelegateCall.selector
+        );
+        sidecar.executeLiquidationBatch{value: 1}(accounts, updateData);
+    }
+
+    function test_BatchSidecar_RejectsForeignDelegateCallBeforeOracleWork() public {
+        ForeignLiquidationBatchDelegateHarness foreign = new ForeignLiquidationBatchDelegateHarness();
+        address[] memory accounts = new address[](1);
+        accounts[0] = ELIGIBLE_ONE;
+        bytes[] memory updateData = new bytes[](0);
+        uint256 pythCallsBefore = baseMockPyth.updatePriceFeedsCallCount();
+
+        (bool ok, bytes memory result) = foreign.execute(router.liquidationBatchSidecar(), accounts, updateData);
+
+        assertFalse(ok, "foreign delegate context must reject");
+        assertEq(
+            bytes4(result),
+            OrderRouterLiquidationBatchSidecar.OrderRouterLiquidationBatchSidecar__OnlyDelegateCall.selector,
+            "foreign delegate rejection selector"
+        );
+
+        assertEq(
+            baseMockPyth.updatePriceFeedsCallCount(),
+            pythCallsBefore,
+            "foreign delegate context must reject before oracle work"
         );
     }
 
@@ -366,12 +446,117 @@ contract LiquidationBatchTest is BasePerpTest {
         );
     }
 
+    function test_Batch_ResultEventsUseRouterEmitterAndExactClassifications() public {
+        address solvent = address(0xBA7CE501);
+        address unexpectedFailure = address(0xBA7CFA17);
+        _fundTrader(solvent, 2000e6);
+        _open(solvent, CfdTypes.Side.BULL, 10_000e18, 1000e6, NEUTRAL_PRICE);
+        _fundAndOpenThinBull(unexpectedFailure);
+
+        bytes4 unexpectedSelector = bytes4(0xDEADFA11);
+        vm.mockCallRevert(
+            address(engine),
+            abi.encodeWithSelector(engine.liquidatePosition.selector, unexpectedFailure),
+            abi.encodePacked(unexpectedSelector)
+        );
+
+        address[] memory accounts = new address[](3);
+        accounts[0] = NO_POSITION;
+        accounts[1] = solvent;
+        accounts[2] = unexpectedFailure;
+        bytes[] memory updateData = _mockPythUpdateData(LIQUIDATION_PRICE);
+
+        vm.recordLogs();
+        vm.prank(KEEPER);
+        uint256 nextIndex = IPerpsKeeper(address(router)).executeLiquidationBatch(accounts, updateData);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        assertEq(nextIndex, accounts.length, "classified nonempty reverts must consume their candidate indices");
+        _assertBatchItemEvent(
+            logs,
+            0,
+            NO_POSITION,
+            IOrderRouterErrors.LiquidationBatchResult.SkippedNoPosition,
+            ICfdEngineTypes.CfdEngine__NoPositionToLiquidate.selector
+        );
+        _assertBatchItemEvent(
+            logs,
+            1,
+            solvent,
+            IOrderRouterErrors.LiquidationBatchResult.SkippedSolvent,
+            ICfdEngineTypes.CfdEngine__PositionIsSolvent.selector
+        );
+        _assertBatchItemEvent(
+            logs, 2, unexpectedFailure, IOrderRouterErrors.LiquidationBatchResult.Failed, unexpectedSelector
+        );
+    }
+
+    function test_Batch_OracleRevertBubblesExactlyAcrossSidecarDelegatecall() public {
+        uint256 requiredFee = 1 ether;
+        baseMockPyth.setFee(requiredFee);
+        address[] memory accounts = new address[](1);
+        accounts[0] = NO_POSITION;
+        bytes[] memory updateData = _mockPythUpdateData(NEUTRAL_PRICE);
+        uint256 pythCallsBefore = baseMockPyth.updatePriceFeedsCallCount();
+
+        vm.expectRevert(abi.encodeWithSelector(IPletherOracle.PletherOracle__InsufficientFee.selector, 0, requiredFee));
+        IPerpsKeeper(address(router)).executeLiquidationBatch(accounts, updateData);
+
+        assertEq(
+            baseMockPyth.updatePriceFeedsCallCount(), pythCallsBefore, "insufficient fee must revert before Pyth update"
+        );
+    }
+
+    function test_Batch_SequentialCallsClearOuterGuardAndPreserveOracleValueFlow() public {
+        uint256 updateFee = 1 ether;
+        uint256 overpayment = 1 ether;
+        baseMockPyth.setFee(updateFee);
+        vm.deal(address(this), 2 * (updateFee + overpayment));
+
+        address[] memory accounts = new address[](1);
+        accounts[0] = NO_POSITION;
+        uint256 callerBalanceBefore = address(this).balance;
+        uint256 pythBalanceBefore = address(baseMockPyth).balance;
+        uint256 pythCallsBefore = baseMockPyth.updatePriceFeedsCallCount();
+
+        bytes[] memory firstUpdateData = _mockPythUpdateData(NEUTRAL_PRICE);
+        uint256 firstNextIndex = IPerpsKeeper(address(router)).executeLiquidationBatch{value: updateFee + overpayment}(
+            accounts, firstUpdateData
+        );
+
+        bytes[] memory secondUpdateData = _mockPythUpdateData(NEUTRAL_PRICE);
+        uint256 secondNextIndex = IPerpsKeeper(address(router)).executeLiquidationBatch{value: updateFee + overpayment}(
+            accounts, secondUpdateData
+        );
+
+        assertEq(firstNextIndex, 1, "first call must complete");
+        assertEq(secondNextIndex, 1, "a completed call must clear the outer transient guard");
+        assertEq(
+            baseMockPyth.updatePriceFeedsCallCount() - pythCallsBefore,
+            2,
+            "each independent call must perform exactly one oracle update"
+        );
+        assertEq(
+            address(this).balance,
+            callerBalanceBefore - (2 * updateFee),
+            "each sidecar call must refund its exact overpayment to the original caller"
+        );
+        assertEq(
+            address(baseMockPyth).balance - pythBalanceBefore,
+            2 * updateFee,
+            "Pyth must retain exactly one quoted fee per call"
+        );
+        assertEq(address(router).balance, 0, "Router must not retain oracle ETH");
+        assertEq(address(pletherOracle).balance, 0, "oracle adapter must not retain excess ETH");
+        assertEq(router.liquidationBatchSidecar().balance, 0, "sidecar must never receive ETH in its own context");
+    }
+
     function test_Batch_EmptyAccountsRevertsBeforePythUpdate() public {
         address[] memory accounts = new address[](0);
         bytes[] memory updateData = new bytes[](0);
         uint256 pythCallsBefore = baseMockPyth.updatePriceFeedsCallCount();
 
-        vm.expectRevert();
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidLiquidationBatchSize.selector);
         IPerpsKeeper(address(router)).executeLiquidationBatch(accounts, updateData);
 
         assertEq(
@@ -384,7 +569,7 @@ contract LiquidationBatchTest is BasePerpTest {
         bytes[] memory updateData = new bytes[](0);
         uint256 pythCallsBefore = baseMockPyth.updatePriceFeedsCallCount();
 
-        vm.expectRevert();
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidLiquidationBatchSize.selector);
         IPerpsKeeper(address(router)).executeLiquidationBatch(accounts, updateData);
 
         assertEq(
@@ -421,7 +606,9 @@ contract LiquidationBatchTest is BasePerpTest {
 
     function test_BatchItem_DirectCallRevertsUnauthorized() public {
         vm.expectRevert(IOrderRouterErrors.OrderRouter__Unauthorized.selector);
-        router.executeLiquidationBatchItem(ELIGIBLE_ONE, NEUTRAL_PRICE, NEUTRAL_PRICE, uint64(block.timestamp), KEEPER);
+        router.executeLiquidationBatchItem(
+            ELIGIBLE_ONE, NEUTRAL_PRICE, NEUTRAL_PRICE, uint64(block.timestamp), KEEPER, 0
+        );
     }
 
     function _fundAndOpenThinBull(
@@ -454,6 +641,33 @@ contract LiquidationBatchTest is BasePerpTest {
         assertEq(actual.committedMarginUsdc, expected.committedMarginUsdc, "committed margin reservation changed");
         assertEq(actual.executionBountyUsdc, expected.executionBountyUsdc, "execution bounty reservation changed");
         assertEq(actual.pendingOrderCount, expected.pendingOrderCount, "pending order count changed");
+    }
+
+    function _assertBatchItemEvent(
+        Vm.Log[] memory logs,
+        uint256 expectedIndex,
+        address expectedAccount,
+        IOrderRouterErrors.LiquidationBatchResult expectedResult,
+        bytes4 expectedSelector
+    ) internal {
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (
+                logs[i].topics.length != 3 || logs[i].topics[0] != LIQUIDATION_BATCH_ITEM_TOPIC
+                    || uint256(logs[i].topics[1]) != expectedIndex
+                    || address(uint160(uint256(logs[i].topics[2]))) != expectedAccount
+            ) {
+                continue;
+            }
+
+            assertEq(logs[i].emitter, address(router), "delegatecall event must be emitted from Router");
+            (uint8 result, uint256 keeperBountyUsdc, bytes4 selector) =
+                abi.decode(logs[i].data, (uint8, uint256, bytes4));
+            assertEq(result, uint8(expectedResult), "batch result classification");
+            assertEq(keeperBountyUsdc, 0, "skipped or failed item must not report a bounty");
+            assertEq(selector, expectedSelector, "batch result selector");
+            return;
+        }
+        fail("expected liquidation batch item event not found");
     }
 
     function _liquidationEvent(
