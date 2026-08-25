@@ -1872,6 +1872,372 @@ contract SettlementMonitorLensTest is BasePerpTest {
         assertEq(health.criticalFaultMask, 0);
     }
 
+    function test_StatusAggregatesBroadUnreadableDependencySurface() public {
+        uint256 observedEpoch = pool.currentLpEpoch();
+        bytes memory unreadable = bytes("unreadable");
+        bytes4[15] memory vaultSelectors = [
+            bytes4(keccak256("LP_REQUEST_CUTOFF_DURATION()")),
+            bytes4(keccak256("getRequestEpochWindow()")),
+            DEPOSIT_QUEUE_HEAD_SELECTOR,
+            DEPOSIT_QUEUE_TAIL_SELECTOR,
+            REDEEM_QUEUE_HEAD_SELECTOR,
+            REDEEM_QUEUE_TAIL_SELECTOR,
+            MATURED_DEPOSIT_HEAD_SELECTOR,
+            MATURED_REDEEM_HEAD_SELECTOR,
+            bytes4(keccak256("totalSupply()")),
+            bytes4(keccak256("pendingDepositEscrowAssets()")),
+            bytes4(keccak256("withdrawalEscrowAssets()")),
+            bytes4(keccak256("pendingRedeemEscrowShares()")),
+            bytes4(keccak256("depositClaimEscrowShares()")),
+            DEPOSIT_EPOCHS_SELECTOR,
+            REDEEM_EPOCHS_SELECTOR
+        ];
+        for (uint256 i; i < vaultSelectors.length; ++i) {
+            vm.mockCallRevert(address(seniorVault), abi.encodeWithSelector(vaultSelectors[i]), unreadable);
+            vm.mockCallRevert(address(juniorVault), abi.encodeWithSelector(vaultSelectors[i]), unreadable);
+        }
+        vm.mockCallRevert(
+            address(seniorVault), abi.encodeWithSelector(DEPOSIT_QUEUE_STATE_SELECTOR, observedEpoch), unreadable
+        );
+        vm.mockCallRevert(
+            address(seniorVault), abi.encodeWithSelector(REDEEM_QUEUE_STATE_SELECTOR, observedEpoch), unreadable
+        );
+        vm.mockCallRevert(
+            address(juniorVault), abi.encodeWithSelector(DEPOSIT_QUEUE_STATE_SELECTOR, observedEpoch), unreadable
+        );
+        vm.mockCallRevert(
+            address(juniorVault), abi.encodeWithSelector(REDEEM_QUEUE_STATE_SELECTOR, observedEpoch), unreadable
+        );
+
+        bytes4[9] memory poolSelectors = [
+            bytes4(keccak256("getPoolLiquidityView()")),
+            bytes4(keccak256("isWithdrawalLive()")),
+            bytes4(keccak256("paused()")),
+            bytes4(keccak256("canSettleDepositEntries()")),
+            bytes4(keccak256("canAcceptOrdinaryDeposits()")),
+            bytes4(keccak256("unassignedAssets()")),
+            bytes4(keccak256("isSeniorImpairedAfterPendingDepositReconcile()")),
+            bytes4(keccak256("getPendingDepositTrancheState()")),
+            bytes4(keccak256("areSeniorDepositReservationsWithinLimits()"))
+        ];
+        for (uint256 i; i < poolSelectors.length; ++i) {
+            vm.mockCallRevert(address(pool), abi.encodeWithSelector(poolSelectors[i]), unreadable);
+        }
+        vm.mockCallRevert(
+            address(engine), abi.encodeWithSelector(bytes4(keccak256("terminalNavSnapshot()"))), unreadable
+        );
+        vm.mockCallRevert(address(engine), abi.encodeWithSelector(bytes4(keccak256("isFadWindow()"))), unreadable);
+
+        SettlementMonitorViewTypes.SettlementStatus memory status = monitorLens.getSettlementStatus(observedEpoch);
+
+        assertEq(uint8(status.requiredExecutionPath), uint8(SettlementMonitorViewTypes.ExecutionPath.Unknown));
+        assertTrue(_hasDependency(status.dependencyFailureMask, SettlementMonitorViewTypes.Dependency.Engine));
+        assertTrue(_hasDependency(status.dependencyFailureMask, SettlementMonitorViewTypes.Dependency.Pool));
+        assertTrue(
+            _hasDependency(status.dependencyFailureMask, SettlementMonitorViewTypes.Dependency.PoolAccountingPreview)
+        );
+        assertTrue(_hasDependency(status.dependencyFailureMask, SettlementMonitorViewTypes.Dependency.SeniorVault));
+        assertTrue(_hasDependency(status.dependencyFailureMask, SettlementMonitorViewTypes.Dependency.JuniorVault));
+        assertTrue(
+            _hasOperationalBlocker(
+                status.operationalBlockerMask, SettlementMonitorViewTypes.OperationalBlocker.RequiredDependencyUnknown
+            )
+        );
+        assertTrue(
+            _hasDeferral(status.seniorDepositDeferralMask, SettlementMonitorViewTypes.DepositDeferral.DependencyUnknown)
+        );
+        assertTrue(
+            _hasDeferral(status.juniorDepositDeferralMask, SettlementMonitorViewTypes.DepositDeferral.DependencyUnknown)
+        );
+    }
+
+    function test_MaturedWorkMakesUnreadableRouteInputsExecutionCritical() public {
+        uint256 observedEpoch = _requestDeposit(juniorVault, ALICE, 10_000e6);
+        vm.warp(pool.lpEpochStart(observedEpoch));
+        _openMonitorPosition();
+        uint256 branch = vm.snapshotState();
+
+        vm.mockCallRevert(
+            address(pool), abi.encodeWithSelector(bytes4(keccak256("getPoolLiquidityView()"))), bytes("unreadable")
+        );
+        SettlementMonitorViewTypes.SettlementStatus memory missingLiquidity =
+            monitorLens.getSettlementStatus(observedEpoch);
+        assertEq(uint8(missingLiquidity.requiredExecutionPath), uint8(SettlementMonitorViewTypes.ExecutionPath.Unknown));
+        assertTrue(
+            _hasDependency(
+                missingLiquidity.executionPathDependencyMask,
+                SettlementMonitorViewTypes.Dependency.PoolAccountingPreview
+            )
+        );
+
+        vm.revertToState(branch);
+        vm.clearMockedCalls();
+        vm.mockCallRevert(
+            address(engine), abi.encodeWithSelector(bytes4(keccak256("terminalNavSnapshot()"))), bytes("unreadable")
+        );
+        SettlementMonitorViewTypes.SettlementStatus memory missingTerminal =
+            monitorLens.getSettlementStatus(observedEpoch);
+        assertEq(uint8(missingTerminal.requiredExecutionPath), uint8(SettlementMonitorViewTypes.ExecutionPath.Unknown));
+        assertTrue(
+            _hasDependency(missingTerminal.executionPathDependencyMask, SettlementMonitorViewTypes.Dependency.Engine)
+        );
+    }
+
+    function test_HealthAggregatesRuntimeBindingAndOracleDependencyFailures() public {
+        vm.mockCall(address(router), abi.encodeWithSelector(bytes4(keccak256("admin()"))), abi.encode(address(0)));
+        vm.mockCall(
+            address(router), abi.encodeWithSelector(bytes4(keccak256("pletherOracle()"))), abi.encode(address(0))
+        );
+
+        SettlementMonitorViewTypes.SettlementHealth memory missingComponents = monitorLens.getSettlementHealth();
+        assertEq(uint8(missingComponents.state), uint8(SettlementMonitorViewTypes.HealthState.Critical));
+        assertTrue(
+            _hasCriticalFault(
+                missingComponents.criticalFaultMask, SettlementMonitorViewTypes.CriticalFault.BindingMismatch
+            )
+        );
+        assertTrue(
+            _hasDependency(missingComponents.dependencyFailureMask, SettlementMonitorViewTypes.Dependency.Router)
+        );
+        assertTrue(
+            _hasDependency(missingComponents.dependencyFailureMask, SettlementMonitorViewTypes.Dependency.Oracle)
+        );
+
+        vm.clearMockedCalls();
+        address oracle = address(router.pletherOracle());
+        vm.mockCallRevert(oracle, abi.encodeWithSelector(bytes4(keccak256("engine()"))), bytes("unreadable"));
+        vm.mockCallRevert(oracle, abi.encodeWithSelector(bytes4(keccak256("housePool()"))), bytes("unreadable"));
+        vm.mockCallRevert(oracle, abi.encodeWithSelector(bytes4(keccak256("pyth()"))), bytes("unreadable"));
+
+        SettlementMonitorViewTypes.SettlementHealth memory unreadableOracle = monitorLens.getSettlementHealth();
+        assertEq(uint8(unreadableOracle.state), uint8(SettlementMonitorViewTypes.HealthState.Unknown));
+        assertTrue(_hasDependency(unreadableOracle.dependencyFailureMask, SettlementMonitorViewTypes.Dependency.Oracle));
+        assertTrue(_hasDependency(unreadableOracle.dependencyFailureMask, SettlementMonitorViewTypes.Dependency.Pyth));
+
+        vm.clearMockedCalls();
+        vm.mockCall(oracle, abi.encodeWithSelector(bytes4(keccak256("engine()"))), abi.encode(address(0xBAD)));
+        vm.mockCall(oracle, abi.encodeWithSelector(bytes4(keccak256("housePool()"))), abi.encode(address(0xBAD)));
+
+        SettlementMonitorViewTypes.SettlementHealth memory mismatchedOracle = monitorLens.getSettlementHealth();
+        assertEq(uint8(mismatchedOracle.state), uint8(SettlementMonitorViewTypes.HealthState.Critical));
+        assertTrue(
+            _hasCriticalFault(
+                mismatchedOracle.criticalFaultMask, SettlementMonitorViewTypes.CriticalFault.BindingMismatch
+            )
+        );
+    }
+
+    function test_ConfigDigestFailsClosedWhenEachConfigDomainIsUnreadable() public {
+        address oracle = address(router.pletherOracle());
+        vm.mockCallRevert(
+            address(pool), abi.encodeWithSelector(bytes4(keccak256("LP_EPOCH_DURATION()"))), bytes("unreadable")
+        );
+        vm.mockCallRevert(
+            address(engine), abi.encodeWithSelector(bytes4(keccak256("riskParams()"))), bytes("unreadable")
+        );
+        vm.mockCallRevert(
+            oracle, abi.encodeWithSelector(bytes4(keccak256("orderExecutionStalenessLimit()"))), bytes("unreadable")
+        );
+        vm.mockCallRevert(
+            address(pool), abi.encodeWithSelector(bytes4(keccak256("seniorRateBps()"))), bytes("unreadable")
+        );
+        vm.mockCallRevert(
+            address(seniorVault), abi.encodeWithSelector(bytes4(keccak256("seedReceiver()"))), bytes("unreadable")
+        );
+
+        assertEq(monitorLens.observableConfigDigest(), bytes32(0));
+    }
+
+    function test_HealthAggregatesCustodySeedAndHwmReadFailures() public {
+        vm.mockCallRevert(
+            address(seniorVault),
+            abi.encodeWithSelector(bytes4(keccak256("pendingDepositEscrowAssets()"))),
+            bytes("unreadable")
+        );
+        vm.mockCallRevert(
+            address(usdc),
+            abi.encodeWithSelector(bytes4(keccak256("balanceOf(address)")), address(juniorVault)),
+            bytes("unreadable")
+        );
+        vm.mockCallRevert(
+            address(juniorVault),
+            abi.encodeWithSelector(bytes4(keccak256("balanceOf(address)")), address(juniorVault)),
+            bytes("unreadable")
+        );
+        vm.mockCallRevert(
+            address(pool), abi.encodeWithSelector(bytes4(keccak256("seniorSeedInitialized()"))), bytes("unreadable")
+        );
+        vm.mockCallRevert(
+            address(pool), abi.encodeWithSelector(bytes4(keccak256("juniorSeedInitialized()"))), bytes("unreadable")
+        );
+        vm.mockCallRevert(
+            address(pool), abi.encodeWithSelector(bytes4(keccak256("seniorPrincipal()"))), bytes("unreadable")
+        );
+
+        SettlementMonitorViewTypes.SettlementHealth memory health = monitorLens.getSettlementHealth();
+
+        assertEq(uint8(health.state), uint8(SettlementMonitorViewTypes.HealthState.Unknown));
+        assertEq(health.criticalFaultMask, 0);
+        assertTrue(_hasDependency(health.dependencyFailureMask, SettlementMonitorViewTypes.Dependency.Pool));
+        assertTrue(_hasDependency(health.dependencyFailureMask, SettlementMonitorViewTypes.Dependency.SeniorVault));
+        assertTrue(_hasDependency(health.dependencyFailureMask, SettlementMonitorViewTypes.Dependency.JuniorVault));
+    }
+
+    function test_ClockValidationAndStandaloneOracleViewsFailClosed() public {
+        uint256 observedEpoch = pool.currentLpEpoch();
+        uint256 branch = vm.snapshotState();
+
+        vm.mockCall(
+            address(pool), abi.encodeWithSelector(bytes4(keccak256("LP_EPOCH_DURATION()"))), abi.encode(uint256(0))
+        );
+        SettlementMonitorViewTypes.SettlementStatus memory zeroDuration = monitorLens.getSettlementStatus(observedEpoch);
+        assertTrue(
+            _hasCriticalFault(
+                zeroDuration.senior.faultMask, SettlementMonitorViewTypes.CriticalFault.RequestWindowFormula
+            )
+        );
+
+        vm.revertToState(branch);
+        vm.clearMockedCalls();
+        vm.mockCallRevert(
+            address(pool), abi.encodeWithSelector(bytes4(keccak256("LP_EPOCH_DURATION()"))), bytes("unreadable")
+        );
+        SettlementMonitorViewTypes.OracleStatus memory missingDuration = monitorLens.getPoolReconcileOracleStatus();
+        assertTrue(_hasDependency(missingDuration.dependencyFailureMask, SettlementMonitorViewTypes.Dependency.Pool));
+
+        vm.revertToState(branch);
+        vm.clearMockedCalls();
+        vm.mockCallRevert(
+            address(seniorVault),
+            abi.encodeWithSelector(bytes4(keccak256("getRequestEpochWindow()"))),
+            bytes("unreadable")
+        );
+        SettlementMonitorViewTypes.SettlementStatus memory missingSeniorWindow =
+            monitorLens.getSettlementStatus(observedEpoch);
+        assertTrue(
+            _hasDependency(missingSeniorWindow.dependencyFailureMask, SettlementMonitorViewTypes.Dependency.SeniorVault)
+        );
+
+        vm.revertToState(branch);
+        vm.clearMockedCalls();
+        vm.mockCallRevert(
+            address(juniorVault),
+            abi.encodeWithSelector(bytes4(keccak256("getRequestEpochWindow()"))),
+            bytes("unreadable")
+        );
+        SettlementMonitorViewTypes.SettlementStatus memory missingJuniorWindow =
+            monitorLens.getSettlementStatus(observedEpoch);
+        assertTrue(
+            _hasDependency(missingJuniorWindow.dependencyFailureMask, SettlementMonitorViewTypes.Dependency.JuniorVault)
+        );
+
+        vm.revertToState(branch);
+        vm.clearMockedCalls();
+        (uint256 nextEpoch, uint256 nextCutoff) = seniorVault.getRequestEpochWindow();
+        vm.mockCall(
+            address(juniorVault),
+            abi.encodeWithSelector(bytes4(keccak256("getRequestEpochWindow()"))),
+            abi.encode(nextEpoch + 1, nextCutoff + EPOCH_DURATION)
+        );
+        SettlementMonitorViewTypes.SettlementStatus memory mismatchedWindows =
+            monitorLens.getSettlementStatus(observedEpoch);
+        assertTrue(
+            _hasCriticalFault(
+                mismatchedWindows.senior.faultMask, SettlementMonitorViewTypes.CriticalFault.RequestWindowMismatch
+            )
+        );
+
+        vm.revertToState(branch);
+        vm.clearMockedCalls();
+        vm.mockCall(
+            address(seniorVault),
+            abi.encodeWithSelector(bytes4(keccak256("getRequestEpochWindow()"))),
+            abi.encode(nextEpoch + 1, nextCutoff + EPOCH_DURATION)
+        );
+        vm.mockCall(
+            address(juniorVault),
+            abi.encodeWithSelector(bytes4(keccak256("getRequestEpochWindow()"))),
+            abi.encode(nextEpoch + 1, nextCutoff + EPOCH_DURATION)
+        );
+        SettlementMonitorViewTypes.SettlementStatus memory invalidFormula =
+            monitorLens.getSettlementStatus(observedEpoch);
+        assertTrue(
+            _hasCriticalFault(
+                invalidFormula.senior.faultMask, SettlementMonitorViewTypes.CriticalFault.RequestWindowFormula
+            )
+        );
+    }
+
+    function test_StandaloneOracleStatusAttributesMissingAndUnreadableBindings() public {
+        uint256 branch = vm.snapshotState();
+        vm.mockCall(
+            address(router), abi.encodeWithSelector(bytes4(keccak256("pletherOracle()"))), abi.encode(address(0))
+        );
+
+        SettlementMonitorViewTypes.OracleStatus memory missingOracle = monitorLens.getPoolReconcileOracleStatus();
+        assertTrue(_hasDependency(missingOracle.dependencyFailureMask, SettlementMonitorViewTypes.Dependency.Oracle));
+
+        vm.revertToState(branch);
+        vm.clearMockedCalls();
+        address oracle = address(router.pletherOracle());
+        vm.mockCallRevert(oracle, abi.encodeWithSelector(bytes4(keccak256("engine()"))), bytes("unreadable"));
+        vm.mockCallRevert(oracle, abi.encodeWithSelector(bytes4(keccak256("housePool()"))), bytes("unreadable"));
+        vm.mockCallRevert(oracle, abi.encodeWithSelector(bytes4(keccak256("pyth()"))), bytes("unreadable"));
+        vm.mockCallRevert(
+            oracle, abi.encodeWithSelector(bytes4(keccak256("basketMaxConfidenceRatioBps()"))), bytes("unreadable")
+        );
+
+        SettlementMonitorViewTypes.OracleStatus memory unreadableBindings = monitorLens.getPoolReconcileOracleStatus();
+        assertTrue(
+            _hasDependency(unreadableBindings.dependencyFailureMask, SettlementMonitorViewTypes.Dependency.Oracle)
+        );
+        assertTrue(_hasDependency(unreadableBindings.dependencyFailureMask, SettlementMonitorViewTypes.Dependency.Pyth));
+    }
+
+    function test_StatusReportsCombinedOperationalWarningsAndDepositDeferrals() public {
+        IHousePool.PoolLiquidityView memory liquidity = pool.getPoolLiquidityView();
+        liquidity.freeUsdc = 0;
+        liquidity.currentTerminalDeficitUsdc = 1;
+        liquidity.degradedMode = true;
+        vm.mockCall(
+            address(pool), abi.encodeWithSelector(bytes4(keccak256("getPoolLiquidityView()"))), abi.encode(liquidity)
+        );
+        vm.mockCall(
+            address(pool), abi.encodeWithSelector(bytes4(keccak256("canAcceptOrdinaryDeposits()"))), abi.encode(false)
+        );
+        vm.mockCall(
+            address(pool), abi.encodeWithSelector(bytes4(keccak256("unassignedAssets()"))), abi.encode(uint256(1))
+        );
+        vm.mockCall(address(pool), abi.encodeWithSelector(bytes4(keccak256("paused()"))), abi.encode(true));
+
+        SettlementMonitorViewTypes.SettlementStatus memory status =
+            monitorLens.getSettlementStatus(pool.currentLpEpoch());
+
+        assertTrue(
+            _hasDeferral(status.seniorDepositDeferralMask, SettlementMonitorViewTypes.DepositDeferral.LifecycleInactive)
+        );
+        assertTrue(
+            _hasDeferral(status.juniorDepositDeferralMask, SettlementMonitorViewTypes.DepositDeferral.UnassignedAssets)
+        );
+        assertTrue(
+            _hasDeferral(status.seniorDepositDeferralMask, SettlementMonitorViewTypes.DepositDeferral.PoolPaused)
+        );
+        assertTrue(
+            _hasDeferral(status.juniorDepositDeferralMask, SettlementMonitorViewTypes.DepositDeferral.EngineDegraded)
+        );
+        assertTrue(
+            _hasDeferral(status.seniorDepositDeferralMask, SettlementMonitorViewTypes.DepositDeferral.TerminalDeficit)
+        );
+        assertTrue(_hasWarning(status.warningMask, SettlementMonitorViewTypes.Warning.PoolPaused));
+        assertTrue(_hasWarning(status.warningMask, SettlementMonitorViewTypes.Warning.TerminalDeficit));
+        assertTrue(_hasWarning(status.warningMask, SettlementMonitorViewTypes.Warning.NoFreeCash));
+        assertTrue(
+            _hasOperationalBlocker(
+                status.operationalBlockerMask, SettlementMonitorViewTypes.OperationalBlocker.EngineDegraded
+            )
+        );
+    }
+
     function test_UnreadableSeniorReservationGateDoesNotPoisonJuniorDeferral() public {
         vm.mockCallRevert(
             address(pool),
