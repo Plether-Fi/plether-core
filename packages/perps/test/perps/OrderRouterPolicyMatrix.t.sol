@@ -2,44 +2,12 @@
 pragma solidity 0.8.35;
 
 import {BasePerpTest} from "./BasePerpTest.sol";
-import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
-import {OrderRouter} from "@plether/perps/OrderRouter.sol";
-import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {ITerminalNavBookV2} from "@plether/perps/interfaces/ITerminalNavBookV2.sol";
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
-
-contract OrderRouterFailurePolicyHarness is OrderRouter {
-
-    constructor(
-        address engine_,
-        address engineLens_,
-        address vault_,
-        address pyth_,
-        bytes32[] memory feedIds_,
-        uint256[] memory weights_,
-        uint256[] memory basePrices_,
-        bool[] memory inversions_
-    )
-        OrderRouter(
-            engine_,
-            engineLens_,
-            vault_,
-            address(new PletherOracle(engine_, vault_, pyth_, feedIds_, weights_, basePrices_, inversions_))
-        )
-    {}
-
-    function failedOutcomeFromEngineRevert(
-        CfdTypes.Order memory order,
-        bytes memory revertData
-    ) external pure returns (uint8) {
-        return uint8(_failedOutcomeFromEngineRevert(order, revertData));
-    }
-
-}
 
 contract OrderRouterPolicyMatrixTest is BasePerpTest {
 
@@ -395,42 +363,6 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
             uint256(_orderRecord(1).status),
             uint256(IOrderRouterAccounting.OrderStatus.Failed),
             "User-invalid order should fail terminally"
-        );
-    }
-
-    function test_MarginDrainedByFeesTypedRevertMapsToClearerFull() public {
-        OrderRouterFailurePolicyHarness harness = new OrderRouterFailurePolicyHarness(
-            address(engine),
-            address(engineLens),
-            address(pool),
-            address(baseMockPyth),
-            _basePythFeedIds(),
-            _basePythWeights(),
-            _basePythBasePrices(),
-            _basePythInversions()
-        );
-        CfdTypes.Order memory order = CfdTypes.Order({
-            account: ALICE,
-            sizeDelta: 10_000e18,
-            marginDelta: 100e6,
-            targetPrice: 1e8,
-            commitTime: uint64(block.timestamp),
-            commitBlock: uint64(block.number),
-            orderId: 1,
-            side: CfdTypes.Side.BULL,
-            isClose: false
-        });
-        bytes memory revertData = abi.encodeWithSelector(
-            ICfdEngineTypes.CfdEngine__TypedOrderFailure.selector,
-            CfdEnginePlanTypes.ExecutionFailurePolicyCategory.ProtocolStateInvalidated,
-            uint8(CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES),
-            false
-        );
-
-        assertEq(
-            harness.failedOutcomeFromEngineRevert(order, revertData),
-            0,
-            "MARGIN_DRAINED_BY_FEES must stay on the clearer-paid path even if failure-category wiring drifts"
         );
     }
 

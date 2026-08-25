@@ -38,14 +38,18 @@ If you want the accounting model first, read [`ACCOUNTING_SPEC.md`](ACCOUNTING_S
 - Keepers execute queued orders and liquidations using Pyth update data.
 - LPs deposit USDC into `HousePool` through senior and junior `TrancheVault`s.
 - `CfdEngine` is the canonical ledger. It does the math but does not custody raw tokens.
-- The owner can delegate emergency router pause authority through `OrderRouterAdmin` and pool pause authority on `HousePool` to dedicated `pauser` addresses while retaining owner-only `unpause()` and role assignment.
+- Governance installs one `EmergencyPauseCoordinator` as the pauser on both `OrderRouterAdmin` and `HousePool`.
+  Its separately rotatable guardian can atomically stop new trading risk and LP entry, while governance alone retains
+  component unpause and role-assignment authority.
 
 ### Core product rules
 
 - Delayed orders only. There is no same-tx trader market-order path.
 - One live position per account address at a time. Side flips must pass through a close.
 - Every open, increase, and close size is an exact multiple of the canonical 100-token lot (`1e20` raw size units).
-- Orders are binding once committed. Users cannot cancel queued orders.
+- Orders are binding once committed. Users cannot cancel queued orders; the sole policy exception is an
+  administrator-recorded emergency risk-off cutoff, which terminally invalidates pre-cutoff opens and refunds their
+  remaining margin and execution bounty to internal settlement.
 - Queue execution is FIFO from the global head.
 - LP-capital carry is used instead of side-to-side funding.
 - If the HousePool is short on cash, trader profits can become senior trader claims instead of reverting the state transition; keeper bounties are funded from reserved trader margin inside the clearinghouse.
@@ -72,6 +76,7 @@ In practice, the compact public API is:
   - `OrderRouter.executeOrderBatch(uint64,bytes[])`
   - `OrderRouter.executeLiquidation(address,bytes[])`
   - `OrderRouter.executeLiquidationBatch(address[],bytes[])`
+  - `OrderRouter.clearRiskOffOrder(uint64)` for unpaid, oracle-free emergency-open cleanup
   - `OrderRouter.settleLpEpoch(bytes[])`
 - LPs:
   - the configured Senior or Junior `TrancheVault`: asynchronous `requestDeposit` / `requestRedeem`, request
@@ -134,6 +139,8 @@ The main runtime and read surfaces are:
 
 - `MarginClearinghouse`: trader custody and typed margin buckets.
 - `OrderRouter`: thin external shell for delayed-order commits, keeper execution, Pyth validation, and clearinghouse-reserved keeper bounties.
+- `OrderRouterLiquidationBatchSidecar`: Router-constructor-deployed, immutable-bound stateless code module for the
+  size-heavy liquidation-batch loop.
 - `CfdEngine`: canonical execution ledger and solvency boundary.
 - `TerminalNavBookV2`: Engine-only exact terminal price-PnL index used symmetrically for LP entry and exit NAV.
 - `CfdEngineSettlementSidecar`: externalized open/close/liquidation settlement orchestration used by the engine.
@@ -144,6 +151,8 @@ The main runtime and read surfaces are:
 - `SettlementMonitorLens`: read-only epoch-settlement, oracle, and invariant diagnostics for keepers and security
   monitoring. Its constructor-created `SettlementMonitorLensSidecar` is a facade-bound code-size implementation
   detail, not a second public or canonical read surface.
+- `EmergencyPauseCoordinator`: least-authority guardian boundary that can atomically pause new open commits and LP
+  entry. It cannot unpause, set prices, change protocol configuration, move funds, or invoke arbitrary targets.
 - `CfdEngineAccountLens` / `CfdEngineProtocolLens`: richer audit and operator read layers.
 
 ### Intended boundaries
@@ -156,11 +165,17 @@ The main runtime and read surfaces are:
   `CfdEngine.setDependencies(...)`.
 - `MarginClearinghouse` owns trader settlement balances and locked-margin custody buckets.
 - `OrderRouter` owns queued order records while execution-bounty value remains reserved in `MarginClearinghouse`; its implementation is split into base storage/hooks, handler, validation, and utility modules.
+- `OrderRouter.executeLiquidationBatch(...)` delegates only to its immutable sidecar. The sidecar declares no mutable
+  storage, rejects direct calls, and can reach Router state-changing callbacks only while executing in the Router's
+  delegatecall context. There is no setter or upgrade path.
 - `HousePool` owns LP capital and pays engine-authorized obligations that must leave the pool.
 - `PerpsPublicLens` is the default read surface for product consumers.
 - `SettlementMonitorLens` is the default bounded settlement-monitoring surface for keeper and security automation.
   Its internal sidecar accepts diagnostic-builder calls only from its constructor-bound facade; the sidecar's public
   bindings are constructor-set storage with no setter or delegatecall path.
+- `EmergencyPauseCoordinator` is immutable-bound to the exact RouterAdmin and HousePool. The monitor remains
+  advisory: off-chain monitoring archives its evidence and the configured guardian independently decides whether to
+  call the coordinator with reason/evidence hashes.
 - The account and protocol lenses are for deeper diagnostics, tests, audits, and operator tooling.
 
 ## Trader Lifecycle
@@ -178,6 +193,10 @@ Important details:
 - Non-lot sizes are rejected at commit, before any order id or margin/bounty reservation is created.
 - Open orders are rejected during degraded mode and close-only windows.
 - Failed orders are finalized from reserved clearinghouse bounty reservation; blocked FIFO heads remain pending.
+- A RouterAdmin emergency pause records an inclusive, monotonic `riskOffOrderCutoff`. Pending opens at or below it
+  can never execute, even after governance unpauses. Permissionless cleanup returns their remaining committed margin
+  and complete execution bounty to the trader's free internal settlement without an oracle or Engine checkpoint;
+  the protocol incident keeper pays cleanup gas and receives no bounty.
 - Execution-time user-invalid opens, protocol-state invalidations, and terminal-invalid closes pay the keeper from reservation so FIFO cleanup remains incentive compatible.
 - Close orders can still execute during genuine frozen-oracle windows using the last valid mark subject to the relaxed frozen-market rules and the fixed LP-owned frozen-close spread.
 - Close-intent queue validation is account-local and bounded by the per-account pending-order queue.
@@ -719,7 +738,9 @@ Timelocked surfaces include:
 - `OrderRouterAdmin` -> `OrderRouter.RouterConfig`
 - `OrderRouterAdmin` -> `OrderRouter.OracleConfig` for the configured `PletherOracle` address
 
-Instant controls remain for one-time wiring and fee withdrawal. `OrderRouter` pause/unpause is now owner-gated on `OrderRouterAdmin` rather than the router itself.
+Instant controls remain for one-time wiring and fee withdrawal. `OrderRouter` pause/unpause is owner-gated on
+`OrderRouterAdmin` rather than the router itself. The installed coordinator may pause both components but exposes no
+unpause method; governance recovers each component directly and deliberately.
 
 Each valid `PoolConfig` proposal supplies all six fields, replaces any earlier pending proposal, and restarts the
 48-hour timelock. Finalization atomically replaces the entire active configuration, so a proposal intended to change
@@ -727,11 +748,21 @@ only one field must repeat the desired active values for the other five.
 
 ### Pause behavior
 
-- Pausing `OrderRouter` blocks new risk-increasing order commits.
-- Keeper execution, liquidation, and other protective paths remain available.
-- Pausing `HousePool` blocks new LP deposit requests and deposit activation. Redemption requests remain available so
-  exit demand can queue, while synchronized settlement continues to reconcile and fund matured exits and reports
-  entries as deferred. Funded redemption claims remain independently callable.
+- The guardian calls `EmergencyPauseCoordinator.triggerEmergencyPause(reasonHash,evidenceHash)`. One atomic
+  transaction pauses RouterAdmin first and HousePool second; failure reverts every state change made by that call and
+  leaves any pre-existing pause unchanged. The hashes are advisory incident metadata, not an on-chain proof from
+  `SettlementMonitorLens`.
+- Router pausing blocks new risk-increasing commits and permanently snapshots the highest existing order id. Opens at
+  or below that cutoff are refunded internally when lazily cleaned; closes, liquidations, mark refresh, and other
+  protective paths remain available. Unpausing never revives invalidated opens.
+- HousePool pausing is entry-only: it blocks new LP deposit requests and deposit activation. Redemption requests,
+  synchronized reconciliation/redemption funding, and funded claims remain live. A matured pending deposit is not
+  made cancellable merely by the pause; it can be recovered only through the pre-existing rejection, terminal-wipe,
+  Senior-impairment, or Senior-reservation escape conditions, or activated after recovery.
+- The guardian cannot unpause, rotate itself, change configuration, set prices, move funds, or call arbitrary
+  contracts. Governance may rotate/disable it and owns staged recovery.
+- LP request-off, LP settlement-off, and corrupted-queue quarantine are follow-up circuit breakers and are not
+  implied by this coordinator.
 
 ## Default Parameters
 

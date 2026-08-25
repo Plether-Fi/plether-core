@@ -8,6 +8,9 @@ For audit review that needs policy tables and read-surface canonicality in one p
 
 - Margin actions: `MarginClearinghouse.depositMargin(uint256)` and `MarginClearinghouse.withdrawMargin(uint256)`
 - Trade actions: `OrderRouter.commitOrder(CfdTypes.Side side, uint256 sizeDelta, uint256 marginDelta, uint256 targetPrice, bool isClose)`
+- Emergency policy note: committed orders remain user-uncancellable. If RouterAdmin enters risk-off, each pre-cutoff
+  open is instead terminally invalidated by protocol policy and its remaining reservations are refunded to the
+  trader's internal clearinghouse balance.
 - Trader claim settlement: `CfdEngine.settleTraderClaim(address account)` for the account owner
 - Compact reads: `PerpsPublicLens`; use `getTrancheQueues(bool)` for matured heads/backlog and
   `getLpRequestState(bool,uint256,address)` for controller-specific pending/claimable balances. The legacy
@@ -72,6 +75,8 @@ seed-lifecycle, and other tranche setup mechanics as admin/setup concerns rather
 - Batch execution: `OrderRouter.executeOrderBatch(uint64,bytes[])`
 - Liquidation: `OrderRouter.executeLiquidation(address,bytes[])`
 - Batch liquidation: `OrderRouter.executeLiquidationBatch(address[],bytes[])`
+- Risk-off queue cleanup: `OrderRouter.clearRiskOffOrder(uint64)`; permissionless, oracle-free, and unpaid. The caller
+  funds gas while the trader receives the full internal margin and execution-bounty refund.
 - LP epoch clearing: follow `SettlementMonitorLens.requiredExecutionPath`; use direct
   `HousePool.settleLpEpoch(uint256,uint256)` for `CachedMark` and `OrderRouter.settleLpEpoch(bytes[])` for
   `AtomicOracleRefresh`
@@ -79,6 +84,9 @@ seed-lifecycle, and other tranche setup mechanics as admin/setup concerns rather
   protocol still settles eligible FIFO heads, and simulate the exact selected direct-Pool or Router calldata before
   broadcast. The atomic route additionally requires the exact Pyth payload and fee. Its constructor-created
   `SettlementMonitorLensSidecar` is monitor-bound implementation code and is not a public keeper entrypoint.
+
+The protocol-operated incident keeper should clear risk-off orders after containment. A risk-off open is already
+logically unexecutable before physical cleanup, and cleanup authority does not grant its caller the trader's bounty.
 
 Use this interface:
 
@@ -103,6 +111,10 @@ Use this interface:
   expose `observationComplete` and `completeObservationDigest`. Completeness requires every Oracle dependency read,
   including the updated current-feed ABI, even for cached/no-work routing, but requires Oracle policy validity only on
   the atomic-refresh route. The complete digest is otherwise zero and always unauthenticated.
+- Emergency containment: `EmergencyPauseCoordinator.triggerEmergencyPause(bytes32,bytes32)`, callable only by the
+  configured guardian. Monitoring output and incident hashes are advisory evidence; neither the Lens nor an arbitrary
+  caller can trip the coordinator. Governance uses `setGuardian(address)` for rotation/disablement and recovers by
+  calling the two component owners directly because the coordinator has no unpause surface.
 
 Use these interfaces:
 
@@ -128,10 +140,14 @@ The following remain useful for tests, admin tooling, migration, and deep accoun
 
 - `CfdEngine` / `ICfdEngineCore`: canonical runtime truth for execution, liquidation, and protocol status.
 - `CfdEngineSettlementSidecar`: externalized close/liquidation settlement orchestration used by `CfdEngine`; not a product-facing surface.
+- `OrderRouterLiquidationBatchSidecar`: immutable stateless Router implementation detail for batch liquidation;
+  direct integrations must call `OrderRouter.executeLiquidationBatch(...)`, never the sidecar.
 - `PerpsPublicLens`: canonical product-facing read layer.
 - `SettlementMonitorLens`: canonical bounded settlement-monitoring read layer; no mutation or circuit-breaker
   authority. It validates the required one-time core wiring and its monitor-only sidecar is not a second canonical
   surface.
+- `EmergencyPauseCoordinator`: guardian-only, immutable-bound containment surface for new trading risk plus LP entry;
+  no recovery, pricing, configuration, fund movement, or arbitrary-call capability.
 - `CfdEngineAccountLens`: rich account/accounting diagnostics.
 - `CfdEngineProtocolLens`: protocol-accounting and house-pool snapshot diagnostics.
 - `MarginClearinghouse`: custody plumbing with a small public trader surface and a larger operator surface.

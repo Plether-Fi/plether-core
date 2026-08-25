@@ -3,6 +3,7 @@ pragma solidity 0.8.35;
 
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IPerpsKeeper} from "@plether/perps/interfaces/IPerpsKeeper.sol";
@@ -19,6 +20,9 @@ import {OrderRouterBase} from "@plether/perps/router/OrderRouterBase.sol";
 /// @custom:security-contact contact@plether.com
 contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, ReentrancyGuardTransient {
 
+    /// @notice Fixed stateless delegate module for liquidation-batch orchestration.
+    address public immutable liquidationBatchSidecar;
+
     /// @notice Deploys the router and its owner-controlled timelocked admin.
     /// @dev The admin owner is the constructor caller. Integration addresses are validated by the inherited
     ///      constructors as described there; the router is not upgradeable.
@@ -31,7 +35,9 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, Reentra
         address _engineLens,
         address _housePool,
         address _pletherOracle
-    ) OrderRouterBase(_engine, _engineLens, _housePool, _pletherOracle) {}
+    ) OrderRouterBase(_engine, _engineLens, _housePool, _pletherOracle) {
+        liquidationBatchSidecar = address(new OrderRouterLiquidationBatchSidecar());
+    }
 
     /// @notice Submits an open/increase or strict reduce-only intent to the delayed global FIFO queue.
     /// @dev Reserves committed margin and the keeper bounty in the clearinghouse immediately. Opens are
@@ -76,14 +82,16 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, Reentra
     }
 
     /// @notice Permissionlessly executes an eligible global queue head and pays its reserved USDC bounty.
-    /// @dev Prunes expired heads up to the requested id before oracle work, subject to the configured prune cap.
-    ///      It then enforces FIFO, post-commit timing outside frozen-oracle mode, staleness, slippage, and a
-    ///      minimum engine-call gas reserve. Expired, slippage-failed, and engine failures other than
-    ///      mark-price-out-of-order—including business-rule rejections and panics—are terminal: committed margin is
-    ///      released and their bounty is still credited to the caller. Mark-price-out-of-order instead reverts
-    ///      nonterminally and leaves the order pending. Excess ETH is refunded, or recorded in the admin contract
-    ///      if the transfer fails. Terminal failures have no retry lane.
-    /// @param orderId Queue-head id to execute, or a later committed id used as the expired-head pruning bound.
+    /// @dev Before oracle work, refunds cutoff-invalid open heads up to the requested id, before pruning expired heads.
+    ///      Risk-off refunds return all remaining margin and bounty to the trader, pay no caller reward, and are capped
+    ///      at 64 per call; reaching the cap or removing a head before the requested target may return without executing
+    ///      that target. Expiry pruning remains subject to its separately configured cap. Execution then enforces FIFO,
+    ///      post-commit timing outside frozen-oracle mode, staleness, slippage, and a minimum engine-call gas reserve.
+    ///      Expired, slippage-failed, and engine failures other than mark-price-out-of-order—including business-rule
+    ///      rejections and panics—are terminal: committed margin is released and their bounty is credited to the caller.
+    ///      Mark-price-out-of-order instead reverts nonterminally and leaves the order pending. Excess ETH is refunded,
+    ///      or recorded in the admin contract if the transfer fails. Terminal failures have no retry lane.
+    /// @param orderId Queue-head id to execute, or a later committed id used as the terminal-head cleanup bound.
     /// @param pythUpdateData Pyth price update blobs; `msg.value` must cover all Pyth fees used by the call.
     function executeOrder(
         uint64 orderId,
@@ -93,12 +101,16 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, Reentra
     }
 
     /// @notice Permissionlessly processes consecutive FIFO orders through a committed inclusive id bound.
-    /// @dev Uses strictly post-commit historical Pyth prices outside frozen-oracle mode and may reuse a proven
-    ///      basket for later compatible orders. It terminally cleans expired, slippage-failed, and engine failures
-    ///      other than mark-price-out-of-order, but stops at an open blocked by close-only policy, an MEV timing
-    ///      boundary, insufficient gas, the prune cap, or unavailable historical data after prior progress.
-    ///      Mark-price-out-of-order reverts the whole batch and leaves its state unchanged. Reserved USDC bounties
-    ///      accrue to the caller; unused ETH is refunded once or deferred to the admin on transfer failure.
+    /// @dev Before oracle work for each item, refunds cutoff-invalid opens before applying expiry or other policy.
+    ///      Those refunds return the complete remaining margin and bounty to the trader and pay no caller reward. The
+    ///      batch processes at most 64 such refunds; after the 64th it may continue with a non-risk-off head, while a
+    ///      65th eligible refund stops the call. The batch otherwise uses strictly post-commit historical Pyth prices
+    ///      outside frozen-oracle mode and may reuse a proven basket for later compatible orders. It terminally cleans
+    ///      expired, slippage-failed, and engine failures other than mark-price-out-of-order, but stops at an open
+    ///      blocked by close-only policy, an MEV timing boundary, insufficient gas, either cleanup cap, or unavailable
+    ///      historical data after prior progress. Mark-price-out-of-order reverts the whole batch and leaves its state
+    ///      unchanged. Ordinary reserved USDC bounties accrue to the caller; unused ETH is refunded once or deferred
+    ///      to the admin on transfer failure.
     /// @param maxOrderId Last committed order id the batch may process; must be at or after the head and below `nextCommitId`.
     /// @param pythUpdateData Pyth price update blobs; `msg.value` must cover the cumulative Pyth fees used.
     function executeOrderBatch(
@@ -106,6 +118,17 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, Reentra
         bytes[] calldata pythUpdateData
     ) external payable nonReentrant {
         _executeOrderBatch(maxOrderId, pythUpdateData);
+    }
+
+    /// @notice Permissionlessly refunds one pending open invalidated by the persistent risk-off cutoff.
+    /// @dev Requires no oracle update or ETH. The complete remaining committed-margin reservation and execution
+    ///      bounty are returned to the submitting account's free internal settlement; the caller receives nothing.
+    ///      The order may be removed from any position in the global queue.
+    /// @param orderId Pending pre-cutoff open to refund and terminally fail.
+    function clearRiskOffOrder(
+        uint64 orderId
+    ) external nonReentrant {
+        _clearRiskOffOrder(orderId);
     }
 
     /// @notice Applies a finalized router risk and queue configuration.
@@ -150,9 +173,9 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, Reentra
     }
 
     /// @notice Permissionlessly liquidates an unsafe account using an account-adverse oracle price.
-    /// @dev Available while paused. Before liquidation, all reserved bounties on the account's queued orders
-    ///      are forfeited through the engine. On success every queued order is failed, its committed margin is
-    ///      released, and its queue links are removed. The oracle handles Pyth fees and ETH refunds.
+    /// @dev Available while paused. Before liquidation, cutoff-invalid opens are refunded and only bounties on the
+    ///      remaining live orders are forfeited through the engine. On success every queued order is failed, its
+    ///      committed margin is released, and its queue links are removed. The oracle handles Pyth fees and ETH refunds.
     /// @param account Canonical account to liquidate.
     /// @param pythUpdateData Pyth price update blobs; `msg.value` must cover the Pyth update fee.
     function executeLiquidation(
@@ -177,7 +200,17 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler, Reentra
         address[] calldata accounts,
         bytes[] calldata pythUpdateData
     ) external payable nonReentrant returns (uint256 nextIndex) {
-        return _executeLiquidationBatch(accounts, pythUpdateData, msg.sender);
+        address target = liquidationBatchSidecar;
+        assembly ("memory-safe") {
+            let ptr := mload(0x40)
+            calldatacopy(ptr, 0, calldatasize())
+            let ok := delegatecall(gas(), target, ptr, calldatasize(), 0, 0)
+            let size := returndatasize()
+            returndatacopy(ptr, 0, size)
+            if iszero(ok) { revert(ptr, size) }
+            if lt(size, 32) { revert(0, 0) }
+            nextIndex := mload(ptr)
+        }
     }
 
 }

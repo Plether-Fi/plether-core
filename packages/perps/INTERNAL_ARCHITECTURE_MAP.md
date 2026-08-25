@@ -43,6 +43,8 @@ For normative semantics, use [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md). For sys
 | `TrancheVault` | Custody active shares, pending-deposit escrow, pending redemption shares, and funded redemption assets; select both deposit and redemption request ids through one five-minute-cutoff helper over the HousePool clock; execute only pool-authorized epoch mutations | Define a competing epoch clock, independently finalize a pending deposit epoch, independently fund a redemption, or reprice an already-funded claim |
 | `SettlementMonitorLens` | Validate required one-time core wiring and read bounded epoch, oracle, wiring, NAV, pool, and vault-custody diagnostics for one explicitly observed epoch | Select FIFO settlement heads, mutate protocol state, authorize settlement, promise transaction success, traverse an unbounded queue, or replace exact route-specific `eth_call` simulation |
 | `SettlementMonitorLensSidecar` | Execute the facade's code-size-split accounting, oracle, health, and config reads when called by its constructor-bound monitor; expose constructor-set binding getters for verification | Accept another caller on monitor-only diagnostic builders, act as a second canonical monitoring surface, mutate its constructor-set bindings, or mutate protocol state |
+| `EmergencyPauseCoordinator` | Let one configured guardian atomically pause the immutable-bound RouterAdmin and HousePool; record advisory reason/evidence hashes | Read the Lens as authorization, unpause, change child configuration, set prices, move funds, or call arbitrary targets |
+| `OrderRouterLiquidationBatchSidecar` | Execute the bounded liquidation-batch loop in its deploying Router's delegatecall context; read Router state through public getters and invoke the Router's self-only item callback | Accept a direct call, own mutable storage, execute for another Router, replace its immutable Router binding, or provide an upgrade target |
 
 ## LP Timing Ownership
 
@@ -59,8 +61,17 @@ For normative semantics, use [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md). For sys
 
 - `OrderRouter` is the main external execution boundary: it can drive engine order/liquidation paths and a narrow clearinghouse reservation surface, but it does not have broad clearinghouse settlement authority or `HousePool.payOut(...)` authority.
 - `CfdEngineSettlementSidecar` is engine-gated, but any external surface added there is security-critical because it inherits engine settlement authority.
+- `OrderRouterLiquidationBatchSidecar` is constructor-deployed and immutable-bound to one Router. Its entrypoint
+  requires `address(this) == ROUTER`, which is true only in that Router's delegatecall context; a direct call to the
+  sidecar reverts. Review its storage-free layout and the Router's self-only item callback together.
 - `TerminalNavBookV2` is immutable-bound to one Engine, and `syncFromEngine(...)` is its sole external mutation authority. Before a mutation, the Engine calls `authenticateEngineState(...)` to prove that canonical pre-transition state matches the stored curve. Afterward, `syncFromEngine(...)` checks that authenticated hash against the stored commitment, then reads canonical post-transition Engine and clearinghouse state to install, replace, or remove the curve; callers cannot supply curve economics. The book has no owner, repair, or migration path.
 - `MarginClearinghouse` broad settlement paths trust only `engine` and `settlementSidecar`; `orderRouter` is limited to queued-order reservation lifecycle calls.
+- `MarginClearinghouse` additionally exposes one narrow Router-only risk-off refund transition. It releases the exact
+  remaining committed-order reservation and recorded bounty into the same trader's free internal settlement without
+  transferring tokens or performing an Engine mutation, carry checkpoint, or Terminal NAV synchronization. Router
+  authorization reads the Engine's canonical Router binding. Account liquidation invokes that transition once per
+  invalidated open under the 32-order account cap, with every call enclosed by the same atomic liquidation frame; the
+  one-call aggregate Router implementation was not deployable within the retained bytecode limits.
 - `HousePool.payOut(...)` and `HousePool.recordProtocolInflow(...)` trust only `engine` and `settlementSidecar`; protocol fees remain outside `HousePool` in treasury clearinghouse margin.
 - Any new helper/sidecar that can reach these caller sets should be treated as a core custody/settlement boundary and reviewed accordingly.
 
@@ -89,6 +100,7 @@ For normative semantics, use [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md). For sys
 | Liquidation charge | Dedicated liquidation reserve -> keeper clearinghouse account + protocol-treasury clearinghouse account + `HousePool` claimant revenue | `CfdEngine` / `CfdEngineSettlementSidecar` | Allocates the capped charge using timelocked shares; both configured shares round down and LPs get the exact remainder without consuming PnL pledge or pre-existing pool cash |
 | Carry realization | Eligible free settlement -> `HousePool` claimant revenue routing | `CfdEngine` via open/close/add-margin and clearinghouse deposit/withdraw hooks | Time-based LP-capital rent is projected/collected before health checks; a funded amount leaves exact price health unchanged, while an uncovered remainder blocks withdrawal and makes the account liquidatable without consuming PnL pledge or claim |
 | Router forfeiture on liquidation cleanup | Clearinghouse-reserved bounty value -> treasury clearinghouse account | `OrderRouter` -> `CfdEngine.absorbReservedExecutionBounty(...)` | Converts abandoned queued-order reserves into protocol-owned clearinghouse margin |
+| Emergency risk-off cleanup | Invalidated open's committed margin + execution bounty -> same trader's free internal settlement | permissionless Router cleanup, ordinarily protocol incident keeper | Preserves gross settlement/custody, pays caller nothing, and leaves carry/NAV unchanged until a later ordinary checkpoint |
 | LP deposit request / activation | External wallet -> `TrancheVault` escrow -> `HousePool` | Vault routes the request with its shared cutoff helper, then route-appropriate epoch settlement activates it | Funding follows both withdrawal phases, the live common entry gate is rechecked after Senior HWM/principal scaling, Junior activates before Senior, and activation never changes trader balances |
 | LP redeem request / funding / claim | LP shares -> `TrancheVault` pending escrow; `HousePool` cash -> vault asset escrow -> receiver | Vault routes the request with the same cutoff helper; permissionless Router settlement funds it; controller/operator later claims | Pending shares retain P&L exposure; funded shares burn; claimable assets are irrevocable and leave pool depth at funding |
 | Governance recapitalization | External wallet -> `HousePool` canonical cash | Owner-controlled recap path | Restores the senior-first claimant path or lands in `unassignedAssets` if no valid claimant exists |
@@ -104,6 +116,9 @@ For normative semantics, use [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md). For sys
   monitors; its internally deployed monitor-only sidecar is an implementation detail. The exact route-specific
   simulation and transaction remain authoritative: direct `HousePool` settlement for `CachedMark`, or `OrderRouter`
   with the exact Oracle payload and value for `AtomicOracleRefresh`.
+- `EmergencyPauseCoordinator` owns no economic state and does not consume Lens output. It is a least-authority
+  guardian gateway into the two existing pause states. RouterAdmin owns the persistent inclusive order cutoff;
+  governance owns all recovery.
 - `HousePool` owns canonical pool cash, the round-hour clock, LP waterfall accounting, and the sole synchronized epoch
   coordinator. Each `TrancheVault` owns request-epoch selection over that clock plus pending-share and funded-asset
   escrow. Protocol fees that cross out of trader custody are owned by the treasury clearinghouse account.

@@ -10,9 +10,11 @@ import {CfdEngineLens} from "@plether/perps/CfdEngineLens.sol";
 import {CfdEnginePlanner} from "@plether/perps/CfdEnginePlanner.sol";
 import {CfdEngineSettlementSidecar} from "@plether/perps/CfdEngineSettlementSidecar.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {EmergencyPauseCoordinator} from "@plether/perps/EmergencyPauseCoordinator.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
+import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
 import {PerpsPublicLens} from "@plether/perps/PerpsPublicLens.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {SettlementMonitorLens} from "@plether/perps/SettlementMonitorLens.sol";
@@ -89,11 +91,13 @@ contract DeployPerpsArbitrumSepolia is Script {
         CfdEngineAccountLens accountLens;
         CfdEngineLens engineLens;
         OrderRouter router;
+        OrderRouterLiquidationBatchSidecar routerLiquidationBatchSidecar;
         address pletherOracle;
         address routerAdmin;
         PerpsPublicLens publicLens;
         SettlementMonitorLens settlementMonitorLens;
         SettlementMonitorLensSidecar settlementMonitorLensSidecar;
+        EmergencyPauseCoordinator emergencyPauseCoordinator;
     }
 
     function run() external returns (DeployedContracts memory deployed) {
@@ -151,6 +155,16 @@ contract DeployPerpsArbitrumSepolia is Script {
         );
         deployed.router = new OrderRouter(
             address(deployed.engine), address(deployed.engineLens), address(deployed.housePool), deployed.pletherOracle
+        );
+        deployed.routerLiquidationBatchSidecar =
+            OrderRouterLiquidationBatchSidecar(deployed.router.liquidationBatchSidecar());
+        require(
+            address(deployed.routerLiquidationBatchSidecar).code.length > 0,
+            "OrderRouter liquidation batch sidecar has no code"
+        );
+        require(
+            deployed.routerLiquidationBatchSidecar.ROUTER() == address(deployed.router),
+            "OrderRouter liquidation batch sidecar binding mismatch"
         );
         deployed.routerAdmin = deployed.router.admin();
 
@@ -254,6 +268,37 @@ contract DeployPerpsArbitrumSepolia is Script {
         require(
             address(deployed.settlementMonitorLensSidecar.USDC()) == address(deployed.usdc),
             "SettlementMonitorLens Sidecar USDC mismatch"
+        );
+
+        deployed.emergencyPauseCoordinator =
+            new EmergencyPauseCoordinator(deployed.routerAdmin, address(deployed.housePool), deployer);
+        require(address(deployed.emergencyPauseCoordinator).code.length > 0, "Emergency coordinator has no code");
+        require(
+            address(deployed.emergencyPauseCoordinator.ROUTER_ADMIN()) == deployed.routerAdmin,
+            "Emergency coordinator RouterAdmin mismatch"
+        );
+        require(
+            address(deployed.emergencyPauseCoordinator.HOUSE_POOL()) == address(deployed.housePool),
+            "Emergency coordinator HousePool mismatch"
+        );
+        require(deployed.emergencyPauseCoordinator.owner() == deployer, "Emergency coordinator owner mismatch");
+        require(deployed.emergencyPauseCoordinator.guardian() == address(0), "Emergency guardian must start disabled");
+        require(
+            deployed.emergencyPauseCoordinator.ROUTER_ADMIN().riskOffOrderCutoff() == 0,
+            "Unexpected initial risk-off cutoff"
+        );
+        require(!deployed.emergencyPauseCoordinator.ROUTER_ADMIN().paused(), "OrderRouterAdmin unexpectedly paused");
+        require(!deployed.emergencyPauseCoordinator.HOUSE_POOL().paused(), "HousePool unexpectedly paused");
+
+        deployed.housePool.setPauser(address(deployed.emergencyPauseCoordinator));
+        deployed.emergencyPauseCoordinator.ROUTER_ADMIN().setPauser(address(deployed.emergencyPauseCoordinator));
+        require(
+            deployed.housePool.pauser() == address(deployed.emergencyPauseCoordinator),
+            "HousePool emergency coordinator mismatch"
+        );
+        require(
+            deployed.emergencyPauseCoordinator.ROUTER_ADMIN().pauser() == address(deployed.emergencyPauseCoordinator),
+            "OrderRouterAdmin emergency coordinator mismatch"
         );
 
         vm.stopBroadcast();
@@ -418,12 +463,16 @@ contract DeployPerpsArbitrumSepolia is Script {
         console.log("CfdEngineAccountLens:", address(deployed.accountLens));
         console.log("CfdEngineLens:", address(deployed.engineLens));
         console.log("OrderRouter:", address(deployed.router));
+        console.log("OrderRouterLiquidationBatchSidecar:", address(deployed.routerLiquidationBatchSidecar));
         console.log("PletherOracle:", deployed.pletherOracle);
         console.log("BasketMaxConfidenceRatioBps:", PletherOracle(deployed.pletherOracle).basketMaxConfidenceRatioBps());
         console.log("OrderRouterAdmin:", deployed.routerAdmin);
         console.log("PerpsPublicLens:", address(deployed.publicLens));
         console.log("SettlementMonitorLens:", address(deployed.settlementMonitorLens));
         console.log("SettlementMonitorLensSidecar:", address(deployed.settlementMonitorLensSidecar));
+        console.log("EmergencyPauseCoordinator:", address(deployed.emergencyPauseCoordinator));
+        console.log("Emergency guardian:", deployed.emergencyPauseCoordinator.guardian());
+        console.log("Risk-off order cutoff:", deployed.emergencyPauseCoordinator.ROUTER_ADMIN().riskOffOrderCutoff());
         console.log("Owner:", deployed.engineAdmin.owner());
     }
 

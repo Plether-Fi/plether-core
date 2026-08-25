@@ -63,6 +63,11 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
         }
     }
 
+    /// @notice Reads the admin's monotonic inclusive open-order invalidation cutoff.
+    function _riskOffOrderCutoff() internal view returns (uint64) {
+        return OrderRouterAdmin(admin).riskOffOrderCutoff();
+    }
+
     /// @notice Releases any active committed-margin reservation immediately before engine execution.
     /// @param orderId Order whose reservation is released.
     function _releaseCommittedMarginForExecution(

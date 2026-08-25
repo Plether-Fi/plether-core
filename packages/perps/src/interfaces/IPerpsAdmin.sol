@@ -5,6 +5,14 @@ pragma solidity 0.8.35;
 /// @dev This is a logical role interface rather than a guarantee that one contract controls every perps component.
 interface IPerpsAdmin {
 
+    /// @notice Returns the account allowed to pause alongside the component owner.
+    /// @return Emergency pauser account, or the zero address when the separate role is disabled
+    function pauser() external view returns (address);
+
+    /// @notice Returns whether the component's guarded user actions are paused.
+    /// @return True when the component-specific emergency gate is active
+    function paused() external view returns (bool);
+
     /// @notice Updates the account allowed to pause alongside the owner.
     /// @dev Implementations restrict this to their owner; the zero address disables the separate pauser role.
     /// @param newPauser New emergency pauser account, or zero to clear the role

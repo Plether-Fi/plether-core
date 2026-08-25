@@ -17,7 +17,7 @@ The deploy script handles contract creation and one-time wiring.
 
 The bootstrap script handles operator actions after deploy:
 
-- setting pausers
+- verifying the shared emergency coordinator and configuring its guardian
 - proposing or finalizing finite senior-exposure limits
 - seeding the junior tranche and then the senior tranche
 - minting mock USDC to test users
@@ -49,9 +49,10 @@ The deploy script creates and wires:
 10. `TrancheVault` junior
 11. `CfdEngineAccountLens`
 12. `CfdEngineLens`
-13. `OrderRouter`
+13. `OrderRouter` (constructor-deploys its immutable `OrderRouterLiquidationBatchSidecar`)
 14. `PerpsPublicLens`
 15. `SettlementMonitorLens` (the facade deploys its monitor-bound `SettlementMonitorLensSidecar` internally)
+16. `EmergencyPauseCoordinator`
 
 It then performs the required set-once wiring:
 
@@ -66,7 +67,7 @@ It then performs the required set-once wiring:
 Important:
 
 - `HousePool` remains inactive after deployment.
-- `SettlementMonitorLens` is deployed last, after every dependency is wired. It is the read-only operator/security
+- `SettlementMonitorLens` is deployed after every settlement dependency is wired. It is the read-only operator/security
   facade bound to the canonical Router deployment; adding it does not shift any earlier deployment address or grant
   settlement authority. Its constructor deploys a size-management `SettlementMonitorLensSidecar` that accepts calls
   only from that facade. Deployment verifies that the facade's `SIDECAR` has code, the sidecar's `MONITOR` is the
@@ -80,6 +81,15 @@ Important:
   sidecar creation code: the optimized build is 48,817 bytes including the 32-byte Router constructor argument,
   leaving 335 bytes of headroom. Keep the dedicated creation-input size regression green when changing either
   contract.
+- `EmergencyPauseCoordinator` is deployed after the monitor and immutable-bound to the exact RouterAdmin and
+  HousePool. The deploy transaction verifies its code, bindings, owner, disabled initial guardian, zero initial
+  `riskOffOrderCutoff`, and unpaused children, then installs it as both pausers. It has no unpause, pricing,
+  configuration, fund-transfer, or arbitrary-call surface. Its later reason/evidence hashes remain advisory and are
+  not derived or authenticated by the Lens.
+- `OrderRouterLiquidationBatchSidecar` is a stateless EIP-170 size split, not an independently operated contract.
+  Deploy and bootstrap both require its address to contain code and its immutable `ROUTER()` binding to equal the
+  deployed Router. Its entrypoint rejects direct calls and works only through Router delegatecall; it has no mutable
+  storage, setter, proxy, or upgrade path. Record the address for verification, but keepers must call the Router.
 - An already deployed compatible stack may add the lens independently against its Router; there is no storage
   migration and no core-contract redeployment requirement. Replacing a faulty lens likewise does not move protocol
   authority, but integrations must pin the intended facade address. Full current-feed diagnostics require the
@@ -223,8 +233,11 @@ The script prints the deployed addresses to the console. Save at least:
 - `TerminalNavBookV2`
 - `HousePool`
 - `OrderRouter`
+- `OrderRouterLiquidationBatchSidecar`
+- `EmergencyPauseCoordinator`
 
-These are needed by the bootstrap script.
+Bootstrap directly consumes the USDC, HousePool, Router, and coordinator addresses and derives the RouterAdmin and
+liquidation sidecar from the Router. Record every listed address for independent deployment verification.
 
 ### Bootstrap
 
@@ -237,6 +250,8 @@ ARB_SEPOLIA_RPC_URL=...
 PERPS_USDC=0x...
 PERPS_HOUSE_POOL=0x...
 PERPS_ORDER_ROUTER=0x...
+PERPS_EMERGENCY_COORDINATOR=0x...
+PERPS_GUARDIAN=0x...
 
 MAX_SENIOR_EXPOSURE_USDC=...
 MAX_SENIOR_SHARE_BPS=...
@@ -245,8 +260,6 @@ MAX_SENIOR_SHARE_BPS=...
 Optional:
 
 ```bash
-PERPS_PAUSER=0x...
-
 SENIOR_SEED_USDC=50000000000000
 JUNIOR_SEED_USDC=50000000000000
 
@@ -265,6 +278,9 @@ Notes:
 - `50000000000000` means `50_000_000e6`, or 50,000,000 mock USDC.
 - Both senior-limit variables are mandatory. The exposure limit must be finite and the share limit must be below
   `10_000` bps; the script deliberately refuses the constructor's uncapped bootstrap values.
+- `PERPS_EMERGENCY_COORDINATOR` and `PERPS_GUARDIAN` are mandatory, and the guardian must be nonzero. Bootstrap
+  verifies that the coordinator has code, is bound to this exact RouterAdmin and HousePool, and is already installed
+  as both pausers. It fails closed rather than repairing any partial or cross-deployment binding.
 - Choose limits that admit the intended seeds. For symmetric `50_000_000e6` seeds, the exposure cap must be at least
   `50_000_000e6` and the senior-share cap must be at least `5_000` bps.
 - `TEST_USER_RECIPIENTS` and `TEST_USER_AMOUNTS` must have the same length.
@@ -287,13 +303,15 @@ The configuration, seed, and activation phases of the bootstrap script are desig
 
 - it separates the required limit proposal and finalization across the `HousePool` 48-hour timelock
 - it refuses to seed while the requested finite limits are not active
-- it skips pauser updates if already set
+- it rotates the coordinator guardian only when the requested address differs; a matching rerun is a no-op
 - it skips a seed if that side is already initialized
 - it skips activation if trading is already active
 
 Before proposing limits, seeding, or activation, bootstrap derives the Engine from `HousePool.ENGINE()` and verifies
 that a code-bearing `TerminalNavBookV2` is wired with matching Engine, cap, and 100-token quantum. A partial or
-misbound V2 stack fails closed.
+misbound V2 stack fails closed. Before a first trading activation it additionally requires a nonzero live guardian,
+both exact coordinator pauser bindings, and unpaused RouterAdmin and HousePool. Bootstrap never unpauses either child
+and never clears or rewrites the historical risk-off cutoff.
 
 Test-user funding is intentionally not idempotent: each ready-state rerun mints the configured amounts again. Remove
 the test-user recipient/amount inputs after the intended funding run.
@@ -308,13 +326,16 @@ This is useful if the first bootstrap attempt completes only partially.
   complete stack and leave the old instance untouched; importing old positions, shares, pending requests, or claim
   escrow is out of scope.
 - Never wire one replacement vault to an old pool or one old vault to a replacement pool. Deploy and verify the engine,
-  terminal NAV book, clearinghouse, pool, both vaults, router/oracle, sidecars, and lenses as a single versioned unit.
+  terminal NAV book, clearinghouse, pool, both vaults, router/oracle, sidecars, coordinator, and lenses as a single
+  versioned unit.
 - `TerminalNavBookV2` has no owner repair or import function. Do not activate trading unless its Engine binding,
   price cap, size quantum, and empty initial state were verified by the deploy transaction.
 - The bootstrap script only mints mock USDC. It does not fund users with ETH.
 - Test users still need Arbitrum Sepolia ETH from a faucet to submit transactions.
 - The deploy and bootstrap scripts currently assume the broadcaster owns the deployed contracts.
 - The router admin is deployed internally by `OrderRouter`; bootstrap uses `router.admin()` to reach it.
+- The deploy script installs `EmergencyPauseCoordinator` as the pauser on both RouterAdmin and HousePool. Do not set
+  the guardian address directly as either pauser: doing so would reintroduce a partial-containment race.
 - All ownership-bearing perps contracts use `Ownable2Step`: the current owner initiates a handoff and the pending
   owner must call `acceptOwnership()` before authority changes.
 
@@ -322,7 +343,7 @@ This is useful if the first bootstrap attempt completes only partially.
 
 1. Run the deploy script.
 2. Record the deployed addresses.
-3. Set bootstrap env vars, including both explicit senior limits.
+3. Set bootstrap env vars, including the printed coordinator, a nonzero guardian, and both explicit senior limits.
 4. Run the bootstrap script to propose the finite limits.
 5. Wait for the 48-hour `HousePool` timelock.
 6. Rerun the same bootstrap command to finalize, seed junior then senior, and activate trading.
@@ -331,6 +352,31 @@ This is useful if the first bootstrap attempt completes only partially.
    and operator monitoring against `SettlementMonitorLens`.
 9. Submit deposit and redemption requests on both vaults, advance to a matured epoch, follow the route reported by
    `SettlementMonitorLens`, and verify that funded claims can be pulled independently.
+10. Dry-run the guardian containment procedure on the fresh testnet stack, verify both pause states and the emitted
+    cutoff, clear invalidated opens with the protocol incident keeper, then have governance perform the deliberate
+    two-component recovery.
+
+## Emergency Containment Runbook
+
+1. Archive the monitor observation, RPC block/hash, external oracle evidence, and incident rationale. Compute stable
+   `reasonHash` and `evidenceHash` values; zero is accepted when metadata is unavailable because containment must not
+   be blocked by evidence collection.
+2. From the configured guardian, simulate and call
+   `EmergencyPauseCoordinator.triggerEmergencyPause(reasonHash,evidenceHash)`. The coordinator does not query the
+   advisory Lens and no Lens condition trips it permissionlessly.
+3. Confirm `EmergencyPauseTriggered`, both component pause states, and the inclusive `riskOffOrderCutoff`. Old opens
+   at or below the cutoff remain invalid forever, including after recovery.
+4. Keep closes, liquidations, LP redemption requests and funding, and funded claims operating. HousePool pause blocks
+   only new deposit requests/activation. A matured pending deposit is not automatically cancellable merely because
+   the pool is paused; use only its existing escape conditions or wait for recovery.
+5. Have the protocol incident keeper call permissionless risk-off cleanup for invalidated opens. Cleanup requires no
+   Pyth payload, refunds full remaining margin and bounty to the trader's internal settlement, and pays no caller, so
+   the protocol pays gas.
+6. After remediation, governance—not the guardian—calls the component `unpause()` functions. Never attempt to reset
+   the historical cutoff. Rotate or disable the guardian separately if the key or monitoring process was implicated.
+
+This runbook does not provide LP request-off, LP settlement-off, or corrupted-queue quarantine; those are explicit
+follow-up circuit breakers.
 
 Frontend and keeper integrations should read `TrancheVault.getRequestEpochWindow()` or the selected
 `PerpsPublicLens.getTrancheQueues(bool)` response immediately before constructing timing-sensitive UI or preflight

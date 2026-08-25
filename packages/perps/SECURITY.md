@@ -75,13 +75,23 @@ constructor bindings. `getSettlementHealth()` checks those bindings again at run
 records the planner, settlement-sidecar, admin, Oracle/Pyth, vault, book, and asset identities for off-chain drift
 comparison. This is detection only; the monitor cannot repair wiring or authorize a replacement.
 
+`EmergencyPauseCoordinator` is independently immutable-bound to the exact RouterAdmin and HousePool. Deployment
+installs it as both components' pauser. It does not trust or call the Lens: monitoring output, `reasonHash`, and
+`evidenceHash` are advisory incident evidence, and only the configured guardian may trigger containment.
+
+`OrderRouter` constructor-deploys one `OrderRouterLiquidationBatchSidecar` and exposes its immutable address. The
+sidecar has no mutable storage or upgrade setter, records the deploying Router immutably, and rejects direct calls;
+its batch entrypoint is valid only under delegatecall where `address(this)` is that Router. Its Router self-callback
+remains self-only, so an external caller cannot use the sidecar to bypass Router authorization or reentrancy guards.
+
 ### Instant owner controls
 
 The owner can act immediately to:
 
 - pause and unpause `OrderRouter` through `OrderRouterAdmin`,
 - pause and unpause `HousePool`,
-- assign the dedicated `pauser` role on `OrderRouterAdmin` and `HousePool`,
+- install or replace the common coordinator pauser on `OrderRouterAdmin` and `HousePool`,
+- rotate or disable the coordinator guardian,
 - set the protocol treasury account,
 - initiate an ownership transfer, which the pending owner must explicitly accept through the `Ownable2Step` flow.
 
@@ -234,13 +244,32 @@ The system relies on standard audited libraries and treats them as trusted build
 
 The owner can tune risk and liveness configuration and activate pauses, but cannot arbitrarily rewrite custody state.
 
-### Dedicated pauser
+### Guardian and emergency coordinator
 
-`OrderRouterAdmin` and `HousePool` each support an owner-assigned `pauser` address. Router pausing is applied through the admin contract onto router-controlled paths.
+`OrderRouterAdmin` and `HousePool` retain separate owner-controlled pause state, but normal deployment installs one
+`EmergencyPauseCoordinator` as both pausers. Governance owns the coordinator and assigns its guardian.
 
-- The `pauser` can call `pause()` immediately.
-- The `pauser` cannot call `unpause()` or change configuration.
-- The owner retains both `pause()` and `unpause()` authority plus role assignment.
+- Only the guardian may call `triggerEmergencyPause(reasonHash,evidenceHash)`.
+- The transaction pauses RouterAdmin first and HousePool second; any failure rolls back every change made by that
+  call while preserving pre-existing pause state. Repeated or partially pre-paused calls are idempotent.
+- The coordinator can only add restrictions. It cannot unpause, change child configuration, set prices, move funds,
+  or call arbitrary targets. Governance retains direct owner-only recovery and role assignment.
+- Router pause records an inclusive, monotonic order-id cutoff. Pending opens at or below it are permanently invalid,
+  including after unpause; later orders are unaffected.
+- Cleanup is permissionless and oracle-independent. It returns all remaining committed margin and execution bounty to
+  the trader's free internal settlement, pays the caller nothing, and defers carry checkpointing to the trader's next
+  ordinary margin mutation. The protocol incident keeper therefore funds cleanup gas.
+- Liquidation applies the same risk-off refund before forfeiting unaffected queued bounties, so cleanup-first and
+  liquidation-first keeper ordering cannot change whether the invalidated-open reservation is refunded. Refunded free
+  settlement remains ordinary trader capital and may still satisfy legitimate liquidation obligations. Liquidation
+  reuses the exact single-order Clearinghouse reversal for each invalidated open; this is bounded by the 32-order
+  account cap and remains inside one rollback frame. A one-call aggregate variant was rejected because it made the
+  Router exceed both EIP-170 and its pre-change runtime baseline.
+- HousePool pause blocks LP entry only. Redemptions, synchronized redemption funding, and funded claims remain live.
+  It does not itself unlock cancellation of a matured deposit; that request still needs an existing rejection,
+  projected-wipe, Senior-impairment, or Senior-reservation escape condition, or later activation after recovery.
+- LP request-off, LP settlement-off, and corrupted-queue quarantine are separate proposed breakers, not powers hidden
+  in this coordinator.
 
 ### Keepers
 
@@ -296,9 +325,12 @@ Current policy is intentionally simple:
 
 - slippage-invalid orders fail terminally,
 - expired orders fail terminally,
-- typed engine failures route bounty according to semantic failure category,
+- ordinary terminal engine failures pay the cleanup caller from the reserved bounty; the reason remains typed for
+  diagnostics but does not change that routing,
 - terminal-invalid closes pay the keeper from the already locked action reserve rather than refunding it to the trader wallet,
 - open-order refunds and keeper payouts credit clearinghouse settlement rather than sending direct wallet USDC transfers,
+- persistent risk-off cancellation is administrative invalidation, precedes expiry, needs no oracle, and fully refunds
+  the trader internally without paying the cleanup caller,
 - the router does not maintain a retry or requeue lane.
 
 ### Oracle regimes
@@ -787,6 +819,7 @@ As of May 21, 2026, `master` includes the resolution commit and later changes. F
 | `HousePool` | Pre-audit reviewed; formal audit pending |
 | `TrancheVault` | Pre-audit reviewed; formal audit pending |
 | `SettlementMonitorLens` and monitor-bound sidecar | Read-only monitoring addition; formal audit pending |
+| `EmergencyPauseCoordinator` and persistent Router risk-off refund path | Emergency containment addition; formal audit pending |
 
 ## Security Contact
 
