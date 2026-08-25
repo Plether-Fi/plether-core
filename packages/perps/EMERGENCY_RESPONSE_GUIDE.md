@@ -36,7 +36,9 @@ exits**. Plether therefore provides granular breakers, not a global protocol sto
 | LP freshness/accounting gates | Automatically evaluated from canonical Engine and HousePool state | Settlement/redemption funding while withdrawals are not live; activation on stale marks, deficits, impairment, unassigned assets, or unavailable Senior capacity | Unrelated trading and claims already funded | Automatic after canonical state becomes eligible |
 
 The unified incident event uses fixed bits: RouterAdmin risk-off `1`, HousePool entry pause `2`, and LP epoch
-settlement hold `4`. Therefore risk-off plus entry is mask `3` and full containment is mask `7`.
+settlement hold `4`. The restrictions requested by risk-off plus entry are `3`, while full containment requests `7`.
+The event's previous/new masks describe the complete observed state, not only the requested action. For example, a
+risk-off action taken while settlement is already held emits a new mask of `7`, not `3`.
 
 Use the narrowest action that contains the credible failure. Direct owner actions remain available for governance
 operations, but operators must record and monitor any partial restriction state.
@@ -221,8 +223,8 @@ settlement; it does not repair state or guarantee success.
   that a later transaction succeeds.
 - Risk-off permanently invalidates covered pending opens; cleanup remains lazy and bounded.
 - The monitor is advisory. Reason/evidence hashes are incident metadata, not on-chain proofs.
-- There is no arbitrary caller-selected mask, claim-off, request-off, queue quarantine, emergency price setter,
-  discretionary close-off, or global freeze.
+- There is no arbitrary caller-selected mask, claim-off, redemption-request-off or global all-LP-request freeze,
+  queue quarantine, emergency price setter, discretionary close-off, or global protocol freeze.
 - The coordinator protects only its immutable RouterAdmin and HousePool. Wrong bindings or pauser assignments cause
   atomic calls to revert.
 - A compromised governance owner can still use its owner authorities; the guardian cannot constrain governance.

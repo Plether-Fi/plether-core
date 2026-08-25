@@ -5,6 +5,7 @@ import {BasePerpTest} from "../BasePerpTest.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
+import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {Test} from "forge-std/Test.sol";
 
@@ -28,6 +29,11 @@ contract PerpHousePoolLifecycleHandler is Test {
 
     address[4] internal actors;
     LastTransfer internal lastTransfer;
+
+    uint256 public ghostHeldSettlementAttempts;
+    uint256 public ghostHeldSettlementUnexpectedSuccesses;
+    uint256 public ghostHeldSettlementWrongReverts;
+    uint256 public ghostHeldSettlementAccountingMutations;
 
     constructor(
         MockUSDC _usdc,
@@ -107,6 +113,21 @@ contract PerpHousePoolLifecycleHandler is Test {
         pool.unpause();
     }
 
+    function setLpEpochSettlementHold(
+        bool held
+    ) external {
+        if (pool.lpEpochSettlementPaused() == held) {
+            return;
+        }
+
+        vm.prank(owner);
+        if (held) {
+            pool.pauseLpEpochSettlement();
+        } else {
+            pool.unpauseLpEpochSettlement();
+        }
+    }
+
     function requestDeposit(
         bool isSenior,
         uint256 actorIndex,
@@ -158,6 +179,10 @@ contract PerpHousePoolLifecycleHandler is Test {
     }
 
     function settleLpEpoch() external {
+        if (pool.lpEpochSettlementPaused()) {
+            return;
+        }
+
         uint256 cutoffEpoch = pool.currentLpEpoch();
         (, uint256 seniorRedeemShares) = seniorVault.getMaturedRedeemHead(cutoffEpoch);
         (, uint256 juniorRedeemShares) = juniorVault.getMaturedRedeemHead(cutoffEpoch);
@@ -171,6 +196,25 @@ contract PerpHousePoolLifecycleHandler is Test {
 
         _refreshMark();
         pool.settleLpEpoch(0, 0);
+    }
+
+    function attemptLpEpochSettlementWhileHeld() external {
+        if (!pool.lpEpochSettlementPaused()) {
+            return;
+        }
+
+        bytes32 accountingBefore = _epochAccountingDigest();
+        (bool success, bytes memory revertData) = address(pool).call(abi.encodeCall(IHousePool.settleLpEpoch, (0, 0)));
+
+        ghostHeldSettlementAttempts++;
+        if (success) {
+            ghostHeldSettlementUnexpectedSuccesses++;
+        } else if (_revertSelector(revertData) != IHousePool.HousePool__LpEpochSettlementPaused.selector) {
+            ghostHeldSettlementWrongReverts++;
+        }
+        if (_epochAccountingDigest() != accountingBefore) {
+            ghostHeldSettlementAccountingMutations++;
+        }
     }
 
     function claimDeposit(
@@ -333,6 +377,93 @@ contract PerpHousePoolLifecycleHandler is Test {
         engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
     }
 
+    function _epochAccountingDigest() internal view returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                pool.currentLpEpoch(),
+                pool.lastReconcileTime(),
+                pool.lastSeniorCouponCheckpointTime(),
+                pool.seniorPrincipal(),
+                pool.juniorPrincipal(),
+                pool.seniorHighWaterMark(),
+                pool.accountedAssets(),
+                pool.unassignedAssets(),
+                pool.pendingRecapitalizationUsdc(),
+                pool.pendingTradingRevenueUsdc(),
+                pool.reservedSeniorDepositAssetsUsdc(),
+                pool.terminalDeficitUsdc(),
+                usdc.balanceOf(address(pool)),
+                _vaultEpochAccountingDigest(seniorVault),
+                _vaultEpochAccountingDigest(juniorVault)
+            )
+        );
+    }
+
+    function _vaultEpochAccountingDigest(
+        TrancheVault vault
+    ) internal view returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                vault.totalSupply(),
+                vault.balanceOf(address(vault)),
+                usdc.balanceOf(address(vault)),
+                vault.pendingDepositEscrowAssets(),
+                vault.pendingRedeemEscrowShares(),
+                vault.depositClaimEscrowShares(),
+                vault.withdrawalEscrowAssets(),
+                vault.depositQueueHead(),
+                vault.depositQueueTail(),
+                vault.redeemQueueHead(),
+                vault.redeemQueueTail(),
+                _depositHeadDigest(vault),
+                _redeemHeadDigest(vault)
+            )
+        );
+    }
+
+    function _depositHeadDigest(
+        TrancheVault vault
+    ) internal view returns (bytes32 digest) {
+        uint256 epochId = vault.depositQueueHead();
+        if (epochId == 0) {
+            return bytes32(0);
+        }
+
+        (bool epochRead, bytes memory epochData) =
+            address(vault).staticcall(abi.encodeWithSignature("depositEpochs(uint256)", epochId));
+        (bool queueRead, bytes memory queueData) =
+            address(vault).staticcall(abi.encodeWithSignature("depositEpochQueueState(uint256)", epochId));
+        require(epochRead && queueRead, "deposit epoch digest read failed");
+        return keccak256(abi.encode(epochId, epochData, queueData));
+    }
+
+    function _redeemHeadDigest(
+        TrancheVault vault
+    ) internal view returns (bytes32 digest) {
+        uint256 epochId = vault.redeemQueueHead();
+        if (epochId == 0) {
+            return bytes32(0);
+        }
+
+        (bool epochRead, bytes memory epochData) =
+            address(vault).staticcall(abi.encodeWithSignature("redeemEpochs(uint256)", epochId));
+        (bool queueRead, bytes memory queueData) =
+            address(vault).staticcall(abi.encodeWithSignature("redeemEpochQueueState(uint256)", epochId));
+        require(epochRead && queueRead, "redeem epoch digest read failed");
+        return keccak256(abi.encode(epochId, epochData, queueData));
+    }
+
+    function _revertSelector(
+        bytes memory revertData
+    ) internal pure returns (bytes4 selector) {
+        if (revertData.length < 4) {
+            return bytes4(0);
+        }
+        assembly ("memory-safe") {
+            selector := mload(add(revertData, 0x20))
+        }
+    }
+
 }
 
 contract PerpHousePoolLifecycleInvariantTest is BasePerpTest {
@@ -364,24 +495,30 @@ contract PerpHousePoolLifecycleInvariantTest is BasePerpTest {
 
         handler = new PerpHousePoolLifecycleHandler(usdc, engine, pool, seniorVault, juniorVault, address(this));
 
-        bytes4[] memory selectors = new bytes4[](14);
+        bytes4[] memory selectors = new bytes4[](16);
         selectors[0] = handler.initializeSeed.selector;
         selectors[1] = handler.activateTrading.selector;
         selectors[2] = handler.pausePool.selector;
         selectors[3] = handler.unpausePool.selector;
-        selectors[4] = handler.requestDeposit.selector;
-        selectors[5] = handler.requestRedeem.selector;
-        selectors[6] = handler.settleLpEpoch.selector;
-        selectors[7] = handler.claimDeposit.selector;
-        selectors[8] = handler.claimRedeem.selector;
-        selectors[9] = handler.transferShares.selector;
-        selectors[10] = handler.warpForward.selector;
-        selectors[11] = handler.mintExcess.selector;
-        selectors[12] = handler.accountExcess.selector;
-        selectors[13] = handler.sweepExcess.selector;
+        selectors[4] = handler.setLpEpochSettlementHold.selector;
+        selectors[5] = handler.attemptLpEpochSettlementWhileHeld.selector;
+        selectors[6] = handler.requestDeposit.selector;
+        selectors[7] = handler.requestRedeem.selector;
+        selectors[8] = handler.settleLpEpoch.selector;
+        selectors[9] = handler.claimDeposit.selector;
+        selectors[10] = handler.claimRedeem.selector;
+        selectors[11] = handler.transferShares.selector;
+        selectors[12] = handler.warpForward.selector;
+        selectors[13] = handler.mintExcess.selector;
+        selectors[14] = handler.accountExcess.selector;
+        selectors[15] = handler.sweepExcess.selector;
 
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
         targetContract(address(handler));
+
+        handler.setLpEpochSettlementHold(true);
+        handler.attemptLpEpochSettlementWhileHeld();
+        handler.setLpEpochSettlementHold(false);
     }
 
     function invariant_SeedLifecycleFlagsStayConsistent() public view {
@@ -441,6 +578,19 @@ contract PerpHousePoolLifecycleInvariantTest is BasePerpTest {
     function invariant_AsyncEscrowsConserveVaultCustody() public view {
         _assertEscrowConservation(seniorVault);
         _assertEscrowConservation(juniorVault);
+    }
+
+    function invariant_HeldLpEpochSettlementAttemptsRevertWithoutAccountingMutation() public view {
+        assertGt(handler.ghostHeldSettlementAttempts(), 0, "held settlement action must remain reachable");
+        assertEq(handler.ghostHeldSettlementUnexpectedSuccesses(), 0, "held LP epoch settlement must never succeed");
+        assertEq(
+            handler.ghostHeldSettlementWrongReverts(), 0, "held LP epoch settlement must use the dedicated hold error"
+        );
+        assertEq(
+            handler.ghostHeldSettlementAccountingMutations(),
+            0,
+            "held LP epoch settlement must not mutate epoch accounting"
+        );
     }
 
     function invariant_ShareTransfersPropagateCooldownTimestamp() public view {

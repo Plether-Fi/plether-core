@@ -269,7 +269,8 @@ Reachability note:
   conditions or later activation remain necessary, and releasing a breaker neither repairs state nor guarantees a
   successful settlement.
 - Deliberate liveness: no discretionary action can block trader closes/reductions, liquidations, or already-funded
-  deposit/redemption claims. LP request-off and corrupted-queue quarantine remain out of scope.
+  deposit/redemption claims. Redemption-request-off, a global all-LP-request freeze, and corrupted-queue quarantine
+  remain out of scope; actions containing the entry restriction do stop new deposit requests.
 
 ### Stale-mark close bounty commits
 

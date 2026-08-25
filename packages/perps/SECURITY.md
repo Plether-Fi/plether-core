@@ -283,7 +283,8 @@ governance owns the coordinator and assigns its guardian.
   cancellations, trading, recapitalization/reconciliation, and already-funded claims remain live. Deposits can
   accumulate in escrow under unchanged cancellation rules.
 - Trader closes/reductions, liquidations, and already-funded claims are deliberately outside guardian authority.
-  LP request-off, corrupted-queue quarantine, emergency pricing, and a global freeze do not exist.
+  Redemption-request-off, a global all-LP-request freeze, corrupted-queue quarantine, emergency pricing, and a
+  global protocol freeze do not exist. Actions containing the LP-entry restriction do stop new deposit requests.
 - A breaker is containment, not repair. Its release only restores eligibility to attempt the path and does not prove
   accounting, oracle, custody, liquidity, or queue health or guarantee transaction success.
 

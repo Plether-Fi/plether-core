@@ -761,10 +761,11 @@ Timelocked surfaces include:
 - `OrderRouterAdmin` -> `OrderRouter.RouterConfig`
 - `OrderRouterAdmin` -> `OrderRouter.OracleConfig` for the configured `PletherOracle` address
 
-Instant controls remain for one-time wiring and fee withdrawal. `OrderRouter` pause/unpause is owner-gated on
-`OrderRouterAdmin` rather than the router itself. The installed coordinator can add any of its three fixed
-restriction combinations but exposes no unpause method; governance recovers Router risk-off, Pool entry, and Pool
-settlement separately and deliberately. Manual restrictions do not expire.
+Instant controls remain for one-time wiring and fee withdrawal. `OrderRouterAdmin.pause()` is callable by its owner
+or configured pauser, while `unpause()` is owner-only; neither control lives on the router itself. The installed
+coordinator can add any of its three fixed restriction combinations but exposes no unpause method; governance
+recovers Router risk-off, Pool entry, and Pool settlement separately and deliberately. Manual restrictions do not
+expire.
 
 Each valid `PoolConfig` proposal supplies all six fields, replaces any earlier pending proposal, and restarts the
 48-hour timelock. Finalization atomically replaces the entire active configuration, so a proposal intended to change
@@ -791,8 +792,9 @@ only one field must repeat the desired active values for the other five.
   creates no new cancellation right and has no expiry. Only the HousePool owner can release it.
 - The guardian cannot unpause, rotate itself, change configuration, set prices, move funds, or call arbitrary
   contracts. Governance may rotate/disable it and owns staged recovery.
-- Trader closes/reductions, liquidations, and already-funded claims are deliberately unpausable. There is no LP
-  request-off, arbitrary restriction mask, corrupted-queue quarantine, emergency price setter, or global freeze.
+- Trader closes/reductions, liquidations, redemption requests, and already-funded claims are deliberately
+  unpausable. There is no redemption-request-off or global all-LP-request freeze, arbitrary restriction mask,
+  corrupted-queue quarantine, emergency price setter, or global protocol freeze.
 - A breaker contains transitions; it does not repair accounting, oracle, custody, liquidity, or queue state, and
   releasing it is not a promise that the next transaction succeeds. Off-chain automatic triggering is out of scope.
 - The canonical operator guide, including off-chain guardian requirements and hard limitations, is

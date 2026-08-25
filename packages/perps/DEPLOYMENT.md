@@ -322,8 +322,10 @@ The configuration, seed, and activation phases of the bootstrap script are desig
 
 Before proposing limits, seeding, or activation, bootstrap derives the Engine from `HousePool.ENGINE()` and verifies
 that a code-bearing `TerminalNavBookV2` is wired with matching Engine, cap, and 100-token quantum and that the supplied
-redemption-math sidecar has the expected implementation id. A partial or misbound stack fails closed. Before a first
-trading activation it additionally requires a nonzero live guardian, both exact coordinator pauser bindings,
+redemption-math sidecar has the expected implementation id. Observable core and coordinator binding mismatches fail
+closed. The supplied sidecar check is inspection-only because bootstrap cannot read back HousePool's internal
+immutable binding; the canonical deployment transaction and manifest establish that exact binding. Before a first
+trading activation bootstrap additionally requires a nonzero live guardian, both exact coordinator pauser bindings,
 unpaused RouterAdmin/HousePool entry, and an inactive LP settlement hold. Inspection-safe reruns after activation may
 observe active containment but never unpause any component or clear/rewrite the historical risk-off cutoff.
 
@@ -397,8 +399,8 @@ pause trader closes/reductions or already-funded claims and does not create a gl
    `unpauseLpEpochSettlement()` functions. There is no expiry. Never attempt to reset the historical cutoff. Release
    restores eligibility but does not repair state or guarantee success. Rotate/disable an implicated guardian.
 
-This runbook does not provide LP request-off, corrupted-queue quarantine, an arbitrary restriction mask, emergency
-pricing, discretionary close-off, or off-chain automatic triggering.
+This runbook does not provide redemption-request-off or a global all-LP-request freeze, corrupted-queue quarantine,
+an arbitrary restriction mask, emergency pricing, discretionary close-off, or off-chain automatic triggering.
 
 Frontend and keeper integrations should read `TrancheVault.getRequestEpochWindow()` or the selected
 `PerpsPublicLens.getTrancheQueues(bool)` response immediately before constructing timing-sensitive UI or preflight

@@ -495,10 +495,10 @@ interface IHousePool {
     ///      buckets and advance the coupon checkpoint.
     function reconcile() external;
 
-    /// @notice Returns whether the protocol-level withdrawal-settlement status gate is open.
+    /// @notice Returns whether the protocol-level redemption-funding status gate is open.
     /// @dev A true result does not guarantee nonzero pool liquidity or matured withdrawal demand. Already funded claims
     ///      are paid from vault escrow and deliberately do not depend on this gate.
-    /// @return Whether the engine is not degraded and any required mark is sufficiently fresh for new funding
+    /// @return Whether settlement is not held, the engine is not degraded, and any required mark is fresh for funding
     function isWithdrawalLive() external view returns (bool);
 
     /// @notice Returns true after either tranche seed position has been initialized.
@@ -522,9 +522,9 @@ interface IHousePool {
     ) external view returns (bool);
 
     /// @notice Returns the projected tranche-neutral pending-deposit activation gate before redemption funding.
-    /// @dev Projects post-reconcile state before tranche-specific checks. Senior redemption funding can still change
-    ///      principal/HWM rounding, and exact settlement rechecks the live post-redemption gate. This diagnostic is not
-    ///      a new-request admission quote or an execution commitment.
+    /// @dev Returns false during an LP settlement hold. Otherwise projects post-reconcile state before tranche-specific
+    ///      checks. Senior redemption funding can still change principal/HWM rounding, and exact settlement rechecks
+    ///      the live post-redemption gate. This diagnostic is not a new-request admission quote or execution commitment.
     /// @return Whether projected post-reconcile state passes the common activation gate before redemption funding
     function canSettleDepositEntries() external view returns (bool);
 

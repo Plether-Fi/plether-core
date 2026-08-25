@@ -56,15 +56,18 @@ price, staleness, feed ordering, and component publish-time-divergence validatio
   deposits do not activate and new redemptions are not funded. New deposits/Senior reservations and redemptions may
   still queue, existing cancellation rules do not change, and already-funded claims remain available.
 - Closes/reductions, liquidations, mark refresh, recapitalization/reconciliation, and funded claims are deliberately
-  unpausable. There is no request-off, arbitrary mask, queue quarantine, emergency price setter, or global freeze.
+  unpausable. Redemption-request-off and a global all-LP-request freeze do not exist; actions containing the entry
+  restriction do stop new deposit requests. There is no arbitrary mask, queue quarantine, emergency price setter, or
+  global protocol freeze.
 - Governance alone recovers Router risk-off, LP entry, and LP settlement. Restrictions have no expiry; release does
   not repair state or guarantee the next transaction, and unpause never clears the historical cutoff. Automated
   off-chain guardian operation remains out of scope.
 
 `SettlementMonitorLens` reports a readable active hold as an explicit operational blocker and deposit deferral while
 preserving route classification for recovery. A failed hold read is an unknown Pool dependency. `LpEpochKeeper`
-rejects an active hold before payload decoding, fee quotation, or broadcast. Because hold state becomes part of the
-observation/configuration digest, the monitor schema and both digest domains advance from V1 to V2.
+rejects an active hold before payload decoding, fee quotation, or broadcast. Hold state is part of the observation
+digest, and the monitoring ABI changes, so the monitor schema and both digest domains advance from V1 to V2. Runtime
+hold changes do not alter `observableConfigDigest`.
 
 To preserve HousePool EIP-170 headroom, deployment now creates a stateless pure
 `HousePoolRedemptionMathSidecar` before HousePool and passes its address into the constructor. The deploy/bootstrap

@@ -1332,10 +1332,11 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         return ctx.pendingState.waterfall.seniorPrincipal < ctx.pendingState.waterfall.seniorHighWaterMark;
     }
 
-    /// @notice Returns whether withdrawals are live under current mark freshness and runtime mode.
+    /// @notice Returns whether new redemption funding is live under the settlement hold, mark freshness, and runtime
+    ///         mode.
     /// @dev This is a status gate only: a true result does not guarantee nonzero liquidity, unlocked vault shares,
-    ///      or satisfaction of the vault's holder cooldown.
-    /// @return True when the engine is not degraded and any required mark is sufficiently fresh
+    ///      or satisfaction of the vault's holder cooldown. Already-funded claims do not depend on this gate.
+    /// @return True when settlement is not held, the engine is not degraded, and any required mark is fresh
     function isWithdrawalLive() external view returns (bool) {
         return _withdrawalsLive(_getHousePoolInputSnapshot(), _getHousePoolStatusSnapshot());
     }

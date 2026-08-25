@@ -102,6 +102,8 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
     }
 
     uint256 internal constant EIP170_RUNTIME_CODE_LIMIT = 24_576;
+    uint256 internal constant HOUSE_POOL_RUNTIME_TARGET = 24_529;
+    uint256 internal constant REDEMPTION_MATH_SIDECAR_RUNTIME_LIMIT = 1200;
     uint256 internal constant CFD_ENGINE_RUNTIME_BASELINE = 24_429;
 
     address internal constant ALICE = address(0xA11CE);
@@ -143,7 +145,15 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
             "terminal NAV synchronization must not grow CfdEngine runtime"
         );
         assertLe(
-            address(pool).code.length, EIP170_RUNTIME_CODE_LIMIT, "atomic LP settlement must keep HousePool deployable"
+            address(pool).code.length,
+            HOUSE_POOL_RUNTIME_TARGET,
+            "atomic LP settlement must keep HousePool within its measured runtime target"
+        );
+        assertLt(address(pool).code.length, EIP170_RUNTIME_CODE_LIMIT, "HousePool must remain EIP-170 deployable");
+        assertLt(
+            address(housePoolRedemptionMathSidecar).code.length,
+            REDEMPTION_MATH_SIDECAR_RUNTIME_LIMIT,
+            "redemption math sidecar must remain below its runtime limit"
         );
         assertLe(
             address(router).code.length,
@@ -620,7 +630,82 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
         );
     }
 
-    function test_AtomicSettlement_SettlementHoldRollsBackOracleEnginePoolVaultAndEth() public {
+    function test_SettlementHold_AllowsSeniorReservationAndCancellation() public {
+        uint256 assets = 10_000e6;
+        uint256 reservedBefore = pool.reservedSeniorDepositAssetsUsdc();
+
+        pool.pauseLpEpochSettlement();
+        usdc.mint(ALICE, assets);
+        vm.startPrank(ALICE);
+        usdc.approve(address(seniorVault), assets);
+        uint256 requestId = seniorVault.requestDeposit(assets, ALICE, ALICE);
+        vm.stopPrank();
+
+        assertTrue(pool.lpEpochSettlementPaused());
+        assertEq(pool.reservedSeniorDepositAssetsUsdc(), reservedBefore + assets);
+        assertEq(seniorVault.pendingDepositRequest(requestId, ALICE), assets);
+
+        vm.prank(ALICE);
+        assertEq(seniorVault.cancelPendingDeposit(requestId), assets);
+
+        assertTrue(pool.lpEpochSettlementPaused(), "cancellation must not release the settlement hold");
+        assertEq(pool.reservedSeniorDepositAssetsUsdc(), reservedBefore);
+        assertEq(seniorVault.pendingDepositRequest(requestId, ALICE), 0);
+        assertEq(usdc.balanceOf(ALICE), assets, "cancellation must return the Senior deposit escrow");
+    }
+
+    function test_SettlementHold_DoesNotMakeHealthyMaturedDepositCancellable() public {
+        uint256 assets = 10_000e6;
+        uint256 requestId = _requestJuniorDeposit(ALICE, assets);
+        _warpToEpoch(requestId);
+
+        pool.pauseLpEpochSettlement();
+
+        vm.prank(ALICE);
+        vm.expectRevert(TrancheVault.TrancheVault__DepositEpochAlreadyActive.selector);
+        juniorVault.cancelPendingDeposit(requestId);
+
+        assertTrue(pool.lpEpochSettlementPaused());
+        assertEq(juniorVault.pendingDepositRequest(requestId, ALICE), assets);
+        assertEq(juniorVault.claimableDepositRequest(requestId, ALICE), 0);
+    }
+
+    function test_SettlementHold_AllowsAuthorizedRecapitalizationAndDirectReconcile() public {
+        uint256 targetSeniorPrincipal = pool.seniorPrincipal();
+        uint256 retainedAssets = targetSeniorPrincipal / 2;
+        uint256 rawAssets = pool.rawAssets();
+        assertGt(rawAssets, retainedAssets, "fixture must have enough pool cash to impair Senior");
+
+        pool.pauseLpEpochSettlement();
+        usdc.burn(address(pool), rawAssets - retainedAssets);
+
+        vm.prank(address(seniorVault));
+        pool.reconcile();
+
+        assertTrue(pool.lpEpochSettlementPaused());
+        assertEq(pool.juniorPrincipal(), 0, "direct reconcile must apply the loss while held");
+        assertEq(pool.seniorPrincipal(), retainedAssets, "direct reconcile must impair Senior while held");
+
+        uint256 recapitalization = targetSeniorPrincipal - retainedAssets;
+        usdc.mint(address(pool), recapitalization);
+        vm.prank(address(engine));
+        pool.recordClaimantInflow(
+            recapitalization,
+            IHousePool.ClaimantInflowKind.Recapitalization,
+            IHousePool.ClaimantInflowCashMode.CashArrived
+        );
+
+        assertEq(pool.pendingRecapitalizationUsdc(), recapitalization);
+        vm.prank(address(seniorVault));
+        pool.reconcile();
+
+        assertTrue(pool.lpEpochSettlementPaused(), "recovery accounting must not release the settlement hold");
+        assertEq(pool.pendingRecapitalizationUsdc(), 0);
+        assertEq(pool.seniorPrincipal(), targetSeniorPrincipal, "recapitalization must restore Senior while held");
+        assertEq(pool.seniorHighWaterMark(), targetSeniorPrincipal);
+    }
+
+    function test_AtomicSettlement_SettlementHoldRollsBackThenReleaseSettlesSameBacklog() public {
         uint256 aliceShares = _seedJuniorLp(ALICE, 100_000e6);
         vm.warp(juniorVault.lastDepositTime(ALICE) + juniorVault.DEPOSIT_COOLDOWN());
         _openMarkSensitivePosition();
@@ -644,6 +729,30 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
         router.settleLpEpoch{value: 1 ether}(_encodedUpdateData(120_000_000));
 
         _assertSettlementHoldSnapshot(beforeState, caller, depositId, redeemId);
+
+        pool.unpauseLpEpochSettlement();
+        vm.prank(caller);
+        router.settleLpEpoch{value: 1 ether}(_encodedUpdateData(120_000_000));
+
+        assertFalse(pool.lpEpochSettlementPaused());
+        assertEq(baseMockPyth.updatePriceFeedsCallCount(), beforeState.pythUpdateCalls + 1);
+        assertEq(engine.lastMarkPrice(), 120_000_000);
+        assertEq(juniorVault.pendingRedeemRequest(redeemId, ALICE), 0);
+        assertEq(juniorVault.claimableRedeemRequest(redeemId, ALICE), aliceShares / 5);
+        assertEq(juniorVault.pendingDepositRequest(depositId, BOB), 0);
+        assertEq(juniorVault.claimableDepositRequest(depositId, BOB), depositAssets);
+
+        uint256 updateCallsAfterSettlement = baseMockPyth.updatePriceFeedsCallCount();
+        vm.prank(caller);
+        vm.expectRevert(IHousePool.HousePool__NoLpEpochProgress.selector);
+        router.settleLpEpoch{value: 1 ether}(_encodedUpdateData(120_000_000));
+        assertEq(
+            baseMockPyth.updatePriceFeedsCallCount(),
+            updateCallsAfterSettlement,
+            "the released backlog must not settle or update the oracle twice"
+        );
+        assertEq(juniorVault.claimableRedeemRequest(redeemId, ALICE), aliceShares / 5);
+        assertEq(juniorVault.claimableDepositRequest(depositId, BOB), depositAssets);
     }
 
     function test_AtomicSettlement_NoProgressRollsBackOracleEngineCarryAndPoolState() public {

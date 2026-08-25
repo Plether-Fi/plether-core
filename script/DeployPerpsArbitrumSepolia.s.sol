@@ -246,43 +246,6 @@ contract DeployPerpsArbitrumSepolia is Script {
             deployed.settlementMonitorLensSidecar.MONITOR() == address(deployed.settlementMonitorLens),
             "SettlementMonitorLens Sidecar monitor mismatch"
         );
-        require(
-            address(deployed.settlementMonitorLensSidecar.ROUTER()) == address(deployed.router),
-            "SettlementMonitorLens Sidecar Router mismatch"
-        );
-        require(
-            address(deployed.settlementMonitorLensSidecar.ENGINE()) == address(deployed.engine),
-            "SettlementMonitorLens Sidecar Engine mismatch"
-        );
-        require(
-            address(deployed.settlementMonitorLensSidecar.HOUSE_POOL()) == address(deployed.housePool),
-            "SettlementMonitorLens Sidecar HousePool mismatch"
-        );
-        require(
-            address(deployed.settlementMonitorLensSidecar.ENGINE_PROTOCOL_LENS())
-                == address(deployed.housePool.ENGINE_PROTOCOL_LENS()),
-            "SettlementMonitorLens Sidecar ProtocolLens mismatch"
-        );
-        require(
-            address(deployed.settlementMonitorLensSidecar.CLEARINGHOUSE()) == address(deployed.clearinghouse),
-            "SettlementMonitorLens Sidecar Clearinghouse mismatch"
-        );
-        require(
-            address(deployed.settlementMonitorLensSidecar.TERMINAL_NAV_BOOK()) == address(deployed.terminalNavBook),
-            "SettlementMonitorLens Sidecar TerminalNavBook mismatch"
-        );
-        require(
-            address(deployed.settlementMonitorLensSidecar.SENIOR_VAULT()) == address(deployed.seniorVault),
-            "SettlementMonitorLens Sidecar SeniorVault mismatch"
-        );
-        require(
-            address(deployed.settlementMonitorLensSidecar.JUNIOR_VAULT()) == address(deployed.juniorVault),
-            "SettlementMonitorLens Sidecar JuniorVault mismatch"
-        );
-        require(
-            address(deployed.settlementMonitorLensSidecar.USDC()) == address(deployed.usdc),
-            "SettlementMonitorLens Sidecar USDC mismatch"
-        );
 
         deployed.emergencyPauseCoordinator =
             new EmergencyPauseCoordinator(deployed.routerAdmin, address(deployed.housePool), deployer);

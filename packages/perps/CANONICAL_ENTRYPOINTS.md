@@ -158,8 +158,8 @@ The following remain useful for tests, admin tooling, migration, and deep accoun
   surface.
 - `EmergencyPauseCoordinator`: guardian-only, immutable-bound surface with three fixed containment actions for new
   trading risk, LP entry, and/or LP settlement; no recovery, arbitrary mask, pricing, configuration, fund movement,
-  or arbitrary-call capability. Closes/reductions, liquidations, requests, and already-funded claims remain outside
-  its authority.
+  or arbitrary-call capability. Closes/reductions, liquidations, redemption requests, and already-funded claims
+  remain outside its authority; LP deposit requests are stopped by actions that include the entry restriction.
 - `CfdEngineAccountLens`: rich account/accounting diagnostics.
 - `CfdEngineProtocolLens`: protocol-accounting and house-pool snapshot diagnostics.
 - `MarginClearinghouse`: custody plumbing with a small public trader surface and a larger operator surface.
