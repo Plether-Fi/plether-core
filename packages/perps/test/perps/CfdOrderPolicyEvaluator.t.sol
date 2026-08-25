@@ -455,6 +455,18 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         evaluator.evaluateClose(_baseCloseSnapshot(), delta, _permissiveBounds(), 1e6);
     }
 
+    function test_InvalidPlannerResultWithOkCodeHasStableError() public {
+        CfdEnginePlanTypes.OpenDelta memory openDelta = _baseOpenDelta();
+        openDelta.valid = false;
+        vm.expectRevert(ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__InvalidPlannerResult.selector);
+        evaluator.evaluateOpen(_baseOpenSnapshot(), openDelta, _permissiveBounds(), BOUNTY);
+
+        CfdEnginePlanTypes.CloseDelta memory closeDelta = _baseCloseDelta();
+        closeDelta.valid = false;
+        vm.expectRevert(ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__InvalidPlannerResult.selector);
+        evaluator.evaluateClose(_baseCloseSnapshot(), closeDelta, _permissiveBounds(), 1e6);
+    }
+
     function _baseOpenSnapshot() private pure returns (CfdEnginePlanTypes.RawSnapshot memory snapshot) {
         snapshot.account = address(0xA11CE);
         snapshot.accountBuckets.settlementBalanceUsdc = 500e6;

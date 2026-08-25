@@ -4,6 +4,7 @@ pragma solidity 0.8.35;
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
 import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
 import {Test} from "forge-std/Test.sol";
@@ -411,6 +412,112 @@ contract OrderLifecycleBookTest is Test {
         book.finalize(_executedReceipt(39, ACCOUNT, request, intentHash));
     }
 
+    function test_FinalizeExecutionModeDisallowedPersistsTypedEvidence() public {
+        OrderV2Types.OrderRequest memory request = _request(bytes32("mode-disallowed"));
+        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 42, request, EXECUTION_BOUNTY_USDC);
+        OrderV2Types.OrderReceipt memory receipt = _failedReceipt(42, ACCOUNT, request, intentHash);
+        receipt.reason = OrderV2Types.TerminalReason.ExecutionModeDisallowed;
+        receipt.executionMode = OrderV2Types.ExecutionMode.Frozen;
+        receipt.failure = OrderV2Types.FailureDetails({
+            selector: ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__ExecutionModeDisallowed.selector,
+            category: 0,
+            code: 0,
+            constraint: OrderV2Types.ConstraintKind.None,
+            actual: uint256(OrderV2Types.ExecutionMode.Frozen),
+            limit: request.bounds.allowedExecutionModes,
+            revertDataHash: keccak256("mode disallowed failure")
+        });
+
+        book.finalize(receipt);
+
+        OrderV2Types.CompactOutcome memory terminalOutcome = book.outcome(42);
+        assertEq(uint8(terminalOutcome.reason), uint8(OrderV2Types.TerminalReason.ExecutionModeDisallowed));
+        assertEq(
+            terminalOutcome.failureSelector,
+            ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__ExecutionModeDisallowed.selector
+        );
+    }
+
+    function test_FinalizeConstraintViolationAcceptsEveryCanonicalConstraintLimit() public {
+        _finalizeConstraint(51, OrderV2Types.ConstraintKind.ExecutionBounty, 2e6);
+        _finalizeConstraint(52, OrderV2Types.ConstraintKind.ExecutionNotional, 102e6);
+        _finalizeConstraint(53, OrderV2Types.ConstraintKind.GrossAccountDebit, 260e6);
+        _finalizeConstraint(54, OrderV2Types.ConstraintKind.ActionCharge, 5e6);
+        _finalizeConstraint(55, OrderV2Types.ConstraintKind.ExplicitFees, 3e6);
+        _finalizeConstraint(56, OrderV2Types.ConstraintKind.PostPositionSize, 200e18);
+        _finalizeConstraint(57, OrderV2Types.ConstraintKind.PostSettlementBalance, 10e6);
+        _finalizeConstraint(58, OrderV2Types.ConstraintKind.PostPositionEquity, 3e6);
+        _finalizeConstraint(59, OrderV2Types.ConstraintKind.PostLeverage, 50_000);
+    }
+
+    function test_FinalizeRejectsUncoveredTerminalForgeryVariants() public {
+        OrderV2Types.OrderRequest memory request = _request(bytes32("terminal-forgeries"));
+        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 60, request, EXECUTION_BOUNTY_USDC);
+
+        OrderV2Types.OrderReceipt memory receipt = _executedReceipt(60, ACCOUNT, request, intentHash);
+        receipt.executor = address(0);
+        _expectInvalidTerminal(receipt);
+
+        receipt = _riskOffReceipt(60, request, intentHash);
+        receipt.failure.selector = bytes4(uint32(0xdeadbeef));
+        _expectInvalidTerminal(receipt);
+
+        vm.mockCall(ENGINE, abi.encodeWithSignature("protocolTreasury()"), abi.encode(PROTOCOL_TREASURY));
+        receipt = _accountLiquidatedReceipt(60, request, intentHash);
+        receipt.failure.selector = bytes4(uint32(0xdeadbeef));
+        _expectInvalidTerminal(receipt);
+
+        receipt = _failedReceipt(60, ACCOUNT, request, intentHash);
+        receipt.reason = OrderV2Types.TerminalReason.Slippage;
+        _expectInvalidTerminal(receipt);
+
+        receipt = _failedReceipt(60, ACCOUNT, request, intentHash);
+        receipt.reason = OrderV2Types.TerminalReason.PlannerRejected;
+        receipt.failure = OrderV2Types.FailureDetails({
+            selector: ICfdEngineTypes.CfdEngine__TypedOrderFailure.selector,
+            category: 1,
+            code: 1,
+            constraint: OrderV2Types.ConstraintKind.None,
+            actual: 0,
+            limit: 0,
+            revertDataHash: bytes32(0)
+        });
+        _expectInvalidTerminal(receipt);
+
+        receipt = _riskOffReceipt(60, request, intentHash);
+        receipt.bountyRecipient = OTHER_ACCOUNT;
+        _expectInvalidTerminal(receipt);
+
+        receipt = _accountLiquidatedReceipt(60, request, intentHash);
+        receipt.bountyRecipient = OTHER_ACCOUNT;
+        _expectInvalidTerminal(receipt);
+
+        receipt = _riskOffReceipt(60, request, intentHash);
+        receipt.priceReachedEngine = true;
+        _expectInvalidTerminal(receipt);
+    }
+
+    function test_FinalizeRejectsRecipientForZeroBounty() public {
+        OrderV2Types.OrderRequest memory request = _request(bytes32("zero-bounty-recipient"));
+        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 61, request, 0);
+        OrderV2Types.OrderReceipt memory receipt = _executedReceipt(61, ACCOUNT, request, intentHash);
+        receipt.bountyUsdc = 0;
+        receipt.bountyDisposition = OrderV2Types.BountyDisposition.None;
+        receipt.bountyRecipient = OTHER_ACCOUNT;
+
+        _expectInvalidTerminal(receipt);
+    }
+
+    function test_FinalizeRejectsTerminalClockOverflow() public {
+        OrderV2Types.OrderRequest memory request = _request(bytes32("clock-overflow"));
+        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 62, request, EXECUTION_BOUNTY_USDC);
+        OrderV2Types.OrderReceipt memory receipt = _executedReceipt(62, ACCOUNT, request, intentHash);
+        vm.roll(uint256(type(uint64).max) + 1);
+
+        vm.expectRevert(IOrderLifecycleBook.OrderLifecycleBook__TerminalClockOverflow.selector);
+        book.finalize(receipt);
+    }
+
     function test_FinalizeAllowsZeroBountyOnlyWithNoDispositionOrRecipient() public {
         OrderV2Types.OrderRequest memory request = _request(bytes32("zero-bounty"));
         (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 40, request, 0);
@@ -578,6 +685,53 @@ contract OrderLifecycleBookTest is Test {
             limit: request.bounds.maxGrossAccountDebitUsdc,
             revertDataHash: keccak256("typed failure data")
         });
+    }
+
+    function _riskOffReceipt(
+        uint64 orderId,
+        OrderV2Types.OrderRequest memory request,
+        bytes32 intentHash
+    ) private pure returns (OrderV2Types.OrderReceipt memory receipt) {
+        receipt = _failedReceipt(orderId, ACCOUNT, request, intentHash);
+        receipt.reason = OrderV2Types.TerminalReason.RiskOff;
+        receipt.executionMode = OrderV2Types.ExecutionMode.None;
+        receipt.priceSource = OrderV2Types.PriceSource.None;
+        receipt.executionPrice = 0;
+        receipt.oraclePublishTime = 0;
+        receipt.bountyDisposition = OrderV2Types.BountyDisposition.RefundedToAccount;
+        receipt.bountyRecipient = ACCOUNT;
+        delete receipt.failure;
+    }
+
+    function _accountLiquidatedReceipt(
+        uint64 orderId,
+        OrderV2Types.OrderRequest memory request,
+        bytes32 intentHash
+    ) private pure returns (OrderV2Types.OrderReceipt memory receipt) {
+        receipt = _failedReceipt(orderId, ACCOUNT, request, intentHash);
+        receipt.reason = OrderV2Types.TerminalReason.AccountLiquidated;
+        receipt.executionMode = OrderV2Types.ExecutionMode.None;
+        receipt.priceSource = OrderV2Types.PriceSource.Liquidation;
+        receipt.priceReachedEngine = false;
+        receipt.bountyDisposition = OrderV2Types.BountyDisposition.Forfeited;
+        receipt.bountyRecipient = PROTOCOL_TREASURY;
+        delete receipt.failure;
+    }
+
+    function _finalizeConstraint(
+        uint64 orderId,
+        OrderV2Types.ConstraintKind constraint,
+        uint256 limit
+    ) private {
+        OrderV2Types.OrderRequest memory request = _request(bytes32(uint256(orderId)));
+        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, orderId, request, EXECUTION_BOUNTY_USDC);
+        OrderV2Types.OrderReceipt memory receipt = _failedReceipt(orderId, ACCOUNT, request, intentHash);
+        receipt.failure.constraint = constraint;
+        receipt.failure.actual = limit + 1;
+        receipt.failure.limit = limit;
+
+        book.finalize(receipt);
+        assertEq(uint8(book.outcome(orderId).failedConstraint), uint8(constraint));
     }
 
     function _assertBoundsEq(
