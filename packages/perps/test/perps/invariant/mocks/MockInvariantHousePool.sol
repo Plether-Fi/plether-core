@@ -12,6 +12,7 @@ contract MockInvariantHousePool is IHousePool {
 
     MockUSDC public immutable usdc;
     address public immutable engine;
+    bool public lpEpochSettlementPaused;
 
     constructor(
         address _usdc,
@@ -155,8 +156,19 @@ contract MockInvariantHousePool is IHousePool {
     function settleLpEpoch(
         uint256,
         uint256
-    ) external pure returns (IHousePool.LpEpochSettlementResult memory result) {
+    ) external view returns (IHousePool.LpEpochSettlementResult memory result) {
+        require(!lpEpochSettlementPaused, "LP settlement paused");
         return result;
+    }
+
+    function pauseLpEpochSettlement() external {
+        require(!lpEpochSettlementPaused, "LP settlement already paused");
+        lpEpochSettlementPaused = true;
+    }
+
+    function unpauseLpEpochSettlement() external {
+        require(lpEpochSettlementPaused, "LP settlement not paused");
+        lpEpochSettlementPaused = false;
     }
 
     function assignUnassignedAssets(
@@ -205,8 +217,8 @@ contract MockInvariantHousePool is IHousePool {
 
     function reconcile() external pure {}
 
-    function isWithdrawalLive() external pure returns (bool) {
-        return true;
+    function isWithdrawalLive() external view returns (bool) {
+        return !lpEpochSettlementPaused;
     }
 
     function canAcceptTrancheDeposits(
@@ -215,8 +227,8 @@ contract MockInvariantHousePool is IHousePool {
         return true;
     }
 
-    function canSettleDepositEntries() external pure returns (bool) {
-        return true;
+    function canSettleDepositEntries() external view returns (bool) {
+        return !lpEpochSettlementPaused;
     }
 
     function isOracleFrozen() external pure returns (bool) {

@@ -3,6 +3,7 @@ pragma solidity 0.8.35;
 
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
+import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
 import {HousePoolRedemptionMathLib} from "@plether/perps/libraries/HousePoolRedemptionMathLib.sol";
 import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {Test} from "forge-std/Test.sol";
@@ -11,7 +12,7 @@ contract HousePoolRedemptionPhaseHarness is HousePool {
 
     constructor(
         address usdc
-    ) HousePool(usdc, address(0xE11E)) {}
+    ) HousePool(usdc, address(0xE11E), address(new HousePoolRedemptionMathSidecar())) {}
 
     function runRedemptionPhase(
         address vault,

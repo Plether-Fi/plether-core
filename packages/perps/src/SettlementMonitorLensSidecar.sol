@@ -34,21 +34,21 @@ interface ISettlementMonitorSidecarVaultView {
 ///      Bindings are constructor-only storage: this non-proxy contract exposes no setter or delegatecall path.
 contract SettlementMonitorLensSidecar {
 
-    uint256 internal constant CONFIG_SCHEMA_VERSION = 1;
-    bytes32 internal constant CONFIG_DOMAIN = keccak256("PLETHER_SETTLEMENT_CONFIG_V1");
+    uint256 internal constant CONFIG_SCHEMA_VERSION = 2;
+    bytes32 internal constant CONFIG_DOMAIN = keccak256("PLETHER_SETTLEMENT_CONFIG_V2");
     uint256 internal constant STATIC_READ_GAS = 500_000;
     uint256 internal constant MAX_STATIC_WORDS = 16;
 
     address public MONITOR;
-    OrderRouter public ROUTER;
-    CfdEngine public ENGINE;
-    HousePool public HOUSE_POOL;
-    CfdEngineProtocolLens public ENGINE_PROTOCOL_LENS;
-    MarginClearinghouse public CLEARINGHOUSE;
-    TerminalNavBookV2 public TERMINAL_NAV_BOOK;
-    TrancheVault public SENIOR_VAULT;
-    TrancheVault public JUNIOR_VAULT;
-    IERC20 public USDC;
+    OrderRouter internal ROUTER;
+    CfdEngine internal ENGINE;
+    HousePool internal HOUSE_POOL;
+    CfdEngineProtocolLens internal ENGINE_PROTOCOL_LENS;
+    MarginClearinghouse internal CLEARINGHOUSE;
+    TerminalNavBookV2 internal TERMINAL_NAV_BOOK;
+    TrancheVault internal SENIOR_VAULT;
+    TrancheVault internal JUNIOR_VAULT;
+    IERC20 internal USDC;
     address internal _BOUND_PLANNER;
     bytes32 internal _BOUND_PLANNER_CODEHASH;
 

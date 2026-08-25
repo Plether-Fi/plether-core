@@ -10,6 +10,7 @@ import {CfdEnginePlanner} from "@plether/perps/CfdEnginePlanner.sol";
 import {CfdEngineSettlementSidecar} from "@plether/perps/CfdEngineSettlementSidecar.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
+import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
@@ -152,7 +153,7 @@ contract GasProfileTest is Test {
         engine.setTerminalNavBook(address(terminalNavBook));
         engineAccountLens = new CfdEngineAccountLens(address(engine));
         engineLens = new CfdEngineLens(address(engine));
-        pool = new HousePool(usdc, address(engine));
+        pool = new HousePool(usdc, address(engine), address(new HousePoolRedemptionMathSidecar()));
 
         seniorVault = new TrancheVault(IERC20(usdc), address(pool), true, "Senior LP", "senUSDC");
         juniorVault = new TrancheVault(IERC20(usdc), address(pool), false, "Junior LP", "junUSDC");

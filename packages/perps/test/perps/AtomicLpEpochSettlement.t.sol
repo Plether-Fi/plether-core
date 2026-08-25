@@ -72,6 +72,35 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
 
     using stdStorage for StdStorage;
 
+    struct SettlementHoldRollbackSnapshot {
+        uint256 pythUpdateCalls;
+        int64 pythPrice;
+        uint256 pythPublishTime;
+        uint256 callerEth;
+        uint256 pythEth;
+        uint256 markPrice;
+        uint64 markTime;
+        uint256 bullCarryIndex;
+        uint256 bearCarryIndex;
+        uint256 lastReconcileTime;
+        uint256 lastSeniorCouponCheckpointTime;
+        uint256 seniorPrincipal;
+        uint256 juniorPrincipal;
+        uint256 seniorHighWaterMark;
+        uint256 accountedAssets;
+        uint256 poolUsdc;
+        uint256 vaultUsdc;
+        uint256 juniorSupply;
+        uint256 depositQueueHead;
+        uint256 depositQueueTail;
+        uint256 redeemQueueHead;
+        uint256 redeemQueueTail;
+        uint256 pendingDepositAssets;
+        uint256 claimableDepositAssets;
+        uint256 pendingRedeemShares;
+        uint256 claimableRedeemShares;
+    }
+
     uint256 internal constant EIP170_RUNTIME_CODE_LIMIT = 24_576;
     uint256 internal constant CFD_ENGINE_RUNTIME_BASELINE = 24_429;
 
@@ -545,6 +574,78 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
         assertEq(juniorVault.claimableDepositRequest(depositId, BOB), 0);
     }
 
+    function test_CachedSettlement_SettlementHoldPreservesBacklogUntilGovernanceRelease() public {
+        uint256 aliceShares = _seedJuniorLp(ALICE, 100_000e6);
+        vm.warp(juniorVault.lastDepositTime(ALICE) + juniorVault.DEPOSIT_COOLDOWN());
+
+        uint256 redeemId = _requestJuniorRedeem(ALICE, aliceShares / 5);
+        uint256 depositAssets = 10_000e6;
+        uint256 depositId = _requestJuniorDeposit(BOB, depositAssets);
+        assertEq(depositId, redeemId, "entry and exit must share the held epoch");
+        _warpToEpoch(depositId);
+
+        pool.pauseLpEpochSettlement();
+        assertTrue(pool.lpEpochSettlementPaused());
+
+        vm.expectRevert(IHousePool.HousePool__LpEpochSettlementPaused.selector);
+        pool.settleLpEpoch(0, 0);
+
+        assertEq(juniorVault.pendingRedeemRequest(redeemId, ALICE), aliceShares / 5);
+        assertEq(juniorVault.claimableRedeemRequest(redeemId, ALICE), 0);
+        assertEq(juniorVault.pendingDepositRequest(depositId, BOB), depositAssets);
+        assertEq(juniorVault.claimableDepositRequest(depositId, BOB), 0);
+
+        pool.unpauseLpEpochSettlement();
+        IHousePool.LpEpochSettlementResult memory result = pool.settleLpEpoch(0, 0);
+
+        assertGt(result.juniorFundedAssets, 0, "release must fund the preserved exit");
+        assertEq(result.juniorFundedShares, aliceShares / 5);
+        assertEq(result.juniorDepositAssets, depositAssets, "release must activate the preserved entry");
+        assertEq(juniorVault.pendingRedeemRequest(redeemId, ALICE), 0);
+        assertEq(juniorVault.claimableRedeemRequest(redeemId, ALICE), aliceShares / 5);
+        assertEq(juniorVault.pendingDepositRequest(depositId, BOB), 0);
+        assertEq(juniorVault.claimableDepositRequest(depositId, BOB), depositAssets);
+
+        vm.expectRevert(IHousePool.HousePool__NoLpEpochProgress.selector);
+        pool.settleLpEpoch(0, 0);
+        assertEq(
+            juniorVault.claimableRedeemRequest(redeemId, ALICE),
+            aliceShares / 5,
+            "the released backlog must not fund twice"
+        );
+        assertEq(
+            juniorVault.claimableDepositRequest(depositId, BOB),
+            depositAssets,
+            "the released backlog must not activate twice"
+        );
+    }
+
+    function test_AtomicSettlement_SettlementHoldRollsBackOracleEnginePoolVaultAndEth() public {
+        uint256 aliceShares = _seedJuniorLp(ALICE, 100_000e6);
+        vm.warp(juniorVault.lastDepositTime(ALICE) + juniorVault.DEPOSIT_COOLDOWN());
+        _openMarkSensitivePosition();
+
+        uint256 redeemId = _requestJuniorRedeem(ALICE, aliceShares / 5);
+        uint256 depositAssets = 10_000e6;
+        uint256 depositId = _requestJuniorDeposit(BOB, depositAssets);
+        assertEq(depositId, redeemId, "entry and exit must share the held epoch");
+        _warpToEpoch(depositId);
+
+        _setBasket(100_000_000, 0, block.timestamp);
+        baseMockPyth.setFee(1 ether);
+        address caller = address(0xC011E2);
+        vm.deal(caller, 2 ether);
+        pool.pauseLpEpochSettlement();
+
+        SettlementHoldRollbackSnapshot memory beforeState = _settlementHoldSnapshot(caller, depositId, redeemId);
+
+        vm.prank(caller);
+        vm.expectRevert(IHousePool.HousePool__LpEpochSettlementPaused.selector);
+        router.settleLpEpoch{value: 1 ether}(_encodedUpdateData(120_000_000));
+
+        _assertSettlementHoldSnapshot(beforeState, caller, depositId, redeemId);
+    }
+
     function test_AtomicSettlement_NoProgressRollsBackOracleEngineCarryAndPoolState() public {
         _openMarkSensitivePosition();
         _warpToEpoch(pool.currentLpEpoch() + 1);
@@ -785,6 +886,99 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
     ) internal pure returns (bytes[] memory updateData) {
         updateData = new bytes[](1);
         updateData[0] = abi.encode(price);
+    }
+
+    function _settlementHoldSnapshot(
+        address caller,
+        uint256 depositId,
+        uint256 redeemId
+    ) internal view returns (SettlementHoldRollbackSnapshot memory snapshot) {
+        PythStructs.Price memory pythPrice = baseMockPyth.getPriceUnsafe(BASE_PYTH_FEED_A);
+        snapshot.pythUpdateCalls = baseMockPyth.updatePriceFeedsCallCount();
+        snapshot.pythPrice = pythPrice.price;
+        snapshot.pythPublishTime = pythPrice.publishTime;
+        snapshot.callerEth = caller.balance;
+        snapshot.pythEth = address(baseMockPyth).balance;
+        snapshot.markPrice = engine.lastMarkPrice();
+        snapshot.markTime = engine.lastMarkTime();
+        snapshot.bullCarryIndex = engine.sideCarryIndex(uint256(CfdTypes.Side.BULL));
+        snapshot.bearCarryIndex = engine.sideCarryIndex(uint256(CfdTypes.Side.BEAR));
+        snapshot.lastReconcileTime = pool.lastReconcileTime();
+        snapshot.lastSeniorCouponCheckpointTime = pool.lastSeniorCouponCheckpointTime();
+        snapshot.seniorPrincipal = pool.seniorPrincipal();
+        snapshot.juniorPrincipal = pool.juniorPrincipal();
+        snapshot.seniorHighWaterMark = pool.seniorHighWaterMark();
+        snapshot.accountedAssets = pool.accountedAssets();
+        snapshot.poolUsdc = usdc.balanceOf(address(pool));
+        snapshot.vaultUsdc = usdc.balanceOf(address(juniorVault));
+        snapshot.juniorSupply = juniorVault.totalSupply();
+        snapshot.depositQueueHead = juniorVault.depositQueueHead();
+        snapshot.depositQueueTail = juniorVault.depositQueueTail();
+        snapshot.redeemQueueHead = juniorVault.redeemQueueHead();
+        snapshot.redeemQueueTail = juniorVault.redeemQueueTail();
+        snapshot.pendingDepositAssets = juniorVault.pendingDepositRequest(depositId, BOB);
+        snapshot.claimableDepositAssets = juniorVault.claimableDepositRequest(depositId, BOB);
+        snapshot.pendingRedeemShares = juniorVault.pendingRedeemRequest(redeemId, ALICE);
+        snapshot.claimableRedeemShares = juniorVault.claimableRedeemRequest(redeemId, ALICE);
+    }
+
+    function _assertSettlementHoldSnapshot(
+        SettlementHoldRollbackSnapshot memory expected,
+        address caller,
+        uint256 depositId,
+        uint256 redeemId
+    ) internal view {
+        PythStructs.Price memory pythPrice = baseMockPyth.getPriceUnsafe(BASE_PYTH_FEED_A);
+        assertEq(baseMockPyth.updatePriceFeedsCallCount(), expected.pythUpdateCalls, "Pyth update count must roll back");
+        assertEq(pythPrice.price, expected.pythPrice, "Pyth price must roll back");
+        assertEq(pythPrice.publishTime, expected.pythPublishTime, "Pyth publish time must roll back");
+        assertEq(caller.balance, expected.callerEth, "caller ETH must roll back");
+        assertEq(address(baseMockPyth).balance, expected.pythEth, "Pyth ETH must roll back");
+        assertEq(engine.lastMarkPrice(), expected.markPrice, "Engine price must roll back");
+        assertEq(engine.lastMarkTime(), expected.markTime, "Engine timestamp must roll back");
+        assertEq(
+            engine.sideCarryIndex(uint256(CfdTypes.Side.BULL)), expected.bullCarryIndex, "bull carry must roll back"
+        );
+        assertEq(
+            engine.sideCarryIndex(uint256(CfdTypes.Side.BEAR)), expected.bearCarryIndex, "bear carry must roll back"
+        );
+        assertEq(pool.lastReconcileTime(), expected.lastReconcileTime, "reconcile checkpoint must roll back");
+        assertEq(
+            pool.lastSeniorCouponCheckpointTime(),
+            expected.lastSeniorCouponCheckpointTime,
+            "coupon checkpoint must roll back"
+        );
+        assertEq(pool.seniorPrincipal(), expected.seniorPrincipal, "Senior principal must roll back");
+        assertEq(pool.juniorPrincipal(), expected.juniorPrincipal, "Junior principal must roll back");
+        assertEq(pool.seniorHighWaterMark(), expected.seniorHighWaterMark, "Senior HWM must roll back");
+        assertEq(pool.accountedAssets(), expected.accountedAssets, "accounted assets must roll back");
+        assertEq(usdc.balanceOf(address(pool)), expected.poolUsdc, "pool USDC must roll back");
+        assertEq(usdc.balanceOf(address(juniorVault)), expected.vaultUsdc, "vault USDC must roll back");
+        assertEq(juniorVault.totalSupply(), expected.juniorSupply, "vault supply must roll back");
+        assertEq(juniorVault.depositQueueHead(), expected.depositQueueHead, "deposit head must roll back");
+        assertEq(juniorVault.depositQueueTail(), expected.depositQueueTail, "deposit tail must roll back");
+        assertEq(juniorVault.redeemQueueHead(), expected.redeemQueueHead, "redeem head must roll back");
+        assertEq(juniorVault.redeemQueueTail(), expected.redeemQueueTail, "redeem tail must roll back");
+        assertEq(
+            juniorVault.pendingDepositRequest(depositId, BOB),
+            expected.pendingDepositAssets,
+            "pending deposit must roll back"
+        );
+        assertEq(
+            juniorVault.claimableDepositRequest(depositId, BOB),
+            expected.claimableDepositAssets,
+            "claimable deposit must roll back"
+        );
+        assertEq(
+            juniorVault.pendingRedeemRequest(redeemId, ALICE),
+            expected.pendingRedeemShares,
+            "pending redemption must roll back"
+        );
+        assertEq(
+            juniorVault.claimableRedeemRequest(redeemId, ALICE),
+            expected.claimableRedeemShares,
+            "claimable redemption must roll back"
+        );
     }
 
 }

@@ -121,6 +121,8 @@ library PerpsViewTypes {
     /// @param redeemBacklog Whether matured redemption work is visible to settlement.
     /// @param settlementLive Whether runtime gates permit new redemption funding.
     /// @param poolPaused Whether HousePool pause currently defers deposit activation.
+    /// @param lpEpochSettlementPaused Whether governance has held LP epoch settlement, deferring deposit activation
+    ///        and new redemption funding without disabling request admission or already-funded claims.
     struct TrancheQueueView {
         address vault;
         uint256 currentEpoch;
@@ -135,6 +137,7 @@ library PerpsViewTypes {
         bool redeemBacklog;
         bool settlementLive;
         bool poolPaused;
+        bool lpEpochSettlementPaused;
     }
 
     /// @notice Controller state for one deposit/redemption request id on one tranche.
@@ -179,12 +182,14 @@ library PerpsViewTypes {
     /// @param lastMarkTime Oracle publish timestamp associated with the cached engine mark.
     /// @param oracleFresh Whether the mark satisfies the HousePool's current reconciliation freshness policy.
     /// @param oracleFrozen Whether the engine is in the calendar-defined frozen-oracle regime.
+    /// @param lpEpochSettlementPaused Whether governance has held LP epoch settlement.
     struct LpStatusView {
         bool tradingActive;
         bool withdrawalLive;
         uint64 lastMarkTime;
         bool oracleFresh;
         bool oracleFrozen;
+        bool lpEpochSettlementPaused;
     }
 
     /// @notice High-level protocol runtime status.
@@ -195,6 +200,7 @@ library PerpsViewTypes {
     /// @param fadWindow Whether Friday Afternoon Deleverage controls are currently active.
     /// @param tradingActive Whether the pool has completed bootstrap and activated trading.
     /// @param withdrawalLive Whether degraded-mode and mark-freshness gates permit pool-level withdrawals.
+    /// @param lpEpochSettlementPaused Whether governance has held LP epoch settlement.
     struct ProtocolStatusView {
         uint8 phase;
         uint256 lastMarkPrice;
@@ -203,6 +209,7 @@ library PerpsViewTypes {
         bool fadWindow;
         bool tradingActive;
         bool withdrawalLive;
+        bool lpEpochSettlementPaused;
     }
 
 }

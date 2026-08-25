@@ -12,7 +12,10 @@ contract EmergencyPauseTargetMock is Pausable {
     uint64 public riskOffOrderCutoff;
     uint64 public nextRiskOffOrderCutoff;
     uint256 public pauseCalls;
+    uint256 public settlementPauseCalls;
     bool public failPause;
+    bool public failSettlementPause;
+    bool public lpEpochSettlementPaused;
 
     error EmergencyPauseTargetMock__Unauthorized();
     error EmergencyPauseTargetMock__ForcedFailure();
@@ -35,8 +38,18 @@ contract EmergencyPauseTargetMock is Pausable {
         failPause = shouldFail;
     }
 
+    function setFailSettlementPause(
+        bool shouldFail
+    ) external {
+        failSettlementPause = shouldFail;
+    }
+
     function forcePause() external {
         _pause();
+    }
+
+    function forceLpEpochSettlementPause() external {
+        lpEpochSettlementPaused = true;
     }
 
     function pause() external {
@@ -53,6 +66,21 @@ contract EmergencyPauseTargetMock is Pausable {
 
     function unpause() external {
         _unpause();
+    }
+
+    function pauseLpEpochSettlement() external {
+        if (msg.sender != pauser) {
+            revert EmergencyPauseTargetMock__Unauthorized();
+        }
+        if (failSettlementPause) {
+            revert EmergencyPauseTargetMock__ForcedFailure();
+        }
+        ++settlementPauseCalls;
+        lpEpochSettlementPaused = true;
+    }
+
+    function unpauseLpEpochSettlement() external {
+        lpEpochSettlementPaused = false;
     }
 
 }
@@ -73,13 +101,14 @@ contract EmergencyPauseCoordinatorTest is Test {
     EmergencyPauseCoordinator internal coordinator;
 
     event GuardianUpdated(address indexed previousGuardian, address indexed newGuardian);
-    event EmergencyPauseTriggered(
+    event EmergencyContainmentTriggered(
         address indexed guardian,
         bytes32 indexed reasonHash,
         bytes32 indexed evidenceHash,
+        EmergencyPauseCoordinator.ContainmentAction action,
         uint64 riskOffOrderCutoff,
-        uint8 previousPauseMask,
-        uint8 newPauseMask
+        uint8 previousRestrictionMask,
+        uint8 newRestrictionMask
     );
 
     function setUp() public {
@@ -98,7 +127,9 @@ contract EmergencyPauseCoordinatorTest is Test {
         assertEq(coordinator.guardian(), address(0));
         assertEq(coordinator.ROUTER_ADMIN_PAUSED_MASK(), 1);
         assertEq(coordinator.HOUSE_POOL_PAUSED_MASK(), 2);
-        assertEq(coordinator.ALL_COMPONENTS_PAUSED_MASK(), 3);
+        assertEq(coordinator.LP_EPOCH_SETTLEMENT_PAUSED_MASK(), 4);
+        assertEq(coordinator.RISK_OFF_PAUSED_MASK(), 3);
+        assertEq(coordinator.FULL_CONTAINMENT_PAUSED_MASK(), 7);
         assertLe(address(coordinator).code.length, COORDINATOR_RUNTIME_SIZE_TARGET);
     }
 
@@ -178,16 +209,32 @@ contract EmergencyPauseCoordinatorTest is Test {
         assertEq(coordinator.guardian(), GUARDIAN);
     }
 
-    function test_TriggerIsGuardianOnlyEvenForOwner() public {
+    function test_AllTriggersAreGuardianOnlyEvenForOwner() public {
         _setGuardian(GUARDIAN);
 
         vm.prank(OWNER);
         vm.expectRevert(EmergencyPauseCoordinator.EmergencyPauseCoordinator__UnauthorizedGuardian.selector);
         coordinator.triggerEmergencyPause(REASON_HASH, EVIDENCE_HASH);
 
+        vm.prank(OWNER);
+        vm.expectRevert(EmergencyPauseCoordinator.EmergencyPauseCoordinator__UnauthorizedGuardian.selector);
+        coordinator.triggerLpEpochSettlementHold(REASON_HASH, EVIDENCE_HASH);
+
+        vm.prank(OWNER);
+        vm.expectRevert(EmergencyPauseCoordinator.EmergencyPauseCoordinator__UnauthorizedGuardian.selector);
+        coordinator.triggerFullContainment(REASON_HASH, EVIDENCE_HASH);
+
         vm.prank(STRANGER);
         vm.expectRevert(EmergencyPauseCoordinator.EmergencyPauseCoordinator__UnauthorizedGuardian.selector);
         coordinator.triggerEmergencyPause(REASON_HASH, EVIDENCE_HASH);
+
+        vm.prank(STRANGER);
+        vm.expectRevert(EmergencyPauseCoordinator.EmergencyPauseCoordinator__UnauthorizedGuardian.selector);
+        coordinator.triggerLpEpochSettlementHold(REASON_HASH, EVIDENCE_HASH);
+
+        vm.prank(STRANGER);
+        vm.expectRevert(EmergencyPauseCoordinator.EmergencyPauseCoordinator__UnauthorizedGuardian.selector);
+        coordinator.triggerFullContainment(REASON_HASH, EVIDENCE_HASH);
     }
 
     function test_DisabledGuardianCannotTrigger() public {
@@ -198,10 +245,12 @@ contract EmergencyPauseCoordinatorTest is Test {
 
     function test_CoordinatorExposesNoRecoveryOrArbitraryCallSurface() public {
         (bool unpauseOk,) = address(coordinator).call(abi.encodeWithSignature("unpause()"));
+        (bool unpauseSettlementOk,) = address(coordinator).call(abi.encodeWithSignature("unpauseLpEpochSettlement()"));
         (bool arbitraryCallOk,) = address(coordinator)
             .call(abi.encodeWithSignature("execute(address,bytes)", address(routerAdmin), bytes("")));
 
         assertFalse(unpauseOk);
+        assertFalse(unpauseSettlementOk);
         assertFalse(arbitraryCallOk);
     }
 
@@ -209,7 +258,9 @@ contract EmergencyPauseCoordinatorTest is Test {
         _setGuardian(GUARDIAN);
 
         vm.expectEmit(true, true, true, true, address(coordinator));
-        emit EmergencyPauseTriggered(GUARDIAN, REASON_HASH, EVIDENCE_HASH, CUTOFF, 0, 3);
+        emit EmergencyContainmentTriggered(
+            GUARDIAN, REASON_HASH, EVIDENCE_HASH, EmergencyPauseCoordinator.ContainmentAction.RiskOff, CUTOFF, 0, 3
+        );
         vm.prank(GUARDIAN);
         uint64 cutoff = coordinator.triggerEmergencyPause(REASON_HASH, EVIDENCE_HASH);
 
@@ -224,7 +275,9 @@ contract EmergencyPauseCoordinatorTest is Test {
         _setGuardian(GUARDIAN);
 
         vm.expectEmit(true, true, true, true, address(coordinator));
-        emit EmergencyPauseTriggered(GUARDIAN, bytes32(0), bytes32(0), CUTOFF, 0, 3);
+        emit EmergencyContainmentTriggered(
+            GUARDIAN, bytes32(0), bytes32(0), EmergencyPauseCoordinator.ContainmentAction.RiskOff, CUTOFF, 0, 3
+        );
         vm.prank(GUARDIAN);
         assertEq(coordinator.triggerEmergencyPause(bytes32(0), bytes32(0)), CUTOFF);
     }
@@ -235,7 +288,9 @@ contract EmergencyPauseCoordinatorTest is Test {
         coordinator.triggerEmergencyPause(REASON_HASH, EVIDENCE_HASH);
 
         vm.expectEmit(true, true, true, true, address(coordinator));
-        emit EmergencyPauseTriggered(GUARDIAN, REASON_HASH, EVIDENCE_HASH, CUTOFF, 3, 3);
+        emit EmergencyContainmentTriggered(
+            GUARDIAN, REASON_HASH, EVIDENCE_HASH, EmergencyPauseCoordinator.ContainmentAction.RiskOff, CUTOFF, 3, 3
+        );
         vm.prank(GUARDIAN);
         assertEq(coordinator.triggerEmergencyPause(REASON_HASH, EVIDENCE_HASH), CUTOFF);
         assertEq(routerAdmin.pauseCalls(), 1);
@@ -247,7 +302,9 @@ contract EmergencyPauseCoordinatorTest is Test {
         _setGuardian(GUARDIAN);
 
         vm.expectEmit(true, true, true, true, address(coordinator));
-        emit EmergencyPauseTriggered(GUARDIAN, REASON_HASH, EVIDENCE_HASH, 0, 1, 3);
+        emit EmergencyContainmentTriggered(
+            GUARDIAN, REASON_HASH, EVIDENCE_HASH, EmergencyPauseCoordinator.ContainmentAction.RiskOff, 0, 1, 3
+        );
         vm.prank(GUARDIAN);
         assertEq(coordinator.triggerEmergencyPause(REASON_HASH, EVIDENCE_HASH), 0);
         assertEq(routerAdmin.pauseCalls(), 0);
@@ -259,11 +316,28 @@ contract EmergencyPauseCoordinatorTest is Test {
         _setGuardian(GUARDIAN);
 
         vm.expectEmit(true, true, true, true, address(coordinator));
-        emit EmergencyPauseTriggered(GUARDIAN, REASON_HASH, EVIDENCE_HASH, CUTOFF, 2, 3);
+        emit EmergencyContainmentTriggered(
+            GUARDIAN, REASON_HASH, EVIDENCE_HASH, EmergencyPauseCoordinator.ContainmentAction.RiskOff, CUTOFF, 2, 3
+        );
         vm.prank(GUARDIAN);
         assertEq(coordinator.triggerEmergencyPause(REASON_HASH, EVIDENCE_HASH), CUTOFF);
         assertEq(routerAdmin.pauseCalls(), 1);
         assertEq(housePool.pauseCalls(), 0);
+    }
+
+    function test_RiskOffPreservesSettlementHoldAndIncludesItInMasks() public {
+        housePool.forceLpEpochSettlementPause();
+        _setGuardian(GUARDIAN);
+
+        vm.expectEmit(true, true, true, true, address(coordinator));
+        emit EmergencyContainmentTriggered(
+            GUARDIAN, REASON_HASH, EVIDENCE_HASH, EmergencyPauseCoordinator.ContainmentAction.RiskOff, CUTOFF, 4, 7
+        );
+        vm.prank(GUARDIAN);
+        assertEq(coordinator.triggerEmergencyPause(REASON_HASH, EVIDENCE_HASH), CUTOFF);
+
+        assertTrue(housePool.lpEpochSettlementPaused());
+        assertEq(housePool.settlementPauseCalls(), 0);
     }
 
     function test_HousePoolPauseFailureRollsBackRouterPauseAndCutoff() public {
@@ -306,6 +380,256 @@ contract EmergencyPauseCoordinatorTest is Test {
         assertFalse(housePool.paused());
         assertEq(routerAdmin.pauseCalls(), 0);
         assertEq(housePool.pauseCalls(), 0);
+    }
+
+    function test_SettlementHoldOnlyPausesLpEpochSettlement() public {
+        _setGuardian(GUARDIAN);
+
+        vm.expectEmit(true, true, true, true, address(coordinator));
+        emit EmergencyContainmentTriggered(
+            GUARDIAN, REASON_HASH, EVIDENCE_HASH, EmergencyPauseCoordinator.ContainmentAction.LpSettlementHold, 0, 0, 4
+        );
+        vm.prank(GUARDIAN);
+        coordinator.triggerLpEpochSettlementHold(REASON_HASH, EVIDENCE_HASH);
+
+        assertFalse(routerAdmin.paused());
+        assertFalse(housePool.paused());
+        assertTrue(housePool.lpEpochSettlementPaused());
+        assertEq(routerAdmin.pauseCalls(), 0);
+        assertEq(housePool.pauseCalls(), 0);
+        assertEq(housePool.settlementPauseCalls(), 1);
+        assertEq(routerAdmin.riskOffOrderCutoff(), 0);
+    }
+
+    function test_RepeatedSettlementHoldSkipsAlreadyActiveGate() public {
+        _setGuardian(GUARDIAN);
+        vm.prank(GUARDIAN);
+        coordinator.triggerLpEpochSettlementHold(REASON_HASH, EVIDENCE_HASH);
+
+        vm.expectEmit(true, true, true, true, address(coordinator));
+        emit EmergencyContainmentTriggered(
+            GUARDIAN, REASON_HASH, EVIDENCE_HASH, EmergencyPauseCoordinator.ContainmentAction.LpSettlementHold, 0, 4, 4
+        );
+        vm.prank(GUARDIAN);
+        coordinator.triggerLpEpochSettlementHold(REASON_HASH, EVIDENCE_HASH);
+
+        assertEq(housePool.settlementPauseCalls(), 1);
+    }
+
+    function test_SettlementHoldPreservesExistingRiskOffCutoff() public {
+        _setGuardian(GUARDIAN);
+        vm.prank(GUARDIAN);
+        coordinator.triggerEmergencyPause(REASON_HASH, EVIDENCE_HASH);
+
+        vm.expectEmit(true, true, true, true, address(coordinator));
+        emit EmergencyContainmentTriggered(
+            GUARDIAN,
+            REASON_HASH,
+            EVIDENCE_HASH,
+            EmergencyPauseCoordinator.ContainmentAction.LpSettlementHold,
+            CUTOFF,
+            3,
+            7
+        );
+        vm.prank(GUARDIAN);
+        coordinator.triggerLpEpochSettlementHold(REASON_HASH, EVIDENCE_HASH);
+
+        assertEq(routerAdmin.riskOffOrderCutoff(), CUTOFF);
+        assertEq(routerAdmin.pauseCalls(), 1);
+        assertEq(housePool.pauseCalls(), 1);
+        assertEq(housePool.settlementPauseCalls(), 1);
+    }
+
+    function test_SettlementHoldAcceptsZeroIncidentHashes() public {
+        _setGuardian(GUARDIAN);
+
+        vm.expectEmit(true, true, true, true, address(coordinator));
+        emit EmergencyContainmentTriggered(
+            GUARDIAN, bytes32(0), bytes32(0), EmergencyPauseCoordinator.ContainmentAction.LpSettlementHold, 0, 0, 4
+        );
+        vm.prank(GUARDIAN);
+        coordinator.triggerLpEpochSettlementHold(bytes32(0), bytes32(0));
+    }
+
+    function test_SettlementHoldFailureDoesNotChangeExistingRiskOffState() public {
+        _setGuardian(GUARDIAN);
+        vm.prank(GUARDIAN);
+        coordinator.triggerEmergencyPause(REASON_HASH, EVIDENCE_HASH);
+        housePool.setFailSettlementPause(true);
+
+        vm.prank(GUARDIAN);
+        vm.expectRevert(EmergencyPauseTargetMock.EmergencyPauseTargetMock__ForcedFailure.selector);
+        coordinator.triggerLpEpochSettlementHold(REASON_HASH, EVIDENCE_HASH);
+
+        assertTrue(routerAdmin.paused());
+        assertTrue(housePool.paused());
+        assertFalse(housePool.lpEpochSettlementPaused());
+        assertEq(routerAdmin.riskOffOrderCutoff(), CUTOFF);
+        assertEq(housePool.settlementPauseCalls(), 0);
+    }
+
+    function test_MissingHousePoolPauserWiringPreventsSettlementHold() public {
+        housePool.setPauser(address(0));
+        _setGuardian(GUARDIAN);
+
+        vm.prank(GUARDIAN);
+        vm.expectRevert(EmergencyPauseTargetMock.EmergencyPauseTargetMock__Unauthorized.selector);
+        coordinator.triggerLpEpochSettlementHold(REASON_HASH, EVIDENCE_HASH);
+
+        assertFalse(housePool.lpEpochSettlementPaused());
+        assertEq(housePool.settlementPauseCalls(), 0);
+    }
+
+    function test_FullContainmentActivatesEveryRestrictionAndReturnsCutoff() public {
+        _setGuardian(GUARDIAN);
+
+        vm.expectEmit(true, true, true, true, address(coordinator));
+        emit EmergencyContainmentTriggered(
+            GUARDIAN,
+            REASON_HASH,
+            EVIDENCE_HASH,
+            EmergencyPauseCoordinator.ContainmentAction.FullContainment,
+            CUTOFF,
+            0,
+            7
+        );
+        vm.prank(GUARDIAN);
+        uint64 cutoff = coordinator.triggerFullContainment(REASON_HASH, EVIDENCE_HASH);
+
+        assertEq(cutoff, CUTOFF);
+        assertTrue(routerAdmin.paused());
+        assertTrue(housePool.paused());
+        assertTrue(housePool.lpEpochSettlementPaused());
+        assertEq(routerAdmin.pauseCalls(), 1);
+        assertEq(housePool.pauseCalls(), 1);
+        assertEq(housePool.settlementPauseCalls(), 1);
+    }
+
+    function test_RepeatedFullContainmentSkipsEveryActiveRestriction() public {
+        _setGuardian(GUARDIAN);
+        vm.prank(GUARDIAN);
+        coordinator.triggerFullContainment(REASON_HASH, EVIDENCE_HASH);
+
+        vm.expectEmit(true, true, true, true, address(coordinator));
+        emit EmergencyContainmentTriggered(
+            GUARDIAN,
+            REASON_HASH,
+            EVIDENCE_HASH,
+            EmergencyPauseCoordinator.ContainmentAction.FullContainment,
+            CUTOFF,
+            7,
+            7
+        );
+        vm.prank(GUARDIAN);
+        assertEq(coordinator.triggerFullContainment(REASON_HASH, EVIDENCE_HASH), CUTOFF);
+
+        assertEq(routerAdmin.pauseCalls(), 1);
+        assertEq(housePool.pauseCalls(), 1);
+        assertEq(housePool.settlementPauseCalls(), 1);
+    }
+
+    function testFuzz_FullContainmentHandlesEveryPartialRestrictionCombination(
+        uint8 initialRestrictionMask
+    ) public {
+        initialRestrictionMask &= 7;
+        if ((initialRestrictionMask & 1) != 0) {
+            routerAdmin.forcePause();
+        }
+        if ((initialRestrictionMask & 2) != 0) {
+            housePool.forcePause();
+        }
+        if ((initialRestrictionMask & 4) != 0) {
+            housePool.forceLpEpochSettlementPause();
+        }
+        _setGuardian(GUARDIAN);
+
+        uint64 expectedCutoff = (initialRestrictionMask & 1) == 0 ? CUTOFF : 0;
+        vm.expectEmit(true, true, true, true, address(coordinator));
+        emit EmergencyContainmentTriggered(
+            GUARDIAN,
+            REASON_HASH,
+            EVIDENCE_HASH,
+            EmergencyPauseCoordinator.ContainmentAction.FullContainment,
+            expectedCutoff,
+            initialRestrictionMask,
+            7
+        );
+        vm.prank(GUARDIAN);
+        assertEq(coordinator.triggerFullContainment(REASON_HASH, EVIDENCE_HASH), expectedCutoff);
+
+        assertTrue(routerAdmin.paused());
+        assertTrue(housePool.paused());
+        assertTrue(housePool.lpEpochSettlementPaused());
+        assertEq(routerAdmin.pauseCalls(), (initialRestrictionMask & 1) == 0 ? 1 : 0);
+        assertEq(housePool.pauseCalls(), (initialRestrictionMask & 2) == 0 ? 1 : 0);
+        assertEq(housePool.settlementPauseCalls(), (initialRestrictionMask & 4) == 0 ? 1 : 0);
+    }
+
+    function test_FullContainmentAcceptsZeroIncidentHashes() public {
+        _setGuardian(GUARDIAN);
+
+        vm.expectEmit(true, true, true, true, address(coordinator));
+        emit EmergencyContainmentTriggered(
+            GUARDIAN, bytes32(0), bytes32(0), EmergencyPauseCoordinator.ContainmentAction.FullContainment, CUTOFF, 0, 7
+        );
+        vm.prank(GUARDIAN);
+        assertEq(coordinator.triggerFullContainment(bytes32(0), bytes32(0)), CUTOFF);
+    }
+
+    function test_FullContainmentSettlementFailureRollsBackEveryRestrictionAndCutoff() public {
+        housePool.setFailSettlementPause(true);
+        _setGuardian(GUARDIAN);
+
+        vm.prank(GUARDIAN);
+        vm.expectRevert(EmergencyPauseTargetMock.EmergencyPauseTargetMock__ForcedFailure.selector);
+        coordinator.triggerFullContainment(REASON_HASH, EVIDENCE_HASH);
+
+        assertFalse(routerAdmin.paused());
+        assertFalse(housePool.paused());
+        assertFalse(housePool.lpEpochSettlementPaused());
+        assertEq(routerAdmin.riskOffOrderCutoff(), 0);
+        assertEq(routerAdmin.pauseCalls(), 0);
+        assertEq(housePool.pauseCalls(), 0);
+        assertEq(housePool.settlementPauseCalls(), 0);
+    }
+
+    function test_FullContainmentEntryFailureRollsBackRouterAndNeverTouchesSettlementGate() public {
+        housePool.setFailPause(true);
+        _setGuardian(GUARDIAN);
+
+        vm.prank(GUARDIAN);
+        vm.expectRevert(EmergencyPauseTargetMock.EmergencyPauseTargetMock__ForcedFailure.selector);
+        coordinator.triggerFullContainment(REASON_HASH, EVIDENCE_HASH);
+
+        assertFalse(routerAdmin.paused());
+        assertFalse(housePool.paused());
+        assertFalse(housePool.lpEpochSettlementPaused());
+        assertEq(routerAdmin.riskOffOrderCutoff(), 0);
+        assertEq(routerAdmin.pauseCalls(), 0);
+        assertEq(housePool.pauseCalls(), 0);
+        assertEq(housePool.settlementPauseCalls(), 0);
+    }
+
+    function test_SettlementHoldGasIsBounded() public {
+        _setGuardian(GUARDIAN);
+
+        vm.prank(GUARDIAN);
+        uint256 gasBefore = gasleft();
+        coordinator.triggerLpEpochSettlementHold(REASON_HASH, EVIDENCE_HASH);
+        uint256 gasUsed = gasBefore - gasleft();
+
+        assertLe(gasUsed, 100_000);
+    }
+
+    function test_FullContainmentGasIsBounded() public {
+        _setGuardian(GUARDIAN);
+
+        vm.prank(GUARDIAN);
+        uint256 gasBefore = gasleft();
+        coordinator.triggerFullContainment(REASON_HASH, EVIDENCE_HASH);
+        uint256 gasUsed = gasBefore - gasleft();
+
+        assertLe(gasUsed, 250_000);
     }
 
     function _setGuardian(

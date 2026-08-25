@@ -17,6 +17,22 @@ import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAcco
 ///      continued risk-reducing operation.
 contract EmergencyRiskOffInvariantTest is BasePerpTest {
 
+    struct HeldEpochSnapshot {
+        uint256 seniorPrincipal;
+        uint256 juniorPrincipal;
+        uint256 seniorHighWaterMark;
+        uint256 accountedAssets;
+        uint256 lastReconcileTime;
+        uint256 lastSeniorCouponCheckpointTime;
+        uint256 depositQueueHead;
+        uint256 depositQueueTail;
+        uint256 pendingDepositAssets;
+        uint256 claimableDepositAssets;
+        uint256 vaultSupply;
+        uint256 poolUsdc;
+        uint256 vaultUsdc;
+    }
+
     address internal constant ALICE = address(0xA11CE);
     address internal constant BOB = address(0xB0B);
     address internal constant GUARDIAN = address(0xCAFE);
@@ -226,6 +242,42 @@ contract EmergencyRiskOffInvariantTest is BasePerpTest {
         );
     }
 
+    /// @notice Repeated settlement attempts cannot partially consume a held epoch or advance accounting checkpoints.
+    function testFuzz_LpSettlementHoldPreservesEpochAccountingUntilGovernanceRelease(
+        uint96 assetsSeed,
+        uint8 attemptsSeed
+    ) public {
+        uint256 assets = bound(uint256(assetsSeed), 1e6, 50_000e6);
+        uint256 attempts = bound(uint256(attemptsSeed), 1, 8);
+
+        usdc.mint(ALICE, assets);
+        vm.startPrank(ALICE);
+        usdc.approve(address(juniorVault), assets);
+        uint256 requestId = juniorVault.requestDeposit(assets, ALICE, ALICE);
+        vm.stopPrank();
+        vm.warp(pool.lpEpochStart(requestId));
+
+        vm.prank(GUARDIAN);
+        coordinator.triggerLpEpochSettlementHold(REASON_HASH, EVIDENCE_HASH);
+        assertTrue(pool.lpEpochSettlementPaused());
+
+        HeldEpochSnapshot memory beforeState = _heldEpochSnapshot(requestId);
+        for (uint256 i; i < attempts; ++i) {
+            vm.expectRevert(IHousePool.HousePool__LpEpochSettlementPaused.selector);
+            pool.settleLpEpoch(0, 0);
+            _assertHeldEpochSnapshot(beforeState, requestId);
+        }
+
+        pool.unpauseLpEpochSettlement();
+        pool.settleLpEpoch(0, 0);
+        assertEq(juniorVault.pendingDepositRequest(requestId, ALICE), 0);
+        assertEq(juniorVault.claimableDepositRequest(requestId, ALICE), assets);
+
+        vm.expectRevert(IHousePool.HousePool__NoLpEpochProgress.selector);
+        pool.settleLpEpoch(0, 0);
+        assertEq(juniorVault.claimableDepositRequest(requestId, ALICE), assets, "released epoch must settle once");
+    }
+
     /// @notice The unified guardian has one escalation capability and no direct component or recovery authority.
     function test_CoordinatorAuthorityRemainsLeastPrivilege() public {
         vm.prank(OUTSIDER);
@@ -292,6 +344,55 @@ contract EmergencyRiskOffInvariantTest is BasePerpTest {
     ) internal pure returns (uint256) {
         // At the test's $1 mark, this is 20% of notional and safely above initial margin.
         return (size / 1e12) / 5;
+    }
+
+    function _heldEpochSnapshot(
+        uint256 requestId
+    ) internal view returns (HeldEpochSnapshot memory snapshot) {
+        snapshot.seniorPrincipal = pool.seniorPrincipal();
+        snapshot.juniorPrincipal = pool.juniorPrincipal();
+        snapshot.seniorHighWaterMark = pool.seniorHighWaterMark();
+        snapshot.accountedAssets = pool.accountedAssets();
+        snapshot.lastReconcileTime = pool.lastReconcileTime();
+        snapshot.lastSeniorCouponCheckpointTime = pool.lastSeniorCouponCheckpointTime();
+        snapshot.depositQueueHead = juniorVault.depositQueueHead();
+        snapshot.depositQueueTail = juniorVault.depositQueueTail();
+        snapshot.pendingDepositAssets = juniorVault.pendingDepositRequest(requestId, ALICE);
+        snapshot.claimableDepositAssets = juniorVault.claimableDepositRequest(requestId, ALICE);
+        snapshot.vaultSupply = juniorVault.totalSupply();
+        snapshot.poolUsdc = usdc.balanceOf(address(pool));
+        snapshot.vaultUsdc = usdc.balanceOf(address(juniorVault));
+    }
+
+    function _assertHeldEpochSnapshot(
+        HeldEpochSnapshot memory expected,
+        uint256 requestId
+    ) internal view {
+        assertEq(pool.seniorPrincipal(), expected.seniorPrincipal, "Senior principal changed while held");
+        assertEq(pool.juniorPrincipal(), expected.juniorPrincipal, "Junior principal changed while held");
+        assertEq(pool.seniorHighWaterMark(), expected.seniorHighWaterMark, "Senior HWM changed while held");
+        assertEq(pool.accountedAssets(), expected.accountedAssets, "accounted assets changed while held");
+        assertEq(pool.lastReconcileTime(), expected.lastReconcileTime, "reconcile checkpoint changed while held");
+        assertEq(
+            pool.lastSeniorCouponCheckpointTime(),
+            expected.lastSeniorCouponCheckpointTime,
+            "coupon checkpoint changed while held"
+        );
+        assertEq(juniorVault.depositQueueHead(), expected.depositQueueHead, "deposit head changed while held");
+        assertEq(juniorVault.depositQueueTail(), expected.depositQueueTail, "deposit tail changed while held");
+        assertEq(
+            juniorVault.pendingDepositRequest(requestId, ALICE),
+            expected.pendingDepositAssets,
+            "pending deposit changed while held"
+        );
+        assertEq(
+            juniorVault.claimableDepositRequest(requestId, ALICE),
+            expected.claimableDepositAssets,
+            "claimable deposit changed while held"
+        );
+        assertEq(juniorVault.totalSupply(), expected.vaultSupply, "vault supply changed while held");
+        assertEq(usdc.balanceOf(address(pool)), expected.poolUsdc, "pool custody changed while held");
+        assertEq(usdc.balanceOf(address(juniorVault)), expected.vaultUsdc, "vault custody changed while held");
     }
 
     function _shuffle(

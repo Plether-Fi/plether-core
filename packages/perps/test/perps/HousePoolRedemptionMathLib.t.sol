@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
 import {HousePoolRedemptionMathLib} from "@plether/perps/libraries/HousePoolRedemptionMathLib.sol";
 import {Test} from "forge-std/Test.sol";
 
@@ -41,9 +42,15 @@ contract HousePoolRedemptionMathLibTest is Test {
     uint256 internal constant BPS = 10_000;
 
     HousePoolRedemptionMathHarness internal harness;
+    HousePoolRedemptionMathSidecar internal sidecar;
 
     function setUp() public {
         harness = new HousePoolRedemptionMathHarness();
+        sidecar = new HousePoolRedemptionMathSidecar();
+    }
+
+    function test_SidecarImplementationIdIsStable() public view {
+        assertEq(sidecar.implementationId(), keccak256("Plether.HousePoolRedemptionMathSidecar.v1"));
     }
 
     function test_NetAssetsForShares_AppliesBothFloorsInOrder() public view {
@@ -73,11 +80,15 @@ contract HousePoolRedemptionMathLibTest is Test {
     function test_NetAssetsForShares_RevertsAboveHundredPercentFee() public {
         vm.expectRevert(HousePoolRedemptionMathLib.HousePoolRedemptionMathLib__InvalidFeeBps.selector);
         harness.netAssetsForShares(1, 1, 1, 1, 1, BPS + 1);
+        vm.expectRevert(HousePoolRedemptionMathLib.HousePoolRedemptionMathLib__InvalidFeeBps.selector);
+        sidecar.netAssetsForShares(1, 1, 1, 1, 1, BPS + 1);
     }
 
     function test_MaxSharesForNetBudget_RevertsAboveHundredPercentFee() public {
         vm.expectRevert(HousePoolRedemptionMathLib.HousePoolRedemptionMathLib__InvalidFeeBps.selector);
         harness.maxSharesForNetBudget(1, 1, 1, 1, 1, 1, BPS + 1);
+        vm.expectRevert(HousePoolRedemptionMathLib.HousePoolRedemptionMathLib__InvalidFeeBps.selector);
+        sidecar.maxSharesForNetBudget(1, 1, 1, 1, 1, 1, BPS + 1);
     }
 
     function test_MaxSharesForNetBudget_FullFillAtExactBudget() public view {
@@ -130,9 +141,13 @@ contract HousePoolRedemptionMathLibTest is Test {
             _bruteForceMaxShares(budget, maxShares, principal, supply, virtualAssets, virtualShares, feeBps);
         (uint256 actualShares, uint256 actualAssets) =
             harness.maxSharesForNetBudget(budget, maxShares, principal, supply, virtualAssets, virtualShares, feeBps);
+        (uint256 sidecarShares, uint256 sidecarAssets) =
+            sidecar.maxSharesForNetBudget(budget, maxShares, principal, supply, virtualAssets, virtualShares, feeBps);
 
         assertEq(actualShares, expectedShares, "funded shares");
         assertEq(actualAssets, expectedAssets, "net assets");
+        assertEq(sidecarShares, actualShares, "sidecar funded shares");
+        assertEq(sidecarAssets, actualAssets, "sidecar net assets");
         assertEq(
             harness.netAssetsForShares(actualShares, principal, supply, virtualAssets, virtualShares, feeBps),
             actualAssets,
@@ -155,9 +170,13 @@ contract HousePoolRedemptionMathLibTest is Test {
         uint256 virtualShares = bound(virtualSharesSeed, 1, 32);
         uint256 feeBps = bound(feeBpsSeed, 0, BPS);
 
+        uint256 libraryAssets =
+            harness.netAssetsForShares(shares, principal, supply, virtualAssets, virtualShares, feeBps);
+        assertEq(libraryAssets, _oracleNetAssets(shares, principal, supply, virtualAssets, virtualShares, feeBps));
         assertEq(
-            harness.netAssetsForShares(shares, principal, supply, virtualAssets, virtualShares, feeBps),
-            _oracleNetAssets(shares, principal, supply, virtualAssets, virtualShares, feeBps)
+            sidecar.netAssetsForShares(shares, principal, supply, virtualAssets, virtualShares, feeBps),
+            libraryAssets,
+            "sidecar exact parity"
         );
     }
 

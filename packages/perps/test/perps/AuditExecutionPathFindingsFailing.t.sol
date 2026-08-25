@@ -7,6 +7,7 @@ import {CfdEngineLens} from "@plether/perps/CfdEngineLens.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
+import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
@@ -55,7 +56,7 @@ contract AuditExecutionPathFindingsFailing_EthRefundFallback is BasePerpTest {
 
         engine = _deployEngine(_riskParams());
         _syncEngineAdmin();
-        pool = new HousePool(address(usdc), address(engine));
+        pool = new HousePool(address(usdc), address(engine), address(new HousePoolRedemptionMathSidecar()));
 
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");

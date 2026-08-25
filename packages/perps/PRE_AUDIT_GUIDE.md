@@ -63,10 +63,15 @@ Before trusting a test as a source of truth, ask:
 | `HousePool.reserveSeniorDeposit` / `releaseSeniorDepositReservation` | configured `seniorVault` only | direct LPs and the Junior vault cannot reserve or release pending Senior-entry capacity; activation happens only through synchronized settlement |
 | `HousePool.reconcile` | either configured tranche vault | retained vault integration hook; end users enter and claim through `TrancheVault` |
 | `OrderRouter.settleLpEpoch(bytes[])` | permissionless | validates one PoolReconcile mark and atomically invokes coordinated LP entry activation and redemption funding |
-| `HousePool.settleLpEpoch(uint256,uint256)` | configured Engine `orderRouter` when live positions exist; otherwise permissionless | binds the Router's exact mark/time for live settlement; `(0,0)` is the mark-independent or frozen cached-mark fallback |
+| `HousePool.settleLpEpoch(uint256,uint256)` | configured Engine `orderRouter` when live positions exist; otherwise permissionless | binds the Router's exact mark/time for live settlement; `(0,0)` is the mark-independent or frozen cached-mark fallback; every route reverts before mutation while the independent settlement hold is active |
+| `HousePool.pauseLpEpochSettlement` | HousePool owner or configured pauser | adds the no-expiry settlement hold without blocking requests, reconciliation, trading, or funded claims |
+| `HousePool.unpauseLpEpochSettlement` | HousePool owner only | restores eligibility to attempt settlement; it does not repair state or guarantee progress |
+| `HousePoolRedemptionMathSidecar` pure functions | permissionless | stateless EIP-170 size split used by the HousePool immutable binding; fixed implementation id, no storage, authorization, setter, delegatecall, or upgrade path |
 | `SettlementMonitorLens` views | permissionless | read-only, bounded, fail-soft settlement diagnostics; no settlement, pause, or circuit-breaker authority |
 | `SettlementMonitorLensSidecar` diagnostic builders | constructor-bound `SettlementMonitorLens` facade only | code-size implementation detail; external callers cannot obtain facade-attributed health from fabricated queue masks, integrations must use the facade rather than treating the sidecar as a second canonical surface, and constructor-set binding getters remain publicly readable; there are no setters or delegatecall paths |
-| `EmergencyPauseCoordinator.triggerEmergencyPause` | configured guardian only | atomically pauses new open commits and LP entry; advisory reason/evidence hashes are not Lens authorization; no unpause, pricing, configuration, fund movement, or arbitrary call |
+| `EmergencyPauseCoordinator.triggerEmergencyPause` | configured guardian only | fixed Router risk-off plus LP-entry action |
+| `EmergencyPauseCoordinator.triggerLpEpochSettlementHold` | configured guardian only | fixed settlement-only action; requests and already-funded claims remain live |
+| `EmergencyPauseCoordinator.triggerFullContainment` | configured guardian only | fixed atomic union of Router risk-off, LP entry pause, and settlement hold |
 | `EmergencyPauseCoordinator.setGuardian` | coordinator owner only | rotate or disable containment authority; the guardian cannot rotate itself |
 | `OrderRouter.clearRiskOffOrder` | permissionless | oracle-free cleanup of one permanently invalidated open; full internal refund to trader, no clearer bounty |
 | `OrderRouterLiquidationBatchSidecar.executeLiquidationBatch` | immutable deploying Router delegatecall context only | stateless size split; direct calls revert, binding has no setter, and Router self-only item callbacks remain the mutation boundary |
@@ -250,15 +255,21 @@ Reachability note:
 ### Atomic guardian containment
 
 - Liveness problem: independent Router and HousePool pause transactions leave a race and partial-containment window.
-- Chosen tradeoff: one immutable-bound coordinator pauses new trading risk and LP entry atomically, while closes,
-  liquidations, redemption requests/funding, and funded claims remain available.
-- New risk: the guardian can deny new opens and deposits, and physical order cleanup still consumes protocol-keeper
-  gas because the trader receives the entire reserved bounty.
+- Chosen tradeoff: one immutable-bound coordinator exposes exactly three fixed actions: Router risk-off plus LP entry,
+  settlement-only hold, and their atomic union. No caller-supplied mask exists. Closes, liquidations, redemption
+  requests, existing cancellation paths, recapitalization, reconciliation, and funded claims remain outside its
+  authority.
+- New risk: risk-off can deny new opens/deposits and permanently invalidates covered opens; settlement-only can defer
+  activation/funding indefinitely while new requests and deposits continue accumulating. Physical order cleanup
+  still consumes protocol-keeper gas because the trader receives the entire reserved bounty.
 - Protecting invariant: the guardian can only add restrictions. It cannot unpause, configure, price, move funds, or
-  make arbitrary calls; governance owns recovery. Lens observations and incident hashes remain advisory.
-- LP limitation: HousePool pause does not itself unlock a matured deposit cancellation. Existing post-maturity escape
-  conditions or later activation after recovery remain necessary.
-- Follow-ups: LP request-off, LP settlement-off, and corrupted-queue quarantine are deliberately out of scope.
+  make arbitrary calls; governance owns recovery and manual restrictions have no expiry. Lens observations and
+  incident hashes remain advisory.
+- LP limitation: neither entry pause nor settlement hold unlocks a matured deposit cancellation. Existing escape
+  conditions or later activation remain necessary, and releasing a breaker neither repairs state nor guarantees a
+  successful settlement.
+- Deliberate liveness: no discretionary action can block trader closes/reductions, liquidations, or already-funded
+  deposit/redemption claims. LP request-off and corrupted-queue quarantine remain out of scope.
 
 ### Stale-mark close bounty commits
 
@@ -338,6 +349,11 @@ Reachability note:
   activation and reservation-limit state rather than new-request admission capacity. Poll status routinely;
   `getSettlementObservation(observedEpoch)` is a checkpoint/alert read with a roughly 6 KB ABI return and about
   0.8–1.3 million gas of representative `eth_call` execution.
+- An active successfully read LP settlement hold is intentional complete state: the explicit status flag,
+  `OperationalBlocker.LpEpochSettlementPaused`, and `DepositDeferral.LpEpochSettlementPaused` are set while route
+  classification remains available for recovery planning. A failed hold-state read is an unknown Pool dependency and
+  makes the composite incomplete. The keeper must reject an active hold before payload decoding, fee quotation, or
+  broadcast.
 - Treat the canonical matured-head getters as route authority. Auxiliary queue lifecycle, membership, neighbor-link,
   and endpoint reads harden health classification but cannot replace a known canonical route; impossible canonical
   head pairs are critical. Verify `ActivationNotConfirmed` against
@@ -393,7 +409,7 @@ Use the suites below as the highest-signal audit companions.
 | Economic conservation | `packages/perps/test/perps/invariant/PerpEconomicConservationInvariant.t.sol`, `packages/perps/test/perps/invariant/PerpAccountingInvariant.t.sol` |
 | Multi-account isolation | `packages/perps/test/perps/invariant/PerpMultiAccountInvariant.t.sol` |
 | FIFO / expiry / queue | `packages/perps/test/perps/OrderRouter.t.sol` |
-| Atomic emergency pause / persistent risk-off refunds | `packages/perps/test/perps/EmergencyPauseCoordinator.t.sol`, `packages/perps/test/perps/OrderRouterRiskOff.t.sol`, `packages/perps/test/perps/EmergencyRiskOffGas.t.sol`, `packages/perps/test/perps/TimelockPause.t.sol`, `packages/perps/test/perps/LiquidationBatch.t.sol`, `packages/perps/test/perps/invariant/EmergencyRiskOffInvariant.t.sol`, `test/scripts/ArbitrumSepoliaReleaseDefaults.t.sol` |
+| Three-action emergency containment / persistent risk-off refunds | `packages/perps/test/perps/EmergencyPauseCoordinator.t.sol`, `packages/perps/test/perps/AtomicLpEpochSettlement.t.sol`, `packages/perps/test/perps/OrderRouterRiskOff.t.sol`, `packages/perps/test/perps/EmergencyRiskOffGas.t.sol`, `packages/perps/test/perps/TimelockPause.t.sol`, `packages/perps/test/perps/LiquidationBatch.t.sol`, `packages/perps/test/perps/invariant/EmergencyRiskOffInvariant.t.sol`, `test/scripts/ArbitrumSepoliaReleaseDefaults.t.sol` |
 | Frozen oracle / FAD | `packages/perps/test/perps/OrderRouter.t.sol`, `packages/perps/test/perps/invariant/PerpOracleBoundaryInvariant.t.sol` |
 | Oracle refresh / ETH refunds | `packages/perps/test/perps/invariant/PerpOraclePathInvariant.t.sol` |
 | Fee accounting | `packages/perps/test/perps/invariant/PerpFeeFlowInvariant.t.sol` |
@@ -405,7 +421,8 @@ Use the suites below as the highest-signal audit companions.
 | Governed senior capacity / delayed reservations | `packages/perps/test/perps/SeniorCapacity.t.sol`, `packages/perps/test/perps/FrozenLpFeePolicy.t.sol`, `packages/perps/test/perps/invariant/GovernedSeniorCapacityInvariant.t.sol` |
 | Router policy matrix | `packages/perps/test/perps/OrderRouterPolicyMatrix.t.sol` |
 | Stale-mark / reconcile behavior | `packages/perps/test/perps/HousePool.t.sol`, `packages/perps/test/perps/CfdEngine.t.sol`, `packages/perps/test/perps/AuditV2.t.sol`, `packages/perps/test/perps/AuditV3.t.sol` |
-| Settlement monitor / cutoff observation | `packages/perps/test/perps/SettlementMonitorLens.t.sol`, `packages/perps/test/perps/LpRequestCutoff.t.sol` |
+| Redemption-math sidecar parity | `packages/perps/test/perps/HousePoolRedemptionMathLib.t.sol`, `packages/perps/test/perps/HousePoolRedemptionPhaseGuard.t.sol` |
+| Settlement monitor / hold / cutoff observation | `packages/perps/test/perps/SettlementMonitorLens.t.sol`, `packages/perps/test/perps/PerpsPublicLens.t.sol`, `packages/perps/test/perps/LpRequestCutoff.t.sol`, `test/scripts/LpEpochKeeper.t.sol` |
 | Audit-history regressions | `packages/perps/test/perps/AuditCurrentFindingsVerification.t.sol`, `packages/perps/test/perps/AuditFindings.t.sol`, `packages/perps/test/perps/AuditV2.t.sol`, `packages/perps/test/perps/AuditV3.t.sol` |
 
 Historical or obsolete regression names that still mention legacy spread labels are audit-history artifacts, not live accounting concepts. When those names appear, trust the surrounding comments and the current accounting docs rather than the historical label.

@@ -25,6 +25,7 @@ contract TimelockPauseTest is BasePerpTest {
     event Paused(address account);
     event RiskOffActivated(uint64 previousCutoff, uint64 newCutoff);
     event OrderFailed(uint64 indexed orderId, OrderExecutionSettlement.OrderFailReason reason);
+    event LpEpochSettlementPauseUpdated(address indexed caller, bool paused);
 
     address alice = address(0x111);
     address nonOwner = address(0xBAD);
@@ -922,6 +923,141 @@ contract TimelockPauseTest is BasePerpTest {
         vm.prank(alice);
         juniorVault.deposit(claimableAssets, alice);
         assertGt(juniorVault.balanceOf(alice), 0);
+    }
+
+    function test_HousePool_SettlementHold_PauserCanActivateButOnlyOwnerCanRelease() public {
+        vm.prank(nonOwner);
+        vm.expectRevert(IHousePool.HousePool__UnauthorizedPauser.selector);
+        pool.pauseLpEpochSettlement();
+
+        pool.setPauser(pauser);
+        vm.expectEmit(true, false, false, true);
+        emit LpEpochSettlementPauseUpdated(pauser, true);
+        vm.prank(pauser);
+        pool.pauseLpEpochSettlement();
+        assertTrue(pool.lpEpochSettlementPaused());
+
+        vm.prank(pauser);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, pauser));
+        pool.unpauseLpEpochSettlement();
+
+        vm.expectRevert(IHousePool.HousePool__LpEpochSettlementPaused.selector);
+        pool.pauseLpEpochSettlement();
+
+        vm.expectEmit(true, false, false, true);
+        emit LpEpochSettlementPauseUpdated(address(this), false);
+        pool.unpauseLpEpochSettlement();
+        assertFalse(pool.lpEpochSettlementPaused());
+
+        vm.expectRevert(IHousePool.HousePool__LpEpochSettlementNotPaused.selector);
+        pool.unpauseLpEpochSettlement();
+    }
+
+    function test_HousePool_EntryPauseAndSettlementHoldAreIndependent() public {
+        pool.pause();
+        assertTrue(pool.paused());
+        assertFalse(pool.lpEpochSettlementPaused());
+
+        pool.pauseLpEpochSettlement();
+        assertTrue(pool.paused());
+        assertTrue(pool.lpEpochSettlementPaused());
+
+        pool.unpause();
+        assertFalse(pool.paused(), "entry pause recovery must not remain active");
+        assertTrue(pool.lpEpochSettlementPaused(), "entry pause recovery must not release settlement");
+
+        pool.pause();
+        pool.unpauseLpEpochSettlement();
+        assertTrue(pool.paused(), "settlement recovery must not reopen LP entry");
+        assertFalse(pool.lpEpochSettlementPaused());
+    }
+
+    function test_HousePool_SettlementHoldAllowsNewRequestsAndTheirExistingCancellationRules() public {
+        pool.pauseLpEpochSettlement();
+        assertFalse(pool.paused(), "settlement-only hold must not engage entry pause");
+
+        uint256 depositAssets = 10_000e6;
+        usdc.mint(alice, depositAssets);
+        vm.startPrank(alice);
+        usdc.approve(address(juniorVault), depositAssets);
+        assertGe(juniorVault.maxRequestDeposit(alice), depositAssets, "settlement hold must retain request capacity");
+        uint256 depositId = juniorVault.requestDeposit(depositAssets, alice, alice);
+        assertEq(juniorVault.cancelPendingDeposit(depositId), depositAssets);
+        vm.stopPrank();
+
+        uint256 redeemCapacity = juniorVault.maxRequestRedeem(address(this));
+        assertGt(redeemCapacity, 0, "settlement hold must retain redemption request capacity");
+        uint256 redeemShares = redeemCapacity / 10;
+        uint256 redeemId = juniorVault.requestRedeem(redeemShares, address(this), address(this));
+        assertEq(juniorVault.cancelRedeemRequest(redeemId, address(this)), redeemShares);
+
+        assertEq(juniorVault.pendingDepositRequest(depositId, alice), 0);
+        assertEq(juniorVault.pendingRedeemRequest(redeemId, address(this)), 0);
+    }
+
+    function test_HousePool_SettlementHoldLeavesAlreadyFundedClaimsLive() public {
+        uint256 redeemCapacity = juniorVault.maxRequestRedeem(address(this));
+        assertGt(redeemCapacity, 0);
+        uint256 redeemShares = redeemCapacity / 10;
+        uint256 redeemId = juniorVault.requestRedeem(redeemShares, address(this), address(this));
+
+        uint256 depositAssets = 10_000e6;
+        usdc.mint(alice, depositAssets);
+        vm.startPrank(alice);
+        usdc.approve(address(juniorVault), depositAssets);
+        uint256 depositId = juniorVault.requestDeposit(depositAssets, alice, alice);
+        vm.stopPrank();
+        assertEq(depositId, redeemId, "fixture must fund entry and exit in one epoch");
+
+        _settleLpEpochAt(depositId);
+        uint256 claimableShares = juniorVault.claimableDepositRequest(depositId, alice);
+        uint256 claimableAssets = juniorVault.claimableRedeemAssets(redeemId, address(this));
+        assertEq(claimableShares, depositAssets);
+        assertGt(claimableAssets, 0);
+
+        pool.pauseLpEpochSettlement();
+
+        vm.prank(alice);
+        uint256 mintedShares = juniorVault.deposit(claimableShares, alice);
+        assertGt(mintedShares, 0, "funded deposit claim must remain callable");
+
+        uint256 balanceBefore = usdc.balanceOf(address(this));
+        uint256 consumedShares = juniorVault.withdraw(claimableAssets, address(this), address(this));
+        assertEq(consumedShares, redeemShares, "funded redemption must consume the reserved shares");
+        assertEq(
+            usdc.balanceOf(address(this)), balanceBefore + claimableAssets, "funded redemption must remain payable"
+        );
+    }
+
+    function test_HousePool_SettlementHoldLeavesOpenCloseAndMarkRefreshLive() public {
+        pool.pauseLpEpochSettlement();
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+        router.executeOrder(1, _mockPythUpdateData());
+        (uint256 sizeAfterOpen,,,,,,) = engine.positions(alice);
+        assertEq(sizeAfterOpen, 10_000e18, "settlement hold must not block new trading risk");
+
+        router.updateMarkPrice(_mockPythUpdateData(1.05e8));
+        assertEq(engine.lastMarkPrice(), 1.05e8, "settlement hold must not block mark refresh");
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, sizeAfterOpen, 0, 0, true);
+        router.executeOrder(2, _mockPythUpdateData(1.05e8));
+        (uint256 sizeAfterClose,,,,,,) = engine.positions(alice);
+        assertEq(sizeAfterClose, 0, "settlement hold must never block a trader close");
+    }
+
+    function test_HousePool_SettlementHoldLeavesLiquidationLive() public {
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, false);
+        router.executeOrder(1, _mockPythUpdateData());
+
+        pool.pauseLpEpochSettlement();
+        router.executeLiquidation(alice, _mockPythUpdateData(1.98e8));
+
+        (uint256 sizeAfter,,,,,,) = engine.positions(alice);
+        assertEq(sizeAfter, 0, "settlement hold must retain permissionless liquidation");
     }
 
     function _withdrawTrancheWhileHousePoolPaused(

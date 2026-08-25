@@ -14,6 +14,7 @@ import {CfdEngineSettlementSidecar} from "@plether/perps/CfdEngineSettlementSide
 import {CfdMath} from "@plether/perps/CfdMath.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
+import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {PerpsPublicLens} from "@plether/perps/PerpsPublicLens.sol";
@@ -135,7 +136,7 @@ contract AuditBlockingAccountingFindingsFailing_SolvencyTiming is BasePerpTest {
         engineAccountLens = new CfdEngineAccountLens(address(engine));
         engineLens = new CfdEngineLens(address(engine));
         engineProtocolLens = new CfdEngineProtocolLens(address(engine));
-        pool = new HousePool(address(usdc), address(engine));
+        pool = new HousePool(address(usdc), address(engine), address(new HousePoolRedemptionMathSidecar()));
         baseMockPyth = new MockPyth();
         bytes32[] memory baseFeedIds = _basePythFeedIds();
         baseMockPyth.setAllPrices(baseFeedIds, int64(100_000_000), int32(-8), SETUP_TIMESTAMP);

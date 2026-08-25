@@ -52,7 +52,8 @@ interface ILpEpochSettlementMonitor is ISettlementMonitorLens {
  *      directly without Pyth data or ETH; `AtomicOracleRefresh` requires a Hermes payload and calls the Router with
  *      the active PletherOracle's exact fee. When `minimumAtomicPublishTime` is nonzero, that payload must be published
  *      at or after the reported boundary; frozen stale-mark recovery deliberately reports zero and uses frozen-policy
- *      freshness instead. The observed epoch does not select what either route settles.
+ *      freshness instead. An active LP epoch settlement hold is rejected before any Hermes payload is decoded or fee
+ *      is quoted. The observed epoch does not select what either route settles.
  *      Monitoring is advisory and route state can race, so Foundry's exact transaction simulation remains mandatory;
  *      do not use `--skip-simulation`. Always use the SettlementMonitorLens facade, not its monitor-only sidecar.
  */
@@ -61,6 +62,7 @@ contract LpEpochKeeper is Script {
     error LpEpochKeeper__InvalidContract(address target);
     error LpEpochKeeper__RouterMismatch(address expected, address actual);
     error LpEpochKeeper__ExecutionPathUnknown(uint256 dependencyMask);
+    error LpEpochKeeper__LpEpochSettlementPaused();
     error LpEpochKeeper__NoMaturedWork();
     error LpEpochKeeper__UnsupportedExecutionPath(SettlementMonitorViewTypes.ExecutionPath executionPath);
 
@@ -123,6 +125,9 @@ contract LpEpochKeeper is Script {
         _requireContract(poolAddress);
 
         status = monitor.getSettlementStatus(observedEpoch);
+        if (status.lpEpochSettlementPaused) {
+            revert LpEpochKeeper__LpEpochSettlementPaused();
+        }
         if (status.executionPathDependencyMask != 0) {
             revert LpEpochKeeper__ExecutionPathUnknown(status.executionPathDependencyMask);
         }
