@@ -72,8 +72,8 @@ contract AuditV3_C01_FIFODeadlockTest is BasePerpTest {
         engine.setTerminalNavBook(address(terminalNavBook));
         pool = new HousePool(address(usdc), address(engine), address(new HousePoolRedemptionMathSidecar()));
 
-        seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior", "sUSDC");
-        juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior", "jUSDC");
+        seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior", "sUSDC", 0, address(0));
+        juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior", "jUSDC", 0, address(0));
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
         engine.setPool(address(pool));

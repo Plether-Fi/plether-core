@@ -1,5 +1,8 @@
 # Arbitrum Sepolia Perps Release Notes (Draft) - 2026-08-06
 
+> Superseded by `RELEASE_NOTES_ARBITRUM_SEPOLIA_2026-08-26.md`. Retained as the historical draft for the earlier
+> release shape and economics; do not use these defaults for the August 26 deployment.
+
 ## Summary
 
 This release candidate replaces Plether's per-component Pyth confidence ceiling with a weighted aggregate basket

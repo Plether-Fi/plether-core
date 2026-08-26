@@ -13,6 +13,7 @@ import {OrderRouterV2ExecutionSidecar} from "@plether/perps/OrderRouterV2Executi
 import {IAsyncTrancheVault} from "@plether/perps/interfaces/IAsyncTrancheVault.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IHousePoolRedemptionMathSidecar} from "@plether/perps/interfaces/IHousePoolRedemptionMathSidecar.sol";
+import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 import {ITerminalNavBookV2} from "@plether/perps/interfaces/ITerminalNavBookV2.sol";
 import "forge-std/Script.sol";
 
@@ -37,6 +38,13 @@ interface IAsyncTrancheVaultBootstrapView {
     function LP_REQUEST_CUTOFF_DURATION() external view returns (uint256);
     function asset() external view returns (address);
     function share() external view returns (address);
+    function totalSupply() external view returns (uint256);
+    function maintenanceFeeAprBps() external view returns (uint256);
+    function maintenanceFeeRecipient() external view returns (address);
+    function maintenanceFeeConfigActivationTime() external view returns (uint256);
+    function pendingMaintenanceFeeConfig() external view returns (uint256 aprBps, address recipient);
+    function pendingMaintenanceFeeShares() external view returns (uint256);
+    function accruedTotalSupply() external view returns (uint256);
     function getRequestEpochWindow() external view returns (uint256 nextRequestEpoch, uint256 nextRequestCutoffTime);
     function vault(
         address asset_
@@ -57,8 +65,16 @@ interface IPositionProtectionBookBootstrapView {
 
 contract BootstrapPerpsArbitrumSepolia is Script {
 
-    uint256 internal constant DEFAULT_SENIOR_SEED_USDC = 50_000_000e6;
-    uint256 internal constant DEFAULT_JUNIOR_SEED_USDC = 50_000_000e6;
+    address internal constant RELEASE_PYTH = 0x0B73614636C855Bf23F342F307FB981A3e47f42B;
+    uint256 internal constant RELEASE_SENIOR_SEED_USDC = 10_000_000e6;
+    uint256 internal constant RELEASE_JUNIOR_SEED_USDC = 10_000_000e6;
+    uint256 internal constant RELEASE_MAX_SENIOR_EXPOSURE_USDC = 40_000_000e6;
+    uint256 internal constant RELEASE_MAX_SENIOR_SHARE_BPS = 8000;
+    uint256 internal constant RELEASE_MIN_OPEN_NOTIONAL_USDC = 1000e6;
+    uint256 internal constant RELEASE_ADVERSE_CONFIDENCE_MULTIPLIER_BPS = 2500;
+    uint256 internal constant RELEASE_BASKET_MAX_CONFIDENCE_RATIO_BPS = 10;
+    uint256 internal constant RELEASE_MAX_PENDING_ORDERS = 5;
+    uint256 internal constant RELEASE_JUNIOR_MAINTENANCE_FEE_APR_BPS = 100;
 
     bytes4 internal constant ERC165_INTERFACE_ID = 0x01ffc9a7;
     bytes4 internal constant ERC7540_OPERATOR_INTERFACE_ID = 0xe3bc4e65;
@@ -80,11 +96,11 @@ contract BootstrapPerpsArbitrumSepolia is Script {
 
         uint256 maxSeniorExposureUsdc = vm.envUint("MAX_SENIOR_EXPOSURE_USDC");
         uint256 maxSeniorShareBps = vm.envUint("MAX_SENIOR_SHARE_BPS");
-        uint256 seniorSeedUsdc = vm.envOr("SENIOR_SEED_USDC", DEFAULT_SENIOR_SEED_USDC);
-        uint256 juniorSeedUsdc = vm.envOr("JUNIOR_SEED_USDC", DEFAULT_JUNIOR_SEED_USDC);
-        address seniorSeedReceiver = vm.envOr("SENIOR_SEED_RECEIVER", deployer);
-        address juniorSeedReceiver = vm.envOr("JUNIOR_SEED_RECEIVER", deployer);
-        bool activateTrading = vm.envOr("ACTIVATE_TRADING", true);
+        uint256 seniorSeedUsdc = vm.envUint("SENIOR_SEED_USDC");
+        uint256 juniorSeedUsdc = vm.envUint("JUNIOR_SEED_USDC");
+        address seniorSeedReceiver = vm.envAddress("SENIOR_SEED_RECEIVER");
+        address juniorSeedReceiver = vm.envAddress("JUNIOR_SEED_RECEIVER");
+        bool activateTrading = vm.envBool("ACTIVATE_TRADING");
 
         address[] memory testUsers = vm.envOr("TEST_USER_RECIPIENTS", ",", new address[](0));
         uint256[] memory testUserAmounts = vm.envOr("TEST_USER_AMOUNTS", ",", new uint256[](0));
@@ -99,7 +115,14 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         EmergencyPauseCoordinator emergencyCoordinator = EmergencyPauseCoordinator(emergencyCoordinatorAddr);
 
         _validateGuardian(desiredGuardian);
-        _validateSeniorLimits(maxSeniorExposureUsdc, maxSeniorShareBps);
+        _validateReleaseInputs(
+            maxSeniorExposureUsdc,
+            maxSeniorShareBps,
+            seniorSeedUsdc,
+            juniorSeedUsdc,
+            seniorSeedReceiver,
+            juniorSeedReceiver
+        );
         _verifyRedemptionMathSidecar(redemptionMathSidecarAddr);
         _verifyAsyncVaultPair(housePool, usdc);
         _verifyTerminalNavBook(housePool);
@@ -127,11 +150,17 @@ contract BootstrapPerpsArbitrumSepolia is Script {
 
         _configureGuardian(emergencyCoordinator, desiredGuardian, deployer);
         bool poolConfigReady = _configureSeniorLimits(housePool, maxSeniorExposureUsdc, maxSeniorShareBps);
-        if (!poolConfigReady) {
+        bool routerConfigReady = _configureRouterRelease(router, routerAdmin);
+        if (!poolConfigReady || !routerConfigReady) {
+            require(!poolConfigReady && !routerConfigReady, "Release configuration readiness diverged");
+            require(
+                housePool.poolConfigActivationTime() == routerAdmin.routerConfigActivationTime(),
+                "HousePool and Router release windows diverged"
+            );
             vm.stopBroadcast();
             console.log("");
-            console.log("Senior limits proposed but not yet active.");
-            console.log("Wait for the HousePool 48-hour timelock, then rerun this same command.");
+            console.log("HousePool and Router release configurations are not both active yet.");
+            console.log("Wait for their shared 48-hour release window, then rerun this same command.");
             console.log("No tranche seeds, test-user funds, or trading activation were performed.");
             return;
         }
@@ -162,6 +191,8 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         console.log("LP epoch settlement paused:", housePool.lpEpochSettlementPaused());
         console.log("Maximum senior exposure (USDC units):", housePool.maxSeniorExposureUsdc());
         console.log("Maximum senior share (bps):", housePool.maxSeniorShareBps());
+        console.log("Minimum opening notional (USDC units):", router.minOpenNotionalUsdc());
+        console.log("Adverse confidence multiplier (bps):", router.adverseConfidenceMultiplierBps());
         console.log("LP epoch duration:", housePool.LP_EPOCH_DURATION());
         console.log("Maximum LP epochs per settlement phase:", housePool.MAX_LP_EPOCHS_PER_PHASE());
         console.log("Current LP epoch:", housePool.currentLpEpoch());
@@ -210,6 +241,7 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         require(address(router.pletherOracle()).code.length > 0, "PletherOracle has no code");
         require(address(router.pletherOracle().engine()) == address(engine), "PletherOracle Engine mismatch");
         require(address(router.pletherOracle().housePool()) == address(housePool), "PletherOracle HousePool mismatch");
+        require(address(router.pletherOracle().pyth()) == RELEASE_PYTH, "Unexpected Pyth contract");
         require(address(router.pletherOracle().pyth()).code.length > 0, "Pyth has no code");
 
         address policyEvaluator = router.policyEvaluator();
@@ -290,10 +322,19 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         address juniorVault = housePool.juniorVault();
         require(seniorVault != address(0) && juniorVault != address(0), "HousePool vault pair is incomplete");
         require(seniorVault != juniorVault, "HousePool vault pair is duplicated");
+        address juniorFeeRecipient = CfdEngine(address(housePool.ENGINE())).protocolTreasury();
+        require(juniorFeeRecipient != address(0), "Protocol treasury is zero");
         (uint256 seniorNextRequestEpoch, uint256 seniorNextRequestCutoffTime) =
-            _verifyAsyncVault(seniorVault, address(housePool), usdc, true);
-        (uint256 juniorNextRequestEpoch, uint256 juniorNextRequestCutoffTime) =
-            _verifyAsyncVault(juniorVault, address(housePool), usdc, false);
+            _verifyAsyncVault(seniorVault, address(housePool), usdc, true, 0, address(0), true);
+        (uint256 juniorNextRequestEpoch, uint256 juniorNextRequestCutoffTime) = _verifyAsyncVault(
+            juniorVault,
+            address(housePool),
+            usdc,
+            false,
+            RELEASE_JUNIOR_MAINTENANCE_FEE_APR_BPS,
+            juniorFeeRecipient,
+            !housePool.juniorSeedInitialized()
+        );
         require(seniorNextRequestEpoch == juniorNextRequestEpoch, "TrancheVault request epoch mismatch");
         require(seniorNextRequestCutoffTime == juniorNextRequestCutoffTime, "TrancheVault request cutoff mismatch");
 
@@ -319,7 +360,10 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         address vault,
         address housePool,
         address usdc,
-        bool isSenior
+        bool isSenior,
+        uint256 expectedMaintenanceFeeAprBps,
+        address expectedMaintenanceFeeRecipient,
+        bool requireZeroPendingFeeShares
     ) internal view returns (uint256 nextRequestEpoch, uint256 nextRequestCutoffTime) {
         IAsyncTrancheVaultBootstrapView candidate = IAsyncTrancheVaultBootstrapView(vault);
         require(candidate.POOL() == housePool, "TrancheVault pool mismatch");
@@ -339,6 +383,21 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         );
         require(!candidate.supportsInterface(0xffffffff), "TrancheVault accepts invalid ERC165 id");
         require(candidate.vault(usdc) == vault, "TrancheVault share lookup mismatch");
+        require(
+            candidate.maintenanceFeeAprBps() == expectedMaintenanceFeeAprBps,
+            "TrancheVault maintenance fee APR mismatch"
+        );
+        require(
+            candidate.maintenanceFeeRecipient() == expectedMaintenanceFeeRecipient,
+            "TrancheVault maintenance fee recipient mismatch"
+        );
+        require(candidate.maintenanceFeeConfigActivationTime() == 0, "Outstanding maintenance fee proposal");
+        (uint256 pendingAprBps, address pendingRecipient) = candidate.pendingMaintenanceFeeConfig();
+        require(pendingAprBps == 0 && pendingRecipient == address(0), "Pending maintenance fee config is not empty");
+        if (requireZeroPendingFeeShares) {
+            require(candidate.pendingMaintenanceFeeShares() == 0, "Pending maintenance fee shares must be zero");
+            require(candidate.accruedTotalSupply() == candidate.totalSupply(), "Accrued supply must equal raw supply");
+        }
         (nextRequestEpoch, nextRequestCutoffTime) = candidate.getRequestEpochWindow();
     }
 
@@ -407,6 +466,83 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         return true;
     }
 
+    /// @dev Coordinates the Router release proposal with the HousePool proposal. The first run stages the exact
+    ///      desired config; a later run finalizes only that proposal after its unchanged 48-hour delay.
+    function _configureRouterRelease(
+        OrderRouter router,
+        OrderRouterAdmin routerAdmin
+    ) internal returns (bool ready) {
+        require(
+            router.basketMaxConfidenceRatioBps() == RELEASE_BASKET_MAX_CONFIDENCE_RATIO_BPS, "Basket confidence changed"
+        );
+        require(router.maxPendingOrders() == RELEASE_MAX_PENDING_ORDERS, "Pending-order limit changed");
+
+        IOrderRouterAdminHost.RouterConfig memory desiredConfig = _activeRouterConfig(router);
+        desiredConfig.minOpenNotionalUsdc = RELEASE_MIN_OPEN_NOTIONAL_USDC;
+        desiredConfig.adverseConfidenceMultiplierBps = RELEASE_ADVERSE_CONFIDENCE_MULTIPLIER_BPS;
+
+        uint256 activationTime = routerAdmin.routerConfigActivationTime();
+        if (_routerConfigMatches(_activeRouterConfig(router), desiredConfig)) {
+            require(activationTime == 0, "Outstanding Router config proposal");
+            return true;
+        }
+
+        if (activationTime == 0) {
+            routerAdmin.proposeRouterConfig(desiredConfig);
+            console.log("Proposed minimum opening notional:", desiredConfig.minOpenNotionalUsdc);
+            console.log("Proposed adverse confidence multiplier (bps):", desiredConfig.adverseConfidenceMultiplierBps);
+            console.log("Router config activation time:", routerAdmin.routerConfigActivationTime());
+            return false;
+        }
+
+        IOrderRouterAdminHost.RouterConfig memory pendingConfig = routerAdmin.pendingRouterConfig();
+        require(
+            _routerConfigMatches(pendingConfig, desiredConfig), "Pending Router config does not match bootstrap release"
+        );
+        if (block.timestamp < activationTime) {
+            console.log("Router config is still timelocked until:", activationTime);
+            return false;
+        }
+
+        routerAdmin.finalizeRouterConfig();
+        require(
+            _routerConfigMatches(_activeRouterConfig(router), desiredConfig),
+            "Finalized Router config does not match bootstrap release"
+        );
+        console.log("Finalized minimum opening notional:", desiredConfig.minOpenNotionalUsdc);
+        console.log("Finalized adverse confidence multiplier (bps):", desiredConfig.adverseConfidenceMultiplierBps);
+        return true;
+    }
+
+    function _activeRouterConfig(
+        OrderRouter router
+    ) internal view returns (IOrderRouterAdminHost.RouterConfig memory config) {
+        config.maxOrderAge = router.maxOrderAge();
+        config.orderExecutionStalenessLimit = router.orderExecutionStalenessLimit();
+        config.liquidationStalenessLimit = router.liquidationStalenessLimit();
+        config.basketMaxConfidenceRatioBps = router.basketMaxConfidenceRatioBps();
+        config.orderSettlementWindow = router.orderSettlementWindow();
+        config.maxComponentPublishTimeDivergence = router.maxComponentPublishTimeDivergence();
+        config.adverseConfidenceMultiplierBps = router.adverseConfidenceMultiplierBps();
+        config.minOpenNotionalUsdc = router.minOpenNotionalUsdc();
+        config.openOrderExecutionBountyBps = router.openOrderExecutionBountyBps();
+        config.minOpenOrderExecutionBountyUsdc = router.minOpenOrderExecutionBountyUsdc();
+        config.maxOpenOrderExecutionBountyUsdc = router.maxOpenOrderExecutionBountyUsdc();
+        config.closeOrderExecutionBountyUsdc = router.closeOrderExecutionBountyUsdc();
+        config.positionProtectionCommitsEnabled = router.positionProtectionCommitsEnabled();
+        config.positionProtectionTriggerBountyUsdc = router.positionProtectionTriggerBountyUsdc();
+        config.maxPendingOrders = router.maxPendingOrders();
+        config.minEngineGas = router.minEngineGas();
+        config.maxPruneOrdersPerCall = router.maxPruneOrdersPerCall();
+    }
+
+    function _routerConfigMatches(
+        IOrderRouterAdminHost.RouterConfig memory left,
+        IOrderRouterAdminHost.RouterConfig memory right
+    ) internal pure returns (bool) {
+        return keccak256(abi.encode(left)) == keccak256(abi.encode(right));
+    }
+
     function _validateSeniorLimits(
         uint256 maxSeniorExposureUsdc,
         uint256 maxSeniorShareBps
@@ -417,6 +553,23 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         if (maxSeniorShareBps >= 10_000) {
             revert("MAX_SENIOR_SHARE_BPS must be below 10000");
         }
+    }
+
+    function _validateReleaseInputs(
+        uint256 maxSeniorExposureUsdc,
+        uint256 maxSeniorShareBps,
+        uint256 seniorSeedUsdc,
+        uint256 juniorSeedUsdc,
+        address seniorSeedReceiver,
+        address juniorSeedReceiver
+    ) internal pure {
+        _validateSeniorLimits(maxSeniorExposureUsdc, maxSeniorShareBps);
+        require(maxSeniorExposureUsdc == RELEASE_MAX_SENIOR_EXPOSURE_USDC, "Unexpected maximum senior exposure");
+        require(maxSeniorShareBps == RELEASE_MAX_SENIOR_SHARE_BPS, "Unexpected maximum senior share");
+        require(seniorSeedUsdc == RELEASE_SENIOR_SEED_USDC, "Unexpected senior seed");
+        require(juniorSeedUsdc == RELEASE_JUNIOR_SEED_USDC, "Unexpected junior seed");
+        require(seniorSeedReceiver != address(0), "SENIOR_SEED_RECEIVER is zero");
+        require(juniorSeedReceiver != address(0), "JUNIOR_SEED_RECEIVER is zero");
     }
 
     function _validateGuardian(

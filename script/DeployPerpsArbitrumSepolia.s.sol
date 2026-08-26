@@ -40,6 +40,8 @@ interface IAsyncTrancheVaultDeploymentView {
     function totalSupply() external view returns (uint256);
     function maintenanceFeeAprBps() external view returns (uint256);
     function maintenanceFeeRecipient() external view returns (address);
+    function maintenanceFeeConfigActivationTime() external view returns (uint256);
+    function pendingMaintenanceFeeConfig() external view returns (uint256 aprBps, address recipient);
     function pendingMaintenanceFeeShares() external view returns (uint256);
     function accruedTotalSupply() external view returns (uint256);
     function getRequestEpochWindow() external view returns (uint256 nextRequestEpoch, uint256 nextRequestCutoffTime);
@@ -62,9 +64,10 @@ interface IPositionProtectionBookDeploymentView {
 
 contract DeployPerpsArbitrumSepolia is Script {
 
-    address internal constant PYTH = 0x4374e5a8b9C22271E9EB878A2AA31DE97DF15DAF;
+    address internal constant PYTH = 0x0B73614636C855Bf23F342F307FB981A3e47f42B;
     uint32 internal constant CAP_PRICE = 2e8;
     uint256 internal constant FROZEN_CLOSE_SPREAD_BPS = 50;
+    uint256 internal constant JUNIOR_MAINTENANCE_FEE_APR_BPS = 100;
 
     bytes4 internal constant ERC165_INTERFACE_ID = 0x01ffc9a7;
     bytes4 internal constant ERC7540_OPERATOR_INTERFACE_ID = 0xe3bc4e65;
@@ -163,13 +166,28 @@ contract DeployPerpsArbitrumSepolia is Script {
             address(deployed.usdc), address(deployed.engine), address(deployed.housePoolRedemptionMathSidecar)
         );
         deployed.seniorVault = new TrancheVault(
-            IERC20(address(deployed.usdc)), address(deployed.housePool), true, "Plether Senior LP", "psLP"
+            IERC20(address(deployed.usdc)),
+            address(deployed.housePool),
+            true,
+            "Plether Senior LP",
+            "psLP",
+            0,
+            address(0)
         );
+        deployed.housePool.setSeniorVault(address(deployed.seniorVault));
+
+        address juniorFeeRecipient = deployed.engine.protocolTreasury();
+        require(juniorFeeRecipient != address(0), "Protocol treasury is zero");
         deployed.juniorVault = new TrancheVault(
-            IERC20(address(deployed.usdc)), address(deployed.housePool), false, "Plether Junior LP", "pjLP"
+            IERC20(address(deployed.usdc)),
+            address(deployed.housePool),
+            false,
+            "Plether Junior LP",
+            "pjLP",
+            JUNIOR_MAINTENANCE_FEE_APR_BPS,
+            juniorFeeRecipient
         );
 
-        deployed.housePool.setSeniorVault(address(deployed.seniorVault));
         deployed.housePool.setJuniorVault(address(deployed.juniorVault));
         _verifyAsyncVaultPair(deployed.housePool, deployed.seniorVault, deployed.juniorVault, deployed.usdc);
         deployed.engine.setPool(address(deployed.housePool));
@@ -329,10 +347,10 @@ contract DeployPerpsArbitrumSepolia is Script {
 
     function _riskParams() internal pure returns (CfdTypes.RiskParams memory) {
         return CfdTypes.RiskParams({
-            vpiFactor: 0.005e18,
+            vpiFactor: 0.01e18,
             maxSkewRatio: 0.4e18,
-            maintMarginBps: 30,
-            initMarginBps: 45,
+            maintMarginBps: 10,
+            initMarginBps: 20,
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
@@ -462,10 +480,18 @@ contract DeployPerpsArbitrumSepolia is Script {
             "Invalid imminent LP epoch start"
         );
 
+        address juniorFeeRecipient = CfdEngine(address(housePool.ENGINE())).protocolTreasury();
+        require(juniorFeeRecipient != address(0), "Protocol treasury is zero");
         (uint256 seniorNextRequestEpoch, uint256 seniorNextRequestCutoffTime) =
-            _verifyAsyncVault(address(seniorVault), address(housePool), address(usdc), true);
-        (uint256 juniorNextRequestEpoch, uint256 juniorNextRequestCutoffTime) =
-            _verifyAsyncVault(address(juniorVault), address(housePool), address(usdc), false);
+            _verifyAsyncVault(address(seniorVault), address(housePool), address(usdc), true, 0, address(0));
+        (uint256 juniorNextRequestEpoch, uint256 juniorNextRequestCutoffTime) = _verifyAsyncVault(
+            address(juniorVault),
+            address(housePool),
+            address(usdc),
+            false,
+            JUNIOR_MAINTENANCE_FEE_APR_BPS,
+            juniorFeeRecipient
+        );
         require(seniorNextRequestEpoch == juniorNextRequestEpoch, "TrancheVault request epoch mismatch");
         require(seniorNextRequestCutoffTime == juniorNextRequestCutoffTime, "TrancheVault request cutoff mismatch");
 
@@ -491,7 +517,9 @@ contract DeployPerpsArbitrumSepolia is Script {
         address vault,
         address housePool,
         address usdc,
-        bool isSenior
+        bool isSenior,
+        uint256 expectedMaintenanceFeeAprBps,
+        address expectedMaintenanceFeeRecipient
     ) internal view returns (uint256 nextRequestEpoch, uint256 nextRequestCutoffTime) {
         IAsyncTrancheVaultDeploymentView candidate = IAsyncTrancheVaultDeploymentView(vault);
         require(candidate.POOL() == housePool, "TrancheVault pool mismatch");
@@ -511,14 +539,19 @@ contract DeployPerpsArbitrumSepolia is Script {
         );
         require(!candidate.supportsInterface(0xffffffff), "TrancheVault accepts invalid ERC165 id");
         require(candidate.vault(usdc) == vault, "TrancheVault share lookup mismatch");
-        if (!isSenior) {
-            require(candidate.maintenanceFeeAprBps() == 0, "Junior maintenance fee must default to zero");
-            require(candidate.maintenanceFeeRecipient() == address(0), "Junior maintenance fee recipient must be zero");
-            require(candidate.pendingMaintenanceFeeShares() == 0, "Junior pending maintenance fee must be zero");
-            require(
-                candidate.accruedTotalSupply() == candidate.totalSupply(), "Junior accrued supply must equal raw supply"
-            );
-        }
+        require(
+            candidate.maintenanceFeeAprBps() == expectedMaintenanceFeeAprBps,
+            "TrancheVault maintenance fee APR mismatch"
+        );
+        require(
+            candidate.maintenanceFeeRecipient() == expectedMaintenanceFeeRecipient,
+            "TrancheVault maintenance fee recipient mismatch"
+        );
+        require(candidate.maintenanceFeeConfigActivationTime() == 0, "Outstanding maintenance fee proposal");
+        (uint256 pendingAprBps, address pendingRecipient) = candidate.pendingMaintenanceFeeConfig();
+        require(pendingAprBps == 0 && pendingRecipient == address(0), "Pending maintenance fee config is not empty");
+        require(candidate.pendingMaintenanceFeeShares() == 0, "Pending maintenance fee shares must be zero");
+        require(candidate.accruedTotalSupply() == candidate.totalSupply(), "Accrued supply must equal raw supply");
         (nextRequestEpoch, nextRequestCutoffTime) = candidate.getRequestEpochWindow();
     }
 
@@ -545,6 +578,8 @@ contract DeployPerpsArbitrumSepolia is Script {
         console.log("CurrentLpEpoch:", deployed.housePool.currentLpEpoch());
         console.log("SeniorVault:", address(deployed.seniorVault));
         console.log("JuniorVault:", address(deployed.juniorVault));
+        console.log("JuniorMaintenanceFeeAprBps:", deployed.juniorVault.maintenanceFeeAprBps());
+        console.log("JuniorMaintenanceFeeRecipient:", deployed.juniorVault.maintenanceFeeRecipient());
         console.log("CfdEngineAccountLens:", address(deployed.accountLens));
         console.log("CfdEngineLens:", address(deployed.engineLens));
         console.log("CfdOrderPolicyEvaluator:", address(deployed.orderPolicyEvaluator));

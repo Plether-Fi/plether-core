@@ -214,6 +214,7 @@ contract TrancheVault is ERC4626 {
     event RedeemSharesRefunded(
         address indexed controller, address indexed receiver, uint256 indexed epochId, uint256 shares
     );
+    event MaintenanceFeeConfigInitialized(uint256 aprBps, address indexed recipient, uint256 checkpointBoundary);
     event MaintenanceFeeConfigProposed(uint256 aprBps, address indexed recipient, uint256 activationTime);
     event MaintenanceFeeConfigFinalized(
         uint256 previousAprBps,
@@ -252,11 +253,27 @@ contract TrancheVault is ERC4626 {
         address _pool,
         bool _isSenior,
         string memory _name,
-        string memory _symbol
+        string memory _symbol,
+        uint256 _initialMaintenanceFeeAprBps,
+        address _initialMaintenanceFeeRecipient
     ) ERC4626(_usdc) ERC20(_name, _symbol) {
         POOL = IHousePool(_pool);
         IS_SENIOR = _isSenior;
-        maintenanceFeeCheckpointBoundary = _nextMaintenanceFeeBoundary(block.timestamp);
+        if (_isSenior) {
+            if (_initialMaintenanceFeeAprBps != 0 || _initialMaintenanceFeeRecipient != address(0)) {
+                revert TrancheVault__MaintenanceFeeSeniorUnsupported();
+            }
+        } else {
+            _validateMaintenanceFeeConfig(_initialMaintenanceFeeAprBps, _initialMaintenanceFeeRecipient);
+        }
+
+        maintenanceFeeAprBps = _initialMaintenanceFeeAprBps;
+        maintenanceFeeRecipient = _initialMaintenanceFeeRecipient;
+        uint256 checkpointBoundary = _nextMaintenanceFeeBoundary(block.timestamp);
+        maintenanceFeeCheckpointBoundary = checkpointBoundary;
+        emit MaintenanceFeeConfigInitialized(
+            _initialMaintenanceFeeAprBps, _initialMaintenanceFeeRecipient, checkpointBoundary
+        );
     }
 
     function _decimalsOffset() internal pure override returns (uint8) {

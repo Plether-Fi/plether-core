@@ -32,7 +32,7 @@ contract SeniorCapacityVaultMathHarness is TrancheVault {
     constructor(
         IERC20 usdc,
         address pool
-    ) TrancheVault(usdc, pool, true, "Senior Capacity Math Harness", "scMath") {}
+    ) TrancheVault(usdc, pool, true, "Senior Capacity Math Harness", "scMath", 0, address(0)) {}
 
     function setShareSupply(
         uint256 shares
@@ -269,10 +269,10 @@ contract SeniorCapacityTest is BasePerpTest {
         HousePool neutralPool =
             new HousePool(address(usdc), address(engine), address(new HousePoolRedemptionMathSidecar()));
         TrancheVault neutralSenior = new TrancheVault(
-            IERC20(address(usdc)), address(neutralPool), true, "Neutral Senior LP", "neutralSeniorUSDC"
+            IERC20(address(usdc)), address(neutralPool), true, "Neutral Senior LP", "neutralSeniorUSDC", 0, address(0)
         );
         TrancheVault neutralJunior = new TrancheVault(
-            IERC20(address(usdc)), address(neutralPool), false, "Neutral Junior LP", "neutralJuniorUSDC"
+            IERC20(address(usdc)), address(neutralPool), false, "Neutral Junior LP", "neutralJuniorUSDC", 0, address(0)
         );
         neutralPool.setSeniorVault(address(neutralSenior));
         neutralPool.setJuniorVault(address(neutralJunior));

@@ -12,7 +12,7 @@ contract TrancheVaultMaintenanceFeeGasDriver is TrancheVault {
         IERC20 asset_,
         address pool_,
         bool isSenior_
-    ) TrancheVault(asset_, pool_, isSenior_, "Maintenance Fee Gas Driver", "feeGas") {}
+    ) TrancheVault(asset_, pool_, isSenior_, "Maintenance Fee Gas Driver", "feeGas", 0, address(0)) {}
 
     function mintForGasTest(
         address receiver,

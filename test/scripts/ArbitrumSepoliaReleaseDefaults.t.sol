@@ -24,6 +24,7 @@ import {OrderRouterV2ExecutionSidecar} from "@plether/perps/OrderRouterV2Executi
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
+import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 import {Test} from "forge-std/Test.sol";
 
 contract DeployPerpsArbitrumSepoliaHarness is DeployPerpsArbitrumSepolia {
@@ -69,11 +70,11 @@ contract DeployPerpsArbitrumSepoliaHarness is DeployPerpsArbitrumSepolia {
 contract BootstrapPerpsArbitrumSepoliaHarness is BootstrapPerpsArbitrumSepolia {
 
     function defaultSeniorSeedUsdc() external pure returns (uint256) {
-        return DEFAULT_SENIOR_SEED_USDC;
+        return RELEASE_SENIOR_SEED_USDC;
     }
 
     function defaultJuniorSeedUsdc() external pure returns (uint256) {
-        return DEFAULT_JUNIOR_SEED_USDC;
+        return RELEASE_JUNIOR_SEED_USDC;
     }
 
     function validateSeniorLimits(
@@ -102,6 +103,39 @@ contract BootstrapPerpsArbitrumSepoliaHarness is BootstrapPerpsArbitrumSepolia {
         uint256 maxSeniorShareBps
     ) external returns (bool) {
         return _configureSeniorLimits(housePool, maxSeniorExposureUsdc, maxSeniorShareBps);
+    }
+
+    function configureRouterRelease(
+        OrderRouter router
+    ) external returns (bool) {
+        return _configureRouterRelease(router, OrderRouterAdmin(router.admin()));
+    }
+
+    function deployConfigTestRouter(
+        address engine,
+        address engineLens,
+        address housePool,
+        address oracle
+    ) external returns (OrderRouter router) {
+        CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
+        OrderRouterV2ExecutionSidecar executionSidecar = new OrderRouterV2ExecutionSidecar();
+        uint64 routerDependencyNonce = vm.getNonce(address(this));
+        address expectedRouter = vm.computeCreateAddress(address(this), uint256(routerDependencyNonce) + 2);
+        OrderLifecycleBook lifecycleBook = new OrderLifecycleBook(
+            expectedRouter, engine, address(CfdEngine(engine).clearinghouse()), housePool
+        );
+        OrderRouterLiquidationBatchSidecar sidecar = new OrderRouterLiquidationBatchSidecar(expectedRouter);
+        router = new OrderRouter(
+            engine,
+            engineLens,
+            housePool,
+            oracle,
+            address(sidecar),
+            address(evaluator),
+            address(executionSidecar),
+            address(lifecycleBook)
+        );
+        require(address(router) == expectedRouter, "Router CREATE address mismatch");
     }
 
     function verifyTerminalNavBook(
@@ -210,16 +244,18 @@ contract MockBootstrapHousePoolAdmin is MockEmergencyAdmin {
 
 contract ArbitrumSepoliaReleaseDefaultsTest is Test {
 
+    address internal constant RELEASE_PYTH = 0x0B73614636C855Bf23F342F307FB981A3e47f42B;
+
     function test_DeployScriptRiskDefaults_MatchArbitrumSepoliaReleaseParams() public {
         DeployPerpsArbitrumSepoliaHarness deployScript = new DeployPerpsArbitrumSepoliaHarness();
 
         CfdTypes.RiskParams memory params = deployScript.riskParams();
 
-        assertEq(params.vpiFactor, 0.005e18, "vpi factor");
+        assertEq(params.vpiFactor, 0.01e18, "vpi factor");
         assertEq(deployScript.frozenCloseSpreadBps(), 50, "frozen close spread");
         assertEq(params.maxSkewRatio, 0.4e18, "max skew");
-        assertEq(params.maintMarginBps, 30, "maintenance margin");
-        assertEq(params.initMarginBps, 45, "initial margin");
+        assertEq(params.maintMarginBps, 10, "maintenance margin");
+        assertEq(params.initMarginBps, 20, "initial margin");
         assertEq(params.fadMarginBps, 300, "fad margin");
         assertEq(params.baseCarryBps, 500, "base carry");
         assertEq(params.minBountyUsdc, 1e6, "min bounty");
@@ -310,8 +346,9 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         basePrices[0] = 1e8;
         bool[] memory inversions = new bool[](1);
         MockPyth pyth = new MockPyth();
+        vm.etch(RELEASE_PYTH, address(pyth).code);
         PletherOracle oracle = new PletherOracle(
-            address(engine), address(pool), address(pyth), feedIds, quantities, basePrices, inversions
+            address(engine), address(pool), RELEASE_PYTH, feedIds, quantities, basePrices, inversions
         );
         CfdEngineLens engineLens = new CfdEngineLens(address(engine));
         CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
@@ -465,8 +502,8 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
     function test_BootstrapDefaults_MatchArbitrumSepoliaReleaseSeeds() public {
         BootstrapPerpsArbitrumSepoliaHarness bootstrapScript = new BootstrapPerpsArbitrumSepoliaHarness();
 
-        assertEq(bootstrapScript.defaultSeniorSeedUsdc(), 50_000_000e6, "senior seed");
-        assertEq(bootstrapScript.defaultJuniorSeedUsdc(), 50_000_000e6, "junior seed");
+        assertEq(bootstrapScript.defaultSeniorSeedUsdc(), 10_000_000e6, "senior seed");
+        assertEq(bootstrapScript.defaultJuniorSeedUsdc(), 10_000_000e6, "junior seed");
     }
 
     function test_DeploymentUsesExpectedRedemptionMathSidecarAndSettlementStartsLive() public {
@@ -486,11 +523,17 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         assertFalse(pool.lpEpochSettlementPaused(), "LP epoch settlement starts paused");
     }
 
-    function test_AsyncVaultReleaseDefaults_DisableJuniorMaintenanceFee() public {
+    function test_AsyncVaultReleaseDefaults_InitializeJuniorMaintenanceFeeAtProtocolTreasury() public {
         (MockUSDC usdc, HousePool pool, TrancheVault seniorVault, TrancheVault juniorVault) = _deployAsyncVaultPair();
 
-        assertEq(juniorVault.maintenanceFeeAprBps(), 0, "Junior maintenance fee APR");
-        assertEq(juniorVault.maintenanceFeeRecipient(), address(0), "Junior maintenance fee recipient");
+        assertEq(seniorVault.maintenanceFeeAprBps(), 0, "Senior maintenance fee APR");
+        assertEq(seniorVault.maintenanceFeeRecipient(), address(0), "Senior maintenance fee recipient");
+        assertEq(juniorVault.maintenanceFeeAprBps(), 100, "Junior maintenance fee APR");
+        assertEq(
+            juniorVault.maintenanceFeeRecipient(),
+            CfdEngine(address(pool.ENGINE())).protocolTreasury(),
+            "Junior maintenance fee recipient"
+        );
         assertEq(juniorVault.pendingMaintenanceFeeShares(), 0, "Junior pending maintenance fee shares");
         assertEq(juniorVault.accruedTotalSupply(), juniorVault.totalSupply(), "Junior effective supply");
 
@@ -500,17 +543,18 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         bootstrapScript.verifyAsyncVaultPair(pool, address(usdc));
     }
 
-    function test_DeploymentRejectsActiveMaintenanceFeeWhileBootstrapRerunAcceptsIt() public {
+    function test_DeploymentAndBootstrapRejectUnexpectedMaintenanceFeeRecipient() public {
         (MockUSDC usdc, HousePool pool, TrancheVault seniorVault, TrancheVault juniorVault) = _deployAsyncVaultPair();
         juniorVault.proposeMaintenanceFeeConfig(100, address(0xFEE));
         vm.warp(juniorVault.maintenanceFeeConfigActivationTime());
         juniorVault.finalizeMaintenanceFeeConfig();
 
         DeployPerpsArbitrumSepoliaHarness deployScript = new DeployPerpsArbitrumSepoliaHarness();
-        vm.expectRevert(bytes("Junior maintenance fee must default to zero"));
+        vm.expectRevert(bytes("TrancheVault maintenance fee recipient mismatch"));
         deployScript.verifyAsyncVaultPair(pool, seniorVault, juniorVault, usdc);
 
         BootstrapPerpsArbitrumSepoliaHarness bootstrapScript = new BootstrapPerpsArbitrumSepoliaHarness();
+        vm.expectRevert(bytes("TrancheVault maintenance fee recipient mismatch"));
         bootstrapScript.verifyAsyncVaultPair(pool, address(usdc));
     }
 
@@ -705,16 +749,71 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         assertTrue(bootstrapScript.configureSeniorLimits(pool, maxExposure, maxShareBps));
     }
 
+    function test_BootstrapRouterReleaseUsesTwoRunProposalAndFinalizeFlow() public {
+        BootstrapPerpsArbitrumSepoliaHarness bootstrapScript = new BootstrapPerpsArbitrumSepoliaHarness();
+        DeployPerpsArbitrumSepoliaHarness deployScript = new DeployPerpsArbitrumSepoliaHarness();
+        MockUSDC usdc = new MockUSDC();
+        MarginClearinghouse clearinghouse = new MarginClearinghouse(address(usdc));
+        CfdEngine engine = new CfdEngine(
+            address(usdc), address(clearinghouse), 2e8, deployScript.riskParams(), deployScript.frozenCloseSpreadBps()
+        );
+        HousePoolRedemptionMathSidecar redemptionMathSidecar = new HousePoolRedemptionMathSidecar();
+        HousePool pool = new HousePool(address(usdc), address(engine), address(redemptionMathSidecar));
+
+        bytes32[] memory feedIds = new bytes32[](1);
+        feedIds[0] = bytes32(uint256(1));
+        uint256[] memory quantities = new uint256[](1);
+        quantities[0] = 1e18;
+        uint256[] memory basePrices = new uint256[](1);
+        basePrices[0] = 1e8;
+        bool[] memory inversions = new bool[](1);
+        MockPyth pyth = new MockPyth();
+        PletherOracle oracle = new PletherOracle(
+            address(engine), address(pool), address(pyth), feedIds, quantities, basePrices, inversions
+        );
+        OrderRouter router =
+            bootstrapScript.deployConfigTestRouter(address(engine), address(0xCAFE), address(pool), address(oracle));
+        engine.setOrderRouter(address(router));
+        OrderRouterAdmin routerAdmin = OrderRouterAdmin(router.admin());
+
+        assertFalse(bootstrapScript.configureRouterRelease(router));
+        uint256 activationTime = routerAdmin.routerConfigActivationTime();
+        assertEq(activationTime, block.timestamp + routerAdmin.TIMELOCK_DELAY());
+        IOrderRouterAdminHost.RouterConfig memory pendingConfig = routerAdmin.pendingRouterConfig();
+        assertEq(pendingConfig.minOpenNotionalUsdc, 1000e6);
+        assertEq(pendingConfig.adverseConfidenceMultiplierBps, 2500);
+        assertEq(pendingConfig.basketMaxConfidenceRatioBps, 10);
+        assertEq(pendingConfig.maxPendingOrders, 5);
+
+        assertFalse(bootstrapScript.configureRouterRelease(router));
+        assertEq(routerAdmin.routerConfigActivationTime(), activationTime, "matching rerun restarts Router timelock");
+
+        vm.warp(activationTime);
+        assertTrue(bootstrapScript.configureRouterRelease(router));
+        assertEq(routerAdmin.routerConfigActivationTime(), 0);
+        assertEq(router.minOpenNotionalUsdc(), 1000e6);
+        assertEq(router.adverseConfidenceMultiplierBps(), 2500);
+        assertEq(router.basketMaxConfidenceRatioBps(), 10);
+        assertEq(router.maxPendingOrders(), 5);
+    }
+
     function _deployAsyncVaultPair()
         internal
         returns (MockUSDC usdc, HousePool pool, TrancheVault seniorVault, TrancheVault juniorVault)
     {
         usdc = new MockUSDC();
+        DeployPerpsArbitrumSepoliaHarness deployScript = new DeployPerpsArbitrumSepoliaHarness();
+        MarginClearinghouse clearinghouse = new MarginClearinghouse(address(usdc));
+        CfdEngine engine = new CfdEngine(
+            address(usdc), address(clearinghouse), 2e8, deployScript.riskParams(), deployScript.frozenCloseSpreadBps()
+        );
         HousePoolRedemptionMathSidecar redemptionMathSidecar = new HousePoolRedemptionMathSidecar();
-        pool = new HousePool(address(usdc), address(0xE11E), address(redemptionMathSidecar));
-        seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior", "senior");
-        juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior", "junior");
+        pool = new HousePool(address(usdc), address(engine), address(redemptionMathSidecar));
+        seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior", "senior", 0, address(0));
         pool.setSeniorVault(address(seniorVault));
+        juniorVault = new TrancheVault(
+            IERC20(address(usdc)), address(pool), false, "Junior", "junior", 100, engine.protocolTreasury()
+        );
         pool.setJuniorVault(address(juniorVault));
     }
 
