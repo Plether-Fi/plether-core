@@ -1984,6 +1984,57 @@ contract CfdEngineTest is BasePerpTest {
         sidecar.executeClose(delta, position, uint64(block.timestamp));
     }
 
+    function test_SettlementSidecar_RejectsCanonicalPostOpenSolvencyBreach() public {
+        address mockHost = address(0x51DEC4A);
+        address mockClearinghouse = address(0xC1EA41);
+        address mockPool = address(0xA55001);
+        vm.etch(mockHost, hex"00");
+        vm.etch(mockClearinghouse, hex"00");
+        vm.etch(mockPool, hex"00");
+
+        CfdEngineSettlementSidecar sidecar = new CfdEngineSettlementSidecar(mockHost);
+        CfdEnginePlanTypes.OpenDelta memory delta;
+        delta.account = address(0xA11CE);
+        delta.requiredEffectiveAssetsAfterUsdc = 1;
+        CfdTypes.Position memory position;
+
+        vm.mockCall(
+            mockHost, abi.encodeWithSelector(bytes4(keccak256("clearinghouse()"))), abi.encode(mockClearinghouse)
+        );
+        vm.mockCall(mockHost, abi.encodeWithSelector(bytes4(keccak256("pool()"))), abi.encode(mockPool));
+        vm.mockCall(mockHost, abi.encodeWithSelector(bytes4(keccak256("protocolTreasury()"))), abi.encode(address(0)));
+        vm.mockCall(
+            mockHost, abi.encodeWithSelector(bytes4(keccak256("totalTraderClaimBalanceUsdc()"))), abi.encode(uint256(0))
+        );
+
+        IMarginClearinghouse.LockedMarginBuckets memory emptyBuckets;
+        vm.mockCall(
+            mockClearinghouse,
+            abi.encodeWithSelector(IMarginClearinghouse.getLockedMarginBuckets.selector, delta.account),
+            abi.encode(emptyBuckets)
+        );
+        vm.mockCall(
+            mockClearinghouse,
+            abi.encodeWithSelector(IMarginClearinghouse.vpiRebateReserveUsdc.selector, delta.account),
+            abi.encode(uint256(0))
+        );
+        vm.mockCall(
+            mockClearinghouse,
+            abi.encodeWithSelector(IMarginClearinghouse.applyOpenCost.selector),
+            abi.encode(int256(0), uint256(0))
+        );
+        vm.mockCall(
+            mockClearinghouse,
+            abi.encodeWithSelector(IMarginClearinghouse.pnlPledgeUsdc.selector, delta.account),
+            abi.encode(uint256(0))
+        );
+        vm.mockCall(mockPool, abi.encodeWithSelector(bytes4(keccak256("totalAssets()"))), abi.encode(uint256(0)));
+
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__PostOpSolvencyBreach.selector);
+        vm.prank(mockHost);
+        sidecar.executeOpen(delta, position, uint64(block.timestamp));
+    }
+
     function test_SettlementSidecar_RevertsWhenCallerIsNotImmutableEngine() public {
         CfdEngineSettlementSidecar sidecar = CfdEngineSettlementSidecar(address(engine.settlementSidecar()));
         CfdEngine wrongHost =

@@ -2227,6 +2227,37 @@ contract SettlementMonitorLensTest is BasePerpTest {
         assertEq(monitorLens.observableConfigDigest(), bytes32(0));
     }
 
+    function test_EngineConfigDigestFailsClosedWhenEachScalarPolicyFieldIsUnreadable() public {
+        assertTrue(monitorLens.observableConfigDigest() != bytes32(0), "baseline config digest must be available");
+
+        address[6] memory targets = [
+            address(engine),
+            address(terminalNavBook),
+            address(engine),
+            address(engine),
+            address(engine),
+            address(engine)
+        ];
+        bytes4[6] memory selectors = [
+            bytes4(keccak256("CAP_PRICE()")),
+            bytes4(keccak256("SIZE_QUANTUM()")),
+            bytes4(keccak256("engineMarkStalenessLimit()")),
+            bytes4(keccak256("fadMaxStaleness()")),
+            bytes4(keccak256("fadRunwaySeconds()")),
+            bytes4(keccak256("settlementBufferBps()"))
+        ];
+
+        for (uint256 i; i < targets.length; ++i) {
+            vm.mockCallRevert(targets[i], abi.encodeWithSelector(selectors[i]), bytes("unreadable"));
+            assertEq(
+                monitorLens.observableConfigDigest(),
+                bytes32(0),
+                "an unreadable Engine policy field must fail the config digest closed"
+            );
+            vm.clearMockedCalls();
+        }
+    }
+
     function test_HealthAggregatesCustodySeedAndHwmReadFailures() public {
         vm.mockCallRevert(
             address(seniorVault),
