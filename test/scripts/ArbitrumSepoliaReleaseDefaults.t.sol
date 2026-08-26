@@ -362,6 +362,7 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
             new HousePool(address(usdc), address(engine), address(new HousePoolRedemptionMathSidecar()));
         engine.setPool(address(housePool));
         MockPyth pyth = new MockPyth();
+        vm.etch(RELEASE_PYTH, address(pyth).code);
         bytes32[] memory feedIds = new bytes32[](1);
         feedIds[0] = bytes32(uint256(1));
         uint256[] memory quantities = new uint256[](1);
@@ -369,7 +370,7 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         uint256[] memory basePrices = new uint256[](1);
         basePrices[0] = 1e8;
         PletherOracle oracle = new PletherOracle(
-            address(engine), address(housePool), address(pyth), feedIds, quantities, basePrices, new bool[](1)
+            address(engine), address(housePool), RELEASE_PYTH, feedIds, quantities, basePrices, new bool[](1)
         );
 
         CfdEngineLens engineLens = new CfdEngineLens(address(engine));
