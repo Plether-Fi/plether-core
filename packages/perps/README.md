@@ -55,6 +55,8 @@ If you want the accounting model first, read [`ACCOUNTING_SPEC.md`](ACCOUNTING_S
 - Each account may have one full-position OCO take-profit/stop-loss protection at a time.
 - Queue execution is FIFO from the global head.
 - LP-capital carry is used instead of side-to-side funding.
+- The optional Junior maintenance fee is share dilution, not a performance fee. It deploys disabled at `0 bps` and
+  can be enabled only through the vault's 48-hour governance delay.
 - If the HousePool is short on cash, trader profits can become senior trader claims instead of reverting the state transition; keeper bounties are funded from reserved trader margin inside the clearinghouse.
 
 ### Units and accounts
@@ -364,6 +366,22 @@ LPs provide USDC to the `HousePool`, which is split into senior and junior ERC-4
   surcharge, while deposit activation is deferred. Requests do not lock a price or fee; settlement fixes both.
 - During `oracleFrozen`, bootstrap admin flows stay blocked: `initializeSeedPosition(...)` and `assignUnassignedAssets(...)` must wait for the oracle to become live again instead of inheriting the stale-window LP fee path.
 
+Junior alone supports a governance-configurable maintenance fee. It starts at `0 bps` with no recipient, is capped at
+`1,000 bps` nominal APR, and can change only after a 48-hour proposal delay. Accrued fees are paid by minting ordinary
+transferable Junior shares to the recipient; no USDC leaves HousePool and no tranche principal, HWM, reserve, or
+waterfall value is rewritten. Pricing and estimates use raw supply plus pending fee shares even before those shares
+are minted. Pending deposits begin paying only when activated, while pending redemption shares pay until they are
+funded and burned. Because accrual advances on completed Unix-hour boundaries, a mid-hour activation can receive less
+than one hour of pre-activation fee exposure, while a mid-hour funded redemption can avoid less than one hour of
+exposure. This bounded timing shift is the intended cost of hourly rather than per-second accounting.
+
+Accrual uses completed Unix-hour periods and crystallizes only before an actual Junior supply mutation or fee-config
+finalization; there is no public fee checkpoint. Each crystallization charges at most 8,760 hours and forgives any
+older backlog. Accrual continues through settlement holds, oracle freezes, losses, and zero NAV. At zero NAV the
+recipient's newly minted shares are initially worthless but participate in any later recovery. This is a maintenance
+fee regardless of performance—there is no Junior HWM, cost basis, equalization, or fee assessed specifically at LP
+exit.
+
 Senior and Junior deposits and redemptions all use one five-minute request cutoff. Let `t = block.timestamp`,
 `e = floor(t / 3,600)`, and `b = (e + 1) * 3,600`, the next round-hour boundary. Every request is routed as follows:
 
@@ -461,8 +479,9 @@ The monitor reads the settlement hold fail-soft. A readable active hold is inten
 `DepositDeferral.LpEpochSettlementPaused` are reported, and the cached-versus-atomic route remains visible for
 post-recovery planning. A failed hold read instead marks the Pool dependency unknown and the composite incomplete.
 The included `LpEpochKeeper` aborts on an active hold before decoding a payload, quoting a Pyth fee, or broadcasting.
-Adding this ABI/digest input bumps the monitor configuration schema and observation domain to V2; off-chain consumers
-must not compare V1 and V2 digests as if they shared a domain.
+The settlement hold previously bumped the monitor configuration schema and observation domain to V2. Including the
+active Junior maintenance-fee rate and recipient in observable configuration bumps both to V3; off-chain consumers
+must not compare V1, V2, and V3 digests as if they shared a domain.
 
 Use `getSettlementStatus(observedEpoch)` as the lighter high-frequency polling surface. The composite
 `getSettlementObservation(observedEpoch)` is intentionally a checkpoint and alert-investigation read: its ABI return

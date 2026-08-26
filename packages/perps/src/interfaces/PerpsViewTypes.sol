@@ -88,8 +88,15 @@ library PerpsViewTypes {
     /// @notice Compact view of a senior or junior tranche vault.
     /// @param totalAssetsUsdc Assets attributed to the tranche, with 6 decimals.
     /// @param totalShares Outstanding raw ERC4626 share units, using the vault's share decimals.
-    /// @param sharePrice Raw `(totalAssetsUsdc * 1e18) / totalShares` quotient, or `1e18` when supply is zero. The
-    ///        populated-vault branch does not normalize differing asset and share decimals.
+    /// @param effectiveTotalShares Raw supply plus uncheckpointed maintenance-fee shares. This equals `totalShares`
+    ///        for Senior and whenever Junior has no pending fee.
+    /// @param pendingMaintenanceFeeShares Uncheckpointed Junior maintenance-fee shares, or zero for Senior.
+    /// @param maintenanceFeeAprBps Active nominal annual Junior maintenance-fee rate in basis points, or zero for
+    ///        Senior.
+    /// @param maintenanceFeeRecipient Address that receives checkpointed Junior maintenance-fee shares, or the zero
+    ///        address when no recipient is configured.
+    /// @param sharePrice Raw `(totalAssetsUsdc * 1e18) / effectiveTotalShares` quotient, or `1e18` when effective
+    ///        supply is zero. The populated-vault branch does not normalize differing asset and share decimals.
     /// @param maxWithdrawUsdc Pool-wide stored-state tranche cap, with 6 decimals; not holder-specific and not a
     ///        preview of the reconciliation performed by live withdrawal execution.
     /// @param frozenLpFeeBps Active frozen-oracle LP fee in basis points, or zero outside frozen mode.
@@ -99,6 +106,10 @@ library PerpsViewTypes {
     struct TrancheView {
         uint256 totalAssetsUsdc;
         uint256 totalShares;
+        uint256 effectiveTotalShares;
+        uint256 pendingMaintenanceFeeShares;
+        uint256 maintenanceFeeAprBps;
+        address maintenanceFeeRecipient;
         uint256 sharePrice;
         uint256 maxWithdrawUsdc;
         uint256 frozenLpFeeBps;

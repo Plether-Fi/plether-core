@@ -10,6 +10,9 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
 
     uint256 internal constant SATURDAY_FROZEN = 1_710_021_600;
     uint256 internal constant SUNDAY_FAD_ONLY = 1_710_105_000;
+    uint256 internal constant MAINTENANCE_FEE_APR_BPS = 1000;
+
+    address internal constant MAINTENANCE_FEE_RECIPIENT = address(0xFEE70002);
 
     function _enterFrozenWindow() internal {
         vm.warp(SATURDAY_FROZEN);
@@ -73,6 +76,49 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
             "Junior frozen redeem fee should improve remaining junior LP share price"
         );
         assertEq(seniorPriceAfter, seniorPriceBefore, "Junior frozen fee should not reprice the senior tranche");
+    }
+
+    function test_JuniorMaintenanceFee_ComposesWithFrozenExitFee() public {
+        address incumbent = address(0xB0C);
+        uint256 shares = 100_000e9;
+
+        _fundJunior(incumbent, 500_000e6);
+        _fundSenior(address(0xD00E), 500_000e6);
+        _enableJuniorMaintenanceFee();
+        _enterFrozenWindow();
+
+        uint256 requestId = _requestRedeem(juniorVault, incumbent, shares);
+        _prepareFrozenEpoch(requestId);
+        uint256 pendingFeeShares = juniorVault.pendingMaintenanceFeeShares();
+        uint256 rawSupplyBefore = juniorVault.totalSupply();
+        uint256 recipientSharesBefore = juniorVault.balanceOf(MAINTENANCE_FEE_RECIPIENT);
+        uint256 noFrozenFeeAssets = juniorVault.convertToAssets(shares);
+        uint256 frozenEstimate = juniorVault.estimateRedeemAssets(shares);
+        assertGt(pendingFeeShares, 0, "weekend delay must accrue a maintenance fee");
+        assertLt(frozenEstimate, noFrozenFeeAssets, "frozen exit fee must reduce the accrued-supply quote");
+
+        IHousePool.LpEpochSettlementResult memory result = _settleLpEpochForTest();
+
+        assertEq(result.juniorFundedShares, shares);
+        assertEq(result.juniorFundedAssets, frozenEstimate);
+        assertEq(
+            juniorVault.balanceOf(MAINTENANCE_FEE_RECIPIENT) - recipientSharesBefore,
+            pendingFeeShares,
+            "funding burn must materialize the maintenance fee exactly once"
+        );
+        assertEq(
+            juniorVault.totalSupply(),
+            rawSupplyBefore + pendingFeeShares - shares,
+            "maintenance dilution and frozen redemption burn must compose exactly"
+        );
+        assertEq(juniorVault.pendingMaintenanceFeeShares(), 0);
+
+        uint256 rawSupplyAfterFunding = juniorVault.totalSupply();
+        vm.prank(incumbent);
+        uint256 redeemedAssets = juniorVault.claimRedeem(requestId, shares, incumbent, incumbent);
+        assertEq(redeemedAssets, frozenEstimate);
+        assertEq(juniorVault.totalSupply(), rawSupplyAfterFunding, "funded claim cannot burn or checkpoint again");
+        assertEq(juniorVault.balanceOf(MAINTENANCE_FEE_RECIPIENT), recipientSharesBefore + pendingFeeShares);
     }
 
     function test_FrozenLpClaims_CannotBypassAsyncRequestsAndPreviewsStayDisabled() public {
@@ -298,6 +344,12 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
             1e6,
             "matured frozen withdraw estimate should match the settled claim ratio up to rounding dust"
         );
+    }
+
+    function _enableJuniorMaintenanceFee() internal {
+        juniorVault.proposeMaintenanceFeeConfig(MAINTENANCE_FEE_APR_BPS, MAINTENANCE_FEE_RECIPIENT);
+        vm.warp(juniorVault.maintenanceFeeConfigActivationTime());
+        juniorVault.finalizeMaintenanceFeeConfig();
     }
 
 }

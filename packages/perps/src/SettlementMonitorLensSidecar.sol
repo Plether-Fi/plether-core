@@ -15,6 +15,10 @@ import {SettlementMonitorViewTypes} from "@plether/perps/interfaces/SettlementMo
 
 interface ISettlementMonitorSidecarVaultView {
 
+    function maintenanceFeeAprBps() external view returns (uint256);
+
+    function maintenanceFeeRecipient() external view returns (address);
+
     function pendingDepositEscrowAssets() external view returns (uint256);
 
     function withdrawalEscrowAssets() external view returns (uint256);
@@ -34,8 +38,8 @@ interface ISettlementMonitorSidecarVaultView {
 ///      Bindings are constructor-only storage: this non-proxy contract exposes no setter or delegatecall path.
 contract SettlementMonitorLensSidecar {
 
-    uint256 internal constant CONFIG_SCHEMA_VERSION = 2;
-    bytes32 internal constant CONFIG_DOMAIN = keccak256("PLETHER_SETTLEMENT_CONFIG_V2");
+    uint256 internal constant CONFIG_SCHEMA_VERSION = 3;
+    bytes32 internal constant CONFIG_DOMAIN = keccak256("PLETHER_SETTLEMENT_CONFIG_V3");
     uint256 internal constant STATIC_READ_GAS = 500_000;
     uint256 internal constant MAX_STATIC_WORDS = 16;
 
@@ -1056,18 +1060,50 @@ contract SettlementMonitorLensSidecar {
     }
 
     function _poolPolicyConfigDigest() internal view returns (bool available, bytes32 digest) {
-        (bool seniorRateOk, uint256 seniorRate) = _readUint(address(HOUSE_POOL), HousePool.seniorRateBps.selector);
-        (bool poolAgeOk, uint256 poolAge) = _readUint(address(HOUSE_POOL), HousePool.markStalenessLimit.selector);
-        (bool seniorFeeOk, uint256 seniorFee) = _readUint(address(HOUSE_POOL), HousePool.seniorFrozenLpFeeBps.selector);
-        (bool juniorFeeOk, uint256 juniorFee) = _readUint(address(HOUSE_POOL), HousePool.juniorFrozenLpFeeBps.selector);
-        (bool exposureOk, uint256 maxExposure) =
-            _readUint(address(HOUSE_POOL), HousePool.maxSeniorExposureUsdc.selector);
-        (bool shareOk, uint256 maxShare) = _readUint(address(HOUSE_POOL), HousePool.maxSeniorShareBps.selector);
-        available = seniorRateOk && poolAgeOk && seniorFeeOk && juniorFeeOk && exposureOk && shareOk;
-        if (!available) {
+        uint256[7] memory values;
+        bool ok;
+        (ok, values[0]) = _readUint(address(HOUSE_POOL), HousePool.seniorRateBps.selector);
+        if (!ok) {
             return (false, bytes32(0));
         }
-        digest = keccak256(abi.encode(seniorRate, poolAge, seniorFee, juniorFee, maxExposure, maxShare));
+        (ok, values[1]) = _readUint(address(HOUSE_POOL), HousePool.markStalenessLimit.selector);
+        if (!ok) {
+            return (false, bytes32(0));
+        }
+        (ok, values[2]) = _readUint(address(HOUSE_POOL), HousePool.seniorFrozenLpFeeBps.selector);
+        if (!ok) {
+            return (false, bytes32(0));
+        }
+        (ok, values[3]) = _readUint(address(HOUSE_POOL), HousePool.juniorFrozenLpFeeBps.selector);
+        if (!ok) {
+            return (false, bytes32(0));
+        }
+        (ok, values[4]) = _readUint(address(HOUSE_POOL), HousePool.maxSeniorExposureUsdc.selector);
+        if (!ok) {
+            return (false, bytes32(0));
+        }
+        (ok, values[5]) = _readUint(address(HOUSE_POOL), HousePool.maxSeniorShareBps.selector);
+        if (!ok) {
+            return (false, bytes32(0));
+        }
+        (ok, values[6]) =
+            _readUint(address(JUNIOR_VAULT), ISettlementMonitorSidecarVaultView.maintenanceFeeAprBps.selector);
+        if (!ok) {
+            return (false, bytes32(0));
+        }
+        address maintenanceRecipient;
+        (ok, maintenanceRecipient) =
+            _readAddress(address(JUNIOR_VAULT), ISettlementMonitorSidecarVaultView.maintenanceFeeRecipient.selector);
+        if (!ok) {
+            return (false, bytes32(0));
+        }
+
+        available = true;
+        digest = keccak256(
+            abi.encode(
+                values[0], values[1], values[2], values[3], values[4], values[5], values[6], maintenanceRecipient
+            )
+        );
     }
 
     function _seedConfigDigest() internal view returns (bool available, bytes32 digest) {
