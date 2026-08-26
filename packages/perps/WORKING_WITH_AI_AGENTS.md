@@ -2,9 +2,13 @@
 
 Plether Perps is designed so autonomous software can operate capital without asking an observer to trust its private
 memory, interpretation of protocol state, or report of what happened. The protocol does not give an AI agent special
-privileges. For ordinary V2 orders, it gives every account a typed, financially bounded and permanently identified
-intent. Position-protection actions add retained OCO geometry and synthesize typed parent or linked-close orders.
-Both paths have deterministic execution semantics and authenticated terminal evidence.
+privileges. For externally submitted bounded orders, it gives every account a typed, financially bounded and
+permanently identified intent. Position-protection actions add retained OCO geometry and synthesize typed parent or
+linked-close orders. Both paths have deterministic execution semantics and authenticated terminal evidence.
+
+Some Solidity identifiers retain a `V2` suffix, including `OrderV2Types` and `OrderRouterV2ExecutionSidecar`. The
+suffix is part of those code names, not a separate integration mode exposed by the Router. This guide uses
+**bounded order** for the public `commitOrder(OrderRequest)` flow.
 
 This document explains the core protocol surfaces available to agent developers. It covers order integration, policy
 enforcement, execution, and verification. Wallet delegation, session keys, strategy design, model hosting, market-data
@@ -16,14 +20,15 @@ selection, and user-facing approvals remain application-layer concerns.
 |-------------|--------------------|--------------|
 | Authoritative state | Live state comes from the Router, Engine, Clearinghouse, HousePool, and Oracle; permanent order identity and outcomes come from a predeployed immutable lifecycle Book whose exact bindings the Router validates | `IOrderLifecycleBook`, `PerpsPublicLens`, Engine preview lenses |
 | Protocol meaning | Requests, policy constraints, execution regimes, terminal reasons, pending reasons, bounty disposition, and economics are typed | `OrderV2Types`, `CfdOrderPolicyEvaluator` |
-| Bounded authority | Fresh external V2 orders pin a deadline, modes, configuration, and inclusive financial limits; protection actions bind explicit OCO geometry and synthesize a documented internal envelope | `OrderV2Types.ExecutionBounds`, `IPositionProtectionActions` |
+| Bounded authority | Fresh externally submitted bounded orders pin a deadline, modes, configuration, and inclusive financial limits; protection actions bind explicit OCO geometry and synthesize a documented internal envelope | `OrderV2Types.ExecutionBounds`, `IPositionProtectionActions` |
 | Financial policy | The evaluator reconstructs authoritative Engine state and checks the registered intent's limits before the Engine applies the transition | `CfdOrderPolicyEvaluator`, configured Engine planner |
-| Composable execution | External V2 submission is client-id idempotent; execution and protection triggering are permissionless; bounded calls return machine-readable results | `IPerpsTraderActions`, `IPerpsKeeper`, `IPositionProtectionActions` |
+| Composable execution | Bounded-order submission is client-id idempotent; execution and protection triggering are permissionless; bounded calls return machine-readable results | `IPerpsTraderActions`, `IPerpsKeeper`, `IPositionProtectionActions` |
 | Verifiable outcome | The lifecycle Book proves queued-order intent and outcome; the protection Book retains OCO thresholds, trigger evidence, and parent/close linkage | `IntentRegistered`, `OrderFinalized`, `IOrderLifecycleBook.outcome`, `IPositionProtectionViews` |
 
 The practical result is that an agent can separate three questions that are often conflated:
 
-1. **What am I authorizing?** For external V2 orders, the complete `OrderRequest` and `ExecutionBounds` answer this.
+1. **What am I authorizing?** For externally submitted bounded orders, the complete `OrderRequest` and
+   `ExecutionBounds` answer this.
    For position protection, the action parameters and retained OCO record answer it, while the protocol synthesizes
    the parent or linked-close request.
 2. **What is the protocol currently willing to do?** Canonical state, previews, and the execution configuration hash
@@ -40,7 +45,7 @@ user policy / risk mandate
 smart account or session-key controller        permissionless keeper + Pyth data
             |                                                |
             v                                                v
-       OrderRouter  -------------------------------->  V2 execution sidecar
+       OrderRouter  --------------------------> bounded-order execution sidecar
             |  \                                             |
             |   +--> Router-bound keeper sidecar              v
             v                                      policy evaluator + Engine
@@ -59,8 +64,8 @@ The account layer should decide *who* may act. The external protocol request—o
 documented synthesized envelope—decides *what financial result is allowed*. Keeping those controls independent gives
 a user protection if an agent key, model, relayer, or keeper behaves incorrectly.
 
-External V2 bounds are per-order execution authority. They are not wallet-wide delegation, a rolling portfolio limit,
-a withdrawal policy, or a revocation mechanism; those controls belong in the account layer.
+Bounded-order limits are per-order execution authority. They are not wallet-wide delegation, a rolling portfolio
+limit, a withdrawal policy, or a revocation mechanism; those controls belong in the account layer.
 
 ## Core integration tools
 
@@ -80,7 +85,7 @@ mandatory, and the resulting FIFO order cannot be cancelled, so agents should us
 Position protection is a separate canonical surface. Discover the stateful Book through
 `OrderRouter.positionProtectionBook()` and use `IPositionProtectionActions` to create, replace, cancel, trigger, or
 atomically attach protection to an opening order. `commitOpenOrderWithProtection` accepts a caller target of zero for
-no practical slippage limit and translates it to a nonzero V2 sentinel before registration. Cancelling a
+no practical slippage limit and translates it to a nonzero bounded-order sentinel before registration. Cancelling a
 `PendingOpen` protection detaches and refunds the protection but does not cancel its already-committed parent order;
 an already `Triggered` linked close is binding.
 
@@ -146,18 +151,18 @@ Use `IPerpsKeeper` for execution:
   protection-trigger surface. Call it directly on the Router-discovered protection Book; the Router does not forward
   public protection selectors.
 
-The submitting agent does not have to be the executor. Any keeper may execute an order. For a fresh external V2
-request, execution remains inside the limits pinned by the account. Protection parent and linked-close orders instead
-use the documented protocol-synthesized envelope and remain subject to ordinary Router, evaluator, Engine, and
-protection-state checks. Bounty economics differ: self-execution credits the stored order bounty to the account while
-an external keeper receives it. Receipts encode self-execution as `Paid` to `executor == account`;
+The submitting agent does not have to be the executor. Any keeper may execute an order. For a freshly submitted
+bounded-order request, execution remains inside the limits pinned by the account. Protection parent and linked-close
+orders instead use the documented protocol-synthesized envelope and remain subject to ordinary Router, evaluator,
+Engine, and protection-state checks. Bounty economics differ: self-execution credits the stored order bounty to the
+account while an external keeper receives it. Receipts encode self-execution as `Paid` to `executor == account`;
 `RefundedToAccount` is reserved for risk-off cleanup.
 
 The Router delegates to two separately deployed stateless modules. Its exactly Router-bound keeper sidecar performs
-commit validation and orchestrates mark refresh, LP settlement, protection triggers, and liquidation; its V2
-execution sidecar applies oracle, policy, rollback-isolation, and receipt logic. Integrations must still call the
-Router or the Router-discovered protection Book. Direct sidecar calls are not alternative protocol entrypoints and
-cannot acquire Router authority.
+commit validation and orchestrates mark refresh, LP settlement, protection triggers, and liquidation; its bounded-order
+execution sidecar (`OrderRouterV2ExecutionSidecar`) applies oracle, policy, rollback-isolation, and receipt logic.
+Integrations must still call the Router or the Router-discovered protection Book. Direct sidecar calls are not
+alternative protocol entrypoints and cannot acquire Router authority.
 
 Solidity return structs are useful for `eth_call`, simulation, and contract-to-contract composition. A normal RPC
 transaction receipt does not expose Solidity return data, so after broadcast an off-chain agent should reconcile the
@@ -180,7 +185,7 @@ that an agent integration can use or replace:
 These services improve availability and ergonomics but are not authoritative. Agents should verify mutation targets,
 payload acceptance, lifecycle state, and terminal evidence against the contracts.
 
-## The external V2 bounded order envelope
+## The bounded-order envelope
 
 Every external `OrderRequest` contains an account-scoped `clientOrderId`, trade direction and size, margin delta,
 target price, open/close flag, and mandatory `ExecutionBounds`.
@@ -250,7 +255,7 @@ Bounds do not promise execution, fill, profit, liveness, or immediately withdraw
 be represented by a senior trader claim until the HousePool can fund it, and wallet-level authority remains outside
 the order envelope.
 
-## External V2 idempotency that survives process failure
+## Bounded-order idempotency that survives process failure
 
 `clientOrderId` is permanent within one chain, Router/Book deployment, and account namespace. It is not a temporary
 nonce.
@@ -268,8 +273,8 @@ identifier, account, and action sequence—not from data that changes between re
 
 Protection actions do not accept a caller-supplied client id. Before retrying an uncertain
 `commitOpenOrderWithProtection`, create, replace, cancel, or trigger transaction, reconcile the retained protection
-record, its events, and the account's pending-order state. Blind application-level retries do not receive the external
-V2 exact-replay guarantee.
+record, its events, and the account's pending-order state. Blind application-level retries do not receive the public
+bounded-order exact-replay guarantee.
 
 If governance configuration changes or the strategy wants different bounds, create a new client id. The old id still
 describes the old authorization and must remain immutable.
@@ -278,8 +283,8 @@ describes the old authorization and must remain immutable.
 
 Before constructing a fresh public request, read `OrderLifecycleBook.currentExecutionConfigHash()` at the intended
 chain and deployment. The digest commits to the configuration schema, chain, lifecycle Book, Router, Engine,
-Clearinghouse, HousePool, Oracle, policy evaluator, V2 execution sidecar, planners, settlement modules, treasury,
-terminal NAV book, finalized admin versions, and Pool mark-staleness policy.
+Clearinghouse, HousePool, Oracle, policy evaluator, bounded-order execution sidecar, planners, settlement modules,
+treasury, terminal NAV book, finalized admin versions, and Pool mark-staleness policy.
 
 The hash deliberately does not freeze dynamic market state. Current price, depth, skew, FAD/frozen regime, pauses,
 LP settlement hold, and the emergency risk-off cutoff can change without changing the digest. Those conditions are
@@ -349,7 +354,7 @@ pre-oracle cleanup from price-dependent execution.
 
 ## Verifying what actually happened
 
-For an external V2 order, use both on-chain state and the canonical event:
+For an externally submitted bounded order, use both on-chain state and the canonical event:
 
 1. Resolve `(account, clientOrderId)` with `clientIntent` and compare the stored intent hash with
    `hashOrderRequest(account, request)`.
@@ -363,8 +368,9 @@ For an external V2 order, use both on-chain state and the canonical event:
    policy requires deeper accounting assurance.
 
 `IntentRegistered` emits the complete registered `OrderRequest`, its canonical intent hash, and the order bounty
-actually reserved. For a public V2 commit, this is the account's original request. For a protection parent or linked
-close, it is the protocol-generated request and does not by itself prove the original scalar protection action.
+actually reserved. For a public bounded-order commit, this is the account's original request. For a protection parent
+or linked close, it is the protocol-generated request and does not by itself prove the original scalar protection
+action.
 
 `OrderFinalized` emits the complete fixed-shape receipt, including:
 
@@ -400,7 +406,7 @@ For `AccountLiquidated`, the order receipt proves queued-order cleanup and bount
 liquidation events remain canonical for the position's liquidation economics. Both receipt state-summary slots use
 the observed post-liquidation state.
 
-## Recommended external V2 workflow
+## Recommended bounded-order workflow
 
 ### 1. Bind the deployment
 
@@ -446,7 +452,7 @@ under supplied price/time inputs; bounds remain the enforceable authorization if
 - Submit with enough gas for the Router's post-Engine settlement tail.
 - If the result is pending, classify `PendingReason` and retry only when its prerequisite changes.
 
-An agent may operate its own keeper, use a shared keeper network, or do both. The same external V2 limits are enforced
+An agent may operate its own keeper, use a shared keeper network, or do both. The same per-order limits are enforced
 regardless of who executes, with the documented self-execution versus external-keeper bounty treatment.
 
 ### 6. Reconcile independently
@@ -464,7 +470,7 @@ regardless of who executes, with the documented self-execution versus external-k
    zero. A trigger threshold authorizes queuing a delayed full-position market-style close; it does not guarantee a
    fill at the threshold.
 3. Simulate the exact direct Book call. An attached-open caller target may be zero and will be translated into the
-   documented nonbinding V2 sentinel.
+   documented nonbinding bounded-order sentinel.
 4. After submission—or before any retry after uncertain inclusion—reconcile the protection record and events plus
    the parent order's lifecycle state. Protection calls do not have caller-controlled client-id replay protection.
 5. To trigger, submit `triggerPositionProtection` directly to the Book with Pyth data and the quoted fee. Then monitor
@@ -502,9 +508,10 @@ protocol-synthesized execution envelope.
   `PendingOpen` or `Armed` protection record can be replaced or cancelled, but cancelling `PendingOpen` does not
   cancel its parent order.
 - **FIFO:** a retryable head can delay later orders. Monitor `PendingReason` and use bounded cleanup/execution calls.
-- **Governance changes:** for a public V2 intent, a pinned configuration change terminally fails the old intent unless
-  risk-off, expiry, liquidation, or another terminal cleanup path finalizes it first; it does not authorize a new one.
-  Internal protection orders are deliberately unpinned and record the observed configuration instead.
+- **Governance changes:** for an externally submitted bounded-order intent, a pinned configuration change terminally
+  fails the old intent unless risk-off, expiry, liquidation, or another terminal cleanup path finalizes it first; it
+  does not authorize a new one. Internal protection orders are deliberately unpinned and record the observed
+  configuration instead.
 - **Dynamic state:** the configuration hash is not a price, liquidity, pause, or oracle-regime snapshot. Use bounds
   and fresh reads as well.
 - **Oracle dependency:** live execution requires valid Pyth data and ETH for its fee. A data API is not authoritative;
@@ -518,17 +525,17 @@ protocol-synthesized execution envelope.
   a strict, predictable progress boundary matters.
 - **Contract size:** several core contracts operate close to EIP-170. Integrations should not assume new convenience
   methods can be added to the core contracts; prefer stable interfaces and off-chain composition.
-- **Audit status:** the protocol remains pre-deployment and formal production audit coverage, including the V2 agent
+- **Audit status:** the protocol remains pre-deployment and formal production audit coverage, including the agent
   execution-authority components, is pending. Check [`SECURITY.md`](SECURITY.md) against the exact deployment commit.
 
 ## Integration checklist
 
 - [ ] Use the canonical deployment and verify immutable bindings.
 - [ ] Put agent authority behind a revocable smart account or session policy.
-- [ ] For external V2, read the Book's current execution configuration hash.
-- [ ] For external V2, use a permanent account-scoped client id and resolve it before submission.
-- [ ] For external V2, set every financial bound explicitly; never treat zero as unbounded.
-- [ ] For external V2, use a nonzero target and a finite deadline.
+- [ ] For bounded orders, read the Book's current execution configuration hash.
+- [ ] For bounded orders, use a permanent account-scoped client id and resolve it before submission.
+- [ ] For bounded orders, set every financial bound explicitly; never treat zero as unbounded.
+- [ ] For bounded orders, use a nonzero target and a finite deadline.
 - [ ] For protection, verify the separate Book target, OCO geometry, active record, and non-idempotent retry state.
 - [ ] Simulate the exact smart-account and keeper calldata.
 - [ ] For every queued order, confirm registration from the lifecycle Book, not only from an RPC response.
