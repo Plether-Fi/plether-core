@@ -3,6 +3,7 @@ pragma solidity 0.8.35;
 
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {PositionProtectionBook} from "@plether/perps/PositionProtectionBook.sol";
 import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
@@ -14,6 +15,7 @@ import {IPositionProtectionActions} from "@plether/perps/interfaces/IPositionPro
 import {IPositionProtectionBook} from "@plether/perps/interfaces/IPositionProtectionBook.sol";
 import {IPositionProtectionViews} from "@plether/perps/interfaces/IPositionProtectionViews.sol";
 import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtectionTypes.sol";
+import {SolvencyAccountingLib} from "@plether/perps/libraries/SolvencyAccountingLib.sol";
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 import {Vm} from "forge-std/Vm.sol";
 
@@ -369,6 +371,43 @@ contract PositionProtectionTest is BasePerpTest {
         );
         (uint256 remainingSize,,,,,,) = engine.positions(ALICE);
         assertEq(remainingSize, 0, "linked close should fully exit the protected position");
+    }
+
+    function test_TriggeredClose_ExecutesInDegradedModeBelowSettlementBufferWhileRawSolvent() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.BULL, BULL_TAKE_PROFIT, 0);
+
+        uint256 maxLiabilityUsdc = _maxLiability();
+        uint256 settlementBufferUsdc = _settlementBufferTargetUsdc(maxLiabilityUsdc);
+        _drainPoolTo(maxLiabilityUsdc);
+
+        assertEq(pool.totalAssets(), maxLiabilityUsdc, "setup should retain raw solvency equality");
+        assertGt(settlementBufferUsdc, 0, "live protection should require a nonzero settlement buffer");
+        assertLt(
+            pool.totalAssets(),
+            maxLiabilityUsdc + settlementBufferUsdc,
+            "setup should leave the live position below the open-admission buffer target"
+        );
+
+        stdstore.target(address(engine)).sig("degradedMode()").checked_write(true);
+        assertTrue(engine.degradedMode(), "setup should latch risk-off mode");
+
+        uint64 linkedOrderId = _triggerAt(protectionId, BULL_TAKE_PROFIT);
+        bytes[] memory executionData = _mockPythUpdateData(BULL_TAKE_PROFIT);
+        vm.prank(EXECUTION_KEEPER);
+        router.executeOrder(linkedOrderId, executionData);
+
+        PositionProtectionTypes.PositionProtectionView memory terminal =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(
+            uint8(terminal.status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Executed),
+            "buffer headroom and degraded mode must not block a protective close"
+        );
+        assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "successful TP should release the trade lock");
+        assertEq(router.pendingOrderCounts(ALICE), 0, "successful TP should leave no queued close");
+        (uint256 remainingSize,,,,,,) = engine.positions(ALICE);
+        assertEq(remainingSize, 0, "profitable TP should fully close the protected position");
+        assertTrue(engine.degradedMode(), "a safety close must not silently clear the risk-off latch");
     }
 
     function test_CancelPositionProtection_RefundsExactReserveAndClearsTradeLock() public {
@@ -833,6 +872,124 @@ contract PositionProtectionTest is BasePerpTest {
         assertEq(remainingSize, 0, "liquidation should remove the protected position");
     }
 
+    function test_AttachedOpen_InheritsSettlementBufferAdmissionAtCommit() public {
+        uint256 size = 100_000e18;
+        uint256 marginUsdc = 5000e6;
+        _open(BOB, CfdTypes.Side.BEAR, size, marginUsdc, MARK_PRICE);
+
+        uint256 maxLiabilityUsdc = _maxLiability();
+        uint256 settlementBufferUsdc = _settlementBufferTargetUsdc(maxLiabilityUsdc);
+        uint256 underBufferedAssetsUsdc = maxLiabilityUsdc + settlementBufferUsdc - 1;
+        _drainPoolTo(underBufferedAssetsUsdc);
+
+        assertGe(pool.totalAssets(), maxLiabilityUsdc, "setup must remain raw solvent");
+        assertLt(
+            pool.totalAssets(),
+            maxLiabilityUsdc + settlementBufferUsdc,
+            "setup must miss only the settlement-buffer admission target"
+        );
+        assertEq(
+            engineLens.previewOpenRevertCode(
+                ALICE, CfdTypes.Side.BULL, size, marginUsdc, MARK_PRICE, uint64(block.timestamp)
+            ),
+            uint8(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED),
+            "the attached parent must inherit the ordinary open buffer gate"
+        );
+
+        uint256 freeBefore = _freeSettlementUsdc(ALICE);
+        vm.prank(ALICE);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IOrderRouterErrors.OrderRouter__PredictableOpenInvalid.selector,
+                uint8(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED)
+            )
+        );
+        protectionActions.commitOpenOrderWithProtection(
+            CfdTypes.Side.BULL, size, marginUsdc, 0, _params(BULL_TAKE_PROFIT, BULL_STOP_LOSS)
+        );
+
+        assertEq(_freeSettlementUsdc(ALICE), freeBefore, "commit rejection must roll back every tentative lock");
+        assertEq(
+            PositionProtectionBook(address(protectionBook)).nextPositionProtectionId(),
+            1,
+            "commit rejection must not allocate a protection id"
+        );
+        assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "commit rejection must not create a trade lock");
+        assertEq(router.pendingOrderCounts(ALICE), 0, "commit rejection must not enqueue a parent order");
+        assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, 0, "commit rejection must reserve no bounty");
+    }
+
+    function test_AttachedOpen_PostCommitBufferInvalidationRefundsAndUnlocksProtection() public {
+        uint256 size = 100_000e18;
+        uint256 marginUsdc = 5000e6;
+        _open(BOB, CfdTypes.Side.BEAR, size, marginUsdc, MARK_PRICE);
+
+        uint256 freeBefore = _freeSettlementUsdc(ALICE);
+        vm.prank(ALICE);
+        (uint64 parentOrderId, uint64 protectionId) = protectionActions.commitOpenOrderWithProtection(
+            CfdTypes.Side.BULL, size, marginUsdc, 0, _params(BULL_TAKE_PROFIT, BULL_STOP_LOSS)
+        );
+        uint256 parentBountyUsdc = _executionBountyReserve(parentOrderId);
+
+        uint256 maxLiabilityUsdc = _maxLiability();
+        uint256 settlementBufferUsdc = _settlementBufferTargetUsdc(maxLiabilityUsdc);
+        _drainPoolTo(maxLiabilityUsdc + settlementBufferUsdc - 1);
+        assertGe(pool.totalAssets(), maxLiabilityUsdc, "post-commit drift must remain raw solvent");
+        assertLt(
+            pool.totalAssets(),
+            maxLiabilityUsdc + settlementBufferUsdc,
+            "post-commit drift must leave the parent one atom below its buffer target"
+        );
+
+        uint256 branch = vm.snapshotState();
+        vm.prank(address(router));
+        clearinghouse.releaseOrderReservationIfActive(parentOrderId);
+        assertEq(
+            engineLens.previewOpenRevertCode(
+                ALICE, CfdTypes.Side.BULL, size, marginUsdc, MARK_PRICE, uint64(block.timestamp)
+            ),
+            uint8(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED),
+            "execution-time revalidation must classify the headroom loss as solvency exceeded"
+        );
+        vm.revertToState(branch);
+
+        uint256 keeperBefore = _settlementBalance(EXECUTION_KEEPER);
+        bytes[] memory executionData = _mockPythUpdateData(MARK_PRICE);
+        vm.prank(EXECUTION_KEEPER);
+        router.executeOrder(parentOrderId, executionData);
+
+        PositionProtectionTypes.PositionProtectionView memory failed =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(
+            uint8(_orderRecord(parentOrderId).status),
+            uint8(IOrderRouterAccounting.OrderStatus.Failed),
+            "under-buffer parent must terminally fail"
+        );
+        assertEq(
+            uint8(failed.status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Failed),
+            "terminal parent invalidation must fail its attached protection"
+        );
+        assertEq(failed.triggerBountyUsdc, 0, "invalidation must refund the trigger bounty");
+        assertEq(failed.executionBountyUsdc, 0, "invalidation must refund the staged close bounty");
+        assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "invalidation must release the trade lock");
+        assertEq(router.pendingOrderCounts(ALICE), 0, "invalidation must remove the parent from the queue");
+        assertEq(router.getAccountReservations(ALICE).committedMarginUsdc, 0, "parent margin must be unlocked");
+        assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, 0, "all bounty reservations must clear");
+        assertEq(
+            _freeSettlementUsdc(ALICE),
+            freeBefore - parentBountyUsdc,
+            "margin and protection bounties must return while the existing parent-bounty policy pays the keeper"
+        );
+        assertEq(
+            _settlementBalance(EXECUTION_KEEPER) - keeperBefore,
+            parentBountyUsdc,
+            "the ordinary parent execution bounty must follow the existing terminal-failure policy"
+        );
+        (uint256 liveSize,,,,,,) = engine.positions(ALICE);
+        assertEq(liveSize, 0, "invalidated attached open must create no position");
+    }
+
     function test_AttachedOpen_SuccessArmsProtectionAtomically() public {
         PositionProtectionTypes.PositionProtectionParams memory params = _params(BULL_TAKE_PROFIT, BULL_STOP_LOSS);
 
@@ -1261,6 +1418,22 @@ contract PositionProtectionTest is BasePerpTest {
 
     function _totalProtectionBountyUsdc() internal view returns (uint256) {
         return router.positionProtectionTriggerBountyUsdc() + router.closeOrderExecutionBountyUsdc();
+    }
+
+    function _settlementBufferTargetUsdc(
+        uint256 maxLiabilityUsdc
+    ) internal view returns (uint256) {
+        return SolvencyAccountingLib.settlementBufferTargetUsdc(maxLiabilityUsdc, engine.settlementBufferBps());
+    }
+
+    function _drainPoolTo(
+        uint256 targetAssetsUsdc
+    ) internal {
+        uint256 assetsUsdc = pool.totalAssets();
+        assertGt(assetsUsdc, targetAssetsUsdc, "fixture must have drainable pool assets");
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), assetsUsdc - targetAssetsUsdc);
+        assertEq(pool.totalAssets(), targetAssetsUsdc, "fixture must reach the requested pool assets");
     }
 
     function _riskBoundaryFixture(

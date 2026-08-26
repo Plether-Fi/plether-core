@@ -115,8 +115,10 @@ Important:
   326 bytes of EIP-3860 headroom. Its monitor sidecar was 19,114 bytes at runtime with 20,488-byte initcode. The
   maintenance-fee release is monitor schema/domain V3 because its observable configuration digest also commits to the
   active Junior fee rate and recipient. With optimizer 200, V3 measures 23,339 bytes of facade runtime, 49,010 bytes
-  of facade creation input (142 bytes below EIP-3860), and 19,298 bytes of sidecar runtime. Keep the dedicated runtime
-  and creation-input size regressions green and remeasure the exact release commit before deployment.
+  of facade creation input (142 bytes below EIP-3860), and 19,298 bytes of sidecar runtime. The combined V4 release
+  also commits the Engine settlement buffer and measures 23,339 bytes of facade runtime, 49,057 bytes of facade
+  creation input (95 bytes below EIP-3860), and 19,345 bytes of sidecar runtime. Keep the dedicated runtime and
+  creation-input size regressions green and remeasure the exact release commit before deployment.
 - `EmergencyPauseCoordinator` is deployed after the monitor and immutable-bound to the exact RouterAdmin and
   HousePool. The deploy transaction verifies its code, bindings, owner, disabled initial guardian, zero initial
   `riskOffOrderCutoff`, unpaused children, and inactive LP settlement hold, then installs it as both pausers. It has
@@ -217,6 +219,7 @@ The next Arbitrum Sepolia perps deployment uses these initial defaults:
 | `keeperShareBps` | `5_000` (50% of collected charge to keeper) |
 | `protocolShareBps` | `0` (protocol liquidation fee disabled; remaining 50% goes to LPs) |
 | `executionFeeBps` | `4` |
+| `settlementBufferBps` | `25` (0.25% of maximum directional liability) |
 | `positionSizeQuantum` | `1e20` raw units (100 synthetic tokens) |
 | `fadRunwaySeconds` | `1 hours` |
 | `basketMaxConfidenceRatioBps` | `10` |
@@ -254,12 +257,23 @@ rerunnable after governance has legitimately activated or rotated the fee config
 is intentionally incompatible with older lens decoders under the fresh-deployment assumption. Regenerate frontend,
 indexer, and integration bindings from this build and deploy the matching Public Lens with the new vault pair.
 
+`settlementBufferBps` is also part of the complete `EngineRiskConfig`. It defaults to `25` bps and accepts the
+inclusive governance range `0..1,000` bps. With `P = HousePool.totalAssets()`, `C = totalTraderClaimBalance`,
+`E = max(P-C, 0)`, `L = max(bullMaxProfit, bearMaxProfit)`, and
+`B = ceil(L * settlementBufferBps / 10_000)`, open/increase admission requires `E >= L + B` and the LP base
+withdrawal reserve is `C + L + B`. The buffer is not terminal NAV, yield, or a separately custodied balance. Closes
+and liquidations may consume it; raw degraded mode remains `E < L` and may be cleared at `E >= L`. A proposal that
+changes another Engine risk field must copy the intended active buffer value into the complete replacement config.
+Off-chain governance tooling must accept the same `0..1,000` bps range. Because the Engine's Admin dependency is
+one-time-bound, an already deployed stack with the old Admin ceiling cannot gain the wider range without redeployment.
+
 Terminal NAV V2 changes position storage, clearinghouse bucket semantics, Engine and HousePool snapshot ABIs, and
 share-pricing economics. Deploy the Engine, book, clearinghouse, pool, vaults, router, sidecars, oracle, and lenses from
 the same build on a fresh testnet deployment. There is no backward-compatibility or in-place migration path, and no V2
 contract may be wired to an older stack. This build also includes the dedicated VPI rebate sub-reserve and its planner,
-sidecar, lens, and clearinghouse ABI fields; mixing contracts across that boundary can make a live negative VPI balance
-under-backed and must be rejected. The `RiskParams` tuple remains a ten-field ABI.
+sidecar, lens, and clearinghouse ABI fields, plus the settlement-buffer risk-config and snapshot fields. Mixing
+contracts across either boundary can produce inconsistent admission or reserve decisions and must be rejected. The
+`RiskParams` tuple remains a ten-field ABI.
 
 `basketMaxConfidenceRatioBps = 10` accepts the neutral, pre-cap basket only when its weighted aggregate Pyth
 confidence is at most `0.10%` of its price:
@@ -654,8 +668,8 @@ new admission capacity. Use `getSettlementHealth()` for critical-fault and depen
 composite `observationDigest` are advisory comparison aids only. `completeObservationDigest` equals that observation
 hash when `observationComplete` and is zero otherwise. Completeness requires every Oracle dependency read even on a
 cached/no-work route, while Oracle policy validity is required only for atomic-refresh routing. The digest is still
-unauthenticated and unenforced. In V3 the observable configuration digest includes the active Junior maintenance-fee
-APR and recipient; inability to read either makes that digest unavailable. The monitor
+unauthenticated and unenforced. V3 added the active Junior maintenance-fee APR and recipient; V4 also includes the
+Engine settlement-buffer policy. Inability to read any required field makes that digest unavailable. The monitor
 deliberately exposes no authoritative `canSettle` decision. A live transaction can still race cancellations, trading,
 configuration, cash, or oracle state. The exact selected-transaction simulation is authoritative; a call with no
 matured progress deliberately reverts, and every atomic-refresh backlog pass needs another validated Pyth update.

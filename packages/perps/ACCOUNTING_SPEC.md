@@ -30,13 +30,16 @@ The key rules are:
 2. Marked LP equity includes only the portion of an unrealized trader loss collectible from that account's dedicated
    PnL pledge or nettable same-account trader claim. It is not spendable withdrawal cash before collection.
 3. LP redemption funding is stricter than protocol solvency.
-4. Pending-order reservations are not free trader collateral.
-5. A trader price loss is collectible only up to the account's PnL pledge plus explicitly nettable claim. Any excess
+4. Risk-increasing admission and LP redemption funding preserve a liability-scaled settlement buffer; the buffer is
+   headroom, not a liability, NAV adjustment, yield source, or separately custodied balance.
+5. Pending-order reservations are not free trader collateral.
+6. A trader price loss is collectible only up to the account's PnL pledge plus explicitly nettable claim. Any excess
    is a diagnostic write-off, not an LP asset, trader claim, or terminal deficit. An unpaid protocol-side payout
    becomes a trader claim; independently negative terminal equity remains explicit as terminal deficit. A waived
    frozen-close spread is an uncollected charge. V2 has no accumulated-debt ledger or repayment selector.
-6. A valid risk-reducing transition must not revert just to preserve pre-close solvency; the protocol contains the outcome with `degradedMode` instead.
-7. Frozen-close spread value belongs to LPs and must never be credited to protocol treasury.
+7. A valid risk-reducing transition must not revert just to preserve either pre-close solvency or settlement-buffer
+   headroom; the protocol contains raw insolvency with `degradedMode` instead.
+8. Frozen-close spread value belongs to LPs and must never be credited to protocol treasury.
 
 ## Canonical Quantities
 
@@ -69,6 +72,26 @@ Operational rules:
 - `badDebt`: a realized protocol-side shortfall that remains after its authorized settlement paths; it excludes
   uncollateralized trader price loss above the account's collectible cap
 
+### Settlement-buffer terms
+
+Let:
+
+```text
+P = physicalAssets
+C = totalTraderClaimBalance
+E = max(P - C, 0)
+L = maxLiability
+B = ceil(L * settlementBufferBps / 10_000)
+```
+
+`settlementBufferBps` defaults to `25` bps and governance may set it anywhere from `0` through `1,000` bps,
+inclusive. The ceiling is applied in 6-decimal USDC atoms, so nonzero `L` and a nonzero rate produce at least one
+atom of buffer.
+
+`B` is protected settlement headroom. It does not represent an additional trader claim or maximum payout, does not
+enter terminal NAV or yield, and is not a custody or clearinghouse reserve bucket. No tokens are moved merely because
+`B` changes. It affects only risk-increasing admission and the cash available for LP redemption funding.
+
 ### Exact terminal price-PnL terms
 
 Every live position is stored as whole 100-token lots:
@@ -89,12 +112,12 @@ remainingEntryCost = oldEntryCost - closedEntryCost
 
 This assigns every entry-cost atom exactly once and preserves all basis dust for the residual position.
 
-For one account at mark `p`, let `E` be exact entry cost and let
+For one account at mark `p`, let `entryCost` be exact entry cost and let
 `K = pnlPledgeUsdc + sameAccountTraderClaimUsdc`. Its LP-side terminal price delta is:
 
 ```text
-BULL: min(lots * p - E, K)
-BEAR: min(E - lots * p, K)
+BULL: min(lots * p - entryCost, K)
+BEAR: min(entryCost - lots * p, K)
 ```
 
 A negative result is an amount owed by LPs to the trader. A positive result is capped at value reachable from that
@@ -188,18 +211,23 @@ Question answered:
 
 Definition:
 
-- start from `physicalAssets`,
-- subtract existing trader claim liabilities when deriving effective solvency assets,
-- compare post-op assets to post-op `maxLiability`.
+- derive post-op `E = max(P - C, 0)`,
+- derive post-op `L = max(bullMaxProfit, bearMaxProfit)`,
+- derive `B = ceil(L * settlementBufferBps / 10_000)`.
 
 Rule:
 
-- a risk-increasing action is allowed only if post-op effective solvency assets remain at least as large as post-op bounded liability.
+- a risk-increasing open or increase is allowed only if post-op `E >= L + B`; implementation uses the equivalent
+  subtraction form after first proving `E >= L`.
 
 Notes:
 
 - it must not count unrealized trader losses as spendable assets,
-- it is less conservative than LP withdrawal accounting, but still bounded and physical-first.
+- it is less conservative than LP withdrawal accounting, but still bounded and physical-first,
+- attached take-profit/stop-loss protection inherits the parent open's ordinary admission check; attaching or
+  replacing protection on an existing position does not create exposure and therefore does not apply this gate,
+- close, liquidation, and triggered-protection settlement may consume `B`; they are not reverted merely to restore
+  the target.
 
 ### 2. LP redemption-settlement view
 
@@ -210,14 +238,15 @@ Question answered:
 Definition:
 
 ```text
-freeUsdc = physicalAssets - withdrawalReservedUsdc
+baseWithdrawalReservedUsdc = C + L + B
+freeUsdc = max(P - withdrawalReservedUsdc, 0)
 ```
 
 Where `withdrawalReservedUsdc` is built from the canonical reserve model, including at least:
 
 - bounded trader liability,
 - trader claim balance,
-- supplemental withdrawal reserves,
+- the settlement-liability buffer `B` as an engine-supplied supplemental reserve,
 - pool-level pending claimant and unassigned-asset reservations where applicable.
 
 Rule:
@@ -345,21 +374,21 @@ Let:
 - `H` be the projected senior high-water mark,
 - `J` be projected junior principal,
 - `R` be gross USDC reserved by all unfinalized senior deposit requests,
-- `E = max(S, H)` be active protected senior exposure,
-- `C = E + R` be counted senior admission exposure,
+- `X = max(S, H)` be active protected senior exposure,
+- `Y = X + R` be counted senior admission exposure,
 - `A = maxSeniorExposureUsdc`, and
-- `B = maxSeniorShareBps`, where finalized governance requires `A` to be finite and `B < 10_000`.
+- `Q = maxSeniorShareBps`, where finalized governance requires `A` to be finite and `Q < 10_000`.
 
 New senior exposure is admissible only while both conditions hold after the action:
 
 ```text
-C <= A
-C * 10_000 <= B * (C + J)
+Y <= A
+Y * 10_000 <= Q * (Y + J)
 ```
 
-Equivalently, before a new deposit and for nonzero `B`, ratio headroom is bounded by
-`floor(J * B / (10_000 - B)) - C`, saturated at zero. The active senior capacity is the smaller absolute and ratio
-headroom. A zero `B` permits no positive senior exposure. Raw cash, unassigned assets, trader balances, and pending
+Equivalently, before a new deposit and for nonzero `Q`, ratio headroom is bounded by
+`floor(J * Q / (10_000 - Q)) - Y`, saturated at zero. The active senior capacity is the smaller absolute and ratio
+headroom. A zero `Q` permits no positive senior exposure. Raw cash, unassigned assets, trader balances, and pending
 junior deposits do not count as junior subordination.
 
 Rules:
@@ -423,7 +452,8 @@ Key fields:
 - `physicalAssetsUsdc`
 - `netPhysicalAssetsUsdc`
 - `maxLiabilityUsdc`
-- `supplementalReservedUsdc`: reserved extension slot for LP-withdrawal accounting; currently zero in the carry model
+- `supplementalReservedUsdc`: the current settlement-buffer target
+  `ceil(maxLiabilityUsdc * settlementBufferBps / 10_000)` for LP-withdrawal accounting
 - `terminalLpPriceDeltaUsdc`: exact signed collectible price-PnL adjustment used by both entry and exit pricing
 - `terminalNavBookVersion`: monotonic version captured with the exact delta
 - `traderClaimBalanceUsdc`
@@ -830,8 +860,13 @@ This prevents overloading one residual bucket with multiple meanings.
 It must trigger whenever a realized transition leaves:
 
 ```text
-effectiveSolvencyAssets < maxLiability
+E < L
 ```
+
+This is the raw solvency boundary. The settlement buffer is deliberately excluded: a close or liquidation may leave
+`L <= E < L + B` without entering degraded mode. The owner may clear an existing latch once `E >= L`; restoring the
+full buffer is not a clear condition. Subsequent opens and increases still fail their separate `E >= L + B`
+admission check.
 
 Allowed while degraded:
 
@@ -979,6 +1014,9 @@ The accounting system should preserve the following:
 29. existing-position protection cannot arm after its reserve lock unless canonical exact-basis price equity, using
     only PnL pledge plus same-account claim, remains strictly above the stricter initial/active requirement
 30. uncovered carry and an underfunded negative-VPI reserve independently block existing-position protection creation
+31. every successful open or increase leaves `E >= L + ceil(L * settlementBufferBps / 10_000)`
+32. the LP base withdrawal reserve includes `C + L + B`, while terminal NAV, raw degraded-mode detection, custody,
+    and yield exclude `B`
 
 ## Architecture Goal
 

@@ -35,6 +35,7 @@ import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
 import {LiquidationAccountingLib} from "@plether/perps/libraries/LiquidationAccountingLib.sol";
 import {MarginClearinghouseAccountingLib} from "@plether/perps/libraries/MarginClearinghouseAccountingLib.sol";
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
+import {SolvencyAccountingLib} from "@plether/perps/libraries/SolvencyAccountingLib.sol";
 import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 import {Test} from "forge-std/Test.sol";
@@ -859,7 +860,7 @@ contract CfdEngineTest is BasePerpTest {
         _open(firstBullAccount, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
 
         uint256 poolAssetsBefore = pool.totalAssets();
-        _open(secondBullAccount, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
+        _open(secondBullAccount, CfdTypes.Side.BULL, 499_000e18, 50_000e6, 1e8);
 
         assertGt(pool.totalAssets(), poolAssetsBefore, "Positive trade cost should increase canonical pool assets");
         assertEq(pool.excessAssets(), 0, "Trade-cost inflows should not remain quarantined as excess");
@@ -1983,6 +1984,57 @@ contract CfdEngineTest is BasePerpTest {
         sidecar.executeClose(delta, position, uint64(block.timestamp));
     }
 
+    function test_SettlementSidecar_RejectsCanonicalPostOpenSolvencyBreach() public {
+        address mockHost = address(0x51DEC4A);
+        address mockClearinghouse = address(0xC1EA41);
+        address mockPool = address(0xA55001);
+        vm.etch(mockHost, hex"00");
+        vm.etch(mockClearinghouse, hex"00");
+        vm.etch(mockPool, hex"00");
+
+        CfdEngineSettlementSidecar sidecar = new CfdEngineSettlementSidecar(mockHost);
+        CfdEnginePlanTypes.OpenDelta memory delta;
+        delta.account = address(0xA11CE);
+        delta.requiredEffectiveAssetsAfterUsdc = 1;
+        CfdTypes.Position memory position;
+
+        vm.mockCall(
+            mockHost, abi.encodeWithSelector(bytes4(keccak256("clearinghouse()"))), abi.encode(mockClearinghouse)
+        );
+        vm.mockCall(mockHost, abi.encodeWithSelector(bytes4(keccak256("pool()"))), abi.encode(mockPool));
+        vm.mockCall(mockHost, abi.encodeWithSelector(bytes4(keccak256("protocolTreasury()"))), abi.encode(address(0)));
+        vm.mockCall(
+            mockHost, abi.encodeWithSelector(bytes4(keccak256("totalTraderClaimBalanceUsdc()"))), abi.encode(uint256(0))
+        );
+
+        IMarginClearinghouse.LockedMarginBuckets memory emptyBuckets;
+        vm.mockCall(
+            mockClearinghouse,
+            abi.encodeWithSelector(IMarginClearinghouse.getLockedMarginBuckets.selector, delta.account),
+            abi.encode(emptyBuckets)
+        );
+        vm.mockCall(
+            mockClearinghouse,
+            abi.encodeWithSelector(IMarginClearinghouse.vpiRebateReserveUsdc.selector, delta.account),
+            abi.encode(uint256(0))
+        );
+        vm.mockCall(
+            mockClearinghouse,
+            abi.encodeWithSelector(IMarginClearinghouse.applyOpenCost.selector),
+            abi.encode(int256(0), uint256(0))
+        );
+        vm.mockCall(
+            mockClearinghouse,
+            abi.encodeWithSelector(IMarginClearinghouse.pnlPledgeUsdc.selector, delta.account),
+            abi.encode(uint256(0))
+        );
+        vm.mockCall(mockPool, abi.encodeWithSelector(bytes4(keccak256("totalAssets()"))), abi.encode(uint256(0)));
+
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__PostOpSolvencyBreach.selector);
+        vm.prank(mockHost);
+        sidecar.executeOpen(delta, position, uint64(block.timestamp));
+    }
+
     function test_SettlementSidecar_RevertsWhenCallerIsNotImmutableEngine() public {
         CfdEngineSettlementSidecar sidecar = CfdEngineSettlementSidecar(address(engine.settlementSidecar()));
         CfdEngine wrongHost =
@@ -2129,8 +2181,16 @@ contract CfdEngineTest is BasePerpTest {
 
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory viewData =
             engineProtocolLens.getProtocolAccountingSnapshot();
+        uint256 settlementBufferUsdc =
+            SolvencyAccountingLib.settlementBufferTargetUsdc(viewData.maxLiabilityUsdc, engine.settlementBufferBps());
+        uint256 expectedWithdrawalReservedUsdc =
+            viewData.maxLiabilityUsdc + viewData.totalTraderClaimBalanceUsdc + settlementBufferUsdc;
+        uint256 expectedFreeUsdc = viewData.poolAssetsUsdc > expectedWithdrawalReservedUsdc
+            ? viewData.poolAssetsUsdc - expectedWithdrawalReservedUsdc
+            : 0;
         assertEq(viewData.poolAssetsUsdc, pool.totalAssets());
-        assertEq(viewData.withdrawalReservedUsdc, _withdrawalReservedUsdc());
+        assertEq(viewData.withdrawalReservedUsdc, expectedWithdrawalReservedUsdc);
+        assertEq(viewData.freeUsdc, expectedFreeUsdc);
         assertEq(viewData.protocolTreasuryBalanceUsdc, clearinghouse.balanceUsdc(engine.protocolTreasury()));
         assertEq(viewData.totalTraderClaimBalanceUsdc, engine.totalTraderClaimBalanceUsdc());
         assertEq(viewData.degradedMode, engine.degradedMode());
@@ -2159,11 +2219,19 @@ contract CfdEngineTest is BasePerpTest {
         uint256 expectedNetPhysicalAssetsUsdc = snapshot.poolAssetsUsdc > snapshot.protocolTreasuryBalanceUsdc
             ? snapshot.poolAssetsUsdc - snapshot.protocolTreasuryBalanceUsdc
             : 0;
+        uint256 settlementBufferUsdc =
+            SolvencyAccountingLib.settlementBufferTargetUsdc(snapshot.maxLiabilityUsdc, engine.settlementBufferBps());
+        uint256 expectedWithdrawalReservedUsdc =
+            snapshot.maxLiabilityUsdc + snapshot.totalTraderClaimBalanceUsdc + settlementBufferUsdc;
+        uint256 expectedFreeUsdc = snapshot.poolAssetsUsdc > expectedWithdrawalReservedUsdc
+            ? snapshot.poolAssetsUsdc - expectedWithdrawalReservedUsdc
+            : 0;
 
         assertEq(snapshot.poolAssetsUsdc, pool.totalAssets());
         assertEq(snapshot.netPhysicalAssetsUsdc, expectedNetPhysicalAssetsUsdc);
         assertEq(snapshot.maxLiabilityUsdc, _maxLiability());
-        assertEq(snapshot.withdrawalReservedUsdc, _withdrawalReservedUsdc());
+        assertEq(snapshot.withdrawalReservedUsdc, expectedWithdrawalReservedUsdc);
+        assertEq(snapshot.freeUsdc, expectedFreeUsdc);
         assertEq(snapshot.protocolTreasuryBalanceUsdc, clearinghouse.balanceUsdc(engine.protocolTreasury()));
         assertEq(snapshot.totalTraderClaimBalanceUsdc, engine.totalTraderClaimBalanceUsdc());
         assertEq(snapshot.degradedMode, engine.degradedMode());
@@ -2314,7 +2382,11 @@ contract CfdEngineTest is BasePerpTest {
             "Treasury clearinghouse fees should be excluded from pool net assets"
         );
         assertEq(snapshot.maxLiabilityUsdc, _maxLiability(), "Snapshot liability must match accessor");
-        assertEq(snapshot.supplementalReservedUsdc, uint256(0), "Snapshot supplemental reserve must match accessor");
+        assertEq(
+            snapshot.supplementalReservedUsdc,
+            SolvencyAccountingLib.settlementBufferTargetUsdc(_maxLiability(), engine.settlementBufferBps()),
+            "Snapshot supplemental reserve must match the configured settlement buffer"
+        );
         assertEq(
             snapshot.terminalLpPriceDeltaUsdc,
             terminalSnapshot.terminalLpPriceDeltaUsdc,
@@ -2469,7 +2541,7 @@ contract CfdEngineTest is BasePerpTest {
         _fundTrader(bullTrader, 100_000e6);
         _fundTrader(bearTrader, 100_000e6);
 
-        _open(bearAccount, CfdTypes.Side.BEAR, 1_000_000e18, 50_000e6, 1e8);
+        _open(bearAccount, CfdTypes.Side.BEAR, 999_000e18, 50_000e6, 1e8);
         _open(bullAccount, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(bullAccount, 500_000e18, 20_000_000);
@@ -2547,7 +2619,7 @@ contract CfdEngineTest is BasePerpTest {
         _fundTrader(residualBearTrader, 100_000e6);
 
         _open(bearAccount, CfdTypes.Side.BEAR, 900_000e18, 45_000e6, 1e8);
-        _open(residualBearAccount, CfdTypes.Side.BEAR, 100_000e18, 5000e6, 1e8);
+        _open(residualBearAccount, CfdTypes.Side.BEAR, 99_000e18, 5000e6, 1e8);
         _open(bullAccount, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
 
         _close(bullAccount, CfdTypes.Side.BULL, 500_000e18, 20_000_000);
@@ -6044,7 +6116,7 @@ contract CfdEngineAuditTest is BasePerpTest {
             keeperShareBps: 5000,
             protocolShareBps: 0
         });
-        ICfdEngineAdminHost.EngineRiskConfig memory config;
+        ICfdEngineAdminHost.EngineRiskConfig memory config = _engineRiskConfig();
         config.riskParams = newParams;
         config.executionFeeBps = engine.executionFeeBps();
         config.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
@@ -6450,7 +6522,9 @@ contract CarryModelFreeUsdcTest is BasePerpTest {
         uint256 bal = usdc.balanceOf(address(pool));
         uint256 maxLiability = _sideMaxProfit(CfdTypes.Side.BULL);
         uint256 pendingFees = clearinghouse.balanceUsdc(engine.protocolTreasury());
-        uint256 reservedWithoutLegacySpread = maxLiability + pendingFees;
+        uint256 settlementBuffer =
+            SolvencyAccountingLib.settlementBufferTargetUsdc(maxLiability, engine.settlementBufferBps());
+        uint256 reservedWithoutLegacySpread = maxLiability + settlementBuffer + pendingFees;
         uint256 freeWithoutLegacySpread = bal > reservedWithoutLegacySpread ? bal - reservedWithoutLegacySpread : 0;
 
         assertEq(
@@ -6489,7 +6563,7 @@ contract DegradedModeLifecycleTest is BasePerpTest {
         _fundTrader(bullTrader, 100_000e6);
         _fundTrader(bearTrader, 100_000e6);
 
-        _open(bearAccount, CfdTypes.Side.BEAR, 1_000_000e18, 50_000e6, 1e8);
+        _open(bearAccount, CfdTypes.Side.BEAR, 999_000e18, 50_000e6, 1e8);
         _open(bullAccount, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
         _close(bullAccount, CfdTypes.Side.BULL, 500_000e18, 20_000_000);
     }
@@ -6624,7 +6698,7 @@ contract ProtocolPhaseTest is BasePerpTest {
         address bearAccount = bearTrader;
         _fundTrader(bullTrader, 100_000e6);
         _fundTrader(bearTrader, 100_000e6);
-        _open(bearAccount, CfdTypes.Side.BEAR, 1_000_000e18, 50_000e6, 1e8);
+        _open(bearAccount, CfdTypes.Side.BEAR, 999_000e18, 50_000e6, 1e8);
         _open(bullAccount, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
         _close(bullAccount, CfdTypes.Side.BULL, 500_000e18, 20_000_000);
 
@@ -7299,7 +7373,7 @@ contract SolvencySnapshotRegressionTest is BasePerpTest {
         _fundTrader(bullTrader, 30_000e6);
         _fundTrader(bearTrader, 100_000e6);
 
-        _open(bullAccount, CfdTypes.Side.BULL, 1_000_000e18, 20_000e6, 1e8);
+        _open(bullAccount, CfdTypes.Side.BULL, 999_000e18, 20_000e6, 1e8);
         _open(bearAccount, CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8);
 
         uint256 currentDay = ((block.timestamp / 1 days) + 4) % 7;

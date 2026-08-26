@@ -142,11 +142,11 @@ transaction ordering, and post-deployment getter/code-hash verification as one o
 
 | Regime | Entry condition | Allowed actions | Core checks |
 |--------|-----------------|----------------|-------------|
-| Live market | oracle not frozen, mark fresh enough | opens, closes, liquidations | staleness, `block.number > commitBlock`, `commitTime < publishTime <= block.timestamp`, `publishTime >= lastMarkTime` |
+| Live market | oracle not frozen, mark fresh enough | opens, closes, liquidations | staleness, `block.number > commitBlock`, `commitTime < publishTime <= block.timestamp`, `publishTime >= lastMarkTime`; opens/increases also require post-op `E >= L + B` |
 | FAD-only / runway live-close regime | FAD active, oracle not frozen | live close-only rules | same live checks; signed VPI and no frozen-close spread |
 | Frozen close-only regime | oracle frozen but within allowed stale window | closes and liquidations only | relaxed publish-ordering rule and frozen-window stale limits; voluntary closes use signed VPI plus fixed LP-owned spread, liquidations unchanged |
 | Over-stale frozen regime | oracle frozen beyond allowed stale window | no execution | revert/block |
-| Degraded mode | post-terminal insolvency latch | risk-reducing and protective actions only | opens blocked, protective transitions allowed |
+| Degraded mode | raw post-terminal `E < L` latch | risk-reducing and protective actions only | opens blocked, protective transitions allowed; settlement-buffer depletion alone does not latch |
 
 ## Source Of Truth By Quantity
 
@@ -165,6 +165,7 @@ transaction ordering, and post-deployment getter/code-hash verification as one o
 | Treasury protocol fees | Protocol/treasury | Treasury account in `MarginClearinghouse`; `MarginClearinghouse.balanceUsdc(CfdEngine.protocolTreasury())` reports that balance | cash-collected execution and liquidation fee routing, settlement top-ups, treasury clearinghouse withdraw | no | yes, as clearinghouse-custodied protocol margin | no | no |
 | Signed terminal price delta | LP marked ownership adjustment | `TerminalNavBookV2` queried through the authenticated Engine snapshot | Engine-only atomic, state-derived `syncFromEngine(...)` | n/a | not the endpoint admission reserve | cannot fund cash redemption | yes, identically for deposit activation and redemption pricing |
 | Canonical pool assets | LP/protocol backing | `HousePool.totalAssets()` and accounting ledger | synchronized LP activation/funding plus accounting hooks | base physical solvency cash | yes | yes | yes |
+| Settlement-liability buffer `B` | No separate owner; protected cash headroom | Derived as `ceil(maxLiability * settlementBufferBps / 10_000)` from canonical Engine state | Liability changes and timelocked `EngineRiskConfig` updates change the target; no custody movement | no | no; excluded from raw `E < L` degraded test | yes, as an engine-supplied supplemental reserve | cash-funding constraint only; excluded from terminal NAV and yield |
 | Pending LP deposit assets | Request controller | USDC in `TrancheVault` request escrow plus per-controller/per-epoch accounting | request, eligible cancellation, or pool-authorized activation | no | no | no | no, until activated |
 | Activated LP deposit shares | Request controller | Shares in `TrancheVault` claim escrow plus claimable epoch accounting | atomic Router epoch settlement, then controller/operator claim | no | no separate asset claim | no | yes, through outstanding share supply |
 | Pending LP redemption shares | Request controller; still exposed to tranche P&L | `TrancheVault` request/epoch queue; shares held by vault escrow and still in supply | request path plus pool-authorized settlement callback | no | no separate asset claim before funding | no | yes, through outstanding share supply |
@@ -200,6 +201,22 @@ Reachability note:
 - Chosen tradeoff: record senior trader claim balances instead of reverting the state transition.
 - New risk: payout servicing becomes asynchronous and must respect seniority.
 - Protecting invariant: trader claim liabilities remain senior in withdrawal, solvency, and reconciliation accounting.
+
+### Settlement-liability headroom
+
+- Liveness problem: admitting exposure exactly at the bounded-liability line leaves no ordinary cash headroom for a
+  profitable close, while treating that headroom as raw solvency would make risk-reducing exits trigger containment
+  too early.
+- Chosen tradeoff: let `P = HousePool.totalAssets()`, `C = totalTraderClaimBalance`, `E = max(P-C, 0)`,
+  `L = max(bullMaxProfit, bearMaxProfit)`, and `B = ceil(L * settlementBufferBps / 10_000)`. Opens/increases require
+  post-op `E >= L + B`, and LP redemption funding reserves `C + L + B`.
+- Governance rule: the rate defaults to `25` bps and the 48-hour timelocked `EngineRiskConfig` accepts `0..1,000` bps,
+  inclusive.
+- Ownership rule: `B` is not a trader or LP liability, terminal NAV, yield, or a clearinghouse/custody bucket. It
+  constrains admission and withdrawable cash only.
+- Liveness rule: closes, liquidations, and triggered protection closes may consume `B`. Raw degraded mode remains
+  `E < L`, and an existing latch clears at `E >= L`; `L <= E < L + B` merely blocks new risk and LP redemption
+  funding.
 
 ### Synchronized LP epoch clearing
 
@@ -246,8 +263,9 @@ Reachability note:
   initially worthless and retain ordinary recovery rights.
 - Boundedness: accrual uses completed Unix hours, exponentiation by squaring, and at most `8,760` charged hours per
   crystallization. Older elapsed hours are forgiven. There is no public fee checkpoint or per-account cost basis.
-- Monitoring boundary: schema/domain V3 commits the readable active APR and recipient into observable configuration;
-  an unreadable value invalidates the digest rather than being interpreted as a disabled fee.
+- Monitoring boundary: schema/domain V3 introduced the readable active APR and recipient in observable configuration;
+  V4 also commits the Engine settlement-buffer policy. An unreadable required value invalidates the digest rather
+  than being interpreted as a disabled fee or buffer.
 
 ### Clearinghouse liquidation-charge servicing
 
@@ -304,6 +322,15 @@ Reachability note:
 - Protecting invariant: this path only supports risk-reducing close commits and still excludes queued reservations from generic collateral reachability.
 
 ## Transaction Narratives
+
+### Buffered open or increase
+
+1. The planner projects the ordinary open economics and post-op directional liability.
+2. It computes `E = max(P-C, 0)`, `L = max(bullMaxProfit, bearMaxProfit)`, and the atom-ceiled
+   `B = ceil(L * settlementBufferBps / 10_000)` from the same snapshot.
+3. The open/increase is admitted only at `E >= L + B`; equality passes.
+4. Apply-time settlement rechecks the required effective-asset target before completing. An attached TP/SL record
+   inherits this parent decision and does not create a second risk gate.
 
 ### Profitable close with immediate payout
 
@@ -408,14 +435,16 @@ Reachability note:
 1. Preview/live parity: canonical close and liquidation planner outputs should match live settlement semantics.
 2. Physical-first solvency: physical cash and mathematical claims are distinct objects.
 3. Trader-claim seniority: trader claim balances remain senior until settled.
-4. Carry isolation: project pending carry from eligible free settlement first; only an uncovered remainder blocks
+4. Settlement headroom: every open/increase leaves `E >= L + B`, LP funding reserves `C + L + B`, and `B` never enters
+   raw degraded mode, terminal NAV, yield, or custody accounting.
+5. Carry isolation: project pending carry from eligible free settlement first; only an uncovered remainder blocks
    withdrawal or makes the position liquidatable, and exact price-risk backing cannot offset it.
-5. Bounded queue behavior: cleanup and close-intent projection are account-local.
-6. Reservation conservation: clearinghouse-reserved execution bounty value and admin-held ETH refund claims are each distributed, refunded, forfeited, or left claimable exactly once.
-7. Exact symmetric NAV: deposits and redemptions use the same signed terminal delta; marked trader losses count only to the account cap and never as spendable withdrawal cash.
-8. Frozen-spread conservation: assessed spread equals LP-paid spread plus terminally waived spread; live/FAD-only closes and all liquidations assess zero.
-9. Terminal-curve parity: after every successful transition, the bound Engine has atomically called the book's sole mutation endpoint and every account curve matches live lots, exact entry cost, side, and `pnlPledge + nettable claim` cap.
-10. Monitor epistemics: a failed dependency read must remain distinguishable from healthy zero state, every Oracle
+6. Bounded queue behavior: cleanup and close-intent projection are account-local.
+7. Reservation conservation: clearinghouse-reserved execution bounty value and admin-held ETH refund claims are each distributed, refunded, forfeited, or left claimable exactly once.
+8. Exact symmetric NAV: deposits and redemptions use the same signed terminal delta; marked trader losses count only to the account cap and never as spendable withdrawal cash.
+9. Frozen-spread conservation: assessed spread equals LP-paid spread plus terminally waived spread; live/FAD-only closes and all liquidations assess zero.
+10. Terminal-curve parity: after every successful transition, the bound Engine has atomically called the book's sole mutation endpoint and every account curve matches live lots, exact entry cost, side, and `pnlPledge + nettable claim` cap.
+11. Monitor epistemics: a failed dependency read must remain distinguishable from healthy zero state, every Oracle
     dependency is required for a complete composite even if its feed policy is not required by the selected route,
     cutoff totals are maximum membership because cancellations may shrink them, and bounded aggregate checks do not
     prove per-account curve or radix-node parity.
@@ -431,6 +460,7 @@ Use the suites below as the highest-signal audit companions.
 | Liquidation | `packages/perps/test/perps/CfdEngine.t.sol`, `packages/perps/test/perps/OrderRouter.t.sol`, `packages/perps/test/perps/invariant/PerpTraderClaimInvariant.t.sol` |
 | Payout modes | `packages/perps/test/perps/PayoutModesMatrix.t.sol`, `packages/perps/test/perps/CfdEngine.t.sol` |
 | Trader claim liabilities | `packages/perps/test/perps/CfdEngine.t.sol`, `packages/perps/test/perps/invariant/PerpTraderClaimInvariant.t.sol` |
+| Settlement-liability buffer / raw degraded boundary | `packages/perps/test/perps/SettlementBuffer.t.sol`, `packages/perps/test/perps/CfdEngine.t.sol`, `packages/perps/test/perps/AuditFollowupFindingsFailing.t.sol`, `packages/perps/test/perps/HousePool.t.sol`, `packages/perps/test/perps/TimelockPause.t.sol` |
 | Economic conservation | `packages/perps/test/perps/invariant/PerpEconomicConservationInvariant.t.sol`, `packages/perps/test/perps/invariant/PerpAccountingInvariant.t.sol` |
 | Multi-account isolation | `packages/perps/test/perps/invariant/PerpMultiAccountInvariant.t.sol` |
 | FIFO / expiry / queue | `packages/perps/test/perps/OrderRouter.t.sol` |

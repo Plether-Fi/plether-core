@@ -11,8 +11,8 @@ library ProtocolLensViewTypes {
     /// @param netPhysicalAssetsUsdc Pool assets net of protocol-treasury settlement credited in custody.
     /// @param maxLiabilityUsdc Larger of the bull-side and bear-side maximum-profit envelopes.
     /// @param effectiveSolvencyAssetsUsdc Pool assets after aggregate trader claims, floored at zero.
-    /// @param withdrawalReservedUsdc Maximum position liability plus aggregate trader claims.
-    /// @param freeUsdc Pool assets above maximum position liability and aggregate trader claims.
+    /// @param withdrawalReservedUsdc Maximum position liability, aggregate trader claims, and settlement buffer.
+    /// @param freeUsdc Pool assets above maximum position liability, aggregate trader claims, and settlement buffer.
     /// @param protocolTreasuryBalanceUsdc Settlement credited to the protocol treasury in the clearinghouse.
     /// @param totalTraderClaimBalanceUsdc Aggregate unpaid trader claims.
     /// @param degradedMode Whether the engine has entered insolvency-protection mode.

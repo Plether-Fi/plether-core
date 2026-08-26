@@ -18,6 +18,7 @@ The perps system is built around a few core security choices:
 - strict separation between trader custody, router intent records, engine accounting, and LP capital,
 - exact symmetric LP NAV that counts only account-capped collectible marked losses as receivables and never as
   withdrawal cash before collection,
+- liability-scaled settlement headroom for risk-increasing admission and LP redemption funding,
 - fail-soft terminal settlement through trader claim balances,
 - degraded-mode containment if a terminal transition reveals insolvency.
 
@@ -45,7 +46,7 @@ size quantum.
 
 | Parameter | Contract | Guard |
 |-----------|----------|-------|
-| `EngineRiskConfig` (`riskParams`, `executionFeeBps`, `frozenCloseSpreadBps`) | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 48-hour timelock |
+| `EngineRiskConfig` (`riskParams`, `executionFeeBps`, `frozenCloseSpreadBps`, `settlementBufferBps`) | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 48-hour timelock |
 | `EngineCalendarConfig` (`fadDayOverrides`, `fadRunwaySeconds`) | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 48-hour timelock |
 | `EngineFreshnessConfig` (`fadMaxStaleness`, `engineMarkStalenessLimit`) | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 48-hour timelock |
 | `seniorRateBps` | `HousePool` | `onlyOwner`, 48-hour timelock |
@@ -55,6 +56,9 @@ size quantum.
 | `OracleConfig` (`pletherOracle`) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
 
 The deployed `frozenCloseSpreadBps` default is `50` bps (0.50%). Both construction and timelocked updates reject zero and values above the `1,000` bps (10%) hard cap.
+
+The deployed `settlementBufferBps` default is `25` bps (0.25%). Timelocked updates accept the inclusive range
+`0..1,000` bps; zero disables the additional headroom without changing raw solvency or degraded-mode semantics.
 
 ### One-time wiring
 
@@ -151,10 +155,10 @@ These are the highest-value properties an auditor should expect to hold.
 
 | Invariant | Description |
 |-----------|-------------|
-| Bounded entry solvency | Risk-increasing opens require `pool.totalAssets() >= max(globalBullMaxProfit, globalBearMaxProfit)` using canonical physical backing rather than raw token balance |
-| Degraded containment | If a close or liquidation reveals post-op insolvency, `degradedMode` latches and blocks further risk expansion while still permitting protective transitions |
+| Buffered entry solvency | With `P = pool.totalAssets()`, `C = totalTraderClaimBalance`, `E = max(P-C, 0)`, `L = max(globalBullMaxProfit, globalBearMaxProfit)`, and `B = ceil(L * settlementBufferBps / 10_000)`, every risk-increasing open/increase requires post-op `E >= L + B` |
+| Degraded containment | If a close or liquidation leaves raw post-op `E < L`, `degradedMode` latches and blocks further risk expansion while still permitting protective transitions; `B` is deliberately excluded |
 | Bounded payout | No trader payout can exceed the capped market payoff implied by `CAP_PRICE` |
-| Withdrawal firewall | Synchronized LP redemption funding is limited to conservative free cash after accounting for bounded liability and trader claim liabilities |
+| Withdrawal firewall | Synchronized LP redemption funding is limited to conservative free cash after a base reserve of `C + L + B` plus any pool-level reservations |
 | Matured Senior priority | A settlement cannot fund Junior redemptions while any eligible matured Senior demand remains unaccounted for |
 | Funded-claim backing | Every claimable LP asset is held one-for-one in vault escrow and cannot be reused by `HousePool` |
 | Trader claim liabilities are senior | Trader claim balance remains a senior claim on pool liquidity until serviced; keeper bounties are not pool liabilities |
@@ -208,10 +212,10 @@ The tables above describe the intended safety properties. The suites below are t
 
 | Invariant family | Primary coverage |
 |-----------|-------------|
-| Bounded entry solvency / margin sufficiency | `packages/perps/test/perps/OrderRouter.t.sol`, `packages/perps/test/perps/CfdEnginePlanRegression.t.sol`, `packages/perps/test/perps/invariant/PerpPreviewInvariant.t.sol` |
+| Buffered entry solvency / margin sufficiency | `packages/perps/test/perps/SettlementBuffer.t.sol`, `packages/perps/test/perps/OrderRouter.t.sol`, `packages/perps/test/perps/CfdEnginePlanRegression.t.sol`, `packages/perps/test/perps/invariant/PerpPreviewInvariant.t.sol` |
 | Degraded containment / post-op degraded-mode parity | `packages/perps/test/perps/PerpInvariant.t.sol`, `packages/perps/test/perps/invariant/PerpPreviewInvariant.t.sol`, `packages/perps/test/perps/PreviewExecutionDifferential.t.sol` |
 | Bounded payout / preview-live settlement parity | `packages/perps/test/perps/CfdEngine.t.sol`, `packages/perps/test/perps/invariant/PerpPreviewInvariant.t.sol`, `packages/perps/test/perps/invariant/PerpClosePreviewParityInvariant.t.sol` |
-| Withdrawal firewall / trader-claim seniority | `packages/perps/test/perps/PerpInvariant.t.sol`, `packages/perps/test/perps/invariant/PerpEconomicConservationInvariant.t.sol`, `packages/perps/test/perps/invariant/PerpTraderClaimInvariant.t.sol`, `packages/perps/test/perps/HousePool.t.sol` |
+| Withdrawal firewall / trader-claim seniority | `packages/perps/test/perps/SettlementBuffer.t.sol`, `packages/perps/test/perps/PerpInvariant.t.sol`, `packages/perps/test/perps/invariant/PerpEconomicConservationInvariant.t.sol`, `packages/perps/test/perps/invariant/PerpTraderClaimInvariant.t.sol`, `packages/perps/test/perps/HousePool.t.sol` |
 | Single direction / side symmetry / total-margin conservation | `packages/perps/test/perps/PerpInvariant.t.sol`, `packages/perps/test/perps/invariant/PerpMultiAccountInvariant.t.sol` |
 | Global FIFO / binding intents / bounded cleanup | `packages/perps/test/perps/OrderRouter.t.sol`, `packages/perps/test/perps/invariant/PerpAccountingInvariant.t.sol` |
 | Bounty conservation / reservation source of truth | `packages/perps/test/perps/OrderRouter.t.sol`, `packages/perps/test/perps/invariant/PerpAccountingInvariant.t.sol`, `packages/perps/test/perps/invariant/PerpEconomicConservationInvariant.t.sol` |
@@ -472,6 +476,29 @@ the final caller to capture another controller's rounding remainder.
 
 This is an explicit design choice, not an accounting accident.
 
+### Settlement-liability buffer
+
+The settlement buffer protects a governed amount of physical headroom above the maximum directional payout envelope:
+
+```text
+P = HousePool.totalAssets()
+C = totalTraderClaimBalance
+E = max(P - C, 0)
+L = max(bullMaxProfit, bearMaxProfit)
+B = ceil(L * settlementBufferBps / 10_000)
+```
+
+Open and increase admission requires post-op `E >= L + B`. The LP cash firewall includes the same `B`, producing a
+base reserve of `C + L + B`. The rate defaults to `25` bps and is bounded by governance to `0..1,000` bps inclusive.
+
+This is a liquidity-headroom policy, not another economic liability. It is excluded from terminal NAV, yield,
+raw degraded-mode detection, and all custody or clearinghouse reserve buckets. Closes, liquidations, and triggered
+protection closes remain live and may consume it. Attached protection uses its parent open's admission result;
+standalone protection changes on an existing position add no exposure and do not independently invoke the gate.
+
+Consequently, `L <= E < L + B` is solvent but unavailable for new risk and LP redemption funding. Raw degraded mode
+still latches only at `E < L` and may be cleared at `E >= L`; the full buffer need not be restored before clearing.
+
 ### LP-capital carry
 
 The perps system uses LP-capital carry instead of a side-to-side rate mechanism.
@@ -672,8 +699,9 @@ settlement must roll back both minting and checkpoint state without forgiving el
 worthless at that instant but share in recovery; this is intentional and must be reflected in incident analysis.
 There is no public checkpoint, fee-specific guardian control, performance test, Junior HWM, equalization, cost basis,
 or privileged cash-withdrawal path. The recipient redeems through the same asynchronous LP flow as every holder.
-Settlement Monitor schema/domain V3 commits the readable active rate and recipient into observable configuration; a
-failed or malformed read makes the configuration digest unavailable rather than silently assuming a zero fee.
+Settlement Monitor schema/domain V3 introduced the readable active rate and recipient in observable configuration;
+V4 also commits the Engine settlement-buffer policy. A failed or malformed required read makes the configuration
+digest unavailable rather than silently assuming a zero fee or buffer.
 
 ### Senior coupon model
 
@@ -851,10 +879,12 @@ service. A terminal price-loss write-off above an account's collectible cap and 
 create neither condition; V2 has no accumulated-debt ledger to clear.
 
 1. Let closes and liquidations continue.
-2. Prevent further risk expansion via degraded mode and, if needed, admin pause.
+2. Prevent further risk expansion via degraded mode when `E < L`, or through the ordinary `E >= L + B` admission
+   gate when raw solvency remains intact; use admin pause if additional containment is needed.
 3. Consider stricter risk settings to accelerate cleanup.
 4. Recapitalize or clear positions.
-5. Clear degraded mode only after solvency is genuinely restored.
+5. Clear degraded mode only after raw solvency `E >= L` is genuinely restored; buffer restoration is not required
+   for clearing, although new risk remains blocked until `E >= L + B`.
 
 ## Asset Isolation
 

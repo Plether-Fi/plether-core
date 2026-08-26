@@ -127,6 +127,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     uint256 internal constant MAX_FROZEN_CLOSE_SPREAD_BPS = 1000;
     /// @notice Fixed LP-owned spread charged on voluntary oracle-frozen close/reduce notional, in basis points.
     uint256 public frozenCloseSpreadBps;
+    /// @notice Protected headroom required per unit of maximum directional liability, in basis points.
+    /// @dev This affects open/increase admission and LP withdrawals, but not raw insolvency or terminal NAV.
+    uint256 public settlementBufferBps = 25;
 
     /// @notice Emitted when the clearinghouse account designated to receive future protocol fees changes.
     /// @param treasury New protocol treasury clearinghouse account.
@@ -233,24 +236,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         } else {
             clearinghouse.settleUsdc(account, int256(claimAmountUsdc));
         }
-    }
-
-    function _increaseClaimLiability(
-        uint256 currentAmountUsdc,
-        uint256 currentTotalUsdc,
-        uint256 amountUsdc
-    ) internal pure returns (uint256 updatedAmountUsdc, uint256 updatedTotalUsdc) {
-        updatedAmountUsdc = currentAmountUsdc + amountUsdc;
-        updatedTotalUsdc = currentTotalUsdc + amountUsdc;
-    }
-
-    function _decreaseClaimLiability(
-        uint256 currentAmountUsdc,
-        uint256 currentTotalUsdc,
-        uint256 amountUsdc
-    ) internal pure returns (uint256 updatedAmountUsdc, uint256 updatedTotalUsdc) {
-        updatedAmountUsdc = currentAmountUsdc - amountUsdc;
-        updatedTotalUsdc = currentTotalUsdc - amountUsdc;
     }
 
     modifier onlyRouter() {
@@ -642,7 +627,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     /// @dev Callable only by `admin`, which is responsible for validation and timelock enforcement. Carry indexes are
     ///      advanced before the carry-rate parameter can change.
     /// @param config Validated configuration: VPI/skew fields use 1e18 scaling, the minimum bounty uses 6-decimal
-    ///               USDC units, and margin, carry, bounty, execution-fee, and spread rates use basis points.
+    ///               USDC units, and margin, carry, bounty, execution-fee, spread, and buffer rates use basis points.
     function applyRiskConfig(
         ICfdEngineAdminHost.EngineRiskConfig calldata config
     ) external onlyAdmin {
@@ -651,6 +636,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         _activeRiskParams = config.riskParams;
         executionFeeBps = config.executionFeeBps;
         frozenCloseSpreadBps = config.frozenCloseSpreadBps;
+        settlementBufferBps = config.settlementBufferBps;
     }
 
     /// @notice Applies finalized FAD calendar overrides from the timelocked engine admin.
@@ -848,17 +834,10 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
                 clearinghouse.settleUsdc(account, int256(amountUsdc));
             }
         } else {
-            _recordTraderClaim(account, amountUsdc);
+            traderClaimBalanceUsdc[account] += amountUsdc;
+            totalTraderClaimBalanceUsdc += amountUsdc;
             emit TraderClaimRecorded(account, amountUsdc);
         }
-    }
-
-    function _recordTraderClaim(
-        address account,
-        uint256 amountUsdc
-    ) internal {
-        (traderClaimBalanceUsdc[account], totalTraderClaimBalanceUsdc) =
-            _increaseClaimLiability(traderClaimBalanceUsdc[account], totalTraderClaimBalanceUsdc, amountUsdc);
     }
 
     function _canPayFreshPoolPayout(
@@ -1043,14 +1022,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         }
 
         return _applyLiquidation(delta, publishTime, keeper);
-    }
-
-    function _assertPostSolvency() internal view {
-        uint256 effectiveAssetsUsdc = _availableCashForFreshPoolPayouts();
-        uint256 maxLiabilityUsdc = _maxLiability();
-        if (effectiveAssetsUsdc < maxLiabilityUsdc) {
-            revert CfdEngine__PostOpSolvencyBreach();
-        }
     }
 
     function _maxLiability() internal view returns (uint256) {
@@ -1299,7 +1270,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
             currentPosition = _loadPosition(delta.account);
         }
         settlementSidecar.executeOpen(delta, currentPosition, publishTime);
-        _assertPostSolvency();
         _endTerminalCurveMutation(delta.account, expectedOldHash);
 
         emit PositionOpened(delta.account, delta.posSide, delta.sizeDelta, delta.price, delta.marginDeltaUsdc);

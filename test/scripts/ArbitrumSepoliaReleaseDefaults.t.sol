@@ -221,6 +221,7 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
 
         assertEq(engine.executionFeeBps(), 4, "execution fee");
         assertEq(engine.frozenCloseSpreadBps(), 50, "frozen close spread");
+        assertEq(engine.settlementBufferBps(), 25, "settlement buffer");
         assertEq(engine.fadRunwaySeconds(), 1 hours, "fad runway");
         assertEq(address(engine.terminalNavBook()), address(terminalNavBook), "terminal NAV book");
         assertEq(terminalNavBook.SIZE_QUANTUM(), 1e20, "position size quantum");

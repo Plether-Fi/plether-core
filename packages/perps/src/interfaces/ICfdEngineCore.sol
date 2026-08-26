@@ -70,6 +70,10 @@ interface ICfdEngineCore is ICfdEngineTypes {
     /// @return Frozen close spread in basis points
     function frozenCloseSpreadBps() external view returns (uint256);
 
+    /// @notice Protected settlement headroom required per unit of maximum directional liability, in basis points.
+    /// @return Settlement buffer in basis points
+    function settlementBufferBps() external view returns (uint256);
+
     /// @notice Router-facing order execution entrypoint with typed business-rule failures.
     /// @dev Callable only by the configured router. The planner computes a delta and the settlement sidecar applies
     ///      clearinghouse, pool, aggregate-side, and position mutations atomically.

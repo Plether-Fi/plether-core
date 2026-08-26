@@ -6,14 +6,16 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 /// @notice Engine host surface called by the timelocked engine admin.
 interface ICfdEngineAdminHost {
 
-    /// @notice Risk parameters, execution fee, and frozen close spread staged by governance.
+    /// @notice Risk parameters, execution fee, frozen close spread, and settlement buffer staged by governance.
     /// @param riskParams VPI, skew, margin, carry, and liquidation-bounty parameters.
     /// @param executionFeeBps Protocol fee charged on executed notional, in basis points.
     /// @param frozenCloseSpreadBps LP-owned spread charged on oracle-frozen voluntary close notional, in basis points.
+    /// @param settlementBufferBps Protected headroom per unit of maximum directional liability, in basis points.
     struct EngineRiskConfig {
         CfdTypes.RiskParams riskParams;
         uint256 executionFeeBps;
         uint256 frozenCloseSpreadBps;
+        uint256 settlementBufferBps;
     }
 
     /// @notice FAD calendar override timestamps and deleverage runway.
@@ -33,7 +35,7 @@ interface ICfdEngineAdminHost {
         uint256 engineMarkStalenessLimit;
     }
 
-    /// @notice Applies finalized risk parameters, execution fee, and frozen close spread.
+    /// @notice Applies finalized risk parameters, execution fee, frozen close spread, and settlement buffer.
     /// @dev Callable only by the engine's configured admin. The admin owns validation and timelock enforcement; the
     ///      engine advances carry indexes before changing the carry rate.
     /// @param config Risk configuration to apply

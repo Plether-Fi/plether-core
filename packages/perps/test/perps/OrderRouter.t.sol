@@ -34,6 +34,7 @@ import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdmin
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {ITerminalNavBookV2} from "@plether/perps/interfaces/ITerminalNavBookV2.sol";
+import {SolvencyAccountingLib} from "@plether/perps/libraries/SolvencyAccountingLib.sol";
 import {IPyth, PythStructs} from "@plether/shared/interfaces/IPyth.sol";
 import {DecimalConstants} from "@plether/shared/libraries/DecimalConstants.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
@@ -169,8 +170,12 @@ contract OrderRouterTest is BasePerpTest {
             200_000,
             "Keeper should receive the 0.20 USDC capped reward as clearinghouse credit"
         );
-        assertGt(freeUsdc, 951_000 * 1e6, "Free USDC should include the seeded junior floor plus unencumbered capital");
-        assertLt(freeUsdc, 953_000 * 1e6, "Free USDC bounded above");
+        uint256 maxLiability = _maxLiability();
+        uint256 settlementBuffer =
+            SolvencyAccountingLib.settlementBufferTargetUsdc(maxLiability, engine.settlementBufferBps());
+        uint256 expectedReserved = maxLiability + engine.totalTraderClaimBalanceUsdc() + settlementBuffer;
+        uint256 expectedFree = pool.totalAssets() > expectedReserved ? pool.totalAssets() - expectedReserved : 0;
+        assertEq(freeUsdc, expectedFree, "Free USDC should exclude liabilities, claims, and settlement headroom");
 
         (,, uint256 maxSeniorWithdrawUsdc, uint256 maxJuniorWithdrawUsdc) = pool.getPendingTrancheState();
         uint256 bobMaxWithdraw = _maxRequestableJuniorAssets(bob);
