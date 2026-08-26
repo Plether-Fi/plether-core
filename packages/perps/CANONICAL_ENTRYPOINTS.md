@@ -4,10 +4,15 @@ This file defines the intended product-facing perps surface.
 
 For audit review that needs policy tables and read-surface canonicality in one place, use [`PRE_AUDIT_GUIDE.md`](PRE_AUDIT_GUIDE.md) alongside this file.
 
+For autonomous trading-account and AI-agent integration, including bounded authority and receipt verification, use
+[`WORKING_WITH_AI_AGENTS.md`](WORKING_WITH_AI_AGENTS.md) alongside this file.
+
 ## Traders
 
 - Margin actions: `MarginClearinghouse.depositMargin(uint256)` and `MarginClearinghouse.withdrawMargin(uint256)`
-- Ordinary trade action: `OrderRouter.commitOrder(CfdTypes.Side side, uint256 sizeDelta, uint256 marginDelta, uint256 targetPrice, bool isClose)`
+- Ordinary trade action: `OrderRouter.commitOrder(OrderV2Types.OrderRequest request)`
+- Fresh external V2 requests must set `expectedConfigHash` to the current nonzero value returned by
+  `OrderLifecycleBook.currentExecutionConfigHash()`; the public commit path rejects zero for a new intent.
 - Emergency policy note: committed orders remain user-uncancellable. If RouterAdmin enters risk-off, each pre-cutoff
   open is instead terminally invalidated by protocol policy and its remaining reservations are refunded to the
   trader's internal clearinghouse balance.
@@ -21,6 +26,9 @@ For audit review that needs policy tables and read-surface canonicality in one p
 - Protection management: replace a `PendingOpen` or `Armed` record with
   `PositionProtectionBook.replacePositionProtection(uint64,PositionProtectionParams)`, or detach/cancel a
   `PendingOpen`/`Armed` record with `PositionProtectionBook.cancelPositionProtection(uint64)`
+- Only Router-authenticated TP/SL-generated orders use `expectedConfigHash == bytes32(0)`: the protected parent-open
+  host and protection-trigger path treat it as an internal unpinned marker. It is not a public wildcard and cannot be
+  selected through `OrderRouter.commitOrder(...)`.
 - Trader claim settlement: `CfdEngine.settleTraderClaim(address account)` for the account owner
 - Compact reads: `PerpsPublicLens`; use `getTrancheQueues(bool)` for matured heads/backlog and
   `getLpRequestState(bool,uint256,address)` for controller-specific pending/claimable balances. The legacy
@@ -131,6 +139,12 @@ by the Book's trailing payload.
 - Compact protocol status and LP/trader views: `PerpsPublicLens`
 - Retained protection status and linkage: `IPositionProtectionViews` on the Book returned by
   `OrderRouter.positionProtectionBook()`
+- Authoritative order identity and outcome reads: the independently predeployed, exactly Router-bound
+  `OrderLifecycleBook` exposed by `OrderRouter.lifecycleBook()` via `IOrderLifecycleBook`. Use
+  `currentExecutionConfigHash()` before constructing a request, `clientIntent(account,
+  clientOrderId)` to resolve permanent idempotency, `lifecycleStatus(orderId)` / `pendingPolicy(orderId)` while live,
+  and `outcome(orderId)` for the compact authenticated terminal result. Full terminal receipts are emitted by
+  `OrderFinalized`; their hash is retained in the compact outcome.
 - Settlement operations and security monitoring: `SettlementMonitorLens`. Its route, oracle, queue, and invariant
   observations are advisory and fail-soft; they do not authorize settlement or replace an `eth_call` of
   the exact route-specific settlement transaction.
@@ -163,6 +177,7 @@ Use these interfaces:
 - `IProtocolViews`
 - `IPerpsTraderViews`
 - `IPerpsLPViews`
+- `IOrderLifecycleBook` for authoritative order identity, policy, and outcome reads
 - `ISettlementMonitorLens` for keeper/security monitoring only
 
 ## Rich Internal Surfaces
@@ -182,9 +197,19 @@ The following remain useful for tests, admin tooling, migration, and deep accoun
 
 - `CfdEngine` / `ICfdEngineCore`: canonical runtime truth for execution, liquidation, and protocol status.
 - `CfdEngineSettlementSidecar`: externalized close/liquidation settlement orchestration used by `CfdEngine`; not a product-facing surface.
+- `CfdOrderPolicyEvaluator`: fixed permissionless stateless policy dependency used to assess authoritative Engine
+  state against caller-pinned financial bounds; applications do not use it as an execution or custody surface.
+- `OrderLifecycleBook`: independently predeployed canonical permanent order-identity and terminal-outcome reader. It
+  is immutable-bound to the predicted Router, Engine, Clearinghouse, and HousePool; the Router constructor validates
+  all four bindings before accepting it. Only that Router may register or finalize lifecycle state, and the Book owns
+  no funds or execution authority.
+- `OrderRouterV2ExecutionSidecar`: fixed stateless Router delegate implementation for oracle preparation, bounded
+  execution, failure classification, and receipts. Direct stateful calls are rejected; integrations call the Router.
 - `OrderRouterLiquidationBatchSidecar`: separately predeployed, immutable, exactly Router-bound stateless
   implementation detail for mark refresh, protection-trigger oracle/orchestration, single and batch liquidation, and
   atomic-refresh LP-epoch settlement. Direct integrations call the corresponding Router entrypoint, never the sidecar.
+- `HousePoolRedemptionMathSidecar`: immutable stateless pure LP redemption-budget implementation used by HousePool;
+  it is not an order, keeper, custody, or product-facing surface.
 - `PerpsPublicLens`: canonical product-facing read layer.
 - `SettlementMonitorLens`: canonical bounded settlement-monitoring read layer; no mutation or circuit-breaker
   authority. It validates the required one-time core wiring and its monitor-only sidecar is not a second canonical
@@ -197,8 +222,10 @@ The following remain useful for tests, admin tooling, migration, and deep accoun
 - `CfdEngineProtocolLens`: protocol-accounting and house-pool snapshot diagnostics.
 - `MarginClearinghouse`: custody plumbing with a small public trader surface and a larger operator surface.
 - `OrderRouter`: delayed-order and keeper-execution plumbing, global FIFO ownership, and timelocked protection
-  configuration. It exposes `positionProtectionBook()` for discovery but does not forward public protection selectors;
-  raw queue state is non-canonical. To stay within EIP-170 it delegatecalls its separate stateless keeper sidecar for
+  configuration. Its eighth and final constructor dependency is the predeployed lifecycle Book, while it creates the
+  position-protection Book itself. It exposes both through `lifecycleBook()` and `positionProtectionBook()` but does
+  not forward public protection selectors; raw queue state is non-canonical. To stay within EIP-170 it delegatecalls
+  its separate stateless keeper sidecar for
   mark refresh/trigger-oracle resolution, single liquidation, liquidation batches, and atomic-refresh LP-epoch
   settlement, plus the active-oracle forwarding step of authenticated configuration, while retaining every public
   entrypoint, admin check, and Router execution/event address.

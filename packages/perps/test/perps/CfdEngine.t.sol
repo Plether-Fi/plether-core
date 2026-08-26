@@ -100,13 +100,13 @@ contract CfdEnginePlanLibHarness {
         CfdEnginePlanTypes.RawSnapshot memory snap;
         uint256 lots = CfdMath.sizeToLots(size);
         uint256 entryCostUsdcAtoms = lots * entryPrice;
-        uint256 maxProfitUsdc = CfdMath.calculateExactMaxProfit(lots, entryCostUsdcAtoms, CfdTypes.Side.BEAR, 2e8);
+        uint256 maxProfitUsdc = CfdMath.calculateExactMaxProfit(lots, entryCostUsdcAtoms, CfdTypes.Side.SHORT, 2e8);
         snap.position = CfdTypes.Position({
             size: size,
             margin: pnlPledgeUsdc,
             entryPrice: entryPrice,
             maxProfitUsdc: maxProfitUsdc,
-            side: CfdTypes.Side.BEAR,
+            side: CfdTypes.Side.SHORT,
             lastUpdateTime: 0,
             lastCarryTimestamp: 0,
             vpiAccrued: 0
@@ -115,10 +115,10 @@ contract CfdEnginePlanLibHarness {
         snap.currentTimestamp = 1;
         snap.lastMarkPrice = oraclePrice;
         snap.lastMarkTime = 1;
-        snap.bearSide.maxProfitUsdc = maxProfitUsdc;
-        snap.bearSide.openInterest = size;
-        snap.bearSide.entryNotional = entryCostUsdcAtoms * CfdMath.USDC_TO_TOKEN_SCALE;
-        snap.bearSide.totalMargin = pnlPledgeUsdc;
+        snap.shortSide.maxProfitUsdc = maxProfitUsdc;
+        snap.shortSide.openInterest = size;
+        snap.shortSide.entryNotional = entryCostUsdcAtoms * CfdMath.USDC_TO_TOKEN_SCALE;
+        snap.shortSide.totalMargin = pnlPledgeUsdc;
         snap.poolAssetsUsdc = 1_000_000e6;
         snap.poolCashUsdc = 1;
         snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
@@ -167,13 +167,13 @@ contract CfdEnginePlanLibHarness {
         CfdEnginePlanTypes.RawSnapshot memory snap;
         uint256 lots = CfdMath.sizeToLots(size);
         uint256 entryCostUsdcAtoms = lots * entryPrice;
-        uint256 maxProfitUsdc = CfdMath.calculateExactMaxProfit(lots, entryCostUsdcAtoms, CfdTypes.Side.BEAR, 2e8);
+        uint256 maxProfitUsdc = CfdMath.calculateExactMaxProfit(lots, entryCostUsdcAtoms, CfdTypes.Side.SHORT, 2e8);
         snap.position = CfdTypes.Position({
             size: size,
             margin: pnlPledgeUsdc,
             entryPrice: entryPrice,
             maxProfitUsdc: maxProfitUsdc,
-            side: CfdTypes.Side.BEAR,
+            side: CfdTypes.Side.SHORT,
             lastUpdateTime: 0,
             lastCarryTimestamp: 1,
             vpiAccrued: 0
@@ -182,10 +182,10 @@ contract CfdEnginePlanLibHarness {
         snap.currentTimestamp = 1;
         snap.lastMarkPrice = oraclePrice;
         snap.lastMarkTime = 1;
-        snap.bearSide.maxProfitUsdc = maxProfitUsdc;
-        snap.bearSide.openInterest = size;
-        snap.bearSide.entryNotional = entryCostUsdcAtoms * CfdMath.USDC_TO_TOKEN_SCALE;
-        snap.bearSide.totalMargin = pnlPledgeUsdc;
+        snap.shortSide.maxProfitUsdc = maxProfitUsdc;
+        snap.shortSide.openInterest = size;
+        snap.shortSide.entryNotional = entryCostUsdcAtoms * CfdMath.USDC_TO_TOKEN_SCALE;
+        snap.shortSide.totalMargin = pnlPledgeUsdc;
         snap.poolAssetsUsdc = 1_000_000e6;
         snap.poolCashUsdc = 1;
         snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
@@ -232,14 +232,14 @@ contract CfdEnginePlanLibHarness {
         CfdEnginePlanTypes.RawSnapshot memory snap;
         uint256 entryCostUsdcAtoms = CfdMath.sizeToLots(size) * entryPrice;
         uint256 maxProfitUsdc =
-            CfdMath.calculateExactMaxProfit(CfdMath.sizeToLots(size), entryCostUsdcAtoms, CfdTypes.Side.BEAR, 2e8);
+            CfdMath.calculateExactMaxProfit(CfdMath.sizeToLots(size), entryCostUsdcAtoms, CfdTypes.Side.SHORT, 2e8);
         uint256 vpiReserveUsdc = vpiAccrued < 0 ? uint256(-(vpiAccrued + 1)) + 1 : 0;
         snap.position = CfdTypes.Position({
             size: size,
             margin: settlementReachableUsdc,
             entryPrice: entryPrice,
             maxProfitUsdc: maxProfitUsdc,
-            side: CfdTypes.Side.BEAR,
+            side: CfdTypes.Side.SHORT,
             lastUpdateTime: 0,
             lastCarryTimestamp: 0,
             vpiAccrued: vpiAccrued
@@ -248,10 +248,10 @@ contract CfdEnginePlanLibHarness {
         snap.currentTimestamp = 1;
         snap.lastMarkPrice = oraclePrice;
         snap.lastMarkTime = 1;
-        snap.bearSide.maxProfitUsdc = maxProfitUsdc;
-        snap.bearSide.openInterest = size;
-        snap.bearSide.entryNotional = entryCostUsdcAtoms * CfdMath.USDC_TO_TOKEN_SCALE;
-        snap.bearSide.totalMargin = settlementReachableUsdc;
+        snap.shortSide.maxProfitUsdc = maxProfitUsdc;
+        snap.shortSide.openInterest = size;
+        snap.shortSide.entryNotional = entryCostUsdcAtoms * CfdMath.USDC_TO_TOKEN_SCALE;
+        snap.shortSide.totalMargin = settlementReachableUsdc;
         snap.poolAssetsUsdc = 1_000_000e6;
         snap.poolCashUsdc = 1;
         snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
@@ -295,7 +295,7 @@ contract CfdEnginePlanLibHarness {
         uint256 currentLots = CfdMath.sizeToLots(params.currentSize);
         uint256 currentEntryCostUsdcAtoms = currentLots * params.currentEntryPrice;
         uint256 currentMaxProfitUsdc =
-            CfdMath.calculateExactMaxProfit(currentLots, currentEntryCostUsdcAtoms, CfdTypes.Side.BULL, 2e8);
+            CfdMath.calculateExactMaxProfit(currentLots, currentEntryCostUsdcAtoms, CfdTypes.Side.LONG, 2e8);
         uint256 vpiReserveUsdc = params.vpiAccrued < 0 ? uint256(-(params.vpiAccrued + 1)) + 1 : 0;
         uint256 liquidationReserveUsdc = (currentLots * params.price * 10) / 10_000;
         if (liquidationReserveUsdc < 1e6) {
@@ -309,7 +309,7 @@ contract CfdEnginePlanLibHarness {
             margin: params.positionMarginUsdc,
             entryPrice: params.currentEntryPrice,
             maxProfitUsdc: currentMaxProfitUsdc,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             lastUpdateTime: 0,
             lastCarryTimestamp: 0,
             vpiAccrued: params.vpiAccrued
@@ -318,7 +318,7 @@ contract CfdEnginePlanLibHarness {
         snap.currentTimestamp = 1;
         snap.lastMarkPrice = params.price;
         snap.lastMarkTime = 1;
-        snap.bullSide = CfdEnginePlanTypes.SideSnapshot({
+        snap.longSide = CfdEnginePlanTypes.SideSnapshot({
             maxProfitUsdc: currentMaxProfitUsdc,
             openInterest: params.currentSize,
             entryNotional: currentEntryCostUsdcAtoms * CfdMath.USDC_TO_TOKEN_SCALE,
@@ -326,7 +326,7 @@ contract CfdEnginePlanLibHarness {
             borrowBaseUsdc: 0,
             carryIndex: 0
         });
-        snap.bearSide = CfdEnginePlanTypes.SideSnapshot({
+        snap.shortSide = CfdEnginePlanTypes.SideSnapshot({
             maxProfitUsdc: 0, openInterest: 0, entryNotional: 0, totalMargin: 0, borrowBaseUsdc: 0, carryIndex: 0
         });
         snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
@@ -374,7 +374,7 @@ contract CfdEnginePlanLibHarness {
                 commitTime: 0,
                 commitBlock: 0,
                 orderId: 0,
-                side: CfdTypes.Side.BULL,
+                side: CfdTypes.Side.LONG,
                 isClose: false
             }),
             params.price,
@@ -430,32 +430,32 @@ contract CfdEngineTest is BasePerpTest {
     }
 
     function _legacyCappedSpreadAfter(
-        int256 bullLegacySpread,
-        int256 bearLegacySpread,
-        uint256 bullMargin,
-        uint256 bearMargin
+        int256 longLegacySpread,
+        int256 shortLegacySpread,
+        uint256 longMargin,
+        uint256 shortMargin
     ) internal pure returns (int256) {
-        if (bullLegacySpread < -int256(bullMargin)) {
-            bullLegacySpread = -int256(bullMargin);
+        if (longLegacySpread < -int256(longMargin)) {
+            longLegacySpread = -int256(longMargin);
         }
-        if (bearLegacySpread < -int256(bearMargin)) {
-            bearLegacySpread = -int256(bearMargin);
+        if (shortLegacySpread < -int256(shortMargin)) {
+            shortLegacySpread = -int256(shortMargin);
         }
-        return bullLegacySpread + bearLegacySpread;
+        return longLegacySpread + shortLegacySpread;
     }
 
     function _maxLiabilityAfterClose(
         CfdTypes.Side side,
         uint256 maxProfitReductionUsdc
     ) internal view returns (uint256) {
-        uint256 bullMaxProfit = _sideMaxProfit(CfdTypes.Side.BULL);
-        uint256 bearMaxProfit = _sideMaxProfit(CfdTypes.Side.BEAR);
-        if (side == CfdTypes.Side.BULL) {
-            bullMaxProfit -= maxProfitReductionUsdc;
+        uint256 longMaxProfit = _sideMaxProfit(CfdTypes.Side.LONG);
+        uint256 shortMaxProfit = _sideMaxProfit(CfdTypes.Side.SHORT);
+        if (side == CfdTypes.Side.LONG) {
+            longMaxProfit -= maxProfitReductionUsdc;
         } else {
-            bearMaxProfit -= maxProfitReductionUsdc;
+            shortMaxProfit -= maxProfitReductionUsdc;
         }
-        return bullMaxProfit > bearMaxProfit ? bullMaxProfit : bearMaxProfit;
+        return longMaxProfit > shortMaxProfit ? longMaxProfit : shortMaxProfit;
     }
 
     function _expectedIndexedCarry(
@@ -556,7 +556,7 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 1,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: false
         });
 
@@ -572,7 +572,7 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 1,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: false
         });
 
@@ -621,7 +621,7 @@ contract CfdEngineTest is BasePerpTest {
 
         assertEq(
             engineLens.previewOpenRevertCode(
-                account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, uint64(block.timestamp)
+                account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8, uint64(block.timestamp)
             ),
             uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN),
             "Planner should use the explicit init margin config"
@@ -634,14 +634,14 @@ contract CfdEngineTest is BasePerpTest {
 
         assertEq(
             engineLens.previewOpenRevertCode(
-                account, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8, uint64(block.timestamp)
+                account, CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8, uint64(block.timestamp)
             ),
             uint8(CfdEnginePlanTypes.OpenRevertCode.OK),
             "Preview should accept the healthy open"
         );
 
         uint256 feesBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8);
 
         (uint256 size, uint256 margin,,,,,) = engine.positions(account);
         assertEq(size, 100_000e18, "Live open should match the previewed size");
@@ -666,7 +666,7 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 1,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: false
         });
 
@@ -698,7 +698,7 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 1,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: false
         });
         vm.prank(address(router));
@@ -721,18 +721,18 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: accrualTime,
             commitBlock: uint64(block.number),
             orderId: 2,
-            side: CfdTypes.Side.BEAR,
+            side: CfdTypes.Side.SHORT,
             isClose: false
         });
         vm.prank(address(router));
         engine.processOrderTyped(mmShort, 1e8, poolDepth, accrualTime);
 
-        assertEq(_legacySideIndexZero(CfdTypes.Side.BULL), 0);
-        assertEq(_legacySideIndexZero(CfdTypes.Side.BEAR), 0);
+        assertEq(_legacySideIndexZero(CfdTypes.Side.LONG), 0);
+        assertEq(_legacySideIndexZero(CfdTypes.Side.SHORT), 0);
 
         (uint256 size,, uint256 entryPrice,, CfdTypes.Side side,,) = engine.positions(account1);
 
-        CfdTypes.Position memory bullPos = CfdTypes.Position({
+        CfdTypes.Position memory longPos = CfdTypes.Position({
             size: size,
             margin: 0,
             entryPrice: entryPrice,
@@ -752,7 +752,7 @@ contract CfdEngineTest is BasePerpTest {
         address traderAccount = trader;
 
         _fundTrader(trader, 50_000e6);
-        _open(traderAccount, CfdTypes.Side.BULL, 200_000e18, 20_000e6, 1e8);
+        _open(traderAccount, CfdTypes.Side.LONG, 200_000e18, 20_000e6, 1e8);
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
 
@@ -766,15 +766,15 @@ contract CfdEngineTest is BasePerpTest {
     }
 
     function test_ProtocolAccounting_DoesNotProjectCarryFromStaleLiveMark() public {
-        address bullTrader = address(0xABC3);
-        address bearTrader = address(0xABC4);
-        address bullAccount = bullTrader;
-        address bearAccount = bearTrader;
+        address longTrader = address(0xABC3);
+        address shortTrader = address(0xABC4);
+        address longAccount = longTrader;
+        address shortAccount = shortTrader;
 
-        _fundTrader(bullTrader, 50_000e6);
-        _fundTrader(bearTrader, 10_000e6);
-        _open(bullAccount, CfdTypes.Side.BULL, 200_000e18, 20_000e6, 1e8);
-        _open(bearAccount, CfdTypes.Side.BEAR, 20_000e18, 2000e6, 1e8);
+        _fundTrader(longTrader, 50_000e6);
+        _fundTrader(shortTrader, 10_000e6);
+        _open(longAccount, CfdTypes.Side.LONG, 200_000e18, 20_000e6, 1e8);
+        _open(shortAccount, CfdTypes.Side.SHORT, 20_000e18, 2000e6, 1e8);
 
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory houseBefore =
             engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
@@ -795,7 +795,7 @@ contract CfdEngineTest is BasePerpTest {
         _setFadMaxStaleness(1 hours);
 
         _fundTrader(trader, 50_000e6);
-        _open(traderAccount, CfdTypes.Side.BULL, 200_000e18, 20_000e6, 1e8);
+        _open(traderAccount, CfdTypes.Side.LONG, 200_000e18, 20_000e6, 1e8);
 
         uint256 currentDay = ((block.timestamp / 1 days) + 4) % 7;
         uint256 startOfDay = block.timestamp - (block.timestamp % 1 days);
@@ -815,17 +815,17 @@ contract CfdEngineTest is BasePerpTest {
     }
 
     function test_ProtocolAccounting_DoesNotProjectCarryFromFrozenMarkPastFadMaxStaleness() public {
-        address bullTrader = address(0xABC6);
-        address bearTrader = address(0xABC7);
-        address bullAccount = bullTrader;
-        address bearAccount = bearTrader;
+        address longTrader = address(0xABC6);
+        address shortTrader = address(0xABC7);
+        address longAccount = longTrader;
+        address shortAccount = shortTrader;
 
         _setFadMaxStaleness(1 hours);
 
-        _fundTrader(bullTrader, 50_000e6);
-        _fundTrader(bearTrader, 10_000e6);
-        _open(bullAccount, CfdTypes.Side.BULL, 200_000e18, 20_000e6, 1e8);
-        _open(bearAccount, CfdTypes.Side.BEAR, 20_000e18, 2000e6, 1e8);
+        _fundTrader(longTrader, 50_000e6);
+        _fundTrader(shortTrader, 10_000e6);
+        _open(longAccount, CfdTypes.Side.LONG, 200_000e18, 20_000e6, 1e8);
+        _open(shortAccount, CfdTypes.Side.SHORT, 20_000e18, 2000e6, 1e8);
 
         uint256 currentDay = ((block.timestamp / 1 days) + 4) % 7;
         uint256 startOfDay = block.timestamp - (block.timestamp % 1 days);
@@ -852,15 +852,15 @@ contract CfdEngineTest is BasePerpTest {
     }
 
     function test_OpenTradeCost_AccountsPoolInflowCanonically() public {
-        address firstBullAccount = address(0xABC2);
-        address secondBullAccount = address(0xABC3);
-        _fundTrader(firstBullAccount, 100_000e6);
-        _fundTrader(secondBullAccount, 100_000e6);
+        address firstLongAccount = address(0xABC2);
+        address secondLongAccount = address(0xABC3);
+        _fundTrader(firstLongAccount, 100_000e6);
+        _fundTrader(secondLongAccount, 100_000e6);
 
-        _open(firstBullAccount, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
+        _open(firstLongAccount, CfdTypes.Side.LONG, 500_000e18, 50_000e6, 1e8);
 
         uint256 poolAssetsBefore = pool.totalAssets();
-        _open(secondBullAccount, CfdTypes.Side.BULL, 499_000e18, 50_000e6, 1e8);
+        _open(secondLongAccount, CfdTypes.Side.LONG, 499_000e18, 50_000e6, 1e8);
 
         assertGt(pool.totalAssets(), poolAssetsBefore, "Positive trade cost should increase canonical pool assets");
         assertEq(pool.excessAssets(), 0, "Trade-cost inflows should not remain quarantined as excess");
@@ -870,7 +870,7 @@ contract CfdEngineTest is BasePerpTest {
         address account = address(0xD301);
         _fundTrader(address(0xD301), 11_000e6);
 
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 9000e6, 1e8);
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
@@ -878,7 +878,7 @@ contract CfdEngineTest is BasePerpTest {
 
         uint256 clearinghouseBefore = clearinghouse.balanceUsdc(account);
 
-        _close(account, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
+        _close(account, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
 
         (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Profitable close should still destroy the position");
@@ -894,7 +894,7 @@ contract CfdEngineTest is BasePerpTest {
         address account = address(0xD30F);
         _fundTrader(account, 11_000e6);
 
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 9000e6, 1e8);
 
         uint256 closePrice = 80_000_000;
         uint256 executionFeeUsdc = _engineExecutionFeeUsdc(100_000e18, closePrice);
@@ -917,7 +917,7 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 0,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: true
         });
         uint256 closeDepth = pool.totalAssets();
@@ -942,7 +942,7 @@ contract CfdEngineTest is BasePerpTest {
         address account = address(0xD310);
         _fundTrader(account, 11_000e6);
 
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 9000e6, 1e8);
 
         uint256 closePrice = 80_000_000;
         CfdEngine.ClosePreview memory liquidPreview = engineLens.previewClose(account, 100_000e18, closePrice);
@@ -967,7 +967,7 @@ contract CfdEngineTest is BasePerpTest {
 
         uint256 feesBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
         CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(account);
-        _close(account, CfdTypes.Side.BULL, 100_000e18, closePrice);
+        _close(account, CfdTypes.Side.LONG, 100_000e18, closePrice);
 
         CloseParityObserved memory observed = _observeCloseParity(account, beforeSnapshot);
         _assertClosePreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
@@ -978,13 +978,13 @@ contract CfdEngineTest is BasePerpTest {
 
     function test_FullClose_AfterFreshMark_DoesNotRevertWhenPoolIlliquid() public {
         uint256 poolDepth = 1_000_000 * 1e6;
-        address bullAccount = address(uint160(1));
-        address bearAccount = address(uint160(2));
-        _fundTrader(bullAccount, 5000 * 1e6);
-        _fundTrader(bearAccount, 5000 * 1e6);
+        address longAccount = address(uint160(1));
+        address shortAccount = address(uint160(2));
+        _fundTrader(longAccount, 5000 * 1e6);
+        _fundTrader(shortAccount, 5000 * 1e6);
 
-        _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, poolDepth);
-        _open(bearAccount, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, poolDepth);
+        _open(longAccount, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8, poolDepth);
+        _open(shortAccount, CfdTypes.Side.SHORT, 10_000e18, 500e6, 1e8, poolDepth);
 
         uint64 refreshTime = uint64(block.timestamp + 30 days);
         vm.warp(refreshTime);
@@ -995,31 +995,31 @@ contract CfdEngineTest is BasePerpTest {
         uint64 accrualTime = refreshTime + 59;
         vm.warp(accrualTime);
 
-        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(bearAccount, 10_000e18, 1e8);
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(shortAccount, 10_000e18, 1e8);
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 1);
 
-        _closeAt(bearAccount, CfdTypes.Side.BEAR, 10_000e18, 1e8, poolDepth, accrualTime);
+        _closeAt(shortAccount, CfdTypes.Side.SHORT, 10_000e18, 1e8, poolDepth, accrualTime);
 
-        (uint256 size,,,,,,) = engine.positions(bearAccount);
+        (uint256 size,,,,,,) = engine.positions(shortAccount);
         assertEq(size, 0, "Illiquid profitable close close should still destroy the position");
         assertEq(
-            engine.traderClaimBalanceUsdc(bearAccount),
+            engine.traderClaimBalanceUsdc(shortAccount),
             preview.traderClaimBalanceUsdc,
             "Live close should match preview"
         );
     }
 
     function test_PreviewClose_UsesCanonicalPoolDepthWhileSimulateCloseAllowsWhatIfDepth() public {
-        address bullAccount = address(uint160(0xC10));
-        address bearAccount = address(uint160(0xC11));
-        _fundTrader(bullAccount, 5000e6);
-        _fundTrader(bearAccount, 5000e6);
+        address longAccount = address(uint160(0xC10));
+        address shortAccount = address(uint160(0xC11));
+        _fundTrader(longAccount, 5000e6);
+        _fundTrader(shortAccount, 5000e6);
 
-        _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
-        _open(bearAccount, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8);
+        _open(longAccount, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
+        _open(shortAccount, CfdTypes.Side.SHORT, 10_000e18, 500e6, 1e8);
 
         uint64 refreshTime = uint64(block.timestamp + 1 days);
         vm.warp(refreshTime);
@@ -1031,11 +1031,11 @@ contract CfdEngineTest is BasePerpTest {
         vm.warp(accrualTime);
 
         uint256 canonicalDepth = pool.totalAssets();
-        ICfdEngineTypes.ClosePreview memory canonicalPreview = engineLens.previewClose(bearAccount, 10_000e18, 1e8);
+        ICfdEngineTypes.ClosePreview memory canonicalPreview = engineLens.previewClose(shortAccount, 10_000e18, 1e8);
         ICfdEngineTypes.ClosePreview memory matchedSimulation =
-            engineLens.simulateClose(bearAccount, 10_000e18, 1e8, canonicalDepth);
+            engineLens.simulateClose(shortAccount, 10_000e18, 1e8, canonicalDepth);
         ICfdEngineTypes.ClosePreview memory lowDepthSimulation =
-            engineLens.simulateClose(bearAccount, 10_000e18, 1e8, canonicalDepth / 10);
+            engineLens.simulateClose(shortAccount, 10_000e18, 1e8, canonicalDepth / 10);
 
         _assertClosePreviewEquals(canonicalPreview, matchedSimulation);
     }
@@ -1045,7 +1045,7 @@ contract CfdEngineTest is BasePerpTest {
         address account = trader;
         _fundTrader(trader, 11_000e6);
 
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 9000e6, 1e8);
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 80_000_000);
         assertTrue(preview.valid, "Setup close preview should be valid");
@@ -1053,7 +1053,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(preview.traderClaimBalanceUsdc, 0, "Liquid profitable close should not defer payout");
 
         CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(account);
-        _close(account, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
+        _close(account, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
 
         CloseParityObserved memory observed = _observeCloseParity(account, beforeSnapshot);
         _assertClosePreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
@@ -1064,7 +1064,7 @@ contract CfdEngineTest is BasePerpTest {
         address account = trader;
         _fundTrader(trader, 11_000e6);
 
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 9000e6, 1e8);
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
@@ -1076,7 +1076,7 @@ contract CfdEngineTest is BasePerpTest {
         assertGt(preview.traderClaimBalanceUsdc, 0, "Illiquid profitable close should defer payout");
 
         CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(account);
-        _close(account, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
+        _close(account, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
 
         CloseParityObserved memory observed = _observeCloseParity(account, beforeSnapshot);
         _assertClosePreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
@@ -1087,7 +1087,7 @@ contract CfdEngineTest is BasePerpTest {
         address account = trader;
         _fundTrader(trader, 10_000e6);
 
-        _open(account, CfdTypes.Side.BULL, 10_000e18, 5000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 5000e6, 1e8);
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 10_000e18, 120_000_000);
         assertTrue(preview.valid, "Setup loss close preview should be valid");
@@ -1096,7 +1096,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(preview.badDebtUsdc, 0, "Setup should keep the loss fully collateralized");
 
         CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(account);
-        _close(account, CfdTypes.Side.BULL, 10_000e18, 120_000_000);
+        _close(account, CfdTypes.Side.LONG, 10_000e18, 120_000_000);
 
         CloseParityObserved memory observed = _observeCloseParity(account, beforeSnapshot);
         _assertClosePreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
@@ -1107,13 +1107,13 @@ contract CfdEngineTest is BasePerpTest {
         address account = trader;
         _fundTrader(trader, 11_000e6);
 
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 9000e6, 1e8);
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
 
-        _close(account, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
+        _close(account, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
 
         uint256 traderClaim = engine.traderClaimBalanceUsdc(account);
         assertGt(traderClaim, 0, "Setup should create a trader claim");
@@ -1137,7 +1137,7 @@ contract CfdEngineTest is BasePerpTest {
         address claimant = address(0xD30B0B);
 
         _fundTrader(trader, 20_000e6);
-        _open(trader, CfdTypes.Side.BULL, 500_000e18, 10_000e6, 1e8);
+        _open(trader, CfdTypes.Side.LONG, 500_000e18, 10_000e6, 1e8);
 
         uint256 claimUsdc = 1000e6;
         stdstore.target(address(engine)).sig("traderClaimBalanceUsdc(address)").with_key(claimant)
@@ -1145,13 +1145,13 @@ contract CfdEngineTest is BasePerpTest {
         stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(claimUsdc);
 
         vm.warp(block.timestamp + 30 days);
-        uint256 expectedCarryIndex = _currentSideCarryIndex(CfdTypes.Side.BULL);
+        uint256 expectedCarryIndex = _currentSideCarryIndex(CfdTypes.Side.LONG);
         uint256 poolAssetsBefore = pool.totalAssets();
 
         vm.prank(claimant);
         engine.settleTraderClaim(claimant);
 
-        uint256 sideIndex = uint256(CfdTypes.Side.BULL);
+        uint256 sideIndex = uint256(CfdTypes.Side.LONG);
         assertEq(
             engine.sideCarryIndex(sideIndex),
             expectedCarryIndex,
@@ -1168,7 +1168,7 @@ contract CfdEngineTest is BasePerpTest {
         address account = trader;
         _fundTrader(trader, 20_000e6);
 
-        _open(account, CfdTypes.Side.BULL, 500_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 500_000e18, 10_000e6, 1e8);
         _seedAuthenticatedTraderClaim(account, 5000e6);
 
         vm.warp(block.timestamp + 30 days);
@@ -1207,7 +1207,7 @@ contract CfdEngineTest is BasePerpTest {
         address account = trader;
         _fundTrader(trader, 20_000e6);
 
-        _open(account, CfdTypes.Side.BULL, 500_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 500_000e18, 10_000e6, 1e8);
         _seedAuthenticatedTraderClaim(account, 5000e6);
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 30 days);
@@ -1244,7 +1244,7 @@ contract CfdEngineTest is BasePerpTest {
         uint256 traderClaim = 5000e6;
 
         _fundTrader(trader, 20_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
         _seedAuthenticatedTraderClaim(account, traderClaim);
 
@@ -1282,7 +1282,7 @@ contract CfdEngineTest is BasePerpTest {
 
         _fundTrader(trader, 10_000e6);
         usdc.mint(trader, depositAmount);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
 
         uint256 settlementBefore = clearinghouse.balanceUsdc(account);
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 30 days);
@@ -1316,13 +1316,13 @@ contract CfdEngineTest is BasePerpTest {
         address account = trader;
         _fundTrader(trader, 11_000e6);
 
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 9000e6, 1e8);
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
 
-        _close(account, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
+        _close(account, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
 
         uint256 traderClaim = engine.traderClaimBalanceUsdc(account);
         usdc.mint(address(pool), traderClaim);
@@ -1337,13 +1337,13 @@ contract CfdEngineTest is BasePerpTest {
         address account = trader;
         _fundTrader(trader, 11_000e6);
 
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 9000e6, 1e8);
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
 
-        _close(account, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
+        _close(account, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
 
         uint256 traderClaim = engine.traderClaimBalanceUsdc(account);
         assertGt(traderClaim, 0, "Setup should create a trader claim");
@@ -1367,13 +1367,13 @@ contract CfdEngineTest is BasePerpTest {
         address account = trader;
         _fundTrader(trader, 11_000e6);
 
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 9000e6, 1e8);
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
 
-        _close(account, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
+        _close(account, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
 
         uint256 traderClaim = engine.traderClaimBalanceUsdc(account);
         assertGt(traderClaim, 0, "Setup should create a trader claim balance");
@@ -1401,13 +1401,13 @@ contract CfdEngineTest is BasePerpTest {
         vm.expectRevert(ICfdEngineTypes.CfdEngine__NoTraderClaim.selector);
         engine.settleTraderClaim(account);
 
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 9000e6, 1e8);
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
 
-        _close(account, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
+        _close(account, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
 
         vm.startPrank(address(pool));
         usdc.transfer(address(0xDEAD), pool.totalAssets());
@@ -1423,7 +1423,7 @@ contract CfdEngineTest is BasePerpTest {
         address account = address(uint160(1));
         _fundTrader(account, 20_000 * 1e6);
 
-        // Open BULL $100k at $1.00
+        // Open LONG $100k at $1.00
         CfdTypes.Order memory openOrder = CfdTypes.Order({
             account: account,
             sizeDelta: 100_000 * 1e18,
@@ -1432,7 +1432,7 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 1,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: false
         });
         vm.prank(address(router));
@@ -1452,7 +1452,7 @@ contract CfdEngineTest is BasePerpTest {
             lockedAfterOpen.reservedSettlementUsdc, 0, "Open positions should not leave reserved settlement behind"
         );
 
-        // Warp 30 days — accumulates legacy negative spread for lone BULL
+        // Warp 30 days — accumulates legacy negative spread for lone LONG
         vm.warp(block.timestamp + 30 days);
 
         // Increase position — triggers carry realization in processOrder
@@ -1464,7 +1464,7 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 2,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: false
         });
         vm.prank(address(router));
@@ -1495,13 +1495,13 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 1,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: false
         });
         vm.prank(address(router));
         engine.processOrderTyped(order, 1e8, 1_000_000 * 1e6, uint64(block.timestamp));
 
-        // 100k BULL at $1.00: execFee = notional * 4bps = $100k * 0.0004 = $40
+        // 100k LONG at $1.00: execFee = notional * 4bps = $100k * 0.0004 = $40
         uint256 fees = clearinghouse.balanceUsdc(engine.protocolTreasury());
         assertEq(fees, 40_000_000, "Exec fee should be 4bps of $100k notional");
 
@@ -1557,10 +1557,10 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(0xAB1720);
         address account = trader;
         _fundTrader(trader, 10_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
 
         uint256 assetsBeforeClose = pool.totalAssets();
-        _close(account, CfdTypes.Side.BULL, 100_000e18, 100_030_000);
+        _close(account, CfdTypes.Side.LONG, 100_000e18, 100_030_000);
         uint256 assetsAfterClose = pool.totalAssets();
 
         usdc.mint(address(pool), 5e6);
@@ -1581,7 +1581,7 @@ contract CfdEngineTest is BasePerpTest {
         address account = address(uint160(0xFEE1));
         _fundTrader(account, 5000e6);
 
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
 
         uint256 fees = clearinghouse.balanceUsdc(engine.protocolTreasury());
         address trader = address(0xFEE2);
@@ -1658,7 +1658,7 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 1,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: false
         });
         vm.prank(address(router));
@@ -1688,11 +1688,11 @@ contract CfdEngineTest is BasePerpTest {
         address account = trader;
         _fundTrader(trader, 10_000 * 1e6);
 
-        _open(account, CfdTypes.Side.BULL, 100_000 * 1e18, 2000 * 1e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000 * 1e18, 2000 * 1e6, 1e8);
 
         (, uint256 marginBefore,,,,,) = engine.positions(account);
         uint256 lockedBefore = clearinghouse.lockedMarginUsdc(account);
-        uint256 totalBullMarginBefore = _sideTotalMargin(CfdTypes.Side.BULL);
+        uint256 totalLongMarginBefore = _sideTotalMargin(CfdTypes.Side.LONG);
 
         vm.prank(trader);
         engine.addMargin(account, 500 * 1e6);
@@ -1705,9 +1705,9 @@ contract CfdEngineTest is BasePerpTest {
             "Clearinghouse locked margin should increase by the same amount"
         );
         assertEq(
-            _sideTotalMargin(CfdTypes.Side.BULL),
-            totalBullMarginBefore + 500 * 1e6,
-            "Global bull margin should track addMargin"
+            _sideTotalMargin(CfdTypes.Side.LONG),
+            totalLongMarginBefore + 500 * 1e6,
+            "Global long margin should track addMargin"
         );
     }
 
@@ -1715,7 +1715,7 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(0xABCE);
         address account = trader;
         _fundTrader(trader, 10_000 * 1e6);
-        _open(account, CfdTypes.Side.BULL, 50_000 * 1e18, 2000 * 1e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 50_000 * 1e18, 2000 * 1e6, 1e8);
 
         vm.prank(address(0xBEEF));
         vm.expectRevert(ICfdEngineTypes.CfdEngine__NotAccountOwner.selector);
@@ -1731,7 +1731,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.expectRevert(ICfdEngineTypes.CfdEngine__NoOpenPosition.selector);
         engine.addMargin(account, 100 * 1e6);
 
-        _open(account, CfdTypes.Side.BULL, 50_000 * 1e18, 2000 * 1e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 50_000 * 1e18, 2000 * 1e6, 1e8);
 
         vm.prank(trader);
         vm.expectRevert(ICfdEngineTypes.CfdEngine__PositionTooSmall.selector);
@@ -1742,7 +1742,7 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(0xABD3);
         address account = trader;
         _fundTrader(trader, 10_000e6);
-        _open(account, CfdTypes.Side.BULL, 20_000e18, 2000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 20_000e18, 2000e6, 1e8);
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
 
@@ -1760,7 +1760,7 @@ contract CfdEngineTest is BasePerpTest {
     function test_CheckWithdraw_RevertsForNonClearinghouseCaller() public {
         address account = address(uint160(0x51582));
         _fundTrader(account, 5000e6);
-        _open(account, CfdTypes.Side.BULL, 20_000e18, 2000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 20_000e18, 2000e6, 1e8);
 
         vm.expectRevert(ICfdEngineTypes.CfdEngine__NotClearinghouse.selector);
         engine.checkWithdraw(account);
@@ -1773,7 +1773,7 @@ contract CfdEngineTest is BasePerpTest {
 
         _fundTrader(trader, 20_000e6);
         usdc.mint(trader, depositAmount);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
         vm.warp(block.timestamp + 1 days);
         vm.prank(address(router));
@@ -1823,7 +1823,7 @@ contract CfdEngineTest is BasePerpTest {
         uint256 carryElapsed = 365 days * 3;
 
         _fundTrader(trader, 10_000e6);
-        _open(account, CfdTypes.Side.BULL, 500_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 500_000e18, 10_000e6, 1e8);
 
         uint256 settlementBefore = clearinghouse.balanceUsdc(account);
 
@@ -1858,7 +1858,7 @@ contract CfdEngineTest is BasePerpTest {
 
         _fundTrader(trader, 10_000e6);
         usdc.mint(trader, depositAmount);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
 
         uint256 settlementBefore = clearinghouse.balanceUsdc(account);
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 30 days);
@@ -1889,7 +1889,7 @@ contract CfdEngineTest is BasePerpTest {
         uint256 carryElapsed = 30 days;
 
         _fundTrader(trader, 10_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
 
         uint256 settlementBefore = clearinghouse.balanceUsdc(account);
 
@@ -1932,7 +1932,7 @@ contract CfdEngineTest is BasePerpTest {
         uint256 carryElapsed = 30 days;
 
         _fundTrader(trader, 10_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
 
         vm.prank(address(router));
         clearinghouse.lockReservedSettlement(account, reservedAmount);
@@ -1960,13 +1960,13 @@ contract CfdEngineTest is BasePerpTest {
         address account = trader;
 
         _fundTrader(trader, 20_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
         vm.warp(block.timestamp + 1 days);
         vm.prank(address(router));
         engine.updateMarkPrice(80_000_000, uint64(block.timestamp));
 
-        _close(account, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
+        _close(account, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
 
         assertEq(
             pool.accountedAssets(),
@@ -2104,10 +2104,10 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(0xAB10);
         address account = trader;
         _fundTrader(trader, 10_000 * 1e6);
-        _open(account, CfdTypes.Side.BULL, 100_000 * 1e18, 2000 * 1e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000 * 1e18, 2000 * 1e6, 1e8);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 7900 * 1e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 7900 * 1e6, type(uint256).max, false);
 
         ICfdEngineTypes.AccountCollateralView memory viewData = engineAccountLens.getAccountCollateralView(account);
         (, uint256 positionMargin,,,,,) = engine.positions(account);
@@ -2128,7 +2128,7 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(0xAB11);
         address account = trader;
         _fundTrader(trader, 10_000 * 1e6);
-        _open(account, CfdTypes.Side.BULL, 100_000 * 1e18, 2000 * 1e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000 * 1e18, 2000 * 1e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(90_000_000, uint64(block.timestamp));
@@ -2136,7 +2136,7 @@ contract CfdEngineTest is BasePerpTest {
         PerpsViewTypes.PositionView memory viewData = _publicPosition(account);
         (, uint256 positionMargin,,,,,) = engine.positions(account);
         assertTrue(viewData.exists);
-        assertEq(uint256(viewData.side), uint256(CfdTypes.Side.BULL));
+        assertEq(uint256(viewData.side), uint256(CfdTypes.Side.LONG));
         assertEq(viewData.size, 100_000 * 1e18);
         assertEq(viewData.entryPrice, 1e8);
         assertEq(viewData.marginUsdc, positionMargin);
@@ -2147,14 +2147,14 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(0xAB1101);
         address account = trader;
         _fundTrader(trader, 5000e6);
-        _open(account, CfdTypes.Side.BEAR, 10_000e18, 5000e6, 1e8);
+        _open(account, CfdTypes.Side.SHORT, 10_000e18, 5000e6, 1e8);
 
         uint256 closeExecutionFeeUsdc = _engineExecutionFeeUsdc(5000e18, 120_000_000);
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - closeExecutionFeeUsdc - 1);
 
-        _close(account, CfdTypes.Side.BEAR, 5000e18, 120_000_000);
+        _close(account, CfdTypes.Side.SHORT, 5000e18, 120_000_000);
         assertGt(engine.traderClaimBalanceUsdc(account), 0, "Setup must create a trader claim balance");
 
         PerpsViewTypes.PositionView memory viewData = _publicPosition(account);
@@ -2171,13 +2171,13 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(0xAB12);
         address account = trader;
         _fundTrader(trader, 11_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 9000e6, 1e8);
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
 
-        _close(account, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
+        _close(account, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
 
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory viewData =
             engineProtocolLens.getProtocolAccountingSnapshot();
@@ -2201,13 +2201,13 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(0xAB13);
         address account = trader;
         _fundTrader(trader, 11_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 9000e6, 1e8);
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
 
-        _close(account, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
+        _close(account, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
 
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory snapshot =
             engineProtocolLens.getProtocolAccountingSnapshot();
@@ -2296,11 +2296,11 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(0xAB15);
         address account = trader;
         _fundTrader(trader, 12_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 9000e6, 1e8);
 
         vm.startPrank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 0, false);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, 0, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 0, true);
         vm.stopPrank();
 
         AccountLensViewTypes.AccountLedgerView memory ledgerView = engineAccountLens.getAccountLedgerView(account);
@@ -2322,10 +2322,10 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(0xAB16);
         address account = trader;
         _fundTrader(trader, 12_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 9000e6, 1e8);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 0, true);
 
         AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(account);
         ICfdEngineTypes.AccountCollateralView memory collateralView =
@@ -2363,7 +2363,7 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(0xAB14);
         address account = trader;
         _fundTrader(trader, 11_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 9000e6, 1e8);
 
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot =
             engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
@@ -2416,7 +2416,7 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(0xAB15);
         address account = trader;
         _fundTrader(trader, 11_000e6);
-        _open(account, CfdTypes.Side.BEAR, 100_000e18, 9000e6, 1e8);
+        _open(account, CfdTypes.Side.SHORT, 100_000e18, 9000e6, 1e8);
 
         vm.warp(saturdayFrozen);
         assertTrue(engine.isOracleFrozen(), "Test setup should be inside a frozen oracle window");
@@ -2493,7 +2493,7 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(0xAB13);
         address account = trader;
         _fundTrader(trader, 11_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 9000e6, 1e8);
 
         ICfdEngineTypes.ClosePreview memory normalPreview = engineLens.previewClose(account, 100_000e18, 80_000_000);
         assertTrue(normalPreview.valid);
@@ -2515,7 +2515,7 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(0xAB1301);
         address account = trader;
         _fundTrader(trader, 11_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 9000e6, 1e8);
 
         uint256 canonicalDepth = pool.totalAssets();
         ICfdEngineTypes.ClosePreview memory canonicalPreview = engineLens.previewClose(account, 100_000e18, 80_000_000);
@@ -2533,39 +2533,39 @@ contract CfdEngineTest is BasePerpTest {
     }
 
     function test_PreviewClose_TriggersDegradedModeMatchesLiveClose() public {
-        address bullTrader = address(0xAB1308);
-        address bearTrader = address(0xAB1309);
-        address bullAccount = bullTrader;
-        address bearAccount = bearTrader;
+        address longTrader = address(0xAB1308);
+        address shortTrader = address(0xAB1309);
+        address longAccount = longTrader;
+        address shortAccount = shortTrader;
 
-        _fundTrader(bullTrader, 100_000e6);
-        _fundTrader(bearTrader, 100_000e6);
+        _fundTrader(longTrader, 100_000e6);
+        _fundTrader(shortTrader, 100_000e6);
 
-        _open(bearAccount, CfdTypes.Side.BEAR, 999_000e18, 50_000e6, 1e8);
-        _open(bullAccount, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
+        _open(shortAccount, CfdTypes.Side.SHORT, 999_000e18, 50_000e6, 1e8);
+        _open(longAccount, CfdTypes.Side.LONG, 500_000e18, 50_000e6, 1e8);
 
-        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(bullAccount, 500_000e18, 20_000_000);
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(longAccount, 500_000e18, 20_000_000);
         assertTrue(preview.triggersDegradedMode, "Preview should flag the profitable close that reveals insolvency");
 
-        CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(bullAccount);
-        _close(bullAccount, CfdTypes.Side.BULL, 500_000e18, 20_000_000);
+        CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(longAccount);
+        _close(longAccount, CfdTypes.Side.LONG, 500_000e18, 20_000_000);
 
-        CloseParityObserved memory observed = _observeCloseParity(bullAccount, beforeSnapshot);
+        CloseParityObserved memory observed = _observeCloseParity(longAccount, beforeSnapshot);
         _assertClosePreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
         assertTrue(engine.degradedMode(), "Live close should match preview degraded-mode trigger");
     }
 
     function helper_PreviewClose_RecomputesPostOpStateInCarryModel() public {
-        address bullTrader = address(0xAB130A);
-        address bearTrader = address(0xAB130B);
-        address bullAccount = bullTrader;
-        address bearAccount = bearTrader;
+        address longTrader = address(0xAB130A);
+        address shortTrader = address(0xAB130B);
+        address longAccount = longTrader;
+        address shortAccount = shortTrader;
 
-        _fundTrader(bullTrader, 12_000e6);
-        _fundTrader(bearTrader, 30_000e6);
+        _fundTrader(longTrader, 12_000e6);
+        _fundTrader(shortTrader, 30_000e6);
 
-        _open(bullAccount, CfdTypes.Side.BULL, 500_000e18, 8000e6, 1e8);
-        _open(bearAccount, CfdTypes.Side.BEAR, 50_000e18, 20_000e6, 1e8);
+        _open(longAccount, CfdTypes.Side.LONG, 500_000e18, 8000e6, 1e8);
+        _open(shortAccount, CfdTypes.Side.SHORT, 50_000e18, 20_000e6, 1e8);
 
         uint64 refreshTime = uint64(block.timestamp + 1 days);
         vm.warp(refreshTime);
@@ -2576,12 +2576,12 @@ contract CfdEngineTest is BasePerpTest {
         uint64 accrualTime = refreshTime + 30;
         vm.warp(accrualTime);
 
-        (uint256 bullSize, uint256 bullMargin,, uint256 bullMaxProfit,,,) = engine.positions(bullAccount);
+        (uint256 longSize, uint256 longMargin,, uint256 longMaxProfit,,,) = engine.positions(longAccount);
 
-        ICfdEngineTypes.ClosePreview memory preDrainPreview = engineLens.previewClose(bullAccount, bullSize, 1e8);
+        ICfdEngineTypes.ClosePreview memory preDrainPreview = engineLens.previewClose(longAccount, longSize, 1e8);
         assertTrue(preDrainPreview.valid, "Setup close preview should remain valid");
 
-        uint256 grossTargetAssets = _maxLiabilityAfterClose(CfdTypes.Side.BULL, bullMaxProfit)
+        uint256 grossTargetAssets = _maxLiabilityAfterClose(CfdTypes.Side.LONG, longMaxProfit)
             + clearinghouse.balanceUsdc(engine.protocolTreasury());
         assertGt(
             grossTargetAssets,
@@ -2595,10 +2595,10 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), currentAssets - targetAssets);
 
-        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(bullAccount, bullSize, 1e8);
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(longAccount, longSize, 1e8);
         assertTrue(preview.triggersDegradedMode, "Preview should detect degraded mode after the forced drain");
 
-        _close(bullAccount, CfdTypes.Side.BULL, bullSize, 1e8);
+        _close(longAccount, CfdTypes.Side.LONG, longSize, 1e8);
         assertEq(
             preview.triggersDegradedMode,
             engine.degradedMode(),
@@ -2607,25 +2607,25 @@ contract CfdEngineTest is BasePerpTest {
     }
 
     function test_PreviewClose_ReportsPostOpDegradedStateAfterLatch() public {
-        address bullTrader = address(0xAB130C);
-        address bearTrader = address(0xAB130D);
-        address residualBearTrader = address(0xAB130E);
-        address bullAccount = bullTrader;
-        address bearAccount = bearTrader;
-        address residualBearAccount = residualBearTrader;
+        address longTrader = address(0xAB130C);
+        address shortTrader = address(0xAB130D);
+        address residualShortTrader = address(0xAB130E);
+        address longAccount = longTrader;
+        address shortAccount = shortTrader;
+        address residualShortAccount = residualShortTrader;
 
-        _fundTrader(bullTrader, 100_000e6);
-        _fundTrader(bearTrader, 100_000e6);
-        _fundTrader(residualBearTrader, 100_000e6);
+        _fundTrader(longTrader, 100_000e6);
+        _fundTrader(shortTrader, 100_000e6);
+        _fundTrader(residualShortTrader, 100_000e6);
 
-        _open(bearAccount, CfdTypes.Side.BEAR, 900_000e18, 45_000e6, 1e8);
-        _open(residualBearAccount, CfdTypes.Side.BEAR, 99_000e18, 5000e6, 1e8);
-        _open(bullAccount, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
+        _open(shortAccount, CfdTypes.Side.SHORT, 900_000e18, 45_000e6, 1e8);
+        _open(residualShortAccount, CfdTypes.Side.SHORT, 99_000e18, 5000e6, 1e8);
+        _open(longAccount, CfdTypes.Side.LONG, 500_000e18, 50_000e6, 1e8);
 
-        _close(bullAccount, CfdTypes.Side.BULL, 500_000e18, 20_000_000);
+        _close(longAccount, CfdTypes.Side.LONG, 500_000e18, 20_000_000);
         assertTrue(engine.degradedMode(), "Setup close should latch degraded mode");
 
-        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(bearAccount, 900_000e18, 20_000_000);
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(shortAccount, 900_000e18, 20_000_000);
         assertTrue(preview.valid, "Full close should remain previewable after degraded mode latches");
         assertFalse(preview.triggersDegradedMode, "Transition flag should stay false after degraded mode latches");
         assertEq(
@@ -2640,7 +2640,7 @@ contract CfdEngineTest is BasePerpTest {
         address account = trader;
         _fundTrader(trader, 10_000e6);
 
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 4000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 4000e6, 1e8);
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 1e8);
 
@@ -2655,7 +2655,7 @@ contract CfdEngineTest is BasePerpTest {
         address account = trader;
         _fundTrader(trader, 10_000e6);
 
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 4000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 4000e6, 1e8);
 
         vm.warp(1_709_934_300); // Friday 21:45 UTC: FAD, but not oracle-frozen.
         assertTrue(engine.isFadWindow(), "Setup should be in FAD");
@@ -2676,7 +2676,7 @@ contract CfdEngineTest is BasePerpTest {
         address account = trader;
         _fundTrader(trader, 10_000e6);
 
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 4000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 4000e6, 1e8);
 
         vm.warp(1_709_985_600); // Saturday 12:00 UTC: oracle-frozen close-only mode.
         assertTrue(engine.isOracleFrozen(), "Setup should be in oracle-frozen mode");
@@ -2713,18 +2713,18 @@ contract CfdEngineTest is BasePerpTest {
     }
 
     function test_PreviewClose_OracleFrozenSkewWorseningCloseKeepsSignedVpiAndPaysSameFixedSpread() public {
-        address bullTrader = address(0xAB1313);
-        address bearTrader = address(0xAB1314);
-        _fundTrader(bullTrader, 10_000e6);
-        _fundTrader(bearTrader, 10_000e6);
+        address longTrader = address(0xAB1313);
+        address shortTrader = address(0xAB1314);
+        _fundTrader(longTrader, 10_000e6);
+        _fundTrader(shortTrader, 10_000e6);
 
-        _open(bullTrader, CfdTypes.Side.BULL, 100_000e18, 4000e6, 1e8);
-        _open(bearTrader, CfdTypes.Side.BEAR, 150_000e18, 6000e6, 1e8);
+        _open(longTrader, CfdTypes.Side.LONG, 100_000e18, 4000e6, 1e8);
+        _open(shortTrader, CfdTypes.Side.SHORT, 150_000e18, 6000e6, 1e8);
 
         vm.warp(1_709_985_600);
         assertTrue(engine.isOracleFrozen(), "Setup should be in oracle-frozen mode");
 
-        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(bullTrader, 100_000e18, 0.8e8);
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(longTrader, 100_000e18, 0.8e8);
 
         assertTrue(preview.valid, "Frozen close should be previewable");
         assertGt(preview.vpiDeltaUsdc, 0, "Frozen skew-worsening close should keep the normal positive VPI charge");
@@ -2735,18 +2735,18 @@ contract CfdEngineTest is BasePerpTest {
     }
 
     function test_PreviewClose_OracleFrozenZeroCrossingCloseUsesNormalCurveAndFixedSpread() public {
-        address bullTrader = address(0xAB1315);
-        address bearTrader = address(0xAB1316);
-        _fundTrader(bullTrader, 20_000e6);
-        _fundTrader(bearTrader, 10_000e6);
+        address longTrader = address(0xAB1315);
+        address shortTrader = address(0xAB1316);
+        _fundTrader(longTrader, 20_000e6);
+        _fundTrader(shortTrader, 10_000e6);
 
-        _open(bullTrader, CfdTypes.Side.BULL, 200_000e18, 8000e6, 1e8);
-        _open(bearTrader, CfdTypes.Side.BEAR, 100_000e18, 4000e6, 1e8);
+        _open(longTrader, CfdTypes.Side.LONG, 200_000e18, 8000e6, 1e8);
+        _open(shortTrader, CfdTypes.Side.SHORT, 100_000e18, 4000e6, 1e8);
 
         vm.warp(1_709_985_600);
         assertTrue(engine.isOracleFrozen(), "Setup should be in oracle-frozen mode");
 
-        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(bullTrader, 150_000e18, 0.8e8);
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(longTrader, 150_000e18, 0.8e8);
 
         assertTrue(preview.valid, "Frozen partial close should be previewable");
         assertLt(preview.vpiDeltaUsdc, 0, "Zero crossing that reduces absolute skew should keep the normal rebate");
@@ -2770,7 +2770,7 @@ contract CfdEngineTest is BasePerpTest {
         address account = trader;
         _fundTrader(trader, 10_000e6);
 
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 4000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 4000e6, 1e8);
 
         vm.warp(1_709_985_600);
         assertTrue(engine.isOracleFrozen(), "Setup should be in oracle-frozen mode");
@@ -2779,7 +2779,7 @@ contract CfdEngineTest is BasePerpTest {
         CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(account);
         uint256 treasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
 
-        _close(account, CfdTypes.Side.BULL, 100_000e18, 0.8e8);
+        _close(account, CfdTypes.Side.LONG, 100_000e18, 0.8e8);
 
         CloseParityObserved memory observed = _observeCloseParity(account, beforeSnapshot);
 
@@ -2809,7 +2809,7 @@ contract CfdEngineTest is BasePerpTest {
         address account = trader;
         _fundTrader(trader, 2000e6);
 
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
 
         vm.warp(1_709_985_600);
         assertTrue(engine.isOracleFrozen(), "Setup should be in oracle-frozen mode");
@@ -2839,7 +2839,7 @@ contract CfdEngineTest is BasePerpTest {
         emit FrozenCloseSpreadSettled(
             account, preview.frozenSpreadUsdc, preview.frozenSpreadPaidUsdc, preview.frozenSpreadWaivedUsdc
         );
-        _close(account, CfdTypes.Side.BULL, 100_000e18, 1.019e8);
+        _close(account, CfdTypes.Side.LONG, 100_000e18, 1.019e8);
 
         (uint256 remainingSize,,,,,,) = engine.positions(account);
         assertEq(remainingSize, 0, "Full close should complete despite the waived spread");
@@ -2855,7 +2855,7 @@ contract CfdEngineTest is BasePerpTest {
         uint256 size = 100_000e18;
         uint256 closePrice = 1.02e8;
         _fundTrader(account, 2000e6);
-        _open(account, CfdTypes.Side.BULL, size, 2000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, size, 2000e6, 1e8);
 
         vm.warp(1_709_985_600);
         assertTrue(engine.isOracleFrozen(), "Setup should be in oracle-frozen mode");
@@ -2919,7 +2919,7 @@ contract CfdEngineTest is BasePerpTest {
         emit FrozenCloseSpreadSettled(
             account, preview.frozenSpreadUsdc, preview.frozenSpreadPaidUsdc, preview.frozenSpreadWaivedUsdc
         );
-        _close(account, CfdTypes.Side.BULL, size, closePrice);
+        _close(account, CfdTypes.Side.LONG, size, closePrice);
 
         assertEq(
             engine.traderClaimBalanceUsdc(account),
@@ -2953,7 +2953,7 @@ contract CfdEngineTest is BasePerpTest {
         address account = trader;
         _fundTrader(trader, 2000e6);
 
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
 
         vm.warp(1_709_985_600);
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 50_000e18, 1.019e8);
@@ -2971,10 +2971,10 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(0xAB1302);
         address account = trader;
         _fundTrader(trader, 5000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 4000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 4000e6, 1e8);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 900e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 900e6, type(uint256).max, false);
 
         uint256 freeSettlementBeforePreview = _freeSettlementUsdc(account);
 
@@ -2994,7 +2994,7 @@ contract CfdEngineTest is BasePerpTest {
         _fundTrader(trader, 22_000 * 1e6);
 
         address account = trader;
-        _open(account, CfdTypes.Side.BEAR, 200_000 * 1e18, 20_000 * 1e6, 1e8);
+        _open(account, CfdTypes.Side.SHORT, 200_000 * 1e18, 20_000 * 1e6, 1e8);
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000 * 1e18, 80_000_000);
         (uint256 sizeBefore, uint256 marginBefore,,,,,) = engine.positions(account);
@@ -3010,10 +3010,9 @@ contract CfdEngineTest is BasePerpTest {
         assertLt(preview.remainingSize, sizeBefore, "Preview should reduce the live position");
         assertLe(preview.remainingMargin, marginBefore, "Partial loss must not increase the surviving PnL pledge");
 
-        vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BEAR, 100_000 * 1e18, 0, 0, true);
-        bytes[] memory priceData = _mockPythUpdateData(0.8e8);
-        router.executeOrder(1, priceData);
+        // This is Engine preview/apply parity. A V2 Router order intentionally rejects the same partial close at
+        // the mandatory nonnegative post-position-equity boundary before it can reach Engine apply.
+        _close(account, CfdTypes.Side.SHORT, 100_000 * 1e18, 0.8e8);
 
         (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(account);
         assertEq(sizeAfter, preview.remainingSize, "Live partial writeoff should match previewed remaining size");
@@ -3025,7 +3024,7 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(0xAB1304);
         address account = trader;
         _fundTrader(trader, 2000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 110_000_000);
         uint256 collectibleCapUsdc = engineAccountLens.getAccountLedgerSnapshot(account).terminalPriceCollectibleCapUsdc;
@@ -3041,7 +3040,7 @@ contract CfdEngineTest is BasePerpTest {
         uint256 writtenOffUsdc = priceLossUsdc - collectibleCapUsdc;
         vm.expectEmit(true, false, false, true, address(engine.settlementSidecar()));
         emit PriceLossWrittenOff(account, writtenOffUsdc);
-        _close(account, CfdTypes.Side.BULL, 100_000e18, 110_000_000);
+        _close(account, CfdTypes.Side.LONG, 100_000e18, 110_000_000);
 
         assertEq(
             pool.totalAssets() - poolAssetsBefore,
@@ -3062,7 +3061,7 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(0xAB1305);
         address account = trader;
         _fundTrader(trader, 5000e6);
-        _open(account, CfdTypes.Side.BEAR, 100_000e18, 4000e6, 1e8);
+        _open(account, CfdTypes.Side.SHORT, 100_000e18, 4000e6, 1e8);
 
         ICfdEngineTypes.ClosePreview memory cappedPreview = engineLens.previewClose(account, 100_000e18, 2e8);
         ICfdEngineTypes.ClosePreview memory overCapPreview = engineLens.previewClose(account, 100_000e18, 3e8);
@@ -3094,7 +3093,7 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(0xAB14);
         address account = trader;
         _fundTrader(trader, 300e6);
-        _open(account, CfdTypes.Side.BULL, 10_000e18, 200e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 200e6, 1e8);
 
         vm.prank(trader);
         clearinghouse.withdraw(account, 100e6);
@@ -3175,7 +3174,7 @@ contract CfdEngineTest is BasePerpTest {
         params.baseCarryBps = 0;
         _setRiskParams(params);
         _fundTrader(trader, 200e6);
-        _open(account, CfdTypes.Side.BEAR, 10_000e18, 200e6, 99_700_000);
+        _open(account, CfdTypes.Side.SHORT, 10_000e18, 200e6, 99_700_000);
 
         _seedAuthenticatedTraderClaim(account, 10e6);
         params.maintMarginBps = 500;
@@ -3248,7 +3247,7 @@ contract CfdEngineTest is BasePerpTest {
         address account = trader;
 
         _fundTrader(trader, 20_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
         vm.warp(block.timestamp + 1 days);
         vm.prank(address(router));
@@ -3259,7 +3258,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(preview.badDebtUsdc, 0, "Carry-adjusted close should remain fully covered in this setup");
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 100_010_000, true);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 100_010_000, true);
 
         bytes[] memory priceData = _mockPythUpdateData(100_010_000);
         router.executeOrder(1, priceData);
@@ -3494,7 +3493,7 @@ contract CfdEngineTest is BasePerpTest {
         address account = trader;
         uint256 poolDepth = pool.totalAssets();
         _fundTrader(trader, 2000e6);
-        _open(account, CfdTypes.Side.BULL, 10_000e18, 1105e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 1105e6, 1e8);
 
         vm.prank(trader);
         clearinghouse.withdraw(account, 895e6);
@@ -3520,7 +3519,7 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(0xAB14015);
         address account = trader;
         _fundTrader(trader, 2000e6);
-        _open(account, CfdTypes.Side.BULL, 10_000e18, 1105e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 1105e6, 1e8);
 
         vm.prank(trader);
         clearinghouse.withdraw(account, 895e6);
@@ -3555,7 +3554,7 @@ contract CfdEngineTest is BasePerpTest {
         address keeper = address(0xAB14A2);
         address account = trader;
         _fundTrader(trader, 300e6);
-        _open(account, CfdTypes.Side.BULL, 10_000e18, 200e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 200e6, 1e8);
 
         vm.prank(trader);
         clearinghouse.withdraw(account, 100e6);
@@ -3578,7 +3577,7 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(0xAB1402);
         address account = trader;
         _fundTrader(trader, 2000e6);
-        _open(account, CfdTypes.Side.BULL, 10_000e18, 1105e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 1105e6, 1e8);
 
         vm.prank(trader);
         clearinghouse.withdraw(account, 895e6);
@@ -3609,7 +3608,7 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(0xAB1403);
         address account = trader;
         _fundTrader(trader, 2000e6);
-        _open(account, CfdTypes.Side.BULL, 10_000e18, 1105e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 1105e6, 1e8);
 
         vm.prank(trader);
         clearinghouse.withdraw(account, 895e6);
@@ -3636,7 +3635,7 @@ contract CfdEngineTest is BasePerpTest {
         address keeper = address(0xAB1405);
         address account = trader;
         _fundTrader(trader, 300e6);
-        _open(account, CfdTypes.Side.BULL, 10_000e18, 200e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 200e6, 1e8);
 
         vm.prank(trader);
         clearinghouse.withdraw(account, 100e6);
@@ -3700,12 +3699,12 @@ contract CfdEngineTest is BasePerpTest {
         address account = trader;
 
         _fundTrader(trader, 900e6);
-        _open(account, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 250e6, 1e8);
 
         vm.startPrank(trader);
         uint256 queuedOrderCount = 5;
         for (uint256 i = 0; i < queuedOrderCount; i++) {
-            router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 100e6, type(uint256).max, false);
+            router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 100e6, type(uint256).max, false);
         }
         clearinghouse.withdraw(account, 70e6);
         vm.stopPrank();
@@ -3756,11 +3755,11 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(0xAB1407);
         address account = trader;
         _fundTrader(trader, 300e6);
-        _open(account, CfdTypes.Side.BULL, 10_000e18, 200e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 200e6, 1e8);
 
         vm.startPrank(trader);
         for (uint256 i = 0; i < 5; i++) {
-            router.commitOrder(CfdTypes.Side.BULL, 1000e18, 0, type(uint256).max, true);
+            router.commitOrder(CfdTypes.Side.LONG, 1000e18, 0, type(uint256).max, true);
         }
         vm.stopPrank();
 
@@ -3786,14 +3785,14 @@ contract CfdEngineTest is BasePerpTest {
 
     function test_Liquidation_ConsumesTraderClaimBeforeWritingOffTerminalPriceLoss() public {
         uint256 poolDepth = 1_000_000 * 1e6;
-        address bullAccount = address(uint160(0xD221));
-        address bearAccount = address(uint160(0xD222));
+        address longAccount = address(uint160(0xD221));
+        address shortAccount = address(uint160(0xD222));
         address keeper = address(0xD223);
-        _fundTrader(bullAccount, 5000e6);
-        _fundTrader(bearAccount, 5000e6);
+        _fundTrader(longAccount, 5000e6);
+        _fundTrader(shortAccount, 5000e6);
 
-        _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, poolDepth);
-        _open(bearAccount, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, poolDepth);
+        _open(longAccount, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8, poolDepth);
+        _open(shortAccount, CfdTypes.Side.SHORT, 10_000e18, 500e6, 1e8, poolDepth);
 
         uint64 refreshTime = uint64(block.timestamp + 1 days);
         vm.warp(refreshTime);
@@ -3806,40 +3805,40 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - firstCloseExecutionFeeUsdc - 1);
 
-        _closeAt(bearAccount, CfdTypes.Side.BEAR, 5000e18, 120_000_000, poolDepth, refreshTime);
-        uint256 traderClaimBefore = engine.traderClaimBalanceUsdc(bearAccount);
+        _closeAt(shortAccount, CfdTypes.Side.SHORT, 5000e18, 120_000_000, poolDepth, refreshTime);
+        uint256 traderClaimBefore = engine.traderClaimBalanceUsdc(shortAccount);
         assertGt(traderClaimBefore, 0, "Setup must create trader claim while keeping the position open");
 
-        uint256 reducedSettlement = clearinghouse.balanceUsdc(bearAccount) - 4700e6;
-        stdstore.target(address(clearinghouse)).sig("balanceUsdc(address)").with_key(bearAccount)
+        uint256 reducedSettlement = clearinghouse.balanceUsdc(shortAccount) - 4700e6;
+        stdstore.target(address(clearinghouse)).sig("balanceUsdc(address)").with_key(shortAccount)
             .checked_write(reducedSettlement);
 
-        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(bearAccount, 50_000_000);
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(shortAccount, 50_000_000);
         assertTrue(preview.liquidatable, "Setup must produce a liquidatable position even after trader claim credit");
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(50_000_000));
         vm.prank(keeper);
-        router.executeLiquidation(bearAccount, priceData);
+        router.executeLiquidation(shortAccount, priceData);
 
         assertLt(
-            engine.traderClaimBalanceUsdc(bearAccount),
+            engine.traderClaimBalanceUsdc(shortAccount),
             traderClaimBefore,
             "Liquidation should consume the same-account claim before writing off terminal price loss"
         );
         assertEq(
-            engine.traderClaimBalanceUsdc(bearAccount),
+            engine.traderClaimBalanceUsdc(shortAccount),
             preview.traderClaimBalanceUsdc,
             "Preview should match remaining trader claim after liquidation"
         );
         assertEq(preview.badDebtUsdc, 0, "V2 liquidation must not recreate protocol bad debt");
         assertEq(
-            clearinghouse.balanceUsdc(bearAccount),
+            clearinghouse.balanceUsdc(shortAccount),
             preview.settlementRetainedUsdc + preview.immediatePayoutUsdc,
             "Live retained settlement and immediate payout must match the exact liquidation preview"
         );
         assertEq(
-            terminalNavBook.curveHashOf(bearAccount),
+            terminalNavBook.curveHashOf(shortAccount),
             bytes32(0),
             "Terminal liquidation must remove the authenticated account curve"
         );
@@ -3847,13 +3846,13 @@ contract CfdEngineTest is BasePerpTest {
 
     function test_Close_ConsumesTraderClaimBeforeRecordingBadDebt() public {
         uint256 poolDepth = 1_000_000 * 1e6;
-        address bullAccount = address(uint160(0xD231));
-        address bearAccount = address(uint160(0xD232));
-        _fundTrader(bullAccount, 5000e6);
-        _fundTrader(bearAccount, 5000e6);
+        address longAccount = address(uint160(0xD231));
+        address shortAccount = address(uint160(0xD232));
+        _fundTrader(longAccount, 5000e6);
+        _fundTrader(shortAccount, 5000e6);
 
-        _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, poolDepth);
-        _open(bearAccount, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, poolDepth);
+        _open(longAccount, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8, poolDepth);
+        _open(shortAccount, CfdTypes.Side.SHORT, 10_000e18, 500e6, 1e8, poolDepth);
 
         uint64 refreshTime = uint64(block.timestamp + 1 days);
         vm.warp(refreshTime);
@@ -3867,16 +3866,16 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - setupCloseFeesUsdc - 1);
 
-        _closeAt(bearAccount, CfdTypes.Side.BEAR, 5000e18, 120_000_000, poolDepth, refreshTime);
-        uint256 traderClaimBefore = engine.traderClaimBalanceUsdc(bearAccount);
+        _closeAt(shortAccount, CfdTypes.Side.SHORT, 5000e18, 120_000_000, poolDepth, refreshTime);
+        uint256 traderClaimBefore = engine.traderClaimBalanceUsdc(shortAccount);
         assertGt(traderClaimBefore, 0, "Setup must create trader claim while keeping the position open");
 
-        uint256 reducedSettlement = clearinghouse.balanceUsdc(bearAccount) - 4700e6;
-        stdstore.target(address(clearinghouse)).sig("balanceUsdc(address)").with_key(bearAccount)
+        uint256 reducedSettlement = clearinghouse.balanceUsdc(shortAccount) - 4700e6;
+        stdstore.target(address(clearinghouse)).sig("balanceUsdc(address)").with_key(shortAccount)
             .checked_write(reducedSettlement);
 
         ICfdEngineTypes.ClosePreview memory preview =
-            engineLens.simulateClose(bearAccount, 5000e18, 80_000_000, poolDepth);
+            engineLens.simulateClose(shortAccount, 5000e18, 80_000_000, poolDepth);
         assertGt(
             preview.existingTraderClaimConsumedUsdc,
             0,
@@ -3888,13 +3887,13 @@ contract CfdEngineTest is BasePerpTest {
             "Close preview should show less trader claim remaining after loss absorption"
         );
 
-        CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(bearAccount);
-        _closeAt(bearAccount, CfdTypes.Side.BEAR, 5000e18, 80_000_000, poolDepth, refreshTime);
+        CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(shortAccount);
+        _closeAt(shortAccount, CfdTypes.Side.SHORT, 5000e18, 80_000_000, poolDepth, refreshTime);
 
-        CloseParityObserved memory observed = _observeCloseParity(bearAccount, beforeSnapshot);
+        CloseParityObserved memory observed = _observeCloseParity(shortAccount, beforeSnapshot);
 
         assertEq(
-            engine.traderClaimBalanceUsdc(bearAccount),
+            engine.traderClaimBalanceUsdc(shortAccount),
             observed.traderClaimBalanceUsdc,
             "Live close should leave the same trader claim remainder observed in settlement state"
         );
@@ -3908,13 +3907,13 @@ contract CfdEngineTest is BasePerpTest {
 
     function test_Close_ConsumesTraderClaimBalancesWithoutQueueOrdering() public {
         uint256 poolDepth = 1_000_000 * 1e6;
-        address bullAccount = address(uint160(0xD241));
-        address bearAccount = address(uint160(0xD242));
-        _fundTrader(bullAccount, 5000e6);
-        _fundTrader(bearAccount, 5000e6);
+        address longAccount = address(uint160(0xD241));
+        address shortAccount = address(uint160(0xD242));
+        _fundTrader(longAccount, 5000e6);
+        _fundTrader(shortAccount, 5000e6);
 
-        _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, poolDepth);
-        _open(bearAccount, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, poolDepth);
+        _open(longAccount, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8, poolDepth);
+        _open(shortAccount, CfdTypes.Side.SHORT, 10_000e18, 500e6, 1e8, poolDepth);
 
         uint64 refreshTime = uint64(block.timestamp + 1 days);
         vm.warp(refreshTime);
@@ -3928,23 +3927,23 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - setupCloseFeesUsdc - 1);
 
-        _closeAt(bearAccount, CfdTypes.Side.BEAR, 5000e18, 120_000_000, poolDepth, refreshTime);
-        uint256 traderClaimBefore = engine.traderClaimBalanceUsdc(bearAccount);
-        assertGt(traderClaimBefore, 0, "Bear account should accrue trader claim balance");
+        _closeAt(shortAccount, CfdTypes.Side.SHORT, 5000e18, 120_000_000, poolDepth, refreshTime);
+        uint256 traderClaimBefore = engine.traderClaimBalanceUsdc(shortAccount);
+        assertGt(traderClaimBefore, 0, "Short account should accrue trader claim balance");
 
-        _closeAt(bearAccount, CfdTypes.Side.BEAR, 2500e18, 120_000_000, poolDepth, refreshTime);
-        uint256 traderClaimAfterAccrual = engine.traderClaimBalanceUsdc(bearAccount);
+        _closeAt(shortAccount, CfdTypes.Side.SHORT, 2500e18, 120_000_000, poolDepth, refreshTime);
+        uint256 traderClaimAfterAccrual = engine.traderClaimBalanceUsdc(shortAccount);
         assertGe(
             traderClaimAfterAccrual, traderClaimBefore, "Additional trader claim should coalesce into the same balance"
         );
 
-        uint256 reducedSettlement = clearinghouse.balanceUsdc(bearAccount) - 4700e6;
-        stdstore.target(address(clearinghouse)).sig("balanceUsdc(address)").with_key(bearAccount)
+        uint256 reducedSettlement = clearinghouse.balanceUsdc(shortAccount) - 4700e6;
+        stdstore.target(address(clearinghouse)).sig("balanceUsdc(address)").with_key(shortAccount)
             .checked_write(reducedSettlement);
 
-        _closeAt(bearAccount, CfdTypes.Side.BEAR, 2500e18, 80_000_000, poolDepth, refreshTime);
+        _closeAt(shortAccount, CfdTypes.Side.SHORT, 2500e18, 80_000_000, poolDepth, refreshTime);
         assertLe(
-            engine.traderClaimBalanceUsdc(bearAccount),
+            engine.traderClaimBalanceUsdc(shortAccount),
             traderClaimAfterAccrual,
             "Consuming trader claim balance should only reduce the tracked balance"
         );
@@ -3952,16 +3951,16 @@ contract CfdEngineTest is BasePerpTest {
 
     function test_TraderClaim_CoalescesPerAccountWithoutQueuePosition() public {
         uint256 poolDepth = 1_000_000 * 1e6;
-        address bullAccount = address(uint160(0xD261));
-        address bearAccount = address(uint160(0xD262));
+        address longAccount = address(uint160(0xD261));
+        address shortAccount = address(uint160(0xD262));
         address laterAccount = address(uint160(0xD263));
-        _fundTrader(bullAccount, 5000e6);
-        _fundTrader(bearAccount, 5000e6);
+        _fundTrader(longAccount, 5000e6);
+        _fundTrader(shortAccount, 5000e6);
         _fundTrader(laterAccount, 5000e6);
 
-        _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, poolDepth);
-        _open(bearAccount, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, poolDepth);
-        _open(laterAccount, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, poolDepth);
+        _open(longAccount, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8, poolDepth);
+        _open(shortAccount, CfdTypes.Side.SHORT, 10_000e18, 500e6, 1e8, poolDepth);
+        _open(laterAccount, CfdTypes.Side.SHORT, 10_000e18, 500e6, 1e8, poolDepth);
 
         uint64 refreshTime = uint64(block.timestamp + 1 days);
         vm.warp(refreshTime);
@@ -3975,31 +3974,31 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - setupCloseFeesUsdc - 1);
 
-        _closeAt(bearAccount, CfdTypes.Side.BEAR, 5000e18, 120_000_000, poolDepth, refreshTime);
-        uint256 bearClaimBefore = engine.traderClaimBalanceUsdc(bearAccount);
-        assertGt(bearClaimBefore, 0, "Initial trader claim should create a tracked balance for bearAccount");
+        _closeAt(shortAccount, CfdTypes.Side.SHORT, 5000e18, 120_000_000, poolDepth, refreshTime);
+        uint256 shortClaimBefore = engine.traderClaimBalanceUsdc(shortAccount);
+        assertGt(shortClaimBefore, 0, "Initial trader claim should create a tracked balance for shortAccount");
 
-        _closeAt(laterAccount, CfdTypes.Side.BEAR, 5000e18, 120_000_000, poolDepth, refreshTime);
+        _closeAt(laterAccount, CfdTypes.Side.SHORT, 5000e18, 120_000_000, poolDepth, refreshTime);
         uint256 laterClaim = engine.traderClaimBalanceUsdc(laterAccount);
         assertGt(laterClaim, 0, "Later claimant should also accrue a trader claim balance");
 
-        _closeAt(bearAccount, CfdTypes.Side.BEAR, 2500e18, 120_000_000, poolDepth, refreshTime);
-        uint256 bearClaimAfter = engine.traderClaimBalanceUsdc(bearAccount);
+        _closeAt(shortAccount, CfdTypes.Side.SHORT, 2500e18, 120_000_000, poolDepth, refreshTime);
+        uint256 shortClaimAfter = engine.traderClaimBalanceUsdc(shortAccount);
 
-        assertGe(bearClaimAfter, bearClaimBefore, "Coalescing should not move the account behind later claimants");
+        assertGe(shortClaimAfter, shortClaimBefore, "Coalescing should not move the account behind later claimants");
     }
 
     function test_Close_WaivesExecutionFeeShortfallWithoutConsumingExistingTraderClaim() public {
         uint256 poolDepth = 1_000_000 * 1e6;
-        address bearAccount = address(uint160(0xD252));
+        address shortAccount = address(uint160(0xD252));
         {
-            address bullAccount = address(uint160(0xD251));
-            _fundTrader(bullAccount, 5000e6);
-            _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, poolDepth);
+            address longAccount = address(uint160(0xD251));
+            _fundTrader(longAccount, 5000e6);
+            _open(longAccount, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8, poolDepth);
         }
-        _fundTrader(bearAccount, 5000e6);
+        _fundTrader(shortAccount, 5000e6);
 
-        _open(bearAccount, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, poolDepth);
+        _open(shortAccount, CfdTypes.Side.SHORT, 10_000e18, 500e6, 1e8, poolDepth);
 
         uint64 refreshTime = uint64(block.timestamp + 1 days);
         vm.warp(refreshTime);
@@ -4014,15 +4013,15 @@ contract CfdEngineTest is BasePerpTest {
             usdc.transfer(address(0xDEAD), poolAssets - firstCloseExecutionFeeUsdc - 1);
         }
 
-        _closeAt(bearAccount, CfdTypes.Side.BEAR, 5000e18, 120_000_000, poolDepth, refreshTime);
-        uint256 traderClaimBefore = engine.traderClaimBalanceUsdc(bearAccount);
+        _closeAt(shortAccount, CfdTypes.Side.SHORT, 5000e18, 120_000_000, poolDepth, refreshTime);
+        uint256 traderClaimBefore = engine.traderClaimBalanceUsdc(shortAccount);
         assertGt(
             traderClaimBefore, 1e6, "Setup must create an existing trader claim large enough to cover the fee shortfall"
         );
 
-        _removePnlPledgeAndSyncTerminalCurve(bearAccount);
+        _removePnlPledgeAndSyncTerminalCurve(shortAccount);
 
-        ICfdEngineTypes.ClosePreview memory preview = engineLens.simulateClose(bearAccount, 5000e18, 1e8, poolDepth);
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.simulateClose(shortAccount, 5000e18, 1e8, poolDepth);
 
         assertTrue(preview.valid, "Terminal action fee shortfall should be waived rather than blocking close");
         assertEq(preview.realizedPnlUsdc, 0, "Setup must isolate action fees from price PnL");
@@ -4036,7 +4035,7 @@ contract CfdEngineTest is BasePerpTest {
         );
 
         uint256 feesBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
-        _processUnderfundedFeeClose(bearAccount, poolDepth, refreshTime);
+        _processUnderfundedFeeClose(shortAccount, poolDepth, refreshTime);
 
         assertEq(
             clearinghouse.balanceUsdc(engine.protocolTreasury()),
@@ -4044,11 +4043,13 @@ contract CfdEngineTest is BasePerpTest {
             "Treasury fees should not consume cash reserved for remaining trader claims"
         );
         assertEq(
-            engine.traderClaimBalanceUsdc(bearAccount),
+            engine.traderClaimBalanceUsdc(shortAccount),
             traderClaimBefore,
             "Live action-fee waiver must leave the existing trader claim untouched"
         );
-        assertEq(terminalNavBook.curveHashOf(bearAccount), bytes32(0), "Terminal close must delete the exact NAV curve");
+        assertEq(
+            terminalNavBook.curveHashOf(shortAccount), bytes32(0), "Terminal close must delete the exact NAV curve"
+        );
     }
 
     function _removePnlPledgeAndSyncTerminalCurve(
@@ -4077,12 +4078,12 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(0xAB1406);
         address account = trader;
         _fundTrader(trader, 350e6);
-        _open(account, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 250e6, 1e8);
 
         vm.startPrank(trader);
         uint256 queuedOrderCount = 5;
         for (uint256 i = 0; i < queuedOrderCount; i++) {
-            router.commitOrder(CfdTypes.Side.BULL, 1000e18, 0, type(uint256).max, true);
+            router.commitOrder(CfdTypes.Side.LONG, 1000e18, 0, type(uint256).max, true);
         }
         clearinghouse.withdraw(account, 70e6);
         vm.stopPrank();
@@ -4119,7 +4120,7 @@ contract CfdEngineTest is BasePerpTest {
         address keeper = address(0xAB1411);
         address account = trader;
         _fundTrader(trader, 300e6);
-        _open(account, CfdTypes.Side.BULL, 10_000e18, 200e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 200e6, 1e8);
 
         vm.prank(trader);
         clearinghouse.withdraw(account, 100e6);
@@ -4143,16 +4144,16 @@ contract CfdEngineTest is BasePerpTest {
     }
 
     function helper_PreviewLiquidation_RecomputesPostOpStateInCarryModel() public {
-        address bullTrader = address(0xAB1412);
-        address bearTrader = address(0xAB1413);
-        address bullAccount = bullTrader;
-        address bearAccount = bearTrader;
+        address longTrader = address(0xAB1412);
+        address shortTrader = address(0xAB1413);
+        address longAccount = longTrader;
+        address shortAccount = shortTrader;
 
-        _fundTrader(bullTrader, 12_000e6);
-        _fundTrader(bearTrader, 30_000e6);
+        _fundTrader(longTrader, 12_000e6);
+        _fundTrader(shortTrader, 30_000e6);
 
-        _open(bullAccount, CfdTypes.Side.BULL, 500_000e18, 8000e6, 1e8);
-        _open(bearAccount, CfdTypes.Side.BEAR, 50_000e18, 20_000e6, 1e8);
+        _open(longAccount, CfdTypes.Side.LONG, 500_000e18, 8000e6, 1e8);
+        _open(shortAccount, CfdTypes.Side.SHORT, 50_000e18, 20_000e6, 1e8);
 
         uint64 refreshTime = uint64(block.timestamp + 365 days);
         vm.warp(refreshTime);
@@ -4164,11 +4165,11 @@ contract CfdEngineTest is BasePerpTest {
         vm.warp(accrualTime);
 
         ICfdEngineTypes.LiquidationPreview memory preDrainPreview =
-            engineLens.previewLiquidation(bullAccount, 195_000_000);
+            engineLens.previewLiquidation(longAccount, 195_000_000);
         assertTrue(preDrainPreview.liquidatable, "Setup must produce a liquidatable position");
 
-        uint256 bearMaxProfit = _sideMaxProfit(CfdTypes.Side.BEAR);
-        uint256 targetAssets = bearMaxProfit + clearinghouse.balanceUsdc(engine.protocolTreasury())
+        uint256 shortMaxProfit = _sideMaxProfit(CfdTypes.Side.SHORT);
+        uint256 targetAssets = shortMaxProfit + clearinghouse.balanceUsdc(engine.protocolTreasury())
             + preDrainPreview.keeperBountyUsdc + preDrainPreview.protocolLiquidationFeeUsdc
             - preDrainPreview.seizedCollateralUsdc - 1;
         uint256 currentAssets = pool.totalAssets();
@@ -4177,13 +4178,13 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), currentAssets - targetAssets);
 
-        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(bullAccount, 195_000_000);
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(longAccount, 195_000_000);
         assertTrue(preview.triggersDegradedMode, "Liquidation preview should detect degraded mode after the drain");
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(195_000_000));
         vm.prank(address(0xAB1414));
-        router.executeLiquidation(bullAccount, priceData);
+        router.executeLiquidation(longAccount, priceData);
 
         assertEq(
             preview.triggersDegradedMode,
@@ -4196,13 +4197,13 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(0xAB15);
         address account = trader;
         _fundTrader(trader, 11_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 9000e6, 1e8);
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
 
-        _close(account, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
+        _close(account, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
 
         vm.startPrank(address(pool));
         usdc.transfer(address(0xDEAD), pool.totalAssets());
@@ -4222,13 +4223,13 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(0xAB16);
         address account = trader;
         _fundTrader(trader, 11_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 9000e6, 1e8);
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
 
-        _close(account, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
+        _close(account, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
 
         uint256 traderClaim = engine.traderClaimBalanceUsdc(account);
         usdc.mint(address(pool), traderClaim);
@@ -4245,10 +4246,10 @@ contract CfdEngineTest is BasePerpTest {
         CfdTypes.RiskParams memory params = _riskParams();
         params.vpiFactor = 0;
         _setRiskParams(params);
-        _open(account, CfdTypes.Side.BULL, 100_000 * 1e18, 2000 * 1e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000 * 1e18, 2000 * 1e6, 1e8);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 7900e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 7900e6, type(uint256).max, false);
 
         // Make the terminal action charge large enough to exhaust free settlement. This is deliberately separate from
         // the adverse price move: only the action slice may reach the queued committed-margin bucket.
@@ -4263,7 +4264,7 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 0,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: true
         });
         CfdEngineSettlementSidecar sidecar = CfdEngineSettlementSidecar(address(engine.settlementSidecar()));
@@ -4287,7 +4288,7 @@ contract CfdEngineTest is BasePerpTest {
             "Price loss must conserve across claim, PnL pledge, and diagnostic write-off"
         );
 
-        _close(account, CfdTypes.Side.BULL, 100_000 * 1e18, 103_000_000);
+        _close(account, CfdTypes.Side.LONG, 100_000 * 1e18, 103_000_000);
 
         assertEq(
             committedBefore - clearinghouse.getLockedMarginBuckets(account).committedOrderMarginUsdc,
@@ -4305,7 +4306,7 @@ contract CfdEngineTest is BasePerpTest {
         address account = address(uint160(1));
         _fundTrader(account, 10_000 * 1e6);
 
-        CfdTypes.Order memory bearOrder = CfdTypes.Order({
+        CfdTypes.Order memory shortOrder = CfdTypes.Order({
             account: account,
             sizeDelta: 10_000 * 1e18,
             marginDelta: 5000 * 1e6,
@@ -4313,13 +4314,13 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 1,
-            side: CfdTypes.Side.BEAR,
+            side: CfdTypes.Side.SHORT,
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrderTyped(bearOrder, 0.8e8, 1_000_000 * 1e6, uint64(block.timestamp));
+        engine.processOrderTyped(shortOrder, 0.8e8, 1_000_000 * 1e6, uint64(block.timestamp));
 
-        CfdTypes.Order memory bullOrder = CfdTypes.Order({
+        CfdTypes.Order memory longOrder = CfdTypes.Order({
             account: account,
             sizeDelta: 10_000 * 1e18,
             marginDelta: 5000 * 1e6,
@@ -4327,19 +4328,19 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 2,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: false
         });
         vm.expectRevert(abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__TypedOrderFailure.selector, 1, 1, false));
         vm.prank(address(router));
-        engine.processOrderTyped(bullOrder, 0.8e8, 1_000_000 * 1e6, uint64(block.timestamp));
+        engine.processOrderTyped(longOrder, 0.8e8, 1_000_000 * 1e6, uint64(block.timestamp));
     }
 
     function test_ProcessOrderTyped_UserInvalidFailureUsesTypedTaxonomy() public {
         address account = address(uint160(1));
         _fundTrader(account, 10_000 * 1e6);
 
-        CfdTypes.Order memory bearOrder = CfdTypes.Order({
+        CfdTypes.Order memory shortOrder = CfdTypes.Order({
             account: account,
             sizeDelta: 10_000 * 1e18,
             marginDelta: 1000 * 1e6,
@@ -4347,13 +4348,13 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 1,
-            side: CfdTypes.Side.BEAR,
+            side: CfdTypes.Side.SHORT,
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrderTyped(bearOrder, 0.8e8, 1_000_000 * 1e6, uint64(block.timestamp));
+        engine.processOrderTyped(shortOrder, 0.8e8, 1_000_000 * 1e6, uint64(block.timestamp));
 
-        CfdTypes.Order memory bullOrder = CfdTypes.Order({
+        CfdTypes.Order memory longOrder = CfdTypes.Order({
             account: account,
             sizeDelta: 10_000 * 1e18,
             marginDelta: 1000 * 1e6,
@@ -4361,7 +4362,7 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 2,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: false
         });
         vm.expectRevert(
@@ -4373,7 +4374,7 @@ contract CfdEngineTest is BasePerpTest {
             )
         );
         vm.prank(address(router));
-        engine.processOrderTyped(bullOrder, 0.8e8, 1_000_000 * 1e6, uint64(block.timestamp));
+        engine.processOrderTyped(longOrder, 0.8e8, 1_000_000 * 1e6, uint64(block.timestamp));
     }
 
     function test_CarryRealization_DoesNotBackfillAfterFreshCheckpoint() public {
@@ -4389,7 +4390,7 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 1,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: false
         });
         vm.prank(address(router));
@@ -4412,7 +4413,7 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: accrualTime,
             commitBlock: uint64(block.number),
             orderId: 2,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: false
         });
         vm.prank(address(router));
@@ -4436,7 +4437,7 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 1,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: false
         });
         vm.prank(address(router));
@@ -4454,7 +4455,7 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 2,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: false
         });
         vm.prank(address(router));
@@ -4478,7 +4479,7 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 1,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: false
         });
         vm.prank(address(router));
@@ -4496,7 +4497,7 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 2,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: true
         });
         vm.prank(address(router));
@@ -4520,7 +4521,7 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 1,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: false
         });
         vm.prank(address(router));
@@ -4566,7 +4567,7 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 1,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: false
         });
 
@@ -4669,7 +4670,7 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 1,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: false
         });
         vm.prank(address(router));
@@ -4683,7 +4684,7 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 2,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: true
         });
         vm.expectRevert(abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__TypedOrderFailure.selector, 1, 1, true));
@@ -4704,7 +4705,7 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 1,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: false
         });
         vm.expectRevert(
@@ -4723,7 +4724,7 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(0xCA2211);
         address account = trader;
         _fundTrader(trader, 20_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
         uint256 sizeDelta = 10_000e18;
         uint256 marginDelta = _freeSettlementUsdc(account);
@@ -4735,17 +4736,17 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 1,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: false
         });
 
         vm.warp(block.timestamp + 30 days);
 
         uint8 revertCode = engineLens.previewOpenRevertCode(
-            account, CfdTypes.Side.BULL, sizeDelta, marginDelta, 1e8, uint64(block.timestamp)
+            account, CfdTypes.Side.LONG, sizeDelta, marginDelta, 1e8, uint64(block.timestamp)
         );
         CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory = engineLens.previewOpenFailurePolicyCategory(
-            account, CfdTypes.Side.BULL, sizeDelta, marginDelta, 1e8, uint64(block.timestamp)
+            account, CfdTypes.Side.LONG, sizeDelta, marginDelta, 1e8, uint64(block.timestamp)
         );
 
         assertEq(
@@ -4788,7 +4789,7 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 1,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: false
         });
 
@@ -4802,7 +4803,7 @@ contract CfdEngineTest is BasePerpTest {
         address account = address(uint160(1));
         _fundTrader(account, 10_000 * 1e6);
 
-        // Open BULL 100k tokens at $1.00 with enough supplied collateral for pledge plus liquidation reserve.
+        // Open LONG 100k tokens at $1.00 with enough supplied collateral for pledge plus liquidation reserve.
         CfdTypes.Order memory openOrder = CfdTypes.Order({
             account: account,
             sizeDelta: 100_000 * 1e18,
@@ -4811,7 +4812,7 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 1,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: false
         });
         vm.prank(address(router));
@@ -4820,7 +4821,7 @@ contract CfdEngineTest is BasePerpTest {
         // Warp 365 days — carry will far exceed margin
         vm.warp(block.timestamp + 365 days);
 
-        // Price dropped to $0.50 → BULL has $50k unrealized profit
+        // Price dropped to $0.50 → LONG has $50k unrealized profit
         // User should be able to close and receive profit minus carry minus fees
         uint256 chBefore = clearinghouse.balanceUsdc(account);
 
@@ -4832,7 +4833,7 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 2,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: true
         });
 
@@ -4864,7 +4865,7 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 1,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: false
         });
 
@@ -4885,7 +4886,7 @@ contract CfdEngineTest is BasePerpTest {
         address account = address(uint160(1));
         _fundTrader(account, 10_000 * 1e6);
 
-        // Open BEAR 100k tokens at price $1.00000001 (just above $1.00)
+        // Open SHORT 100k tokens at price $1.00000001 (just above $1.00)
         CfdTypes.Order memory first = CfdTypes.Order({
             account: account,
             sizeDelta: 100_000 * 1e18,
@@ -4894,13 +4895,13 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 1,
-            side: CfdTypes.Side.BEAR,
+            side: CfdTypes.Side.SHORT,
             isClose: false
         });
         vm.prank(address(router));
         engine.processOrderTyped(first, 100_000_001, poolDepth, uint64(block.timestamp));
 
-        // Open BEAR 200k tokens at price $1.00 — blends entry to 100_000_000 (truncated from .33)
+        // Open SHORT 200k tokens at price $1.00 — blends entry to 100_000_000 (truncated from .33)
         // Sum of individual maxProfits < maxProfit(blended) due to integer truncation
         CfdTypes.Order memory second = CfdTypes.Order({
             account: account,
@@ -4910,7 +4911,7 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 2,
-            side: CfdTypes.Side.BEAR,
+            side: CfdTypes.Side.SHORT,
             isClose: false
         });
         vm.prank(address(router));
@@ -4925,7 +4926,7 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 3,
-            side: CfdTypes.Side.BEAR,
+            side: CfdTypes.Side.SHORT,
             isClose: true
         });
         vm.prank(address(router));
@@ -4933,7 +4934,7 @@ contract CfdEngineTest is BasePerpTest {
 
         (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Position should be fully closed");
-        assertEq(_sideMaxProfit(CfdTypes.Side.BEAR), 0, "Global bear max profit should be zero");
+        assertEq(_sideMaxProfit(CfdTypes.Side.SHORT), 0, "Global short max profit should be zero");
     }
 
     function test_H9_SolvencyDeadlock_CloseAllowedDuringInsolvency() public {
@@ -4954,7 +4955,7 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 1,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: false
         });
         vm.prank(address(router));
@@ -4968,7 +4969,7 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 2,
-            side: CfdTypes.Side.BEAR,
+            side: CfdTypes.Side.SHORT,
             isClose: false
         });
         vm.prank(address(router));
@@ -4977,9 +4978,9 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(engine));
         pool.payOut(address(0xDEAD), 60_000 * 1e6);
 
-        uint256 maxLiab = _sideMaxProfit(CfdTypes.Side.BULL) > _sideMaxProfit(CfdTypes.Side.BEAR)
-            ? _sideMaxProfit(CfdTypes.Side.BULL)
-            : _sideMaxProfit(CfdTypes.Side.BEAR);
+        uint256 maxLiab = _sideMaxProfit(CfdTypes.Side.LONG) > _sideMaxProfit(CfdTypes.Side.SHORT)
+            ? _sideMaxProfit(CfdTypes.Side.LONG)
+            : _sideMaxProfit(CfdTypes.Side.SHORT);
         assertTrue(usdc.balanceOf(address(pool)) < maxLiab, "Pool should be insolvent");
 
         CfdTypes.Order memory aliceClose = CfdTypes.Order({
@@ -4990,7 +4991,7 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 3,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: true
         });
         vm.prank(address(router));
@@ -5014,7 +5015,7 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 1,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: false
         });
         vm.prank(address(router));
@@ -5028,7 +5029,7 @@ contract CfdEngineTest is BasePerpTest {
 
         uint256 poolBalanceBefore = usdc.balanceOf(address(pool));
 
-        // Price rises to $1.10 — BULL loses $10k, equity = margin (~$1537) - $10k = negative
+        // Price rises to $1.10 — LONG loses $10k, equity = margin (~$1537) - $10k = negative
         vm.prank(address(router));
         engine.liquidatePosition(account, 1.1e8, poolDepth, uint64(block.timestamp), address(this));
 
@@ -5063,7 +5064,7 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 1,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: false
         });
         vm.prank(address(router));
@@ -5080,7 +5081,7 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 2,
-            side: CfdTypes.Side.BEAR,
+            side: CfdTypes.Side.SHORT,
             isClose: false
         });
         vm.prank(address(router));
@@ -5090,12 +5091,12 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(engine));
         pool.payOut(address(0xDEAD), 810_000 * 1e6);
 
-        uint256 maxLiab = _sideMaxProfit(CfdTypes.Side.BULL) > _sideMaxProfit(CfdTypes.Side.BEAR)
-            ? _sideMaxProfit(CfdTypes.Side.BULL)
-            : _sideMaxProfit(CfdTypes.Side.BEAR);
+        uint256 maxLiab = _sideMaxProfit(CfdTypes.Side.LONG) > _sideMaxProfit(CfdTypes.Side.SHORT)
+            ? _sideMaxProfit(CfdTypes.Side.LONG)
+            : _sideMaxProfit(CfdTypes.Side.SHORT);
         assertTrue(usdc.balanceOf(address(pool)) < maxLiab, "Pool should be insolvent");
 
-        // Price rises to $1.10 — BULL loses $20k, deeply underwater
+        // Price rises to $1.10 — LONG loses $20k, deeply underwater
         vm.prank(address(router));
         engine.liquidatePosition(aliceAccount, 1.1e8, poolDepth, uint64(block.timestamp), address(this));
 
@@ -5139,7 +5140,7 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 1,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: false
         });
         vm.prank(address(router));
@@ -5184,7 +5185,7 @@ contract CfdEngineTest is BasePerpTest {
 
         address account = address(uint160(0x5157));
         _fundTrader(account, 5000 * 1e6);
-        _open(account, CfdTypes.Side.BULL, 20_000 * 1e18, 2000 * 1e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 20_000 * 1e18, 2000 * 1e6, 1e8);
 
         vm.warp(block.timestamp + 31);
 
@@ -5246,8 +5247,8 @@ contract CfdEngineTest is BasePerpTest {
 
         _fundTrader(trader, 10_000e6);
         _fundTrader(counterparty, 50_000e6);
-        _open(account, CfdTypes.Side.BULL, 10_000e18, 1500e6, 1e8);
-        _open(counterpartyAccount, CfdTypes.Side.BEAR, 10_000e18, 50_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 1500e6, 1e8);
+        _open(counterpartyAccount, CfdTypes.Side.SHORT, 10_000e18, 50_000e6, 1e8);
 
         vm.warp(block.timestamp + 31);
         uint256 reserveBeforeFresh = clearinghouse.actionReserveUsdc(account);
@@ -5278,8 +5279,8 @@ contract CfdEngineTest is BasePerpTest {
 
         _fundTrader(trader, 10_000e6);
         _fundTrader(counterparty, 50_000e6);
-        _open(account, CfdTypes.Side.BULL, 10_000e18, 1500e6, 1e8);
-        _open(counterpartyAccount, CfdTypes.Side.BEAR, 10_000e18, 50_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 1500e6, 1e8);
+        _open(counterpartyAccount, CfdTypes.Side.SHORT, 10_000e18, 50_000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(0, uint64(block.timestamp));
@@ -5296,11 +5297,11 @@ contract CfdEngineTest is BasePerpTest {
 
         _fundTrader(trader, 10_000e6);
         _fundTrader(counterparty, 50_000e6);
-        _open(account, CfdTypes.Side.BULL, 10_000e18, 2000e6, 1e8);
-        _open(counterpartyAccount, CfdTypes.Side.BEAR, 10_000e18, 50_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 2000e6, 1e8);
+        _open(counterpartyAccount, CfdTypes.Side.SHORT, 10_000e18, 50_000e6, 1e8);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 4000e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 4000e6, type(uint256).max, false);
 
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(account);
         assertEq(
@@ -5322,7 +5323,7 @@ contract CfdEngineTest is BasePerpTest {
     function test_CheckWithdraw_RevertsWhenOpenPositionHasZeroMarkPrice() public {
         address account = address(uint160(0x5158));
         _fundTrader(account, 5000 * 1e6);
-        _open(account, CfdTypes.Side.BULL, 20_000 * 1e18, 2000 * 1e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 20_000 * 1e18, 2000 * 1e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(0, uint64(block.timestamp));
@@ -5339,7 +5340,7 @@ contract CfdEngineTest is BasePerpTest {
         params.vpiFactor = 0;
         _setRiskParams(params);
         _fundTrader(trader, 10_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(102_000_000, uint64(block.timestamp));
@@ -5371,7 +5372,7 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(0x515816);
         address account = trader;
         _fundTrader(trader, 10_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
 
         WithdrawParityState memory state = _observeWithdrawParity(account, trader, 5000e6);
         _assertWithdrawParity(state, ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition.selector);
@@ -5381,7 +5382,7 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(0x515817);
         address account = trader;
         _fundTrader(trader, 10_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
 
@@ -5396,7 +5397,7 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(0x515818);
         address account = trader;
         _fundTrader(trader, 10_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 1600e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 1600e6, 1e8);
 
         ICfdEngineAdminHost.EngineFreshnessConfig memory config = _engineFreshnessConfig();
         config.engineMarkStalenessLimit = 300;
@@ -5416,7 +5417,7 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(0x515815);
         address account = trader;
         _fundTrader(trader, 3200e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 3000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 3000e6, 1e8);
 
         CfdTypes.RiskParams memory params = _riskParams();
         params.initMarginBps = 300;
@@ -5445,7 +5446,7 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(0x515817);
         address account = trader;
         _fundTrader(trader, 20e6);
-        _open(account, CfdTypes.Side.BULL, 100e18, 16e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100e18, 16e6, 1e8);
 
         vm.warp(1_709_971_200);
         assertTrue(engine.isFadWindow(), "Setup must execute inside the FAD window");
@@ -5468,7 +5469,7 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(0x51583);
         address account = trader;
         _fundTrader(trader, 2000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
@@ -5496,7 +5497,7 @@ contract CfdEngineTest is BasePerpTest {
         // Leave a distinct free-settlement slice so the historical carry and close bounty are actually collectible;
         // neither obligation may borrow from the isolated price pledge or liquidation reserve in V2.
         _fundTrader(trader, marginUsdc + 100e6);
-        _open(account, CfdTypes.Side.BULL, size, marginUsdc, price);
+        _open(account, CfdTypes.Side.LONG, size, marginUsdc, price);
 
         vm.prank(address(router));
         engine.updateMarkPrice(price, uint64(block.timestamp));
@@ -5544,8 +5545,8 @@ contract CfdEngineTest is BasePerpTest {
 
         _fundTrader(trader, 1000e6);
         _fundTrader(counterparty, 50_000e6);
-        _open(account, CfdTypes.Side.BULL, size, 1000e6, 1e8);
-        _open(counterpartyAccount, CfdTypes.Side.BEAR, size, 50_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, size, 1000e6, 1e8);
+        _open(counterpartyAccount, CfdTypes.Side.SHORT, size, 50_000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(103_000_000, uint64(block.timestamp));
@@ -5566,8 +5567,8 @@ contract CfdEngineTest is BasePerpTest {
 
         _fundTrader(trader, 1000e6);
         _fundTrader(counterparty, 50_000e6);
-        _open(account, CfdTypes.Side.BULL, size, 1000e6, 1e8);
-        _open(counterpartyAccount, CfdTypes.Side.BEAR, size, 50_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, size, 1000e6, 1e8);
+        _open(counterpartyAccount, CfdTypes.Side.SHORT, size, 50_000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(103_000_000, uint64(block.timestamp));
@@ -5592,7 +5593,7 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 1,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: false
         });
         uint256 chBeforeOpen = clearinghouse.balanceUsdc(account);
@@ -5610,7 +5611,7 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 2,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: true
         });
         vm.prank(address(router));
@@ -5645,7 +5646,7 @@ contract CfdEngineTest is BasePerpTest {
             commitTime: refreshTime,
             commitBlock: uint64(block.number),
             orderId: 0,
-            side: CfdTypes.Side.BEAR,
+            side: CfdTypes.Side.SHORT,
             isClose: true
         });
         vm.prank(address(router));
@@ -5674,7 +5675,7 @@ contract CfdEngineCarryRegressionTest is BasePerpTest {
         int256 markedNotionalUsdc = int256(uint256(curve.lots) * markPrice);
         int256 entryCostUsdc = int256(uint256(curve.entryCostUsdcAtoms));
         int256 uncappedUsdc =
-            curve.side == CfdTypes.Side.BULL ? markedNotionalUsdc - entryCostUsdc : entryCostUsdc - markedNotionalUsdc;
+            curve.side == CfdTypes.Side.LONG ? markedNotionalUsdc - entryCostUsdc : entryCostUsdc - markedNotionalUsdc;
         int256 collectibleCapUsdc = int256(uint256(curve.effectiveCapUsdcAtoms));
         deltaUsdc = uncappedUsdc > collectibleCapUsdc ? collectibleCapUsdc : uncappedUsdc;
     }
@@ -5707,12 +5708,12 @@ contract CfdEngineCarryRegressionTest is BasePerpTest {
 
         address counterAccount = address(0xB1);
         _fundTrader(address(0xB1), 500_000 * 1e6);
-        _open(counterAccount, CfdTypes.Side.BEAR, 500_000 * 1e18, 50_000 * 1e6, 1e8, depth);
+        _open(counterAccount, CfdTypes.Side.SHORT, 500_000 * 1e18, 50_000 * 1e6, 1e8, depth);
 
         uint256 minNotional = (uint256(1) * 1e6 * 10_000) / 10 + 1e6;
         uint256 rawMinSize = (minNotional * CfdTypes.SIZE_QUANTUM) / 1e8;
         uint256 minSize = ((rawMinSize + CfdTypes.SIZE_QUANTUM - 1) / CfdTypes.SIZE_QUANTUM) * CfdTypes.SIZE_QUANTUM;
-        _open(attackerAccount, CfdTypes.Side.BULL, minSize, 50_000 * 1e6, 1e8, depth);
+        _open(attackerAccount, CfdTypes.Side.LONG, minSize, 50_000 * 1e6, 1e8, depth);
 
         // Canonical whole-lot accounting rejects a close that would create a sub-lot dust position.
         uint256 closeSize = minSize - 1;
@@ -5734,7 +5735,7 @@ contract CfdEngineCarryRegressionTest is BasePerpTest {
                 commitTime: uint64(block.timestamp),
                 commitBlock: uint64(block.number),
                 orderId: 0,
-                side: CfdTypes.Side.BULL,
+                side: CfdTypes.Side.LONG,
                 isClose: true
             }),
             1e8,
@@ -5749,11 +5750,11 @@ contract CfdEngineCarryRegressionTest is BasePerpTest {
 
         address aliceAccount = address(0xA2);
         _fundTrader(address(0xA2), 100_000 * 1e6);
-        _open(aliceAccount, CfdTypes.Side.BULL, 50_000 * 1e18, 5000 * 1e6, 1.2e8, depth);
+        _open(aliceAccount, CfdTypes.Side.LONG, 50_000 * 1e18, 5000 * 1e6, 1.2e8, depth);
 
         address bobAccount = address(0xB2);
         _fundTrader(address(0xB2), 100_000 * 1e6);
-        _open(bobAccount, CfdTypes.Side.BEAR, 100_000 * 1e18, 5000 * 1e6, 1.2e8, depth);
+        _open(bobAccount, CfdTypes.Side.SHORT, 100_000 * 1e18, 5000 * 1e6, 1.2e8, depth);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1.1e8, uint64(block.timestamp));
@@ -5778,7 +5779,7 @@ contract CfdEngineCarryRegressionTest is BasePerpTest {
 
         address traderAccount = address(0x2222);
         _fundTrader(address(0x2222), 500_000 * 1e6);
-        _open(traderAccount, CfdTypes.Side.BULL, 2_000_000 * 1e18, 200_000 * 1e6, 1e8, depth);
+        _open(traderAccount, CfdTypes.Side.LONG, 2_000_000 * 1e18, 200_000 * 1e6, 1e8, depth);
 
         uint256 rawAssetsBefore = pool.rawAssets();
         uint256 accountedAssetsBefore = pool.accountedAssets();
@@ -5790,7 +5791,7 @@ contract CfdEngineCarryRegressionTest is BasePerpTest {
         int256 terminalDeltaUsdc = _terminalLpPriceDelta();
         (uint256 withdrawalSeniorNav, uint256 withdrawalJuniorNav,,) = pool.getPendingTrancheState();
         (uint256 depositSeniorNav, uint256 depositJuniorNav) = pool.getPendingDepositTrancheState();
-        assertGt(terminalDeltaUsdc, 0, "Adverse BULL mark must create collectible LP terminal price value");
+        assertGt(terminalDeltaUsdc, 0, "Adverse LONG mark must create collectible LP terminal price value");
         assertEq(depositSeniorNav, withdrawalSeniorNav, "Senior entry and exit must share the signed projection");
         assertEq(depositJuniorNav, withdrawalJuniorNav, "Junior entry and exit must share the signed projection");
         assertGt(withdrawalJuniorNav, juniorBefore, "Collectible trader loss must increase the shared Junior NAV");
@@ -5846,7 +5847,7 @@ contract CfdEngineAuditTest is BasePerpTest {
         address account = carol;
 
         vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
         bytes[] memory empty = _mockPythUpdateData();
         router.executeOrder(1, empty);
 
@@ -5858,7 +5859,7 @@ contract CfdEngineAuditTest is BasePerpTest {
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
         vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BULL, 1000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 1000 * 1e18, 500 * 1e6, 1e8, false);
         empty = _mockPythUpdateData();
         router.executeOrder(2, empty);
 
@@ -5877,13 +5878,13 @@ contract CfdEngineAuditTest is BasePerpTest {
 
         _fundJunior(bob, 1_000_000 * 1e6);
         _fundTrader(trader, 1040 * 1e6);
-        _open(account, CfdTypes.Side.BULL, 50_000 * 1e18, 1000 * 1e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 50_000 * 1e18, 1000 * 1e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(101_800_000, uint64(block.timestamp));
 
         uint8 revertCode = engineLens.previewOpenRevertCode(
-            account, CfdTypes.Side.BULL, 10_000 * 1e18, 20 * 1e6, 101_800_000, uint64(block.timestamp)
+            account, CfdTypes.Side.LONG, 10_000 * 1e18, 20 * 1e6, 101_800_000, uint64(block.timestamp)
         );
         assertEq(
             revertCode,
@@ -5899,7 +5900,7 @@ contract CfdEngineAuditTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 0,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: false
         });
         uint256 poolDepth = pool.totalAssets();
@@ -5922,7 +5923,7 @@ contract CfdEngineAuditTest is BasePerpTest {
 
         _fundJunior(bob, 1_000_000 * 1e6);
         _fundTrader(trader, 1040 * 1e6);
-        _open(account, CfdTypes.Side.BULL, 50_000 * 1e18, 1000 * 1e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 50_000 * 1e18, 1000 * 1e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(102_000_000, uint64(block.timestamp));
@@ -5931,10 +5932,10 @@ contract CfdEngineAuditTest is BasePerpTest {
         assertTrue(positionView.liquidatable, "Setup must make the existing position liquidatable before the increase");
 
         uint8 revertCode = engineLens.previewOpenRevertCode(
-            account, CfdTypes.Side.BULL, 10_000 * 1e18, 20 * 1e6, 102_000_000, uint64(block.timestamp)
+            account, CfdTypes.Side.LONG, 10_000 * 1e18, 20 * 1e6, 102_000_000, uint64(block.timestamp)
         );
         CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory = engineLens.previewOpenFailurePolicyCategory(
-            account, CfdTypes.Side.BULL, 10_000 * 1e18, 20 * 1e6, 102_000_000, uint64(block.timestamp)
+            account, CfdTypes.Side.LONG, 10_000 * 1e18, 20 * 1e6, 102_000_000, uint64(block.timestamp)
         );
         assertEq(
             revertCode,
@@ -5955,7 +5956,7 @@ contract CfdEngineAuditTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 0,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: false
         });
         uint256 poolDepth = pool.totalAssets();
@@ -5981,12 +5982,12 @@ contract CfdEngineAuditTest is BasePerpTest {
         _fundTrader(dave, 60_001 * 1e6);
 
         vm.prank(dave);
-        router.commitOrder(CfdTypes.Side.BEAR, 60_000 * 1e18, 60_000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 60_000 * 1e18, 60_000 * 1e6, 1e8, false);
         bytes[] memory empty;
         router.executeOrder(1, empty);
 
         vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BULL, 15_000 * 1e18, 1500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 15_000 * 1e18, 1500 * 1e6, 1e8, false);
         router.executeOrder(2, empty);
 
         address carolAccount = carol;
@@ -5994,12 +5995,12 @@ contract CfdEngineAuditTest is BasePerpTest {
 
         IOrderRouterAdminHost.RouterConfig memory config;
         config.maxOrderAge = router.maxOrderAge();
-        config.orderExecutionStalenessLimit = router.orderExecutionStalenessLimit();
-        config.liquidationStalenessLimit = router.liquidationStalenessLimit();
-        config.basketMaxConfidenceRatioBps = router.basketMaxConfidenceRatioBps();
-        config.orderSettlementWindow = router.orderSettlementWindow();
-        config.maxComponentPublishTimeDivergence = router.maxComponentPublishTimeDivergence();
-        config.adverseConfidenceMultiplierBps = router.adverseConfidenceMultiplierBps();
+        config.orderExecutionStalenessLimit = router.pletherOracle().orderExecutionStalenessLimit();
+        config.liquidationStalenessLimit = router.pletherOracle().liquidationStalenessLimit();
+        config.basketMaxConfidenceRatioBps = router.pletherOracle().basketMaxConfidenceRatioBps();
+        config.orderSettlementWindow = router.pletherOracle().orderSettlementWindow();
+        config.maxComponentPublishTimeDivergence = router.pletherOracle().maxComponentPublishTimeDivergence();
+        config.adverseConfidenceMultiplierBps = router.pletherOracle().adverseConfidenceMultiplierBps();
         config.minOpenNotionalUsdc = router.minOpenNotionalUsdc();
         config.openOrderExecutionBountyBps = router.openOrderExecutionBountyBps();
         config.minOpenOrderExecutionBountyUsdc = router.minOpenOrderExecutionBountyUsdc();
@@ -6015,7 +6016,7 @@ contract CfdEngineAuditTest is BasePerpTest {
         routerAdmin.finalizeRouterConfig();
 
         vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         vm.warp(block.timestamp + 91 days);
 
@@ -6024,7 +6025,7 @@ contract CfdEngineAuditTest is BasePerpTest {
 
         vm.expectRevert(ICfdEngineTypes.CfdEngine__MarkPriceStale.selector);
         engineLens.previewOpenRevertCode(
-            carolAccount, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, uint64(block.timestamp)
+            carolAccount, CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8, uint64(block.timestamp)
         );
 
         vm.roll(block.number + 1);
@@ -6043,7 +6044,7 @@ contract CfdEngineAuditTest is BasePerpTest {
         address account = alice;
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BEAR, 200_000 * 1e18, 20_000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 200_000 * 1e18, 20_000 * 1e6, 1e8, false);
         bytes[] memory empty = _mockPythUpdateData();
         router.executeOrder(1, empty);
 
@@ -6051,18 +6052,18 @@ contract CfdEngineAuditTest is BasePerpTest {
         assertEq(openSize, 200_000 * 1e18);
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000 * 1e18, 0.8e8);
-        assertTrue(preview.valid, "Collateral-capped V2 partial close should remain executable");
+        assertTrue(preview.valid, "Engine partial-close plan should preserve its collateral-capped write-off path");
         assertEq(preview.remainingSize, 100_000 * 1e18, "Preview must retain exactly half the position");
         assertGt(preview.remainingMargin, 0, "Preview must preserve pledge for the surviving position");
         assertLt(preview.remainingMargin, openMargin, "Partial close must release only the closed portion's pledge");
-        assertEq(preview.badDebtUsdc, 0, "Price loss above the collectible cap must remain a V2 write-off");
+        assertEq(preview.badDebtUsdc, 0, "Price loss above the collectible cap must remain an Engine write-off");
 
-        vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BEAR, 100_000 * 1e18, 0, 0, true);
         bytes[] memory priceData = _mockPythUpdateData(0.8e8);
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
-        router.executeOrder(2, priceData);
+        // Preserve the original Engine C-01 regression independently of V2 policy. The V2 Router correctly
+        // terminalizes this underwater partial close because its surviving position has negative execution equity.
+        _close(account, CfdTypes.Side.SHORT, 100_000 * 1e18, 0.8e8);
 
         (uint256 remainingSize, uint256 remainingMargin,,,,,) = engine.positions(account);
         assertEq(remainingSize, preview.remainingSize, "Live partial close size must match the preview");
@@ -6096,11 +6097,11 @@ contract CfdEngineAuditTest is BasePerpTest {
         vm.warp(T0);
 
         vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 100_000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000 * 1e18, 100_000 * 1e6, 1e8, false);
         bytes[] memory empty = _mockPythUpdateData();
         router.executeOrder(1, empty);
 
-        int256 indexAfterOpen = _legacySideIndexZero(CfdTypes.Side.BULL);
+        int256 indexAfterOpen = _legacySideIndexZero(CfdTypes.Side.LONG);
 
         vm.warp(T_PROPOSE);
 
@@ -6131,11 +6132,11 @@ contract CfdEngineAuditTest is BasePerpTest {
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
         vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 5000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 5000 * 1e6, 1e8, false);
         empty = _mockPythUpdateData();
         router.executeOrder(2, empty);
 
-        int256 indexAfterSettle = _legacySideIndexZero(CfdTypes.Side.BULL);
+        int256 indexAfterSettle = _legacySideIndexZero(CfdTypes.Side.LONG);
         int256 indexDrop = indexAfterOpen - indexAfterSettle;
 
         uint256 totalElapsed = T_ORDER2 - T0;
@@ -6153,7 +6154,7 @@ contract CfdEngineAuditTest is BasePerpTest {
         address account = alice;
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 10_000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 10_000 * 1e6, 1e8, false);
         bytes[] memory empty = _mockPythUpdateData();
         router.executeOrder(1, empty);
 
@@ -6178,7 +6179,7 @@ contract CfdEngineAuditTest is BasePerpTest {
         address account = alice;
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 10_000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 10_000 * 1e6, 1e8, false);
         bytes[] memory empty = _mockPythUpdateData();
         router.executeOrder(1, empty);
 
@@ -6231,16 +6232,16 @@ contract MarginCappedMtmTest is BasePerpTest {
         _fundJunior(bob, 500_000e6);
         _fundTrader(alice, 50_000e6);
 
-        assertEq(_sideTotalMargin(CfdTypes.Side.BULL), 0);
-        assertEq(_sideTotalMargin(CfdTypes.Side.BEAR), 0);
+        assertEq(_sideTotalMargin(CfdTypes.Side.LONG), 0);
+        assertEq(_sideTotalMargin(CfdTypes.Side.SHORT), 0);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 100_000e18, 10_000e6, 1e8, false);
         bytes[] memory empty = _mockPythUpdateData();
         router.executeOrder(1, empty);
 
-        assertEq(_sideTotalMargin(CfdTypes.Side.BULL), 0, "Bull margin unchanged");
-        assertGt(_sideTotalMargin(CfdTypes.Side.BEAR), 0, "Bear margin tracked after open");
+        assertEq(_sideTotalMargin(CfdTypes.Side.LONG), 0, "Long margin unchanged");
+        assertGt(_sideTotalMargin(CfdTypes.Side.SHORT), 0, "Short margin tracked after open");
     }
 
     function test_MarginTracking_DecreasesOnClose() public {
@@ -6248,19 +6249,19 @@ contract MarginCappedMtmTest is BasePerpTest {
         _fundTrader(alice, 50_000e6);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 100_000e18, 10_000e6, 1e8, false);
         bytes[] memory empty = _mockPythUpdateData();
         router.executeOrder(1, empty);
 
-        uint256 bearMarginAfterOpen = _sideTotalMargin(CfdTypes.Side.BEAR);
-        assertGt(bearMarginAfterOpen, 0);
+        uint256 shortMarginAfterOpen = _sideTotalMargin(CfdTypes.Side.SHORT);
+        assertGt(shortMarginAfterOpen, 0);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 0, 1e8, true);
+        router.commitOrder(CfdTypes.Side.SHORT, 100_000e18, 0, 1e8, true);
         empty = _mockPythUpdateData();
         router.executeOrder(2, empty);
 
-        assertEq(_sideTotalMargin(CfdTypes.Side.BEAR), 0, "Bear margin zero after full close");
+        assertEq(_sideTotalMargin(CfdTypes.Side.SHORT), 0, "Short margin zero after full close");
     }
 
     function test_MarginTracking_PartialClose() public {
@@ -6268,20 +6269,20 @@ contract MarginCappedMtmTest is BasePerpTest {
         _fundTrader(alice, 50_000e6);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 100_000e18, 10_000e6, 1e8, false);
         bytes[] memory empty = _mockPythUpdateData();
         router.executeOrder(1, empty);
 
-        uint256 bearMarginFull = _sideTotalMargin(CfdTypes.Side.BEAR);
+        uint256 shortMarginFull = _sideTotalMargin(CfdTypes.Side.SHORT);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BEAR, 50_000e18, 0, 1e8, true);
+        router.commitOrder(CfdTypes.Side.SHORT, 50_000e18, 0, 1e8, true);
         empty = _mockPythUpdateData();
         router.executeOrder(2, empty);
 
-        uint256 bearMarginHalf = _sideTotalMargin(CfdTypes.Side.BEAR);
-        assertLt(bearMarginHalf, bearMarginFull, "Margin decreases on partial close");
-        assertGt(bearMarginHalf, 0, "Margin still tracked for remaining position");
+        uint256 shortMarginHalf = _sideTotalMargin(CfdTypes.Side.SHORT);
+        assertLt(shortMarginHalf, shortMarginFull, "Margin decreases on partial close");
+        assertGt(shortMarginHalf, 0, "Margin still tracked for remaining position");
     }
 
     function test_MarginTracking_ZeroAfterLiquidation() public {
@@ -6289,17 +6290,17 @@ contract MarginCappedMtmTest is BasePerpTest {
         _fundTrader(alice, 50_000e6);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 2000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 100_000e18, 2000e6, 1e8, false);
         router.executeOrder(1, _mockPythUpdateData());
 
-        assertGt(_sideTotalMargin(CfdTypes.Side.BEAR), 0);
+        assertGt(_sideTotalMargin(CfdTypes.Side.SHORT), 0);
 
         bytes[] memory liqPrice = new bytes[](1);
         liqPrice[0] = abi.encode(uint256(0.5e8));
         address account = alice;
         router.executeLiquidation(account, liqPrice);
 
-        assertEq(_sideTotalMargin(CfdTypes.Side.BEAR), 0, "Bear margin zero after liquidation");
+        assertEq(_sideTotalMargin(CfdTypes.Side.SHORT), 0, "Short margin zero after liquidation");
     }
 
     // Regression: C-02
@@ -6308,20 +6309,20 @@ contract MarginCappedMtmTest is BasePerpTest {
         _fundTrader(alice, 50_000e6);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BEAR, 200_000e18, 10_000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 200_000e18, 10_000e6, 1e8, false);
         bytes[] memory empty = _mockPythUpdateData();
         router.executeOrder(1, empty);
 
         _fundTrader(carol, 50_000e6);
         vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 10_000e6, 0.5e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 50_000e18, 10_000e6, 0.5e8, false);
         bytes[] memory priceData = _mockPythUpdateData(0.5e8);
         router.executeOrder(2, priceData);
 
         int256 uncappedPnl = _unrealizedTraderPnl();
         uint256 cappedMtm = _poolMtmAdjustment();
 
-        assertLt(uncappedPnl, -int256(_sideTotalMargin(CfdTypes.Side.BEAR)), "Uncapped loss exceeds deposited margin");
+        assertLt(uncappedPnl, -int256(_sideTotalMargin(CfdTypes.Side.SHORT)), "Uncapped loss exceeds deposited margin");
         assertGt(int256(cappedMtm), uncappedPnl, "Capped MtM is less aggressive than uncapped");
     }
 
@@ -6331,7 +6332,7 @@ contract MarginCappedMtmTest is BasePerpTest {
         _fundTrader(alice, 50_000e6);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BEAR, 200_000e18, 10_000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 200_000e18, 10_000e6, 1e8, false);
         bytes[] memory empty = _mockPythUpdateData();
         router.executeOrder(1, empty);
 
@@ -6339,7 +6340,7 @@ contract MarginCappedMtmTest is BasePerpTest {
 
         _fundTrader(carol, 50_000e6);
         vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 10_000e6, 0.5e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 50_000e18, 10_000e6, 0.5e8, false);
         bytes[] memory priceData = _mockPythUpdateData(0.5e8);
         router.executeOrder(2, priceData);
 
@@ -6350,7 +6351,7 @@ contract MarginCappedMtmTest is BasePerpTest {
         uint256 revenue = juniorAfter > juniorBefore ? juniorAfter - juniorBefore : 0;
         assertLe(
             revenue,
-            _sideTotalMargin(CfdTypes.Side.BEAR) + _sideTotalMargin(CfdTypes.Side.BULL),
+            _sideTotalMargin(CfdTypes.Side.SHORT) + _sideTotalMargin(CfdTypes.Side.LONG),
             "Recognized revenue must not exceed seizable margin"
         );
     }
@@ -6360,13 +6361,13 @@ contract MarginCappedMtmTest is BasePerpTest {
         _fundTrader(alice, 50_000e6);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 100_000e18, 10_000e6, 1e8, false);
         bytes[] memory empty = _mockPythUpdateData();
         router.executeOrder(1, empty);
 
         _fundTrader(carol, 50_000e6);
         vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 10_000e6, 1.2e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 50_000e18, 10_000e6, 1.2e8, false);
         bytes[] memory priceData = _mockPythUpdateData(1.2e8);
         router.executeOrder(2, priceData);
 
@@ -6422,7 +6423,7 @@ contract PhantomExecFeeTest is BasePerpTest {
         clearinghouse.deposit(account, margin);
 
         uint256 size = 50_000e18;
-        router.commitOrder(CfdTypes.Side.BULL, size, 1000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, size, 1000e6, 1e8, false);
         vm.stopPrank();
 
         vm.warp(block.timestamp + 1);
@@ -6435,7 +6436,7 @@ contract PhantomExecFeeTest is BasePerpTest {
 
         vm.warp(block.timestamp + 1);
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, size, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, size, 0, 0, true);
 
         assertEq(router.nextCommitId(), 3, "Close intents should reserve a flat keeper bounty from free settlement");
         assertEq(
@@ -6487,7 +6488,7 @@ contract CarryModelFreeUsdcTest is BasePerpTest {
         clearinghouse.deposit(account, margin);
 
         uint256 size = 200_000e18;
-        router.commitOrder(CfdTypes.Side.BULL, size, 100_000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, size, 100_000e6, 1e8, false);
         vm.stopPrank();
 
         _warpForward(1);
@@ -6507,7 +6508,7 @@ contract CarryModelFreeUsdcTest is BasePerpTest {
         vm.startPrank(carol);
         usdc.approve(address(clearinghouse), carolMargin);
         clearinghouse.deposit(carol, carolMargin);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 10_000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 10_000e6, 1e8, false);
         vm.stopPrank();
 
         _warpForward(1);
@@ -6520,7 +6521,7 @@ contract CarryModelFreeUsdcTest is BasePerpTest {
         uint256 freeUsdcNow = pool.getFreeUSDC();
 
         uint256 bal = usdc.balanceOf(address(pool));
-        uint256 maxLiability = _sideMaxProfit(CfdTypes.Side.BULL);
+        uint256 maxLiability = _sideMaxProfit(CfdTypes.Side.LONG);
         uint256 pendingFees = clearinghouse.balanceUsdc(engine.protocolTreasury());
         uint256 settlementBuffer =
             SolvencyAccountingLib.settlementBufferTargetUsdc(maxLiability, engine.settlementBufferBps());
@@ -6538,8 +6539,8 @@ contract CarryModelFreeUsdcTest is BasePerpTest {
 
 contract DegradedModeLifecycleTest is BasePerpTest {
 
-    address bullTrader = address(0xD001);
-    address bearTrader = address(0xD002);
+    address longTrader = address(0xD001);
+    address shortTrader = address(0xD002);
 
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
         return CfdTypes.RiskParams({
@@ -6557,15 +6558,15 @@ contract DegradedModeLifecycleTest is BasePerpTest {
     }
 
     function _enterDegradedMode() internal {
-        address bullAccount = bullTrader;
-        address bearAccount = bearTrader;
+        address longAccount = longTrader;
+        address shortAccount = shortTrader;
 
-        _fundTrader(bullTrader, 100_000e6);
-        _fundTrader(bearTrader, 100_000e6);
+        _fundTrader(longTrader, 100_000e6);
+        _fundTrader(shortTrader, 100_000e6);
 
-        _open(bearAccount, CfdTypes.Side.BEAR, 999_000e18, 50_000e6, 1e8);
-        _open(bullAccount, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
-        _close(bullAccount, CfdTypes.Side.BULL, 500_000e18, 20_000_000);
+        _open(shortAccount, CfdTypes.Side.SHORT, 999_000e18, 50_000e6, 1e8);
+        _open(longAccount, CfdTypes.Side.LONG, 500_000e18, 50_000e6, 1e8);
+        _close(longAccount, CfdTypes.Side.LONG, 500_000e18, 20_000_000);
     }
 
     function test_DegradedMode_LatchesAndBlocksNewOpens() public {
@@ -6584,7 +6585,7 @@ contract DegradedModeLifecycleTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 0,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: false
         });
 
@@ -6637,7 +6638,7 @@ contract DegradedModeLifecycleTest is BasePerpTest {
         address trader = address(0xD004);
         address account = trader;
         _fundTrader(trader, 200_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8);
 
         _enterDegradedMode();
         assertTrue(engine.degradedMode(), "Setup must latch degraded mode");
@@ -6665,8 +6666,8 @@ contract DegradedModeLifecycleTest is BasePerpTest {
 
 contract ProtocolPhaseTest is BasePerpTest {
 
-    address bullTrader = address(0xD001);
-    address bearTrader = address(0xD002);
+    address longTrader = address(0xD001);
+    address shortTrader = address(0xD002);
 
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
         return CfdTypes.RiskParams({
@@ -6694,13 +6695,13 @@ contract ProtocolPhaseTest is BasePerpTest {
         assertEq(uint8(status.phase), uint8(ICfdEngine.ProtocolPhase.Active));
         assertEq(status.lastMarkPrice, 1e8, "Async LP setup should establish the mark used for epoch settlement");
 
-        address bullAccount = bullTrader;
-        address bearAccount = bearTrader;
-        _fundTrader(bullTrader, 100_000e6);
-        _fundTrader(bearTrader, 100_000e6);
-        _open(bearAccount, CfdTypes.Side.BEAR, 999_000e18, 50_000e6, 1e8);
-        _open(bullAccount, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
-        _close(bullAccount, CfdTypes.Side.BULL, 500_000e18, 20_000_000);
+        address longAccount = longTrader;
+        address shortAccount = shortTrader;
+        _fundTrader(longTrader, 100_000e6);
+        _fundTrader(shortTrader, 100_000e6);
+        _open(shortAccount, CfdTypes.Side.SHORT, 999_000e18, 50_000e6, 1e8);
+        _open(longAccount, CfdTypes.Side.LONG, 500_000e18, 50_000e6, 1e8);
+        _close(longAccount, CfdTypes.Side.LONG, 500_000e18, 20_000_000);
 
         assertEq(
             uint8(ICfdEngine.ProtocolPhase(_publicProtocolStatus().phase)),
@@ -6839,7 +6840,7 @@ contract VpiDepthTest is BasePerpTest {
 
         _fundTrader(carol, 50_000 * 1e6);
         vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BEAR, 200_000 * 1e18, 40_000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 200_000 * 1e18, 40_000 * 1e6, 1e8, false);
         bytes[] memory empty = _mockPythUpdateData();
         router.executeOrder(1, empty);
 
@@ -6848,14 +6849,14 @@ contract VpiDepthTest is BasePerpTest {
         uint256 aliceBalBefore = clearinghouse.balanceUsdc(aliceAccount);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
         empty = _mockPythUpdateData();
         router.executeOrder(2, empty);
 
         _fundJuniorDelayed(bob, 9_000_000 * 1e6);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000 * 1e18, 0, 0, true);
         bytes[] memory closePrice = _mockPythUpdateData();
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
@@ -6875,14 +6876,14 @@ contract VpiDepthTest is BasePerpTest {
         uint256 aliceBalBefore = clearinghouse.balanceUsdc(aliceAccount);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 5000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 5000 * 1e6, 1e8, false);
         bytes[] memory empty = _mockPythUpdateData();
         router.executeOrder(1, empty);
 
         _fundJuniorDelayed(bob, 9_000_000 * 1e6);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
         empty = _mockPythUpdateData();
         router.executeOrder(2, empty);
 
@@ -6893,7 +6894,7 @@ contract VpiDepthTest is BasePerpTest {
         _settleAvailableJuniorWithdrawal(bob);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 110_000 * 1e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 110_000 * 1e18, 0, 0, true);
         bytes[] memory closePrice = _mockPythUpdateData();
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
@@ -6914,9 +6915,9 @@ contract VpiDepthTest is BasePerpTest {
         _fundTrader(rebateTrader, 20_000e6);
 
         uint256 depth = pool.totalAssets();
-        _open(skewTrader, CfdTypes.Side.BEAR, 500_000e18, 50_000e6, 1e8, depth);
+        _open(skewTrader, CfdTypes.Side.SHORT, 500_000e18, 50_000e6, 1e8, depth);
         rebateAccount = rebateTrader;
-        _open(rebateAccount, CfdTypes.Side.BULL, 500_000e18, 10_000e6, 1e8, depth);
+        _open(rebateAccount, CfdTypes.Side.LONG, 500_000e18, 10_000e6, 1e8, depth);
 
         (,,,,,, int256 storedVpi) = engine.positions(rebateAccount);
         assertLt(storedVpi, 0, "Fixture must create a negative lifetime VPI obligation");
@@ -7013,7 +7014,7 @@ contract VpiDepthTest is BasePerpTest {
             "Withdrawing free cash must not touch rebate backing"
         );
 
-        _close(rebateTrader, CfdTypes.Side.BULL, 500_000 * 1e18, 1e8, pool.totalAssets());
+        _close(rebateTrader, CfdTypes.Side.LONG, 500_000 * 1e18, 1e8, pool.totalAssets());
 
         (uint256 sizeAfter,,,,,,) = engine.positions(rebateTrader);
         assertEq(sizeAfter, 0, "The terminal close should complete");
@@ -7039,7 +7040,7 @@ contract VpiDepthTest is BasePerpTest {
             _fundTrader(rebateTrader, 20_000 * 1e6);
 
             uint256 largeDepth = pool.totalAssets();
-            _open(skewTrader, CfdTypes.Side.BEAR, 500_000 * 1e18, 50_000 * 1e6, 1e8, largeDepth);
+            _open(skewTrader, CfdTypes.Side.SHORT, 500_000 * 1e18, 50_000 * 1e6, 1e8, largeDepth);
 
             vm.warp(block.timestamp + 2 hours);
             bytes[] memory freshPrice = new bytes[](1);
@@ -7065,7 +7066,7 @@ contract VpiDepthTest is BasePerpTest {
                 commitTime: rebatePublishTime,
                 commitBlock: uint64(block.number),
                 orderId: 0,
-                side: CfdTypes.Side.BULL,
+                side: CfdTypes.Side.LONG,
                 isClose: false
             }),
             1e8,
@@ -7275,23 +7276,23 @@ contract VpiChunkingTest is Test {
 
     // Regression: H-01 — round-trip skew healing must not create net positive VPI without price movement.
     function test_MM_RoundTripSkewHealing_DoesNotCreatePositiveNetRebate() public {
-        address bearSkewerAccount = address(0x51);
-        _deposit(bearSkewerAccount, 500_000 * 1e6);
-        _open(bearSkewerAccount, CfdTypes.Side.BEAR, 500_000 * 1e18, 50_000 * 1e6, 1e8, DEPTH);
+        address shortSkewerAccount = address(0x51);
+        _deposit(shortSkewerAccount, 500_000 * 1e6);
+        _open(shortSkewerAccount, CfdTypes.Side.SHORT, 500_000 * 1e18, 50_000 * 1e6, 1e8, DEPTH);
 
         address mmAccount = address(0x111);
         _deposit(mmAccount, 500_000 * 1e6);
-        _open(mmAccount, CfdTypes.Side.BULL, 500_000 * 1e18, 50_000 * 1e6, 1e8, DEPTH);
+        _open(mmAccount, CfdTypes.Side.LONG, 500_000 * 1e18, 50_000 * 1e6, 1e8, DEPTH);
 
         (,,,,,, int256 vpiAfterOpen) = engine.positions(mmAccount);
         assertLe(vpiAfterOpen, 0, "MM should not pay positive VPI when healing skew on open");
 
-        address bullFlipperAccount = address(0x52);
-        _deposit(bullFlipperAccount, 500_000 * 1e6);
-        _open(bullFlipperAccount, CfdTypes.Side.BULL, 1_000_000 * 1e18, 100_000 * 1e6, 1e8, DEPTH);
+        address longFlipperAccount = address(0x52);
+        _deposit(longFlipperAccount, 500_000 * 1e6);
+        _open(longFlipperAccount, CfdTypes.Side.LONG, 1_000_000 * 1e18, 100_000 * 1e6, 1e8, DEPTH);
 
         (uint256 mmSize,,,,,,) = engine.positions(mmAccount);
-        _close(mmAccount, CfdTypes.Side.BULL, mmSize, 1e8, DEPTH);
+        _close(mmAccount, CfdTypes.Side.LONG, mmSize, 1e8, DEPTH);
         uint256 mmUsdcAfter = clearinghouse.balanceUsdc(mmAccount);
 
         uint256 totalDeposited = 500_000 * 1e6;
@@ -7309,27 +7310,27 @@ contract VpiChunkingTest is Test {
     function test_PartialClose_LinearChunking_BoundedError() public {
         address skewerAccount = address(0x52);
         _deposit(skewerAccount, 500_000 * 1e6);
-        _open(skewerAccount, CfdTypes.Side.BEAR, 500_000 * 1e18, 50_000 * 1e6, 1e8, DEPTH);
+        _open(skewerAccount, CfdTypes.Side.SHORT, 500_000 * 1e18, 50_000 * 1e6, 1e8, DEPTH);
 
         address aliceAccount = address(0xA1);
         _deposit(aliceAccount, 500_000 * 1e6);
-        _open(aliceAccount, CfdTypes.Side.BULL, 400_000 * 1e18, 100_000 * 1e6, 1e8, DEPTH);
+        _open(aliceAccount, CfdTypes.Side.LONG, 400_000 * 1e18, 100_000 * 1e6, 1e8, DEPTH);
 
         uint256 aliceBefore = clearinghouse.balanceUsdc(aliceAccount);
-        _close(aliceAccount, CfdTypes.Side.BULL, 400_000 * 1e18, 1e8, DEPTH);
+        _close(aliceAccount, CfdTypes.Side.LONG, 400_000 * 1e18, 1e8, DEPTH);
         uint256 aliceAfter = clearinghouse.balanceUsdc(aliceAccount);
         int256 aliceNet = int256(aliceAfter) - int256(aliceBefore);
 
-        _close(skewerAccount, CfdTypes.Side.BEAR, 500_000 * 1e18, 1e8, DEPTH);
-        _open(skewerAccount, CfdTypes.Side.BEAR, 500_000 * 1e18, 50_000 * 1e6, 1e8, DEPTH);
+        _close(skewerAccount, CfdTypes.Side.SHORT, 500_000 * 1e18, 1e8, DEPTH);
+        _open(skewerAccount, CfdTypes.Side.SHORT, 500_000 * 1e18, 50_000 * 1e6, 1e8, DEPTH);
 
         address bobAccount = address(0xB1);
         _deposit(bobAccount, 500_000 * 1e6);
-        _open(bobAccount, CfdTypes.Side.BULL, 400_000 * 1e18, 100_000 * 1e6, 1e8, DEPTH);
+        _open(bobAccount, CfdTypes.Side.LONG, 400_000 * 1e18, 100_000 * 1e6, 1e8, DEPTH);
 
         uint256 bobBefore = clearinghouse.balanceUsdc(bobAccount);
-        _close(bobAccount, CfdTypes.Side.BULL, 200_000 * 1e18, 1e8, DEPTH);
-        _close(bobAccount, CfdTypes.Side.BULL, 200_000 * 1e18, 1e8, DEPTH);
+        _close(bobAccount, CfdTypes.Side.LONG, 200_000 * 1e18, 1e8, DEPTH);
+        _close(bobAccount, CfdTypes.Side.LONG, 200_000 * 1e18, 1e8, DEPTH);
         uint256 bobAfter = clearinghouse.balanceUsdc(bobAccount);
         int256 bobNet = int256(bobAfter) - int256(bobBefore);
 
@@ -7362,19 +7363,19 @@ contract SolvencySnapshotRegressionTest is BasePerpTest {
     ///      for solvency computation. Now also uses previewPostOpSolvency with physicalAssetsDelta
     ///      to account for seized collateral flowing into the pool.
     function test_PreviewLiquidation_SolvencyUsesPostLiquidationCarryState() public {
-        address bullTrader = address(0xDD01);
-        address bearTrader = address(0xDD02);
-        address bullAccount = bullTrader;
-        address bearAccount = bearTrader;
+        address longTrader = address(0xDD01);
+        address shortTrader = address(0xDD02);
+        address longAccount = longTrader;
+        address shortAccount = shortTrader;
 
         CfdTypes.RiskParams memory params = _riskParams();
         _setRiskParams(params);
 
-        _fundTrader(bullTrader, 30_000e6);
-        _fundTrader(bearTrader, 100_000e6);
+        _fundTrader(longTrader, 30_000e6);
+        _fundTrader(shortTrader, 100_000e6);
 
-        _open(bullAccount, CfdTypes.Side.BULL, 999_000e18, 20_000e6, 1e8);
-        _open(bearAccount, CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8);
+        _open(longAccount, CfdTypes.Side.LONG, 999_000e18, 20_000e6, 1e8);
+        _open(shortAccount, CfdTypes.Side.SHORT, 100_000e18, 10_000e6, 1e8);
 
         uint256 currentDay = ((block.timestamp / 1 days) + 4) % 7;
         uint256 startOfDay = block.timestamp - (block.timestamp % 1 days);
@@ -7387,46 +7388,46 @@ contract SolvencySnapshotRegressionTest is BasePerpTest {
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
         vm.warp(block.timestamp + 30 hours);
 
-        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(bullAccount, 1e8);
-        assertTrue(preview.liquidatable, "BULL majority must be liquidatable after carry drain");
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(longAccount, 1e8);
+        assertTrue(preview.liquidatable, "LONG majority must be liquidatable after carry drain");
 
         address keeper = address(0x999);
-        LiquidationParitySnapshot memory beforeSnapshot = _captureLiquidationParitySnapshot(bullAccount, keeper);
+        LiquidationParitySnapshot memory beforeSnapshot = _captureLiquidationParitySnapshot(longAccount, keeper);
         vm.prank(keeper);
         bytes[] memory liquidationPriceData = new bytes[](1);
         liquidationPriceData[0] = abi.encode(uint256(1e8));
-        router.executeLiquidation(bullAccount, liquidationPriceData);
+        router.executeLiquidation(longAccount, liquidationPriceData);
 
-        LiquidationParityObserved memory observed = _observeLiquidationParity(bullAccount, keeper, beforeSnapshot);
+        LiquidationParityObserved memory observed = _observeLiquidationParity(longAccount, keeper, beforeSnapshot);
         _assertLiquidationPreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
     }
 
     /// @dev Regression: _computeCloseSolvency did not reduce openInterest before computing
     ///      stale side-state math previously overstated solvency after close.
     function test_PreviewClose_SolvencyUsesPostCloseOiForCarry() public {
-        address bullTraderA = address(0xDD03);
-        address bullTraderB = address(0xDD04);
-        address bearTrader = address(0xDD05);
-        address bullIdA = bullTraderA;
-        address bullIdB = bullTraderB;
-        address bearAccount = bearTrader;
+        address longTraderA = address(0xDD03);
+        address longTraderB = address(0xDD04);
+        address shortTrader = address(0xDD05);
+        address longIdA = longTraderA;
+        address longIdB = longTraderB;
+        address shortAccount = shortTrader;
 
-        _fundTrader(bullTraderA, 50_000e6);
-        _fundTrader(bullTraderB, 50_000e6);
-        _fundTrader(bearTrader, 100_000e6);
+        _fundTrader(longTraderA, 50_000e6);
+        _fundTrader(longTraderB, 50_000e6);
+        _fundTrader(shortTrader, 100_000e6);
 
-        _open(bullIdA, CfdTypes.Side.BULL, 400_000e18, 20_000e6, 1e8);
-        _open(bullIdB, CfdTypes.Side.BULL, 400_000e18, 20_000e6, 1e8);
-        _open(bearAccount, CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8);
+        _open(longIdA, CfdTypes.Side.LONG, 400_000e18, 20_000e6, 1e8);
+        _open(longIdB, CfdTypes.Side.LONG, 400_000e18, 20_000e6, 1e8);
+        _open(shortAccount, CfdTypes.Side.SHORT, 100_000e18, 10_000e6, 1e8);
 
         vm.warp(block.timestamp + 5 days);
 
-        (uint256 sizeA,,,,,,) = engine.positions(bullIdA);
+        (uint256 sizeA,,,,,,) = engine.positions(longIdA);
 
-        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(bullIdA, sizeA, 1e8);
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(longIdA, sizeA, 1e8);
         assertTrue(preview.valid, "Close preview must be valid");
 
-        _close(bullIdA, CfdTypes.Side.BULL, sizeA, 1e8);
+        _close(longIdA, CfdTypes.Side.LONG, sizeA, 1e8);
     }
 
 }

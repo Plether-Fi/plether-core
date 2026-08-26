@@ -38,7 +38,7 @@ library CfdMath {
     /// @dev A zero-size position returns `(false, 0)`. At exactly the entry price, a nonzero position is
     ///      classified as profitable with zero PnL. Multiplication uses ordinary checked arithmetic.
     /// @param pos Position to evaluate; size is 18 decimals and entry price is 8 decimals.
-    /// @param currentOraclePrice Current BEAR-leg oracle price (8 decimals).
+    /// @param currentOraclePrice Current raw FX-basket mark (8 decimals).
     /// @param capPrice Protocol maximum oracle price (8 decimals).
     /// @return isProfit Whether the price move is favorable to `pos.side` (including equality).
     /// @return pnlUsdc Absolute PnL in 6-decimal USDC.
@@ -55,12 +55,12 @@ library CfdMath {
         uint256 price = currentOraclePrice > capPrice ? capPrice : currentOraclePrice;
         uint256 priceDiff;
 
-        if (pos.side == CfdTypes.Side.BULL) {
-            // BULL profits when oracle price drops (USD strengthens)
+        if (pos.side == CfdTypes.Side.LONG) {
+            // LONG profits when oracle price drops (USD strengthens)
             isProfit = price <= pos.entryPrice;
             priceDiff = isProfit ? (pos.entryPrice - price) : (price - pos.entryPrice);
         } else {
-            // BEAR profits when oracle price rises (USD weakens)
+            // SHORT profits when oracle price rises (USD weakens)
             isProfit = price >= pos.entryPrice;
             priceDiff = isProfit ? (price - pos.entryPrice) : (pos.entryPrice - price);
         }
@@ -76,7 +76,7 @@ library CfdMath {
     /// @param lots Position size in canonical 100-token lots.
     /// @param entryCostUsdcAtoms Exact entry cost in 6-decimal USDC atoms.
     /// @param side Position direction.
-    /// @param currentOraclePrice Current BEAR-leg oracle price, with 8 decimals.
+    /// @param currentOraclePrice Current raw FX-basket mark, with 8 decimals.
     /// @param capPrice Protocol maximum oracle price, with 8 decimals.
     /// @return isProfit Whether the marked price move is favorable, including equality.
     /// @return pnlUsdc Absolute exact PnL in 6-decimal USDC atoms.
@@ -93,16 +93,16 @@ library CfdMath {
 
         uint256 price = currentOraclePrice > capPrice ? capPrice : currentOraclePrice;
         uint256 exitValueUsdcAtoms = lots * price;
-        if (side == CfdTypes.Side.BULL) {
+        if (side == CfdTypes.Side.LONG) {
             isProfit = entryCostUsdcAtoms >= exitValueUsdcAtoms;
         } else {
             isProfit = exitValueUsdcAtoms >= entryCostUsdcAtoms;
         }
         pnlUsdc = isProfit
-            ? (side == CfdTypes.Side.BULL
+            ? (side == CfdTypes.Side.LONG
                     ? entryCostUsdcAtoms - exitValueUsdcAtoms
                     : exitValueUsdcAtoms - entryCostUsdcAtoms)
-            : (side == CfdTypes.Side.BULL
+            : (side == CfdTypes.Side.LONG
                     ? exitValueUsdcAtoms - entryCostUsdcAtoms
                     : entryCostUsdcAtoms - exitValueUsdcAtoms);
     }
@@ -117,7 +117,7 @@ library CfdMath {
         if (lots == 0) {
             return 0;
         }
-        if (side == CfdTypes.Side.BULL) {
+        if (side == CfdTypes.Side.LONG) {
             return entryCostUsdcAtoms;
         }
         uint256 capValueUsdcAtoms = lots * capPrice;
@@ -125,7 +125,7 @@ library CfdMath {
     }
 
     /// @notice Calculates the maximum profit available between zero and the protocol price cap.
-    /// @dev BULL uses a zero-price endpoint. BEAR uses `capPrice` and therefore returns zero when the
+    /// @dev LONG uses a zero-price endpoint. SHORT uses `capPrice` and therefore returns zero when the
     ///      entry price is at or above the cap. A zero-size position also returns zero.
     /// @param size Notional size in synthetic-token units (18 decimals).
     /// @param entryPrice Entry oracle price (8 decimals).
@@ -143,7 +143,7 @@ library CfdMath {
         }
 
         uint256 maxPriceDiff;
-        if (side == CfdTypes.Side.BULL) {
+        if (side == CfdTypes.Side.LONG) {
             // Max profit when price hits 0
             maxPriceDiff = entryPrice;
         } else {
@@ -173,7 +173,7 @@ library CfdMath {
         }
 
         uint256 clampedPrice = price > capPrice ? capPrice : price;
-        if (side == CfdTypes.Side.BULL) {
+        if (side == CfdTypes.Side.LONG) {
             return Math.mulDiv(maxProfitUsdc, capPrice - clampedPrice, capPrice, Math.Rounding.Ceil);
         }
         return Math.mulDiv(maxProfitUsdc, clampedPrice, capPrice, Math.Rounding.Ceil);

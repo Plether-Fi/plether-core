@@ -20,7 +20,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
     }
 
     function testFuzz_PreviewOpen_MatchesLiveExecution_AfterCarryAndSkew(
-        bool isBull,
+        bool isLong,
         uint256 initialMarginFuzz,
         uint256 marginDeltaFuzz,
         uint256 sizeDeltaFuzz,
@@ -33,7 +33,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
 
         address trader = address(0xC109);
         address account = trader;
-        CfdTypes.Side side = isBull ? CfdTypes.Side.BULL : CfdTypes.Side.BEAR;
+        CfdTypes.Side side = isLong ? CfdTypes.Side.LONG : CfdTypes.Side.SHORT;
         uint256 initialMargin = bound(initialMarginFuzz, 20_000e6, 70_000e6);
         uint256 marginDelta = bound(marginDeltaFuzz, 0, 40_000e6);
         uint256 sizeDelta = bound(sizeDeltaFuzz, 1000e18, 40_000e18);
@@ -59,20 +59,21 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         params.vpiFactor = 0.0005e18;
         _setRiskParams(params);
 
-        address bullTrader = address(0xC10A);
-        address bearTrader = address(0xC10B);
-        _fundTrader(bullTrader, 20_000e6);
-        _fundTrader(bearTrader, 20_000e6);
-        _open(bullTrader, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        address longTrader = address(0xC10A);
+        address shortTrader = address(0xC10B);
+        _fundTrader(longTrader, 20_000e6);
+        _fundTrader(shortTrader, 20_000e6);
+        _open(longTrader, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
-        ICfdEngineTypes.OpenPreview memory preview =
-            engineLens.previewOpen(bearTrader, CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8, uint64(block.timestamp));
+        ICfdEngineTypes.OpenPreview memory preview = engineLens.previewOpen(
+            shortTrader, CfdTypes.Side.SHORT, 100_000e18, 10_000e6, 1e8, uint64(block.timestamp)
+        );
         assertTrue(preview.valid, "Healing open should be valid");
         assertLt(preview.vpiUsdc, 0, "Healing open should receive a VPI rebate");
 
-        _executeOpen(bearTrader, CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8, uint64(block.timestamp));
+        _executeOpen(shortTrader, CfdTypes.Side.SHORT, 100_000e18, 10_000e6, 1e8, uint64(block.timestamp));
 
-        _assertOpenPreviewMatchesLive(bearTrader, CfdTypes.Side.BEAR, preview);
+        _assertOpenPreviewMatchesLive(shortTrader, CfdTypes.Side.SHORT, preview);
     }
 
     function testFuzz_ValidPreviewOpen_DoesNotUntypedRevertOnSameStateExecution(
@@ -90,7 +91,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         uint256 carryDelay = bound(carryDelayFuzz, 0, 30 days);
 
         _fundTrader(trader, 60_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, initialMargin, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, initialMargin, 1e8);
 
         if (carryDelay > 0) {
             vm.warp(block.timestamp + carryDelay);
@@ -105,15 +106,15 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 0,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: false
         });
 
         uint8 revertCode = engineLens.previewOpenRevertCode(
-            account, CfdTypes.Side.BULL, sizeDelta, marginDelta, oraclePrice, uint64(block.timestamp)
+            account, CfdTypes.Side.LONG, sizeDelta, marginDelta, oraclePrice, uint64(block.timestamp)
         );
         CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory = engineLens.previewOpenFailurePolicyCategory(
-            account, CfdTypes.Side.BULL, sizeDelta, marginDelta, oraclePrice, uint64(block.timestamp)
+            account, CfdTypes.Side.LONG, sizeDelta, marginDelta, oraclePrice, uint64(block.timestamp)
         );
 
         vm.assume(revertCode == uint8(CfdEnginePlanTypes.OpenRevertCode.OK));
@@ -242,11 +243,11 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             engineLens.previewLiquidation(account, preview.liquidationPrice).liquidatable,
             "Returned liquidation threshold should be liquidatable"
         );
-        if (side == CfdTypes.Side.BULL) {
+        if (side == CfdTypes.Side.LONG) {
             if (preview.liquidationPrice > 0) {
                 assertFalse(
                     engineLens.previewLiquidation(account, preview.liquidationPrice - 1).liquidatable,
-                    "BULL should be solvent below liquidation threshold"
+                    "LONG should be solvent below liquidation threshold"
                 );
             }
             return;
@@ -255,7 +256,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         if (preview.liquidationPrice < CAP_PRICE) {
             assertFalse(
                 engineLens.previewLiquidation(account, preview.liquidationPrice + 1).liquidatable,
-                "BEAR should be solvent above liquidation threshold"
+                "SHORT should be solvent above liquidation threshold"
             );
         }
     }
@@ -279,11 +280,11 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         closePrice -= closePrice % 2;
 
         _fundTrader(trader, 11_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 9000e6, 1e8);
 
         uint64 closeOrderId = router.nextCommitId();
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 0, true);
         uint256 executionBountyUsdc = _executionBountyReserve(closeOrderId);
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
@@ -313,7 +314,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         closePrice -= closePrice % 2;
 
         _fundTrader(trader, 11_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 9000e6, 1e8);
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
@@ -321,7 +322,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
 
         uint64 closeOrderId = router.nextCommitId();
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 0, true);
         uint256 executionBountyUsdc = _executionBountyReserve(closeOrderId);
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
@@ -399,34 +400,34 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
     }
 
     function test_PreviewClose_PartialCloseMatchesLiveExecution_AfterPositiveCarryAccrual() public {
-        address bullTrader = address(0xC103);
-        address bearTrader = address(0xC104);
-        address bullAccount = bullTrader;
-        address bearAccount = bearTrader;
+        address longTrader = address(0xC103);
+        address shortTrader = address(0xC104);
+        address longAccount = longTrader;
+        address shortAccount = shortTrader;
 
         _fundJunior(address(0xC105), 1_000_000e6);
-        _fundTrader(bullTrader, 80_000e6);
-        _fundTrader(bearTrader, 80_000e6);
+        _fundTrader(longTrader, 80_000e6);
+        _fundTrader(shortTrader, 80_000e6);
 
-        _open(bullAccount, CfdTypes.Side.BULL, 500_000e18, 30_000e6, 1e8);
-        _open(bearAccount, CfdTypes.Side.BEAR, 100_000e18, 20_000e6, 1e8);
+        _open(longAccount, CfdTypes.Side.LONG, 500_000e18, 30_000e6, 1e8);
+        _open(shortAccount, CfdTypes.Side.SHORT, 100_000e18, 20_000e6, 1e8);
 
         vm.warp(block.timestamp + 180 days);
 
-        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(bearAccount, 50_000e18, 1e8);
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(shortAccount, 50_000e18, 1e8);
         assertTrue(preview.valid, "Positive-carry partial close preview should remain valid");
 
-        uint256 traderClaimBefore = engine.traderClaimBalanceUsdc(bearAccount);
+        uint256 traderClaimBefore = engine.traderClaimBalanceUsdc(shortAccount);
 
-        _close(bearAccount, CfdTypes.Side.BEAR, 50_000e18, 1e8);
+        _close(shortAccount, CfdTypes.Side.SHORT, 50_000e18, 1e8);
 
-        (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(bearAccount);
+        (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(shortAccount);
         assertEq(sizeAfter, preview.remainingSize, "Partial close preview remaining size should match live execution");
         assertEq(
             marginAfter, preview.remainingMargin, "Partial close preview remaining margin should match live execution"
         );
         assertEq(
-            engine.traderClaimBalanceUsdc(bearAccount) - traderClaimBefore,
+            engine.traderClaimBalanceUsdc(shortAccount) - traderClaimBefore,
             preview.traderClaimBalanceUsdc,
             "Partial close preview trader claim should match live trader claim delta"
         );
@@ -441,7 +442,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             engine.degradedMode(),
             "Partial close preview post-op degraded flag should match live outcome"
         );
-        _assertTerminalCurveMatchesEngine(bearAccount);
+        _assertTerminalCurveMatchesEngine(shortAccount);
         _assertTerminalNavSnapshotMatchesBook();
     }
 
@@ -451,23 +452,26 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
 
         _fundJunior(address(0xC107), 1_000_000e6);
         _fundTrader(trader, 8000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 4000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 4000e6, 1e8);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 50_000e18, 0, 0, true);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 900e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 900e6, type(uint256).max, false);
 
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
 
-        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 50_000e18, 110_000_000);
+        // Keep the surviving position solvent so this remains a Router reservation-isolation regression. V2
+        // intentionally terminalizes underwater partial closes at the post-position-equity policy boundary.
+        uint256 executionPrice = 102_000_000;
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 50_000e18, executionPrice);
         assertTrue(preview.valid, "Partial close preview should remain valid without queued margin support");
 
         uint256 committedBefore = _remainingCommittedMargin(2);
         bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(1.1e8));
+        priceData[0] = abi.encode(executionPrice);
 
         vm.prank(KEEPER);
         router.executeOrder(1, priceData);
@@ -494,7 +498,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         liquidationPrice -= liquidationPrice % 2;
 
         _fundTrader(trader, 300e6);
-        _open(account, CfdTypes.Side.BULL, 10_000e18, 200e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 200e6, 1e8);
 
         vm.prank(trader);
         clearinghouse.withdraw(account, 100e6);
@@ -568,7 +572,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         liquidationPrice -= liquidationPrice % 2;
 
         _fundTrader(trader, 300e6);
-        _open(account, CfdTypes.Side.BULL, 10_000e18, 200e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 200e6, 1e8);
 
         vm.prank(trader);
         clearinghouse.withdraw(account, 100e6);
@@ -651,7 +655,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
 
         vm.warp(1_729_283_399); // Friday 20:29:59 UTC, immediately before the daylight-time FAD window.
         _fundTrader(trader, 200e6);
-        _open(account, CfdTypes.Side.BULL, 10_000e18, 200e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 200e6, 1e8);
         vm.warp(1_729_283_400); // Friday 20:30:00 UTC, when the higher FAD margin becomes active.
 
         uint256 targetPoolCash = 48e6;
@@ -711,10 +715,10 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         uint256 liquidationPrice = 102_500_000;
 
         _fundTrader(trader, 260e6);
-        _open(account, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 250e6, 1e8);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 0, 0, true);
 
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, liquidationPrice);
         AccountLensViewTypes.AccountLedgerSnapshot memory snapshotBefore =

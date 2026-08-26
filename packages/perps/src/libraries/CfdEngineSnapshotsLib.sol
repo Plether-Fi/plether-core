@@ -9,7 +9,7 @@ library CfdEngineSnapshotsLib {
     /// @dev All fields are USDC amounts with 6 decimals.
     /// @param physicalAssets Canonical pool assets supplied to the solvency builder.
     /// @param netPhysicalAssets Current net-asset field, equal to `physicalAssets` in the active builder.
-    /// @param maxLiability Larger of the bull-side and bear-side maximum-profit envelopes.
+    /// @param maxLiability Larger of the long-side and short-side maximum-profit envelopes.
     /// @param effectiveSolvencyAssets Physical assets less aggregate trader claims, floored at zero.
     struct SolvencySnapshot {
         uint256 physicalAssets;

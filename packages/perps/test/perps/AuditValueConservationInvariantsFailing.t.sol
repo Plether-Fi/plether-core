@@ -30,8 +30,8 @@ contract AuditValueConservationInvariant_FullCloseBounty is BasePerpTest {
     function test_Invariant_FailedFullCloseCannotExtractActiveMarginAsKeeperBounty() public {
         _fundTrader(trader, 5000e6);
         _fundTrader(counterparty, 50_000e6);
-        _open(trader, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
-        _open(counterparty, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
+        _open(trader, CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8);
+        _open(counterparty, CfdTypes.Side.SHORT, 100_000e18, 50_000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1.96e8, uint64(block.timestamp));
@@ -40,8 +40,17 @@ contract AuditValueConservationInvariant_FullCloseBounty is BasePerpTest {
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeper);
 
         vm.prank(trader);
-        (bool committed,) =
-            address(router).call(abi.encodeCall(router.commitOrder, (CfdTypes.Side.BULL, 100_000e18, 0, 1.95e8, true)));
+        (bool committed,) = address(router)
+            .call(
+                abi.encodeWithSelector(
+                    bytes4(keccak256("commitOrder(uint8,uint256,uint256,uint256,bool)")),
+                    CfdTypes.Side.LONG,
+                    100_000e18,
+                    0,
+                    1.95e8,
+                    true
+                )
+            );
         if (!committed) {
             return;
         }
@@ -64,8 +73,8 @@ contract AuditValueConservationInvariant_FullCloseBounty is BasePerpTest {
 
 contract AuditValueConservationInvariant_MtmDepositPricing is BasePerpTest {
 
-    address bullTrader = address(0xB011);
-    address bearTrader = address(0xBEA2);
+    address longTrader = address(0xB011);
+    address shortTrader = address(0xBEA2);
 
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
         return CfdTypes.RiskParams({
@@ -86,10 +95,10 @@ contract AuditValueConservationInvariant_MtmDepositPricing is BasePerpTest {
         uint256 depositAssets = 100_000e6;
         uint256 baselineShares = juniorVault.estimateDepositShares(depositAssets);
 
-        _fundTrader(bullTrader, 25_000e6);
-        _fundTrader(bearTrader, 25_000e6);
-        _open(bullTrader, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
-        _open(bearTrader, CfdTypes.Side.BEAR, 200_000e18, 10_000e6, 1e8);
+        _fundTrader(longTrader, 25_000e6);
+        _fundTrader(shortTrader, 25_000e6);
+        _open(longTrader, CfdTypes.Side.LONG, 200_000e18, 10_000e6, 1e8);
+        _open(shortTrader, CfdTypes.Side.SHORT, 200_000e18, 10_000e6, 1e8);
 
         assertEq(_unrealizedTraderPnl(), 0, "Equal and opposite positions opened at the mark have zero current PnL");
 
@@ -124,7 +133,7 @@ contract AuditValueConservationInvariant_CarryTiming is BasePerpTest {
 
     function test_Invariant_CarryCheckpointCannotForgiveHistoricalLpBackedTime() public {
         _fundTrader(trader, 150_000e6);
-        _open(trader, CfdTypes.Side.BULL, 200_000e18, 100_000e6, 1e8);
+        _open(trader, CfdTypes.Side.LONG, 200_000e18, 100_000e6, 1e8);
 
         uint256 balanceBeforeCheckpoint = clearinghouse.balanceUsdc(trader);
         uint256 elapsed = 30 days;

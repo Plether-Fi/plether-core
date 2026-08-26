@@ -109,10 +109,10 @@ interface ICfdEngineTypes {
     );
 
     /// @notice Legacy carry-index event retained in the ABI; the current engine does not emit it.
-    /// @param bullIndex Updated BULL carry index, scaled by 1e18.
-    /// @param bearIndex Updated BEAR carry index, scaled by 1e18.
+    /// @param longIndex Updated LONG carry index, scaled by 1e18.
+    /// @param shortIndex Updated SHORT carry index, scaled by 1e18.
     /// @param absSkewUsdc Absolute directional skew used for the update, in USDC.
-    event CarryUpdated(int256 bullIndex, int256 bearIndex, uint256 absSkewUsdc);
+    event CarryUpdated(int256 longIndex, int256 shortIndex, uint256 absSkewUsdc);
     /// @notice Emitted after an open or increase is settled.
     /// @param account Account whose position was opened or increased.
     /// @param side Resulting position side.
@@ -474,7 +474,7 @@ interface ICfdEngineTypes {
     /// @param markTime Oracle publish time associated with the mark.
     /// @param terminalLpPriceDeltaUsdc Signed exact LP price delta in 6-decimal USDC atoms.
     /// @param totalTraderClaimsUsdc Aggregate senior trader claims, in USDC.
-    /// @param maxDirectionalLiabilityUsdc Worst price-endpoint liability across BULL and BEAR sides, in USDC.
+    /// @param maxDirectionalLiabilityUsdc Worst price-endpoint liability across LONG and SHORT sides, in USDC.
     /// @param bookVersion Monotonic terminal-book mutation version.
     /// @param hasOpenPositions Whether either side has nonzero open interest.
     /// @param degradedMode Whether Engine risk increase is latched off.

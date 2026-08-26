@@ -9,7 +9,7 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 ///      avoid depending on queue-accounting internals directly.
 interface IOrderRouterAccounting {
 
-    /// @notice Lifecycle status retained for a committed router order.
+    /// @notice Ephemeral lifecycle status used while an order remains in the Router queue.
     enum OrderStatus {
         /// @notice No order was assigned to the id.
         None,
@@ -34,13 +34,13 @@ interface IOrderRouterAccounting {
         uint256 pendingOrderCount;
     }
 
-    /// @notice User-facing metadata and live reservation amounts for one retained router order record.
+    /// @notice User-facing metadata and live reservation amounts for one pending Router record.
     /// @param orderId Router order identifier.
     /// @param isClose Whether the order strictly reduces queued position exposure.
     /// @param side Direction to open/increase or direction of the queued position being closed.
     /// @param sizeDelta Position-size change with 18 decimals.
     /// @param marginDelta Original order-supplied margin in USDC; close orders require zero.
-    /// @param targetPrice Direction-aware execution limit with 8 decimals, or zero for no limit.
+    /// @param targetPrice Nonzero direction-aware execution limit with 8 decimals.
     /// @param commitTime Submission timestamp in Unix seconds.
     /// @param commitBlock Submission block number.
     /// @param committedMarginUsdc Current remaining clearinghouse reservation for the order, in USDC.
@@ -82,11 +82,10 @@ interface IOrderRouterAccounting {
     ) external view returns (uint64 headOrderId);
 
     /// @notice Returns the pending-order view for a specific order plus the next account-queue order id.
-    /// @dev Core order fields are retained and can remain populated after terminal execution. The reservation values
-    ///      and next link reflect current state; traverse from `accountHeadOrderId` when pending-only data is required.
-    ///      An unknown id returns zero-valued fields except that `pending.orderId` echoes the requested id.
+    /// @dev Terminal Router records are deleted; their permanent identity and outcome live in the lifecycle book. An
+    ///      unknown or terminal id returns zero-valued fields except that `pending.orderId` echoes the requested id.
     /// @param orderId Order id to inspect
-    /// @return pending Retained order metadata plus current clearinghouse margin and bounty reservation
+    /// @return pending Pending order metadata plus current clearinghouse margin and bounty reservation
     /// @return nextAccountOrderId Next live order id in the account queue, or zero at the tail
     function getPendingOrderView(
         uint64 orderId

@@ -9,7 +9,6 @@ import {HousePool} from "@plether/perps/HousePool.sol";
 import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
-import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
@@ -27,7 +26,7 @@ contract AuditRemainingFindingsFailing is BasePerpTest {
     function test_H1_UserCanAddMarginWithoutChangingSize() public {
         address account = alice;
         _fundTrader(alice, 50_000e6);
-        _open(account, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 20_000e18, 5000e6, 1e8);
 
         (, uint256 marginBefore,,,,,) = engine.positions(account);
         vm.prank(alice);
@@ -43,9 +42,9 @@ contract AuditRemainingFindingsFailing is BasePerpTest {
 
         uint256 equityBefore = pool.seniorPrincipal() + pool.juniorPrincipal();
 
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 0, true);
         bytes[] memory priceData = _mockPythUpdateData(1e8);
         router.executeOrder(1, priceData);
 
@@ -67,7 +66,7 @@ contract AuditRemainingFindingsFailing is BasePerpTest {
     function test_H2_LiquidationMustRespectFreeUsdcCollateral() public {
         address account = alice;
         _fundTrader(alice, 1000e6);
-        _open(account, CfdTypes.Side.BULL, 20_000e18, 330e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 20_000e18, 330e6, 1e8);
         assertEq(clearinghouse.pnlPledgeUsdc(account), 302e6, "Fixture must fund the exact protected price pledge");
         assertEq(
             clearinghouse.liquidationReserveUsdc(account), 20e6, "Fixture must separately fund the liquidation reserve"
@@ -137,16 +136,16 @@ contract AuditRemainingFindingsFailing_MevDrift is BasePerpTest {
         bases.push(1e8);
         bases.push(1e8);
 
-        engineLens = new CfdEngineLens(address(engine));
-        pletherOracle = new PletherOracle(
-            address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
+        router = _deployLegacyOrderRouter(
+            address(engine),
+            address(new CfdEngineLens(address(engine))),
+            address(pool),
+            address(
+                new PletherOracle(
+                    address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
+                )
+            )
         );
-        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
-        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
-        router = new OrderRouter(
-            address(engine), address(engineLens), address(pool), address(pletherOracle), address(keeperSidecar)
-        );
-        assertEq(address(router), predictedRouter);
         engine.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
@@ -160,7 +159,7 @@ contract AuditRemainingFindingsFailing_MevDrift is BasePerpTest {
         uint256 commitTime = block.timestamp;
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, 1e8, false);
 
         uint256 publishTime = commitTime + 1;
         mockPyth.setAllUniquePrices(feedIds, int64(100_000_000), 0, int32(-8), publishTime, commitTime);
@@ -216,16 +215,16 @@ contract AuditRemainingFindingsFailing_StaleOracleExecution is BasePerpTest {
         bases.push(1e8);
         bases.push(1e8);
 
-        engineLens = new CfdEngineLens(address(engine));
-        pletherOracle = new PletherOracle(
-            address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
+        router = _deployLegacyOrderRouter(
+            address(engine),
+            address(new CfdEngineLens(address(engine))),
+            address(pool),
+            address(
+                new PletherOracle(
+                    address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
+                )
+            )
         );
-        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
-        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
-        router = new OrderRouter(
-            address(engine), address(engineLens), address(pool), address(pletherOracle), address(keeperSidecar)
-        );
-        assertEq(address(router), predictedRouter);
         engine.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
@@ -239,7 +238,7 @@ contract AuditRemainingFindingsFailing_StaleOracleExecution is BasePerpTest {
         vm.warp(1000);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, 1e8, false);
 
         mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1010);
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 1010);
@@ -258,7 +257,7 @@ contract AuditRemainingFindingsFailing_StaleOracleExecution is BasePerpTest {
         address account = trader;
         _fundTrader(trader, 1500e6);
         vm.deal(trader, 1 ether);
-        _open(account, CfdTypes.Side.BULL, 20_000e18, 1000e6, 100_000_000);
+        _open(account, CfdTypes.Side.LONG, 20_000e18, 1000e6, 100_000_000);
 
         uint64 commitTime = uint64(block.timestamp + 1000);
         uint64 stalePublishTime = commitTime + 6;
@@ -266,7 +265,7 @@ contract AuditRemainingFindingsFailing_StaleOracleExecution is BasePerpTest {
 
         vm.warp(commitTime);
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 1000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 1000e18, 0, 0, true);
 
         mockPyth.setPrice(FEED_A, int64(150_000_000), int32(-8), freshPublishTime);
         mockPyth.setPrice(FEED_B, int64(150_000_000), int32(-8), freshPublishTime);
@@ -316,20 +315,20 @@ contract AuditRemainingFindingsFailing_CarryPathDependence is BasePerpTest {
     function test_M4_CarryRealizationShouldBePathIndependent() public {
         address account = alice;
         _fundTrader(alice, 150_000e6);
-        _open(account, CfdTypes.Side.BULL, 200_000e18, 100_120e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 200_000e18, 100_120e6, 1e8);
 
         uint256 snap = vm.snapshotState();
 
         vm.warp(block.timestamp + 1 days);
         vm.prank(address(router));
         engine.updateMarkPrice(120_000_000, uint64(block.timestamp));
-        _close(account, CfdTypes.Side.BULL, 200_000e18, 120_000_000);
+        _close(account, CfdTypes.Side.LONG, 200_000e18, 120_000_000);
         uint256 markThenTradeBalance = clearinghouse.balanceUsdc(account);
 
         vm.revertToState(snap);
 
         vm.warp(block.timestamp + 1 days);
-        _close(account, CfdTypes.Side.BULL, 200_000e18, 120_000_000);
+        _close(account, CfdTypes.Side.LONG, 200_000e18, 120_000_000);
         uint256 tradeOnlyBalance = clearinghouse.balanceUsdc(account);
 
         assertEq(tradeOnlyBalance, markThenTradeBalance, "Carry realization should not depend on update-vs-trade path");

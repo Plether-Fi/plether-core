@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {LegacyOrderRouterHarness} from "../../utils/LegacyOrderRouterHarness.sol";
 import {OrderRouterDebugLens} from "../../utils/OrderRouterDebugLens.sol";
 import {MockInvariantHousePool} from "./mocks/MockInvariantHousePool.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
@@ -11,11 +12,14 @@ import {CfdEngineLens} from "@plether/perps/CfdEngineLens.sol";
 import {CfdEnginePlanner} from "@plether/perps/CfdEnginePlanner.sol";
 import {CfdEngineProtocolLens} from "@plether/perps/CfdEngineProtocolLens.sol";
 import {CfdEngineSettlementSidecar} from "@plether/perps/CfdEngineSettlementSidecar.sol";
+import {CfdOrderPolicyEvaluator} from "@plether/perps/CfdOrderPolicyEvaluator.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
+import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
+import {OrderRouterV2ExecutionSidecar} from "@plether/perps/OrderRouterV2ExecutionSidecar.sol";
 import {PerpsPublicLens} from "@plether/perps/PerpsPublicLens.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
@@ -37,7 +41,7 @@ abstract contract BasePerpInvariantTest is Test {
     MarginClearinghouse internal clearinghouse;
     MockInvariantHousePool internal housePool;
     MockPyth internal mockPyth;
-    OrderRouter internal router;
+    LegacyOrderRouterHarness internal router;
     OrderRouterAdmin internal routerAdmin;
     PerpsPublicLens internal publicLens;
 
@@ -65,10 +69,21 @@ abstract contract BasePerpInvariantTest is Test {
         PletherOracle testOracle = new PletherOracle(
             address(engine), address(housePool), address(mockPyth), feedIds, weights, basePrices, new bool[](1)
         );
-        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
+        CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
+        OrderRouterV2ExecutionSidecar executionSidecar = new OrderRouterV2ExecutionSidecar();
+        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
+        OrderLifecycleBook lifecycleBook =
+            new OrderLifecycleBook(predictedRouter, address(engine), address(clearinghouse), address(housePool));
         OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
-        router = new OrderRouter(
-            address(engine), address(engineLens), address(housePool), address(testOracle), address(keeperSidecar)
+        router = new LegacyOrderRouterHarness(
+            address(engine),
+            address(engineLens),
+            address(housePool),
+            address(testOracle),
+            address(keeperSidecar),
+            address(evaluator),
+            address(executionSidecar),
+            address(lifecycleBook)
         );
         assertEq(address(router), predictedRouter);
         _syncRouterAdmin();
@@ -177,9 +192,9 @@ abstract contract BasePerpInvariantTest is Test {
     }
 
     function _maxLiability() internal view returns (uint256) {
-        (uint256 bullMaxProfit,,,) = engine.sides(uint8(CfdTypes.Side.BULL));
-        (uint256 bearMaxProfit,,,) = engine.sides(uint8(CfdTypes.Side.BEAR));
-        return bullMaxProfit > bearMaxProfit ? bullMaxProfit : bearMaxProfit;
+        (uint256 longMaxProfit,,,) = engine.sides(uint8(CfdTypes.Side.LONG));
+        (uint256 shortMaxProfit,,,) = engine.sides(uint8(CfdTypes.Side.SHORT));
+        return longMaxProfit > shortMaxProfit ? longMaxProfit : shortMaxProfit;
     }
 
     function _withdrawalReservedUsdc() internal view returns (uint256) {
@@ -191,13 +206,14 @@ abstract contract BasePerpInvariantTest is Test {
         if (price == 0) {
             return 0;
         }
-        (uint256 bullMaxProfit, uint256 bullOi, uint256 bullEntryNotional,) = engine.sides(uint8(CfdTypes.Side.BULL));
-        bullMaxProfit;
-        (uint256 bearMaxProfit, uint256 bearOi, uint256 bearEntryNotional,) = engine.sides(uint8(CfdTypes.Side.BEAR));
-        bearMaxProfit;
-        int256 bullPnl = (SafeCast.toInt256(bullEntryNotional) - SafeCast.toInt256(bullOi * price)) / int256(1e20);
-        int256 bearPnl = (SafeCast.toInt256(bearOi * price) - SafeCast.toInt256(bearEntryNotional)) / int256(1e20);
-        return bullPnl + bearPnl;
+        (uint256 longMaxProfit, uint256 longOi, uint256 longEntryNotional,) = engine.sides(uint8(CfdTypes.Side.LONG));
+        longMaxProfit;
+        (uint256 shortMaxProfit, uint256 shortOi, uint256 shortEntryNotional,) =
+            engine.sides(uint8(CfdTypes.Side.SHORT));
+        shortMaxProfit;
+        int256 longPnl = (SafeCast.toInt256(longEntryNotional) - SafeCast.toInt256(longOi * price)) / int256(1e20);
+        int256 shortPnl = (SafeCast.toInt256(shortOi * price) - SafeCast.toInt256(shortEntryNotional)) / int256(1e20);
+        return longPnl + shortPnl;
     }
 
     function _maintenanceMarginUsdc(

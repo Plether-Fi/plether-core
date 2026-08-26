@@ -14,7 +14,7 @@ contract OracleMarkPriceIsolationTest is BasePerpTest {
 
         uint64 commitTime = uint64(block.timestamp);
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 0, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 1000e6, 0, false);
 
         uint64 publishTime = commitTime + 1;
         vm.warp(publishTime);
@@ -36,7 +36,7 @@ contract OracleMarkPriceIsolationTest is BasePerpTest {
 
     function test_LiquidationUsesAdversePriceButStoresNeutralMark() public {
         _fundTrader(trader, 700e6);
-        _open(trader, CfdTypes.Side.BULL, 10_000e18, 500e6, 100_000_000);
+        _open(trader, CfdTypes.Side.LONG, 10_000e18, 500e6, 100_000_000);
 
         uint64 publishTime = uint64(block.timestamp + 1);
         vm.warp(publishTime);

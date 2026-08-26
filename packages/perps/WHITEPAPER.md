@@ -90,11 +90,11 @@ The answer developed here has five parts:
 Plether is therefore not best understood as a conventional matched order-book
 future. It is a pooled, oracle-settled perpetual CFD with USDC cross-margin
 custody, explicit position-margin buckets, and a tranched external capital
-provider. Long means long the Plether basket and gains as its mark rises; Short
-means short the basket and gains as its mark falls. Accounts may hold one live
-side at a time, and changing direction requires closing first. In contract
-nomenclature, generic Long maps to `BEAR` and generic Short maps to `BULL` because
-the stored oracle mark is the raw price of the BEAR leg.
+provider. Long means long Plether's dollar index and gains as the raw FX-basket
+mark falls; Short means short the dollar index and gains as that mark rises.
+Accounts may hold one live side at a time, and changing direction requires
+closing first. The contract uses the same Long/Short product terminology even
+though its stored raw mark moves inversely to dollar strength.
 
 ### 1.1 Contributions and prior art
 
@@ -174,22 +174,22 @@ Let:
 Signed price PnL is
 
 \[
-\Pi_i^{\mathrm{SHORT}}(p)=q_i(e_i-p)
+\Pi_i^{\mathrm{LONG}}(p)=q_i(e_i-p)
 \]
 
-for Short and
+for Long and
 
 \[
-\Pi_i^{\mathrm{LONG}}(p)=q_i(p-e_i)
+\Pi_i^{\mathrm{SHORT}}(p)=q_i(p-e_i)
 \]
 
-for Long. The pool's gross positive price-PnL obligation at \(p\) is
+for Short. The pool's gross positive price-PnL obligation at \(p\) is
 
 \[
 G(p)=
-\sum_{i\in\mathrm{SHORT}}q_i[e_i-p]^+
+\sum_{i\in\mathrm{LONG}}q_i[e_i-p]^+
 +
-\sum_{i\in\mathrm{LONG}}q_i[p-e_i]^+.
+\sum_{i\in\mathrm{SHORT}}q_i[p-e_i]^+.
 \]
 
 Position margin is held in the MarginClearinghouse. Returning that trader-owned
@@ -200,13 +200,13 @@ margin is distinct from paying positive price PnL from HousePool capital.
 Define the side endpoint liabilities
 
 \[
-L_{\mathrm{SHORT}}=\sum_{i\in\mathrm{SHORT}}q_i e_i
+L_{\mathrm{LONG}}=\sum_{i\in\mathrm{LONG}}q_i e_i
 \]
 
 and
 
 \[
-L_{\mathrm{LONG}}=\sum_{i\in\mathrm{LONG}}q_i(C-e_i).
+L_{\mathrm{SHORT}}=\sum_{i\in\mathrm{SHORT}}q_i(C-e_i).
 \]
 
 Then, for every common mark \(p\in[0,C]\),
@@ -219,8 +219,8 @@ G(p)\le L_{\max}
 **Proof.** Every term \([e_i-p]^+\) and \([p-e_i]^+\) is convex in
 \(p\), so their nonnegative weighted sum \(G(p)\) is convex. A convex
 function on a closed interval reaches its maximum at an endpoint. At \(p=0\),
-Long positive PnL is zero and \(G(0)=L_{\mathrm{SHORT}}\). At \(p=C\),
-Short positive PnL is zero and \(G(C)=L_{\mathrm{LONG}}\). Therefore the
+Short positive PnL is zero and \(G(0)=L_{\mathrm{LONG}}\). At \(p=C\),
+Long positive PnL is zero and \(G(C)=L_{\mathrm{SHORT}}\). Therefore the
 maximum is the larger endpoint value. \(\square\)
 
 The engine stores side open interest, entry notional, margin, borrow base, and
@@ -251,10 +251,10 @@ rejected before entering the router queue.
 Proposition 1 is an instantaneous result under one shared mark. It is not
 pathwise.
 
-Consider one unit Short and one unit Long, both entered at \(e=1\), with
+Consider one unit Long and one unit Short, both entered at \(e=1\), with
 \(C=2\). Each endpoint liability is 1, so \(L_{\max}=1\). At any one
-mark, aggregate positive price PnL is at most 1. But if Short closes at \(p=0\)
-and is credited 1, then Long remains open and later closes at \(p=2\),
+mark, aggregate positive price PnL is at most 1. But if Long closes at \(p=0\)
+and is credited 1, then Short remains open and later closes at \(p=2\),
 cumulative realized price-PnL obligations equal 2. The second obligation may be
 a trader claim rather than an immediate cash payment. Reserving 1 at inception
 did not fund this sequential path.
@@ -262,8 +262,8 @@ did not fund this sequential path.
 This counterexample is not an implementation accident. It identifies the exact
 boundary of the accounting primitive:
 
-- `max(Short, Long)` is a common-mark price-PnL envelope;
-- `Short + Long` is a more conservative bound on independently realized endpoint
+- `max(Long, Short)` is a common-mark price-PnL envelope;
+- `Long + Short` is a more conservative bound on independently realized endpoint
   maxima;
 - neither expression alone captures VPI, fees, carry, collateral seizure,
   claims, cash timing, or external loss; and
@@ -466,16 +466,18 @@ funding.
 For account \(i\), let \(\ell_i\) be its number of 100-token lots, \(E_i\) its
 exact entry cost in USDC atoms, and \(k_i\) its effective collectible cap: the
 smaller of its dedicated PnL pledge plus nettable same-account claim and its
-maximum possible price loss inside \([0,C]\). With the protocol's BULL side
-profiting as the oracle price falls and BEAR profiting as it rises, the LP-side
+maximum possible price loss inside \([0,C]\). With the protocol's LONG side
+profiting as the oracle price falls and SHORT profiting as it rises, the LP-side
 terminal price delta is
 
 \[
-\delta_i(p)=
-\begin{cases}
-\min(\ell_i p-E_i,k_i), & \text{BULL},\\
-\min(E_i-\ell_i p,k_i), & \text{BEAR}.
-\end{cases}
+\delta_i^{\mathrm{LONG}}(p)=\min(\ell_i p-E_i,k_i)
+\]
+
+and
+
+\[
+\delta_i^{\mathrm{SHORT}}(p)=\min(E_i-\ell_i p,k_i).
 \]
 
 A negative value is marked value owed by LPs to that trader. A positive value
@@ -866,12 +868,12 @@ be 5%:
 
 | Side | Max-profit envelope | Position margin | Borrow base | Utilization | Effective annual rate | One-year carry |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Long | $25.0m | $2.5m | $22.5m | 22.5% | 1.125% | $253,125 |
-| Short | $40.0m | $4.0m | $36.0m | 36.0% | 1.800% | $648,000 |
+| Long | $40.0m | $4.0m | $36.0m | 36.0% | 1.800% | $648,000 |
+| Short | $25.0m | $2.5m | $22.5m | 22.5% | 1.125% | $253,125 |
 
 The example produces $901,125 of total one-year carry before changes in
 positions, pool depth, or collection. The Solidity rate-view helper displays
-the Long rate as 112 basis points after flooring, while the combined index
+the Short rate as 112 basis points after flooring, while the combined index
 calculation preserves the 112.5-basis-point economic product.
 
 ---
@@ -888,22 +890,38 @@ and FIFO does not by itself prove fairness [21-22].
 ### 6.1 Order lifecycle
 
 1. The trader deposits USDC into MarginClearinghouse.
-2. `commitOrder` records side, size, margin, slippage limit, commit time, commit
-   block, and close/open intent.
-3. The router moves open margin into an order-specific reservation and reserves
+2. The trader constructs one typed request with an account-scoped nonzero
+   `clientOrderId`, side, size, margin, nonzero price limit, close/open intent,
+   deadline, permitted execution modes, expected execution-configuration hash,
+   and inclusive financial limits.
+3. `commitOrder` permanently binds `(account, clientOrderId)` to the full intent
+   hash in OrderLifecycleBook. An exact replay returns the original order ID
+   before current-state validation and creates no second side effect; conflicting
+   reuse reverts.
+4. For a fresh valid intent, the router records commit time and block, moves open
+   margin into an order-specific reservation, and reserves
    a keeper bounty from trader value.
-4. The order becomes the global FIFO head in turn.
-5. For live execution, a keeper supplies Pyth updates and native-token oracle
+5. The binding, user-uncancellable order becomes the global FIFO head in turn.
+6. For live execution, a keeper supplies Pyth updates and native-token oracle
    fees.
-6. The router resolves the unique historical update in the configured window
+7. The router resolves the unique historical update in the configured window
    strictly after commit.
-7. Basket components are normalized, confidence is propagated, publish-time
+8. Basket components are normalized, confidence is propagated, publish-time
    dispersion is checked, and the side-adverse execution price is capped at
    \(C\).
-8. Typed policy determines whether the order executes, fails terminally, or
-   remains pending for retry.
-9. Reserved value is consumed, paid, refunded, forfeited, or remains claimable
-   exactly once.
+9. The stateless policy evaluator rebuilds authoritative Engine state, derives
+   protocol meaning through the canonical planner, and checks the resulting
+   economics against the request's pinned modes and bounds.
+10. Exact known planner or policy failures may terminate; timing, close-only,
+    insufficient-gas, mark-ordering, unknown, panic, out-of-gas, empty, or
+    malformed failures leave the FIFO head pending for retry.
+11. Each prepared batch item executes in an independent Router rollback frame,
+    so one retryable item cannot undo an already finalized prefix. Oracle/Pyth
+    preparation remains batch-atomic.
+12. A terminal item settles reserved value exactly once, deletes ephemeral Router
+    state, and then finalizes an authenticated lifecycle receipt. The Book retains
+    the compact outcome and receipt hash permanently while emitting the full
+    receipt preimage for independent reconstruction of what happened.
 
 Pyth's `parsePriceFeedUpdatesUnique` primitive verifies that returned updates are
 the first qualifying feed updates in a specified range [6]. Plether obtains
@@ -1221,9 +1239,9 @@ The cap did not bind in this sample. That is not evidence that it cannot bind.
 It shows the capital-efficiency price of an endpoint guarantee: a large fraction
 of reserved tail space was unused by the historical macro proxy.
 
-For the most favorable forward Long move in the sample, a position entering at
+For the most favorable forward Short move in the sample, a position entering at
 0.9597 and exiting at a later 1.1168 used 15.09% of its cap-endpoint
-maximum-profit reserve. For Short, the highest reserve utilization was 22.67%,
+maximum-profit reserve. For Long, the highest reserve utilization was 22.67%,
 from an entry at 1.1168 to a later 0.8636. These are ex-post sample maxima, not
 risk limits.
 
@@ -1317,11 +1335,13 @@ trader account rather than HousePool.
 | Cumulative admitted entry notional | $5.760bn | $5.759bn | $3.904bn |
 | Time-weighted endpoint reserve utilization | 30.21% | 30.95% | 22.20% |
 | Time-weighted capped aggregate borrow-to-assets | 32.68% | 32.50% | 21.94% |
-| Time-weighted Long / Short carry utilization | 15.64% / 17.04% | 16.79% / 15.80% | 11.16% / 10.84% |
+| Time-weighted Long / Short carry utilization | 17.04% / 15.64% | 15.80% / 16.79% | 10.84% / 11.16% |
 | Liquidations | 100 | 145 | 87 |
 | Liquidations after a 3+ day gap | 25 | 38 | 18 |
 | Carry assessed | $7.600m | $8.100m | $5.340m |
 | Carry conservatively realized | $7.531m | $8.060m | $5.319m |
+| Maximum conservative MtM | $50.424m | $78.368m | $66.418m |
+| Minimum senior principal | $50.000m | $22.944m | $36.854m |
 | Legacy loss telemetry | $0.991m | $0.919m | $0.654m |
 | Trader claims created | $0 | $0 | $0 |
 | Ending LP economic equity | $103.493m | $99.817m | $99.196m |
@@ -1357,8 +1377,8 @@ representative of production demand.
 
 ### 8.5 Cap and directional-book sensitivity
 
-Consider a stylized $100 million pool, entry price 1.00, 50 million Long units,
-and 30 million Short units. The common-mark endpoint envelope is
+Consider a stylized $100 million pool, entry price 1.00, 50 million Short units,
+and 30 million Long units. The common-mark endpoint envelope is
 
 \[
 L_{\max}(C)=\max(30\mathrm{m},50\mathrm{m}(C-1)).
@@ -1366,18 +1386,18 @@ L_{\max}(C)=\max(30\mathrm{m},50\mathrm{m}(C-1)).
 
 | Cap | Long endpoint | Short endpoint | \(L_{\max}\) | Pool reserve utilization |
 | ---: | ---: | ---: | ---: | ---: |
-| 1.10 | $5.0m | $30.0m | $30.0m | 30.0% |
-| 1.25 | $12.5m | $30.0m | $30.0m | 30.0% |
-| 1.50 | $25.0m | $30.0m | $30.0m | 30.0% |
-| 1.75 | $37.5m | $30.0m | $37.5m | 37.5% |
-| 2.00 | $50.0m | $30.0m | $50.0m | 50.0% |
-| 2.50 | $75.0m | $30.0m | $75.0m | 75.0% |
-| 3.00 | $100.0m | $30.0m | $100.0m | 100.0% |
+| 1.10 | $30.0m | $5.0m | $30.0m | 30.0% |
+| 1.25 | $30.0m | $12.5m | $30.0m | 30.0% |
+| 1.50 | $30.0m | $25.0m | $30.0m | 30.0% |
+| 1.75 | $30.0m | $37.5m | $37.5m | 37.5% |
+| 2.00 | $30.0m | $50.0m | $50.0m | 50.0% |
+| 2.50 | $30.0m | $75.0m | $75.0m | 75.0% |
+| 3.00 | $30.0m | $100.0m | $100.0m | 100.0% |
 
 ![Cap sensitivity](whitepaper/generated/cap_sensitivity.svg)
 
 The result is piecewise. Lowering the cap below 1.60 does not reduce this book's
-reserve because Short remains the dominant endpoint. Cap governance cannot be
+reserve because Long remains the dominant endpoint. Cap governance cannot be
 analyzed without side composition.
 
 Re-running the stateful 80/20 scenario changes both admitted size and the carry
@@ -1391,7 +1411,7 @@ base:
 | 2.50 | $5.891bn | 37.16% | $12.495m | $107.043m | $0.949m |
 | 3.00 | $5.702bn | 40.75% | $15.850m | $110.259m | $1.023m |
 
-Admitted notional is non-monotonic in this path. A larger cap raises Long
+Admitted notional is non-monotonic in this path. A larger cap raises Short
 endpoint liability and borrow base, but the 40% skew wall, prior liquidations,
 cash evolution, and the admission state jointly determine which later cohorts
 fit. Carry rises across these particular runs because the surviving admitted
@@ -1753,8 +1773,8 @@ when normal settlement assumptions fail.
 | \(k_i\) | Effective collectible price-loss cap of account \(i\) |
 | \(\ell_i\) | Number of canonical 100-token lots in account \(i\) |
 | \(L_i^{\max}\) | Position maximum price profit |
-| \(L_{\mathrm{LONG}}\) | Long endpoint liability at \(p=C\) |
-| \(L_{\mathrm{SHORT}}\) | Short endpoint liability at \(p=0\) |
+| \(L_{\mathrm{LONG}}\) | Long endpoint liability at \(p=0\) |
+| \(L_{\mathrm{SHORT}}\) | Short endpoint liability at \(p=C\) |
 | \(L_{\max}\) | Larger side endpoint liability |
 | \(M(p)\) | Legacy side-envelope stress used only in the empirical replay |
 | \(m_i\) | Position margin |

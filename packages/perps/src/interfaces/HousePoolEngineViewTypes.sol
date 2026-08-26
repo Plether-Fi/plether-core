@@ -11,7 +11,7 @@ library HousePoolEngineViewTypes {
     ///      values are payable by LPs.
     /// @param physicalAssetsUsdc Canonical assets recognized by the HousePool before engine-side reservations.
     /// @param netPhysicalAssetsUsdc Physical assets net of protocol-treasury settlement credited in custody.
-    /// @param maxLiabilityUsdc Larger of the bull-side and bear-side maximum-profit envelopes.
+    /// @param maxLiabilityUsdc Larger of the long-side and short-side maximum-profit envelopes.
     /// @param supplementalReservedUsdc Additional senior reservation supplied by the engine, including protected
     ///        settlement headroom that does not affect terminal NAV.
     /// @param terminalLpPriceDeltaUsdc Signed terminal mark-to-close delta attributable to LPs.

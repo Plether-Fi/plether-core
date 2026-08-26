@@ -58,14 +58,14 @@ contract AuditC01_HwmInflation is BasePerpTest {
         );
         assertGt(pool.seniorHighWaterMark(), SEEDED_SENIOR + 100_000 * 1e6);
 
-        // Open a BEAR position. BEAR profits when oracle price rises.
+        // Open a SHORT position. SHORT profits when oracle price rises.
         // 100k tokens at $1.00, max profit = 100k * ($2 - $1) = $100k
         // Pool has $150k, so solvency check passes.
         _fundTrader(address(0xAAA), 5000 * 1e6);
         address traderAccount = address(0xAAA);
-        _open(traderAccount, CfdTypes.Side.BEAR, 100_000 * 1e18, 5000 * 1e6, 1e8);
+        _open(traderAccount, CfdTypes.Side.SHORT, 100_000 * 1e18, 5000 * 1e6, 1e8);
 
-        // Price rises to $1.80 → BEAR unrealized PnL = 100k * 0.8 = $80k
+        // Price rises to $1.80 → SHORT unrealized PnL = 100k * 0.8 = $80k
         // Reconcile: distributable ≈ cash - mtm, loss ≈ $80k
         // Junior absorbs $50k, senior absorbs $30k → senior = $70k, HWM = $100k
         vm.prank(address(router));
@@ -109,9 +109,9 @@ contract AuditC02_KeeperFeeRefund is BasePerpTest {
     function test_C02_FailedOrderRefunds100Percent() public {
         _fundTrader(spammer, 10_000 * 1e6);
 
-        // Spammer commits with impossible slippage (targetPrice=1 for BULL open = always fails)
+        // Spammer commits with impossible slippage (targetPrice=1 for LONG open = always fails)
         vm.prank(spammer);
-        router.commitOrder(CfdTypes.Side.BULL, 50_000 * 1e18, 1000 * 1e6, 1, false);
+        router.commitOrder(CfdTypes.Side.LONG, 50_000 * 1e18, 1000 * 1e6, 1, false);
 
         uint256 keeperBefore = keeper.balance;
 
@@ -137,7 +137,7 @@ contract AuditC03_MarginCheck is BasePerpTest {
         _fundTrader(alice, 100_000 * 1e6);
         address aliceAccount = alice;
 
-        // Open 200k BULL tokens at $1.00
+        // Open 200k LONG tokens at $1.00
         // Notional = $200k, MMR = 1% = $2000, explicit IMR = 1.5% = $3000
         // marginDelta = $3070 → pre-fee passes IMR ($3070 >= $3000)
         // execFee = 4bps * $200k = $80 → pos.margin = $2990 < $3000
@@ -154,7 +154,7 @@ contract AuditC03_MarginCheck is BasePerpTest {
                 commitTime: uint64(block.timestamp),
                 commitBlock: uint64(block.number),
                 orderId: 0,
-                side: CfdTypes.Side.BULL,
+                side: CfdTypes.Side.LONG,
                 isClose: false
             }),
             1e8,
@@ -186,13 +186,13 @@ contract AuditC04_StaleOracleMtmBypass is BasePerpTest {
         _fundJunior(alice, 500_000 * 1e6);
         _fundJunior(bob, 500_000 * 1e6);
 
-        // Open a position so staleness path triggers (bullMax+bearMax > 0)
+        // Open a position so staleness path triggers (longMax+shortMax > 0)
         address trader = address(0xAAA);
         _fundTrader(trader, 50_000 * 1e6);
         address traderAccount = trader;
-        _open(traderAccount, CfdTypes.Side.BULL, 200_000 * 1e18, 20_000 * 1e6, 1e8);
+        _open(traderAccount, CfdTypes.Side.LONG, 200_000 * 1e18, 20_000 * 1e6, 1e8);
 
-        // Crash: BULL loses when oracle rises
+        // Crash: LONG loses when oracle rises
         vm.prank(address(router));
         engine.updateMarkPrice(1.5e8, uint64(block.timestamp));
         vm.prank(address(juniorVault));
@@ -223,7 +223,7 @@ contract AuditC04_StaleOracleMtmBypass is BasePerpTest {
 
         _fundTrader(address(0xBBB), 10_000 * 1e6);
         address traderAccount = address(0xBBB);
-        _open(traderAccount, CfdTypes.Side.BULL, 50_000 * 1e18, 5000 * 1e6, 1e8);
+        _open(traderAccount, CfdTypes.Side.LONG, 50_000 * 1e18, 5000 * 1e6, 1e8);
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -288,10 +288,10 @@ contract AuditC05_ImpairedDeposit is BasePerpTest {
         _fundSenior(alice, 100_000 * 1e6);
         _fundJunior(address(this), 50_000 * 1e6);
 
-        // Create a deficit: BEAR trader profits, wiping junior and dipping into senior
+        // Create a deficit: SHORT trader profits, wiping junior and dipping into senior
         _fundTrader(address(0xAAA), 5000 * 1e6);
         address traderAccount = address(0xAAA);
-        _open(traderAccount, CfdTypes.Side.BEAR, 100_000 * 1e18, 5000 * 1e6, 1e8);
+        _open(traderAccount, CfdTypes.Side.SHORT, 100_000 * 1e18, 5000 * 1e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1.8e8, uint64(block.timestamp));
@@ -329,7 +329,7 @@ contract AuditH01_MarkTimeLookback is BasePerpTest {
     function test_H01_UpdateMarkUsesPublishTime() public {
         _fundTrader(address(0xAAA), 10_000 * 1e6);
         address traderAccount = address(0xAAA);
-        _open(traderAccount, CfdTypes.Side.BULL, 50_000 * 1e18, 5000 * 1e6, 1e8);
+        _open(traderAccount, CfdTypes.Side.LONG, 50_000 * 1e18, 5000 * 1e6, 1e8);
 
         _warpForward(50);
 
@@ -360,7 +360,7 @@ contract AuditH02_WithdrawBlocked is BasePerpTest {
 
         // Open a small position: 50k tokens, $1000 margin (well above IMR)
         // Notional = $50k, IMR = max(1.5% * $50k, $5) = $750
-        _open(aliceAccount, CfdTypes.Side.BULL, 50_000 * 1e18, 1000 * 1e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.LONG, 50_000 * 1e18, 1000 * 1e6, 1e8);
 
         (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertGt(size, 0);
@@ -396,7 +396,7 @@ contract AuditH03_DustPosition is BasePerpTest {
         // IMR = max(1.5% * $50k, $5) = $750. The supplied margin also funds the
         // dedicated $50 liquidation reserve and the $20 execution fee.
         uint256 posSize = 50_000 * 1e18;
-        _open(aliceAccount, CfdTypes.Side.BULL, posSize, 825 * 1e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.LONG, posSize, 825 * 1e6, 1e8);
 
         // Closing every lot but one is quantum-valid. V2 permits the exact residual and
         // preserves its dedicated liquidation reserve so it can still be liquidated.
@@ -412,7 +412,7 @@ contract AuditH03_DustPosition is BasePerpTest {
                 commitTime: uint64(block.timestamp),
                 commitBlock: uint64(block.number),
                 orderId: 0,
-                side: CfdTypes.Side.BULL,
+                side: CfdTypes.Side.LONG,
                 isClose: true
             }),
             1e8,

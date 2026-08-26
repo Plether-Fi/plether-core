@@ -16,12 +16,12 @@ contract AuditRemainingCoverageFindingsFailing_ReservationShielding is BasePerpT
         address account = trader;
         _fundTrader(trader, 10_000e6);
 
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
 
         uint64 queuedOrderId = router.nextCommitId();
         uint256 committedMarginUsdc = _freeSettlementUsdc(account) - 200_000;
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, committedMarginUsdc, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, committedMarginUsdc, type(uint256).max, false);
 
         uint256 committedBefore = router.getAccountReservations(account).committedMarginUsdc;
         assertEq(_freeSettlementUsdc(account), 0, "Setup must shelter all non-bounty free settlement in the queue");
@@ -31,7 +31,7 @@ contract AuditRemainingCoverageFindingsFailing_ReservationShielding is BasePerpT
         assertEq(preview.realizedPnlUsdc, 0, "Setup must isolate action charges from price PnL");
         assertEq(preview.badDebtUsdc, 0, "Action-charge collection must never create protocol debt");
 
-        _close(account, CfdTypes.Side.BULL, 100_000e18, 1e8);
+        _close(account, CfdTypes.Side.LONG, 100_000e18, 1e8);
 
         assertLt(
             router.getAccountReservations(account).committedMarginUsdc,
@@ -50,12 +50,12 @@ contract AuditRemainingCoverageFindingsFailing_ReservationShielding is BasePerpT
         address account = trader;
         _fundTrader(trader, 10_000e6);
 
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
 
         uint64 queuedOrderId = router.nextCommitId();
         uint256 committedMarginUsdc = _freeSettlementUsdc(account) - 200_000;
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, committedMarginUsdc, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, committedMarginUsdc, type(uint256).max, false);
 
         uint256 committedBefore = router.getAccountReservations(account).committedMarginUsdc;
         assertEq(_freeSettlementUsdc(account), 0, "Setup must shelter all non-bounty free settlement in the queue");
@@ -103,7 +103,7 @@ contract AuditRemainingCoverageFindingsFailing_LiquidationBounty is BasePerpTest
         address account = trader;
 
         _fundTrader(trader, 100e6);
-        _open(account, CfdTypes.Side.BULL, CfdTypes.SIZE_QUANTUM, 12e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, CfdTypes.SIZE_QUANTUM, 12e6, 1e8);
 
         uint256 freeSettlementUsdc = _freeSettlementUsdc(account);
         vm.prank(trader);
@@ -141,11 +141,11 @@ contract AuditRemainingCoverageFindingsFailing_ForfeitedOrderBountyFees is BaseP
 
         _fundTrader(trader, 10_000e6);
         _fundTrader(counterparty, 100_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
-        _open(counterAccount, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8);
+        _open(counterAccount, CfdTypes.Side.SHORT, 100_000e18, 50_000e6, 1e8);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 100e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 100e6, type(uint256).max, false);
 
         uint256 forfeitedBounty = _executionBountyReserve(1);
         uint256 feesBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
@@ -179,7 +179,7 @@ contract AuditRemainingCoverageFindingsFailing_DustQueueEconomics is BasePerpTes
         _fundTrader(trader, 3e6);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 100e18, 2e6, 0, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100e18, 2e6, 0, false);
 
         address account = trader;
         IOrderRouterAccounting.AccountReservationView memory reservation = router.getAccountReservations(account);
@@ -230,10 +230,10 @@ contract AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees is BasePerp
         address account = trader;
         _fundTrader(trader, 11_000e6);
 
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 0, true);
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
@@ -255,10 +255,10 @@ contract AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees is BasePerp
         address account = trader;
         _fundTrader(trader, 2001e6);
 
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 0, true);
 
         assertEq(
             router.nextCommitId(), 2, "Close commits should still succeed when the trader prefunds the keeper bounty"
@@ -273,10 +273,10 @@ contract AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees is BasePerp
         address keeperAccount = keeper;
         _fundTrader(trader, 11_000e6);
 
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 0, true);
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
@@ -312,7 +312,7 @@ contract AuditRemainingCoverageFindingsFailing_TerminalLiveness is BasePerpTest 
         address account = trader;
         _fundTrader(trader, 11_000e6);
 
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(125_000_000));
@@ -338,15 +338,15 @@ contract AuditRemainingCoverageFindingsFailing_TerminalLiveness is BasePerpTest 
         _fundTrader(trader, 20_000e6);
         _fundTrader(spammer, 250_000e6);
 
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 0, true);
 
         uint256 spamCount = 5;
         for (uint256 i = 0; i < spamCount; i++) {
             vm.prank(spammer);
-            router.commitOrder(CfdTypes.Side.BEAR, 10_000e18, 1000e6, 2e8, false);
+            router.commitOrder(CfdTypes.Side.SHORT, 10_000e18, 1000e6, 2e8, false);
         }
 
         bytes[] memory empty = _mockPythUpdateData();

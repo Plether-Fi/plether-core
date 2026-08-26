@@ -39,5 +39,5 @@ text{font-family:'Times New Roman',Times,serif;fill:#111111}
 <circle cx="707.26" cy="131.00" r="4" fill="#111111"/>
 <circle cx="932.00" cy="56.00" r="4" fill="#111111"/>
 <line x1="78" y1="356" x2="932" y2="356" class="axis"/>
-<text x="78" y="407" class="small">Assumptions: pool $100m; entry 1.00; Long size 50m; Short size 30m. Envelope = max(30m, 50m x (cap - 1)).</text>
+<text x="78" y="407" class="small">Assumptions: pool $100m; entry 1.00; Short size 50m; Long size 30m. Envelope = max(30m, 50m x (cap - 1)).</text>
 </svg>

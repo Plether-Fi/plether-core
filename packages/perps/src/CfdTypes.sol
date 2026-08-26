@@ -10,13 +10,13 @@ library CfdTypes {
     /// @dev With 8-decimal prices, `lots * price` is exactly denominated in 6-decimal USDC atoms.
     uint256 internal constant SIZE_QUANTUM = 1e20;
 
-    /// @notice Direction of a position or order relative to the protocol's USD-strength oracle price.
-    /// @dev The oracle price represents the BEAR leg: BULL profits as it falls and BEAR profits as it rises.
+    /// @notice Direction of a position or order relative to Plether's dollar index.
+    /// @dev The raw FX-basket mark moves inversely to dollar strength: LONG profits as it falls and SHORT as it rises.
     enum Side {
         /// @notice Profits when the oracle price falls (USD strengthens).
-        BULL,
+        LONG,
         /// @notice Profits when the oracle price rises (USD weakens).
-        BEAR
+        SHORT
     }
 
     /// @notice A user's active position in a specific market.
@@ -24,7 +24,7 @@ library CfdTypes {
     ///      It is intentionally distinct from the clearinghouse custody bucket that holds the locked funds backing it.
     /// @param size Position notional in synthetic-token units (18 decimals).
     /// @param margin Isolated position margin in USDC units (6 decimals).
-    /// @param entryPrice Size-weighted entry oracle price of the BEAR leg (8 decimals).
+    /// @param entryPrice Size-weighted raw FX-basket mark at execution (8 decimals).
     /// @param maxProfitUsdc Cumulative maximum-profit envelope used for solvency accounting (6-decimal USDC).
     /// @param side Direction of the position.
     /// @param lastUpdateTime Unix timestamp of the position's most recent state change.
@@ -33,7 +33,7 @@ library CfdTypes {
     struct Position {
         uint256 size; // [18 dec] Notional size in synthetic tokens
         uint256 margin; // [6 dec] Isolated margin backing this position
-        uint256 entryPrice; // [8 dec] Oracle price of BEAR at execution
+        uint256 entryPrice; // [8 dec] Raw FX-basket mark at execution
         uint256 maxProfitUsdc; // [6 dec] Cumulative max profit tracked to avoid truncation underflow
         Side side; // [uint8] Trade direction
         uint64 lastUpdateTime; // [uint64] Timestamp of last modification
@@ -45,7 +45,7 @@ library CfdTypes {
     /// @param account Canonical clearinghouse account that submitted the order.
     /// @param sizeDelta Position-size change in synthetic-token units (18 decimals).
     /// @param marginDelta Margin committed by an open/increase order in 6-decimal USDC; close orders require zero.
-    /// @param targetPrice Direction-aware execution limit (8 decimals), or zero for no slippage limit.
+    /// @param targetPrice Direction-aware execution limit (8 decimals); production V2 commits require it nonzero.
     /// @param commitTime Unix timestamp at submission, used for expiry and post-commit oracle checks.
     /// @param commitBlock Block number at submission, used to block same-block execution outside frozen-oracle mode.
     /// @param orderId Monotonically increasing router order identifier.
@@ -59,7 +59,7 @@ library CfdTypes {
         uint64 commitTime; // Timestamp of intent submission (MEV shield)
         uint64 commitBlock; // Block number of intent submission (same-block execution shield)
         uint64 orderId; // Strict FIFO execution queue ID
-        Side side; // [uint8] BULL or BEAR
+        Side side; // [uint8] LONG or SHORT
         bool isClose; // [bool] True if strictly closing/reducing
     }
 

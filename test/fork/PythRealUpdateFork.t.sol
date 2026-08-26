@@ -7,12 +7,16 @@ import {CfdEngineAdmin} from "@plether/perps/CfdEngineAdmin.sol";
 import {CfdEngineLens} from "@plether/perps/CfdEngineLens.sol";
 import {CfdEnginePlanner} from "@plether/perps/CfdEnginePlanner.sol";
 import {CfdEngineSettlementSidecar} from "@plether/perps/CfdEngineSettlementSidecar.sol";
+import {CfdOrderPolicyEvaluator} from "@plether/perps/CfdOrderPolicyEvaluator.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
+import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
+import {OrderRouterV2ExecutionSidecar} from "@plether/perps/OrderRouterV2ExecutionSidecar.sol";
+import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
@@ -93,7 +97,7 @@ contract PythRealUpdateForkTest is Test {
         uint64 orderId = router.nextCommitId();
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 5000e6, 0, false);
+        router.commitOrder(_orderRequest(alice, CfdTypes.Side.LONG, 100_000e18, 5000e6));
 
         uint256 fee = IPyth(REAL_PYTH).getUpdateFee(updateData);
         vm.deal(keeper, fee);
@@ -164,10 +168,23 @@ contract PythRealUpdateForkTest is Test {
         PletherOracle oracle = new PletherOracle(
             address(engine), address(pool), REAL_PYTH, _singleFeedIds(), weights, basePrices, new bool[](1)
         );
-        uint64 routerSidecarNonce = vm.getNonce(address(this));
-        address predictedRouter = vm.computeCreateAddress(address(this), routerSidecarNonce + 1);
+        CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
+        OrderRouterV2ExecutionSidecar executionSidecar = new OrderRouterV2ExecutionSidecar();
+        uint64 routerDependencyNonce = vm.getNonce(address(this));
+        address predictedRouter = vm.computeCreateAddress(address(this), routerDependencyNonce + 2);
+        OrderLifecycleBook lifecycleBook =
+            new OrderLifecycleBook(predictedRouter, address(engine), address(clearinghouse), address(pool));
         OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
-        router = new OrderRouter(address(engine), address(lens), address(pool), address(oracle), address(keeperSidecar));
+        router = new OrderRouter(
+            address(engine),
+            address(lens),
+            address(pool),
+            address(oracle),
+            address(keeperSidecar),
+            address(evaluator),
+            address(executionSidecar),
+            address(lifecycleBook)
+        );
         assertEq(address(router), predictedRouter, "router prediction");
 
         engine.setOrderRouter(address(router));
@@ -198,6 +215,38 @@ contract PythRealUpdateForkTest is Test {
         IERC20(USDC).approve(address(juniorVault), type(uint256).max);
         juniorVault.deposit(1_000_000e6, lp);
         vm.stopPrank();
+    }
+
+    function _orderRequest(
+        address trader,
+        CfdTypes.Side side,
+        uint256 size,
+        uint256 margin
+    ) internal view returns (OrderV2Types.OrderRequest memory request) {
+        request = OrderV2Types.OrderRequest({
+            clientOrderId: keccak256(
+                abi.encode("PythRealUpdateForkTest", block.chainid, address(router), trader, router.nextCommitId())
+            ),
+            side: side,
+            sizeDelta: size,
+            marginDelta: margin,
+            targetPrice: side == CfdTypes.Side.LONG ? 1 : type(uint256).max,
+            isClose: false,
+            bounds: OrderV2Types.ExecutionBounds({
+                validUntil: uint64(block.timestamp + router.maxOrderAge()),
+                allowedExecutionModes: 7,
+                expectedConfigHash: router.lifecycleBook().currentExecutionConfigHash(),
+                maxExecutionBountyUsdc: type(uint256).max,
+                maxExecutionNotionalUsdc: type(uint256).max,
+                maxGrossAccountDebitUsdc: type(uint256).max,
+                maxActionChargeUsdc: type(uint256).max,
+                maxExplicitFeesUsdc: type(uint256).max,
+                maxPostPositionSize: type(uint256).max,
+                minPostSettlementBalanceUsdc: 0,
+                minPostPositionEquityUsdc: 0,
+                maxPostLeverageBps: type(uint32).max
+            })
+        });
     }
 
     function _depositToClearinghouse(

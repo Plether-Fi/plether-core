@@ -9,12 +9,11 @@ import {HousePool} from "@plether/perps/HousePool.sol";
 import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
-import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
+import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
-import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
 import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 
@@ -51,8 +50,8 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
         _fundTrader(winner, 200_000e6);
         _fundTrader(loser, 2000e6);
 
-        _open(winnerAccount, CfdTypes.Side.BULL, 100_000e18, 100_000e6, 1.5e8);
-        _open(loserAccount, CfdTypes.Side.BULL, 100_000e18, 1000e6, 0.5e8);
+        _open(winnerAccount, CfdTypes.Side.LONG, 100_000e18, 100_000e6, 1.5e8);
+        _open(loserAccount, CfdTypes.Side.LONG, 100_000e18, 1000e6, 0.5e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
@@ -79,11 +78,20 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
     function test_H1_MarginOnlyUpdateViaRouterReverts() public {
         address aliceAccount = alice;
         _fundTrader(alice, 50_000e6);
-        _open(aliceAccount, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.LONG, 20_000e18, 5000e6, 1e8);
 
         vm.prank(alice);
         (bool ok,) = address(router)
-            .call(abi.encodeWithSelector(router.commitOrder.selector, CfdTypes.Side.BULL, 0, 500e6, 1e8, false));
+            .call(
+                abi.encodeWithSelector(
+                    bytes4(keccak256("commitOrder(uint8,uint256,uint256,uint256,bool)")),
+                    CfdTypes.Side.LONG,
+                    0,
+                    500e6,
+                    1e8,
+                    false
+                )
+            );
         assertFalse(ok, "Margin-only updates must be rejected at commit time");
     }
 
@@ -93,9 +101,9 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
 
         uint256 equityBefore = pool.seniorPrincipal() + pool.juniorPrincipal();
 
-        _open(aliceAccount, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 0, true);
         bytes[] memory priceData = _mockPythUpdateData(1e8);
         vm.roll(block.number + 1);
         router.executeOrder(1, priceData);
@@ -138,11 +146,20 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
     function test_I1_CloseWithMarginDeltaMustRevert() public {
         address aliceAccount = alice;
         _fundTrader(alice, 50_000e6);
-        _open(aliceAccount, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.LONG, 20_000e18, 5000e6, 1e8);
 
         vm.prank(alice);
         (bool ok,) = address(router)
-            .call(abi.encodeWithSelector(router.commitOrder.selector, CfdTypes.Side.BULL, 20_000e18, 500e6, 0, true));
+            .call(
+                abi.encodeWithSelector(
+                    bytes4(keccak256("commitOrder(uint8,uint256,uint256,uint256,bool)")),
+                    CfdTypes.Side.LONG,
+                    20_000e18,
+                    500e6,
+                    0,
+                    true
+                )
+            );
         assertFalse(ok, "Close orders with positive marginDelta must be rejected");
     }
 
@@ -178,7 +195,7 @@ contract AuditLatestFindingsFailing_VPI is BasePerpTest {
 
         _fundTrader(carol, 50_000e6);
         vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BEAR, 200_000e18, 40_000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 200_000e18, 40_000e6, 1e8, false);
         bytes[] memory empty = _mockPythUpdateData();
         router.executeOrder(1, empty);
 
@@ -187,7 +204,7 @@ contract AuditLatestFindingsFailing_VPI is BasePerpTest {
         uint256 aliceBalBefore = clearinghouse.balanceUsdc(aliceAccount);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8, false);
         router.executeOrder(2, _mockPythUpdateData(1e8));
 
         usdc.mint(address(pool), 9_000_000e6);
@@ -195,7 +212,7 @@ contract AuditLatestFindingsFailing_VPI is BasePerpTest {
         pool.recordProtocolInflow(9_000_000e6);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 0, true);
         bytes[] memory closePrice = _mockPythUpdateData(1e8);
         router.executeOrder(3, closePrice);
 
@@ -245,16 +262,16 @@ contract AuditLatestFindingsFailing_MevDrift is BasePerpTest {
         bases.push(1e8);
         bases.push(1e8);
 
-        engineLens = new CfdEngineLens(address(engine));
-        pletherOracle = new PletherOracle(
-            address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
+        router = _deployLegacyOrderRouter(
+            address(engine),
+            address(new CfdEngineLens(address(engine))),
+            address(pool),
+            address(
+                new PletherOracle(
+                    address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
+                )
+            )
         );
-        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
-        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
-        router = new OrderRouter(
-            address(engine), address(engineLens), address(pool), address(pletherOracle), address(keeperSidecar)
-        );
-        assertEq(address(router), predictedRouter);
         engine.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
@@ -265,11 +282,11 @@ contract AuditLatestFindingsFailing_MevDrift is BasePerpTest {
         vm.deal(alice, 10 ether);
     }
 
-    function test_H2_CrossBlockPublishAfterCommitReverts() public {
+    function test_H2_SameBlockPublishAfterCommitReturnsPending() public {
         vm.warp(1000);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, 1e8, false);
 
         mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1001);
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 1001);
@@ -278,8 +295,11 @@ contract AuditLatestFindingsFailing_MevDrift is BasePerpTest {
         bytes[] memory updateData = new bytes[](1);
         updateData[0] = "";
 
-        vm.expectRevert(IOrderRouterErrors.OrderRouter__MevDetected.selector);
-        router.executeOrder(1, updateData);
+        OrderV2Types.ExecutionResult memory result = router.executeOrder(1, updateData);
+
+        assertEq(uint8(result.status), uint8(OrderV2Types.LifecycleStatus.Pending));
+        assertEq(uint8(result.pendingReason), uint8(OrderV2Types.PendingReason.SameBlock));
+        assertEq(router.nextExecuteId(), 1, "Same-block execution must leave the FIFO head pending");
     }
 
 }

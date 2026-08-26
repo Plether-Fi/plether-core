@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
-import {OrderRouter} from "@plether/perps/OrderRouter.sol";
-import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
-import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {IPyth, PythStructs} from "@plether/shared/interfaces/IPyth.sol";
 import {DecimalConstants} from "@plether/shared/libraries/DecimalConstants.sol";
@@ -12,7 +9,7 @@ import {MockOracle} from "@plether/test-utils/MockOracle.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
 import {Test} from "forge-std/Test.sol";
 
-contract OracleParityBasketPriceHarness is OrderRouter {
+contract OracleParityBasketPriceHarness {
 
     IPyth internal localPyth;
     bytes32[] internal localPythFeedIds;
@@ -25,17 +22,8 @@ contract OracleParityBasketPriceHarness is OrderRouter {
         bytes32[] memory feedIds,
         uint256[] memory quantities,
         uint256[] memory basePrices,
-        bool[] memory inversions,
-        address keeperSidecar
-    )
-        OrderRouter(
-            address(1),
-            address(1),
-            address(1),
-            address(new PletherOracle(address(1), address(1), pyth, feedIds, quantities, basePrices, inversions)),
-            keeperSidecar
-        )
-    {
+        bool[] memory inversions
+    ) {
         localPyth = IPyth(pyth);
         localPythFeedIds = feedIds;
         localQuantities = quantities;
@@ -168,12 +156,8 @@ contract OracleParityIntegrationTest is Test {
         inversions[1] = true;
         inversions[3] = true;
 
-        address predictedHarness = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
-        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedHarness);
-        OracleParityBasketPriceHarness harness = new OracleParityBasketPriceHarness(
-            address(mockPyth), pythIds, weights, basePrices, inversions, address(keeperSidecar)
-        );
-        assertEq(address(harness), predictedHarness, "predicted Router harness CREATE address");
+        OracleParityBasketPriceHarness harness =
+            new OracleParityBasketPriceHarness(address(mockPyth), pythIds, weights, basePrices, inversions);
 
         mockPyth.setPrice(pythIds[0], int64(108_000_000), int32(-8), 1001);
         mockPyth.setPrice(pythIds[1], int64(15_670), int32(-2), 1001);

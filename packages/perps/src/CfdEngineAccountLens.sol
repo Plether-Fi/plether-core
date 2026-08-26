@@ -318,7 +318,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
 
         uint256 lots = CfdMath.sizeToLots(pos.size);
         uint256 entryCostUsdcAtoms = engineContract.positionEntryCostUsdcAtoms(account);
-        uint256 maximumCollectibleUsdc = pos.side == CfdTypes.Side.BULL
+        uint256 maximumCollectibleUsdc = pos.side == CfdTypes.Side.LONG
             ? lots * engineContract.CAP_PRICE() - entryCostUsdcAtoms
             : entryCostUsdcAtoms;
         uint256 candidateCapUsdc =

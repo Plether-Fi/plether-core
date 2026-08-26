@@ -5,6 +5,7 @@ import {BasePerpTest} from "./BasePerpTest.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
 import {PositionProtectionBook} from "@plether/perps/PositionProtectionBook.sol";
 import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
@@ -56,10 +57,10 @@ contract PositionProtectionTest is BasePerpTest {
     uint256 internal constant MARK_PRICE = 1e8;
     uint256 internal constant POSITION_SIZE = 10_000e18;
     uint256 internal constant POSITION_MARGIN_USDC = 2000e6;
-    uint256 internal constant BULL_TAKE_PROFIT = 90_000_000;
-    uint256 internal constant BULL_STOP_LOSS = 110_000_000;
-    uint256 internal constant BEAR_TAKE_PROFIT = 110_000_000;
-    uint256 internal constant BEAR_STOP_LOSS = 90_000_000;
+    uint256 internal constant LONG_TAKE_PROFIT = 90_000_000;
+    uint256 internal constant LONG_STOP_LOSS = 110_000_000;
+    uint256 internal constant SHORT_TAKE_PROFIT = 110_000_000;
+    uint256 internal constant SHORT_STOP_LOSS = 90_000_000;
     uint256 internal constant FRIDAY_FAD_START = 1_709_933_400;
     bytes32 internal constant RISK_OFF_RESERVES_REFUNDED_TOPIC =
         keccak256("RiskOffOrderReservesRefunded(address,uint256,uint256)");
@@ -92,14 +93,14 @@ contract PositionProtectionTest is BasePerpTest {
     function test_CreatePositionProtection_RejectsNoPositionAndDegradedMode() public {
         vm.prank(ALICE);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__NoOpenPosition.selector);
-        protectionActions.createPositionProtection(_params(BULL_TAKE_PROFIT, BULL_STOP_LOSS));
+        protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
 
-        _open(ALICE, CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
+        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
         stdstore.target(address(engine)).sig("degradedMode()").checked_write(true);
 
         vm.prank(ALICE);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__DegradedMode.selector);
-        protectionActions.createPositionProtection(_params(BULL_TAKE_PROFIT, BULL_STOP_LOSS));
+        protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
 
         assertEq(
             router.getAccountReservations(ALICE).executionBountyUsdc,
@@ -109,7 +110,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_CreatePositionProtection_RejectsEmptyOrAboveCapThresholds() public {
-        _open(ALICE, CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
+        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
 
         vm.prank(ALICE);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidProtectionPrices.selector);
@@ -127,12 +128,12 @@ contract PositionProtectionTest is BasePerpTest {
         );
     }
 
-    function test_CreatePositionProtection_ValidatesBullGeometryAndArmsOffQueue() public {
-        _open(ALICE, CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
+    function test_CreatePositionProtection_ValidatesLongGeometryAndArmsOffQueue() public {
+        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
 
         vm.prank(ALICE);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidProtectionPrices.selector);
-        protectionActions.createPositionProtection(_params(BULL_STOP_LOSS, BULL_TAKE_PROFIT));
+        protectionActions.createPositionProtection(_params(LONG_STOP_LOSS, LONG_TAKE_PROFIT));
 
         vm.prank(ALICE);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionTriggerAlreadyMet.selector);
@@ -140,17 +141,17 @@ contract PositionProtectionTest is BasePerpTest {
 
         uint256 freeBefore = _freeSettlementUsdc(ALICE);
         vm.prank(ALICE);
-        uint64 protectionId = protectionActions.createPositionProtection(_params(BULL_TAKE_PROFIT, BULL_STOP_LOSS));
+        uint64 protectionId = protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
 
         PositionProtectionTypes.PositionProtectionView memory protection =
             protectionViews.getPositionProtection(protectionId);
         assertEq(protectionId, 1, "first protection id");
         assertEq(protectionViews.activePositionProtectionId(ALICE), protectionId, "active protection id");
         assertEq(protection.account, ALICE, "protection owner");
-        assertEq(uint8(protection.side), uint8(CfdTypes.Side.BULL), "protected side");
+        assertEq(uint8(protection.side), uint8(CfdTypes.Side.LONG), "protected side");
         assertEq(protection.size, POSITION_SIZE, "full position size");
-        assertEq(protection.takeProfitTriggerPrice, BULL_TAKE_PROFIT, "take-profit threshold");
-        assertEq(protection.stopLossTriggerPrice, BULL_STOP_LOSS, "stop-loss threshold");
+        assertEq(protection.takeProfitTriggerPrice, LONG_TAKE_PROFIT, "take-profit threshold");
+        assertEq(protection.stopLossTriggerPrice, LONG_STOP_LOSS, "stop-loss threshold");
         assertEq(
             uint8(protection.status),
             uint8(PositionProtectionTypes.PositionProtectionStatus.Armed),
@@ -171,87 +172,92 @@ contract PositionProtectionTest is BasePerpTest {
         );
     }
 
-    function test_CreatePositionProtection_ValidatesBearGeometry() public {
-        _open(ALICE, CfdTypes.Side.BEAR, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
+    function test_CreatePositionProtection_ValidatesShortGeometry() public {
+        _open(ALICE, CfdTypes.Side.SHORT, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
 
         vm.prank(ALICE);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidProtectionPrices.selector);
-        protectionActions.createPositionProtection(_params(BEAR_STOP_LOSS, BEAR_TAKE_PROFIT));
+        protectionActions.createPositionProtection(_params(SHORT_STOP_LOSS, SHORT_TAKE_PROFIT));
 
         vm.prank(ALICE);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionTriggerAlreadyMet.selector);
         protectionActions.createPositionProtection(_params(MARK_PRICE, 0));
 
         vm.prank(ALICE);
-        uint64 protectionId = protectionActions.createPositionProtection(_params(BEAR_TAKE_PROFIT, BEAR_STOP_LOSS));
+        uint64 protectionId = protectionActions.createPositionProtection(_params(SHORT_TAKE_PROFIT, SHORT_STOP_LOSS));
 
         PositionProtectionTypes.PositionProtectionView memory protection =
             protectionViews.getPositionProtection(protectionId);
-        assertEq(uint8(protection.side), uint8(CfdTypes.Side.BEAR), "protected side");
+        assertEq(uint8(protection.side), uint8(CfdTypes.Side.SHORT), "protected side");
         assertEq(
             uint8(protection.status),
             uint8(PositionProtectionTypes.PositionProtectionStatus.Armed),
-            "bear protection should arm"
+            "short protection should arm"
         );
     }
 
-    function test_BullTakeProfit_TriggersAtEqualityAndRejectsWrongDirection() public {
-        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.BULL, BULL_TAKE_PROFIT, 0);
+    function test_LongTakeProfit_TriggersAtEqualityAndRejectsWrongDirection() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
 
-        _expectTriggerNotMet(protectionId, BULL_TAKE_PROFIT + 2);
-        uint64 linkedOrderId = _triggerAt(protectionId, BULL_TAKE_PROFIT);
+        _expectTriggerNotMet(protectionId, LONG_TAKE_PROFIT + 2);
+        uint64 linkedOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
 
         _assertTriggered(
             protectionId,
             linkedOrderId,
             PositionProtectionTypes.PositionProtectionTriggerLeg.TakeProfit,
-            BULL_TAKE_PROFIT
+            LONG_TAKE_PROFIT
         );
     }
 
-    function test_BullStopLoss_TriggersAtEqualityAndRejectsWrongDirection() public {
-        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.BULL, 0, BULL_STOP_LOSS);
+    function test_LongStopLoss_TriggersAtEqualityAndRejectsWrongDirection() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, 0, LONG_STOP_LOSS);
 
-        _expectTriggerNotMet(protectionId, BULL_STOP_LOSS - 1);
-        uint64 linkedOrderId = _triggerAt(protectionId, BULL_STOP_LOSS);
+        _expectTriggerNotMet(protectionId, LONG_STOP_LOSS - 1);
+        uint64 linkedOrderId = _triggerAt(protectionId, LONG_STOP_LOSS);
 
         _assertTriggered(
-            protectionId, linkedOrderId, PositionProtectionTypes.PositionProtectionTriggerLeg.StopLoss, BULL_STOP_LOSS
+            protectionId, linkedOrderId, PositionProtectionTypes.PositionProtectionTriggerLeg.StopLoss, LONG_STOP_LOSS
         );
     }
 
-    function test_BearTakeProfit_TriggersAtEqualityAndRejectsWrongDirection() public {
-        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.BEAR, BEAR_TAKE_PROFIT, 0);
+    function test_ShortTakeProfit_TriggersAtEqualityAndRejectsWrongDirection() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.SHORT, SHORT_TAKE_PROFIT, 0);
 
-        _expectTriggerNotMet(protectionId, BEAR_TAKE_PROFIT - 1);
-        uint64 linkedOrderId = _triggerAt(protectionId, BEAR_TAKE_PROFIT);
+        _expectTriggerNotMet(protectionId, SHORT_TAKE_PROFIT - 1);
+        uint64 linkedOrderId = _triggerAt(protectionId, SHORT_TAKE_PROFIT);
 
         _assertTriggered(
             protectionId,
             linkedOrderId,
             PositionProtectionTypes.PositionProtectionTriggerLeg.TakeProfit,
-            BEAR_TAKE_PROFIT
+            SHORT_TAKE_PROFIT
+        );
+        assertEq(
+            _orderRecord(linkedOrderId).core.targetPrice,
+            1,
+            "linked close should use the canonical unbounded SHORT-close sentinel"
         );
     }
 
-    function test_BearStopLoss_TriggersAtEqualityAndRejectsWrongDirection() public {
-        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.BEAR, 0, BEAR_STOP_LOSS);
+    function test_ShortStopLoss_TriggersAtEqualityAndRejectsWrongDirection() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.SHORT, 0, SHORT_STOP_LOSS);
 
-        _expectTriggerNotMet(protectionId, BEAR_STOP_LOSS + 2);
-        uint64 linkedOrderId = _triggerAt(protectionId, BEAR_STOP_LOSS);
+        _expectTriggerNotMet(protectionId, SHORT_STOP_LOSS + 2);
+        uint64 linkedOrderId = _triggerAt(protectionId, SHORT_STOP_LOSS);
 
         _assertTriggered(
-            protectionId, linkedOrderId, PositionProtectionTypes.PositionProtectionTriggerLeg.StopLoss, BEAR_STOP_LOSS
+            protectionId, linkedOrderId, PositionProtectionTypes.PositionProtectionTriggerLeg.StopLoss, SHORT_STOP_LOSS
         );
     }
 
     function test_TriggeredProtection_RejectsReplacementAndCancellation() public {
-        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.BULL, BULL_TAKE_PROFIT, 0);
-        uint64 linkedOrderId = _triggerAt(protectionId, BULL_TAKE_PROFIT);
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
+        uint64 linkedOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
 
         vm.startPrank(ALICE);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionNotArmed.selector);
-        protectionActions.replacePositionProtection(protectionId, _params(BULL_TAKE_PROFIT - 1, 0));
+        protectionActions.replacePositionProtection(protectionId, _params(LONG_TAKE_PROFIT - 1, 0));
         vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionNotArmed.selector);
         protectionActions.cancelPositionProtection(protectionId);
         vm.stopPrank();
@@ -272,18 +278,18 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_TriggerPositionProtection_RejectsSameBlockAndOldPublishTime() public {
-        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.BULL, BULL_TAKE_PROFIT, 0);
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
         PositionProtectionTypes.PositionProtectionView memory armed =
             protectionViews.getPositionProtection(protectionId);
 
-        bytes[] memory sameBlockData = _priceData(BULL_TAKE_PROFIT);
+        bytes[] memory sameBlockData = _priceData(LONG_TAKE_PROFIT);
         vm.prank(TRIGGER_KEEPER);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__SameBlockTrigger.selector);
         protectionActions.triggerPositionProtection(protectionId, sameBlockData);
 
         vm.roll(block.number + 1);
         vm.warp(block.timestamp + 1);
-        baseMockPyth.setAllPrices(_basePythFeedIds(), int64(uint64(BULL_TAKE_PROFIT)), 0, int32(-8), armed.armedAt);
+        baseMockPyth.setAllPrices(_basePythFeedIds(), int64(uint64(LONG_TAKE_PROFIT)), 0, int32(-8), armed.armedAt);
         bytes[] memory oldPublishData = new bytes[](1);
         oldPublishData[0] = hex"01";
 
@@ -307,14 +313,14 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_TriggeredClose_AppendsToGlobalFifoAndExecutesThroughOrdinaryPath() public {
-        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.BULL, BULL_TAKE_PROFIT, 0);
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
 
         vm.prank(BOB);
-        router.commitOrder(CfdTypes.Side.BEAR, POSITION_SIZE, POSITION_MARGIN_USDC, 0, false);
+        router.commitOrder(CfdTypes.Side.SHORT, POSITION_SIZE, POSITION_MARGIN_USDC, 0, false);
         assertEq(router.nextExecuteId(), 1, "foreign order should be queue head");
 
         uint256 triggerKeeperBefore = clearinghouse.balanceUsdc(TRIGGER_KEEPER);
-        uint64 linkedOrderId = _triggerAt(protectionId, BULL_TAKE_PROFIT);
+        uint64 linkedOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
         assertEq(linkedOrderId, 2, "triggered close should consume the next ordinary order id");
         assertEq(router.nextExecuteId(), 1, "triggered close must not jump the foreign head");
         assertEq(router.globalTailOrderId(), linkedOrderId, "triggered close should join the FIFO tail");
@@ -330,8 +336,12 @@ contract PositionProtectionTest is BasePerpTest {
         assertEq(closeOrder.account, ALICE, "linked close owner");
         assertEq(closeOrder.sizeDelta, POSITION_SIZE, "linked close should cover the full position");
         assertEq(closeOrder.marginDelta, 0, "linked close margin delta");
-        assertEq(closeOrder.targetPrice, 0, "linked close should be market-style");
-        assertEq(uint8(closeOrder.side), uint8(CfdTypes.Side.BULL), "linked close side");
+        assertEq(
+            closeOrder.targetPrice,
+            engine.CAP_PRICE(),
+            "linked close should use the canonical unbounded LONG-close sentinel"
+        );
+        assertEq(uint8(closeOrder.side), uint8(CfdTypes.Side.LONG), "linked close side");
         assertTrue(closeOrder.isClose, "linked order should be reduce-only");
         assertEq(router.pendingCloseSize(ALICE), POSITION_SIZE, "linked close aggregate");
         assertEq(
@@ -350,7 +360,7 @@ contract PositionProtectionTest is BasePerpTest {
         router.executeOrder(1, bobExecutionData);
 
         uint256 executionKeeperBefore = clearinghouse.balanceUsdc(EXECUTION_KEEPER);
-        bytes[] memory closeExecutionData = _mockPythUpdateData(BULL_TAKE_PROFIT);
+        bytes[] memory closeExecutionData = _mockPythUpdateData(LONG_TAKE_PROFIT);
         vm.prank(EXECUTION_KEEPER);
         router.executeOrder(linkedOrderId, closeExecutionData);
 
@@ -374,7 +384,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_TriggeredClose_ExecutesInDegradedModeBelowSettlementBufferWhileRawSolvent() public {
-        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.BULL, BULL_TAKE_PROFIT, 0);
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
 
         uint256 maxLiabilityUsdc = _maxLiability();
         uint256 settlementBufferUsdc = _settlementBufferTargetUsdc(maxLiabilityUsdc);
@@ -391,8 +401,8 @@ contract PositionProtectionTest is BasePerpTest {
         stdstore.target(address(engine)).sig("degradedMode()").checked_write(true);
         assertTrue(engine.degradedMode(), "setup should latch risk-off mode");
 
-        uint64 linkedOrderId = _triggerAt(protectionId, BULL_TAKE_PROFIT);
-        bytes[] memory executionData = _mockPythUpdateData(BULL_TAKE_PROFIT);
+        uint64 linkedOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
+        bytes[] memory executionData = _mockPythUpdateData(LONG_TAKE_PROFIT);
         vm.prank(EXECUTION_KEEPER);
         router.executeOrder(linkedOrderId, executionData);
 
@@ -411,11 +421,11 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_CancelPositionProtection_RefundsExactReserveAndClearsTradeLock() public {
-        _open(ALICE, CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
+        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
         uint256 freeBefore = _freeSettlementUsdc(ALICE);
 
         vm.prank(ALICE);
-        uint64 protectionId = protectionActions.createPositionProtection(_params(BULL_TAKE_PROFIT, BULL_STOP_LOSS));
+        uint64 protectionId = protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
         assertEq(_freeSettlementUsdc(ALICE), freeBefore - _totalProtectionBountyUsdc(), "reserve after create");
 
         vm.prank(ALICE);
@@ -441,8 +451,8 @@ contract PositionProtectionTest is BasePerpTest {
 
         _fundTrader(RISK_EXACT, fixture.exactOpeningMarginDeltaUsdc + fixture.protectionBountiesUsdc);
         _fundTrader(RISK_PLUS_ONE, fixture.plusOneOpeningMarginDeltaUsdc + fixture.protectionBountiesUsdc);
-        _open(RISK_EXACT, CfdTypes.Side.BULL, POSITION_SIZE, fixture.exactOpeningMarginDeltaUsdc, MARK_PRICE);
-        _open(RISK_PLUS_ONE, CfdTypes.Side.BULL, POSITION_SIZE, fixture.plusOneOpeningMarginDeltaUsdc, MARK_PRICE);
+        _open(RISK_EXACT, CfdTypes.Side.LONG, POSITION_SIZE, fixture.exactOpeningMarginDeltaUsdc, MARK_PRICE);
+        _open(RISK_PLUS_ONE, CfdTypes.Side.LONG, POSITION_SIZE, fixture.plusOneOpeningMarginDeltaUsdc, MARK_PRICE);
 
         assertEq(clearinghouse.pnlPledgeUsdc(RISK_EXACT), fixture.requirementUsdc, "exact pledge boundary");
         assertEq(clearinghouse.pnlPledgeUsdc(RISK_PLUS_ONE), fixture.requirementUsdc + 1, "one-atom pledge surplus");
@@ -455,12 +465,12 @@ contract PositionProtectionTest is BasePerpTest {
         );
         vm.prank(RISK_EXACT);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector);
-        protectionActions.createPositionProtection(_params(BULL_TAKE_PROFIT, BULL_STOP_LOSS));
+        protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
         assertEq(_freeSettlementUsdc(RISK_EXACT), exactFreeBefore, "risk failure must roll back the bounty lock");
         assertEq(protectionViews.activePositionProtectionId(RISK_EXACT), 0, "risk failure must not create protection");
 
         vm.prank(RISK_PLUS_ONE);
-        uint64 protectionId = protectionActions.createPositionProtection(_params(BULL_TAKE_PROFIT, BULL_STOP_LOSS));
+        uint64 protectionId = protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
         assertEq(
             uint8(protectionViews.getPositionProtection(protectionId).status),
             uint8(PositionProtectionTypes.PositionProtectionStatus.Armed),
@@ -476,7 +486,7 @@ contract PositionProtectionTest is BasePerpTest {
         _fundTrader(
             RISK_EXACT, fixture.exactOpeningMarginDeltaUsdc + fixture.protectionBountiesUsdc + surplusFreeSettlementUsdc
         );
-        _open(RISK_EXACT, CfdTypes.Side.BULL, POSITION_SIZE, fixture.exactOpeningMarginDeltaUsdc, MARK_PRICE);
+        _open(RISK_EXACT, CfdTypes.Side.LONG, POSITION_SIZE, fixture.exactOpeningMarginDeltaUsdc, MARK_PRICE);
 
         assertEq(clearinghouse.pnlPledgeUsdc(RISK_EXACT), fixture.requirementUsdc, "price pledge at equality");
         assertEq(
@@ -487,7 +497,7 @@ contract PositionProtectionTest is BasePerpTest {
 
         vm.prank(RISK_EXACT);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector);
-        protectionActions.createPositionProtection(_params(BULL_TAKE_PROFIT, BULL_STOP_LOSS));
+        protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
 
         assertEq(
             _freeSettlementUsdc(RISK_EXACT),
@@ -502,16 +512,16 @@ contract PositionProtectionTest is BasePerpTest {
         RiskBoundaryFixture memory fixture = _riskBoundaryFixture(riskParams, riskParams.initMarginBps);
 
         _fundTrader(RISK_EXACT, fixture.exactOpeningMarginDeltaUsdc + fixture.protectionBountiesUsdc);
-        _open(RISK_EXACT, CfdTypes.Side.BULL, POSITION_SIZE, fixture.exactOpeningMarginDeltaUsdc, MARK_PRICE);
+        _open(RISK_EXACT, CfdTypes.Side.LONG, POSITION_SIZE, fixture.exactOpeningMarginDeltaUsdc, MARK_PRICE);
         assertEq(clearinghouse.pnlPledgeUsdc(RISK_EXACT), fixture.requirementUsdc, "pledge starts at equality");
 
         vm.prank(RISK_EXACT);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector);
-        protectionActions.createPositionProtection(_params(BULL_TAKE_PROFIT, BULL_STOP_LOSS));
+        protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
 
         _seedAuthenticatedTraderClaim(RISK_EXACT, 1);
         vm.prank(RISK_EXACT);
-        uint64 protectionId = protectionActions.createPositionProtection(_params(BULL_TAKE_PROFIT, BULL_STOP_LOSS));
+        uint64 protectionId = protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
 
         assertEq(engine.traderClaimBalanceUsdc(RISK_EXACT), 1, "fixture must add one same-account claim atom");
         assertEq(
@@ -539,8 +549,8 @@ contract PositionProtectionTest is BasePerpTest {
 
         _fundTrader(RISK_EXACT, fixture.exactOpeningMarginDeltaUsdc + fixture.protectionBountiesUsdc);
         _fundTrader(RISK_PLUS_ONE, fixture.plusOneOpeningMarginDeltaUsdc + fixture.protectionBountiesUsdc);
-        _open(RISK_EXACT, CfdTypes.Side.BULL, POSITION_SIZE, fixture.exactOpeningMarginDeltaUsdc, MARK_PRICE);
-        _open(RISK_PLUS_ONE, CfdTypes.Side.BULL, POSITION_SIZE, fixture.plusOneOpeningMarginDeltaUsdc, MARK_PRICE);
+        _open(RISK_EXACT, CfdTypes.Side.LONG, POSITION_SIZE, fixture.exactOpeningMarginDeltaUsdc, MARK_PRICE);
+        _open(RISK_PLUS_ONE, CfdTypes.Side.LONG, POSITION_SIZE, fixture.plusOneOpeningMarginDeltaUsdc, MARK_PRICE);
 
         assertEq(clearinghouse.pnlPledgeUsdc(RISK_EXACT), fixture.requirementUsdc, "exact FAD pledge boundary");
         assertEq(clearinghouse.pnlPledgeUsdc(RISK_PLUS_ONE), fixture.requirementUsdc + 1, "one-atom FAD pledge surplus");
@@ -553,11 +563,11 @@ contract PositionProtectionTest is BasePerpTest {
         assertGe(exactFreeBefore, fixture.protectionBountiesUsdc, "exact-boundary account can fund the bounty itself");
         vm.prank(RISK_EXACT);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector);
-        protectionActions.createPositionProtection(_params(BULL_TAKE_PROFIT, BULL_STOP_LOSS));
+        protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
         assertEq(_freeSettlementUsdc(RISK_EXACT), exactFreeBefore, "risk failure must roll back the bounty lock");
 
         vm.prank(RISK_PLUS_ONE);
-        uint64 protectionId = protectionActions.createPositionProtection(_params(BULL_TAKE_PROFIT, BULL_STOP_LOSS));
+        uint64 protectionId = protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
         assertEq(
             uint8(protectionViews.getPositionProtection(protectionId).status),
             uint8(PositionProtectionTypes.PositionProtectionStatus.Armed),
@@ -573,8 +583,8 @@ contract PositionProtectionTest is BasePerpTest {
 
         uint256 size = 100_000e18;
         uint256 depth = pool.totalAssets();
-        _open(ALICE, CfdTypes.Side.BEAR, size, 5000e6, MARK_PRICE, depth);
-        _open(BOB, CfdTypes.Side.BULL, size, 5000e6, MARK_PRICE, depth);
+        _open(ALICE, CfdTypes.Side.SHORT, size, 5000e6, MARK_PRICE, depth);
+        _open(BOB, CfdTypes.Side.LONG, size, 5000e6, MARK_PRICE, depth);
         (,,,,,, int256 vpiAccrued) = engine.positions(BOB);
         assertLt(vpiAccrued, 0, "rebate-side fixture must have negative lifetime VPI");
 
@@ -586,7 +596,7 @@ contract PositionProtectionTest is BasePerpTest {
         uint256 freeBefore = _freeSettlementUsdc(BOB);
         vm.prank(BOB);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector);
-        protectionActions.createPositionProtection(_params(BULL_TAKE_PROFIT, BULL_STOP_LOSS));
+        protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
 
         assertEq(
             clearinghouse.vpiRebateReserveUsdc(BOB), reserveTargetUsdc - 1, "failed action must not repair VPI backing"
@@ -596,7 +606,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_PostLockRisk_RejectsCarryLeftUncoveredByLockCheckpoint() public {
-        _open(ALICE, CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
+        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
         _withdrawAllFreeSettlement(ALICE);
 
         stdstore.target(address(router)).sig("closeOrderExecutionBountyUsdc()").checked_write(uint256(0));
@@ -608,7 +618,7 @@ contract PositionProtectionTest is BasePerpTest {
 
         vm.prank(ALICE);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector);
-        protectionActions.createPositionProtection(_params(BULL_TAKE_PROFIT, BULL_STOP_LOSS));
+        protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
 
         assertEq(
             engine.unsettledCarryUsdc(ALICE),
@@ -620,28 +630,28 @@ contract PositionProtectionTest is BasePerpTest {
 
     function test_Pause_BlocksNewAndReplacementButAllowsCancelAndTrigger() public {
         uint64 cancelledProtectionId = _createProtectionFor(
-            ALICE, CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, BULL_TAKE_PROFIT, BULL_STOP_LOSS
+            ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, LONG_TAKE_PROFIT, LONG_STOP_LOSS
         );
         uint64 triggeredProtectionId =
-            _createProtectionFor(BOB, CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, BULL_TAKE_PROFIT, 0);
+            _createProtectionFor(BOB, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, LONG_TAKE_PROFIT, 0);
 
         routerAdmin.pause();
 
         vm.prank(ALICE);
         vm.expectRevert(Pausable.EnforcedPause.selector);
-        protectionActions.replacePositionProtection(cancelledProtectionId, _params(BULL_TAKE_PROFIT - 1, 0));
+        protectionActions.replacePositionProtection(cancelledProtectionId, _params(LONG_TAKE_PROFIT - 1, 0));
 
         vm.prank(CAROL);
         vm.expectRevert(Pausable.EnforcedPause.selector);
         protectionActions.commitOpenOrderWithProtection(
-            CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, 0, _params(BULL_TAKE_PROFIT, BULL_STOP_LOSS)
+            CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0, _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS)
         );
 
         vm.prank(ALICE);
         protectionActions.cancelPositionProtection(cancelledProtectionId);
         assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "pause must not block cancellation");
 
-        uint64 linkedOrderId = _triggerAt(triggeredProtectionId, BULL_TAKE_PROFIT);
+        uint64 linkedOrderId = _triggerAt(triggeredProtectionId, LONG_TAKE_PROFIT);
         assertEq(
             uint8(protectionViews.getPositionProtection(triggeredProtectionId).status),
             uint8(PositionProtectionTypes.PositionProtectionStatus.Triggered),
@@ -652,10 +662,10 @@ contract PositionProtectionTest is BasePerpTest {
 
     function test_FeatureOff_BlocksNewAndReplacementButAllowsCancelAndTrigger() public {
         uint64 cancelledProtectionId = _createProtectionFor(
-            ALICE, CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, BULL_TAKE_PROFIT, BULL_STOP_LOSS
+            ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, LONG_TAKE_PROFIT, LONG_STOP_LOSS
         );
         uint64 triggeredProtectionId =
-            _createProtectionFor(BOB, CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, BULL_TAKE_PROFIT, 0);
+            _createProtectionFor(BOB, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, LONG_TAKE_PROFIT, 0);
 
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         config.positionProtectionCommitsEnabled = false;
@@ -663,19 +673,19 @@ contract PositionProtectionTest is BasePerpTest {
 
         vm.prank(ALICE);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionDisabled.selector);
-        protectionActions.replacePositionProtection(cancelledProtectionId, _params(BULL_TAKE_PROFIT - 1, 0));
+        protectionActions.replacePositionProtection(cancelledProtectionId, _params(LONG_TAKE_PROFIT - 1, 0));
 
         vm.prank(CAROL);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionDisabled.selector);
         protectionActions.commitOpenOrderWithProtection(
-            CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, 0, _params(BULL_TAKE_PROFIT, BULL_STOP_LOSS)
+            CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0, _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS)
         );
 
         vm.prank(ALICE);
         protectionActions.cancelPositionProtection(cancelledProtectionId);
         assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "feature-off must not block cancellation");
 
-        uint64 linkedOrderId = _triggerAt(triggeredProtectionId, BULL_TAKE_PROFIT);
+        uint64 linkedOrderId = _triggerAt(triggeredProtectionId, LONG_TAKE_PROFIT);
         assertEq(
             uint8(protectionViews.getPositionProtection(triggeredProtectionId).status),
             uint8(PositionProtectionTypes.PositionProtectionStatus.Triggered),
@@ -685,14 +695,14 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_ReplacePositionProtection_RemainsAvailableInDegradedMode() public {
-        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.BULL, BULL_TAKE_PROFIT, 0);
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
         vm.roll(block.number + 1);
         vm.warp(block.timestamp + 1);
         stdstore.target(address(engine)).sig("degradedMode()").checked_write(true);
         assertTrue(engine.degradedMode(), "setup should enter degraded mode");
 
         vm.prank(ALICE);
-        protectionActions.replacePositionProtection(protectionId, _params(BULL_TAKE_PROFIT - 1, 0));
+        protectionActions.replacePositionProtection(protectionId, _params(LONG_TAKE_PROFIT - 1, 0));
 
         PositionProtectionTypes.PositionProtectionView memory replaced =
             protectionViews.getPositionProtection(protectionId);
@@ -701,7 +711,7 @@ contract PositionProtectionTest is BasePerpTest {
             uint8(PositionProtectionTypes.PositionProtectionStatus.Armed),
             "geometry-only replacement should remain available in degraded mode"
         );
-        assertEq(replaced.takeProfitTriggerPrice, BULL_TAKE_PROFIT - 1, "replacement threshold");
+        assertEq(replaced.takeProfitTriggerPrice, LONG_TAKE_PROFIT - 1, "replacement threshold");
         assertEq(replaced.armedAt, block.timestamp, "replacement should restart time separation");
         assertEq(replaced.armedBlock, block.number, "replacement should restart block separation");
         assertEq(
@@ -712,14 +722,14 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_ProtectionBook_NonTriggerActionsRejectEthAndNeverCustodyIt() public {
-        PositionProtectionTypes.PositionProtectionParams memory params = _params(BULL_TAKE_PROFIT, BULL_STOP_LOSS);
+        PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS);
         bytes[] memory calls = new bytes[](4);
         calls[0] = abi.encodeCall(IPositionProtectionActions.createPositionProtection, (params));
         calls[1] = abi.encodeCall(IPositionProtectionActions.replacePositionProtection, (uint64(1), params));
         calls[2] = abi.encodeCall(IPositionProtectionActions.cancelPositionProtection, (uint64(1)));
         calls[3] = abi.encodeCall(
             IPositionProtectionActions.commitOpenOrderWithProtection,
-            (CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, 0, params)
+            (CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0, params)
         );
 
         vm.deal(ALICE, calls.length);
@@ -747,18 +757,15 @@ contract PositionProtectionTest is BasePerpTest {
         protectionBook.forfeitOnLiquidation(ALICE);
     }
 
-    function test_Router_IgnoresBookTrailingMetadataFromUntrustedCaller() public {
-        bytes memory commitCall = abi.encodeWithSelector(
-            router.commitOrder.selector, CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, 0, false
-        );
+    function test_Router_RejectsUntrustedProtectionHostMetadata() public {
+        OrderV2Types.OrderRequest memory protectedOpenRequest;
         vm.prank(BOB);
-        (bool commitSuccess,) = address(router).call(abi.encodePacked(commitCall, abi.encode(ALICE)));
-        assertTrue(commitSuccess, "ordinary callers may still submit canonical orders with ignored trailing bytes");
-        assertEq(_orderRecord(1).core.account, BOB, "only the Book may supply a trailing canonical account");
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__Unauthorized.selector);
+        router.commitProtectedOpen(ALICE, protectedOpenRequest);
 
-        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.BULL, BULL_TAKE_PROFIT, 0);
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
         bytes memory refreshCall =
-            abi.encodeWithSelector(router.updateMarkPrice.selector, _mockPythUpdateData(BULL_TAKE_PROFIT));
+            abi.encodeWithSelector(router.updateMarkPrice.selector, _mockPythUpdateData(LONG_TAKE_PROFIT));
         vm.prank(CAROL);
         (bool refreshSuccess,) =
             address(router).call(abi.encodePacked(refreshCall, abi.encode(CAROL, uint256(protectionId))));
@@ -772,8 +779,8 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_TriggerPositionProtection_RefundsUnusedEthAndLeavesBookBalanceZero() public {
-        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.BULL, BULL_TAKE_PROFIT, 0);
-        bytes[] memory updateData = _mockPythUpdateData(BULL_TAKE_PROFIT);
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
+        bytes[] memory updateData = _mockPythUpdateData(LONG_TAKE_PROFIT);
         vm.deal(TRIGGER_KEEPER, 1 ether);
         uint256 keeperEthBefore = TRIGGER_KEEPER.balance;
 
@@ -791,11 +798,11 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_ActiveProtection_BlocksDiscretionaryOrdersButAllowsAddMargin() public {
-        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.BULL, BULL_TAKE_PROFIT, 0);
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
 
         vm.prank(ALICE);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionActive.selector);
-        router.commitOrder(CfdTypes.Side.BULL, POSITION_SIZE, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, POSITION_SIZE, 0, 0, true);
 
         (, uint256 marginBefore,,,,,) = engine.positions(ALICE);
         vm.prank(ALICE);
@@ -803,14 +810,24 @@ contract PositionProtectionTest is BasePerpTest {
         (, uint256 marginAfter,,,,,) = engine.positions(ALICE);
         assertEq(marginAfter, marginBefore + 100e6, "protection should not block add-margin safety action");
 
-        _triggerAt(protectionId, BULL_TAKE_PROFIT);
+        _triggerAt(protectionId, LONG_TAKE_PROFIT);
         vm.prank(ALICE);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionActive.selector);
-        router.commitOrder(CfdTypes.Side.BULL, POSITION_SIZE, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, POSITION_SIZE, 0, 0, true);
+    }
+
+    function test_ActiveProtection_BlocksAttachedOpenWithCanonicalSelector() public {
+        _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
+
+        vm.prank(ALICE);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionActive.selector);
+        protectionActions.commitOpenOrderWithProtection(
+            CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0, _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS)
+        );
     }
 
     function test_Liquidation_ArmedProtectionForfeitsBothBountiesAndTerminalizes() public {
-        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.BULL, 0, BULL_STOP_LOSS);
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, 0, LONG_STOP_LOSS);
         _withdrawAllFreeSettlement(ALICE);
 
         uint256 treasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
@@ -838,9 +855,9 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_Liquidation_TriggeredProtectionForfeitsLinkedCloseBountyExactlyOnce() public {
-        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.BULL, 0, BULL_STOP_LOSS);
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, 0, LONG_STOP_LOSS);
         _withdrawAllFreeSettlement(ALICE);
-        uint64 linkedOrderId = _triggerAt(protectionId, BULL_STOP_LOSS);
+        uint64 linkedOrderId = _triggerAt(protectionId, LONG_STOP_LOSS);
 
         uint256 treasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
         vm.prank(EXECUTION_KEEPER);
@@ -875,7 +892,7 @@ contract PositionProtectionTest is BasePerpTest {
     function test_AttachedOpen_InheritsSettlementBufferAdmissionAtCommit() public {
         uint256 size = 100_000e18;
         uint256 marginUsdc = 5000e6;
-        _open(BOB, CfdTypes.Side.BEAR, size, marginUsdc, MARK_PRICE);
+        _open(BOB, CfdTypes.Side.SHORT, size, marginUsdc, MARK_PRICE);
 
         uint256 maxLiabilityUsdc = _maxLiability();
         uint256 settlementBufferUsdc = _settlementBufferTargetUsdc(maxLiabilityUsdc);
@@ -890,7 +907,7 @@ contract PositionProtectionTest is BasePerpTest {
         );
         assertEq(
             engineLens.previewOpenRevertCode(
-                ALICE, CfdTypes.Side.BULL, size, marginUsdc, MARK_PRICE, uint64(block.timestamp)
+                ALICE, CfdTypes.Side.LONG, size, marginUsdc, MARK_PRICE, uint64(block.timestamp)
             ),
             uint8(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED),
             "the attached parent must inherit the ordinary open buffer gate"
@@ -905,7 +922,7 @@ contract PositionProtectionTest is BasePerpTest {
             )
         );
         protectionActions.commitOpenOrderWithProtection(
-            CfdTypes.Side.BULL, size, marginUsdc, 0, _params(BULL_TAKE_PROFIT, BULL_STOP_LOSS)
+            CfdTypes.Side.LONG, size, marginUsdc, 0, _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS)
         );
 
         assertEq(_freeSettlementUsdc(ALICE), freeBefore, "commit rejection must roll back every tentative lock");
@@ -922,12 +939,12 @@ contract PositionProtectionTest is BasePerpTest {
     function test_AttachedOpen_PostCommitBufferInvalidationRefundsAndUnlocksProtection() public {
         uint256 size = 100_000e18;
         uint256 marginUsdc = 5000e6;
-        _open(BOB, CfdTypes.Side.BEAR, size, marginUsdc, MARK_PRICE);
+        _open(BOB, CfdTypes.Side.SHORT, size, marginUsdc, MARK_PRICE);
 
         uint256 freeBefore = _freeSettlementUsdc(ALICE);
         vm.prank(ALICE);
         (uint64 parentOrderId, uint64 protectionId) = protectionActions.commitOpenOrderWithProtection(
-            CfdTypes.Side.BULL, size, marginUsdc, 0, _params(BULL_TAKE_PROFIT, BULL_STOP_LOSS)
+            CfdTypes.Side.LONG, size, marginUsdc, 0, _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS)
         );
         uint256 parentBountyUsdc = _executionBountyReserve(parentOrderId);
 
@@ -946,7 +963,7 @@ contract PositionProtectionTest is BasePerpTest {
         clearinghouse.releaseOrderReservationIfActive(parentOrderId);
         assertEq(
             engineLens.previewOpenRevertCode(
-                ALICE, CfdTypes.Side.BULL, size, marginUsdc, MARK_PRICE, uint64(block.timestamp)
+                ALICE, CfdTypes.Side.LONG, size, marginUsdc, MARK_PRICE, uint64(block.timestamp)
             ),
             uint8(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED),
             "execution-time revalidation must classify the headroom loss as solvency exceeded"
@@ -991,11 +1008,11 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_AttachedOpen_SuccessArmsProtectionAtomically() public {
-        PositionProtectionTypes.PositionProtectionParams memory params = _params(BULL_TAKE_PROFIT, BULL_STOP_LOSS);
+        PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS);
 
         vm.prank(ALICE);
         (uint64 parentOrderId, uint64 protectionId) = protectionActions.commitOpenOrderWithProtection(
-            CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, 0, params
+            CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0, params
         );
 
         PositionProtectionTypes.PositionProtectionView memory staged =
@@ -1040,7 +1057,7 @@ contract PositionProtectionTest is BasePerpTest {
             "successful parent should atomically arm protection"
         );
         assertEq(armed.size, POSITION_SIZE, "armed size should match actual position");
-        assertEq(uint8(armed.side), uint8(CfdTypes.Side.BULL), "armed side should match actual position");
+        assertEq(uint8(armed.side), uint8(CfdTypes.Side.LONG), "armed side should match actual position");
         assertEq(protectionViews.activePositionProtectionId(ALICE), protectionId, "active id after parent success");
         assertEq(router.pendingOrderCounts(ALICE), 0, "parent should be terminal");
         assertEq(
@@ -1052,15 +1069,101 @@ contract PositionProtectionTest is BasePerpTest {
         assertEq(liveSize, POSITION_SIZE, "parent should open the position");
     }
 
-    function test_AttachedOpen_ThresholdCrossedBeforeFillArmsThenTriggersOnLaterTick() public {
-        PositionProtectionTypes.PositionProtectionParams memory params = _params(BULL_TAKE_PROFIT, 0);
+    function test_AttachedOpen_PublicRawIdPreclaimCannotPoisonProtocolParent() public {
+        uint64 poisonOrderId = router.nextCommitId();
+        uint64 predictedParentOrderId = poisonOrderId + 1;
+        bytes32 rawParentDigest = keccak256(
+            abi.encode(
+                "PLETHER_POSITION_PROTECTION_PARENT_V2", block.chainid, address(router), ALICE, predictedParentOrderId
+            )
+        );
+        bytes32 protocolClientOrderId = OrderV2Types.protocolClientOrderId(rawParentDigest);
+
+        OrderV2Types.OrderRequest memory poisonRequest = _publicBoundedRequest(rawParentDigest, false);
+        poisonRequest.bounds.validUntil = uint64(block.timestamp + 1);
+        vm.prank(ALICE);
+        assertEq(router.commitOrder(poisonRequest), poisonOrderId, "public preclaim order id");
+
+        vm.warp(uint256(poisonRequest.bounds.validUntil) + 1);
+        vm.prank(EXECUTION_KEEPER);
+        OrderV2Types.ExecutionResult memory poisonResult = router.executeOrder(poisonOrderId, new bytes[](0));
+        assertEq(uint8(poisonResult.terminalReason), uint8(OrderV2Types.TerminalReason.Expired));
+        _refreshMark(MARK_PRICE);
 
         vm.prank(ALICE);
         (uint64 parentOrderId, uint64 protectionId) = protectionActions.commitOpenOrderWithProtection(
-            CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, 0, params
+            CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0, _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS)
         );
 
-        uint256 crossedTakeProfit = BULL_TAKE_PROFIT - 2;
+        assertEq(parentOrderId, predictedParentOrderId, "fixture must target the formerly colliding parent");
+        assertTrue(OrderV2Types.isProtocolClientOrderId(protocolClientOrderId));
+        assertEq(router.lifecycleBook().clientIntent(ALICE, rawParentDigest).orderId, poisonOrderId);
+        assertEq(router.lifecycleBook().clientIntent(ALICE, protocolClientOrderId).orderId, parentOrderId);
+        assertEq(
+            uint8(protectionViews.getPositionProtection(protectionId).status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.PendingOpen),
+            "raw public preclaim must not block the protected parent"
+        );
+    }
+
+    function test_Trigger_PublicRawIdPreclaimCannotPoisonProtocolClose() public {
+        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
+
+        uint64 protectionId = PositionProtectionBook(address(protectionBook)).nextPositionProtectionId();
+        uint64 poisonOrderId = router.nextCommitId();
+        uint64 predictedLinkedOrderId = poisonOrderId + 1;
+        bytes32 rawTriggerDigest = keccak256(
+            abi.encode(
+                "PLETHER_POSITION_PROTECTION_TRIGGER_V2",
+                block.chainid,
+                address(router),
+                ALICE,
+                protectionId,
+                predictedLinkedOrderId
+            )
+        );
+        bytes32 protocolClientOrderId = OrderV2Types.protocolClientOrderId(rawTriggerDigest);
+
+        OrderV2Types.OrderRequest memory poisonRequest = _publicBoundedRequest(rawTriggerDigest, true);
+        poisonRequest.bounds.validUntil = uint64(block.timestamp + 1);
+        vm.prank(ALICE);
+        assertEq(router.commitOrder(poisonRequest), poisonOrderId, "public preclaim order id");
+
+        vm.warp(uint256(poisonRequest.bounds.validUntil) + 1);
+        vm.prank(EXECUTION_KEEPER);
+        OrderV2Types.ExecutionResult memory poisonResult = router.executeOrder(poisonOrderId, new bytes[](0));
+        assertEq(uint8(poisonResult.terminalReason), uint8(OrderV2Types.TerminalReason.Expired));
+        _refreshMark(MARK_PRICE);
+
+        vm.prank(ALICE);
+        assertEq(
+            protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, LONG_STOP_LOSS)),
+            protectionId,
+            "fixture protection id"
+        );
+        uint64 linkedOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
+
+        assertEq(linkedOrderId, predictedLinkedOrderId, "fixture must target the formerly colliding close");
+        assertTrue(OrderV2Types.isProtocolClientOrderId(protocolClientOrderId));
+        assertEq(router.lifecycleBook().clientIntent(ALICE, rawTriggerDigest).orderId, poisonOrderId);
+        assertEq(router.lifecycleBook().clientIntent(ALICE, protocolClientOrderId).orderId, linkedOrderId);
+        _assertTriggered(
+            protectionId,
+            linkedOrderId,
+            PositionProtectionTypes.PositionProtectionTriggerLeg.TakeProfit,
+            LONG_TAKE_PROFIT
+        );
+    }
+
+    function test_AttachedOpen_ThresholdCrossedBeforeFillArmsThenTriggersOnLaterTick() public {
+        PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, 0);
+
+        vm.prank(ALICE);
+        (uint64 parentOrderId, uint64 protectionId) = protectionActions.commitOpenOrderWithProtection(
+            CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0, params
+        );
+
+        uint256 crossedTakeProfit = LONG_TAKE_PROFIT - 2;
         bytes[] memory executionData = _mockPythUpdateData(crossedTakeProfit);
         vm.prank(EXECUTION_KEEPER);
         router.executeOrder(parentOrderId, executionData);
@@ -1085,11 +1188,11 @@ contract PositionProtectionTest is BasePerpTest {
 
     function test_AttachedOpen_SlippageFailureRefundsProtectionBounties() public {
         uint256 freeBefore = _freeSettlementUsdc(ALICE);
-        PositionProtectionTypes.PositionProtectionParams memory params = _params(BULL_TAKE_PROFIT, BULL_STOP_LOSS);
+        PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS);
 
         vm.prank(ALICE);
         (uint64 parentOrderId, uint64 protectionId) = protectionActions.commitOpenOrderWithProtection(
-            CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, BULL_STOP_LOSS, params
+            CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, LONG_STOP_LOSS, params
         );
         uint256 parentBountyUsdc = _executionBountyReserve(parentOrderId);
 
@@ -1126,7 +1229,7 @@ contract PositionProtectionTest is BasePerpTest {
 
         vm.prank(ALICE);
         (fixture.parentOrderId, fixture.protectionId) = protectionActions.commitOpenOrderWithProtection(
-            CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, 0, _params(BULL_TAKE_PROFIT, BULL_STOP_LOSS)
+            CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0, _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS)
         );
 
         fixture.parentMarginUsdc = _remainingCommittedMargin(fixture.parentOrderId);
@@ -1258,10 +1361,10 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_AttachedOpen_RiskOffClearinghouseFailureRollsBackProtectionAndRouter() public {
-        PositionProtectionTypes.PositionProtectionParams memory params = _params(BULL_TAKE_PROFIT, BULL_STOP_LOSS);
+        PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS);
         vm.prank(ALICE);
         (uint64 parentOrderId, uint64 protectionId) = protectionActions.commitOpenOrderWithProtection(
-            CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, 0, params
+            CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0, params
         );
         routerAdmin.pause();
 
@@ -1313,15 +1416,15 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_AttachedOpen_ParentExpiryBatchFailsProtectionsAndRefundsTheirBounties() public {
-        PositionProtectionTypes.PositionProtectionParams memory params = _params(BULL_TAKE_PROFIT, BULL_STOP_LOSS);
+        PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS);
 
         vm.prank(ALICE);
         (uint64 aliceParentId, uint64 aliceProtectionId) = protectionActions.commitOpenOrderWithProtection(
-            CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, 0, params
+            CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0, params
         );
         vm.prank(BOB);
         (uint64 bobParentId, uint64 bobProtectionId) = protectionActions.commitOpenOrderWithProtection(
-            CfdTypes.Side.BULL, POSITION_SIZE, POSITION_MARGIN_USDC, 0, params
+            CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0, params
         );
         assertEq(aliceParentId, 1, "Alice parent queue id");
         assertEq(bobParentId, 2, "Bob parent queue id");
@@ -1414,6 +1517,32 @@ contract PositionProtectionTest is BasePerpTest {
     ) internal pure returns (PositionProtectionTypes.PositionProtectionParams memory params) {
         params.takeProfitTriggerPrice = takeProfit;
         params.stopLossTriggerPrice = stopLoss;
+    }
+
+    function _publicBoundedRequest(
+        bytes32 clientOrderId,
+        bool isClose
+    ) internal view returns (OrderV2Types.OrderRequest memory request) {
+        request.clientOrderId = clientOrderId;
+        request.side = CfdTypes.Side.LONG;
+        request.sizeDelta = POSITION_SIZE;
+        request.marginDelta = isClose ? 0 : POSITION_MARGIN_USDC;
+        request.targetPrice = isClose ? engine.CAP_PRICE() : 1;
+        request.isClose = isClose;
+        request.bounds = OrderV2Types.ExecutionBounds({
+            validUntil: uint64(block.timestamp + router.maxOrderAge()),
+            allowedExecutionModes: 1 | 2 | 4,
+            expectedConfigHash: router.lifecycleBook().currentExecutionConfigHash(),
+            maxExecutionBountyUsdc: type(uint256).max,
+            maxExecutionNotionalUsdc: type(uint256).max,
+            maxGrossAccountDebitUsdc: type(uint256).max,
+            maxActionChargeUsdc: type(uint256).max,
+            maxExplicitFeesUsdc: type(uint256).max,
+            maxPostPositionSize: type(uint256).max,
+            minPostSettlementBalanceUsdc: 0,
+            minPostPositionEquityUsdc: 0,
+            maxPostLeverageBps: type(uint32).max
+        });
     }
 
     function _totalProtectionBountyUsdc() internal view returns (uint256) {

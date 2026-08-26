@@ -114,7 +114,7 @@ contract SettlementBufferIntegrationTest is BasePerpTest {
         address freshTrader = address(0xB0FF02);
         _fundTrader(incumbent, 10_000e6);
         _fundTrader(freshTrader, 10_000e6);
-        _open(incumbent, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
+        _open(incumbent, CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8);
 
         uint256 maxLiabilityUsdc = _maxLiability();
         uint256 settlementBufferUsdc =
@@ -141,7 +141,7 @@ contract SettlementBufferIntegrationTest is BasePerpTest {
         assertEq(accounting.freeUsdc, 0, "under-buffer raw solvency must expose no LP withdrawal cash");
 
         uint8 revertCode = engineLens.previewOpenRevertCode(
-            freshTrader, CfdTypes.Side.BEAR, 10_000e18, 1000e6, 1e8, uint64(block.timestamp)
+            freshTrader, CfdTypes.Side.SHORT, 10_000e18, 1000e6, 1e8, uint64(block.timestamp)
         );
         assertEq(
             revertCode,
@@ -166,7 +166,7 @@ contract SettlementBufferIntegrationTest is BasePerpTest {
         address queuedTrader = address(0xB0FF04);
         _fundTrader(incumbent, 10_000e6);
         _fundTrader(queuedTrader, 10_000e6);
-        _open(incumbent, CfdTypes.Side.BEAR, 300_000e18, 5000e6, 1e8);
+        _open(incumbent, CfdTypes.Side.SHORT, 300_000e18, 5000e6, 1e8);
 
         uint256 maxLiabilityUsdc = _maxLiability();
         uint256 bufferAtCommitUsdc =
@@ -179,20 +179,20 @@ contract SettlementBufferIntegrationTest is BasePerpTest {
         uint256 queuedSize = 10_000e18;
         uint256 queuedMarginUsdc = 1000e6;
         uint8 commitCode = engineLens.previewOpenRevertCode(
-            queuedTrader, CfdTypes.Side.BULL, queuedSize, queuedMarginUsdc, 1e8, uint64(block.timestamp)
+            queuedTrader, CfdTypes.Side.LONG, queuedSize, queuedMarginUsdc, 1e8, uint64(block.timestamp)
         );
         assertEq(commitCode, uint8(CfdEnginePlanTypes.OpenRevertCode.OK), "25 bps commit preflight must pass");
 
         uint64 orderId = router.nextCommitId();
         vm.prank(queuedTrader);
-        router.commitOrder(CfdTypes.Side.BULL, queuedSize, queuedMarginUsdc, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, queuedSize, queuedMarginUsdc, 1e8, false);
         (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(orderId);
 
         vm.warp(activationTime);
         engineAdmin.finalizeRiskConfig();
 
         uint8 executionCode = engineLens.previewOpenRevertCode(
-            queuedTrader, CfdTypes.Side.BULL, queuedSize, queuedMarginUsdc, 1e8, pending.commitTime + 1
+            queuedTrader, CfdTypes.Side.LONG, queuedSize, queuedMarginUsdc, 1e8, pending.commitTime + 1
         );
         assertEq(
             executionCode,

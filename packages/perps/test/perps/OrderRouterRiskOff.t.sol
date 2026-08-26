@@ -3,6 +3,7 @@ pragma solidity 0.8.35;
 
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
@@ -21,7 +22,7 @@ contract OrderRouterRiskOffTest is BasePerpTest {
     address internal constant RESTORED = address(0xC0FFEE);
 
     uint256 internal constant MARK_PRICE = 1e8;
-    uint256 internal constant UNSAFE_BULL_PRICE = 1.98e8;
+    uint256 internal constant UNSAFE_LONG_PRICE = 1.98e8;
     uint256 internal constant SATURDAY_NOON = 1_710_021_600;
 
     bytes32 internal constant CARRY_CHECKPOINTED_TOPIC = keccak256("CarryCheckpointed(address,uint256,uint256)");
@@ -53,11 +54,11 @@ contract OrderRouterRiskOffTest is BasePerpTest {
     }
 
     function test_TargetedNonHeadRefundAndInvalidTargets() public {
-        _open(ALICE, CfdTypes.Side.BULL, 20_000e18, 5000e6, MARK_PRICE);
+        _open(ALICE, CfdTypes.Side.LONG, 20_000e18, 5000e6, MARK_PRICE);
 
-        uint64 headOpenId = _commitOpen(ALICE, CfdTypes.Side.BULL, 10_000e18, 2000e6);
-        uint64 nonHeadOpenId = _commitOpen(BOB, CfdTypes.Side.BULL, 10_000e18, 2000e6);
-        uint64 closeId = _commitClose(ALICE, CfdTypes.Side.BULL, 20_000e18);
+        uint64 headOpenId = _commitOpen(ALICE, CfdTypes.Side.LONG, 10_000e18, 2000e6);
+        uint64 nonHeadOpenId = _commitOpen(BOB, CfdTypes.Side.LONG, 10_000e18, 2000e6);
+        uint64 closeId = _commitClose(ALICE, CfdTypes.Side.LONG, 20_000e18);
         uint256 nonHeadRefund = _remainingCommittedMargin(nonHeadOpenId) + _executionBountyReserve(nonHeadOpenId);
         uint256 bobFreeBefore = _freeSettlementUsdc(BOB);
         uint256 keeperBefore = _settlementBalance(KEEPER);
@@ -78,13 +79,13 @@ contract OrderRouterRiskOffTest is BasePerpTest {
         router.clearRiskOffOrder(nonHeadOpenId);
 
         routerAdmin.unpause();
-        uint64 postCutoffOpenId = _commitOpen(BOB, CfdTypes.Side.BULL, 10_000e18, 2000e6);
+        uint64 postCutoffOpenId = _commitOpen(BOB, CfdTypes.Side.LONG, 10_000e18, 2000e6);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__OrderNotRiskOff.selector);
         router.clearRiskOffOrder(postCutoffOpenId);
     }
 
     function test_RiskOffPrecedesExpiryWithoutOracleOrKeeperBounty() public {
-        uint64 orderId = _commitOpen(ALICE, CfdTypes.Side.BULL, 10_000e18, 2000e6);
+        uint64 orderId = _commitOpen(ALICE, CfdTypes.Side.LONG, 10_000e18, 2000e6);
         uint256 expectedRefund = _remainingCommittedMargin(orderId) + _executionBountyReserve(orderId);
         uint256 traderFreeBefore = _freeSettlementUsdc(ALICE);
         uint256 keeperBefore = _settlementBalance(KEEPER);
@@ -110,13 +111,19 @@ contract OrderRouterRiskOffTest is BasePerpTest {
         for (uint256 i; i < orderIds.length; ++i) {
             address account = address(uint160(0x10000 + i));
             _fundTrader(account, 2000e6);
-            orderIds[i] = _commitOpen(account, CfdTypes.Side.BULL, 10_000e18, 1000e6);
+            orderIds[i] = _commitOpen(account, CfdTypes.Side.LONG, 10_000e18, 1000e6);
         }
         routerAdmin.pause();
         uint256 pythCallsBefore = baseMockPyth.updatePriceFeedsCallCount();
 
         vm.prank(KEEPER);
-        router.executeOrderBatch(orderIds[64], new bytes[](0));
+        OrderV2Types.BatchResult memory firstResult = router.executeOrderBatch(orderIds[64], new bytes[](0));
+
+        assertEq(
+            uint256(firstResult.stopReason),
+            uint256(OrderV2Types.PendingReason.CleanupLimit),
+            "the first call must expose the cleanup work cap"
+        );
 
         for (uint256 i; i < 64; ++i) {
             assertEq(
@@ -141,11 +148,11 @@ contract OrderRouterRiskOffTest is BasePerpTest {
     }
 
     function test_OldInvalidationSurvivesUnpauseAndNewOpenExecutes() public {
-        uint64 oldOrderId = _commitOpen(ALICE, CfdTypes.Side.BULL, 10_000e18, 2000e6);
+        uint64 oldOrderId = _commitOpen(ALICE, CfdTypes.Side.LONG, 10_000e18, 2000e6);
         routerAdmin.pause();
         uint64 cutoff = routerAdmin.riskOffOrderCutoff();
         routerAdmin.unpause();
-        uint64 newOrderId = _commitOpen(ALICE, CfdTypes.Side.BULL, 10_000e18, 2000e6);
+        uint64 newOrderId = _commitOpen(ALICE, CfdTypes.Side.LONG, 10_000e18, 2000e6);
 
         vm.prank(KEEPER);
         router.executeOrder(oldOrderId, new bytes[](0));
@@ -161,17 +168,17 @@ contract OrderRouterRiskOffTest is BasePerpTest {
     }
 
     function test_OpenCloseOpenProjectionIgnoresBothInvalidatedOpens() public {
-        _open(ALICE, CfdTypes.Side.BULL, 20_000e18, 5000e6, MARK_PRICE);
-        uint64 firstOpenId = _commitOpen(ALICE, CfdTypes.Side.BULL, 10_000e18, 2000e6);
-        uint64 closeId = _commitClose(ALICE, CfdTypes.Side.BULL, 20_000e18);
-        uint64 secondOpenId = _commitOpen(ALICE, CfdTypes.Side.BULL, 10_000e18, 2000e6);
+        _open(ALICE, CfdTypes.Side.LONG, 20_000e18, 5000e6, MARK_PRICE);
+        uint64 firstOpenId = _commitOpen(ALICE, CfdTypes.Side.LONG, 10_000e18, 2000e6);
+        uint64 closeId = _commitClose(ALICE, CfdTypes.Side.LONG, 20_000e18);
+        uint64 secondOpenId = _commitOpen(ALICE, CfdTypes.Side.LONG, 10_000e18, 2000e6);
         uint256 closeBounty = _executionBountyReserve(closeId);
         uint256 keeperBefore = _settlementBalance(KEEPER);
         routerAdmin.pause();
 
         vm.prank(ALICE);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__NoQueuedPosition.selector);
-        router.commitOrder(CfdTypes.Side.BULL, 100e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 100e18, 0, 0, true);
 
         bytes[] memory closeUpdate = _mockPythUpdateData();
         vm.prank(KEEPER);
@@ -185,8 +192,8 @@ contract OrderRouterRiskOffTest is BasePerpTest {
     }
 
     function test_LivePositionRefundHasNoCheckpointOrNavSideEffects() public {
-        _open(ALICE, CfdTypes.Side.BULL, 100_000e18, 5000e6, MARK_PRICE);
-        uint64 orderId = _commitOpen(ALICE, CfdTypes.Side.BULL, 10_000e18, 2000e6);
+        _open(ALICE, CfdTypes.Side.LONG, 100_000e18, 5000e6, MARK_PRICE);
+        uint64 orderId = _commitOpen(ALICE, CfdTypes.Side.LONG, 10_000e18, 2000e6);
         routerAdmin.pause();
         vm.warp(block.timestamp + 30 days);
 
@@ -237,7 +244,7 @@ contract OrderRouterRiskOffTest is BasePerpTest {
     }
 
     function test_ForcedClearinghouseFailureRollsBackAllRouterEffects() public {
-        uint64 orderId = _commitOpen(ALICE, CfdTypes.Side.BULL, 10_000e18, 2000e6);
+        uint64 orderId = _commitOpen(ALICE, CfdTypes.Side.LONG, 10_000e18, 2000e6);
         routerAdmin.pause();
 
         bytes32 orderHashBefore = keccak256(abi.encode(_orderRecord(orderId)));
@@ -273,22 +280,22 @@ contract OrderRouterRiskOffTest is BasePerpTest {
     }
 
     function test_CleanupFirstAndEmbeddedSingleLiquidationAreEconomicallyEquivalent() public {
-        _open(ALICE, CfdTypes.Side.BULL, 100_000e18, 2000e6, MARK_PRICE);
-        uint64 invalidOpenId = _commitOpen(ALICE, CfdTypes.Side.BULL, 10_000e18, 2000e6);
-        uint64 liveCloseId = _commitClose(ALICE, CfdTypes.Side.BULL, 10_000e18);
+        _open(ALICE, CfdTypes.Side.LONG, 100_000e18, 2000e6, MARK_PRICE);
+        uint64 invalidOpenId = _commitOpen(ALICE, CfdTypes.Side.LONG, 10_000e18, 2000e6);
+        uint64 liveCloseId = _commitClose(ALICE, CfdTypes.Side.LONG, 10_000e18);
         routerAdmin.pause();
-        assertTrue(engineLens.isLiquidatableAt(ALICE, UNSAFE_BULL_PRICE, pool.totalAssets()));
+        assertTrue(engineLens.isLiquidatableAt(ALICE, UNSAFE_LONG_PRICE, pool.totalAssets()));
         uint256 branch = vm.snapshotState();
 
         vm.prank(KEEPER);
         router.clearRiskOffOrder(invalidOpenId);
-        bytes[] memory cleanupFirstUpdate = _mockPythUpdateData(UNSAFE_BULL_PRICE);
+        bytes[] memory cleanupFirstUpdate = _mockPythUpdateData(UNSAFE_LONG_PRICE);
         vm.prank(KEEPER);
         router.executeLiquidation(ALICE, cleanupFirstUpdate);
         bytes32 cleanupFirst = _liquidationOutcomeHash(ALICE, invalidOpenId, liveCloseId);
 
         vm.revertToState(branch);
-        bytes[] memory embeddedUpdate = _mockPythUpdateData(UNSAFE_BULL_PRICE);
+        bytes[] memory embeddedUpdate = _mockPythUpdateData(UNSAFE_LONG_PRICE);
         vm.prank(KEEPER);
         router.executeLiquidation(ALICE, embeddedUpdate);
         bytes32 embedded = _liquidationOutcomeHash(ALICE, invalidOpenId, liveCloseId);
@@ -299,8 +306,8 @@ contract OrderRouterRiskOffTest is BasePerpTest {
 
     function test_EmbeddedRefundCanRestoreSolvencyWithoutRollingBackRefund() public {
         _fundTrader(RESTORED, 300e6);
-        _open(RESTORED, CfdTypes.Side.BULL, 10_000e18, 250e6, MARK_PRICE);
-        uint64 invalidOpenId = _commitOpen(RESTORED, CfdTypes.Side.BULL, 100e18, 49e6);
+        _open(RESTORED, CfdTypes.Side.LONG, 10_000e18, 250e6, MARK_PRICE);
+        uint64 invalidOpenId = _commitOpen(RESTORED, CfdTypes.Side.LONG, 100e18, 49e6);
         routerAdmin.pause();
         vm.warp(block.timestamp + 365 days);
 
@@ -334,14 +341,14 @@ contract OrderRouterRiskOffTest is BasePerpTest {
     }
 
     function test_BatchLiquidationAppliesRiskOffRefundBeforeLiquidating() public {
-        _open(ALICE, CfdTypes.Side.BULL, 100_000e18, 2000e6, MARK_PRICE);
-        uint64 invalidOpenId = _commitOpen(ALICE, CfdTypes.Side.BULL, 10_000e18, 2000e6);
+        _open(ALICE, CfdTypes.Side.LONG, 100_000e18, 2000e6, MARK_PRICE);
+        uint64 invalidOpenId = _commitOpen(ALICE, CfdTypes.Side.LONG, 10_000e18, 2000e6);
         routerAdmin.pause();
         uint256 keeperBefore = _settlementBalance(KEEPER);
         address[] memory accounts = new address[](1);
         accounts[0] = ALICE;
 
-        bytes[] memory liquidationUpdate = _mockPythUpdateData(UNSAFE_BULL_PRICE);
+        bytes[] memory liquidationUpdate = _mockPythUpdateData(UNSAFE_LONG_PRICE);
         vm.prank(KEEPER);
         uint256 nextIndex = router.executeLiquidationBatch(accounts, liquidationUpdate);
 
@@ -358,8 +365,8 @@ contract OrderRouterRiskOffTest is BasePerpTest {
 
     function test_BatchRefundRestoresSolvencyAndEmitsCanonicalSkip() public {
         _fundTrader(RESTORED, 300e6);
-        _open(RESTORED, CfdTypes.Side.BULL, 10_000e18, 250e6, MARK_PRICE);
-        uint64 invalidOpenId = _commitOpen(RESTORED, CfdTypes.Side.BULL, 100e18, 49e6);
+        _open(RESTORED, CfdTypes.Side.LONG, 10_000e18, 250e6, MARK_PRICE);
+        uint64 invalidOpenId = _commitOpen(RESTORED, CfdTypes.Side.LONG, 100e18, 49e6);
         routerAdmin.pause();
         vm.warp(block.timestamp + 365 days);
 
@@ -469,10 +476,10 @@ contract OrderRouterRiskOffTest is BasePerpTest {
                 carryIndex,
                 carryTimestamp,
                 engine.unsettledCarryUsdc(account),
-                engine.sideCarryIndex(uint256(CfdTypes.Side.BULL)),
-                engine.sideCarryTimestamp(uint256(CfdTypes.Side.BULL)),
-                engine.sideCarryIndex(uint256(CfdTypes.Side.BEAR)),
-                engine.sideCarryTimestamp(uint256(CfdTypes.Side.BEAR))
+                engine.sideCarryIndex(uint256(CfdTypes.Side.LONG)),
+                engine.sideCarryTimestamp(uint256(CfdTypes.Side.LONG)),
+                engine.sideCarryIndex(uint256(CfdTypes.Side.SHORT)),
+                engine.sideCarryTimestamp(uint256(CfdTypes.Side.SHORT))
             )
         );
     }

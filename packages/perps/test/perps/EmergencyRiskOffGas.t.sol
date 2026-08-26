@@ -15,8 +15,10 @@ contract EmergencyRiskOffGasTest is BasePerpTest {
     address internal constant GUARDIAN = address(0xCAFE);
     address internal constant KEEPER = address(0xBEEF);
 
-    uint256 internal constant SINGLE_CLEANUP_GAS_LIMIT = 250_000;
-    uint256 internal constant MAX_BATCH_CLEANUP_GAS_LIMIT = 15_000_000;
+    // V2 cleanup persists and emits an authenticated lifecycle receipt for every invalidated order. These limits
+    // retain regression headroom while keeping the 64-order incident transaction below ArbOS 50's 32m tx cap.
+    uint256 internal constant SINGLE_CLEANUP_GAS_LIMIT = 425_000;
+    uint256 internal constant MAX_BATCH_CLEANUP_GAS_LIMIT = 28_000_000;
     uint256 internal constant COORDINATOR_ACTIVATION_GAS_LIMIT = 200_000;
     uint256 internal constant MAX_PENDING_ORDERS_PER_ACCOUNT = 32;
 
@@ -113,7 +115,7 @@ contract EmergencyRiskOffGasTest is BasePerpTest {
         address account
     ) internal {
         vm.prank(account);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 2000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 2000e6, 1e8, false);
     }
 
     function _activateRiskOff() internal returns (uint64 cutoff) {

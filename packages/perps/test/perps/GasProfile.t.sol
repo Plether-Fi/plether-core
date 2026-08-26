@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {LegacyOrderRouterHarness} from "../utils/LegacyOrderRouterHarness.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdEngineAccountLens} from "@plether/perps/CfdEngineAccountLens.sol";
@@ -8,12 +9,14 @@ import {CfdEngineAdmin} from "@plether/perps/CfdEngineAdmin.sol";
 import {CfdEngineLens} from "@plether/perps/CfdEngineLens.sol";
 import {CfdEnginePlanner} from "@plether/perps/CfdEnginePlanner.sol";
 import {CfdEngineSettlementSidecar} from "@plether/perps/CfdEngineSettlementSidecar.sol";
+import {CfdOrderPolicyEvaluator} from "@plether/perps/CfdOrderPolicyEvaluator.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
-import {OrderRouter} from "@plether/perps/OrderRouter.sol";
+import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
+import {OrderRouterV2ExecutionSidecar} from "@plether/perps/OrderRouterV2ExecutionSidecar.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
@@ -102,7 +105,7 @@ contract GasProfileTest is Test {
     HousePool pool;
     TrancheVault seniorVault;
     TrancheVault juniorVault;
-    OrderRouter router;
+    LegacyOrderRouterHarness router;
     ControllablePythGas pyth;
     address usdc;
 
@@ -170,10 +173,21 @@ contract GasProfileTest is Test {
         b[0] = 1e8;
         PletherOracle testOracle =
             new PletherOracle(address(engine), address(pool), address(pyth), feedIds, w, b, new bool[](1));
-        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
-        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
-        router = new OrderRouter(
-            address(engine), address(engineLens), address(pool), address(testOracle), address(keeperSidecar)
+        CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
+        OrderRouterV2ExecutionSidecar executionSidecar = new OrderRouterV2ExecutionSidecar();
+        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
+        OrderLifecycleBook lifecycleBook =
+            new OrderLifecycleBook(predictedRouter, address(engine), address(clearinghouse), address(pool));
+        OrderRouterLiquidationBatchSidecar liquidationSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
+        router = new LegacyOrderRouterHarness(
+            address(engine),
+            address(engineLens),
+            address(pool),
+            address(testOracle),
+            address(liquidationSidecar),
+            address(evaluator),
+            address(executionSidecar),
+            address(lifecycleBook)
         );
         assertEq(address(router), predictedRouter);
         engine.setOrderRouter(address(router));
@@ -212,7 +226,7 @@ contract GasProfileTest is Test {
 
         vm.prank(alice);
         uint256 g0 = gasleft();
-        router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 5000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 50_000e18, 5000e6, 1e8, false);
         uint256 gas = g0 - gasleft();
         emit log_named_uint("01_commitOrder_open", gas);
     }
@@ -220,11 +234,11 @@ contract GasProfileTest is Test {
     // --- 2. commitOrder (close) ---
     function test_gas_02_commitOrder_close() public {
         _depositToClearinghouse(alice, 10_000e6);
-        _openPosition(alice, CfdTypes.Side.BULL, 50_000e18, 5000e6, 1e8);
+        _openPosition(alice, CfdTypes.Side.LONG, 50_000e18, 5000e6, 1e8);
 
         vm.prank(alice);
         uint256 g0 = gasleft();
-        router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 50_000e18, 0, 0, true);
         uint256 gas = g0 - gasleft();
         emit log_named_uint("02_commitOrder_close", gas);
     }
@@ -235,7 +249,7 @@ contract GasProfileTest is Test {
         uint256 ts = block.timestamp;
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 5000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 50_000e18, 5000e6, 1e8, false);
 
         pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), ts + 6);
         vm.warp(ts + 7);
@@ -251,12 +265,12 @@ contract GasProfileTest is Test {
     // --- 4. executeOrder (open, increase existing position — warm storage) ---
     function test_gas_04_executeOrder_open_increase() public {
         _depositToClearinghouse(alice, 20_000e6);
-        _openPosition(alice, CfdTypes.Side.BULL, 50_000e18, 5000e6, 1e8);
+        _openPosition(alice, CfdTypes.Side.LONG, 50_000e18, 5000e6, 1e8);
 
         uint256 ts = block.timestamp + 30;
         vm.warp(ts);
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 20_000e18, 3000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 20_000e18, 3000e6, 1e8, false);
 
         pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), ts + 6);
         vm.warp(ts + 7);
@@ -272,12 +286,12 @@ contract GasProfileTest is Test {
     // --- 5. executeOrder (close, full) ---
     function test_gas_05_executeOrder_close_full() public {
         _depositToClearinghouse(alice, 10_000e6);
-        _openPosition(alice, CfdTypes.Side.BULL, 50_000e18, 5000e6, 1e8);
+        _openPosition(alice, CfdTypes.Side.LONG, 50_000e18, 5000e6, 1e8);
 
         uint256 ts = block.timestamp + 30;
         vm.warp(ts);
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 50_000e18, 0, 0, true);
 
         pyth.setAllPrices(feedIds, int64(95_000_000), int32(-8), ts + 6);
         vm.warp(ts + 7);
@@ -293,12 +307,12 @@ contract GasProfileTest is Test {
     // --- 6. executeOrder (close, partial) ---
     function test_gas_06_executeOrder_close_partial() public {
         _depositToClearinghouse(alice, 10_000e6);
-        _openPosition(alice, CfdTypes.Side.BULL, 50_000e18, 5000e6, 1e8);
+        _openPosition(alice, CfdTypes.Side.LONG, 50_000e18, 5000e6, 1e8);
 
         uint256 ts = block.timestamp + 30;
         vm.warp(ts);
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 20_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 20_000e18, 0, 0, true);
 
         pyth.setAllPrices(feedIds, int64(95_000_000), int32(-8), ts + 6);
         vm.warp(ts + 7);
@@ -320,11 +334,11 @@ contract GasProfileTest is Test {
         uint256 ts = block.timestamp;
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 30_000e18, 3000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 30_000e18, 3000e6, 1e8, false);
         vm.prank(bob);
-        router.commitOrder(CfdTypes.Side.BEAR, 25_000e18, 2500e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 25_000e18, 2500e6, 1e8, false);
         vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BULL, 20_000e18, 2000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 20_000e18, 2000e6, 1e8, false);
 
         pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), ts + 6);
         vm.warp(ts + 7);
@@ -340,7 +354,7 @@ contract GasProfileTest is Test {
     // --- 8. executeLiquidation ---
     function test_gas_08_executeLiquidation() public {
         _depositToClearinghouse(alice, 10_000e6);
-        _openPosition(alice, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
+        _openPosition(alice, CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8);
 
         // Withdraw free margin so position is thinly margined
         address aliceAccount = _account(alice);
@@ -351,7 +365,7 @@ contract GasProfileTest is Test {
             clearinghouse.withdraw(aliceAccount, balance - locked);
         }
 
-        // Price rises → BULL loses. $1.10 = -$10k PnL on $100k notional
+        // Price rises → LONG loses. $1.10 = -$10k PnL on $100k notional
         uint256 liqTs = block.timestamp + 60;
         vm.warp(liqTs);
         pyth.setAllPrices(feedIds, int64(110_000_000), int32(-8), liqTs);
@@ -366,7 +380,7 @@ contract GasProfileTest is Test {
     // --- 9. addMargin ---
     function test_gas_09_addMargin() public {
         _depositToClearinghouse(alice, 10_000e6);
-        _openPosition(alice, CfdTypes.Side.BULL, 50_000e18, 3000e6, 1e8);
+        _openPosition(alice, CfdTypes.Side.LONG, 50_000e18, 3000e6, 1e8);
 
         address aliceAccount = _account(alice);
 
@@ -380,7 +394,7 @@ contract GasProfileTest is Test {
     // --- 10. settleTraderClaim ---
     function test_gas_10_settleTraderClaim() public {
         _depositToClearinghouse(alice, 11_000e6);
-        _openPosition(alice, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+        _openPosition(alice, CfdTypes.Side.LONG, 100_000e18, 9000e6, 1e8);
 
         address aliceAccount = _account(alice);
 
@@ -390,7 +404,7 @@ contract GasProfileTest is Test {
         IERC20(usdc).transfer(address(0xDEAD), poolAssets - 9000e6);
 
         // Close at profit; payout becomes a trader claim (use external call for clean timestamp reads)
-        this._closeAtPrice(alice, CfdTypes.Side.BULL, 100_000e18, int64(80_000_000));
+        this._closeAtPrice(alice, CfdTypes.Side.LONG, 100_000e18, int64(80_000_000));
 
         uint256 traderClaim = engine.traderClaimBalanceUsdc(aliceAccount);
         require(traderClaim > 0, "Setup failed: no trader claim balance");
@@ -470,7 +484,7 @@ contract GasProfileTest is Test {
     // --- 17. previewClose ---
     function test_gas_17_previewClose() public {
         _depositToClearinghouse(alice, 10_000e6);
-        _openPosition(alice, CfdTypes.Side.BULL, 50_000e18, 5000e6, 1e8);
+        _openPosition(alice, CfdTypes.Side.LONG, 50_000e18, 5000e6, 1e8);
 
         address aliceAccount = _account(alice);
         uint256 g0 = gasleft();
@@ -482,7 +496,7 @@ contract GasProfileTest is Test {
     // --- 18. previewLiquidation ---
     function test_gas_18_previewLiquidation() public {
         _depositToClearinghouse(alice, 10_000e6);
-        _openPosition(alice, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
+        _openPosition(alice, CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8);
 
         address aliceAccount = _account(alice);
         uint256 g0 = gasleft();
@@ -494,7 +508,7 @@ contract GasProfileTest is Test {
     // --- 19. getAccountLedgerSnapshot ---
     function test_gas_19_getAccountLedgerSnapshot() public {
         _depositToClearinghouse(alice, 10_000e6);
-        _openPosition(alice, CfdTypes.Side.BULL, 50_000e18, 5000e6, 1e8);
+        _openPosition(alice, CfdTypes.Side.LONG, 50_000e18, 5000e6, 1e8);
 
         address aliceAccount = _account(alice);
         uint256 g0 = gasleft();
@@ -509,7 +523,7 @@ contract GasProfileTest is Test {
         _fundTrancheAsync(seniorVault, lp2, 500_000e6);
 
         _depositToClearinghouse(alice, 10_000e6);
-        _openPosition(alice, CfdTypes.Side.BULL, 50_000e18, 5000e6, 1e8);
+        _openPosition(alice, CfdTypes.Side.LONG, 50_000e18, 5000e6, 1e8);
 
         uint256 g0 = gasleft();
         pool.getPoolLiquidityView();
@@ -538,7 +552,7 @@ contract GasProfileTest is Test {
         for (uint256 i = 0; i < n; i++) {
             address trader = address(uint160(0xA000 + i));
             _depositToClearinghouse(trader, 5000e6);
-            CfdTypes.Side side = i % 2 == 0 ? CfdTypes.Side.BULL : CfdTypes.Side.BEAR;
+            CfdTypes.Side side = i % 2 == 0 ? CfdTypes.Side.LONG : CfdTypes.Side.SHORT;
             vm.prank(trader);
             router.commitOrder(side, 10_000e18, 1000e6, 1e8, false);
         }

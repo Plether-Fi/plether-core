@@ -48,22 +48,35 @@ abstract contract OrderBountyAccounting is OrderRouterBase {
     /// @param account Liquidated account whose bounties are forfeited.
     function _forfeitReservedOrderBountiesOnLiquidation(
         address account
-    ) internal {
+    ) internal returns (uint64[] memory orderIds, uint256[] memory orderBountiesUsdc) {
+        uint256 orderCount = 0;
+        for (
+            uint64 cursor = accountHeadOrderId[account]; cursor != 0; cursor = orderRecords[cursor].nextAccountOrderId) {
+            ++orderCount;
+        }
+        orderIds = new uint64[](orderCount);
+        orderBountiesUsdc = new uint256[](orderCount);
+
         uint256 forfeitedUsdc = _protectionBountiesToForfeitOnLiquidation(account);
+        uint256 index = 0;
         for (
             uint64 orderId = accountHeadOrderId[account];
             orderId != 0;
             orderId = orderRecords[orderId].nextAccountOrderId
         ) {
             OrderRecord storage record = orderRecords[orderId];
-            if (record.executionBountyUsdc > 0) {
-                forfeitedUsdc += record.executionBountyUsdc;
+            uint256 executionBountyUsdc = record.executionBountyUsdc;
+            orderIds[index] = orderId;
+            orderBountiesUsdc[index] = executionBountyUsdc;
+            ++index;
+            if (executionBountyUsdc > 0) {
+                forfeitedUsdc += executionBountyUsdc;
                 record.executionBountyUsdc = 0;
             }
         }
 
         if (forfeitedUsdc == 0) {
-            return;
+            return (orderIds, orderBountiesUsdc);
         }
 
         engine.absorbReservedExecutionBounty(account, forfeitedUsdc);

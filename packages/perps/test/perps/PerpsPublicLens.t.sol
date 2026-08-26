@@ -56,7 +56,7 @@ contract PerpsPublicLensTest is BasePerpTest {
         address account = trader;
 
         _fundTrader(trader, 50_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(105_000_000, uint64(block.timestamp));
@@ -85,7 +85,7 @@ contract PerpsPublicLensTest is BasePerpTest {
         address account = trader;
 
         _fundTrader(trader, 50_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(105_000_000, uint64(block.timestamp));
@@ -129,7 +129,7 @@ contract PerpsPublicLensTest is BasePerpTest {
         address account = trader;
 
         _fundTrader(trader, 20_000e6);
-        _open(account, CfdTypes.Side.BEAR, 80_000e18, 8000e6, 1e8);
+        _open(account, CfdTypes.Side.SHORT, 80_000e18, 8000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(95_000_000, uint64(block.timestamp));
@@ -147,7 +147,7 @@ contract PerpsPublicLensTest is BasePerpTest {
         address account = trader;
 
         _fundTrader(trader, 20_000e6);
-        _open(account, CfdTypes.Side.BEAR, 80_000e18, 8000e6, 1e8);
+        _open(account, CfdTypes.Side.SHORT, 80_000e18, 8000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(95_000_000, uint64(block.timestamp));
@@ -183,7 +183,7 @@ contract PerpsPublicLensTest is BasePerpTest {
         expected.protectionId = 7;
         expected.parentOrderId = 3;
         expected.account = account;
-        expected.side = CfdTypes.Side.BEAR;
+        expected.side = CfdTypes.Side.SHORT;
         expected.size = 42_000e18;
         expected.takeProfitTriggerPrice = 120_000_000;
         expected.stopLossTriggerPrice = 80_000_000;
@@ -229,7 +229,7 @@ contract PerpsPublicLensTest is BasePerpTest {
         expected.protectionId = 9;
         expected.linkedOrderId = 11;
         expected.account = account;
-        expected.side = CfdTypes.Side.BULL;
+        expected.side = CfdTypes.Side.LONG;
         expected.size = 10_000e18;
         expected.takeProfitTriggerPrice = 90_000_000;
         expected.stopLossTriggerPrice = 110_000_000;
@@ -252,7 +252,7 @@ contract PerpsPublicLensTest is BasePerpTest {
         address account = trader;
 
         _fundTrader(trader, 50_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
@@ -278,7 +278,7 @@ contract PerpsPublicLensTest is BasePerpTest {
         address account = trader;
 
         _fundTrader(trader, 10_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
 
         vm.warp(block.timestamp + 2 * 365 days);
         vm.prank(address(router));
@@ -300,7 +300,7 @@ contract PerpsPublicLensTest is BasePerpTest {
         address account = trader;
 
         _fundTrader(trader, 5000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 1700e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 1700e6, 1e8);
 
         uint256 withdrawableBeforeCarry = engineAccountLens.getWithdrawableUsdc(account);
         assertGt(withdrawableBeforeCarry, 0, "Setup should start with positive withdrawable headroom");
@@ -330,7 +330,7 @@ contract PerpsPublicLensTest is BasePerpTest {
         address account = trader;
 
         _fundTrader(trader, 1000e6);
-        _open(account, CfdTypes.Side.BULL, 50_000e18, 900e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 50_000e18, 900e6, 1e8);
 
         assertFalse(publicLens.isLiquidatable(account), "Setup should start above maintenance before carry accrues");
 
@@ -350,7 +350,7 @@ contract PerpsPublicLensTest is BasePerpTest {
         address account = trader;
 
         _fundTrader(trader, 50_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
         vm.warp(SATURDAY_NOON);
         assertTrue(engine.isOracleFrozen(), "setup should be inside a frozen-oracle window");

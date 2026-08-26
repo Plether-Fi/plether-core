@@ -2,8 +2,10 @@
 pragma solidity 0.8.35;
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
+import {IOrderRouterV2ExecutionHost} from "@plether/perps/interfaces/IOrderRouterV2ExecutionHost.sol";
 import {IPerpsKeeper} from "@plether/perps/interfaces/IPerpsKeeper.sol";
 import {IPerpsTraderActions} from "@plether/perps/interfaces/IPerpsTraderActions.sol";
 import {OrderHandler} from "@plether/perps/router/OrderHandler.sol";
@@ -25,7 +27,11 @@ interface IOrderRouterKeeperSidecarBinding {
 /// @custom:security-contact contact@plether.com
 contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
 
-    /// @notice Fixed stateless delegate module for oracle config, mark refresh, LP settlement, and liquidations.
+    /// @notice Fixed independently deployed stateless delegate module for V2 order execution and receipts.
+    address public immutable executionSidecar;
+
+    /// @notice Fixed stateless delegate module for oracle config, mark refresh, LP settlement, protection triggers,
+    ///         and liquidations.
     /// @dev The sidecar is deployed immediately before this Router and constructor-bound to this exact address. Keeping
     ///      its creation payload outside the Router preserves EIP-3860 deployability without trusting storage layout.
     address public immutable liquidationBatchSidecar;
@@ -38,13 +44,19 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
     /// @param _housePool HousePool used for depth and risk-availability queries.
     /// @param _pletherOracle Deployed Plether oracle used for Pyth basket pricing.
     /// @param _keeperSidecar Predeployed stateless keeper logic bound to this Router's address.
+    /// @param _policyEvaluator Deployed stateless V2 financial-policy evaluator.
+    /// @param _executionSidecar Deployed stateless V2 oracle, execution, and receipt delegate module.
+    /// @param _lifecycleBook Predeployed lifecycle Book bound to this predicted Router and protocol stack.
     constructor(
         address _engine,
         address _engineLens,
         address _housePool,
         address _pletherOracle,
-        address _keeperSidecar
-    ) OrderRouterBase(_engine, _engineLens, _housePool, _pletherOracle) {
+        address _keeperSidecar,
+        address _policyEvaluator,
+        address _executionSidecar,
+        address _lifecycleBook
+    ) OrderRouterBase(_engine, _engineLens, _housePool, _pletherOracle, _policyEvaluator, _lifecycleBook) {
         if (
             _keeperSidecar.code.length == 0
                 || IOrderRouterKeeperSidecarBinding(_keeperSidecar).ROUTER() != address(this)
@@ -52,34 +64,85 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
             revert OrderRouter__InvalidKeeperSidecar();
         }
         liquidationBatchSidecar = _keeperSidecar;
+        if (_executionSidecar == address(0) || _executionSidecar.code.length == 0) {
+            revert OrderRouter__InvalidExecutionSidecar();
+        }
+        executionSidecar = _executionSidecar;
     }
 
-    /// @notice Submits an open/increase or strict reduce-only intent to the delayed global FIFO queue.
-    /// @dev Reserves committed margin and the keeper bounty in the clearinghouse immediately. Opens are
-    ///      blocked while paused, degraded, close-only, or unable to increase pool risk and may be rejected
-    ///      by a fresh-mark preflight. Closes remain committable in those modes but must match and not exceed
-    ///      the position obtained after applying the account's earlier queued orders. Normally the caller is the
-    ///      account. The router's immutable position-protection book may append an authenticated account word when
-    ///      atomically attaching protection to a newly committed open; no other caller can use that path.
-    /// @param side Direction to open/increase, or the direction of the queued position being closed.
-    /// @param sizeDelta Position-size change in synthetic-token units (18 decimals); must be a nonzero 100-token lot multiple.
-    /// @param marginDelta Margin to reserve for an open/increase (6-decimal USDC); must be zero for a close.
-    /// @param targetPrice Direction-aware slippage limit (8 decimals), or zero for no price limit.
-    /// @param isClose True for a strict position reduction and false for an open/increase.
+    /// @notice Submits or idempotently resolves a financially bounded V2 delayed-order intent.
+    /// @dev `clientOrderId` is permanent within the caller's account namespace. An exact replay returns the
+    ///      original order id before consulting current configuration or market state and creates no reservation,
+    ///      queue entry, counter increment, or event. A fresh request pins its execution configuration, permitted
+    ///      execution modes, absolute deadline, and financial limits in the immutable lifecycle book. The
+    ///      `0x504c455448455221` client-id prefix is reserved for protocol-generated protection orders.
+    /// @param request Canonical account-scoped V2 order intent and execution bounds.
+    /// @return orderId Newly assigned order id or the original id for an exact replay.
     function commitOrder(
-        CfdTypes.Side side,
-        uint256 sizeDelta,
-        uint256 marginDelta,
-        uint256 targetPrice,
-        bool isClose
-    ) external nonReentrant {
-        address account = msg.sender;
-        if (account == address(positionProtectionBook)) {
-            assembly ("memory-safe") {
-                account := calldataload(164)
-            }
+        OrderV2Types.OrderRequest calldata request
+    ) external nonReentrant returns (uint64 orderId) {
+        request;
+        return uint64(_delegateToKeeperSidecar());
+    }
+
+    /// @notice Typed compatibility host used only by the immutable position-protection Book for an attached open.
+    /// @dev The Book constructs the synthetic identity and permissive zero-config policy outside Router runtime. This
+    ///      host authenticates the Book and explicit account, then uses the canonical V2 registration and commit path.
+    function commitProtectedOpen(
+        address account,
+        OrderV2Types.OrderRequest calldata request
+    ) external nonReentrant returns (uint64 orderId) {
+        account;
+        request;
+        return uint64(_delegateToKeeperSidecar());
+    }
+
+    /// @notice Returns the immutable engine lens to delegated commit validation without exposing storage layout.
+    function engineLensForCommit() external view returns (address) {
+        return address(engineLens);
+    }
+
+    /// @notice Establishes reservations and queues a sidecar-validated, lifecycle-registered order.
+    /// @dev The trusted sidecar appends a fixed raw payload to this no-argument selector so Router runtime avoids a
+    ///      second large V2 request decoder. The external self-call is the isolated canonical storage mutation frame.
+    function executeCommitOrderItem() external {
+        _onlySelfCall();
+        uint64 orderId;
+        address account;
+        uint256 sizeDelta;
+        uint256 marginDelta;
+        uint256 targetPrice;
+        CfdTypes.Side side;
+        uint256 isCloseWord;
+        uint256 executionBountyUsdc;
+        assembly ("memory-safe") {
+            orderId := calldataload(4)
+            account := calldataload(36)
+            sizeDelta := calldataload(68)
+            marginDelta := calldataload(100)
+            targetPrice := calldataload(132)
+            side := calldataload(164)
+            isCloseWord := calldataload(196)
+            executionBountyUsdc := calldataload(228)
         }
-        _commitOrderFor(account, side, sizeDelta, marginDelta, targetPrice, isClose);
+        if (orderId != nextCommitId) {
+            revert OrderRouter__Unauthorized();
+        }
+        nextCommitId = orderId + 1;
+        _createPendingOrder(
+            CfdTypes.Order({
+                account: account,
+                sizeDelta: sizeDelta,
+                marginDelta: marginDelta,
+                targetPrice: targetPrice,
+                commitTime: uint64(block.timestamp),
+                commitBlock: uint64(block.number),
+                orderId: orderId,
+                side: side,
+                isClose: isCloseWord != 0
+            }),
+            executionBountyUsdc
+        );
     }
 
     /// @notice Prunes spent margin-reservation links for an account's pending-order queue.
@@ -93,8 +156,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
     }
 
     /// @notice Returns the pending-order view and next account-queue link for an order id.
-    /// @dev The returned core fields are populated from the retained order record even after terminal execution;
-    ///      callers should traverse only live account-queue ids when they require pending-only data.
+    /// @dev Terminal records are deleted from the Router; permanent identity and outcomes are read from `lifecycleBook`.
     /// @param orderId Order id to inspect.
     /// @return pending Order data plus current clearinghouse margin and router bounty reservation.
     /// @return nextAccountOrderId Next order id in the live account queue, or zero at the tail.
@@ -104,43 +166,131 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
         return _getPendingOrderView(orderId);
     }
 
-    /// @notice Permissionlessly executes an eligible global queue head and pays its reserved USDC bounty.
-    /// @dev Before oracle work, refunds cutoff-invalid open heads up to the requested id, before pruning expired heads.
-    ///      Risk-off refunds return all remaining margin and bounty to the trader, pay no caller reward, and are capped
-    ///      at 64 per call; reaching the cap or removing a head before the requested target may return without executing
-    ///      that target. Expiry pruning remains subject to its separately configured cap. Execution then enforces FIFO,
-    ///      post-commit timing outside frozen-oracle mode, staleness, slippage, and a minimum engine-call gas reserve.
-    ///      Expired, slippage-failed, and engine failures other than mark-price-out-of-order—including business-rule
-    ///      rejections and panics—are terminal: committed margin is released and their bounty is credited to the caller.
-    ///      Mark-price-out-of-order instead reverts nonterminally and leaves the order pending. Excess ETH is refunded,
-    ///      or recorded in the admin contract if the transfer fails. Terminal failures have no retry lane.
+    /// @notice Permissionlessly executes or terminally classifies an eligible global queue head.
+    /// @dev Risk-off, expiry, and pinned-config mismatch are checked in that order before oracle work. Slippage and
+    ///      exact-shape typed planner/policy rejections are terminal and receive canonical receipts. Close-only, MEV,
+    ///      insufficient gas, mark ordering, and unknown, panic, empty, or malformed dependency failures leave the
+    ///      order pending. Each returned result is machine-readable; terminal state is permanent in `lifecycleBook`.
     /// @param orderId Queue-head id to execute, or a later committed id used as the terminal-head cleanup bound.
     /// @param pythUpdateData Pyth price update blobs; `msg.value` must cover all Pyth fees used by the call.
     function executeOrder(
         uint64 orderId,
         bytes[] calldata pythUpdateData
-    ) external payable nonReentrant {
-        _executeOrder(orderId, pythUpdateData);
+    ) external payable nonReentrant returns (OrderV2Types.ExecutionResult memory result) {
+        orderId;
+        pythUpdateData;
+        return abi.decode(_delegateExecutionSidecar(), (OrderV2Types.ExecutionResult));
     }
 
     /// @notice Permissionlessly processes consecutive FIFO orders through a committed inclusive id bound.
-    /// @dev Before oracle work for each item, refunds cutoff-invalid opens before applying expiry or other policy.
-    ///      Those refunds return the complete remaining margin and bounty to the trader and pay no caller reward. The
-    ///      batch processes at most 64 such refunds; after the 64th it may continue with a non-risk-off head, while a
-    ///      65th eligible refund stops the call. The batch otherwise uses strictly post-commit historical Pyth prices
-    ///      outside frozen-oracle mode and may reuse a proven basket for later compatible orders. It terminally cleans
-    ///      expired, slippage-failed, and engine failures other than mark-price-out-of-order, but stops at an open
-    ///      blocked by close-only policy, an MEV timing boundary, insufficient gas, either cleanup cap, or unavailable
-    ///      historical data after prior progress. Mark-price-out-of-order reverts the whole batch and leaves its state
-    ///      unchanged. Ordinary reserved USDC bounties accrue to the caller; unused ETH is refunded once or deferred
-    ///      to the admin on transfer failure.
+    /// @dev Every prepared item has its own Router rollback frame, so retryable Engine/policy failures or receipt
+    ///      failures leave that item pending without undoing earlier terminal items. Oracle/Pyth preparation and the
+    ///      Engine mark update remain batch-atomic outside that frame. The result identifies the next live order,
+    ///      terminal count, and exact stop class. Unused ETH is refunded once or deferred to the admin.
     /// @param maxOrderId Last committed order id the batch may process; must be at or after the head and below `nextCommitId`.
     /// @param pythUpdateData Pyth price update blobs; `msg.value` must cover the cumulative Pyth fees used.
     function executeOrderBatch(
         uint64 maxOrderId,
         bytes[] calldata pythUpdateData
-    ) external payable nonReentrant {
-        _executeOrderBatch(maxOrderId, pythUpdateData);
+    ) external payable nonReentrant returns (OrderV2Types.BatchResult memory result) {
+        maxOrderId;
+        pythUpdateData;
+        return abi.decode(_delegateExecutionSidecar(), (OrderV2Types.BatchResult));
+    }
+
+    /// @notice Returns one canonical live record to the immutable execution sidecar.
+    /// @dev Restricted to Router self-calls so only a delegate-executing trusted sidecar can consume the host surface.
+    function getV2OrderForSidecar(
+        uint64 orderId
+    ) external view returns (IOrderRouterV2ExecutionHost.OrderView memory orderView) {
+        _onlySelfCall();
+        OrderRecord storage record = orderRecords[orderId];
+        orderView.order = record.core;
+        orderView.nextGlobalOrderId = record.nextGlobalOrderId;
+        orderView.pending = record.status == IOrderRouterAccounting.OrderStatus.Pending;
+    }
+
+    /// @notice Re-enters one V2 item through an independently revertible Router frame.
+    /// @dev The outer non-reentrant entrypoint remains active; this callback delegates the exact authenticated calldata.
+    function executeV2OrderItemFromSidecar(
+        IOrderRouterV2ExecutionHost.ItemRequest calldata request
+    ) external returns (OrderV2Types.ExecutionResult memory result) {
+        _onlySelfCall();
+        request;
+        return abi.decode(_delegateExecutionSidecar(), (OrderV2Types.ExecutionResult));
+    }
+
+    /// @notice Releases order margin, settles its bounty, and deletes its ephemeral Router record.
+    /// @dev The recipient is explicit because the item rollback boundary changes `msg.sender` to the Router. When the
+    ///      source account executes its own order, only the bounty classification is released and no Engine carry
+    ///      checkpoint occurs; all other recipients use the canonical Engine bounty-credit path.
+    function settleV2OrderFromSidecar(
+        uint64 orderId,
+        bool success,
+        address bountyRecipient,
+        uint256 executionPrice,
+        uint256 accountingPrice,
+        uint64 accountingPublishTime
+    ) external returns (uint256 bountyUsdc) {
+        _onlySelfCall();
+        (OrderRecord storage record, CfdTypes.Order memory order) = _pendingOrder(orderId);
+        clearinghouse.releaseOrderReservationForTerminalCleanup(orderId);
+        bountyUsdc = record.executionBountyUsdc;
+        record.executionBountyUsdc = 0;
+        if (bountyUsdc != 0) {
+            if (bountyRecipient == order.account) {
+                clearinghouse.releaseReservedExecutionBountyToSource(order.account, bountyUsdc);
+            } else {
+                engine.creditBounty(order.account, bountyRecipient, bountyUsdc, accountingPrice, accountingPublishTime);
+            }
+        }
+        if (success) {
+            emit OrderExecuted(orderId, executionPrice);
+        }
+        _deleteOrder(
+            orderId, success ? IOrderRouterAccounting.OrderStatus.Executed : IOrderRouterAccounting.OrderStatus.Failed
+        );
+    }
+
+    /// @notice Refunds a cutoff-invalid open without carry checkpointing and deletes its ephemeral record.
+    function refundRiskOffOrderFromSidecar(
+        uint64 orderId,
+        uint64 riskOffCutoff
+    ) external returns (uint256 refundedBountyUsdc) {
+        _onlySelfCall();
+        (OrderRecord storage record, CfdTypes.Order memory order) = _pendingOrder(orderId);
+        if (!_isRiskOffOpen(orderId, order.isClose, riskOffCutoff)) {
+            revert OrderRouter__OrderNotRiskOff();
+        }
+
+        refundedBountyUsdc = record.executionBountyUsdc;
+        record.executionBountyUsdc = 0;
+        uint64[] memory orderIds = new uint64[](1);
+        orderIds[0] = orderId;
+        emit OrderFailed(orderId, OrderFailReason.RiskOff);
+        uint256 protectionBountyUsdc = _failPendingOpenProtectionForRiskOff(orderId, order.account);
+        _deleteOrder(orderId, IOrderRouterAccounting.OrderStatus.Failed);
+        clearinghouse.releaseInvalidatedOrderReserves(
+            order.account, orderIds, refundedBountyUsdc + protectionBountyUsdc
+        );
+    }
+
+    /// @notice Delegates receipt construction for an order already settled by risk-off or liquidation accounting.
+    function recordSettledTerminal(
+        IOrderRouterV2ExecutionHost.SettledTerminalInput calldata input
+    ) external returns (OrderV2Types.ExecutionResult memory result) {
+        _onlySelfCall();
+        input;
+        return abi.decode(_delegateExecutionSidecar(), (OrderV2Types.ExecutionResult));
+    }
+
+    /// @notice Executes the Router's canonical ETH refund-or-defer policy for the trusted sidecar.
+    function sendEthFromSidecar(
+        address recipient,
+        uint256 amount
+    ) external {
+        _onlySelfCall();
+        _sendEth(recipient, amount);
     }
 
     /// @notice Permissionlessly refunds one pending open invalidated by the persistent risk-off cutoff.
@@ -213,7 +363,20 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
             revert OrderRouter__Unauthorized();
         }
         nextCommitId = linkedOrderId + 1;
-        _recordCommittedOrder(linkedOrderId, account, side, size, 0, 0, true, executionBountyUsdc);
+        _recordCommittedOrder(
+            CfdTypes.Order({
+                account: account,
+                sizeDelta: size,
+                marginDelta: 0,
+                targetPrice: side == CfdTypes.Side.LONG ? engine.CAP_PRICE() : 1,
+                commitTime: uint64(block.timestamp),
+                commitBlock: uint64(block.number),
+                orderId: linkedOrderId,
+                side: side,
+                isClose: true
+            }),
+            executionBountyUsdc
+        );
     }
 
     /// @notice Atomically refreshes the pool-accounting mark and settles matured LP epochs against that exact mark.
@@ -275,6 +438,26 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
             returndatacopy(input, 0, outputSize)
             if iszero(success) { revert(input, outputSize) }
             outputWord := mload(input)
+        }
+    }
+
+    /// @dev Restricts sidecar host callbacks to an external call made by this Router itself.
+    function _onlySelfCall() private view {
+        if (msg.sender != address(this)) {
+            revert OrderRouter__Unauthorized();
+        }
+    }
+
+    /// @dev Delegates the exact current calldata to the immutable V2 execution module and bubbles failures verbatim.
+    function _delegateExecutionSidecar() private returns (bytes memory returndata) {
+        bool success;
+        // The target is immutable and constructor code-validated; Router entrypoints constrain the forwarded selector.
+        // slither-disable-next-line controlled-delegatecall
+        (success, returndata) = executionSidecar.delegatecall(msg.data);
+        if (!success) {
+            assembly ("memory-safe") {
+                revert(add(returndata, 0x20), mload(returndata))
+            }
         }
     }
 

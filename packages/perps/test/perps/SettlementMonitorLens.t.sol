@@ -3,8 +3,10 @@ pragma solidity 0.8.35;
 
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
+import {OrderRouterV2ExecutionSidecar} from "@plether/perps/OrderRouterV2ExecutionSidecar.sol";
 import {SettlementMonitorLens} from "@plether/perps/SettlementMonitorLens.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
@@ -196,10 +198,20 @@ contract SettlementMonitorLensTest is BasePerpTest {
         address wrongPool = address(0xBADF00D);
         SettlementMonitorOracleBindingMock wrongOracle =
             new SettlementMonitorOracleBindingMock(address(engine), wrongPool, address(baseMockPyth));
-        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
-        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
+        OrderRouterV2ExecutionSidecar executionSidecar = new OrderRouterV2ExecutionSidecar();
+        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
+        OrderLifecycleBook lifecycleBook =
+            new OrderLifecycleBook(predictedRouter, address(engine), address(clearinghouse), wrongPool);
+        OrderRouterLiquidationBatchSidecar liquidationSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
         OrderRouter wrongRouter = new OrderRouter(
-            address(engine), address(engineLens), wrongPool, address(wrongOracle), address(keeperSidecar)
+            address(engine),
+            address(engineLens),
+            wrongPool,
+            address(wrongOracle),
+            address(liquidationSidecar),
+            address(policyEvaluator),
+            address(executionSidecar),
+            address(lifecycleBook)
         );
         assertEq(address(wrongRouter), predictedRouter);
         vm.mockCall(
@@ -2730,10 +2742,10 @@ contract SettlementMonitorLensTest is BasePerpTest {
     }
 
     function test_HealthDetectsIndividualSideDivisibilityAndZeroSideAggregateCorruption() public {
-        bytes memory bullSideCall = abi.encodeWithSelector(bytes4(keccak256("sides(uint256)")), uint256(0));
+        bytes memory longSideCall = abi.encodeWithSelector(bytes4(keccak256("sides(uint256)")), uint256(0));
         uint256 branch = vm.snapshotState();
 
-        vm.mockCall(address(engine), bullSideCall, abi.encode(uint256(0), uint256(1), uint256(0), uint256(0)));
+        vm.mockCall(address(engine), longSideCall, abi.encode(uint256(0), uint256(1), uint256(0), uint256(0)));
         SettlementMonitorViewTypes.SettlementHealth memory indivisible = monitorLens.getSettlementHealth();
         assertEq(uint8(indivisible.state), uint8(SettlementMonitorViewTypes.HealthState.Critical));
         assertTrue(
@@ -2741,7 +2753,7 @@ contract SettlementMonitorLensTest is BasePerpTest {
         );
 
         vm.revertToState(branch);
-        vm.mockCall(address(engine), bullSideCall, abi.encode(uint256(0), uint256(0), uint256(0), uint256(1)));
+        vm.mockCall(address(engine), longSideCall, abi.encode(uint256(0), uint256(0), uint256(0), uint256(1)));
         SettlementMonitorViewTypes.SettlementHealth memory emptySide = monitorLens.getSettlementHealth();
         assertEq(uint8(emptySide.state), uint8(SettlementMonitorViewTypes.HealthState.Critical));
         assertTrue(
@@ -2949,7 +2961,7 @@ contract SettlementMonitorLensTest is BasePerpTest {
 
     function _openMonitorPosition() internal {
         _fundTrader(TRADER, 200e6);
-        _open(TRADER, CfdTypes.Side.BULL, 1000e18, 100e6, 100_000_000);
+        _open(TRADER, CfdTypes.Side.LONG, 1000e18, 100e6, 100_000_000);
     }
 
     function _setCurrentBasket(

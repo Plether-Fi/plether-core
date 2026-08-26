@@ -4,6 +4,7 @@ pragma solidity 0.8.35;
 // Audit-history file: tests prefixed with `obsolete_` preserve superseded findings for context only.
 // They are intentionally not statements about the live carry model or current accounting semantics.
 
+import {LegacyOrderRouterHarness} from "../utils/LegacyOrderRouterHarness.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
@@ -11,13 +12,15 @@ import {CfdEngineAdmin} from "@plether/perps/CfdEngineAdmin.sol";
 import {CfdEngineLens} from "@plether/perps/CfdEngineLens.sol";
 import {CfdEnginePlanner} from "@plether/perps/CfdEnginePlanner.sol";
 import {CfdEngineSettlementSidecar} from "@plether/perps/CfdEngineSettlementSidecar.sol";
+import {CfdOrderPolicyEvaluator} from "@plether/perps/CfdOrderPolicyEvaluator.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
-import {OrderRouter} from "@plether/perps/OrderRouter.sol";
+import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
+import {OrderRouterV2ExecutionSidecar} from "@plether/perps/OrderRouterV2ExecutionSidecar.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
@@ -50,8 +53,8 @@ contract CooldownBypassReceiver {
 
 contract AuditVerifiedFindingsFailing_F1_LegacySpreadSolvency is BasePerpTest {
 
-    address bullTrader = address(0xCA01);
-    address bearTrader = address(0xDA02);
+    address longTrader = address(0xCA01);
+    address shortTrader = address(0xDA02);
 
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
         return CfdTypes.RiskParams({
@@ -69,34 +72,34 @@ contract AuditVerifiedFindingsFailing_F1_LegacySpreadSolvency is BasePerpTest {
     }
 
     function obsolete_F1_CappedLegacySpreadShouldNetCollectibleReceivablesAgainstLiabilities() public {
-        _fundTrader(bullTrader, 300_000e6);
-        _fundTrader(bearTrader, 100_000e6);
+        _fundTrader(longTrader, 300_000e6);
+        _fundTrader(shortTrader, 100_000e6);
 
-        address bullAccount = bullTrader;
-        address bearAccount = bearTrader;
+        address longAccount = longTrader;
+        address shortAccount = shortTrader;
 
-        _open(bullAccount, CfdTypes.Side.BULL, 200_000e18, 200_000e6, 1e8);
-        _open(bearAccount, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
+        _open(longAccount, CfdTypes.Side.LONG, 200_000e18, 200_000e6, 1e8);
+        _open(shortAccount, CfdTypes.Side.SHORT, 100_000e18, 50_000e6, 1e8);
 
         vm.warp(block.timestamp + 180 days);
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
-        CfdTypes.Position memory bullPos;
-        CfdTypes.Position memory bearPos;
+        CfdTypes.Position memory longPos;
+        CfdTypes.Position memory shortPos;
         {
-            (uint256 size, uint256 margin, uint256 entryPrice,, CfdTypes.Side side,,) = engine.positions(bullAccount);
-            bullPos = CfdTypes.Position(size, margin, entryPrice, 0, side, 0, 0, 0);
+            (uint256 size, uint256 margin, uint256 entryPrice,, CfdTypes.Side side,,) = engine.positions(longAccount);
+            longPos = CfdTypes.Position(size, margin, entryPrice, 0, side, 0, 0, 0);
         }
         {
-            (uint256 size, uint256 margin, uint256 entryPrice,, CfdTypes.Side side,,) = engine.positions(bearAccount);
-            bearPos = CfdTypes.Position(size, margin, entryPrice, 0, side, 0, 0, 0);
+            (uint256 size, uint256 margin, uint256 entryPrice,, CfdTypes.Side side,,) = engine.positions(shortAccount);
+            shortPos = CfdTypes.Position(size, margin, entryPrice, 0, side, 0, 0, 0);
         }
 
-        int256 bullLegacySpread = 0;
-        int256 bearLegacySpread = 0;
-        assertLt(bullLegacySpread, 0, "Bull side should owe legacy spread in the obsolete skewed-market model");
-        assertGt(bearLegacySpread, 0, "Bear side should be owed legacy spread in the obsolete skewed-market model");
+        int256 longLegacySpread = 0;
+        int256 shortLegacySpread = 0;
+        assertLt(longLegacySpread, 0, "Long side should owe legacy spread in the obsolete skewed-market model");
+        assertGt(shortLegacySpread, 0, "Short side should be owed legacy spread in the obsolete skewed-market model");
         assertLt(
             int256(0),
             0,
@@ -134,7 +137,7 @@ contract AuditVerifiedFindingsFailing_F2_SkewCapBypass is BasePerpTest {
 
         uint256 depth = pool.totalAssets();
         vm.expectRevert();
-        _open(whaleAccount, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8, depth);
+        _open(whaleAccount, CfdTypes.Side.LONG, 500_000e18, 50_000e6, 1e8, depth);
     }
 
 }
@@ -157,22 +160,22 @@ contract AuditVerifiedFindingsFailing_F2_SkewDoubleCount is BasePerpTest {
     }
 
     function test_F2_SkewCapShouldUseSinglePostTradeSizeDelta() public {
-        address bearTrader = address(0xBEA2);
-        address bullTrader = address(0xB011);
+        address shortTrader = address(0xBEA2);
+        address longTrader = address(0xB011);
 
-        address bearAccount = bearTrader;
-        address bullAccount = bullTrader;
+        address shortAccount = shortTrader;
+        address longAccount = longTrader;
 
-        _fundTrader(bearTrader, 60_000e6);
-        _fundTrader(bullTrader, 120_000e6);
+        _fundTrader(shortTrader, 60_000e6);
+        _fundTrader(longTrader, 120_000e6);
 
-        _open(bearAccount, CfdTypes.Side.BEAR, 100_000e18, 20_000e6, 1e8);
-        _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 20_000e6, 1e8);
+        _open(shortAccount, CfdTypes.Side.SHORT, 100_000e18, 20_000e6, 1e8);
+        _open(longAccount, CfdTypes.Side.LONG, 100_000e18, 20_000e6, 1e8);
 
-        _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 20_000e6, 1e8);
+        _open(longAccount, CfdTypes.Side.LONG, 100_000e18, 20_000e6, 1e8);
 
-        (uint256 bullSize,,,,,,) = engine.positions(bullAccount);
-        assertEq(bullSize, 200_000e18, "Skew cap should evaluate the real post-trade open interest");
+        (uint256 longSize,,,,,,) = engine.positions(longAccount);
+        assertEq(longSize, 200_000e18, "Skew cap should evaluate the real post-trade open interest");
     }
 
 }
@@ -186,7 +189,7 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
     MarginClearinghouse clearinghouse;
     TrancheVault seniorVault;
     TrancheVault juniorVault;
-    OrderRouter router;
+    LegacyOrderRouterHarness router;
     OrderRouterAdmin routerAdmin;
 
     bytes32 constant FEED_A = bytes32(uint256(1));
@@ -229,13 +232,24 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
         bases[0] = 1e8;
         bases[1] = 1e8;
 
+        CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
+        OrderRouterV2ExecutionSidecar executionSidecar = new OrderRouterV2ExecutionSidecar();
         CfdEngineLens testEngineLens = new CfdEngineLens(address(engine));
         PletherOracle testOracle =
             new PletherOracle(address(engine), address(pool), address(mockPyth), feedIds, weights, bases, inversions);
-        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
-        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
-        router = new OrderRouter(
-            address(engine), address(testEngineLens), address(pool), address(testOracle), address(keeperSidecar)
+        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
+        OrderLifecycleBook lifecycleBook =
+            new OrderLifecycleBook(predictedRouter, address(engine), address(clearinghouse), address(pool));
+        OrderRouterLiquidationBatchSidecar liquidationSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
+        router = new LegacyOrderRouterHarness(
+            address(engine),
+            address(testEngineLens),
+            address(pool),
+            address(testOracle),
+            address(liquidationSidecar),
+            address(evaluator),
+            address(executionSidecar),
+            address(lifecycleBook)
         );
         assertEq(address(router), predictedRouter);
         routerAdmin = OrderRouterAdmin(router.admin());
@@ -255,24 +269,25 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
     }
 
     function test_F3_StaleOracleCancellationMustNotPayKeeperUsdc() public {
-        IOrderRouterAdminHost.RouterConfig memory config;
-        config.maxOrderAge = 3600;
-        config.orderExecutionStalenessLimit = router.orderExecutionStalenessLimit();
-        config.liquidationStalenessLimit = router.liquidationStalenessLimit();
-        config.basketMaxConfidenceRatioBps = router.basketMaxConfidenceRatioBps();
-        config.orderSettlementWindow = router.orderSettlementWindow();
-        config.maxComponentPublishTimeDivergence = router.maxComponentPublishTimeDivergence();
-        config.adverseConfidenceMultiplierBps = router.adverseConfidenceMultiplierBps();
-        config.minOpenNotionalUsdc = router.minOpenNotionalUsdc();
-        config.openOrderExecutionBountyBps = router.openOrderExecutionBountyBps();
-        config.minOpenOrderExecutionBountyUsdc = router.minOpenOrderExecutionBountyUsdc();
-        config.maxOpenOrderExecutionBountyUsdc = router.maxOpenOrderExecutionBountyUsdc();
-        config.closeOrderExecutionBountyUsdc = router.closeOrderExecutionBountyUsdc();
-        config.positionProtectionCommitsEnabled = router.positionProtectionCommitsEnabled();
-        config.positionProtectionTriggerBountyUsdc = router.positionProtectionTriggerBountyUsdc();
-        config.maxPendingOrders = router.maxPendingOrders();
-        config.minEngineGas = router.minEngineGas();
-        config.maxPruneOrdersPerCall = router.maxPruneOrdersPerCall();
+        IOrderRouterAdminHost.RouterConfig memory config = IOrderRouterAdminHost.RouterConfig({
+            maxOrderAge: 3600,
+            orderExecutionStalenessLimit: router.pletherOracle().orderExecutionStalenessLimit(),
+            liquidationStalenessLimit: router.pletherOracle().liquidationStalenessLimit(),
+            basketMaxConfidenceRatioBps: router.pletherOracle().basketMaxConfidenceRatioBps(),
+            orderSettlementWindow: router.pletherOracle().orderSettlementWindow(),
+            maxComponentPublishTimeDivergence: router.pletherOracle().maxComponentPublishTimeDivergence(),
+            adverseConfidenceMultiplierBps: router.pletherOracle().adverseConfidenceMultiplierBps(),
+            minOpenNotionalUsdc: router.minOpenNotionalUsdc(),
+            openOrderExecutionBountyBps: router.openOrderExecutionBountyBps(),
+            minOpenOrderExecutionBountyUsdc: router.minOpenOrderExecutionBountyUsdc(),
+            maxOpenOrderExecutionBountyUsdc: router.maxOpenOrderExecutionBountyUsdc(),
+            closeOrderExecutionBountyUsdc: router.closeOrderExecutionBountyUsdc(),
+            positionProtectionCommitsEnabled: router.positionProtectionCommitsEnabled(),
+            positionProtectionTriggerBountyUsdc: router.positionProtectionTriggerBountyUsdc(),
+            maxPendingOrders: router.maxPendingOrders(),
+            minEngineGas: router.minEngineGas(),
+            maxPruneOrdersPerCall: router.maxPruneOrdersPerCall()
+        });
         routerAdmin.proposeRouterConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
         routerAdmin.finalizeRouterConfig();
@@ -285,7 +300,7 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), t0);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, 1e8, false);
 
         bytes[] memory updateData = new bytes[](1);
         updateData[0] = "";
@@ -376,11 +391,11 @@ contract AuditVerifiedFindingsFailing_F4_PartialCloseLosses is BasePerpTest {
         address account = trader;
 
         _fundTrader(trader, 10_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
         uint256 depth = pool.totalAssets();
         vm.expectRevert();
-        _close(account, CfdTypes.Side.BULL, 99_000e18, 110_000_000, depth);
+        _close(account, CfdTypes.Side.LONG, 99_000e18, 110_000_000, depth);
     }
 
 }
@@ -418,7 +433,7 @@ contract AuditVerifiedFindingsFailing_F6_KeeperFeeReserveFreeEquity is BasePerpT
         address account = trader;
 
         _fundTrader(trader, 10_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
 
         uint256 lockedBefore = clearinghouse.lockedMarginUsdc(account);
         uint256 freeBefore = clearinghouse.getFreeBuyingPowerUsdc(account);
@@ -428,7 +443,7 @@ contract AuditVerifiedFindingsFailing_F6_KeeperFeeReserveFreeEquity is BasePerpT
         clearinghouse.withdraw(account, freeBefore - closeBounty);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 0, true);
 
         assertGe(
             clearinghouse.balanceUsdc(account),
@@ -470,8 +485,8 @@ contract AuditVerifiedFindingsFailing_F8_LiquidationDegradedMode is BasePerpTest
         _fundTrader(winner, 100_000e6);
         _fundTrader(loser, 2000e6);
 
-        _open(winnerAccount, CfdTypes.Side.BULL, 100_000e18, 100_000e6, 1.5e8);
-        _open(loserAccount, CfdTypes.Side.BEAR, 100_000e18, 2000e6, 0.5e8);
+        _open(winnerAccount, CfdTypes.Side.LONG, 100_000e18, 100_000e6, 1.5e8);
+        _open(loserAccount, CfdTypes.Side.SHORT, 100_000e18, 2000e6, 0.5e8);
 
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), 20_000e6);

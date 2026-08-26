@@ -170,8 +170,8 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         snap.lastMarkTime = engine.lastMarkTime();
         snap.riskParams = _loadRiskParams(engine);
 
-        snap.bullSide = _sideSnapshot(engine, CfdTypes.Side.BULL, poolDepthUsdc, snap.riskParams.baseCarryBps);
-        snap.bearSide = _sideSnapshot(engine, CfdTypes.Side.BEAR, poolDepthUsdc, snap.riskParams.baseCarryBps);
+        snap.longSide = _sideSnapshot(engine, CfdTypes.Side.LONG, poolDepthUsdc, snap.riskParams.baseCarryBps);
+        snap.shortSide = _sideSnapshot(engine, CfdTypes.Side.SHORT, poolDepthUsdc, snap.riskParams.baseCarryBps);
         snap.poolAssetsUsdc = poolDepthUsdc;
         snap.poolCashUsdc = IHousePool(host.pool()).totalAssets();
 

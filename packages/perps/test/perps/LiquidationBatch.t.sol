@@ -3,6 +3,7 @@ pragma solidity 0.8.35;
 
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
 import {PositionProtectionBook} from "@plether/perps/PositionProtectionBook.sol";
@@ -54,8 +55,8 @@ contract LiquidationBatchTest is BasePerpTest {
     uint256 internal constant EIP3860_INITCODE_LIMIT = 49_152;
     uint256 internal constant LIQUIDATION_PRICE = 102_000_000;
     uint256 internal constant NEUTRAL_PRICE = 100_000_000;
-    uint256 internal constant BULL_ADVERSE_PRICE = 100_020_000;
-    uint256 internal constant BEAR_ADVERSE_PRICE = 99_980_000;
+    uint256 internal constant LONG_ADVERSE_PRICE = 100_020_000;
+    uint256 internal constant SHORT_ADVERSE_PRICE = 99_980_000;
     uint256 internal constant SATURDAY_NOON = 1_710_021_600;
 
     address internal constant ELIGIBLE_ONE = address(0xBA7C0001);
@@ -71,25 +72,49 @@ contract LiquidationBatchTest is BasePerpTest {
 
     function test_Batch_SplitComponentsFitDeploymentLimits() public view {
         assertLe(
-            address(router).code.length, EIP170_RUNTIME_CODE_LIMIT, "batch entrypoint must keep OrderRouter deployable"
+            vm.getDeployedCode("OrderRouter.sol:OrderRouter").length,
+            EIP170_RUNTIME_CODE_LIMIT,
+            "batch entrypoint must keep production OrderRouter deployable"
         );
 
         address sidecar = router.liquidationBatchSidecar();
-        address book = address(router.positionProtectionBook());
-        assertNotEq(sidecar, book, "keeper sidecar and state-owning protection Book must be separate contracts");
+        address protectionBook = address(router.positionProtectionBook());
+        OrderLifecycleBook lifecycleBook = router.lifecycleBook();
+        assertNotEq(
+            sidecar, protectionBook, "keeper sidecar and state-owning protection Book must be separate contracts"
+        );
+        assertNotEq(sidecar, address(lifecycleBook), "keeper sidecar and lifecycle Book must be separate contracts");
+        assertNotEq(
+            protectionBook, address(lifecycleBook), "position-protection and lifecycle Books must be separate contracts"
+        );
         assertGt(sidecar.code.length, 0, "predeployed keeper sidecar must have code");
         assertLe(sidecar.code.length, EIP170_RUNTIME_CODE_LIMIT, "sidecar runtime must remain EIP-170 deployable");
-        assertGt(book.code.length, 0, "Router must deploy the protection Book");
-        assertLe(book.code.length, EIP170_RUNTIME_CODE_LIMIT, "Book runtime must remain EIP-170 deployable");
+        assertGt(protectionBook.code.length, 0, "Router must deploy the protection Book");
+        assertLe(protectionBook.code.length, EIP170_RUNTIME_CODE_LIMIT, "Book runtime must remain EIP-170 deployable");
+        assertGt(address(lifecycleBook).code.length, 0, "predeployed lifecycle Book must have code");
+        assertLe(
+            address(lifecycleBook).code.length,
+            EIP170_RUNTIME_CODE_LIMIT,
+            "lifecycle Book runtime must remain EIP-170 deployable"
+        );
+        assertEq(lifecycleBook.ROUTER(), address(router), "lifecycle Book must bind the exact Router");
+        assertEq(lifecycleBook.ENGINE(), address(engine), "lifecycle Book Engine binding");
+        assertEq(lifecycleBook.CLEARINGHOUSE(), address(clearinghouse), "lifecycle Book clearinghouse binding");
+        assertEq(lifecycleBook.HOUSE_POOL(), address(pool), "lifecycle Book HousePool binding");
 
-        uint256 routerCreationInputLength = type(OrderRouter).creationCode.length + (5 * 32);
+        uint256 sidecarCreationInputLength = type(OrderRouterLiquidationBatchSidecar).creationCode.length + 32;
+        assertLe(sidecarCreationInputLength, EIP3860_INITCODE_LIMIT, "sidecar initcode must remain EIP-3860 deployable");
+
+        uint256 lifecycleCreationInputLength = type(OrderLifecycleBook).creationCode.length + (4 * 32);
+        assertLe(
+            lifecycleCreationInputLength,
+            EIP3860_INITCODE_LIMIT,
+            "lifecycle Book creation input must remain EIP-3860 deployable"
+        );
+
+        uint256 routerCreationInputLength = type(OrderRouter).creationCode.length + (8 * 32);
         assertLe(
             routerCreationInputLength, EIP3860_INITCODE_LIMIT, "Router creation input must remain EIP-3860 deployable"
-        );
-        assertLe(
-            type(OrderRouterLiquidationBatchSidecar).creationCode.length + 32,
-            EIP3860_INITCODE_LIMIT,
-            "sidecar creation input must remain EIP-3860 deployable"
         );
         assertLe(
             type(PositionProtectionBook).creationCode.length + (2 * 32),
@@ -117,12 +142,41 @@ contract LiquidationBatchTest is BasePerpTest {
     }
 
     function test_RouterConstructor_RejectsSidecarBoundToForeignRouter() public {
+        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
+        OrderLifecycleBook lifecycleBook =
+            new OrderLifecycleBook(predictedRouter, address(engine), address(clearinghouse), address(pool));
         OrderRouterLiquidationBatchSidecar foreignBoundSidecar =
             new OrderRouterLiquidationBatchSidecar(address(0xBADB1D));
 
         vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidKeeperSidecar.selector);
         new OrderRouter(
-            address(engine), address(engineLens), address(pool), address(pletherOracle), address(foreignBoundSidecar)
+            address(engine),
+            address(engineLens),
+            address(pool),
+            address(pletherOracle),
+            address(foreignBoundSidecar),
+            address(policyEvaluator),
+            address(orderExecutionSidecar),
+            address(lifecycleBook)
+        );
+    }
+
+    function test_RouterConstructor_RejectsLifecycleBookBoundToForeignRouter() public {
+        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
+        OrderLifecycleBook foreignBoundLifecycleBook =
+            new OrderLifecycleBook(address(0xBADB1D), address(engine), address(clearinghouse), address(pool));
+        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
+
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidLifecycleBook.selector);
+        new OrderRouter(
+            address(engine),
+            address(engineLens),
+            address(pool),
+            address(pletherOracle),
+            address(keeperSidecar),
+            address(policyEvaluator),
+            address(orderExecutionSidecar),
+            address(foreignBoundLifecycleBook)
         );
     }
 
@@ -165,11 +219,11 @@ contract LiquidationBatchTest is BasePerpTest {
     }
 
     function test_Batch_MixedEligibilitySkipsIndependentlyAndPaysExactBountySum() public {
-        _fundAndOpenThinBull(ELIGIBLE_ONE);
-        _fundAndOpenThinBull(ELIGIBLE_TWO);
+        _fundAndOpenThinLong(ELIGIBLE_ONE);
+        _fundAndOpenThinLong(ELIGIBLE_TWO);
 
         _fundTrader(SOLVENT, 2000e6);
-        _open(SOLVENT, CfdTypes.Side.BULL, 10_000e18, 1000e6, NEUTRAL_PRICE);
+        _open(SOLVENT, CfdTypes.Side.LONG, 10_000e18, 1000e6, NEUTRAL_PRICE);
 
         _fundTrader(NO_POSITION, 1000e6);
         uint64 solventOrderId = _queueOpen(SOLVENT, 200e6);
@@ -247,12 +301,12 @@ contract LiquidationBatchTest is BasePerpTest {
 
     function test_Batch_SuccessForfeitsQueuedBountyAndClearsOrders() public {
         address account = address(0xBA7CB017);
-        _fundAndOpenThinBull(account);
+        _fundAndOpenThinLong(account);
 
         uint64 orderId = router.nextCommitId();
         vm.startPrank(account);
         for (uint256 i = 0; i < 5; i++) {
-            router.commitOrder(CfdTypes.Side.BULL, 2000e18, 0, 0, true);
+            router.commitOrder(CfdTypes.Side.LONG, 2000e18, 0, 0, true);
         }
         vm.stopPrank();
 
@@ -297,12 +351,12 @@ contract LiquidationBatchTest is BasePerpTest {
 
         address account = address(0xBA7C0032);
         _fundTrader(account, 270e6);
-        _open(account, CfdTypes.Side.BULL, 10_000e18, 200e6, NEUTRAL_PRICE);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 200e6, NEUTRAL_PRICE);
 
         uint64 firstOrderId = router.nextCommitId();
         vm.startPrank(account);
         for (uint256 i = 0; i < maxPendingOrders; i++) {
-            router.commitOrder(CfdTypes.Side.BULL, 100e18, 2e6, type(uint256).max, false);
+            router.commitOrder(CfdTypes.Side.LONG, 100e18, 2e6, type(uint256).max, false);
         }
         vm.stopPrank();
 
@@ -364,8 +418,8 @@ contract LiquidationBatchTest is BasePerpTest {
     function test_Batch_UnexpectedPerAccountRevertDoesNotRollBackLaterSuccess() public {
         address failingAccount = address(0xBA7CFA11);
         address succeedingAccount = address(0xBA7C600D);
-        _fundAndOpenThinBull(failingAccount);
-        _fundAndOpenThinBull(succeedingAccount);
+        _fundAndOpenThinLong(failingAccount);
+        _fundAndOpenThinLong(succeedingAccount);
 
         ICfdEngineTypes.LiquidationPreview memory succeedingPreview =
             engineLens.previewLiquidation(succeedingAccount, LIQUIDATION_PRICE);
@@ -405,9 +459,9 @@ contract LiquidationBatchTest is BasePerpTest {
         address firstAccount = address(0xBA7CE000);
         address failingAccount = address(0xBA7CE001);
         address laterAccount = address(0xBA7CE002);
-        _fundAndOpenThinBull(firstAccount);
-        _fundAndOpenThinBull(failingAccount);
-        _fundAndOpenThinBull(laterAccount);
+        _fundAndOpenThinLong(firstAccount);
+        _fundAndOpenThinLong(failingAccount);
+        _fundAndOpenThinLong(laterAccount);
 
         ICfdEngineTypes.LiquidationPreview memory firstPreview =
             engineLens.previewLiquidation(firstAccount, LIQUIDATION_PRICE);
@@ -444,14 +498,14 @@ contract LiquidationBatchTest is BasePerpTest {
         );
     }
 
-    function test_Batch_BullAndBearUseDirectionalAdversePricesButStoreNeutralMark() public {
-        address bull = address(0xBA7CB011);
-        address bear = address(0xBA7CBEA2);
+    function test_Batch_LongAndShortUseDirectionalAdversePricesButStoreNeutralMark() public {
+        address long = address(0xBA7CB011);
+        address short = address(0xBA7CBEA2);
 
-        _fundTrader(bull, 2100e6);
-        _fundTrader(bear, 2100e6);
-        _open(bull, CfdTypes.Side.BULL, 100_000e18, 2000e6, NEUTRAL_PRICE);
-        _open(bear, CfdTypes.Side.BEAR, 100_000e18, 2000e6, NEUTRAL_PRICE);
+        _fundTrader(long, 2100e6);
+        _fundTrader(short, 2100e6);
+        _open(long, CfdTypes.Side.LONG, 100_000e18, 2000e6, NEUTRAL_PRICE);
+        _open(short, CfdTypes.Side.SHORT, 100_000e18, 2000e6, NEUTRAL_PRICE);
 
         vm.warp(SATURDAY_NOON);
         assertTrue(engine.isOracleFrozen(), "setup must use the frozen FAD oracle policy");
@@ -460,15 +514,16 @@ contract LiquidationBatchTest is BasePerpTest {
             _basePythFeedIds(), int64(uint64(NEUTRAL_PRICE)), uint64(100_000), int32(-8), block.timestamp
         );
         assertTrue(
-            engineLens.previewLiquidation(bull, BULL_ADVERSE_PRICE).liquidatable, "FAD bull setup must be liquidatable"
+            engineLens.previewLiquidation(long, LONG_ADVERSE_PRICE).liquidatable, "FAD long setup must be liquidatable"
         );
         assertTrue(
-            engineLens.previewLiquidation(bear, BEAR_ADVERSE_PRICE).liquidatable, "FAD bear setup must be liquidatable"
+            engineLens.previewLiquidation(short, SHORT_ADVERSE_PRICE).liquidatable,
+            "FAD short setup must be liquidatable"
         );
 
         address[] memory accounts = new address[](2);
-        accounts[0] = bull;
-        accounts[1] = bear;
+        accounts[0] = long;
+        accounts[1] = short;
         bytes[] memory updateData = new bytes[](1);
         updateData[0] = hex"00";
         uint256 pythCallsBefore = baseMockPyth.updatePriceFeedsCallCount();
@@ -478,15 +533,15 @@ contract LiquidationBatchTest is BasePerpTest {
         IPerpsKeeper(address(router)).executeLiquidationBatch(accounts, updateData);
         Vm.Log[] memory logs = vm.getRecordedLogs();
 
-        (bool foundBull, CfdTypes.Side bullSide, uint256 bullPrice) = _liquidationEvent(logs, bull);
-        (bool foundBear, CfdTypes.Side bearSide, uint256 bearPrice) = _liquidationEvent(logs, bear);
+        (bool foundLong, CfdTypes.Side longSide, uint256 longPrice) = _liquidationEvent(logs, long);
+        (bool foundShort, CfdTypes.Side shortSide, uint256 shortPrice) = _liquidationEvent(logs, short);
 
-        assertTrue(foundBull, "bull liquidation event must be emitted");
-        assertTrue(foundBear, "bear liquidation event must be emitted");
-        assertEq(uint256(bullSide), uint256(CfdTypes.Side.BULL), "bull event side");
-        assertEq(uint256(bearSide), uint256(CfdTypes.Side.BEAR), "bear event side");
-        assertEq(bullPrice, BULL_ADVERSE_PRICE, "bull must execute above the neutral basket");
-        assertEq(bearPrice, BEAR_ADVERSE_PRICE, "bear must execute below the neutral basket");
+        assertTrue(foundLong, "long liquidation event must be emitted");
+        assertTrue(foundShort, "short liquidation event must be emitted");
+        assertEq(uint256(longSide), uint256(CfdTypes.Side.LONG), "long event side");
+        assertEq(uint256(shortSide), uint256(CfdTypes.Side.SHORT), "short event side");
+        assertEq(longPrice, LONG_ADVERSE_PRICE, "long must execute above the neutral basket");
+        assertEq(shortPrice, SHORT_ADVERSE_PRICE, "short must execute below the neutral basket");
         assertEq(engine.lastMarkPrice(), NEUTRAL_PRICE, "global mark must remain the neutral basket price");
         assertEq(engine.lastMarkTime(), SATURDAY_NOON, "global mark must use the shared publish time");
         assertEq(
@@ -500,8 +555,8 @@ contract LiquidationBatchTest is BasePerpTest {
         address solvent = address(0xBA7CE501);
         address unexpectedFailure = address(0xBA7CFA17);
         _fundTrader(solvent, 2000e6);
-        _open(solvent, CfdTypes.Side.BULL, 10_000e18, 1000e6, NEUTRAL_PRICE);
-        _fundAndOpenThinBull(unexpectedFailure);
+        _open(solvent, CfdTypes.Side.LONG, 10_000e18, 1000e6, NEUTRAL_PRICE);
+        _fundAndOpenThinLong(unexpectedFailure);
 
         bytes4 unexpectedSelector = bytes4(0xDEADFA11);
         vm.mockCallRevert(
@@ -657,15 +712,15 @@ contract LiquidationBatchTest is BasePerpTest {
     function test_BatchItem_DirectCallRevertsUnauthorized() public {
         vm.expectRevert(IOrderRouterErrors.OrderRouter__Unauthorized.selector);
         router.executeLiquidationBatchItem(
-            ELIGIBLE_ONE, NEUTRAL_PRICE, NEUTRAL_PRICE, uint64(block.timestamp), KEEPER, 0
+            ELIGIBLE_ONE, NEUTRAL_PRICE, NEUTRAL_PRICE, NEUTRAL_PRICE, uint64(block.timestamp), KEEPER, 0
         );
     }
 
-    function _fundAndOpenThinBull(
+    function _fundAndOpenThinLong(
         address account
     ) internal {
         _fundTrader(account, 300e6);
-        _open(account, CfdTypes.Side.BULL, 10_000e18, 250e6, NEUTRAL_PRICE);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 250e6, NEUTRAL_PRICE);
     }
 
     function _queueOpen(
@@ -674,7 +729,7 @@ contract LiquidationBatchTest is BasePerpTest {
     ) internal returns (uint64 orderId) {
         orderId = router.nextCommitId();
         vm.prank(account);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, marginUsdc, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, marginUsdc, type(uint256).max, false);
     }
 
     function _positionSize(

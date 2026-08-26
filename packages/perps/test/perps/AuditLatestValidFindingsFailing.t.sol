@@ -9,11 +9,10 @@ import {HousePool} from "@plether/perps/HousePool.sol";
 import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
-import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
+import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
-import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
 import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
@@ -62,16 +61,16 @@ contract AuditLatestValidFindingsFailing_Mev is BasePerpTest {
         bases.push(1e8);
         bases.push(1e8);
 
-        engineLens = new CfdEngineLens(address(engine));
-        pletherOracle = new PletherOracle(
-            address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
+        router = _deployLegacyOrderRouter(
+            address(engine),
+            address(new CfdEngineLens(address(engine))),
+            address(pool),
+            address(
+                new PletherOracle(
+                    address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
+                )
+            )
         );
-        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
-        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
-        router = new OrderRouter(
-            address(engine), address(engineLens), address(pool), address(pletherOracle), address(keeperSidecar)
-        );
-        assertEq(address(router), predictedRouter);
         engine.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
@@ -81,11 +80,11 @@ contract AuditLatestValidFindingsFailing_Mev is BasePerpTest {
         vm.deal(alice, 10 ether);
     }
 
-    function test_C1_CrossBlockPublishAfterCommitMustRevert() public {
+    function test_C1_SameBlockPublishAfterCommitReturnsPending() public {
         vm.warp(1000);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, 1e8, false);
 
         mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1005);
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 1005);
@@ -94,15 +93,18 @@ contract AuditLatestValidFindingsFailing_Mev is BasePerpTest {
         bytes[] memory updateData = new bytes[](1);
         updateData[0] = "";
 
-        vm.expectRevert(IOrderRouterErrors.OrderRouter__MevDetected.selector);
-        router.executeOrder(1, updateData);
+        OrderV2Types.ExecutionResult memory result = router.executeOrder(1, updateData);
+
+        assertEq(uint8(result.status), uint8(OrderV2Types.LifecycleStatus.Pending));
+        assertEq(uint8(result.pendingReason), uint8(OrderV2Types.PendingReason.SameBlock));
+        assertEq(router.nextExecuteId(), 1, "Same-block execution must leave the FIFO head pending");
     }
 
     function test_H1_FutureDatedVaaShouldNotPanic() public {
         vm.warp(1000);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, 1e8, false);
 
         mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1002);
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 1002);

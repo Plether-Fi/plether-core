@@ -116,7 +116,7 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         uint256 protocolTreasuryBalanceUsdc =
             engineContract.clearinghouse().balanceUsdc(engineContract.protocolTreasury());
         uint256 maxLiabilityUsdc = SolvencyAccountingLib.getMaxLiability(
-            _sideState(CfdTypes.Side.BULL).maxProfitUsdc, _sideState(CfdTypes.Side.BEAR).maxProfitUsdc
+            _sideState(CfdTypes.Side.LONG).maxProfitUsdc, _sideState(CfdTypes.Side.SHORT).maxProfitUsdc
         );
         SolvencyAccountingLib.SolvencyState memory solvencyState = _buildAdjustedSolvencyState();
         snapshot.poolAssetsUsdc = poolAssetsUsdc;
@@ -133,9 +133,9 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         snapshot.protocolTreasuryBalanceUsdc = protocolTreasuryBalanceUsdc;
         snapshot.totalTraderClaimBalanceUsdc = engineContract.totalTraderClaimBalanceUsdc();
         snapshot.degradedMode = engineContract.degradedMode();
-        ICfdEngineTypes.SideState memory bullState = _sideState(CfdTypes.Side.BULL);
-        ICfdEngineTypes.SideState memory bearState = _sideState(CfdTypes.Side.BEAR);
-        snapshot.hasLiveLiability = bullState.maxProfitUsdc + bearState.maxProfitUsdc > 0;
+        ICfdEngineTypes.SideState memory longState = _sideState(CfdTypes.Side.LONG);
+        ICfdEngineTypes.SideState memory shortState = _sideState(CfdTypes.Side.SHORT);
+        snapshot.hasLiveLiability = longState.maxProfitUsdc + shortState.maxProfitUsdc > 0;
     }
 
     /// @notice Builds solvency from pool assets, maximum side liability, and aggregate trader claims.
@@ -144,7 +144,7 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         return SolvencyAccountingLib.buildSolvencyState(
             engineContract.pool().totalAssets(),
             SolvencyAccountingLib.getMaxLiability(
-                _sideState(CfdTypes.Side.BULL).maxProfitUsdc, _sideState(CfdTypes.Side.BEAR).maxProfitUsdc
+                _sideState(CfdTypes.Side.LONG).maxProfitUsdc, _sideState(CfdTypes.Side.SHORT).maxProfitUsdc
             ),
             engineContract.totalTraderClaimBalanceUsdc()
         );

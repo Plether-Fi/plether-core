@@ -30,7 +30,7 @@ contract AuditTightenedFindingsFailing is BasePerpTest {
     function test_H1_WithdrawScenarioNowBlocksOnOpenPosition() public {
         address account = alice;
         _fundTrader(alice, 10_000 * 1e6);
-        _open(account, CfdTypes.Side.BULL, 100_000 * 1e18, 5000 * 1e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000 * 1e18, 5000 * 1e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(103_800_000, uint64(block.timestamp));
@@ -46,7 +46,7 @@ contract AuditTightenedFindingsFailing is BasePerpTest {
         vm.deal(keeper, 1 ether);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(1e8));
@@ -58,26 +58,26 @@ contract AuditTightenedFindingsFailing is BasePerpTest {
     }
 
     function test_M1_FullCloseMustZeroFundedSideMargin() public {
-        address bullTrader = address(0x1111);
-        address bearTrader = address(0x2222);
-        address bullAccount = bullTrader;
-        address bearAccount = bearTrader;
+        address longTrader = address(0x1111);
+        address shortTrader = address(0x2222);
+        address longAccount = longTrader;
+        address shortAccount = shortTrader;
 
-        _fundTrader(bullTrader, 100_000 * 1e6);
-        _fundTrader(bearTrader, 600_000 * 1e6);
+        _fundTrader(longTrader, 100_000 * 1e6);
+        _fundTrader(shortTrader, 600_000 * 1e6);
         // This regression targets post-close side margin, so fund the independent admission headroom first.
         _fundJunior(address(this), 1000 * 1e6);
 
-        _open(bearAccount, CfdTypes.Side.BEAR, 1_000_000 * 1e18, 100_000 * 1e6, 1e8);
-        _open(bullAccount, CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8);
+        _open(shortAccount, CfdTypes.Side.SHORT, 1_000_000 * 1e18, 100_000 * 1e6, 1e8);
+        _open(longAccount, CfdTypes.Side.LONG, 100_000 * 1e18, 10_000 * 1e6, 1e8);
 
         vm.warp(block.timestamp + 365 days);
-        _close(bullAccount, CfdTypes.Side.BULL, 100_000 * 1e18, 1e8);
+        _close(longAccount, CfdTypes.Side.LONG, 100_000 * 1e18, 1e8);
 
         assertEq(
-            _sideTotalMargin(CfdTypes.Side.BULL),
+            _sideTotalMargin(CfdTypes.Side.LONG),
             0,
-            "Full close should remove all bull margin, including legacy-spread gains in the obsolete model"
+            "Full close should remove all long margin, including legacy-spread gains in the obsolete model"
         );
     }
 
@@ -99,7 +99,7 @@ contract AuditTightenedFindingsFailing is BasePerpTest {
 
         address account = address(0x3333);
         _fundTrader(address(0x3333), 50_000 * 1e6);
-        _open(account, CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000 * 1e18, 10_000 * 1e6, 1e8);
 
         uint256 seniorBefore = pool.seniorPrincipal();
 

@@ -703,7 +703,7 @@ contract TimelockPauseTest is BasePerpTest {
 
         vm.prank(alice);
         vm.expectRevert(Pausable.EnforcedPause.selector);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
     }
 
     function test_ExecuteOrder_RefundsPrePauseOpenWithoutOracleWhenPaused() public {
@@ -711,7 +711,7 @@ contract TimelockPauseTest is BasePerpTest {
         uint256 executorSettlementBefore = _settlementBalance(address(this));
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         routerAdmin.pause();
 
@@ -733,7 +733,7 @@ contract TimelockPauseTest is BasePerpTest {
 
     function test_ExecuteLiquidation_WorksWhenPaused() public {
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
 
         router.executeOrder(1, _mockPythUpdateData());
 
@@ -785,7 +785,7 @@ contract TimelockPauseTest is BasePerpTest {
 
     function test_Pause_SnapshotsInclusiveRiskOffCutoff() public {
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         vm.expectEmit(address(routerAdmin));
         emit Paused(address(this));
@@ -810,7 +810,7 @@ contract TimelockPauseTest is BasePerpTest {
 
     function test_Unpause_DoesNotClearRiskOffCutoff() public {
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         routerAdmin.pause();
         routerAdmin.unpause();
@@ -821,13 +821,13 @@ contract TimelockPauseTest is BasePerpTest {
 
     function test_Pause_RiskOffCutoffIsMonotonicAcrossPauseCycles() public {
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
         routerAdmin.pause();
         assertEq(routerAdmin.riskOffOrderCutoff(), 1);
 
         routerAdmin.unpause();
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         vm.expectEmit(address(routerAdmin));
         emit Paused(address(this));
@@ -851,12 +851,12 @@ contract TimelockPauseTest is BasePerpTest {
 
         vm.prank(alice);
         vm.expectRevert(Pausable.EnforcedPause.selector);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         routerAdmin.unpause();
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
         assertEq(router.nextCommitId(), 2);
     }
 
@@ -1058,7 +1058,7 @@ contract TimelockPauseTest is BasePerpTest {
         pool.pauseLpEpochSettlement();
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8, false);
         router.executeOrder(1, _mockPythUpdateData());
         (uint256 sizeAfterOpen,,,,,,) = engine.positions(alice);
         assertEq(sizeAfterOpen, 10_000e18, "settlement hold must not block new trading risk");
@@ -1067,7 +1067,7 @@ contract TimelockPauseTest is BasePerpTest {
         assertEq(engine.lastMarkPrice(), 1.05e8, "settlement hold must not block mark refresh");
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, sizeAfterOpen, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, sizeAfterOpen, 0, 0, true);
         router.executeOrder(2, _mockPythUpdateData(1.05e8));
         (uint256 sizeAfterClose,,,,,,) = engine.positions(alice);
         assertEq(sizeAfterClose, 0, "settlement hold must never block a trader close");
@@ -1075,7 +1075,7 @@ contract TimelockPauseTest is BasePerpTest {
 
     function test_HousePool_SettlementHoldLeavesLiquidationLive() public {
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8, false);
         router.executeOrder(1, _mockPythUpdateData());
 
         pool.pauseLpEpochSettlement();

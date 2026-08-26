@@ -26,6 +26,10 @@ contract CfdEngineAdmin is Ownable2Step {
     /// @notice Engine host that receives finalized configuration.
     ICfdEngineAdminHost public immutable engine;
 
+    /// @notice Monotonic version of the active engine configuration, starting at one.
+    /// @dev Advances once after every successful risk, calendar, or freshness finalization.
+    uint64 public activeConfigVersion = 1;
+
     /// @notice Latest staged risk, execution-fee, frozen-spread, and settlement-buffer configuration.
     ICfdEngineAdminHost.EngineRiskConfig public pendingRiskConfig;
     /// @notice Earliest Unix timestamp for risk finalization, or zero when none is active.
@@ -130,6 +134,7 @@ contract CfdEngineAdmin is Ownable2Step {
         delete pendingRiskConfig;
         riskConfigActivationTime = 0;
         engine.applyRiskConfig(config);
+        activeConfigVersion += 1;
         emit RiskConfigFinalized(config);
     }
 
@@ -171,6 +176,7 @@ contract CfdEngineAdmin is Ownable2Step {
         delete _pendingCalendarConfig.fadDayTimestamps;
         calendarConfigActivationTime = 0;
         engine.applyCalendarConfig(config);
+        activeConfigVersion += 1;
         emit CalendarConfigFinalized(config);
     }
 
@@ -218,6 +224,7 @@ contract CfdEngineAdmin is Ownable2Step {
         delete pendingFreshnessConfig;
         freshnessConfigActivationTime = 0;
         engine.applyFreshnessConfig(config);
+        activeConfigVersion += 1;
         emit FreshnessConfigFinalized(config);
     }
 

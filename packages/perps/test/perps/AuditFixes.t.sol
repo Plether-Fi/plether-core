@@ -14,12 +14,12 @@ contract AuditFixesTest is BasePerpTest {
         address account = trader;
 
         _fundTrader(trader, 100_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 50_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 50_000e6, 1e8);
 
         stdstore.target(address(engine)).sig("unsettledCarryUsdc(address)").with_key(account)
             .checked_write(uint256(10e6));
 
-        _close(account, CfdTypes.Side.BULL, 100_000e18, 1e8);
+        _close(account, CfdTypes.Side.LONG, 100_000e18, 1e8);
 
         assertEq(engine.unsettledCarryUsdc(account), 0, "Close should clear cached unsettled carry");
     }
@@ -30,7 +30,7 @@ contract AuditFixesTest is BasePerpTest {
         address account = trader;
 
         _fundTrader(trader, 10_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
 
         vm.prank(trader);
         clearinghouse.withdraw(account, 8000e6);

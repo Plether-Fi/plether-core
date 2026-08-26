@@ -50,8 +50,8 @@ contract PerpExplicitAccountingHandler is Test {
     HousePool internal immutable pool;
     OrderRouter internal immutable router;
 
-    address internal constant BULL_TRADER = address(0xACCA01);
-    address internal constant BEAR_TRADER = address(0xACCA02);
+    address internal constant LONG_TRADER = address(0xACCA01);
+    address internal constant SHORT_TRADER = address(0xACCA02);
     address internal constant KEEPER = address(0xACCA03);
 
     bool public closePreviewLiveMismatch;
@@ -100,17 +100,17 @@ contract PerpExplicitAccountingHandler is Test {
 
         if (_openPair(size, margin, 1e8)) {
             uint256 closeSize = bound(closeSizeFuzz, 1, size / CfdTypes.SIZE_QUANTUM) * CfdTypes.SIZE_QUANTUM;
-            ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(BULL_TRADER, closeSize, closePrice);
+            ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(LONG_TRADER, closeSize, closePrice);
             if (preview.valid) {
-                uint256 settlementBefore = clearinghouse.balanceUsdc(BULL_TRADER);
+                uint256 settlementBefore = clearinghouse.balanceUsdc(LONG_TRADER);
                 bool degradedBefore = engine.degradedMode();
 
-                bool executed = _close(BULL_TRADER, CfdTypes.Side.BULL, closeSize, closePrice);
+                bool executed = _close(LONG_TRADER, CfdTypes.Side.LONG, closeSize, closePrice);
                 if (!executed) {
                     mismatch = true;
                     mismatchCode = 1;
                 } else {
-                    CloseObserved memory observed = _observeClose(BULL_TRADER, settlementBefore);
+                    CloseObserved memory observed = _observeClose(LONG_TRADER, settlementBefore);
                     (mismatch, mismatchCode, expected, actual) = _closeMismatch(preview, observed, degradedBefore);
                 }
             }
@@ -141,20 +141,20 @@ contract PerpExplicitAccountingHandler is Test {
 
         if (_openPair(size, margin, 1e8)) {
             ICfdEngineTypes.LiquidationPreview memory preview =
-                engineLens.previewLiquidation(BULL_TRADER, liquidationPrice);
+                engineLens.previewLiquidation(LONG_TRADER, liquidationPrice);
             if (preview.liquidatable) {
-                uint256 settlementBefore = clearinghouse.balanceUsdc(BULL_TRADER);
+                uint256 settlementBefore = clearinghouse.balanceUsdc(LONG_TRADER);
                 uint256 keeperBefore = clearinghouse.balanceUsdc(KEEPER);
                 uint256 protocolTreasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
                 bool degradedBefore = engine.degradedMode();
 
-                bool executed = _liquidate(BULL_TRADER, liquidationPrice, KEEPER);
+                bool executed = _liquidate(LONG_TRADER, liquidationPrice, KEEPER);
                 if (!executed) {
                     mismatch = true;
                     mismatchCode = 1;
                 } else {
                     LiquidationObserved memory observed = _observeLiquidation(
-                        BULL_TRADER, KEEPER, settlementBefore, keeperBefore, protocolTreasuryBefore
+                        LONG_TRADER, KEEPER, settlementBefore, keeperBefore, protocolTreasuryBefore
                     );
                     (mismatch, mismatchCode, expected, actual) = _liquidationMismatch(preview, observed, degradedBefore);
                 }
@@ -192,10 +192,11 @@ contract PerpExplicitAccountingHandler is Test {
 
             vm.warp(block.timestamp + bound(elapsedFuzz, 0, 30 days));
 
-            ICfdEngineTypes.ClosePreview memory bullPreview = engineLens.previewClose(BULL_TRADER, size, closePrice);
-            if (bullPreview.valid && _close(BULL_TRADER, CfdTypes.Side.BULL, size, closePrice)) {
-                ICfdEngineTypes.ClosePreview memory bearPreview = engineLens.previewClose(BEAR_TRADER, size, closePrice);
-                if (bearPreview.valid && _close(BEAR_TRADER, CfdTypes.Side.BEAR, size, closePrice)) {
+            ICfdEngineTypes.ClosePreview memory longPreview = engineLens.previewClose(LONG_TRADER, size, closePrice);
+            if (longPreview.valid && _close(LONG_TRADER, CfdTypes.Side.LONG, size, closePrice)) {
+                ICfdEngineTypes.ClosePreview memory shortPreview =
+                    engineLens.previewClose(SHORT_TRADER, size, closePrice);
+                if (shortPreview.valid && _close(SHORT_TRADER, CfdTypes.Side.SHORT, size, closePrice)) {
                     uint256 valueAfter = _lpTraderProtocolValue();
                     uint256 physicalCashAfter = _protocolPhysicalCash();
                     valueMismatch = valueAfter != valueBefore;
@@ -360,7 +361,7 @@ contract PerpExplicitAccountingHandler is Test {
         uint256 lots = size / CfdTypes.SIZE_QUANTUM;
         uint256 entryCostUsdcAtoms = engine.positionEntryCostUsdcAtoms(account);
         uint256 maximumCollectibleUsdc =
-            side == CfdTypes.Side.BULL ? lots * engine.CAP_PRICE() - entryCostUsdcAtoms : entryCostUsdcAtoms;
+            side == CfdTypes.Side.LONG ? lots * engine.CAP_PRICE() - entryCostUsdcAtoms : entryCostUsdcAtoms;
         uint256 candidateCapUsdc = clearinghouse.pnlPledgeUsdc(account) + engine.traderClaimBalanceUsdc(account);
         uint256 expectedCapUsdc = candidateCapUsdc < maximumCollectibleUsdc ? candidateCapUsdc : maximumCollectibleUsdc;
 
@@ -372,10 +373,10 @@ contract PerpExplicitAccountingHandler is Test {
         ITerminalNavBookV2 book = engine.terminalNavBook();
         ITerminalNavBookV2.BookState memory bookState = book.bookState();
         ICfdEngineTypes.TerminalNavSnapshot memory snapshot = engine.terminalNavSnapshot();
-        (uint256 bullMaxProfit, uint256 bullOpenInterest,,) = engine.sides(uint8(CfdTypes.Side.BULL));
-        (uint256 bearMaxProfit, uint256 bearOpenInterest,,) = engine.sides(uint8(CfdTypes.Side.BEAR));
-        uint256 maxDirectionalLiabilityUsdc = bullMaxProfit > bearMaxProfit ? bullMaxProfit : bearMaxProfit;
-        bool hasOpenPositions = bullOpenInterest > 0 || bearOpenInterest > 0;
+        (uint256 longMaxProfit, uint256 longOpenInterest,,) = engine.sides(uint8(CfdTypes.Side.LONG));
+        (uint256 shortMaxProfit, uint256 shortOpenInterest,,) = engine.sides(uint8(CfdTypes.Side.SHORT));
+        uint256 maxDirectionalLiabilityUsdc = longMaxProfit > shortMaxProfit ? longMaxProfit : shortMaxProfit;
+        bool hasOpenPositions = longOpenInterest > 0 || shortOpenInterest > 0;
 
         return snapshot.markPrice == engine.lastMarkPrice() && snapshot.markTime == engine.lastMarkTime()
             && snapshot.bookVersion == bookState.bookVersion
@@ -393,10 +394,10 @@ contract PerpExplicitAccountingHandler is Test {
         uint256 price
     ) internal returns (bool) {
         uint256 fee = _executionFee(size, price);
-        _fundTrader(BULL_TRADER, margin + fee + 10e6);
-        _fundTrader(BEAR_TRADER, margin + fee + 10e6);
-        return _open(BULL_TRADER, CfdTypes.Side.BULL, size, margin, price)
-            && _open(BEAR_TRADER, CfdTypes.Side.BEAR, size, margin, price);
+        _fundTrader(LONG_TRADER, margin + fee + 10e6);
+        _fundTrader(SHORT_TRADER, margin + fee + 10e6);
+        return _open(LONG_TRADER, CfdTypes.Side.LONG, size, margin, price)
+            && _open(SHORT_TRADER, CfdTypes.Side.SHORT, size, margin, price);
     }
 
     function _open(
@@ -485,10 +486,10 @@ contract PerpExplicitAccountingHandler is Test {
     }
 
     function _lpTraderProtocolValue() internal view returns (uint256) {
-        uint256 traderClaims = engine.traderClaimBalanceUsdc(BULL_TRADER) + engine.traderClaimBalanceUsdc(BEAR_TRADER);
+        uint256 traderClaims = engine.traderClaimBalanceUsdc(LONG_TRADER) + engine.traderClaimBalanceUsdc(SHORT_TRADER);
         uint256 lpNetAssets = pool.totalAssets() > traderClaims ? pool.totalAssets() - traderClaims : 0;
-        return lpNetAssets + traderClaims + clearinghouse.balanceUsdc(BULL_TRADER)
-            + clearinghouse.balanceUsdc(BEAR_TRADER) + clearinghouse.balanceUsdc(KEEPER)
+        return lpNetAssets + traderClaims + clearinghouse.balanceUsdc(LONG_TRADER)
+            + clearinghouse.balanceUsdc(SHORT_TRADER) + clearinghouse.balanceUsdc(KEEPER)
             + clearinghouse.balanceUsdc(engine.protocolTreasury());
     }
 

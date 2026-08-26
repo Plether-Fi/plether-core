@@ -4,12 +4,12 @@ pragma solidity 0.8.35;
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
 import {ICfdEnginePlanner} from "@plether/perps/interfaces/ICfdEnginePlanner.sol";
 import {ICfdEngineRiskParamsView} from "@plether/perps/interfaces/ICfdEngineRiskParamsView.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
-import {IPerpsTraderActions} from "@plether/perps/interfaces/IPerpsTraderActions.sol";
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {IPositionProtectionActions} from "@plether/perps/interfaces/IPositionProtectionActions.sol";
 import {IPositionProtectionBook} from "@plether/perps/interfaces/IPositionProtectionBook.sol";
@@ -76,6 +76,8 @@ interface IPositionProtectionRouterHost {
 
     function closeOrderExecutionBountyUsdc() external view returns (uint256);
 
+    function maxOrderAge() external view returns (uint256);
+
     function nextCommitId() external view returns (uint64);
 
     function pendingOrderCounts(
@@ -89,6 +91,17 @@ interface IPositionProtectionRouterHost {
     function getPendingOrderView(
         uint64 orderId
     ) external view returns (IOrderRouterAccounting.PendingOrderView memory pending, uint64 nextAccountOrderId);
+
+}
+
+/// @notice Book-only bounded-order surface for atomically attaching protection to a newly committed open.
+/// @dev The Router authenticates this explicit-account host call by requiring this immutable Book as caller.
+interface IPositionProtectionOrderCommitHost {
+
+    function commitProtectedOpen(
+        address account,
+        OrderV2Types.OrderRequest calldata request
+    ) external returns (uint64 orderId);
 
 }
 
@@ -591,11 +604,37 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         uint256 marginDelta,
         uint256 targetPrice
     ) private returns (uint64 parentOrderId) {
-        bytes memory commitCall =
-            abi.encodeCall(IPerpsTraderActions.commitOrder, (side, sizeDelta, marginDelta, targetPrice, false));
-        bytes memory callData = bytes.concat(commitCall, abi.encode(account));
-        parentOrderId = IPositionProtectionRouterHost(ROUTER).nextCommitId();
-        _callRouterNoReturn(callData, 0);
+        IPositionProtectionRouterHost router = IPositionProtectionRouterHost(ROUTER);
+        parentOrderId = router.nextCommitId();
+
+        // Solidity zero-initializes the fields intentionally omitted from this synthetic permissive request.
+        // slither-disable-next-line uninitialized-local
+        OrderV2Types.OrderRequest memory request;
+        request.clientOrderId = OrderV2Types.protocolClientOrderId(
+            keccak256(
+                abi.encode("PLETHER_POSITION_PROTECTION_PARENT_V2", block.chainid, ROUTER, account, parentOrderId)
+            )
+        );
+        request.side = side;
+        request.sizeDelta = sizeDelta;
+        request.marginDelta = marginDelta;
+        request.targetPrice = targetPrice == 0 ? (side == CfdTypes.Side.LONG ? 1 : ENGINE.CAP_PRICE()) : targetPrice;
+        request.bounds.validUntil = uint64(block.timestamp + router.maxOrderAge());
+        request.bounds.allowedExecutionModes = 1 | 2 | 4;
+        // Zero is a Router-authenticated internal wildcard. Public V2 commits reject it.
+        request.bounds.expectedConfigHash = bytes32(0);
+        request.bounds.maxExecutionBountyUsdc = type(uint256).max;
+        request.bounds.maxExecutionNotionalUsdc = type(uint256).max;
+        request.bounds.maxGrossAccountDebitUsdc = type(uint256).max;
+        request.bounds.maxActionChargeUsdc = type(uint256).max;
+        request.bounds.maxExplicitFeesUsdc = type(uint256).max;
+        request.bounds.maxPostPositionSize = type(uint256).max;
+        request.bounds.maxPostLeverageBps = type(uint32).max;
+
+        uint64 committedOrderId = IPositionProtectionOrderCommitHost(ROUTER).commitProtectedOpen(account, request);
+        if (committedOrderId != parentOrderId) {
+            revert PositionProtectionBook__InvalidHostResponse();
+        }
     }
 
     function _callRouterNoReturn(
@@ -695,13 +734,13 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
             revert OrderRouter__InvalidProtectionPrices();
         }
         if (takeProfit != 0 && stopLoss != 0) {
-            bool invalidOrdering = side == CfdTypes.Side.BULL ? takeProfit >= stopLoss : stopLoss >= takeProfit;
+            bool invalidOrdering = side == CfdTypes.Side.LONG ? takeProfit >= stopLoss : stopLoss >= takeProfit;
             if (invalidOrdering) {
                 revert OrderRouter__InvalidProtectionPrices();
             }
         }
 
-        bool alreadyTriggered = side == CfdTypes.Side.BULL
+        bool alreadyTriggered = side == CfdTypes.Side.LONG
             ? (takeProfit != 0 && markPrice <= takeProfit) || (stopLoss != 0 && markPrice >= stopLoss)
             : (takeProfit != 0 && markPrice >= takeProfit) || (stopLoss != 0 && markPrice <= stopLoss);
         if (alreadyTriggered) {
@@ -785,11 +824,11 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         uint256 stopLoss = protection.stopLossTriggerPrice;
         if (
             takeProfit != 0
-                && (protection.side == CfdTypes.Side.BULL ? markPrice <= takeProfit : markPrice >= takeProfit)
+                && (protection.side == CfdTypes.Side.LONG ? markPrice <= takeProfit : markPrice >= takeProfit)
         ) {
             return PositionProtectionTypes.PositionProtectionTriggerLeg.TakeProfit;
         }
-        if (stopLoss != 0 && (protection.side == CfdTypes.Side.BULL ? markPrice >= stopLoss : markPrice <= stopLoss)) {
+        if (stopLoss != 0 && (protection.side == CfdTypes.Side.LONG ? markPrice >= stopLoss : markPrice <= stopLoss)) {
             return PositionProtectionTypes.PositionProtectionTriggerLeg.StopLoss;
         }
         return PositionProtectionTypes.PositionProtectionTriggerLeg.None;

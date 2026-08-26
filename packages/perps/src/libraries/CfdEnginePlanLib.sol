@@ -175,24 +175,24 @@ library CfdEnginePlanLib {
         pure
         returns (CfdEnginePlanTypes.SideSnapshot memory selected, CfdEnginePlanTypes.SideSnapshot memory opposite)
     {
-        if (side == CfdTypes.Side.BULL) {
-            selected = snap.bullSide;
-            opposite = snap.bearSide;
+        if (side == CfdTypes.Side.LONG) {
+            selected = snap.longSide;
+            opposite = snap.shortSide;
         } else {
-            selected = snap.bearSide;
-            opposite = snap.bullSide;
+            selected = snap.shortSide;
+            opposite = snap.longSide;
         }
     }
 
     /// @notice Selects one aggregate side snapshot.
     /// @param snap Complete planner snapshot.
     /// @param side Side to select.
-    /// @return selected BULL snapshot for `BULL`, otherwise BEAR snapshot.
+    /// @return selected LONG snapshot for `LONG`, otherwise SHORT snapshot.
     function _selectedSide(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdTypes.Side side
     ) private pure returns (CfdEnginePlanTypes.SideSnapshot memory selected) {
-        selected = side == CfdTypes.Side.BULL ? snap.bullSide : snap.bearSide;
+        selected = side == CfdTypes.Side.LONG ? snap.longSide : snap.shortSide;
     }
 
     /// @notice Computes all carry currently payable by the snapshot position.
@@ -218,64 +218,64 @@ library CfdEnginePlanLib {
 
     /// @notice Computes absolute directional open-interest skew at a price.
     /// @dev Each side is independently converted from size to USDC with floor division before taking the difference.
-    /// @param bull BULL aggregate side snapshot.
-    /// @param bear BEAR aggregate side snapshot.
+    /// @param long LONG aggregate side snapshot.
+    /// @param short SHORT aggregate side snapshot.
     /// @param price Price used to value both sides.
-    /// @return Absolute BULL-versus-BEAR skew in 6-decimal USDC.
+    /// @return Absolute LONG-versus-SHORT skew in 6-decimal USDC.
     function _absSkewUsdc(
-        CfdEnginePlanTypes.SideSnapshot memory bull,
-        CfdEnginePlanTypes.SideSnapshot memory bear,
+        CfdEnginePlanTypes.SideSnapshot memory long,
+        CfdEnginePlanTypes.SideSnapshot memory short,
         uint256 price
     ) private pure returns (uint256) {
-        uint256 bullUsdc = (bull.openInterest * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        uint256 bearUsdc = (bear.openInterest * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        return bullUsdc > bearUsdc ? bullUsdc - bearUsdc : bearUsdc - bullUsdc;
+        uint256 longUsdc = (long.openInterest * price) / CfdMath.USDC_TO_TOKEN_SCALE;
+        uint256 shortUsdc = (short.openInterest * price) / CfdMath.USDC_TO_TOKEN_SCALE;
+        return longUsdc > shortUsdc ? longUsdc - shortUsdc : shortUsdc - longUsdc;
     }
 
     /// @notice Computes skew state after adding an order's size to one side.
     /// @dev Each post-trade side notional is independently rounded down to USDC before taking the difference.
-    /// @param bull BULL aggregate state before the open.
-    /// @param bear BEAR aggregate state before the open.
+    /// @param long LONG aggregate state before the open.
+    /// @param short SHORT aggregate state before the open.
     /// @param side Side receiving the size increase.
     /// @param sizeDelta Size added to the selected side.
     /// @param price Price used to value open interest.
     /// @return postSkewUsdc Post-open absolute skew in 6-decimal USDC.
     /// @return orderSideIsPostOpenHeavy Whether the side receiving the open is heavier after the trade.
     function _postOpenSkewUsdc(
-        CfdEnginePlanTypes.SideSnapshot memory bull,
-        CfdEnginePlanTypes.SideSnapshot memory bear,
+        CfdEnginePlanTypes.SideSnapshot memory long,
+        CfdEnginePlanTypes.SideSnapshot memory short,
         CfdTypes.Side side,
         uint256 sizeDelta,
         uint256 price
     ) private pure returns (uint256 postSkewUsdc, bool orderSideIsPostOpenHeavy) {
-        uint256 bullOi = bull.openInterest;
-        uint256 bearOi = bear.openInterest;
-        if (side == CfdTypes.Side.BULL) {
-            bullOi += sizeDelta;
+        uint256 longOi = long.openInterest;
+        uint256 shortOi = short.openInterest;
+        if (side == CfdTypes.Side.LONG) {
+            longOi += sizeDelta;
         } else {
-            bearOi += sizeDelta;
+            shortOi += sizeDelta;
         }
-        uint256 postBullUsdc = (bullOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        uint256 postBearUsdc = (bearOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        postSkewUsdc = postBullUsdc > postBearUsdc ? postBullUsdc - postBearUsdc : postBearUsdc - postBullUsdc;
+        uint256 postLongUsdc = (longOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
+        uint256 postShortUsdc = (shortOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
+        postSkewUsdc = postLongUsdc > postShortUsdc ? postLongUsdc - postShortUsdc : postShortUsdc - postLongUsdc;
         orderSideIsPostOpenHeavy =
-            side == CfdTypes.Side.BULL ? postBullUsdc > postBearUsdc : postBearUsdc > postBullUsdc;
+            side == CfdTypes.Side.LONG ? postLongUsdc > postShortUsdc : postShortUsdc > postLongUsdc;
     }
 
-    /// @notice Computes absolute skew from explicit BULL and BEAR open-interest values.
+    /// @notice Computes absolute skew from explicit LONG and SHORT open-interest values.
     /// @dev Each side is independently rounded down to USDC before taking the difference.
-    /// @param bullOi BULL open interest, with 18 decimals.
-    /// @param bearOi BEAR open interest, with 18 decimals.
+    /// @param longOi LONG open interest, with 18 decimals.
+    /// @param shortOi SHORT open interest, with 18 decimals.
     /// @param price Price used to value both sides, with 8 decimals.
     /// @return Absolute directional skew in 6-decimal USDC.
     function _skewUsdc(
-        uint256 bullOi,
-        uint256 bearOi,
+        uint256 longOi,
+        uint256 shortOi,
         uint256 price
     ) private pure returns (uint256) {
-        uint256 bullUsdc = (bullOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        uint256 bearUsdc = (bearOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        return bullUsdc > bearUsdc ? bullUsdc - bearUsdc : bearUsdc - bullUsdc;
+        uint256 longUsdc = (longOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
+        uint256 shortUsdc = (shortOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
+        return longUsdc > shortUsdc ? longUsdc - shortUsdc : shortUsdc - longUsdc;
     }
 
     // ──────────────────────────────────────────────
@@ -333,13 +333,13 @@ library CfdEnginePlanLib {
             return delta;
         }
 
-        CfdEnginePlanTypes.SideSnapshot memory bull = effectiveSnap.bullSide;
-        CfdEnginePlanTypes.SideSnapshot memory bear = effectiveSnap.bearSide;
-        delta.sideTotalMarginBefore = order.side == CfdTypes.Side.BULL ? bull.totalMargin : bear.totalMargin;
+        CfdEnginePlanTypes.SideSnapshot memory long = effectiveSnap.longSide;
+        CfdEnginePlanTypes.SideSnapshot memory short = effectiveSnap.shortSide;
+        delta.sideTotalMarginBefore = order.side == CfdTypes.Side.LONG ? long.totalMargin : short.totalMargin;
 
-        uint256 preSkewUsdc = _absSkewUsdc(bull, bear, price);
+        uint256 preSkewUsdc = _absSkewUsdc(long, short, price);
         (uint256 postSkewUsdc, bool orderSideIsPostOpenHeavy) =
-            _postOpenSkewUsdc(bull, bear, order.side, order.sizeDelta, price);
+            _postOpenSkewUsdc(long, short, order.side, order.sizeDelta, price);
 
         OpenAccountingLib.OpenState memory openState = OpenAccountingLib.buildOpenState(
             OpenAccountingLib.OpenInputs({
@@ -562,25 +562,25 @@ library CfdEnginePlanLib {
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdEnginePlanTypes.OpenDelta memory delta
     ) private pure returns (bool satisfied) {
-        CfdEnginePlanTypes.SideSnapshot memory bull = snap.bullSide;
-        CfdEnginePlanTypes.SideSnapshot memory bear = snap.bearSide;
-        if (delta.posSide == CfdTypes.Side.BULL) {
-            bull.openInterest += delta.sideOiIncrease;
-            bull.maxProfitUsdc += delta.sideMaxProfitIncrease;
-            bull.totalMargin = delta.sideTotalMarginAfterOpen;
+        CfdEnginePlanTypes.SideSnapshot memory long = snap.longSide;
+        CfdEnginePlanTypes.SideSnapshot memory short = snap.shortSide;
+        if (delta.posSide == CfdTypes.Side.LONG) {
+            long.openInterest += delta.sideOiIncrease;
+            long.maxProfitUsdc += delta.sideMaxProfitIncrease;
+            long.totalMargin = delta.sideTotalMarginAfterOpen;
         } else {
-            bear.openInterest += delta.sideOiIncrease;
-            bear.maxProfitUsdc += delta.sideMaxProfitIncrease;
-            bear.totalMargin = delta.sideTotalMarginAfterOpen;
+            short.openInterest += delta.sideOiIncrease;
+            short.maxProfitUsdc += delta.sideMaxProfitIncrease;
+            short.totalMargin = delta.sideTotalMarginAfterOpen;
         }
 
-        uint256 postMaxLiability = SolvencyAccountingLib.getMaxLiability(bull.maxProfitUsdc, bear.maxProfitUsdc);
+        uint256 postMaxLiability = SolvencyAccountingLib.getMaxLiability(long.maxProfitUsdc, short.maxProfitUsdc);
 
         int256 physicalAssetsDeltaUsdc = delta.tradeCostUsdc - int256(delta.executionFeeUsdc);
 
         SolvencyAccountingLib.SolvencyState memory currentState = SolvencyAccountingLib.buildSolvencyState(
             snap.poolCashUsdc,
-            SolvencyAccountingLib.getMaxLiability(snap.bullSide.maxProfitUsdc, snap.bearSide.maxProfitUsdc),
+            SolvencyAccountingLib.getMaxLiability(snap.longSide.maxProfitUsdc, snap.shortSide.maxProfitUsdc),
             snap.totalTraderClaimBalanceUsdc
         );
         SolvencyAccountingLib.PreviewResult memory result = SolvencyAccountingLib.previewPostOpSolvency(
@@ -655,10 +655,10 @@ library CfdEnginePlanLib {
             return delta;
         }
 
-        (delta.totalMarginBefore, delta.postBullOi, delta.postBearOi) =
+        (delta.totalMarginBefore, delta.postLongOi, delta.postShortOi) =
             _closeOpenInterest(snap, pos.side, order.sizeDelta);
 
-        delta.closeState = _buildCloseState(snap, pos, order.sizeDelta, price, delta.postBullOi, delta.postBearOi);
+        delta.closeState = _buildCloseState(snap, pos, order.sizeDelta, price, delta.postLongOi, delta.postShortOi);
 
         CloseAccountingLib.CloseState memory cs = delta.closeState;
         delta.posSizeDelta = order.sizeDelta;
@@ -955,17 +955,17 @@ library CfdEnginePlanLib {
 
     /// @notice Projects side open interest after removing close size from the selected side.
     /// @dev Assumes `sizeDelta` does not exceed selected-side open interest. The opposite side is copied unchanged.
-    /// @param snap Aggregate BULL and BEAR side snapshots.
+    /// @param snap Aggregate LONG and SHORT side snapshots.
     /// @param side Side whose open interest is reduced.
     /// @param sizeDelta Position size being closed.
     /// @return totalMarginBefore Aggregate margin of the selected side before the close.
-    /// @return postBullOi Projected BULL open interest.
-    /// @return postBearOi Projected BEAR open interest.
+    /// @return postLongOi Projected LONG open interest.
+    /// @return postShortOi Projected SHORT open interest.
     function _closeOpenInterest(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdTypes.Side side,
         uint256 sizeDelta
-    ) private pure returns (uint256 totalMarginBefore, uint256 postBullOi, uint256 postBearOi) {
+    ) private pure returns (uint256 totalMarginBefore, uint256 postLongOi, uint256 postShortOi) {
         (CfdEnginePlanTypes.SideSnapshot memory selected, CfdEnginePlanTypes.SideSnapshot memory opposite) =
             _selectedAndOpposite(snap, side);
 
@@ -973,8 +973,8 @@ library CfdEnginePlanLib {
 
         uint256 selectedOiAfter = selected.openInterest - sizeDelta;
         uint256 oppositeOi = opposite.openInterest;
-        postBullOi = side == CfdTypes.Side.BULL ? selectedOiAfter : oppositeOi;
-        postBearOi = side == CfdTypes.Side.BEAR ? selectedOiAfter : oppositeOi;
+        postLongOi = side == CfdTypes.Side.LONG ? selectedOiAfter : oppositeOi;
+        postShortOi = side == CfdTypes.Side.SHORT ? selectedOiAfter : oppositeOi;
     }
 
     /// @notice Builds detailed close economics from projected post-close open interest.
@@ -984,19 +984,19 @@ library CfdEnginePlanLib {
     /// @param pos Position being reduced.
     /// @param sizeDelta Size being closed.
     /// @param price Capped execution price.
-    /// @param postBullOi Projected BULL open interest.
-    /// @param postBearOi Projected BEAR open interest.
+    /// @param postLongOi Projected LONG open interest.
+    /// @param postShortOi Projected SHORT open interest.
     /// @return Detailed close state before pending carry and collateral collection.
     function _buildCloseState(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdTypes.Position memory pos,
         uint256 sizeDelta,
         uint256 price,
-        uint256 postBullOi,
-        uint256 postBearOi
+        uint256 postLongOi,
+        uint256 postShortOi
     ) private pure returns (CloseAccountingLib.CloseState memory) {
-        uint256 preSkewUsdc = _absSkewUsdc(snap.bullSide, snap.bearSide, price);
-        uint256 postSkewUsdc = _skewUsdc(postBullOi, postBearOi, price);
+        uint256 preSkewUsdc = _absSkewUsdc(snap.longSide, snap.shortSide, price);
+        uint256 postSkewUsdc = _skewUsdc(postLongOi, postShortOi, price);
         return CloseAccountingLib.buildCloseState(
             CloseAccountingLib.CloseInputs({
                 position: pos,
@@ -1028,7 +1028,7 @@ library CfdEnginePlanLib {
         CfdEnginePlanTypes.CloseDelta memory delta
     ) private pure returns (CfdEnginePlanTypes.SolvencyPreview memory sp) {
         uint256 postMaxLiability = SolvencyAccountingLib.getMaxLiabilityAfterClose(
-            snap.bullSide.maxProfitUsdc, snap.bearSide.maxProfitUsdc, delta.side, delta.posMaxProfitReduction
+            snap.longSide.maxProfitUsdc, snap.shortSide.maxProfitUsdc, delta.side, delta.posMaxProfitReduction
         );
 
         int256 physicalAssetsDelta = _closePoolPhysicalAssetsDelta(delta);
@@ -1037,7 +1037,7 @@ library CfdEnginePlanLib {
 
         SolvencyAccountingLib.SolvencyState memory currentState = SolvencyAccountingLib.buildSolvencyState(
             snap.poolAssetsUsdc,
-            SolvencyAccountingLib.getMaxLiability(snap.bullSide.maxProfitUsdc, snap.bearSide.maxProfitUsdc),
+            SolvencyAccountingLib.getMaxLiability(snap.longSide.maxProfitUsdc, snap.shortSide.maxProfitUsdc),
             snap.totalTraderClaimBalanceUsdc
         );
 
@@ -1299,12 +1299,12 @@ library CfdEnginePlanLib {
         CfdTypes.Position memory pos
     ) private pure returns (CfdEnginePlanTypes.SolvencyPreview memory sp) {
         uint256 postMaxLiability = SolvencyAccountingLib.getMaxLiabilityAfterClose(
-            snap.bullSide.maxProfitUsdc, snap.bearSide.maxProfitUsdc, pos.side, pos.maxProfitUsdc
+            snap.longSide.maxProfitUsdc, snap.shortSide.maxProfitUsdc, pos.side, pos.maxProfitUsdc
         );
 
         SolvencyAccountingLib.SolvencyState memory currentState = SolvencyAccountingLib.buildSolvencyState(
             snap.poolAssetsUsdc,
-            SolvencyAccountingLib.getMaxLiability(snap.bullSide.maxProfitUsdc, snap.bearSide.maxProfitUsdc),
+            SolvencyAccountingLib.getMaxLiability(snap.longSide.maxProfitUsdc, snap.shortSide.maxProfitUsdc),
             snap.totalTraderClaimBalanceUsdc
         );
 

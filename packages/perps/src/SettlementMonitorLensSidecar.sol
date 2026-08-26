@@ -542,25 +542,25 @@ contract SettlementMonitorLensSidecar {
         SettlementMonitorViewTypes.SettlementHealth memory health
     ) internal view {
         uint256[16] memory book;
-        uint256[16] memory bull;
-        uint256[16] memory bear;
+        uint256[16] memory long;
+        uint256[16] memory short;
         {
             bool bookOk;
-            bool bullOk;
-            bool bearOk;
+            bool longOk;
+            bool shortOk;
             bool sizeOk;
             bool engineCapOk;
             (bookOk, book) = _readWords(
                 address(TERMINAL_NAV_BOOK), abi.encodeWithSelector(ITerminalNavBookV2.bookState.selector), 8
             );
-            (bullOk, bull) =
+            (longOk, long) =
                 _readWords(address(ENGINE), abi.encodeWithSelector(bytes4(keccak256("sides(uint256)")), 0), 4);
-            (bearOk, bear) =
+            (shortOk, short) =
                 _readWords(address(ENGINE), abi.encodeWithSelector(bytes4(keccak256("sides(uint256)")), 1), 4);
             (sizeOk, health.sizeQuantum) =
                 _readUint(address(TERMINAL_NAV_BOOK), ITerminalNavBookV2.SIZE_QUANTUM.selector);
             (engineCapOk, health.engineCapPrice) = _readUint(address(ENGINE), bytes4(keccak256("CAP_PRICE()")));
-            if (!bookOk || !bullOk || !bearOk || !sizeOk || !engineCapOk) {
+            if (!bookOk || !longOk || !shortOk || !sizeOk || !engineCapOk) {
                 health.dependencyFailureMask |= _dependencyBit(SettlementMonitorViewTypes.Dependency.TerminalNavBook)
                 | _dependencyBit(SettlementMonitorViewTypes.Dependency.Engine);
                 return;
@@ -591,24 +591,24 @@ contract SettlementMonitorLensSidecar {
         health.bookTotalLots = book[3];
         health.bookTotalEntryCostUsdcAtoms = book[4];
         health.bookTotalEffectiveCapUsdcAtoms = book[5];
-        health.engineBullOpenInterest = bull[1];
-        health.engineBearOpenInterest = bear[1];
-        health.engineBullEntryNotional = bull[2];
-        health.engineBearEntryNotional = bear[2];
+        health.engineLongOpenInterest = long[1];
+        health.engineShortOpenInterest = short[1];
+        health.engineLongEntryNotional = long[2];
+        health.engineShortEntryNotional = short[2];
 
         if (health.sizeQuantum == 0) {
             health.criticalFaultMask |= _criticalBit(SettlementMonitorViewTypes.CriticalFault.ArithmeticDomain);
         } else {
-            if (bull[1] % health.sizeQuantum != 0 || bear[1] % health.sizeQuantum != 0) {
+            if (long[1] % health.sizeQuantum != 0 || short[1] % health.sizeQuantum != 0) {
                 health.criticalFaultMask |= _criticalBit(SettlementMonitorViewTypes.CriticalFault.NavLotsMismatch);
             }
-            if (bull[2] % health.sizeQuantum != 0 || bear[2] % health.sizeQuantum != 0) {
+            if (long[2] % health.sizeQuantum != 0 || short[2] % health.sizeQuantum != 0) {
                 health.criticalFaultMask |= _criticalBit(SettlementMonitorViewTypes.CriticalFault.NavEntryBasisMismatch);
             }
         }
         if (
-            (bull[1] == 0 && (bull[0] != 0 || bull[2] != 0 || bull[3] != 0))
-                || (bear[1] == 0 && (bear[0] != 0 || bear[2] != 0 || bear[3] != 0))
+            (long[1] == 0 && (long[0] != 0 || long[2] != 0 || long[3] != 0))
+                || (short[1] == 0 && (short[0] != 0 || short[2] != 0 || short[3] != 0))
         ) {
             health.criticalFaultMask |= _criticalBit(SettlementMonitorViewTypes.CriticalFault.NavActiveEmptyMismatch);
         }
@@ -621,9 +621,9 @@ contract SettlementMonitorLensSidecar {
             uint256 representedOi;
             uint256 totalEntry;
             uint256 representedEntry;
-            (oiOk, totalOi) = _safeAdd(bull[1], bear[1]);
+            (oiOk, totalOi) = _safeAdd(long[1], short[1]);
             (lotsOk, representedOi) = _safeMul(book[3], health.sizeQuantum);
-            (entryOk, totalEntry) = _safeAdd(bull[2], bear[2]);
+            (entryOk, totalEntry) = _safeAdd(long[2], short[2]);
             (basisOk, representedEntry) = _safeMul(book[4], health.sizeQuantum);
             if (!oiOk || !lotsOk || !entryOk || !basisOk) {
                 health.criticalFaultMask |= _criticalBit(SettlementMonitorViewTypes.CriticalFault.ArithmeticDomain);
@@ -655,7 +655,7 @@ contract SettlementMonitorLensSidecar {
             if (markTime > block.timestamp) {
                 health.criticalFaultMask |= _criticalBit(SettlementMonitorViewTypes.CriticalFault.FutureCachedMark);
             }
-            _validateTerminalSnapshotParity(health, book[2], markPrice, markTime, bull[0], bear[0]);
+            _validateTerminalSnapshotParity(health, book[2], markPrice, markTime, long[0], short[0]);
         }
     }
 
@@ -664,8 +664,8 @@ contract SettlementMonitorLensSidecar {
         uint256 bookVersion,
         uint256 markPrice,
         uint256 markTime,
-        uint256 bullMaxProfit,
-        uint256 bearMaxProfit
+        uint256 longMaxProfit,
+        uint256 shortMaxProfit
     ) internal view {
         (bool terminalOk, uint256[16] memory terminal) =
             _readWords(address(ENGINE), abi.encodeWithSelector(CfdEngine.terminalNavSnapshot.selector), 8);
@@ -678,8 +678,8 @@ contract SettlementMonitorLensSidecar {
             health.dependencyFailureMask |= _dependencyBit(SettlementMonitorViewTypes.Dependency.Engine);
             return;
         }
-        uint256 maxLiability = bullMaxProfit > bearMaxProfit ? bullMaxProfit : bearMaxProfit;
-        bool expectedOpen = health.engineBullOpenInterest != 0 || health.engineBearOpenInterest != 0;
+        uint256 maxLiability = longMaxProfit > shortMaxProfit ? longMaxProfit : shortMaxProfit;
+        bool expectedOpen = health.engineLongOpenInterest != 0 || health.engineShortOpenInterest != 0;
         if (
             terminal[0] != markPrice || terminal[1] != markTime || terminal[3] != claims || terminal[4] != maxLiability
                 || terminal[5] != bookVersion || (terminal[6] == 1) != expectedOpen || (terminal[7] == 1) != degraded

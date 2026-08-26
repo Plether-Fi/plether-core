@@ -402,7 +402,7 @@ contract CfdEngineLens is ICfdEngineLens {
     }
 
     /// @notice Finds the integer liquidation boundary within the engine price domain.
-    /// @dev For BULL positions this returns the lowest liquidatable price; for BEAR positions, the highest. If the
+    /// @dev For LONG positions this returns the lowest liquidatable price; for SHORT positions, the highest. If the
     ///      position is never liquidatable within `[0, capPrice]`, the boolean is false and price is zero.
     /// @param projected Position whose threshold is searched.
     /// @param capPrice Inclusive upper price bound, with 8 decimals.
@@ -424,7 +424,7 @@ contract CfdEngineLens is ICfdEngineLens {
             projected, entryCostUsdcAtoms, capPrice, capPrice, reachableCollateralUsdc, maintenanceBps
         );
 
-        if (projected.side == CfdTypes.Side.BULL) {
+        if (projected.side == CfdTypes.Side.LONG) {
             if (!liquidatableAtCap) {
                 return (false, 0);
             }
@@ -550,12 +550,12 @@ contract CfdEngineLens is ICfdEngineLens {
         uint256 poolDepthUsdc,
         uint64 publishTime
     ) internal view returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
-        ICfdEngineTypes.SideState memory bull;
-        ICfdEngineTypes.SideState memory bear;
-        (bull.maxProfitUsdc, bull.openInterest, bull.entryNotional, bull.totalMargin) =
-            engineContract.sides(uint8(CfdTypes.Side.BULL));
-        (bear.maxProfitUsdc, bear.openInterest, bear.entryNotional, bear.totalMargin) =
-            engineContract.sides(uint8(CfdTypes.Side.BEAR));
+        ICfdEngineTypes.SideState memory long;
+        ICfdEngineTypes.SideState memory short;
+        (long.maxProfitUsdc, long.openInterest, long.entryNotional, long.totalMargin) =
+            engineContract.sides(uint8(CfdTypes.Side.LONG));
+        (short.maxProfitUsdc, short.openInterest, short.entryNotional, short.totalMargin) =
+            engineContract.sides(uint8(CfdTypes.Side.SHORT));
         uint256 lastMarkPrice = engineContract.lastMarkPrice();
         uint64 lastMarkTime = engineContract.lastMarkTime();
         uint256 liveMarkAge = block.timestamp > lastMarkTime ? block.timestamp - lastMarkTime : 0;
@@ -573,8 +573,8 @@ contract CfdEngineLens is ICfdEngineLens {
         }
         snap.lastMarkTime = publishTime == 0 ? lastMarkTime : publishTime;
         (snap.positionBorrowBaseUsdc, snap.positionLastCarryIndex,) = engineContract.positionCarryState(account);
-        snap.bullSide = _sideSnapshot(CfdTypes.Side.BULL, bull);
-        snap.bearSide = _sideSnapshot(CfdTypes.Side.BEAR, bear);
+        snap.longSide = _sideSnapshot(CfdTypes.Side.LONG, long);
+        snap.shortSide = _sideSnapshot(CfdTypes.Side.SHORT, short);
         snap.poolAssetsUsdc = poolDepthUsdc;
         snap.poolCashUsdc = poolDepthUsdc;
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(engineContract.clearinghouse());

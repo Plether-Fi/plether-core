@@ -4,9 +4,12 @@ pragma solidity 0.8.35;
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {EmergencyPauseCoordinator} from "@plether/perps/EmergencyPauseCoordinator.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
+import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
+import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
+import {OrderRouterV2ExecutionSidecar} from "@plether/perps/OrderRouterV2ExecutionSidecar.sol";
 import {IAsyncTrancheVault} from "@plether/perps/interfaces/IAsyncTrancheVault.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IHousePoolRedemptionMathSidecar} from "@plether/perps/interfaces/IHousePoolRedemptionMathSidecar.sol";
@@ -111,6 +114,11 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         console.log("OrderRouter:", routerAddr);
         console.log("OrderRouterLiquidationBatchSidecar:", router.liquidationBatchSidecar());
         console.log("PositionProtectionBook:", address(router.positionProtectionBook()));
+        console.log("CfdOrderPolicyEvaluator:", router.policyEvaluator());
+        console.log("OrderRouterV2ExecutionSidecar:", router.executionSidecar());
+        console.log("OrderLifecycleBook:", address(router.lifecycleBook()));
+        console.log("OrderExecutionConfigHash:");
+        console.logBytes32(router.lifecycleBook().currentExecutionConfigHash());
         console.log("OrderRouterAdmin:", address(routerAdmin));
         console.log("EmergencyPauseCoordinator:", emergencyCoordinatorAddr);
         console.log("Requested guardian:", desiredGuardian);
@@ -186,31 +194,57 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         require(book.SIZE_QUANTUM() == 1e20, "TerminalNavBookV2 quantum mismatch");
     }
 
-    /// @dev Refuses to bootstrap a stack whose permissionless Router cannot authenticate the HousePool callback or
-    ///      whose oracle is wired to another Engine/HousePool pair.
+    /// @dev Refuses to bootstrap a mixed-generation stack. Verifies reciprocal Router/Engine/oracle wiring, the
+    ///      separately deployed V2 policy modules, the predeployed lifecycle book, and both delegate sidecars.
     function _verifyRouterWiring(
         HousePool housePool,
         OrderRouter router
     ) internal view {
         CfdEngine engine = CfdEngine(address(housePool.ENGINE()));
+        require(address(engine.pool()) == address(housePool), "Engine HousePool mismatch");
+        MarginClearinghouse clearinghouse = MarginClearinghouse(address(engine.clearinghouse()));
+        require(clearinghouse.engine() == address(engine), "Clearinghouse Engine mismatch");
+        require(address(engine.USDC()) == address(housePool.USDC()), "Engine settlement asset mismatch");
+        require(clearinghouse.settlementAsset() == address(housePool.USDC()), "Clearinghouse settlement asset mismatch");
         require(engine.orderRouter() == address(router), "Engine OrderRouter mismatch");
         require(address(router.pletherOracle()).code.length > 0, "PletherOracle has no code");
         require(address(router.pletherOracle().engine()) == address(engine), "PletherOracle Engine mismatch");
         require(address(router.pletherOracle().housePool()) == address(housePool), "PletherOracle HousePool mismatch");
-        require(address(router.pyth()).code.length > 0, "Pyth has no code");
+        require(address(router.pletherOracle().pyth()).code.length > 0, "Pyth has no code");
 
-        address book = address(router.positionProtectionBook());
-        require(book != address(0), "PositionProtectionBook is not wired");
-        require(book.code.length > 0, "PositionProtectionBook has no code");
-        address sidecar = router.liquidationBatchSidecar();
-        require(sidecar != address(0), "OrderRouter sidecar is not wired");
-        require(sidecar.code.length > 0, "OrderRouter sidecar has no code");
-        require(sidecar != book, "OrderRouter sidecar aliases PositionProtectionBook");
+        address policyEvaluator = router.policyEvaluator();
+        require(policyEvaluator.code.length > 0, "Order policy evaluator has no code");
+        address executionSidecar = router.executionSidecar();
+        require(executionSidecar.code.length > 0, "Order execution sidecar has no code");
         require(
-            OrderRouterLiquidationBatchSidecar(sidecar).ROUTER() == address(router),
+            OrderRouterV2ExecutionSidecar(executionSidecar).SELF() == executionSidecar,
+            "Order execution sidecar self binding mismatch"
+        );
+
+        OrderLifecycleBook lifecycleBook = router.lifecycleBook();
+        require(address(lifecycleBook).code.length > 0, "Order lifecycle book has no code");
+        require(lifecycleBook.ROUTER() == address(router), "Order lifecycle book Router mismatch");
+        require(lifecycleBook.ENGINE() == address(engine), "Order lifecycle book Engine mismatch");
+        require(
+            lifecycleBook.CLEARINGHOUSE() == address(engine.clearinghouse()),
+            "Order lifecycle book Clearinghouse mismatch"
+        );
+        require(lifecycleBook.HOUSE_POOL() == address(housePool), "Order lifecycle book HousePool mismatch");
+        require(lifecycleBook.currentExecutionConfigHash() != bytes32(0), "Order config hash is zero");
+
+        address liquidationBatchSidecar = router.liquidationBatchSidecar();
+        require(liquidationBatchSidecar != address(0), "OrderRouter sidecar is not wired");
+        require(liquidationBatchSidecar.code.length > 0, "OrderRouter liquidation batch sidecar has no code");
+        require(
+            OrderRouterLiquidationBatchSidecar(liquidationBatchSidecar).ROUTER() == address(router),
             "OrderRouter sidecar router mismatch"
         );
-        IPositionProtectionBookBootstrapView candidate = IPositionProtectionBookBootstrapView(book);
+
+        address positionProtectionBook = address(router.positionProtectionBook());
+        require(positionProtectionBook != address(0), "PositionProtectionBook is not wired");
+        require(positionProtectionBook.code.length > 0, "PositionProtectionBook has no code");
+        require(liquidationBatchSidecar != positionProtectionBook, "OrderRouter sidecar aliases PositionProtectionBook");
+        IPositionProtectionBookBootstrapView candidate = IPositionProtectionBookBootstrapView(positionProtectionBook);
         require(candidate.ROUTER() == address(router), "PositionProtectionBook router mismatch");
         require(candidate.ENGINE() == address(engine), "PositionProtectionBook engine mismatch");
     }

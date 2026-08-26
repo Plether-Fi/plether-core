@@ -265,10 +265,10 @@ library SettlementMonitorViewTypes {
         uint256 bookTotalLots;
         uint256 bookTotalEntryCostUsdcAtoms;
         uint256 bookTotalEffectiveCapUsdcAtoms;
-        uint256 engineBullOpenInterest;
-        uint256 engineBearOpenInterest;
-        uint256 engineBullEntryNotional;
-        uint256 engineBearEntryNotional;
+        uint256 engineLongOpenInterest;
+        uint256 engineShortOpenInterest;
+        uint256 engineLongEntryNotional;
+        uint256 engineShortEntryNotional;
         uint256 sizeQuantum;
         uint256 poolRawAssetsUsdc;
         uint256 poolAccountedAssetsUsdc;

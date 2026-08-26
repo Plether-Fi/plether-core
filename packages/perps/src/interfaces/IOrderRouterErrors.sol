@@ -43,6 +43,12 @@ interface IOrderRouterErrors {
     error OrderRouter__InsufficientPythFee();
     /// @notice The engine-lens dependency is the zero address.
     error OrderRouter__InvalidEngineLens();
+    /// @notice The V2 policy-evaluator dependency is zero or has no deployed code.
+    error OrderRouter__InvalidPolicyEvaluator();
+    /// @notice The immutable V2 execution-sidecar dependency is zero or has no deployed code.
+    error OrderRouter__InvalidExecutionSidecar();
+    /// @notice The supplied lifecycle Book has no code or does not match this Router's immutable protocol bindings.
+    error OrderRouter__InvalidLifecycleBook();
     /// @notice Legacy router oracle resolution produced a zero or otherwise invalid execution price.
     error OrderRouter__InvalidOraclePrice();
     /// @notice Engine execution rejected an oracle publish timestamp older than its cached mark.
@@ -93,6 +99,20 @@ interface IOrderRouterErrors {
     error OrderRouter__InsufficientFreeEquity();
     /// @notice Committing another order would exceed the per-account pending-order limit.
     error OrderRouter__TooManyPendingOrders();
+    /// @notice A fresh V2 request supplied the reserved zero client-order identifier.
+    error OrderRouter__ZeroClientOrderId();
+    /// @notice A fresh V2 request omitted its mandatory direction-aware target price.
+    error OrderRouter__ZeroTargetPrice();
+    /// @notice A fresh V2 request supplied an expired deadline or one beyond the active maximum order age.
+    error OrderRouter__InvalidValidUntil();
+    /// @notice A fresh V2 request supplied no execution mode or included an undefined mode bit.
+    error OrderRouter__InvalidExecutionModeMask();
+    /// @notice A fresh V2 request did not pin the currently authoritative execution configuration.
+    error OrderRouter__ExecutionConfigMismatch(bytes32 expectedConfigHash, bytes32 currentConfigHash);
+    /// @notice A fresh V2 request omitted its mandatory post-position leverage ceiling.
+    error OrderRouter__ZeroPostLeverageBound();
+    /// @notice The quoted execution bounty alone exceeds the request's gross-account-debit ceiling.
+    error OrderRouter__ExecutionBountyAboveGrossDebit(uint256 executionBountyUsdc, uint256 maximumGrossDebitUsdc);
     /// @notice A router integration or configuration hook was called by an unauthorized engine, sidecar, or admin.
     error OrderRouter__Unauthorized();
     /// @notice An open/increase commit was attempted while engine degraded mode is latched.

@@ -72,7 +72,7 @@ library PerpsViewTypes {
     /// @param side Requested position direction.
     /// @param sizeDelta Position size to open, increase, or reduce.
     /// @param marginDeltaUsdc Requested nonnegative margin amount; close orders always report zero.
-    /// @param acceptablePrice Router directional target-price boundary; zero disables the slippage check.
+    /// @param acceptablePrice Nonzero Router directional target-price boundary.
     /// @param isReduceOnly Whether the order is a close/reduce order.
     /// @param status Product-facing lifecycle status.
     struct PendingOrderView {

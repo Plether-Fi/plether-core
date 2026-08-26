@@ -14,8 +14,12 @@ It is written as an audit-facing companion to:
 The perps system is built around a few core security choices:
 
 - bounded trader payouts through a capped market price,
-- delayed-order execution through a keeper-run FIFO router,
+- delayed-order execution through a keeper-run FIFO router with caller-pinned deadlines, configuration, execution
+  regimes, and financial bounds,
 - strict separation between trader custody, router intent records, engine accounting, and LP capital,
+- permanent account-scoped client-id resolution and authenticated terminal receipts in an immutable lifecycle Book,
+- exact-shape failure classification: only known typed policy failures are terminal, while unknown, panic,
+  out-of-gas, empty, and malformed failures preserve retryability,
 - exact symmetric LP NAV that counts only account-capped collectible marked losses as receivables and never as
   withdrawal cash before collection,
 - liability-scaled settlement headroom for risk-increasing admission and LP redemption funding,
@@ -31,12 +35,20 @@ All perps contracts are non-upgradeable.
 - No proxy patterns.
 - Runtime logic is fixed at deployment.
 - Core constructor parameters such as `CAP_PRICE` are immutable.
+- `OrderLifecycleBook` is independently predeployed and immutable-bound to the predicted Router and its exact Engine,
+  Clearinghouse, and HousePool dependencies. The Router constructor validates all four bindings before accepting it.
+  `CfdOrderPolicyEvaluator` and `OrderRouterV2ExecutionSidecar` are separately deployed stateless code dependencies
+  fixed by a fresh Router; none has an upgrade setter.
 - `OrderRouter`'s configured `PletherOracle` address can be rotated only through `OrderRouterAdmin`'s 48-hour timelocked oracle config flow. Feed ids, basket weights, base prices, inversion flags, and the Pyth endpoint are fixed on each `PletherOracle` instance, so changing them requires deploying a new oracle and timelocking the router onto it.
 
 ### Timelocked admin state
 
 The following parameter families are owner-controlled behind a 48-hour propose/finalize delay.
 Engine risk controls live in `CfdEngineAdmin`, and router risk controls live in `OrderRouterAdmin`, with each deployed admin contract applying finalized values onto its host contract:
+
+Both admins expose `activeConfigVersion`, initialized to one. `CfdEngineAdmin` increments it only after successful
+risk, calendar, or freshness finalization; `OrderRouterAdmin` increments it only after successful Router or Oracle
+configuration finalization. The versions are execution-authority inputs, not timestamps or proposal counters.
 
 `CfdEngine` sidecars (`CfdEnginePlanner`, `CfdEngineSettlementSidecar`, `CfdEngineAdmin`) are now deployed separately and wired once via `setDependencies(...)`. That wiring is owner-only and one-time. The engine rejects a settlement sidecar or admin bound to another engine and rejects a no-code admin address; audited `CfdEngineAdmin` bytecode remains a deployment trust assumption.
 
@@ -54,6 +66,10 @@ size quantum.
 | `maxSeniorExposureUsdc`, `maxSeniorShareBps` | `HousePool` | `onlyOwner`, 48-hour timelock; finalized values must be finite and below 100%, respectively |
 | `RouterConfig` (`maxOrderAge`, staleness limits, basket confidence ratio, historical settlement window, component publish-time skew, adverse confidence multiplier, bounty limits) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
 | `OracleConfig` (`pletherOracle`) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
+
+Each successful Engine/Router finalization therefore changes
+`OrderLifecycleBook.currentExecutionConfigHash()`. Proposal, cancellation, pause/unpause, and failed finalization do
+not advance these versions.
 
 The deployed `frozenCloseSpreadBps` default is `50` bps (0.50%). Both construction and timelocked updates reject zero and values above the `1,000` bps (10%) hard cap.
 
@@ -74,6 +90,12 @@ These are one-time configuration setters rather than mutable governance knobs:
 | `setSeniorVault(address)` | `HousePool` |
 | `setJuniorVault(address)` | `HousePool` |
 
+The V2 Router additionally fixes the Engine, Engine lens, HousePool, keeper sidecar, policy evaluator, execution
+sidecar, and predeployed lifecycle Book at construction. The lifecycle Book is the eighth and final Router constructor
+dependency; it fixes the predicted Router plus the Engine, Clearinghouse, and HousePool and accepts mutations only
+from that Router. The Router rejects missing Book code or any mismatched immutable binding. These are constructor
+bindings, not entries in the mutable setter table. The stateful position-protection Book remains Router-created.
+
 `SettlementMonitorLens` construction validates the required core wiring and reciprocal bindings before fixing its
 constructor bindings. `getSettlementHealth()` checks those bindings again at runtime, and the observable configuration digest
 records the planner, settlement-sidecar, admin, Oracle/Pyth, vault, terminal NAV book, and asset identities for off-chain drift
@@ -87,16 +109,30 @@ installs it as both components' pauser. It does not trust or call the Lens: moni
 requires code and the exact implementation id. The sidecar exposes only pure redemption-budget calculations: it has no
 storage, setter, delegatecall, upgrade path, custody, or settlement authority.
 
-`OrderRouterLiquidationBatchSidecar` is separately predeployed with the predicted address of the immediately next
-Router `CREATE`; the same deployer must then create the Router with no intervening nonce-consuming transaction or
-`CREATE`. The Router constructor
-rejects a sidecar with no code or one whose immutable `ROUTER()` does not equal `address(this)`, and exposes the
+`OrderLifecycleBook`, `OrderRouterLiquidationBatchSidecar`, and `OrderRouter` are deployed as one consecutive
+three-`CREATE` sequence. From the nonce immediately before the Book deployment, the Router address is predicted two
+nonces ahead. The lifecycle Book is created first with that Router and the exact Engine, Clearinghouse, and HousePool;
+the sidecar is created second with the same Router; and the Router is created third with no intervening
+nonce-consuming operation. The Router constructor rejects a lifecycle Book without code or with any mismatched core
+binding, rejects a sidecar with no code or one whose immutable `ROUTER()` does not equal `address(this)`, and exposes the
 accepted address through `liquidationBatchSidecar()`. The sidecar has no mutable storage or upgrade setter and its
 active-oracle configuration, mark-refresh/protection-trigger, LP-epoch settlement, and liquidation selectors are valid
 only under delegatecall where `address(this)` is that exact Router. Direct calls and delegatecalls from a foreign host
 revert. Router self-callbacks remain self-only, so an external caller cannot use the sidecar to bypass Router
 authorization or reentrancy guards. HousePool remains the canonical settlement-policy boundary, so delegated atomic
 refresh cannot bypass its independent LP-epoch settlement hold.
+
+V2 order execution instead uses the separately deployed reusable
+`OrderRouterV2ExecutionSidecar` fixed by the Router. It records its own deployment address only to reject direct
+stateful calls; another contract can delegate it into that contract's own context, but cannot thereby impersonate the
+protocol Router. Book, Clearinghouse, and Engine caller checks authenticate the actual Router address. Both sidecars
+have no mutable storage or upgrade setter. V2 item callbacks are Router-self-only and delegate back to the same fixed
+execution sidecar, so an external caller cannot use a sidecar to bypass Router authorization or reentrancy guards.
+
+This release requires a fresh, internally compatible stack. It does not migrate legacy Router queue storage into the
+Book and must not be mixed with an already-wired Engine or a legacy Router ABI. A nonce-sequence failure leaves
+unusable immutable-bound Book/sidecar deployments; neither may be rebound. Deployment must verify every constructor
+and reciprocal binding before admitting margin, orders, or LP exposure.
 
 ### Instant owner controls
 
@@ -123,8 +159,18 @@ The owner cannot:
 Several perps contracts intentionally expose narrow but high-authority capability surfaces.
 
 - `OrderRouter` is the external execution boundary and can reach engine order/liquidation paths plus a narrow clearinghouse reservation surface. Router-sourced protocol value must credit the treasury account through clearinghouse accounting rather than calling `HousePool` inflow hooks.
+- `OrderLifecycleBook` accepts registration and finalization only from its immutable Router. It permanently owns
+  client-id resolution and compact outcomes but owns no funds and cannot execute an order. It is predeployed against
+  a predicted Router, and that Router validates the Book's Router, Engine, Clearinghouse, and HousePool bindings in
+  its constructor.
 - `PositionProtectionBook` is created by and immutable-bound to the Router and Engine. It owns retained protection
   state, direct actions/views, and Router-only lifecycle hooks; it does not carry keeper or liquidation orchestration.
+- `OrderRouterV2ExecutionSidecar` is a fixed, stateless Router delegate dependency. It orchestrates Oracle, evaluator,
+  Engine, Clearinghouse, and lifecycle Book calls under the Router's address, but it cannot be called directly to
+  obtain Router authority. Its self-call item boundary and ABI forwarding are security-critical.
+- `CfdOrderPolicyEvaluator` is permissionless and stateless. It is not a custody authority; the Router sidecar pins
+  its address, validates exact return shape, and compares selected assessed mode/account/position fields against live
+  pre/post state.
 - The separately predeployed `OrderRouterLiquidationBatchSidecar` carries stateless mark-refresh/protection-trigger,
   single-liquidation, liquidation-batch, and LP-epoch orchestration to preserve Router deploy-size headroom. The Router
   is the only valid execution context for those helpers. Under `delegatecall`, they read integrations through external
@@ -143,9 +189,27 @@ Several perps contracts intentionally expose narrow but high-authority capabilit
   cross the combined floor of protected execution bounties plus `max(-vpiAccrued, 0)`.
 - `HousePool.payOut(...)` and `HousePool.recordProtocolInflow(...)` trust only `engine` and `settlementSidecar`; unsolicited raw pool cash must be admitted through owner-governed excess accounting, and protocol fees stay in treasury clearinghouse margin.
 
+### V2 caller and dependency matrix
+
+| Surface | Authorized caller/context | Security effect and failure rule |
+|---------|---------------------------|----------------------------------|
+| `OrderLifecycleBook.registerPending(...)` / `finalize(...)` | Immutable Router only | Permanently binds identity or terminal outcome; Book finalization is last and any failure rolls back the whole item |
+| `OrderRouterV2ExecutionSidecar.executeOrder(...)` / `executeOrderBatch(...)` | Productive protocol use is delegatecall from the Router that fixed this sidecar | Runs with the host's storage/address; direct calls are rejected, and a different delegate host does not gain the configured Router's authority |
+| V2 prepared-item callback | Router external self-call only, then delegatecall to the fixed sidecar | Creates one rollback frame per order and preserves earlier batch progress on retryable item failure |
+| Router reservation settlement callbacks | Router external self-call only | Release/refund reservation, pay/refund/forfeit the exact bounty, unlink and delete the live Router record |
+| `CfdOrderPolicyEvaluator.assessOrder(...)` | Permissionless static call from the execution sidecar | Rebuilds Engine state and invokes its configured planner; typed policy failures may be terminal, unknown or malformed behavior may not be classified as terminal |
+| `MarginClearinghouse.releaseOrderReservationForTerminalCleanup(...)` | Current Router only | Releases one reservation without a carry checkpoint inside the item rollback frame |
+| `CfdEngine.processOrderTyped(...)` | Configured Router only | Applies the canonical plan; only exact known typed reverts are eligible for terminal classification |
+
+The no-carry release methods change reservation buckets only. Carry remains derived from canonical Engine indexes and
+is assessed by the planner/Engine. On a retryable V2 item failure, the self-call revert restores the released
+reservation, so a classifier cannot strand value between custody buckets.
+
 Practical rule:
 
-- any new external function on `OrderRouter` or `CfdEngineSettlementSidecar`, and any new helper/sidecar that can reach these caller sets, must be treated as security-critical and reviewed like a core custody or settlement change.
+- any new external function on `OrderRouter`, `OrderLifecycleBook`, `OrderRouterV2ExecutionSidecar`, or
+  `CfdEngineSettlementSidecar`, and any new helper/sidecar that can reach these caller sets, must be treated as
+  security-critical and reviewed like a core custody or settlement change.
 
 ## Critical Protocol Invariants
 
@@ -155,7 +219,7 @@ These are the highest-value properties an auditor should expect to hold.
 
 | Invariant | Description |
 |-----------|-------------|
-| Buffered entry solvency | With `P = pool.totalAssets()`, `C = totalTraderClaimBalance`, `E = max(P-C, 0)`, `L = max(globalBullMaxProfit, globalBearMaxProfit)`, and `B = ceil(L * settlementBufferBps / 10_000)`, every risk-increasing open/increase requires post-op `E >= L + B` |
+| Buffered entry solvency | With `P = pool.totalAssets()`, `C = totalTraderClaimBalance`, `E = max(P-C, 0)`, `L = max(globalLongMaxProfit, globalShortMaxProfit)`, and `B = ceil(L * settlementBufferBps / 10_000)`, every risk-increasing open/increase requires post-op `E >= L + B` |
 | Degraded containment | If a close or liquidation leaves raw post-op `E < L`, `degradedMode` latches and blocks further risk expansion while still permitting protective transitions; `B` is deliberately excluded |
 | Bounded payout | No trader payout can exceed the capped market payoff implied by `CAP_PRICE` |
 | Withdrawal firewall | Synchronized LP redemption funding is limited to conservative free cash after a base reserve of `C + L + B` plus any pool-level reservations |
@@ -171,7 +235,7 @@ These are the highest-value properties an auditor should expect to hold.
 | Single direction per account | An account address holds at most one live directional position at a time |
 | Margin sufficiency | Opens and withdraw-facing checks use explicit initial/maintenance/FAD margin policy surfaces |
 | Side symmetry | Side-local cached accounting stays consistent with the live position set |
-| Total margin conservation | `sides[BULL].totalMargin + sides[BEAR].totalMargin == sum(pos.margin)` across all live positions |
+| Total margin conservation | `sides[LONG].totalMargin + sides[SHORT].totalMargin == sum(pos.margin)` across all live positions |
 | Preview/live parity | Close and liquidation preview math should match live execution semantics |
 | Frozen-spread conservation | For a valid frozen voluntary close, assessed spread equals LP-paid spread plus terminally waived spread; none is credited to protocol treasury |
 | Exact-lot basis | Every live position uses whole 100-token lots and exact entry cost is conserved across increases and partial closes |
@@ -183,6 +247,12 @@ These are the highest-value properties an auditor should expect to hold.
 |-----------|-------------|
 | Global FIFO | Execution always starts from the current global queue head |
 | Binding intents | Users cannot cancel queued orders once committed |
+| Permanent idempotency | `(account, clientOrderId)` is bound forever to one full intent hash; exact replay returns the original id before current-state validation and conflicting reuse reverts |
+| Bounded authority | Every fresh order pins a nonzero target, deadline, mode mask, config hash, and inclusive financial limits; zero maxima are real zero allowances rather than unbounded sentinels |
+| Configuration authority | The Book digest binds execution-critical identities and finalized Engine/Router config versions; execution against a different digest fails terminally |
+| Retryable uncertainty | Unknown selectors, panic, out-of-gas, empty/malformed revert data, malformed success data, and mark-ordering failures never become guessed terminal policy failures |
+| Terminal evidence | Every terminal transition finalizes one authenticated Book receipt after economic settlement; a receipt failure rolls back that item |
+| Single terminal owner | Router records are fully deleted terminally, while the Book retains permanent client identity, lifecycle outcome, and the full-receipt hash |
 | Bounty conservation | Clearinghouse-reserved execution bounty value is conserved across order lifecycle transitions until distributed or absorbed, and is excluded from close-loss reachability while reserved |
 | VPI reserve conservation | Every live negative lifetime-VPI balance has equal dedicated action-reserve backing; only an exact clawback, equivalent withholding, or lower surviving target may consume or release it |
 | Reservation source of truth | Clearinghouse reservation records remain the source of truth for committed order margin |
@@ -191,6 +261,7 @@ These are the highest-value properties an auditor should expect to hold.
 | Earliest lot gate | Router commit rejects non-100-token-multiple opens and closes before reserving value or assigning an order id |
 | Economic close granularity | Partial close intents must meet the engine notional floor; only full residual closes may be smaller |
 | Bounded cleanup | Queue cleanup, liquidation cleanup, and close-intent position projection are account-local and intentionally bounded |
+| Carry-neutral reservation release | Execution/cleanup reservation release does not checkpoint carry, and a retryable item rollback restores the reservation |
 
 ### HousePool and LP accounting
 
@@ -217,7 +288,14 @@ The tables above describe the intended safety properties. The suites below are t
 | Bounded payout / preview-live settlement parity | `packages/perps/test/perps/CfdEngine.t.sol`, `packages/perps/test/perps/invariant/PerpPreviewInvariant.t.sol`, `packages/perps/test/perps/invariant/PerpClosePreviewParityInvariant.t.sol` |
 | Withdrawal firewall / trader-claim seniority | `packages/perps/test/perps/SettlementBuffer.t.sol`, `packages/perps/test/perps/PerpInvariant.t.sol`, `packages/perps/test/perps/invariant/PerpEconomicConservationInvariant.t.sol`, `packages/perps/test/perps/invariant/PerpTraderClaimInvariant.t.sol`, `packages/perps/test/perps/HousePool.t.sol` |
 | Single direction / side symmetry / total-margin conservation | `packages/perps/test/perps/PerpInvariant.t.sol`, `packages/perps/test/perps/invariant/PerpMultiAccountInvariant.t.sol` |
-| Global FIFO / binding intents / bounded cleanup | `packages/perps/test/perps/OrderRouter.t.sol`, `packages/perps/test/perps/invariant/PerpAccountingInvariant.t.sol` |
+| Global FIFO / binding intents / bounded cleanup | `packages/perps/test/perps/OrderRouter.t.sol`, `packages/perps/test/perps/OrderRouterV2ExecutionSidecar.t.sol`, `packages/perps/test/perps/invariant/PerpAccountingInvariant.t.sol` |
+| Permanent idempotency / lifecycle outcomes / receipt authentication | `packages/perps/test/perps/OrderLifecycleBook.t.sol`, `packages/perps/test/perps/OrderRouterV2ExecutionSidecar.t.sol` |
+| Caller financial bounds / planner parity / retryable failure classification | `packages/perps/test/perps/CfdOrderPolicyEvaluator.t.sol`, `packages/perps/test/perps/CfdOrderPolicyEvaluatorParity.t.sol`, `packages/perps/test/perps/OrderRouterV2ExecutionSidecar.t.sol` |
+| Config-version drift / pinned execution configuration | `packages/perps/test/perps/AdminConfigVersion.t.sol`, `packages/perps/test/perps/OrderLifecycleBook.t.sol`, `packages/perps/test/perps/OrderRouterV2ExecutionSidecar.t.sol` |
+| Carry-neutral reservation release | `packages/perps/test/perps/MarginClearinghouseReservationRelease.t.sol`, `packages/perps/test/perps/OrderRouterV2ExecutionSidecar.t.sol` |
+| Risk-off and liquidation receipt/bounty disposition | `packages/perps/test/perps/OrderRouterRiskOff.t.sol`, `packages/perps/test/perps/OrderRouterV2ExecutionSidecar.t.sol`, `packages/perps/test/perps/Liquidation.t.sol`, `packages/perps/test/perps/LiquidationBatch.t.sol` |
+| Emergency pause atomicity / monotonic risk-off cutoff / bounded cleanup gas | `packages/perps/test/perps/EmergencyPauseCoordinator.t.sol`, `packages/perps/test/perps/OrderRouterRiskOff.t.sol`, `packages/perps/test/perps/EmergencyRiskOffGas.t.sol` |
+| Settlement-monitor binding, fail-soft reads, route diagnostics, and observation digests | `packages/perps/test/perps/SettlementMonitorLens.t.sol` |
 | Bounty conservation / reservation source of truth | `packages/perps/test/perps/OrderRouter.t.sol`, `packages/perps/test/perps/invariant/PerpAccountingInvariant.t.sol`, `packages/perps/test/perps/invariant/PerpEconomicConservationInvariant.t.sol` |
 | Position-protection lifecycle / post-lock safety | `packages/perps/test/perps/PositionProtection.t.sol`, `packages/perps/test/perps/PositionProtectionLiquidationBatch.t.sol` |
 | Delegated mark refresh, single/batch liquidation, and LP-epoch isolation | `packages/perps/test/perps/OrderRouter.t.sol`, `packages/perps/test/perps/PositionProtection.t.sol`, `packages/perps/test/perps/Liquidation.t.sol`, `packages/perps/test/perps/LiquidationBatch.t.sol`, `packages/perps/test/perps/AtomicLpEpochSettlement.t.sol` |
@@ -291,7 +369,10 @@ governance owns the coordinator and assigns its guardian.
   including after unpause; later orders are unaffected.
 - Cleanup is permissionless and oracle-independent. It returns all remaining committed margin and execution bounty to
   the trader's free internal settlement, pays the caller nothing, and defers carry checkpointing to the trader's next
-  ordinary margin mutation. The protocol incident keeper therefore funds cleanup gas.
+  ordinary margin mutation. The protocol incident keeper therefore funds cleanup gas. The terminal Book receipt uses
+  reason `RiskOff`, execution mode and price source `None`, the cleaner as executor, and the account as bounty
+  recipient with disposition `RefundedToAccount` when the bounty is nonzero. A zero bounty instead has disposition
+  `None` and a zero recipient.
 - Liquidation applies the same risk-off refund before forfeiting unaffected queued bounties, so cleanup-first and
   liquidation-first keeper ordering cannot change whether the invalidated-open reservation is refunded. Refunded free
   settlement remains ordinary trader capital and may still satisfy legitimate liquidation obligations. Liquidation
@@ -322,13 +403,22 @@ Keepers are permissionless executors.
 
 ### Position protection and Router keeper sidecar
 
-The Router-created Book owns the retained OCO lifecycle and uses only narrow clearinghouse/Router capabilities. It is
-stateful and distinct from the separately predeployed `OrderRouterLiquidationBatchSidecar`. Router `delegatecall` uses
+The Router-created position-protection Book owns the retained OCO lifecycle and uses only narrow clearinghouse/Router
+capabilities. It is stateful and distinct from the separately predeployed `OrderRouterLiquidationBatchSidecar`.
+Router `delegatecall` uses
 that sidecar only as a stateless bytecode carrier for mark refresh/protection-trigger resolution, single and batch
 liquidation, atomic-refresh LP-epoch settlement, and the active-oracle forwarding step inside an authenticated Router
 configuration finalization. The Router retains admin authentication and applies its storage fields in the original
 before/after ordering. Delegated functions reject direct and foreign-context calls and must not read or write Router
 storage slots by assumed layout.
+
+The attached parent open and triggered linked close are the only requests allowed to carry
+`expectedConfigHash == bytes32(0)`. Zero is an internal unpinned marker, not a public wildcard: the parent path requires
+the immutable position-protection Book as the Router caller, and the trigger path runs through the exactly
+Router-bound keeper sidecar plus Router-only Book activation/registration hooks. Fresh external V2 commits reject a
+zero hash and remain bound to the exact digest they supplied. Internal protected orders skip only config-digest
+equality; their typed execution modes, deadlines, financial policy, lifecycle evidence, and observed receipt digest
+remain enforced.
 
 When existing-position protection locks its trigger and linked-close bounties, admission is checked after the lock.
 The Book calls the Engine-configured planner's canonical `isExactPriceRiskLiquidatable(...)` predicate rather than
@@ -366,6 +456,10 @@ The router uses delayed commit/execute semantics rather than same-tx market exec
 
 Security properties:
 
+- every fresh request pins a nonzero account-scoped client id, target, deadline, execution-mode mask, exact active
+  configuration digest, and explicit financial bounds before any reservation is created,
+- the account/client-id mapping is permanent and hashes the chain, Router, account, and every request field; exact
+  replay is a side-effect-free resolution even after terminal settlement, while conflicting reuse reverts,
 - trader intent is committed before keeper execution,
 - live-market execution uses Pyth's unique historical parse over `(commitTime, commitTime + orderSettlementWindow]`, capped at `block.timestamp`, so settlement is bound to the first post-commit tick rather than the keeper's reveal-time tick,
 - the unique historical parse rejects skipped ticks because the parsed update must prove its previous publish time is no later than the order's `commitTime`,
@@ -374,22 +468,103 @@ Security properties:
 - aggregate basket confidence is included in live/FAD execution and all liquidation prices instead of being treated only as metadata; oracle-frozen voluntary closes retain aggregate confidence-width validation but replace the adverse price shift with the fixed frozen-close spread,
 - FIFO execution prevents later orders from bypassing earlier ones,
 - partial-close size floors prevent flat-bounty dust closes from occupying global FIFO slots,
-- binding order semantics prevent traders from turning queued intents into free options.
+- binding order semantics and the lack of a user cancellation path prevent traders from turning queued intents into
+  free options,
+- the stateless evaluator reconstructs the canonical settlement snapshot and calls the configured Engine planner
+  before mutation; the execution sidecar then checks selected assessment fields against actual pre/post state,
+- the execution sidecar reserves a fixed post-Engine gas tail and finalizes the lifecycle Book only after economic
+  settlement and Router-record deletion,
+- batch execution also limits every item self-call and retains an outer gas tail, while Router and Oracle ETH refunds
+  cap recipient-call gas and defer rejected refunds; a later gas-burning prepared item or refund recipient therefore
+  cannot roll back an already finalized batch prefix,
+- Oracle/Pyth preparation and the resulting Engine mark update remain in the outer batch frame. A revert at that
+  boundary reverts the complete batch; keepers that require a strict durable-progress boundary must bound
+  `maxOrderId` and separate pre-oracle cleanup from price-dependent execution.
 
 ### Queue failure handling
 
-Current policy is intentionally simple:
+Terminal classification is deliberately allow-listed:
 
 - slippage-invalid orders fail terminally,
 - expired orders fail terminally,
-- ordinary terminal engine failures pay the cleanup caller from the reserved bounty; the reason remains typed for
-  diagnostics but does not change that routing,
+- configuration mismatch fails terminally before oracle/Engine execution,
+- exact-shape typed planner rejections, execution-mode violations, and financial-constraint violations fail
+  terminally and record selector/category/code/constraint evidence,
+- ordinary terminal failure cleanup pays the executor from the exact clearinghouse-reserved bounty; the reason does
+  not change that routing,
 - terminal-invalid closes pay the keeper from the already locked action reserve rather than refunding it to the trader wallet,
 - open-order refunds and keeper payouts credit clearinghouse settlement rather than sending direct wallet USDC transfers,
 - persistent risk-off cancellation is administrative invalidation, precedes expiry, needs no oracle, and fully refunds
   the trader's order plus attached `PendingOpen` protection reserves internally in one no-checkpoint clearinghouse
-  release without paying the cleanup caller,
-- the router does not maintain a retry or requeue lane.
+  release without paying the cleanup caller; its receipt records no price source and, for a nonzero order bounty,
+  `RefundedToAccount`,
+- liquidation cleanup records each remaining order as `AccountLiquidated`, preserves the original keeper as receipt
+  executor, and records a nonzero queued bounty as `Forfeited` to `CfdEngine.protocolTreasury()`,
+- close-only, same-block/MEV, historical-price availability, insufficient gas, and mark-price ordering remain
+  nonterminal,
+- an unknown selector, panic, out-of-gas, empty or malformed revert, or malformed success payload is never decoded as
+  a business-policy failure. The item frame reverts, restoring any no-carry reservation release and leaving the order
+  pending.
+
+`executeOrder(...)` and `executeOrderBatch(...)` expose machine-readable `ExecutionResult` and `BatchResult` values
+for completed calls. Each batch item uses an external Router self-call and a delegatecall back to the fixed sidecar,
+so a prepared-item failure can stop the batch without rolling back already finalized predecessors. Oracle/Pyth
+preparation is deliberately outside that item frame and is batch-atomic: if it reverts, the complete call reverts.
+There is no separate requeue operation: retry means calling execution again against the same pending FIFO head.
+
+### Pinned financial policy and configuration
+
+The external V2 request sets inclusive maxima for execution bounty, execution notional, gross account debit, assessed
+action charge, explicit fees, and post-position size, plus inclusive minima for post-settlement balance and
+post-position equity and an inclusive maximum post-leverage. Zero is an actual zero allowance, not an unbounded sentinel. A field
+that is separately required nonzero cannot use zero; integrations use the field type's maximum to express no
+practical ceiling. In particular, a fresh external request must supply the current nonzero execution-config hash.
+Only the Router-authenticated TP/SL parent/trigger paths use zero as the internal unpinned marker. A terminal full
+close skips only the post-position equity and leverage checks because no position survives. Gross account debit
+includes settlement value lost or charged, consumed trader-claim value, and the
+reserved execution bounty; post-settlement balance means total internal settlement custody, including locked value.
+
+`currentExecutionConfigHash()` binds the schema and chain; lifecycle Book, Router, Engine, Clearinghouse, HousePool,
+execution sidecar, evaluator, and Oracle; both admin identities and monotonic active versions; the Engine planner and
+settlement sidecar; protocol treasury; terminal NAV book; and HousePool mark staleness. It excludes dynamic
+market/runtime values such as price, depth, position skew, FAD/frozen mode, Router/HousePool pause state, the LP
+settlement hold, and the risk-off cutoff. It also excludes the immutable HousePool redemption-math sidecar because
+that module affects only LP redemption budgeting, not order execution. This division is intentional: identity and
+finalized policy drift produces terminal `ConfigMismatch` for config-pinned external orders, while execution mode and
+economics must fit the separately pinned request bounds. The internal TP/SL marker skips the hash-equality check but
+still records the observed digest in its terminal receipt.
+
+Deadline equality passes. Expiry begins only when `block.timestamp > validUntil`. A fresh commit must nevertheless
+choose a future deadline no farther away than the currently active `maxOrderAge`.
+
+The Book's execution-authority digest is separate from `SettlementMonitorLens.observableConfigDigest()` and its
+observation digests. Monitor digests remain advisory drift evidence and are never accepted by the Router as an order
+authorization or settlement commitment.
+
+### Terminal receipt boundary
+
+The lifecycle Book authenticates receipt identity against its pending intent and actual reserved bounty, records a
+compact permanent outcome, deletes pending policy, and emits the full `OrderFinalized` receipt. The full receipt
+includes identity and expected/observed config, status/reason/mode, executor, adverse execution price, neutral mark,
+pool depth, oracle time, whether the price reached the Engine, bounty recipient/disposition, typed failure evidence,
+and normalized economics fields. Its hash additionally commits to chain, Book, Router, terminal block, and terminal
+time. For queued orders removed by account liquidation, the receipt's state-only economics use the state observed
+after liquidation in both summary slots; Engine liquidation events remain the source for the position transition,
+while the order receipt records the exact bounty forfeiture.
+
+At registration, `IntentRegistered` emits the complete `OrderRequest` preimage alongside its canonical hash and the
+actual reserved bounty. Terminal verification therefore needs only canonical chain logs plus the Book's permanent
+compact outcome; it does not rely on an agent retaining private request data.
+
+Expiry and configuration mismatch are pre-oracle terminal paths: their receipts use `PriceSource.None`, zero
+execution price and oracle publish time, and `priceReachedEngine == false`, even though they may report the stored
+neutral mark and current pool depth as context. Risk-off uses the same no-price convention. Any terminal receipt with
+a zero bounty must use `BountyDisposition.None` and the zero recipient; `Paid`, `RefundedToAccount`, and `Forfeited`
+describe only nonzero value movement.
+
+Book finalization occurs last and is fail closed. If identity, status/reason, bounty, or event construction cannot be
+finalized, the enclosing item reverts: Engine/Clearinghouse/Router changes are not allowed to persist without their
+canonical lifecycle evidence. Full receipts are log data; only the compact outcome and hash remain in storage.
 
 ### Oracle regimes
 
@@ -767,6 +942,13 @@ Liquidation performs bounded account-local cleanup of that account's pending ord
 
 This preserves terminal liveness without requiring an unbounded global queue scan.
 
+Before liquidation, cutoff-invalid opens receive the same full internal risk-off refund and `RiskOff` receipt as
+standalone cleanup. If the account remains liquidatable, every other pending order is terminally recorded as
+`AccountLiquidated`; a nonzero reserved execution bounty is `Forfeited` to `CfdEngine.protocolTreasury()`, and the
+receipt's executor is the original keeper rather than the Router self-call address. A zero bounty uses disposition
+`None` and the zero recipient. The Router live records are fully deleted only within the same rollback frame as
+reservation settlement and Book finalization.
+
 Batch liquidation validates and pays for one shared Pyth snapshot, updates the neutral mark once, and isolates each
 account in its own rollback frame. Solvent and positionless accounts are skipped without losing prior successes, while
 the returned cursor leaves any low-gas or empty-revert item unattempted so a keeper can resume safely.
@@ -789,14 +971,23 @@ the returned cursor leaves any low-gas or empty-revert item unattempted so a kee
 ### Router and keeper limitations
 
 - users cannot manually cancel queued intents,
+- account-scoped client ids are permanent; a terminal or config-invalidated id cannot be reused for a replacement
+  request, so clients must generate and persist unique ids,
 - bounded cleanup means heavily expired queues may take multiple keeper calls to clear,
 - per-account pending-order caps bound griefing and liquidation cleanup now stays on bounded account-local order traversal,
-- the Router and immutable Book are one non-upgradeable reviewed bytecode unit. Reusing the Book as a delegate-only
-  code carrier saves Router runtime bytes but increases review coupling: a change to protection code or any delegated
-  keeper path requires rechecking direct-call rejection, external-getter assumptions, Router caller/event context, and
-  both contracts' EIP-170 sizes. Because Router construction deploys the Book, Book creation code also contributes to
-  Router initcode and must remain safely below EIP-3860,
-- failed orders remain terminal rather than retryable.
+- the Router, its independently predeployed lifecycle Book, constructor-created protection Book, and fixed sidecars
+  form one non-upgradeable reviewed stack. Externalizing the lifecycle Book plus keeper and execution paths saves
+  Router initcode/runtime bytes but increases review coupling: a
+  change to either Book or any delegated path requires rechecking direct-call rejection, external-getter assumptions,
+  Router caller/event context, and every affected EIP-170 size. Only protection-Book creation code remains embedded in
+  Router initcode; lifecycle-Book and sidecar creation inputs must be gated independently under EIP-3860,
+- known typed planner/policy failures, slippage, expiry, and config mismatch are terminal and have no retry lane,
+  while uncertain dependency failures deliberately retain the FIFO head and can block later orders until a successful
+  retry or a different terminal rule such as expiry/risk-off/liquidation applies,
+- complete terminal economics are event-backed; on-chain storage retains only the compact outcome and receipt hash,
+  so historical consumers require reliable log indexing,
+- the V2 lifecycle Book has no migration or repair authority. A binding/invariant fault requires containment and a
+  fresh compatible stack.
 
 ### LP accounting limitations
 
@@ -949,8 +1140,9 @@ As of May 21, 2026, `master` includes the resolution commit and later changes. F
 |-----------|--------|
 | `CfdEngine` | Pre-audit reviewed; formal audit pending |
 | `CfdMath` | Pre-audit reviewed as supporting logic; formal audit pending |
-| `OrderRouter` | Pre-audit reviewed; formal audit pending |
-| `MarginClearinghouse` | Pre-audit reviewed; formal audit pending |
+| `OrderRouter` | Pre-audit reviewed before the V2 bounded-intent/lifecycle redesign; V2 formal audit pending |
+| `OrderLifecycleBook`, `CfdOrderPolicyEvaluator`, and `OrderRouterV2ExecutionSidecar` | V2 execution-authority additions; formal audit pending |
+| `MarginClearinghouse` | Pre-audit reviewed before V2 no-carry reservation-release additions; formal audit pending |
 | `HousePool` and stateless redemption-math sidecar | Settlement-hold and size-split changes require formal review |
 | `TrancheVault` | Pre-audit reviewed; formal audit pending |
 | `SettlementMonitorLens` and monitor-bound sidecar | Read-only monitoring addition; formal audit pending |

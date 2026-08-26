@@ -8,13 +8,17 @@ import {CfdEngineAdmin} from "@plether/perps/CfdEngineAdmin.sol";
 import {CfdEngineLens} from "@plether/perps/CfdEngineLens.sol";
 import {CfdEnginePlanner} from "@plether/perps/CfdEnginePlanner.sol";
 import {CfdEngineSettlementSidecar} from "@plether/perps/CfdEngineSettlementSidecar.sol";
+import {CfdOrderPolicyEvaluator} from "@plether/perps/CfdOrderPolicyEvaluator.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
+import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
+import {OrderRouterV2ExecutionSidecar} from "@plether/perps/OrderRouterV2ExecutionSidecar.sol";
+import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
@@ -149,10 +153,23 @@ contract PerpsForkTest is Test {
         CfdEngineLens lens = new CfdEngineLens(address(engine));
         PletherOracle oracle =
             new PletherOracle(address(engine), address(pool), address(pyth), feedIds, w, b, new bool[](1));
-        uint64 routerSidecarNonce = vm.getNonce(address(this));
-        address predictedRouter = vm.computeCreateAddress(address(this), routerSidecarNonce + 1);
+        CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
+        OrderRouterV2ExecutionSidecar executionSidecar = new OrderRouterV2ExecutionSidecar();
+        uint64 routerDependencyNonce = vm.getNonce(address(this));
+        address predictedRouter = vm.computeCreateAddress(address(this), routerDependencyNonce + 2);
+        OrderLifecycleBook lifecycleBook =
+            new OrderLifecycleBook(predictedRouter, address(engine), address(clearinghouse), address(pool));
         OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
-        router = new OrderRouter(address(engine), address(lens), address(pool), address(oracle), address(keeperSidecar));
+        router = new OrderRouter(
+            address(engine),
+            address(lens),
+            address(pool),
+            address(oracle),
+            address(keeperSidecar),
+            address(evaluator),
+            address(executionSidecar),
+            address(lifecycleBook)
+        );
         assertEq(address(router), predictedRouter, "router prediction");
         routerAdmin = OrderRouterAdmin(router.admin());
         engine.setOrderRouter(address(router));
@@ -214,7 +231,7 @@ contract PerpsForkTest is Test {
         uint64 orderId = router.nextCommitId();
 
         vm.prank(trader);
-        router.commitOrder(side, size, margin, targetPrice, isClose);
+        router.commitOrder(_orderRequest(trader, side, size, margin, targetPrice, isClose));
 
         pyth.setAllPrices(feedIds, pythPrice, int32(-8), commitTime + 6);
         vm.warp(commitTime + 7);
@@ -248,12 +265,12 @@ contract PerpsForkTest is Test {
     function _configureLongOrderExpiry() internal {
         IOrderRouterAdminHost.RouterConfig memory config;
         config.maxOrderAge = 1000;
-        config.orderExecutionStalenessLimit = router.orderExecutionStalenessLimit();
-        config.liquidationStalenessLimit = router.liquidationStalenessLimit();
-        config.basketMaxConfidenceRatioBps = router.basketMaxConfidenceRatioBps();
-        config.orderSettlementWindow = router.orderSettlementWindow();
-        config.maxComponentPublishTimeDivergence = router.maxComponentPublishTimeDivergence();
-        config.adverseConfidenceMultiplierBps = router.adverseConfidenceMultiplierBps();
+        config.orderExecutionStalenessLimit = router.pletherOracle().orderExecutionStalenessLimit();
+        config.liquidationStalenessLimit = router.pletherOracle().liquidationStalenessLimit();
+        config.basketMaxConfidenceRatioBps = router.pletherOracle().basketMaxConfidenceRatioBps();
+        config.orderSettlementWindow = router.pletherOracle().orderSettlementWindow();
+        config.maxComponentPublishTimeDivergence = router.pletherOracle().maxComponentPublishTimeDivergence();
+        config.adverseConfidenceMultiplierBps = router.pletherOracle().adverseConfidenceMultiplierBps();
         config.minOpenNotionalUsdc = router.minOpenNotionalUsdc();
         config.openOrderExecutionBountyBps = router.openOrderExecutionBountyBps();
         config.minOpenOrderExecutionBountyUsdc = router.minOpenOrderExecutionBountyUsdc();
@@ -282,7 +299,46 @@ contract PerpsForkTest is Test {
         commitBlock = block.number;
 
         vm.prank(trader);
-        router.commitOrder(side, size, margin, targetPrice, isClose);
+        router.commitOrder(_orderRequest(trader, side, size, margin, targetPrice, isClose));
+    }
+
+    function _orderRequest(
+        address trader,
+        CfdTypes.Side side,
+        uint256 size,
+        uint256 margin,
+        uint256 targetPrice,
+        bool isClose
+    ) internal view returns (OrderV2Types.OrderRequest memory request) {
+        if (targetPrice == 0) {
+            targetPrice = isClose
+                ? (side == CfdTypes.Side.LONG ? type(uint256).max : 1)
+                : (side == CfdTypes.Side.LONG ? 1 : type(uint256).max);
+        }
+        request = OrderV2Types.OrderRequest({
+            clientOrderId: keccak256(
+                abi.encode("PerpsForkTest", block.chainid, address(router), trader, router.nextCommitId())
+            ),
+            side: side,
+            sizeDelta: size,
+            marginDelta: margin,
+            targetPrice: targetPrice,
+            isClose: isClose,
+            bounds: OrderV2Types.ExecutionBounds({
+                validUntil: uint64(block.timestamp + router.maxOrderAge()),
+                allowedExecutionModes: 7,
+                expectedConfigHash: router.lifecycleBook().currentExecutionConfigHash(),
+                maxExecutionBountyUsdc: type(uint256).max,
+                maxExecutionNotionalUsdc: type(uint256).max,
+                maxGrossAccountDebitUsdc: type(uint256).max,
+                maxActionChargeUsdc: type(uint256).max,
+                maxExplicitFeesUsdc: type(uint256).max,
+                maxPostPositionSize: type(uint256).max,
+                minPostSettlementBalanceUsdc: 0,
+                minPostPositionEquityUsdc: 0,
+                maxPostLeverageBps: type(uint32).max
+            })
+        });
     }
 
     function _pythUpdateData() internal pure returns (bytes[] memory updateData) {
@@ -329,16 +385,16 @@ contract PerpsForkTest is Test {
         uint256 clearinghouseBefore = IERC20(USDC).balanceOf(address(clearinghouse));
         uint256 keeperBefore = clearinghouse.balanceUsdc(keeper);
 
-        // Open BULL $50k at $1.00
-        this._commitAndExecute(alice, CfdTypes.Side.BULL, 50_000e18, 5000e6, 1e8, int64(100_000_000), false);
+        // Open LONG $50k at $1.00
+        this._commitAndExecute(alice, CfdTypes.Side.LONG, 50_000e18, 5000e6, 1e8, int64(100_000_000), false);
 
         address aliceAccount = _account(alice);
         (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 50_000e18, "Position should be 50k tokens");
 
-        // Close at $0.90 (BULL profits when price drops)
+        // Close at $0.90 (LONG profits when price drops)
         vm.warp(block.timestamp + 60);
-        this._commitAndExecute(alice, CfdTypes.Side.BULL, 50_000e18, 0, 0, int64(90_000_000), true);
+        this._commitAndExecute(alice, CfdTypes.Side.LONG, 50_000e18, 0, 0, int64(90_000_000), true);
 
         (size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 0, "Position should be closed");
@@ -373,11 +429,22 @@ contract PerpsForkTest is Test {
         CfdEngineLens realPythLens = new CfdEngineLens(address(engine));
         PletherOracle realPythOracle =
             new PletherOracle(address(engine), address(pool), REAL_PYTH, feedIds, rw, rb, new bool[](1));
-        uint64 routerSidecarNonce = vm.getNonce(address(this));
-        address predictedRouter = vm.computeCreateAddress(address(this), routerSidecarNonce + 1);
+        CfdOrderPolicyEvaluator realPythEvaluator = new CfdOrderPolicyEvaluator();
+        OrderRouterV2ExecutionSidecar realPythExecutionSidecar = new OrderRouterV2ExecutionSidecar();
+        uint64 routerDependencyNonce = vm.getNonce(address(this));
+        address predictedRouter = vm.computeCreateAddress(address(this), routerDependencyNonce + 2);
+        OrderLifecycleBook lifecycleBook =
+            new OrderLifecycleBook(predictedRouter, address(engine), address(clearinghouse), address(pool));
         OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
         OrderRouter realPythRouter = new OrderRouter(
-            address(engine), address(realPythLens), address(pool), address(realPythOracle), address(keeperSidecar)
+            address(engine),
+            address(realPythLens),
+            address(pool),
+            address(realPythOracle),
+            address(keeperSidecar),
+            address(realPythEvaluator),
+            address(realPythExecutionSidecar),
+            address(lifecycleBook)
         );
         assertEq(address(realPythRouter), predictedRouter, "router prediction");
 
@@ -385,7 +452,9 @@ contract PerpsForkTest is Test {
         engine.setOrderRouter(address(realPythRouter));
 
         assertEq(
-            address(realPythRouter.pyth()), REAL_PYTH, "Router construction should still accept the real Pyth contract"
+            address(realPythRouter.pletherOracle().pyth()),
+            REAL_PYTH,
+            "Router construction should still accept the real Pyth contract"
         );
     }
 
@@ -398,7 +467,7 @@ contract PerpsForkTest is Test {
         _depositToClearinghouse(alice, 10_000e6);
 
         (uint64 orderId, uint256 commitTime, uint256 commitBlock) =
-            _commitOrderDeterministic(alice, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+            _commitOrderDeterministic(alice, CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8, false);
 
         pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), commitTime);
         vm.warp(commitTime + 2);
@@ -429,7 +498,7 @@ contract PerpsForkTest is Test {
         _depositToClearinghouse(alice, 10_000e6);
 
         (uint64 orderId, uint256 commitTime, uint256 commitBlock) =
-            _commitOrderDeterministic(alice, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+            _commitOrderDeterministic(alice, CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8, false);
 
         pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), commitTime + 6);
         vm.warp(commitTime + 67);
@@ -450,7 +519,7 @@ contract PerpsForkTest is Test {
         _depositToClearinghouse(alice, 10_000e6);
 
         (uint64 orderId, uint256 commitTime, uint256 commitBlock) =
-            _commitOrderDeterministic(alice, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+            _commitOrderDeterministic(alice, CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8, false);
 
         pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), commitTime + 6);
         vm.warp(commitTime + 65);
@@ -469,7 +538,7 @@ contract PerpsForkTest is Test {
 
     function test_LiquidationStaleness_16SecondsOld_Reverts() public {
         _depositToClearinghouse(alice, 10_000e6);
-        this._commitAndExecute(alice, CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, int64(100_000_000), false);
+        this._commitAndExecute(alice, CfdTypes.Side.LONG, 10_000e18, 500e6, 1e8, int64(100_000_000), false);
 
         address aliceAccount = _account(alice);
         uint256 liqPublishTime = block.timestamp + 1;
@@ -488,8 +557,8 @@ contract PerpsForkTest is Test {
     function test_LiquidationE2E_RealUsdcSettlement() public {
         _depositToClearinghouse(alice, 10_000e6);
 
-        // Open BULL $100k at $1.00
-        this._commitAndExecute(alice, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8, int64(100_000_000), false);
+        // Open LONG $100k at $1.00
+        this._commitAndExecute(alice, CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8, int64(100_000_000), false);
 
         address aliceAccount = _account(alice);
         (uint256 size,,,,,,) = engine.positions(aliceAccount);
@@ -499,7 +568,7 @@ contract PerpsForkTest is Test {
         uint256 chBefore = IERC20(USDC).balanceOf(address(clearinghouse));
         uint256 keeperBefore = IERC20(USDC).balanceOf(keeper);
 
-        // Price rises to $1.10 → BULL PnL = -$10k, equity turns liquidatable
+        // Price rises to $1.10 → LONG PnL = -$10k, equity turns liquidatable
         uint256 liqTs = block.timestamp + 60;
         vm.warp(liqTs);
         pyth.setAllPrices(feedIds, int64(110_000_000), -8, liqTs);
@@ -534,7 +603,7 @@ contract PerpsForkTest is Test {
 
         uint256 ts = block.timestamp;
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+        router.commitOrder(_orderRequest(alice, CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8, false));
 
         pyth.setAllPrices(feedIds, int64(100_000_000), -8, ts + 6);
         vm.warp(ts + 7);
@@ -589,30 +658,30 @@ contract PerpsForkTest is Test {
         uint256 totalUsdcBefore = IERC20(USDC).balanceOf(address(pool)) + IERC20(USDC).balanceOf(address(clearinghouse))
             + IERC20(USDC).balanceOf(keeper);
 
-        // Alice BULL $100k, Bob BEAR $80k, Carol BULL $50k — all at $1.00
-        this._commitAndExecute(alice, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, int64(100_000_000), false);
-        this._commitAndExecute(bob, CfdTypes.Side.BEAR, 80_000e18, 8000e6, 1e8, int64(100_000_000), false);
-        this._commitAndExecute(carol, CfdTypes.Side.BULL, 50_000e18, 5000e6, 1e8, int64(100_000_000), false);
+        // Alice LONG $100k, Bob SHORT $80k, Carol LONG $50k — all at $1.00
+        this._commitAndExecute(alice, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8, int64(100_000_000), false);
+        this._commitAndExecute(bob, CfdTypes.Side.SHORT, 80_000e18, 8000e6, 1e8, int64(100_000_000), false);
+        this._commitAndExecute(carol, CfdTypes.Side.LONG, 50_000e18, 5000e6, 1e8, int64(100_000_000), false);
 
-        assertEq(_sideOpenInterest(CfdTypes.Side.BULL), 150_000e18, "Bull OI should be 150k");
-        assertEq(_sideOpenInterest(CfdTypes.Side.BEAR), 80_000e18, "Bear OI should be 80k");
+        assertEq(_sideOpenInterest(CfdTypes.Side.LONG), 150_000e18, "Long OI should be 150k");
+        assertEq(_sideOpenInterest(CfdTypes.Side.SHORT), 80_000e18, "Short OI should be 80k");
 
-        // Close Alice at $0.95 (BULL profits when price drops)
+        // Close Alice at $0.95 (LONG profits when price drops)
         vm.warp(t0 + 200);
-        this._commitAndExecute(alice, CfdTypes.Side.BULL, 100_000e18, 0, 0, int64(95_000_000), true);
-        assertEq(_sideOpenInterest(CfdTypes.Side.BULL), 50_000e18, "Bull OI should be 50k after Alice close");
+        this._commitAndExecute(alice, CfdTypes.Side.LONG, 100_000e18, 0, 0, int64(95_000_000), true);
+        assertEq(_sideOpenInterest(CfdTypes.Side.LONG), 50_000e18, "Long OI should be 50k after Alice close");
 
-        // Close Bob at $0.95 (BEAR loses when price drops)
+        // Close Bob at $0.95 (SHORT loses when price drops)
         vm.warp(t0 + 400);
-        this._commitAndExecute(bob, CfdTypes.Side.BEAR, 80_000e18, 0, 0, int64(95_000_000), true);
-        assertEq(_sideOpenInterest(CfdTypes.Side.BEAR), 0, "Bear OI should be 0 after Bob close");
+        this._commitAndExecute(bob, CfdTypes.Side.SHORT, 80_000e18, 0, 0, int64(95_000_000), true);
+        assertEq(_sideOpenInterest(CfdTypes.Side.SHORT), 0, "Short OI should be 0 after Bob close");
 
-        // Close Carol at $1.05 (BULL loses when price rises)
+        // Close Carol at $1.05 (LONG loses when price rises)
         vm.warp(t0 + 600);
-        this._commitAndExecute(carol, CfdTypes.Side.BULL, 50_000e18, 0, 0, int64(105_000_000), true);
+        this._commitAndExecute(carol, CfdTypes.Side.LONG, 50_000e18, 0, 0, int64(105_000_000), true);
 
-        assertEq(_sideOpenInterest(CfdTypes.Side.BULL), 0, "Bull OI should be 0 after all close");
-        assertEq(_sideOpenInterest(CfdTypes.Side.BEAR), 0, "Bear OI should be 0 after all close");
+        assertEq(_sideOpenInterest(CfdTypes.Side.LONG), 0, "Long OI should be 0 after all close");
+        assertEq(_sideOpenInterest(CfdTypes.Side.SHORT), 0, "Short OI should be 0 after all close");
 
         // USDC conservation
         uint256 totalUsdcAfter = IERC20(USDC).balanceOf(address(pool)) + IERC20(USDC).balanceOf(address(clearinghouse))
@@ -628,31 +697,31 @@ contract PerpsForkTest is Test {
         uint256 t0 = block.timestamp;
         _depositToClearinghouse(alice, 50_000e6);
 
-        // Lone BULL $200k -> max skew, carry will drain margin
-        this._commitAndExecute(alice, CfdTypes.Side.BULL, 200_000e18, 40_000e6, 1e8, int64(100_000_000), false);
+        // Lone LONG $200k -> max skew, carry will drain margin
+        this._commitAndExecute(alice, CfdTypes.Side.LONG, 200_000e18, 40_000e6, 1e8, int64(100_000_000), false);
 
         address aliceAccount = _account(alice);
         (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertGt(size, 0, "Position should exist");
 
-        int256 bullIdxBefore = _legacySideIndexZero(CfdTypes.Side.BULL);
-        int256 bearIdxBefore = _legacySideIndexZero(CfdTypes.Side.BEAR);
+        int256 longIdxBefore = _legacySideIndexZero(CfdTypes.Side.LONG);
+        int256 shortIdxBefore = _legacySideIndexZero(CfdTypes.Side.SHORT);
 
         // Warp 90 days; close position to realize carry
         vm.warp(t0 + 90 days + 60);
-        this._commitAndExecute(alice, CfdTypes.Side.BULL, size, 0, 0, int64(100_000_000), true);
+        this._commitAndExecute(alice, CfdTypes.Side.LONG, size, 0, 0, int64(100_000_000), true);
 
-        int256 bullIdxAfter = _legacySideIndexZero(CfdTypes.Side.BULL);
-        int256 bearIdxAfter = _legacySideIndexZero(CfdTypes.Side.BEAR);
+        int256 longIdxAfter = _legacySideIndexZero(CfdTypes.Side.LONG);
+        int256 shortIdxAfter = _legacySideIndexZero(CfdTypes.Side.SHORT);
 
         // Legacy side indices should remain zero in the carry model
-        assertLt(bullIdxAfter, bullIdxBefore, "Bull legacy side index should remain zero");
-        assertGt(bearIdxAfter, bearIdxBefore, "Bear legacy side index should remain zero");
+        assertLt(longIdxAfter, longIdxBefore, "Long legacy side index should remain zero");
+        assertGt(shortIdxAfter, shortIdxBefore, "Short legacy side index should remain zero");
 
         // Symmetry: sum of changes should be zero
-        int256 bullDelta = bullIdxAfter - bullIdxBefore;
-        int256 bearDelta = bearIdxAfter - bearIdxBefore;
-        assertEq(bullDelta + bearDelta, 0, "Legacy side index changes must be symmetric");
+        int256 longDelta = longIdxAfter - longIdxBefore;
+        int256 shortDelta = shortIdxAfter - shortIdxBefore;
+        assertEq(longDelta + shortDelta, 0, "Legacy side index changes must be symmetric");
     }
 
     // ==========================================
@@ -672,15 +741,15 @@ contract PerpsForkTest is Test {
 
         _depositToClearinghouse(alice, 50_000e6);
 
-        // BULL $200k at $1.00
-        this._commitAndExecute(alice, CfdTypes.Side.BULL, 200_000e18, 20_000e6, 1e8, int64(100_000_000), false);
+        // LONG $200k at $1.00
+        this._commitAndExecute(alice, CfdTypes.Side.LONG, 200_000e18, 20_000e6, 1e8, int64(100_000_000), false);
 
         uint256 seniorBefore = pool.seniorPrincipal();
         uint256 juniorBefore = pool.juniorPrincipal();
 
-        // Price drops to $0.50 → BULL profits $100k
+        // Price drops to $0.50 → LONG profits $100k
         vm.warp(block.timestamp + 120);
-        this._commitAndExecute(alice, CfdTypes.Side.BULL, 200_000e18, 0, 0, int64(50_000_000), true);
+        this._commitAndExecute(alice, CfdTypes.Side.LONG, 200_000e18, 0, 0, int64(50_000_000), true);
 
         // Reconcile to distribute loss through tranches
         vm.prank(address(juniorVault));
@@ -708,7 +777,7 @@ contract PerpsForkTest is Test {
     function test_TraderClaimSettlementFlow_RealUsdc() public {
         _depositToClearinghouse(alice, 11_000e6);
 
-        this._commitAndExecute(alice, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8, int64(100_000_000), false);
+        this._commitAndExecute(alice, CfdTypes.Side.LONG, 100_000e18, 9000e6, 1e8, int64(100_000_000), false);
 
         address aliceAccount = _account(alice);
         uint256 poolAssets = IERC20(USDC).balanceOf(address(pool));
@@ -720,7 +789,7 @@ contract PerpsForkTest is Test {
 
         uint256 commitTime = block.timestamp;
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+        router.commitOrder(_orderRequest(alice, CfdTypes.Side.LONG, 100_000e18, 0, 0, true));
         pyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), commitTime + 6);
         vm.warp(commitTime + 7);
         vm.roll(block.number + 2);
@@ -761,7 +830,7 @@ contract PerpsForkTest is Test {
     function test_TraderClaimBatchDoesNotBlockTailOrder_RealUsdc() public {
         _depositToClearinghouse(alice, 20_000e6);
 
-        this._commitAndExecute(alice, CfdTypes.Side.BULL, 100_000e18, 8000e6, 1e8, int64(100_000_000), false);
+        this._commitAndExecute(alice, CfdTypes.Side.LONG, 100_000e18, 8000e6, 1e8, int64(100_000_000), false);
 
         address aliceAccount = _account(alice);
         uint256 poolAssets = IERC20(USDC).balanceOf(address(pool));
@@ -769,12 +838,12 @@ contract PerpsForkTest is Test {
         IERC20(USDC).safeTransfer(address(0xDEAD), poolAssets - 8000e6);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+        router.commitOrder(_orderRequest(alice, CfdTypes.Side.LONG, 100_000e18, 0, 0, true));
 
         vm.warp(block.timestamp + 10);
         vm.roll(block.number + 1);
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BEAR, 10_000e18, 500e6, 0, false);
+        router.commitOrder(_orderRequest(alice, CfdTypes.Side.SHORT, 10_000e18, 500e6, 0, false));
 
         pyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), block.timestamp + 6);
         vm.warp(block.timestamp + 7);
@@ -797,7 +866,7 @@ contract PerpsForkTest is Test {
         );
         assertEq(
             uint256(side),
-            uint256(CfdTypes.Side.BULL),
+            uint256(CfdTypes.Side.LONG),
             "Position metadata should remain stable after the close empties the position"
         );
     }

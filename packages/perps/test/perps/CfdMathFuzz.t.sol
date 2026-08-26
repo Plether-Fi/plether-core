@@ -48,7 +48,7 @@ contract CfdMathFuzzTest is Test {
         size = bound(size, 1e18, 1_000_000e18);
         entryPrice = bound(entryPrice, 0.01e8, 1.99e8);
         currentPrice = bound(currentPrice, 0, 3e8);
-        CfdTypes.Side side = sideRaw % 2 == 0 ? CfdTypes.Side.BULL : CfdTypes.Side.BEAR;
+        CfdTypes.Side side = sideRaw % 2 == 0 ? CfdTypes.Side.LONG : CfdTypes.Side.SHORT;
 
         CfdTypes.Position memory pos = CfdTypes.Position({
             size: size,
@@ -76,7 +76,7 @@ contract CfdMathFuzzTest is Test {
     ) public pure {
         size = bound(size, 1e18, 1_000_000e18);
         entryPrice = bound(entryPrice, 1, CAP_PRICE);
-        CfdTypes.Side side = sideRaw % 2 == 0 ? CfdTypes.Side.BULL : CfdTypes.Side.BEAR;
+        CfdTypes.Side side = sideRaw % 2 == 0 ? CfdTypes.Side.LONG : CfdTypes.Side.SHORT;
 
         uint256 maxProfit = CfdMath.calculateMaxProfit(size, entryPrice, side, CAP_PRICE);
 

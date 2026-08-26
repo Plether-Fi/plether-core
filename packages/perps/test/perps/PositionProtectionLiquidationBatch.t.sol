@@ -3,6 +3,7 @@ pragma solidity 0.8.35;
 
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
 import {PositionProtectionBook} from "@plether/perps/PositionProtectionBook.sol";
@@ -36,14 +37,19 @@ contract OrderRouterInitcodeSizeTest is Test {
 
     function test_OrderRouterCreationCodeAndConstructorArgsFitEip3860() public pure {
         assertLe(
-            type(OrderRouter).creationCode.length + (5 * 32),
+            type(OrderRouter).creationCode.length + (8 * 32),
             EIP3860_INITCODE_LIMIT,
-            "OrderRouter creation code plus five static constructor arguments must fit EIP-3860"
+            "OrderRouter creation code plus eight static constructor arguments must fit EIP-3860"
         );
         assertLe(
             type(OrderRouterLiquidationBatchSidecar).creationCode.length + 32,
             EIP3860_INITCODE_LIMIT,
             "sidecar creation code plus its static constructor argument must fit EIP-3860"
+        );
+        assertLe(
+            type(OrderLifecycleBook).creationCode.length + (4 * 32),
+            EIP3860_INITCODE_LIMIT,
+            "OrderLifecycleBook creation code plus four static constructor arguments must fit EIP-3860"
         );
         assertLe(
             type(PositionProtectionBook).creationCode.length + (2 * 32),
@@ -73,7 +79,7 @@ contract PositionProtectionLiquidationBatchTest is BasePerpTest {
     uint256 internal constant MARK_PRICE = 100_000_000;
     uint256 internal constant LIQUIDATION_PRICE = 102_000_000;
     uint256 internal constant DEEP_LIQUIDATION_PRICE = 150_000_000;
-    uint256 internal constant BULL_STOP_LOSS = 110_000_000;
+    uint256 internal constant LONG_STOP_LOSS = 110_000_000;
     uint256 internal constant POSITION_SIZE = 10_000e18;
     uint256 internal constant HEALTHY_MARGIN_USDC = 2000e6;
     uint256 internal constant THIN_MARGIN_USDC = 250e6;
@@ -186,7 +192,7 @@ contract PositionProtectionLiquidationBatchTest is BasePerpTest {
         uint64 protectionId = _openAndProtect(TRIGGERED_ACCOUNT, HEALTHY_MARGIN_USDC);
         _withdrawAllFreeSettlement(TRIGGERED_ACCOUNT);
 
-        bytes[] memory triggerData = _mockPythUpdateData(BULL_STOP_LOSS);
+        bytes[] memory triggerData = _mockPythUpdateData(LONG_STOP_LOSS);
         vm.prank(TRIGGER_KEEPER);
         uint64 linkedOrderId = protectionActions.triggerPositionProtection(protectionId, triggerData);
         assertEq(
@@ -281,7 +287,11 @@ contract PositionProtectionLiquidationBatchTest is BasePerpTest {
             OrderRouterLiquidationBatchSidecar(sidecar).ROUTER(), address(router), "sidecar must bind the exact Router"
         );
         assertEq(PositionProtectionBook(book).ROUTER(), address(router), "Book must bind the exact Router");
-        assertLe(address(router).code.length, EIP170_RUNTIME_CODE_LIMIT, "OrderRouter runtime must fit EIP-170");
+        assertLe(
+            vm.getDeployedCode("OrderRouter.sol:OrderRouter").length,
+            EIP170_RUNTIME_CODE_LIMIT,
+            "production OrderRouter runtime must fit EIP-170"
+        );
         assertGt(sidecar.code.length, 0, "keeper sidecar must be deployed");
         assertLe(sidecar.code.length, EIP170_RUNTIME_CODE_LIMIT, "keeper sidecar runtime must fit EIP-170");
         assertGt(book.code.length, 0, "PositionProtectionBook must be deployed");
@@ -293,10 +303,10 @@ contract PositionProtectionLiquidationBatchTest is BasePerpTest {
         uint256 marginUsdc
     ) internal returns (uint64 protectionId) {
         _fundTrader(account, 20_000e6);
-        _open(account, CfdTypes.Side.BULL, POSITION_SIZE, marginUsdc, MARK_PRICE);
+        _open(account, CfdTypes.Side.LONG, POSITION_SIZE, marginUsdc, MARK_PRICE);
 
         PositionProtectionTypes.PositionProtectionParams memory params;
-        params.stopLossTriggerPrice = BULL_STOP_LOSS;
+        params.stopLossTriggerPrice = LONG_STOP_LOSS;
         vm.prank(account);
         protectionId = protectionActions.createPositionProtection(params);
     }

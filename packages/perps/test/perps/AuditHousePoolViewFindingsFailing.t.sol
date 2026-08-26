@@ -132,7 +132,7 @@ contract AuditHousePoolViewFindingsFailing_StaleYieldBackfill is BasePerpTest {
         _fundTrader(trader, 50_000e6);
 
         address traderAccount = trader;
-        _open(traderAccount, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(traderAccount, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
         uint256 before = pool.lastReconcileTime();
 
@@ -171,7 +171,7 @@ contract AuditHousePoolViewFindingsFailing_ProjectedLegacySpreadViews is BasePer
     function test_L2_SimpleHealthViewsMustUseProjectedCarryState() public {
         address account = trader;
         _fundTrader(trader, 50_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
         vm.warp(block.timestamp + 30 days);
 
@@ -212,7 +212,7 @@ contract AuditHousePoolViewFindingsFailing_WithdrawalCapLiveness is BasePerpTest
         _fundTrader(trader, 50_000e6);
 
         address traderAccount = trader;
-        _open(traderAccount, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(traderAccount, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
         vm.warp(block.timestamp + 121);
 
@@ -238,7 +238,7 @@ contract AuditHousePoolViewFindingsFailing_GrossAssetsReconstruction is BasePerp
 
         _fundJunior(address(this), 500_000e6);
         _fundTrader(trader, 50_000e6);
-        _open(traderAccount, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(traderAccount, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
         uint256 fees = clearinghouse.balanceUsdc(engine.protocolTreasury());
         assertGt(fees, 0, "Setup must accrue protocol fees");

@@ -556,7 +556,7 @@ contract JuniorMaintenanceFeeTest is BasePerpTest {
         assertEq(juniorVault.pendingMaintenanceFeeShares(), 0);
         uint256 checkpointAfterFirstFunding = juniorVault.maintenanceFeeCheckpointBoundary();
 
-        _close(TRADER, CfdTypes.Side.BULL, positionSize, 1e8);
+        _close(TRADER, CfdTypes.Side.LONG, positionSize, 1e8);
         IHousePool.LpEpochSettlementResult memory second = _settleLpEpochForTest();
 
         assertGt(second.juniorFundedShares, 0);
@@ -1022,7 +1022,7 @@ contract JuniorMaintenanceFeeTest is BasePerpTest {
         uint256 margin = maxLiabilityUsdc / 10 + 10e6;
         _fundTrader(TRADER, margin);
         positionSize = maxLiabilityUsdc * 1e12;
-        _open(TRADER, CfdTypes.Side.BULL, positionSize, margin, 1e8);
+        _open(TRADER, CfdTypes.Side.LONG, positionSize, margin, 1e8);
         uint256 settlementBufferUsdc =
             SolvencyAccountingLib.settlementBufferTargetUsdc(maxLiabilityUsdc, engine.settlementBufferBps());
         uint256 expectedFreeUsdc = assets - maxLiabilityUsdc - settlementBufferUsdc;

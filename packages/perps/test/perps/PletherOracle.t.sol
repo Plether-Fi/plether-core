@@ -97,6 +97,35 @@ contract PletherOracleVaultMock {
 
 }
 
+/// @dev Consumes every gas unit offered to the immediate refund callback until explicitly configured to accept ETH.
+contract GasBurningOracleRefundRecipient {
+
+    bool internal burnRefundGas = true;
+    uint256 public receivedEth;
+
+    receive() external payable {
+        if (burnRefundGas) {
+            assembly ("memory-safe") {
+                for {} 1 {} { pop(gas()) }
+            }
+        }
+        receivedEth += msg.value;
+    }
+
+    function setBurnRefundGas(
+        bool burnRefundGas_
+    ) external {
+        burnRefundGas = burnRefundGas_;
+    }
+
+    function claim(
+        IPletherOracle oracle
+    ) external {
+        oracle.claimEthRefund();
+    }
+
+}
+
 contract PletherOracleTest is Test {
 
     bytes32 internal constant FEED_A = bytes32(uint256(1));
@@ -148,6 +177,34 @@ contract PletherOracleTest is Test {
         assertEq(snapshot.updateFee, 0.1 ether, "fee snapshot");
         assertEq(snapshot.maxStaleness, 60, "mode staleness");
         assertEq(balanceBefore - address(this).balance, 0.1 ether, "only Pyth fee retained");
+    }
+
+    function test_UpdatePrice_GasBurningRefundRecipientAccruesAndClaimsDeferredRefund() public {
+        vm.warp(1000);
+        vm.deal(address(this), 1 ether);
+        pyth.setFee(0.1 ether);
+        _setBothPrices(100_000_000, 990);
+
+        GasBurningOracleRefundRecipient recipient = new GasBurningOracleRefundRecipient();
+        uint256 refund = 0.15 ether;
+
+        IPletherOracle.PriceSnapshot memory snapshot = oracle.updatePrice{value: 0.1 ether + refund, gas: 1_000_000}(
+            address(recipient), _pythUpdateData(), IPletherOracle.PriceMode.OrderExecution
+        );
+
+        assertEq(snapshot.updateFee, 0.1 ether, "price update should still complete after the capped callback fails");
+        assertEq(address(recipient).balance, 0, "failed immediate refund must not transfer ETH");
+        assertEq(recipient.receivedEth(), 0, "failed callback state must roll back");
+        assertEq(oracle.claimableEth(address(recipient)), refund, "the full failed refund must become claimable");
+        assertEq(address(oracle).balance, refund, "the deferred claim must remain fully funded");
+
+        recipient.setBurnRefundGas(false);
+        recipient.claim(oracle);
+
+        assertEq(oracle.claimableEth(address(recipient)), 0, "a successful claim must clear its accounting");
+        assertEq(recipient.receivedEth(), refund, "the recipient must receive the complete deferred refund");
+        assertEq(address(recipient).balance, refund, "claimed ETH balance");
+        assertEq(address(oracle).balance, 0, "the oracle must not retain claimed ETH");
     }
 
     function test_GetLatestPrice_IsViewOnlyAndUsesCurrentStoredPythPrice() public {
@@ -303,7 +360,7 @@ contract PletherOracleTest is Test {
         inversions[1] = true;
         basePrices[1] = 50_000_000;
         oracle = _deployOracle(address(pyth));
-        engine.setPosition(1e18, CfdTypes.Side.BULL);
+        engine.setPosition(1e18, CfdTypes.Side.LONG);
         pyth.setPrice(FEED_A, int64(100_000_000), uint64(100_000), int32(-8), 990);
         pyth.setPrice(FEED_B, int64(200_000_000), uint64(200_000), int32(-8), 990);
 
@@ -385,7 +442,7 @@ contract PletherOracleTest is Test {
         _setHistoricalPricesWithConfidence(100_000_000, 100_000);
 
         (bool ok, IPletherOracle.PriceSnapshot memory snapshot) =
-            oracle.updateOrderExecutionPrice(address(this), _pythUpdateData(), _orderRequest(CfdTypes.Side.BULL, true));
+            oracle.updateOrderExecutionPrice(address(this), _pythUpdateData(), _orderRequest(CfdTypes.Side.LONG, true));
 
         assertTrue(ok, "live close should resolve a historical execution price");
         assertFalse(snapshot.closeOnly, "live execution should not be close-only");
@@ -400,7 +457,7 @@ contract PletherOracleTest is Test {
         _setHistoricalPricesWithConfidence(100_000_000, 100_000);
 
         (bool ok, IPletherOracle.PriceSnapshot memory snapshot) =
-            oracle.updateOrderExecutionPrice(address(this), _pythUpdateData(), _orderRequest(CfdTypes.Side.BULL, true));
+            oracle.updateOrderExecutionPrice(address(this), _pythUpdateData(), _orderRequest(CfdTypes.Side.LONG, true));
 
         assertTrue(ok, "FAD-only close should resolve a historical execution price");
         assertTrue(snapshot.closeOnly, "FAD execution should be close-only");
@@ -415,7 +472,7 @@ contract PletherOracleTest is Test {
         _setLivePricesWithConfidence(100_000_000, 100_000, 990);
 
         (bool ok, IPletherOracle.PriceSnapshot memory snapshot) =
-            oracle.updateOrderExecutionPrice(address(this), _pythUpdateData(), _orderRequest(CfdTypes.Side.BULL, true));
+            oracle.updateOrderExecutionPrice(address(this), _pythUpdateData(), _orderRequest(CfdTypes.Side.LONG, true));
 
         assertTrue(ok, "oracle-frozen close should resolve the stored Pyth basket");
         assertTrue(snapshot.closeOnly, "oracle-frozen execution should be close-only");
@@ -438,7 +495,7 @@ contract PletherOracleTest is Test {
                 uint256(10)
             )
         );
-        oracle.updateOrderExecutionPrice(address(this), _pythUpdateData(), _orderRequest(CfdTypes.Side.BULL, true));
+        oracle.updateOrderExecutionPrice(address(this), _pythUpdateData(), _orderRequest(CfdTypes.Side.LONG, true));
     }
 
     function test_OracleFrozenBatchClose_WaivesAdverseConfidenceAdjustment() public {
@@ -448,7 +505,7 @@ contract PletherOracleTest is Test {
         IPletherOracle.BatchOrderPriceCache memory cache;
 
         (bool ok, IPletherOracle.PriceSnapshot memory snapshot, IPletherOracle.BatchOrderPriceCache memory nextCache) = oracle.updateBatchOrderExecutionPrice(
-            address(this), _pythUpdateData(), _orderRequest(CfdTypes.Side.BULL, true), cache
+            address(this), _pythUpdateData(), _orderRequest(CfdTypes.Side.LONG, true), cache
         );
 
         assertTrue(ok, "oracle-frozen batch close should resolve the stored Pyth basket");
@@ -463,7 +520,7 @@ contract PletherOracleTest is Test {
         _setLivePricesWithConfidence(100_000_000, 100_000, 990);
 
         (bool ok, IPletherOracle.PriceSnapshot memory snapshot) =
-            oracle.updateOrderExecutionPrice(address(this), _pythUpdateData(), _orderRequest(CfdTypes.Side.BULL, false));
+            oracle.updateOrderExecutionPrice(address(this), _pythUpdateData(), _orderRequest(CfdTypes.Side.LONG, false));
 
         assertTrue(ok, "direct oracle call should still resolve a frozen open price");
         assertEq(snapshot.price, 99_980_000, "non-close execution should retain the adverse confidence shift");
@@ -472,7 +529,7 @@ contract PletherOracleTest is Test {
     function test_OracleFrozenLiquidation_RetainsAdverseConfidenceAdjustment() public {
         vm.warp(1000);
         engine.setFadDayOverride(block.timestamp / 86_400, true);
-        engine.setPosition(1e18, CfdTypes.Side.BULL);
+        engine.setPosition(1e18, CfdTypes.Side.LONG);
         _setLivePricesWithConfidence(100_000_000, 100_000, 990);
 
         IPletherOracle.PriceSnapshot memory snapshot =

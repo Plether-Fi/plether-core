@@ -10,26 +10,19 @@ import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdmin
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {PythStructs} from "@plether/shared/interfaces/IPyth.sol";
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
+import {Vm} from "forge-std/Vm.sol";
 
 /// @notice Caller used to prove that the Router's final ETH refund cannot reenter LP settlement.
 contract LpEpochRefundReenterer {
 
     OrderRouter internal immutable ROUTER;
-    IHousePool internal immutable POOL;
 
-    bool public attempted;
-    bool public reentered;
-    bytes4 public revertSelector;
-    bool public directAttempted;
-    bool public directSettled;
-    bytes4 public directRevertSelector;
+    event RefundCallback(bool reentered, bytes4 revertSelector);
 
     constructor(
-        OrderRouter router,
-        IHousePool pool
+        OrderRouter router
     ) {
         ROUTER = router;
-        POOL = pool;
     }
 
     function settle(
@@ -39,30 +32,17 @@ contract LpEpochRefundReenterer {
     }
 
     receive() external payable {
-        attempted = true;
         bytes[] memory updateData = new bytes[](1);
         updateData[0] = "";
         (bool ok, bytes memory revertData) =
             address(ROUTER).call(abi.encodeCall(OrderRouter.settleLpEpoch, (updateData)));
-        reentered = ok;
+        bytes4 revertSelector;
         if (revertData.length >= 4) {
-            bytes4 selector;
             assembly ("memory-safe") {
-                selector := mload(add(revertData, 0x20))
+                revertSelector := mload(add(revertData, 0x20))
             }
-            revertSelector = selector;
         }
-
-        directAttempted = true;
-        (ok, revertData) = address(POOL).call(abi.encodeCall(IHousePool.settleLpEpoch, (0, 0)));
-        directSettled = ok;
-        if (revertData.length >= 4) {
-            bytes4 selector;
-            assembly ("memory-safe") {
-                selector := mload(add(revertData, 0x20))
-            }
-            directRevertSelector = selector;
-        }
+        emit RefundCallback(ok, revertSelector);
     }
 
 }
@@ -80,8 +60,8 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
         uint256 pythEth;
         uint256 markPrice;
         uint64 markTime;
-        uint256 bullCarryIndex;
-        uint256 bearCarryIndex;
+        uint256 longCarryIndex;
+        uint256 shortCarryIndex;
         uint256 lastReconcileTime;
         uint256 lastSeniorCouponCheckpointTime;
         uint256 seniorPrincipal;
@@ -107,6 +87,18 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
         uint256 claimableDepositAssets;
         uint256 pendingRedeemShares;
         uint256 claimableRedeemShares;
+    }
+
+    struct MaintenanceFeeSettlementFixture {
+        uint256 redeemShares;
+        uint256 redeemId;
+        uint256 depositAssets;
+        uint256 depositId;
+        uint256 feeShares;
+        uint256 rawSupplyBefore;
+        uint256 feeBoundaryBefore;
+        address caller;
+        bytes4 injectedFailure;
     }
 
     uint256 internal constant EIP170_RUNTIME_CODE_LIMIT = 24_576;
@@ -167,9 +159,9 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
             "redemption math sidecar must remain below its runtime limit"
         );
         assertLe(
-            address(router).code.length,
+            vm.getDeployedCode("OrderRouter.sol:OrderRouter").length,
             EIP170_RUNTIME_CODE_LIMIT,
-            "atomic LP settlement must keep OrderRouter deployable"
+            "atomic LP settlement must keep production OrderRouter deployable"
         );
     }
 
@@ -767,120 +759,88 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
     }
 
     function test_AtomicSettlement_MaintenanceFeeAccruesDuringHoldAndMaterializesOnceAfterRelease() public {
-        uint256 aliceShares = _seedJuniorLp(ALICE, 100_000e6);
-        _enableJuniorMaintenanceFee();
-        _openMarkSensitivePosition();
+        MaintenanceFeeSettlementFixture memory fixture = _prepareHeldMaintenanceFeeSettlement();
+        SettlementHoldRollbackSnapshot memory beforeState =
+            _settlementHoldSnapshot(fixture.caller, fixture.depositId, fixture.redeemId);
 
-        uint256 redeemShares = aliceShares / 5;
-        uint256 redeemId = _requestJuniorRedeem(ALICE, redeemShares);
-        uint256 depositAssets = 10_000e6;
-        uint256 depositId = _requestJuniorDeposit(BOB, depositAssets);
-        assertEq(depositId, redeemId, "entry and exit must share the held fee epoch");
-
-        pool.pauseLpEpochSettlement();
-        vm.warp(pool.lpEpochStart(depositId) + 6 hours);
-        _setBasket(100_000_000, 0, block.timestamp);
-        baseMockPyth.setFee(1 ether);
-        address caller = address(0xC011E3);
-        vm.deal(caller, 2 ether);
-
-        uint256 feeShares = juniorVault.pendingMaintenanceFeeShares();
-        assertGt(feeShares, 0, "held time must remain chargeable");
-        uint256 rawSupplyBefore = juniorVault.totalSupply();
-        uint256 feeBoundaryBefore = juniorVault.maintenanceFeeCheckpointBoundary();
-        SettlementHoldRollbackSnapshot memory beforeState = _settlementHoldSnapshot(caller, depositId, redeemId);
-
-        vm.prank(caller);
+        vm.prank(fixture.caller);
         vm.expectRevert(IHousePool.HousePool__LpEpochSettlementPaused.selector);
         router.settleLpEpoch{value: 1 ether}(_encodedUpdateData(100_000_000));
 
-        _assertSettlementHoldSnapshot(beforeState, caller, depositId, redeemId);
-        assertEq(juniorVault.pendingMaintenanceFeeShares(), feeShares, "held attempt must preserve accrued fee");
+        _assertSettlementHoldSnapshot(beforeState, fixture.caller, fixture.depositId, fixture.redeemId);
+        assertEq(juniorVault.pendingMaintenanceFeeShares(), fixture.feeShares, "held attempt must preserve accrued fee");
 
         pool.unpauseLpEpochSettlement();
-        assertEq(juniorVault.totalSupply(), rawSupplyBefore, "release cannot mint fee shares");
+        assertEq(juniorVault.totalSupply(), fixture.rawSupplyBefore, "release cannot mint fee shares");
         assertEq(
-            juniorVault.maintenanceFeeCheckpointBoundary(), feeBoundaryBefore, "release cannot advance fee checkpoint"
+            juniorVault.maintenanceFeeCheckpointBoundary(),
+            fixture.feeBoundaryBefore,
+            "release cannot advance fee checkpoint"
         );
         assertEq(juniorVault.balanceOf(MAINTENANCE_FEE_RECIPIENT), 0, "release cannot credit the recipient");
 
-        vm.prank(caller);
+        vm.prank(fixture.caller);
         router.settleLpEpoch{value: 1 ether}(_encodedUpdateData(100_000_000));
 
-        assertEq(juniorVault.balanceOf(MAINTENANCE_FEE_RECIPIENT), feeShares, "recovery must mint the accrued fee once");
+        assertEq(
+            juniorVault.balanceOf(MAINTENANCE_FEE_RECIPIENT),
+            fixture.feeShares,
+            "recovery must mint the accrued fee once"
+        );
         assertEq(juniorVault.pendingMaintenanceFeeShares(), 0, "successful settlement must consume accrued fee");
         assertGt(
             juniorVault.maintenanceFeeCheckpointBoundary(),
-            feeBoundaryBefore,
+            fixture.feeBoundaryBefore,
             "successful settlement advances checkpoint"
         );
-        assertEq(juniorVault.pendingRedeemRequest(redeemId, ALICE), 0);
-        assertEq(juniorVault.claimableRedeemRequest(redeemId, ALICE), redeemShares);
-        assertEq(juniorVault.pendingDepositRequest(depositId, BOB), 0);
-        assertEq(juniorVault.claimableDepositRequest(depositId, BOB), depositAssets);
+        assertEq(juniorVault.pendingRedeemRequest(fixture.redeemId, ALICE), 0);
+        assertEq(juniorVault.claimableRedeemRequest(fixture.redeemId, ALICE), fixture.redeemShares);
+        assertEq(juniorVault.pendingDepositRequest(fixture.depositId, BOB), 0);
+        assertEq(juniorVault.claimableDepositRequest(fixture.depositId, BOB), fixture.depositAssets);
 
         uint256 checkpointAfterSettlement = juniorVault.maintenanceFeeCheckpointBoundary();
-        vm.prank(caller);
+        vm.prank(fixture.caller);
         vm.expectRevert(IHousePool.HousePool__NoLpEpochProgress.selector);
         router.settleLpEpoch{value: 1 ether}(_encodedUpdateData(100_000_000));
-        assertEq(juniorVault.balanceOf(MAINTENANCE_FEE_RECIPIENT), feeShares, "fee must not mint twice");
+        assertEq(juniorVault.balanceOf(MAINTENANCE_FEE_RECIPIENT), fixture.feeShares, "fee must not mint twice");
         assertEq(juniorVault.maintenanceFeeCheckpointBoundary(), checkpointAfterSettlement);
     }
 
     function test_AtomicSettlement_DownstreamFailureRollsBackMaterializedMaintenanceFee() public {
-        uint256 aliceShares = _seedJuniorLp(ALICE, 100_000e6);
-        _enableJuniorMaintenanceFee();
-        vm.warp(block.timestamp + 6 hours);
-        _openMarkSensitivePosition();
+        MaintenanceFeeSettlementFixture memory fixture = _prepareFailingMaintenanceFeeSettlement();
+        SettlementHoldRollbackSnapshot memory beforeState =
+            _settlementHoldSnapshot(fixture.caller, fixture.depositId, fixture.redeemId);
 
-        uint256 redeemShares = aliceShares / 5;
-        uint256 redeemId = _requestJuniorRedeem(ALICE, redeemShares);
-        uint256 depositAssets = 200_000e6;
-        uint256 depositId = _requestJuniorDeposit(BOB, depositAssets);
-        assertEq(depositId, redeemId, "entry and exit must share the failing fee epoch");
-        _warpToEpoch(depositId);
-        _setBasket(100_000_000, 0, block.timestamp);
-        baseMockPyth.setFee(1 ether);
-        address caller = address(0xC011E4);
-        vm.deal(caller, 2 ether);
-
-        uint256 feeShares = juniorVault.pendingMaintenanceFeeShares();
-        assertGt(feeShares, 0, "fixture must have a materializable fee");
-        uint256 expectedRedeemAssets = juniorVault.estimateRedeemAssets(redeemShares);
-        assertGt(expectedRedeemAssets, 0, "redemption must materialize the fee before the injected failure");
-        assertEq(usdc.balanceOf(address(juniorVault)), depositAssets, "fixture isolates deposit escrow cash");
-        bytes4 injectedFailure = bytes4(keccak256("InjectedDepositTransferFailure()"));
-        vm.mockCallRevert(
-            address(usdc),
-            abi.encodeWithSelector(bytes4(keccak256("transfer(address,uint256)")), address(pool), depositAssets),
-            abi.encodeWithSelector(injectedFailure)
-        );
-        SettlementHoldRollbackSnapshot memory beforeState = _settlementHoldSnapshot(caller, depositId, redeemId);
-
-        vm.prank(caller);
-        vm.expectRevert(injectedFailure);
+        vm.prank(fixture.caller);
+        vm.expectRevert(fixture.injectedFailure);
         router.settleLpEpoch{value: 1 ether}(_encodedUpdateData(100_000_000));
 
-        _assertSettlementHoldSnapshot(beforeState, caller, depositId, redeemId);
-        assertEq(juniorVault.pendingMaintenanceFeeShares(), feeShares, "failed settlement must preserve accrued fee");
+        _assertSettlementHoldSnapshot(beforeState, fixture.caller, fixture.depositId, fixture.redeemId);
+        assertEq(
+            juniorVault.pendingMaintenanceFeeShares(), fixture.feeShares, "failed settlement must preserve accrued fee"
+        );
         assertEq(juniorVault.balanceOf(MAINTENANCE_FEE_RECIPIENT), 0, "transient fee mint must roll back completely");
 
         vm.clearMockedCalls();
-        vm.prank(caller);
+        vm.prank(fixture.caller);
         router.settleLpEpoch{value: 1 ether}(_encodedUpdateData(100_000_000));
 
-        assertEq(juniorVault.balanceOf(MAINTENANCE_FEE_RECIPIENT), feeShares, "recovered settlement must mint fee once");
+        assertEq(
+            juniorVault.balanceOf(MAINTENANCE_FEE_RECIPIENT),
+            fixture.feeShares,
+            "recovered settlement must mint fee once"
+        );
         assertEq(juniorVault.pendingMaintenanceFeeShares(), 0);
-        assertEq(juniorVault.pendingRedeemRequest(redeemId, ALICE), 0);
-        assertEq(juniorVault.claimableRedeemRequest(redeemId, ALICE), redeemShares);
-        assertEq(juniorVault.pendingDepositRequest(depositId, BOB), 0);
-        assertEq(juniorVault.claimableDepositRequest(depositId, BOB), depositAssets);
+        assertEq(juniorVault.pendingRedeemRequest(fixture.redeemId, ALICE), 0);
+        assertEq(juniorVault.claimableRedeemRequest(fixture.redeemId, ALICE), fixture.redeemShares);
+        assertEq(juniorVault.pendingDepositRequest(fixture.depositId, BOB), 0);
+        assertEq(juniorVault.claimableDepositRequest(fixture.depositId, BOB), fixture.depositAssets);
 
         uint256 checkpointAfterSettlement = juniorVault.maintenanceFeeCheckpointBoundary();
-        vm.prank(caller);
+        vm.prank(fixture.caller);
         vm.expectRevert(IHousePool.HousePool__NoLpEpochProgress.selector);
         router.settleLpEpoch{value: 1 ether}(_encodedUpdateData(100_000_000));
-        assertEq(juniorVault.balanceOf(MAINTENANCE_FEE_RECIPIENT), feeShares, "fee must remain single-shot");
+        assertEq(juniorVault.balanceOf(MAINTENANCE_FEE_RECIPIENT), fixture.feeShares, "fee must remain single-shot");
         assertEq(juniorVault.maintenanceFeeCheckpointBoundary(), checkpointAfterSettlement);
     }
 
@@ -898,8 +858,8 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
         PythStructs.Price memory pythBefore = baseMockPyth.getPriceUnsafe(BASE_PYTH_FEED_A);
         uint256 markPriceBefore = engine.lastMarkPrice();
         uint64 markTimeBefore = engine.lastMarkTime();
-        uint256 bullCarryBefore = engine.sideCarryIndex(uint256(CfdTypes.Side.BULL));
-        uint256 bearCarryBefore = engine.sideCarryIndex(uint256(CfdTypes.Side.BEAR));
+        uint256 longCarryBefore = engine.sideCarryIndex(uint256(CfdTypes.Side.LONG));
+        uint256 shortCarryBefore = engine.sideCarryIndex(uint256(CfdTypes.Side.SHORT));
         uint256 reconcileBefore = pool.lastReconcileTime();
         uint256 couponBefore = pool.lastSeniorCouponCheckpointTime();
         uint256 seniorBefore = pool.seniorPrincipal();
@@ -915,8 +875,8 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
         assertEq(pythAfter.publishTime, pythBefore.publishTime, "Pyth timestamp must roll back");
         assertEq(engine.lastMarkPrice(), markPriceBefore, "Engine price must roll back");
         assertEq(engine.lastMarkTime(), markTimeBefore, "Engine timestamp must roll back");
-        assertEq(engine.sideCarryIndex(uint256(CfdTypes.Side.BULL)), bullCarryBefore, "bull carry must roll back");
-        assertEq(engine.sideCarryIndex(uint256(CfdTypes.Side.BEAR)), bearCarryBefore, "bear carry must roll back");
+        assertEq(engine.sideCarryIndex(uint256(CfdTypes.Side.LONG)), longCarryBefore, "long carry must roll back");
+        assertEq(engine.sideCarryIndex(uint256(CfdTypes.Side.SHORT)), shortCarryBefore, "short carry must roll back");
         assertEq(pool.lastReconcileTime(), reconcileBefore, "reconcile checkpoint must roll back");
         assertEq(pool.lastSeniorCouponCheckpointTime(), couponBefore, "coupon checkpoint must roll back");
         assertEq(pool.seniorPrincipal(), seniorBefore);
@@ -1025,32 +985,47 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
         _setBasket(100_000_000, 0, block.timestamp);
         baseMockPyth.setFee(1 ether);
 
-        LpEpochRefundReenterer receiver = new LpEpochRefundReenterer(router, IHousePool(address(pool)));
+        LpEpochRefundReenterer receiver = new LpEpochRefundReenterer(router);
         vm.deal(address(this), 2 ether);
+        vm.recordLogs();
         receiver.settle{value: 2 ether}(_emptyUpdateData());
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        bytes32 settlementTopic = keccak256("LpEpochSettled(uint256,uint256,uint256,uint256,uint256,bool,bool,bool)");
+        bytes32 refundTopic = keccak256("RefundCallback(bool,bytes4)");
+        uint256 settlementLogPosition;
+        uint256 refundLogPosition;
+        bool reentered;
+        bytes4 reentryRevertSelector;
+        for (uint256 i = 0; i < logs.length; ++i) {
+            if (logs[i].topics.length == 0) {
+                continue;
+            }
+            if (logs[i].emitter == address(pool) && logs[i].topics[0] == settlementTopic) {
+                settlementLogPosition = i + 1;
+            } else if (logs[i].emitter == address(receiver) && logs[i].topics[0] == refundTopic) {
+                refundLogPosition = i + 1;
+                (reentered, reentryRevertSelector) = abi.decode(logs[i].data, (bool, bytes4));
+            }
+        }
 
         assertEq(juniorVault.claimableDepositRequest(requestId, ALICE), assets);
-        assertTrue(receiver.attempted(), "the final excess-fee refund must reach the caller");
-        assertFalse(receiver.reentered(), "Router transient guard must reject refund reentry");
+        assertGt(settlementLogPosition, 0, "LP settlement event must be present");
+        assertGt(refundLogPosition, settlementLogPosition, "the refund callback must occur after LP settlement");
+        assertFalse(reentered, "Router transient guard must reject refund reentry");
         assertEq(
-            receiver.revertSelector(),
+            reentryRevertSelector,
             bytes4(keccak256("ReentrancyGuardReentrantCall()")),
             "refund callback must fail at the nonreentrant boundary"
         );
-        assertTrue(receiver.directAttempted(), "refund callback must observe the settled HousePool state");
-        assertFalse(receiver.directSettled(), "the already-consumed batch must not settle twice");
-        assertEq(
-            receiver.directRevertSelector(),
-            IHousePool.HousePool__NoLpEpochProgress.selector,
-            "direct callback proves the first settlement consumed all matured work"
-        );
         assertEq(address(receiver).balance, 1 ether, "only excess ETH must be returned");
+        assertEq(routerAdmin.claimableEth(address(receiver)), 0, "the bounded callback must not require deferral");
         assertEq(address(baseMockPyth).balance, 1 ether, "Pyth must receive exactly its quoted fee");
     }
 
     function _openMarkSensitivePosition() internal {
         _fundTrader(TRADER, 200e6);
-        _open(TRADER, CfdTypes.Side.BULL, 1000e18, 100e6, 100_000_000);
+        _open(TRADER, CfdTypes.Side.LONG, 1000e18, 100e6, 100_000_000);
     }
 
     function _enableJuniorMaintenanceFee() internal {
@@ -1069,6 +1044,72 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
                 juniorVault.maintenanceFeeCheckpointBoundary(),
                 juniorVault.pendingMaintenanceFeeShares()
             )
+        );
+    }
+
+    function _prepareHeldMaintenanceFeeSettlement() internal returns (MaintenanceFeeSettlementFixture memory fixture) {
+        fixture.redeemShares = _seedJuniorLp(ALICE, 100_000e6) / 5;
+        _enableJuniorMaintenanceFee();
+        _openMarkSensitivePosition();
+
+        fixture.redeemId = _requestJuniorRedeem(ALICE, fixture.redeemShares);
+        fixture.depositAssets = 10_000e6;
+        fixture.depositId = _requestJuniorDeposit(BOB, fixture.depositAssets);
+        assertEq(fixture.depositId, fixture.redeemId, "entry and exit must share the held fee epoch");
+
+        pool.pauseLpEpochSettlement();
+        vm.warp(pool.lpEpochStart(fixture.depositId) + 6 hours);
+        _setBasket(100_000_000, 0, block.timestamp);
+        baseMockPyth.setFee(1 ether);
+        fixture.caller = address(0xC011E3);
+        vm.deal(fixture.caller, 2 ether);
+
+        fixture.feeShares = juniorVault.pendingMaintenanceFeeShares();
+        assertGt(fixture.feeShares, 0, "held time must remain chargeable");
+        fixture.rawSupplyBefore = juniorVault.totalSupply();
+        fixture.feeBoundaryBefore = juniorVault.maintenanceFeeCheckpointBoundary();
+    }
+
+    function _prepareFailingMaintenanceFeeSettlement()
+        internal
+        returns (MaintenanceFeeSettlementFixture memory fixture)
+    {
+        fixture.redeemShares =
+            _seedJuniorLp(ALICE, 100_000e6) / 5;
+        _enableJuniorMaintenanceFee();
+        vm.warp(block.timestamp + 6 hours);
+        _openMarkSensitivePosition();
+
+        fixture.redeemId = _requestJuniorRedeem(ALICE, fixture.redeemShares);
+        fixture.depositAssets = 200_000e6;
+        fixture.depositId = _requestJuniorDeposit(BOB, fixture.depositAssets);
+        assertEq(fixture.depositId, fixture.redeemId, "entry and exit must share the failing fee epoch");
+        _warpToEpoch(fixture.depositId);
+        _setBasket(100_000_000, 0, block.timestamp);
+        baseMockPyth.setFee(1 ether);
+        fixture.caller = address(0xC011E4);
+        vm.deal(fixture.caller, 2 ether);
+
+        fixture.feeShares = juniorVault.pendingMaintenanceFeeShares();
+        assertGt(fixture.feeShares, 0, "fixture must have a materializable fee");
+        assertGt(
+            juniorVault.estimateRedeemAssets(fixture.redeemShares),
+            0,
+            "redemption must materialize the fee before the injected failure"
+        );
+        assertEq(usdc.balanceOf(address(juniorVault)), fixture.depositAssets, "fixture isolates deposit escrow cash");
+        fixture.injectedFailure = bytes4(keccak256("InjectedDepositTransferFailure()"));
+        _mockDepositTransferFailure(fixture.depositAssets, fixture.injectedFailure);
+    }
+
+    function _mockDepositTransferFailure(
+        uint256 depositAssets,
+        bytes4 injectedFailure
+    ) internal {
+        vm.mockCallRevert(
+            address(usdc),
+            abi.encodeWithSelector(bytes4(keccak256("transfer(address,uint256)")), address(pool), depositAssets),
+            abi.encodeWithSelector(injectedFailure)
         );
     }
 
@@ -1168,8 +1209,8 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
         snapshot.pythEth = address(baseMockPyth).balance;
         snapshot.markPrice = engine.lastMarkPrice();
         snapshot.markTime = engine.lastMarkTime();
-        snapshot.bullCarryIndex = engine.sideCarryIndex(uint256(CfdTypes.Side.BULL));
-        snapshot.bearCarryIndex = engine.sideCarryIndex(uint256(CfdTypes.Side.BEAR));
+        snapshot.longCarryIndex = engine.sideCarryIndex(uint256(CfdTypes.Side.LONG));
+        snapshot.shortCarryIndex = engine.sideCarryIndex(uint256(CfdTypes.Side.SHORT));
         snapshot.lastReconcileTime = pool.lastReconcileTime();
         snapshot.lastSeniorCouponCheckpointTime = pool.lastSeniorCouponCheckpointTime();
         snapshot.seniorPrincipal = pool.seniorPrincipal();
@@ -1212,10 +1253,10 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
         assertEq(engine.lastMarkPrice(), expected.markPrice, "Engine price must roll back");
         assertEq(engine.lastMarkTime(), expected.markTime, "Engine timestamp must roll back");
         assertEq(
-            engine.sideCarryIndex(uint256(CfdTypes.Side.BULL)), expected.bullCarryIndex, "bull carry must roll back"
+            engine.sideCarryIndex(uint256(CfdTypes.Side.LONG)), expected.longCarryIndex, "long carry must roll back"
         );
         assertEq(
-            engine.sideCarryIndex(uint256(CfdTypes.Side.BEAR)), expected.bearCarryIndex, "bear carry must roll back"
+            engine.sideCarryIndex(uint256(CfdTypes.Side.SHORT)), expected.shortCarryIndex, "short carry must roll back"
         );
         assertEq(pool.lastReconcileTime(), expected.lastReconcileTime, "reconcile checkpoint must roll back");
         assertEq(

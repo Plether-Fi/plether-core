@@ -40,7 +40,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package: [shared, spot, options, perps]
+        package: [shared, spot, options]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -61,6 +61,48 @@ jobs:
       - name: Run package tests
         if: matrix.package != 'shared'
         run: forge test --root packages/${{ matrix.package }} --no-match-test "testFuzz_|invariant_"
+
+  package-test-perps-shard:
+    name: Package (perps shard ${{ matrix.shard_number }}/4)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard_index: 0
+            shard_number: 1
+          - shard_index: 1
+            shard_number: 2
+          - shard_index: 2
+            shard_number: 3
+          - shard_index: 3
+            shard_number: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.5.1
+
+      - name: Build package
+        run: forge build --sizes --skip test --skip script --root packages/perps
+
+      - name: Run package test shard
+        run: bash scripts/run-with-heartbeat.sh bash scripts/run-perps-package-tests.sh "${{ matrix.shard_index }}" 4
+
+  package-test-perps:
+    name: Package (perps)
+    if: always()
+    needs: package-test-perps-shard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every perps package shard
+        env:
+          SHARD_RESULT: ${{ needs.package-test-perps-shard.result }}
+        run: test "${SHARD_RESULT}" = success
 
   coverage-core:
     name: Coverage (core protocol)
@@ -101,6 +143,7 @@ jobs:
     env:
       FOUNDRY_SRC: packages/perps/src
       FOUNDRY_SCRIPT: integration/src
+      PERPS_COVERAGE_SHARDS: 4
     steps:
       - uses: actions/checkout@v4
         with:
@@ -111,8 +154,11 @@ jobs:
         with:
           version: v1.5.1
 
+      - name: Install LCOV
+        run: sudo apt-get update && sudo apt-get install --yes lcov
+
       - name: Run coverage
-        run: bash scripts/run-with-heartbeat.sh bash scripts/run-perps-coverage.sh --report lcov --report-file "$GITHUB_WORKSPACE/lcov-perps.raw.info" --no-match-test "testFuzz_|invariant_|test_H01_UpdateMarkUsesPublishTime|test_GetTraderAccount_Withdrawable(Decreases|Drops)|test_Batch_SplitComponentsFitDeploymentLimits|test_AtomicLpEpoch_RuntimeFitsEip170|test_Batch_SplitComponentBindingAndRuntimeFitsEip170|test_OrderRouterCreationCodeAndConstructorArgsFitEip3860|test_SettlementMonitorLens(RuntimeFitsEip170|CreationInputFitsEip3860)|test_Batch_MaxPendingOrdersLiquidatesWithinItemGasBudget|test_Runtime_|test_Gas_"
+        run: bash scripts/run-with-heartbeat.sh bash scripts/run-perps-coverage.sh --ir-minimum --report lcov --lcov-version 1 --report-file "$GITHUB_WORKSPACE/lcov-perps.raw.info" --no-match-test "testFuzz_|invariant_|test_H01_UpdateMarkUsesPublishTime|test_GetTraderAccount_Withdrawable(Decreases|Drops)|test_Batch_SplitComponentsFitDeploymentLimits|test_AtomicLpEpoch_RuntimeFitsEip170|test_Batch_SplitComponentBindingAndRuntimeFitsEip170|test_OrderRouterCreationCodeAndConstructorArgsFitEip3860|test_SettlementMonitorLens(RuntimeFitsEip170|CreationInputFitsEip3860)|test_Batch_MaxPendingOrdersLiquidatesWithinItemGasBudget|test_Runtime_|test_Gas_|testProductionRuntimeFitsEip170|test_BatchLiquidationAppliesRiskOffRefundBeforeLiquidating|test_BatchLiquidationHonorsCutoffAdvancedDuringOracleRefund"
 
       - name: Filter coverage report
         run: awk -v scope=perps -f scripts/filter-lcov-by-scope.awk lcov-perps.raw.info > lcov-perps.info

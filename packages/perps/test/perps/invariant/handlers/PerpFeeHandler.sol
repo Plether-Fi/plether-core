@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {LegacyOrderRouterHarness} from "../../../utils/LegacyOrderRouterHarness.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
-import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {Test} from "forge-std/Test.sol";
 
@@ -13,7 +13,7 @@ contract PerpFeeHandler is Test {
     MockUSDC public immutable usdc;
     CfdEngine public immutable engine;
     MarginClearinghouse public immutable clearinghouse;
-    OrderRouter public immutable router;
+    LegacyOrderRouterHarness public immutable router;
     address public immutable owner;
 
     address[2] internal actors;
@@ -26,7 +26,7 @@ contract PerpFeeHandler is Test {
         MockUSDC _usdc,
         CfdEngine _engine,
         MarginClearinghouse _clearinghouse,
-        OrderRouter _router
+        LegacyOrderRouterHarness _router
     ) {
         usdc = _usdc;
         engine = _engine;
@@ -72,7 +72,7 @@ contract PerpFeeHandler is Test {
         uint256 beforeFees = clearinghouse.balanceUsdc(engine.protocolTreasury());
         uint256 margin = bound(marginFuzz, 2000e6, 10_000e6);
         vm.prank(actor);
-        router.commitOrder(CfdTypes.Side.BULL, 50_000e18, margin, 0, false);
+        router.commitOrder(CfdTypes.Side.LONG, 50_000e18, margin, 0, false);
         bytes[] memory empty;
         router.executeOrderBatch(1, empty);
         _syncFeeDelta(beforeFees, clearinghouse.balanceUsdc(engine.protocolTreasury()));

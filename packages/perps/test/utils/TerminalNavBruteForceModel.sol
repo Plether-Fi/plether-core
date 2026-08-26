@@ -83,8 +83,8 @@ library TerminalNavBruteForceModel {
         uint256 totalEntryCostUsdcAtoms;
         uint256 totalEffectiveCapUsdcAtoms;
         uint256 totalTraderClaimsUsdc;
-        SideTotals bull;
-        SideTotals bear;
+        SideTotals long;
+        SideTotals short;
     }
 
     /// @notice Loads one exhaustive account domain from canonical state without consulting the NAV book.
@@ -117,15 +117,15 @@ library TerminalNavBruteForceModel {
             totals.totalEntryCostUsdcAtoms += state.entryCostUsdcAtoms;
             totals.totalEffectiveCapUsdcAtoms += state.effectiveCapUsdcAtoms;
 
-            SideTotals memory sideTotals = state.side == CfdTypes.Side.BULL ? totals.bull : totals.bear;
+            SideTotals memory sideTotals = state.side == CfdTypes.Side.LONG ? totals.long : totals.short;
             sideTotals.size += state.size;
             sideTotals.entryCostUsdcAtoms += state.entryCostUsdcAtoms;
             sideTotals.maxProfitUsdc += state.maxProfitUsdc;
             sideTotals.pnlPledgeUsdc += state.pnlPledgeUsdc;
-            if (state.side == CfdTypes.Side.BULL) {
-                totals.bull = sideTotals;
+            if (state.side == CfdTypes.Side.LONG) {
+                totals.long = sideTotals;
             } else {
-                totals.bear = sideTotals;
+                totals.short = sideTotals;
             }
         }
     }
@@ -157,7 +157,7 @@ library TerminalNavBruteForceModel {
         uint256 exitValueUsdcAtoms = state.lots * markPrice;
         uint256 positiveValue;
         uint256 negativeValue;
-        if (state.side == CfdTypes.Side.BULL) {
+        if (state.side == CfdTypes.Side.LONG) {
             if (exitValueUsdcAtoms >= state.entryCostUsdcAtoms) {
                 positiveValue = exitValueUsdcAtoms - state.entryCostUsdcAtoms;
             } else {
@@ -196,14 +196,14 @@ library TerminalNavBruteForceModel {
             return (false, 0);
         }
 
-        uint256 maximumCollectible = state.side == CfdTypes.Side.BULL
+        uint256 maximumCollectible = state.side == CfdTypes.Side.LONG
             ? state.lots * capPrice - state.entryCostUsdcAtoms
             : state.entryCostUsdcAtoms;
         if (state.effectiveCapUsdcAtoms >= maximumCollectible) {
             return (false, 0);
         }
 
-        if (state.side == CfdTypes.Side.BULL) {
+        if (state.side == CfdTypes.Side.LONG) {
             boundary = _ceilDiv(state.entryCostUsdcAtoms + state.effectiveCapUsdcAtoms, state.lots);
         } else {
             boundary = _ceilDiv(state.entryCostUsdcAtoms - state.effectiveCapUsdcAtoms, state.lots);
@@ -251,7 +251,7 @@ library TerminalNavBruteForceModel {
 
         state.collectibleCapUsdcAtoms = pnlPledgeUsdc + traderClaimBalanceUsdc;
         uint256 maximumCollectible =
-            side == CfdTypes.Side.BULL ? maximumEntryCost - entryCostUsdcAtoms : entryCostUsdcAtoms;
+            side == CfdTypes.Side.LONG ? maximumEntryCost - entryCostUsdcAtoms : entryCostUsdcAtoms;
         state.effectiveCapUsdcAtoms =
             state.collectibleCapUsdcAtoms < maximumCollectible ? state.collectibleCapUsdcAtoms : maximumCollectible;
     }

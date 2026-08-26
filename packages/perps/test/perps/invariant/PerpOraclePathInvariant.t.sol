@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {LegacyOrderRouterHarness} from "../../utils/LegacyOrderRouterHarness.sol";
 import {BasePerpTest} from "../BasePerpTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
@@ -11,9 +12,7 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
-import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
-import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
 import {PerpsPublicLens} from "@plether/perps/PerpsPublicLens.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
@@ -29,7 +28,7 @@ import {Test} from "forge-std/Test.sol";
 contract PerpOraclePathHandler is Test {
 
     MockPyth public immutable mockPyth;
-    OrderRouter public immutable router;
+    LegacyOrderRouterHarness public immutable router;
     OrderRouterAdmin public immutable routerAdmin;
     IPletherOracle public immutable pletherOracle;
     CfdEngine public immutable engine;
@@ -48,7 +47,7 @@ contract PerpOraclePathHandler is Test {
 
     constructor(
         MockPyth _mockPyth,
-        OrderRouter _router,
+        LegacyOrderRouterHarness _router,
         CfdEngine _engine,
         address _owner,
         bytes32[] memory _feedIds,
@@ -85,11 +84,11 @@ contract PerpOraclePathHandler is Test {
         IOrderRouterAdminHost.RouterConfig memory config;
         config.maxOrderAge = router.maxOrderAge();
         config.orderExecutionStalenessLimit = limit;
-        config.liquidationStalenessLimit = router.liquidationStalenessLimit();
-        config.basketMaxConfidenceRatioBps = router.basketMaxConfidenceRatioBps();
-        config.orderSettlementWindow = router.orderSettlementWindow();
-        config.maxComponentPublishTimeDivergence = router.maxComponentPublishTimeDivergence();
-        config.adverseConfidenceMultiplierBps = router.adverseConfidenceMultiplierBps();
+        config.liquidationStalenessLimit = router.pletherOracle().liquidationStalenessLimit();
+        config.basketMaxConfidenceRatioBps = router.pletherOracle().basketMaxConfidenceRatioBps();
+        config.orderSettlementWindow = router.pletherOracle().orderSettlementWindow();
+        config.maxComponentPublishTimeDivergence = router.pletherOracle().maxComponentPublishTimeDivergence();
+        config.adverseConfidenceMultiplierBps = router.pletherOracle().adverseConfidenceMultiplierBps();
         config.minOpenNotionalUsdc = router.minOpenNotionalUsdc();
         config.openOrderExecutionBountyBps = router.openOrderExecutionBountyBps();
         config.minOpenOrderExecutionBountyUsdc = router.minOpenOrderExecutionBountyUsdc();
@@ -113,12 +112,12 @@ contract PerpOraclePathHandler is Test {
         vm.startPrank(owner);
         IOrderRouterAdminHost.RouterConfig memory config;
         config.maxOrderAge = router.maxOrderAge();
-        config.orderExecutionStalenessLimit = router.orderExecutionStalenessLimit();
+        config.orderExecutionStalenessLimit = router.pletherOracle().orderExecutionStalenessLimit();
         config.liquidationStalenessLimit = limit;
-        config.basketMaxConfidenceRatioBps = router.basketMaxConfidenceRatioBps();
-        config.orderSettlementWindow = router.orderSettlementWindow();
-        config.maxComponentPublishTimeDivergence = router.maxComponentPublishTimeDivergence();
-        config.adverseConfidenceMultiplierBps = router.adverseConfidenceMultiplierBps();
+        config.basketMaxConfidenceRatioBps = router.pletherOracle().basketMaxConfidenceRatioBps();
+        config.orderSettlementWindow = router.pletherOracle().orderSettlementWindow();
+        config.maxComponentPublishTimeDivergence = router.pletherOracle().maxComponentPublishTimeDivergence();
+        config.adverseConfidenceMultiplierBps = router.pletherOracle().adverseConfidenceMultiplierBps();
         config.minOpenNotionalUsdc = router.minOpenNotionalUsdc();
         config.openOrderExecutionBountyBps = router.openOrderExecutionBountyBps();
         config.minOpenOrderExecutionBountyUsdc = router.minOpenOrderExecutionBountyUsdc();
@@ -149,7 +148,7 @@ contract PerpOraclePathHandler is Test {
         bool rejectRefund
     ) external {
         uint256 price = bound(priceFuzz, 1, 3e8);
-        uint256 limit = router.orderExecutionStalenessLimit();
+        uint256 limit = router.pletherOracle().orderExecutionStalenessLimit();
         uint256 age = bound(ageFuzz, 0, limit + 120);
         uint256 divergence = bound(divergenceFuzz, 0, limit + 120);
         uint256 publishTimeA = block.timestamp > age ? block.timestamp - age : 0;
@@ -290,12 +289,7 @@ contract PerpOraclePathInvariantTest is BasePerpTest {
 
         pletherOracle =
             new PletherOracle(address(engine), address(pool), address(mockPyth), feedIds, weights, bases, inversions);
-        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
-        OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
-        router = new OrderRouter(
-            address(engine), address(engineLens), address(pool), address(pletherOracle), address(keeperSidecar)
-        );
-        assertEq(address(router), predictedRouter);
+        router = _deployLegacyOrderRouter(address(engine), address(engineLens), address(pool), address(pletherOracle));
         _syncRouterAdmin();
         engine.setOrderRouter(address(router));
         publicLens = new PerpsPublicLens(address(engineAccountLens), address(engine), address(router), address(pool));
@@ -335,8 +329,14 @@ contract PerpOraclePathInvariantTest is BasePerpTest {
     }
 
     function invariant_OracleStalenessLimitsRemainPositive() public view {
-        assertGt(router.orderExecutionStalenessLimit(), 0, "order execution staleness limit must stay positive");
-        assertGt(router.liquidationStalenessLimit(), 0, "liquidation staleness limit must stay positive");
+        assertGt(
+            router.pletherOracle().orderExecutionStalenessLimit(),
+            0,
+            "order execution staleness limit must stay positive"
+        );
+        assertGt(
+            router.pletherOracle().liquidationStalenessLimit(), 0, "liquidation staleness limit must stay positive"
+        );
     }
 
 }
